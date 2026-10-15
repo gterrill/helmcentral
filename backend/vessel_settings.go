@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"strings"
 	"sync"
@@ -182,32 +183,77 @@ type vesselHouseBankSetting struct {
 // that fails to parse as vesselSettings's own shape is a different case:
 // that is a corrupt section, not an absent one, and fails fast rather than
 // being silently treated as "not set up" (AGENTS.md's fail-fast policy).
+//
+// The vessel block's YAML is cached with readSettings' parse
+// (settings_cache.go), keyed on the same modification time and size, so a
+// build that runs every tick skips the whole-document copy and re-marshal
+// until settings.yaml changes. Each caller still decodes its own
+// vesselSettings from those bytes, so no caller can change what another
+// gets, whatever fields the struct grows.
 func loadVesselSettings(settingsPath string) (vesselSettings, error) {
+	info, statErr := os.Stat(settingsPath)
+	if statErr == nil {
+		if buf, ok := cachedVesselYAMLFor(settingsPath, info); ok {
+			return decodeVesselYAML(buf)
+		}
+	}
+
 	settings, err := readSettings(settingsPath)
 	if err != nil {
 		return vesselSettings{}, err
 	}
 
-	return parseVesselBlock(settings)
+	buf, err := vesselBlockYAML(settings)
+	if err != nil {
+		return vesselSettings{}, err
+	}
+	v, err := decodeVesselYAML(buf)
+	if err != nil {
+		return vesselSettings{}, err
+	}
+	if statErr == nil {
+		// Keyed on the stat taken before the read: if the file changed in
+		// between, the entry readSettings stored will not match and nothing
+		// is cached. Only a block that decodes is cached.
+		storeVesselYAMLCache(settingsPath, info, buf)
+	}
+	return v, nil
 }
 
 // parseVesselBlock decodes the "vessel" key of an already-read settings map.
 // Absent or nil is the zero value; a block that does not parse is an error.
 func parseVesselBlock(settings map[string]any) (vesselSettings, error) {
+	buf, err := vesselBlockYAML(settings)
+	if err != nil {
+		return vesselSettings{}, err
+	}
+	return decodeVesselYAML(buf)
+}
+
+// vesselBlockYAML is the "vessel" key of an already-read settings map as
+// YAML, nil when the key is absent or null.
+func vesselBlockYAML(settings map[string]any) ([]byte, error) {
 	raw, ok := settings["vessel"]
 	if !ok || raw == nil {
-		return vesselSettings{}, nil
+		return nil, nil
 	}
-
 	// readSettings already parsed the whole document with yaml.v3; re-marshal
 	// just this branch and unmarshal it into the typed struct rather than
 	// hand-walking the generic map[string]any/[]any tree a second time.
 	buf, err := yaml.Marshal(raw)
 	if err != nil {
-		return vesselSettings{}, fmt.Errorf("vessel settings: re-marshalling vessel block: %w", err)
+		return nil, fmt.Errorf("vessel settings: re-marshalling vessel block: %w", err)
 	}
+	return buf, nil
+}
 
+// decodeVesselYAML decodes a vessel block into a fresh vesselSettings; nil
+// is the zero value.
+func decodeVesselYAML(buf []byte) (vesselSettings, error) {
 	var result vesselSettings
+	if buf == nil {
+		return result, nil
+	}
 	if err := yaml.Unmarshal(buf, &result); err != nil {
 		return vesselSettings{}, fmt.Errorf("vessel settings: parsing vessel block: %w", err)
 	}

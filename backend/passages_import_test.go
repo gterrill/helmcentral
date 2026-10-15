@@ -254,3 +254,73 @@ func TestImportHandlerTakesAYearOfDailyFilesButNotAThousand(t *testing.T) {
 		t.Errorf("501 files: %d %s", code, body)
 	}
 }
+
+// Two creations of overlapping passages at once (the live detector and an
+// import, or two imports) store exactly one; the other reports the overlap.
+func TestInsertPassageIfNoOverlapIsAtomic(t *testing.T) {
+	store := newTestPassageStore(t)
+	const n = 8
+	start := make(chan struct{})
+	type result struct {
+		inserted bool
+		err      error
+	}
+	out := make(chan result, n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			<-start
+			off := time.Duration(i) * time.Minute
+			_, inserted, err := store.InsertPassageIfNoOverlap(passageRecord{Start: passageEpoch.Add(off), End: passageEpoch.Add(4*time.Hour + off)})
+			out <- result{inserted, err}
+		}(i)
+	}
+	close(start)
+	created := 0
+	for i := 0; i < n; i++ {
+		r := <-out
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		if r.inserted {
+			created++
+		}
+	}
+	var stored int
+	store.db.QueryRow(`SELECT COUNT(*) FROM passages`).Scan(&stored)
+	if created != 1 || stored != 1 {
+		t.Fatalf("created %d, stored %d; want exactly one", created, stored)
+	}
+}
+
+func TestConcurrentImportsOfOneFileStoreItOnce(t *testing.T) {
+	store := newTestPassageStore(t)
+	files := importTrip(simpleTrip(2 * time.Hour).pts)
+	const n = 4
+	start := make(chan struct{})
+	sums := make(chan gpxImportSummary, n)
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			<-start
+			s, err := store.ImportGPX(files)
+			sums <- s
+			errs <- err
+		}()
+	}
+	close(start)
+	added, created := 0, 0
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+		s := <-sums
+		added += s.PointsAdded
+		created += s.PassagesCreated
+	}
+	var points, passages int
+	store.db.QueryRow(`SELECT COUNT(*) FROM track_points`).Scan(&points)
+	store.db.QueryRow(`SELECT COUNT(*) FROM passages`).Scan(&passages)
+	if points != len(files[0].Fixes) || added != points || passages != 1 || created != 1 {
+		t.Fatalf("points %d (added %d) of %d fixes, passages %d (created %d)", points, added, len(files[0].Fixes), passages, created)
+	}
+}

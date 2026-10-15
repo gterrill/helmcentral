@@ -44,7 +44,7 @@ interface MateSheetProps {
    * `readAloud` is on. Questions from Help, Settings or a selection are
    * read, not heard, so they leave this off. */
   spoken?: boolean
-  /** The screen the operator is on, sent with every question (ADR 0180).
+  /** The screen the operator is on, sent with every question (ADR 0183).
    * Undefined over the Mate panel itself. */
   screen?: AssistantScreenContext
   canWrite: boolean
@@ -73,7 +73,7 @@ interface MateSheetProps {
  * that hosts the same AssistantThread the full panel uses, over whatever
  * page is behind it, so a voice question doesn't have to leave the
  * Forecast panel (or any other) to get answered. Mounted once in the shell
- * with its own Mate session (ADR 0180), independent of the panel's.
+ * with its own Mate session (ADR 0183), independent of the panel's.
  *
  * Mate UI cycle ("Mate opens on an empty chat"): the sheet never actually
  * unmounts once opened (App.tsx's mateSheetHasOpenedRef keeps it mounted;

@@ -30,7 +30,7 @@ var (
 // profile edit that would strand job state, a profile delete while an item
 // still points at it). Writes go through ds.RunTx and reads through ds.Read,
 // so every use of the shared connection takes the document store's mutex
-// (ADR 0181).
+// (ADR 0184).
 type profileStore struct {
 	ds *documentStore
 }

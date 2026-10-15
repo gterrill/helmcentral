@@ -88,7 +88,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     return (
       <div
         data-testid="passage-map-webgl2-fallback"
-        className="flex h-full items-center justify-center px-3 text-center text-[10px] uppercase tracking-[0.14em] text-muted-foreground"
+        className="flex h-full items-center justify-center px-3 text-center text-xs text-muted-foreground"
       >
         Map needs WebGL2, which this browser does not provide
       </div>

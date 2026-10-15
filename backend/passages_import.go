@@ -188,8 +188,8 @@ func importedTrackPoints(fixes []gpxFix) (pts []recordedTrackPoint, rejected int
 
 // recordedCoverage returns the time ranges the recorded log already covers
 // within [from, to].
-func (s *passageStore) recordedCoverage(from, to time.Time) ([][2]time.Time, error) {
-	rec, err := s.trackPoints(from.Add(-importCoverageGap), to.Add(importCoverageGap), trackSourceRecorded)
+func recordedCoverage(q sqlQueryer, from, to time.Time) ([][2]time.Time, error) {
+	rec, err := trackPointsIn(q, from.Add(-importCoverageGap), to.Add(importCoverageGap), trackSourceRecorded)
 	if err != nil {
 		return nil, err
 	}
@@ -231,39 +231,8 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 	}
 	from, to := pts[0].At, pts[len(pts)-1].At
 
-	cover, err := s.recordedCoverage(from, to)
-	if err != nil {
+	if err := s.storeImportedPoints(pts, from, to, &sum); err != nil {
 		return sum, err
-	}
-	held, err := s.trackPoints(from, to, trackSourceImported)
-	if err != nil {
-		return sum, err
-	}
-	have := make(map[int64]bool, len(held))
-	for _, h := range held {
-		have[h.At.UnixMilli()] = true
-	}
-
-	tx, err := s.db.Begin()
-	if err != nil {
-		return sum, fmt.Errorf("begin import: %w", err)
-	}
-	defer tx.Rollback()
-	for _, p := range pts {
-		switch {
-		case covered(cover, p.At):
-			sum.PointsInRecordedLog++
-		case have[p.At.UnixMilli()]:
-			sum.PointsAlreadyHeld++
-		default:
-			if err := insertTrackPoint(tx, p); err != nil {
-				return sum, err
-			}
-			sum.PointsAdded++
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return sum, fmt.Errorf("commit import: %w", err)
 	}
 
 	if sum.PointsAdded > 0 {
@@ -284,21 +253,61 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 		found = append(found, *det.Open)
 	}
 	for _, lp := range found {
-		overlaps, err := s.PassageOverlaps(lp.Start, lp.End)
+		rec, inserted, err := s.InsertPassageIfNoOverlap(passageRecord{Start: lp.Start, End: lp.End})
 		if err != nil {
 			return sum, err
 		}
-		if overlaps {
+		if !inserted {
 			sum.PassagesSkipped++
 			continue
-		}
-		rec, err := s.InsertPassage(passageRecord{Start: lp.Start, End: lp.End})
-		if err != nil {
-			return sum, err
 		}
 		s.PassageStatsFor(rec) // warm the stored figures
 		announcePassage(rec.ID)
 		sum.PassagesCreated++
 	}
 	return sum, nil
+}
+
+// storeImportedPoints inserts the points that are neither held already nor
+// inside time the recorded log covers, counting each into sum. The reads of
+// what is held and the inserts are one transaction (begun IMMEDIATE on the
+// store's one connection), so two imports of one file at once store its
+// points once.
+func (s *passageStore) storeImportedPoints(pts []recordedTrackPoint, from, to time.Time, sum *gpxImportSummary) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin import: %w", err)
+	}
+	defer tx.Rollback()
+
+	cover, err := recordedCoverage(tx, from, to)
+	if err != nil {
+		return err
+	}
+	held, err := trackPointsIn(tx, from, to, trackSourceImported)
+	if err != nil {
+		return err
+	}
+	have := make(map[int64]bool, len(held))
+	for _, h := range held {
+		have[h.At.UnixMilli()] = true
+	}
+
+	for _, p := range pts {
+		switch {
+		case covered(cover, p.At):
+			sum.PointsInRecordedLog++
+		case have[p.At.UnixMilli()]:
+			sum.PointsAlreadyHeld++
+		default:
+			if err := insertTrackPoint(tx, p); err != nil {
+				return err
+			}
+			sum.PointsAdded++
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit import: %w", err)
+	}
+	return nil
 }

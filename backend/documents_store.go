@@ -259,7 +259,7 @@ func documentsDirPath() string {
 // queueing them itself), a mutex serializing every method since the pool
 // is one connection wide, and an injectable now so tests can control
 // timestamps without a real sleep. Every transaction it opens goes through
-// RunTx (store_tx.go, ADR 0181).
+// RunTx (store_tx.go, ADR 0184).
 type documentStore struct {
 	mu  sync.Mutex
 	db  *sql.DB

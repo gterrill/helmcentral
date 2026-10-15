@@ -256,7 +256,7 @@ func cmdCompleteMaintenanceRule(tx *sql.Tx, now time.Time, id string, req mainte
 
 // The REST handlers' way into the commands above: each runs one command in a
 // transaction of its own through RunTx, so no handler holds a *sql.Tx
-// (ADR 0181). A Mate changeset runs the same commands, several to a
+// (ADR 0184). A Mate changeset runs the same commands, several to a
 // transaction, through the record registry instead.
 
 // runCmd runs one command in its own RunTx and returns what it wrote.

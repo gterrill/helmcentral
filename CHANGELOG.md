@@ -19,10 +19,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the Alternators tile stays hidden, anchor auto-raise does nothing, Mate says
   engines are not set up when asked for a passage estimate, and the Battery &
   Power tile shows `--` for state of charge, voltage, current, power and
-  capacity, with no dawn figure. Tick your engines under **Engines** and pick
-  the bank under **Power**. If the bank's battery monitor does not report its
-  capacity, enter it under **Power** too, or the charge rate and the time to
-  full or empty read `--`.
+  capacity, with no dawn figure. The Generator tile leaves out its Battery at
+  Finish forecast during a timed run. Tick your engines under **Engines** and
+  pick the bank under **Power**. If the bank's battery monitor does not report
+  its capacity, enter it under **Power** too, or the charge rate and the time
+  to full or empty read `--`.
 - State-of-charge band alarm rules must be on the house bank you chose. The
   bands on the Battery & Power tile only read rules for that bank's state of
   charge. If your rules are on another battery, edit their **SignalK path** in
@@ -55,6 +56,39 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   projection now skips nights when shore power was connected or the generator
   ran by looking at the shore charger and generator you pick under Electrical.
   A night is not screened for one you leave as Not set.
+
+### Added
+
+- Passages, cruises and selected passages can be shared from the new **Export**
+  button. **Copy blog embed** shows an animated map to copy and paste
+  into a Ghost HTML card: readers tap play, the map drops from a view of the
+  globe onto the track, and the boat follows it with the local time, each night
+  at anchor shown as a short pause, and the distance, time underway, nights,
+  fuel and highest gust underneath. Choose a 15, 30 or 60 second replay and
+  whether the small overview map shows. The embed loads public map tiles and
+  never connects to the boat. **Download embed as HTML** gives a page for
+  previewing it, and two image downloads (1200 × 630 and 2:1) make a still
+  picture of the track with its title and figures.
+- Helmcentral now keeps its own log of where the boat has been, with speed,
+  wind, house battery, fuel rate, generator and fresh water recorded alongside
+  each position. It starts on its own after the upgrade and needs no setting;
+  to include the house battery, choose the house bank under Vessel settings.
+- A new **Passages** page in the sidebar lists every leg the boat has run,
+  newest first, with the distance, time underway and the places it went from
+  and to. Open one to see its track on the chart, replay it with a moving boat
+  and the local time, and read its speed, fuel, wind and battery figures.
+  Figures the boat did not record show `--`.
+- Passages can be grouped into a **cruise**. A cruise page replays its passages
+  one after another and adds nights, fuel, wind underway and at anchor,
+  generator hours, the lowest house battery and its charge at dawn each night,
+  and the fresh water used and taken on, with each fill marked as Watermaker or
+  Dock fill.
+- Passages can be edited: rename them, change the two ends, add notes, split
+  one in two, trim its start or end, merge neighbours, hide one, or move it to
+  another cruise.
+- Trips Helmcentral did not record can be added with **Import GPX** on the
+  Passages page. See the new pages on importing GPX tracks and editing
+  passages in the help.
 
 ### Changed
 
@@ -98,36 +132,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
-- Passages, cruises and selected passages can be shared from the new **Export**
-  button. **Copy blog embed** shows an animated map to copy and paste
-  into a Ghost HTML card: readers tap play, the map drops from a view of the
-  globe onto the track, and the boat follows it with the local time, each night
-  at anchor shown as a short pause, and the distance, time underway, nights,
-  fuel and highest gust underneath. Choose a 15, 30 or 60 second replay and
-  whether the small overview map shows. The embed loads public map tiles and
-  never connects to the boat. **Download embed as HTML** gives a page for
-  previewing it, and two image downloads (1200 × 630 and 2:1) make a still
-  picture of the track with its title and figures.
-- Helmcentral now keeps its own log of where the boat has been, with speed,
-  wind, house battery, fuel rate, generator and fresh water recorded alongside
-  each position. It starts on its own after the upgrade and needs no setting;
-  to include the house battery, choose the house bank under Vessel settings.
-- A new **Passages** page in the sidebar lists every leg the boat has run,
-  newest first, with the distance, time underway and the places it went from
-  and to. Open one to see its track on the chart, replay it with a moving boat
-  and the local time, and read its speed, fuel, wind and battery figures.
-  Figures the boat did not record show `--`.
-- Passages can be grouped into a **cruise**. A cruise page replays its passages
-  one after another and adds nights, fuel, wind underway and at anchor,
-  generator hours, the lowest house battery and its charge at dawn each night,
-  and the fresh water used and taken on, with each fill marked as Watermaker or
-  Dock fill.
-- Passages can be edited: rename them, change the two ends, add notes, split
-  one in two, trim its start or end, merge neighbours, hide one, or move it to
-  another cruise.
-- Trips Helmcentral did not record can be added with **Import GPX** on the
-  Passages page. See the new pages on importing GPX tracks and editing
-  passages in the help.
 - Mate can see the active alarms, so asking it about an alarm investigates the
   sensor that raised it, not a guess from the device name on the card.
 

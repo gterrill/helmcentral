@@ -89,6 +89,7 @@ type passageStore struct {
 
 	marinaMu   sync.Mutex
 	marinaSeen map[string]string // cruise id -> fingerprint last looked at
+
 }
 
 func newPassageStore(dbPath string) (*passageStore, error) {
@@ -292,7 +293,12 @@ func (s *passageStore) TrackPointsBetween(from, to time.Time) ([]recordedTrackPo
 
 // trackPoints reads a time range, optionally only one source.
 func (s *passageStore) trackPoints(from, to time.Time, source string) ([]recordedTrackPoint, error) {
-	rows, err := s.db.Query(`SELECT `+trackPointColumns+` FROM track_points WHERE t_ms >= ? AND t_ms <= ? AND (? = '' OR source = ?) ORDER BY t_ms, id`,
+	return trackPointsIn(s.db, from, to, source)
+}
+
+// trackPointsIn is trackPoints through q, so a transaction can read them.
+func trackPointsIn(q sqlQueryer, from, to time.Time, source string) ([]recordedTrackPoint, error) {
+	rows, err := q.Query(`SELECT `+trackPointColumns+` FROM track_points WHERE t_ms >= ? AND t_ms <= ? AND (? = '' OR source = ?) ORDER BY t_ms, id`,
 		from.UnixMilli(), to.UnixMilli(), source, source)
 	if err != nil {
 		return nil, fmt.Errorf("query track points: %w", err)
@@ -363,17 +369,34 @@ func (s *passageStore) SetDetectorResume(t time.Time) error {
 	return nil
 }
 
-// PassageOverlaps reports whether any stored passage, hidden or not, shares
-// time with [start, end]. That is how the detector avoids recreating a
-// passage the operator hid or edited, and avoids doubling an existing one.
-func (s *passageStore) PassageOverlaps(start, end time.Time) (bool, error) {
-	var n int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM passages WHERE start_ms < ? AND end_ms > ?`,
-		end.UnixMilli(), start.UnixMilli()).Scan(&n)
-	if err != nil {
-		return false, fmt.Errorf("passage overlap: %w", err)
+// InsertPassageIfNoOverlap stores a detected passage unless a stored one,
+// hidden or not, shares time with it. inserted is false, and nothing written,
+// when one does. The check and the insert are one statement, so SQLite makes
+// them atomic against every other writer of the passages table: two callers
+// creating the same passage at once store it once, and no edit can widen a
+// passage into the gap between a check and an insert.
+func (s *passageStore) InsertPassageIfNoOverlap(r passageRecord) (rec passageRecord, inserted bool, err error) {
+	if r.ID == "" {
+		r.ID = uuid.NewString()
 	}
-	return n > 0, nil
+	if r.CreatedAt.IsZero() {
+		r.CreatedAt = time.Now().UTC()
+	}
+	res, err := s.db.Exec(`INSERT INTO passages
+		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited)
+		SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?
+		WHERE NOT EXISTS (SELECT 1 FROM passages WHERE start_ms < ? AND end_ms > ?)`,
+		r.ID, r.Start.UnixMilli(), r.End.UnixMilli(), r.FromName, r.ToName, r.Title, r.Notes,
+		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited),
+		r.End.UnixMilli(), r.Start.UnixMilli())
+	if err != nil {
+		return r, false, fmt.Errorf("insert passage unless it overlaps a stored one: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return r, false, fmt.Errorf("insert passage: reading whether it was stored or overlapped: %w", err)
+	}
+	return r, n == 1, nil
 }
 
 // InsertPassage stores a passage and returns it with its new id.
