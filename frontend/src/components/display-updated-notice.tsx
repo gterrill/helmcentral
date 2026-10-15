@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
-import type { AppVersion } from '@/hooks/use-app-version'
-import { recordSeenVersion } from '@/lib/seen-version'
+import { useVersionAnnouncement } from '@/hooks/use-version-announcement'
+import type { AppVersion } from '@/lib/build-stamp'
 import { cn } from '@/lib/utils'
 
 const SHOW_FOR_MS = 8000
@@ -12,20 +12,13 @@ const SHOW_FOR_MS = 8000
  * rotates with the board.
  */
 export function DisplayUpdatedNotice({ current }: { current: AppVersion | null }) {
-  const [version, setVersion] = useState<string | null>(null)
+  const version = useVersionAnnouncement(current)
   const [visible, setVisible] = useState(false)
-  const running = current?.version ?? null
 
   useEffect(() => {
-    if (running === null) return
-    const to = recordSeenVersion(running)
-    if (to === null) return
-    setVersion(to)
-    setVisible(true)
-  }, [running])
+    if (version !== null) setVisible(true)
+  }, [version])
 
-  // A separate effect, so a StrictMode remount of the one above (which finds
-  // the version already recorded) cannot cancel the timer and leave it showing.
   useEffect(() => {
     if (!visible) return
     const id = setTimeout(() => setVisible(false), SHOW_FOR_MS)

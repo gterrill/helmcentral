@@ -10,7 +10,10 @@ const watch = (overrides: Partial<VersionWatch> = {}): VersionWatch => ({
   current: { version: 'v1', revision: 'aaa' },
   available: null,
   chunkFailure: null,
-  recheckChunkFailure: vi.fn(),
+  readError: null,
+  reportChunkFailure: vi.fn(),
+  clearChunkFailure: vi.fn(),
+  retryHeldReload: vi.fn(),
   ...overrides,
 })
 const v2 = { version: 'v2', revision: 'bbb' }
@@ -73,12 +76,26 @@ describe('UpdateNotices', () => {
     expect(requestReload).toHaveBeenCalled()
   })
 
-  it('a screen that failed to load on a current build offers Retry', async () => {
+  it('a screen that failed to load on a current build offers Reload, which asks like any other reload', async () => {
+    const { requestReload } = mount(watch({ chunkFailure: 'connection' }))
+    expect(await screen.findByText("Couldn't load this screen. Check the connection.")).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(requestReload).toHaveBeenCalledTimes(1)
+  })
+
+  it('clears the failure once it has been shown, so a second one raises the toast again', async () => {
     const w = watch({ chunkFailure: 'connection' })
     mount(w)
-    expect(await screen.findByText("Couldn't load this screen. Check the connection.")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
-    expect(w.recheckChunkFailure).toHaveBeenCalledTimes(1)
+    await screen.findByText("Couldn't load this screen. Check the connection.")
+    expect(w.clearChunkFailure).toHaveBeenCalledTimes(1)
+  })
+
+  it('takes the Update available toast down when the build is current again', async () => {
+    const { again } = mount(watch({ available: v2 }))
+    await screen.findByText('Update available')
+    again(watch({ available: null }))
+    await waitFor(() => expect(screen.queryByText('Update available')).not.toBeInTheDocument())
   })
 })
 

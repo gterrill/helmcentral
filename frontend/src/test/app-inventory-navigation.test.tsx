@@ -33,7 +33,7 @@ const versionReload = vi.hoisted(() => ({ latest: null as null | { hasUnsavedWor
 vi.mock('@/hooks/use-version-reload', () => ({
   useVersionReload: (options: { hasUnsavedWork?: () => boolean }) => {
     versionReload.latest = options
-    return { current: null, available: null, chunkFailure: null, recheckChunkFailure: () => {} }
+    return { current: null, available: null, chunkFailure: null, readError: null, reportChunkFailure: () => {}, clearChunkFailure: () => {}, retryHeldReload: () => {} }
   },
 }))
 

@@ -281,7 +281,7 @@ const versionWatch = vi.hoisted(() => ({ latest: null as null | { unattended?: (
 vi.mock('@/hooks/use-version-reload', () => ({
   useVersionReload: (options: { unattended?: () => boolean }) => {
     versionWatch.latest = options
-    return { current: null, available: null, chunkFailure: null, recheckChunkFailure: () => {} }
+    return { current: null, available: null, chunkFailure: null, readError: null, reportChunkFailure: () => {}, clearChunkFailure: () => {}, retryHeldReload: () => {} }
   },
 }))
 
@@ -540,6 +540,16 @@ describe('App: which screens reload themselves on an update', () => {
     stubFullscreenEnabled(undefined)
     render(<App />)
     expect(versionWatch.latest?.unattended?.()).toBe(true)
+  })
+
+  it('a Home Screen dashboard with a sheet open over it is attended, and unattended again once it closes', async () => {
+    mockRunningFromHomeScreen.mockReturnValue(true)
+    stubFullscreenEnabled(undefined)
+    render(<App />)
+    expect(versionWatch.latest?.unattended?.()).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
+    expect(versionWatch.latest?.unattended?.()).toBe(false)
   })
 
   it('a Home Screen app on another panel is attended', () => {

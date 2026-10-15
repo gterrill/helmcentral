@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { fetchSummaryDraft, saveSummaryNote, type SummaryDraft } from '@/lib/mate-summary-note'
 
 // ADR 0162: the review step between Mate's summary of a conversation and a
@@ -50,6 +51,9 @@ export function MateSummaryNoteDialog({ open, onOpenChange, conversationId, onSa
       })
     return () => controller.abort()
   }, [open, conversationId])
+
+  // The draft exists only in this dialog until it is saved: closing it throws it away.
+  useUnsavedWorkReport('mate-summary', open && draft !== null)
 
   const updating = draft?.existingNoteId != null
 

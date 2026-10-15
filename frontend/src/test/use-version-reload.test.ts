@@ -200,6 +200,89 @@ describe('useVersionReload', () => {
     })
   })
 
+  describe('the build stamped into the bundle', () => {
+    const stamped = { version: 'v1', revision: 'aaa' }
+
+    it('is the running build from the start, without waiting for a health read', () => {
+      vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+      const { result } = mount({ bundle: stamped })
+      expect(result.current.current).toEqual(stamped)
+    })
+
+    it('is the baseline: a first read that differs is already an update', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(health('v2', 'bbb')))
+      const { result } = mount({ bundle: stamped })
+      await settle()
+      expect(result.current.current).toEqual(stamped)
+      expect(result.current.available).toEqual({ version: 'v2', revision: 'bbb' })
+    })
+
+    it('a first read that matches is no update', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(health('v1', 'aaa')))
+      const { result } = mount({ bundle: stamped })
+      await settle()
+      expect(result.current.available).toBeNull()
+    })
+
+    it('an unstamped (dev) bundle falls back to the first read as the baseline', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(health('v9', 'zzz')))
+      const { result } = mount({ bundle: { version: 'dev', revision: 'unknown' } })
+      expect(result.current.current).toBeNull()
+      await settle()
+      expect(result.current.current).toEqual({ version: 'v9', revision: 'zzz' })
+      expect(result.current.available).toBeNull()
+    })
+
+    it('reports a failed read while there is no build to show', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+      const { result } = mount({ bundle: { version: 'dev', revision: 'unknown' } })
+      await settle()
+      expect(result.current.readError).toBe('offline')
+    })
+  })
+
+  describe('a held reload on an unattended screen', () => {
+    it('is retried on focus without another health read, once the throttle would have blocked it', async () => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValue(health('v2', 'bbb'))
+      vi.stubGlobal('fetch', fetchMock)
+      let unsaved = true
+      mount({ unattended: () => true, hasUnsavedWork: () => unsaved })
+      await settle()
+      clock += VERSION_ATTENTION_INTERVAL_MS
+      await focus()
+      expect(reload).not.toHaveBeenCalled()
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+
+      unsaved = false
+      clock += 1000
+      await focus()
+      expect(reload).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    })
+
+    it('is retried when asked, as unsaved work clears', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValue(health('v2', 'bbb')))
+      let unsaved = true
+      const { result } = mount({ unattended: () => true, hasUnsavedWork: () => unsaved })
+      await settle()
+      clock += VERSION_ATTENTION_INTERVAL_MS
+      await focus()
+      expect(reload).not.toHaveBeenCalled()
+
+      unsaved = false
+      act(() => result.current.retryHeldReload())
+      expect(reload).toHaveBeenCalledTimes(1)
+    })
+
+    it('does nothing when no update is known', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(health('v1', 'aaa')))
+      const { result } = mount({ unattended: () => true })
+      await settle()
+      act(() => result.current.retryHeldReload())
+      expect(reload).not.toHaveBeenCalled()
+    })
+  })
+
   describe('a lazy screen that fails to load', () => {
     const preloadError = () => {
       const event = new Event('vite:preloadError', { cancelable: true })
@@ -207,14 +290,15 @@ describe('useVersionReload', () => {
       return event
     }
 
-    it('after a deploy: says the screen needs the update, and handles the event so it is not swallowed', async () => {
+    it('after a deploy: says the screen needs the update, logs the failure and leaves the event alone', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValueOnce(health('v2', 'bbb')))
       const { result } = mount({ unattended: () => false })
       await settle()
 
       const event = preloadError()
       await settle()
-      expect(event.defaultPrevented).toBe(true)
+      // Left alone: with preventDefault Vite resolves the import to undefined and the lazy wrapper throws a TypeError instead.
+      expect(event.defaultPrevented).toBe(false)
       expect(console.error).toHaveBeenCalled()
       expect(result.current.chunkFailure).toBe('needs-update')
       expect(result.current.available).toEqual({ version: 'v2', revision: 'bbb' })
@@ -240,17 +324,27 @@ describe('useVersionReload', () => {
       expect(result.current.chunkFailure).toBe('connection')
     })
 
-    it('Retry checks again and can turn a connection problem into a needs-update', async () => {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValueOnce(health('v2', 'bbb')))
+    it('a failure reported by an error boundary takes the same path', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(health('v1', 'aaa')).mockResolvedValueOnce(health('v2', 'bbb')))
+      const { result } = mount()
+      await settle()
+      act(() => result.current.reportChunkFailure(new Error('Failed to fetch dynamically imported module')))
+      await settle()
+      expect(result.current.chunkFailure).toBe('needs-update')
+    })
+
+    it('once cleared, a second failure shows again', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(health('v1', 'aaa')))
       const { result } = mount()
       await settle()
       preloadError()
       await settle()
       expect(result.current.chunkFailure).toBe('connection')
-
-      act(() => result.current.recheckChunkFailure())
+      act(() => result.current.clearChunkFailure())
+      expect(result.current.chunkFailure).toBeNull()
+      preloadError()
       await settle()
-      expect(result.current.chunkFailure).toBe('needs-update')
+      expect(result.current.chunkFailure).toBe('connection')
     })
 
     it('stops listening on unmount', async () => {
@@ -258,7 +352,8 @@ describe('useVersionReload', () => {
       const { unmount } = mount()
       await settle()
       unmount()
-      expect(preloadError().defaultPrevented).toBe(false)
+      preloadError()
+      expect(console.error).not.toHaveBeenCalled()
     })
   })
 })

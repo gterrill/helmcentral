@@ -39,9 +39,11 @@ A screen nobody is operating picks up the new version by itself. That means the
 wall display, and the dashboard of a Home Screen app on a phone or tablet. It
 reloads as soon as it sees the update. A Home Screen app that is showing
 Documents, Settings or any page other than a dashboard counts as in use and
-asks like a browser tab does. A dashboard in the browser's full screen mode
+asks like a browser tab does, and so does a Home Screen dashboard with a sheet
+or dialog open over it, such as Mate, Help or a tile's settings. A dashboard in the browser's full screen mode
 also asks, because a reload would drop it out of full screen. If a Home Screen
-dashboard has unsaved work open it waits and tries again at the next check.
+dashboard has unsaved work open it waits, and reloads as soon as you save or
+close it.
 
 After the new version loads, a short "Helmcentral updated to" message names it,
 with a **Release notes** button. Each browser remembers the last version it
@@ -53,7 +55,7 @@ few seconds across the bottom of the screen.
 If a screen won't open after an upgrade because its parts are gone from the old
 page, you see "This screen needs the update. Reload to open it." If the update
 isn't the cause, you see "Couldn't load this screen. Check the connection."
-with a **Retry** button. If a check can't reach Helmcentral it does nothing and
+Both messages have a **Reload** button. If a check can't reach Helmcentral it does nothing and
 tries again at the next one. Reloading the page by hand always works.
 
 ## SignalK delegated authentication (opt-in)

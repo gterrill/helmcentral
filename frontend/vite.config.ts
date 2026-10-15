@@ -31,6 +31,9 @@ export default defineConfig(({ mode }) => ({
   // drag-start mousedown, aborting the drag before it engages.
   define: {
     'process.env.NODE_ENV': JSON.stringify(mode),
+    // The build stamp, from the release build's environment (see lib/build-stamp.ts).
+    __APP_VERSION__: JSON.stringify(process.env.APP_VERSION || 'dev'),
+    __APP_REVISION__: JSON.stringify(process.env.APP_REVISION || 'unknown'),
   },
   server: {
     port: 5173,

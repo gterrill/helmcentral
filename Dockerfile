@@ -14,6 +14,12 @@ COPY frontend/. ./
 
 # Empty string makes all /api calls relative so they hit the same-origin backend
 ENV VITE_API_BASE_URL=""
+# The page carries its own build stamp so it can tell when the server has moved
+# on. These are the same values the backend stage stamps into /api/health below,
+# and sit after the dependency layer so a new tag does not redo `npm ci`.
+ARG APP_VERSION=dev
+ARG APP_REVISION=unknown
+ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
 RUN npm run build
 
 # ── Stage 2: build backend with embedded frontend ────────────────────────────

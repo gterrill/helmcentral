@@ -20,10 +20,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   note or a service log entry, you are asked before the page reloads. Before,
   an unsaved note could be lost.
 - The wall display and a Home Screen dashboard still reload by themselves, as
-  soon as an update is found. A Home Screen app on any other page, and a
-  dashboard in the browser's full screen mode, ask instead.
-- A screen that cannot open after an upgrade now says so: it offers Reload when
-  the update is the cause, or Retry when it looks like the connection.
+  soon as an update is found. A Home Screen app on any other page or with
+  a sheet or dialog open over the dashboard, and a dashboard in the browser's
+  full screen mode, ask instead.
+- A screen that cannot open after an upgrade now says so and offers Reload,
+  whether the update or the connection is the likely cause. Before, the whole
+  page could go blank.
 
 ### Fixed
 

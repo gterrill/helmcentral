@@ -215,7 +215,11 @@ function requiresNewDueDateNow(rule: MaintenanceRule): boolean {
 }
 
 export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: MaintenanceCompleteDialogProps) {
-  const [form, setForm] = useState<LogFormState>(() => blankForm(rule?.current_hours))
+  // What the form was when it was opened or last reset: "unsaved" means
+  // different from this, not different from a blank rebuilt on each render
+  // (which moves at midnight and when the hours reading refreshes).
+  const [initialForm, setInitialForm] = useState<LogFormState>(() => blankForm(rule?.current_hours))
+  const [form, setForm] = useState<LogFormState>(initialForm)
   const [newDueDate, setNewDueDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -224,16 +228,16 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
 
   const { items } = useEquipment(rule !== null ? {} : null)
 
-  // Anything entered and not yet written to the log is unsaved work.
-  const blank = blankForm(rule?.current_hours)
+  // Anything changed since the form was opened and not yet written to the log is unsaved work.
   const entered = rule !== null && completedEntry === null
-    && (newDueDate !== '' || form.hours !== blank.hours || form.description !== '' || form.who !== ''
-      || form.cost !== '' || form.currency !== '' || form.parts.length > 0 || form.performedAt !== blank.performedAt)
+    && (newDueDate !== '' || JSON.stringify(form) !== JSON.stringify(initialForm))
   useUnsavedWorkReport('maintenance-complete', entered)
 
   useEffect(() => {
     if (rule) {
-      setForm(blankForm(rule.current_hours))
+      const fresh = blankForm(rule.current_hours)
+      setInitialForm(fresh)
+      setForm(fresh)
       setNewDueDate('')
       setCompletedEntry(null)
       setCompletedRule(null)

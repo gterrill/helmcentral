@@ -4,7 +4,7 @@
  * to the router (a guard that never holds a move) while it holds some, and
  * stops when saved, emptied or closed.
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 vi.mock('@/hooks/use-notes')
@@ -14,6 +14,7 @@ vi.mock('@/hooks/use-inventory', async (importOriginal) => {
 })
 
 import { NoteEditor } from '@/components/note-editor'
+import { MateSummaryNoteDialog } from '@/components/mate-summary-note-dialog'
 import { NoteCaptureSheet } from '@/components/documents/note-capture-sheet'
 import { MaintenanceCompleteDialog, MaintenanceLogEntryDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { useNotes } from '@/hooks/use-notes'
@@ -121,5 +122,36 @@ describe('the maintenance log dialogs', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(router.hasGuards()).toBe(false))
+  })
+
+  it('Complete: an untouched form is not unsaved work after midnight or a fresh hours reading', () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      vi.setSystemTime(new Date(2026, 5, 1, 23, 59))
+      const { wrapper, router } = testRouter('/inventory')
+      const { rerender } = render(<MaintenanceCompleteDialog rule={{ ...rule(), interval_hours: 250, current_hours: 100 }} onCancel={vi.fn()} onComplete={vi.fn()} />, { wrapper })
+      expect(router.hasGuards()).toBe(false)
+
+      vi.setSystemTime(new Date(2026, 5, 2, 0, 1))
+      rerender(<MaintenanceCompleteDialog rule={{ ...rule(), interval_hours: 250, current_hours: 100 }} onCancel={vi.fn()} onComplete={vi.fn()} />)
+      expect(router.hasGuards()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe('the Mate summary dialog', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('counts as unsaved work while a draft is on screen, and not once closed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ title: 'T', body: 'B', type: 'quirk', equipment: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    const { wrapper, router } = testRouter('/mate')
+    const { rerender } = render(<MateSummaryNoteDialog open conversationId="c1" onOpenChange={vi.fn()} onSaved={vi.fn()} />, { wrapper })
+    expect(router.hasGuards()).toBe(false)
+    await screen.findByLabelText('Title')
+    expect(router.hasGuards()).toBe(true)
+    rerender(<MateSummaryNoteDialog open={false} conversationId="c1" onOpenChange={vi.fn()} onSaved={vi.fn()} />)
+    expect(router.hasGuards()).toBe(false)
   })
 })

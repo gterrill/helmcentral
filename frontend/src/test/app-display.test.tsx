@@ -36,7 +36,7 @@ const versionWatch = vi.hoisted(() => ({
 vi.mock('@/hooks/use-version-reload', () => ({
   useVersionReload: (options: { unattended?: () => boolean }) => {
     versionWatch.latest = options
-    return { current: versionWatch.current, available: null, chunkFailure: null, recheckChunkFailure: () => {} }
+    return { current: versionWatch.current, available: null, chunkFailure: null, readError: null, reportChunkFailure: () => {}, clearChunkFailure: () => {}, retryHeldReload: () => {} }
   },
 }))
 

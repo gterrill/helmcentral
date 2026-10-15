@@ -1,5 +1,5 @@
 import { useUpdatedToast } from '@/hooks/use-updated-toast'
-import type { AppVersion } from '@/hooks/use-app-version'
+import type { AppVersion } from '@/lib/build-stamp'
 
 /**
  * Raises the "Helmcentral updated to …" message. Rendered just after the

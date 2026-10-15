@@ -32,8 +32,15 @@ yet. Nothing handled that.
 
 1. **Detect every five minutes.** While the page is visible the build is read
    every five minutes, and again on focus or visibility return (at most once a
-   minute). The first successful read is the baseline. A failed or malformed
-   read never counts as an update; it is logged.
+   minute). A failed or malformed read never counts as an update; it is logged.
+   The baseline is the build stamped into the page's own bundle (`APP_VERSION`
+   and `APP_REVISION` at build time, passed by the Dockerfile and the
+   GoReleaser hook), not the first health read: after a deploy the server
+   answers for the new build, so a page loaded from a stale cache that took its
+   baseline from the server would think it was current. Only an unstamped
+   bundle (`dev`, the local dev stack) falls back to the first health read.
+   The sidebar version, the toasts and the "updated" message all use that one
+   stamp.
 2. **An attended screen never reloads by itself.** A changed version or
    revision raises an "Update available" toast with a Reload action (no
    auto-dismiss, once per detected build per tab) and turns the sidebar
@@ -50,11 +57,14 @@ yet. Nothing handled that.
    running as a Home Screen app (`display-mode: standalone`) reload as soon as
    an update is seen, without waiting for alarms (the alarm is still there
    after the reload). A Home Screen app counts as unattended only while it is
-   on a dashboard page: on Documents, Settings or any other panel someone is
-   using it, so it prompts like a browser tab. A dashboard in the browser's
+   on a dashboard page with nothing open over it: on Documents, Settings or any
+   other panel, or with the Mate or Help sheet, a tile's configuration dialog,
+   layout editing or any other dialog showing, someone is using it, so it
+   prompts like a browser tab. A dashboard in the browser's
    Fullscreen API full screen is attended: a reload would drop it out of full
    screen, so it gets the prompt. An unattended screen holds the reload while
-   unsaved work exists and retries after each later check.
+   unsaved work exists or a sheet is open, and retries on every return to the
+   page and the moment that clears, without waiting for the next health read.
 5. **The "updated" message compares versions, not page lifetimes.** Each
    browser keeps the last version it showed in `localStorage`. After the first
    successful health read, a stored version that differs from the running one
@@ -63,12 +73,17 @@ yet. Nothing handled that.
    announces, and neither does a revision-only change. If storage cannot be
    used the message is skipped and the reason logged. The wall display shows
    its own few-second, non-interactive notice inside the display shell.
-6. **A lazy chunk that fails to load re-checks the build.** On
-   `vite:preloadError` the event is handled (default prevented, logged) and
-   `/api/health` is read again. A changed build shows "This screen needs the
-   update. Reload to open it." with Reload; otherwise "Couldn't load this
-   screen. Check the connection." with Retry, which checks again. Neither
-   reloads an attended screen.
+6. **A lazy chunk that fails to load re-checks the build.** An error boundary
+   around the lazy panels, drawers and sheets shows a small message in place
+   of the screen, so the rest of the shell and the toasts survive, and reports
+   the failure; `vite:preloadError` is logged and reported the same way and
+   left alone (calling `preventDefault` would make Vite resolve the import to
+   `undefined`, and the lazy wrapper would throw a TypeError that takes down the
+   shell). `/api/health` is read again. A changed build shows "This screen
+   needs the update. Reload to open it."; otherwise "Couldn't load this screen.
+   Check the connection." Both carry a Reload action that asks first when
+   anything is unsaved, and neither reloads an attended screen. The failure
+   state is cleared once shown, so a second failure raises the message again.
 
 ## Rejected
 
@@ -88,8 +103,7 @@ yet. Nothing handled that.
 - An attended page can run an old bundle for as long as the operator leaves
   the toast alone. Settings and the rest keep working against the new backend
   as before; only chunks not yet fetched can fail, and that case is handled.
-- `React.lazy` caches a rejected import, so Retry cannot re-run the same
-  import in place. It re-checks the build and reports; the screen opens again
-  after a reload or, for a transient failure, on the next attempt that mounts a
-  fresh component.
+- `React.lazy` caches a rejected import, so a failed screen cannot be
+  re-imported in place. That is why the connection case offers Reload, not
+  Retry: opening the screen again needs a fresh page.
 - Operator-facing wording is in `docs/how-to/upgrading.md`.

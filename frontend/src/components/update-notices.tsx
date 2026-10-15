@@ -29,14 +29,19 @@ interface UpdateNoticesProps {
  * does not bring it back, the sidebar line carries on.
  */
 export function UpdateNotices({ watch, requestReload }: UpdateNoticesProps) {
-  const { available, chunkFailure, recheckChunkFailure } = watch
+  const { available, chunkFailure, clearChunkFailure } = watch
   const requestReloadRef = useRef(requestReload)
   requestReloadRef.current = requestReload
   const announced = useRef(new Set<string>())
 
   const availableKey = available ? `${available.version}@${available.revision}` : null
   useEffect(() => {
-    if (availableKey === null || announced.current.has(availableKey)) return
+    // The build is current again (a rollback, say): the message is stale.
+    if (availableKey === null) {
+      toast.dismiss(UPDATE_TOAST_ID)
+      return
+    }
+    if (announced.current.has(availableKey)) return
     announced.current.add(availableKey)
     toast('Update available', {
       id: UPDATE_TOAST_ID,
@@ -45,21 +50,22 @@ export function UpdateNotices({ watch, requestReload }: UpdateNoticesProps) {
     })
   }, [availableKey])
 
+  // Shown once and then cleared, so the next failure raises it again.
   useEffect(() => {
-    if (chunkFailure === 'needs-update') {
-      toast('This screen needs the update. Reload to open it.', {
+    if (chunkFailure === null) return
+    toast(
+      chunkFailure === 'needs-update'
+        ? 'This screen needs the update. Reload to open it.'
+        : "Couldn't load this screen. Check the connection.",
+      {
         id: CHUNK_TOAST_ID,
         duration: Infinity,
+        // A rejected import is cached by the page, so opening the screen again needs a fresh page.
         action: { label: 'Reload', onClick: () => requestReloadRef.current() },
-      })
-    } else if (chunkFailure === 'connection') {
-      toast("Couldn't load this screen. Check the connection.", {
-        id: CHUNK_TOAST_ID,
-        duration: Infinity,
-        action: { label: 'Retry', onClick: () => recheckChunkFailure() },
-      })
-    }
-  }, [chunkFailure, recheckChunkFailure])
+      },
+    )
+    clearChunkFailure()
+  }, [chunkFailure, clearChunkFailure])
 
   return null
 }

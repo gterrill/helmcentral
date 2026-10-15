@@ -18,7 +18,7 @@ import {
   MonitorPlay,
   Wrench,
 } from 'lucide-react'
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
@@ -210,6 +210,7 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { SidebarVersion } from '@/components/sidebar-version'
+import { LazyBoundary } from '@/components/lazy-boundary'
 import { UpdatedToast } from '@/components/updated-toast'
 import { ReloadConfirmDialog, UpdateNotices } from '@/components/update-notices'
 import { DisplayUpdatedNotice } from '@/components/display-updated-notice'
@@ -462,8 +463,7 @@ function AppShell() {
   const mateDraftRef = useRef(false)
   mateDraftRef.current = matePanelHasDraft || mateSheetHasDraft
   const hasUnsavedWork = useCallback(() => router.hasGuards() || mateDraftRef.current, [router])
-  // Home Screen apps and the wall display are unattended; a dashboard in the
-  // browser's own full screen is not (a reload would drop out of it).
+  // Set below, once every overlay's state has been declared.
   const unattendedRef = useRef(false)
   const [reloadConfirmOpen, setReloadConfirmOpen] = useState(false)
   const versionWatch = useVersionReload({ hasUnsavedWork, unattended: () => unattendedRef.current })
@@ -484,7 +484,6 @@ function AppShell() {
   // has it in scope. isDisplay depends only on activePanel, which is already
   // set by this point, so nothing about moving it changes what it means.
   const isDisplay = activePanel === 'display'
-  unattendedRef.current = isDisplay || (runningFromHomeScreen() && activePanel === null && !fullscreen.isFullscreen)
   // Full screen at the helm means the operator is watching, so the screen
   // shouldn't sleep. A Home Screen app on iPad or iPhone has no full screen
   // but is already free of browser bars, so its dashboard holds the lock
@@ -821,6 +820,31 @@ function AppShell() {
   // and its back-stack history then survives later closes.
   const helpSheetHasOpenedRef = useRef(false)
   if (helpOpen) helpSheetHasOpenedRef.current = true
+
+  // Who is at the screen. The wall display is never attended. A Home Screen
+  // dashboard is unattended only while nothing is open over it: a sheet, a
+  // tile's configuration dialog, layout editing or any other dialog on screen
+  // means someone is using it. A dashboard in the browser's own full screen
+  // is attended too (a reload would drop out of full screen), and so is a
+  // Home Screen app on any panel other than the dashboard.
+  const overlayOpen =
+    mateSheetOpen || helpOpen || engineProfileOpen || ribbonDialogOpen || layoutEditing || namingPageId !== null ||
+    [embedDraft, gaugeDraft, gaugeGroupDraft, lampStripDraft, clusterDraft, poiMapDraft].some((d) => d !== null)
+  const overlayOpenRef = useRef(false)
+  overlayOpenRef.current = overlayOpen
+  unattendedRef.current = isDisplay || (
+    runningFromHomeScreen() && activePanel === null && !fullscreen.isFullscreen && !overlayOpenRef.current &&
+    // Anything else that put a dialog or sheet up, in a tile or a panel.
+    document.querySelector('[role="dialog"], [role="alertdialog"]') === null
+  )
+  // A reload held back for unsaved work or an open sheet goes ahead the
+  // moment that clears, without waiting for the next health read.
+  const guardCount = useSyncExternalStore(router.subscribe, () => router.getSnapshot().guardOwners.length)
+  const unsavedNow = guardCount > 0 || matePanelHasDraft || mateSheetHasDraft
+  const { retryHeldReload } = versionWatch
+  useEffect(() => {
+    if (!unsavedNow && !overlayOpen) retryHeldReload()
+  }, [unsavedNow, overlayOpen, activePanel, fullscreen.isFullscreen, retryHeldReload])
   const openHelp = useCallback((target: HelpTarget | null) => {
     setHelpTarget(target)
     setHelpOpen(true)
@@ -2720,7 +2744,12 @@ function AppShell() {
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter>
-          <SidebarVersion updateAvailable={versionWatch.available !== null} onReload={requestReload} />
+          <SidebarVersion
+            build={versionWatch.current}
+            error={versionWatch.readError}
+            updateAvailable={versionWatch.available !== null}
+            onReload={requestReload}
+          />
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
@@ -3056,9 +3085,11 @@ function AppShell() {
                       it never keeps a previous panel's boundary state - each
                       panel always gets its own fallback while its own chunk
                       loads, not whatever state the boundary was last left in. */}
-                  <Suspense key={activePanel} fallback={renderPanelFallback(panelFallbackLabel(activePanel))}>
-                    {activePanelContent}
-                  </Suspense>
+                  <LazyBoundary resetKey={activePanel} onChunkError={versionWatch.reportChunkFailure}>
+                    <Suspense key={activePanel} fallback={renderPanelFallback(panelFallbackLabel(activePanel))}>
+                      {activePanelContent}
+                    </Suspense>
+                  </LazyBoundary>
                 </div>
               )}
             </div>
@@ -3082,6 +3113,7 @@ function AppShell() {
           no panel) until `open` is true, so there is nothing that should be
           showing while its chunk loads on this very first open. */}
       {mateSheetHasOpenedRef.current && (
+        <LazyBoundary fallback={null} onChunkError={versionWatch.reportChunkFailure}>
         <Suspense fallback={null}>
           <MateSheet
             open={mateSheetOpen}
@@ -3105,10 +3137,12 @@ function AppShell() {
             onHasDraftChange={setMateSheetHasDraft}
           />
         </Suspense>
+        </LazyBoundary>
       )}
 
       {/* Same reasoning as the Mate sheet above - see helpSheetHasOpenedRef. */}
       {helpSheetHasOpenedRef.current && (
+        <LazyBoundary fallback={null} onChunkError={versionWatch.reportChunkFailure}>
         <Suspense fallback={null}>
           <HelpSheet
             open={helpOpen}
@@ -3120,6 +3154,7 @@ function AppShell() {
             }}
           />
         </Suspense>
+        </LazyBoundary>
       )}
 
       <Toaster isDarkTheme={isDarkTheme} />
