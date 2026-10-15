@@ -40,25 +40,38 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   old house bank were converted to follow it. Add new ones with **Follow the
   house bank's state of charge** in the Alarms drawer.
 
-- **Engine, gauge group and indicator tiles now show equipment you choose.**
-  On the first start after upgrading, each Engine Cluster, each gauge group of
-  one engine or alternator, and each indicator lamp that read a SignalK path
-  under an engine, generator, charger, inverter or alternator is switched to the
-  equipment item that owns that source, keeping its layout and display choices.
-  A tile whose source has no item yet, and the fuel bars of a tank with no item,
-  show **Pick equipment**: open the tile's settings in Layout mode and choose
-  the equipment, mapping the item first under **Settings → SignalK → Discovery**
-  if it has no source. A reading the old tile took from outside its engine, such
-  as an exhaust temperature under `propulsion.0` on a boat whose engines are
-  `port` and `starboard`, is dropped and has to be re-added to a tile that can
-  read it. The startup log lists each one.
+- **Tiles that read the boat's equipment now follow an equipment item.** On the
+  first start after upgrading, Helmcentral switches these to the item that owns
+  the source they read, keeping their layout and display choices:
+  - every Engine Cluster;
+  - every gauge group whose gauges all read under one source, whatever the kind
+    of equipment: an engine, battery, alternator, solar controller, tank,
+    generator, charger or inverter;
+  - every indicator lamp, on a page strip or the ribbon, that reads under the
+    source of an item.
+
+  Then check what is left. A cluster or gauge group whose source has no item
+  yet, and a fuel bar for a tank with no item, shows **Pick equipment**: open
+  the tile's settings in Layout mode and choose the equipment, mapping the item
+  first under **Settings → SignalK → Discovery** if it has no source. A lamp
+  whose source has no item keeps its path, so it does not follow an item until
+  you change it to read equipment. A gauge group whose gauges read several
+  different sources stays a group of the paths you picked. A reading the old
+  tile took from outside its engine, such as an exhaust temperature under
+  `propulsion.0` on a boat whose engines are `port` and `starboard`, is dropped
+  and has to be re-added to a tile that can read it. The startup log lists each
+  tile and reading it changed or could not move.
 - **Gauge zones live on the equipment profile.** A zone on one of those tiles
-  moved to the engine's profile when the profile had none for that reading. Where
-  the profile already had its own zones, the tile's were dropped and the log says
-  which. Edit them on the profile or from a tile that shows the equipment; the
-  change applies to every tile and alarm using that profile. The alarms raised
-  from zones on these tiles have new names and start with no history or
-  acknowledgement; look in the Alarms drawer to confirm they are all there.
+  moved to the equipment's profile when the profile had none for that reading,
+  converted into the profile's unit. Where the profile already had its own zones,
+  or had no gauge for the reading, or the equipment had no profile, the tile's
+  zones were dropped and the log says which; check your oil pressure, coolant
+  and speed limits on the profile. A reading on one of these tiles now always
+  uses the profile's unit, so a unit chosen on the tile is ignored. The alarms
+  raised from zones on these tiles have new names and start with no history or
+  acknowledgement; look in the Alarms drawer to confirm they are all there. A
+  fuel bar keeps its own low-fuel zones, because a tank has no profile, and its
+  alarm is kept.
 - **Apply gauge zones is gone** from the equipment page, along with the equipment
   profile dialog on the Add Tile menu and the find-and-replace in gauge groups.
   Add an Engine Cluster or a gauge group and choose the equipment instead.

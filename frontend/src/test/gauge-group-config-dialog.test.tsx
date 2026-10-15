@@ -196,6 +196,18 @@ describe('GaugeGroupConfigDialog', () => {
       expect(saved.equipmentId).toBe('eng-port')
     })
 
+    test('the unit of a reading on the profile is the profile unit and cannot be changed here', () => {
+      render(<GaugeGroupConfigDialog widget={widget({ ...equipmentGroup, gauges: [{ ...equipmentGroup.gauges[0], quantity: 'pressure', unit: 'bar' }] })} onCancel={vi.fn()} onSave={vi.fn()} />)
+      expect(screen.getByLabelText('Quantity')).toBeDisabled()
+      expect(screen.getByLabelText('Unit')).toBeDisabled()
+      expect(screen.getByLabelText('Unit')).toHaveValue('psi')
+    })
+
+    test('a reading the profile does not have keeps its own unit, editable', () => {
+      render(<GaugeGroupConfigDialog widget={widget({ ...equipmentGroup, gauges: [{ ...equipmentGroup.gauges[0], suffix: 'exhaust', quantity: 'temperature', unit: 'C' }] })} onCancel={vi.fn()} onSave={vi.fn()} />)
+      expect(screen.getByLabelText('Unit')).toBeEnabled()
+    })
+
     test('a title is optional, because the item name is the default', () => {
       render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={vi.fn()} />)
       expect((screen.getByLabelText('Title') as HTMLInputElement).placeholder).toBe('Port engine')

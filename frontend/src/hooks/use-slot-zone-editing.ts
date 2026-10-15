@@ -4,6 +4,7 @@ import type { GaugeEquipmentMode } from '@/components/gauge-fields'
 import { saveEquipmentProfile } from '@/hooks/use-equipment-profiles'
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import {
+  effectiveScale,
   itemsUsingProfile,
   profileBands,
   profileGaugeFor,
@@ -40,8 +41,7 @@ export function useSlotZoneEditing(ctx: EquipmentTileContext, item: TileItem | u
   const modeFor = useCallback((slot: GaugeWidgetConfig): GaugeEquipmentMode => {
     const suffix = (slot.suffix ?? '').trim()
     const gauge = profileGaugeFor(profile, suffix)
-    const min = slot.min ?? gauge?.min ?? 0
-    const max = slot.max ?? gauge?.max ?? 100
+    const { min, max } = effectiveScale(slot.min, slot.max, gauge)
     return {
       profileGauges: profile?.gauges ?? [],
       zones: gauge ? (edits[suffix]?.bands ?? profileBands(gauge, min, max)) : undefined,

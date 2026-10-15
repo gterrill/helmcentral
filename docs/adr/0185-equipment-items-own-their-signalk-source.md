@@ -120,11 +120,18 @@ Tiles that show a piece of equipment store the item, not paths.
    volume, which removes the old rule that refused a tank saved without units.
 3. **Zones live on the profile.** A slot's bands are the zones of the gauge on
    the item's profile with the same suffix, anchored to the slot's scale, and a
-   zone with no threshold draws nothing. `gauge_zone_alarms.go` reads the same
-   gauges, so a tile and its alarm cannot differ. Alarm ids for these are
+   zone with no threshold draws nothing. `gauge_zone_alarms.go` builds an item's
+   alarms from the item and the profile gauge alone, so a tile and its alarm
+   cannot differ and the alarm does not depend on which tile shows it. Alarm ids for these are
    `zone:item:<item id>:<suffix>:<n>`: one alarm per item and reading however
    many tiles show it, named for the item ("Port engine Oil Press"). There is
-   no per-tile override. Editing a zone in a tile's form edits the profile (the
+   no per-tile override, and the unit of a reading on the profile is the
+   profile's (a slot's own quantity and unit apply only to a reading the profile
+   lacks), because the thresholds are in that unit. The scale a zone is anchored
+   to is the slot's, else the gauge's, else 0 to 100, in one helper per language.
+   The exception is a fuel bar: a tank has no profile, so a bar keeps its own
+   zones, as bands of the level in percent, and they raise a low-fuel alarm
+   keyed `zone:tank:<tank item id>:<n>` and named "<tank> level". Editing a zone in a tile's form edits the profile (the
    tile's save writes the profile first and stops if the server refuses it), and
    the form names the profile and the items that follow it. A reading the
    profile has no gauge for has no zones; the form says so.
@@ -154,7 +161,8 @@ Tiles that show a piece of equipment store the item, not paths.
    item and asks for one. A tile's zones move onto the profile gauge when the
    profile has none for that reading; when it has its own they are dropped and
    logged once; a band that floats mid-scale, a reading the profile has no gauge
-   for, or an item with no profile are dropped and logged. Lamps with a
+   for, or an item with no profile are dropped and logged; zones in another unit
+   than the profile's are converted. A fuel bar's zones are kept on the bar. Lamps with a
    mapped source become references; an unowned lamp keeps its path and is
    logged. A profile or pages file that cannot be written stops startup.
 

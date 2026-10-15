@@ -4,6 +4,7 @@ import type { EngineClusterConfig, GaugeGroupWidgetConfig, LampStripWidgetConfig
 import type { EngineProfile } from '@/lib/engine-profiles'
 import {
   bandsToProfileZones,
+  effectiveScale,
   resolveCluster,
   resolveGaugeGroup,
   resolveLamps,
@@ -172,5 +173,58 @@ describe('profile zone editing', () => {
       { direction: 'above', threshold: null, state: 'warn' },
       { direction: 'below', threshold: 20, state: 'warn' },
     ])
+  })
+})
+
+describe('the scale and unit of an equipment slot', () => {
+  const bar: EngineProfile = {
+    id: 'bar-engine', name: 'Bar engine', kind: 'engine',
+    gauges: [{
+      path_suffix: 'oilPressure', label: 'Oil Press', display: 'radial', quantity: 'pressure', unit: 'bar', min: 0, max: 10,
+      zones: [{ direction: 'above', threshold: 8, state: 'alarm' }],
+    }],
+  }
+  const tile: EngineClusterConfig = {
+    equipmentId: 'eng-port', title: '',
+    ring: slot('oilPressure', { quantity: 'pressure', unit: 'psi' }),
+    centre: slot('runTime'),
+    corners: [],
+  }
+
+  it('carries the profile scale its zones were anchored to when the slot sets none', () => {
+    const r = resolveCluster(tile, ctx([item({ profile_id: 'bar-engine' })], { profiles: [bar] }))
+    if (!r.ok) throw new Error('expected resolved')
+    expect(r.config.ring).toMatchObject({ min: 0, max: 10 })
+    expect(r.config.ring.zones).toEqual([{ from: 8, to: 10, state: 'alarm' }])
+  })
+
+  it('takes the quantity and unit from the profile gauge, because its thresholds are in that unit', () => {
+    const r = resolveCluster(tile, ctx([item({ profile_id: 'bar-engine' })], { profiles: [bar] }))
+    if (!r.ok) throw new Error('expected resolved')
+    expect(r.config.ring).toMatchObject({ quantity: 'pressure', unit: 'bar' })
+  })
+
+  it('keeps the slot own quantity and unit for a reading the profile does not have', () => {
+    const r = resolveCluster(tile, ctx([item({ profile_id: 'bar-engine' })], { profiles: [bar] }))
+    if (!r.ok) throw new Error('expected resolved')
+    expect(r.config.centre).toMatchObject({ quantity: 'raw', unit: 'raw' })
+  })
+
+  it('has one rule for the scale: the slot, else the gauge, else 0 to 100', () => {
+    expect(effectiveScale(2, 4, { min: 0, max: 10 })).toEqual({ min: 2, max: 4 })
+    expect(effectiveScale(undefined, undefined, { min: 1, max: 10 })).toEqual({ min: 1, max: 10 })
+    expect(effectiveScale(undefined, undefined, undefined)).toEqual({ min: 0, max: 100 })
+  })
+})
+
+describe('fuel bar zones', () => {
+  const tank = item({ id: 'tank-5', name: 'Port forward fuel', signalk_source: 'tanks.fuel.5', source_kind: 'tank', profile_id: '' })
+  it('go onto the level slot, because a tank has no profile to hold them', () => {
+    const r = resolveCluster(
+      { ...cluster, fuel: { side: 'left', bars: [{ tankId: 'tank-5', label: 'Fwd', zones: [{ from: 0, to: 15, state: 'warn' }] }] } },
+      ctx([item(), tank]),
+    )
+    if (!r.ok || !r.config.fuel) throw new Error('expected a rail')
+    expect(r.config.fuel.bars[0].level.zones).toEqual([{ from: 0, to: 15, state: 'warn' }])
   })
 })

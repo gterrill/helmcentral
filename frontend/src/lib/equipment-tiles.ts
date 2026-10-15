@@ -87,7 +87,25 @@ export function profileBands(gauge: EngineProfileGauge, min: number, max: number
   return (gauge.zones ?? []).map((z) => toBand(z, min, max)).filter((z): z is GaugeZone => z !== null)
 }
 
-/** One slot with its path and the profile's zones filled in. */
+/**
+ * The scale a slot's zones are anchored to: the slot's own minimum and maximum
+ * when it sets them, else the profile gauge's, else 0 to 100. The one place that
+ * rule lives (backend: gaugeScale in dashboard_equipment.go).
+ */
+export function effectiveScale(
+  slotMin: number | undefined,
+  slotMax: number | undefined,
+  gauge: { min?: number; max?: number } | undefined,
+): { min: number; max: number } {
+  return { min: slotMin ?? gauge?.min ?? 0, max: slotMax ?? gauge?.max ?? 100 }
+}
+
+/**
+ * One slot with its path and the profile's zones filled in. When the profile has
+ * a gauge for the reading, the quantity and unit are the profile's, because its
+ * thresholds are in that unit, and the slot carries the scale its zones were
+ * anchored to.
+ */
 export function resolveSlot(item: TileItem, profile: EngineProfile | undefined, slot: GaugeWidgetConfig): GaugeWidgetConfig {
   const suffix = (slot.suffix ?? '').trim()
   const { suffix: _suffix, zones: _zones, ...rest } = slot
@@ -95,12 +113,16 @@ export function resolveSlot(item: TileItem, profile: EngineProfile | undefined, 
   void _zones
   if (suffix === '') return { ...rest, path: '' }
   const gauge = profileGaugeFor(profile, suffix)
-  const min = slot.min ?? gauge?.min ?? 0
-  const max = slot.max ?? gauge?.max ?? 100
-  const zones = gauge ? profileBands(gauge, min, max) : []
+  if (!gauge) return { ...rest, path: `${item.signalk_source}.${suffix}` }
+  const { min, max } = effectiveScale(slot.min, slot.max, gauge)
+  const zones = profileBands(gauge, min, max)
   return {
     ...rest,
     path: `${item.signalk_source}.${suffix}`,
+    quantity: gauge.quantity,
+    unit: gauge.unit,
+    min,
+    max,
     ...(zones.length > 0 ? { zones } : {}),
   }
 }
@@ -129,7 +151,10 @@ export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileCo
       const source = tank && tank.source_kind === 'tank' ? tank.signalk_source : ''
       const label = bar.label ?? ''
       return {
-        level: { path: source ? `${source}.currentLevel` : '', label, display: 'bar' as const, quantity: 'ratio', unit: 'percent', decimals: 0, min: 0, max: 100 },
+        level: {
+          path: source ? `${source}.currentLevel` : '', label, display: 'bar' as const, quantity: 'ratio', unit: 'percent', decimals: 0, min: 0, max: 100,
+          ...(bar.zones && bar.zones.length > 0 ? { zones: bar.zones } : {}),
+        },
         capacity: { path: source ? `${source}.capacity` : '', label: '', display: 'numeric' as const, quantity: 'volume', unit: 'L', decimals: 0 },
       }
     }),

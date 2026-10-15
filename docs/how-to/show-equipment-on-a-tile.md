@@ -19,6 +19,8 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
    the telltales are filled from the engine's profile. Change any slot after.
 4. Leave **Title** blank to show the engine's name, or type your own.
 5. To add a fuel rail, choose **Add fuel rail**, then choose a tank for each bar.
+   A bar can carry a **low fuel alarm**: the level it falls below, and how severe.
+   Unlike engine limits, it belongs to the bar, because a tank has no profile.
 6. Choose **Save**.
 
 For the second engine, duplicate the tile and choose the other engine.
@@ -39,6 +41,9 @@ Each gauge with a scale lists its zones. Edit one and the form shows which
 equipment and tiles the change applies to, for example "Applies to every tile
 and alarm using Yanmar 4JH (Port engine, Starboard engine)". Saving the tile
 saves the limit to the profile. There is no limit that belongs to one tile.
+
+The reading's quantity and unit come from the profile, so the limits are always
+in the profile's unit and you cannot change them on the tile.
 
 If the profile has no gauge for a reading, the form says so and shows no zones.
 Add the reading to the profile under **Inventory → Profiles** to give it some.

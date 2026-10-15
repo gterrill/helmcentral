@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import type { SignalKPath } from '@/hooks/use-signalk-paths'
 import type { EngineProfileGauge } from '@/lib/engine-profiles'
 import { GAUGE_TREND_WINDOWS, type GaugeDisplay, type GaugeWidgetConfig, type GaugeZone } from '@/lib/dashboard-widgets'
+import { effectiveScale } from '@/lib/equipment-tiles'
 import { inferredQuantityForSIUnit, QUANTITIES, quantityById, unitOption } from '@/lib/quantities'
 
 /**
@@ -86,7 +87,12 @@ export function slotFromProfileGauge(slot: GaugeWidgetConfig, gauge: EngineProfi
  * row of a gauge group (ADR 0049) so the two never drift apart.
  */
 export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: GaugeFieldsProps) {
-  const quantity = quantityById(value.quantity)
+  // On an equipment slot the profile's gauge decides the quantity and unit,
+  // because its zone thresholds are in that unit.
+  const profileGauge = equipment?.profileGauges.find((g) => g.path_suffix === (value.suffix ?? '').trim())
+  const shownQuantity = profileGauge ? profileGauge.quantity : value.quantity
+  const shownUnit = profileGauge ? profileGauge.unit : value.unit
+  const quantity = quantityById(shownQuantity)
   const known = useMemo(() => new Map(paths.map((p) => [p.path, p])), [paths])
   const listId = `${idPrefix}-path-options`
 
@@ -122,9 +128,9 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: Gau
     onChange(gauge ? slotFromProfileGauge({ ...value, suffix }, gauge) : { ...value, suffix })
   }
 
-  const min = value.min ?? 0
-  const max = value.max ?? 100
-  const unitLabel = unitOption(value.quantity, value.unit).label
+  const { min, max } = effectiveScale(value.min, value.max, undefined)
+
+  const unitLabel = unitOption(shownQuantity, shownUnit).label
 
   /**
    * Zones are edited as a direction plus a threshold, never as a free from/to
@@ -211,7 +217,8 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: Gau
         <Field>
           <FieldLabel htmlFor={`${idPrefix}-quantity`}>Quantity</FieldLabel>
           <select id={`${idPrefix}-quantity`} className={SELECT_CLASS}
-            value={value.quantity}
+            disabled={profileGauge !== undefined}
+            value={shownQuantity}
             onChange={(e) => {
               const next = quantityById(e.target.value)
               onChange({ ...value, quantity: next.id, unit: next.units[0].id })
@@ -222,7 +229,8 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: Gau
         <Field>
           <FieldLabel htmlFor={`${idPrefix}-unit`}>Unit</FieldLabel>
           <select id={`${idPrefix}-unit`} className={SELECT_CLASS}
-            value={value.unit} onChange={(e) => set('unit', e.target.value)}>
+            disabled={profileGauge !== undefined}
+            value={shownUnit} onChange={(e) => set('unit', e.target.value)}>
             {quantity.units.map((u) => <option key={u.id} value={u.id}>{u.label || u.id}</option>)}
           </select>
         </Field>
