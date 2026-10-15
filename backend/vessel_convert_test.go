@@ -164,7 +164,7 @@ func TestConvertLegacyVesselMapsItemsAndWritesRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := vesselRoles{HouseBank: f.bank, GeneratorACInstance: "5"}
+	want := vesselRoles{HouseBank: f.bank, Generator: f.gen, GeneratorACInstance: "5"}
 	if roles != want {
 		t.Errorf("roles = %+v, want %+v (no alternator, charger, inverter or readout item existed to choose)", roles, want)
 	}
@@ -311,5 +311,24 @@ func TestConvertLegacyVesselCorruptBlockFailsFast(t *testing.T) {
 	settings, _ := readSettings(path)
 	if _, still := settings["vessel"]; !still {
 		t.Errorf("a block that failed to convert must be left in place")
+	}
+}
+
+// The generator the old settings named is the item whose hand-typed hour meter
+// gave it its source, so the role has to be picked after that assignment.
+func TestConvertLegacyVesselPicksTheGeneratorRoleAfterTheHourMeterGivesItASource(t *testing.T) {
+	f := newConvertFixture(t)
+	withTempAlarmRules(t)
+	captureLog(t)
+
+	if err := convertLegacyVessel(f.path, f.store); err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	roles, err := loadVesselRoles(f.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if roles.Generator != f.gen {
+		t.Fatalf("the generator role should name the genset, got %q (want %q)", roles.Generator, f.gen)
 	}
 }

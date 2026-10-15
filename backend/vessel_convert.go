@@ -231,22 +231,6 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 			nameOnto(sourcePath(sourceTank, strings.ToLower(strings.TrimSpace(key))), label, "tank")
 		}
 
-		el := legacy.Electrical
-		pick := func(group sourceGroup, instance, what string) string {
-			instance = strings.TrimSpace(instance)
-			if instance == "" {
-				return ""
-			}
-			return find(sourcePath(group, instance), what)
-		}
-		roles.PortAlternator = pick(sourceAlternator, legacy.Alternators.PortInstance, "the port alternator")
-		roles.StarboardAlternator = pick(sourceAlternator, legacy.Alternators.StarboardInstance, "the starboard alternator")
-		roles.Generator = pick(sourceGenerator, el.GeneratorInstance, "the generator")
-		roles.ShoreCharger = pick(sourceCharger, el.ShoreChargerInstance, "the shore charger")
-		roles.Inverter = pick(sourceInverter, el.InverterInstance, "the inverter")
-		roles.VoltageReadoutBattery = pick(sourceBattery, el.VoltageReadoutBattery, "the voltage readout battery")
-		roles.GeneratorACInstance = strings.TrimSpace(el.GeneratorACInstance)
-
 		// A hand-typed hour meter path becomes the item's source when it names
 		// an engine's or generator's own runtime counter and the item has no
 		// source yet; then the column is retired for every item.
@@ -282,6 +266,23 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 				return fmt.Errorf("retire hour meter path: %w", err)
 			}
 		}
+		// Roles are picked last, once every source has been assigned: the hour
+		// meter loop above is what gives a generator its source.
+		el := legacy.Electrical
+		pick := func(group sourceGroup, instance, what string) string {
+			instance = strings.TrimSpace(instance)
+			if instance == "" {
+				return ""
+			}
+			return find(sourcePath(group, instance), what)
+		}
+		roles.PortAlternator = pick(sourceAlternator, legacy.Alternators.PortInstance, "the port alternator")
+		roles.StarboardAlternator = pick(sourceAlternator, legacy.Alternators.StarboardInstance, "the starboard alternator")
+		roles.Generator = pick(sourceGenerator, el.GeneratorInstance, "the generator")
+		roles.ShoreCharger = pick(sourceCharger, el.ShoreChargerInstance, "the shore charger")
+		roles.Inverter = pick(sourceInverter, el.InverterInstance, "the inverter")
+		roles.VoltageReadoutBattery = pick(sourceBattery, el.VoltageReadoutBattery, "the voltage readout battery")
+		roles.GeneratorACInstance = strings.TrimSpace(el.GeneratorACInstance)
 		return nil
 	})
 	if err != nil {
