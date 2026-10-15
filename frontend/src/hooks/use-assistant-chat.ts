@@ -93,6 +93,11 @@ export interface AssistantSendOptions {
 
 const STALE_PAGE_MESSAGE = 'Helmcentral has been updated since this page was opened. Reload the page to keep talking to Mate.'
 
+/** What the operator reads when a question arrives while Mate is still
+ * answering the last one: the server's 409 on a send, and a Mate session
+ * refusing a second question itself (use-mate-session.ts). */
+export const MATE_BUSY_MESSAGE = 'Mate is still answering the last question.'
+
 // A non-2xx response carries a JSON `{error}` body per the API contract, but
 // a 503 from a proxy in front of the backend (or any other layer that never
 // reaches the handler) won't - read it defensively rather than letting a
@@ -345,7 +350,9 @@ export function useAssistantChat() {
       )
 
       if (!response.ok) {
-        const message = await readErrorMessage(response)
+        // 409: another answer for this conversation is still being written.
+        // The server's wording is for engineers.
+        const message = response.status === 409 ? MATE_BUSY_MESSAGE : await readErrorMessage(response)
         removeMateWatch(conversationId)
         if (isCurrent()) setError(message)
         return null

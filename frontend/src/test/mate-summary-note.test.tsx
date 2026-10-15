@@ -4,8 +4,8 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 
 import { MateSummaryNoteDialog } from '@/components/mate-summary-note-dialog'
 import { AssistantThread } from '@/components/assistant-thread'
-import type { useAssistantChat } from '@/hooks/use-assistant-chat'
-import type { AssistantMessage, useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
+import { fakeMateSession } from './helpers/fake-mate-session'
 
 // The Plate editor is covered by note-editor.test.tsx; here it is a textarea
 // that reports edits the way the real body does.
@@ -129,46 +129,6 @@ describe('MateSummaryNoteDialog', () => {
   })
 })
 
-function buildConversations(overrides: Partial<ReturnType<typeof useAssistantConversations>> = {}): ReturnType<typeof useAssistantConversations> {
-  return {
-    conversations: [],
-    activeId: 'c1',
-    messages: [],
-    summaryNoteId: null,
-    setSummaryNoteId: vi.fn(),
-    conversationLoading: false,
-    loading: false,
-    error: null,
-    errorMessage: null,
-    select: vi.fn(),
-    create: vi.fn(),
-    startNew: vi.fn(),
-    remove: vi.fn(),
-    appendLocal: vi.fn(),
-    updateProposal: vi.fn(),
-    updateFormDraft: vi.fn(),
-    refresh: vi.fn().mockResolvedValue(undefined),
-    reload: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  }
-}
-
-function buildChat(overrides: Partial<ReturnType<typeof useAssistantChat>> = {}): ReturnType<typeof useAssistantChat> {
-  return {
-    send: vi.fn().mockResolvedValue(null),
-    sending: false,
-    statusText: null,
-    draft: null,
-    error: null,
-    abort: vi.fn(),
-    attach: vi.fn().mockResolvedValue(null),
-    isStreamingConversation: vi.fn().mockReturnValue(false),
-    answerDelivered: vi.fn().mockReturnValue(false),
-    deliveredMessageId: null,
-    ...overrides,
-  }
-}
-
 const reply: AssistantMessage = {
   id: 'm2',
   conversationId: 'c1',
@@ -180,28 +140,26 @@ const reply: AssistantMessage = {
 
 describe('Summarise to note button in the composer', () => {
   it('is disabled while the selected conversation is still loading', () => {
-    const conversations = buildConversations({ messages: [reply], conversationLoading: true })
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={fakeMateSession({ messages: [reply], conversationLoading: true })} />)
     expect(screen.getByRole('button', { name: 'Summarise to note' })).toBeDisabled()
   })
 
   it('is disabled until Mate has replied', () => {
-    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={fakeMateSession()} />)
     expect(screen.getByRole('button', { name: 'Summarise to note' })).toBeDisabled()
   })
 
   it('is disabled while sending and for a read-only session', () => {
-    const conversations = buildConversations({ messages: [reply] })
-    const { unmount } = render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true })} />)
+    const { unmount } = render(<AssistantThread canWrite session={fakeMateSession({ messages: [reply], status: { sending: true } })} />)
     expect(screen.getByRole('button', { name: 'Summarise to note' })).toBeDisabled()
     unmount()
-    render(<AssistantThread canWrite={false} conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite={false} session={fakeMateSession({ messages: [reply] })} />)
     expect(screen.getByRole('button', { name: 'Summarise to note' })).toBeDisabled()
   })
 
   it('opens the review dialog and fetches the draft when tapped', async () => {
     scriptSummary(jsonResponse(draftResponse))
-    render(<AssistantThread canWrite conversations={buildConversations({ messages: [reply] })} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={fakeMateSession({ messages: [reply] })} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Summarise to note' }))
 
@@ -215,8 +173,7 @@ describe('Summarise to note button in the composer', () => {
     render(
       <AssistantThread
         canWrite
-        conversations={buildConversations({ messages: [reply], summaryNoteId: 'n1', setSummaryNoteId })}
-        chat={buildChat()}
+        session={fakeMateSession({ messages: [reply], summaryNoteId: 'n1', setSummaryNoteId })}
       />,
     )
 

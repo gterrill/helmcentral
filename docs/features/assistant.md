@@ -25,6 +25,13 @@ reading for a few minutes, nearby vessels,
 forecasts and tides, passage estimates, places, equipment and maintenance, and
 your documents.
 
+Mate answers one question at a time in each conversation. Send stays
+greyed out until the answer is in or you stop it. A question that arrives
+by voice, from Help or from a selection while the sheet is still answering
+waits in the box, with "Mate is still answering the last question." above
+it, for you to send once the answer is in. One that reaches Mate from
+another device gets the same sentence rather than a second answer.
+
 Mate keeps writing the answer even if you switch to another panel, or the
 sheet closes, while it's still working. Come back and you'll either see it
 still arriving or already finished, footer and all, instead of finding it
@@ -174,10 +181,12 @@ generator, switching circuits, the anchor watch and alarm acknowledgement are
 not things it can propose, and neither are your settings or logins.
 
 Mate also knows two things about the app itself: what you're looking at when
-you ask, and how Helmcentral's own features work. A question asked from the
-sheet over the Forecast panel arrives with that noted, so "explain how the
-upper atmosphere graph works" gets answered as a question about the panel
-you're on, not a guess at what you might mean. The same goes for a document:
+you ask, and how Helmcentral's own features work. Every question asked from
+the sheet arrives with the screen behind it noted, the follow-ups you type
+as well as the first one, so "explain how the upper
+atmosphere graph works", asked from the sheet over the Forecast panel, gets
+answered as a question about the panel you're on, not a guess at what you
+might mean. The same goes for a document:
 open Mate from a document's Details page and ask "what period does this
 cover?", and Mate reads that document to answer rather than asking which
 source you mean. And for a question about
@@ -332,7 +341,9 @@ microphone too, and it does a different job: it dictates into whatever
 question you're already typing, rather than sending on its own, for adding a
 follow-up thought by voice without cutting off what you'd already typed. A
 voice question can also be answered aloud, on top of the full written
-answer, never instead of it.
+answer, never instead of it. Only a question you spoke is answered that way:
+one sent from Help, a Settings page or a text selection gets an answer
+written for reading.
 
 There's also "Listen for Hey Mate", an experimental always-on mode: say "Hey
 Mate" followed by your question, or say "Hey Mate" alone and Mate waits about

@@ -31,6 +31,13 @@ the reply and whether it is on offer for this run. Calls in a round run
 concurrently, so a tool that writes is safe under that on its own.
 _Avoid_: function, plugin, skill.
 
+**Mate session**: one Mate surface's hold on a conversation in the browser:
+which conversation is open, its messages, the question in flight and its
+streaming answer (`useMateSession`). The Mate panel and the Mate sheet each
+have their own, so each can show a different conversation. A session asks one
+question at a time and sends the screen the operator is on with every one.
+_Avoid_: chat, thread (the thread is the rendered list of messages).
+
 ## Passages
 
 **Track point**: one recorded position with the readings taken at that moment

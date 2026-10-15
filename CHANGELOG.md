@@ -19,6 +19,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - A moment with no GPS position, or only half of one, no longer raises a GNSS
   alarm at anchor when the next fix arrives. The boat's position holds at the
   last good fix through the gap.
+- Mate now knows which page or document you are on for every question asked
+  from the Mate sheet, including ones you type. Before, only a question that
+  arrived by voice, from Help, Settings or a text selection carried it.
+- Questions sent to Mate from Help, a Settings page or a text selection get an
+  answer written for reading. Only a question you speak gets one written to be
+  read aloud.
+- Asking Mate a second question while it is still answering the first now says
+  "Mate is still answering the last question." instead of a technical error.
 
 ## [0.45.0] - 2026-10-14
 

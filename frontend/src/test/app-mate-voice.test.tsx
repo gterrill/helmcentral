@@ -213,9 +213,13 @@ vi.mock('@/hooks/use-alarms', () => ({
   collisionAlarmStatesByVessel: () => new Map(),
 }))
 
+// Every question App's Mate sheet sends, as the request body.
+let sentQuestions: Array<Record<string, unknown>> = []
+
 function stubFetch() {
   const conversations: Array<{ id: string; title: string; created_at: string; updated_at: string }> = []
   let counter = 0
+  sentQuestions = []
 
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
@@ -237,6 +241,10 @@ function stubFetch() {
       const conversation = { id, title: 'New conversation', created_at: now, updated_at: now }
       conversations.unshift(conversation)
       return { ok: true, status: 201, json: async () => conversation }
+    }
+    if (/\/api\/assistant\/conversations\/[^/]+\/messages$/.test(url) && method === 'POST') {
+      sentQuestions.push(JSON.parse(init?.body as string) as Record<string, unknown>)
+      return { ok: false, status: 503, json: async () => ({ error: 'Mate is not set up in this test.' }) }
     }
     const conversationMatch = url.match(/\/api\/assistant\/conversations\/([^/]+)$/)
     if (conversationMatch && method === 'GET') {
@@ -350,6 +358,27 @@ describe('App-wide voice (ADR 0093)', () => {
 
     expect(await screen.findByRole('heading', { name: 'Mate' })).toBeInTheDocument()
     expect(await screen.findByText('how does the passage look')).toBeInTheDocument()
+  })
+
+  // Only a question that came in by voice asks Mate for an answer to be
+  // spoken; one typed into the sheet does not. Both say which screen the
+  // operator is on.
+  it('asks for a spoken answer to a voice question, and not to a typed follow-up', async () => {
+    vi.stubGlobal('SpeechRecognition', FakeSpeechRecognition)
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Talk to Mate' }))
+    currentRecognition().emitResult('how does the passage look', true)
+    await waitFor(() => expect(sentQuestions).toHaveLength(1))
+    expect(sentQuestions[0]).toEqual(expect.objectContaining({ content: 'how does the passage look', spoken: true, screen: expect.any(Object) }))
+
+    const composer = await screen.findByPlaceholderText('Ask Mate')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled())
+    fireEvent.change(composer, { target: { value: 'and tomorrow?' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() => expect(sentQuestions).toHaveLength(2))
+    expect(sentQuestions[1]).not.toHaveProperty('spoken')
+    expect(sentQuestions[1]).toEqual(expect.objectContaining({ content: 'and tomorrow?', screen: expect.any(Object) }))
   })
 
   it('an unsent message in the Mate sheet holds an update reload until it is cleared', async () => {

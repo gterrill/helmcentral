@@ -264,22 +264,57 @@ describe('useAssistantConversations', () => {
     expect(result.current.messages).toEqual([])
   })
 
-  it('appendLocal appends a message to the thread without a network call', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ conversations: [] }) })
-    vi.stubGlobal('fetch', fetchMock)
+  // The swap after an answer lands must not disturb what is on screen: an
+  // unchanged message keeps its object, and the server's copy of the
+  // optimistic question keeps that bubble's key.
+  it('reloadMessages keeps unchanged messages and carries the optimistic key onto the server copy', async () => {
+    const reply = messageApi({ id: 'a2', seq: 2, role: 'assistant', content: 'Turning at 14:10.' })
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+      return { ok: true, json: async () => ({ conversation: conversationApi(), messages: [messageApi({ id: 'u1', content: 'Is the tide turning?' }), reply] }) }
+    }))
+
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => {
+      result.current.appendLocal({ id: 'local-1', clientKey: 'local-1', conversationId: 'c1', seq: -1, role: 'user', content: 'Is the tide turning?', createdAt: '' })
+      result.current.appendLocal({ id: 'a2', conversationId: 'c1', seq: 2, role: 'assistant', content: 'Turning at 14:10.', createdAt: '2026-09-01T00:00:00Z' })
+    })
+    const streamedReply = result.current.messages[1]
+
+    await act(async () => { await result.current.reloadMessages('c1') })
+
+    expect(result.current.messages[0]).toEqual(expect.objectContaining({ id: 'u1', clientKey: 'local-1' }))
+    expect(result.current.messages[1]).toBe(streamedReply)
+  })
+
+  // The quiet re-read after an answer lands must not drop a message
+  // appended while it was in flight: it may predate that message.
+  it('reloadMessages drops its answer when a message was appended meanwhile', async () => {
+    let answer!: () => void
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+      return {
+        ok: true,
+        json: () => new Promise((resolve) => { answer = () => resolve({ conversation: conversationApi(), messages: [messageApi()] }) }),
+      }
+    }))
 
     const { result } = renderHook(() => useAssistantConversations())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    const callCountBefore = fetchMock.mock.calls.length
+    let reloading!: Promise<void>
+    act(() => { reloading = result.current.reloadMessages('c1') })
+    await waitFor(() => expect(answer).toBeTypeOf('function'))
     act(() => {
-      result.current.appendLocal({
-        id: 'local-1', conversationId: 'c1', seq: 0, role: 'user', content: 'hi', createdAt: '2026-09-01T00:00:00Z',
-      })
+      result.current.appendLocal({ id: 'local-1', conversationId: 'c1', seq: -1, role: 'user', content: 'and tomorrow?', createdAt: '' })
+    })
+    await act(async () => {
+      answer()
+      await reloading
     })
 
-    expect(result.current.messages).toHaveLength(1)
-    expect(fetchMock.mock.calls.length).toBe(callCountBefore)
+    expect(result.current.messages.map((m) => m.id)).toEqual(['local-1'])
   })
 
   // ADR 0094: "Open in Mate" hands the panel a conversation id the sheet

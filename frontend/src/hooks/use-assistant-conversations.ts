@@ -158,6 +158,9 @@ export interface AssistantProposal {
 
 export interface AssistantMessage {
   id: string
+  /** The id of the optimistic bubble this message replaced, carried onto the
+   * server's copy so the thread keeps rendering it as the same item. */
+  clientKey?: string
   conversationId: string
   seq: number
   role: 'user' | 'assistant' | 'watch'
@@ -235,6 +238,34 @@ function mapMessage(api: MessageApi): AssistantMessage {
     proposals: api.proposals?.map(mapProposal),
     formDrafts: api.form_drafts?.map(mapFormDraft),
   }
+}
+
+function sameMessage(a: AssistantMessage, b: AssistantMessage): boolean {
+  return JSON.stringify({ ...a, clientKey: undefined }) === JSON.stringify({ ...b, clientKey: undefined })
+}
+
+// The server's copy of a thread, swapped in without disturbing what is on
+// screen: a message that has not changed keeps its object, so its bubble does
+// not re-render or re-parse, and the server's copy of an optimistic question
+// carries that bubble's key, so it is not remounted.
+function mergeReloaded(previous: AssistantMessage[], fresh: AssistantMessage[]): AssistantMessage[] {
+  const byId = new Map(previous.map((message) => [message.id, message]))
+  const optimistic = previous.filter((message) => message.id.startsWith('local-'))
+  return fresh.map((message) => {
+    const old = byId.get(message.id)
+    if (old) {
+      if (sameMessage(old, message)) return old
+      return old.clientKey ? { ...message, clientKey: old.clientKey } : message
+    }
+    if (message.role === 'user') {
+      const index = optimistic.findIndex((local) => local.content === message.content)
+      if (index !== -1) {
+        const [local] = optimistic.splice(index, 1)
+        return { ...message, clientKey: local.clientKey ?? local.id }
+      }
+    }
+    return message
+  })
 }
 
 export interface UseAssistantConversationsOptions {
@@ -392,9 +423,8 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // this cycle removes). `startNew` is the local-only equivalent: it clears
   // the active selection and the thread exactly the way a fresh mount
   // already does, with no request at all. The conversation is only ever
-  // actually created, by `create()`, at the moment `chat.send()` posts the
-  // first real message (AssistantThread's handleSend already does this
-  // lazily) - so pressing "New conversation" and never sending anything now
+  // actually created, by `create()`, when the Mate session sends the first
+  // real message (use-mate-session.ts) - so pressing "New conversation" and never sending anything now
   // leaves the list exactly as it was.
   //
   // Defined here, ahead of the re-select effect below, so that effect can
@@ -437,17 +467,28 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     }
   }, [initialId, select, startNew])
 
-  const create = useCallback(async (): Promise<string | null> => {
+  // Creates a conversation and opens it. A new conversation has no messages
+  // and no summary note, so it opens straight from the POST's answer with
+  // no read. `onCreated` runs before the new id becomes active, so a caller
+  // can mark it (the Mate session is about to send into it and must not
+  // look for a running answer there).
+  const create = useCallback(async (onCreated?: (id: string) => void): Promise<string | null> => {
     try {
       const created = mapConversation(await apiRequest<ConversationApi>(LIST_PATH, { method: 'POST', json: {} }))
       invalidateQueries([LIST_PATH])
-      await select(created.id)
+      selectionSeqRef.current += 1
+      onCreated?.(created.id)
+      setActiveId(created.id)
+      setMessages([])
+      setSummaryNoteId(null)
+      setConversationLoading(false)
+      setActionError(null)
       return created.id
     } catch (err) {
       setActionError(wireMessage(err))
       return null
     }
-  }, [select])
+  }, [])
 
   const remove = useCallback(async (id: string) => {
     try {
@@ -485,11 +526,39 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     }
   }, [activeId, select])
 
+  // Bumped by every local append, so a quiet reload that was already in
+  // flight when a new message landed knows its answer is out of date.
+  const localAppendsRef = useRef(0)
+
   // Appends a message already known to the caller - the optimistic user
   // bubble sent before the server has responded, and the final assistant
   // message once it has. Never issues a request itself.
   const appendLocal = useCallback((message: AssistantMessage) => {
+    localAppendsRef.current += 1
     setMessages((previous) => [...previous, message])
+  }, [])
+
+  // Re-reads the open conversation's messages without the loading state
+  // select() shows, so the thread does not flash. Used once an answer has
+  // landed, to swap the optimistic question bubble for the server's copy.
+  // The answer is dropped when anything changed meanwhile: another
+  // conversation opened (the selection sequence moved) or a message was
+  // appended locally (the read may predate it).
+  const reloadMessages = useCallback(async (id: string) => {
+    const seq = selectionSeqRef.current
+    const appends = localAppendsRef.current
+    try {
+      const data = await apiRequest<{ conversation?: ConversationApi; messages?: MessageApi[] }>(
+        `${LIST_PATH}/${encodeURIComponent(id)}`,
+      )
+      if (selectionSeqRef.current !== seq || localAppendsRef.current !== appends) return
+      const fresh = Array.isArray(data.messages) ? data.messages.map(mapMessage) : []
+      setMessages((previous) => mergeReloaded(previous, fresh))
+      setSummaryNoteId(data.conversation?.summary_note_id ?? null)
+    } catch (err) {
+      if (selectionSeqRef.current !== seq) return
+      setActionError(wireMessage(err))
+    }
   }, [])
 
   // Replaces one proposal's card state with what the server just answered
@@ -532,6 +601,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     startNew,
     remove,
     appendLocal,
+    reloadMessages,
     updateProposal,
     updateFormDraft,
     refresh,
