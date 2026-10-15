@@ -671,6 +671,9 @@ function AppShell() {
   const [mateSheetOpen, setMateSheetOpen] = useState(false)
   const [mateSheetQuestion, setMateSheetQuestion] = useState<string | undefined>(undefined)
   const [mateSheetNewConversation, setMateSheetNewConversation] = useState(false)
+  // Whether `mateSheetQuestion` came in by voice: only then does Mate write
+  // an answer meant for speaking, and only then is it read aloud.
+  const [mateSheetSpoken, setMateSheetSpoken] = useState(false)
   // MateSheet is lazy-loaded and does not mount at all until the sheet is
   // opened for the first time - it fetches its conversation list and runs
   // every other effect only while `open`, so there is nothing for it to do
@@ -747,11 +750,16 @@ function AppShell() {
   // the answer watcher can tell a conversation the sheet is showing right
   // now apart from one it merely knows about.
   const [mateSheetConversationId, setMateSheetConversationId] = useState<string | null>(null)
-  const openMate = useCallback((question?: string, options?: { newConversation?: boolean }) => {
+  const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean }) => {
     setMateSheetQuestion(question)
     setMateSheetNewConversation(Boolean(options?.newConversation))
+    setMateSheetSpoken(Boolean(options?.spoken))
     setMateSheetOpen(true)
   }, [])
+  // Push-to-talk and "Hey Mate": the one way a question arrives by voice.
+  const openMateBySpeech = useCallback((question: string) => {
+    openMate(question, { spoken: true })
+  }, [openMate])
   const mateScreen = useMemo(
     () => screenContextFor(appLocation, activePage?.name ?? null, documentDetailsTitle),
     [appLocation, activePage, documentDetailsTitle],
@@ -829,7 +837,7 @@ function AppShell() {
     readAloud: assistantVoiceConfig.readAloud,
     canWrite,
     prime: mateSpeechOutput.prime,
-    onQuestion: openMate,
+    onQuestion: openMateBySpeech,
   })
   const { pushToTalk: mateVoicePushToTalk, cancel: mateVoiceCancel, listening: mateVoiceListening, error: mateVoiceError } = mateVoice
   // Drives the header mic's small dot and its title while wake mode is
@@ -3074,10 +3082,12 @@ function AppShell() {
               if (!open) {
                 setMateSheetQuestion(undefined)
                 setMateSheetNewConversation(false)
+                setMateSheetSpoken(false)
               }
             }}
             initialQuestion={mateSheetQuestion}
             newConversation={mateSheetNewConversation}
+            spoken={mateSheetSpoken}
             screen={mateScreen}
             canWrite={canWrite}
             readAloud={assistantVoiceConfig.readAloud}

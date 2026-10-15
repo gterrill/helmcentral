@@ -8,7 +8,11 @@ import type { AssistantScreenContext } from '@/hooks/use-assistant-chat'
 // as app-location.ts): AppLocation only carries a dashboard page's id, not
 // its name, so the active page's name is threaded in separately rather than
 // making this helper reach into the dashboard-pages hook itself.
-export function screenContextFor(location: AppLocation, pageName: string | null, documentTitle?: string | null): AssistantScreenContext {
+export function screenContextFor(location: AppLocation, pageName: string | null, documentTitle?: string | null): AssistantScreenContext | undefined {
+  // On the Mate panel the screen is Mate itself, which says nothing about
+  // what a question is about.
+  if (location.panel === 'assistant') return undefined
+
   if (location.panel === null) {
     return pageName ? { page: pageName } : {}
   }

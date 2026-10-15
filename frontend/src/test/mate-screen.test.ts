@@ -19,8 +19,10 @@ describe('screenContextFor', () => {
     expect(screenContextFor({ panel: 'forecast' }, null)).toEqual({ panel: 'forecast' })
   })
 
-  it('names the Assistant panel itself', () => {
-    expect(screenContextFor({ panel: 'assistant', conversationId: null }, null)).toEqual({ panel: 'assistant' })
+  // The Mate panel tells Mate nothing about what the operator is working
+  // on, and naming it would read as though the question were about Mate.
+  it('gives no screen on the Mate panel itself', () => {
+    expect(screenContextFor({ panel: 'assistant', conversationId: null }, null)).toBeUndefined()
   })
 
   it('names the settings section', () => {

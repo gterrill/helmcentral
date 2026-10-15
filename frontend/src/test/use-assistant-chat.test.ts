@@ -2,84 +2,14 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useAssistantChat } from '@/hooks/use-assistant-chat'
 import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
-import { todayISO } from '@/lib/local-date'
 import { getMateWatchSnapshot, removeMateWatch } from '@/lib/mate-watch-store'
+import { controllableSseStream, flushMicrotasks, installFakeRaf, neverEndingStream, sseStream } from './helpers/fake-sse'
 
 // ADR 0093: send() posts one message and reads the reply back as SSE
 // (status/message/error frames) over the response body's ReadableStream,
-// since the browser's EventSource can't POST.
-
-function sseStream(chunks: string[]): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder()
-  return new ReadableStream({
-    start(controller) {
-      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk))
-      controller.close()
-    },
-  })
-}
-
-// A stream this test pushes chunks into by hand, so the "statusText updates
-// before the reply resolves" assertion doesn't race a real setTimeout/poll
-// against however many microtask hops the reader happens to need - every
-// hop here is awaited explicitly instead.
-function controllableSseStream() {
-  let streamController!: ReadableStreamDefaultController<Uint8Array>
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) { streamController = controller },
-  })
-  const encoder = new TextEncoder()
-  return {
-    stream,
-    push: (chunk: string) => streamController.enqueue(encoder.encode(chunk)),
-    close: () => streamController.close(),
-  }
-}
-
-async function flushMicrotasks(times = 8) {
-  for (let i = 0; i < times; i++) await Promise.resolve()
-}
-
-// ADR 0105: delta text is buffered in a ref and flushed to `draft` state at
-// most once per requestAnimationFrame, so markdown isn't re-parsed on every
-// token. happy-dom's rAF fires on a real timer, which would make these tests
-// slow and non-deterministic, so every test that touches `draft` installs
-// this fake instead (the same pattern anchor-watch-map-radar-echo.test.tsx
-// uses): it records the queued callback rather than ever calling it, and
-// `flush()` runs it synchronously on demand.
-function installFakeRaf() {
-  let queued: FrameRequestCallback | null = null
-  let nextId = 1
-  vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
-    queued = cb
-    return nextId++
-  })
-  vi.stubGlobal('cancelAnimationFrame', () => {
-    queued = null
-  })
-  return {
-    flush: () => {
-      const cb = queued
-      queued = null
-      cb?.(0)
-    },
-    pending: () => queued !== null,
-  }
-}
-
-// A stream that never closes on its own - the caller must abort it. Used to
-// prove a second send() cancels a first one still in flight.
-function neverEndingStream(onCancel: () => void): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder()
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoder.encode('event: status\ndata: {"text":"first request working"}\n\n'))
-    },
-    cancel() {
-      onCancel()
-    },
-  })
-}
+// since the browser's EventSource can't POST. What a Mate session does with
+// a reply is covered in use-mate-session.test.ts; this file keeps the
+// streaming internals the session does not expose.
 
 const messageApi = {
   id: 'm2',
@@ -162,6 +92,24 @@ describe('useAssistantChat', () => {
     })
 
     expect(result.current.error).toBe('content is required')
+  })
+
+  // The server refuses a question while another answer for the same
+  // conversation is still being written (another tab, or a run this tab
+  // stopped watching). Its wording is for engineers.
+  it('says Mate is still answering when the server refuses a send with 409', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: 'the assistant is still answering the previous message' }),
+    }))
+
+    const { result } = renderHook(() => useAssistantChat())
+    await act(async () => {
+      await result.current.send('c1', 'hello')
+    })
+
+    expect(result.current.error).toBe('Mate is still answering the last question.')
   })
 
   it('falls back to HTTP <status> when a non-2xx body is not JSON', async () => {
@@ -312,40 +260,6 @@ describe('useAssistantChat', () => {
   // only when the caller actually passes them - an ordinary panel send (no
   // options) must not grow a `spoken: false` or `screen: undefined` key the
   // backend was never asked for.
-  it('includes spoken and screen in the request body when given', async () => {
-    const body = sseStream([`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`])
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body })
-    vi.stubGlobal('fetch', fetchMock)
-
-    const { result } = renderHook(() => useAssistantChat())
-
-    await act(async () => {
-      await result.current.send('c1', 'How does tomorrow look?', {
-        spoken: true,
-        screen: { panel: 'forecast' },
-      })
-    })
-
-    const sentBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string)
-    expect(sentBody).toEqual({ content: 'How does tomorrow look?', today: todayISO(), spoken: true, screen: { panel: 'forecast' } })
-  })
-
-  it('sends only content and today when no options are given', async () => {
-    const body = sseStream([`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`])
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, body })
-    vi.stubGlobal('fetch', fetchMock)
-
-    const { result } = renderHook(() => useAssistantChat())
-
-    await act(async () => {
-      await result.current.send('c1', 'hello')
-    })
-
-    const sentBody = JSON.parse(fetchMock.mock.calls[0][1]?.body as string)
-    // today is the operator's local date, always sent (the maintenance tools need it).
-    expect(sentBody).toEqual({ content: 'hello', today: todayISO() })
-  })
-
   // ADR 0105: delta/retract/message/error frames drive `draft`, rAF-batched.
   describe('draft (ADR 0105 token streaming)', () => {
     it('accumulates delta text into draft, flushed at most once per animation frame', async () => {

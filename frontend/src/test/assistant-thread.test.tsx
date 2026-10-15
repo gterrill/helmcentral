@@ -3,11 +3,11 @@ import { act, render, screen, fireEvent, waitFor, within } from '@testing-librar
 
 import { AssistantThread } from '@/components/assistant-thread'
 import type { AssistantMessage } from '@/hooks/use-assistant-conversations'
-import type { useAssistantChat } from '@/hooks/use-assistant-chat'
-import type { useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { useNotes } from '@/hooks/use-notes'
 import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { MATE_WAITING_PHRASES } from '@/lib/mate-waiting-phrases'
+import type { MateSession } from '@/hooks/use-mate-session'
+import { fakeMateSession } from './helpers/fake-mate-session'
 
 // The thread creates a note directly (no sheet) when the operator saves an
 // answer - Mate is often itself a sheet, so opening the capture sheet over
@@ -46,57 +46,10 @@ function makeNotesMock(overrides: Partial<NotesMock> = {}): NotesMock {
   }
 }
 
-// AssistantThread (ADR 0093) is a pure view over whatever conversations/chat
-// hook results its caller hands it - both AssistantDrawer (the panel) and
-// MateSheet (the voice quick-channel) pass their own instances. These tests
-// drive it directly with hand-built hook results rather than through fetch,
-// mirroring how a component test drives a controlled child.
-
-function buildConversations(
-  overrides: Partial<ReturnType<typeof useAssistantConversations>> = {},
-): ReturnType<typeof useAssistantConversations> {
-  return {
-    conversations: [],
-    activeId: 'c1',
-    messages: [],
-    summaryNoteId: null,
-    setSummaryNoteId: vi.fn(),
-    conversationLoading: false,
-    loading: false,
-    error: null,
-    errorMessage: null,
-    select: vi.fn(),
-    create: vi.fn(),
-    startNew: vi.fn(),
-    remove: vi.fn(),
-    appendLocal: vi.fn(),
-    updateProposal: vi.fn(),
-    updateFormDraft: vi.fn(),
-    refresh: vi.fn().mockResolvedValue(undefined),
-    reload: vi.fn().mockResolvedValue(undefined),
-    ...overrides,
-  }
-}
-
-function buildChat(overrides: Partial<ReturnType<typeof useAssistantChat>> = {}): ReturnType<typeof useAssistantChat> {
-  return {
-    send: vi.fn().mockResolvedValue(null),
-    sending: false,
-    statusText: null,
-    draft: null,
-    error: null,
-    abort: vi.fn(),
-    // ADR 0105: every test below either doesn't care about rejoining a run
-    // (the default, a no-op 204-shaped resolution) or overrides this
-    // directly - AssistantThread calls this on mount/switch regardless of
-    // what a given test is checking.
-    attach: vi.fn().mockResolvedValue(null),
-    isStreamingConversation: vi.fn().mockReturnValue(false),
-    answerDelivered: vi.fn().mockReturnValue(false),
-    deliveredMessageId: null,
-    ...overrides,
-  }
-}
+// AssistantThread (ADR 0093) is a view over the Mate session its caller
+// hands it - AssistantDrawer (the panel) and MateSheet (the voice
+// quick-channel) each pass their own. These tests drive it with a fake
+// session; what a session does with a question is use-mate-session.test.ts.
 
 // FakeXHR (ADR 0106 F2): AssistantThread's composer now stages attachments
 // through use-document-uploads.ts, which uploads via XMLHttpRequest (not
@@ -158,7 +111,7 @@ const assistantMessage = (overrides: Partial<AssistantMessage> = {}): AssistantM
 
 describe('AssistantThread', () => {
   it('shows the empty-thread hint when there are no messages yet', () => {
-    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={fakeMateSession()} />)
 
     expect(screen.getByText('What Mate can check')).toBeInTheDocument()
     expect(screen.getByText('Other vessels nearby')).toBeInTheDocument()
@@ -166,7 +119,7 @@ describe('AssistantThread', () => {
   })
 
   it('renders messages with the assistant reply footer, cost first and mechanics in a tooltip', async () => {
-    const conversations = buildConversations({
+    const session = fakeMateSession({
       messages: [
         {
           id: 'u1',
@@ -180,7 +133,7 @@ describe('AssistantThread', () => {
       ],
     })
 
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={session} />)
 
     expect(screen.getByText('Tongue Bay or Blue Pearl Bay first?')).toBeInTheDocument()
     // Assistant content renders through the now-lazy AssistantMarkdown.
@@ -193,41 +146,41 @@ describe('AssistantThread', () => {
   })
 
   it('shows how many prompt tokens came from the cache, only when there were some', () => {
-    const cached = buildConversations({ messages: [assistantMessage({ cachedTokens: 9820 })] })
-    const { unmount } = render(<AssistantThread canWrite conversations={cached} chat={buildChat()} />)
+    const cached = fakeMateSession({ messages: [assistantMessage({ cachedTokens: 9820 })] })
+    const { unmount } = render(<AssistantThread canWrite session={cached} />)
     const footer = screen.getByText('$0.018 · anthropic/claude-sonnet-4.5 · 9,820 cached')
     expect(footer).toHaveAttribute('title', 'anthropic/claude-sonnet-4.5 · 1,200 tokens · 9,820 cached')
     unmount()
 
-    const none = buildConversations({ messages: [assistantMessage({ cachedTokens: 0 })] })
-    render(<AssistantThread canWrite conversations={none} chat={buildChat()} />)
+    const none = fakeMateSession({ messages: [assistantMessage({ cachedTokens: 0 })] })
+    render(<AssistantThread canWrite session={none} />)
     expect(screen.getByText('$0.018 · anthropic/claude-sonnet-4.5')).toBeInTheDocument()
   })
 
   it('omits the tool-round part of the footer when tool_rounds was not reported', () => {
-    const conversations = buildConversations({ messages: [assistantMessage()] })
+    const session = fakeMateSession({ messages: [assistantMessage()] })
 
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={session} />)
 
     expect(screen.getByText('$0.018 · anthropic/claude-sonnet-4.5')).toBeInTheDocument()
   })
 
   it('pluralises multiple tool rounds', () => {
-    const conversations = buildConversations({ messages: [assistantMessage({ toolRounds: 2 })] })
+    const session = fakeMateSession({ messages: [assistantMessage({ toolRounds: 2 })] })
 
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={session} />)
 
     expect(screen.getByText('$0.018 · anthropic/claude-sonnet-4.5 · 2 tool rounds')).toBeInTheDocument()
   })
 
   it('renders -- for every footer field the server did not report', () => {
-    const conversations = buildConversations({
+    const session = fakeMateSession({
       messages: [
         assistantMessage({ model: undefined, promptTokens: undefined, completionTokens: undefined, costUsd: undefined, toolRounds: undefined }),
       ],
     })
 
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={session} />)
 
     const footer = screen.getByText('-- · --')
     expect(footer).toHaveAttribute('title', '-- · -- tokens')
@@ -243,7 +196,7 @@ describe('AssistantThread', () => {
   // node directly - so this checks the ancestor Bubble's own `data-variant`
   // instead of raw class strings.
   it('gives the user bubble the secondary variant, so it reads as a figure', () => {
-    const conversations = buildConversations({
+    const session = fakeMateSession({
       messages: [
         {
           id: 'u1',
@@ -256,7 +209,7 @@ describe('AssistantThread', () => {
       ],
     })
 
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={session} />)
 
     const content = screen.getByText('Tongue Bay or Blue Pearl Bay first?')
     const bubble = content.closest('[data-slot="bubble"]')
@@ -266,29 +219,37 @@ describe('AssistantThread', () => {
     expect(content.className).toEqual(expect.stringContaining('whitespace-pre-wrap'))
   })
 
-  it('Enter sends the composer content through the passed chat.send and appends it locally', async () => {
-    const send = vi.fn().mockResolvedValue(null)
-    const conversations = buildConversations()
+  it('Enter sends the composer content through the session and clears the composer', async () => {
+    const session = fakeMateSession()
 
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ send })} />)
+    render(<AssistantThread canWrite session={session} />)
 
     const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
-    await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'What about the wind tomorrow?', { onMessage: expect.any(Function) }))
-    expect(conversations.appendLocal).toHaveBeenCalledWith(
-      expect.objectContaining({ role: 'user', content: 'What about the wind tomorrow?' }),
-    )
+    await waitFor(() => expect(session.send).toHaveBeenCalledWith('What about the wind tomorrow?', { attachments: [] }))
     // The composer clears once the send is issued.
     await waitFor(() => expect(textarea.value).toBe(''))
   })
 
+  it('puts a refused question back in the composer', async () => {
+    const session = fakeMateSession({ send: vi.fn().mockResolvedValue({ answered: false, message: null, refused: 'busy' }) })
+
+    render(<AssistantThread canWrite session={session} />)
+
+    const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'And the wind?' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    await waitFor(() => expect(session.send).toHaveBeenCalled())
+    await waitFor(() => expect(textarea.value).toBe('And the wind?'))
+  })
+
   it('reports typed-but-unsent text as a draft, and not once it is sent or cleared', async () => {
     const onHasDraftChange = vi.fn()
-    const send = vi.fn().mockResolvedValue(null)
     render(
-      <AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} onHasDraftChange={onHasDraftChange} />,
+      <AssistantThread canWrite session={fakeMateSession()} onHasDraftChange={onHasDraftChange} />,
     )
     expect(onHasDraftChange).toHaveBeenLastCalledWith(false)
 
@@ -305,105 +266,67 @@ describe('AssistantThread', () => {
   })
 
   it('Shift+Enter does not send', () => {
-    const send = vi.fn()
-    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+    const session = fakeMateSession()
+    render(<AssistantThread canWrite session={session} />)
 
     const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
     fireEvent.change(textarea, { target: { value: 'Draft in progress' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: true })
 
-    expect(send).not.toHaveBeenCalled()
+    expect(session.send).not.toHaveBeenCalled()
     expect(textarea.value).toBe('Draft in progress')
   })
 
-  it('creates a conversation first when none is active yet, then sends into it', async () => {
-    const send = vi.fn().mockResolvedValue(null)
-    const create = vi.fn().mockResolvedValue('new-1')
-    const conversations = buildConversations({ activeId: null, create })
-
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ send })} />)
+  it('does not send while an answer is still streaming', () => {
+    const session = fakeMateSession({ status: { sending: true } })
+    render(<AssistantThread canWrite session={session} />)
 
     const textarea = screen.getByPlaceholderText('Ask Mate')
-    fireEvent.change(textarea, { target: { value: 'A fresh question' } })
+    fireEvent.change(textarea, { target: { value: 'And the wind?' } })
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
-    await waitFor(() => expect(create).toHaveBeenCalled())
-    await waitFor(() => expect(send).toHaveBeenCalledWith('new-1', 'A fresh question', { onMessage: expect.any(Function) }))
+    expect(session.send).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
   it('shows the status line while sending', () => {
     render(
       <AssistantThread
         canWrite
-        conversations={buildConversations()}
-        chat={buildChat({ sending: true, statusText: 'Fetching wind forecast for Tongue Bay…' })}
+        session={fakeMateSession({ status: { sending: true, statusText: 'Fetching wind forecast for Tongue Bay…' } })}
       />,
     )
 
     expect(screen.getByText('Fetching wind forecast for Tongue Bay…')).toBeInTheDocument()
   })
 
-  // [P1, impeccable critique 2026-09-12] useAssistantChat.abort() already
-  // existed (wired only to unmount and a superseding send) but there was no
-  // way for the operator to cancel a question in flight themselves.
-  it('shows a Stop button while sending, which calls abort and leaves a Stopped. line', () => {
-    const abort = vi.fn()
-    const { rerender } = render(
-      <AssistantThread
-        canWrite
-        conversations={buildConversations()}
-        chat={buildChat({ sending: true, statusText: 'Fetching wind forecast for Tongue Bay…', abort })}
-      />,
-    )
+  // [P1, impeccable critique 2026-09-12] there was no way for the operator
+  // to cancel a question in flight themselves.
+  it('shows a Stop button while sending, which stops the session', () => {
+    const session = fakeMateSession({ status: { sending: true, statusText: 'Fetching wind forecast for Tongue Bay…' } })
+    render(<AssistantThread canWrite session={session} />)
 
-    const stopButton = screen.getByRole('button', { name: 'Stop asking' })
-    fireEvent.click(stopButton)
-    expect(abort).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: 'Stop asking' }))
+    expect(session.stop).toHaveBeenCalledTimes(1)
+  })
 
-    // The hook's own abort() sets sending false and leaves error null - the
-    // rerender below is what that looks like from the caller's side.
-    rerender(
-      <AssistantThread
-        canWrite
-        conversations={buildConversations()}
-        chat={buildChat({ sending: false, statusText: null, error: null, abort })}
-      />,
-    )
+  it('says Stopped. once the session has stopped an answer, and no Stop button', () => {
+    render(<AssistantThread canWrite session={fakeMateSession({ status: { stopped: true } })} />)
 
     expect(screen.queryByRole('button', { name: 'Stop asking' })).not.toBeInTheDocument()
     expect(screen.getByText('Stopped.')).toBeInTheDocument()
   })
 
   it('does not show the Stop button or the Stopped. line while idle', () => {
-    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={fakeMateSession()} />)
 
     expect(screen.queryByRole('button', { name: 'Stop asking' })).not.toBeInTheDocument()
     expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
   })
 
-  it('clears the Stopped. line once a new question is sent', async () => {
-    const send = vi.fn().mockResolvedValue(null)
-    const abort = vi.fn()
-    const conversations = buildConversations()
-
-    const { rerender } = render(
-      <AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true, send, abort })} />,
-    )
-    fireEvent.click(screen.getByRole('button', { name: 'Stop asking' }))
-    rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: false, send, abort })} />)
-    expect(screen.getByText('Stopped.')).toBeInTheDocument()
-
-    const textarea = screen.getByPlaceholderText('Ask Mate')
-    fireEvent.change(textarea, { target: { value: 'A follow-up' } })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
-
-    await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'A follow-up', { onMessage: expect.any(Function) }))
-    expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
-  })
-
   it('surfaces a chat error as-is - it already carries server-provided text', () => {
     render(
-      <AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ error: 'upstream 401' })} />,
+      <AssistantThread canWrite session={fakeMateSession({ status: { error: 'upstream 401' } })} />,
     )
 
     expect(screen.getByText('upstream 401')).toBeInTheDocument()
@@ -416,12 +339,10 @@ describe('AssistantThread', () => {
     render(
       <AssistantThread
         canWrite
-        conversations={buildConversations({
-          error: 'HTTP 502',
+        session={fakeMateSession({
           errorMessage:
             "Mate's conversations could not be loaded. The server answered 502. This is usually the boat's link dropping for a moment.",
         })}
-        chat={buildChat()}
       />,
     )
 
@@ -430,7 +351,7 @@ describe('AssistantThread', () => {
   })
 
   it('disables the composer and shows the read-only hint when canWrite is false', () => {
-    render(<AssistantThread canWrite={false} conversations={buildConversations()} chat={buildChat()} />)
+    render(<AssistantThread canWrite={false} session={fakeMateSession()} />)
 
     expect(screen.getByPlaceholderText('Ask Mate')).toBeDisabled()
     expect(screen.getByText('Read-only session')).toBeInTheDocument()
@@ -449,7 +370,7 @@ describe('AssistantThread', () => {
 
     it('shows a nautical phrase while waiting with no tool status, and rotates it without repeating', () => {
       vi.useFakeTimers()
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ sending: true, statusText: null })} />)
+      render(<AssistantThread canWrite session={fakeMateSession({ status: { sending: true, statusText: null } })} />)
 
       let previous = shownPhrase()
       expect(previous).not.toBeNull()
@@ -469,8 +390,7 @@ describe('AssistantThread', () => {
       render(
         <AssistantThread
           canWrite
-          conversations={buildConversations()}
-          chat={buildChat({ sending: true, statusText: 'Looking up Tongue Bay…' })}
+          session={fakeMateSession({ status: { sending: true, statusText: 'Looking up Tongue Bay…' } })}
         />,
       )
 
@@ -491,7 +411,7 @@ describe('AssistantThread', () => {
   // going (e.g. the round turned into tool calls).
   describe('streamed draft (ADR 0105)', () => {
     it('renders the draft inside the message log while sending, and hides the status marker', () => {
-      const conversations = buildConversations({
+      const session = fakeMateSession({
         messages: [
           {
             id: 'u1',
@@ -507,8 +427,7 @@ describe('AssistantThread', () => {
       render(
         <AssistantThread
           canWrite
-          conversations={conversations}
-          chat={buildChat({ sending: true, statusText: 'Thinking…', draft: 'A bowline forms a fixed loop' })}
+          session={{ ...session, status: { ...session.status, sending: true, statusText: 'Thinking…', draft: 'A bowline forms a fixed loop' } }}
         />,
       )
 
@@ -522,13 +441,12 @@ describe('AssistantThread', () => {
     })
 
     it('shows the status marker again once a retract clears the draft but sending continues', () => {
-      const conversations = buildConversations({ messages: [] })
+      const session = fakeMateSession({ messages: [] })
 
       const { rerender } = render(
         <AssistantThread
           canWrite
-          conversations={conversations}
-          chat={buildChat({ sending: true, statusText: 'Working out the answer…', draft: 'Let me check the wind' })}
+          session={{ ...session, status: { ...session.status, sending: true, statusText: 'Working out the answer…', draft: 'Let me check the wind' } }}
         />,
       )
 
@@ -540,8 +458,7 @@ describe('AssistantThread', () => {
       rerender(
         <AssistantThread
           canWrite
-          conversations={conversations}
-          chat={buildChat({ sending: true, statusText: 'Fetching wind forecast…', draft: null })}
+          session={{ ...session, status: { ...session.status, sending: true, statusText: 'Fetching wind forecast…', draft: null } }}
         />,
       )
 
@@ -553,8 +470,7 @@ describe('AssistantThread', () => {
       render(
         <AssistantThread
           canWrite
-          conversations={buildConversations({ messages: [] })}
-          chat={buildChat({ sending: true, draft: 'Partial answer, still writing' })}
+          session={fakeMateSession({ status: { sending: true, draft: 'Partial answer, still writing' } })}
         />,
       )
 
@@ -562,112 +478,6 @@ describe('AssistantThread', () => {
       const message = draftText.closest('[data-slot="message"]')
       expect(message).not.toBeNull()
       expect(within(message as HTMLElement).queryByText(/·/)).not.toBeInTheDocument()
-    })
-  })
-
-  // ADR 0105 ("the answer outlives the page"): a reply left running when the
-  // operator navigated away must be rejoined, not just left for dead, the
-  // moment this thread is showing that conversation again - whether that's
-  // this component's first mount or the operator switching to a different
-  // thread while the panel stays open.
-  describe('rejoining a run on mount/switch (ADR 0105)', () => {
-    it('calls chat.attach with the active conversation id on mount', () => {
-      const attach = vi.fn().mockResolvedValue(null)
-      render(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={buildChat({ attach })} />)
-
-      expect(attach).toHaveBeenCalledWith('c1', undefined, expect.any(Function))
-    })
-
-    it('calls chat.attach again when the active conversation switches to a different id', () => {
-      const attach = vi.fn().mockResolvedValue(null)
-      const chat = buildChat({ attach })
-      const { rerender } = render(
-        <AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={chat} />,
-      )
-      expect(attach).toHaveBeenCalledWith('c1', undefined, expect.any(Function))
-
-      rerender(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c2' })} chat={chat} />)
-      expect(attach).toHaveBeenCalledWith('c2', undefined, expect.any(Function))
-    })
-
-    it('does not call chat.attach when there is no active conversation yet', () => {
-      const attach = vi.fn().mockResolvedValue(null)
-      render(<AssistantThread canWrite conversations={buildConversations({ activeId: null })} chat={buildChat({ attach })} />)
-
-      expect(attach).not.toHaveBeenCalled()
-    })
-
-    it('does not call chat.attach while a local send for this conversation is already streaming', () => {
-      const attach = vi.fn().mockResolvedValue(null)
-      render(
-        <AssistantThread
-          canWrite
-          conversations={buildConversations({ activeId: 'c1' })}
-          chat={buildChat({ attach, sending: true, isStreamingConversation: (id: string) => id === 'c1' })}
-        />,
-      )
-
-      expect(attach).not.toHaveBeenCalled()
-    })
-
-    // Code review 2026-09-17: the rejoin used to be skipped whenever
-    // anything was streaming, so opening B while A was still answering left
-    // B showing A's draft and status, with Stop cancelling A's run.
-    it('rejoins the newly opened conversation even while another one is still streaming', () => {
-      const attach = vi.fn().mockResolvedValue(null)
-      const chat = buildChat({ attach, sending: true, isStreamingConversation: (id: string) => id === 'c1' })
-      const { rerender } = render(
-        <AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={chat} />,
-      )
-      expect(attach).not.toHaveBeenCalled()
-
-      rerender(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c2' })} chat={chat} />)
-
-      expect(attach).toHaveBeenCalledWith('c2', undefined, expect.any(Function))
-    })
-
-    it("does not append a reply into a conversation other than the one it answers", async () => {
-      let resolveSend!: (message: AssistantMessage | null) => void
-      const send = vi.fn((_id: string, _text: string, options?: { onMessage?: (m: AssistantMessage) => void }) =>
-        new Promise<AssistantMessage | null>((resolve) => {
-          resolveSend = (message) => {
-            if (message) options?.onMessage?.(message)
-            resolve(message)
-          }
-        }))
-      const chat = buildChat({ send })
-      const first = buildConversations({ activeId: 'c1' })
-      const { rerender } = render(<AssistantThread canWrite conversations={first} chat={chat} />)
-
-      const textarea = screen.getByPlaceholderText('Ask Mate')
-      fireEvent.change(textarea, { target: { value: 'Refuge Cove or Waterloo Bay?' } })
-      fireEvent.keyDown(textarea, { key: 'Enter' })
-      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Refuge Cove or Waterloo Bay?', { onMessage: expect.any(Function) }))
-
-      // One conversations hook across renders, as in the app: its
-      // appendLocal always writes into whatever thread is active now.
-      const second = buildConversations({ activeId: 'c2', appendLocal: first.appendLocal, refresh: first.refresh })
-      rerender(<AssistantThread canWrite conversations={second} chat={chat} />)
-
-      await act(async () => {
-        resolveSend(assistantMessage({ id: 'late', conversationId: 'c1' }))
-      })
-      expect(first.appendLocal).not.toHaveBeenCalledWith(expect.objectContaining({ id: 'late' }))
-      expect(first.refresh).not.toHaveBeenCalled()
-    })
-
-    it('appends the rejoined reply and refreshes the conversation once attach resolves a message', async () => {
-      const reply = assistantMessage({ id: 'rejoined-1', content: 'Blue Pearl Bay first, on the flood.' })
-      const attach = vi.fn(async (_id: string, _c?: unknown, onMessage?: (m: AssistantMessage) => void) => {
-        onMessage?.(reply)
-        return reply
-      })
-      const conversations = buildConversations({ activeId: 'c1' })
-
-      render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ attach })} />)
-
-      await waitFor(() => expect(conversations.appendLocal).toHaveBeenCalledWith(reply))
-      await waitFor(() => expect(conversations.refresh).toHaveBeenCalled())
     })
   })
 
@@ -685,7 +495,7 @@ describe('AssistantThread', () => {
     it('reports a draft while an attachment is staged and clears it on unmount', () => {
       const onHasDraftChange = vi.fn()
       const { unmount } = render(
-        <AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} onHasDraftChange={onHasDraftChange} />,
+        <AssistantThread canWrite session={fakeMateSession()} onHasDraftChange={onHasDraftChange} />,
       )
       expect(onHasDraftChange).toHaveBeenLastCalledWith(false)
 
@@ -699,7 +509,7 @@ describe('AssistantThread', () => {
     })
 
     it('disables Send while an attachment is uploading, with a readable reason, and enables it once indexed', () => {
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+      render(<AssistantThread canWrite session={fakeMateSession()} />)
 
       const textarea = screen.getByPlaceholderText('Ask Mate')
       fireEvent.change(textarea, { target: { value: 'What does this say about the impeller?' } })
@@ -718,9 +528,9 @@ describe('AssistantThread', () => {
       expect(screen.queryByText(/Waiting for attachments to finish uploading/)).not.toBeInTheDocument()
     })
 
-    it('sends the staged attachment ids through chat.send, alongside the typed question', async () => {
-      const send = vi.fn().mockResolvedValue(null)
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+    it('sends the staged attachments through the session, alongside the typed question', async () => {
+      const session = fakeMateSession()
+      render(<AssistantThread canWrite session={session} />)
 
       const fileInput = screen.getByTestId('composer-file-input')
       fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
@@ -731,23 +541,23 @@ describe('AssistantThread', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
       await waitFor(() =>
-        expect(send).toHaveBeenCalledWith('c1', 'What is the impeller part number?', { attachments: ['doc-1'], onMessage: expect.any(Function) }),
+        expect(session.send).toHaveBeenCalledWith('What is the impeller part number?', {
+          attachments: [{ documentId: 'doc-1', filename: 'manual.pdf' }],
+        }),
       )
     })
 
+    // The session says the answer arrived even when the operator has moved
+    // to another conversation (its `message` is then null): the chips that
+    // went with the question are spent either way, and would otherwise ride
+    // along with the next question there.
     it('clears the sent chips when the answer lands after the operator moved to another conversation', async () => {
       let deliver!: () => void
-      const send = vi.fn((_id: string, _text: string, options?: { onMessage?: (m: AssistantMessage) => void }) =>
-        new Promise<AssistantMessage | null>((resolve) => {
-          deliver = () => {
-            const reply = assistantMessage({ id: 'late-1', conversationId: 'c1' })
-            options?.onMessage?.(reply)
-            resolve(reply)
-          }
-        }))
-      const chat = buildChat({ send })
-      const first = buildConversations({ activeId: 'c1' })
-      const { rerender } = render(<AssistantThread canWrite conversations={first} chat={chat} />)
+      const send = vi.fn(() => new Promise((resolve) => {
+        deliver = () => resolve({ answered: true, message: null })
+      }))
+      const session = fakeMateSession({ activeId: 'c1', send } as Partial<MateSession>)
+      const { rerender } = render(<AssistantThread canWrite session={session} />)
 
       fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
       resolveUpload(FakeXHR.instances[0], { documentId: 'doc-1' })
@@ -756,8 +566,7 @@ describe('AssistantThread', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
       await waitFor(() => expect(send).toHaveBeenCalled())
 
-      // The operator starts a new chat and stages a fresh file there.
-      rerender(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c2' })} chat={chat} />)
+      rerender(<AssistantThread canWrite session={{ ...session, activeId: 'c2' }} />)
       await act(async () => { deliver() })
 
       await waitFor(() => expect(screen.queryByText('manual.pdf')).not.toBeInTheDocument())
@@ -765,15 +574,10 @@ describe('AssistantThread', () => {
 
     it('keeps a chip staged while the answer was streaming and drops only the sent one', async () => {
       let deliver!: () => void
-      const send = vi.fn((_id: string, _text: string, options?: { onMessage?: (m: AssistantMessage) => void }) =>
-        new Promise<AssistantMessage | null>((resolve) => {
-          deliver = () => {
-            const reply = assistantMessage({ id: 'late-2', conversationId: 'c1' })
-            options?.onMessage?.(reply)
-            resolve(reply)
-          }
-        }))
-      render(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={buildChat({ send })} />)
+      const send = vi.fn(() => new Promise((resolve) => {
+        deliver = () => resolve({ answered: true, message: assistantMessage({ id: 'late-2' }) })
+      }))
+      render(<AssistantThread canWrite session={fakeMateSession({ send } as Partial<MateSession>)} />)
 
       fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
       resolveUpload(FakeXHR.instances[0], { documentId: 'doc-1' })
@@ -793,9 +597,21 @@ describe('AssistantThread', () => {
       expect(screen.getByText('wiring.pdf')).toBeInTheDocument()
     })
 
+    it('keeps the chips staged when no answer came, so the operator can retry', async () => {
+      const session = fakeMateSession()
+      render(<AssistantThread canWrite session={session} />)
+
+      fireEvent.change(screen.getByTestId('composer-file-input'), { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
+      resolveUpload(FakeXHR.instances[0], { documentId: 'doc-1' })
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
+
+      await waitFor(() => expect(session.send).toHaveBeenCalled())
+      expect(screen.getByText('manual.pdf')).toBeInTheDocument()
+    })
+
     it('sends with an attachment and no text typed', async () => {
-      const send = vi.fn().mockResolvedValue(null)
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+      const session = fakeMateSession()
+      render(<AssistantThread canWrite session={session} />)
 
       const fileInput = screen.getByTestId('composer-file-input')
       fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
@@ -804,34 +620,18 @@ describe('AssistantThread', () => {
       expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled()
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
-      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', '', { attachments: ['doc-1'], onMessage: expect.any(Function) }))
-    })
-
-    // Existing thread tests (above) call send with exactly two arguments for
-    // a text-only question - this pins that a staged-but-empty composer
-    // still omits the attachments option entirely rather than sending `{}`
-    // or `{ attachments: [] }`, the same conditional-inclusion rule
-    // spoken/screen already follow in use-assistant-chat.ts.
-    it('omits the attachments option entirely when nothing is staged', async () => {
-      const send = vi.fn().mockResolvedValue(null)
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
-
-      const textarea = screen.getByPlaceholderText('Ask Mate')
-      fireEvent.change(textarea, { target: { value: 'Plain question, no attachment' } })
-      fireEvent.click(screen.getByRole('button', { name: 'Send' }))
-
-      await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'Plain question, no attachment', { onMessage: expect.any(Function) }))
+      await waitFor(() => expect(session.send).toHaveBeenCalledWith('', { attachments: [{ documentId: 'doc-1', filename: 'manual.pdf' }] }))
     })
 
     // ADR 0106 F2 follow-up: uploads dedupe by sha256 server-side, so
     // attaching the same file twice (or two files with identical content)
     // can resolve to the same document id. use-document-uploads.ts collapses
     // the second chip rather than staging a duplicate - this pins that the
-    // composer only ever posts one copy of that id, not [X, X], which the
+    // composer only ever sends one copy of that id, not [X, X], which the
     // backend rejects with 400 "duplicate attachment".
-    it('sends one attachment id when the same document is staged twice', async () => {
-      const send = vi.fn().mockResolvedValue(null)
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+    it('sends one attachment when the same document is staged twice', async () => {
+      const session = fakeMateSession()
+      render(<AssistantThread canWrite session={session} />)
 
       const fileInput = screen.getByTestId('composer-file-input')
       fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
@@ -848,12 +648,14 @@ describe('AssistantThread', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Send' }))
 
       await waitFor(() =>
-        expect(send).toHaveBeenCalledWith('c1', 'What is the impeller part number?', { attachments: ['doc-1'], onMessage: expect.any(Function) }),
+        expect(session.send).toHaveBeenCalledWith('What is the impeller part number?', {
+          attachments: [{ documentId: 'doc-1', filename: 'manual.pdf' }],
+        }),
       )
     })
 
     it('shows a staged chip and removes it on request', () => {
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+      render(<AssistantThread canWrite session={fakeMateSession()} />)
 
       const fileInput = screen.getByTestId('composer-file-input')
       fireEvent.change(fileInput, { target: { files: [new File(['hello'], 'manual.pdf', { type: 'application/pdf' })] } })
@@ -864,7 +666,7 @@ describe('AssistantThread', () => {
     })
 
     it('uploads a file dropped onto the composer', () => {
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+      render(<AssistantThread canWrite session={fakeMateSession()} />)
 
       const dropzone = screen.getByTestId('composer-dropzone')
       const file = new File(['hello'], 'manual.pdf', { type: 'application/pdf' })
@@ -874,7 +676,7 @@ describe('AssistantThread', () => {
     })
 
     it("renders a past user message's attachment filenames as chips", () => {
-      const conversations = buildConversations({
+      const session = fakeMateSession({
         messages: [
           {
             id: 'u1',
@@ -888,7 +690,7 @@ describe('AssistantThread', () => {
         ],
       })
 
-      render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+      render(<AssistantThread canWrite session={session} />)
 
       expect(screen.getByText('What about the impeller?')).toBeInTheDocument()
       // ADR 0106 F1: the chip is a real link into the Documents panel's
@@ -914,7 +716,7 @@ describe('AssistantThread', () => {
     })
 
     it('puts the textarea, the attach button and the send button inside one input-group panel', () => {
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+      render(<AssistantThread canWrite session={fakeMateSession()} />)
 
       const textarea = screen.getByPlaceholderText('Ask Mate')
       const group = textarea.closest('[data-slot="input-group"]')
@@ -971,8 +773,8 @@ describe('AssistantThread', () => {
       })
 
       it('shows a Dictate button in the same input-group panel as Send, that never sends by itself', () => {
-        const send = vi.fn()
-        render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+        const session = fakeMateSession()
+        render(<AssistantThread canWrite session={session} />)
 
         const textarea = screen.getByPlaceholderText('Ask Mate')
         const group = textarea.closest('[data-slot="input-group"]')
@@ -982,19 +784,19 @@ describe('AssistantThread', () => {
         fireEvent.click(dictateButton)
         act(() => { currentRecognition().emitResult('what about the wind tomorrow', true) })
 
-        expect(send).not.toHaveBeenCalled()
+        expect(session.send).not.toHaveBeenCalled()
         expect(textarea).toHaveValue('what about the wind tomorrow')
       })
 
       it('is disabled when canWrite is false', () => {
-        render(<AssistantThread canWrite={false} conversations={buildConversations()} chat={buildChat()} />)
+        render(<AssistantThread canWrite={false} session={fakeMateSession()} />)
 
         expect(screen.getByRole('button', { name: 'Dictate' })).toBeDisabled()
       })
 
       it('is absent entirely when there is no speech API', () => {
         vi.unstubAllGlobals()
-        render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+        render(<AssistantThread canWrite session={fakeMateSession()} />)
 
         expect(screen.queryByRole('button', { name: /dictate/i })).not.toBeInTheDocument()
       })
@@ -1005,8 +807,8 @@ describe('AssistantThread', () => {
       // box as if it were the start of a fresh, unsent message. Send has to
       // cancel dictation itself, before it clears the composer.
       it('cancels dictation at send time, so a result recognised after Send cannot land in the emptied composer', async () => {
-        const send = vi.fn().mockResolvedValue(null)
-        render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ send })} />)
+        const session = fakeMateSession()
+        render(<AssistantThread canWrite session={session} />)
 
         const textarea = screen.getByPlaceholderText('Ask Mate') as HTMLTextAreaElement
         fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
@@ -1015,7 +817,7 @@ describe('AssistantThread', () => {
 
         fireEvent.keyDown(textarea, { key: 'Enter' })
 
-        await waitFor(() => expect(send).toHaveBeenCalledWith('c1', 'What about the wind tomorrow?', { onMessage: expect.any(Function) }))
+        await waitFor(() => expect(session.send).toHaveBeenCalledWith('What about the wind tomorrow?', { attachments: [] }))
         expect(currentRecognition().aborted).toBe(true)
 
         act(() => { currentRecognition().emitResult('leftover words', true) })
@@ -1024,7 +826,7 @@ describe('AssistantThread', () => {
     })
 
     it('puts the staged-attachment chips inside the same input-group panel', () => {
-      render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} />)
+      render(<AssistantThread canWrite session={fakeMateSession()} />)
 
       const fileInput = screen.getByTestId('composer-file-input')
       fireEvent.change(fileInput, {
@@ -1054,8 +856,8 @@ describe('AssistantThread: save an answer as a note', () => {
     })
     mockedUseNotes.mockReturnValue(makeNotesMock({ createNote }))
 
-    const conversations = buildConversations({ messages: [assistantMessage()] })
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    const session = fakeMateSession({ messages: [assistantMessage()] })
+    render(<AssistantThread canWrite session={session} />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Save as note' }))
 
@@ -1069,9 +871,9 @@ describe('AssistantThread: save an answer as a note', () => {
   // button at all.
   it('is absent without write permission', () => {
     mockedUseNotes.mockReturnValue(makeNotesMock())
-    const conversations = buildConversations({ messages: [assistantMessage()] })
+    const session = fakeMateSession({ messages: [assistantMessage()] })
 
-    render(<AssistantThread canWrite={false} conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite={false} session={session} />)
 
     expect(screen.queryByRole('button', { name: 'Save as note' })).not.toBeInTheDocument()
   })
@@ -1080,11 +882,11 @@ describe('AssistantThread: save an answer as a note', () => {
   // is for Mate's answers.
   it('is not offered on the operator\'s own messages', () => {
     mockedUseNotes.mockReturnValue(makeNotesMock())
-    const conversations = buildConversations({
+    const session = fakeMateSession({
       messages: [assistantMessage({ id: 'u1', role: 'user', content: 'where should we anchor?' })],
     })
 
-    render(<AssistantThread canWrite conversations={conversations} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={session} />)
 
     expect(screen.queryByRole('button', { name: 'Save as note' })).not.toBeInTheDocument()
   })
@@ -1105,7 +907,7 @@ describe('AssistantThread: save an answer as a note', () => {
 
     it('renders the card under the reply from the stored status, so it survives a reload', () => {
       const applied = render(
-        <AssistantThread canWrite conversations={buildConversations({ messages: [proposedMessage('applied')] })} chat={buildChat()} />,
+        <AssistantThread canWrite session={fakeMateSession({ messages: [proposedMessage('applied')] })} />,
       )
       expect(screen.getByTestId('assistant-proposal-card')).toHaveAttribute('data-status', 'applied')
       expect(screen.getByRole('link', { name: 'Acknowledge Generator · Belts: parts on order' })).toHaveAttribute(
@@ -1115,7 +917,7 @@ describe('AssistantThread: save an answer as a note', () => {
       applied.unmount()
 
       render(
-        <AssistantThread canWrite conversations={buildConversations({ messages: [proposedMessage('pending')] })} chat={buildChat()} />,
+        <AssistantThread canWrite session={fakeMateSession({ messages: [proposedMessage('pending')] })} />,
       )
       expect(screen.getByTestId('assistant-proposal-card')).toHaveAttribute('data-status', 'pending')
       expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument()
@@ -1123,7 +925,7 @@ describe('AssistantThread: save an answer as a note', () => {
 
     it('renders a stored stale proposal with its reason and no Apply after a reload', () => {
       render(
-        <AssistantThread canWrite conversations={buildConversations({ messages: [proposedMessage('stale')] })} chat={buildChat()} />,
+        <AssistantThread canWrite session={fakeMateSession({ messages: [proposedMessage('stale')] })} />,
       )
 
       expect(screen.getByTestId('assistant-proposal-card')).toHaveAttribute('data-status', 'stale')
@@ -1133,7 +935,7 @@ describe('AssistantThread: save an answer as a note', () => {
 
     it('hides Apply and Dismiss for a read-tier viewer but still shows the proposal', () => {
       render(
-        <AssistantThread canWrite={false} conversations={buildConversations({ messages: [proposedMessage('pending')] })} chat={buildChat()} />,
+        <AssistantThread canWrite={false} session={fakeMateSession({ messages: [proposedMessage('pending')] })} />,
       )
 
       expect(screen.getByText('Acknowledge Generator · Belts: parts on order')).toBeInTheDocument()
@@ -1141,7 +943,7 @@ describe('AssistantThread: save an answer as a note', () => {
     })
 
     it('shows no card on a reply with no proposals', () => {
-      render(<AssistantThread canWrite conversations={buildConversations({ messages: [assistantMessage()] })} chat={buildChat()} />)
+      render(<AssistantThread canWrite session={fakeMateSession({ messages: [assistantMessage()] })} />)
 
       expect(screen.queryByTestId('assistant-proposal-card')).not.toBeInTheDocument()
     })
@@ -1177,7 +979,7 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
   // server, never this device's clock.
   it('shows what is being watched, when it ends, and a Stop that ends it', () => {
     const watch = buildWatch()
-    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} watch={watch} />)
+    render(<AssistantThread canWrite session={fakeMateSession()} watch={watch} />)
 
     const chip = screen.getByTestId('mate-watch-chip')
     expect(chip).toHaveTextContent('Watching Port engine load and Starboard engine load · ends 15:35')
@@ -1186,7 +988,7 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
   })
 
   it('offers no Stop to a read-only session', () => {
-    render(<AssistantThread canWrite={false} conversations={buildConversations()} chat={buildChat()} watch={buildWatch()} />)
+    render(<AssistantThread canWrite={false} session={fakeMateSession()} watch={buildWatch()} />)
 
     expect(screen.getByTestId('mate-watch-chip')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Stop watching' })).not.toBeInTheDocument()
@@ -1195,14 +997,14 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
   it('says Mate is reading the report once the watch has ended, with no Stop', () => {
     const base = buildWatch()
     const watch = buildWatch({ watch: { ...base.watch!, status: 'reporting' } })
-    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} watch={watch} />)
+    render(<AssistantThread canWrite session={fakeMateSession()} watch={watch} />)
 
     expect(screen.getByTestId('mate-watch-chip')).toHaveTextContent('Watch finished. Mate is reading it.')
     expect(screen.queryByRole('button', { name: 'Stop watching' })).not.toBeInTheDocument()
   })
 
   it('shows no chip with no watch running', () => {
-    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat()} watch={buildWatch({ watch: null })} />)
+    render(<AssistantThread canWrite session={fakeMateSession()} watch={buildWatch({ watch: null })} />)
 
     expect(screen.queryByTestId('mate-watch-chip')).not.toBeInTheDocument()
   })
@@ -1215,43 +1017,41 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
       model: undefined,
       costUsd: undefined,
     })
-    render(<AssistantThread canWrite conversations={buildConversations({ messages: [report] })} chat={buildChat()} />)
+    render(<AssistantThread canWrite session={fakeMateSession({ messages: [report] })} />)
 
     expect(screen.getByText('Watch finished: Port engine load and Starboard engine load (5 min)')).toBeInTheDocument()
     expect(screen.queryByText(/watch_id/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Save as note/ })).not.toBeInTheDocument()
   })
 
-  it('rejoins Mate\'s follow-up and reloads the thread when the watch ends', async () => {
-    const reply = assistantMessage({ id: 'm9', content: 'Port load spiked twice.' })
-    const attach = vi.fn()
-      .mockResolvedValueOnce(null)
-      .mockImplementationOnce(async (_id: string, _c?: unknown, onMessage?: (m: AssistantMessage) => void) => {
-        onMessage?.(reply)
-        return reply
-      })
-    const chat = buildChat({ attach })
-    const conversations = buildConversations()
-    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} watch={buildWatch()} />)
-    await waitFor(() => expect(attach).toHaveBeenCalledTimes(1)) // the mount-time rejoin
+  it('asks the session to rejoin Mate\'s follow-up when the watch ends', async () => {
+    const session = fakeMateSession()
+    const { rerender } = render(<AssistantThread canWrite session={session} watch={buildWatch()} />)
+    expect(session.rejoin).not.toHaveBeenCalled()
 
-    rerender(<AssistantThread canWrite conversations={conversations} chat={chat} watch={buildWatch({ watch: null, ended: 1 })} />)
+    rerender(<AssistantThread canWrite session={session} watch={buildWatch({ watch: null, ended: 1 })} />)
 
-    await waitFor(() => expect(attach).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(conversations.appendLocal).toHaveBeenCalledWith(reply))
-    expect(conversations.refresh).toHaveBeenCalled()
+    await waitFor(() => expect(session.rejoin).toHaveBeenCalledTimes(1))
+  })
+
+  it('leaves an answer already streaming alone when the watch ends', () => {
+    const session = fakeMateSession({ isAnswering: vi.fn().mockReturnValue(true), status: { sending: true } })
+    const { rerender } = render(<AssistantThread canWrite session={session} watch={buildWatch()} />)
+
+    rerender(<AssistantThread canWrite session={session} watch={buildWatch({ watch: null, ended: 1 })} />)
+
+    expect(session.rejoin).not.toHaveBeenCalled()
   })
 })
 
 // The reply must never leave the DOM between the streamed draft and the
 // final message: if it does, the content shrinks by a whole reply, the
 // browser clamps scrollTop, and the scroller re-anchors from the wrong spot.
+// Driven through a real session against a fake server, since the hand-off is
+// the session's and the thread's together.
 describe('reply hand-off from draft to final message', () => {
   it('keeps the reply text on screen across completion of a streamed reply', async () => {
-    const { useAssistantChat: realUseAssistantChat } = await vi.importActual<
-      typeof import('@/hooks/use-assistant-chat')
-    >('@/hooks/use-assistant-chat')
-    const { useState, useCallback } = await import('react')
+    const { useMateSession } = await vi.importActual<typeof import('@/hooks/use-mate-session')>('@/hooks/use-mate-session')
 
     const replyText = 'Blue Pearl Bay first, on the flood.'
     const enc = new TextEncoder()
@@ -1263,9 +1063,14 @@ describe('reply hand-off from draft to final message', () => {
         close = () => c.close()
       },
     })
-    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) =>
-      url.endsWith('/run') ? { ok: true, status: 204, body: null } : { ok: true, status: 200, body: stream },
-    ))
+    const conversation = { id: 'c1', title: 't', created_at: '2026-10-05T00:00:00Z', updated_at: '2026-10-05T00:00:00Z' }
+    const stored: Array<Record<string, unknown>> = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/run')) return { ok: true, status: 204, body: null }
+      if (url.endsWith('/messages') && init?.method === 'POST') return { ok: true, status: 200, body: stream }
+      if (url.endsWith('/api/assistant/conversations')) return { ok: true, json: async () => ({ conversations: [conversation] }) }
+      return { ok: true, json: async () => ({ conversation, messages: stored }) }
+    }))
     // rAF fires on a real timer in happy-dom; make it immediate for the draft flush.
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
       queueMicrotask(() => cb(0))
@@ -1273,14 +1078,12 @@ describe('reply hand-off from draft to final message', () => {
     })
 
     function Harness() {
-      const [messages, setMessages] = useState<AssistantMessage[]>([])
-      const appendLocal = useCallback((m: AssistantMessage) => setMessages((p) => [...p, m]), [])
-      const chat = realUseAssistantChat()
-      const conversations = buildConversations({ messages, appendLocal })
-      return <AssistantThread canWrite conversations={conversations} chat={chat} />
+      const session = useMateSession({ initialId: 'c1' })
+      return <AssistantThread canWrite session={session} />
     }
 
     const { container } = render(<Harness />)
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/run'), expect.anything()))
     const gaps: string[] = []
     let sawReply = false
     const observer = new MutationObserver(() => {
@@ -1299,11 +1102,12 @@ describe('reply hand-off from draft to final message', () => {
     })
     await waitFor(() => expect(container.textContent).toContain(replyText))
 
+    const question = { id: 'u1', conversation_id: 'c1', seq: 1, role: 'user', content: 'Which bay?', created_at: '2026-10-05T00:00:00Z' }
     const message = {
       id: 'm2', conversation_id: 'c1', seq: 2, role: 'assistant', content: replyText,
       model: 'm', created_at: '2026-10-05T00:00:00Z',
     }
-    const conversation = { id: 'c1', title: 't', created_at: '2026-10-05T00:00:00Z', updated_at: '2026-10-05T00:00:00Z' }
+    stored.push(question, message)
     await act(async () => {
       push(`event: message\ndata: ${JSON.stringify({ message, conversation })}\n\n`)
       close()
@@ -1315,52 +1119,6 @@ describe('reply hand-off from draft to final message', () => {
     expect(gaps).toEqual([])
     expect(container.textContent).toContain(replyText)
     vi.unstubAllGlobals()
-  })
-})
-
-// Stop tapped after the final message frame but before the stream closes: the
-// answer is already on screen, so it is a delivered answer, not a stopped one.
-describe('Stop after the answer has been delivered', () => {
-  it('keeps the answer a success: no Stopped line, chips cleared, thread refreshed', async () => {
-    const reply = assistantMessage({ id: 'done-1', content: 'Delivered answer.' })
-    let finish!: () => void
-    const send = vi.fn((_id: string, _text: string, options?: { onMessage?: (m: AssistantMessage) => void }) =>
-      new Promise<AssistantMessage | null>((resolve) => {
-        options?.onMessage?.(reply)
-        // Stop makes the stream end early, so send() resolves null.
-        finish = () => resolve(null)
-      }))
-    const conversations = buildConversations()
-    const chat = buildChat({ send, abort: vi.fn(), answerDelivered: vi.fn().mockReturnValue(true) })
-    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} />)
-
-    const textarea = screen.getByPlaceholderText('Ask Mate')
-    fireEvent.change(textarea, { target: { value: 'Which bay?' } })
-    fireEvent.keyDown(textarea, { key: 'Enter' })
-    await waitFor(() => expect(conversations.appendLocal).toHaveBeenCalledWith(reply))
-
-    const withReply = { ...conversations, messages: [reply] }
-    rerender(<AssistantThread canWrite conversations={withReply} chat={{ ...chat, sending: true }} />)
-    fireEvent.click(screen.getByRole('button', { name: /stop/i }))
-    rerender(<AssistantThread canWrite conversations={withReply} chat={{ ...chat, sending: false }} />)
-    await act(async () => { finish() })
-
-    expect(chat.abort).toHaveBeenCalled()
-    await waitFor(() => expect(conversations.refresh).toHaveBeenCalled())
-    expect(screen.queryByText('Stopped.')).not.toBeInTheDocument()
-  })
-
-  it('still says Stopped. for a follow-up stream that has not delivered, even when the thread ends on an older reply', () => {
-    const earlier = assistantMessage({ id: 'earlier', content: "I'll watch the bilge." })
-    const conversations = buildConversations({ messages: [earlier] })
-    const abort = vi.fn()
-    // A follow-up run (after a watch ended) is streaming: no message frame yet.
-    const chat = buildChat({ sending: true, statusText: 'Checking the bilge', abort })
-    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Stop asking' }))
-    expect(abort).toHaveBeenCalled()
-    rerender(<AssistantThread canWrite conversations={conversations} chat={{ ...chat, sending: false }} />)
-    expect(screen.getByText('Stopped.')).toBeInTheDocument()
   })
 })
 
@@ -1378,58 +1136,59 @@ describe('scroll to the start of a delivered reply', () => {
     vi.unstubAllGlobals()
   })
 
+  const streaming = (session: MateSession, deliveredMessageId: string | null = null): MateSession =>
+    ({ ...session, status: { ...session.status, sending: true, deliveredMessageId } })
+
   it('scrolls the delivered reply to the top of the viewport', async () => {
-    const conversations = buildConversations()
-    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true })} />)
-    rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true, deliveredMessageId: 'm9' })} />)
+    const session = fakeMateSession()
+    const { rerender } = render(<AssistantThread canWrite session={streaming(session)} />)
+    rerender(<AssistantThread canWrite session={streaming(session, 'm9')} />)
     await waitFor(() => expect(scrollToMessageSpy).toHaveBeenCalledWith('m9', expect.objectContaining({ align: 'start' })))
   })
 
   it('does not scroll for a reply that was already delivered when the thread mounted', async () => {
-    render(<AssistantThread canWrite conversations={buildConversations()} chat={buildChat({ deliveredMessageId: 'm9' })} />)
+    render(<AssistantThread canWrite session={fakeMateSession({ status: { deliveredMessageId: 'm9' } })} />)
     await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
     expect(scrollToMessageSpy).not.toHaveBeenCalled()
   })
 
   it('leaves the view alone when the operator grabbed the scrollbar during streaming', async () => {
-    const conversations = buildConversations()
-    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true })} />)
+    const session = fakeMateSession()
+    const { rerender } = render(<AssistantThread canWrite session={streaming(session)} />)
     fireEvent.pointerDown(screen.getByTestId('assistant-thread-scroll'))
-    rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true, deliveredMessageId: 'm9' })} />)
+    rerender(<AssistantThread canWrite session={streaming(session, 'm9')} />)
     await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
     expect(scrollToMessageSpy).not.toHaveBeenCalled()
   })
 
   it('leaves the view alone when the operator scrolled during streaming', async () => {
-    const conversations = buildConversations()
-    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true })} />)
+    const session = fakeMateSession()
+    const { rerender } = render(<AssistantThread canWrite session={streaming(session)} />)
     fireEvent.wheel(screen.getByTestId('assistant-thread-scroll'))
-    rerender(<AssistantThread canWrite conversations={conversations} chat={buildChat({ sending: true, deliveredMessageId: 'm9' })} />)
+    rerender(<AssistantThread canWrite session={streaming(session, 'm9')} />)
     await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
     expect(scrollToMessageSpy).not.toHaveBeenCalled()
   })
 
   it('keeps the operator\'s scroll-away when a watch ends while a reply is already streaming', async () => {
-    const conversations = buildConversations()
-    const isStreamingConversation = vi.fn(() => true)
-    const chat = buildChat({ sending: true, isStreamingConversation })
-    const { rerender } = render(<AssistantThread canWrite conversations={conversations} chat={chat} watch={buildWatch()} />)
+    const session = fakeMateSession({ isAnswering: vi.fn(() => true) })
+    const { rerender } = render(<AssistantThread canWrite session={streaming(session)} watch={buildWatch()} />)
     fireEvent.wheel(screen.getByTestId('assistant-thread-scroll'))
-    rerender(<AssistantThread canWrite conversations={conversations} chat={chat} watch={buildWatch({ watch: null, ended: 1 })} />)
-    rerender(<AssistantThread canWrite conversations={conversations} chat={{ ...chat, deliveredMessageId: 'm9' }} watch={buildWatch({ watch: null, ended: 1 })} />)
+    rerender(<AssistantThread canWrite session={streaming(session)} watch={buildWatch({ watch: null, ended: 1 })} />)
+    rerender(<AssistantThread canWrite session={streaming(session, 'm9')} watch={buildWatch({ watch: null, ended: 1 })} />)
     await act(async () => { await new Promise((r) => setTimeout(r, 20)) })
     expect(scrollToMessageSpy).not.toHaveBeenCalled()
   })
 
   it('scrolls a rejoined reply after the operator scrolled before switching conversations', async () => {
-    const chat = buildChat()
-    const { rerender } = render(<AssistantThread canWrite conversations={buildConversations({ activeId: 'c1' })} chat={chat} />)
+    const session = fakeMateSession({ activeId: 'c1' })
+    const { rerender } = render(<AssistantThread canWrite session={session} />)
     fireEvent.wheel(screen.getByTestId('assistant-thread-scroll'))
     // Switching threads starts afresh: the earlier scroll says nothing about
-    // a reply that arrives through attach(), which never sets `sending`.
-    const c2 = buildConversations({ activeId: 'c2' })
-    rerender(<AssistantThread canWrite conversations={c2} chat={chat} />)
-    rerender(<AssistantThread canWrite conversations={c2} chat={buildChat({ deliveredMessageId: 'm9' })} />)
+    // a reply that arrives through a rejoin, which never sets `sending`.
+    const c2 = fakeMateSession({ activeId: 'c2' })
+    rerender(<AssistantThread canWrite session={c2} />)
+    rerender(<AssistantThread canWrite session={{ ...c2, status: { ...c2.status, deliveredMessageId: 'm9' } }} />)
     await waitFor(() => expect(scrollToMessageSpy).toHaveBeenCalledWith('m9', expect.objectContaining({ align: 'start' })))
   })
 })

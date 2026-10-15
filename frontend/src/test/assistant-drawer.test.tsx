@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 
 import { AssistantDrawer } from '@/components/assistant-drawer'
+import { todayISO } from '@/lib/local-date'
+import { controllableSseStream, flushMicrotasks as flush, recordingBody } from './helpers/fake-sse'
 
 // ADR 0093: the assistant panel owns its own hooks (status, conversations,
 // chat), each of which calls fetch directly - so these tests drive it the
@@ -28,12 +30,17 @@ interface AssistantServerOptions {
   conversations?: ConversationRecord[]
   searchResults?: Array<{ id: string; title: string; updated_at: string; snippet?: string }>
   onSendMessage?: (conversationId: string, content: string) => FetchLike
+  /** Sees every question's request body. */
+  onSendBody?: (body: Record<string, unknown>) => void
 }
 
 function buildAssistantFetch(opts: AssistantServerOptions) {
   const conversations: ConversationRecord[] = opts.conversations ? [...opts.conversations] : []
   const messagesByConversation = new Map<string, Array<Record<string, unknown>>>()
   let counter = 0
+  const store = (conversationId: string, message: Record<string, unknown>) => {
+    messagesByConversation.set(conversationId, [...(messagesByConversation.get(conversationId) ?? []), message])
+  }
 
   const fetchMock = vi.fn(async (url: string, init?: RequestInit): Promise<FetchLike> => {
     const method = init?.method ?? 'GET'
@@ -65,7 +72,13 @@ function buildAssistantFetch(opts: AssistantServerOptions) {
       const id = decodeURIComponent(messagesMatch[1])
       const parsedBody = init?.body ? (JSON.parse(init.body as string) as { content: string }) : { content: '' }
       if (!opts.onSendMessage) throw new Error('onSendMessage not configured for this test')
-      return opts.onSendMessage(id, parsedBody.content)
+      opts.onSendBody?.(parsedBody)
+      counter += 1
+      // Stored as the real server does, so the thread's re-read after an
+      // answer finds the question and the reply.
+      store(id, { id: `u${counter}`, conversation_id: id, seq: 0, role: 'user', content: parsedBody.content, created_at: '' })
+      const response = opts.onSendMessage(id, parsedBody.content)
+      return response.body ? { ...response, body: recordingBody(response.body, (message) => store(id, message)) } : response
     }
 
     const conversationMatch = url.match(/\/api\/assistant\/conversations\/([^/]+)$/)
@@ -113,21 +126,6 @@ function sseMessageResponse(message: Record<string, unknown>, conversation: Reco
     },
   })
   return { ok: true, body }
-}
-
-function controllableStream() {
-  let streamController!: ReadableStreamDefaultController<Uint8Array>
-  const stream = new ReadableStream<Uint8Array>({ start(controller) { streamController = controller } })
-  const encoder = new TextEncoder()
-  return {
-    body: stream,
-    push: (chunk: string) => streamController.enqueue(encoder.encode(chunk)),
-    close: () => streamController.close(),
-  }
-}
-
-async function flush(times = 8) {
-  for (let i = 0; i < times; i++) await Promise.resolve()
 }
 
 const assistantMessage = (overrides: Partial<Record<string, unknown>> = {}) => ({
@@ -383,11 +381,32 @@ describe('AssistantDrawer', () => {
     expect(textarea.value).toBe('')
   })
 
-  it('shows the status line while a status frame is pending, then resolves', async () => {
-    const stream = controllableStream()
+  // The Mate panel is not a screen worth telling Mate about.
+  it('sends no screen with a question typed on the Mate panel', async () => {
+    let sent: Record<string, unknown> | null = null
     vi.stubGlobal('fetch', buildAssistantFetch({
       status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
-      onSendMessage: () => ({ ok: true, body: stream.body }),
+      onSendBody: (body) => { sent = body },
+      onSendMessage: (conversationId) => sseMessageResponse(
+        assistantMessage({ conversation_id: conversationId }),
+        { id: conversationId, title: 'Wind', created_at: '2026-09-11T00:00:00Z', updated_at: '2026-09-11T00:00:01Z' },
+      ),
+    }))
+
+    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
+
+    const textarea = await screen.findByPlaceholderText('Ask Mate')
+    fireEvent.change(textarea, { target: { value: 'What about the wind tomorrow?' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    await waitFor(() => expect(sent).toEqual({ content: 'What about the wind tomorrow?', today: todayISO() }))
+  })
+
+  it('shows the status line while a status frame is pending, then resolves', async () => {
+    const stream = controllableSseStream()
+    vi.stubGlobal('fetch', buildAssistantFetch({
+      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
+      onSendMessage: () => ({ ok: true, body: stream.stream }),
     }))
 
     render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)

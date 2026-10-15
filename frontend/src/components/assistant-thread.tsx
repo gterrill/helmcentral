@@ -21,8 +21,8 @@ import {
   MessageScrollerViewport,
   useMessageScroller,
 } from '@/components/ui/message-scroller'
-import type { useAssistantChat } from '@/hooks/use-assistant-chat'
-import type { AssistantMessage, AssistantMessageAttachment, useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import type { AssistantMessage, AssistantMessageAttachment } from '@/hooks/use-assistant-conversations'
+import type { MateSession } from '@/hooks/use-mate-session'
 import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-uploads'
 import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useNotes } from '@/hooks/use-notes'
@@ -243,20 +243,24 @@ function MateWatchChip({ watch, canWrite }: { watch: NonNullable<ReturnType<type
 
 interface AssistantThreadProps {
   canWrite: boolean
-  conversations: ReturnType<typeof useAssistantConversations>
-  chat: ReturnType<typeof useAssistantChat>
+  /** The surface's Mate session (ADR 0179): the panel and the sheet each
+   * hand over their own. */
+  session: MateSession
   /** Focuses the composer as soon as it mounts - the Mate sheet (ADR 0093
    * voice phase) wants this when it opens with no question already in
    * flight; the panel never sets it, matching its pre-extraction behaviour. */
   autoFocus?: boolean
   /** Forwarded straight to the composer's textarea (ADR 0094): the sheet's
-   * "New conversation" button focuses it directly after `create()` resolves,
+   * "New conversation" button focuses it directly after `startNew()`,
    * which `autoFocus` alone can't do since that only ever fires on mount. */
   composerRef?: Ref<HTMLTextAreaElement>
   /** Fires with whether the composer holds a draft: typed-but-unsent text or
    * a staged attachment. Reports false when the thread unmounts. App uses it
    * so an update reload never throws a half-written question away. */
   onHasDraftChange?: (hasDraft: boolean) => void
+  /** A question to put in the composer, unsent: one the sheet was handed
+   * while Mate was still answering. A new `key` puts it in again. */
+  queuedQuestion?: { text: string; key: number } | null
   /** The watch Mate is running in the active conversation (ADR 0160), from
    * `useMateTelemetryWatch`. Optional: without it the thread shows no chip
    * and never collects a watch's report on its own. */
@@ -304,32 +308,33 @@ function ScrollToDeliveredReply({ messageId, operatorScrolled }: { messageId: st
  * conversation (ADR 0093, streamed per ADR 0105). Extracted from
  * AssistantDrawer so both the full panel (which also owns a
  * conversation-list column) and the quick Mate sheet can host the same
- * thread over whatever page is behind it - neither owns any data itself,
- * both hand it a conversations/chat pair.
+ * thread over whatever page is behind it. It owns no conversation data
+ * itself: both hand it their own Mate session (ADR 0179).
  *
  * Built on shadcn's chat primitives (MessageScroller/Message/Bubble/
  * Marker, ADR 0104): MessageScroller owns the scroll position and the
  * jump-to-latest button, Message/Bubble render one turn each, and Marker
  * carries the status line and tool activity while a reply is in flight.
  */
-export function AssistantThread({ canWrite, conversations, chat, autoFocus, composerRef, onHasDraftChange, watch }: AssistantThreadProps) {
+export function AssistantThread({ canWrite, session, autoFocus, composerRef, onHasDraftChange, watch, queuedQuestion }: AssistantThreadProps) {
   const [content, setContent] = useState('')
+  // A queued question goes in after anything already typed, never over it.
+  const queuedKey = queuedQuestion?.key
+  const queuedText = queuedQuestion?.text
+  useEffect(() => {
+    if (queuedKey === undefined || !queuedText) return
+    setContent((current) => (current.trim() === '' ? queuedText : `${current}\n${queuedText}`))
+  }, [queuedKey, queuedText])
   const [summaryOpen, setSummaryOpen] = useState(false)
-  // [P1, ADR 0093/impeccable critique 2026-09-12] chat.abort() already
-  // cancelled a request on unmount or a superseding send, but the operator
-  // had no way to cancel a question themselves. Purely a local "did the
-  // operator just stop this" flag - chat.error stays null through an abort,
-  // so this is the only way to tell "stopped" apart from "idle before the
-  // first question", and it clears the moment the next question is sent.
-  const [stopped, setStopped] = useState(false)
+  const { status } = session
   // Set when the operator wheels, touches or keys the thread while a reply
   // streams; clears when the next run starts, a run is rejoined or the
   // thread switches conversation (a rejoined run never sets `sending`).
   // Gates the post-delivery scroll.
   const operatorScrolledRef = useRef(false)
   useEffect(() => {
-    if (chat.sending) operatorScrolledRef.current = false
-  }, [chat.sending])
+    if (status.sending) operatorScrolledRef.current = false
+  }, [status.sending])
 
   // ADR 0106 F2: the composer's staged attachments. One useDocumentUploads()
   // instance per AssistantThread - it isn't threaded through as a prop
@@ -346,81 +351,32 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
   useEffect(() => () => onHasDraftChangeRef.current?.(false), [])
   const [dragOver, setDragOver] = useState(false)
 
-  // ADR 0105 ("the answer outlives the page"): whenever the active
-  // conversation becomes a real id - on mount, or when the operator
-  // switches threads - rejoin whatever reply the server is still writing
-  // for it. The only case to skip is this conversation's own send already
-  // streaming (a brand new thread's first question creates the id and sends
-  // straight away). A stream for a *different* conversation is superseded:
-  // attach() closes it locally (its run carries on server-side) and clears
-  // its status and draft, so this thread never shows, or Stops, another
-  // conversation's run.
-  const activeIdRef = useRef(conversations.activeId)
-  activeIdRef.current = conversations.activeId
+  // Opening another conversation starts a fresh scroll; the session
+  // rejoins any answer still being written for it (ADR 0105).
   useEffect(() => {
-    const id = conversations.activeId
     operatorScrolledRef.current = false
-    if (id === null || chat.isStreamingConversation(id)) return
-    let cancelled = false
-    void (async () => {
-      // A second effect run (React StrictMode's mount/cleanup/mount) simply
-      // supersedes this call the same way a second chat.send() would - the
-      // superseded attach resolves null and this local `cancelled` guard
-      // keeps its resolution from doing anything further either way.
-      // Appended as the final frame lands so the streamed draft is swapped
-      // for the message in one render; see handleSend.
-      let delivered = false
-      await chat.attach(id, undefined, (message) => {
-        if (cancelled || activeIdRef.current !== id) return
-        delivered = true
-        conversations.appendLocal(message)
-      })
-      if (!delivered) return
-      await conversations.refresh()
-    })()
-    return () => {
-      cancelled = true
-    }
-    // Only an activeId change (including the initial mount) should rejoin a
-    // run; re-running on every `chat`/`conversations` identity change would
-    // loop or race an in-progress send.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations.activeId])
+  }, [session.activeId])
 
   // ADR 0160: a reply may have started a watch, so look again whenever the
   // thread's messages change.
-  const messageCount = conversations.messages.length
+  const messageCount = session.messages.length
   const refreshWatch = watch?.refresh
   useEffect(() => {
     if (refreshWatch) void refreshWatch()
   }, [messageCount, refreshWatch])
 
   // ADR 0160: when a watch ends on its own the server has already started
-  // Mate's turn on the report. Rejoin it like any other run, then reload so
-  // the report row and the answer both show even if the turn already ended.
+  // Mate's turn on the report. The session rejoins it and reloads the
+  // thread so the report row and the answer both show.
   const watchEnded = watch?.ended ?? 0
+  const { isAnswering, rejoin, send, stop } = session
   useEffect(() => {
-    if (watchEnded === 0) return
-    const id = conversations.activeId
-    if (id === null || chat.isStreamingConversation(id)) return
-    // Only a run this effect actually rejoins starts a fresh scroll; a reply
+    if (watchEnded === 0 || isAnswering()) return
+    // Only a run this actually rejoins starts a fresh scroll; a reply
     // already streaming keeps the operator's scroll-away.
     operatorScrolledRef.current = false
-    let cancelled = false
-    void (async () => {
-        await chat.attach(id, undefined, (message) => {
-        if (cancelled || activeIdRef.current !== id) return
-        conversations.appendLocal(message)
-      })
-      if (cancelled || activeIdRef.current !== id) return
-      await conversations.refresh()
-    })()
-    return () => {
-      cancelled = true
-    }
-    // Only a new end should rejoin; see the activeId effect above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [watchEnded])
+    void rejoin()
+  }, [watchEnded, isAnswering, rejoin])
 
   // ADR 0122: dictation, not push-to-talk - appends to the composer, never
   // sends by itself. The header's "Talk to Mate" mic (App.tsx) stays the
@@ -431,41 +387,15 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
 
   const handleSend = useCallback(async () => {
     const trimmed = content.trim()
-    // ADR 0106 F2: a question may now be nothing but an attachment - the
+    // ADR 0106 F2: a question may be nothing but an attachment - the
     // backend accepts empty content as long as at least one document is
-    // attached - so the old "no text, nothing to send" guard has to allow
-    // that case through. `uploads.ready` is what actually gates Send on
-    // upload/indexing state; see use-document-uploads.ts for exactly what
-    // it requires.
-    const attachmentIds = uploads.items
-      .map((item) => item.documentId)
-      .filter((id): id is string => id !== null)
-    if ((trimmed === '' && attachmentIds.length === 0) || chat.sending || !canWrite || !uploads.ready) return
-    setStopped(false)
+    // attached. `uploads.ready` is what gates Send on upload/indexing
+    // state; see use-document-uploads.ts for exactly what it requires.
+    const attachments: AssistantMessageAttachment[] = uploads.items
+      .filter((item) => item.documentId !== null)
+      .map((item) => ({ documentId: item.documentId as string, filename: item.filename }))
+    if ((trimmed === '' && attachments.length === 0) || status.sending || !canWrite || !uploads.ready) return
 
-    let conversationId = conversations.activeId
-    if (conversationId === null) {
-      conversationId = await conversations.create()
-      if (conversationId === null) return
-      // This thread now shows the new conversation, even before the render
-      // that carries its id lands.
-      activeIdRef.current = conversationId
-    }
-
-    const attachmentChips: AssistantMessageAttachment[] = uploads.items.map((item) => ({
-      documentId: item.documentId as string,
-      filename: item.filename,
-    }))
-
-    conversations.appendLocal({
-      id: `local-${Date.now()}`,
-      conversationId,
-      seq: -1,
-      role: 'user',
-      content: trimmed,
-      createdAt: new Date().toISOString(),
-      attachments: attachmentChips.length > 0 ? attachmentChips : undefined,
-    })
     // Code review: sending used to leave an active dictation running - it
     // kept listening after the composer was cleared below, so a word
     // recognised after Send landed in the now-empty box as though it were
@@ -474,46 +404,24 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     dictation.cancel()
     setContent('')
 
-    // Only included when something is actually staged - same
-    // conditional-inclusion `send()` already applies to `spoken`/`screen`,
-    // so a plain text-only question posts exactly the body it always has.
-    // The reply is appended as the stream's final frame lands, in the same
-    // render that drops the streamed draft. Appending only after send()
-    // resolves left a commit with neither, the thread shrank by a reply and
-    // the scroller re-anchored from the clamped position. The answer counts
-    // as delivered once that has run: Stop tapped before the stream closes
-    // makes send() resolve null, but the answer is on screen.
-    let answered = false
-    let delivered = false
-    const onMessage = (message: AssistantMessage) => {
-      answered = true
-      if (activeIdRef.current !== conversationId) return
-      delivered = true
-      conversations.appendLocal(message)
-    }
-    if (attachmentIds.length > 0) {
-      await chat.send(conversationId, trimmed, { attachments: attachmentIds, onMessage })
-    } else {
-      await chat.send(conversationId, trimmed, { onMessage })
+    const result = await send(trimmed, { attachments })
+    // Refused because an answer is still streaming: the question was never
+    // sent, so it goes back in the composer.
+    if (result.refused) {
+      setContent((current) => (current === '' ? trimmed : current))
+      return
     }
 
     // A delivered answer has nothing left for the composer to hold onto -
     // the chips that went with the question are dropped (everything sent
     // had finished uploading, since uploads.ready gated Send above), and
     // only those: a file staged for the next question while this one
-    // streamed stays. A failed send (chat.error is set) leaves them staged
-    // so the operator can retry without re-uploading. The chips go whenever
-    // the answer landed, even if the operator opened another thread meanwhile:
-    // they would otherwise ride along with the next question there.
-    if (answered) uploads.removeByDocumentIds(attachmentIds)
-    if (delivered) await conversations.refresh()
-  }, [content, chat, conversations, canWrite, uploads, dictation])
-
-  const handleStop = useCallback(() => {
-    void chat.abort()
-    // Stop after the final message frame arrived leaves a finished answer.
-    if (!chat.answerDelivered()) setStopped(true)
-  }, [chat])
+    // streamed stays. A failed send leaves them staged so the operator can
+    // retry without re-uploading. The chips go whenever the answer landed,
+    // even if the operator opened another thread meanwhile: they would
+    // otherwise ride along with the next question there.
+    if (result.answered) uploads.removeByDocumentIds(attachments.map((a) => a.documentId))
+  }, [content, status.sending, send, canWrite, uploads, dictation])
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -548,14 +456,14 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
     if (event.dataTransfer.files.length > 0) uploads.add(event.dataTransfer.files)
   }, [uploads])
 
-  const hasMessages = conversations.messages.length > 0
+  const hasMessages = session.messages.length > 0
   // ADR 0105: the draft is the current round's answer text streaming in.
   // While it holds text, it is the thing on screen in place of the status
   // marker below - a retract (the round turned into tool calls) clears it
   // back to null and the marker returns, even though `sending` is still true.
-  const showDraft = chat.sending && Boolean(chat.draft)
-  const showStatusMarker = chat.sending && !showDraft
-  const waitingPhrase = useWaitingPhrase(showStatusMarker && chat.statusText === null)
+  const showDraft = status.sending && Boolean(status.draft)
+  const showStatusMarker = status.sending && !showDraft
+  const waitingPhrase = useWaitingPhrase(showStatusMarker && status.statusText === null)
 
   // ADR 0106 F2: Send's own disabled reasons, beyond the plain "nothing
   // typed and nothing attached" case. uploads.ready requires every staged
@@ -571,9 +479,9 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       ? 'Waiting for attachments to finish reading…'
       : null
   const hasContentOrAttachment = content.trim() !== '' || uploads.items.length > 0
-  const hasAssistantReply = conversations.messages.some((m) => m.role === 'assistant')
-  const summaryLabel = conversations.summaryNoteId !== null && !conversations.conversationLoading ? 'Update note' : 'Summarise to note'
-  const sendDisabled = chat.sending || !canWrite || !hasContentOrAttachment || attachmentsNotReady
+  const hasAssistantReply = session.messages.some((m) => m.role === 'assistant')
+  const summaryLabel = session.summaryNoteId !== null && !session.conversationLoading ? 'Update note' : 'Summarise to note'
+  const sendDisabled = status.sending || !canWrite || !hasContentOrAttachment || attachmentsNotReady
 
   return (
     <div
@@ -581,7 +489,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
       data-testid="assistant-thread-root"
     >
       <MessageScrollerProvider defaultScrollPosition="last-anchor">
-        <ScrollToDeliveredReply messageId={chat.deliveredMessageId} operatorScrolled={operatorScrolledRef} />
+        <ScrollToDeliveredReply messageId={status.deliveredMessageId} operatorScrolled={operatorScrolledRef} />
         <MessageScroller className="min-h-0 flex-1" data-testid="assistant-thread-message-scroller">
           <MessageScrollerViewport
             className="min-h-0 flex-1 px-1 py-2"
@@ -607,9 +515,9 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                 </section>
               ) : (
                 <>
-                  {conversations.messages.map((message) => (
+                  {session.messages.map((message) => (
                     <MessageScrollerItem
-                      key={message.id}
+                      key={message.clientKey ?? message.id}
                       messageId={message.id}
                       scrollAnchor={message.role === 'user'}
                     >
@@ -652,7 +560,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                                 key={proposal.id}
                                 proposal={proposal}
                                 canWrite={canWrite}
-                                onChange={conversations.updateProposal}
+                                onChange={session.updateProposal}
                               />
                             ))}
                             {/* ADR 0165: a form Mate filled in. A draft until
@@ -662,7 +570,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                                 key={draft.id}
                                 draft={draft}
                                 canWrite={canWrite}
-                                onChange={conversations.updateFormDraft}
+                                onChange={session.updateFormDraft}
                               />
                             ))}
                             <div className="flex items-center gap-2">
@@ -701,7 +609,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
                         <MessageContent>
                           <Bubble variant="ghost">
                             <BubbleContent>
-                              <AssistantMarkdown content={chat.draft ?? ''} />
+                              <AssistantMarkdown content={status.draft ?? ''} />
                             </BubbleContent>
                           </Bubble>
                         </MessageContent>
@@ -718,29 +626,29 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
 
       {watch && <MateWatchChip watch={watch} canWrite={canWrite} />}
 
-      {chat.sending && (
+      {status.sending && (
         <Marker role={showStatusMarker ? 'status' : undefined}>
           {showStatusMarker && (
             <>
               <MarkerIcon>
                 <Loader2 className="animate-spin" />
               </MarkerIcon>
-              <MarkerContent className="shimmer">{chat.statusText ?? waitingPhrase}</MarkerContent>
+              <MarkerContent className="shimmer">{status.statusText ?? waitingPhrase}</MarkerContent>
             </>
           )}
           {/* Stop outlives the status text: a streaming answer is still
               spending tokens and can be cut off mid-sentence. */}
-          <Button variant="ghost" size="icon" className="ml-auto" aria-label="Stop asking" onClick={handleStop}>
+          <Button variant="ghost" size="icon" className="ml-auto" aria-label="Stop asking" onClick={stop}>
             <Square className="h-4 w-4" />
           </Button>
         </Marker>
       )}
 
-      {stopped && !chat.sending && <Marker className="text-xs">Stopped.</Marker>}
+      {status.stopped && !status.sending && <Marker className="text-xs">Stopped.</Marker>}
 
-      {(chat.error || conversations.errorMessage) && (
+      {(status.error || session.errorMessage) && (
         <Bubble variant="destructive">
-          <BubbleContent>{chat.error ?? conversations.errorMessage}</BubbleContent>
+          <BubbleContent>{status.error ?? session.errorMessage}</BubbleContent>
         </Bubble>
       )}
 
@@ -841,7 +749,7 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
               aria-label={summaryLabel}
               title={summaryLabel}
               size="icon-sm"
-              disabled={!canWrite || chat.sending || !hasAssistantReply || conversations.activeId === null || conversations.conversationLoading}
+              disabled={!canWrite || status.sending || !hasAssistantReply || session.activeId === null || session.conversationLoading}
               onClick={() => setSummaryOpen(true)}
             >
               <FileText className="h-4 w-4" />
@@ -878,13 +786,13 @@ export function AssistantThread({ canWrite, conversations, chat, autoFocus, comp
         {canWrite && attachmentWaitMessage && (
           <p className="text-xs text-muted-foreground">{attachmentWaitMessage}</p>
         )}
-        {conversations.activeId !== null && (
+        {session.activeId !== null && (
           <MateSummaryNoteDialog
             open={summaryOpen}
             onOpenChange={setSummaryOpen}
-            conversationId={conversations.activeId}
+            conversationId={session.activeId}
             onSaved={(noteId) => {
-              conversations.setSummaryNoteId(noteId)
+              session.setSummaryNoteId(noteId)
               setSummaryOpen(false)
               toast.success(
                 <span>

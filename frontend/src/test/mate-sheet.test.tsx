@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor, within, act } from '@testing-librar
 
 import { MateSheet } from '@/components/mate-sheet'
 import { todayISO } from '@/lib/local-date'
+import { controllableSseStream, flushMicrotasks, recordingBody } from './helpers/fake-sse'
 
 // ADR 0093 voice phase: the Mate sheet owns its own conversations/chat hooks
 // (same fetch-router pattern as assistant-drawer.test.tsx) - a voice
@@ -67,6 +68,11 @@ function buildFetch(
   const conversations: ConversationRecord[] = [...initialConversations]
   const messagesByConversation = new Map<string, Array<Record<string, unknown>>>()
   let counter = 0
+  const store = (conversationId: string, message: Record<string, unknown>) => {
+    messagesByConversation.set(conversationId, [...(messagesByConversation.get(conversationId) ?? []), message])
+  }
+  const recorded = (response: FetchLike, conversationId: string): FetchLike =>
+    response.body ? { ...response, body: recordingBody(response.body, (message) => store(conversationId, message)) } : response
 
   return vi.fn(async (url: string, init?: RequestInit): Promise<FetchLike> => {
     const method = init?.method ?? 'GET'
@@ -91,7 +97,9 @@ function buildFetch(
       const id = decodeURIComponent(messagesMatch[1])
       const body = init?.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : {}
       if (!onSendMessage) throw new Error('onSendMessage not configured for this test')
-      return onSendMessage(id, body)
+      counter += 1
+      store(id, { id: `u${counter}`, conversation_id: id, seq: 0, role: 'user', content: body.content, created_at: '' })
+      return recorded(onSendMessage(id, body), id)
     }
 
     // ADR 0160: the thread asks whether a watch is running; none is here.
@@ -112,7 +120,7 @@ function buildFetch(
         // landed; an instant answer here would let that read's setMessages([])
         // wipe the frame, an ordering the real server does not produce.
         await new Promise((resolve) => setTimeout(resolve, 20))
-        return onAttach(id)
+        return recorded(onAttach(id), id)
       }
       return { ok: true, status: 204 }
     }
@@ -137,24 +145,6 @@ function sseMessageResponse(message: Record<string, unknown>, conversation: Reco
     },
   })
   return { ok: true, body }
-}
-
-// ADR 0105: a stream this test pushes delta/message frames into by hand, so
-// the "never speaks from the draft" assertion doesn't race a real
-// setTimeout/poll against however many microtask hops the SSE reader needs.
-function controllableStream() {
-  let streamController!: ReadableStreamDefaultController<Uint8Array>
-  const stream = new ReadableStream<Uint8Array>({ start(controller) { streamController = controller } })
-  const encoder = new TextEncoder()
-  return {
-    body: stream,
-    push: (chunk: string) => streamController.enqueue(encoder.encode(chunk)),
-    close: () => streamController.close(),
-  }
-}
-
-async function flushMicrotasks(times = 8) {
-  for (let i = 0; i < times; i++) await Promise.resolve()
 }
 
 describe('MateSheet', () => {
@@ -247,7 +237,8 @@ describe('MateSheet', () => {
     )
 
     await waitFor(() => expect(postedCreateCalls).toBeGreaterThan(0))
-    await waitFor(() => expect(sentBody).toEqual({ content: 'Why did the logs fail?', today: todayISO(), spoken: true, screen: { panel: 'forecast' } }))
+    // From the Logs page or a text selection: read, not heard.
+    await waitFor(() => expect(sentBody).toEqual({ content: 'Why did the logs fail?', today: todayISO(), screen: { panel: 'forecast' } }))
   })
 
   it('Open the Mate page hands the active conversation to the panel and closes the sheet', async () => {
@@ -278,7 +269,7 @@ describe('MateSheet', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
-  it('sends the initial question at once with spoken:true and the screen', async () => {
+  it('sends a voice question at once with spoken:true and the screen', async () => {
     let sentBody: Record<string, unknown> | null = null
     vi.stubGlobal('fetch', buildFetch((conversationId, body) => {
       sentBody = body
@@ -300,6 +291,7 @@ describe('MateSheet', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud={false}
@@ -316,6 +308,70 @@ describe('MateSheet', () => {
     expect(await screen.findByText(/Fine tomorrow, light winds\./)).toBeInTheDocument()
     // The question itself lands as the optimistic user bubble.
     expect(screen.getByText('How does tomorrow look?')).toBeInTheDocument()
+  })
+
+  // A typed follow-up is asked from the same page as the first question:
+  // Mate needs to know what is on screen for it too (ADR 0167's "this").
+  it('sends the screen with a question typed into the composer', async () => {
+    let sentBody: Record<string, unknown> | null = null
+    vi.stubGlobal('fetch', buildFetch((conversationId, body) => {
+      sentBody = body
+      return sseMessageResponse(
+        { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: 'Replace the membrane.', created_at: '' },
+        { id: conversationId, title: 'Membrane', created_at: '', updated_at: '' },
+      )
+    }))
+    const screenContext = { panel: 'documents', document_id: 'd7', document_title: 'Watermaker manual' }
+
+    render(<MateSheet open onOpenChange={vi.fn()} screen={screenContext} canWrite readAloud={false} onOpenPanel={vi.fn()} />)
+
+    const textarea = await screen.findByPlaceholderText('Ask Mate')
+    fireEvent.change(textarea, { target: { value: 'What does this say about the membrane?' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+
+    await waitFor(() => expect(sentBody).toEqual({
+      content: 'What does this say about the membrane?',
+      today: todayISO(),
+      screen: screenContext,
+    }))
+    expect(await screen.findByText('Replace the membrane.')).toBeInTheDocument()
+  })
+
+  // A question handed to the sheet while it is still answering (Hey Mate,
+  // Help, a selection) is not sent, and not lost either: it waits in the
+  // composer for the operator to send once the answer is in.
+  it('puts a question that arrives while Mate is still answering into the composer, with the reason', async () => {
+    const stream = controllableSseStream()
+    let posts = 0
+    vi.stubGlobal('fetch', buildFetch(() => {
+      posts += 1
+      return { ok: true, body: stream.stream }
+    }))
+    const props = { onOpenChange: vi.fn(), screen: { panel: 'forecast' }, canWrite: true, readAloud: false, onOpenPanel: vi.fn() }
+
+    const { rerender } = render(<MateSheet open {...props} />)
+    const textarea = await screen.findByPlaceholderText('Ask Mate') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'What about tomorrow?' } })
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => expect(posts).toBe(1))
+
+    rerender(<MateSheet open {...props} initialQuestion="And the swell?" spoken />)
+
+    await waitFor(() => expect(textarea.value).toBe('And the swell?'))
+    expect(screen.getByText('Mate is still answering the last question.')).toBeInTheDocument()
+    expect(posts).toBe(1)
+
+    await act(async () => {
+      stream.push(`data: ${JSON.stringify({
+        message: { id: 'm1', conversation_id: 'new-1', seq: 1, role: 'assistant', content: 'Fine tomorrow.', created_at: '' },
+        conversation: { id: 'new-1', title: 'What about tomorrow?', created_at: '', updated_at: '' },
+      })}\n\n`)
+      stream.close()
+      await flushMicrotasks()
+    })
+
+    await waitFor(() => expect(screen.queryByText('Mate is still answering the last question.')).not.toBeInTheDocument())
+    expect(textarea.value).toBe('And the swell?')
   })
 
   it('does not send when canWrite is false', async () => {
@@ -445,6 +501,7 @@ describe('MateSheet', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
@@ -677,8 +734,8 @@ describe('MateSheet', () => {
     // `messages` at all (AssistantThread's handleSend only appends it when
     // the conversation it was sent to is still the active one).
     it('does not reset a conversation whose reply is still streaming', async () => {
-      const stream = controllableStream()
-      vi.stubGlobal('fetch', buildFetch(() => ({ ok: true, body: stream.body })))
+      const stream = controllableSseStream()
+      vi.stubGlobal('fetch', buildFetch(() => ({ ok: true, body: stream.stream })))
 
       const { rerender } = render(
         <MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'forecast' }} canWrite readAloud={false} onOpenPanel={vi.fn()} />,
@@ -852,6 +909,7 @@ describe('MateSheet read-aloud', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
@@ -862,6 +920,36 @@ describe('MateSheet read-aloud', () => {
     await screen.findByText(/Fine tomorrow, light winds\./)
     await waitFor(() => expect(fakeSynth.spoken).toHaveLength(1))
     expect(fakeSynth.spoken[0].text).toBe('Fine tomorrow, light winds.')
+  })
+
+  // Help, Settings and a text selection hand the sheet a question the
+  // operator typed or picked, not one they spoke.
+  it('neither asks for a spoken answer nor reads one aloud for a question that did not come by voice', async () => {
+    installFakeSpeechSynthesis()
+    let sentBody: Record<string, unknown> | null = null
+    vi.stubGlobal('fetch', buildFetch((conversationId, body) => {
+      sentBody = body
+      return sseMessageResponse(
+        { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: 'Set the alarm under Settings.\n\n## Spoken summary\n\nUnder Settings.', created_at: '' },
+        { id: conversationId, title: '', created_at: '', updated_at: '' },
+      )
+    }))
+
+    render(
+      <MateSheet
+        open
+        onOpenChange={vi.fn()}
+        initialQuestion="How do I set a depth alarm?"
+        screen={{ panel: 'settings', section: 'alarms' }}
+        canWrite
+        readAloud
+        onOpenPanel={vi.fn()}
+      />,
+    )
+
+    await screen.findByText(/Set the alarm under Settings\./)
+    expect(sentBody).not.toHaveProperty('spoken')
+    expect(fakeSynth.spoken).toHaveLength(0)
   })
 
   it('does not speak when readAloud is off', async () => {
@@ -876,6 +964,7 @@ describe('MateSheet read-aloud', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud={false}
@@ -899,6 +988,7 @@ describe('MateSheet read-aloud', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
@@ -931,6 +1021,7 @@ describe('MateSheet read-aloud', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
@@ -963,11 +1054,11 @@ describe('MateSheet read-aloud', () => {
   // arrived.
   it('does not speak from an in-progress draft, only from the resolved message', async () => {
     installFakeSpeechSynthesis()
-    const stream = controllableStream()
+    const stream = controllableSseStream()
     let capturedConversationId = ''
     vi.stubGlobal('fetch', buildFetch((conversationId) => {
       capturedConversationId = conversationId
-      return { ok: true, body: stream.body }
+      return { ok: true, body: stream.stream }
     }))
 
     render(
@@ -975,6 +1066,7 @@ describe('MateSheet read-aloud', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
@@ -1018,11 +1110,11 @@ describe('MateSheet read-aloud', () => {
 
   it('still reads the answer aloud when Stop is tapped after the answer arrived but before the stream closed', async () => {
     installFakeSpeechSynthesis()
-    const stream = controllableStream()
+    const stream = controllableSseStream()
     let capturedConversationId = ''
     const inner = buildFetch((conversationId) => {
       capturedConversationId = conversationId
-      return { ok: true, body: stream.body }
+      return { ok: true, body: stream.stream }
     })
     vi.stubGlobal('fetch', (url: string, init?: RequestInit) =>
       url.endsWith('/run/cancel') ? Promise.resolve({ ok: true }) : inner(url, init))
@@ -1032,6 +1124,7 @@ describe('MateSheet read-aloud', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
@@ -1123,12 +1216,12 @@ describe('MateSheet read-aloud', () => {
 
   it('neither shows nor speaks a reply when the operator moved to another conversation meanwhile', async () => {
     installFakeSpeechSynthesis()
-    const stream = controllableStream()
+    const stream = controllableSseStream()
     let sentTo = ''
     vi.stubGlobal('fetch', buildFetch(
       (conversationId) => {
         sentTo = conversationId
-        return { ok: true, body: stream.body }
+        return { ok: true, body: stream.stream }
       },
       [{ id: 'c1', title: 'Hook Reef anchorages', created_at: '', updated_at: '' }],
     ))
@@ -1138,6 +1231,7 @@ describe('MateSheet read-aloud', () => {
         open
         onOpenChange={vi.fn()}
         initialQuestion="How does tomorrow look?"
+        spoken
         screen={{ panel: 'forecast' }}
         canWrite
         readAloud
