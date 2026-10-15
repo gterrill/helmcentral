@@ -75,7 +75,7 @@ func TestValidateVesselRolesElectrical(t *testing.T) {
 		{"slash ac", vesselRoles{GeneratorACInstance: "a/b"}, "roles.generator_ac_instance"},
 	}
 	for _, c := range cases {
-		got := validateVesselRoles(c.in, items)
+		got := validateVesselRoles(c.in, items, nil)
 		switch {
 		case c.wantErr == "" && got != nil:
 			t.Errorf("%s: unexpected error %+v", c.name, got)

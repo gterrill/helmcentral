@@ -90,7 +90,7 @@ func trackFreshWaterLitres(read alarmReader, t telemetryReader, now time.Time) *
 }
 
 // buildTrackSample reads one tick. houseSoCPath is empty when no house bank is
-// chosen in Vessel settings; the state of charge is then absent.
+// chosen in the roles; the state of charge is then absent.
 //
 // It reads one copy of the self tree, taken at now: the recorded point is
 // one moment, so a delta landing mid-tick must not mix two (a live view would

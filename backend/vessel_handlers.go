@@ -72,6 +72,9 @@ type vesselDetectorStatus struct {
 }
 
 type discoveryResponse struct {
+	// Connected is false while Helmcentral has no vessel data from SignalK, so
+	// the page can say so instead of showing an empty list.
+	Connected bool                            `json:"connected"`
 	Groups    []discoveryGroup                `json:"groups"`
 	Detectors map[string]vesselDetectorStatus `json:"detectors"`
 }
@@ -312,7 +315,7 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 	}
 	groups = append(groups, discoveryGroup{Kind: "ac", Mappable: false, Rows: acInputRows(telemetry, paths)})
 
-	return discoveryResponse{Groups: groups, Detectors: vesselDetectorStatuses(vessel)}
+	return discoveryResponse{Connected: snapshot.selfTelemetry().HasSelf(), Groups: groups, Detectors: vesselDetectorStatuses(vessel)}
 }
 
 // vesselDetectorStatuses names, per detector, whether vessel has completed

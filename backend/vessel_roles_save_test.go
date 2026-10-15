@@ -289,3 +289,39 @@ func TestRoleRuleNeedsAHouseBank(t *testing.T) {
 		t.Fatalf("an unknown role must be refused")
 	}
 }
+
+// A role left as it is is not checked again, so an item that has lost its
+// source since the role was chosen does not stop an unrelated setting saving.
+// Changing that role does have to name a fitting item.
+func TestUpdateSettings_UnchangedStaleRoleDoesNotBlockOtherSaves(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	withTempAlarmRules(t)
+	store := vesselFixtureStore(t)
+	bank, err := store.CreateEquipment(equipmentItem{Name: "Lithium bank", SignalKSource: "electrical.batteries.512"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, body := postSettings(t, settingsPath, func(p *settingsPayload) { p.Roles = &vesselRoles{HouseBank: bank.ID} }); code != http.StatusOK {
+		t.Fatalf("got %d %v", code, body)
+	}
+
+	bank.SignalKSource = ""
+	if _, err := store.UpdateEquipment(bank.ID, bank); err != nil {
+		t.Fatal(err)
+	}
+	invalidateSourceItems()
+
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) { p.Units = "imperial" })
+	if code != http.StatusOK {
+		t.Fatalf("an unchanged stale role must not block another save, got %d %v", code, body)
+	}
+	other, err := store.CreateEquipment(equipmentItem{Name: "Engine", SignalKSource: "propulsion.port"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ = postSettings(t, settingsPath, func(p *settingsPayload) { p.Roles = &vesselRoles{HouseBank: other.ID} })
+	if code == http.StatusOK {
+		t.Fatalf("choosing an engine as the house bank must be refused")
+	}
+}

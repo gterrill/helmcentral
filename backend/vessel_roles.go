@@ -69,7 +69,13 @@ func normalizeVesselRoles(r vesselRoles) vesselRoles {
 // each role names an item that exists, owns a source, and is of the right kind;
 // the two alternators differ. A blank role is always valid (not set). items is
 // every item that currently owns a source.
-func validateVesselRoles(r vesselRoles, items []sourceItem) *settingsValidationError {
+//
+// current, when not nil, is the block already saved. A role left exactly as it
+// is not checked again: an item that lost its source since the role was chosen
+// leaves that role unset in the vessel (loudly, in the log), and must not stop
+// the operator saving an unrelated setting. Only a role being changed has to
+// name a fitting item.
+func validateVesselRoles(r vesselRoles, items []sourceItem, current *vesselRoles) *settingsValidationError {
 	byID := map[string]sourceItem{}
 	for _, it := range items {
 		byID[it.ID] = it
@@ -77,6 +83,9 @@ func validateVesselRoles(r vesselRoles, items []sourceItem) *settingsValidationE
 	for _, spec := range roleSpecs {
 		id := *spec.get(&r)
 		if id == "" {
+			continue
+		}
+		if current != nil && *spec.get(current) == id {
 			continue
 		}
 		it, ok := byID[id]

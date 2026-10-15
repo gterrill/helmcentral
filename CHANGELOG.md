@@ -11,12 +11,44 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
-### Changed
+### Breaking
 
-- **Settings → Vessel → Engines** explains what ticking an engine does and
-  that linking an equipment item is optional. An engine with no reading says
-  Not reporting, and the engine differential check now sits under Engines
-  instead of Power.
+- **Engines, batteries, tanks and the rest are now equipment items.** On the
+  first start after upgrading, Helmcentral moves your Settings → Vessel engines
+  and house bank, your alternator and electrical choices, and your tank labels
+  onto equipment items and a new **Roles** list in **Settings → SignalK**. Then
+  check what it could not move. Open **Settings → SignalK → Discovery**: any
+  battery, solar controller or tank you had only named, and any engine you had
+  not linked to an item, shows **Create item**; create one (a name and a kind)
+  to get the name back. Under **Roles**, choose the port and starboard
+  alternators, the shore charger, the inverter, the generator and the voltage
+  readout battery if they show **Not set**, then choose **Save**. Until you do,
+  those figures show no data. The startup log lists every name and role it could
+  not move.
+- **Hour meters come from the item's source.** The hand-entered hour meter on
+  an equipment item is gone. An engine or a generator reads its hours from its
+  SignalK source. Where the old path named an engine's or generator's runtime
+  counter it was converted; otherwise assign the item a source (**Source**
+  on the item's page) to get its hours back.
+- **House bank figures moved to the bank's item.** Capacity, cell count and the
+  voltage overrides are now on the house bank's equipment item, under
+  **SignalK source**. The conversion copies them.
+- **Settings → Vessel** now holds only the boat's identity and particulars.
+  **Battery names**, **Solar names** and the **Labels** on the SignalK page are
+  gone: a source takes the name of the equipment item assigned to it.
+- **State-of-charge bands can follow the house bank.** Rules that watched the
+  old house bank were converted to follow it. Add new ones with **Follow the
+  house bank's state of charge** in the Alarms drawer.
+
+### Added
+
+- **Settings → SignalK → Discovery** lists what the boat reports (engines,
+  batteries, alternators, solar controllers, tanks, generators, chargers and
+  inverters) with live readings and the equipment item each belongs to. Assign
+  a source to an item, or create an item for it.
+- **Source** on the equipment page picks the item's SignalK source from what the
+  boat reports. A battery item holds its cell count and capacity, and an engine
+  item with a profile has **Apply gauge zones**.
 
 ## [0.46.0] - 2026-10-15
 

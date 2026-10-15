@@ -318,7 +318,7 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, vessel v
 	}
 
 	// Generator state comes from the generator instance the operator chose in
-	// Vessel settings. With none chosen the fields stay empty: no instance is
+	// the roles. With none chosen the fields stay empty: no instance is
 	// guessed.
 	if gen := vessel.Electrical.GeneratorInstance; gen != "" {
 		prefix := "electrical.generator." + gen
@@ -343,7 +343,7 @@ func vesselStateFromTelemetry(t telemetryReader, state vesselStateData, vessel v
 }
 
 // readEnginesRunning reports whether any configured engine is turning.
-// Only the instances the operator chose in Vessel settings are read, each
+// Only the instances the operator chose in the roles are read, each
 // from propulsion.<id>.revolutions (Hz, so x60) or .rpm, and a reading older
 // than defaultRPMMaxAge is ignored without ending the search. The result is
 // nil when no engine is configured or none has a fresh reading: unknown is
@@ -459,7 +459,7 @@ func electricalStateFromTelemetry(t telemetryReader, state electricalStateData, 
 	state.LastUpdateAge = subtreeAgeSeconds(t, "electrical", state.Datetime)
 
 	// The bank figures all come from the house bank the operator chose in
-	// Vessel settings, never from a battery picked by what it reports. With
+	// the roles, never from a battery picked by what it reports. With
 	// no bank set they stay at their unknown values.
 	bank := vessel.houseBankPath()
 	var configuredCapacityAh float64
@@ -741,7 +741,7 @@ func (v vesselView) solarLabel(id string) string {
 }
 
 // voltageReadoutLabel names the voltage readout battery: the operator's name
-// from Vessel settings, then the name the bus publishes for it, then
+// from the roles, then the name the bus publishes for it, then
 // "Battery <id>".
 func voltageReadoutLabel(t telemetryReader, vessel vesselView, id string) string {
 	for _, b := range vessel.Batteries {

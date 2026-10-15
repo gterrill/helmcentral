@@ -202,6 +202,11 @@ func updateSettingsHandler(c echo.Context) error {
 
 	normalized := normalizeSettingsPayload(req)
 	current := buildSettingsPayload(settings)
+	// A roles block that cannot be read is treated as nothing saved, so a save
+	// that sets the roles again repairs it.
+	if saved, err := parseRolesBlock(settings); err == nil {
+		current.Roles = &saved
+	}
 
 	if invalid := validateSettingsChange(current, normalized); invalid != nil {
 		return c.JSON(http.StatusBadGateway, map[string]string{
@@ -413,7 +418,7 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 		if err != nil {
 			return &settingsValidationError{Field: "roles", Message: "could not read the equipment items: " + err.Error()}
 		}
-		if invalid := validateVesselRoles(*next.Roles, items); invalid != nil {
+		if invalid := validateVesselRoles(*next.Roles, items, current.Roles); invalid != nil {
 			return invalid
 		}
 	}

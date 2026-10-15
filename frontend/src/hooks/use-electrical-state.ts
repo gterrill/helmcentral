@@ -27,7 +27,7 @@ interface ElectricalState {
   voltage_readout_label: string
   ac_loads_w: number
   generator_real_power_w: number
-  /** A generator instance is chosen in Vessel settings. */
+  /** A generator instance is chosen in the roles. */
   generator_configured: boolean | null
   alternator_0_current_a: number
   alternator_0_voltage_v: number

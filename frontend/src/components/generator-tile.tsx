@@ -5,7 +5,7 @@ import { Tile } from '@/components/ui/tile'
 import { apiRequest } from '@/lib/api-query'
 
 interface GeneratorTileProps {
-  /** A generator instance is chosen in Vessel settings; null while that is not known. */
+  /** A generator instance is chosen in the roles; null while that is not known. */
   generatorConfigured: boolean | null
   generatorState: string | null
   generatorManualStart: boolean
