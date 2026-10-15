@@ -5,6 +5,7 @@ import { DictateButton, DictationError, DictationStatus, useDictation } from '@/
 import { NoteEditorBody, type NoteEditorHandle } from '@/components/note-editor'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 
@@ -80,6 +81,8 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
   }, [])
   const [type, setType] = useState<string>(initialType ?? TYPE_AUTO)
   const [empty, setEmpty] = useState(true)
+  // Text typed or dictated and not yet captured is unsaved work.
+  useUnsavedWorkReport('note-capture', open && !empty)
   const [error, setError] = useState<string | null>(null)
   const [capturing, setCapturing] = useState(false)
   // Bumped on every open and after a successful Capture - remounts

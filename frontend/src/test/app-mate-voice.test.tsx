@@ -276,9 +276,9 @@ function stubFetch() {
 // ask the same hasUnsavedWork() the real hook would consult before reloading.
 const versionReload = vi.hoisted(() => ({ latest: null as null | { hasUnsavedWork?: () => boolean } }))
 vi.mock('@/hooks/use-version-reload', () => ({
-  UPDATED_TO_KEY: 'helmcentral.updatedTo',
   useVersionReload: (options: { hasUnsavedWork?: () => boolean }) => {
     versionReload.latest = options
+    return { current: null, available: null, chunkFailure: null, readError: null, reportChunkFailure: () => {}, clearChunkFailure: () => {}, retryHeldReload: () => {} }
   },
 }))
 

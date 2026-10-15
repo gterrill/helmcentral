@@ -26,16 +26,37 @@ curl -s http://localhost:8080/api/health
 
 ## Open pages pick up the new version
 
-A phone or tablet left open across an upgrade reloads itself the next time you
-return to it. A wall display that stays on screen checks by itself once an hour,
-so it picks up the new version without anyone touching it. Either way, the check
-runs at most once an hour.
+Helmcentral checks for a newer version every five minutes while a page is on
+screen, and again when you return to it. When one is found, a phone, tablet or
+laptop tells you and leaves the page alone: an "Update available" message with
+a **Reload** button appears, and the version line at the foot of the menu
+changes to "Update available · Reload". Nothing reloads until you press one of
+them. If you have something unsaved, such as a Settings change, a note you are
+writing, a service log entry, an inventory edit or a Mate message you have not
+sent, you are asked "You have unsaved changes. Reload anyway?" first.
 
-The reload waits while you are in the middle of something: an unsaved Settings,
-document or inventory edit, a stocktake scan or a bin quick-add in progress, or
-a Mate message you have typed but not sent. It goes ahead once you have saved,
-sent or left. If the check can't reach Helmcentral it does nothing and tries
-again later. Reloading the page by hand always works.
+A screen nobody is operating picks up the new version by itself. That means the
+wall display, and the dashboard of a Home Screen app on a phone or tablet. It
+reloads as soon as it sees the update. A Home Screen app that is showing
+Documents, Settings or any page other than a dashboard counts as in use and
+asks like a browser tab does, and so does a Home Screen dashboard with a sheet
+or dialog open over it, such as Mate, Help or a tile's settings. A dashboard in the browser's full screen mode
+also asks, because a reload would drop it out of full screen. If a Home Screen
+dashboard has unsaved work open it waits, and reloads as soon as you save or
+close it.
+
+After the new version loads, a short "Helmcentral updated to" message names it,
+with a **Release notes** button. Each browser remembers the last version it
+showed, so the message appears however the page came back: Reload, a manual
+refresh, a new tab or reopening the Home Screen app. A browser seeing Helmcentral
+for the first time stays quiet. The wall display shows the same message for a
+few seconds across the bottom of the screen.
+
+If a screen won't open after an upgrade because its parts are gone from the old
+page, you see "This screen needs the update. Reload to open it." If the update
+isn't the cause, you see "Couldn't load this screen. Check the connection."
+Both messages have a **Reload** button. If a check can't reach Helmcentral it does nothing and
+tries again at the next one. Reloading the page by hand always works.
 
 ## SignalK delegated authentication (opt-in)
 

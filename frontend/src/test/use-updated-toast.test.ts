@@ -5,27 +5,36 @@ import { StrictMode } from 'react'
 const toastMock = vi.hoisted(() => vi.fn())
 vi.mock('sonner', () => ({ toast: toastMock }))
 
-import { UPDATED_TO_KEY } from '@/hooks/use-version-reload'
 import { useUpdatedToast } from '@/hooks/use-updated-toast'
+import { SEEN_VERSION_KEY } from '@/lib/seen-version'
+
+const build = (version: string, revision = 'aaa') => ({ version, revision })
 
 describe('useUpdatedToast', () => {
   beforeEach(() => {
     toastMock.mockReset()
-    sessionStorage.clear()
+    localStorage.clear()
     vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it('does nothing without a marker', () => {
-    renderHook(() => useUpdatedToast())
+  it('waits for the first health read', () => {
+    localStorage.setItem(SEEN_VERSION_KEY, 'v0.41.0')
+    renderHook(() => useUpdatedToast(null))
     expect(toastMock).not.toHaveBeenCalled()
   })
 
-  it('announces the new release once, with a release notes action, and clears the marker', () => {
-    sessionStorage.setItem(UPDATED_TO_KEY, JSON.stringify({ from: 'v0.41.0', to: 'v0.42.0' }))
+  it('stays silent the first time this browser loads, and remembers the version', () => {
+    renderHook(() => useUpdatedToast(build('v0.42.0')))
+    expect(toastMock).not.toHaveBeenCalled()
+    expect(localStorage.getItem(SEEN_VERSION_KEY)).toBe('v0.42.0')
+  })
+
+  it('announces a load on a different version than the browser last showed, once, with release notes', () => {
+    localStorage.setItem(SEEN_VERSION_KEY, 'v0.41.0')
     const open = vi.spyOn(window, 'open').mockImplementation(() => null)
 
-    renderHook(() => useUpdatedToast(), { wrapper: StrictMode })
+    renderHook(() => useUpdatedToast(build('v0.42.0')), { wrapper: StrictMode })
 
     expect(toastMock).toHaveBeenCalledTimes(1)
     const [message, options] = toastMock.mock.calls[0]
@@ -33,26 +42,47 @@ describe('useUpdatedToast', () => {
     expect(options.duration).toBeGreaterThanOrEqual(8000)
     expect(options.action.label).toBe('Release notes')
     options.action.onClick()
-    expect(open).toHaveBeenCalledWith(
-      'https://github.com/gterrill/helmcentral/releases/tag/v0.42.0',
-      '_blank',
-      'noopener',
-    )
-    expect(sessionStorage.getItem(UPDATED_TO_KEY)).toBeNull()
+    expect(open).toHaveBeenCalledWith('https://github.com/gterrill/helmcentral/releases/tag/v0.42.0', '_blank', 'noopener')
+    expect(localStorage.getItem(SEEN_VERSION_KEY)).toBe('v0.42.0')
   })
 
-  it('offers no action for a non-release build', () => {
-    sessionStorage.setItem(UPDATED_TO_KEY, JSON.stringify({ from: 'v0.41.0', to: 'dev' }))
-    renderHook(() => useUpdatedToast())
+  it('does not announce the same version again on the next load', () => {
+    localStorage.setItem(SEEN_VERSION_KEY, 'v0.41.0')
+    const first = renderHook(() => useUpdatedToast(build('v0.42.0')))
+    first.unmount()
+    renderHook(() => useUpdatedToast(build('v0.42.0')))
+    expect(toastMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('a revision-only change does not announce', () => {
+    localStorage.setItem(SEEN_VERSION_KEY, 'v0.42.0')
+    renderHook(() => useUpdatedToast(build('v0.42.0', 'bbb')))
+    expect(toastMock).not.toHaveBeenCalled()
+  })
+
+  it('a dev build never announces, and is remembered', () => {
+    localStorage.setItem(SEEN_VERSION_KEY, 'v0.41.0')
+    renderHook(() => useUpdatedToast(build('dev', 'unknown')))
+    expect(toastMock).not.toHaveBeenCalled()
+    expect(localStorage.getItem(SEEN_VERSION_KEY)).toBe('dev')
+  })
+
+  it('offers no action for a version that is not a release tag', () => {
+    localStorage.setItem(SEEN_VERSION_KEY, 'v0.41.0')
+    renderHook(() => useUpdatedToast(build('v0.42.0-3-gabc')))
     const [message, options] = toastMock.mock.calls[0]
-    expect(message).toBe('Helmcentral updated to dev')
+    expect(message).toBe('Helmcentral updated to v0.42.0-3-gabc')
     expect(options.action).toBeUndefined()
   })
 
-  it('ignores and clears a malformed marker', () => {
-    sessionStorage.setItem(UPDATED_TO_KEY, 'not json')
-    renderHook(() => useUpdatedToast())
-    expect(toastMock).not.toHaveBeenCalled()
-    expect(sessionStorage.getItem(UPDATED_TO_KEY)).toBeNull()
+  it('logs and skips the message when storage cannot be used', () => {
+    vi.stubGlobal('localStorage', { getItem: () => { throw new Error('blocked') }, setItem: () => { throw new Error('blocked') } })
+    try {
+      renderHook(() => useUpdatedToast(build('v0.42.0')))
+      expect(toastMock).not.toHaveBeenCalled()
+      expect(console.warn).toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

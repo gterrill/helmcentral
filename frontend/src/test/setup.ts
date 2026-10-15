@@ -1,7 +1,6 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach } from 'vitest'
 import { resetQueryStore } from '@/lib/api-query'
-import { resetAppVersionProbe } from '@/hooks/use-app-version'
 import { setViewportWidth } from './viewport'
 
 // jsdom doesn't implement the Popover API. The real @oddbird/popover-polyfill
@@ -154,5 +153,4 @@ beforeEach(() => {
 // test would otherwise answer the next test's request.
 afterEach(() => {
   resetQueryStore()
-  resetAppVersionProbe()
 })

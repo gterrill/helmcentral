@@ -11,8 +11,29 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- A phone, tablet or laptop no longer reloads itself when a new version is
+  deployed. It checks every five minutes, shows an "Update available" message
+  with a **Reload** button, and changes the version line in the menu to "Update
+  available · Reload". If you have unsaved work, including a note draft, a new
+  note or a service log entry, you are asked before the page reloads. Before,
+  an unsaved note could be lost.
+- The wall display and a Home Screen dashboard still reload by themselves, as
+  soon as an update is found. A Home Screen app on any other page or with
+  a sheet or dialog open over the dashboard, and a dashboard in the browser's
+  full screen mode, ask instead.
+- A screen that cannot open after an upgrade now says so and offers Reload,
+  whether the update or the connection is the likely cause. Before, the whole
+  page could go blank.
+
 ### Fixed
 
+- The "Helmcentral updated to" message now appears whenever a browser first
+  loads a version it hasn't shown before, including after a manual refresh, in
+  a new tab and when reopening a Home Screen app. Before, it appeared only
+  after the page had reloaded itself. The wall display shows it for a few
+  seconds too.
 - The tidal current on the Wind tile and in Anchor Watch now shows which way
   it is setting as well as its rate when the instruments report the two
   together. Before, it showed only the rate, or nothing at all.

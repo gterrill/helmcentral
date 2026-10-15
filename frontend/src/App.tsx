@@ -18,7 +18,7 @@ import {
   MonitorPlay,
   Wrench,
 } from 'lucide-react'
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
@@ -210,7 +210,10 @@ import {
   SidebarTrigger,
 } from '@/components/ui/sidebar'
 import { SidebarVersion } from '@/components/sidebar-version'
+import { LazyBoundary } from '@/components/lazy-boundary'
 import { UpdatedToast } from '@/components/updated-toast'
+import { ReloadConfirmDialog, UpdateNotices } from '@/components/update-notices'
+import { DisplayUpdatedNotice } from '@/components/display-updated-notice'
 import { inventorySectionOf, settingsSectionOf, type AppLocation, type PanelId } from '@/lib/app-location'
 import { browserHistory, createAppRouter } from '@/lib/app-router'
 import { AppRouterContext, useAppLocation, useAppRouter, useNavigate } from '@/hooks/use-app-location'
@@ -445,20 +448,29 @@ function AppShell() {
   // composer (the /mate panel and the sheet over any page).
   const [matePanelHasDraft, setMatePanelHasDraft] = useState(false)
   const [mateSheetHasDraft, setMateSheetHasDraft] = useState(false)
-  // Reload when a new build has been deployed (checked on return to the
-  // page and hourly while it stays on screen), but never over unsaved work:
-  // a Settings, document or inventory edit, a stocktake scan or bin quick-add
-  // draft, or an unsent Mate message. The reload waits until the operator
-  // has saved, sent or left. Mounted at the App root, so the wall display
-  // and kiosk routes get it too. Settings, Document Details and the
-  // Inventory panel register a navigation guard while they hold unsaved
-  // work, so "any guard" is "unsaved work"; Mate drafts are deliberately
-  // unguarded (leaving a half-typed message is fine) and only count here.
-  // The sidebar's unsaved dot: Settings holds a guard exactly while it is dirty.
+  // A newer build than this page loaded with is checked for every five
+  // minutes and on return to the page. An attended screen is only told: the
+  // operator reloads from the toast or the sidebar line, and is asked first
+  // when something is unsaved. The wall display and a Home Screen dashboard
+  // have nobody to ask and reload by themselves (never over unsaved work).
+  // Settings, Document Details, the Inventory panel, note drafts and the
+  // maintenance log dialogs register a navigation guard while they hold
+  // unsaved work, so "any guard" is "unsaved work"; Mate drafts are
+  // deliberately unguarded (leaving a half-typed message is fine) and only
+  // count here. The sidebar's unsaved dot: Settings holds a guard exactly
+  // while it is dirty.
   const settingsDirty = useHasNavigationGuard('settings')
   const mateDraftRef = useRef(false)
   mateDraftRef.current = matePanelHasDraft || mateSheetHasDraft
-  useVersionReload({ hasUnsavedWork: () => router.hasGuards() || mateDraftRef.current })
+  const hasUnsavedWork = useCallback(() => router.hasGuards() || mateDraftRef.current, [router])
+  // Set below, once every overlay's state has been declared.
+  const unattendedRef = useRef(false)
+  const [reloadConfirmOpen, setReloadConfirmOpen] = useState(false)
+  const versionWatch = useVersionReload({ hasUnsavedWork, unattended: () => unattendedRef.current })
+  const requestReload = useCallback(() => {
+    if (hasUnsavedWork()) setReloadConfirmOpen(true)
+    else window.location.reload()
+  }, [hasUnsavedWork])
   useEffect(() => {
     globalThis.localStorage?.setItem(ANCHOR_IMAGERY_ENABLED_KEY, String(showAnchorImagery))
   }, [showAnchorImagery])
@@ -816,6 +828,31 @@ function AppShell() {
   // and its back-stack history then survives later closes.
   const helpSheetHasOpenedRef = useRef(false)
   if (helpOpen) helpSheetHasOpenedRef.current = true
+
+  // Who is at the screen. The wall display is never attended. A Home Screen
+  // dashboard is unattended only while nothing is open over it: a sheet, a
+  // tile's configuration dialog, layout editing or any other dialog on screen
+  // means someone is using it. A dashboard in the browser's own full screen
+  // is attended too (a reload would drop out of full screen), and so is a
+  // Home Screen app on any panel other than the dashboard.
+  const overlayOpen =
+    mateSheetOpen || helpOpen || engineProfileOpen || ribbonDialogOpen || layoutEditing || namingPageId !== null ||
+    [embedDraft, gaugeDraft, gaugeGroupDraft, lampStripDraft, clusterDraft, poiMapDraft].some((d) => d !== null)
+  const overlayOpenRef = useRef(false)
+  overlayOpenRef.current = overlayOpen
+  unattendedRef.current = isDisplay || (
+    runningFromHomeScreen() && activePanel === null && !fullscreen.isFullscreen && !overlayOpenRef.current &&
+    // Anything else that put a dialog or sheet up, in a tile or a panel.
+    document.querySelector('[role="dialog"], [role="alertdialog"]') === null
+  )
+  // A reload held back for unsaved work or an open sheet goes ahead the
+  // moment that clears, without waiting for the next health read.
+  const guardCount = useSyncExternalStore(router.subscribe, () => router.getSnapshot().guardOwners.length)
+  const unsavedNow = guardCount > 0 || matePanelHasDraft || mateSheetHasDraft
+  const { retryHeldReload } = versionWatch
+  useEffect(() => {
+    if (!unsavedNow && !overlayOpen) retryHeldReload()
+  }, [unsavedNow, overlayOpen, activePanel, fullscreen.isFullscreen, retryHeldReload])
   const openHelp = useCallback((target: HelpTarget | null) => {
     setHelpTarget(target)
     setHelpOpen(true)
@@ -2600,12 +2637,15 @@ function AppShell() {
         alarms={alarms}
         preview={displayOptions.preview}
         overlay={
-          <DisplayRemoteToast
-            announcementId={remoteAnnouncementId}
-            pageName={activePage?.name ?? ''}
-            position={displayRotation.position}
-            paused={displayRotation.paused}
-          />
+          <>
+            <DisplayRemoteToast
+              announcementId={remoteAnnouncementId}
+              pageName={activePage?.name ?? ''}
+              position={displayRotation.position}
+              paused={displayRotation.paused}
+            />
+            <DisplayUpdatedNotice current={versionWatch.current} />
+          </>
         }
       >
         {pagesError && pages.length === 0 ? (
@@ -2712,7 +2752,12 @@ function AppShell() {
           </SidebarMenu>
         </SidebarContent>
         <SidebarFooter>
-          <SidebarVersion />
+          <SidebarVersion
+            build={versionWatch.current}
+            error={versionWatch.readError}
+            updateAvailable={versionWatch.available !== null}
+            onReload={requestReload}
+          />
         </SidebarFooter>
         <SidebarRail />
       </Sidebar>
@@ -3048,9 +3093,11 @@ function AppShell() {
                       it never keeps a previous panel's boundary state - each
                       panel always gets its own fallback while its own chunk
                       loads, not whatever state the boundary was last left in. */}
-                  <Suspense key={activePanel} fallback={renderPanelFallback(panelFallbackLabel(activePanel))}>
-                    {activePanelContent}
-                  </Suspense>
+                  <LazyBoundary resetKey={activePanel} onChunkError={versionWatch.reportChunkFailure}>
+                    <Suspense key={activePanel} fallback={renderPanelFallback(panelFallbackLabel(activePanel))}>
+                      {activePanelContent}
+                    </Suspense>
+                  </LazyBoundary>
                 </div>
               )}
             </div>
@@ -3074,6 +3121,7 @@ function AppShell() {
           no panel) until `open` is true, so there is nothing that should be
           showing while its chunk loads on this very first open. */}
       {mateSheetHasOpenedRef.current && (
+        <LazyBoundary fallback={null} onChunkError={versionWatch.reportChunkFailure}>
         <Suspense fallback={null}>
           <MateSheet
             open={mateSheetOpen}
@@ -3099,10 +3147,12 @@ function AppShell() {
             onHasDraftChange={setMateSheetHasDraft}
           />
         </Suspense>
+        </LazyBoundary>
       )}
 
       {/* Same reasoning as the Mate sheet above - see helpSheetHasOpenedRef. */}
       {helpSheetHasOpenedRef.current && (
+        <LazyBoundary fallback={null} onChunkError={versionWatch.reportChunkFailure}>
         <Suspense fallback={null}>
           <HelpSheet
             open={helpOpen}
@@ -3114,10 +3164,17 @@ function AppShell() {
             }}
           />
         </Suspense>
+        </LazyBoundary>
       )}
 
       <Toaster isDarkTheme={isDarkTheme} />
-      <UpdatedToast />
+      <UpdatedToast current={versionWatch.current} />
+      <UpdateNotices watch={versionWatch} requestReload={requestReload} />
+      <ReloadConfirmDialog
+        open={reloadConfirmOpen}
+        onCancel={() => setReloadConfirmOpen(false)}
+        onConfirm={() => window.location.reload()}
+      />
     </SidebarProvider>
   )
 }

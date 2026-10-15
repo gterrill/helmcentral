@@ -1,27 +1,26 @@
 /**
  * The post-update message has to reach a mounted <Toaster>. sonner drops a
- * toast raised before its Toaster subscribes, and App shows "Checking
- * sign-in…" (no Toaster) on first render after the reload, so UpdatedToast is
- * rendered beside the Toaster rather than called from App's top level. This
- * runs against the real sonner, which the hook's own unit test mocks out.
+ * toast raised before its Toaster subscribes, so UpdatedToast is rendered
+ * beside the Toaster rather than called from App's top level. This runs
+ * against the real sonner, which the hook's own unit test mocks out.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
 import { Toaster } from '@/components/ui/sonner'
 import { UpdatedToast } from '@/components/updated-toast'
-import { UPDATED_TO_KEY } from '@/hooks/use-version-reload'
+import { SEEN_VERSION_KEY } from '@/lib/seen-version'
 
 describe('UpdatedToast', () => {
-  afterEach(() => sessionStorage.clear())
+  afterEach(() => localStorage.clear())
 
   it('shows the update message when rendered beside the Toaster', async () => {
-    sessionStorage.setItem(UPDATED_TO_KEY, JSON.stringify({ from: 'v0.41.0', to: 'v0.42.0' }))
+    localStorage.setItem(SEEN_VERSION_KEY, 'v0.41.0')
 
     render(
       <>
         <Toaster />
-        <UpdatedToast />
+        <UpdatedToast current={{ version: 'v0.42.0', revision: 'aaa' }} />
       </>,
     )
 

@@ -34,3 +34,13 @@ export function useHasNavigationGuard(owner: string): boolean {
   const router = useAppRouter()
   return useSyncExternalStore(router.subscribe, () => router.getSnapshot().guardOwners.includes(owner))
 }
+
+/**
+ * Reports unsaved work that is not a page of its own (a note being written, a
+ * service log dialog) so the update reload asks before dropping it. It is a
+ * guard that never holds a move: leaving such a screen is allowed, as it always
+ * was; only the reload, which cannot be undone by navigating back, is asked.
+ */
+export function useUnsavedWorkReport(owner: string, active: boolean): void {
+  useNavigationGuard(active ? { owner, label: owner, blocks: () => null } : null)
+}

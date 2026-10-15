@@ -1,5 +1,16 @@
-import { useAppVersion } from '@/hooks/use-app-version'
+import type { AppVersion } from '@/lib/build-stamp'
 import { releaseNotesUrl } from '@/lib/help-links'
+
+interface SidebarVersionProps {
+  /** The build this page is running: the same one the update messages compare against. */
+  build: AppVersion | null
+  /** Why there is no build to show; without it, nothing renders until there is one. */
+  error?: string | null
+  /** A newer build has been deployed than the one this page is running. */
+  updateAvailable?: boolean
+  /** Reload to the new build; asks first when there is unsaved work. */
+  onReload?: () => void
+}
 
 /**
  * The build stamp, parked in the sidebar footer so "what version am I on?" is
@@ -7,15 +18,13 @@ import { releaseNotesUrl } from '@/lib/help-links'
  *
  * Only the version gets width — the git revision rides along in the title
  * attribute, where it's there for a support conversation without crowding a
- * sidebar that also has to survive being collapsed to icons. When the probe
- * fails this says so rather than showing a stale or invented version, per the
- * fallback policy in AGENTS.md. A release tag links to that release's notes;
- * dev and between-release builds have none, so they stay plain text.
+ * sidebar that also has to survive being collapsed to icons. When the build
+ * can't be read this says so rather than showing a stale or invented version,
+ * per the fallback policy in AGENTS.md. A release tag links to that release's
+ * notes; dev and between-release builds have none, so they stay plain text.
  */
-export function SidebarVersion() {
-  const { build, loading, error } = useAppVersion()
-
-  if (loading) return null
+export function SidebarVersion({ build, error = null, updateAvailable = false, onReload }: SidebarVersionProps) {
+  if (build === null && error === null) return null
 
   const label = build ? build.version : 'version unavailable'
   const title = build
@@ -25,6 +34,20 @@ export function SidebarVersion() {
   const className =
     'truncate px-2 pb-1 text-center font-mono text-xs leading-none text-muted-foreground group-data-[collapsible=icon]:hidden'
   const notesUrl = build ? releaseNotesUrl(build.version) : null
+
+  if (updateAvailable && onReload) {
+    return (
+      <div data-testid="sidebar-version" title={title} className={className}>
+        <button
+          type="button"
+          onClick={onReload}
+          className="max-w-full truncate rounded-sm font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          Update available · Reload
+        </button>
+      </div>
+    )
+  }
 
   if (notesUrl) {
     return (

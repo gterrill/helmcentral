@@ -28,6 +28,18 @@ const RIBBON: LampStripWidgetConfig = {
   showCheck: false,
 }
 
+// What App tells the update watcher, and the build it reports having loaded.
+const versionWatch = vi.hoisted(() => ({
+  latest: null as null | { unattended?: () => boolean },
+  current: null as null | { version: string; revision: string },
+}))
+vi.mock('@/hooks/use-version-reload', () => ({
+  useVersionReload: (options: { unattended?: () => boolean }) => {
+    versionWatch.latest = options
+    return { current: versionWatch.current, available: null, chunkFailure: null, readError: null, reportChunkFailure: () => {}, clearChunkFailure: () => {}, retryHeldReload: () => {} }
+  },
+}))
+
 vi.mock('@/hooks/use-dashboard-ribbon', () => ({
   useDashboardRibbon: () => ({ ribbon: RIBBON, loading: false, error: null, saveRibbon: vi.fn() }),
 }))
@@ -425,6 +437,30 @@ describe('App at /display/<slug>', () => {
     expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
     expect(screen.queryByText('Dashboard')).not.toBeInTheDocument() // sidebar nav item
     expect(screen.queryByText(/Server connection unavailable/)).not.toBeInTheDocument()
+  })
+
+  it('is unattended: it reloads by itself when an update is found', () => {
+    window.history.replaceState({}, '', '/display/flybridge')
+    render(<App />)
+
+    expect(versionWatch.latest?.unattended?.()).toBe(true)
+  })
+
+  it('shows a brief non-interactive notice inside the display when the version changed since it last loaded', () => {
+    globalThis.localStorage?.setItem('helmcentral.lastSeenVersion', 'v0.44.0')
+    versionWatch.current = { version: 'v0.45.0', revision: 'abc' }
+    try {
+      window.history.replaceState({}, '', '/display/flybridge')
+      render(<App />)
+
+      const notice = screen.getByTestId('display-updated-notice')
+      expect(notice).toHaveTextContent('Updated to v0.45.0')
+      expect(notice).toHaveClass('pointer-events-none')
+      expect(screen.getByTestId('display-shell-overlay').contains(notice)).toBe(true)
+    } finally {
+      versionWatch.current = null
+      globalThis.localStorage?.clear()
+    }
   })
 
   it("leaves the screen to sleep when the display's own wake lock is off, even from a Home Screen icon", () => {

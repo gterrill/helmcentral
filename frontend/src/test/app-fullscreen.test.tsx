@@ -275,6 +275,16 @@ vi.mock('@/hooks/use-screen-wake-lock', () => ({
   runningFromHomeScreen: mockRunningFromHomeScreen,
 }))
 
+// Captures what App tells the update watcher, to pin which screens count as
+// unattended (reload by themselves) and which are asked.
+const versionWatch = vi.hoisted(() => ({ latest: null as null | { unattended?: () => boolean } }))
+vi.mock('@/hooks/use-version-reload', () => ({
+  useVersionReload: (options: { unattended?: () => boolean }) => {
+    versionWatch.latest = options
+    return { current: null, available: null, chunkFailure: null, readError: null, reportChunkFailure: () => {}, clearChunkFailure: () => {}, retryHeldReload: () => {} }
+  },
+}))
+
 describe('App full screen', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -506,5 +516,53 @@ describe('App full screen', () => {
     swipeLeft(screen.getByTestId('dashboard-swipe-surface'))
 
     expect(mockSetActivePageId).not.toHaveBeenCalled()
+  })
+})
+
+describe('App: which screens reload themselves on an update', () => {
+  beforeEach(() => {
+    stubFullscreenElement(null)
+    mockActivePageId = 'p1'
+    mockRunningFromHomeScreen.mockReturnValue(false)
+  })
+  afterEach(() => {
+    stubFullscreenEnabled(undefined)
+    stubFullscreenElement(null)
+  })
+
+  it('a browser tab is attended', () => {
+    render(<App />)
+    expect(versionWatch.latest?.unattended?.()).toBe(false)
+  })
+
+  it('a Home Screen dashboard is unattended', () => {
+    mockRunningFromHomeScreen.mockReturnValue(true)
+    stubFullscreenEnabled(undefined)
+    render(<App />)
+    expect(versionWatch.latest?.unattended?.()).toBe(true)
+  })
+
+  it('a Home Screen dashboard with a sheet open over it is attended, and unattended again once it closes', async () => {
+    mockRunningFromHomeScreen.mockReturnValue(true)
+    stubFullscreenEnabled(undefined)
+    render(<App />)
+    expect(versionWatch.latest?.unattended?.()).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open help' }))
+    expect(versionWatch.latest?.unattended?.()).toBe(false)
+  })
+
+  it('a Home Screen app on another panel is attended', () => {
+    mockRunningFromHomeScreen.mockReturnValue(true)
+    render(<App />)
+    fireEvent.click(screen.getByRole('button', { name: /forecast/i }))
+    expect(versionWatch.latest?.unattended?.()).toBe(false)
+  })
+
+  it('a dashboard in browser full screen is attended, so a reload does not drop it out of full screen', () => {
+    stubFullscreenEnabled(true)
+    render(<App />)
+    fireFullscreenChange(document.documentElement)
+    expect(versionWatch.latest?.unattended?.()).toBe(false)
   })
 })

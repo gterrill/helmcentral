@@ -27,6 +27,7 @@ import {
   type MaintenanceLogPartInput,
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
+import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { documentViewerHref } from '@/lib/document-citation'
 import { addMonthsISO, todayISO } from '@/lib/local-date'
 
@@ -214,7 +215,11 @@ function requiresNewDueDateNow(rule: MaintenanceRule): boolean {
 }
 
 export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: MaintenanceCompleteDialogProps) {
-  const [form, setForm] = useState<LogFormState>(() => blankForm(rule?.current_hours))
+  // What the form was when it was opened or last reset: "unsaved" means
+  // different from this, not different from a blank rebuilt on each render
+  // (which moves at midnight and when the hours reading refreshes).
+  const [initialForm, setInitialForm] = useState<LogFormState>(() => blankForm(rule?.current_hours))
+  const [form, setForm] = useState<LogFormState>(initialForm)
   const [newDueDate, setNewDueDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -223,9 +228,16 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
 
   const { items } = useEquipment(rule !== null ? {} : null)
 
+  // Anything changed since the form was opened and not yet written to the log is unsaved work.
+  const entered = rule !== null && completedEntry === null
+    && (newDueDate !== '' || JSON.stringify(form) !== JSON.stringify(initialForm))
+  useUnsavedWorkReport('maintenance-complete', entered)
+
   useEffect(() => {
     if (rule) {
-      setForm(blankForm(rule.current_hours))
+      const fresh = blankForm(rule.current_hours)
+      setInitialForm(fresh)
+      setForm(fresh)
       setNewDueDate('')
       setCompletedEntry(null)
       setCompletedRule(null)
@@ -446,6 +458,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
   const [dirty, setDirty] = useState(false)
 
   const { items } = useEquipment(open ? {} : null)
+  useUnsavedWorkReport('maintenance-entry', open && dirty)
 
   useEffect(() => {
     if (open) {
