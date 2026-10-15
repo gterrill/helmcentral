@@ -3,8 +3,6 @@ package main
 import (
 	"log"
 	"math"
-	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,10 +19,10 @@ import (
 // stale reading.
 
 const (
-	trackSOGPath         = "navigation.speedOverGround"
-	trackCOGPath         = "navigation.courseOverGroundTrue"
-	trackWaterTankPrefix = "tanks.freshWater."
-	trackDetectEvery     = time.Minute
+	trackSOGPath     = "navigation.speedOverGround"
+	trackCOGPath     = "navigation.courseOverGroundTrue"
+	trackWaterTanks  = "tanks.freshWater"
+	trackDetectEvery = time.Minute
 )
 
 func freshReading(s alarmSample, now time.Time) (float64, bool) {
@@ -73,25 +71,16 @@ func trackFuelRateLph(read alarmReader, ratePaths []string, now time.Time) *floa
 // trackFreshWaterLitres sums level x capacity over every freshWater tank. One
 // tank with an old level leaves the sum absent rather than short.
 func trackFreshWaterLitres(read alarmReader, t telemetryReader, now time.Time) *float64 {
-	ids := map[string]bool{}
-	for _, entry := range t.Paths() {
-		if strings.HasPrefix(entry.Path, trackWaterTankPrefix) && strings.HasSuffix(entry.Path, ".currentLevel") {
-			ids[strings.TrimSuffix(strings.TrimPrefix(entry.Path, trackWaterTankPrefix), ".currentLevel")] = true
-		}
-	}
-	if len(ids) == 0 {
+	levels := leafPathsUnder(t, trackWaterTanks, func(path string) bool {
+		return strings.HasSuffix(path, ".currentLevel")
+	})
+	if len(levels) == 0 {
 		return nil
 	}
-	sorted := make([]string, 0, len(ids))
-	for id := range ids {
-		sorted = append(sorted, id)
-	}
-	sort.Strings(sorted)
-
 	var litres float64
-	for _, id := range sorted {
-		level, ok := freshReading(read(trackWaterTankPrefix+id+".currentLevel"), now)
-		capacity := read(trackWaterTankPrefix + id + ".capacity")
+	for _, levelPath := range levels {
+		level, ok := freshReading(read(levelPath), now)
+		capacity := read(strings.TrimSuffix(levelPath, ".currentLevel") + ".capacity")
 		if !ok || !capacity.Present {
 			return nil
 		}
@@ -102,9 +91,16 @@ func trackFreshWaterLitres(read alarmReader, t telemetryReader, now time.Time) *
 
 // buildTrackSample reads one tick. houseSoCPath is empty when no house bank is
 // chosen in Vessel settings; the state of charge is then absent.
+//
+// It reads one copy of the self tree, taken at now: the recorded point is
+// one moment, so a delta landing mid-tick must not mix two (a live view would
+// read each path at a different instant). Every path it reads is one SignalK
+// publishes, none a helmcentral.* derived path, so it needs the engine-off
+// view of the alarm reader but not the derived pass, and it walks only the
+// propulsion and fresh water branches, not the whole tree.
 func buildTrackSample(snapshot *signalKSnapshot, state vesselStateData, houseBankPath string, anchorSetAt *time.Time, now time.Time) trackSample {
-	read := derivedAwareAlarmReader(snapshot)
 	telemetry := snapshot.selfTelemetryAt(now)
+	read := engineAwareAlarmReader(snapshot, alarmReaderFromView(telemetry), now)
 
 	s := trackSample{
 		At:  now,
@@ -144,8 +140,13 @@ func observeLiveTrack(snapshot *signalKSnapshot, state vesselStateData, settings
 		return
 	}
 
-	houseBank, err := liveHouseBank.path(settingsPath)
-	if err != nil {
+	// loadVesselSettings decodes the vessel block only after settings.yaml
+	// changes, so reading it every five-second tick costs a stat.
+	var houseBank string
+	vessel, err := loadVesselSettings(settingsPath)
+	if err == nil {
+		houseBank = vessel.houseBankPath()
+	} else {
 		if msg := err.Error(); msg != lastVesselLogErr {
 			lastVesselLogErr = msg
 			log.Printf("passages: house bank unavailable, state of charge not recorded: %v", err)
@@ -189,43 +190,3 @@ func startPassageRecording(store *passageStore) error {
 	globalTrackRecord = rec
 	return nil
 }
-
-// houseBankCache holds the house bank path from Vessel settings and reads the
-// vessel block again only when settings.yaml changes (size or modification
-// time), not on every five-second tick.
-type houseBankCache struct {
-	load func(settingsPath string) (string, error)
-
-	mu       sync.Mutex
-	file     string
-	modTime  time.Time
-	size     int64
-	have     bool
-	cached   string
-	cachedEr error
-}
-
-func (c *houseBankCache) path(settingsPath string) (string, error) {
-	info, statErr := os.Stat(settingsPath)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if statErr == nil && c.have && c.file == settingsPath && c.modTime.Equal(info.ModTime()) && c.size == info.Size() {
-		return c.cached, c.cachedEr
-	}
-	p, err := c.load(settingsPath)
-	if statErr == nil {
-		c.file, c.modTime, c.size, c.have = settingsPath, info.ModTime(), info.Size(), true
-		c.cached, c.cachedEr = p, err
-	} else {
-		c.have = false
-	}
-	return p, err
-}
-
-var liveHouseBank = &houseBankCache{load: func(settingsPath string) (string, error) {
-	vessel, err := loadVesselSettings(settingsPath)
-	if err != nil {
-		return "", err
-	}
-	return vessel.houseBankPath(), nil
-}}

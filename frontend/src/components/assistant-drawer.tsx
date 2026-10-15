@@ -28,7 +28,7 @@ interface AssistantDrawerProps {
 
 /**
  * The onboard assistant panel (ADR 0093), user-facing as "Mate". Owns its
- * own data - status and its own Mate session (ADR 0180) - the same
+ * own data - status and its own Mate session (ADR 0183) - the same
  * way RadarDrawer owns its map state: nothing else in the app needs any of
  * it. The list/thread split mirrors the Mate sheet (mate-sheet.tsx): this
  * component owns the conversation-list column and the problem/loading
@@ -38,7 +38,7 @@ interface AssistantDrawerProps {
  */
 export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationId, onActiveConversationChange, onHasDraftChange }: AssistantDrawerProps) {
   const status = useAssistantStatus()
-  // No screen: on the Mate panel the screen is Mate itself (ADR 0180).
+  // No screen: on the Mate panel the screen is Mate itself (ADR 0183).
   const session = useMateSession({ initialId: initialConversationId })
   const watch = useMateTelemetryWatch(session.activeId)
   const [query, setQuery] = useState('')

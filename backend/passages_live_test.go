@@ -160,3 +160,20 @@ func TestTrackFuelRateOffEngineIsKnownZero(t *testing.T) {
 		t.Errorf("no rate paths at all is absent, got %v", *got)
 	}
 }
+
+// The passage log finds burn paths by collectFuelPaths' rule, nested ids
+// included, while walking only the propulsion branch.
+func TestFuelRatePathsMatchesCollectFuelPaths(t *testing.T) {
+	now := time.Now()
+	snap := newSignalKSnapshot()
+	snap.setSelfContext("vessels.self")
+	for _, p := range []string{"propulsion.port.fuel.rate", "propulsion.gen.set.fuel.rate", "propulsion.port.revolutions", "tanks.fuel.0.currentLevel", "electrical.batteries.0.fuel.rate"} {
+		snap.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{Values: []signalKValue{{Path: p, Value: 1.0}}}}}, now)
+	}
+	view := snap.selfTelemetryAt(now)
+	want, _ := collectFuelPaths(view.Paths())
+	got := fuelRatePaths(view)
+	if strings.Join(got, ",") != strings.Join(want, ",") || len(got) != 2 {
+		t.Fatalf("fuelRatePaths %v, collectFuelPaths %v", got, want)
+	}
+}

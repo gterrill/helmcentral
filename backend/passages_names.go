@@ -81,8 +81,13 @@ func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64)
 		return err
 	}
 	// Stamped first, so a lookup that fails or hangs is not tried again in a
-	// tight loop; the scan retries it after the retry window.
-	if _, err := s.db.Exec(`UPDATE passages SET name_attempted_ms = ? WHERE id = ?`, time.Now().UnixMilli(), id); err != nil {
+	// tight loop; the scan retries it after the retry window. Each name is
+	// written only while the stamp is still this one: a split or trim during
+	// the lookup clears it, because the ends read above are no longer the
+	// passage's, and the write then changes nothing and the passage stays
+	// queued.
+	stamp := time.Now().UnixMilli()
+	if _, err := s.db.Exec(`UPDATE passages SET name_attempted_ms = ? WHERE id = ?`, stamp, id); err != nil {
 		return err
 	}
 	if rec.FromName == "" && !rec.FromNameEdited {
@@ -90,7 +95,7 @@ func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64)
 			return err
 		} else if p != nil {
 			if name := lookup(p.Lat, p.Lon); name != "" {
-				if _, err := s.db.Exec(`UPDATE passages SET from_name = ? WHERE id = ? AND from_name_edited = 0 AND from_name = ''`, name, id); err != nil {
+				if _, err := s.db.Exec(`UPDATE passages SET from_name = ? WHERE id = ? AND from_name_edited = 0 AND from_name = '' AND name_attempted_ms = ?`, name, id, stamp); err != nil {
 					return err
 				}
 			}
@@ -101,7 +106,7 @@ func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64)
 			return err
 		} else if p != nil {
 			if name := lookup(p.Lat, p.Lon); name != "" {
-				if _, err := s.db.Exec(`UPDATE passages SET to_name = ? WHERE id = ? AND to_name_edited = 0 AND to_name = ''`, name, id); err != nil {
+				if _, err := s.db.Exec(`UPDATE passages SET to_name = ? WHERE id = ? AND to_name_edited = 0 AND to_name = '' AND name_attempted_ms = ?`, name, id, stamp); err != nil {
 					return err
 				}
 			}

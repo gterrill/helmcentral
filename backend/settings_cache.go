@@ -31,6 +31,13 @@ type settingsCacheEntry struct {
 	modTime  time.Time
 	size     int64
 	settings map[string]any
+	// vesselYAML is the "vessel" block re-marshalled from settings (nil for
+	// none), filled by the first loadVesselSettings after the parse, so the
+	// vessel-state and electrical-state builders skip the whole-document
+	// copy and re-marshal every tick. It goes with the entry: a write or an
+	// external change drops both.
+	vesselYAML   []byte
+	vesselCached bool
 }
 
 var (
@@ -73,4 +80,30 @@ func storeSettingsCache(settingsPath string, info os.FileInfo, settings map[stri
 		settings: settings,
 	}
 	settingsCacheMu.Unlock()
+}
+
+// cachedVesselYAMLFor returns the vessel block's YAML cached with
+// settingsPath's parse, if info still matches it and the block has been
+// cached. The bytes are never written after caching; callers only decode them.
+func cachedVesselYAMLFor(settingsPath string, info os.FileInfo) ([]byte, bool) {
+	settingsCacheMu.Lock()
+	entry, ok := settingsCache[settingsPath]
+	settingsCacheMu.Unlock()
+	if !ok || !entry.vesselCached || !entry.modTime.Equal(info.ModTime()) || entry.size != info.Size() {
+		return nil, false
+	}
+	return entry.vesselYAML, true
+}
+
+// storeVesselYAMLCache records buf as the vessel block of settingsPath's
+// cached parse, only while that parse is still the one info describes.
+func storeVesselYAMLCache(settingsPath string, info os.FileInfo, buf []byte) {
+	settingsCacheMu.Lock()
+	defer settingsCacheMu.Unlock()
+	entry, ok := settingsCache[settingsPath]
+	if !ok || !entry.modTime.Equal(info.ModTime()) || entry.size != info.Size() {
+		return
+	}
+	entry.vesselYAML, entry.vesselCached = buf, true
+	settingsCache[settingsPath] = entry
 }

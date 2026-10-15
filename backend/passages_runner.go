@@ -29,16 +29,12 @@ func runPassageDetection(store *passageStore) error {
 
 	det := detectLoggedPassages(pts)
 	for _, lp := range det.Closed {
-		overlaps, err := store.PassageOverlaps(lp.Start, lp.End)
-		if err != nil {
-			return err
-		}
-		if overlaps {
-			continue
-		}
-		rec, err := store.InsertPassage(passageRecord{Start: lp.Start, End: lp.End})
+		rec, inserted, err := store.InsertPassageIfNoOverlap(passageRecord{Start: lp.Start, End: lp.End})
 		if err != nil {
 			return fmt.Errorf("store detected passage: %w", err)
+		}
+		if !inserted {
+			continue
 		}
 		store.PassageStatsFor(rec) // warm the stored figures
 		announcePassage(rec.ID)

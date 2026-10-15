@@ -301,3 +301,78 @@ func TestTrimClearsAndRequeuesMovedEndsNotOperatorNamed(t *testing.T) {
 		t.Errorf("%+v wakes %d", got, wakes)
 	}
 }
+
+func TestSplitRequeuesTheFirstHalfAndWakesTheNamer(t *testing.T) {
+	wakes := 0
+	prev := passageNamesWake
+	passageNamesWake = func() { wakes++ }
+	defer func() { passageNamesWake = prev }()
+
+	s := newTestPassageStore(t)
+	p, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(4 * time.Hour), FromName: "A", ToName: "B"})
+	s.FillPassageNames(p.ID, func(float64, float64) string { return "" }) // stamps an attempt
+
+	first, second, err := s.SplitPassage(p.ID, passageEpoch.Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, _ := s.PassagesNeedingNames(time.Now(), 24*time.Hour)
+	if !idsContain(ids, first.ID) {
+		t.Error("the first half's cleared destination must be queued again despite the earlier attempt")
+	}
+	if !idsContain(ids, second.ID) {
+		t.Error("the second half's empty origin must be queued")
+	}
+	if wakes != 1 {
+		t.Errorf("wakes %d, want 1", wakes)
+	}
+}
+
+// A naming worker that read the passage before a split or trim must not write
+// the old end's place into the edited passage: the edit clears the attempt
+// stamp the worker set, its write no-ops, and the passage stays queued.
+func TestStaleNamingWorkerDoesNotNameAnEditedEnd(t *testing.T) {
+	prev := passageNamesWake
+	passageNamesWake = nil
+	defer func() { passageNamesWake = prev }()
+
+	for _, edit := range []string{"split", "trim"} {
+		t.Run(edit, func(t *testing.T) {
+			s := newTestPassageStore(t)
+			trip := simpleTrip(4 * time.Hour)
+			for _, p := range trip.pts {
+				if err := s.AppendTrackPoint(p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			start, end := trip.pts[0].At, trip.pts[len(trip.pts)-1].At
+			p, _ := s.InsertPassage(passageRecord{Start: start, End: end, FromName: "Origin"})
+			mid := start.Add(end.Sub(start) / 2)
+
+			err := s.FillPassageNames(p.ID, func(float64, float64) string {
+				// the operator edits the passage while the lookup is out
+				var err error
+				if edit == "split" {
+					_, _, err = s.SplitPassage(p.ID, mid)
+				} else {
+					_, err = s.TrimPassage(p.ID, start, mid)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				return "Old end place"
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, _ := s.GetPassage(p.ID)
+			if got.ToName != "" {
+				t.Errorf("stale worker named the moved end %q", got.ToName)
+			}
+			ids, _ := s.PassagesNeedingNames(time.Now(), 24*time.Hour)
+			if !idsContain(ids, p.ID) {
+				t.Error("the edited passage must stay queued for naming")
+			}
+		})
+	}
+}

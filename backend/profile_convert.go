@@ -95,7 +95,7 @@ func convertProfileRulesSteps(dir string, opts conversionOptions) []conversionSt
 // checks a real run does.
 //
 // It begins its own transaction on the document store's handle rather than
-// going through RunTx (ADR 0181) because it only ever runs in the
+// going through RunTx (ADR 0184) because it only ever runs in the
 // convert-profile-rules subcommand: a separate, operator-run process that
 // opened this store itself and serves nothing, so no other goroutine shares
 // the handle. A running server in another process is kept apart by SQLite's

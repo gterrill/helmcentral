@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// The record store's one transaction convention (ADR 0181).
+// The record store's one transaction convention (ADR 0184).
 //
 // documentStore owns every record table in helmcentral.sqlite - documents,
 // folders, manuals, notes, imports, inventory, maintenance, vessel

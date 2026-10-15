@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -226,7 +227,7 @@ func TestApplyProposal_RunsEveryOperationInOneTransaction(t *testing.T) {
 }
 
 // An apply is a write to the record tables, so it takes the record store's
-// lock like every REST command does (ADR 0181). While anything else holds
+// lock like every REST command does (ADR 0184). While anything else holds
 // that lock (a REST command mid-transaction, here the test itself), the
 // apply waits on the Go mutex rather than racing the other writer at the
 // SQLite file lock on a second connection.
@@ -1033,5 +1034,47 @@ func TestProposal_NotApplicableIsRefusedOnAHandRule(t *testing.T) {
 	msg := proposeError(t, env.deps, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"not_applicable":true}}]}`, rule.ID))
 	if !strings.Contains(msg, "not_applicable") {
 		t.Fatalf("got %q", msg)
+	}
+}
+
+// A panic inside an apply must not leave the record store's mutex held: the
+// caller recovers, and the next write still gets the lock.
+func TestApplyProposal_PanicReleasesTheRecordStoreLock(t *testing.T) {
+	env := newProposalEnv(t)
+	const name = "panic_test_thing"
+	defaultRecordRegistry.register(&recordType{
+		Name: name, Label: "thing", Actions: []string{changeCreate},
+		Fields: []recordField{{Name: "name", Kind: kindString, Writable: true}},
+		Get:    func(q sqlQueryer, id string) (recordSnapshot, error) { return recordSnapshot{}, errRecordNotFound },
+		Create: func(env changeEnv, f fieldSet) (createdRecord, error) { panic("boom inside apply") },
+	})
+	t.Cleanup(func() { delete(defaultRecordRegistry.types, name) })
+
+	p := assistantProposal{
+		ID:  "panic-proposal",
+		Ops: []changeOp{{Type: name, Action: changeCreate, Fields: map[string]any{"name": "x"}, Description: "Add x"}},
+	}
+	env.saveOnMessage(t, "Tap Apply.", p)
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected the apply to panic")
+			}
+		}()
+		_, _ = env.apply(p.ID)
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- env.docs.RunTx("after panic", func(tx *sql.Tx, now time.Time) error { return nil })
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunTx after the panic: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("RunTx did not get the record store lock after a panicking apply")
 	}
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -90,35 +89,6 @@ func TestImportIntoAStoredPassageInvalidatesItsStats(t *testing.T) {
 	s.db.QueryRow(`SELECT COUNT(*) FROM passages WHERE stats_json IS NOT NULL`).Scan(&n)
 	if n != 0 {
 		t.Errorf("import into a passage's range must clear its stats, %d still stored", n)
-	}
-}
-
-func TestHouseBankPathIsReadOnceUntilTheFileChanges(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "settings.yaml")
-	os.WriteFile(path, []byte("vessel:\n  house_bank:\n    path: electrical.batteries.3\n"), 0o644)
-	loads := 0
-	c := &houseBankCache{load: func(p string) (string, error) {
-		loads++
-		v, err := loadVesselSettings(p)
-		if err != nil || v.HouseBank == nil {
-			return "", err
-		}
-		return v.HouseBank.Path, nil
-	}}
-	for i := 0; i < 5; i++ {
-		if got, _ := c.path(path); got != "electrical.batteries.3" {
-			t.Fatalf("path %q", got)
-		}
-	}
-	if loads != 1 {
-		t.Errorf("loads %d over five ticks", loads)
-	}
-	os.WriteFile(path, []byte("vessel:\n  house_bank:\n    path: electrical.batteries.0\n    equipment_id: x\n"), 0o644)
-	future := time.Now().Add(time.Minute)
-	os.Chtimes(path, future, future)
-	if got, _ := c.path(path); got != "electrical.batteries.0" || loads != 2 {
-		t.Errorf("after change: %q, loads %d", got, loads)
 	}
 }
 

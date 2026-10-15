@@ -187,7 +187,7 @@ func (s *assistantStore) GetProposal(id string) (assistantProposal, error) {
 	return assistantProposalByID(s.db, id)
 }
 
-// Proposal status writes and the record store (ADR 0181).
+// Proposal status writes and the record store (ADR 0184).
 //
 // A proposal's status lives in assistant_message_proposals, the assistant
 // store's table, but every write that resolves one (apply, the stale mark
@@ -276,14 +276,21 @@ func applyAssistantProposal(assistant *assistantStore, records *documentStore, i
 	if err := checkProposalStores(assistant, records); err != nil {
 		return assistantProposal{}, err
 	}
-	records.lockForTx()
-	p, results, err := applyAssistantProposalLocked(records, id, today)
-	records.mu.Unlock()
+	p, results, err := applyAssistantProposalUnderLock(records, id, today)
 	if err != nil {
 		return assistantProposal{}, err
 	}
 	defaultRecordRegistry.afterCommit(results)
 	return p, nil
+}
+
+// applyAssistantProposalUnderLock holds records.mu across
+// applyAssistantProposalLocked, releasing it by defer so a panic in an
+// operation cannot leave the record store locked.
+func applyAssistantProposalUnderLock(records *documentStore, id string, today time.Time) (assistantProposal, []changeOpResult, error) {
+	records.lockForTx()
+	defer records.mu.Unlock()
+	return applyAssistantProposalLocked(records, id, today)
 }
 
 // applyAssistantProposalLocked is applyAssistantProposal's body; the caller

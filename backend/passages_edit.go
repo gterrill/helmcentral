@@ -133,7 +133,11 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	first.End, first.ToName, first.ToNameEdited, first.Edited = at, "", false, true
 	second.ID, second.Start, second.FromName, second.FromNameEdited, second.Title, second.Edited = uuid.NewString(), at, "", false, "", true
 	second.CreatedAt = time.Now().UTC()
-	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name='', to_name_edited=0, edited=1, stats_json=NULL WHERE id=?`, at.UnixMilli(), id); err != nil {
+	// The first half's destination is now the cut, which the old name did not
+	// describe: clear it and queue the half for naming again, as a trim does.
+	// The second half is new, so it is queued already; the wake after commit
+	// gets both named promptly.
+	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name='', to_name_edited=0, edited=1, stats_json=NULL, name_attempted_ms=NULL WHERE id=?`, at.UnixMilli(), id); err != nil {
 		return
 	}
 	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
@@ -142,7 +146,12 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 		return
 	}
 	second.Notes = ""
-	err = tx.Commit()
+	if err = tx.Commit(); err != nil {
+		return
+	}
+	if passageNamesWake != nil {
+		passageNamesWake()
+	}
 	return
 }
 
@@ -216,7 +225,17 @@ func (s *passageStore) MergePassages(idA, idB string) (passageRecord, error) {
 
 // TrimPassage moves a passage's ends inward. The track points are untouched.
 func (s *passageStore) TrimPassage(id string, start, end time.Time) (passageRecord, error) {
-	rec, err := s.GetPassage(id)
+	// One transaction, so the read the checks use is the row the write
+	// replaces, and SQLite serialises it against every other passage writer.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return passageRecord{}, err
+	}
+	defer tx.Rollback()
+	rec, err := scanPassage(tx.QueryRow(`SELECT `+passageColumns+` FROM passages WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return rec, errPassageNotFound
+	}
 	if err != nil {
 		return rec, err
 	}
@@ -225,22 +244,27 @@ func (s *passageStore) TrimPassage(id string, start, end time.Time) (passageReco
 	}
 	// A name filled in by the plugin described the old end. Where an end moved
 	// and the operator did not type its name, clear it and queue it for naming
-	// again; an operator's name stays whatever happens to the end.
-	clearFrom := !start.Equal(rec.Start) && !rec.FromNameEdited && rec.FromName != ""
-	clearTo := !end.Equal(rec.End) && !rec.ToNameEdited && rec.ToName != ""
-	if clearFrom {
+	// again; an operator's name stays whatever happens to the end. An end that
+	// moved with no name yet is queued again too: a naming lookup already out
+	// for the old end must not land on the new one.
+	moveFrom := !start.Equal(rec.Start) && !rec.FromNameEdited
+	moveTo := !end.Equal(rec.End) && !rec.ToNameEdited
+	if moveFrom {
 		rec.FromName = ""
 	}
-	if clearTo {
+	if moveTo {
 		rec.ToName = ""
 	}
-	if _, err := s.db.Exec(`UPDATE passages SET start_ms=?, end_ms=?, from_name=?, to_name=?, edited=1, stats_json=NULL,
+	if _, err := tx.Exec(`UPDATE passages SET start_ms=?, end_ms=?, from_name=?, to_name=?, edited=1, stats_json=NULL,
 		name_attempted_ms = CASE WHEN ? THEN NULL ELSE name_attempted_ms END WHERE id=?`,
-		start.UnixMilli(), end.UnixMilli(), rec.FromName, rec.ToName, clearFrom || clearTo, id); err != nil {
+		start.UnixMilli(), end.UnixMilli(), rec.FromName, rec.ToName, moveFrom || moveTo, id); err != nil {
+		return rec, fmt.Errorf("trim passage: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return rec, fmt.Errorf("trim passage: %w", err)
 	}
 	rec.Start, rec.End, rec.Edited = start, end, true
-	if (clearFrom || clearTo) && passageNamesWake != nil {
+	if (moveFrom || moveTo) && passageNamesWake != nil {
 		passageNamesWake()
 	}
 	return rec, nil

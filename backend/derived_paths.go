@@ -112,6 +112,20 @@ const (
 	windDirectionTruePath = "environment.wind.directionTrue"
 )
 
+// engineAwareAlarmReader wraps published so a switched-off engine's paths
+// read the way the Engine Cluster tile shows them (EngineOff), and a rule
+// bound to one agrees with the tile. Engine states are worked out at most
+// once, on the first propulsion path asked for.
+func engineAwareAlarmReader(snapshot *signalKSnapshot, published alarmReader, now time.Time) alarmReader {
+	engineStateOf := memoEngineStates(snapshot, now)
+	return func(path string) alarmSample {
+		if id := propulsionEngineID(path); id != "" && engineStateOf()[id].State == engineStateOff {
+			return alarmSample{EngineOff: true}
+		}
+		return published(path)
+	}
+}
+
 /*
 Forecast wind and surf warning level (plan: fold the forecast warning into
 the alarm system; ADR 0087).
@@ -380,7 +394,7 @@ func collectFuelPaths(entries []signalKPath) (ratePaths []string, tankPaths []fu
 
 	for _, entry := range entries {
 		switch {
-		case strings.HasPrefix(entry.Path, "propulsion.") && strings.HasSuffix(entry.Path, ".fuel.rate"):
+		case isFuelRatePath(entry.Path):
 			ratePaths = append(ratePaths, entry.Path)
 		case strings.HasPrefix(entry.Path, tankPrefix) && strings.HasSuffix(entry.Path, ".currentLevel"):
 			levels[strings.TrimSuffix(strings.TrimPrefix(entry.Path, tankPrefix), ".currentLevel")] = true
@@ -408,11 +422,47 @@ func collectFuelPaths(entries []signalKPath) (ratePaths []string, tankPaths []fu
 	return ratePaths, tankPaths
 }
 
+// isFuelRatePath is the one rule for an engine's burn path, shared by the
+// derived fuel figures (collectFuelPaths) and the passage log
+// (fuelRatePaths).
+func isFuelRatePath(path string) bool {
+	return strings.HasPrefix(path, "propulsion.") && strings.HasSuffix(path, ".fuel.rate")
+}
+
 // fuelRatePaths finds every engine's burn path in our own boat's telemetry,
-// so a boat with one engine or three needs no configuration here.
+// so a boat with one engine or three needs no configuration here. It walks
+// only the propulsion branch, by the same rule collectFuelPaths applies to
+// the whole tree's path list.
 func fuelRatePaths(t telemetryReader) []string {
-	rates, _ := collectFuelPaths(t.Paths())
-	return rates
+	return leafPathsUnder(t, "propulsion", isFuelRatePath)
+}
+
+// leafPathsUnder lists, sorted, the leaves at or under prefix whose path keep
+// accepts, walking only that branch: a leaf is a node carrying a value, and
+// meta is not descended into, as in collectSignalKPaths.
+func leafPathsUnder(t telemetryReader, prefix string, keep func(string) bool) []string {
+	var out []string
+	var walk func(path string, depth int)
+	walk = func(path string, depth int) {
+		if depth > signalKPathMaxDepth {
+			return
+		}
+		if t.Sample(path).Present {
+			if keep(path) {
+				out = append(out, path)
+			}
+			return
+		}
+		for _, key := range t.Children(path) {
+			if key == "meta" {
+				continue
+			}
+			walk(path+"."+key, depth+1)
+		}
+	}
+	walk(prefix, strings.Count(prefix, ".")+1)
+	sort.Strings(out)
+	return out
 }
 
 /*
@@ -824,9 +874,8 @@ own use of this reader, for three ordinary SignalK paths, costs nothing
 extra from this).
 */
 func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
-	published := snapshotAlarmReader(snapshot)
 	now := time.Now().UTC()
-	engineStateOf := memoEngineStates(snapshot, now)
+	published := engineAwareAlarmReader(snapshot, snapshotAlarmReader(snapshot), now)
 
 	var (
 		once   sync.Once
@@ -836,11 +885,6 @@ func derivedAwareAlarmReader(snapshot *signalKSnapshot) alarmReader {
 
 	return func(path string) alarmSample {
 		if !isDerivedPath(path) {
-			// A switched-off engine's paths read the way the Engine Cluster
-			// tile shows them, so a rule bound to one agrees with the tile.
-			if id := propulsionEngineID(path); id != "" && engineStateOf()[id].State == engineStateOff {
-				return alarmSample{EngineOff: true}
-			}
 			return published(path)
 		}
 
