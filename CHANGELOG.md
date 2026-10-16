@@ -19,7 +19,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   onto equipment items and a new **Roles** list in **Settings → SignalK**. Every
   battery, solar controller and tank you had only named, and every engine row you
   had not linked to an item, gets an equipment item created for it, with that
-  name and mapped to that source, so no name is lost. Delete any you do not want
+  name and mapped to that source, so no name is lost. A tank's item is named for
+  what it holds, such as Fresh water PORT, Black water STBD or Fuel PORT FWD,
+  because the old labels were per type. Delete any you do not want
   on the Equipment page. Then check what it could not move. Under **Roles**, choose the port and starboard
   alternators, the shore charger, the inverter, the generator and the voltage
   readout battery if they show **Not set**, then choose **Save**. Until you do,
@@ -61,17 +63,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   `propulsion.0` on a boat whose engines are `port` and `starboard`, is dropped
   and has to be re-added to a tile that can read it. The startup log lists each
   tile and reading it changed or could not move.
-- **Gauge zones live on the equipment profile.** A zone on one of those tiles
-  moved to the equipment's profile when the profile had none for that reading,
-  converted into the profile's unit. Where the profile already had its own zones,
-  or had no gauge for the reading, or the equipment had no profile, the tile's
-  zones were dropped and the log says which; check your oil pressure, coolant
-  and speed limits on the profile. A reading on one of these tiles now always
-  uses the profile's unit, so a unit chosen on the tile is ignored. The alarms
-  raised from zones on these tiles have new names and start with no history or
+- **Gauge zones live on the equipment profile, and none are lost.** A zone on
+  one of those tiles moved to the equipment's profile when the profile had none
+  for that reading, converted into the profile's unit. In every other case the
+  tile keeps its zones, stored on the tile, and they keep raising the same
+  alarms under the same names: when the tile has no equipment yet (it says
+  **Pick equipment**, and your oil pressure, coolant, RPM and alternator alarms
+  carry on from the source it read), when the equipment has no profile, when the
+  profile has no gauge for the reading, and when the profile already has
+  different zones for it (the profile's apply until you choose). Open the tile's
+  settings and choose the equipment. Zones move to its profile when you save the
+  tile; if the profile has its own for a reading you see both sets and choose
+  which to keep. If the equipment has no profile yet, link one on the item's
+  page, and the zones move the next time you save the tile. A reading on one of
+  these tiles now always uses the profile's unit once its zones are on the
+  profile. The startup log lists every tile whose zones stayed. The alarms from
+  zones on the profile have new names and start with no history or
   acknowledgement; look in the Alarms drawer to confirm they are all there. A
   fuel bar keeps its own low-fuel zones, because a tank has no profile, and its
-  alarm is kept.
+  alarm is kept. Engine cluster telltales (coolant, gearbox) now raise alarms
+  from their zones too, which they did not before.
 - **Apply gauge zones is gone** from the equipment page, along with the equipment
   profile dialog on the Add Tile menu and the find-and-replace in gauge groups.
   Add an Engine Cluster or a gauge group and choose the equipment instead.

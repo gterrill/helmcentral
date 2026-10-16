@@ -57,6 +57,8 @@ export interface GaugeEquipmentMode {
   onZonesChange: (zones: GaugeZone[]) => void
   /** Says what editing the zones touches. */
   zoneNotice: string
+  /** The slot still holds zones of its own, with none on the profile gauge to hold them, so its own unit applies. */
+  holdsOwnZones?: boolean
 }
 
 interface GaugeFieldsProps {
@@ -89,7 +91,9 @@ export function slotFromProfileGauge(slot: GaugeWidgetConfig, gauge: EngineProfi
 export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: GaugeFieldsProps) {
   // On an equipment slot the profile's gauge decides the quantity and unit,
   // because its zone thresholds are in that unit.
-  const profileGauge = equipment?.profileGauges.find((g) => g.path_suffix === (value.suffix ?? '').trim())
+  const profileGauge = equipment?.holdsOwnZones
+    ? undefined
+    : equipment?.profileGauges.find((g) => g.path_suffix === (value.suffix ?? '').trim())
   const shownQuantity = profileGauge ? profileGauge.quantity : value.quantity
   const shownUnit = profileGauge ? profileGauge.unit : value.unit
   const quantity = quantityById(shownQuantity)

@@ -290,6 +290,8 @@ export interface GaugeGroupWidgetConfig {
   equipmentKind?: string
   /** The equipment item shown; unset until one is picked. */
   equipmentId?: string
+  /** The source the group read before any equipment was picked; see EngineClusterConfig.source. */
+  source?: string
   /** Overrides the item's name; blank shows the name. */
   title: string
   /** Columns inside the tile; undefined derives a count from the member count. */
@@ -350,6 +352,8 @@ export interface FuelBarRef {
   /** Unset until a tank is picked. */
   tankId?: string
   label?: string
+  /** The tank's SignalK source while no tank is picked, so the bar's low-fuel zones keep alarming. */
+  source?: string
   /**
    * Bands of the tank's level in percent. A tank has no equipment profile to
    * hold zones, so a bar keeps its own (the one exception to zones living on the
@@ -389,6 +393,12 @@ export interface ClusterFuelRailRef {
 export interface EngineClusterConfig {
   /** The engine item shown (ADR 0185); unset until one is picked. */
   equipmentId?: string
+  /**
+   * The source the tile read before any equipment was picked. Set by the
+   * conversion and cleared when equipment is chosen; only the zones the tile
+   * still holds use it, so their alarms keep running.
+   */
+  source?: string
   /** Overrides the item's name; blank shows the name. */
   title: string
   ring: GaugeWidgetConfig

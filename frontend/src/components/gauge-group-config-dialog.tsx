@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import { useSlotZoneEditing } from '@/hooks/use-slot-zone-editing'
+import { ZoneConflicts } from '@/components/zone-conflicts'
 import { findItem } from '@/lib/equipment-tiles'
 import { SOURCE_KINDS, SOURCE_KIND_NOUNS, type SourceKind } from '@/lib/vessel-settings'
 import {
@@ -62,7 +63,7 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
 
   const kind = (config.equipmentKind ?? '') as SourceKind | ''
   const item = findItem(ctx, config.equipmentId)
-  const zoneEditing = useSlotZoneEditing(ctx, item)
+  const zoneEditing = useSlotZoneEditing(ctx, item, config.gauges)
   const { profile } = zoneEditing
 
   const setKind = (next: SourceKind | '') =>
@@ -78,7 +79,14 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
   const fillFromProfile = () => {
     if (!profile) return
     setConfig((current) => {
-      const gauges = (profile.gauges ?? []).map((g) => slotFromProfileGauge({ ...defaultGaugeConfig(), suffix: g.path_suffix }, g))
+      // Zones a gauge still holds are not the profile's to replace: carry them over.
+      const held = new Map(current.gauges.filter((g) => (g.zones?.length ?? 0) > 0).map((g) => [g.suffix, g]))
+      const gauges = (profile.gauges ?? []).map((g) => {
+        const slot = slotFromProfileGauge({ ...defaultGaugeConfig(), suffix: g.path_suffix }, g)
+        const old = held.get(g.path_suffix)
+        // The zones are in the old gauge's unit and scale, so those come with them.
+        return old ? { ...slot, zones: old.zones, quantity: old.quantity, unit: old.unit, min: old.min, max: old.max } : slot
+      })
       const hero = (profile.gauges ?? []).findIndex((g) => g.hero === true)
       return { ...current, gauges, hero: hero === -1 ? undefined : hero }
     })
@@ -123,7 +131,13 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
     (config.hero === undefined || (config.hero >= 0 && config.hero < config.gauges.length)) &&
     (kind === ''
       ? config.gauges.every((g) => g.path.trim() !== '')
-      : (config.equipmentId ?? '') !== '' && config.gauges.every((g) => (g.suffix ?? '').trim() !== ''))
+      : (config.equipmentId ?? '') !== '' && config.gauges.every((g) => (g.suffix ?? '').trim() !== '') && zoneEditing.unresolved === 0)
+
+  /** The group with the zones that now live on the profile taken off its gauges. */
+  const settled = (cleared: Set<number>): GaugeGroupWidgetConfig => ({
+    ...config,
+    gauges: config.gauges.map((g, i) => (cleared.has(i) ? { ...g, zones: undefined } : g)),
+  })
 
   const save = async () => {
     // Nothing to write to a profile: save the tile at once, in the same tick.
@@ -134,8 +148,7 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
     setSaving(true)
     setSaveError(null)
     try {
-      await zoneEditing.commit()
-      onSave(config)
+      onSave(settled(await zoneEditing.commit()))
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
     } finally {
@@ -208,11 +221,19 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
                 label="Equipment"
                 kind={kind}
                 value={config.equipmentId ?? ''}
-                onChange={(id) => setConfig((current) => ({ ...current, equipmentId: id }))}
+                // Choosing equipment ends the source the tile remembered.
+                onChange={(id) => setConfig((current) => ({ ...current, equipmentId: id, source: id === '' ? current.source : undefined }))}
                 ctx={ctx}
               />
             )}
           </div>
+
+          {kind !== '' && (
+            <ZoneConflicts
+              plan={zoneEditing.plan} choices={zoneEditing.choices} onChoose={zoneEditing.setChoice}
+              heldWithoutItem={zoneEditing.heldWithoutItem} idPrefix="gauge-group"
+            />
+          )}
 
           {kind !== '' && (
             <div className="flex flex-wrap items-center gap-2">
@@ -296,12 +317,11 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
                 }
                 void (async () => {
                   try {
-                    await zoneEditing.commit()
+                    onDuplicate?.(settled(await zoneEditing.commit()))
                   } catch (err) {
                     setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
                     return
                   }
-                  onDuplicate?.(config)
                   onCancel()
                 })()
               }}

@@ -1,5 +1,6 @@
 import type { EquipmentItem } from '@/hooks/use-inventory'
 import type { EngineProfile, EngineProfileGauge, EngineProfileZone } from '@/lib/engine-profiles'
+import { convertBetweenUnits } from '@/lib/quantities'
 import type {
   EngineClusterConfig,
   GaugeGroupWidgetConfig,
@@ -70,6 +71,11 @@ export function profileOf(ctx: EquipmentTileContext, item: TileItem): EngineProf
   return item.profile_id ? ctx.profiles.find((p) => p.id === item.profile_id) : undefined
 }
 
+/** Whether a profile gauge holds any zone with a threshold. A zone with none is a blank the manufacturer leaves. */
+export function gaugeHasZones(gauge: EngineProfileGauge | undefined): boolean {
+  return (gauge?.zones ?? []).some((z) => z.threshold !== null && z.threshold !== undefined)
+}
+
 export function profileGaugeFor(profile: EngineProfile | undefined, suffix: string): EngineProfileGauge | undefined {
   return profile?.gauges?.find((g) => g.path_suffix === suffix)
 }
@@ -113,7 +119,12 @@ export function resolveSlot(item: TileItem, profile: EngineProfile | undefined, 
   void _zones
   if (suffix === '') return { ...rest, path: '' }
   const gauge = profileGaugeFor(profile, suffix)
-  if (!gauge) return { ...rest, path: `${item.signalk_source}.${suffix}` }
+  // The profile's zones win whenever it has any. A slot that still holds zones
+  // of its own, with none on the profile to hold them, keeps them and its own
+  // unit and scale.
+  if (!gauge || ((slot.zones?.length ?? 0) > 0 && !gaugeHasZones(gauge))) {
+    return { ...rest, ...(slot.zones && slot.zones.length > 0 ? { zones: slot.zones } : {}), path: `${item.signalk_source}.${suffix}` }
+  }
   const { min, max } = effectiveScale(slot.min, slot.max, gauge)
   const zones = profileBands(gauge, min, max)
   return {
@@ -268,4 +279,80 @@ export function withGaugeZones(
       return { ...gauge, min: gauge.min ?? min, max: gauge.max ?? max, zones }
     }),
   }
+}
+
+/** A reading whose zones the tile still holds, and what moving them to the profile would do. */
+export interface TileZoneMove {
+  /** The slot's position in the flat list passed to planTileZones. */
+  index: number
+  suffix: string
+  label: string
+  /** The tile's bands in the profile gauge's unit, on `min`..`max`. */
+  bands: GaugeZone[]
+  min: number
+  max: number
+}
+
+/** A reading whose zones the tile holds and the profile also has, differently. */
+export interface TileZoneConflict extends TileZoneMove {
+  tileText: string
+  profileText: string
+}
+
+export interface TileZonePlan {
+  /** Zones that go onto the profile because it has none for the reading. */
+  moves: TileZoneMove[]
+  /** Readings where the operator must choose which set to keep. */
+  conflicts: TileZoneConflict[]
+  /** Labels of readings whose zones stay on the tile (no profile, or no gauge for it). */
+  stays: string[]
+}
+
+function bandText(bands: readonly GaugeZone[], min: number, unit: string): string {
+  if (bands.length === 0) return 'no zones'
+  return bands
+    .map((b) => {
+      const label = b.state === 'normal' ? 'healthy' : b.state
+      return b.from <= min ? `below ${b.to} ${unit}, ${label}` : `above ${b.from} ${unit}, ${label}`
+    })
+    .join('; ')
+}
+
+/**
+ * What to do with the zones slots still hold (ADR 0185). A tile converted
+ * before there was equipment, or a profile, keeps its zones on the tile and
+ * they keep alarming. Once the item has a profile they belong there: moved when
+ * the profile has none for the reading, offered as a choice when it has its
+ * own, left in place when there is no profile or it lacks the gauge.
+ */
+export function planTileZones(profile: EngineProfile | undefined, slots: readonly GaugeWidgetConfig[]): TileZonePlan {
+  const plan: TileZonePlan = { moves: [], conflicts: [], stays: [] }
+  slots.forEach((slot, index) => {
+    const zones = slot.zones ?? []
+    const suffix = (slot.suffix ?? '').trim()
+    if (zones.length === 0 || suffix === '') return
+    const label = slot.label.trim() || suffix
+    const gauge = profileGaugeFor(profile, suffix)
+    if (!profile || !gauge || gauge.quantity !== slot.quantity) {
+      plan.stays.push(label)
+      return
+    }
+    const tile = effectiveScale(slot.min, slot.max, undefined)
+    const convert = (v: number) => convertBetweenUnits(v, slot.quantity, slot.unit, gauge.unit)
+    const min = convert(tile.min)
+    const max = convert(tile.max)
+    const bands = zones.map((z) => ({ from: convert(z.from), to: convert(z.to), state: z.state }))
+    const move: TileZoneMove = { index, suffix, label, bands, min, max }
+    if (!gaugeHasZones(gauge)) {
+      plan.moves.push(move)
+      return
+    }
+    const own = effectiveScale(undefined, undefined, gauge)
+    plan.conflicts.push({
+      ...move,
+      tileText: bandText(bands, min, gauge.unit),
+      profileText: bandText(profileBands(gauge, own.min, own.max), own.min, gauge.unit),
+    })
+  })
+  return plan
 }

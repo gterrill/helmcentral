@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { EquipmentPicker } from '@/components/equipment-picker'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { useSlotZoneEditing } from '@/hooks/use-slot-zone-editing'
+import { ZoneConflicts } from '@/components/zone-conflicts'
 import {
   CLUSTER_MAX_CORNERS,
   CLUSTER_MAX_CORNER_ROWS,
@@ -61,6 +62,22 @@ const SLOT_SUFFIXES = {
   telltales: ['temperature', 'transmission.oilTemperature'],
 } as const
 
+/** Every slot of a cluster in a fixed order: ring, centre, corner rows, telltales. */
+function clusterSlotList(c: EngineClusterConfig): GaugeWidgetConfig[] {
+  return [c.ring, c.centre, ...c.corners.flatMap((corner) => corner.rows), ...(c.telltales ?? [])]
+}
+
+/** The cluster with the zones that now live on the profile taken off the slots at `cleared`. */
+function withoutSettledZones(c: EngineClusterConfig, cleared: Set<number>): EngineClusterConfig {
+  let i = 0
+  const settle = (slot: GaugeWidgetConfig): GaugeWidgetConfig => (cleared.has(i++) ? { ...slot, zones: undefined } : slot)
+  const ring = settle(c.ring)
+  const centre = settle(c.centre)
+  const corners = c.corners.map((corner) => ({ ...corner, rows: corner.rows.map(settle) }))
+  const telltales = c.telltales?.map(settle)
+  return { ...c, ring, centre, corners, telltales }
+}
+
 function blankSlot(label: string): GaugeWidgetConfig {
   return { path: '', suffix: '', label, display: 'numeric', quantity: 'raw', unit: 'raw' }
 }
@@ -72,9 +89,15 @@ function blankFuelBar(label: string): FuelBarRef {
 
 /** Builds the slots of a cluster from a profile; the equipment is already chosen. */
 function clusterFromProfile(profile: EngineProfile, current: EngineClusterConfig): EngineClusterConfig {
+  // Zones a slot still holds are not the profile's to replace: carry them to
+  // the new slot for the same reading, so filling never drops one.
+  const held = new Map(clusterSlotList(current).filter((s) => (s.zones?.length ?? 0) > 0).map((s) => [s.suffix, s]))
   const pick = (suffix: string, fallbackLabel: string): GaugeWidgetConfig => {
     const gauge = profileGaugeFor(profile, suffix)
-    return gauge ? slotFromProfileGauge({ ...blankSlot(''), suffix }, gauge) : { ...blankSlot(fallbackLabel), suffix }
+    const slot = gauge ? slotFromProfileGauge({ ...blankSlot(''), suffix }, gauge) : { ...blankSlot(fallbackLabel), suffix }
+    const old = held.get(suffix)
+    // The zones are in the old slot's unit and scale, so those come with them.
+    return old ? { ...slot, zones: old.zones, quantity: old.quantity, unit: old.unit, min: old.min, max: old.max } : slot
   }
 
   const ring = { ...pick(SLOT_SUFFIXES.ring, 'RPM') }
@@ -116,7 +139,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   }, [widget?.id, widget?.cluster])
 
   const item = findItem(ctx, config?.equipmentId)
-  const zoneEditing = useSlotZoneEditing(ctx, item)
+  const zoneEditing = useSlotZoneEditing(ctx, item, config ? clusterSlotList(config) : [])
   const { profile } = zoneEditing
 
   const setSlot = (update: (current: EngineClusterConfig) => EngineClusterConfig) =>
@@ -133,6 +156,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
     config !== null &&
     (config.equipmentId ?? '') !== '' &&
     slotsFilled(config) &&
+    zoneEditing.unresolved === 0 &&
     (config.fuel === undefined || (config.fuel.bars.length > 0 && config.fuel.bars.every((bar) => (bar.tankId ?? '') !== '')))
 
   const save = async () => {
@@ -145,8 +169,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
     setSaving(true)
     setSaveError(null)
     try {
-      await zoneEditing.commit()
-      onSave(config)
+      onSave(withoutSettledZones(config, await zoneEditing.commit()))
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
     } finally {
@@ -177,7 +200,8 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 label="Engine"
                 kind="engine"
                 value={config.equipmentId ?? ''}
-                onChange={(id) => setSlot((c) => ({ ...c, equipmentId: id }))}
+                // Choosing equipment ends the source the tile remembered.
+                onChange={(id) => setSlot((c) => ({ ...c, equipmentId: id, source: id === '' ? c.source : undefined }))}
                 ctx={ctx}
               />
               <Button
@@ -188,6 +212,12 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 Fill slots from profile
               </Button>
             </div>
+          )}
+          {config && (
+            <ZoneConflicts
+              plan={zoneEditing.plan} choices={zoneEditing.choices} onChoose={zoneEditing.setChoice}
+              heldWithoutItem={zoneEditing.heldWithoutItem} idPrefix="cluster"
+            />
           )}
           <FieldDescription>
             The tile reads this engine's readings live and takes its zones from the engine's profile.
@@ -375,7 +405,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                           onChange={(id) => setFuel((f) => ({
                             ...f,
                             bars: f.bars.map((b, i) => (i === index
-                              ? { ...b, tankId: id, label: b.label || (findItem(ctx, id)?.name ?? '') }
+                              ? { ...b, tankId: id, source: id === '' ? b.source : undefined, label: b.label || (findItem(ctx, id)?.name ?? '') }
                               : b)),
                           }))}
                         />

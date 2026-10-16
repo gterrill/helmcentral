@@ -5,6 +5,7 @@ import type { EngineProfile } from '@/lib/engine-profiles'
 import {
   bandsToProfileZones,
   effectiveScale,
+  planTileZones,
   resolveCluster,
   resolveGaugeGroup,
   resolveLamps,
@@ -226,5 +227,56 @@ describe('fuel bar zones', () => {
     )
     if (!r.ok || !r.config.fuel) throw new Error('expected a rail')
     expect(r.config.fuel.bars[0].level.zones).toEqual([{ from: 0, to: 15, state: 'warn' }])
+  })
+})
+
+describe('zones a converted tile still holds', () => {
+  const heldOil = slot('oilPressure', {
+    label: 'Oil', quantity: 'pressure', unit: 'psi', min: 0, max: 100, zones: [{ from: 0, to: 14.5038, state: 'alarm' }],
+  })
+  const bare: EngineProfile = {
+    id: 'bare', name: 'Bare', kind: 'engine',
+    gauges: [{ path_suffix: 'oilPressure', label: 'Oil', display: 'radial', quantity: 'pressure', unit: 'bar', min: 0, max: 10 }],
+  }
+  const withOwn: EngineProfile = {
+    id: 'own', name: 'Own', kind: 'engine',
+    gauges: [{ path_suffix: 'oilPressure', label: 'Oil', display: 'radial', quantity: 'pressure', unit: 'bar', min: 0, max: 10,
+      zones: [{ direction: 'below', threshold: 2, state: 'warn' }] }],
+  }
+
+  it('applies in force, in the tile unit, while the profile has no zones for the reading', () => {
+    const r = resolveCluster({ ...cluster, corners: [{ label: 'Oil', rows: [heldOil] }] }, ctx([item({ profile_id: 'bare' })], { profiles: [bare] }))
+    if (!r.ok) throw new Error('expected resolved')
+    const row = r.config.corners[0].rows[0]
+    expect(row.zones).toEqual([{ from: 0, to: 14.5038, state: 'alarm' }])
+    expect(row.unit).toBe('psi')
+  })
+
+  it('gives way to the profile zones when it has its own', () => {
+    const r = resolveCluster({ ...cluster, corners: [{ label: 'Oil', rows: [heldOil] }] }, ctx([item({ profile_id: 'own' })], { profiles: [withOwn] }))
+    if (!r.ok) throw new Error('expected resolved')
+    expect(r.config.corners[0].rows[0]).toMatchObject({ unit: 'bar', zones: [{ from: 0, to: 2, state: 'warn' }] })
+  })
+
+  it('moves onto a profile gauge that has none, converted to the profile unit', () => {
+    const plan = planTileZones(bare, [heldOil])
+    expect(plan.moves).toHaveLength(1)
+    expect(plan.moves[0].bands[0].to).toBeCloseTo(1, 2)
+    expect(plan.moves[0]).toMatchObject({ suffix: 'oilPressure', min: 0 })
+    expect(plan.moves[0].max).toBeCloseTo(6.89, 1)
+    expect(plan.conflicts).toEqual([])
+  })
+
+  it('is a conflict, to be chosen, where the profile has its own', () => {
+    const plan = planTileZones(withOwn, [heldOil])
+    expect(plan.moves).toEqual([])
+    expect(plan.conflicts).toHaveLength(1)
+    expect(plan.conflicts[0].profileText).toBe('below 2 bar, warn')
+    expect(plan.conflicts[0].tileText).toMatch(/^below 1\.0\d* bar, alarm$/)
+  })
+
+  it('stays on the tile when there is no profile, or no gauge for the reading', () => {
+    expect(planTileZones(undefined, [heldOil]).stays).toEqual(['Oil'])
+    expect(planTileZones(bare, [{ ...heldOil, suffix: 'exhaust' }]).stays).toEqual(['Oil'])
   })
 })

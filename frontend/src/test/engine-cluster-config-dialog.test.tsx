@@ -60,4 +60,29 @@ describe('EngineClusterConfigDialog', () => {
     expect(screen.queryByLabelText(/signalk path/i)).toBeNull()
     expect(screen.queryByLabelText(/engine instance/i)).toBeNull()
   })
+
+  test('zones a converted cluster still holds are settled on save, wherever the slot is', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ profile: {} }) }))
+    const onSave = vi.fn()
+    const held = {
+      ...blank, equipmentId: 'eng-port',
+      ring: { ...blank.ring, suffix: 'revolutions' }, centre: { ...blank.centre, suffix: 'runTime' },
+      corners: [{ label: 'Oil', rows: [{
+        path: '', suffix: 'oilPressure', label: 'Oil', display: 'numeric' as const, quantity: 'pressure', unit: 'psi', min: 0, max: 100,
+        zones: [{ from: 0, to: 20, state: 'warn' as const }],
+      }] }],
+    }
+    render(<EngineClusterConfigDialog widget={widget(held)} onCancel={vi.fn()} onSave={onSave} />)
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled()
+    fireEvent.click(screen.getByLabelText(/Keep the profile's/))
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await vi.waitFor(() => expect(onSave).toHaveBeenCalled())
+    expect((onSave.mock.calls[0][0] as EngineClusterConfig).corners[0].rows[0].zones).toBeUndefined()
+  })
+
+  test('a cluster with no equipment says it keeps its zones', () => {
+    const held = { ...blank, source: 'propulsion.port', ring: { ...blank.ring, zones: [{ from: 0, to: 5, state: 'alarm' as const }] } }
+    render(<EngineClusterConfigDialog widget={widget(held)} onCancel={vi.fn()} onSave={vi.fn()} />)
+    expect(screen.getByTestId('zone-migration')).toHaveTextContent('keeps its zones')
+  })
 })

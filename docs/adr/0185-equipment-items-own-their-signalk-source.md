@@ -107,12 +107,12 @@ Tiles that show a piece of equipment store the item, not paths.
    multi-instance equipment has `equipmentId` and a `suffix`; a cluster fuel bar
    has a `tankId`. Each slot stores a `suffix` (`oilPressure`, `fuel.rate`)
    plus the operator's display choices (label, display, units, scale, ring
-   options), and never a path or zones. The title is an optional override and
+   options), and never a path. Zones are normally not on the slot (see 3). The title is an optional override and
    defaults to the item's name. A gauge group with no `equipmentKind` stays a
    plain list of paths, and a lamp with a `path` stays a direct lamp, for
    single-instance signals such as a bilge float. Single-instance gauges
-   (depth, wind) are unchanged. The server refuses a slot that holds a path or
-   zones on an equipment tile, and a bar that still holds level and capacity
+   (depth, wind) are unchanged. The server refuses a slot that holds a path on
+   an equipment tile (it may hold zones, see 3), and a bar that still holds level and capacity
    paths. A tile with no item picked yet may hold empty suffixes, so it can be
    moved and resized while it waits.
 2. **Resolution.** A path is the item's source plus the suffix, worked out on
@@ -132,9 +132,17 @@ Tiles that show a piece of equipment store the item, not paths.
    profile's (a slot's own quantity and unit apply only to a reading the profile
    lacks), because the thresholds are in that unit. The scale a zone is anchored
    to is the slot's, else the gauge's, else 0 to 100, in one helper per language.
-   The exception is a fuel bar: a tank has no profile, so a bar keeps its own
-   zones, as bands of the level in percent, and they raise a low-fuel alarm
-   keyed `zone:tank:<tank item id>:<n>` and named "<tank> level". Editing a zone in a tile's form edits the profile (the
+   Two things keep zones on the tile. A fuel bar: a tank has no profile, so a bar
+   keeps its own zones, as bands of the level in percent, and they raise a
+   low-fuel alarm keyed `zone:tank:<tank item id>:<n>` and named "<tank> level".
+   And zones a converted tile held before there was equipment or a profile for
+   them: a slot's own zones are in force only while the profile has none for the
+   reading (no item, no profile, no gauge for it, or a gauge with no zones); the
+   profile's apply whenever it has any, so one alarm exists, not two. Those
+   alarms keep the id they always had (`zone:<widget id>:<slot index>:<n>`,
+   telltales at a fixed index base) and are named for the item, or the tile's
+   title when it has none. A tile with no item remembers the source it read
+   (`source`), cleared when equipment is picked, so its zones can alarm. Editing a zone in a tile's form edits the profile (the
    tile's save writes the profile first and stops if the server refuses it), and
    the form names the profile and the items that follow it. A reading the
    profile has no gauge for has no zones; the form says so.
@@ -162,10 +170,18 @@ Tiles that show a piece of equipment store the item, not paths.
    its display choices. A slot reading outside the tile's source is dropped and
    logged. A tile that matches no item keeps its readings as suffixes with no
    item and asks for one. A tile's zones move onto the profile gauge when the
-   profile has none for that reading; when it has its own they are dropped and
-   logged once; a band that floats mid-scale, a reading the profile has no gauge
-   for, or an item with no profile are dropped and logged; zones in another unit
-   than the profile's are converted. A fuel bar's zones are kept on the bar. Lamps with a
+   profile has none for that reading, converted into its unit. Nothing is ever
+   dropped: with no item, no profile, no gauge for the reading, a band the
+   profile cannot hold (floating mid-scale), a unit that does not convert, or a
+   profile that already has different zones, the zones stay on the tile and the
+   log says why. A reading outside the tile's source is the one thing still
+   removed, with its slot, and logged. A fuel bar's zones are kept on the bar. In
+   the tile's settings, picking equipment moves the held zones onto the profile
+   at save, shows both sets and asks which to keep where the profile has its own,
+   and leaves them on the tile when there is no profile, moving them at the first
+   save after one is linked (a check at save, not a separate action). Converted
+   tank items are named for what they hold ("Fresh water PORT"), because the old
+   labels were per type. Lamps with a
    mapped source become references; an unowned lamp keeps its path and is
    logged. A profile or pages file that cannot be written stops startup.
 

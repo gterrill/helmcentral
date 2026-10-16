@@ -48,6 +48,19 @@ in the profile's unit and you cannot change them on the tile.
 If the profile has no gauge for a reading, the form says so and shows no zones.
 Add the reading to the profile under **Inventory → Profiles** to give it some.
 
+## Limits a converted tile still holds
+
+A tile that was set up before you chose equipment keeps its own limits, and
+they keep raising their alarms, until the equipment has a profile to hold them.
+When you choose the equipment and save the tile:
+
+- If the profile has no limit for a reading, the tile's limit moves to the
+  profile and leaves the tile.
+- If the profile already has its own, the form shows both and asks which to
+  keep. You cannot save until you choose.
+- If the equipment has no profile, the limits stay on the tile and move the next
+  time you save it after you link a profile on the item's page.
+
 ## When the tile does not show readings
 
 A tile that cannot read its equipment says why, in the tile:
