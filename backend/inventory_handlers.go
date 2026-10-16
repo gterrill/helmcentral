@@ -547,7 +547,16 @@ func deleteEquipmentHandler(c echo.Context) error {
 		return writeDocumentError(c, err)
 	}
 	// A deleted house bank leaves the rules that follow it watching nothing.
+	// This runs before the roles are cleared: it finds the bank by its role.
 	reseedAnomalyRulesAfterItemSave(id)
+	// No role keeps pointing at an item that no longer exists; the figure it
+	// fed shows Not set. Tiles stay and say Equipment removed.
+	if _, err := clearRolesForItem(getEnv("SETTINGS_FILE", "../settings.yaml"), id); err != nil {
+		log.Printf("inventory: delete equipment %s: %v", id, err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{
+			"error": "the item was deleted, but the roles that named it could not be cleared; check Settings > SignalK > Roles",
+		})
+	}
 
 	failed := 0
 	for _, sha := range deletedPhotoSHAs {
@@ -859,6 +868,7 @@ func inventoryRoutes() []apiRoute {
 		{http.MethodGet, "/api/inventory/zones", tierRead, listZonesHandler},
 		{http.MethodGet, "/api/inventory/equipment", tierRead, listEquipmentHandler},
 		{http.MethodGet, "/api/inventory/equipment/:id", tierRead, getEquipmentHandler},
+		{http.MethodGet, "/api/inventory/equipment/:id/dependants", tierRead, equipmentDependantsHandler},
 
 		// Inventory writes (plan "Inventory: the equipment registry and
 		// locations"). DELETE on a zone/bin still in use answers 409 with

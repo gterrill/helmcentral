@@ -42,18 +42,19 @@ type vesselRoles struct {
 type roleSpec struct {
 	field string // the JSON/YAML key, which is also the field named in an error
 	label string // how an error names it
+	title string // how a list names it to the operator
 	group sourceGroup
 	get   func(*vesselRoles) *string
 }
 
 var roleSpecs = []roleSpec{
-	{"house_bank", "the house bank", sourceBattery, func(r *vesselRoles) *string { return &r.HouseBank }},
-	{"port_alternator", "the port alternator", sourceAlternator, func(r *vesselRoles) *string { return &r.PortAlternator }},
-	{"starboard_alternator", "the starboard alternator", sourceAlternator, func(r *vesselRoles) *string { return &r.StarboardAlternator }},
-	{"voltage_readout_battery", "the voltage readout battery", sourceBattery, func(r *vesselRoles) *string { return &r.VoltageReadoutBattery }},
-	{"shore_charger", "the shore charger", sourceCharger, func(r *vesselRoles) *string { return &r.ShoreCharger }},
-	{"inverter", "the inverter", sourceInverter, func(r *vesselRoles) *string { return &r.Inverter }},
-	{"generator", "the generator", sourceGenerator, func(r *vesselRoles) *string { return &r.Generator }},
+	{"house_bank", "the house bank", "House bank", sourceBattery, func(r *vesselRoles) *string { return &r.HouseBank }},
+	{"port_alternator", "the port alternator", "Port alternator", sourceAlternator, func(r *vesselRoles) *string { return &r.PortAlternator }},
+	{"starboard_alternator", "the starboard alternator", "Starboard alternator", sourceAlternator, func(r *vesselRoles) *string { return &r.StarboardAlternator }},
+	{"voltage_readout_battery", "the voltage readout battery", "Voltage readout battery", sourceBattery, func(r *vesselRoles) *string { return &r.VoltageReadoutBattery }},
+	{"shore_charger", "the shore charger", "Shore charger", sourceCharger, func(r *vesselRoles) *string { return &r.ShoreCharger }},
+	{"inverter", "the inverter", "Inverter", sourceInverter, func(r *vesselRoles) *string { return &r.Inverter }},
+	{"generator", "the generator", "Generator", sourceGenerator, func(r *vesselRoles) *string { return &r.Generator }},
 }
 
 func normalizeVesselRoles(r vesselRoles) vesselRoles {
@@ -153,4 +154,38 @@ func rolesBlockMap(r vesselRoles) (map[string]any, error) {
 		return nil, fmt.Errorf("roles settings: round-tripping roles block: %w", err)
 	}
 	return generic, nil
+}
+
+// clearRolesForItem blanks every role that names itemID and saves the block, so
+// deleting an item leaves no role pointing at an id that no longer exists. It
+// returns the roles it cleared. A settings file that cannot be read or written
+// is an error: the caller must not report a clean delete.
+func clearRolesForItem(settingsPath, itemID string) ([]string, error) {
+	settings, err := readSettings(settingsPath)
+	if err != nil {
+		return nil, fmt.Errorf("roles settings: reading %s: %w", settingsPath, err)
+	}
+	roles, err := parseRolesBlock(settings)
+	if err != nil {
+		return nil, err
+	}
+	var cleared []string
+	for _, spec := range roleSpecs {
+		if p := spec.get(&roles); *p == itemID {
+			*p = ""
+			cleared = append(cleared, spec.field)
+		}
+	}
+	if len(cleared) == 0 {
+		return nil, nil
+	}
+	block, err := rolesBlockMap(roles)
+	if err != nil {
+		return nil, err
+	}
+	settings["roles"] = block
+	if err := writeSettings(settingsPath, settings); err != nil {
+		return nil, fmt.Errorf("roles settings: saving after clearing %v: %w", cleared, err)
+	}
+	return cleared, nil
 }
