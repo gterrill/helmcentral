@@ -1,8 +1,8 @@
-# ADR 0186: Engine Cluster v2
+# ADR 0188: Engine Cluster v2
 
 ## Status
 
-Accepted. Builds on [ADR 0185](0185-equipment-items-own-their-signalk-source.md),
+Accepted. Builds on [ADR 0187](0187-equipment-items-own-their-signalk-source.md),
 whose equipment model the tile's slots use. Supersedes the layout in ADR 0054
 section 5a (the telltale strip) and ADR 0061 (the straight fuel rail). The rest
 of ADR 0054 stands: one tile is one engine, every slot is a `GaugeWidgetConfig`,
@@ -15,7 +15,7 @@ A design for a full engine card (800 x 616: a 380 px tachometer, four readout
 cards cut round it, a fuel fan, a footer) replaced the 520-wide ring-and-corners
 layout. Paths were captured from the live SignalK server rather than assumed.
 
-Under ADR 0185 a cluster stores an engine item and, per slot, a suffix under that
+Under ADR 0187 a cluster stores an engine item and, per slot, a suffix under that
 item's source; the path is worked out on every read and the zones come from the
 item's profile. The new card shows more than one piece of equipment: the starter
 battery, the alternator and the exhaust are not the engine.
@@ -51,7 +51,7 @@ battery, the alternator and the exhaust are not the engine.
    slot's zones alarm under its own item. A footer slot whose own item is gone or
    unmapped reads nothing and raises nothing; it never falls back to the
    engine's source. Zones a slot still holds (a converted tile with no profile)
-   keep the index ids of ADR 0185. The old telltales shipped at index 18 and up,
+   keep the index ids of ADR 0187. The old telltales shipped at index 18 and up,
    and a telltale moved onto an arc keeps the index of its own old position
    (`zoneIndex` on the slot), so no issued id changes, whichever order the
    telltales were in. The coolant arc is 18 by default. The footer and the right

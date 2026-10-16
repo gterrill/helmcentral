@@ -7,7 +7,7 @@ import (
 
 // The Engine Cluster v2 slots that are not the ring, centre and corners: two
 // arcs in the gap at the foot of the dial and a footer of cards. Every one is a
-// gauge slot on the equipment model (ADR 0185): a suffix under an item's
+// gauge slot on the equipment model (ADR 0187): a suffix under an item's
 // source, with zones from that item's profile. Arcs and the transmission and
 // charge figures read the cluster's own engine; the starter battery, the
 // alternator and the exhaust name their own item (dashboardGaugeConfig.EquipmentID).
