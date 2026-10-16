@@ -191,9 +191,13 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 		}
 
 		// Names go onto an item that has none. Every item has a name, so this
-		// only matters for a name the item lacks; a named source with no item
-		// has nowhere to go and is reported.
-		nameOnto := func(source, name, what string) {
+		// only matters for a name the item lacks. A named source no item owns
+		// gets a minimal item made for it (the name, the kind the source
+		// belongs to, the source), so no name is lost; the operator can delete
+		// any they do not want. A source an item already owns is never given a
+		// second one. create is false for an engine row that was linked to an
+		// item: that item exists and was dealt with above.
+		nameOnto := func(source, name, what string, create bool) {
 			name = strings.TrimSpace(name)
 			if name == "" {
 				return
@@ -206,7 +210,25 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 				}
 			}
 			if !ok {
-				note("%s %q (%s) has no equipment item, so the name was not carried over; create an item for it in Settings > SignalK", what, name, source)
+				if !create {
+					return
+				}
+				group, _, valid := parseSource(source)
+				if !valid {
+					note("%s %q (%s) is not a source an item can own, so the name was not carried over", what, name, source)
+					return
+				}
+				created, err := createEquipmentTx(tx, now, equipmentItem{
+					Name: name, System: sourceSystem(group), Quantity: 1, SignalKSource: source,
+				})
+				if err != nil {
+					note("%s %q (%s): could not create an equipment item: %v", what, name, source, err)
+					return
+				}
+				ci := convertItem{id: created.ID, name: created.Name, source: source}
+				byID[ci.id] = ci
+				bySource[source] = ci
+				note("created equipment item %q for %s (%s); delete it on the Equipment page if you do not want it", name, source, what)
 				return
 			}
 			if strings.TrimSpace(it.name) == "" {
@@ -218,17 +240,17 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 			}
 		}
 		for _, b := range legacy.Batteries {
-			nameOnto(sourcePath(sourceBattery, strings.TrimSpace(b.Instance)), b.Name, "battery")
+			nameOnto(sourcePath(sourceBattery, strings.TrimSpace(b.Instance)), b.Name, "battery", true)
 		}
 		for _, s := range legacy.Solar {
-			nameOnto(sourcePath(sourceSolar, strings.TrimSpace(s.Instance)), s.Name, "solar controller")
+			nameOnto(sourcePath(sourceSolar, strings.TrimSpace(s.Instance)), s.Name, "solar controller", true)
 		}
 		for _, e := range legacy.Engines {
-			nameOnto(sourcePath(sourceEngine, strings.TrimSpace(e.Instance)), e.Name, "engine")
+			nameOnto(sourcePath(sourceEngine, strings.TrimSpace(e.Instance)), e.Name, "engine", strings.TrimSpace(e.EquipmentID) == "")
 		}
 		for key, v := range tankLabels {
 			label, _ := v.(string)
-			nameOnto(sourcePath(sourceTank, strings.ToLower(strings.TrimSpace(key))), label, "tank")
+			nameOnto(sourcePath(sourceTank, strings.TrimSpace(key)), label, "tank", true)
 		}
 
 		// A hand-typed hour meter path becomes the item's source when it names

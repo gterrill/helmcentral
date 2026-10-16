@@ -199,9 +199,9 @@ func TestConvertLegacyVesselMapsItemsAndWritesRoles(t *testing.T) {
 		`engine "Centre" (propulsion.centre) had no equipment item`,
 		"the port alternator was electrical.alternator.2; no equipment item is assigned to it now",
 		"the inverter was electrical.inverters.5",
-		`battery "Port Engine Starter Battery" (electrical.batteries.3) has no equipment item`,
-		`tank "PORT FWD" (tanks.fuel.5) has no equipment item`,
-		`solar controller "Port array" (electrical.solar.289) has no equipment item`,
+		`created equipment item "Port Engine Starter Battery" for electrical.batteries.3`,
+		`created equipment item "PORT FWD" for tanks.fuel.5`,
+		`created equipment item "Port array" for electrical.solar.289`,
 		"watermaker.runtime",
 	} {
 		if !strings.Contains(out, want) {
@@ -330,5 +330,121 @@ func TestConvertLegacyVesselPicksTheGeneratorRoleAfterTheHourMeterGivesItASource
 	}
 	if roles.Generator != f.gen {
 		t.Fatalf("the generator role should name the genset, got %q (want %q)", roles.Generator, f.gen)
+	}
+}
+
+// The boat's real tank labels: eight of them, keyed the way the SignalK page
+// wrote them.
+const realTankLabelsSettings = `signalk:
+    address: 127.0.0.1
+    port: 3000
+ui:
+    tank_labels:
+        blackWater.1: PORT
+        blackWater.3: STBD
+        fuel.2: STBD FWD
+        fuel.4: PORT AFT
+        fuel.5: PORT FWD
+        fuel.7: STBD AFT
+        freshWater.0: FWD
+        freshWater.6: AFT
+vessel:
+    engines:
+        - instance: port
+          name: Port
+          equipment_id: ""
+        - instance: starboard
+          name: Starboard
+          equipment_id: %s
+    batteries:
+        - instance: "3"
+          name: Port Engine Starter Battery
+        - instance: "4"
+          name: Starboard Starter Battery
+    solar:
+        - instance: "289"
+          name: Port array
+units: metric
+`
+
+// Every name the old settings held for a source no item owns becomes a minimal
+// item of the matching kind mapped to that source, once; a source an item
+// already owns is left alone.
+func TestConvertLegacyVesselCreatesItemsForNamedSourcesWithNoItem(t *testing.T) {
+	store := vesselFixtureStore(t)
+	withTempAlarmRules(t)
+	logs := captureLog(t)
+	stbd, err := store.CreateEquipment(equipmentItem{Name: "Yanmar starboard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An item already owns the starter battery 4, so its name is not made into a second item.
+	owned, err := store.CreateEquipment(equipmentItem{Name: "Starboard start bank", SignalKSource: "electrical.batteries.4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "settings.yaml")
+	if err := os.WriteFile(path, []byte(fmt.Sprintf(realTankLabelsSettings, stbd.ID)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SETTINGS_FILE", path)
+
+	if err := convertLegacyVessel(path, store); err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+
+	bySource := map[string]equipmentItem{}
+	all, err := store.ListEquipment(equipmentFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := map[string]int{}
+	for _, it := range all {
+		if it.SignalKSource != "" {
+			bySource[it.SignalKSource] = it
+			count[it.SignalKSource]++
+		}
+	}
+	want := map[string]string{
+		"tanks.blackWater.1":     "PORT",
+		"tanks.blackWater.3":     "STBD",
+		"tanks.fuel.2":           "STBD FWD",
+		"tanks.fuel.4":           "PORT AFT",
+		"tanks.fuel.5":           "PORT FWD",
+		"tanks.fuel.7":           "STBD AFT",
+		"tanks.freshWater.0":     "FWD",
+		"tanks.freshWater.6":     "AFT",
+		"electrical.batteries.3": "Port Engine Starter Battery",
+		"electrical.solar.289":   "Port array",
+		"propulsion.port":        "Port",
+	}
+	for source, name := range want {
+		it, ok := bySource[source]
+		if !ok || it.Name != name {
+			t.Errorf("%s should have an item named %q, got %+v", source, name, it)
+			continue
+		}
+		if group, _, _ := parseSource(source); it.SourceKind != string(group) {
+			t.Errorf("%s: kind = %q, want %q", source, it.SourceKind, group)
+		}
+	}
+	if got := bySource["electrical.batteries.4"]; got.ID != owned.ID || count["electrical.batteries.4"] != 1 {
+		t.Errorf("a source an item already owns must not get a second item: %+v", got)
+	}
+	if got := bySource["propulsion.starboard"]; got.ID != stbd.ID {
+		t.Errorf("a named engine with a link keeps its own item: %+v", got)
+	}
+	if !strings.Contains(logs.String(), `created equipment item "PORT FWD" for tanks.fuel.5`) {
+		t.Errorf("each created item is logged, got:\n%s", logs.String())
+	}
+
+	// Once: a second run adds nothing.
+	before := len(all)
+	if err := convertLegacyVessel(path, store); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := store.ListEquipment(equipmentFilter{})
+	if len(after) != before {
+		t.Errorf("the conversion ran twice: %d items, then %d", before, len(after))
 	}
 }

@@ -41,7 +41,9 @@ reports now, plus the source the item already owns, so there is nothing to type.
 Names come only from items. There are no separate battery names, solar names,
 engine names or tank labels any more. A tank shows on the Tanks tile once an
 item owns it. A battery or solar controller no item owns shows under its
-number.
+number. If you upgraded from the old Vessel settings, an item was made for each
+battery, solar controller, tank and engine you had named, so you can delete the
+ones you do not want.
 
 ## Engines
 

@@ -16,11 +16,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Engines, batteries, tanks and the rest are now equipment items.** On the
   first start after upgrading, Helmcentral moves your Settings → Vessel engines
   and house bank, your alternator and electrical choices, and your tank labels
-  onto equipment items and a new **Roles** list in **Settings → SignalK**. Then
-  check what it could not move. Open **Settings → SignalK → Discovery**: any
-  battery, solar controller or tank you had only named, and any engine you had
-  not linked to an item, shows **Create item**; create one (a name and a kind)
-  to get the name back. Under **Roles**, choose the port and starboard
+  onto equipment items and a new **Roles** list in **Settings → SignalK**. Every
+  battery, solar controller and tank you had only named, and every engine row you
+  had not linked to an item, gets an equipment item created for it, with that
+  name and mapped to that source, so no name is lost. Delete any you do not want
+  on the Equipment page. Then check what it could not move. Under **Roles**, choose the port and starboard
   alternators, the shore charger, the inverter, the generator and the voltage
   readout battery if they show **Not set**, then choose **Save**. Until you do,
   those figures show no data. The startup log lists every name and role it could

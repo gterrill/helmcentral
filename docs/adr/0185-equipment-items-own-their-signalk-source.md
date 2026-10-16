@@ -89,8 +89,11 @@ items.
    hand-typed engine and generator hour meter paths become sources, and alarm
    rules on the old bank's state of charge start following the role. Anything
    that cannot be mapped is logged once, plainly, and its role is left unset.
-   Names of sources that have no item are not carried over (an item is the only
-   place a name lives) and each is logged so the operator can create the item.
+   A name for a source that no item owns (a tank label, a battery or solar name,
+   an engine row with no equipment link) becomes a minimal item made for it:
+   the name, the kind of the source, the source. Each is logged, none is made for
+   a source an item already owns, and the operator can delete any they do not
+   want. An item is the only place a name lives, so none is dropped.
    A source already owned by another item is never taken. The old keys are
    removed from settings.yaml, which ends the conversion; a block that does not
    parse stops startup.
@@ -178,9 +181,10 @@ does not carry dashboard records, so nothing there changed.
 ## Consequences
 
 - Breaking for the one boat: after upgrading, the conversion moves what it can,
-  and the operator creates items for batteries, solar controllers and tanks
-  that were only named before, and chooses the alternator, charger, inverter,
-  generator and readout roles that had no item to map to.
+  creates items for the batteries, solar controllers, tanks and unlinked engines
+  that were only named before (the operator deletes any unwanted), and the
+  operator chooses the alternator, charger, inverter, generator and readout roles
+  that had no item to map to.
 - The equipment PUT replaces the whole record, so every client must send the
   source and bank figures back. The editor and the stocktake do; Mate's
   changesets carry them through untouched and cannot set them.
