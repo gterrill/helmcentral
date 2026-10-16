@@ -9,7 +9,7 @@ import (
 )
 
 // dashboard_equipment.go is how a tile that shows a piece of equipment finds
-// its readings (ADR 0185, phase 2). The tile stores the id of an equipment
+// its readings (ADR 0187, phase 2). The tile stores the id of an equipment
 // item and, per slot, a suffix such as oilPressure or fuel.rate. The path is
 // the item's SignalK source plus the suffix, worked out each time it is read,
 // so mapping an item to another source moves every tile that shows it. Gauge

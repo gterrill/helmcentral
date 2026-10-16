@@ -1,4 +1,4 @@
-# ADR 0185: Equipment items own their SignalK source
+# ADR 0187: Equipment items own their SignalK source
 
 ## Status
 

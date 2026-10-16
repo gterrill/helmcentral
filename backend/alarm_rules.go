@@ -65,7 +65,7 @@ type alarmRule struct {
 	Label string `json:"label"`
 
 	// PathRole, when set, binds the rule to a role instead of a literal path
-	// (ADR 0185): the server keeps Path equal to that role's current SignalK
+	// (ADR 0187): the server keeps Path equal to that role's current SignalK
 	// path, so changing the house bank moves the rule with it. The only role
 	// a rule can follow is house_bank_soc, the house bank's state of charge.
 	// With the role unset the rule has no path and never fires.

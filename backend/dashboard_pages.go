@@ -121,7 +121,7 @@ type dashboardLamp struct {
 	// bilge float, a fault line). A lamp for something with several instances
 	// (an engine, the generator, an alternator) names its equipment item and a
 	// suffix instead, and the path is worked out from the item's source
-	// (ADR 0185). Exactly one of the two forms is set.
+	// (ADR 0187). Exactly one of the two forms is set.
 	Path        string `json:"path"`
 	EquipmentID string `json:"equipmentId,omitempty"`
 	Suffix      string `json:"suffix,omitempty"`
@@ -264,7 +264,7 @@ type dashboardClusterCorner struct {
 // decision that made gauge groups cheap: zones, units and scales all work per
 // slot with no new machinery.
 type dashboardClusterConfig struct {
-	// EquipmentID is the engine item the cluster shows (ADR 0185). Empty means
+	// EquipmentID is the engine item the cluster shows (ADR 0187). Empty means
 	// none is picked yet and the tile asks for one. Every slot below reads a
 	// suffix of that item's source, and its zones come from the item's profile.
 	EquipmentID string `json:"equipmentId,omitempty"`
@@ -288,7 +288,7 @@ type dashboardClusterConfig struct {
 }
 
 // dashboardClusterFuelBar is one tank, by the equipment item that owns its
-// source (ADR 0185). Its level and capacity are that source's currentLevel and
+// source (ADR 0187). Its level and capacity are that source's currentLevel and
 // capacity, read as a ratio and a volume. Empty TankID is a bar with no tank
 // picked yet.
 type dashboardClusterFuelBar struct {
@@ -317,7 +317,7 @@ type dashboardClusterFuelRail struct {
 }
 
 type dashboardGaugeGroupConfig struct {
-	// EquipmentKind marks a group that shows one piece of equipment (ADR 0185):
+	// EquipmentKind marks a group that shows one piece of equipment (ADR 0187):
 	// the source group its item belongs to, such as "engine" or "alternator".
 	// Its gauges then read suffixes of the item's source and take their zones
 	// from the item's profile. Empty is a plain group of directly picked paths.
@@ -1400,7 +1400,7 @@ func validateGaugeSettings(g dashboardGaugeConfig, ctx string) string {
 }
 
 // validateSlotConfig guards one slot of a tile that shows an equipment item
-// (ADR 0185). It reads a suffix of the item's source, never a path, and
+// (ADR 0187). It reads a suffix of the item's source, never a path, and
 // carries no zones: those come from the item's profile. A tile with no item
 // picked yet may hold slots with no suffix, so it can still be moved and
 // resized while it waits to be picked; once an item is set every slot names
@@ -1513,7 +1513,7 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 /*
 validateClusterFuelRail guards the fuel rail (ADR 0061).
 
-A bar names a tank by its equipment item (ADR 0185). Its level and capacity are
+A bar names a tank by its equipment item (ADR 0187). Its level and capacity are
 that item's source plus currentLevel and capacity, read as a ratio and a
 volume, so there is no quantity or unit to get wrong and a tank path with no
 meta.units can no longer read 1.2 where it should read 890.
@@ -1610,7 +1610,7 @@ func validateLampStripConfig(cfg *dashboardLampStripConfig, where string) string
 	for _, lamp := range cfg.Lamps {
 		path := strings.TrimSpace(lamp.Path)
 		if lamp.EquipmentID != "" {
-			// A lamp for a piece of equipment (ADR 0185) reads a suffix of the
+			// A lamp for a piece of equipment (ADR 0187) reads a suffix of the
 			// item's source; the two forms never mix.
 			suffix := strings.TrimSpace(lamp.Suffix)
 			if path != "" {
@@ -1768,7 +1768,7 @@ func gaugeBoundPaths() []string {
 	defer dashboardPagesMu.RUnlock()
 
 	// Read once for the whole walk: a tile that shows an equipment item binds
-	// the item's source plus a suffix (ADR 0185), so the paths move with the
+	// the item's source plus a suffix (ADR 0187), so the paths move with the
 	// item. A tile whose item is gone, unmapped or unpicked binds nothing and
 	// shows that, rather than falling back to a path it once held.
 	ix := currentEquipmentIndex()

@@ -272,7 +272,7 @@ func updateSettingsHandler(c echo.Context) error {
 	// stale key never breaks loading, but every save must still drop it from
 	// the file for good instead of copying it forward via the loop above.
 	delete(uiMap, "vessel_state_refresh_seconds")
-	// Tank labels moved onto equipment items (ADR 0185); drop the retired key.
+	// Tank labels moved onto equipment items (ADR 0187); drop the retired key.
 	delete(uiMap, "tank_labels")
 	uiMap["tide_provider"] = normalized.UI.TideProvider
 	uiMap["tide_station_id"] = normalized.UI.TideStationID

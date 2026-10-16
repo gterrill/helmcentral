@@ -7,7 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// vessel_roles.go owns the "roles:" block of settings.yaml (ADR 0185). A role
+// vessel_roles.go owns the "roles:" block of settings.yaml (ADR 0187). A role
 // is a single-choice answer to "which of my equipment items is the ...": the
 // house bank, the port alternator, the shore charger. Each is the id of an
 // equipment item that owns a SignalK source of the right kind, so changing an

@@ -219,7 +219,7 @@ type equipmentItem struct {
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 
-	// SignalKSource is the one SignalK node this item owns (ADR 0185), for
+	// SignalKSource is the one SignalK node this item owns (ADR 0187), for
 	// example propulsion.port or electrical.batteries.1; "" when it owns none.
 	// At most one item owns a given source. CapacityAh, Cells, WarnVoltage and
 	// HighVoltage describe a battery bank and are meaningful only on an item

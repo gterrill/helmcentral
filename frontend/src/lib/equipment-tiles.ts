@@ -11,7 +11,7 @@ import type {
 } from '@/lib/dashboard-widgets'
 
 /**
- * How a tile that shows a piece of equipment finds its readings (ADR 0185,
+ * How a tile that shows a piece of equipment finds its readings (ADR 0187,
  * phase 2). The tile stores the item's id and a suffix per reading. The path is
  * the item's SignalK source plus the suffix, and the zones are the ones on the
  * gauge of the item's profile with the same suffix, so the tile, the alarms
@@ -320,7 +320,7 @@ function bandText(bands: readonly GaugeZone[], min: number, unit: string): strin
 }
 
 /**
- * What to do with the zones slots still hold (ADR 0185). A tile converted
+ * What to do with the zones slots still hold (ADR 0187). A tile converted
  * before there was equipment, or a profile, keeps its zones on the tile and
  * they keep alarming. Once the item has a profile they belong there: moved when
  * the profile has none for the reading, offered as a choice when it has its

@@ -4,7 +4,7 @@ import { LAMP_LABEL_MAX_LENGTH, LAMP_STRIP_MAX_LAMPS, type LampConfig } from './
 
 /**
  * Default lamps for a fresh indicator ribbon (ADR 0085), built from the
- * equipment items that are mapped to a source (ADR 0185) rather than from
+ * equipment items that are mapped to a source (ADR 0187) rather than from
  * patterns over live paths. One lamp per engine, generator, charger, inverter
  * and alternator, labelled with the item's own name and reading its running
  * signal. A boat missing a generator or a second alternator simply gets a

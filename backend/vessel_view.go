@@ -18,7 +18,7 @@ import (
 // None of it is stored here. Equipment items own their SignalK source
 // (equipment_source.go) and the roles block names which item plays each
 // single-choice part (vessel_roles.go); vesselView is computed from the two on
-// every read (ADR 0185). Nothing ships a default for any field: an item with
+// every read (ADR 0187). Nothing ships a default for any field: an item with
 // no source, a role left blank, or a role whose item has gone away resolves
 // to the zero value, which is the "not set up" state, not a guess. A role
 // that names an item that no longer fits is logged once and left unset, so

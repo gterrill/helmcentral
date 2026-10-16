@@ -19,7 +19,7 @@ import {
 } from '@/lib/equipment-tiles'
 
 /**
- * A tile that cannot show its readings says why, in the tile (ADR 0185): no
+ * A tile that cannot show its readings says why, in the tile (ADR 0187): no
  * item picked yet, the item gone, the item not mapped to a source, or its source
  * not reporting. Never a fallback to a path the tile once held.
  */

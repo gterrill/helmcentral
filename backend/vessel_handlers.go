@@ -16,7 +16,7 @@ import (
 // GET /api/vessel/discovery lists what the boat is currently reporting, grouped
 // by kind, with which equipment item (if any) owns each source, so the
 // operator assigns a source to an item or creates one from live readings
-// rather than typing a SignalK path (ADR 0185). The roles block itself
+// rather than typing a SignalK path (ADR 0187). The roles block itself
 // (vessel_roles.go) loads and saves with the rest of the settings (GET/POST
 // /api/settings), which re-seeds whichever anomaly-v1 sub-sets just became
 // configured (alarm_seed_anomaly.go).

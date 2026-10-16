@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded by [ADR 0185](0185-equipment-items-own-their-signalk-source.md). Was accepted (2026-10-15). Follows [ADR 0180](0180-alternator-instances-are-a-vessel-setting.md),
+Superseded by [ADR 0187](0187-equipment-items-own-their-signalk-source.md). Was accepted (2026-10-15). Follows [ADR 0180](0180-alternator-instances-are-a-vessel-setting.md),
 which did the same for alternators. Supersedes section 4 of
 [ADR 0077](0077-battery-power-tile-reads-the-bank-not-the-fields.md): the
 `INFLUX_SOC_MEASUREMENT` pin is replaced by the house bank setting.

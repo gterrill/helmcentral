@@ -140,7 +140,7 @@ func zoneHysteresisSI(gauge dashboardGaugeConfig, min, max float64) (float64, er
 //
 // A standalone gauge, or a member of a plain gauge group, carries its own zones
 // and is keyed by its widget. A slot of a tile that shows an equipment item
-// (ADR 0185) has none: its zones are read live from the gauge of the item's
+// (ADR 0187) has none: its zones are read live from the gauge of the item's
 // profile with the same suffix, the same ones the tile draws. Those rules are
 // keyed by item and reading rather than by tile, so two tiles showing the same
 // item's oil pressure raise one alarm, and editing a profile's zones changes

@@ -12,7 +12,7 @@ interface ZoneConflictsProps {
 }
 
 /**
- * Where the zones a converted tile still holds are going (ADR 0185). It says
+ * Where the zones a converted tile still holds are going (ADR 0187). It says
  * what stays on the tile, what moves to the equipment's profile when the tile
  * is saved, and, where the profile already has zones of its own, shows both
  * sets and makes the operator pick one. Nothing is dropped without that choice.

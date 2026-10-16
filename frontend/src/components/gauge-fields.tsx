@@ -46,7 +46,7 @@ export function defaultGaugeConfig(): GaugeWidgetConfig {
 
 /**
  * Set when the gauge is a slot of a tile that shows an equipment item (ADR
- * 0185): it names a reading under the item's source instead of a path, and its
+ * 0187): it names a reading under the item's source instead of a path, and its
  * zones are the profile's, edited here but saved to the profile.
  */
 export interface GaugeEquipmentMode {

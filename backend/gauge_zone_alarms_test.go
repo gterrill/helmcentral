@@ -206,7 +206,7 @@ func engineProfileWithZones() engineProfile {
 
 // A cluster slot's zones must alarm like any other gauge's, or ADR 0050's
 // whole point - that a red band is the alarm - holds everywhere but here. The
-// zones come from the item's profile (ADR 0185), so the tile carries none.
+// zones come from the item's profile (ADR 0187), so the tile carries none.
 func TestZoneDerivedAlarmRulesCoversClusterSlotsFromTheProfile(t *testing.T) {
 	useProfiles(t, engineProfileWithZones())
 	itemID := newTileItem(t, "Port engine", "propulsion.port", "yanmar-4jh")

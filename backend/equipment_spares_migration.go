@@ -35,7 +35,7 @@ const equipmentTableBody = `(
 		bin_id          TEXT REFERENCES inventory_bins(id) ON DELETE RESTRICT,
 		location_detail TEXT NOT NULL DEFAULT '',
 		install_date    TEXT NOT NULL DEFAULT '',
-		hour_meter_path TEXT NOT NULL DEFAULT '', -- retired (ADR 0185): read once by the vessel conversion, never written
+		hour_meter_path TEXT NOT NULL DEFAULT '', -- retired (ADR 0187): read once by the vessel conversion, never written
 		profile_id      TEXT NOT NULL DEFAULT '',
 		aliases_json    TEXT NOT NULL DEFAULT '[]',
 		verified_aboard INTEGER NOT NULL DEFAULT 0 CHECK (verified_aboard IN (0,1)),

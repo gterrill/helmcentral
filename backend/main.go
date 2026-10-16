@@ -436,13 +436,13 @@ func main() {
 	loadEngineProfiles()
 	// One-off: the old vessel: settings block, tank labels and hour meter
 	// paths become equipment items that own their SignalK source plus the
-	// roles block (ADR 0185). Fail fast: a half-converted vessel would read
+	// roles block (ADR 0187). Fail fast: a half-converted vessel would read
 	// as an unset one. Must run after loadAlarmRules, which it edits.
 	if err := convertLegacyVessel(getEnv("SETTINGS_FILE", "../settings.yaml"), globalDocumentStore); err != nil {
 		log.Fatalf("failed to convert the vessel settings: %v", err)
 	}
 	// One-off: dashboard tiles that held full SignalK paths become references
-	// to the equipment items that own them (ADR 0185, phase 2). Must run after
+	// to the equipment items that own them (ADR 0187, phase 2). Must run after
 	// the vessel conversion (which gives items their sources) and after the
 	// profiles load (which receive the zones a tile held).
 	if err := convertDashboardTilesToEquipment(); err != nil {
