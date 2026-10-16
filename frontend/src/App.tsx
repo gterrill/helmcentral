@@ -77,7 +77,7 @@ import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { RouteTile } from '@/components/route-tile'
-import { DashboardBentoGrid, raiseGaugeHeight } from '@/components/dashboard-bento-grid'
+import { CLUSTER_DEFAULT_SIZE, DashboardBentoGrid, raiseGaugeHeight } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
 import { EmptyPagePrompt } from '@/components/empty-page-prompt'
@@ -1396,7 +1396,7 @@ function AppShell() {
     const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
     setClusterDraft({
       id: newClusterWidgetId(effectiveWidgets),
-      x: 0, y: maxY, w: 6, h: 7,
+      x: 0, y: maxY, ...CLUSTER_DEFAULT_SIZE,
       cluster: {
         title: '',
         ring: { path: '', label: 'RPM', display: 'radial', quantity: 'raw', unit: 'raw' },

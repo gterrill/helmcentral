@@ -83,6 +83,9 @@ const CLUSTER_WIDGET_CONSTRAINTS = {
   minH: rowsForHeight(TILE_CHROME_H + CLUSTER_H),
 }
 
+/** Where a new cluster tile is placed: the card's own minimum, so it fits. */
+export const CLUSTER_DEFAULT_SIZE = { w: CLUSTER_WIDGET_CONSTRAINTS.minW, h: CLUSTER_WIDGET_CONSTRAINTS.minH } as const
+
 /**
  * A cluster saved before the v2 card is narrower than the card needs, and drawn
  * at that width it scales to half. It is lifted to the minimum width when drawn

@@ -8,6 +8,7 @@ import {
   POI_MAP_WIDGET_CONSTRAINTS,
   WIDGET_CONSTRAINTS,
   gaugeWidgetConstraints,
+  CLUSTER_DEFAULT_SIZE,
   liftClusterBox,
   raiseGaugeHeight,
   gridPixelHeight,
@@ -166,5 +167,17 @@ describe('liftClusterBox', () => {
     const lifted = liftClusterBox({ x: 9, w: 3 })
     expect(lifted.x + lifted.w).toBeLessThanOrEqual(12)
     expect(lifted.w).toBe(min.minW)
+  })
+})
+
+/**
+ * A new cluster tile is placed at the card's own minimum. At the old 6 x 7 the
+ * 592-tall card overflowed its tile and spilled its footer onto whatever sat
+ * below, found placing one through the real UI.
+ */
+describe('a new engine cluster tile', () => {
+  test('is placed at the minimum size, so the card fits its tile', () => {
+    expect(CLUSTER_DEFAULT_SIZE).toEqual({ w: CLUSTER_WIDGET_CONSTRAINTS.minW, h: CLUSTER_WIDGET_CONSTRAINTS.minH })
+    expect(gridPixelHeight(CLUSTER_DEFAULT_SIZE.h)).toBeGreaterThanOrEqual(32 + 592 + 8)
   })
 })
