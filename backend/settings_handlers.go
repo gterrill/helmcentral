@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v4"
 	"gopkg.in/yaml.v3"
@@ -194,6 +195,9 @@ func updateSettingsHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
 	}
 
+	settingsWriteMu.Lock()
+	defer settingsWriteMu.Unlock()
+
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	settings, err := readSettings(settingsPath)
 	if err != nil {
@@ -272,7 +276,7 @@ func updateSettingsHandler(c echo.Context) error {
 	// stale key never breaks loading, but every save must still drop it from
 	// the file for good instead of copying it forward via the loop above.
 	delete(uiMap, "vessel_state_refresh_seconds")
-	// Tank labels moved onto equipment items (ADR 0185); drop the retired key.
+	// Tank labels moved onto equipment items (ADR 0187); drop the retired key.
 	delete(uiMap, "tank_labels")
 	uiMap["tide_provider"] = normalized.UI.TideProvider
 	uiMap["tide_station_id"] = normalized.UI.TideStationID
@@ -962,6 +966,12 @@ func testSignalKConnectionHandler(c echo.Context) error {
 		"vessel_name": strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name"))),
 	})
 }
+
+// settingsWriteMu serialises every read-modify-write of settings.yaml: the
+// settings save, the tide station auto-update and the role clear on an item
+// delete. Without it, two of them read the same file and the later write
+// silently undoes the earlier one. Hold it from the read to the write.
+var settingsWriteMu sync.Mutex
 
 func writeSettings(settingsPath string, settings map[string]any) error {
 

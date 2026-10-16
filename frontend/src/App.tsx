@@ -439,7 +439,7 @@ function AppShell() {
   // Which engines read as switched off, so a cluster says OFF, not stale.
   const engineStates = useEngineStates()
   // The equipment items, profiles and reporting sources that tiles showing a
-  // piece of equipment read their paths and zones from (ADR 0185).
+  // piece of equipment read their paths and zones from (ADR 0187).
   const equipmentContext = useEquipmentTileContext()
   // The Details page's document name, for the Mate sheet's screen context.
   const [documentDetailsTitle, setDocumentDetailsTitle] = useState<string | null>(null)

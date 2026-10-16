@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded by [ADR 0185](0185-equipment-items-own-their-signalk-source.md). Was accepted (2026-10-15). Follows [ADR 0180](0180-alternator-instances-are-a-vessel-setting.md)
+Superseded by [ADR 0187](0187-equipment-items-own-their-signalk-source.md). Was accepted (2026-10-15). Follows [ADR 0180](0180-alternator-instances-are-a-vessel-setting.md)
 and [ADR 0181](0181-engines-and-house-bank-come-from-vessel-settings.md), which
 did the same for alternators, engines and the house bank. Replaces the
 `INFLUX_SHORE_MEASUREMENT` and `INFLUX_GENERATOR_MEASUREMENT` pins described in

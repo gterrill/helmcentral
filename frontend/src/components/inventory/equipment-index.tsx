@@ -24,6 +24,12 @@ import {
   type EquipmentStatus,
   type EquipmentSystem,
 } from '@/hooks/use-inventory'
+import { useEquipmentDependants } from '@/hooks/use-equipment-dependants'
+import {
+  DELETE_CONSEQUENCE,
+  EquipmentDependantsNotice,
+  dependantsBlock,
+} from '@/components/inventory/equipment-dependants-notice'
 
 // ADR 0142: the Equipment index, rebuilt on the CRUD pattern library
 // (components/patterns) in place of the hand-rolled shell this used to copy
@@ -125,6 +131,7 @@ export function EquipmentIndex({ onOpenItem, onNewItem, canWrite = true }: Equip
     },
   ]
 
+  const dependants = useEquipmentDependants(pendingDeleteId)
   const pendingItem = pendingDeleteId ? (items.find((item) => item.id === pendingDeleteId) ?? null) : null
 
   const rowActions = (): RowAction<EquipmentItem>[] => [
@@ -225,8 +232,11 @@ export function EquipmentIndex({ onOpenItem, onNewItem, canWrite = true }: Equip
         title={`Delete "${pendingItem?.name ?? ''}"?`}
         description={deleteError ?? "This removes the equipment record. It can't be undone."}
         deleting={deleting}
+        confirmDisabled={dependantsBlock(dependants)}
         onConfirm={() => { void handleConfirmDelete() }}
-      />
+      >
+        <EquipmentDependantsNotice state={dependants} consequence={DELETE_CONSEQUENCE} />
+      </ConfirmDelete>
     </Page>
   )
 }

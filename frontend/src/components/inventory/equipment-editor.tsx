@@ -42,6 +42,7 @@ import {
   EQUIPMENT_SYSTEM_LABELS,
   createEquipment,
   deleteEquipmentPhoto,
+  fetchEquipmentDependants,
   setEquipmentPhotoOrder,
   useEquipmentItem,
   useInventoryZones,
@@ -58,6 +59,15 @@ import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { fetchNote, saveNote } from '@/lib/note-api'
 import { hourMeterSourceFor } from '@/lib/vessel-settings'
 import { EquipmentSourceSection } from '@/components/inventory/equipment-source-section'
+import {
+  CHANGE_SOURCE_CONSEQUENCE,
+  CLEAR_SOURCE_CONSEQUENCE,
+  DELETE_CONSEQUENCE,
+  EquipmentDependantsNotice,
+  dependantsBlock,
+} from '@/components/inventory/equipment-dependants-notice'
+import { useEquipmentDependants } from '@/hooks/use-equipment-dependants'
+import { hasDependants, type EquipmentDependants } from '@/lib/equipment-dependants'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
 // equipment record - `id === null` is the "New item" draft, everything else is
@@ -186,6 +196,14 @@ interface EquipmentEditorProps {
   initialBinId?: string | null
 }
 
+/** The operator backed out of the source-change confirmation. */
+class SourceChangeDeclined extends Error {
+  constructor() {
+    super('Source change not confirmed')
+    this.name = 'SourceChangeDeclined'
+  }
+}
+
 /** The operator backed out of the profile-change confirmation. */
 class ProfileChangeDeclined extends Error {
   constructor() {
@@ -224,6 +242,11 @@ export function EquipmentEditor(
   const [profilePreview, setProfilePreview] = useState<MaintenanceProfileChangePreview | null>(null)
   const [profilePreviewError, setProfilePreviewError] = useState<string | null>(null)
   const [confirmingProfileChange, setConfirmingProfileChange] = useState(false)
+  // Taking an item's source away, or moving it, is confirmed when something
+  // uses the item: the list of what is asked for at save, like the profile
+  // change above, and answered through the same kind of promise.
+  const [sourceChange, setSourceChange] = useState<{ dependants: EquipmentDependants; clearing: boolean } | null>(null)
+  const sourceDecision = useRef<{ resolve: () => void; reject: (err: Error) => void } | null>(null)
   const profilePreviewSeq = useRef(0)
   const profilePreviewPending = useRef(false)
   // The operator's answer to the confirmation, awaited by performSave so every
@@ -280,6 +303,7 @@ export function EquipmentEditor(
   const [saveError, setSaveError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<InventoryFieldError[]>([])
   const [pendingDelete, setPendingDelete] = useState(false)
+  const deleteDependants = useEquipmentDependants(pendingDelete ? id : null)
   const [deleting, setDeleting] = useState(false)
   // 2026-09-25 amendment: the delete confirm dialog's own "Also delete N
   // photo(s) only this item uses" checkbox - off by default (the operator's
@@ -449,6 +473,13 @@ export function EquipmentEditor(
     pending?.reject(new ProfileChangeDeclined())
   }, [])
   useEffect(() => { clearProfileChange() }, [id, clearProfileChange])
+  const clearSourceChange = useCallback(() => {
+    setSourceChange(null)
+    const pending = sourceDecision.current
+    sourceDecision.current = null
+    pending?.reject(new SourceChangeDeclined())
+  }, [])
+  useEffect(() => { clearSourceChange() }, [id, clearSourceChange])
 
   const handleProfileChange = (profileId: string) => {
     const seq = (profilePreviewSeq.current += 1)
@@ -705,6 +736,18 @@ export function EquipmentEditor(
           })
         }
       }
+      // Unmapping or moving the source of an item that something uses is
+      // confirmed first, with what uses it. An item that nothing uses, or one
+      // being mapped for the first time, asks nothing.
+      if (id !== null && item && item.signalk_source.trim() !== '' && draft.signalk_source.trim() !== item.signalk_source.trim()) {
+        const dependants = await fetchEquipmentDependants(id)
+        if (hasDependants(dependants)) {
+          await new Promise<void>((resolve, reject) => {
+            sourceDecision.current = { resolve, reject }
+            setSourceChange({ dependants, clearing: draft.signalk_source.trim() === '' })
+          })
+        }
+      }
       if (id === null) {
         const created = await createEquipment(draft)
         onCreated(created.id)
@@ -789,7 +832,7 @@ export function EquipmentEditor(
       }
       throw err
     }
-  }, [id, draft, setDraft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
+  }, [id, item, draft, setDraft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
 
   // ADR 0171: this editor owns the guard for its draft. An unsaved draft has a
   // Save behind Save and Continue; photos still waiting for Retry have nothing
@@ -816,13 +859,22 @@ export function EquipmentEditor(
     else pending.reject(new ProfileChangeDeclined())
   }
 
+  const decideSourceChange = (confirmed: boolean) => {
+    const pending = sourceDecision.current
+    sourceDecision.current = null
+    setSourceChange(null)
+    if (!pending) return
+    if (confirmed) pending.resolve()
+    else pending.reject(new SourceChangeDeclined())
+  }
+
   const handleSave = async () => {
     setSaving(true)
     try {
       await performSave()
     } catch (err) {
       // Declining the profile confirmation is a choice, not a failure.
-      if (err instanceof ProfileChangeDeclined) return
+      if (err instanceof ProfileChangeDeclined || err instanceof SourceChangeDeclined) return
       // AGENTS.md fallback policy: the server's own message, draft left
       // exactly as typed.
       setSaveError(err instanceof Error ? err.message : String(err))
@@ -1322,13 +1374,33 @@ export function EquipmentEditor(
       </AlertDialog>
 
       <ConfirmDelete
+        open={sourceChange !== null}
+        onOpenChange={(isOpen) => { if (!isOpen) decideSourceChange(false) }}
+        title={sourceChange?.clearing ? `Clear the source of "${item?.name}"?` : `Change the source of "${item?.name}"?`}
+        description={sourceChange?.clearing
+          ? 'This item will stop reading from the boat. Everything that uses it is affected.'
+          : 'This item will read from a different source. Everything that uses it is affected.'}
+        confirmLabel={sourceChange?.clearing ? 'Clear source' : 'Change source'}
+        onConfirm={() => decideSourceChange(true)}
+      >
+        {sourceChange && (
+          <EquipmentDependantsNotice
+            state={{ status: 'ready', dependants: sourceChange.dependants }}
+            consequence={sourceChange.clearing ? CLEAR_SOURCE_CONSEQUENCE : CHANGE_SOURCE_CONSEQUENCE}
+          />
+        )}
+      </ConfirmDelete>
+
+      <ConfirmDelete
         open={pendingDelete}
         onOpenChange={(isOpen) => { if (!isOpen) setPendingDelete(false) }}
         title={`Delete "${item?.name}"?`}
         description={`This removes the equipment record.${deleteCascadeNote} It can't be undone.`}
         deleting={deleting}
+        confirmDisabled={dependantsBlock(deleteDependants)}
         onConfirm={() => { void handleConfirmDelete() }}
       >
+        <EquipmentDependantsNotice state={deleteDependants} consequence={DELETE_CONSEQUENCE} />
         {/* 2026-09-25 amendment: only shown when N > 0 - an item with no
             exclusive photos has nothing this checkbox could offer to
             delete, and showing it anyway would ask about a choice that

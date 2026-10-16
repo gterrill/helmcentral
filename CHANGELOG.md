@@ -11,18 +11,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
-### Changed
-
-- AIS distress alarms are now titled "AIS Distress" instead of showing the
-  receiver's internal name, and they clear on their own about ten minutes
-  after the beacon was last heard, never while the SignalK feed is down or has
-  just reconnected. Before, a SART that had stopped
-  transmitting stayed on the board indefinitely.
-
-### Fixed
-
-- The Acknowledge and View buttons in the alarm banner are readable on an
-  emergency. They were white on white.
 ### Breaking
 
 - **Engines, batteries, tanks and the rest are now equipment items.** On the
@@ -99,8 +87,28 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   profile dialog on the Add Tile menu and the find-and-replace in gauge groups.
   Add an Engine Cluster or a gauge group and choose the equipment instead.
 
+### Changed
+
+- AIS distress alarms are now titled "AIS Distress" instead of showing the
+  receiver's internal name, and they clear on their own about ten minutes
+  after the beacon was last heard, never while the SignalK feed is down or has
+  just reconnected. Before, a SART that had stopped
+  transmitting stayed on the board indefinitely.
+
+### Fixed
+
+- The Acknowledge and View buttons in the alarm banner are readable on an
+  emergency. They were white on white.
+
 ### Added
 
+- **Helmcentral lists what uses an equipment item before you clear its source or
+  delete it.** Clearing or changing the item's **Source**, or deleting the item,
+  now asks you to confirm when anything uses it, and names what: the tiles by
+  page and title, the features that read it, the roles it plays and the alarm
+  rules that watch it. An item nothing uses asks nothing more than before.
+  Deleting an item also clears the roles that named it, so they show **Not
+  set** instead of pointing at an item that no longer exists.
 - **Settings → SignalK → Discovery** lists what the boat reports (engines,
   batteries, alternators, solar controllers, tanks, generators, chargers and
   inverters) with live readings and the equipment item each belongs to. Assign

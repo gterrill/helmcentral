@@ -251,7 +251,7 @@ export interface GaugeZone {
 /**
  * Binds one widget to one SignalK path (ADR 0039).
  *
- * On a tile that shows an equipment item (ADR 0185) the slot names a `suffix`
+ * On a tile that shows an equipment item (ADR 0187) the slot names a `suffix`
  * under the item's source instead, `path` is empty in the stored record, and
  * the zones come from the item's profile. The tiles themselves are given the
  * resolved slot, with `path` and `zones` filled in (lib/equipment-tiles.ts).
@@ -305,7 +305,7 @@ export interface GaugeGroupWidgetConfig {
 export interface LampConfig {
   /** A path read directly, for a single-instance signal. Empty on a lamp for equipment. */
   path: string
-  /** A lamp for multi-instance equipment names the item and a reading under its source (ADR 0185). */
+  /** A lamp for multi-instance equipment names the item and a reading under its source (ADR 0187). */
   equipmentId?: string
   suffix?: string
   label: string
@@ -347,7 +347,7 @@ export interface FuelBarConfig {
   capacity: GaugeWidgetConfig
 }
 
-/** One tank as stored: the equipment item that owns its source (ADR 0185). */
+/** One tank as stored: the equipment item that owns its source (ADR 0187). */
 export interface FuelBarRef {
   /** Unset until a tank is picked. */
   tankId?: string
@@ -391,7 +391,7 @@ export interface ClusterFuelRailRef {
  * groups cheap, so zones, units and scales all work per slot unchanged.
  */
 export interface EngineClusterConfig {
-  /** The engine item shown (ADR 0185); unset until one is picked. */
+  /** The engine item shown (ADR 0187); unset until one is picked. */
   equipmentId?: string
   /**
    * The source the tile read before any equipment was picked. Set by the

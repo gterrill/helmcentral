@@ -881,7 +881,7 @@ func applyDocumentStoreMigrations(db *sql.DB) error {
 	return nil
 }
 
-// applyEquipmentSourceColumns adds the ADR 0185 columns to equipment: the
+// applyEquipmentSourceColumns adds the ADR 0187 columns to equipment: the
 // SignalK source an item owns and a battery item's bank figures. It runs after
 // rebuildEquipmentForSpares, which builds a new table from equipmentTableBody
 // and would drop columns added before it. hour_meter_path stays in the table

@@ -9,7 +9,7 @@ import (
 )
 
 // dashboard_equipment_convert.go is the one-off conversion of dashboard tiles
-// from full SignalK paths to equipment items (ADR 0185, phase 2). It runs at
+// from full SignalK paths to equipment items (ADR 0187, phase 2). It runs at
 // startup after the vessel conversion has given items their sources, and
 // finishes by recording that it has, so a plain group of paths made later is
 // never touched.

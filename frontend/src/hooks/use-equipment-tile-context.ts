@@ -8,7 +8,7 @@ import type { EquipmentTileContext } from '@/lib/equipment-tiles'
 
 /**
  * What a tile that shows a piece of equipment needs to find its readings: the
- * items, their profiles, and which sources the boat is reporting (ADR 0185).
+ * items, their profiles, and which sources the boat is reporting (ADR 0187).
  * Each part is the same cached read the Inventory and Settings pages use, so
  * a tile adds no request of its own, and an edit to an item or a profile
  * reaches every tile showing it.

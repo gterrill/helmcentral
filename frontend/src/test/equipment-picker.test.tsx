@@ -78,5 +78,8 @@ describe('EquipmentPicker', () => {
     const put = calls.find((c) => c.method === 'PUT')!
     expect(put.url).toContain('/api/inventory/equipment/spare')
     expect(JSON.parse(put.body!).signalk_source).toBe('propulsion.starboard')
+    // Mapping an item that owns no source takes a source from nothing, so
+    // there is nothing to confirm and nothing to look up.
+    expect(calls.some((c) => c.url.endsWith('/dependants'))).toBe(false)
   })
 })

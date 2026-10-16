@@ -74,7 +74,9 @@ A tile that cannot read its equipment says why, in the tile:
 - **Not reporting.** The item is mapped, but the boat is not reporting that
   source now. An engine that is simply switched off still shows its tile, with
   `OFF`.
-- **Equipment removed.** The item was deleted. Choose another.
+- **Equipment removed.** The item was deleted. Choose another. Deleting an item
+  lists the tiles that show it first; see
+  [Set up your vessel](set-up-your-vessel.md).
 
 ## Map an item without leaving the tile
 

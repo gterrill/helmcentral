@@ -8,7 +8,7 @@ import (
 )
 
 // vessel_sources.go is the vocabulary of an equipment item's SignalK source
-// (ADR 0185). A source is the one SignalK node an item owns, written as the
+// (ADR 0187). A source is the one SignalK node an item owns, written as the
 // path of the instance, for example propulsion.port or
 // electrical.batteries.1. Only the multi-instance groups have one: engines,
 // batteries, alternators, solar controllers, tanks, generators, chargers and

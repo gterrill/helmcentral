@@ -43,7 +43,7 @@ interface GaugeGroupConfigDialogProps {
 /**
  * Builds a gauge group (ADR 0049): a named cluster of gauges in one tile.
  *
- * A group shows either a piece of equipment (ADR 0185) or a hand-picked list of
+ * A group shows either a piece of equipment (ADR 0187) or a hand-picked list of
  * paths. A group of equipment stores the item and a reading per gauge, takes
  * its zones from the item's profile, and is pointed at the other engine by
  * choosing the other item: duplicate "Port", pick the starboard engine.

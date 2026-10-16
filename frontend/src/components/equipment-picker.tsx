@@ -24,7 +24,7 @@ interface EquipmentPickerProps {
 }
 
 /**
- * Chooses the equipment item a tile shows (ADR 0185). Mapped items of the right
+ * Chooses the equipment item a tile shows (ADR 0187). Mapped items of the right
  * kind are listed first. An item that is not mapped to any source yet is also
  * offered, and choosing one opens a picker over what the boat reports that no
  * item owns, so the item can be mapped without leaving the dialog. Mapping

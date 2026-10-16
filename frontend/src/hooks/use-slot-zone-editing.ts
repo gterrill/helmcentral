@@ -26,7 +26,7 @@ export type ZoneChoice = 'profile' | 'tile'
 
 /**
  * Zone editing for the slots of a tile that shows an equipment item (ADR
- * 0185). Zones live on the item's profile, so the form edits the profile's
+ * 0187). Zones live on the item's profile, so the form edits the profile's
  * bands; nothing is written until the tile is saved, when `commit` saves the
  * profile. The notice names everything else the change touches.
  *

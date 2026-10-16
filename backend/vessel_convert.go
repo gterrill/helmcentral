@@ -14,7 +14,7 @@ import (
 
 // vessel_convert.go is the one-off conversion of the old "vessel:" settings
 // block, ui.tank_labels and the per-item hour meter path into equipment items
-// that own their SignalK source plus the roles block (ADR 0185). It runs at
+// that own their SignalK source plus the roles block (ADR 0187). It runs at
 // startup and is finished once the old keys are gone from settings.yaml, so
 // every start after the first does nothing but one read.
 //
@@ -342,7 +342,7 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 	for _, n := range notes {
 		log.Printf("vessel conversion: %s", n)
 	}
-	log.Printf("vessel conversion: moved the vessel settings onto equipment items and roles (ADR 0185)")
+	log.Printf("vessel conversion: moved the vessel settings onto equipment items and roles (ADR 0187)")
 
 	// Alarm rules on the old house bank's state of charge now follow the role.
 	if oldSocPath != "" && roles.HouseBank != "" {

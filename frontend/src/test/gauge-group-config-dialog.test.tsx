@@ -166,7 +166,7 @@ describe('GaugeGroupConfigDialog', () => {
     expect(saved.hero).toBeUndefined()
   })
 
-  describe('a group that shows equipment (ADR 0185)', () => {
+  describe('a group that shows equipment (ADR 0187)', () => {
     beforeEach(() => {
       ctx = {
         items: [

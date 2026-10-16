@@ -8,7 +8,7 @@ import (
 )
 
 // equipment_source.go is the write-side rule for an item's SignalK source
-// (ADR 0185): the source is one of the eight shapes in vessel_sources.go, no
+// (ADR 0187): the source is one of the eight shapes in vessel_sources.go, no
 // two items own the same one, and the bank figures sit only on a battery.
 
 var (

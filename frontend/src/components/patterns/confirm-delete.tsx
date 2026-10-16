@@ -31,6 +31,9 @@ export interface ConfirmDeleteProps {
   cancelLabel?: string
   onConfirm: () => void
   deleting?: boolean
+  /** Keeps the confirm button off while something the caller must know first
+   * is still being worked out, such as what depends on the record. */
+  confirmDisabled?: boolean
   /** Extra content between the description and the actions - e.g. equipment-
    * editor.tsx's "also delete N photos only this item uses" checkbox and its
    * thumbnails. */
@@ -46,6 +49,7 @@ export function ConfirmDelete({
   cancelLabel = 'Cancel',
   onConfirm,
   deleting = false,
+  confirmDisabled = false,
   children,
 }: ConfirmDeleteProps) {
   return (
@@ -73,7 +77,7 @@ export function ConfirmDelete({
           <Button
             type="button"
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            disabled={deleting}
+            disabled={deleting || confirmDisabled}
             onClick={onConfirm}
           >
             {deleting ? 'Deleting…' : confirmLabel}

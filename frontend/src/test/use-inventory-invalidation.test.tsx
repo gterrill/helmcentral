@@ -4,6 +4,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 import { stubApi } from '@/test/helpers/stub-api'
 import {
   createEquipment,
+  deleteEquipment,
   useEquipment,
   useInventoryDecks,
   useInventoryZones,
@@ -11,6 +12,7 @@ import {
   type EquipmentItem,
   type InventoryZone,
 } from '@/hooks/use-inventory'
+import { useApiQuery } from '@/lib/api-query'
 import { completeMaintenanceRule, useMaintenanceLogEntries, useMaintenanceRules } from '@/hooks/use-maintenance'
 
 // ADR 0173: a write refreshes the lists it changes inside the hook, so no
@@ -40,6 +42,25 @@ describe('cross-hook invalidation', () => {
     await act(async () => { await createEquipment(BLANK_DRAFT) })
 
     await waitFor(() => expect(result.current.items).toHaveLength(2))
+  })
+
+  it('deleteEquipment re-reads the settings, whose roles the delete may have cleared', async () => {
+    let roles = { house_bank: 'a' }
+    const api = stubApi({
+      'GET /api/inventory/equipment': { items: [] },
+      'GET /api/settings': () => ({ roles }),
+      'DELETE /api/inventory/equipment/a': () => {
+        roles = { house_bank: '' }
+        return null
+      },
+    })
+    const { result } = renderHook(() => useApiQuery<{ roles: { house_bank: string } }>({ queryKey: ['/api/settings'], path: '/api/settings' }))
+    await waitFor(() => expect(result.current.data?.roles.house_bank).toBe('a'))
+    expect(api).toBeDefined()
+
+    await act(async () => { await deleteEquipment('a') })
+
+    await waitFor(() => expect(result.current.data?.roles.house_bank).toBe(''))
   })
 
   it('saveLayout hands the zones cache the zones the server answered with', async () => {

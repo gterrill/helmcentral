@@ -36,7 +36,7 @@ func buildTanksStatePayload() map[string]any {
 
 	signalkURL := buildSignalKURL(address, port)
 	// A tank is listed under the name of the equipment item that owns it
-	// (ADR 0185); one no item owns is not listed.
+	// (ADR 0187); one no item owns is not listed.
 	vessel, vesselErr := loadVesselView(settingsPath)
 	noteVesselRead("tanks", vesselErr, "tanks: tank names unavailable, no tanks listed: %v")
 	labelOverrides := vessel.Tanks

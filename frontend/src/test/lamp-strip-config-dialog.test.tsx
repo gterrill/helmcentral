@@ -12,7 +12,7 @@ vi.mock('@/hooks/use-signalk-paths', () => ({
 
 const mockedUseSignalKPaths = vi.mocked(useSignalKPaths)
 
-// The equipment the dialog suggests lamps from (ADR 0185).
+// The equipment the dialog suggests lamps from (ADR 0187).
 let items: TileItem[] = []
 vi.mock('@/hooks/use-equipment-tile-context', () => ({
   useEquipmentTileContext: (): EquipmentTileContext => ({ items, profiles: [], reporting: null }),
@@ -146,7 +146,7 @@ describe('LampStripConfigDialog', () => {
     expect(onSave.mock.calls[0][0].lamps[0].icon).toBeUndefined()
   })
 
-  // ADR 0085, ADR 0185: a fresh ribbon prefills from the equipment that is mapped.
+  // ADR 0085, ADR 0187: a fresh ribbon prefills from the equipment that is mapped.
   describe('suggested lamps', () => {
     const equipmentIds = () => (screen.getAllByLabelText('Equipment') as HTMLSelectElement[]).map((select) => select.value)
 

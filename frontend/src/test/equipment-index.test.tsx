@@ -43,6 +43,8 @@ const zones: InventoryZone[] = [
 
 const fetchMock = vi.fn()
 
+const NO_DEPENDANTS = { item_id: 'eq-1', tiles: [], roles: [], alarm_rules: [], features: [] }
+
 beforeEach(() => {
   fetchMock.mockReset()
   fetchMock.mockImplementation((url: string) => {
@@ -139,6 +141,7 @@ describe('EquipmentIndex', () => {
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       if (String(url).includes('/api/inventory/zones')) return { ok: true, json: async () => ({ zones }) }
       if (init?.method === 'DELETE') return { ok: true, status: 204, json: async () => ({}) }
+      if (String(url).endsWith('/dependants')) return { ok: true, json: async () => NO_DEPENDANTS }
       if (String(url).includes('/api/inventory/equipment')) {
         if (++listReadCount === 2) await secondRead
         return { ok: true, json: async () => ({ items: listReadCount === 1 ? [makeItem({})] : [] }) }
@@ -171,6 +174,48 @@ describe('EquipmentIndex', () => {
     // One read after the delete, not an invalidate and a refetch.
     await new Promise((r) => setTimeout(r, 30))
     expect(listReadCount).toBe(2)
+  })
+
+  it('says what uses the item before a delete, and deletes only once that is known', async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/api/inventory/zones')) return { ok: true, json: async () => ({ zones }) }
+      if (init?.method === 'DELETE') return { ok: true, status: 204, json: async () => ({}) }
+      if (String(url).endsWith('/eq-1/dependants')) {
+        return { ok: true, json: async () => ({
+          ...NO_DEPENDANTS,
+          tiles: [{ page_id: 'p1', page_name: 'Underway', tile_id: 'cluster:a', title: 'Port' }],
+          roles: [{ role: 'house_bank', label: 'House bank' }],
+        }) }
+      }
+      if (String(url).includes('/api/inventory/equipment')) return { ok: true, json: async () => ({ items: [makeItem({})] }) }
+      return { ok: false, json: async () => ({}) }
+    })
+    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+
+    await screen.findByText('Generator')
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Generator' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+
+    const notice = await screen.findByTestId('equipment-dependants')
+    expect(notice).toHaveTextContent('Used by 1 tile (Underway: Port), the House bank role.')
+    expect(notice).toHaveTextContent('Tiles stay and show Equipment removed')
+  })
+
+  it('will not delete while what uses the item cannot be checked', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes('/api/inventory/zones')) return { ok: true, json: async () => ({ zones }) }
+      if (String(url).endsWith('/eq-1/dependants')) return { ok: false, status: 500, json: async () => ({ error: 'store down' }) }
+      if (String(url).includes('/api/inventory/equipment')) return { ok: true, json: async () => ({ items: [makeItem({})] }) }
+      return { ok: false, json: async () => ({}) }
+    })
+    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+
+    await screen.findByText('Generator')
+    fireEvent.click(screen.getByRole('button', { name: 'Actions for Generator' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Delete' }))
+
+    expect(await screen.findByText(/Could not check what uses this item: store down/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
   })
 
   it('calls onNewItem from the toolbar button', async () => {

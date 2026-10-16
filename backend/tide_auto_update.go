@@ -56,6 +56,14 @@ func updateNearestTideStation() {
 
 	log.Printf("Auto-updating tide station: %s → %s (%s)", payload.UI.TideStationID, station.StationID, station.Name)
 
+	// Re-read under the settings lock: the file may have changed during the
+	// SignalK and station lookups above, and this write must not undo it.
+	settingsWriteMu.Lock()
+	defer settingsWriteMu.Unlock()
+	settings, err = readSettings(settingsPath)
+	if err != nil {
+		return
+	}
 	uiMap, _ := settings["ui"].(map[string]any)
 	if uiMap == nil {
 		uiMap = map[string]any{}
