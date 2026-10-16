@@ -102,6 +102,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Helmcentral lists what uses an equipment item before you clear its source or
+  delete it.** Clearing or changing the item's **Source**, or deleting the item,
+  now asks you to confirm when anything uses it, and names what: the tiles by
+  page and title, the features that read it, the roles it plays and the alarm
+  rules that watch it. An item nothing uses asks nothing more than before.
+  Deleting an item also clears the roles that named it, so they show **Not
+  set** instead of pointing at an item that no longer exists.
 - **Settings → SignalK → Discovery** lists what the boat reports (engines,
   batteries, alternators, solar controllers, tanks, generators, chargers and
   inverters) with live readings and the equipment item each belongs to. Assign

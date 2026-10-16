@@ -6,8 +6,7 @@ Accepted (2026-10-16). Supersedes
 [ADR 0181](0181-engines-and-house-bank-come-from-vessel-settings.md) and
 [ADR 0182](0182-electrical-instances-and-solar-names-are-vessel-settings.md).
 Builds on [ADR 0180](0180-alternator-instances-are-a-vessel-setting.md), whose
-alternator instances are now a role. Phases 1 and 2 are built; phase 3 is
-decided and not yet built.
+alternator instances are now a role. Phases 1, 2 and 3 are built.
 
 ## Context
 
@@ -188,11 +187,40 @@ Tiles that show a piece of equipment store the item, not paths.
 Mate has no tool that builds or edits these tiles, and the record registry
 does not carry dashboard records, so nothing there changed.
 
-## Phase 3 (not built)
+## Phase 3: dependants are visible (built)
 
-1. **Dependants are visible.** Unassigning a source or deleting an item shows a
-   "used by" list (roles, tiles, alarm rules, maintenance rules), and anything
-   that depended on it shows "Not mapped" instead of going quietly blank.
+1. **One answer.** `GET /api/inventory/equipment/{id}/dependants` (same tier as
+   reading equipment) returns, grouped by kind, what depends on an item: tiles
+   (page, title, tile id), roles, alarm rules and backend features. It is one
+   function, `equipmentDependantsFor` in `equipment_dependants.go`, over the real
+   stores. Tiles come from the dashboard pages and the ribbon (an engine
+   cluster or gauge group that follows the item, a cluster whose fuel bar reads
+   it as a tank, a lamp strip or the ribbon with a lamp for it), each tile once.
+   Roles come from `roleSpecs`. Alarm rules are the rules bound to the house
+   bank role when the item is the bank, plus every saved rule and every rule
+   raised from a gauge zone whose path sits under the item's source. Features
+   come from a table, `dependantFeatures`, keyed by the item's kind and counted
+   only while the item owns a source: anchor auto-raise, the GNSS jump check,
+   the engine checks and Mate's passage estimate for an engine, and the names on
+   alarms and tiles for a battery, solar controller or tank. A new consumer
+   registers in that one place.
+2. **Confirmation.** The equipment page asks for the list before it clears or
+   changes a saved source (at save, through the same promise the profile change
+   uses) and before a delete, in the index and in the editor. An item nothing
+   uses asks nothing more. A list that cannot be read keeps the confirmation off
+   and says why, rather than reading as "nothing uses it". First mapping an item
+   needs no prompt, since it takes nothing from anything.
+3. **Discovery and the tile picker cannot take a source.** Both offer only items
+   with no source (and a source no item owns), and Discovery has no unassign, so
+   neither can strip an item of a source another part relies on. They therefore
+   ask nothing; a test pins that. If an unassign is ever added to Discovery it
+   must ask for the same list.
+4. **Nothing is removed behind the operator's back.** Clearing a source leaves
+   tiles showing Not mapped (linked to the item), roles on the item (the role list
+   says Item no longer assigned), and rules with no data. Deleting an item leaves
+   tiles showing Equipment removed, and now clears every role that named it in
+   settings.yaml, after the house bank rules have been emptied, so the role list
+   shows Not set. A delete whose roles cannot be cleared reports it.
 
 ## Consequences
 

@@ -157,9 +157,36 @@ leave Settings with changes unsaved you are asked first.
 Under **Roles**, each check shows whether it is ready, or what is still
 missing, so you always know what saving will turn on.
 
-If an item loses its source, or is deleted, while a role still points at it, the
-role's figure shows no data and the log says why; the role list shows **Item no
-longer assigned** until you choose again. Other settings still save.
+If an item loses its source while a role still points at it, the role's figure
+shows no data and the log says why; the role list shows **Item no longer
+assigned** until you choose again. If the item is deleted, the role is cleared
+and shows **Not set**. Other settings still save.
+
+## Before you clear a source or delete an item
+
+Clearing an item's source, moving it to another, or deleting it affects
+everything that uses it. When something does, Helmcentral lists what first and
+asks you to confirm, for example:
+
+> Used by 2 tiles (Underway: Port, Wall: Engines: Port), anchor auto-raise, the
+> engine checks, the House bank role, 3 state-of-charge alarm rules.
+
+Tiles are named by their page and title. The list also covers the features that
+read an engine, battery or tank, the roles the item plays, and the alarm rules
+that watch its readings, including limits set on a gauge.
+
+Nothing is removed behind your back:
+
+- **Clearing the source** leaves every tile in place, showing **Not mapped**
+  with a link to the item. The roles stay on the item, and the figures and alarm
+  rules that depend on its source show no data until you map it again.
+- **Moving the source** takes everything that uses the item to the new source.
+- **Deleting the item** leaves its tiles showing **Equipment removed**, clears
+  the roles it played, and leaves the state-of-charge rules in place watching
+  nothing until you choose a new house bank.
+
+If nothing uses the item, you are asked nothing more than before. If Helmcentral
+cannot work out what uses it, the confirmation stays switched off and says why.
 
 ## Excluding a sensor you know is dead
 
