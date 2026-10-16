@@ -3057,12 +3057,12 @@ func TestGaugeBoundPathsIncludesClusterArcsAndFooter(t *testing.T) {
 	}
 	cluster := validClusterConfig()
 	cluster.EquipmentID = engine
-	cluster.Arcs = &dashboardClusterArcs{Left: g("", "temperature"), Right: g("", "oilTemperature")}
+	cluster.Arcs = &dashboardClusterArcs{Left: g("", "temperature"), Right: g("", "transmission.oilTemperature")}
 	cluster.Footer = &dashboardClusterFooter{
 		Battery: g(batt, "voltage"), AltAmps: g(alt, "current"), AltWatts: g(alt, "power"),
 		AltTemp: g(alt, "temperature"), AltStage: g(alt, "chargingModeNumber"),
-		TransPressure: g("", "transmission.oilPressure"), TransTemp: g("", "transmission.oilTemperature"),
-		Egt: g(exhaust, "exhaustTemperature"),
+		TransPressure: g("", "transmission.oilPressure"),
+		Egt:           g(exhaust, "exhaustTemperature"),
 	}
 	withPages(t, clusterWidget("cluster:abcd1234", cluster))
 
@@ -3071,10 +3071,10 @@ func TestGaugeBoundPathsIncludesClusterArcsAndFooter(t *testing.T) {
 		got[p] = true
 	}
 	for _, want := range []string{
-		"propulsion.port.temperature", "propulsion.port.oilTemperature",
+		"propulsion.port.temperature", "propulsion.port.transmission.oilTemperature",
 		"electrical.batteries.292.voltage", "electrical.alternator.2.current", "electrical.alternator.2.power",
 		"electrical.alternator.2.temperature", "electrical.alternator.2.chargingModeNumber",
-		"propulsion.port.transmission.oilPressure", "propulsion.port.transmission.oilTemperature",
+		"propulsion.port.transmission.oilPressure",
 		"propulsion.0.exhaustTemperature",
 	} {
 		if !got[want] {

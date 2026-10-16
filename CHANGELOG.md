@@ -90,8 +90,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   under the dial is replaced by two arcs and the footer, a readout card shows one
   reading, a fuel rail shows two tanks and has no caption or edge choice (it sits
   on the outer edge for the engine's side). On the first start the coolant
-  moves to the left arc and the gearbox temperature to the footer's transmission
-  card, and any other strip reading is dropped (the log says which). Open each
+  moves to the left arc and the gearbox temperature to the right arc, and any other strip reading is dropped (the log says which). Open each
   cluster's settings in Layout mode, choose **Engine side**, press **Fill slots
   from profile**, then choose the starter battery, alternator and exhaust
   equipment for the footer. The exhaust needs an equipment item mapped to its
@@ -109,10 +108,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - The Engine Cluster tile is redrawn as one full engine card: a lit tachometer
   that reads plain rpm, four readout cards with bars drawn from each reading's
-  own limits, coolant and engine oil temperature arcs, forward and aft fuel arcs
+  own limits, coolant and gearbox oil temperature arcs, forward and aft fuel arcs
   with litres, and a footer with the starter battery voltage, the alternator
   (current, power, temperature, charge stage, a one-hour trace and the battery
-  management system's charge limit), the gearbox and the exhaust. A starboard
+  management system's charge limit), the gearbox oil pressure and the exhaust. A starboard
   tile is a mirror of a port one, and an engine that is switched off says `OFF`
   once, in the tile's title. The tile needs half the board's width. The
   alternator, battery and exhaust are equipment items like the engine: choose

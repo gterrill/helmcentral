@@ -58,12 +58,12 @@ const SLOT_SUFFIXES = {
     // engines running (ADR 0055).
     { label: 'Fuel', suffixes: ['fuel.rate'] },
   ],
-  // The left arc in the dial's gap. The right one is engine oil temperature,
-  // which no profile fills: the Cummins profile has no engine oil sensor to
-  // point it at, and the gearbox is not a substitute.
+  // The two arcs in the dial's gap: the engine's coolant on the left, the
+  // gearbox oil temperature on the right (the engine has no oil temperature
+  // sensor of its own).
   arcLeft: 'temperature',
+  arcRight: 'transmission.oilTemperature',
   transPressure: 'transmission.oilPressure',
-  transTemp: 'transmission.oilTemperature',
 } as const
 
 /**
@@ -98,7 +98,6 @@ const FOOTER_TITLES: Record<ClusterFooterSlot, string> = {
   altStage: 'Charge stage (regulator state number)',
   altLimit: 'Charge current limit from the battery management system',
   transPressure: 'Transmission oil pressure',
-  transTemp: 'Transmission oil temperature',
   egt: 'Exhaust temperature',
 }
 
@@ -124,7 +123,7 @@ function clusterSlotList(c: EngineClusterConfig): GaugeWidgetConfig[] {
   return [
     c.ring, c.centre, ...c.corners.flatMap((corner) => corner.rows),
     ...(c.arcs?.left ? [c.arcs.left] : []), ...(c.arcs?.right ? [c.arcs.right] : []),
-    ...(c.footer?.transPressure ? [c.footer.transPressure] : []), ...(c.footer?.transTemp ? [c.footer.transTemp] : []),
+    ...(c.footer?.transPressure ? [c.footer.transPressure] : []),
   ]
 }
 
@@ -141,7 +140,6 @@ function withoutSettledZones(c: EngineClusterConfig, cleared: Set<number>): Engi
   }
   const footer = c.footer && { ...c.footer }
   if (footer?.transPressure) footer.transPressure = settle(footer.transPressure)
-  if (footer?.transTemp) footer.transTemp = settle(footer.transTemp)
   return { ...c, ring, centre, corners, arcs, footer }
 }
 
@@ -198,7 +196,6 @@ function clusterFromProfile(
     footer[key] = existing ?? { ...spec.slot, suffix: spec.suffix, ...(spec.kind === 'alternator' && alternatorId ? { equipmentId: alternatorId } : {}) }
   }
   footer.transPressure = { ...pick(SLOT_SUFFIXES.transPressure, 'Gear press'), decimals: 0 }
-  footer.transTemp = { ...pick(SLOT_SUFFIXES.transTemp, 'Gearbox'), decimals: 0 }
 
   return {
     ...current,
@@ -212,8 +209,7 @@ function clusterFromProfile(
     arcs: {
       // Whole degrees on an arc: a tenth of a degree of coolant is noise at a glance.
       left: { ...pick(SLOT_SUFFIXES.arcLeft, 'Coolant'), decimals: 0 },
-      // Unset until the engine has a sensor to point it at.
-      right: (current.arcs?.right?.suffix ?? '').trim() !== '' ? current.arcs!.right : blankArc('Engine oil', 0, 140),
+      right: { ...pick(SLOT_SUFFIXES.arcRight, 'Gearbox'), decimals: 0 },
     },
     footer,
     ...(current.fuel ? { fuel: { ...current.fuel, side: fuelEdge(side) } } : {}),
@@ -227,13 +223,13 @@ function withBlankSlots(config: EngineClusterConfig): EngineClusterConfig {
     if (footer[key]) continue
     footer[key] = isForeign(key)
       ? { ...FOREIGN_SLOTS[key].slot, suffix: '' }
-      : { ...blankSlot(key === 'transPressure' ? 'Gear press' : 'Gearbox'), suffix: '' }
+      : { ...blankSlot('Gear press'), suffix: '' }
   }
   return {
     ...config,
     arcs: {
       left: config.arcs?.left ?? blankArc('Coolant', 0, 120),
-      right: config.arcs?.right ?? blankArc('Engine oil', 0, 140),
+      right: config.arcs?.right ?? blankArc('Gearbox', 0, 120),
     },
     footer,
   }
@@ -469,12 +465,8 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 {slotForm(config.arcs?.left ?? blankArc('Coolant', 0, 120), 'cluster-arc-left',
                   (next) => setSlot((c) => ({ ...c, arcs: { ...c.arcs, left: next } })))}
               </SlotSection>
-              <SlotSection title="Dial arc, right (engine oil temperature)">
-                <FieldDescription className="mb-2">
-                  Leave the reading empty unless the engine has an oil temperature sensor. The gearbox is a
-                  separate reading and is not a substitute.
-                </FieldDescription>
-                {slotForm(config.arcs?.right ?? blankArc('Engine oil', 0, 140), 'cluster-arc-right',
+              <SlotSection title="Dial arc, right (gearbox oil temperature)">
+                {slotForm(config.arcs?.right ?? blankArc('Gearbox', 0, 120), 'cluster-arc-right',
                   (next) => setSlot((c) => ({ ...c, arcs: { ...c.arcs, right: next } })))}
               </SlotSection>
 

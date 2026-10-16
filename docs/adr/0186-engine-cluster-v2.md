@@ -29,7 +29,7 @@ battery, the alternator and the exhaust are not the engine.
    of 12 columns and 14 rows, and is 592 design px tall, ending 12 px under the
    footer.
 2. **Slots are the equipment model's.** The ring, centre, corners, the two dial
-   arcs and the transmission pair are suffixes under the cluster's engine item
+   arcs and the transmission pressure are suffixes under the cluster's engine item
    and take the engine profile's zones, quantity, unit and scale
    (`resolveSlot`), exactly like the slots they join. The footer's starter
    battery, alternator (amps, watts, temperature, stage, charge limit) and
@@ -51,12 +51,12 @@ battery, the alternator and the exhaust are not the engine.
    slot's zones alarm under its own item. Zones a slot still holds (a converted
    tile with no profile) keep the index ids of ADR 0185: the coolant arc is
    index 18, which was the first telltale, the footer starts at 24 (past the old
-   telltale cap of six) in the fixed order of the footer's slots, and the second
-   arc sits after the footer's reserved sixteen. Append only. The backend tests
+   telltale cap of six) in the fixed order of the footer's slots, and the right arc (the gearbox temperature) sits after the footer's reserved sixteen,
+   at 40. The footer's old gearbox-temperature position (7) is a held gap. Append only. The backend tests
    pin the constants.
 5. **Telltales move.** `telltales` is a legacy field only the conversion and a
    load-time step read: the engine temperature goes to the left arc and the
-   gearbox temperature to the transmission card; anything else (the exhaust read
+   gearbox temperature to the right arc; anything else (the exhaust read
    from another node) is dropped and logged. A save that still carries one is
    refused.
 6. **Bars from zones.** A bullet graph draws only the bands the slot has,
@@ -65,11 +65,17 @@ battery, the alternator and the exhaust are not the engine.
    amber or red band. Bundled profiles ship null thresholds, so the usual case
    is one normal band and no ticks, and a reading outside it is amber, never red
    (and does not light the tile edge, as before).
-7. **Engine oil temperature is unset.** This vessel has only the gearbox
-   temperature (`transmission.oilTemperature`), which stays the transmission
-   card's header value, with `transmission.oilPressure` as its bullet. The right
-   arc is a configurable slot with no profile gauge; the gearbox is not
-   substituted.
+7. **The right arc is the gearbox oil temperature.** This vessel has no engine
+   oil temperature sensor; its only oil temperature is the gearbox's
+   (`transmission.oilTemperature`). The first cut left the right arc empty and
+   kept the gearbox temperature as the transmission card's header value, so as
+   not to pass the gearbox off as engine oil. The operator then asked for it
+   under the rpm, which reverses that decision: the right arc is bound from the
+   engine item like the coolant arc, labelled and iconed as the gearbox, and
+   Fill slots binds it. The transmission card shows only
+   `transmission.oilPressure` (value and bullet). The footer's gearbox-temperature
+   slot is gone; its place in the footer's id order is held as a gap so the
+   exhaust keeps its index. A v1 telltale for the gearbox lands on the right arc.
 8. **Exhaust is wet.** Scale 0 to 100 C with an above band for raw-water loss,
    set by the operator on the exhaust item's profile. No threshold of the
    vessel's is shipped.

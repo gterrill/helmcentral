@@ -25,8 +25,8 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
 5. Under **Footer**, choose the equipment for the starter battery, the
    alternator and the exhaust, and the reading each shows. Filling the slots
    picks the alternator you named for that side under **Roles**; leave a part
-   without equipment to leave it out. The **Dial arc, right** is engine oil
-   temperature: leave it empty unless the engine has that sensor.
+   without equipment to leave it out. The **Dial arc, right** is the gearbox
+   oil temperature, filled from the engine's profile like the coolant arc.
 6. Leave **Title** blank to show the engine's name, or type your own.
 7. To add a fuel rail, choose **Add fuel rail**, then choose a tank for each bar
    (forward and aft). The arcs sit on the outer edge for the engine's side.

@@ -233,7 +233,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
               historyEnabled={!off && footer.altAmps !== undefined} />
             <ReadingCard
               testId="cluster-trans" label="Trans" icon={FOOTER_ICONS.trans}
-              slot={footer.transPressure} extraSlot={footer.transTemp}
+              slot={footer.transPressure}
               flex={`0 0 ${layout.bulletWidth + 40}px`} values={values} ages={ages}
               bulletWidth={layout.bulletWidth} side={side}
             />

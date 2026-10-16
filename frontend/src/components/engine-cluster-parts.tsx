@@ -2,7 +2,7 @@ import { Thermometer, Zap } from 'lucide-react'
 import { useMemo, type CSSProperties, type ReactNode } from 'react'
 
 import { zoneColor } from '@/components/ui/dial-ring'
-import { CoolantIcon, ExhaustIcon, GearboxIcon, OilTempIcon } from '@/components/ui/telltale-icons'
+import { CoolantIcon, ExhaustIcon, GearboxIcon } from '@/components/ui/telltale-icons'
 import { useTelemetryHistory } from '@/hooks/use-telemetry-history'
 import { CLUSTER_ICONS, iconForSlot } from '@/lib/cluster-icons'
 import type { ClusterFuelRail, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
@@ -161,7 +161,7 @@ export function ReadoutContent({ slot, icon, label, values, ages, side, width, b
 }
 
 /** The icon each gap arc carries. */
-const ARC_ICONS: Record<GapArcName, typeof CoolantIcon> = { left: CoolantIcon, right: OilTempIcon }
+const ARC_ICONS: Record<GapArcName, typeof CoolantIcon> = { left: CoolantIcon, right: GearboxIcon }
 
 /**
  * One of the two arcs in the dial's gap. Nothing is drawn for a slot that is
@@ -485,12 +485,11 @@ export function AlternatorCard({ footer, values, ages, historyEnabled }: {
 }
 
 /** A footer card with a header icon, a big value and a bullet (transmission and exhaust). */
-export function ReadingCard({ testId, label, icon, slot, extraSlot, flex, values, ages, bulletWidth, side }: {
+export function ReadingCard({ testId, label, icon, slot, flex, values, ages, bulletWidth, side }: {
   testId: string
   label: string
   icon: ReactNode
   slot: GaugeWidgetConfig | undefined
-  extraSlot?: GaugeWidgetConfig
   flex: string
   values: Values
   ages: Ages
@@ -500,7 +499,7 @@ export function ReadingCard({ testId, label, icon, slot, extraSlot, flex, values
   const model = slot ? bulletFor(slot, values, ages) : null
   return (
     <FooterFrame testId={testId} tone={model?.tone ?? 'neutral'} flex={flex} icon={icon} label={label}
-      extra={<HeaderTemp slot={extraSlot} values={values} ages={ages} />}>
+      >
       <div className="flex h-[30px] items-baseline justify-end gap-1.5">
         <span data-reading="" className={`font-display text-3xl font-semibold leading-none tabular-nums ${toneText(model?.tone ?? 'neutral')}`}>
           {model?.text ?? '--'}

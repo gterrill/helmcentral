@@ -57,16 +57,3 @@ export function ExhaustIcon({ className }: TelltaleIconProps) {
     </svg>
   )
 }
-
-/** Engine oil: an oil can with a drop. For the dial's right-hand temperature arc. */
-export function OilTempIcon({ className }: TelltaleIconProps) {
-  return (
-    <svg data-telltale-icon="oil" className={className} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"
-      aria-hidden="true">
-      <path d="M3 10h9l3-2 6 2-5 6H5a2 2 0 0 1-2-2z" />
-      <path d="M12 8V6M10 6h4" />
-      <path d="M20 15.5c0 1-.6 1.5-1.2 1.5s-1.2-.5-1.2-1.5.6-1.8 1.2-2.5c.6.7 1.2 1.5 1.2 2.5z" />
-    </svg>
-  )
-}

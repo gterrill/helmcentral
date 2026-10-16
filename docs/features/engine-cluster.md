@@ -14,15 +14,14 @@ you the engine is charging and cooling properly. Place one tile per engine.
   normal range. The bar stays neutral while the reading is in range. It turns
   amber or red only while the reading is in an amber or red band, and the bands
   behind it brighten for the one the reading is in.
-- **Two arcs at the foot of the dial.** Coolant temperature on the left, engine
+- **Two arcs at the foot of the dial.** Coolant temperature on the left, gearbox
   oil temperature on the right. An arc you have not connected is not drawn.
 - **Fuel arcs** on the outer edge: forward and aft tank, with litres in the
   tanks against capacity.
 - **Footer.** Starter battery voltage; the alternator, with its current, output
   power, temperature, charge stage and a one-hour trace of current (a dashed
   line marks the battery management system's charge limit, if you have
-  connected it); the gearbox, with oil pressure and temperature; and the
-  exhaust temperature.
+  connected it); the gearbox oil pressure; and the exhaust temperature.
 
 ## Port and starboard
 
@@ -66,9 +65,8 @@ alternator is named there, the alternator parts stay empty until you choose one.
 
 ## What it does not do
 
-- There is no engine oil temperature on this boat's engines, so that arc stays
-  empty until you connect a sensor. The gearbox temperature is shown in the
-  footer and is not a substitute.
+- It shows no engine oil temperature: these engines have no sensor for it. The
+  right-hand arc is the gearbox oil temperature, which is a different reading.
 - Charge stage shows the regulator's reported state. A state Helmcentral does
   not recognise is shown as its number.
 - The alternator trace needs history recording switched on. Without it the

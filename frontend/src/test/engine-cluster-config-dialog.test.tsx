@@ -96,15 +96,16 @@ describe('filling a cluster from the engine item', () => {
     expect(saved.corners.map((c) => c.rows[0].suffix)).toEqual(['oilPressure', 'boostPressure', 'engineLoad', 'fuel.rate'])
     expect(saved.arcs?.left?.suffix).toBe('temperature')
     expect(saved.footer?.transPressure?.suffix).toBe('transmission.oilPressure')
-    expect(saved.footer?.transTemp?.suffix).toBe('transmission.oilTemperature')
   })
 
-  // The gearbox is not engine oil. The right arc stays unset rather than
-  // pointing at it, and the gearbox appears once, on the transmission card.
-  test('leaves the engine oil temperature arc unset, and does not substitute the gearbox', async () => {
+  // The right arc under the rpm is the gearbox oil temperature, bound from the
+  // engine item like the coolant arc; the transmission card keeps only pressure.
+  test('binds the right arc to the gearbox oil temperature and keeps it off the footer', async () => {
     const saved = await fillAndSave('port')
-    expect(saved.arcs?.right).toBeUndefined()
+    expect(saved.arcs?.right?.suffix).toBe('transmission.oilTemperature')
+    expect(saved.arcs?.right?.equipmentId).toBeUndefined()
     expect(allSlots(saved).filter((s) => s.suffix === 'transmission.oilTemperature')).toHaveLength(1)
+    expect(Object.keys(saved.footer ?? {})).not.toContain('transTemp')
   })
 
   test('every slot it fills resolves to a path the vessel publishes', async () => {

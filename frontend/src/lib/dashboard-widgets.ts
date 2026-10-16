@@ -432,7 +432,7 @@ export type ClusterSide = 'port' | 'stbd'
 export interface ClusterArcs {
   /** Engine coolant. */
   left?: GaugeWidgetConfig
-  /** Engine oil temperature. Most boats have no sensor for it, and the gearbox is not a substitute. */
+  /** Gearbox (transmission) oil temperature. */
   right?: GaugeWidgetConfig
 }
 
@@ -442,7 +442,7 @@ export interface ClusterArcs {
  */
 export const CLUSTER_FOOTER_SLOTS = [
   'battery', 'altAmps', 'altWatts', 'altTemp', 'altStage', 'altLimit',
-  'transPressure', 'transTemp', 'egt',
+  'transPressure', 'egt',
 ] as const
 
 export type ClusterFooterSlot = (typeof CLUSTER_FOOTER_SLOTS)[number]

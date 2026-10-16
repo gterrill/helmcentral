@@ -482,6 +482,11 @@ func TestClusterHeldZoneIndexSpaceKeepsIssuedIDs(t *testing.T) {
 	if clusterFooterZoneIndexBase < 24 {
 		t.Fatalf("the footer must start past the old telltale cap (18..23), got %d", clusterFooterZoneIndexBase)
 	}
+	// Egt stays the ninth footer slot (index base+8) after the gearbox
+	// temperature left the footer, so nothing renumbers.
+	if (&dashboardClusterFooter{Egt: &dashboardGaugeConfig{}}).slots()[8] == nil {
+		t.Fatal("the exhaust must stay the ninth footer slot")
+	}
 	if clusterRightArcZoneIndex < clusterFooterZoneIndexBase+len((&dashboardClusterFooter{}).slots()) {
 		t.Fatalf("the right arc overlaps the footer: %d", clusterRightArcZoneIndex)
 	}
@@ -554,7 +559,7 @@ func TestZoneDerivedAlarmRulesKeepHeldFooterAndArcZoneIDs(t *testing.T) {
 	}
 }
 
-// A v1 cluster's telltales become the coolant arc and the gearbox card; the
+// A v1 cluster's telltales become the coolant arc and the gearbox arc; the
 // exhaust, read from another node, has no place and is dropped, never guessed.
 func TestMoveLegacyTelltalesPlacesThemOnTheV2Card(t *testing.T) {
 	cl := &dashboardClusterConfig{Title: "Port", Telltales: []dashboardGaugeConfig{
@@ -565,11 +570,14 @@ func TestMoveLegacyTelltalesPlacesThemOnTheV2Card(t *testing.T) {
 	if !moveLegacyTelltales(cl) {
 		t.Fatal("expected a change")
 	}
-	if cl.Arcs == nil || cl.Arcs.Left == nil || cl.Arcs.Left.Label != "Coolant" || cl.Arcs.Right != nil {
-		t.Fatalf("coolant belongs on the left arc and nothing on the right: %+v", cl.Arcs)
+	if cl.Arcs == nil || cl.Arcs.Left == nil || cl.Arcs.Left.Label != "Coolant" {
+		t.Fatalf("coolant belongs on the left arc: %+v", cl.Arcs)
 	}
-	if cl.Footer == nil || cl.Footer.TransTemp == nil || cl.Footer.TransTemp.Label != "Gearbox" || cl.Footer.Egt != nil {
-		t.Fatalf("the gearbox belongs on the transmission card, not in place of the exhaust: %+v", cl.Footer)
+	if cl.Arcs.Right == nil || cl.Arcs.Right.Label != "Gearbox" {
+		t.Fatalf("the gearbox temperature belongs on the right arc: %+v", cl.Arcs)
+	}
+	if cl.Footer != nil {
+		t.Fatalf("nothing lands on the footer, and the exhaust is not guessed at: %+v", cl.Footer)
 	}
 	if len(cl.Telltales) != 0 || moveLegacyTelltales(cl) {
 		t.Fatal("telltales are cleared and moving them again is a no-op")

@@ -16,8 +16,7 @@ import (
 var validClusterSides = map[string]bool{"": true, "port": true, "stbd": true}
 
 type dashboardClusterArcs struct {
-	// Left is the engine coolant; Right the engine oil temperature, which most
-	// boats have no sensor for and so leave unset.
+	// Left is the engine coolant; Right the gearbox oil temperature.
 	Left  *dashboardGaugeConfig `json:"left,omitempty"`
 	Right *dashboardGaugeConfig `json:"right,omitempty"`
 }
@@ -39,7 +38,6 @@ type dashboardClusterFooter struct {
 	AltStage      *dashboardGaugeConfig `json:"altStage,omitempty"`
 	AltLimit      *dashboardGaugeConfig `json:"altLimit,omitempty"`
 	TransPressure *dashboardGaugeConfig `json:"transPressure,omitempty"`
-	TransTemp     *dashboardGaugeConfig `json:"transTemp,omitempty"`
 	Egt           *dashboardGaugeConfig `json:"egt,omitempty"`
 }
 
@@ -49,7 +47,9 @@ func (f *dashboardClusterFooter) slots() []*dashboardGaugeConfig {
 	}
 	return []*dashboardGaugeConfig{
 		f.Battery, f.AltAmps, f.AltWatts, f.AltTemp, f.AltStage, f.AltLimit,
-		f.TransPressure, f.TransTemp, f.Egt,
+		// Index 7 was the gearbox temperature, which moved to the right arc. It is
+		// held as a gap so the exhaust keeps its index and no id is renumbered.
+		f.TransPressure, nil, f.Egt,
 	}
 }
 
@@ -62,9 +62,8 @@ func validateClusterSlot(g dashboardGaugeConfig, hasItem bool, ctx string) strin
 	return validateSlotConfig(g, hasItem || g.EquipmentID != "", ctx)
 }
 
-// moveLegacyTelltales moves what a cluster held as telltales onto the arcs and
-// footer: the engine temperature to the left arc, the gearbox temperature to
-// the footer's transmission card. Anything else (the exhaust read from another
+// moveLegacyTelltales moves what a cluster held as telltales onto the arcs: the
+// engine temperature to the left arc, the gearbox temperature to the right. Anything else (the exhaust read from another
 // node) is dropped and logged, not guessed at. It reports whether it changed
 // anything, and is a no-op once the field is empty.
 func moveLegacyTelltales(cl *dashboardClusterConfig) bool {
@@ -82,11 +81,11 @@ func moveLegacyTelltales(cl *dashboardClusterConfig) bool {
 				cl.Arcs.Left = &t
 			}
 		case "transmission.oilTemperature":
-			if cl.Footer == nil {
-				cl.Footer = &dashboardClusterFooter{}
+			if cl.Arcs == nil {
+				cl.Arcs = &dashboardClusterArcs{}
 			}
-			if cl.Footer.TransTemp == nil {
-				cl.Footer.TransTemp = &t
+			if cl.Arcs.Right == nil {
+				cl.Arcs.Right = &t
 			}
 		default:
 			log.Printf("dashboard: cluster %q: telltale %q has no place on the v2 card and was dropped", cl.Title, firstNonEmpty(t.Suffix, t.Path, t.Label))

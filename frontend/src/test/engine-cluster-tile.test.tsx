@@ -61,6 +61,7 @@ const port: ResolvedClusterConfig = {
 }
 
 const arcs = {
+  right: slot('propulsion.port.transmission.oilTemperature', 'Gearbox', 'temperature', 'C', { min: 0, max: 120, decimals: 0 }),
   left: slot('propulsion.port.temperature', 'Coolant', 'temperature', 'C', { min: 0, max: 120, decimals: 0, zones: [{ from: 0, to: 85, state: 'normal' as const }] }),
 }
 
@@ -72,7 +73,6 @@ const footer: NonNullable<ResolvedClusterConfig['footer']> = {
   altStage: slot('electrical.alternator.2.chargingModeNumber', 'Stage', 'raw', 'raw', { decimals: 0 }),
   altLimit: slot('electrical.alternator.2.limit', 'Limit', 'current', 'A', { decimals: 0 }),
   transPressure: slot('propulsion.port.transmission.oilPressure', 'Gear press', 'pressure', 'psi', { decimals: 0, min: 0, max: 500 }),
-  transTemp: slot('propulsion.port.transmission.oilTemperature', 'Gearbox', 'temperature', 'C', { decimals: 0 }),
   egt: slot('propulsion.0.exhaustTemperature', 'Exhaust', 'temperature', 'C', { decimals: 0, min: 0, max: 100 }),
 }
 
@@ -252,20 +252,19 @@ describe('dial gap arcs', () => {
     expect(left).toHaveTextContent('71°')
   })
 
-  // The right arc is engine oil temperature, which this vessel has no sensor
-  // for. An unbound slot draws nothing at all rather than an empty track.
-  test('draws nothing for the unbound right arc', () => {
+  // The right arc is the gearbox oil temperature (37.7 C here), under the rpm.
+  test('draws the bound right arc as the gearbox temperature', () => {
     const { container } = renderCluster()
-    expect(container.querySelector('[data-gap-arc="right"]')).toBeNull()
+    const right = container.querySelector('[data-gap-arc="right"]')!
+    expect(right).toHaveTextContent('38°')
+    expect(right.querySelector('[data-telltale-icon="gearbox"]')).not.toBeNull()
+    expect(right.querySelector('[data-telltale-icon="oil"]')).toBeNull()
   })
 
-  test('draws the right arc once it is bound', () => {
-    const bound: ResolvedClusterConfig = {
-      ...full,
-      arcs: { ...arcs, right: slot('propulsion.port.oilTemperature', 'Engine oil', 'temperature', 'C', { min: 0, max: 140, decimals: 0 }) },
-    }
-    const { container } = renderCluster(bound, { ...values, 'propulsion.port.oilTemperature': 363.15 })
-    expect(container.querySelector('[data-gap-arc="right"]')).toHaveTextContent('90°')
+  // An unset slot draws nothing at all rather than an empty track.
+  test('draws nothing for an unset right arc', () => {
+    const { container } = renderCluster({ ...full, arcs: { left: arcs.left } })
+    expect(container.querySelector('[data-gap-arc="right"]')).toBeNull()
   })
 
   test('is amber past a band with no alarm configured, never red', () => {
@@ -360,11 +359,13 @@ describe('footer', () => {
     expect(screen.getByTestId('cluster-alt-stage')).toHaveTextContent('ABSORPTION')
   })
 
-  test('reads the transmission: pressure large, temperature in the header', () => {
+  // The gearbox temperature is the right arc's now; the card shows pressure only.
+  test('reads the transmission pressure with no temperature in the card', () => {
     renderCluster()
     const trans = screen.getByTestId('cluster-trans')
     expect(within(trans).getByText('341')).toBeInTheDocument()
-    expect(trans.querySelector('[data-header-temp]')).toHaveTextContent('38°')
+    expect(trans.querySelector('[data-header-temp]')).toBeNull()
+    expect(trans.querySelector('[data-bullet]')).not.toBeNull()
   })
 
   test('reads the wet exhaust', () => {
