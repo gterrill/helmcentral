@@ -560,3 +560,46 @@ func TestLoadVesselRolesTrimsTheACInstance(t *testing.T) {
 		t.Fatalf("got %+v", v.Electrical)
 	}
 }
+
+func TestElectricalPayloadSaysWhetherAHouseBankIsChosen(t *testing.T) {
+	seedSelfTree(t, electricalInstancesTree)
+
+	saveElectricalVessel(t, vesselView{})
+	if got := buildElectricalStatePayload()["house_bank_configured"]; got != false {
+		t.Fatalf("unset: got %v", got)
+	}
+
+	saveElectricalVessel(t, vesselView{HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0"}})
+	if got := buildElectricalStatePayload()["house_bank_configured"]; got != true {
+		t.Fatalf("chosen: got %v", got)
+	}
+}
+
+func TestElectricalPayloadHouseBankConfiguredDoesNotDependOnTheFeed(t *testing.T) {
+	saveElectricalVessel(t, vesselView{HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0"}})
+	withGlobalSnapshot(t, newSignalKSnapshot()) // SignalK has dropped: no self data
+	if got := buildElectricalStatePayload()["house_bank_configured"]; got != true {
+		t.Fatalf("a dropped feed must not read as no bank chosen, got %v", got)
+	}
+}
+
+func TestElectricalPayloadHouseBankConfiguredIsUnknownWhenSettingsAreUnreadable(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := os.WriteFile(settingsPath, []byte("roles: [not, a, block]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resetVesselReadLog()
+	seedSelfTree(t, electricalInstancesTree)
+	payload := buildElectricalStatePayload()
+	v, has := payload["house_bank_configured"]
+	if !has {
+		t.Fatal("the key must be present")
+	}
+	if b, isBool := v.(bool); isBool {
+		t.Fatalf("unreadable settings must send null, got %v", b)
+	}
+	if body, _ := json.Marshal(payload); !strings.Contains(string(body), `"house_bank_configured":null`) {
+		t.Fatalf("got %s", body)
+	}
+}

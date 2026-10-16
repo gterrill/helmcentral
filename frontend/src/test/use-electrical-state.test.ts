@@ -113,4 +113,15 @@ describe('useElectricalState voltage readout and generator', () => {
     emit({ datetime: '2026-09-14T00:00:00Z', generator_configured: null })
     expect(result.current.generatorConfigured).toBeNull()
   })
+
+  it('says whether a house bank is chosen, and not until the backend says', () => {
+    const { result } = renderHook(() => useElectricalState())
+    expect(result.current.houseBankConfigured).toBeNull()
+    emit({ datetime: '2026-09-14T00:00:00Z', house_bank_configured: false })
+    expect(result.current.houseBankConfigured).toBe(false)
+    emit({ datetime: '2026-09-14T00:00:00Z', house_bank_configured: true })
+    expect(result.current.houseBankConfigured).toBe(true)
+    emit({ datetime: '2026-09-14T00:00:00Z', house_bank_configured: null })
+    expect(result.current.houseBankConfigured).toBeNull()
+  })
 })

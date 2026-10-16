@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- The Battery & Power tile now says "No house bank chosen" and links to
+  **Settings, SignalK, Roles** when no house bank is chosen, instead of showing
+  dashes that looked like a bank that had stopped reporting. Solar, Loads, Shore
+  and the readout battery's voltage still show. A chosen bank that is not
+  reporting still shows a dash (—). The Generator tile's "not set up" message
+  also points to Roles now, where it used to name Settings, Vessel.
+
 ## [0.47.0] - 2026-10-16
 
 ### Breaking
