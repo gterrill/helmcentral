@@ -268,6 +268,10 @@ type dashboardClusterConfig struct {
 	// none is picked yet and the tile asks for one. Every slot below reads a
 	// suffix of that item's source, and its zones come from the item's profile.
 	EquipmentID string `json:"equipmentId,omitempty"`
+	// Source is the SignalK source the tile read before any equipment was
+	// picked (set by the conversion, cleared when equipment is chosen). Only the
+	// zones the tile still holds use it, so their alarms keep running.
+	Source string `json:"source,omitempty"`
 	// Title overrides the item's name; empty shows the name.
 	Title      string                   `json:"title"`
 	Ring       dashboardGaugeConfig     `json:"ring"`
@@ -290,6 +294,9 @@ type dashboardClusterConfig struct {
 type dashboardClusterFuelBar struct {
 	TankID string `json:"tankId,omitempty"`
 	Label  string `json:"label,omitempty"`
+	// Source is the tank's SignalK source while no tank item is picked, so the
+	// bar's low-fuel zones keep raising their alarm.
+	Source string `json:"source,omitempty"`
 	// Level and Capacity are the two paths a bar held before it named a tank.
 	// Only the one-off conversion at startup reads them (it turns them into
 	// TankID and clears them); a save that still carries one is refused.
@@ -317,6 +324,9 @@ type dashboardGaugeGroupConfig struct {
 	EquipmentKind string `json:"equipmentKind,omitempty"`
 	// EquipmentID is the item shown; empty until one is picked.
 	EquipmentID string `json:"equipmentId,omitempty"`
+	// Source is the SignalK source the group read before any equipment was
+	// picked; see dashboardClusterConfig.Source.
+	Source string `json:"source,omitempty"`
 	// Title overrides the item's name; empty shows the name.
 	Title   string                 `json:"title"`
 	Columns *int                   `json:"columns,omitempty"`
@@ -1399,9 +1409,6 @@ func validateSlotConfig(g dashboardGaugeConfig, hasItem bool, ctx string) string
 	if strings.TrimSpace(g.Path) != "" {
 		return "a slot on an equipment tile reads a suffix of the item's source, not a path: " + ctx
 	}
-	if len(g.Zones) > 0 {
-		return "zones belong to the equipment profile, not the tile: " + ctx
-	}
 	suffix := strings.TrimSpace(g.Suffix)
 	if suffix == "" {
 		if hasItem {
@@ -1410,7 +1417,33 @@ func validateSlotConfig(g dashboardGaugeConfig, hasItem bool, ctx string) string
 	} else if len(suffix) > dashboardSuffixMaxLen || !dashboardSuffixPattern.MatchString(suffix) {
 		return "invalid reading name: " + ctx
 	}
-	return validateGaugeSettings(g, ctx)
+	if msg := validateGaugeSettings(g, ctx); msg != "" {
+		return msg
+	}
+	// Zones a slot still holds (until a profile can) must be able to alarm.
+	for i, zone := range g.Zones {
+		if _, ok := alarmStateRank[zone.State]; !ok {
+			return "unknown gauge zone state: " + zone.State
+		}
+		if zone.State == alarmStateNormal {
+			continue
+		}
+		if _, err := gaugeZoneRule("validate", g, zone, i); err != nil {
+			return fmt.Sprintf("gauge zone %d cannot raise an alarm (%v): %s", i+1, err, ctx)
+		}
+	}
+	return ""
+}
+
+// validateTileSource checks the source a tile remembers while it has no item.
+func validateTileSource(source, ctx string) string {
+	if source == "" {
+		return ""
+	}
+	if err := validateSource(source); err != nil {
+		return "invalid tile source: " + ctx
+	}
+	return ""
 }
 
 // validateClusterWidget guards the fifth operator-configured widget.
@@ -1435,6 +1468,9 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 		return "cluster equipment id too long: " + w.ID
 	}
 	hasItem := w.Cluster.EquipmentID != ""
+	if msg := validateTileSource(w.Cluster.Source, w.ID); msg != "" {
+		return msg
+	}
 	if msg := validateSlotConfig(w.Cluster.Ring, hasItem, w.ID+" ring"); msg != "" {
 		return msg
 	}
@@ -1502,6 +1538,9 @@ func validateClusterFuelRail(rail *dashboardClusterFuelRail, id string) string {
 	}
 	for i, bar := range rail.Bars {
 		ctx := fmt.Sprintf("%s fuel bar %d", id, i+1)
+		if msg := validateTileSource(bar.Source, ctx); msg != "" {
+			return msg
+		}
 		if bar.Level != nil || bar.Capacity != nil {
 			return "a fuel bar names its tank, not level and capacity paths: " + ctx
 		}
@@ -1650,6 +1689,9 @@ func validateGaugeGroupWidget(w dashboardLayoutItem) string {
 	}
 	if w.GaugeGroup.Hero != nil && (*w.GaugeGroup.Hero < 0 || *w.GaugeGroup.Hero >= len(w.GaugeGroup.Gauges)) {
 		return "gauge group hero out of range: " + w.ID
+	}
+	if msg := validateTileSource(w.GaugeGroup.Source, w.ID); msg != "" {
+		return msg
 	}
 	kind := sourceGroup(w.GaugeGroup.EquipmentKind)
 	if w.GaugeGroup.EquipmentKind == "" {

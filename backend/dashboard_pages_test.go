@@ -2951,7 +2951,7 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 	pathSlot.Corners[0].Rows[0].Path = "propulsion.port.oilPressure"
 
 	zonedSlot := validClusterConfig()
-	zonedSlot.Ring.Zones = []gaugeZone{{From: 0, To: 10, State: alarmStateAlarm}}
+	zonedSlot.Ring.Zones = []gaugeZone{{From: 40, To: 60, State: alarmStateAlarm}}
 
 	badSuffix := validClusterConfig()
 	badSuffix.Corners[0].Rows[0].Suffix = "../../etc"
@@ -2987,7 +2987,7 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 		{"missing config", clusterWidget("cluster:abcd1234", nil)},
 		{"ring with no reading", clusterWidget("cluster:abcd1234", noRing)},
 		{"a slot that holds a path", clusterWidget("cluster:abcd1234", pathSlot)},
-		{"a slot that holds zones", clusterWidget("cluster:abcd1234", zonedSlot)},
+		{"a slot that holds a zone that cannot alarm", clusterWidget("cluster:abcd1234", zonedSlot)},
 		{"a suffix that escapes the source", clusterWidget("cluster:abcd1234", badSuffix)},
 		{"too many corners", clusterWidget("cluster:abcd1234", tooManyCorners)},
 		{"corner with no rows", clusterWidget("cluster:abcd1234", emptyCorner)},

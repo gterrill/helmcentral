@@ -2,8 +2,10 @@ package main
 
 import (
 	"database/sql"
+	"math"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -129,8 +131,8 @@ func TestConvertDashboardTilesToEquipment(t *testing.T) {
 	}
 
 	g := widget("p1", "gauge-group:alt00001").GaugeGroup
-	if g.EquipmentKind != "alternator" || g.EquipmentID != alt || g.Gauges[1].Suffix != "current" || len(g.Gauges[1].Zones) != 0 {
-		t.Errorf("alternator group should become an equipment group: %+v", g)
+	if g.EquipmentKind != "alternator" || g.EquipmentID != alt || g.Gauges[1].Suffix != "current" || len(g.Gauges[1].Zones) != 1 {
+		t.Errorf("alternator group should become an equipment group that keeps its Amps zone while its item has no profile: %+v", g)
 	}
 	if econ := widget("p1", "gauge:econ0001").Gauge; econ.Path != "helmcentral.propulsion.fuelEconomy" {
 		t.Errorf("a single-instance gauge keeps its path: %+v", econ)
@@ -145,6 +147,12 @@ func TestConvertDashboardTilesToEquipment(t *testing.T) {
 	}
 	if wc.Fuel.Bars[1].TankID != "" || wc.Fuel.Bars[1].Label != "Aft" {
 		t.Errorf("a tank with no item keeps its label and asks for one: %+v", wc.Fuel.Bars[1])
+	}
+
+	// The gearbox zone the tile held differs from the profile's own, so it stays
+	// on the tile, inert, until the operator chooses.
+	if gb := pc.Telltales[0]; gb.Suffix != "transmission.oilTemperature" || len(gb.Zones) != 1 {
+		t.Errorf("the gearbox zone stays on the tile: %+v", gb)
 	}
 
 	// Zones moved to the profile where it had none, and the profile's own
@@ -307,4 +315,107 @@ func barProfileWithoutZones() engineProfile {
 	p := barProfile()
 	p.Gauges[0].Zones = nil
 	return p
+}
+
+// The boat's engines and alternators have no equipment item yet when the
+// dashboard is converted. Their zones must go on raising the same alarms, from
+// the tile, until equipment is picked.
+func TestConvertDashboardTilesKeepsZonesOnTilesWithNoItem(t *testing.T) {
+	setupDashboardPagesTest(t)
+	path := filepath.Join(t.TempDir(), "dashboard-pages.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", path)
+	if err := os.WriteFile(path, []byte(tileConvertFixture), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	vesselFixtureStore(t)
+	logs := captureLog(t)
+	loadDashboardPages()
+	if err := convertDashboardTilesToEquipment(); err != nil {
+		t.Fatal(err)
+	}
+
+	dashboardPagesMu.RLock()
+	wall := dashboardPagesState["p2"].Widgets[0].Cluster
+	group := dashboardPagesState["p1"].Widgets[2].GaugeGroup
+	dashboardPagesMu.RUnlock()
+	if wall.EquipmentID != "" || wall.Source != "propulsion.port" {
+		t.Errorf("a tile with no item remembers the source it read: %+v", wall)
+	}
+	if len(wall.Ring.Zones) != 2 || len(wall.Corners[0].Rows[0].Zones) != 1 {
+		t.Errorf("the zones stay on the tile: ring %+v oil %+v", wall.Ring.Zones, wall.Corners[0].Rows[0].Zones)
+	}
+	if group.Source != "electrical.alternator.0" || len(group.Gauges[1].Zones) != 1 {
+		t.Errorf("the alternator group keeps its source and its Amps zone: %+v", group)
+	}
+	if strings.Contains(logs.String(), "dropped the zones") {
+		t.Errorf("the conversion never drops a zone:\n%s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "kept the zones") {
+		t.Errorf("what stayed on the tile is logged:\n%s", logs.String())
+	}
+
+	// The alarms keep running, under the ids they always had.
+	byID := map[string]alarmRule{}
+	for _, r := range zoneDerivedAlarmRules() {
+		byID[r.ID] = r
+	}
+	rpm, ok := byID["zone:cluster:preview01:0:1"]
+	if !ok || rpm.Path != "propulsion.port.revolutions" || rpm.State != alarmStateAlarm {
+		t.Errorf("the overspeed alarm must survive under its old id, got %+v", byID)
+	}
+	amps, ok := byID["zone:gauge-group:alt00001:1:0"]
+	if !ok || amps.Path != "electrical.alternator.0.current" || amps.State != alarmStateWarn {
+		t.Errorf("the alternator amps alarm must survive under its old id, got %+v", byID)
+	}
+	if rpm.Label != "Port RPM" {
+		t.Errorf("an alarm on a tile with no item is named for the tile, got %q", rpm.Label)
+	}
+}
+
+// An item with no profile holds nothing, so the tile keeps its zones and they
+// alarm on the item's source.
+func TestTileZonesStayOnTheTileWhileTheItemHasNoProfile(t *testing.T) {
+	itemID := newTileItem(t, "Port engine", "propulsion.port", "")
+	oil := dashboardGaugeConfig{Suffix: "oilPressure", Label: "Oil", Display: "radial", Quantity: "pressure", Unit: "psi",
+		Zones: []gaugeZone{{From: 0, To: 15, State: alarmStateAlarm}}}
+	withPages(t, oilCluster(itemID, oil))
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 1 || rules[0].Path != "propulsion.port.oilPressure" || rules[0].Label != "Port engine Oil" {
+		t.Fatalf("expected the tile's alarm on the item's source, got %+v", rules)
+	}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{oilCluster(itemID, oil)}, ""); msg != "" {
+		t.Fatalf("a slot may hold zones while there is no profile to hold them: %s", msg)
+	}
+}
+
+// When the profile has its own zones for the reading they apply and the tile's
+// stay stored but inert until the operator chooses, so one alarm exists, not two.
+func TestTheProfilesZonesWinOverZonesStillOnTheTile(t *testing.T) {
+	useProfiles(t, barProfile())
+	itemID := newTileItem(t, "Port engine", "propulsion.port", "bar-engine")
+	slot := dashboardGaugeConfig{Suffix: "oilPressure", Label: "Oil", Display: "radial", Quantity: "pressure", Unit: "psi",
+		Zones: []gaugeZone{{From: 0, To: 15, State: alarmStateWarn}}}
+	withPages(t, oilCluster(itemID, slot))
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 1 || math.Abs(rules[0].Value-800000) > 1 {
+		t.Fatalf("only the profile's alarm, got %+v", rules)
+	}
+}
+
+// A profile with a gauge but no zones for it leaves the tile's zones in force,
+// in the tile's own unit.
+func TestTileZonesApplyWhenTheProfileGaugeHasNoZones(t *testing.T) {
+	useProfiles(t, barProfileWithoutZones())
+	itemID := newTileItem(t, "Port engine", "propulsion.port", "bar-engine")
+	slot := dashboardGaugeConfig{Suffix: "oilPressure", Label: "Oil", Display: "radial", Quantity: "pressure", Unit: "psi",
+		Zones: []gaugeZone{{From: 0, To: 14.5038, State: alarmStateAlarm}}}
+	withPages(t, oilCluster(itemID, slot))
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 1 || math.Abs(rules[0].Value-100000) > 50 {
+		t.Fatalf("14.5 psi is about 100000 Pa, got %+v", rules)
+	}
+	resolved, _, _ := currentEquipmentIndex().resolveSlot(itemID, slot)
+	if resolved.Unit != "psi" || len(resolved.Zones) != 1 {
+		t.Fatalf("a slot that still holds its zones keeps its unit, got %+v", resolved)
+	}
 }

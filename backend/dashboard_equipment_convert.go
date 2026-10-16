@@ -116,25 +116,29 @@ func (c *tileConverter) convertSlot(slot *dashboardGaugeConfig, src string, item
 		return false
 	}
 	slot.Path, slot.Suffix = "", suffix
-	if len(slot.Zones) > 0 {
-		c.moveZones(slot, item, found, where)
+	if len(slot.Zones) > 0 && c.moveZones(slot, item, found, where) {
 		slot.Zones = nil
 	}
 	return true
 }
 
 // moveZones carries a slot's zones to the gauge of the item's profile that
-// reads the same suffix, when that gauge has none of its own.
-func (c *tileConverter) moveZones(slot *dashboardGaugeConfig, item equipmentRef, found bool, where string) {
+// reads the same suffix, when that gauge has none of its own, and reports
+// whether the slot's zones can be cleared (they moved, or the profile already
+// holds exactly the same). When they cannot move, they stay on the tile, which
+// keeps raising their alarms, and the log says why.
+func (c *tileConverter) moveZones(slot *dashboardGaugeConfig, item equipmentRef, found bool, where string) bool {
 	label := firstNonEmpty(slot.Label, slot.Suffix)
+	keep := func(format string, args ...any) bool {
+		c.logOnce("%s: kept the zones on %q on the tile; "+format, append([]any{where, label}, args...)...)
+		return false
+	}
 	if !found {
-		c.logOnce("%s: dropped the zones on %q; the tile shows no equipment item yet, and a zone now lives on the item's profile", where, label)
-		return
+		return keep("the tile shows no equipment item yet, so there is no profile to hold them")
 	}
 	profile, ok := c.ix.profiles[item.ProfileID]
 	if !ok {
-		c.logOnce("%s: dropped the zones on %q; %s has no equipment profile to hold them", where, label, item.Name)
-		return
+		return keep("%s has no equipment profile to hold them", item.Name)
 	}
 	index := -1
 	for i, g := range profile.Gauges {
@@ -144,28 +148,25 @@ func (c *tileConverter) moveZones(slot *dashboardGaugeConfig, item equipmentRef,
 		}
 	}
 	if index < 0 {
-		c.logOnce("%s: dropped the zones on %q; profile %q has no %s gauge to hold them", where, label, profile.Name, slot.Suffix)
-		return
+		return keep("profile %q has no %s gauge to hold them", profile.Name, slot.Suffix)
 	}
 
 	gauge := profile.Gauges[index]
 	// The tile's thresholds are in the tile's unit and its scale; the profile
-	// holds them in its gauge's unit. Convert, or drop what cannot be converted.
+	// holds them in its gauge's unit. Convert, or keep them on the tile.
 	// The tile judged its bands against its own scale, 0..100 when it set none,
 	// so that is the scale to read them against here.
 	min, max := gaugeScale(slot.Min, slot.Max, nil)
 	tileZones, unrepresentable := storedZonesToProfile(slot.Zones, min, max)
 	if unrepresentable {
-		c.logOnce("%s: left out a band on %q that floats mid-scale; a profile zone is a direction and a threshold", where, label)
+		return keep("a band floats mid-scale, and a profile zone is a direction and a threshold")
 	}
 	if slot.Quantity != gauge.Quantity || slot.Unit != gauge.Unit {
-		converted := tileZones[:0]
+		converted := make([]engineProfileZone, 0, len(tileZones))
 		for _, z := range tileZones {
 			v, err := convertBetweenUnits(*z.Threshold, slot.Quantity, slot.Unit, gauge.Quantity, gauge.Unit)
 			if err != nil {
-				c.logOnce("%s: dropped a zone on %q; its unit %s %s does not convert to the profile's %s %s: %v",
-					where, label, slot.Quantity, slot.Unit, gauge.Quantity, gauge.Unit, err)
-				continue
+				return keep("its unit %s %s does not convert to the profile's %s %s: %v", slot.Quantity, slot.Unit, gauge.Quantity, gauge.Unit, err)
 			}
 			z.Threshold = &v
 			converted = append(converted, z)
@@ -190,12 +191,9 @@ func (c *tileConverter) moveZones(slot *dashboardGaugeConfig, item equipmentRef,
 	}
 	switch {
 	case sameProfileZones(existing, tileZones):
-		return
+		return true
 	case len(existing) > 0:
-		c.logOnce("%s: dropped the zones on %q in favour of the ones profile %q already has", where, label, profile.Name)
-		return
-	case len(tileZones) == 0:
-		return
+		return keep("profile %q already has different zones for it, which apply until you choose which set to keep", profile.Name)
 	}
 
 	gauge.Zones = append(slots, tileZones...)
@@ -206,11 +204,11 @@ func (c *tileConverter) moveZones(slot *dashboardGaugeConfig, item equipmentRef,
 	next.Gauges = append([]engineProfileGauge(nil), profile.Gauges...)
 	next.Gauges[index] = gauge
 	if err := validateEngineProfile(next); err != nil {
-		c.logOnce("%s: dropped the zones on %q; profile %q would not accept them: %v", where, label, profile.Name, err)
-		return
+		return keep("profile %q would not accept them: %v", profile.Name, err)
 	}
 	c.ix.profiles[profile.ID] = next
 	c.edited[profile.ID] = true
+	return true
 }
 
 // storedZonesToProfile turns bands into the direction and threshold a profile
@@ -272,6 +270,8 @@ func (c *tileConverter) convertCluster(page, id string, cl *dashboardClusterConf
 	if found {
 		cl.EquipmentID = item.ID
 	} else if ok {
+		// The tile remembers what it read, so the zones it keeps still alarm.
+		cl.Source = src
 		c.logOnce("%s: no equipment item owns %s, so the cluster asks for one", where, src)
 	}
 
@@ -333,6 +333,9 @@ func (c *tileConverter) convertCluster(page, id string, cl *dashboardClusterConf
 			if owner, owned := c.ix.bySource[tank]; split && owned && owner.Group == sourceTank {
 				bar.TankID = owner.ID
 			} else {
+				if split {
+					bar.Source = tank
+				}
 				c.logOnce("%s: no equipment item owns the tank %q, so its fuel bar asks for one", where, bar.Level.Path)
 			}
 			if len(bar.Level.Zones) > 0 {
@@ -365,6 +368,7 @@ func (c *tileConverter) convertGaugeGroup(page, id string, g *dashboardGaugeGrou
 	if found {
 		g.EquipmentID = item.ID
 	} else {
+		g.Source = src
 		c.logOnce("%s: no equipment item owns %s, so the group asks for one", where, src)
 	}
 	for i := range g.Gauges {

@@ -202,13 +202,28 @@ func gaugeScale(slotMin, slotMax *float64, gauge *engineProfileGauge) (min, max 
 	return min, max
 }
 
+// gaugeHasZones reports whether a profile gauge holds any zone with a
+// threshold. A zone with none is a slot the manufacturer leaves blank and
+// counts for nothing.
+func gaugeHasZones(g engineProfileGauge) bool {
+	for _, z := range g.Zones {
+		if z.Threshold != nil {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveSlot turns a slot on a tile that shows item equipmentID into a gauge
 // with a path and the profile's zones. ok is false when the item does not
 // exist, owns no source, or the slot names no reading.
 //
-// When the profile has a gauge for the reading, the quantity and unit are the
-// profile's, because its thresholds are in that unit, and the returned slot
-// carries the scale its zones were anchored to.
+// When the profile has a gauge for the reading and its zones apply (they win
+// whenever the profile has any, and are all there is when the slot holds none),
+// the quantity and unit are the profile's, because its thresholds are in that
+// unit, and the returned slot carries the scale its zones were anchored to. A
+// slot that still holds zones of its own, with none on the profile to hold
+// them, keeps them, and its own unit and scale.
 func (ix equipmentIndex) resolveSlot(equipmentID string, slot dashboardGaugeConfig) (dashboardGaugeConfig, equipmentRef, bool) {
 	item, found := ix.items[equipmentID]
 	if !found || item.Source == "" || strings.TrimSpace(slot.Suffix) == "" {
@@ -217,9 +232,9 @@ func (ix equipmentIndex) resolveSlot(equipmentID string, slot dashboardGaugeConf
 	suffix := strings.TrimSpace(slot.Suffix)
 	out := slot
 	out.Path = item.Source + "." + suffix
-	out.Zones = nil
+	// Zones the slot still holds stay unless the profile's replace them below.
 	if profile, ok := ix.profiles[item.ProfileID]; ok {
-		if gauge, ok := profileGaugeFor(profile, suffix); ok {
+		if gauge, ok := profileGaugeFor(profile, suffix); ok && (len(slot.Zones) == 0 || gaugeHasZones(gauge)) {
 			min, max := gaugeScale(slot.Min, slot.Max, &gauge)
 			out.Quantity, out.Unit = gauge.Quantity, gauge.Unit
 			out.Min, out.Max = &min, &max
@@ -264,24 +279,22 @@ func (ix equipmentIndex) resolveTank(tankID string) (level, capacity string, ok 
 	return item.Source + ".currentLevel", item.Source + ".capacity", true
 }
 
-// tankLevelReading is the gauge a low-fuel alarm is raised from: the tank item's
-// level as a percentage of full, with the zones the fuel bar carries.
-func (ix equipmentIndex) tankLevelReading(tankID string, zones []gaugeZone) (dashboardGaugeConfig, bool) {
-	level, _, ok := ix.resolveTank(tankID)
-	if !ok {
-		return dashboardGaugeConfig{}, false
-	}
+// tankLevelReading is the gauge a low-fuel alarm is raised from: the tank's
+// level as a percentage of full, with the zones the fuel bar carries. The tank
+// is the item picked for the bar, or, while none is, the source the bar read.
+func (ix equipmentIndex) tankLevelReading(bar dashboardClusterFuelBar) (key string, gauge dashboardGaugeConfig, ok bool) {
 	min, max := 0.0, 100.0
-	return dashboardGaugeConfig{
-		Path:     level,
-		Label:    ix.items[tankID].Name + " level",
-		Display:  "bar",
-		Quantity: "ratio",
-		Unit:     "percent",
-		Min:      &min,
-		Max:      &max,
-		Zones:    zones,
-	}, true
+	gauge = dashboardGaugeConfig{Display: "bar", Quantity: "ratio", Unit: "percent", Min: &min, Max: &max, Zones: bar.Zones}
+	if level, _, resolved := ix.resolveTank(bar.TankID); resolved {
+		gauge.Path, gauge.Label = level, ix.items[bar.TankID].Name+" level"
+		return "tank:" + bar.TankID, gauge, true
+	}
+	if bar.Source != "" {
+		gauge.Path = bar.Source + ".currentLevel"
+		gauge.Label = firstNonEmpty(bar.Label, bar.Source) + " level"
+		return "tank:" + bar.Source, gauge, true
+	}
+	return "", dashboardGaugeConfig{}, false
 }
 
 // resolveLamp gives the path a lamp reads: its own, or its item's source plus
