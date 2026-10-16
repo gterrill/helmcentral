@@ -161,7 +161,7 @@ function blankArc(label: string, min: number, max: number): GaugeWidgetConfig {
  * already chosen. The alternator is the one the Roles setting names for this
  * engine's side, when it names one: there is no default and no guess otherwise.
  */
-function clusterFromProfile(
+export function clusterFromProfile(
   profile: EngineProfile, current: EngineClusterConfig, ctx: EquipmentTileContext, roles: { port_alternator: string; starboard_alternator: string } | null,
 ): EngineClusterConfig {
   // Zones a slot still holds are not the profile's to replace: carry them to
@@ -172,7 +172,9 @@ function clusterFromProfile(
     const slot = gauge ? slotFromProfileGauge({ ...blankSlot(''), suffix }, gauge) : { ...blankSlot(fallbackLabel), suffix }
     const old = held.get(suffix)
     // The zones are in the old slot's unit and scale, so those come with them.
-    return old ? { ...slot, zones: old.zones, quantity: old.quantity, unit: old.unit, min: old.min, max: old.max } : slot
+    return old
+      ? { ...slot, zones: old.zones, quantity: old.quantity, unit: old.unit, min: old.min, max: old.max, ...(old.zoneIndex !== undefined ? { zoneIndex: old.zoneIndex } : {}) }
+      : slot
   }
 
   const ring = { ...pick(SLOT_SUFFIXES.ring, 'RPM') }

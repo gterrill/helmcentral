@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, test, vi } from 'vitest'
 
-import { EngineClusterConfigDialog } from '@/components/engine-cluster-config-dialog'
+import { EngineClusterConfigDialog, clusterFromProfile } from '@/components/engine-cluster-config-dialog'
 import type { DashboardLayoutItem, EngineClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import type { EngineProfile } from '@/lib/engine-profiles'
 import type { SourceKind } from '@/lib/vessel-settings'
@@ -130,6 +130,21 @@ describe('filling a cluster from the engine item', () => {
     }
   })
 
+  // A migrated telltale's held zones are keyed by the position it was issued
+  // (zoneIndex). Filling from the profile rebuilds the slot, and must keep it or
+  // the held zones move to a new alarm id.
+  test('keeps the issued alarm position of a slot whose zones it carries over', async () => {
+    await setup('port')
+    const held: GaugeWidgetConfig = {
+      path: '', suffix: 'transmission.oilTemperature', label: 'Gearbox', display: 'numeric', quantity: 'temperature', unit: 'C',
+      zones: [{ from: 90, to: 120, state: 'alarm' }], zoneIndex: 19,
+    }
+    const profile = await loadProfile()
+    const filled = clusterFromProfile(profile, { ...blank, arcs: { right: held } }, state.ctx as EquipmentTileContext, null)
+    expect(filled.arcs?.right?.zones).toEqual(held.zones)
+    expect(filled.arcs?.right?.zoneIndex).toBe(19)
+  })
+
   test('takes the side from the engine item', async () => {
     expect((await fillAndSave('port')).side).toBe('port')
   })
@@ -190,12 +205,12 @@ describe('the slots no profile fills', () => {
   })
 
   // A wet exhaust reads tens of degrees after water injection, not hundreds.
-  test('the exhaust starts on a 0 to 100 C scale with no threshold of ours', async () => {
+  test('the exhaust starts with no scale or threshold of ours', async () => {
     const saved = await fillThen(() => {
       fireEvent.change(document.querySelector('#cluster-footer-egt-equipment') as HTMLSelectElement, { target: { value: 'exh' } })
     })
     const egt = saved.footer!.egt!
-    expect([egt.equipmentId, egt.suffix, egt.quantity, egt.unit, egt.min, egt.max]).toEqual(['exh', 'exhaustTemperature', 'temperature', 'C', 0, 100])
+    expect([egt.equipmentId, egt.suffix, egt.quantity, egt.unit, egt.min, egt.max]).toEqual(['exh', 'exhaustTemperature', 'temperature', 'C', undefined, undefined])
     expect(egt.zones).toBeUndefined()
     const resolved = resolveCluster(saved, state.ctx as EquipmentTileContext)
     if (!resolved.ok) throw new Error('did not resolve')

@@ -274,6 +274,11 @@ export interface GaugeWidgetConfig {
   min?: number
   max?: number
   zones?: GaugeZone[]
+  /**
+   * Set by the server: where in the flat list of a cluster's slots the zones this
+   * slot still holds were issued their alarm ids. Carry it with the zones.
+   */
+  zoneIndex?: number
   /** History window; `trend` only (ADR 0051). */
   window?: string
   /** `radial` only: `plain` is the bare arc, `instrument` adds ticks and a scale (ADR 0054). */
