@@ -26,15 +26,16 @@ const zoneDerivedAlarmRuleIDPrefix = "zone:"
 // come first. 18 is where the old telltales began (2 + 4 corners * 4 rows, before
 // a corner held one row), a position that shipped; a telltale moved onto an arc
 // keeps its own old index (dashboardGaugeConfig.ZoneIndex), so no issued id
-// changes. The footer and the right arc are new in this release, so they follow
-// without gaps: footer slot i is clusterFooterZoneIndexBase+i, in the order the
-// frontend's CLUSTER_FOOTER_SLOTS lists (a test pins the two together).
+// changes. The footer and both arcs' defaults are new in this release, so they
+// follow without gaps and never share a telltale's: footer slot i is
+// clusterFooterZoneIndexBase+i, in the order the frontend's
+// CLUSTER_FOOTER_SLOTS lists (a test pins the two together).
 const (
 	clusterTelltaleZoneIndexBase = 18
-	clusterLeftArcZoneIndex      = clusterTelltaleZoneIndexBase
 	clusterFooterZoneIndexBase   = 24
 	clusterFooterSlotCount       = 8
 	clusterRightArcZoneIndex     = clusterFooterZoneIndexBase + clusterFooterSlotCount
+	clusterLeftArcZoneIndex      = clusterRightArcZoneIndex + 1
 )
 
 const (
@@ -279,11 +280,28 @@ func zoneDerivedAlarmRules() []alarmRule {
 				c := widget.Cluster
 				collectSlot(widget.ID, 0, c.EquipmentID, c.Source, c.Title, c.Ring)
 				collectSlot(widget.ID, 1, c.EquipmentID, c.Source, c.Title, c.Centre)
+				// A row may carry the index it was issued (ZoneIndex); the
+				// counter must not hand the same one to a row without.
+				claimed := map[int]bool{}
+				for _, corner := range c.Corners {
+					for _, row := range corner.Rows {
+						if row.ZoneIndex != nil {
+							claimed[*row.ZoneIndex] = true
+						}
+					}
+				}
 				index := 2
 				for _, corner := range c.Corners {
 					for _, row := range corner.Rows {
+						if row.ZoneIndex == nil {
+							for claimed[index] {
+								index++
+							}
+						}
 						collectSlot(widget.ID, index, c.EquipmentID, c.Source, c.Title, row)
-						index++
+						if row.ZoneIndex == nil {
+							index++
+						}
 					}
 				}
 				for i, slot := range c.Arcs.slots() {

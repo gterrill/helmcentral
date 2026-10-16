@@ -54,9 +54,12 @@ battery, the alternator and the exhaust are not the engine.
    keep the index ids of ADR 0187. The old telltales shipped at index 18 and up,
    and a telltale moved onto an arc keeps the index of its own old position
    (`zoneIndex` on the slot), so no issued id changes, whichever order the
-   telltales were in. The coolant arc is 18 by default. The footer and the right
-   arc are new and follow without gaps: footer slot i is 24 + i in the order of
-   the frontend's `CLUSTER_FOOTER_SLOTS`, the right arc 32. A fixture read by both
+   telltales were in. The footer and both arcs' defaults are new and follow
+   without gaps, so none can share a telltale's id: footer slot i is 24 + i in
+   the order of the frontend's `CLUSTER_FOOTER_SLOTS`, the right arc 32, the left
+   arc 33. Corner rows are stamped with their position in the old flat list
+   before the one-row cap or the conversion drops any, so the rows after them
+   keep their ids. A fixture read by both
    the Go and the frontend tests pins that order. Append only from here.
 5. **Telltales move.** `telltales` is a legacy field only the conversion and a
    load-time step read: the engine temperature goes to the left arc and the
@@ -115,8 +118,10 @@ battery, the alternator and the exhaust are not the engine.
     when the engine is known to be turning on live data: not when it is off, its
     feed is lost, its rpm is stale, missing or zero, or the tile is stale, so a
     stale border never has RUN beside it.
-15. **Off is said once.** An engine that is off shows `--`, a neutral border and
-    the muted OFF pill in the title (ADR 0163). The card's status chip is for a
+15. **Off is said once.** An engine that is off shows `--` for its own readings,
+    no state of its own and the muted OFF pill in the title (ADR 0163). A slot
+    reading another item (the starter battery, a tank) is live and still lights
+    the border. The card's status chip is for a
     running engine and is not drawn when it is off, so OFF does not appear twice.
     No history request is made for an off engine.
 

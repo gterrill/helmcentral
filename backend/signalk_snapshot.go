@@ -138,6 +138,10 @@ func propulsionEngineID(path string) string {
 // subscribe=all stream carries (atons, aircraft, meteo).
 const vesselContextPrefix = "vessels."
 
+// mmsiContextMarker is the part of an MMSI-named context ("<kind>.urn:mrn:imo:mmsi:<MMSI>")
+// shared by every kind SignalK files such a target under.
+const mmsiContextMarker = "mmsi:"
+
 // signalKDeltaMaxPathSegments caps how many dotted segments a single delta
 // value's path may have before applyDelta rejects it outright, rather than
 // ever building the nested tree for it.
@@ -541,7 +545,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 	}
 
 	s.lastMessage = now
-	if strings.HasPrefix(d.Context, vesselContextPrefix) {
+	// A beacon is filed under whatever context SignalK gives its MMSI
+	// ("vessels.", "sar.", "atons." ...), so any MMSI-named context counts.
+	if strings.HasPrefix(d.Context, vesselContextPrefix) || strings.Contains(d.Context, mmsiContextMarker) {
 		for _, update := range d.Updates {
 			if len(update.Values) == 0 {
 				continue
@@ -1011,8 +1017,15 @@ func (s *signalKSnapshot) distressView(now time.Time, window, fresh time.Duratio
 	}
 	v.trusted = true
 	for _, context := range contexts {
-		if at, ok := s.contextHeard[context]; ok {
-			v.heard[context] = at
+		// Any context carrying the same MMSI counts, whatever kind SignalK
+		// filed it under: never declare a beacon gone that is still heard.
+		i := strings.Index(context, mmsiContextMarker)
+		for heardContext, at := range s.contextHeard {
+			if heardContext == context || (i >= 0 && strings.HasSuffix(heardContext, context[i:])) {
+				if at.After(v.heard[context]) {
+					v.heard[context] = at
+				}
+			}
 		}
 	}
 	return v
@@ -1086,6 +1099,14 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 		}
 		if seen.After(newest[context]) {
 			newest[context] = seen
+		}
+	}
+
+	// Heard times of non-vessel MMSI contexts are not covered by the vessel
+	// eviction below; bound them here.
+	for context, at := range s.contextHeard {
+		if !strings.HasPrefix(context, vesselContextPrefix) && now.Sub(at) > vesselContextStaleAfter {
+			delete(s.contextHeard, context)
 		}
 	}
 

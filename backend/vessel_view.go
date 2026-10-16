@@ -140,11 +140,14 @@ var sourceItemsCache = struct {
 	store *documentStore
 	at    time.Time
 	items []sourceItem
+	// generation counts invalidations, so a read that straddled one is not cached.
+	generation uint64
 }{}
 
 // invalidateSourceItems drops the cached list of items that own a source.
 func invalidateSourceItems() {
 	sourceItemsCache.mu.Lock()
+	sourceItemsCache.generation++
 	sourceItemsCache.items = nil
 	sourceItemsCache.at = time.Time{}
 	sourceItemsCache.mu.Unlock()
@@ -164,6 +167,7 @@ func listSourceItems() ([]sourceItem, error) {
 		sourceItemsCache.mu.Unlock()
 		return items, nil
 	}
+	generation := sourceItemsCache.generation
 	sourceItemsCache.mu.Unlock()
 
 	items, err := store.SourceItems()
@@ -174,7 +178,10 @@ func listSourceItems() ([]sourceItem, error) {
 		items = []sourceItem{}
 	}
 	sourceItemsCache.mu.Lock()
-	sourceItemsCache.store, sourceItemsCache.items, sourceItemsCache.at = store, items, time.Now()
+	// An invalidate during the read means these items may predate the edit.
+	if sourceItemsCache.generation == generation {
+		sourceItemsCache.store, sourceItemsCache.items, sourceItemsCache.at = store, items, time.Now()
+	}
 	sourceItemsCache.mu.Unlock()
 	return items, nil
 }

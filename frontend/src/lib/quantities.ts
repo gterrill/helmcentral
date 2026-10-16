@@ -267,17 +267,21 @@ export function convertFromSI(value: number, quantityId: QuantityId | string, un
  * Converts a value between two display units of one quantity. Units here are
  * affine in the SI value (a scale and, for temperature, an offset), so the
  * inverse of one unit's `fromSI` is recovered from its value at 0 and 1. Two
- * different quantities cannot be converted: null, never a guess.
+ * different quantities, or a unit the quantity does not list, cannot be converted: null, never a guess.
  */
 export function convertBetweenUnits(
   value: number,
   quantityId: QuantityId | string,
   fromUnit: string,
   toUnit: string,
-): number {
+): number | null {
+  // unitOption falls back to a quantity's first unit for an id it does not know;
+  // converting through that fallback would use the wrong factor, so refuse.
+  const quantity = QUANTITIES.find((q) => q.id === quantityId)
+  const from = quantity?.units.find((u) => u.id === fromUnit)
+  const to = quantity?.units.find((u) => u.id === toUnit)
+  if (!from || !to) return null
   if (fromUnit === toUnit) return value
-  const from = unitOption(quantityId, fromUnit)
-  const to = unitOption(quantityId, toUnit)
   const offset = from.fromSI(0)
   const si = (value - offset) / (from.fromSI(1) - offset)
   return to.fromSI(si)

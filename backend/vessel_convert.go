@@ -117,6 +117,7 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 			}
 		}
 
+		var updateErr error
 		// assign gives item id the source, unless the item already has a
 		// different one or another item owns it. It reports whether the item
 		// now owns source.
@@ -143,7 +144,11 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 			}
 			if _, err := tx.Exec(`UPDATE equipment SET signalk_source = ?, category = ?, updated_at = ? WHERE id = ?`,
 				source, deriveEquipmentCategory(source), now.Unix(), id); err != nil {
-				note("%s: %v", why, err)
+				// A store failure, not a mapping the operator can redo: stop,
+				// roll back and keep the vessel block (checked after the walk).
+				if updateErr == nil {
+					updateErr = fmt.Errorf("assign %s to %s (%s): %w", source, it.name, why, err)
+				}
 				return false
 			}
 			it.source = source
@@ -311,7 +316,7 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 		roles.Inverter = pick(sourceInverter, el.InverterInstance, "the inverter")
 		roles.VoltageReadoutBattery = pick(sourceBattery, el.VoltageReadoutBattery, "the voltage readout battery")
 		roles.GeneratorACInstance = strings.TrimSpace(el.GeneratorACInstance)
-		return nil
+		return updateErr
 	})
 	if err != nil {
 		return fmt.Errorf("convert vessel settings: %w", err)

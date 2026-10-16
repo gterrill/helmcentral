@@ -473,17 +473,45 @@ func TestZoneDerivedAlarmRulesRaiseLowFuelFromABarsOwnZones(t *testing.T) {
 }
 
 // Engine Cluster v2 keeps the ids of zones a slot still holds where they were:
-// the coolant arc is index 18, which was the first telltale, and the footer and
-// the second arc are appended after the old telltale cap. Append only.
+// a telltale moved onto an arc carries its own old index (18..23), the footer
+// follows the old telltale cap and the two arcs' defaults follow the footer,
+// so no default collides with an issued id. Append only.
 func TestClusterHeldZoneIndexSpaceKeepsIssuedIDs(t *testing.T) {
-	if clusterLeftArcZoneIndex != 18 {
-		t.Fatalf("the coolant arc must stay at index 18, the first telltale's, got %d", clusterLeftArcZoneIndex)
+	if clusterTelltaleZoneIndexBase != 18 {
+		t.Fatalf("telltale ids began at 18 and must stay there, got %d", clusterTelltaleZoneIndexBase)
 	}
 	if clusterFooterZoneIndexBase < 24 {
 		t.Fatalf("the footer must start past the old telltale cap (18..23), got %d", clusterFooterZoneIndexBase)
 	}
 	if clusterRightArcZoneIndex != clusterFooterZoneIndexBase+len((&dashboardClusterFooter{}).slots()) {
 		t.Fatalf("the right arc follows the footer without a gap: %d", clusterRightArcZoneIndex)
+	}
+	if clusterLeftArcZoneIndex <= clusterRightArcZoneIndex {
+		t.Fatalf("the left arc default must sit past every telltale, footer and right arc id, got %d", clusterLeftArcZoneIndex)
+	}
+}
+
+// A telltale migrated onto the right arc keeps its old index (18 for the first
+// one); a left arc with held zones and no index of its own must not share it.
+func TestZoneDerivedAlarmRulesArcDefaultsNeverCollideWithMigratedTelltales(t *testing.T) {
+	right := *zoneGaugeConfig(0, 120, gaugeZone{From: 100, To: 120, State: alarmStateAlarm})
+	right.Suffix = "transmission.oilTemperature"
+	first := clusterTelltaleZoneIndexBase
+	right.ZoneIndex = &first
+	left := *zoneGaugeConfig(0, 120, gaugeZone{From: 100, To: 120, State: alarmStateWarn})
+	left.Suffix = "temperature"
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	withPages(t, dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 14,
+		Cluster: &dashboardClusterConfig{
+			EquipmentID: engine, Title: "Port",
+			Ring:   dashboardGaugeConfig{Suffix: "revolutions", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+			Centre: dashboardGaugeConfig{Suffix: "runTime", Display: "numeric", Quantity: "duration", Unit: "h"},
+			Arcs:   &dashboardClusterArcs{Left: &left, Right: &right},
+		},
+	})
+	if rules := zoneDerivedAlarmRules(); len(rules) != 2 {
+		t.Fatalf("both arcs hold zones and each needs its own alarm, got %+v", rules)
 	}
 }
 

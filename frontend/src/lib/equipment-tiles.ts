@@ -157,7 +157,9 @@ export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileCo
     if (!s.equipmentId) return slot(s)
     const own = findItem(ctx, s.equipmentId)
     if (!own || own.signalk_source === '') return { ...s, path: '', zones: undefined }
-    return resolveSlot(own, profileOf(ctx, own), s)
+    // Its scale is its own item's profile gauge's, the one the alarm raised from
+    // the same zones uses, so a scale the slot once carried cannot bend a band.
+    return resolveSlot(own, profileOf(ctx, own), { ...s, min: undefined, max: undefined })
   }
   const footer = config.footer && Object.fromEntries(
     CLUSTER_FOOTER_SLOTS.flatMap((key) => {
@@ -352,7 +354,14 @@ export function planTileZones(profile: EngineProfile | undefined, slots: readonl
     const convert = (v: number) => convertBetweenUnits(v, slot.quantity, slot.unit, gauge.unit)
     const min = convert(tile.min)
     const max = convert(tile.max)
-    const bands = zones.map((z) => ({ from: convert(z.from), to: convert(z.to), state: z.state }))
+    const converted = zones.map((z) => ({ from: convert(z.from), to: convert(z.to), state: z.state }))
+    // A unit the conversion does not know cannot be carried onto the profile: the
+    // zones stay on the tile in their own unit, and nothing is written.
+    if (min === null || max === null || converted.some((b) => b.from === null || b.to === null)) {
+      plan.stays.push(label)
+      return
+    }
+    const bands = converted as GaugeZone[]
     const move: TileZoneMove = { index, suffix, label, bands, min, max }
     if (!gaugeHasZones(gauge)) {
       plan.moves.push(move)

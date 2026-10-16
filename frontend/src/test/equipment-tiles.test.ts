@@ -13,6 +13,7 @@ import {
   type EquipmentTileContext,
   type TileItem,
 } from '@/lib/equipment-tiles'
+import { convertBetweenUnits } from '@/lib/quantities'
 
 const yanmar: EngineProfile = {
   id: 'yanmar-4jh', name: 'Yanmar 4JH', kind: 'engine',
@@ -275,6 +276,17 @@ describe('zones a converted tile still holds', () => {
     expect(plan.conflicts[0].tileText).toMatch(/^below 1\.0\d* bar, alarm$/)
   })
 
+  it('stays on the tile when a unit is not one the quantity knows, never converted by guess', () => {
+    expect(convertBetweenUnits(1, 'pressure', 'furlongs', 'bar')).toBeNull()
+    expect(convertBetweenUnits(1, 'pressure', 'psi', 'furlongs')).toBeNull()
+    expect(convertBetweenUnits(1, 'nonsense', 'psi', 'bar')).toBeNull()
+    expect(convertBetweenUnits(14.5038, 'pressure', 'psi', 'bar')).toBeCloseTo(1, 2)
+    const plan = planTileZones(bare, [{ ...heldOil, unit: 'furlongs' }])
+    expect(plan.moves).toEqual([])
+    expect(plan.conflicts).toEqual([])
+    expect(plan.stays).toEqual(['Oil'])
+  })
+
   it('stays on the tile when there is no profile, or no gauge for the reading', () => {
     expect(planTileZones(undefined, [heldOil]).stays).toEqual(['Oil'])
     expect(planTileZones(bare, [{ ...heldOil, suffix: 'exhaust' }]).stays).toEqual(['Oil'])
@@ -324,6 +336,26 @@ describe('resolveCluster: the arcs and footer of Engine Cluster v2', () => {
     if (!r.ok) throw new Error('expected a resolved cluster')
     expect(r.config.footer?.altAmps?.zones).toEqual([{ from: 150, to: 200, state: 'warn' }])
     expect(r.config.footer?.altAmps?.unit).toBe('A')
+  })
+
+  it('a footer slot\'s zones sit on its own item\'s profile scale, whatever scale the slot once carried', () => {
+    const twelveVolt: EngineProfile = {
+      id: 'batt-12', name: '12 V battery', kind: 'battery',
+      gauges: [{
+        path_suffix: 'voltage', label: 'Voltage', display: 'numeric', quantity: 'potential', unit: 'V', min: 10, max: 15,
+        zones: [{ direction: 'below', threshold: 12, state: 'warn' }],
+      }],
+    }
+    const start = item({ id: 'batt', name: 'Start battery', signalk_source: 'electrical.batteries.292', source_kind: 'battery', profile_id: 'batt-12' })
+    const seeded: EngineClusterConfig = {
+      ...cluster, fuel: undefined,
+      footer: { battery: slot('voltage', { equipmentId: 'batt', min: 20, max: 30 }) },
+    }
+    const r = resolveCluster(seeded, ctx([item(), start], { profiles: [yanmar, twelveVolt] }))
+    if (!r.ok) throw new Error('expected a resolved cluster')
+    expect(r.config.footer?.battery?.zones).toEqual([{ from: 10, to: 12, state: 'warn' }])
+    expect(r.config.footer?.battery?.min).toBe(10)
+    expect(r.config.footer?.battery?.max).toBe(15)
   })
 
   it('a slot whose own item is gone reads as no data and never falls back to the engine', () => {

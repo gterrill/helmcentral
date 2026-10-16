@@ -26,3 +26,38 @@ func useProfiles(t *testing.T, profiles ...engineProfile) {
 	storeEngineProfiles(profiles, nil)
 	t.Cleanup(func() { storeEngineProfiles(previous, problems) })
 }
+
+// An edit that lands while a read is in flight must not be undone by that
+// read: the stale refs it fetched may not be cached as fresh.
+func TestListEquipmentRefsDoesNotCacheARefreshThatRacedAnInvalidate(t *testing.T) {
+	store := vesselFixtureStore(t)
+	item, err := store.CreateEquipment(equipmentItem{Name: "Port engine", System: "propulsion", Quantity: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidateSourceItems()
+
+	equipmentRefsReadDone = func() {
+		equipmentRefsReadDone = nil
+		// The operator renames the item after the read returned, before the
+		// refresh is stored.
+		if _, err := store.db.Exec(`UPDATE equipment SET name = 'Renamed' WHERE id = ?`, item.ID); err != nil {
+			t.Fatal(err)
+		}
+		invalidateEquipmentRefs()
+	}
+	t.Cleanup(func() { equipmentRefsReadDone = nil })
+
+	if _, err := listEquipmentRefs(); err != nil {
+		t.Fatal(err)
+	}
+	refs, err := listEquipmentRefs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range refs {
+		if r.ID == item.ID && r.Name != "Renamed" {
+			t.Fatalf("stale refs served after an invalidate: %+v", r)
+		}
+	}
+}

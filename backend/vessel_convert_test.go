@@ -448,3 +448,25 @@ func TestConvertLegacyVesselCreatesItemsForNamedSourcesWithNoItem(t *testing.T) 
 		t.Errorf("the conversion ran twice: %d items, then %d", before, len(after))
 	}
 }
+
+// A failed UPDATE is a store problem, not something the operator can fix by
+// choosing again: the conversion must roll back and keep the vessel block, or
+// the mapping is lost for good.
+func TestConvertLegacyVesselAbortsWhenAnItemUpdateFails(t *testing.T) {
+	f := newConvertFixture(t)
+	withTempAlarmRules(t)
+	if _, err := f.store.db.Exec(`CREATE TRIGGER fail_source BEFORE UPDATE OF signalk_source ON equipment BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	err := convertLegacyVessel(f.path, f.store)
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("an item update failure must stop the conversion, got %v", err)
+	}
+	settings, readErr := readSettings(f.path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if _, still := settings["vessel"]; !still {
+		t.Errorf("the vessel block must stay in settings.yaml when the conversion failed")
+	}
+}
