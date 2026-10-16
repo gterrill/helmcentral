@@ -5,25 +5,30 @@ With write access, in layout mode:
 1. Toggle layout mode in the header (desktop widths only).
 2. Choose **Ribbon** next to the page's hero and skin controls. The first
    time, with nothing pinned yet, the dialog opens already carrying a lamp
-   for whatever it can find on the boat's own bus: an engine's revolutions, the
-   generator's state, shore power, an alternator's charging mode. Nothing is
+   for each piece of mapped equipment that has a running signal: each engine's
+   revolutions, the generator's state, the charger's shore current, the
+   inverter's AC input, each alternator's charging mode. Each lamp is labelled
+   with the equipment's own name. Nothing is
    pinned until you choose Save, so it's still fine to change or clear any of
    this before it's kept.
-3. Add a lamp by hand: give it a SignalK path and a short label (12
+3. Add a lamp by hand. Under **Reads**, choose **Equipment** to pick a mapped
+   engine, generator, charger, inverter or alternator and the reading to watch,
+   or **A path** for a single signal such as a bilge float. Give it a short label (12
    characters or fewer; the whole label is always shown). Use "Lit when off" for a signal whose healthy state
    is off, such as a bilge float or a fault line. For a CZone bilge circuit,
    the path is `electrical.switches.bank.<n>.<m>.state`, using the bank and
    circuit numbers CZone assigned it, with "Lit when off" checked if the
    circuit reads off while the bilge is dry.
-4. Choose **Suggest lamps** to add anything the boat now publishes that isn't
-   already in the list, such as a second generator wired in since you last
-   edited the ribbon, or an engine the vessel didn't have before. It only
+4. Choose **Suggest lamps** to add any mapped equipment that isn't already in
+   the list, such as a second generator you have mapped since you last edited
+   the ribbon, or an engine the vessel didn't have before. Equipment that is
+   not mapped to a source gets no lamp. It only
    appends what's missing; a lamp already in the list, whether you added it
    by hand or it came from an earlier suggestion, is left alone.
 5. Optionally give a lamp a **Group**, such as Propulsion or Power (16
    characters or fewer): neighbouring lamps with the same group share one
    heading. Choose an **Icon** for it, or leave **Automatic** and one is picked
-   from the path.
+   from the reading.
 6. Reorder lamps with the up and down arrows, or remove one with the trash
    icon.
 7. Toggle **Show the CHK indicator** on or off. CHK colours from the worst

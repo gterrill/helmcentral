@@ -60,10 +60,10 @@ func buildSolarStatePayload() map[string]any {
 
 	// A vessel block that cannot be read is logged, and the controllers then
 	// read as unnamed. The solar figures themselves are unaffected.
-	vessel, vesselErr := loadVesselSettings(settingsPath)
-	noteVesselRead("solar state", vesselErr, "solar state: vessel settings unreadable, solar controllers show no names: %v")
+	vessel, vesselErr := loadVesselView(settingsPath)
+	noteVesselRead("solar state", vesselErr, "solar state: vessel unreadable, solar controllers show no names: %v")
 	if vesselErr != nil {
-		vessel = vesselSettings{}
+		vessel = vesselView{}
 	}
 
 	if signalkURL != "" {

@@ -616,9 +616,9 @@ func updateProfileHandler(c echo.Context, requiredKind string) error {
 // the same non-fatal treatment every other seed call in this codebase gets
 // -- the profile save itself already succeeded.
 func seedAnomalyRulesAfterProfileSave() {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
-		log.Printf("could not load vessel settings for anomaly rule seeding: %v", err)
+		log.Printf("could not load the vessel for anomaly rule seeding: %v", err)
 		return
 	}
 	if err := seedAnomalyRules(vessel); err != nil {

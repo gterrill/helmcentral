@@ -240,7 +240,7 @@ function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
     bin_code: 'LAZ-02',
     location_detail: '',
     install_date: '',
-    hour_meter_path: '',
+    signalk_source: '', capacity_ah: 0, cells: 0, warn_voltage: 0, high_voltage: 0, source_kind: '', hour_meter_source: '',
     profile_id: '',
     aliases: [],
     verified_aboard: false,

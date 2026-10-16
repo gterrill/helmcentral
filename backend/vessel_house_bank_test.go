@@ -20,16 +20,16 @@ const houseBankTree = `{"electrical":{
 	"venus":{"batteryVoltage":{"value":27.7}}
 }}`
 
-func useHouseBank(t *testing.T, bank *vesselHouseBankSetting) vesselSettings {
+func useHouseBank(t *testing.T, bank *vesselHouseBankSetting) vesselView {
 	t.Helper()
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
 	if bank != nil {
-		if err := saveVesselSettings(settingsPath, vesselSettings{HouseBank: bank}); err != nil {
+		if err := saveVesselFixture(t, settingsPath, vesselView{HouseBank: bank}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	vessel, err := loadVesselSettings(settingsPath)
+	vessel, err := loadVesselView(settingsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestElectricalPayloadLogsAnUnsetHouseBankOnce(t *testing.T) {
 	buildElectricalStatePayload()
 	buildElectricalStatePayload()
 
-	if n := strings.Count(buf.String(), "no house bank is set"); n != 1 {
+	if n := strings.Count(buf.String(), "no house bank is chosen"); n != 1 {
 		t.Fatalf("expected one log line, got %d in %q", n, buf.String())
 	}
 }
@@ -165,7 +165,7 @@ func TestElectricalPayloadHasNoSocPathWithoutAHouseBank(t *testing.T) {
 func TestUnreadableVesselBlockIsLoggedOncePerDistinctError(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles: [not, a, block]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	resetVesselReadLog()
@@ -177,20 +177,20 @@ func TestUnreadableVesselBlockIsLoggedOncePerDistinctError(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		buildElectricalStatePayload()
 	}
-	if n := strings.Count(buf.String(), "vessel settings unreadable"); n != 1 {
+	if n := strings.Count(buf.String(), "vessel unreadable"); n != 1 {
 		t.Fatalf("expected one log line for three ticks, got %d in %q", n, buf.String())
 	}
 
 	// Reading cleanly resets it, so the next failure is reported again.
-	if err := os.WriteFile(settingsPath, []byte("vessel: {}\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	buildElectricalStatePayload()
-	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles: [not, a, block]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	buildElectricalStatePayload()
-	if n := strings.Count(buf.String(), "vessel settings unreadable"); n != 2 {
+	if n := strings.Count(buf.String(), "vessel unreadable"); n != 2 {
 		t.Fatalf("expected a second line after a clean read, got %d", n)
 	}
 }

@@ -18,8 +18,8 @@ import { GAUGE_GROUP_TITLE_MAX_LENGTH } from '@/lib/dashboard-widgets'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 
 vi.mock('@/hooks/use-signalk-paths', () => ({ useSignalKPaths: () => ({ paths: [], loading: false }) }))
-vi.mock('@/hooks/use-engine-profiles', () => ({
-  useEngineProfiles: () => ({ profiles: [], problems: [], loading: false }),
+vi.mock('@/hooks/use-equipment-tile-context', () => ({
+  useEquipmentTileContext: () => ({ items: [], profiles: [], reporting: null }),
 }))
 
 const cluster: DashboardLayoutItem = {

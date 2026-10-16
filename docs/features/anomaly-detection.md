@@ -29,7 +29,7 @@ never notices:
 
 The impossible-reading and gone-quiet checks need nothing set up: they
 watch whatever engines and batteries the boat is already publishing. The
-frozen check needs at least one engine ticked in Settings → Vessel, since it
+frozen check needs at least one engine item assigned to a propulsion source (Settings → SignalK), since it
 checks a stuck reading against that engine's own rpm.
 
 Each of these alarms tells you which sensor it is about, by name, and what
@@ -37,7 +37,7 @@ is wrong with it, one line per sensor. For example: "Port Engine Starter
 Battery voltage 75.7 V · above the 70 V any 12, 24 or 48 V bank reaches", or
 "Port engine oil pressure has not changed in 15 minutes while rpm varied", or
 "PORT START BATT has stopped sending". The names are the ones you give your
-batteries and engines in Settings → Vessel; where you have not named one, the
+batteries and engines, which come from the names of their equipment items; where a source has no item, the
 card uses what the boat's own instruments call it.
 
 The impossible-reading check looks at batteries, not at chargers. A solar
@@ -64,8 +64,8 @@ don't know it, and the BMS eventually has to intervene on its own. A second,
 tighter tier watches for the bank being driven further still, toward the
 point a BMS would act.
 
-Needs a house bank picked in Settings → Vessel → Power, with its cell count
-and a battery profile linked from your equipment registry, so Helmcentral
+Needs a house bank chosen under Settings → SignalK → Roles, with its cell count
+and a battery profile on the bank's equipment item, so Helmcentral
 knows what "full" and "too high" mean for your own pack chemistry.
 
 ## Engine differentials
@@ -83,4 +83,4 @@ normal gap from several weeks of history, and stay up once raised until a
 steady run proves the difference has genuinely gone away, rather than
 clearing the moment the numbers touch back down.
 
-Needs at least two engines ticked in Settings → Vessel.
+Needs at least two engine items assigned to propulsion sources in Settings → SignalK.

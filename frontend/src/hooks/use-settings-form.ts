@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { apiRequest, setQueryData } from '@/lib/api-query'
 import { publishAppConfigSettings } from '@/hooks/use-app-config'
-import type { VesselSettings } from '@/lib/vessel-settings'
+import type { VesselRoles } from '@/lib/vessel-settings'
 
 export type SettingsPayload = {
   signalk?: {
@@ -14,7 +14,6 @@ export type SettingsPayload = {
     model?: string
   }
   ui?: {
-    tank_labels?: Record<string, string>
     tide_provider?: string
     tide_station_id?: string
     tide_station_name?: string
@@ -75,12 +74,12 @@ export type SettingsPayload = {
     web_search?: boolean
     web_search_model?: string
   }
-  // The engines and house bank the anomaly detectors watch. Saved with the
-  // rest of Settings. A payload that omits it leaves the stored block alone
-  // on the server; null house_bank is an explicit "no house bank".
-  vessel?: VesselSettings
-  // Set by the server instead of `vessel` when the stored block cannot be read.
-  vessel_error?: string
+  // Which equipment item plays each single-choice part (house bank, port
+  // alternator, ...). Saved with the rest of Settings. A payload that omits it
+  // leaves the stored block alone on the server.
+  roles?: VesselRoles
+  // Set by the server instead of `roles` when the stored block cannot be read.
+  roles_error?: string
   units?: string
 }
 
@@ -97,11 +96,9 @@ export type DeepPartial<T> = T extends (infer U)[]
  * sub-object (`signalk`/`boat`/`ui`/`anchor`/`influxdb`). This is
  * deliberately shallow *within* each sub-object (not a recursive deep
  * merge) — e.g. `save({ ui: { tide_provider: 'bom' } })` must not wipe
- * `ui.tank_labels`, but nothing in this payload nests deeper than one
+ * `ui.tide_station_id`, but nothing in this payload nests deeper than one
  * level under a top-level key, so a one-level merge per sub-object is
- * sufficient and avoids surprising array/object-merge semantics for
- * `ui.tank_labels` (a flat string map, merged key-by-key which is also
- * the desired behavior there).
+ * sufficient and avoids surprising array/object-merge semantics.
  */
 export function deepMergeSettings(
   current: SettingsPayload,

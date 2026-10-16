@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -62,6 +63,13 @@ type alarmRule struct {
 	// Path is a dotted SignalK path, e.g. "environment.depth.belowTransducer".
 	Path  string `json:"path"`
 	Label string `json:"label"`
+
+	// PathRole, when set, binds the rule to a role instead of a literal path
+	// (ADR 0185): the server keeps Path equal to that role's current SignalK
+	// path, so changing the house bank moves the rule with it. The only role
+	// a rule can follow is house_bank_soc, the house bank's state of charge.
+	// With the role unset the rule has no path and never fires.
+	PathRole string `json:"path_role,omitempty"`
 
 	Op    string  `json:"op"`
 	Value float64 `json:"value"`
@@ -282,7 +290,8 @@ func createSeededAlarmRule(rule alarmRule) (alarmRule, error) {
 }
 
 func updateAlarmRule(id string, next alarmRule) (alarmRule, error) {
-	if err := validateAlarmRule(&next); err != nil {
+	_, exists := getAlarmRule(id)
+	if err := validateAlarmRuleFor(&next, exists); err != nil {
 		return alarmRule{}, err
 	}
 
@@ -329,8 +338,34 @@ func deleteAlarmRule(id string) error {
 // deliberately strict: a rule that does not do what its author meant is worse
 // than no rule, because it is trusted and silent.
 func validateAlarmRule(rule *alarmRule) error {
+	return validateAlarmRuleFor(rule, false)
+}
+
+// errHouseBankNotChosen is what resolving a role says when no house bank is set.
+var errHouseBankNotChosen = errors.New("choose a house bank in Settings first: this rule follows it")
+
+// validateAlarmRuleFor is validateAlarmRule, for a rule that may already
+// exist. A rule that follows the house bank can be saved with no path when it
+// is disabled, or when it is an existing rule being edited: it then simply
+// does not evaluate, so it can still be switched off or reworded while the
+// bank is unchosen. A new enabled rule is still refused, because it would watch
+// nothing from the moment it was made.
+func validateAlarmRuleFor(rule *alarmRule, existing bool) error {
 	rule.Path = strings.TrimSpace(rule.Path)
-	if rule.Path == "" {
+	rule.PathRole = strings.TrimSpace(rule.PathRole)
+	if rule.PathRole != "" {
+		if rule.PathRole != alarmPathRoleHouseBankSoC {
+			return fmt.Errorf("unknown path role %q", rule.PathRole)
+		}
+		path, err := alarmRolePath(rule.PathRole)
+		switch {
+		case errors.Is(err, errHouseBankNotChosen) && (existing || !rule.Enabled):
+			path = ""
+		case err != nil:
+			return err
+		}
+		rule.Path = path
+	} else if rule.Path == "" {
 		return fmt.Errorf("alarm rule requires a SignalK path")
 	}
 
@@ -379,5 +414,56 @@ func validateAlarmRule(rule *alarmRule) error {
 		rule.StaleAfterSeconds = 60
 	}
 
+	return nil
+}
+
+// alarmPathRoleHouseBankSoC is the one role a rule can follow: the house
+// bank's state of charge.
+const alarmPathRoleHouseBankSoC = "house_bank_soc"
+
+// alarmRolePath is the SignalK path a role resolves to now, "" when the role is
+// not set. A rule saved while the role is unset is refused: it would watch
+// nothing, and a rule that watches nothing is trusted and silent.
+func alarmRolePath(role string) (string, error) {
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		return "", fmt.Errorf("resolving %s: %w", role, err)
+	}
+	path := vessel.houseBankSocPath()
+	if path == "" {
+		return "", errHouseBankNotChosen
+	}
+	return path, nil
+}
+
+// syncRoleBoundRules moves every rule that follows a role onto the role's
+// current path. A role that is not set leaves its rules with no path, so they
+// stop watching the bank they used to follow instead of watching a stale one.
+// It writes only when something moved.
+func syncRoleBoundRules(vessel vesselView) error {
+	alarmRulesMu.Lock()
+	defer alarmRulesMu.Unlock()
+
+	want := vessel.houseBankSocPath()
+	now := time.Now().UTC()
+	previous := map[string]alarmRule{}
+	for id, rule := range alarmRulesState {
+		if rule.PathRole != alarmPathRoleHouseBankSoC || rule.Path == want {
+			continue
+		}
+		previous[id] = *rule
+		rule.Path = want
+		rule.UpdatedAt = now
+	}
+	if len(previous) == 0 {
+		return nil
+	}
+	if err := saveAlarmRulesLocked(); err != nil {
+		for id, old := range previous {
+			restored := old
+			alarmRulesState[id] = &restored
+		}
+		return err
+	}
 	return nil
 }

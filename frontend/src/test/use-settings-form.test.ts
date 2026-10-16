@@ -29,7 +29,7 @@ describe('useSettingsForm', () => {
       ok: true,
       json: async () => ({
         signalk: { address: 'localhost', port: 3000 },
-        ui: { tank_labels: { 'fuel.2': 'Port Fuel' } },
+        ui: { tide_station_id: 'QLD_TP033' },
       }),
     })
     vi.stubGlobal('fetch', fetchMock)
@@ -38,7 +38,7 @@ describe('useSettingsForm', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.settings.signalk?.address).toBe('localhost')
-    expect(result.current.settings.ui?.tank_labels).toEqual({ 'fuel.2': 'Port Fuel' })
+    expect(result.current.settings.ui?.tide_station_id).toBe('QLD_TP033')
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/settings'), expect.anything())
   })
 
@@ -70,7 +70,7 @@ describe('useSettingsForm', () => {
         ok: true,
         json: async () => ({
           ui: {
-            tank_labels: { 'fuel.2': 'Port Fuel' },
+            tide_station_id: 'QLD_TP033',
           },
         }),
       }
@@ -93,7 +93,7 @@ describe('useSettingsForm', () => {
     // ...and fields already in state that were NOT part of the patch were
     // NOT dropped — the POST body is the full merged object, not a bare
     // patch.
-    expect(body.ui.tank_labels).toEqual({ 'fuel.2': 'Port Fuel' })
+    expect(body.ui.tide_station_id).toBe('QLD_TP033')
   })
 
   it('surfaces a save failure via the error field', async () => {

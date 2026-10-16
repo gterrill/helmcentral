@@ -10,7 +10,7 @@ import { reading, zoneFor, zoneTextClass } from '@/lib/cluster-readings'
 import { FitCanvas } from '@/components/fit-canvas'
 import { CLUSTER_CANVAS, CLUSTER_RAIL, clusterDesignWidth, computeCornerMasks } from '@/lib/cluster-canvas'
 import { FuelRail } from '@/components/ui/fuel-rail'
-import type { ClusterCorner, EngineClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
+import type { ClusterCorner, GaugeWidgetConfig, ResolvedClusterConfig } from '@/lib/dashboard-widgets'
 import { majorStepFor } from '@/components/gauge-tile'
 import { severityTextClass, worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge } from '@/lib/staleness'
@@ -219,7 +219,7 @@ function Telltales({ slots, values, ages }: {
 }
 
 interface EngineClusterTileProps {
-  config: EngineClusterConfig
+  config: ResolvedClusterConfig
   values: Record<string, number | null>
   /** Age in seconds behind each bound path (ADR 0083); absent is unknown. */
   ages?: Record<string, number | null>

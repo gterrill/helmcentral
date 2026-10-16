@@ -323,7 +323,7 @@ func TestCreateEquipmentHandler_IgnoresClientCategoryAndDerivesIt(t *testing.T) 
 	for _, tc := range []struct{ body, want string }{
 		{`{"name":"X","category":"bogus"}`, "general"},
 		{`{"name":"X"}`, "general"},
-		{`{"name":"X","category":"general","hour_meter_path":"propulsion.main.runTime"}`, "mechanical"},
+		{`{"name":"X","category":"general","signalk_source":"propulsion.main"}`, "mechanical"},
 	} {
 		c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment", tc.body, "")
 		if err := createEquipmentHandler(c); err != nil {
@@ -461,12 +461,12 @@ func TestCreateEquipmentHandler_BadInstallDateReturns400(t *testing.T) {
 	}
 }
 
-// TestCreateEquipmentHandler_HourMeterPathWithSpaceReturns400 pins plan's
-// "hour_meter_path trimmed, no spaces".
-func TestCreateEquipmentHandler_HourMeterPathWithSpaceReturns400(t *testing.T) {
+// A source that is not one of the eight multi-instance shapes is refused, in
+// words, and nothing is written.
+func TestCreateEquipmentHandler_UnknownSourceReturns400(t *testing.T) {
 	withTestDocumentStore(t)
 
-	body := `{"name":"Generator","category":"mechanical","hour_meter_path":"electrical generator runtime"}`
+	body := `{"name":"Generator","signalk_source":"electrical generator runtime"}`
 	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment", body, "")
 	if err := createEquipmentHandler(c); err != nil {
 		t.Fatalf("createEquipmentHandler returned error: %v", err)
@@ -474,14 +474,29 @@ func TestCreateEquipmentHandler_HourMeterPathWithSpaceReturns400(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
-	var resp struct {
-		Field string `json:"field"`
+	if !strings.Contains(rec.Body.String(), "not a SignalK source an item can own") {
+		t.Fatalf("expected a plain reason, got %s", rec.Body.String())
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+}
+
+// One source belongs to one item. The second claim is refused with a 409 that
+// names the item holding it.
+func TestCreateEquipmentHandler_SourceAlreadyOwnedReturns409(t *testing.T) {
+	withTestDocumentStore(t)
+	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Port engine", SignalKSource: "propulsion.port"}); err != nil {
+		t.Fatalf("CreateEquipment: %v", err)
 	}
-	if resp.Field != "hour_meter_path" {
-		t.Fatalf("expected field=hour_meter_path, got %+v", resp)
+
+	body := `{"name":"Another engine","signalk_source":"propulsion.port"}`
+	c, rec := newDocumentEchoContext(http.MethodPost, "/api/inventory/equipment", body, "")
+	if err := createEquipmentHandler(c); err != nil {
+		t.Fatalf("createEquipmentHandler returned error: %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Port engine") {
+		t.Fatalf("the refusal should name the item that owns the source: %s", rec.Body.String())
 	}
 }
 
@@ -516,7 +531,7 @@ func TestCreateEquipmentHandler_LocationMismatchReturns400(t *testing.T) {
 func TestListEquipmentHandler_FiltersByQueryParams(t *testing.T) {
 	withTestDocumentStore(t)
 
-	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", System: "electrical", HourMeterPath: "electrical.generator.0.runTime"}); err != nil {
+	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Generator", System: "electrical", SignalKSource: "electrical.generator.0"}); err != nil {
 		t.Fatalf("CreateEquipment: %v", err)
 	}
 	if _, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Spare impeller", Category: "general", System: "propulsion"}); err != nil {
@@ -711,7 +726,7 @@ func TestUpdateEquipmentHandlerSeedsFullBankRuleWhenProfileIDLinksHouseBank(t *t
 
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := saveVesselSettings(settingsPath, vesselSettings{
+	if err := saveVesselFixture(t, settingsPath, vesselView{
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: item.ID, CapacityAh: 400, Cells: 8},
 	}); err != nil {
 		t.Fatalf("saveVesselSettings: %v", err)
@@ -721,7 +736,9 @@ func TestUpdateEquipmentHandlerSeedsFullBankRuleWhenProfileIDLinksHouseBank(t *t
 		t.Fatalf("did not expect the full-bank rule seeded before the house bank's Inventory item had a linked profile")
 	}
 
-	body := `{"name":"House bank","category":"mechanical","profile_id":"test-battery-wiring"}`
+	// A PUT replaces the whole record, so the page sends the source and the
+	// bank figures back with the profile.
+	body := `{"name":"House bank","category":"mechanical","profile_id":"test-battery-wiring","signalk_source":"electrical.batteries.0","capacity_ah":400,"cells":8}`
 	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+item.ID, body, item.ID)
 	if err := updateEquipmentHandler(c); err != nil {
 		t.Fatalf("updateEquipmentHandler returned error: %v", err)
@@ -739,7 +756,7 @@ func TestUpdateEquipmentHandlerSeedsFullBankRuleWhenProfileIDLinksHouseBank(t *t
 // scoping half of the fix above: an equipment record that is NOT the
 // vessel's own house bank must not trigger a reseed at all -- there is
 // nothing for it to complete, and doing this unconditionally on every save
-// would be needless work (loadVesselSettings plus a full seedAnomalyRules
+// would be needless work (loadVesselView plus a full seedAnomalyRules
 // pass) for no operator-visible effect.
 func TestUpdateEquipmentHandlerDoesNotReseedForUnrelatedEquipment(t *testing.T) {
 	withTestDocumentStore(t)
@@ -748,7 +765,7 @@ func TestUpdateEquipmentHandlerDoesNotReseedForUnrelatedEquipment(t *testing.T) 
 
 	settingsPath := filepath.Join(t.TempDir(), "settings.yaml")
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := saveVesselSettings(settingsPath, vesselSettings{}); err != nil {
+	if err := saveVesselFixture(t, settingsPath, vesselView{}); err != nil {
 		t.Fatalf("saveVesselSettings: %v", err)
 	}
 
@@ -992,7 +1009,8 @@ func TestListEquipmentHandler_EveryFieldIsUnconditional(t *testing.T) {
 	for _, key := range []string{
 		"id", "name", "category", "system", "manufacturer", "model", "serial",
 		"quantity", "status", "zone_id", "bin_id", "location_detail",
-		"install_date", "hour_meter_path", "profile_id", "aliases",
+		"install_date", "signalk_source", "capacity_ah", "cells", "warn_voltage", "high_voltage",
+		"source_kind", "hour_meter_source", "profile_id", "aliases",
 		"verified_aboard", "notes", "created_at", "updated_at",
 		"zone_name", "bin_code", "link_count", "photo_ids",
 	} {

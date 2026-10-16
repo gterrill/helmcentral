@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import type { SignalKPath } from '@/hooks/use-signalk-paths'
+import type { EngineProfileGauge } from '@/lib/engine-profiles'
 import { GAUGE_TREND_WINDOWS, type GaugeDisplay, type GaugeWidgetConfig, type GaugeZone } from '@/lib/dashboard-widgets'
+import { effectiveScale } from '@/lib/equipment-tiles'
 import { inferredQuantityForSIUnit, QUANTITIES, quantityById, unitOption } from '@/lib/quantities'
 
 /**
@@ -42,20 +44,61 @@ export function defaultGaugeConfig(): GaugeWidgetConfig {
   return { path: '', label: '', display: 'numeric', quantity: 'raw', unit: 'raw' }
 }
 
+/**
+ * Set when the gauge is a slot of a tile that shows an equipment item (ADR
+ * 0185): it names a reading under the item's source instead of a path, and its
+ * zones are the profile's, edited here but saved to the profile.
+ */
+export interface GaugeEquipmentMode {
+  /** The gauges of the item's profile; their suffixes are offered, and picking one fills the slot. */
+  profileGauges: readonly EngineProfileGauge[]
+  /** The profile's bands for this reading; undefined when the profile has no gauge for it. */
+  zones?: GaugeZone[]
+  onZonesChange: (zones: GaugeZone[]) => void
+  /** Readings the boat reports under the item's source that the profile has no gauge for. */
+  reportedSuffixes?: readonly string[]
+  /** Says what editing the zones touches. */
+  zoneNotice: string
+  /** The slot still holds zones of its own, with none on the profile gauge to hold them, so its own unit applies. */
+  holdsOwnZones?: boolean
+}
+
 interface GaugeFieldsProps {
   value: GaugeWidgetConfig
   onChange: (next: GaugeWidgetConfig) => void
   paths: SignalKPath[]
   /** Namespaces the input and datalist ids, so N copies coexist in one dialog. */
   idPrefix: string
+  equipment?: GaugeEquipmentMode
+}
+
+/** The slot with a profile gauge's label, display, units and scale filled in. */
+export function slotFromProfileGauge(slot: GaugeWidgetConfig, gauge: EngineProfileGauge): GaugeWidgetConfig {
+  return {
+    ...slot,
+    label: slot.label || gauge.label,
+    display: gauge.display,
+    quantity: gauge.quantity,
+    unit: gauge.unit,
+    decimals: gauge.decimals,
+    min: gauge.min,
+    max: gauge.max,
+  }
 }
 
 /**
  * The per-gauge form, shared between the single-gauge dialog and each member
  * row of a gauge group (ADR 0049) so the two never drift apart.
  */
-export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsProps) {
-  const quantity = quantityById(value.quantity)
+export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: GaugeFieldsProps) {
+  // On an equipment slot the profile's gauge decides the quantity and unit,
+  // because its zone thresholds are in that unit.
+  const profileGauge = equipment?.holdsOwnZones
+    ? undefined
+    : equipment?.profileGauges.find((g) => g.path_suffix === (value.suffix ?? '').trim())
+  const shownQuantity = profileGauge ? profileGauge.quantity : value.quantity
+  const shownUnit = profileGauge ? profileGauge.unit : value.unit
+  const quantity = quantityById(shownQuantity)
   const known = useMemo(() => new Map(paths.map((p) => [p.path, p])), [paths])
   const listId = `${idPrefix}-path-options`
 
@@ -86,9 +129,14 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
     })
   }
 
-  const min = value.min ?? 0
-  const max = value.max ?? 100
-  const unitLabel = unitOption(value.quantity, value.unit).label
+  const chooseSuffix = (suffix: string) => {
+    const gauge = equipment?.profileGauges.find((g) => g.path_suffix === suffix)
+    onChange(gauge ? slotFromProfileGauge({ ...value, suffix }, gauge) : { ...value, suffix })
+  }
+
+  const { min, max } = effectiveScale(value.min, value.max, undefined)
+
+  const unitLabel = unitOption(shownQuantity, shownUnit).label
 
   /**
    * Zones are edited as a direction plus a threshold, never as a free from/to
@@ -96,8 +144,12 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
    * floating in the middle of the scale has no equivalent — so the editor is
    * built so it cannot produce one, rather than rejecting it afterwards.
    */
-  const setZone = (index: number, next: GaugeZone) =>
-    onChange({ ...value, zones: (value.zones ?? []).map((z, i) => (i === index ? next : z)) })
+  // On a slot of an equipment tile the zones are the profile's, so they are read
+  // from and written to it rather than the slot.
+  const zones = equipment ? (equipment.zones ?? []) : (value.zones ?? [])
+  const setZones = (next: GaugeZone[]) => (equipment ? equipment.onZonesChange(next) : onChange({ ...value, zones: next }))
+
+  const setZone = (index: number, next: GaugeZone) => setZones(zones.map((z, i) => (i === index ? next : z)))
 
   const anchoredZone = (direction: 'below' | 'above', threshold: number, state: GaugeZone['state']): GaugeZone =>
     direction === 'below' ? { from: min, to: threshold, state } : { from: threshold, to: max, state }
@@ -105,17 +157,47 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
   const zoneDirection = (zone: GaugeZone): 'below' | 'above' => (zone.from <= min ? 'below' : 'above')
   const zoneThreshold = (zone: GaugeZone): number => (zoneDirection(zone) === 'below' ? zone.to : zone.from)
 
-  const addZone = () =>
-    onChange({
-      ...value,
-      zones: [...(value.zones ?? []), anchoredZone('below', min + (max - min) * 0.15, 'alarm')],
-    })
+  const addZone = () => setZones([...zones, anchoredZone('below', min + (max - min) * 0.15, 'alarm')])
 
-  const removeZone = (index: number) =>
-    onChange({ ...value, zones: (value.zones ?? []).filter((_, i) => i !== index) })
+  const removeZone = (index: number) => setZones(zones.filter((_, i) => i !== index))
 
   return (
     <div className="grid gap-3">
+      {equipment ? (
+        <Field>
+          <FieldLabel htmlFor={`${idPrefix}-suffix`}>Reading</FieldLabel>
+          <select
+            id={`${idPrefix}-suffix`}
+            className={SELECT_CLASS}
+            value={value.suffix ?? ''}
+            onChange={(e) => chooseSuffix(e.target.value)}
+          >
+            <option value="">Pick a reading…</option>
+            {equipment.profileGauges.length > 0 && (
+              <optgroup label="From the profile">
+                {equipment.profileGauges.map((g) => (
+                  <option key={g.path_suffix} value={g.path_suffix}>{g.label} ({g.path_suffix})</option>
+                ))}
+              </optgroup>
+            )}
+            {(equipment.reportedSuffixes ?? []).length > 0 && (
+              <optgroup label="Reported by the boat">
+                {(equipment.reportedSuffixes ?? []).map((suffix) => <option key={suffix} value={suffix}>{suffix}</option>)}
+              </optgroup>
+            )}
+            {(value.suffix ?? '') !== ''
+              && !equipment.profileGauges.some((g) => g.path_suffix === value.suffix)
+              && !(equipment.reportedSuffixes ?? []).includes(value.suffix ?? '') && (
+              <option value={value.suffix}>{value.suffix} (not reported now)</option>
+            )}
+          </select>
+          <FieldDescription>
+            {equipment.profileGauges.length === 0 && (equipment.reportedSuffixes ?? []).length === 0
+              ? "Nothing to pick yet: the equipment has no profile and the boat reports nothing under its source."
+              : "Pick a reading from the equipment's profile, or one the boat reports under its source. A reading from the profile fills in the scale and units."}
+          </FieldDescription>
+        </Field>
+      ) : (
       <Field>
         <FieldLabel htmlFor={`${idPrefix}-path`}>SignalK path</FieldLabel>
         <Input
@@ -139,6 +221,7 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
             : 'No paths seen yet. You can still type one.'}
         </FieldDescription>
       </Field>
+      )}
 
       <Field>
         <FieldLabel htmlFor={`${idPrefix}-label`}>Label</FieldLabel>
@@ -156,7 +239,8 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
         <Field>
           <FieldLabel htmlFor={`${idPrefix}-quantity`}>Quantity</FieldLabel>
           <select id={`${idPrefix}-quantity`} className={SELECT_CLASS}
-            value={value.quantity}
+            disabled={profileGauge !== undefined}
+            value={shownQuantity}
             onChange={(e) => {
               const next = quantityById(e.target.value)
               onChange({ ...value, quantity: next.id, unit: next.units[0].id })
@@ -167,7 +251,8 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
         <Field>
           <FieldLabel htmlFor={`${idPrefix}-unit`}>Unit</FieldLabel>
           <select id={`${idPrefix}-unit`} className={SELECT_CLASS}
-            value={value.unit} onChange={(e) => set('unit', e.target.value)}>
+            disabled={profileGauge !== undefined}
+            value={shownUnit} onChange={(e) => set('unit', e.target.value)}>
             {quantity.units.map((u) => <option key={u.id} value={u.id}>{u.label || u.id}</option>)}
           </select>
         </Field>
@@ -202,7 +287,13 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
         </div>
       )}
 
-      {hasScale(value.display) && (
+      {equipment && hasScale(value.display) && equipment.zones === undefined && (
+        <FieldDescription>
+          This reading is not on the equipment's profile, so it has no zones. Add it to the profile to give it some.
+        </FieldDescription>
+      )}
+
+      {hasScale(value.display) && (!equipment || equipment.zones !== undefined) && (
         <div className="grid gap-2 rounded-md border border-border p-3">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
             Zones
@@ -210,8 +301,13 @@ export function GaugeFields({ value, onChange, paths, idPrefix }: GaugeFieldsPro
           <FieldDescription>
             A zone colours the gauge, and every severity except Healthy also raises an alarm at its threshold. Thresholds are in {unitLabel || 'the display unit'}, not SignalK's SI unit.
           </FieldDescription>
+          {equipment && (
+            <p data-testid="zone-notice" className="rounded-md border border-amber-500/40 bg-amber-50/60 p-2 text-xs text-foreground dark:bg-amber-950/30">
+              {equipment.zoneNotice}
+            </p>
+          )}
 
-          {(value.zones ?? []).map((zone, index) => {
+          {zones.map((zone, index) => {
             const direction = zoneDirection(zone)
             return (
               <div key={index} className="grid items-end gap-2 sm:grid-cols-[auto_1fr_1fr_auto]">

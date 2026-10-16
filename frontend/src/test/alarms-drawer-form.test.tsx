@@ -122,3 +122,17 @@ describe('RuleForm threshold unit', () => {
     expect(screen.queryByText(/^=/)).toBeNull()
   })
 })
+
+describe('a rule that follows the house bank', () => {
+  it('says so when no house bank is chosen, so the rule watches nothing', () => {
+    renderDrawer([rule({ path: '', path_role: 'house_bank_soc', label: 'House low' })])
+    fireEvent.click(screen.getByRole('button', { name: /edit house low/i }))
+    expect(screen.getByRole('status')).toHaveTextContent(/no house bank is chosen/i)
+  })
+
+  it('says nothing when the rule has a path', () => {
+    renderDrawer([rule({ path: 'electrical.batteries.1.capacity.stateOfCharge', path_role: 'house_bank_soc', label: 'House low' })])
+    fireEvent.click(screen.getByRole('button', { name: /edit house low/i }))
+    expect(screen.queryByText(/no house bank is chosen/i)).toBeNull()
+  })
+})

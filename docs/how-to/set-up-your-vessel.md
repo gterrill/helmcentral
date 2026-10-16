@@ -3,84 +3,86 @@
 Helmcentral needs to know which engines, battery bank, generator, charger and
 inverter are yours before it can show or watch them. The Alternators tile, the
 Battery & Power tile (including its dawn projection and state-of-charge bands),
-the Generator and Solar tiles, anchor auto-raise, Mate's passage estimates and
-anomaly detection (frozen and impossible sensor readings, charging into a full
-house bank, twin engines pulling apart) all read what you pick here. Nothing is
-pre-filled for your boat: until you pick them, those features show no data or
-stay off, rather than guessing from whatever the boat reports.
+the Generator, Solar and Tanks tiles, anchor auto-raise, Mate's passage
+estimates and anomaly detection (frozen and impossible sensor readings,
+charging into a full house bank, twin engines pulling apart) all read what you
+set up here. Nothing is pre-filled for your boat: until you set it up, those
+features show no data or stay off, rather than guessing from whatever the boat
+reports.
+
+The idea is simple. Each engine, battery, alternator, solar controller, tank,
+generator, charger and inverter is an item in your equipment registry, and each
+such item owns the one thing the boat reports for it, called its SignalK source
+(for example `propulsion.port` or `electrical.batteries.1`). The item's name is
+the name you see on tiles and alarms. A few single-choice parts, such as which
+battery is the house bank, are then picked from those items under **Roles**.
+
+## Assign each source to an item
+
+1. Open **Settings → SignalK**. Once Helmcentral is connected, **Discovery**
+   lists what the boat reports, grouped by kind: engines, batteries,
+   alternators, solar controllers, tanks, generators, chargers and inverters.
+   Each row shows its live readings so you can tell one from another, for
+   example "RPM 1800 rpm · Coolant 77 °C" for an engine.
+2. On a row with no item yet, choose **Assign to item** and pick one of your
+   existing items that does not own a source yet, or choose **Create item**,
+   type a name such as "Port engine" and choose **Create**. A new item starts
+   with just that name and the right system; fill in the rest on its own page.
+3. A row that names an item is done. Choose **Open** to go to the item.
+
+A source belongs to one item. If another item already has it, Helmcentral says
+which one, and you free it there first. A source an item still owns that the
+boat has stopped reporting stays in the list and says **Not reporting**.
+
+You can also set a source from the item itself: open the item in Inventory and
+use **Source** under **SignalK source**. The list holds only what the boat
+reports now, plus the source the item already owns, so there is nothing to type.
+
+Names come only from items. There are no separate battery names, solar names,
+engine names or tank labels any more. A tank shows on the Tanks tile once an
+item owns it. A battery or solar controller no item owns shows under its
+number. If you upgraded from the old Vessel settings, an item was made for each
+battery, solar controller, tank and engine you had named, so you can delete the
+ones you do not want.
 
 ## Engines
 
-1. Open **Settings → Vessel**.
-2. Under **Engines**, each row is an engine the boat is reporting, or one you
-   saved that has since gone quiet. Tick the ones that are your engines. Each
-   row shows its live rpm and coolant temperature so you can tell which is
-   which; a row with no reading says **Not reporting**.
-3. Give each engine a name (Port, Starboard, and so on).
-4. Linking an equipment item is optional; you only need one for the gauge
-   zones in steps 5 and 6. Under **Linked equipment item**, pick the
-   matching item from your equipment registry, or choose **+ Create new
-   item** and name one on the spot.
-5. Once an item is linked, pick its **Equipment profile** from the same
-   row. This is the same profile your engine gauges already use, so
-   assigning it here and in Inventory is the same edit.
-6. With a profile picked, an **Apply gauge zones** button appears. It adds a
-   new gauge tile for that engine to your first dashboard page, with the
-   profile's ranges marked. Each use adds another tile, so move or remove it
-   from the dashboard afterwards.
-7. Choose **Save** in the bar across the top of the screen.
+An engine is an equipment item mapped to a `propulsion.` source. Map one for
+each engine the boat has.
 
-The frozen-sensor check is ready once at least one engine is ticked. The
-engine-differential check (comparing engines against each other) needs at
-least two.
-
-The same list tells Helmcentral whether the engines are running. The
-Alternators tile appears when a ticked engine is turning, and anchor
-auto-raise only acts while one is. With no engine ticked, or none reporting,
-the tile stays hidden and auto-raise does nothing. Mate's passage estimates
-use these engines for fuel history, and say engines are not set up if you have
-ticked none.
+- Give the item an engine profile and the engine's tiles take that profile's
+  ranges and alarm limits. Add an Engine Cluster tile and choose the engine
+  from the list; see [Show equipment on a tile](show-equipment-on-a-tile.md).
+  There is nothing to copy across, and no per-tile limits to keep in step.
+- The Alternators tile appears when a mapped engine is turning, and anchor
+  auto-raise only acts while one is. With no engine mapped, or none reporting,
+  the tile stays hidden and auto-raise does nothing.
+- Mate's passage estimates use these engines for fuel history, and say engines
+  are not set up if you have mapped none.
+- The frozen-sensor check is ready once one engine is mapped. The
+  engine-differential check (comparing engines against each other) needs two.
 
 ## House bank
 
-1. Still under **Settings → Vessel**, find **Power**.
-2. Under **House bank**, pick the battery bank the charging check should
-   watch. Every bank the boat publishes is listed with its live voltage,
-   current and state of charge, so you can tell them apart even when the
-   instance numbers alone would not (for example, a bank that reports under
-   two different addresses).
-3. Under **Linked equipment item**, pick or create the registry item for
-   this bank, then pick its **Equipment profile**: the battery's chemistry
-   and charge thresholds.
-4. Enter the bank's **cell count** and **capacity**.
-5. Leave **Warn override** and **High override** blank to use the profile's
-   own thresholds, multiplied out by your cell count. Fill either in only if
-   your bank needs a different number than the profile gives.
-6. Choose **Save** in the bar across the top of the screen.
+1. Map the bank's battery source to an item as above, for example "House bank".
+2. Open the item. Under **SignalK source**, enter its **Cells** and **Capacity**.
+   Leave **Warn override** and **High override** blank to use the profile's own
+   thresholds, multiplied out by your cell count. Fill either in only if your
+   bank needs a different number than the profile gives.
+3. Under **Profile**, pick the battery profile: the chemistry and charge
+   thresholds. Save the item.
+4. Open **Settings → SignalK**, find **Roles**, and set **House bank** to that
+   item. Choose **Save** in the bar across the top of the screen.
 
 This is the bank the Battery & Power tile reads for state of charge, voltage,
 current and power. If the bank reports its own nominal capacity, that figure is
-used; otherwise the capacity you entered here is. The overnight dawn projection
-and the state-of-charge bands follow the same bank. With no house bank picked,
-the tile shows `--` for those figures, and the bands and dawn figure are
-absent. See [Set battery state-of-charge bands](set-battery-state-of-charge-bands.md).
+used; otherwise the capacity on the item is. The overnight dawn projection and
+the state-of-charge bands follow the same bank. With no house bank chosen, the
+tile shows `--` for those figures, and the bands and dawn figure are absent. See
+[Set battery state-of-charge bands](set-battery-state-of-charge-bands.md).
 
-## Battery names
-
-1. Still under **Settings → Vessel**, find **Battery names**.
-2. Every battery number the boat reports is listed with its live voltage,
-   current and state of charge. Under the name box, a line says what the boat
-   itself calls it, if anything: that is also the grey hint in the box.
-3. Type the name you use for it, for example "Port Engine Starter Battery".
-   Leave the box empty to keep using the boat's own name.
-4. A number that only chargers report, where those chargers also feed another
-   battery number, is marked "Charger input, not a battery". Its readings are
-   not checked as a battery, so a solar panel array's high voltage does not
-   raise an impossible-reading alarm.
-5. Choose **Save** in the bar across the top of the screen.
-
-Alarms and the Ignored sensors list use these names. An engine's name
-is the one you gave it under **Engines**.
+If you later move the house bank, either by choosing another item or by giving
+the item another source, the state-of-charge bands move with it.
 
 ## Alternators
 
@@ -89,18 +91,16 @@ boat's instruments number the alternators in their own order, and that order can
 change when equipment is reinstalled, so Helmcentral does not assume which
 number is port and which is starboard.
 
-1. Under **Settings → Vessel**, find **Alternators**.
-2. Open **Port alternator**. Every alternator the boat reports is listed with
-   its live output current, for example "12 · 28.5 A". Pick the one on the port
-   engine. With the engines running, the one that is charging shows a current;
-   an alternator showing "--" is not reporting.
-3. Do the same for **Starboard alternator**. A number picked for one side cannot
-   be picked for the other.
-4. Leave a side as **Not set** if the boat has no alternator there. With only one
+1. Map each alternator to an item ("Port alternator", "Starboard alternator").
+   With the engines running, the one that is charging shows a current in
+   Discovery.
+2. Under **Roles**, set **Port alternator** and **Starboard alternator**. An
+   item chosen for one side cannot be chosen for the other.
+3. Leave a side as **Not set** if the boat has no alternator there. With only one
    side set, the tile shows a single alternator.
-5. Choose **Save** in the bar across the top of the screen.
+4. Choose **Save** in the bar across the top of the screen.
 
-A side that is not set shows no reading on the Alternators tile. Until you pick
+A side that is not set shows no reading on the Alternators tile. Until you set
 at least one side, the tile is empty.
 
 ## Electrical
@@ -109,59 +109,57 @@ The boat's instruments number the generator, the AC meters, the chargers and
 the inverters in their own order, and that order can change when equipment is
 reinstalled, so Helmcentral does not assume which number is which.
 
-1. Under **Settings → Vessel**, find **Electrical**.
-2. Open **Generator** and pick yours. Each is listed with its live state, for
-   example "0 · running". One showing "--" is not reporting.
-3. Open **Generator AC input** and pick the AC circuit the generator feeds. The
-   list shows each circuit's live power, so start the generator and pick the one
-   that reads load. This is the figure on the Generator tile's Power card.
-4. Open **Shore charger** and pick the charger that takes shore power. Each is
-   listed with its output current and its AC input current, for example "5 ·
-   20.0 A out · 6.0 A AC in". Plug in shore power and pick the one with an AC
-   input reading.
-5. Open **Inverter** and pick the inverter whose AC output you want counted as a
-   load. Each is listed with its live output power.
-6. Open **Voltage readout battery** and pick the battery whose voltage the
-   Battery & Power tile shows beside the charge rate. It is labelled with the name
-   you gave that battery under **Battery names**, or what the boat calls it.
-7. Leave any of them as **Not set** if the boat has none. Choose **Save** in the
+1. Map the generator, the shore charger and the inverter to items, and any
+   battery you want as the voltage readout.
+2. Under **Roles**, set **Generator**, **Shore charger**, **Inverter** and
+   **Voltage readout battery** to those items.
+3. Set **Generator AC input** to the AC circuit the generator feeds. This one
+   is not an item: AC meters are not equipment, so the list shows each circuit
+   the boat reports with its live power. Start the generator and pick the one
+   that reads load.
+4. Leave any of them as **Not set** if the boat has none. Choose **Save** in the
    bar across the top of the screen.
 
 What each one does:
 
 - **Generator.** The Generator tile reads its state and runtime from it, and its
-  Start and Stop buttons control it. With none picked the tile says the generator
+  Start and Stop buttons control it. With none chosen the tile says the generator
   is not set up and offers no Start or Stop.
 - **Generator AC input** is the Generator tile's Power card. Not set shows `--`.
 - **Shore charger** is the Shore line on the Battery & Power tile.
 - **Inverter** is the AC part of Loads on the Battery & Power tile. Not set
   leaves it blank, and Loads reads `--` because the total would otherwise leave
   out the AC draw.
-- **Voltage readout battery** is the voltage in the tile's footer. Not set, or a
-  battery that is not reporting, leaves the voltage out.
+- **Voltage readout battery** is the voltage in the tile's footer, labelled with
+  the item's name. Not set, or a battery that is not reporting, leaves the
+  voltage out.
 
 The shore charger and the generator also decide which nights the dawn projection
 trusts: a night when shore power was connected or the generator ran is skipped
 because the bank did not discharge naturally. A night is only screened for the
-ones you picked.
+ones you chose.
 
-## Solar names
+## Hour meters
 
-1. Still under **Settings → Vessel**, find **Solar names**.
-2. Every solar controller the boat reports is listed with its live panel power.
-3. Type the name you use for it, for example "Port arch". Leave the box empty and
-   the Solar tile shows "Array" followed by the controller's number.
-4. Choose **Save** in the bar across the top of the screen.
+An engine or a generator has an hour meter, read from the source you mapped it
+to. You do not enter a path. Open the item and **Maintenance** shows the hour
+meter, read only. If it says **Not reporting**, the item has no engine or
+generator source mapped, or the source does not publish a runtime counter, and
+service rules counted in hours cannot count hours for it.
 
-Engines, battery names, alternators, the house bank, the electrical choices and
-solar names save together with the rest of Settings. The bar
-appears as soon as you change anything, **Discard** puts it all back, and if
-you try to leave Settings with changes unsaved you are asked first. **Apply
-gauge zones** is not part of that: it adds the gauge tile to your first
-dashboard page straight away, and only needs the linked item and profile.
+## Saving, and what each check needs
 
-Each fieldset shows whether its check is ready, or what is still missing,
-so you always know what saving will turn on.
+Assigning a source or creating an item takes effect at once, like any change on
+an item's own page. The roles save together with the rest of Settings. The bar
+appears as soon as you change one, **Discard** puts it back, and if you try to
+leave Settings with changes unsaved you are asked first.
+
+Under **Roles**, each check shows whether it is ready, or what is still
+missing, so you always know what saving will turn on.
+
+If an item loses its source, or is deleted, while a role still points at it, the
+role's figure shows no data and the log says why; the role list shows **Item no
+longer assigned** until you choose again. Other settings still save.
 
 ## Excluding a sensor you know is dead
 

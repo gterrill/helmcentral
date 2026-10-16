@@ -204,52 +204,50 @@ func TestReadSettings_CacheEntryRecordsRealModTime(t *testing.T) {
 	}
 }
 
-// The vessel block is re-marshalled once per parse of settings.yaml, not on
+// The roles block is re-marshalled once per parse of settings.yaml, not on
 // every vessel-state and electrical-state build; each caller decodes its own.
-func TestLoadVesselSettings_CachesTheBlockUntilTheFileChanges(t *testing.T) {
-	path := writeSettingsCacheFixture(t, "vessel:\n  house_bank:\n    path: electrical.batteries.3\n  engines:\n    - instance: port\n  solar:\n    - instance: \"1\"\n      name: Arch\n")
+func TestLoadVesselRoles_CachesTheBlockUntilTheFileChanges(t *testing.T) {
+	path := writeSettingsCacheFixture(t, "roles:\n  house_bank: bank-1\n  generator_ac_instance: \"1\"\n")
 
-	first, err := loadVesselSettings(path)
+	first, err := loadVesselRoles(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	settingsCacheMu.Lock()
 	entry := settingsCache[path]
 	settingsCacheMu.Unlock()
-	if !entry.vesselCached || len(entry.vesselYAML) == 0 {
-		t.Fatal("expected the vessel block to be cached with the parse")
+	if !entry.rolesCached || len(entry.rolesYAML) == 0 {
+		t.Fatal("expected the roles block to be cached with the parse")
 	}
 	// Served from the cache: readSettings' map is not touched again.
 	settingsCacheMu.Lock()
 	e := settingsCache[path]
-	e.settings = map[string]any{"vessel": map[string]any{"house_bank": map[string]any{"path": "from-the-map"}}}
+	e.settings = map[string]any{"roles": map[string]any{"house_bank": "from-the-map"}}
 	settingsCache[path] = e
 	settingsCacheMu.Unlock()
 
 	// a caller changing what it got back must not change what the next one gets
-	first.Engines[0].Instance = "mutated"
-	first.HouseBank.Path = "mutated"
-	first.Solar[0].Name = "mutated"
-	second, err := loadVesselSettings(path)
+	first.HouseBank = "mutated"
+	second, err := loadVesselRoles(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Engines[0].Instance != "port" || second.HouseBank.Path != "electrical.batteries.3" || second.Solar[0].Name != "Arch" {
+	if second.HouseBank != "bank-1" || second.GeneratorACInstance != "1" {
 		t.Fatalf("a later read saw another caller's change or missed the cache: %+v", second)
 	}
 }
 
 // A settings save takes effect on the very next build, even one landing on
 // the same size within the filesystem's mtime resolution.
-func TestLoadVesselSettings_SaveTakesEffectOnTheNextRead(t *testing.T) {
-	path := writeSettingsCacheFixture(t, "vessel:\n  house_bank:\n    path: electrical.batteries.3\n")
-	if v, err := loadVesselSettings(path); err != nil || v.HouseBank.Path != "electrical.batteries.3" {
-		t.Fatalf("first read %+v %v", v, err)
+func TestLoadVesselRoles_SaveTakesEffectOnTheNextRead(t *testing.T) {
+	path := writeSettingsCacheFixture(t, "roles:\n  house_bank: bank-3\n")
+	if r, err := loadVesselRoles(path); err != nil || r.HouseBank != "bank-3" {
+		t.Fatalf("first read %+v %v", r, err)
 	}
-	if err := writeSettings(path, map[string]any{"vessel": map[string]any{"house_bank": map[string]any{"path": "electrical.batteries.4"}}}); err != nil {
+	if err := writeSettings(path, map[string]any{"roles": map[string]any{"house_bank": "bank-4"}}); err != nil {
 		t.Fatal(err)
 	}
-	if v, err := loadVesselSettings(path); err != nil || v.HouseBank.Path != "electrical.batteries.4" {
-		t.Fatalf("after save %+v %v", v, err)
+	if r, err := loadVesselRoles(path); err != nil || r.HouseBank != "bank-4" {
+		t.Fatalf("after save %+v %v", r, err)
 	}
 }

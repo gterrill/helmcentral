@@ -248,9 +248,18 @@ export interface GaugeZone {
   state: 'normal' | 'alert' | 'warn' | 'alarm' | 'emergency'
 }
 
-/** Binds one widget to one SignalK path (ADR 0039). */
+/**
+ * Binds one widget to one SignalK path (ADR 0039).
+ *
+ * On a tile that shows an equipment item (ADR 0185) the slot names a `suffix`
+ * under the item's source instead, `path` is empty in the stored record, and
+ * the zones come from the item's profile. The tiles themselves are given the
+ * resolved slot, with `path` and `zones` filled in (lib/equipment-tiles.ts).
+ */
 export interface GaugeWidgetConfig {
   path: string
+  /** The reading under the item's source, such as oilPressure or fuel.rate. */
+  suffix?: string
   label: string
   display: GaugeDisplay
   quantity: string
@@ -277,6 +286,13 @@ export interface GaugeWidgetConfig {
  * forked for the grouped case.
  */
 export interface GaugeGroupWidgetConfig {
+  /** The source group of the item shown ('engine', 'alternator', ...); unset for a plain group of paths. */
+  equipmentKind?: string
+  /** The equipment item shown; unset until one is picked. */
+  equipmentId?: string
+  /** The source the group read before any equipment was picked; see EngineClusterConfig.source. */
+  source?: string
+  /** Overrides the item's name; blank shows the name. */
   title: string
   /** Columns inside the tile; undefined derives a count from the member count. */
   columns?: number
@@ -287,7 +303,11 @@ export interface GaugeGroupWidgetConfig {
 
 /** One indicator lamp bound to a path. */
 export interface LampConfig {
+  /** A path read directly, for a single-instance signal. Empty on a lamp for equipment. */
   path: string
+  /** A lamp for multi-instance equipment names the item and a reading under its source (ADR 0185). */
+  equipmentId?: string
+  suffix?: string
   label: string
   /** Lights when the value is zero or absent, for a signal whose healthy state is off. */
   invert?: boolean
@@ -316,27 +336,30 @@ export interface ClusterCorner {
 }
 
 /**
- * One tank on the fuel rail (ADR 0061).
- *
- * Two gauge slots, not one. `GaugeWidgetConfig` binds one widget to one path,
- * and litres needs two readings: a 0..1 ratio and a capacity in m3. Both are
- * that type verbatim, the decision that made gauge groups and cluster corners
- * cheap, so zones, units and the backend's per-gauge validation work unchanged.
- *
- * The capacity slot leaves min, max and zones meaningless, which is the price
- * of not forking the type and the Go struct and the validator alongside it. The
- * editor pays it by rendering a cut-down form for that slot.
- *
- * Both slots must declare their quantity, and the backend rejects a level that
- * is not `ratio` or a capacity that is not `volume`. Nothing on this vessel
- * publishes `meta.units` for a tank, so the path picker preselects Unitless and
- * an unnoticed default would turn 890 L into 1.2 on the helm.
+ * One tank on the fuel rail, as the tile draws it (ADR 0061): a level slot
+ * (quantity `ratio`) and a capacity slot (quantity `volume`) with their paths
+ * filled in from the tank item's source. Built by resolveCluster; never stored.
  */
 export interface FuelBarConfig {
   /** tanks.fuel.5.currentLevel. Quantity `ratio`, so the bar reads percent. */
   level: GaugeWidgetConfig
   /** tanks.fuel.5.capacity. Quantity `volume`, which is what makes litres. */
   capacity: GaugeWidgetConfig
+}
+
+/** One tank as stored: the equipment item that owns its source (ADR 0185). */
+export interface FuelBarRef {
+  /** Unset until a tank is picked. */
+  tankId?: string
+  label?: string
+  /** The tank's SignalK source while no tank is picked, so the bar's low-fuel zones keep alarming. */
+  source?: string
+  /**
+   * Bands of the tank's level in percent. A tank has no equipment profile to
+   * hold zones, so a bar keeps its own (the one exception to zones living on the
+   * profile), and a low-fuel band raises its alarm.
+   */
+  zones?: GaugeZone[]
 }
 
 /**
@@ -353,6 +376,13 @@ export interface ClusterFuelRail {
   totalLabel?: string
 }
 
+/** The fuel rail as stored. */
+export interface ClusterFuelRailRef {
+  side: 'left' | 'right'
+  bars: FuelBarRef[]
+  totalLabel?: string
+}
+
 /**
  * An engine cluster (ADR 0054): a ticked ring with the primary reading inside
  * it and up to four mask-cut cards in the corners.
@@ -361,6 +391,15 @@ export interface ClusterFuelRail {
  * groups cheap, so zones, units and scales all work per slot unchanged.
  */
 export interface EngineClusterConfig {
+  /** The engine item shown (ADR 0185); unset until one is picked. */
+  equipmentId?: string
+  /**
+   * The source the tile read before any equipment was picked. Set by the
+   * conversion and cleared when equipment is chosen; only the zones the tile
+   * still holds use it, so their alarms keep running.
+   */
+  source?: string
+  /** Overrides the item's name; blank shows the name. */
   title: string
   ring: GaugeWidgetConfig
   centre: GaugeWidgetConfig
@@ -374,8 +413,11 @@ export interface EngineClusterConfig {
    */
   telltales?: GaugeWidgetConfig[]
   /** A fuel rail down one edge (ADR 0061). */
-  fuel?: ClusterFuelRail
+  fuel?: ClusterFuelRailRef
 }
+
+/** What the cluster tile draws: every slot has its path and zones, the rail its tanks' paths. */
+export type ResolvedClusterConfig = Omit<EngineClusterConfig, 'fuel'> & { fuel?: ClusterFuelRail }
 
 /**
  * A moving map of nearby points of interest (ADR 0091 phase 3b): a range, a
@@ -677,29 +719,6 @@ function cloneGauge(gauge: GaugeWidgetConfig): GaugeWidgetConfig {
 
 function cloneGaugeGroup(group: GaugeGroupWidgetConfig): GaugeGroupWidgetConfig {
   return { ...group, gauges: group.gauges.map(cloneGauge) }
-}
-
-/**
- * Retargets a group's paths in one pass — the point of duplicating a tile.
- * Copy "Port", replace `port` with `starboard`, and five gauges move to the
- * other engine without five rounds of retyping.
- *
- * Paths only. Labels are left alone deliberately: "Port RPM" is a two-word
- * edit, while a wrong bulk label rewrite is silent and easy to miss.
- *
- * No caller right now, on purpose. The gauge group dialog had a Replace/With
- * row wired to this, but the preview list grows with every match and there
- * was no layout found that didn't make the dialog resize as you typed, so
- * the row was pulled. Keeping the function for when that layout problem is
- * solved rather than deleting it.
- */
-export function rewriteGaugePaths(
-  gauges: readonly GaugeWidgetConfig[],
-  from: string,
-  to: string,
-): GaugeWidgetConfig[] {
-  if (from === '') return gauges.map(cloneGauge)
-  return gauges.map((gauge) => ({ ...cloneGauge(gauge), path: gauge.path.split(from).join(to) }))
 }
 
 /**

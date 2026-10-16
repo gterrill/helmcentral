@@ -5,19 +5,20 @@ line from your own alarm rules rather than a built-in threshold. Until you
 create a rule, the tile's state-of-charge number stays plain amber at any
 level, and the line beside it only ever reads "To full" or "To empty".
 
-The bands follow the house bank you chose in **Settings → Vessel → Power**.
-Pick the bank there first: with no house bank chosen, the tile has no bands and
-no dawn figure, and a rule is not matched to anything.
+The bands follow the house bank you chose in **Settings → SignalK → Roles**.
+Choose the bank there first: with no house bank chosen, the tile has no bands
+and no dawn figure, and a rule is not matched to anything.
 
 This sets up a warn band at 20% and an alarm band at 10% on the house bank.
 Adjust the numbers to suit your own bank.
 
 1. Open the Alarms drawer.
 2. Choose **Add Rule**.
-3. Set **SignalK path** to the house bank's state of charge: the path of the
-   bank you chose in **Settings → Vessel → Power**, followed by
-   `.capacity.stateOfCharge`. A rule on any other battery does not colour the
-   tile.
+3. Tick **Follow the house bank's state of charge**. The rule then watches
+   the bank you chose in **Settings → SignalK → Roles** and moves with it if
+   you change the bank. (You can instead type a path: the bank's SignalK
+   source followed by `.capacity.stateOfCharge`. A rule on any other battery
+   does not colour the tile.)
 4. Set **Condition** to `below`.
 5. Set **Threshold** to `0.2`.
 6. Set **Severity** to `warn`.
@@ -45,8 +46,10 @@ without a reload:
   percentage falls into one of these bands, which is your cue to run the
   generator or plug in before dark.
 
-If you change the house bank, the bands disappear until the rules sit on the
-new bank's path. Edit the path on each rule, or add new ones.
+If you change the house bank, rules that follow it move to the new bank and
+the bands stay. A rule you gave a typed path stays on that path, so the bands
+disappear until you edit it or add a new one. With no house bank chosen, a rule
+that follows it watches nothing.
 
 To change a threshold later, edit either rule from the Alarms drawer's rules
 list. To go back to the plain, uncoloured behaviour, delete both rules; the

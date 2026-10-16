@@ -101,7 +101,7 @@ covers every screen.
 
 The watch comes up when all of these have held for 15 seconds straight:
 
-- At least one of the engines you ticked in Settings → Vessel shows rpm
+- At least one of the engine items assigned to a propulsion source in Settings → SignalK shows rpm
 	above zero, from a reading less than 30 seconds old. With no engine
 	ticked, or none reporting, it never raises.
 - The GNSS fix is usable and puts the boat more than the watch radius plus

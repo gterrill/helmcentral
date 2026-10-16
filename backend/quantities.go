@@ -115,6 +115,35 @@ var siQuantities = []siQuantity{
 	{ID: "pressureDelta", Units: []siUnitOption{linear("deltaKPa", 1.0/1000), identityUnit("deltaPa")}},
 }
 
+// convertFromSI is convertToSI's inverse: an SI value in a gauge's display unit.
+func convertFromSI(value float64, quantityID, unitID string) (float64, error) {
+	for _, q := range siQuantities {
+		if q.ID != quantityID {
+			continue
+		}
+		for _, u := range q.Units {
+			if u.ID == unitID {
+				return u.FromSI(value), nil
+			}
+		}
+		return 0, fmt.Errorf("unknown unit %q for quantity %q", unitID, quantityID)
+	}
+	return 0, fmt.Errorf("unknown quantity %q", quantityID)
+}
+
+// convertBetweenUnits moves a value from one display unit to another of the
+// same quantity. Two different quantities are an error, never a guess.
+func convertBetweenUnits(value float64, fromQuantity, fromUnit, toQuantity, toUnit string) (float64, error) {
+	if fromQuantity != toQuantity {
+		return 0, fmt.Errorf("cannot convert %s to %s", fromQuantity, toQuantity)
+	}
+	si, err := convertToSI(value, fromQuantity, fromUnit)
+	if err != nil {
+		return 0, err
+	}
+	return convertFromSI(si, toQuantity, toUnit)
+}
+
 // convertToSI turns a value in a gauge's display unit into the SI value
 // SignalK publishes. An unknown quantity or unit is an error rather than a
 // pass-through: silently comparing psi against pascals is the failure this

@@ -262,9 +262,11 @@ func (e *alarmEngine) evaluate(rules []alarmRule, read alarmReader, now time.Tim
 	seen := make(map[string]bool, len(rules))
 
 	for _, rule := range rules {
-		if !rule.Enabled {
+		if !rule.Enabled || strings.TrimSpace(rule.Path) == "" {
 			// A disabled rule keeps no state, so re-enabling starts clean
-			// rather than resuming a stale dwell.
+			// rather than resuming a stale dwell. A rule with no path (one that
+			// follows a house bank that is not chosen) watches nothing and is
+			// treated the same way, so a stale-data op cannot fire on it.
 			delete(e.statuses, rule.ID)
 			continue
 		}

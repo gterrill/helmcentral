@@ -11,12 +11,97 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
-### Changed
+### Breaking
 
-- **Settings → Vessel → Engines** explains what ticking an engine does and
-  that linking an equipment item is optional. An engine with no reading says
-  Not reporting, and the engine differential check now sits under Engines
-  instead of Power.
+- **Engines, batteries, tanks and the rest are now equipment items.** On the
+  first start after upgrading, Helmcentral moves your Settings → Vessel engines
+  and house bank, your alternator and electrical choices, and your tank labels
+  onto equipment items and a new **Roles** list in **Settings → SignalK**. Every
+  battery, solar controller and tank you had only named, and every engine row you
+  had not linked to an item, gets an equipment item created for it, with that
+  name and mapped to that source, so no name is lost. A tank's item is named for
+  what it holds, such as Fresh water PORT, Black water STBD or Fuel PORT FWD,
+  because the old labels were per type. Delete any you do not want
+  on the Equipment page. Then check what it could not move. Under **Roles**, choose the port and starboard
+  alternators, the shore charger, the inverter, the generator and the voltage
+  readout battery if they show **Not set**, then choose **Save**. Until you do,
+  those figures show no data. The startup log lists every name and role it could
+  not move.
+- **Hour meters come from the item's source.** The hand-entered hour meter on
+  an equipment item is gone. An engine or a generator reads its hours from its
+  SignalK source. Where the old path named an engine's or generator's runtime
+  counter it was converted; otherwise assign the item a source (**Source**
+  on the item's page) to get its hours back.
+- **House bank figures moved to the bank's item.** Capacity, cell count and the
+  voltage overrides are now on the house bank's equipment item, under
+  **SignalK source**. The conversion copies them.
+- **Settings → Vessel** now holds only the boat's identity and particulars.
+  **Battery names**, **Solar names** and the **Labels** on the SignalK page are
+  gone: a source takes the name of the equipment item assigned to it.
+- **State-of-charge bands can follow the house bank.** Rules that watched the
+  old house bank were converted to follow it. Add new ones with **Follow the
+  house bank's state of charge** in the Alarms drawer.
+
+- **Tiles that read the boat's equipment now follow an equipment item.** On the
+  first start after upgrading, Helmcentral switches these to the item that owns
+  the source they read, keeping their layout and display choices:
+  - every Engine Cluster;
+  - every gauge group whose gauges all read under one source, whatever the kind
+    of equipment: an engine, battery, alternator, solar controller, tank,
+    generator, charger or inverter;
+  - every indicator lamp, on a page strip or the ribbon, that reads under the
+    source of an item.
+
+  Then check what is left. A cluster or gauge group whose source has no item
+  yet, and a fuel bar for a tank with no item, shows **Pick equipment**: open
+  the tile's settings in Layout mode and choose the equipment, mapping the item
+  first under **Settings → SignalK → Discovery** if it has no source. A lamp
+  whose source has no item keeps its path, so it does not follow an item until
+  you change it to read equipment. A gauge group whose gauges read several
+  different sources stays a group of the paths you picked. A reading the old
+  tile took from outside its engine, such as an exhaust temperature under
+  `propulsion.0` on a boat whose engines are `port` and `starboard`, is dropped
+  and has to be re-added to a tile that can read it. The startup log lists each
+  tile and reading it changed or could not move.
+- **Gauge zones live on the equipment profile, and none are lost.** A zone on
+  one of those tiles moved to the equipment's profile when the profile had none
+  for that reading, converted into the profile's unit. In every other case the
+  tile keeps its zones, stored on the tile, and they keep raising the same
+  alarms under the same names: when the tile has no equipment yet (it says
+  **Pick equipment**, and your oil pressure, coolant, RPM and alternator alarms
+  carry on from the source it read), when the equipment has no profile, when the
+  profile has no gauge for the reading, and when the profile already has
+  different zones for it (the profile's apply until you choose). Open the tile's
+  settings and choose the equipment. Zones move to its profile when you save the
+  tile; if the profile has its own for a reading you see both sets and choose
+  which to keep. If the equipment has no profile yet, link one on the item's
+  page, and the zones move the next time you save the tile. A reading on one of
+  these tiles now always uses the profile's unit once its zones are on the
+  profile. The startup log lists every tile whose zones stayed. The alarms from
+  zones on the profile have new names and start with no history or
+  acknowledgement; look in the Alarms drawer to confirm they are all there. A
+  fuel bar keeps its own low-fuel zones, because a tank has no profile, and its
+  alarm is kept. Engine cluster telltales (coolant, gearbox) now raise alarms
+  from their zones too, which they did not before.
+- **Apply gauge zones is gone** from the equipment page, along with the equipment
+  profile dialog on the Add Tile menu and the find-and-replace in gauge groups.
+  Add an Engine Cluster or a gauge group and choose the equipment instead.
+
+### Added
+
+- **Settings → SignalK → Discovery** lists what the boat reports (engines,
+  batteries, alternators, solar controllers, tanks, generators, chargers and
+  inverters) with live readings and the equipment item each belongs to. Assign
+  a source to an item, or create an item for it.
+- **Source** on the equipment page picks the item's SignalK source from what the
+  boat reports. A battery item holds its cell count and capacity.
+- **Tiles pick equipment from a list.** An Engine Cluster, a gauge group set to
+  show equipment, and an indicator lamp for an engine, generator, charger,
+  inverter or alternator choose an item instead of a SignalK path, so a tile
+  follows the item when its source changes and shares the profile's alarm limits
+  with every other tile and alarm for that equipment. An item that is not mapped
+  yet can be mapped from the picker. A tile whose equipment is missing, not
+  mapped or not reporting says so, with a link to the item.
 
 ## [0.46.0] - 2026-10-15
 

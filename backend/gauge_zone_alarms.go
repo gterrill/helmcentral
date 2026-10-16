@@ -21,10 +21,9 @@ import (
 
 const zoneDerivedAlarmRuleIDPrefix = "zone:"
 
-// Where a cluster's fuel bars start in the flat index space, past every corner
-// row a cluster can hold. Fixed rather than derived from the corners actually
-// present, so editing them cannot renumber a fuel bar's derived alarm.
-const clusterFuelZoneIndexBase = 2 + clusterMaxCorners*clusterMaxCornerRows
+// Where a cluster's telltales start in the flat index space, past every corner
+// row a cluster can hold, so adding a corner row cannot renumber an alarm.
+const clusterTelltaleZoneIndexBase = 2 + clusterMaxCorners*clusterMaxCornerRows
 
 const (
 	// A value hovering at a threshold is the reason people switch marine
@@ -74,13 +73,7 @@ func gaugeZoneRule(id string, gauge dashboardGaugeConfig, zone gaugeZone, zoneIn
 		return alarmRule{}, fmt.Errorf("normal bands are not alarms")
 	}
 
-	min, max := 0.0, 100.0
-	if gauge.Min != nil {
-		min = *gauge.Min
-	}
-	if gauge.Max != nil {
-		max = *gauge.Max
-	}
+	min, max := gaugeScale(gauge.Min, gauge.Max, nil)
 	if max <= min {
 		return alarmRule{}, fmt.Errorf("gauge range is not usable")
 	}
@@ -142,8 +135,16 @@ func zoneHysteresisSI(gauge dashboardGaugeConfig, min, max float64) (float64, er
 	return hysteresis, nil
 }
 
-// zoneDerivedAlarmRules walks every gauge on every page — standalone widgets
-// and gauge-group members alike — and returns one rule per alarm-severity zone.
+// zoneDerivedAlarmRules walks every gauge on every page and returns one rule per
+// alarm-severity zone.
+//
+// A standalone gauge, or a member of a plain gauge group, carries its own zones
+// and is keyed by its widget. A slot of a tile that shows an equipment item
+// (ADR 0185) has none: its zones are read live from the gauge of the item's
+// profile with the same suffix, the same ones the tile draws. Those rules are
+// keyed by item and reading rather than by tile, so two tiles showing the same
+// item's oil pressure raise one alarm, and editing a profile's zones changes
+// the alarm and every tile at once.
 //
 // Zones that cannot become a rule are skipped rather than reported here:
 // validateGaugeConfig rejects them at save time, so anything that reaches this
@@ -152,16 +153,83 @@ func zoneDerivedAlarmRules() []alarmRule {
 	dashboardPagesMu.RLock()
 	defer dashboardPagesMu.RUnlock()
 
+	ix := currentEquipmentIndex()
+	seen := map[string]bool{}
 	var rules []alarmRule
-	collect := func(widgetID string, gaugeIndex int, gauge dashboardGaugeConfig) {
+	add := func(id string, gauge dashboardGaugeConfig) {
 		for zoneIndex, zone := range gauge.Zones {
-			id := fmt.Sprintf("%s%s:%d:%d", zoneDerivedAlarmRuleIDPrefix, widgetID, gaugeIndex, zoneIndex)
-			rule, err := gaugeZoneRule(id, gauge, zone, zoneIndex)
+			ruleID := fmt.Sprintf("%s%s:%d", zoneDerivedAlarmRuleIDPrefix, id, zoneIndex)
+			if seen[ruleID] {
+				continue
+			}
+			rule, err := gaugeZoneRule(ruleID, gauge, zone, zoneIndex)
 			if err != nil {
 				continue
 			}
+			seen[ruleID] = true
 			rules = append(rules, rule)
 		}
+	}
+	collect := func(widgetID string, gaugeIndex int, gauge dashboardGaugeConfig) {
+		add(fmt.Sprintf("%s:%d", widgetID, gaugeIndex), gauge)
+	}
+	// A slot's alarm comes from one of two places. When the profile has zones
+	// for the reading they are the alarm: one per item and reading, built from
+	// the item and the profile gauge alone (never from a slot), so its label,
+	// scale and unit are the same however many tiles show the reading and
+	// whichever the walk meets first. Otherwise any zones the slot itself still
+	// holds (a tile converted before there was equipment or a profile to hold
+	// them) are the alarm, under the id they have always had.
+	seenReading := map[string]bool{}
+	collectSlot := func(widgetID string, index int, equipmentID, tileSource, title string, slot dashboardGaugeConfig) {
+		suffix := strings.TrimSpace(slot.Suffix)
+		if suffix == "" {
+			return
+		}
+		item, hasItem := ix.items[equipmentID]
+		if hasItem && item.Source != "" {
+			if profile, ok := ix.profiles[item.ProfileID]; ok {
+				if gauge, ok := profileGaugeFor(profile, suffix); ok && gaugeHasZones(gauge) {
+					key := item.ID + "\x00" + suffix
+					if seenReading[key] {
+						return
+					}
+					seenReading[key] = true
+					if reading, ok := ix.itemReading(item, suffix); ok {
+						add(fmt.Sprintf("item:%s:%s", item.ID, suffix), reading)
+					}
+					return
+				}
+			}
+		}
+		if len(slot.Zones) == 0 {
+			return
+		}
+		source, owner := tileSource, title
+		if hasItem {
+			owner = item.Name
+			if item.Source != "" {
+				source = item.Source
+			}
+		}
+		if source == "" {
+			return
+		}
+		held := slot
+		held.Path = source + "." + suffix
+		held.Label = strings.TrimSpace(owner + " " + firstNonEmpty(slot.Label, suffix))
+		add(fmt.Sprintf("%s:%d", widgetID, index), held)
+	}
+	collectTank := func(bar dashboardClusterFuelBar) {
+		if len(bar.Zones) == 0 {
+			return
+		}
+		key, reading, ok := ix.tankLevelReading(bar)
+		if !ok || seenReading[key] {
+			return
+		}
+		seenReading[key] = true
+		add(key, reading)
 	}
 
 	for _, page := range dashboardPagesState {
@@ -170,33 +238,38 @@ func zoneDerivedAlarmRules() []alarmRule {
 				collect(widget.ID, 0, *widget.Gauge)
 			}
 			if widget.GaugeGroup != nil {
-				for i, gauge := range widget.GaugeGroup.Gauges {
-					collect(widget.ID, i, gauge)
+				g := widget.GaugeGroup
+				for i, gauge := range g.Gauges {
+					if g.EquipmentKind == "" {
+						collect(widget.ID, i, gauge)
+					} else {
+						collectSlot(widget.ID, i, g.EquipmentID, g.Source, g.Title, gauge)
+					}
 				}
 			}
-			// A cluster slot's zones alarm like any other gauge's. The index
-			// space is flat and stable: ring, centre, then corner rows in
-			// order, so ids survive a restart.
+			// A cluster slot's zones alarm like any other gauge's. A fuel bar has
+			// no profile to hold zones, so it keeps its own and they alarm on the
+			// tank's level; a capacity is a constant an alarm would never clear.
+			// The index space is flat and stable, so ids survive a restart: ring,
+			// centre, then corner rows, with the telltales at a fixed base past
+			// every corner row a cluster can hold.
 			if widget.Cluster != nil {
-				collect(widget.ID, 0, widget.Cluster.Ring)
-				collect(widget.ID, 1, widget.Cluster.Centre)
+				c := widget.Cluster
+				collectSlot(widget.ID, 0, c.EquipmentID, c.Source, c.Title, c.Ring)
+				collectSlot(widget.ID, 1, c.EquipmentID, c.Source, c.Title, c.Centre)
 				index := 2
-				for _, corner := range widget.Cluster.Corners {
+				for _, corner := range c.Corners {
 					for _, row := range corner.Rows {
-						collect(widget.ID, index, row)
+						collectSlot(widget.ID, index, c.EquipmentID, c.Source, c.Title, row)
 						index++
 					}
 				}
-				// Fuel bars sit at a fixed base past every corner row a cluster
-				// can hold, rather than continuing the counter above. Appending
-				// would keep the ids already issued stable but renumber the
-				// fuel bars whenever a corner row was added, so an unrelated
-				// edit would orphan a low-fuel alarm's history and its
-				// acknowledgement. Level slots only: a capacity is a constant,
-				// and an alarm derived from one would never clear.
-				if widget.Cluster.Fuel != nil {
-					for i, bar := range widget.Cluster.Fuel.Bars {
-						collect(widget.ID, clusterFuelZoneIndexBase+i, bar.Level)
+				for i, telltale := range c.Telltales {
+					collectSlot(widget.ID, clusterTelltaleZoneIndexBase+i, c.EquipmentID, c.Source, c.Title, telltale)
+				}
+				if c.Fuel != nil {
+					for _, bar := range c.Fuel.Bars {
+						collectTank(bar)
 					}
 				}
 			}
@@ -207,4 +280,13 @@ func zoneDerivedAlarmRules() []alarmRule {
 	// unique by construction.
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	return rules
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }

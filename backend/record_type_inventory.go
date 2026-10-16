@@ -79,12 +79,17 @@ func equipmentRecordType() *recordType {
 			{Name: "bin_id", Kind: kindID, Writable: true, Nullable: true, Ref: recordTypeBin, Description: "the bin it is in"},
 			{Name: "location_detail", Kind: kindString, Writable: true, Description: "free text about where, e.g. \"port side, behind the panel\""},
 			{Name: "install_date", Kind: kindDate, Writable: true, Description: "YYYY-MM-DD or blank"},
-			{Name: "hour_meter_path", Kind: kindString, Writable: true, Description: "the live hour-meter path, no spaces"},
 			{Name: "profile_id", Kind: kindString, Writable: true, Description: "the equipment profile it follows"},
 			{Name: "aliases", Kind: kindStringList, Writable: true, Description: "other names it goes by"},
 			{Name: "verified_aboard", Kind: kindBoolean, Writable: true, Description: "whether the operator has checked it is on the boat"},
 			{Name: "notes", Kind: kindString, Writable: true},
 			{Name: "category", Kind: kindString, Description: "mechanical when it has an hour meter, otherwise general"},
+			{Name: "signalk_source", Kind: kindString, Description: "the SignalK source this item owns, such as propulsion.port; set in Settings, not by Mate"},
+			{Name: "capacity_ah", Kind: kindNumber, Description: "a battery item's bank capacity in amp-hours; set on the item page, not by Mate"},
+			{Name: "cells", Kind: kindInteger, Description: "a battery item's cell count"},
+			{Name: "warn_voltage", Kind: kindNumber, Description: "a battery item's warn voltage override"},
+			{Name: "high_voltage", Kind: kindNumber, Description: "a battery item's high voltage override"},
+			{Name: "hour_meter_source", Kind: kindString, Description: "the live hour meter derived from the SignalK source"},
 			{Name: "zone_name", Kind: kindString, Description: "the name of its location"},
 			{Name: "bin_code", Kind: kindString, Description: "the code of its bin"},
 		},
@@ -101,7 +106,7 @@ func equipmentRecordType() *recordType {
 		Href:     func(r recordSnapshot) string { return "/inventory/equipment/" + r.ID },
 		AfterCommit: func(res changeOpResult) {
 			if res.Type == recordTypeEquipment && res.Action == changeUpdate {
-				reseedAnomalyRulesIfHouseBank(res.ID)
+				reseedAnomalyRulesAfterItemSave(res.ID)
 			}
 		},
 	}
@@ -118,9 +123,11 @@ func equipmentSnapshot(it equipmentItem) recordSnapshot {
 			"name": it.Name, "system": it.System, "manufacturer": it.Manufacturer, "model": it.Model, "serial": it.Serial,
 			"part_number": it.PartNumber, "quantity": it.Quantity, "required_quantity": nilInt(it.RequiredQuantity),
 			"status": it.Status, "zone_id": nilStringPtr(it.ZoneID), "bin_id": nilStringPtr(it.BinID),
-			"location_detail": it.LocationDetail, "install_date": it.InstallDate, "hour_meter_path": it.HourMeterPath,
+			"location_detail": it.LocationDetail, "install_date": it.InstallDate,
 			"profile_id": it.ProfileID, "aliases": aliases, "verified_aboard": it.VerifiedAboard, "notes": it.Notes,
 			"category": it.Category, "zone_name": it.ZoneName, "bin_code": it.BinCode,
+			"signalk_source": it.SignalKSource, "capacity_ah": it.CapacityAh, "cells": it.Cells,
+			"warn_voltage": it.WarnVoltage, "high_voltage": it.HighVoltage, "hour_meter_source": it.HourMeterSource,
 		},
 	}
 }
@@ -193,6 +200,8 @@ func mapInventoryError(err error) error {
 		return fieldErr("bin_id", "that bin is not in the given location")
 	case errors.Is(err, errEquipmentQuantityInvalid):
 		return fieldErr("quantity", "quantity cannot be negative")
+	case errors.Is(err, errEquipmentSourceInvalid), isEquipmentSourceTaken(err):
+		return fieldErr("signalk_source", "%s", err)
 	}
 	var inUse *inventoryInUseError
 	if errors.As(err, &inUse) {

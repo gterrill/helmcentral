@@ -183,7 +183,7 @@ func (d assistantToolDeps) executeFindEquipment(ctx context.Context, raw json.Ra
 		hit := assistantEquipmentHit{
 			ID: it.ID, Name: it.Name, Manufacturer: it.Manufacturer, Model: it.Model,
 			System: it.System, Status: it.Status,
-			HourMeterBound: strings.TrimSpace(it.HourMeterPath) != "",
+			HourMeterBound: it.HourMeterSource != "",
 			HoursKnown:     hours.Known,
 			Rules:          rulesByItem[it.ID],
 			ScheduleErrors: errorsByItem[it.ID],

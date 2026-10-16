@@ -613,7 +613,7 @@ func findAlarmRule(t *testing.T, id string) (alarmRule, bool) {
 func TestSeedAnomalyRules_BaseSetNeedsNoVesselSetup(t *testing.T) {
 	withTempAlarmRules(t)
 
-	if err := seedAnomalyRules(vesselSettings{}); err != nil {
+	if err := seedAnomalyRules(vesselView{}); err != nil {
 		t.Fatalf("seeding failed: %v", err)
 	}
 
@@ -645,7 +645,7 @@ func TestSeedAnomalyRules_BaseSetNeedsNoVesselSetup(t *testing.T) {
 func TestSeedAnomalyRules_FrozenNeedsAtLeastOneEngine(t *testing.T) {
 	withTempAlarmRules(t)
 
-	if err := seedAnomalyRules(vesselSettings{
+	if err := seedAnomalyRules(vesselView{
 		Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}},
 	}); err != nil {
 		t.Fatalf("seeding failed: %v", err)
@@ -664,7 +664,7 @@ func TestSeedAnomalyRules_BatteryNeedsACompleteHouseBank(t *testing.T) {
 	withTempAlarmRules(t)
 
 	// A house bank is chosen but has no linked profile at all yet.
-	incomplete := vesselSettings{
+	incomplete := vesselView{
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", CapacityAh: 400, Cells: 8},
 	}
 	if err := seedAnomalyRules(incomplete); err != nil {
@@ -682,7 +682,7 @@ func TestSeedAnomalyRules_BatterySeedsOnceTheProfileIsComplete(t *testing.T) {
 	equipmentID := setupBatteryTestStore(t)
 	setupBatteryProfileFixture(t)
 
-	vessel := vesselSettings{
+	vessel := vesselView{
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.0", EquipmentID: equipmentID, CapacityAh: 400, Cells: 8},
 	}
 	if err := seedAnomalyRules(vessel); err != nil {
@@ -712,7 +712,7 @@ func TestSeedAnomalyRules_BatterySeedsOnceTheProfileIsComplete(t *testing.T) {
 func TestSeedAnomalyRules_EngineResidualRulesKeepFixedIDs(t *testing.T) {
 	withTempAlarmRules(t)
 
-	vessel := vesselSettings{Engines: []vesselEngineSetting{
+	vessel := vesselView{Engines: []vesselEngineSetting{
 		{Instance: "port", Name: "Port"},
 		{Instance: "starboard", Name: "Starboard"},
 	}}
@@ -735,7 +735,7 @@ func TestSeedAnomalyRules_EngineResidualRulesKeepFixedIDs(t *testing.T) {
 func TestSeedAnomalyRules_TwoEnginesSeedOnlyTheFirstEnginesResiduals(t *testing.T) {
 	withTempAlarmRules(t)
 
-	vessel := vesselSettings{Engines: []vesselEngineSetting{
+	vessel := vesselView{Engines: []vesselEngineSetting{
 		{Instance: "port", Name: "Port"},
 		{Instance: "starboard", Name: "Starboard"},
 	}}
@@ -768,7 +768,7 @@ func TestSeedAnomalyRules_TwoEnginesSeedOnlyTheFirstEnginesResiduals(t *testing.
 func TestSeedAnomalyRules_ThreeEnginesSeedEveryEnginesResiduals(t *testing.T) {
 	withTempAlarmRules(t)
 
-	vessel := vesselSettings{Engines: []vesselEngineSetting{
+	vessel := vesselView{Engines: []vesselEngineSetting{
 		{Instance: "port", Name: "Port"},
 		{Instance: "center", Name: "Center"},
 		{Instance: "starboard", Name: "Starboard"},
@@ -794,7 +794,7 @@ func TestSeedAnomalyRules_ThreeEnginesSeedEveryEnginesResiduals(t *testing.T) {
 
 func TestSeedAnomalyRules_RunsRepeatedlyWithoutDuplicating(t *testing.T) {
 	withTempAlarmRules(t)
-	vessel := vesselSettings{Engines: []vesselEngineSetting{
+	vessel := vesselView{Engines: []vesselEngineSetting{
 		{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"},
 	}}
 
@@ -822,7 +822,7 @@ func TestSeedAnomalyRules_RunsRepeatedlyWithoutDuplicating(t *testing.T) {
 // stable Signal K instance id, so a rename re-seeds nothing at all.
 func TestSeedAnomalyRules_RenamingAnEngineDoesNotReseedOrOrphanItsRules(t *testing.T) {
 	withTempAlarmRules(t)
-	vessel := vesselSettings{Engines: []vesselEngineSetting{
+	vessel := vesselView{Engines: []vesselEngineSetting{
 		{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"},
 	}}
 	if err := seedAnomalyRules(vessel); err != nil {
@@ -830,7 +830,7 @@ func TestSeedAnomalyRules_RenamingAnEngineDoesNotReseedOrOrphanItsRules(t *testi
 	}
 	first := len(listAlarmRules())
 
-	renamed := vesselSettings{Engines: []vesselEngineSetting{
+	renamed := vesselView{Engines: []vesselEngineSetting{
 		{Instance: "port", Name: "Port Main"}, {Instance: "starboard", Name: "Starboard"},
 	}}
 	if err := seedAnomalyRules(renamed); err != nil {
@@ -852,13 +852,13 @@ func TestSeedAnomalyRules_AddingAnEngineLaterSeedsItsOwnRules(t *testing.T) {
 
 	// Start with a single engine: only the frozen rule, no residual pair
 	// yet (needs >= 2).
-	if err := seedAnomalyRules(vesselSettings{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}}}); err != nil {
+	if err := seedAnomalyRules(vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port"}}}); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
 	beforeSecondEngine := len(listAlarmRules())
 
 	// The operator adds starboard and saves again.
-	vessel := vesselSettings{Engines: []vesselEngineSetting{
+	vessel := vesselView{Engines: []vesselEngineSetting{
 		{Instance: "port", Name: "Port"}, {Instance: "starboard", Name: "Starboard"},
 	}}
 	if err := seedAnomalyRules(vessel); err != nil {
@@ -874,7 +874,7 @@ func TestSeedAnomalyRules_AddingAnEngineLaterSeedsItsOwnRules(t *testing.T) {
 func TestSeedAnomalyRules_DoesNotResurrectADeletedRule(t *testing.T) {
 	withTempAlarmRules(t)
 
-	if err := seedAnomalyRules(vesselSettings{}); err != nil {
+	if err := seedAnomalyRules(vesselView{}); err != nil {
 		t.Fatalf("first seed: %v", err)
 	}
 	rules := listAlarmRules()
@@ -883,7 +883,7 @@ func TestSeedAnomalyRules_DoesNotResurrectADeletedRule(t *testing.T) {
 	}
 	remaining := len(listAlarmRules())
 
-	if err := seedAnomalyRules(vesselSettings{}); err != nil {
+	if err := seedAnomalyRules(vesselView{}); err != nil {
 		t.Fatalf("second seed: %v", err)
 	}
 	if got := len(listAlarmRules()); got != remaining {

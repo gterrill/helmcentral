@@ -434,8 +434,22 @@ func main() {
 	}
 	globalProfileStore = ps
 	loadEngineProfiles()
+	// One-off: the old vessel: settings block, tank labels and hour meter
+	// paths become equipment items that own their SignalK source plus the
+	// roles block (ADR 0185). Fail fast: a half-converted vessel would read
+	// as an unset one. Must run after loadAlarmRules, which it edits.
+	if err := convertLegacyVessel(getEnv("SETTINGS_FILE", "../settings.yaml"), globalDocumentStore); err != nil {
+		log.Fatalf("failed to convert the vessel settings: %v", err)
+	}
+	// One-off: dashboard tiles that held full SignalK paths become references
+	// to the equipment items that own them (ADR 0185, phase 2). Must run after
+	// the vessel conversion (which gives items their sources) and after the
+	// profiles load (which receive the zones a tile held).
+	if err := convertDashboardTilesToEquipment(); err != nil {
+		log.Fatalf("failed to convert the dashboard tiles: %v", err)
+	}
 	// Offers the anomaly-detection set (sensor health always, the rest as
-	// vessel.engines/house_bank are completed): unlike the sets above, this
+	// engines and a house bank are set up): unlike the sets above, this
 	// one is several independent markers rather than one, seeded again on
 	// every vessel-settings save so a detector configured after this boot
 	// still gets its rules. Must run after loadEngineProfiles just above --
@@ -445,10 +459,15 @@ func main() {
 	// seeded at boot no matter how complete the vessel setup was (code
 	// review finding 1). A failure here is not fatal, for the same reason
 	// as the sets above.
-	if vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml")); err != nil {
-		log.Printf("could not load vessel settings for anomaly rule seeding: %v", err)
-	} else if err := seedAnomalyRules(vessel); err != nil {
-		log.Printf("could not seed the anomaly alarm rules: %v", err)
+	if vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml")); err != nil {
+		log.Printf("could not load the vessel for anomaly rule seeding: %v", err)
+	} else {
+		if err := syncRoleBoundRules(vessel); err != nil {
+			log.Printf("could not move the house bank alarm rules: %v", err)
+		}
+		if err := seedAnomalyRules(vessel); err != nil {
+			log.Printf("could not seed the anomaly alarm rules: %v", err)
+		}
 	}
 	// Radar (ADR 0062, amended for the mayara SignalK plugin): a target store
 	// fed by radarPoller (radar_source.go), which polls the plugin's proxied
