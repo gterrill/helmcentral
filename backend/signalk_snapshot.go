@@ -58,6 +58,14 @@ type signalKSnapshot struct {
 	// before treating its absence as evidence of anything, rather than
 	// declaring every notification stale the instant the process starts.
 	listenSince time.Time
+
+	// connectedSince is when the current stream connection was established
+	// (zero while disconnected). contextHeard is the latest receive time of
+	// any delta per vessel context; it dies with the context on eviction.
+	// distressCleared latches AIS distress labels declared gone (ADR 0185).
+	connectedSince  time.Time
+	contextHeard    map[string]time.Time
+	distressCleared map[string]struct{}
 }
 
 // signalKSentenceSeenMaxDistinct caps how many distinct sentence type strings
@@ -254,6 +262,8 @@ func newSignalKSnapshot() *signalKSnapshot {
 		sourceSeen:        make(map[string]sourceSeenEntry),
 		batteryPublishers: make(map[string]map[string]struct{}),
 		sentenceSeen:      make(map[string]time.Time),
+		contextHeard:      make(map[string]time.Time),
+		distressCleared:   make(map[string]struct{}),
 	}
 }
 
@@ -531,6 +541,21 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 	}
 
 	s.lastMessage = now
+	if strings.HasPrefix(d.Context, vesselContextPrefix) {
+		for _, update := range d.Updates {
+			if len(update.Values) == 0 {
+				continue
+			}
+			// A cached value replayed on reconnect carries the time it was
+			// first written; that is not the beacon being heard now, the same
+			// reasoning as sentenceSeen above (ADR 0144).
+			if ts, err := time.Parse(time.RFC3339Nano, update.Timestamp); err == nil && now.Sub(ts) > distressBeaconGoneAfter {
+				continue
+			}
+			s.contextHeard[d.Context] = now
+			break
+		}
+	}
 }
 
 // snapshotWholeTreeCopies counts operations that deep-copy an entire
@@ -772,6 +797,9 @@ func (s *signalKSnapshot) setConnected(connected bool) {
 	defer s.mu.Unlock()
 
 	s.connected = connected
+	if !connected {
+		s.connectedSince = time.Time{}
+	}
 }
 
 // status returns the current connected status and the time of the last
@@ -942,6 +970,77 @@ func (s *signalKSnapshot) listeningSince() time.Time {
 	return s.listenSince
 }
 
+// markStreamConnected records when the current SignalK stream connection was
+// established; setConnected(false) clears it, so it measures the present
+// connection, not the process (ADR 0185).
+func (s *signalKSnapshot) markStreamConnected(at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.connectedSince = at
+}
+
+// distressView is what the AIS distress clear (ADR 0185) reads in one locked
+// call: whether silence can be trusted at all -- the stream is connected, the
+// current connection is older than window, and it has delivered something
+// within fresh -- the latest heard time of just the contexts asked about, which
+// of the candidate labels are latched, and the latched labels that are not
+// candidates any more (their notification has left the tree).
+type distressView struct {
+	trusted bool
+	heard   map[string]time.Time
+	latched map[string]bool
+	orphans []string
+}
+
+func (s *signalKSnapshot) distressView(now time.Time, window, fresh time.Duration, contexts map[string]string) distressView {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v := distressView{latched: map[string]bool{}, heard: map[string]time.Time{}}
+	for label := range s.distressCleared {
+		if _, candidate := contexts[label]; candidate {
+			v.latched[label] = true
+		} else {
+			v.orphans = append(v.orphans, label)
+		}
+	}
+	if !s.connected || s.connectedSince.IsZero() || now.Sub(s.connectedSince) <= window {
+		return v
+	}
+	if s.lastMessage.IsZero() || now.Sub(s.lastMessage) > fresh {
+		return v
+	}
+	v.trusted = true
+	for _, context := range contexts {
+		if at, ok := s.contextHeard[context]; ok {
+			v.heard[context] = at
+		}
+	}
+	return v
+}
+
+// applyDistressLatch latches, releases and prunes distress labels in one write.
+func (s *signalKSnapshot) applyDistressLatch(latch, release, prune []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, label := range latch {
+		s.distressCleared[label] = struct{}{}
+	}
+	for _, label := range release {
+		delete(s.distressCleared, label)
+	}
+	for _, label := range prune {
+		delete(s.distressCleared, label)
+	}
+}
+
+// distressLatched reports whether a distress label was already declared gone.
+func (s *signalKSnapshot) distressLatched(label string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.distressCleared[label]
+	return ok
+}
+
 // vesselContextStaleAfter is how long a non-self vessel context may go
 // without a fresh delta before evictStaleVesselContexts drops it. Before
 // this, nothing ever evicted a context (collision_ais.go used to document
@@ -1003,6 +1102,7 @@ func (s *signalKSnapshot) evictStaleVesselContexts(now time.Time) []string {
 
 	for _, context := range evicted {
 		delete(s.contexts, context)
+		delete(s.contextHeard, context)
 		prefix := context + "|"
 		for key := range s.pathSeen {
 			if strings.HasPrefix(key, prefix) {

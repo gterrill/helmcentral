@@ -52,6 +52,9 @@ type busNotificationWatcher struct {
 	// route stays stopped, matching notificationSyncer's own failing-streak
 	// idiom (notification_sync.go).
 	staleNMEALogged map[string]bool
+	// distressLogged is, for the labels in staleNMEALogged that are AIS
+	// distress alarms set aside as gone, the beacon's MMSI (ADR 0185).
+	distressLogged map[string]string
 }
 
 func newBusNotificationWatcher(snapshot *signalKSnapshot) *busNotificationWatcher {
@@ -219,6 +222,15 @@ func (w *busNotificationWatcher) logStaleNMEATransitions(now time.Time) {
 			continue
 		}
 		w.staleNMEALogged[label] = true
+		if info.DistressMMSI != "" {
+			if w.distressLogged == nil {
+				w.distressLogged = map[string]string{}
+			}
+			w.distressLogged[label] = info.DistressMMSI
+			log.Printf("notifications.%s: beacon MMSI %s is no longer in the vessel snapshot, distress alarm set aside as cleared",
+				label, info.DistressMMSI)
+			continue
+		}
 		lastSeen := "not since Helmcentral started listening"
 		if info.EverSeen {
 			lastSeen = info.LastSeen.Format(time.RFC3339)
@@ -243,6 +255,13 @@ func (w *busNotificationWatcher) logStaleNMEATransitions(now time.Time) {
 		delete(w.staleNMEALogged, label)
 		// A notification that cleared while set aside has gone, not come
 		// back; its clear needs no line of its own here.
+		if mmsi, wasDistress := w.distressLogged[label]; wasDistress {
+			delete(w.distressLogged, label)
+			if stillLive[label] {
+				log.Printf("notifications.%s: beacon MMSI %s heard again, distress alarm live again", label, mmsi)
+			}
+			continue
+		}
 		if stillLive[label] {
 			log.Printf("notifications.%s: no longer set aside as stale", label)
 		}

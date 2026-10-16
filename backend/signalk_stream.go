@@ -209,6 +209,7 @@ func (c *signalKStreamClient) connectOnce(ctx context.Context, streamURL, httpBa
 	}
 
 	c.snapshot.setConnected(true)
+	c.snapshot.markStreamConnected(c.now())
 	defer c.snapshot.setConnected(false)
 
 	for {

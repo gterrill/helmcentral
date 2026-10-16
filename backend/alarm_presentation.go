@@ -62,6 +62,15 @@ func presentNotification(path, message string, radars []radarInfo) (title, body 
 		return "Collision Watch Fault", sentence(message, path)
 	}
 
+	if strings.HasPrefix(path, distressReceivedPrefix) {
+		// The key carries a timestamp and the beacon's MMSI; neither belongs
+		// on the card. The producer's sentence says where and what.
+		if strings.HasPrefix(path, distressAISPrefix) {
+			return "AIS Distress", sentence(message, path)
+		}
+		return "Distress Received", sentence(message, path)
+	}
+
 	title, ok := writtenTitles[path]
 	if !ok {
 		title = humanisePath(path)
