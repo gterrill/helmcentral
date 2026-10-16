@@ -18,15 +18,24 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
    profile), never a spare, a tool or a consumable; see below. Two items with the
    same name are told apart by where they are and their serial number.
 3. Choose **Fill slots from profile**, or pick each slot's **Reading** from the
-   list of the profile's readings and the ones the boat reports for that engine. The ring, the hours, the corner cards and
-   the telltales are filled from the engine's profile. Change any slot after.
-4. Leave **Title** blank to show the engine's name, or type your own.
-5. To add a fuel rail, choose **Add fuel rail**, then choose a tank for each bar.
+   list of the profile's readings and the ones the boat reports for that engine. The ring, the hours, the four readout cards,
+   the coolant arc and the gearbox are filled from the engine's profile. Change any slot after.
+4. Choose **Engine side**, Port or Starboard. It is taken from the engine's
+   source when you fill the slots, and starboard mirrors the card.
+5. Under **Footer**, choose the equipment for the starter battery, the
+   alternator and the exhaust, and the reading each shows. Filling the slots
+   picks the alternator you named for that side under **Roles**; leave a part
+   without equipment to leave it out. The **Dial arc, right** is engine oil
+   temperature: leave it empty unless the engine has that sensor.
+6. Leave **Title** blank to show the engine's name, or type your own.
+7. To add a fuel rail, choose **Add fuel rail**, then choose a tank for each bar
+   (forward and aft). The arcs sit on the outer edge for the engine's side.
    A bar can carry a **low fuel alarm**: the level it falls below, and how severe.
    Unlike engine limits, it belongs to the bar, because a tank has no profile.
-6. Choose **Save**.
+8. Choose **Save**.
 
-For the second engine, duplicate the tile and choose the other engine.
+For the second engine, duplicate the tile, choose the other engine and press
+**Fill slots from profile** again.
 
 ## Add a gauge group for equipment
 

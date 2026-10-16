@@ -86,6 +86,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Apply gauge zones is gone** from the equipment page, along with the equipment
   profile dialog on the Add Tile menu and the find-and-replace in gauge groups.
   Add an Engine Cluster or a gauge group and choose the equipment instead.
+- **Engine Cluster tiles are rebuilt for the new card.** The temperature strip
+  under the dial is replaced by two arcs and the footer, a readout card shows one
+  reading, a fuel rail shows two tanks and has no caption or edge choice (it sits
+  on the outer edge for the engine's side). On the first start the coolant
+  moves to the left arc and the gearbox temperature to the footer's transmission
+  card, and any other strip reading is dropped (the log says which). Open each
+  cluster's settings in Layout mode, choose **Engine side**, press **Fill slots
+  from profile**, then choose the starter battery, alternator and exhaust
+  equipment for the footer. The exhaust needs an equipment item mapped to its
+  own source (for example `propulsion.0`), because it is not part of either
+  engine. The alarms from a footer or arc reading's zones are named for its
+  equipment and start with no history.
 
 ### Changed
 
@@ -94,6 +106,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   after the beacon was last heard, never while the SignalK feed is down or has
   just reconnected. Before, a SART that had stopped
   transmitting stayed on the board indefinitely.
+
+- The Engine Cluster tile is redrawn as one full engine card: a lit tachometer
+  that reads plain rpm, four readout cards with bars drawn from each reading's
+  own limits, coolant and engine oil temperature arcs, forward and aft fuel arcs
+  with litres, and a footer with the starter battery voltage, the alternator
+  (current, power, temperature, charge stage, a one-hour trace and the battery
+  management system's charge limit), the gearbox and the exhaust. A starboard
+  tile is a mirror of a port one, and an engine that is switched off says `OFF`
+  once, in the tile's title. The tile needs half the board's width. The
+  alternator, battery and exhaust are equipment items like the engine: choose
+  them in the tile's settings, and **Fill slots from profile** takes the
+  alternator the Roles setting names for the engine's side.
 
 ### Fixed
 
