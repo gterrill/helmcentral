@@ -2,22 +2,9 @@ import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 
 import { apiBaseUrl } from '@/config/api'
-import { readServerSentEvents } from '@/lib/sse-reader'
+import type { ConversationApi, MessageApi } from '@/lib/mate-api'
+import { MATE_REPLY_NOT_SHOWN, MateEventError, readMateEvents } from '@/lib/mate-events'
 import { getMateWatchSnapshot, removeMateWatch, subscribeMateWatch } from '@/lib/mate-watch-store'
-
-interface ConversationApi {
-  id: string
-  title: string
-  created_at: string
-  updated_at: string
-}
-
-interface MessageApi {
-  id: string
-  conversation_id: string
-  role: 'user' | 'assistant' | 'watch'
-  created_at: string
-}
 
 function firstLine(text: string): string {
   const index = text.indexOf('\n')
@@ -104,14 +91,23 @@ async function watchOneConversation(
     let resolvedConversationTitle = ''
     let errorText: string | null = null
 
-    await readServerSentEvents(response.body, (event) => {
-      if (event.event === 'message') {
-        const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
-        resolvedConversationId = data.conversation.id
-        resolvedConversationTitle = data.conversation.title
-      } else if (event.event === 'error') {
-        const data = JSON.parse(event.data) as { error?: string }
-        errorText = typeof data.error === 'string' && data.error !== '' ? data.error : 'assistant error'
+    await readMateEvents(response.body, (event) => {
+      switch (event.type) {
+        case 'message':
+          resolvedConversationId = event.conversation.id
+          resolvedConversationTitle = event.conversation.title
+          break
+        case 'error':
+          errorText = event.error !== '' ? event.error : 'assistant error'
+          break
+        case 'status':
+        case 'delta':
+        case 'retract':
+          break
+        default: {
+          const unhandled: never = event
+          throw new Error(`unhandled Mate event ${JSON.stringify(unhandled)}`)
+        }
       }
     }, signal)
 
@@ -139,6 +135,13 @@ async function watchOneConversation(
     // it via send() if there's something new to watch for.
   } catch (err) {
     if (signal.aborted) return
+    if (err instanceof MateEventError) {
+      console.error(`use-mate-answer-watcher: ${err.message}`)
+      toast.error(MATE_REPLY_NOT_SHOWN, {
+        action: { label: 'Reload', onClick: () => globalThis.location.reload() },
+      })
+      return
+    }
     console.error(`use-mate-answer-watcher: watching conversation ${conversationId} failed`, err)
   }
 }

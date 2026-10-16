@@ -547,7 +547,7 @@ func TestAssistantWatchFollowUp_AppendsReportAndStartsOneTurn(t *testing.T) {
 			gotConversation = assistantConversationIDFrom(ctx)
 			gotLive = systemLive
 			mu.Unlock()
-			emit("status", assistantStatus("Thinking…"))
+			emit(mateStatusEvent{Text: "Thinking…"})
 			return assistantReply{Content: "Port load spiked twice.", Model: "openai/gpt-4o"}, nil
 		})
 	})

@@ -1135,7 +1135,7 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("assistant: run for conversation %s panicked: %v\n%s", id, r, debug.Stack())
-				run.append("error", map[string]string{"error": fmt.Sprintf("the assistant run crashed: %v", r)})
+				run.append(mateErrorEvent{Error: fmt.Sprintf("the assistant run crashed: %v", r)})
 				run.finish()
 			}
 		}()
@@ -1144,10 +1144,10 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		if runErr != nil {
 			if run.wasCancelled() {
 				log.Printf("assistant: run for conversation %s stopped by the operator", id)
-				run.append("error", map[string]string{"error": "stopped"})
+				run.append(mateErrorEvent{Error: "stopped"})
 			} else {
 				log.Printf("assistant: run failed for conversation %s: %v", id, runErr)
-				run.append("error", map[string]string{"error": firstErrorLine(runErr)})
+				run.append(mateErrorEvent{Error: firstErrorLine(runErr)})
 			}
 			run.finish()
 			return
@@ -1158,7 +1158,7 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		if summaryTitle := assistantSummaryTitle(reply.Content); summaryTitle != "" {
 			if err := globalAssistantStore.SetTitle(id, summaryTitle); err != nil {
 				log.Printf("assistant: update conversation summary title for %s: %v", id, err)
-				run.append("error", map[string]string{"error": firstErrorLine(err)})
+				run.append(mateErrorEvent{Error: firstErrorLine(err)})
 				run.finish()
 				return
 			}
@@ -1183,7 +1183,7 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		})
 		if err != nil {
 			log.Printf("assistant: persist reply for conversation %s: %v", id, err)
-			run.append("error", map[string]string{"error": firstErrorLine(err)})
+			run.append(mateErrorEvent{Error: firstErrorLine(err)})
 			run.finish()
 			return
 		}
@@ -1191,12 +1191,12 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		updatedConv, ok, err := globalAssistantStore.GetConversation(id)
 		if err != nil || !ok {
 			log.Printf("assistant: reload conversation %s after reply: ok=%v err=%v", id, ok, err)
-			run.append("error", map[string]string{"error": "failed to reload the conversation after the reply"})
+			run.append(mateErrorEvent{Error: "failed to reload the conversation after the reply"})
 			run.finish()
 			return
 		}
 
-		run.append("message", map[string]any{"message": assistantRow, "conversation": updatedConv})
+		run.append(mateMessageEvent{Message: assistantRow, Conversation: updatedConv})
 		run.finish()
 	}()
 	return nil

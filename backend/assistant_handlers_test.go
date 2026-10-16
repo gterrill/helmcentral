@@ -72,9 +72,9 @@ type fakeAssistantRunner struct {
 
 func (f *fakeAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 	f.gotSystem = systemStable + systemLive
-	f.emit("status", assistantStatus("Thinking…"))
+	f.emit(mateStatusEvent{Text: "Thinking…"})
 	for _, d := range f.deltas {
-		f.emit("delta", assistantDelta(d))
+		f.emit(mateDeltaEvent{Text: d})
 	}
 	if f.err != nil {
 		return assistantReply{}, f.err
@@ -128,10 +128,10 @@ type scriptedAssistantRunner struct {
 }
 
 func (s *scriptedAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
-	s.emit("status", assistantStatus("Thinking…"))
+	s.emit(mateStatusEvent{Text: "Thinking…"})
 	close(s.started)
 	<-s.proceed
-	s.emit("delta", assistantDelta("Tongue Bay first."))
+	s.emit(mateDeltaEvent{Text: "Tongue Bay first."})
 	return s.reply, nil
 }
 

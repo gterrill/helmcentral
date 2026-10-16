@@ -88,7 +88,7 @@ export async function readServerSentEvents(
   let buffer = ''
 
   const onAbort = () => {
-    void reader.cancel()
+    reader.cancel().catch(() => {})
   }
   signal?.addEventListener('abort', onAbort)
 
@@ -102,6 +102,12 @@ export async function readServerSentEvents(
       buffer = rest
       for (const event of events) onEvent(event)
     }
+  } catch (err) {
+    // A throwing onEvent (a frame the caller rejects) must not leave the
+    // connection streaming into nothing. If read() itself failed the stream
+    // is already dead and cancel() may reject too; that is not worth raising.
+    reader.cancel().catch(() => {})
+    throw err
   } finally {
     signal?.removeEventListener('abort', onAbort)
   }

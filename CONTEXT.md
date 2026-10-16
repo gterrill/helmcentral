@@ -31,6 +31,13 @@ the reply and whether it is on offer for this run. Calls in a round run
 concurrently, so a tool that writes is safe under that on its own.
 _Avoid_: function, plugin, skill.
 
+**Mate event**: one entry in the stream a run sends the browser, from a closed
+set: `status` (a tool's line, or waiting on the model), `delta` (answer text so
+far), `retract` (drop this round's draft), `message` (the stored reply) and
+`error`. Go defines the set as structs; the browser decodes it in one place
+(`readMateEvents`) and treats anything outside it as a failed reply.
+_Avoid_: chunk, frame (a frame is the SSE framing one event rides in).
+
 **Mate session**: one Mate surface's hold on a conversation in the browser:
 which conversation is open, its messages, the question in flight and its
 streaming answer (`useMateSession`). The Mate panel and the Mate sheet each
