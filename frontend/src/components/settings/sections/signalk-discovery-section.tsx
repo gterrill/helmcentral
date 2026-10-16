@@ -87,10 +87,19 @@ export function SignalKDiscoverySection() {
         </p>
       )}
       {!loading && !error && discovery.connected && groups.length === 0 && (
-        <p className="text-sm text-muted-foreground">The boat is not reporting any engines, batteries, tanks or other equipment yet.</p>
+        <p id="discovery-engine" tabIndex={-1} className="text-sm text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring">The boat is not reporting any engines, batteries, tanks or other equipment yet.</p>
+      )}
+      {/* The setup checklist lands here for engines, so the anchor exists even
+          when the boat reports none: here when other kinds are listed, on the
+          general empty message when nothing is. */}
+      {!loading && !error && discovery.connected && groups.length > 0 && !groups.some((g) => g.kind === 'engine') && (
+        <div id="discovery-engine" tabIndex={-1} className="flex flex-col gap-2 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{SOURCE_KIND_LABELS.engine}</h3>
+          <p className="text-sm text-muted-foreground">The boat isn&apos;t reporting any engines.</p>
+        </div>
       )}
       {shownGroups.map((group) => (
-        <div key={group.kind} className="flex flex-col gap-2">
+        <div key={group.kind} id={`discovery-${group.kind}`} tabIndex={-1} className="flex flex-col gap-2 outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             {SOURCE_KIND_LABELS[group.kind as SourceKind]}
           </h3>
@@ -161,7 +170,9 @@ function DiscoveryRowView({ row, kind, items, profiles }: DiscoveryRowViewProps)
   return (
     <div className="grid min-w-0 grid-cols-1 gap-2 rounded-md border border-border/60 bg-background/40 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <div className="min-w-0">
-        <p className="truncate font-mono text-xs text-foreground">{row.source}</p>
+        {/* A source that reports nothing is secondary: it is usually a bare
+            numbered duplicate of an engine that does carry figures. */}
+        <p className={`truncate font-mono text-xs ${row.reporting && row.metrics.length === 0 ? 'text-muted-foreground' : 'text-foreground'}`}>{row.source}</p>
         <p className="mt-1 truncate text-xs tabular-nums text-muted-foreground">
           {row.reporting ? (reading === '' ? 'Reporting, no figures yet' : reading) : 'Not reporting'}
         </p>

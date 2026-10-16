@@ -37,6 +37,7 @@ import {
 import { CLUSTER_ICON_NAMES, iconForSlot } from '@/lib/cluster-icons'
 import { findItem, profileGaugeFor, profileOf, type EquipmentTileContext } from '@/lib/equipment-tiles'
 import type { EngineProfile } from '@/lib/engine-profiles'
+import { ROLE_NONE } from '@/lib/vessel-settings'
 
 /**
  * The slots a cluster fills from the engine's profile, and the suffix each looks
@@ -186,7 +187,9 @@ export function clusterFromProfile(
 
   const engine = findItem(ctx, current.equipmentId)
   const side = sideOf(engine?.signalk_source)
-  const alternatorId = (side === 'stbd' ? roles?.starboard_alternator : roles?.port_alternator) ?? ''
+  const roleAlternator = (side === 'stbd' ? roles?.starboard_alternator : roles?.port_alternator) ?? ''
+  // "This boat has none" is an answer, not an item.
+  const alternatorId = roleAlternator === ROLE_NONE ? '' : roleAlternator
 
   const footer: NonNullable<EngineClusterConfig['footer']> = {}
   for (const key of CLUSTER_FOOTER_SLOTS) {

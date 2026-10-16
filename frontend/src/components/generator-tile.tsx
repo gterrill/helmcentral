@@ -9,6 +9,8 @@ interface GeneratorTileProps {
   onOpenRoles?: () => void
   /** A generator instance is chosen in the roles; null while that is not known. */
   generatorConfigured: boolean | null
+  /** The operator answered "This boat has none": a statement, not a gap to fix. */
+  generatorNone?: boolean
   generatorState: string | null
   generatorManualStart: boolean
   generatorManualStartTimer: number
@@ -50,6 +52,7 @@ function formatRunReason(condition: string | null): string | null {
 
 export const GeneratorTile = memo(function GeneratorTile({
   generatorConfigured,
+  generatorNone = false,
   onOpenRoles,
   generatorState,
   generatorManualStart,
@@ -122,6 +125,14 @@ export const GeneratorTile = memo(function GeneratorTile({
     return (
       <Tile title="Generator">
         <p className="mt-2 text-sm text-muted-foreground">--</p>
+      </Tile>
+    )
+  }
+
+  if (!generatorConfigured && generatorNone) {
+    return (
+      <Tile title="Generator">
+        <p className="mt-2 text-sm text-muted-foreground">This boat has no generator.</p>
       </Tile>
     )
   }

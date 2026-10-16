@@ -34,6 +34,8 @@ import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
 import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
+import { SetupLine } from '@/components/setup-line'
+import { requestSetupFocus } from '@/lib/setup-status'
 import { AlarmBanner } from '@/components/alarm-banner'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
@@ -807,6 +809,13 @@ function AppShell() {
     navigate({ panel: 'settings', route: { view: 'section', section } })
   }, [navigate])
 
+  // Opens Settings at a section and asks it to focus one control, so a tile or
+  // the setup line lands on the exact dropdown rather than the section's top.
+  const openSetupStep = useCallback((section: SettingsSectionId, control: string) => {
+    requestSetupFocus(control)
+    openSettingsSection(section)
+  }, [openSettingsSection])
+
   // Mounted unconditionally (rules of hooks) but a no-op on the wall route
   // (`enabled: !isDisplay`) - see the hook's own doc comment. Never on the
   // wall path: no Mate UI is reachable there at all (isDisplay's early
@@ -1058,6 +1067,7 @@ function AppShell() {
     voltageReadoutLabel,
     generatorRealPowerW,
     generatorConfigured,
+    generatorNone,
     houseBankConfigured,
     alternator0,
     alternator1,
@@ -1848,7 +1858,7 @@ function AppShell() {
             overnight={overnight}
             houseBankConfigured={houseBankConfigured}
             // The wall display shares this render; a kiosk has no Settings to go to.
-            onOpenRoles={isDisplay ? undefined : () => openSettingsSection('signalk')}
+            onOpenRoles={isDisplay ? undefined : () => openSetupStep('signalk', 'role-house_bank')}
           />
         )
       case 'solar':
@@ -1874,7 +1884,8 @@ function AppShell() {
             generatorRuntime={generatorRuntime}
             generatorRealPowerW={generatorRealPowerW}
             generatorConfigured={generatorConfigured}
-            onOpenRoles={isDisplay ? undefined : () => openSettingsSection('signalk')}
+            generatorNone={generatorNone}
+            onOpenRoles={isDisplay ? undefined : () => openSetupStep('signalk', 'role-generator')}
             batterySocPercent={batterySocPercent}
             batteryRatePercentPerHour={batteryRatePercentPerHour}
             readOnly={!canWrite}
@@ -2982,6 +2993,15 @@ function AppShell() {
               display:none) whenever nothing is dirty. */}
           <SaveBarSlot />
         </header>
+        )}
+        {/* First-run setup: one quiet line under the header on the dashboard
+            while a step is undone. Never on a wall display (which returns
+            before this shell) and never for a read-only session. */}
+        {!isFullscreenDashboard && (
+          <SetupLine
+            enabled={!isDisplay && canWrite && activePanel === null}
+            onOpen={(step) => openSetupStep(step.target.section as SettingsSectionId, step.target.control)}
+          />
         )}
         {/* Full screen, touch-first exit affordance: the header (and its
             "Exit full screen" counterpart) is gone in this state, so a

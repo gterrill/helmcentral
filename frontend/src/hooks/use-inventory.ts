@@ -270,6 +270,7 @@ const DECKS = '/api/inventory/decks'
 // (profile, stored/deployed), so it invalidates the same prefix.
 const MAINTENANCE_RULES = '/api/inventory/maintenance/rules'
 const DISCOVERY = '/api/vessel/discovery'
+const SETUP_STATUS = '/api/setup/status'
 
 const NO_ITEMS: EquipmentItem[] = []
 const NO_DOCUMENTS: EquipmentDocument[] = []
@@ -298,6 +299,8 @@ function equipmentChanged() {
   // An item owns a SignalK source, so Discovery's "assigned to" column and the
   // roles' vessel checks read from it.
   invalidateQueries([DISCOVERY])
+  // Engines and the house bank are items, so the setup steps follow them.
+  invalidateQueries([SETUP_STATUS])
 }
 
 // An item is gone. The equipment lists re-read (the promise settles when they
@@ -306,6 +309,7 @@ function equipmentChanged() {
 // rules are left alone: a read of them would only answer 404.
 function equipmentDeleted(id: string): Promise<void> {
   void invalidateQueries([DISCOVERY])
+  void invalidateQueries([SETUP_STATUS])
   // Deleting an item clears the roles that named it in settings.
   void invalidateQueries(['/api/settings'])
   void invalidateQueries([MAINTENANCE_RULES], (key) => {

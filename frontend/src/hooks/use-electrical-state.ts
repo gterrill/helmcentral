@@ -29,6 +29,7 @@ interface ElectricalState {
   generator_real_power_w: number
   /** A generator instance is chosen in the roles. */
   generator_configured: boolean | null
+  generator_none?: boolean
   /** A house bank is chosen in the roles; null when the backend cannot read them. */
   house_bank_configured: boolean | null
   alternator_0_current_a: number
@@ -69,6 +70,7 @@ export function useElectricalState() {
   const [voltageReadoutV, setVoltageReadoutV] = useState<number | null>(null)
   const [voltageReadoutLabel, setVoltageReadoutLabel] = useState<string | null>(null)
   const [generatorConfigured, setGeneratorConfigured] = useState<boolean | null>(null)
+  const [generatorNone, setGeneratorNone] = useState(false)
   const [houseBankConfigured, setHouseBankConfigured] = useState<boolean | null>(null)
   const [acLoadsW, setAcLoadsW] = useState<number | null>(null)
   const [generatorRealPowerW, setGeneratorRealPowerW] = useState<number | null>(null)
@@ -104,6 +106,7 @@ export function useElectricalState() {
         setVoltageReadoutV(readoutV !== null && readoutLabel !== null ? readoutV : null)
         setVoltageReadoutLabel(readoutV !== null && readoutLabel !== null ? readoutLabel : null)
         setGeneratorConfigured(typeof data.generator_configured === 'boolean' ? data.generator_configured : null)
+        setGeneratorNone(data.generator_none === true)
         setHouseBankConfigured(typeof data.house_bank_configured === 'boolean' ? data.house_bank_configured : null)
         setAcLoadsW(typeof data.ac_loads_w === 'number' && data.ac_loads_w >= 0 ? data.ac_loads_w : null)
         setGeneratorRealPowerW(typeof data.generator_real_power_w === 'number' && data.generator_real_power_w >= 0 ? data.generator_real_power_w : null)
@@ -167,6 +170,7 @@ export function useElectricalState() {
     acLoadsW,
     generatorRealPowerW,
     generatorConfigured,
+    generatorNone,
     houseBankConfigured,
     alternator0,
     alternator1,

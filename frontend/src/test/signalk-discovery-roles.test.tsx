@@ -27,6 +27,7 @@ let equipmentItems: ReturnType<typeof item>[]
 let discoveryBody: Record<string, unknown>
 let settingsBody: Record<string, unknown>
 let putFailsWith: string | null
+let postFailsWith: string | null
 const fetchMock = vi.fn()
 
 const row = (source: string, instance: string, metrics: { label: string; text: string }[], extra: Record<string, unknown> = {}) => ({
@@ -52,8 +53,9 @@ function stubFetch() {
       return Promise.resolve({ ok: true, json: async () => ({ item: equipmentItems[index] }) })
     }
     if (u.endsWith('/api/inventory/equipment') && method === 'POST') {
+      if (postFailsWith) return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: postFailsWith }) })
       const body = JSON.parse(String(init?.body))
-      const created = item({ id: 'eq-new', ...body })
+      const created = item({ id: 'eq-new', ...body, source_kind: String(body.signalk_source).startsWith('electrical.batteries') ? 'battery' : '' })
       equipmentItems.push(created)
       return Promise.resolve({ ok: true, status: 201, json: async () => ({ item: created }) })
     }
@@ -66,6 +68,7 @@ function stubFetch() {
 
 beforeEach(() => {
   putFailsWith = null
+  postFailsWith = null
   equipmentItems = [
     item({ id: 'eng-1', name: 'Port engine', system: 'propulsion', signalk_source: 'propulsion.port', source_kind: 'engine' }),
     item({ id: 'bank-1', name: 'Lithium bank', system: 'electrical', signalk_source: 'electrical.batteries.512', source_kind: 'battery' }),
@@ -301,6 +304,129 @@ describe('Settings -> SignalK: Roles', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Roles could not be read: roles settings: parsing roles block: bad')
     expect(buildRegularSettingsPatch(latestDraft)).not.toHaveProperty('roles')
+  })
+})
+
+describe('Settings -> SignalK -> Roles: choosing from what the boat reports', () => {
+  it('lists unassigned reporting sources under "From the boat" with a short live reading', async () => {
+    renderRoles()
+
+    const bank = await screen.findByLabelText('House bank')
+    const group = await waitFor(() => {
+      const found = bank.querySelector('optgroup[label="From the boat"]')
+      expect(found).not.toBeNull()
+      return found as HTMLElement
+    })
+    // The charger input is not a battery; only the one battery nobody owns is offered.
+    expect(within(group).getAllByRole('option').map((o) => o.textContent)).toEqual(['Batrium-BMS · electrical.batteries.0 · 27.20 V · 79%'])
+    // Items already assigned to the kind come first, before the group.
+    const labels = Array.from(bank.querySelectorAll('option')).map((o) => o.textContent)
+    expect(labels.indexOf('Lithium bank · electrical.batteries.512')).toBeLessThan(labels.indexOf('Batrium-BMS · electrical.batteries.0 · 27.20 V · 79%'))
+  })
+
+  it('creates an item named after the role, then sets the role to it', async () => {
+    renderRoles()
+
+    const bank = await screen.findByLabelText('House bank')
+    await waitFor(() => expect(bank.querySelector('optgroup[label="From the boat"]')).not.toBeNull())
+    fireEvent.change(bank, { target: { value: 'source:electrical.batteries.0' } })
+
+    await waitFor(() => expect(pendingRoles()).toEqual({ ...emptyVesselRoles, house_bank: 'eq-new' }))
+    const post = fetchMock.mock.calls.find(([url, init]) => String(url).endsWith('/api/inventory/equipment') && (init as RequestInit | undefined)?.method === 'POST')
+    expect(JSON.parse(String((post![1] as RequestInit).body))).toMatchObject({ name: 'House bank', system: 'electrical', signalk_source: 'electrical.batteries.0' })
+  })
+
+  it('never flashes "Item no longer assigned" while the new item is still being read back', async () => {
+    renderRoles()
+    const bank = await screen.findByLabelText('House bank')
+    await waitFor(() => expect(bank.querySelector('optgroup[label="From the boat"]')).not.toBeNull())
+    fireEvent.change(bank, { target: { value: 'source:electrical.batteries.0' } })
+
+    await waitFor(() => expect((bank as HTMLSelectElement).value).toBe('eq-new'))
+    expect(within(bank).queryByRole('option', { name: 'Item no longer assigned' })).toBeNull()
+    expect(within(bank).getByRole('option', { name: 'House bank · electrical.batteries.0' })).toBeInTheDocument()
+  })
+
+  it('says in the help text that the item is made at once and the role waits for Save', async () => {
+    renderRoles()
+    expect(await screen.findByText(/creates its item straight away; the role itself is saved with Save/)).toBeInTheDocument()
+  })
+
+  it('shows the error and leaves the role unchanged when the item cannot be created', async () => {
+    postFailsWith = 'electrical.batteries.0 is already assigned to "Old bank"'
+    renderRoles()
+
+    const bank = await screen.findByLabelText('House bank')
+    await waitFor(() => expect(bank.querySelector('optgroup[label="From the boat"]')).not.toBeNull())
+    fireEvent.change(bank, { target: { value: 'source:electrical.batteries.0' } })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('already assigned to "Old bank"')
+    expect(pendingRoles()).toEqual(emptyVesselRoles)
+    expect((bank as HTMLSelectElement).value).toBe('')
+  })
+
+  it('leaves the boat\'s own name out when it gives none', async () => {
+    renderRoles()
+    const generator = await screen.findByLabelText('Generator AC input')
+    expect(within(generator).getByRole('option', { name: '5 · 1250 W' })).toBeInTheDocument()
+    const alt = await screen.findByLabelText('Port alternator')
+    expect(alt.querySelector('optgroup')).toBeNull()
+  })
+
+  it('disables the generator AC input, with a hint, when the boat has no generator', async () => {
+    renderRoles({ ...emptyVesselRoles, generator: 'none' })
+    const ac = await screen.findByLabelText('Generator AC input')
+    expect(ac).toBeDisabled()
+    expect(screen.getByText(/no generator/i)).toBeInTheDocument()
+  })
+
+  it('says the boat is not reporting any of a kind when there is nothing to choose', async () => {
+    renderRoles()
+
+    expect(await screen.findByText("The boat isn't reporting any chargers.")).toBeInTheDocument()
+    expect(screen.getByText("The boat isn't reporting any inverters.")).toBeInTheDocument()
+    // A kind with items to choose from needs no such line.
+    expect(screen.queryByText("The boat isn't reporting any batteries.")).toBeNull()
+  })
+
+  it('says SignalK is not connected instead, when it is not', async () => {
+    discoveryBody = { connected: false, groups: [], detectors: {} }
+    equipmentItems = []
+    renderRoles()
+
+    expect(await screen.findAllByText("SignalK isn't connected.")).not.toHaveLength(0)
+    expect(screen.queryByText(/isn't reporting any/)).toBeNull()
+  })
+})
+
+describe('Settings -> SignalK -> Roles: This boat has none', () => {
+  it('offers it for the parts a boat can lack, and not for the house bank or the voltage readout battery', async () => {
+    renderRoles()
+
+    await screen.findByLabelText('House bank')
+    for (const label of ['Port alternator', 'Starboard alternator', 'Shore charger', 'Inverter', 'Generator', 'Generator AC input']) {
+      expect(within(screen.getByLabelText(label)).getByRole('option', { name: 'This boat has none' })).toBeInTheDocument()
+    }
+    expect(within(screen.getByLabelText('House bank')).queryByRole('option', { name: 'This boat has none' })).toBeNull()
+    expect(within(screen.getByLabelText('Voltage readout battery')).queryByRole('option', { name: 'This boat has none' })).toBeNull()
+  })
+
+  it('stores it as "none", distinct from Not set, and shows it as chosen', async () => {
+    renderRoles()
+
+    const inverter = await screen.findByLabelText('Inverter')
+    fireEvent.change(inverter, { target: { value: 'none' } })
+
+    await waitFor(() => expect(pendingRoles()).toEqual({ ...emptyVesselRoles, inverter: 'none' }))
+    expect((inverter as HTMLSelectElement).value).toBe('none')
+    expect(within(inverter).getByRole('option', { name: 'Not set' })).toBeInTheDocument()
+  })
+
+  it('does not treat "none" on both alternators as a clash', async () => {
+    renderRoles({ ...emptyVesselRoles, port_alternator: 'none' })
+
+    const starboard = await screen.findByLabelText('Starboard alternator')
+    expect(within(starboard).getByRole('option', { name: 'This boat has none' })).not.toBeDisabled()
   })
 })
 

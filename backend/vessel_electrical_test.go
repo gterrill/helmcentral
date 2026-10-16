@@ -496,6 +496,20 @@ func TestElectricalPayloadSaysWhetherAGeneratorIsSetUp(t *testing.T) {
 	}
 }
 
+func TestElectricalPayloadSaysWhenTheBoatHasNoGenerator(t *testing.T) {
+	seedSelfTree(t, electricalInstancesTree)
+
+	saveElectricalVessel(t, vesselView{})
+	if got := buildElectricalStatePayload()["generator_none"]; got != false {
+		t.Fatalf("unset is not none: got %v", got)
+	}
+	saveElectricalVessel(t, vesselView{RolesNone: map[string]bool{"generator": true}})
+	p := buildElectricalStatePayload()
+	if p["generator_none"] != true || p["generator_configured"] != false {
+		t.Fatalf("none: configured=%v none=%v", p["generator_configured"], p["generator_none"])
+	}
+}
+
 func TestElectricalPayloadGeneratorConfiguredDoesNotDependOnTheFeed(t *testing.T) {
 	saveElectricalVessel(t, vesselView{Electrical: vesselElectricalSettings{GeneratorInstance: "3"}})
 	withGlobalSnapshot(t, newSignalKSnapshot()) // SignalK has dropped: no self data
@@ -601,5 +615,16 @@ func TestElectricalPayloadHouseBankConfiguredIsUnknownWhenSettingsAreUnreadable(
 	}
 	if body, _ := json.Marshal(payload); !strings.Contains(string(body), `"house_bank_configured":null`) {
 		t.Fatalf("got %s", body)
+	}
+}
+
+func TestElectricalUnsetLineLeavesOutRolesAnsweredNone(t *testing.T) {
+	v := vesselView{RolesNone: map[string]bool{"generator": true, "generator_ac_instance": true, "inverter": true}}
+	got := electricalUnsetLine(v)
+	if strings.Contains(got, "generator") || strings.Contains(got, "inverter") {
+		t.Fatalf("none is an answer, not a gap: %q", got)
+	}
+	if !strings.Contains(got, "shore charger") || !strings.Contains(got, "voltage readout battery") {
+		t.Fatalf("unanswered roles are listed: %q", got)
 	}
 }

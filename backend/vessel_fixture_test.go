@@ -173,6 +173,14 @@ func saveVesselFixture(t *testing.T, settingsPath string, v vesselView) error {
 		return err
 	}
 	roles.GeneratorACInstance = v.Electrical.GeneratorACInstance
+	for _, spec := range roleSpecs {
+		if v.RolesNone[spec.field] {
+			*spec.get(&roles) = roleNone
+		}
+	}
+	if v.RolesNone["generator_ac_instance"] {
+		roles.GeneratorACInstance = roleNone
+	}
 
 	invalidateSourceItems()
 	settings, err := readSettings(settingsPath)

@@ -319,11 +319,13 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 }
 
 // vesselDetectorStatuses names, per detector, whether vessel has completed
-// its setup and, when not, the single next thing missing.
+// its setup and, when not, the single next thing missing. The engine and house
+// bank questions are answered by enginesAssigned and houseBankChosen, the same
+// helpers the setup status (setup_status.go) uses, so the two cannot disagree.
 func vesselDetectorStatuses(vessel vesselView) map[string]vesselDetectorStatus {
 	statuses := map[string]vesselDetectorStatus{}
 
-	if len(vessel.Engines) >= 1 {
+	if enginesAssigned(vessel) {
 		statuses["frozen"] = vesselDetectorStatus{Ready: true}
 	} else {
 		statuses["frozen"] = vesselDetectorStatus{Missing: "Assign an engine to a propulsion source"}
@@ -331,7 +333,7 @@ func vesselDetectorStatuses(vessel vesselView) map[string]vesselDetectorStatus {
 
 	if vesselHouseBankReady(vessel.HouseBank) {
 		statuses["battery"] = vesselDetectorStatus{Ready: true}
-	} else if vessel.HouseBank == nil || vessel.HouseBank.Path == "" {
+	} else if !houseBankChosen(vessel) {
 		statuses["battery"] = vesselDetectorStatus{Missing: "Choose your house bank under Roles"}
 	} else if vessel.HouseBank.CapacityAh <= 0 || vessel.HouseBank.Cells <= 0 {
 		statuses["battery"] = vesselDetectorStatus{Missing: "Enter the house bank item's capacity and cell count"}
