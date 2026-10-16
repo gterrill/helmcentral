@@ -78,10 +78,10 @@ func buildElectricalStatePayload() map[string]any {
 	// A vessel block that cannot be read is logged, and the alternators and
 	// the house bank figures then read as not set. Every other electrical
 	// figure is unaffected.
-	vessel, vesselErr := loadVesselSettings(settingsPath)
-	noteVesselRead("electrical state", vesselErr, "electrical state: vessel settings unreadable, alternator, electrical instances and house bank show no data: %v")
+	vessel, vesselErr := loadVesselView(settingsPath)
+	noteVesselRead("electrical state", vesselErr, "electrical state: vessel unreadable, alternator, electrical instances and house bank show no data: %v")
 	if vesselErr != nil {
-		vessel = vesselSettings{}
+		vessel = vesselView{}
 	} else {
 		noteHouseBank(vessel.HouseBank)
 		noteElectricalInstances(vessel.Electrical)
@@ -156,7 +156,7 @@ func noteHouseBank(bank *vesselHouseBankSetting) {
 		return
 	}
 	if houseBankUnsetLogged.CompareAndSwap(false, true) {
-		log.Printf("electrical state: no house bank is set in Vessel settings, so the Battery & Power bank figures show no data")
+		log.Printf("electrical state: no house bank is chosen under Settings > SignalK > Roles, so the Battery & Power bank figures show no data")
 	}
 }
 
@@ -199,7 +199,7 @@ func noteElectricalInstances(e vesselElectricalSettings) {
 	}
 	electricalUnsetLogged.last = line
 	if line != "" {
-		log.Printf("electrical state: not set in Vessel settings, so these show no data: %s", line)
+		log.Printf("electrical state: not chosen under Settings > SignalK > Roles, so these show no data: %s", line)
 	}
 }
 

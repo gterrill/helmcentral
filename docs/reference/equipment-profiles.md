@@ -2,8 +2,9 @@
 
 An equipment profile describes one piece of machinery: the
 gauges it needs, their display scales, its normal operating ranges, and its
-service intervals. Applying one builds a configured tile in two clicks instead
-of typing a dozen paths and scales by hand.
+service intervals. An equipment item follows a profile, and every tile that
+shows the item reads the profile's gauges and bands live, so you set a limit
+once and the tile and its alarm both follow it.
 
 Three kinds of equipment are covered, set by the profile's `kind` field:
 
@@ -61,17 +62,19 @@ Check any shipped threshold against your own installation before relying on it.
 A specification describes the machine, not the way yours is mounted, loaded or
 cooled.
 
-Applying a profile to a tile that already exists configures the gauges it finds
-and appends the ones it does not, which completes a partly built tile. The
-instance prefix comes from the tile's existing gauges, so applying a profile to
-a port tile cannot append starboard gauges. Gauges the profile does not mention
-are left alone.
+A tile never holds a copy of a profile's bands. It reads them from the profile of
+the equipment it shows, so changing a band changes every tile and every alarm
+that uses the profile at once. The tile's own slots only choose which of the
+profile's gauges to show, and how.
 
 ## Filling in your thresholds
 
-Two ways, same result. Edit the profile in **Inventory → Profiles**, or apply the profile to a
-tile and edit the zones on each gauge in the ordinary gauge configuration
-dialog. The dialog is easier to check against the gauge layout as you go.
+Two ways, same result. Edit the profile in **Inventory → Profiles**, or edit the
+zones on a gauge in the settings of a tile that shows the equipment. The tile's
+form is easier to check against the gauge layout as you go. Either way the
+zones are saved to the profile, and the form says which equipment and tiles the
+change applies to, for example "Applies to every tile and alarm using Yanmar 4JH
+(Port engine, Starboard engine)". There is no zone setting on a tile alone.
 
 A zone at any severity other than **Healthy** raises an alarm at its threshold
 through the whole pipeline: the banner, the CHK lamp, acknowledgement, and
@@ -127,17 +130,15 @@ From an alternator manual, the temperature limit and the output voltage window.
 
 **`schema_version` and `kind`.** Both are required. `schema_version` is `1`;
 anything else is refused rather than guessed at. `kind` is `engine`,
-`alternator` or `generator`, and it decides which path suffixes are legal. The
-apply dialog lists every kind together and shows each profile's kind beside its
-name. A profile written before these fields existed still loads: it is read as a
+`alternator` or `generator`, and it decides which path suffixes are legal. A
+profile's kind has to suit the equipment that follows it. A profile written before these fields existed still loads: it is read as a
 version 1 engine profile.
 
-**`path_suffix`, not a full path.** You pick the instance prefix, such as
-`propulsion.port` or `electrical.alternator.1`, when you apply the profile, so
-one file serves both engines. The dialog suggests prefixes the server is
-currently publishing and lets you type your own. With the engines shut down
-nothing under `propulsion.*` is published, which is usually exactly when you
-are sitting at the nav station configuring gauges.
+**`path_suffix`, not a full path.** The instance, such as `propulsion.port` or
+`electrical.alternator.1`, is the SignalK source of the equipment item that
+follows the profile, so one file serves both engines. Map each item to its
+source under **Settings → SignalK → Discovery** or on the item's page; the tile
+joins the two.
 
 **`hero` marks one gauge as the headline.** At most one per profile. That
 member renders larger and spans the tile's full width. Leave it out and every
@@ -161,8 +162,8 @@ as a raw number will compare a Celsius threshold against a Kelvin reading and
 raise an alarm that can never clear.
 
 **`"threshold": null` is a slot.** The manufacturer has a number here and the
-profile does not. It shows in the apply preview as "not set" so you know to
-look it up, and it is left out of the saved configuration rather than being
+profile does not. It shows as "not set" in the profile so you know to
+look it up, and it draws no band and raises no alarm rather than being
 filled with a default nobody chose.
 
 **A threshold that is set must cite its `source`.** This is enforced for the
@@ -175,8 +176,8 @@ needs without inventing an interval for it.
 
 ## When a profile does not load
 
-A bad profile is skipped, logged, and reported. The others still load, and the
-apply dialog names the profile that failed and why. Common causes: an unknown
+A bad profile is skipped, logged, and reported. The others still load, and
+Inventory names the profile that failed and why. Common causes: an unknown
 `unit`, `quantity` or `display`; a zone whose `direction` is neither `below`
 nor `above`; `min` not below `max`; a zone with a threshold on a gauge that has
 no scale; a service item whose `id` is not lowercase letters, numbers, dots, underscores and hyphens; a generator gauge whose suffix does not

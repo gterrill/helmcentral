@@ -201,7 +201,10 @@ separate screen or convert it to different units.
 
 Rules derived this way appear in the alarms list alongside hand-written ones,
 marked as coming from a gauge, and are edited on the gauge rather than in the
-list. See [Set an alarm threshold](../how-to/set-an-alarm-threshold.md) for
+list. For a tile that shows a piece of equipment the bands are the equipment
+profile's, so there is one alarm per engine and reading however many tiles show
+it, and changing the profile's limit changes the alarm. The alarm is named for
+the equipment, such as "Port engine Oil Press". See [Set an alarm threshold](../how-to/set-an-alarm-threshold.md) for
 the steps either way.
 
 ## Values Helmcentral works out for itself

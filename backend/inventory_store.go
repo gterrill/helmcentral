@@ -86,7 +86,7 @@ var (
 
 	// errEquipmentInvalidSystem/Status are returned when a caller supplies a
 	// value outside the schema's own CHECK-constrained enum. (category is not
-	// validated: it is derived from hour_meter_path, see
+	// validated: it is derived from the SignalK source, see
 	// deriveEquipmentCategory.) system and status have a default (applied by
 	// CreateEquipment/UpdateEquipment before this check ever runs), so only a
 	// genuinely bogus non-blank value reaches these sentinels. The schema's own CHECK constraints are the
@@ -212,13 +212,31 @@ type equipmentItem struct {
 	BinID            *string   `json:"bin_id"`
 	LocationDetail   string    `json:"location_detail"`
 	InstallDate      string    `json:"install_date"`
-	HourMeterPath    string    `json:"hour_meter_path"`
 	ProfileID        string    `json:"profile_id"`
 	Aliases          []string  `json:"aliases"`
 	VerifiedAboard   bool      `json:"verified_aboard"`
 	Notes            string    `json:"notes"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
+
+	// SignalKSource is the one SignalK node this item owns (ADR 0185), for
+	// example propulsion.port or electrical.batteries.1; "" when it owns none.
+	// At most one item owns a given source. CapacityAh, Cells, WarnVoltage and
+	// HighVoltage describe a battery bank and are meaningful only on an item
+	// whose source is a battery: capacity and cell count are not something
+	// SignalK reliably publishes, and the two voltages override the linked
+	// profile's per-cell thresholds (zero means "use the profile's numbers").
+	SignalKSource string  `json:"signalk_source"`
+	CapacityAh    float64 `json:"capacity_ah"`
+	Cells         int     `json:"cells"`
+	WarnVoltage   float64 `json:"warn_voltage"`
+	HighVoltage   float64 `json:"high_voltage"`
+
+	// SourceKind and HourMeterSource are derived from SignalKSource on every
+	// read and ignored on a write: the kind is the source's group (engine,
+	// battery, ...), and the hour meter is the source's own runtime counter.
+	SourceKind      string `json:"source_kind"`
+	HourMeterSource string `json:"hour_meter_source"`
 
 	// Joined, read-only. Always the zero value on a value CreateEquipment/
 	// UpdateEquipment haven't yet re-read after their own write.
@@ -781,8 +799,9 @@ func normalizeAliases(in []string) []string {
 // uses, so a query built with this constant and scanEquipmentRow can never
 // drift apart from each other.
 const equipmentColumns = `e.id, e.name, e.category, e.system, e.manufacturer, e.model, e.serial, e.part_number, e.quantity, e.required_quantity, e.status,
-	e.zone_id, e.bin_id, e.location_detail, e.install_date, e.hour_meter_path, e.profile_id, e.aliases_json,
+	e.zone_id, e.bin_id, e.location_detail, e.install_date, e.profile_id, e.aliases_json,
 	e.verified_aboard, e.notes, e.created_at, e.updated_at,
+	e.signalk_source, e.capacity_ah, e.cells, e.warn_voltage, e.high_voltage,
 	z.name, b.code,
 	(SELECT COUNT(*) FROM equipment_documents ed WHERE ed.equipment_id = e.id)`
 
@@ -804,8 +823,9 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 
 	if err := row.Scan(
 		&it.ID, &it.Name, &it.Category, &it.System, &it.Manufacturer, &it.Model, &it.Serial, &it.PartNumber, &it.Quantity, &required, &it.Status,
-		&zoneID, &binID, &it.LocationDetail, &it.InstallDate, &it.HourMeterPath, &it.ProfileID, &aliasesJSON,
+		&zoneID, &binID, &it.LocationDetail, &it.InstallDate, &it.ProfileID, &aliasesJSON,
 		&verified, &it.Notes, &createdAt, &updatedAt,
+		&it.SignalKSource, &it.CapacityAh, &it.Cells, &it.WarnVoltage, &it.HighVoltage,
 		&zoneName, &binCode, &it.LinkCount,
 	); err != nil {
 		return equipmentItem{}, err
@@ -837,6 +857,10 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 		aliases = []string{}
 	}
 	it.Aliases = aliases
+	if group, _, ok := parseSource(it.SignalKSource); ok {
+		it.SourceKind = string(group)
+		it.HourMeterSource = sourceHourMeterPath(it.SignalKSource)
+	}
 
 	return it, nil
 }
@@ -1012,8 +1036,8 @@ func equipmentByID(q sqlQueryer, id string) (equipmentItem, error) {
 // with an hour meter is 'mechanical', one without is 'general'. Whatever a
 // client sends is ignored (old clients and bin quick-add still send one), so
 // the stored value can never disagree with the meter.
-func deriveEquipmentCategory(hourMeterPath string) string {
-	if strings.TrimSpace(hourMeterPath) != "" {
+func deriveEquipmentCategory(signalkSource string) string {
+	if sourceHourMeterPath(strings.TrimSpace(signalkSource)) != "" {
 		return "mechanical"
 	}
 	return "general"
@@ -1038,7 +1062,7 @@ func validateEquipmentQuantities(item equipmentItem) (quantity int, required any
 }
 
 // CreateEquipment inserts a new equipment record. category is derived from
-// hour_meter_path (deriveEquipmentCategory); system and status
+// the SignalK source (deriveEquipmentCategory); system and status
 // default to 'other'/'deployed' when left blank, then both are checked
 // against their own valid* set the same as a non-blank value would be -
 // same treatment, just with a default value substituted first. zone_id/
@@ -1059,7 +1083,6 @@ func createEquipmentTx(tx *sql.Tx, now time.Time, item equipmentItem) (equipment
 	if name == "" {
 		return equipmentItem{}, errEquipmentNameRequired
 	}
-	item.Category = deriveEquipmentCategory(item.HourMeterPath)
 	system := item.System
 	if system == "" {
 		system = "other"
@@ -1078,6 +1101,10 @@ func createEquipmentTx(tx *sql.Tx, now time.Time, item equipmentItem) (equipment
 	if err != nil {
 		return equipmentItem{}, err
 	}
+	if err := validateEquipmentSource(tx, "", &item); err != nil {
+		return equipmentItem{}, err
+	}
+	item.Category = deriveEquipmentCategory(item.SignalKSource)
 
 	resolvedZoneID, err := validateEquipmentLocation(tx, item.ZoneID, item.BinID)
 	if err != nil {
@@ -1093,12 +1120,14 @@ func createEquipmentTx(tx *sql.Tx, now time.Time, item equipmentItem) (equipment
 	if _, err := tx.Exec(`
 		INSERT INTO equipment (
 			id, name, category, system, manufacturer, model, serial, part_number, quantity, required_quantity, status,
-			zone_id, bin_id, location_detail, install_date, hour_meter_path, profile_id,
-			aliases_json, verified_aboard, notes, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			zone_id, bin_id, location_detail, install_date, profile_id,
+			aliases_json, verified_aboard, notes, created_at, updated_at,
+			signalk_source, capacity_ah, cells, warn_voltage, high_voltage
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, name, item.Category, system, strings.TrimSpace(item.Manufacturer), strings.TrimSpace(item.Model), strings.TrimSpace(item.Serial), strings.TrimSpace(item.PartNumber), quantity, required, status,
-		nullableString(resolvedZoneID), nullableString(item.BinID), item.LocationDetail, item.InstallDate, item.HourMeterPath, item.ProfileID,
+		nullableString(resolvedZoneID), nullableString(item.BinID), item.LocationDetail, item.InstallDate, item.ProfileID,
 		string(aliasesJSON), boolToInt(item.VerifiedAboard), item.Notes, now.Unix(), now.Unix(),
+		item.SignalKSource, item.CapacityAh, item.Cells, item.WarnVoltage, item.HighVoltage,
 	); err != nil {
 		return equipmentItem{}, fmt.Errorf("create equipment: %w", err)
 	}
@@ -1128,7 +1157,6 @@ func updateEquipmentTx(tx *sql.Tx, now time.Time, id string, item equipmentItem)
 	if name == "" {
 		return equipmentItem{}, errEquipmentNameRequired
 	}
-	item.Category = deriveEquipmentCategory(item.HourMeterPath)
 	system := item.System
 	if system == "" {
 		system = "other"
@@ -1155,6 +1183,10 @@ func updateEquipmentTx(tx *sql.Tx, now time.Time, id string, item equipmentItem)
 	if !ok {
 		return equipmentItem{}, errEquipmentNotFound
 	}
+	if err := validateEquipmentSource(tx, id, &item); err != nil {
+		return equipmentItem{}, err
+	}
+	item.Category = deriveEquipmentCategory(item.SignalKSource)
 
 	resolvedZoneID, err := validateEquipmentLocation(tx, item.ZoneID, item.BinID)
 	if err != nil {
@@ -1169,12 +1201,14 @@ func updateEquipmentTx(tx *sql.Tx, now time.Time, id string, item equipmentItem)
 	if _, err := tx.Exec(`
 		UPDATE equipment SET
 			name = ?, category = ?, system = ?, manufacturer = ?, model = ?, serial = ?, part_number = ?, quantity = ?, required_quantity = ?, status = ?,
-			zone_id = ?, bin_id = ?, location_detail = ?, install_date = ?, hour_meter_path = ?, profile_id = ?,
-			aliases_json = ?, verified_aboard = ?, notes = ?, updated_at = ?
+			zone_id = ?, bin_id = ?, location_detail = ?, install_date = ?, profile_id = ?,
+			aliases_json = ?, verified_aboard = ?, notes = ?, updated_at = ?,
+			signalk_source = ?, capacity_ah = ?, cells = ?, warn_voltage = ?, high_voltage = ?
 		WHERE id = ?`,
 		name, item.Category, system, strings.TrimSpace(item.Manufacturer), strings.TrimSpace(item.Model), strings.TrimSpace(item.Serial), strings.TrimSpace(item.PartNumber), quantity, required, status,
-		nullableString(resolvedZoneID), nullableString(item.BinID), item.LocationDetail, item.InstallDate, item.HourMeterPath, item.ProfileID,
+		nullableString(resolvedZoneID), nullableString(item.BinID), item.LocationDetail, item.InstallDate, item.ProfileID,
 		string(aliasesJSON), boolToInt(item.VerifiedAboard), item.Notes, now.Unix(),
+		item.SignalKSource, item.CapacityAh, item.Cells, item.WarnVoltage, item.HighVoltage,
 		id,
 	); err != nil {
 		return equipmentItem{}, fmt.Errorf("update equipment: %w", err)

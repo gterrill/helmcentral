@@ -909,7 +909,7 @@ func TestExecuteGetTides_EmptyWindowAddsNote(t *testing.T) {
 func TestConfiguredEngineInstances_ReadsVesselSettings(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := saveVesselSettings(settingsPath, vesselSettings{Engines: []vesselEngineSetting{{Instance: "port"}, {Instance: "starboard"}}}); err != nil {
+	if err := saveVesselFixture(t, settingsPath, vesselView{Engines: []vesselEngineSetting{{Instance: "port"}, {Instance: "starboard"}}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -924,7 +924,7 @@ func TestConfiguredEngineInstances_ReadsVesselSettings(t *testing.T) {
 
 func TestConfiguredEngineInstances_UnreadableSettingsIsAnError(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
-	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles: [not, a, block]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := configuredEngineInstances(settingsPath)(); err == nil {

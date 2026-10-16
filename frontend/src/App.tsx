@@ -176,12 +176,10 @@ import { PoiMapConfigDialog } from '@/components/poi-map-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
 import { GaugeTile } from '@/components/gauge-tile'
 import { GaugeGroupConfigDialog } from '@/components/gauge-group-config-dialog'
-import { GaugeGroupTile } from '@/components/gauge-group-tile'
 import { EngineClusterConfigDialog } from '@/components/engine-cluster-config-dialog'
-import { EngineClusterTile } from '@/components/engine-cluster-tile'
-import { EngineProfileDialog } from '@/components/engine-profile-dialog'
+import { EngineClusterHost, GaugeGroupHost, LampStripHost } from '@/components/equipment-tile-hosts'
+import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
-import { LampStripTile } from '@/components/lamp-strip-tile'
 import { useEngineStates, useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
 import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
@@ -430,7 +428,6 @@ function AppShell() {
   // so a new group has no business reaching it until it holds a bound gauge.
   const [gaugeGroupDraft, setGaugeGroupDraft] = useState<DashboardLayoutItem | null>(null)
   const [lampStripDraft, setLampStripDraft] = useState<DashboardLayoutItem | null>(null)
-  const [engineProfileOpen, setEngineProfileOpen] = useState(false)
   const [clusterDraft, setClusterDraft] = useState<DashboardLayoutItem | null>(null)
   // Same pattern as embedDraft: a freshly added Nearby map (ADR 0091 phase
   // 3b) exists only here until it holds a valid config.
@@ -441,6 +438,9 @@ function AppShell() {
   const gaugeAges = useGaugeAges()
   // Which engines read as switched off, so a cluster says OFF, not stale.
   const engineStates = useEngineStates()
+  // The equipment items, profiles and reporting sources that tiles showing a
+  // piece of equipment read their paths and zones from (ADR 0185).
+  const equipmentContext = useEquipmentTileContext()
   // The Details page's document name, for the Mate sheet's screen context.
   const [documentDetailsTitle, setDocumentDetailsTitle] = useState<string | null>(null)
   // Unsent Mate composer text or staged attachments, one flag per mounted
@@ -835,7 +835,7 @@ function AppShell() {
   // is attended too (a reload would drop out of full screen), and so is a
   // Home Screen app on any panel other than the dashboard.
   const overlayOpen =
-    mateSheetOpen || helpOpen || engineProfileOpen || ribbonDialogOpen || layoutEditing || namingPageId !== null ||
+    mateSheetOpen || helpOpen || ribbonDialogOpen || layoutEditing || namingPageId !== null ||
     [embedDraft, gaugeDraft, gaugeGroupDraft, lampStripDraft, clusterDraft, poiMapDraft].some((d) => d !== null)
   const overlayOpenRef = useRef(false)
   overlayOpenRef.current = overlayOpen
@@ -1391,24 +1391,6 @@ function AppShell() {
     setGaugeGroupDraft(null)
   }, [activePage, effectiveWidgets, gaugeGroupDraft, updatePage])
 
-  /**
-   * An engine profile lands as an ordinary gauge group (ADR 0053) — already
-   * configured, and saved straight away rather than held as a draft, because
-   * unlike a blank tile it is valid the moment it is built.
-   */
-  const handleApplyEngineProfile = useCallback((title: string, gauges: GaugeWidgetConfig[], _suffixes: string[], hero?: number) => {
-    if (!activePage) return
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
-    void updatePage(activePage.id, {
-      widgets: [...effectiveWidgets, {
-        id: newGaugeGroupWidgetId(effectiveWidgets),
-        x: 0, y: maxY, w: 4, h: 7,
-        gaugeGroup: { title, gauges, ...(hero === undefined ? {} : { hero }) },
-      }],
-    })
-    setEngineProfileOpen(false)
-  }, [activePage, effectiveWidgets, updatePage])
-
   // Tall: the canvas is 460x300 plus the tile chrome.
   const handleAddCluster = useCallback(() => {
     const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
@@ -1585,8 +1567,9 @@ function AppShell() {
     if (isClusterWidgetId(id)) {
       if (!widget.cluster) return null
       return (
-        <EngineClusterTile
+        <EngineClusterHost
           config={widget.cluster}
+          ctx={equipmentContext}
           values={gaugeValues}
           ages={gaugeAges}
           engines={engineStates}
@@ -1599,8 +1582,9 @@ function AppShell() {
     if (isLampStripWidgetId(id)) {
       if (!widget.lamps) return null
       return (
-        <LampStripTile
+        <LampStripHost
           config={widget.lamps}
+          ctx={equipmentContext}
           values={gaugeValues}
           ages={gaugeAges}
           worstAlarmState={worstAlarmState}
@@ -1615,8 +1599,9 @@ function AppShell() {
     if (isGaugeGroupWidgetId(id)) {
       if (!widget.gaugeGroup) return null
       return (
-        <GaugeGroupTile
+        <GaugeGroupHost
           config={widget.gaugeGroup}
+          ctx={equipmentContext}
           values={gaugeValues}
           ages={gaugeAges}
           editing={layoutEditing}
@@ -1926,7 +1911,6 @@ function AppShell() {
   const addWidgetMultiInstanceEntries: AddTileMultiInstanceEntry[] = [
     { label: 'Gauge…', category: 'custom', onSelect: handleAddGauge },
     { label: 'Engine Cluster…', category: 'engine', onSelect: handleAddCluster },
-    { label: 'From equipment profile…', category: 'engine', onSelect: () => setEngineProfileOpen(true) },
     { label: 'Indicators…', category: 'custom', onSelect: handleAddLampStrip },
     { label: 'Gauge Group…', category: 'custom', onSelect: handleAddGaugeGroup },
     { label: 'Embed…', category: 'custom', onSelect: handleAddEmbed },
@@ -2090,8 +2074,9 @@ function AppShell() {
           it would for any other page-specific status row. */}
       {!isDisplay && ribbon && (
         <div data-testid="dashboard-ribbon" className="w-full min-w-0">
-          <LampStripTile
+          <LampStripHost
             config={ribbon}
+            ctx={equipmentContext}
             values={gaugeValues}
             ages={gaugeAges}
             worstAlarmState={worstAlarmState}
@@ -2177,12 +2162,6 @@ function AppShell() {
         widget={clusterDraft}
         onCancel={() => setClusterDraft(null)}
         onSave={handleSaveCluster}
-      />
-
-      <EngineProfileDialog
-        open={engineProfileOpen}
-        onCancel={() => setEngineProfileOpen(false)}
-        onApply={handleApplyEngineProfile}
       />
 
       <LampStripConfigDialog

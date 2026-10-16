@@ -33,7 +33,7 @@ import (
 // every recompute that lands on it.
 //
 // The history scan excludes any night shore power or the generator ran
-// (the shore charger and generator the operator picked in Vessel settings), on top of the
+// (the shore charger and generator the operator picked in the roles), on top of the
 // pre-existing gap and net-rise checks. This was added after a marina week
 // of shore-power nights passed the net-rise check outright - a charger in
 // float holds the state of charge flat, which reads as a quiet night at
@@ -190,7 +190,7 @@ type overnightResult struct {
 	NightsConsidered        int       `json:"nights_considered"`
 	NightsUsed              int       `json:"nights_used"`
 	// ShoreChecked and GeneratorChecked say whether nights were screened for
-	// shore power and generator running. They are false when Vessel settings
+	// shore power and generator running. They are false when the roles
 	// name no shore charger or generator, so a zero count beside them means
 	// "not checked", not "none found".
 	ShoreChecked            bool      `json:"shore_checked"`
@@ -414,7 +414,7 @@ func computeOvernight(
 }
 
 // overnightPaths is every series the overnight model reads, all taken from
-// Vessel settings so the history, the bands and the alarm rules agree. Shore
+// the roles so the history, the bands and the alarm rules agree. Shore
 // and Generator are the two series a night has to clear before its slope is
 // judged: the shore charger's AC input current and the generator's state.
 // Either is empty when the operator has not chosen that device, and that
@@ -445,7 +445,7 @@ func (p overnightPaths) cacheKey() string {
 // the generator runs. A misnamed path yields no points, and no points means
 // no exclusions, which is why the response carries the excluded counts.
 func overnightMeasurementPaths() (overnightPaths, error) {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
 		return overnightPaths{}, err
 	}
@@ -580,15 +580,15 @@ func electricalOvernightHandler(c echo.Context) error {
 	now := time.Now().UTC()
 
 	paths, socErr := overnightMeasurementPaths()
-	noteVesselRead("overnight", socErr, "overnight model: vessel settings unreadable, no projection: %v")
+	noteVesselRead("overnight", socErr, "overnight model: vessel unreadable, no projection: %v")
 	if socErr != nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "vessel settings unreadable; dawn projection needs the house bank",
+			"error": "vessel unreadable; dawn projection needs the house bank",
 		})
 	}
 	if paths.Soc == "" {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{
-			"error": "no house bank is set in Vessel settings; dawn projection needs one",
+			"error": "no house bank is chosen under Settings > SignalK > Roles; dawn projection needs one",
 		})
 	}
 	cacheKey := paths.cacheKey()

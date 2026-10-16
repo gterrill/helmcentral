@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { EngineClusterTile } from '@/components/engine-cluster-tile'
-import type { EngineClusterConfig } from '@/lib/dashboard-widgets'
+import type { ResolvedClusterConfig } from '@/lib/dashboard-widgets'
 import { setViewportWidth } from './viewport'
 
 /** The live idle readings from the vessel, in the SI the stream carries. */
@@ -17,7 +17,7 @@ const values = {
   // exhaust deliberately absent
 }
 
-const port: EngineClusterConfig = {
+const port: ResolvedClusterConfig = {
   title: 'Port',
   ring: { path: 'propulsion.port.revolutions', label: 'RPM', display: 'radial', quantity: 'frequency', unit: 'rpm', min: 0, max: 3000, decimals: 0, labelDivisor: 100 },
   centre: { path: 'propulsion.port.runTime', label: 'Hours', display: 'numeric', quantity: 'duration', unit: 'h', decimals: 0 },
@@ -211,11 +211,11 @@ describe('fuel rail', () => {
         quantity: 'volume', unit: 'L', decimals: 0 },
     }],
   }
-  const withRail = (side: 'left' | 'right' = 'left'): EngineClusterConfig =>
+  const withRail = (side: 'left' | 'right' = 'left'): ResolvedClusterConfig =>
     ({ ...port, fuel: { ...rail, side } })
 
   const fuelValues = { ...values, 'tanks.fuel.5.currentLevel': 0.7416, 'tanks.fuel.5.capacity': 1.2 }
-  const renderRailed = (config: EngineClusterConfig) =>
+  const renderRailed = (config: ResolvedClusterConfig) =>
     render(<EngineClusterTile config={config} values={fuelValues} editing={false} onConfigure={vi.fn()} />)
 
   test('renders nothing extra when no rail is configured', () => {
@@ -244,7 +244,7 @@ describe('fuel rail', () => {
    * box, every mask would cut in the wrong place.
    */
   test('leaves the corner geometry exactly where it was', () => {
-    const offsets = (config: EngineClusterConfig) => {
+    const offsets = (config: ResolvedClusterConfig) => {
       const { container } = renderRailed(config)
       return [0, 1, 2, 3].map((i) => {
         const el = container.querySelector(`[data-testid="cluster-corner-${i}"]`) as HTMLElement
@@ -255,7 +255,7 @@ describe('fuel rail', () => {
   })
 
   test('costs the tile no extra height, only width', () => {
-    const canvas = (config: EngineClusterConfig) =>
+    const canvas = (config: ResolvedClusterConfig) =>
       (renderRailed(config).container.querySelector('[data-cluster-canvas]') as HTMLElement).style
 
     const bare = canvas(port)
@@ -704,7 +704,7 @@ describe('engine off', () => {
 
   test('an off engine still shows STALE when a non-engine slot on the tile is genuinely stale', () => {
     const tank = 'tanks.fuel.0.currentLevel'
-    const config: EngineClusterConfig = {
+    const config: ResolvedClusterConfig = {
       ...port,
       corners: [
         { label: 'Fuel', rows: [{ path: tank, label: 'Fuel', display: 'numeric', quantity: 'ratio', unit: '%' }] },

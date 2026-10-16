@@ -13,6 +13,8 @@ export interface AlarmRule {
   id: string
   enabled: boolean
   path: string
+  /** 'house_bank_soc' when the server keeps `path` on the house bank's state of charge; absent for a literal path. */
+  path_role?: string
   label: string
   op: AlarmOperator
   value: number

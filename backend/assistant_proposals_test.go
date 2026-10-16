@@ -866,7 +866,7 @@ func TestApplyProposal_AStaleProposalCanNeitherBeAppliedNorDismissedAndHistoryTe
 func TestProposal_UpdateOnAProfileJobAppliesAsAnOverride(t *testing.T) {
 	env := newProposalEnv(t)
 	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
-	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a", HourMeterPath: "propulsion.main.runTime"})
+	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a", SignalKSource: "propulsion.main"})
 	job := maintenanceJobID(item.ID, "engine-oil")
 
 	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"maintenance_rule","action":"update","id":%q,"fields":{"interval_hours":500}}]}`, job))
@@ -912,7 +912,7 @@ func TestProposal_UpdateOnAProfileJobRefusesWhatItCannotChange(t *testing.T) {
 func TestProposal_CompletingAProfileJobUsesTheEffectiveInterval(t *testing.T) {
 	env := newProposalEnv(t)
 	setupEngineProfiles(t, map[string]string{"a.json": scheduleProfileA})
-	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a", HourMeterPath: "propulsion.main.runTime"})
+	item := env.equipment(t, equipmentItem{Name: "Main engine", System: "propulsion", ProfileID: "sched-a", SignalKSource: "propulsion.main"})
 	oil := maintenanceJobID(item.ID, "engine-oil")
 	impeller := maintenanceJobID(item.ID, "impeller")
 

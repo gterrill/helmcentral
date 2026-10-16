@@ -40,7 +40,7 @@ interface VesselState {
   generator_manual_start_timer: number
   generator_running_by_condition: string
   generator_runtime: number
-  /** null when no engine is set up in Vessel settings or none is reporting. */
+  /** null when no engine is set up in the roles or none is reporting. */
   engines_running: boolean | null
   depth_last_update_age_s: number
   position_last_update_age_s: number
@@ -107,7 +107,7 @@ export function useVesselState() {
   const [generatorManualStartTimer, setGeneratorManualStartTimer] = useState<number>(0)
   const [generatorRunningByCondition, setGeneratorRunningByCondition] = useState<string | null>(null)
   const [generatorRuntime, setGeneratorRuntime] = useState<number | null>(null)
-  // null: no engine is set up in Vessel settings, or none is reporting.
+  // null: no engine is set up in the roles, or none is reporting.
   const [enginesRunning, setEnginesRunning] = useState<boolean | null>(null)
   // Which source the backend answered from ("signalk", "signalk-unreachable",
   // "backend-fallback"). Surfaced so the app can offer to go looking for a

@@ -92,7 +92,7 @@ func unignoreSensor(identifier string) error {
 // operator knows it by -- the settings list shows names and never an id.
 func ignoredSensorsResponse() map[string]any {
 	identifiers := listIgnoredSensors()
-	namer := newSensorNamer(globalSignalKSnapshot, vesselSettingsForNaming(), globalSourceDevices.get())
+	namer := newSensorNamer(globalSignalKSnapshot, vesselViewForNaming(), globalSourceDevices.get())
 	return map[string]any{"identifiers": identifiers, "sensors": ignoredSensorEntries(namer, identifiers)}
 }
 
@@ -106,14 +106,14 @@ func ignoredSensorEntries(namer *sensorNamer, identifiers []string) []sensorHeal
 	return disambiguateSensorEntries(sensors)
 }
 
-// vesselSettingsForNaming loads the vessel block for naming only. A block
+// vesselViewForNaming loads the vessel block for naming only. A block
 // that cannot be read is logged and names fall back to the bus's own: this
 // is a label, and the settings page shows the read error itself.
-func vesselSettingsForNaming() vesselSettings {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+func vesselViewForNaming() vesselView {
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
-		log.Printf("sensor names: vessel settings unreadable, using the bus's own names: %v", err)
-		return vesselSettings{}
+		log.Printf("sensor names: vessel unreadable, using the bus's own names: %v", err)
+		return vesselView{}
 	}
 	return vessel
 }

@@ -1,53 +1,44 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import type { SignalKPath } from '@/hooks/use-signalk-paths'
-import { LAMP_STRIP_MAX_LAMPS } from '@/lib/dashboard-widgets'
 import { suggestRibbonLamps } from '@/lib/ribbon-defaults'
+import type { TileItem } from '@/lib/equipment-tiles'
 
-import fixture from './fixtures/signalk-paths-2026-09-08.json'
+const item = (id: string, name: string, source: string, kind: TileItem['source_kind']): TileItem => ({
+  id, name, signalk_source: source, source_kind: kind, profile_id: '',
+})
+
+const boat: TileItem[] = [
+  item('alt-1', 'Starboard alternator', 'electrical.alternator.1', 'alternator'),
+  item('eng-s', 'Starboard engine', 'propulsion.starboard', 'engine'),
+  item('eng-p', 'Port engine', 'propulsion.port', 'engine'),
+  item('gen', 'Generator', 'electrical.generator.0', 'generator'),
+  item('alt-0', 'Port alternator', 'electrical.alternator.0', 'alternator'),
+  item('inv', 'Inverter', 'electrical.inverters.0', 'inverter'),
+]
 
 describe('suggestRibbonLamps', () => {
-  test('resolves the live vessel fixture to the expected default set, in order', () => {
-    const paths = (fixture as { paths: SignalKPath[] }).paths
-    expect(suggestRibbonLamps(paths)).toEqual([
-      { path: 'propulsion.port.revolutions', label: 'Port', group: 'Propulsion', icon: 'engine' },
-      { path: 'propulsion.starboard.revolutions', label: 'Stbd', group: 'Propulsion', icon: 'engine' },
-      { path: 'electrical.generator.0.stateNumber', label: 'Gen', group: 'Power', icon: 'generator' },
-      { path: 'electrical.inverters.276.acState.acIn1Available', label: 'Shore', group: 'Power', icon: 'plug' },
-      { path: 'electrical.alternator.0.chargingModeNumber', label: 'Alt 0', group: 'Power', icon: 'alternator' },
-      { path: 'electrical.alternator.1.chargingModeNumber', label: 'Alt 1', group: 'Power', icon: 'alternator' },
-    ])
+  it('suggests one lamp per mapped item, referencing the item, never a path', () => {
+    const lamps = suggestRibbonLamps(boat)
+    expect(lamps.map((l) => l.equipmentId)).toEqual(['eng-p', 'eng-s', 'gen', 'inv', 'alt-0', 'alt-1'])
+    expect(lamps.every((l) => l.path === '')).toBe(true)
+    expect(lamps[0]).toMatchObject({ suffix: 'revolutions', group: 'Propulsion', icon: 'engine' })
   })
 
-  test('an empty path list yields nothing', () => {
+  it('labels each lamp with the item name, cut to the lamp label limit', () => {
+    const lamps = suggestRibbonLamps(boat)
+    expect(lamps[0].label).toBe('Port engine')
+    expect(lamps[1].label).toBe('Starboard en')
+  })
+
+  it('gives an item with no source no lamp', () => {
+    expect(suggestRibbonLamps([item('x', 'Spare engine', '', '')])).toEqual([])
+  })
+
+  it('suggests nothing for a boat with nothing mapped', () => {
     expect(suggestRibbonLamps([])).toEqual([])
   })
 
-  test('a single-engine boat with only propulsion.0.revolutions yields "Eng 0"', () => {
-    const paths: SignalKPath[] = [{ path: 'propulsion.0.revolutions', value: 1200 }]
-    expect(suggestRibbonLamps(paths)).toEqual([{ path: 'propulsion.0.revolutions', label: 'Eng 0', group: 'Propulsion', icon: 'engine' }])
-  })
-
-  test('a path list with 20 engines is capped at 16', () => {
-    const paths: SignalKPath[] = Array.from({ length: 20 }, (_, i) => ({
-      path: `propulsion.${i}.revolutions`,
-      value: 1000 + i,
-    }))
-    const result = suggestRibbonLamps(paths)
-    expect(result).toHaveLength(LAMP_STRIP_MAX_LAMPS)
-  })
-
-  test('does not suggest an inverting-mode, anchor, autopilot or bilge lamp absent from the fixture', () => {
-    const paths = (fixture as { paths: SignalKPath[] }).paths
-    const suggested = suggestRibbonLamps(paths)
-    expect(suggested.some((lamp) => lamp.path.includes('inverterMode'))).toBe(false)
-    expect(suggested.some((lamp) => lamp.path.includes('anchor'))).toBe(false)
-    expect(suggested.some((lamp) => lamp.path.includes('autopilot'))).toBe(false)
-    expect(suggested.some((lamp) => lamp.path.includes('switches.bank'))).toBe(false)
-  })
-
-  test('no suggestion carries invert', () => {
-    const paths = (fixture as { paths: SignalKPath[] }).paths
-    expect(suggestRibbonLamps(paths).every((lamp) => lamp.invert === undefined)).toBe(true)
+  it('leaves out kinds a ribbon has no running signal for', () => {
+    expect(suggestRibbonLamps([item('b', 'House bank', 'electrical.batteries.1', 'battery')])).toEqual([])
   })
 })

@@ -3,6 +3,19 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { GaugeGroupConfigDialog } from '@/components/gauge-group-config-dialog'
 import type { DashboardLayoutItem, GaugeGroupWidgetConfig } from '@/lib/dashboard-widgets'
+import type { EngineProfile } from '@/lib/engine-profiles'
+import type { EquipmentTileContext } from '@/lib/equipment-tiles'
+
+const oilGauge = { path_suffix: 'oilPressure', label: 'Oil Press', display: 'radial', quantity: 'pressure', unit: 'psi', min: 0, max: 100 } as const
+const yanmar: EngineProfile = {
+  id: 'yanmar-4jh', name: 'Yanmar 4JH', kind: 'engine',
+  gauges: [
+    { ...oilGauge, zones: [{ direction: 'below', threshold: 15, state: 'alarm' }] },
+    { path_suffix: 'revolutions', label: 'RPM', hero: true, display: 'radial', quantity: 'frequency', unit: 'rpm', min: 0, max: 3000 },
+  ],
+}
+let ctx: EquipmentTileContext = { items: [], profiles: [], reporting: null }
+vi.mock('@/hooks/use-equipment-tile-context', () => ({ useEquipmentTileContext: () => ctx }))
 
 const portEngine: GaugeGroupWidgetConfig = {
   title: 'Port',
@@ -22,6 +35,7 @@ function pathInputs(): HTMLInputElement[] {
 }
 
 beforeEach(() => {
+  ctx = { items: [], profiles: [], reporting: null }
   vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
     if (String(url).includes('/api/equipment-profiles') || String(url).includes('/api/engine-profiles')) {
       return Promise.resolve({
@@ -152,17 +166,206 @@ describe('GaugeGroupConfigDialog', () => {
     expect(saved.hero).toBeUndefined()
   })
 
-  test('adopts the profile hero when applying an equipment profile', async () => {
-    const onSave = vi.fn()
-    render(<GaugeGroupConfigDialog widget={widget(portEngine)} onCancel={vi.fn()} onSave={onSave} />)
+  describe('a group that shows equipment (ADR 0185)', () => {
+    beforeEach(() => {
+      ctx = {
+        items: [
+          { id: 'eng-port', name: 'Port engine', signalk_source: 'propulsion.port', source_kind: 'engine', profile_id: 'yanmar-4jh' },
+          { id: 'eng-star', name: 'Starboard engine', signalk_source: 'propulsion.starboard', source_kind: 'engine', profile_id: 'yanmar-4jh' },
+        ],
+        profiles: [yanmar],
+        reporting: null,
+      }
+    })
 
-    fireEvent.click(screen.getByRole('button', { name: /apply an equipment profile/i }))
-    fireEvent.change(await screen.findByLabelText('Engine instance'), { target: { value: 'electrical.alternator.0' } })
-    fireEvent.click(screen.getByRole('button', { name: /apply to these gauges/i }))
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    // A reading the tile still holds zones for, as a converted tile does.
+    const heldGroup = (equipmentId: string): GaugeGroupWidgetConfig => ({
+      equipmentKind: 'engine', equipmentId, title: '',
+      gauges: [{ path: '', suffix: 'oilPressure', label: 'Oil Press', display: 'radial', quantity: 'pressure', unit: 'psi', min: 0, max: 100,
+        zones: [{ from: 0, to: 14.5038, state: 'alarm' }] }],
+    })
+    const withBareProfile = () => {
+      ctx = {
+        items: [
+          ...ctx.items,
+          { id: 'eng-bare', name: 'Bare engine', signalk_source: 'propulsion.centre', source_kind: 'engine', profile_id: 'bare' },
+          { id: 'eng-none', name: 'No profile engine', signalk_source: 'propulsion.aux', source_kind: 'engine', profile_id: '' },
+        ],
+        profiles: [...ctx.profiles, { id: 'bare', name: 'Bare', kind: 'engine', gauges: [{ path_suffix: 'oilPressure', label: 'Oil', display: 'radial', quantity: 'pressure', unit: 'bar', min: 0, max: 10 }] }],
+        reporting: null,
+      }
+    }
+    const putBodies = () => vi.mocked(fetch).mock.calls
+      .filter((c) => (c[1] as RequestInit | undefined)?.method === 'PUT')
+      .map((c) => JSON.parse((c[1] as RequestInit).body as string))
+    const okFetch = () => vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ profile: {} }) }))
 
-    const saved = onSave.mock.calls[0][0] as GaugeGroupWidgetConfig
-    expect(saved.hero).toBeDefined()
-    expect(saved.gauges[saved.hero!].label).toBe('Output')
+    test('zones the tile holds move onto a profile that has none, and leave the tile', async () => {
+      withBareProfile()
+      okFetch()
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget(heldGroup('eng-bare'))} onCancel={vi.fn()} onSave={onSave} />)
+      expect(screen.getByTestId('zone-migration')).toHaveTextContent('Oil Press move to the equipment')
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalled())
+      expect(putBodies()[0].gauges[0].zones[0]).toMatchObject({ direction: 'below', state: 'alarm' })
+      expect(putBodies()[0].gauges[0].zones[0].threshold).toBeCloseTo(1, 2)
+      expect((onSave.mock.calls[0][0] as GaugeGroupWidgetConfig).gauges[0].zones).toBeUndefined()
+    })
+
+    test('where the profile has its own zones both sets are shown and one must be chosen', async () => {
+      okFetch()
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget(heldGroup('eng-port'))} onCancel={vi.fn()} onSave={onSave} />)
+      expect(screen.getByTestId('zone-conflict')).toHaveTextContent("Keep the profile's: below 15 psi, alarm")
+      expect(screen.getByTestId('zone-conflict')).toHaveTextContent("Use this tile's, replacing the profile's: below 14.5038 psi, alarm")
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+      fireEvent.click(screen.getByLabelText(/Use this tile's/))
+      expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalled())
+      expect(putBodies()[0].gauges[0].zones[0].threshold).toBeCloseTo(14.5038, 3)
+      expect((onSave.mock.calls[0][0] as GaugeGroupWidgetConfig).gauges[0].zones).toBeUndefined()
+    })
+
+    test("choosing the profile's set clears the tile's and writes nothing to the profile", () => {
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget(heldGroup('eng-port'))} onCancel={vi.fn()} onSave={onSave} />)
+      fireEvent.click(screen.getByLabelText(/Keep the profile's/))
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      return vi.waitFor(() => {
+        expect(onSave).toHaveBeenCalled()
+        expect(putBodies()).toHaveLength(0)
+        expect((onSave.mock.calls[0][0] as GaugeGroupWidgetConfig).gauges[0].zones).toBeUndefined()
+      })
+    })
+
+    test('with no profile the zones stay on the tile, saved with it, until one is linked', () => {
+      withBareProfile()
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget(heldGroup('eng-none'))} onCancel={vi.fn()} onSave={onSave} />)
+      expect(screen.getByTestId('zone-migration')).toHaveTextContent('stay on this tile')
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect((onSave.mock.calls[0][0] as GaugeGroupWidgetConfig).gauges[0].zones).toEqual([{ from: 0, to: 14.5038, state: 'alarm' }])
+    })
+
+    test('a tile with no equipment says it keeps its zones, and choosing equipment ends the remembered source', () => {
+      withBareProfile()
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget({ ...heldGroup(''), equipmentId: undefined, source: 'propulsion.port' })} onCancel={vi.fn()} onSave={onSave} />)
+      expect(screen.getByTestId('zone-migration')).toHaveTextContent('keeps its zones')
+      fireEvent.change(screen.getByLabelText('Equipment'), { target: { value: 'eng-none' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect((onSave.mock.calls[0][0] as GaugeGroupWidgetConfig).source).toBeUndefined()
+    })
+
+    const equipmentGroup: GaugeGroupWidgetConfig = {
+      equipmentKind: 'engine', equipmentId: 'eng-port', title: '',
+      gauges: [{ path: '', suffix: 'oilPressure', label: 'Oil Press', display: 'radial', quantity: 'pressure', unit: 'psi', min: 0, max: 100 }],
+    }
+
+    test('fills the gauges and the hero from the item profile', () => {
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={onSave} />)
+      fireEvent.click(screen.getByRole('button', { name: /fill gauges from profile/i }))
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+      const saved = onSave.mock.calls[0][0] as GaugeGroupWidgetConfig
+      expect(saved.gauges.map((g) => g.suffix)).toEqual(['oilPressure', 'revolutions'])
+      expect(saved.gauges.every((g) => g.path === '' && g.zones === undefined)).toBe(true)
+      expect(saved.hero).toBe(1)
+      expect(saved.equipmentId).toBe('eng-port')
+    })
+
+    test('the Reading is picked, never typed: the profile gauges plus what the boat reports under the source', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve({
+        ok: true,
+        json: async () => (String(url).includes('signalk') || String(url).includes('paths')
+          ? { paths: [
+            { path: 'propulsion.port.revolutions' }, { path: 'propulsion.port.exhaustTemperature' },
+            { path: 'propulsion.starboard.revolutions' }, { path: 'environment.depth.belowTransducer' },
+          ] }
+          : {}),
+      })))
+      render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={vi.fn()} />)
+      const reading = screen.getByLabelText('Reading') as HTMLSelectElement
+      expect(reading.tagName).toBe('SELECT')
+      await vi.waitFor(() => {
+        const options = Array.from(reading.querySelectorAll('option')).map((o) => o.value)
+        // The profile's two gauges, then only what the boat reports under propulsion.port.
+        expect(options).toEqual(['', 'oilPressure', 'revolutions', 'exhaustTemperature'])
+      })
+      fireEvent.change(reading, { target: { value: 'revolutions' } })
+      expect((screen.getByLabelText('Unit') as HTMLSelectElement).value).toBe('rpm')
+    })
+
+    test('the unit of a reading on the profile is the profile unit and cannot be changed here', () => {
+      render(<GaugeGroupConfigDialog widget={widget({ ...equipmentGroup, gauges: [{ ...equipmentGroup.gauges[0], quantity: 'pressure', unit: 'bar' }] })} onCancel={vi.fn()} onSave={vi.fn()} />)
+      expect(screen.getByLabelText('Quantity')).toBeDisabled()
+      expect(screen.getByLabelText('Unit')).toBeDisabled()
+      expect(screen.getByLabelText('Unit')).toHaveValue('psi')
+    })
+
+    test('a reading the profile does not have keeps its own unit, editable', () => {
+      render(<GaugeGroupConfigDialog widget={widget({ ...equipmentGroup, gauges: [{ ...equipmentGroup.gauges[0], suffix: 'exhaust', quantity: 'temperature', unit: 'C' }] })} onCancel={vi.fn()} onSave={vi.fn()} />)
+      expect(screen.getByLabelText('Unit')).toBeEnabled()
+    })
+
+    test('a title is optional, because the item name is the default', () => {
+      render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={vi.fn()} />)
+      expect((screen.getByLabelText('Title') as HTMLInputElement).placeholder).toBe('Port engine')
+      expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled()
+    })
+
+    test('will not save with no equipment picked', () => {
+      render(<GaugeGroupConfigDialog widget={widget({ ...equipmentGroup, equipmentId: '' })} onCancel={vi.fn()} onSave={vi.fn()} />)
+      expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
+    })
+
+    test('retargets to the other engine by picking the other item', () => {
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={onSave} />)
+      fireEvent.change(screen.getByLabelText('Equipment'), { target: { value: 'eng-star' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(onSave.mock.calls[0][0]).toMatchObject({ equipmentId: 'eng-star', gauges: [{ suffix: 'oilPressure' }] })
+    })
+
+    test('shows the profile zones and says what editing them touches', () => {
+      render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={vi.fn()} />)
+      expect((screen.getByLabelText('Zone 1 threshold') as HTMLInputElement).value).toBe('15')
+      expect(screen.getByTestId('zone-notice')).toHaveTextContent(
+        'Applies to every tile and alarm using Yanmar 4JH (Port engine, Starboard engine)',
+      )
+    })
+
+    test('editing a zone saves the profile first, then the tile', async () => {
+      const calls: string[] = []
+      vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        calls.push(`${init?.method ?? 'GET'} ${url}`)
+        return Promise.resolve({ ok: true, json: async () => ({ profile: yanmar }) })
+      }))
+      const onSave = vi.fn(() => { calls.push('tile saved') })
+      render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={onSave} />)
+
+      fireEvent.change(screen.getByLabelText('Zone 1 threshold'), { target: { value: '25' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+      await vi.waitFor(() => expect(onSave).toHaveBeenCalled())
+      const put = calls.findIndex((c) => c.startsWith('PUT') && c.includes('/api/equipment-profiles/yanmar-4jh'))
+      expect(put).toBeGreaterThanOrEqual(0)
+      expect(put).toBeLessThan(calls.indexOf('tile saved'))
+      const body = JSON.parse(((vi.mocked(fetch).mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === 'PUT')![1]) as RequestInit).body as string)
+      expect(body.gauges[0].zones[0]).toMatchObject({ direction: 'below', threshold: 25, state: 'alarm' })
+    })
+
+    test('a failed profile save keeps the dialog open and says why', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({ error: 'zone 1 is wrong' }) }))
+      const onSave = vi.fn()
+      render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={onSave} />)
+      fireEvent.change(screen.getByLabelText('Zone 1 threshold'), { target: { value: '25' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      expect(await screen.findByRole('alert')).toHaveTextContent('zone 1 is wrong')
+      expect(onSave).not.toHaveBeenCalled()
+    })
   })
 })

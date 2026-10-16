@@ -1,133 +1,110 @@
 /**
- * Types for the vessel.* settings block (anomaly detection: sensor health,
- * full-bank charging, engine differentials) and its candidates endpoint.
- * Mirrors backend/vessel_settings.go and backend/vessel_handlers.go
- * field-for-field, snake_case as the API sends it.
+ * Types for the roles block (Settings -> SignalK -> Roles) and the discovery
+ * endpoint it sits beside. Mirrors backend/vessel_roles.go and
+ * backend/vessel_handlers.go field-for-field, snake_case as the API sends it.
+ *
+ * An equipment item owns one SignalK source (`propulsion.port`,
+ * `electrical.batteries.1`, ...); a role is the choice of which item plays a
+ * single part, such as the house bank. Roles hold item ids, never paths.
  */
 
-export interface VesselEngineSetting {
-  instance: string
-  name: string
-  equipment_id: string
-}
-
-export interface VesselHouseBankSetting {
-  path: string
-  equipment_id: string
-  capacity_ah: number
-  cells: number
-  /** 0 means "use the linked battery profile's own computed threshold". */
-  warn_voltage?: number
-  high_voltage?: number
-}
-
-/** The operator's own name for one electrical.batteries.<id> instance. */
-export interface VesselBatterySetting {
-  instance: string
-  name: string
-}
-
-/** Which electrical.alternator.<id> instances are port and starboard. '' is not set. */
-export interface VesselAlternatorSettings {
-  port_instance: string
-  starboard_instance: string
-}
-
-/**
- * The electrical.<kind>.<id> instances the tiles and the overnight model read.
- * Bare instance ids; '' is not set.
- */
-export interface VesselElectricalSettings {
-  generator_instance: string
-  generator_ac_instance: string
-  shore_charger_instance: string
-  inverter_instance: string
+/** Every role is an equipment item id except the generator's AC input, which is an instance id. '' is not set. */
+export interface VesselRoles {
+  house_bank: string
+  port_alternator: string
+  starboard_alternator: string
   voltage_readout_battery: string
+  shore_charger: string
+  inverter: string
+  generator: string
+  /** The <id> in electrical.ac.<id>: an AC meter, which no item owns. */
+  generator_ac_instance: string
 }
 
-/** The operator's own name for one electrical.solar.<id> controller. */
-export interface VesselSolarSetting {
-  instance: string
+export const emptyVesselRoles: VesselRoles = {
+  house_bank: '',
+  port_alternator: '',
+  starboard_alternator: '',
+  voltage_readout_battery: '',
+  shore_charger: '',
+  inverter: '',
+  generator: '',
+  generator_ac_instance: '',
+}
+
+/** The kinds of source an item can own; also the `source_kind` an item reports. */
+export type SourceKind = 'engine' | 'battery' | 'alternator' | 'solar' | 'tank' | 'generator' | 'charger' | 'inverter'
+
+export const SOURCE_KINDS: readonly SourceKind[] = ['engine', 'battery', 'alternator', 'solar', 'tank', 'generator', 'charger', 'inverter']
+
+export const SOURCE_KIND_LABELS: Record<SourceKind, string> = {
+  engine: 'Engines',
+  battery: 'Batteries',
+  alternator: 'Alternators',
+  solar: 'Solar controllers',
+  tank: 'Tanks',
+  generator: 'Generators',
+  charger: 'Chargers',
+  inverter: 'Inverters',
+}
+
+/** The singular, for a button or a sentence: "Create engine item". */
+export const SOURCE_KIND_NOUNS: Record<SourceKind, string> = {
+  engine: 'engine',
+  battery: 'battery',
+  alternator: 'alternator',
+  solar: 'solar controller',
+  tank: 'tank',
+  generator: 'generator',
+  charger: 'charger',
+  inverter: 'inverter',
+}
+
+/** The inventory system a new item for a kind starts in; mirrors sourceSystem in the backend. */
+export function systemForKind(kind: SourceKind): 'propulsion' | 'fuel' | 'electrical' {
+  if (kind === 'engine') return 'propulsion'
+  if (kind === 'tank') return 'fuel'
+  return 'electrical'
+}
+
+/** The live hour meter a source carries, or '' (mirrors sourceHourMeterPath in the backend). */
+export function hourMeterSourceFor(source: string): string {
+  if (/^propulsion\.[A-Za-z0-9_-]+$/.test(source)) return `${source}.runTime`
+  if (/^electrical\.generator\.[A-Za-z0-9_-]+$/.test(source)) return `${source}.runtime`
+  return ''
+}
+
+/** One live figure beside a source, already formatted for the operator. */
+export interface DiscoveryMetric {
+  label: string
+  text: string
+}
+
+export interface DiscoveryItemRef {
+  id: string
   name: string
 }
 
-export interface VesselSettings {
-  engines: VesselEngineSetting[]
-  house_bank: VesselHouseBankSetting | null
-  batteries: VesselBatterySetting[]
-  alternators: VesselAlternatorSettings
-  electrical: VesselElectricalSettings
-  solar: VesselSolarSetting[]
-}
-
-export const emptyVesselElectrical: VesselElectricalSettings = {
-  generator_instance: '',
-  generator_ac_instance: '',
-  shore_charger_instance: '',
-  inverter_instance: '',
-  voltage_readout_battery: '',
-}
-
-export const emptyVesselSettings: VesselSettings = {
-  engines: [],
-  house_bank: null,
-  batteries: [],
-  alternators: { port_instance: '', starboard_instance: '' },
-  electrical: emptyVesselElectrical,
-  solar: [],
-}
-
-export interface VesselEngineCandidate {
+/** A source the boat reports now, or one an item still owns that has gone quiet. */
+export interface DiscoveryRow {
+  source: string
+  /** The <id> segment: "port", "1", "fuel.2". */
   instance: string
-  rpm: number | null
-  coolant_c: number | null
-}
-
-export interface VesselBatteryCandidate {
-  path: string
-  /** The <id> in electrical.batteries.<id>, the key an operator name is saved under. */
-  instance: string
-  /** What the bus itself calls this instance; '' when it says nothing. */
+  /** What the bus itself calls a battery; '' when it says nothing. */
   bus_name: string
   /** A charger's own input (a solar array's voltage), not a battery. */
   charger_input: boolean
-  voltage: number | null
-  current: number | null
-  soc: number | null
+  /** False for a source an item owns that the boat has stopped reporting. */
+  reporting: boolean
+  metrics: DiscoveryMetric[]
+  item: DiscoveryItemRef | null
 }
 
-export interface VesselAlternatorCandidate {
-  /** The <id> in electrical.alternator.<id>. */
-  instance: string
-  /** Live output current in amps; null when the instance reports nothing. */
-  current: number | null
-}
-
-/** Each reading is null when the instance has not reported recently. */
-export interface VesselGeneratorCandidate {
-  instance: string
-  state: string | null
-}
-
-export interface VesselACCandidate {
-  instance: string
-  real_power: number | null
-}
-
-export interface VesselChargerCandidate {
-  instance: string
-  current: number | null
-  acin_current: number | null
-}
-
-export interface VesselInverterCandidate {
-  instance: string
-  ac_out: number | null
-}
-
-export interface VesselSolarCandidate {
-  instance: string
-  panel_power: number | null
+export interface DiscoveryGroup {
+  /** A SourceKind, or 'ac' for the AC inputs, which no item owns. */
+  kind: string
+  mappable: boolean
+  rows: DiscoveryRow[]
 }
 
 export interface VesselDetectorStatus {
@@ -135,25 +112,32 @@ export interface VesselDetectorStatus {
   missing?: string
 }
 
-export interface VesselCandidatesResponse {
-  engines: VesselEngineCandidate[]
-  batteries: VesselBatteryCandidate[]
-  alternators: VesselAlternatorCandidate[]
-  generators: VesselGeneratorCandidate[]
-  ac: VesselACCandidate[]
-  chargers: VesselChargerCandidate[]
-  inverters: VesselInverterCandidate[]
-  solar: VesselSolarCandidate[]
+export interface VesselDiscoveryResponse {
+  /** False while Helmcentral has no vessel data from SignalK. */
+  connected: boolean
+  groups: DiscoveryGroup[]
   detectors: Record<string, VesselDetectorStatus>
 }
 
-export const emptyVesselCandidates: VesselCandidatesResponse = {
-  engines: [], batteries: [], alternators: [], generators: [], ac: [], chargers: [], inverters: [], solar: [], detectors: {},
+export const emptyVesselDiscovery: VesselDiscoveryResponse = { connected: false, groups: [], detectors: {} }
+
+/** The rows of one kind, or none. */
+export function discoveryRows(discovery: VesselDiscoveryResponse, kind: string): DiscoveryRow[] {
+  return discovery.groups.find((g) => g.kind === kind)?.rows ?? []
 }
 
-/** "propulsion.port" style display, or a raw instance id if that's all there is: "port" -> "Port". */
-export function titleCaseInstance(instance: string): string {
-  const trimmed = instance.trim()
-  if (trimmed === '') return ''
-  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
+const SOURCE_SHAPES: { kind: SourceKind; re: RegExp }[] = [
+  { kind: 'engine', re: /^propulsion\.[A-Za-z0-9_-]+$/ },
+  { kind: 'battery', re: /^electrical\.batteries\.[A-Za-z0-9_-]+$/ },
+  { kind: 'alternator', re: /^electrical\.alternator\.[A-Za-z0-9_-]+$/ },
+  { kind: 'solar', re: /^electrical\.solar\.[A-Za-z0-9_-]+$/ },
+  { kind: 'tank', re: /^tanks\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/ },
+  { kind: 'generator', re: /^electrical\.generator\.[A-Za-z0-9_-]+$/ },
+  { kind: 'charger', re: /^electrical\.chargers\.[A-Za-z0-9_-]+$/ },
+  { kind: 'inverter', re: /^electrical\.inverters\.[A-Za-z0-9_-]+$/ },
+]
+
+/** The kind of item a source belongs to, or null for '' or anything that is not one of the eight shapes. */
+export function sourceKindOf(source: string): SourceKind | null {
+  return SOURCE_SHAPES.find((shape) => shape.re.test(source))?.kind ?? null
 }

@@ -213,7 +213,6 @@ func TestUpdateSettings_AllowsUnrelatedEditsWhileSignalKIsUnreachable(t *testing
 	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
 		p.Boat.Model = "Renamed While Offline"
 		p.Anchor.ChainOnboardM = 120
-		p.UI.TankLabels = map[string]string{"fuel.2": "PORT AFT"}
 	})
 	if code != http.StatusOK {
 		t.Fatalf("unchanged address must not be probed; got %d (body %v)", code, body)

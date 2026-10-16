@@ -77,7 +77,7 @@ function makeItem(overrides: Partial<EquipmentItem> = {}): EquipmentItem {
     bin_code: '',
     location_detail: '',
     install_date: '',
-    hour_meter_path: '',
+    signalk_source: '', capacity_ah: 0, cells: 0, warn_voltage: 0, high_voltage: 0, source_kind: '', hour_meter_source: '',
     profile_id: '',
     aliases: [],
     verified_aboard: false,
@@ -108,6 +108,26 @@ const profiles = [
     manufacturer: 'Onan', model: '13.5 kW MDKD', gauges: [],
   },
 ]
+
+// What the boat reports: a generator and an engine the item can own, a
+// battery owned by another item, and a battery bank source.
+const discoveryBody = {
+  connected: true,
+  groups: [
+    { kind: 'engine', mappable: true, rows: [
+      { source: 'propulsion.port', instance: 'port', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'RPM', text: '1800 rpm' }], item: null },
+    ] },
+    { kind: 'battery', mappable: true, rows: [
+      { source: 'electrical.batteries.0', instance: '0', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'Voltage', text: '27.20 V' }], item: null },
+      { source: 'electrical.batteries.512', instance: '512', bus_name: '', charger_input: false, reporting: true, metrics: [], item: { id: 'eq-9', name: 'Lithium bank' } },
+    ] },
+    { kind: 'generator', mappable: true, rows: [
+      { source: 'electrical.generator.0', instance: '0', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'State', text: 'stopped' }], item: null },
+      { source: 'electrical.generator.7', instance: '7', bus_name: '', charger_input: false, reporting: false, metrics: [], item: { id: 'eq-1', name: 'Generator' } },
+    ] },
+  ],
+  detectors: {},
+}
 
 let currentItem: EquipmentItem
 let currentDocuments: EquipmentDocument[]
@@ -150,11 +170,8 @@ function stubFetch() {
     if (u.includes('/api/equipment-profiles')) {
       return Promise.resolve({ ok: true, json: async () => ({ profiles, problems: [] }) })
     }
-    if (u.includes('/api/signalk/paths')) {
-      return Promise.resolve({
-        ok: true,
-        json: async () => ({ paths: [{ path: 'electrical.generator.0.runTime' }, { path: 'navigation.speedOverGround' }] }),
-      })
+    if (u.endsWith('/api/vessel/discovery')) {
+      return Promise.resolve({ ok: true, json: async () => discoveryBody })
     }
     if (u.match(/\/api\/inventory\/equipment\/eq-1\/documents$/) && method === 'PATCH') {
       const body = JSON.parse(String(init?.body)) as { add: string[]; remove: string[] }
@@ -425,8 +442,8 @@ describe('EquipmentEditor', () => {
     expect(screen.getByLabelText('Name').closest('[data-slot="form-row"]')).toBeNull()
   })
 
-  // category is derived on the server from the hour meter, so the editor has
-  // no such choice - just an optional Hour meter, always visible.
+  // category is derived on the server from the SignalK source, so the editor
+  // has no such choice: the source decides whether there is an hour meter.
   it('has no Serviced by / Category choice', async () => {
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
@@ -435,37 +452,104 @@ describe('EquipmentEditor', () => {
     expect(screen.queryByText('Running hours')).not.toBeInTheDocument()
   })
 
-  it('shows Hour meter as an ordinary optional field at the top of Maintenance, with its help text', async () => {
-    currentItem = makeItem({ hour_meter_path: 'electrical.generator.0.runTime' })
+  it('shows the hour meter read-only, derived from the source', async () => {
+    currentItem = makeItem({ signalk_source: 'electrical.generator.0', source_kind: 'generator', hour_meter_source: 'electrical.generator.0.runtime' })
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
 
     const maintenance = screen.getByText('Maintenance').closest('[data-slot="card"]') as HTMLElement
-    expect(within(maintenance).getByLabelText('Hour meter')).toHaveValue('electrical.generator.0.runTime')
-    expect(within(maintenance).getByText('Leave blank if this item has no hour meter. Rules counted in hours need one.')).toBeInTheDocument()
+    const meter = within(maintenance).getByLabelText('Hour meter')
+    expect(meter).toHaveValue('electrical.generator.0.runtime')
+    expect(meter).toHaveAttribute('readonly')
     expect(screen.queryByLabelText('Hour-meter path')).not.toBeInTheDocument()
   })
 
-  it('shows Hour meter even when blank, and on a new item', async () => {
-    currentItem = makeItem({ hour_meter_path: '' })
+  it('says Not reporting for the hour meter when the source has none, on a saved and a new item', async () => {
+    currentItem = makeItem({ signalk_source: '' })
     const { unmount } = render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
-    expect(screen.getByLabelText('Hour meter')).toHaveValue('')
+    expect(screen.getByLabelText('Hour meter')).toHaveValue('Not reporting')
     unmount()
 
     render(<EquipmentEditor id={null} onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue(''))
     const maintenance = screen.getByText('Maintenance').closest('[data-slot="card"]') as HTMLElement
-    expect(within(maintenance).getByLabelText('Hour meter')).toBeInTheDocument()
+    expect(within(maintenance).getByLabelText('Hour meter')).toHaveValue('Not reporting')
     // The parts that need a saved record stay hidden.
     expect(screen.queryByRole('button', { name: 'Add rule' })).not.toBeInTheDocument()
   })
 
+  it('offers the sources the boat reports, and a source another item owns cannot be taken', async () => {
+    currentItem = makeItem()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    const picker = await screen.findByLabelText('Source')
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'propulsion.port · 1800 rpm' })).toBeInTheDocument())
+    expect(within(picker).getByRole('option', { name: 'None' })).toBeInTheDocument()
+    expect(within(picker).getByRole('option', { name: 'electrical.batteries.512 · assigned to Lithium bank' })).toBeDisabled()
+    expect(within(picker).getByRole('option', { name: 'electrical.generator.0 · stopped' })).not.toBeDisabled()
+  })
+
+  it('picking a source derives the hour meter and saves the source', async () => {
+    currentItem = makeItem()
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    const picker = await screen.findByLabelText('Source')
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'electrical.generator.0 · stopped' })).toBeInTheDocument())
+    fireEvent.change(picker, { target: { value: 'electrical.generator.0' } })
+    expect(screen.getByLabelText('Hour meter')).toHaveValue('electrical.generator.0.runtime')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1') && (init as RequestInit | undefined)?.method === 'PUT')
+      expect(call).toBeDefined()
+      const body = JSON.parse(String((call?.[1] as RequestInit).body))
+      expect(body.signalk_source).toBe('electrical.generator.0')
+      expect(body).not.toHaveProperty('hour_meter_path')
+    })
+  })
+
+  it('keeps a saved source the boat has stopped reporting, marked not reporting', async () => {
+    currentItem = makeItem({ signalk_source: 'electrical.generator.9', source_kind: 'generator', hour_meter_source: 'electrical.generator.9.runtime' })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    const picker = await screen.findByLabelText('Source')
+    expect((picker as HTMLSelectElement).value).toBe('electrical.generator.9')
+    expect(within(picker).getByRole('option', { name: 'electrical.generator.9 · not reporting' })).toBeInTheDocument()
+  })
+
+  it('asks for a bank only on a battery item, and clears the figures when the source moves off one', async () => {
+    currentItem = makeItem({ signalk_source: 'electrical.batteries.0', source_kind: 'battery', capacity_ah: 400, cells: 8 })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    expect(screen.getByLabelText('Bank cell count')).toHaveValue('8')
+    expect(screen.getByLabelText('Bank capacity in amp-hours')).toHaveValue('400')
+    expect(screen.getByLabelText('Pack warn voltage override')).toBeInTheDocument()
+
+    const picker = await screen.findByLabelText('Source')
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'electrical.generator.0 · stopped' })).toBeInTheDocument())
+    fireEvent.change(picker, { target: { value: 'electrical.generator.0' } })
+    expect(screen.queryByLabelText('Bank cell count')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1') && (init as RequestInit | undefined)?.method === 'PUT')
+      const body = JSON.parse(String((call?.[1] as RequestInit).body))
+      expect(body).toMatchObject({ signalk_source: 'electrical.generator.0', capacity_ah: 0, cells: 0 })
+    })
+  })
+
   it('does not send category on save (create or update)', async () => {
-    currentItem = makeItem({ hour_meter_path: 'electrical.generator.0.runTime' })
+    currentItem = makeItem({ signalk_source: 'electrical.generator.0', source_kind: 'generator', hour_meter_source: 'electrical.generator.0.runtime' })
     const { unmount } = render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
-    fireEvent.change(screen.getByLabelText('Hour meter'), { target: { value: 'electrical.generator.1.runTime' } })
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Generator (aft)' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, init]) =>
@@ -473,7 +557,7 @@ describe('EquipmentEditor', () => {
       expect(call).toBeDefined()
       const body = JSON.parse(String((call?.[1] as RequestInit).body))
       expect(body).not.toHaveProperty('category')
-      expect(body.hour_meter_path).toBe('electrical.generator.1.runTime')
+      expect(body.signalk_source).toBe('electrical.generator.0')
     })
     unmount()
 

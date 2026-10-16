@@ -221,7 +221,7 @@ func buildMaintenanceRuleView(eff effectiveMaintenanceRule, eq *equipmentItem, h
 	if eq != nil {
 		view.EquipmentName = eq.Name
 		view.System = eq.System
-		view.HasHourMeterPath = strings.TrimSpace(eq.HourMeterPath) != ""
+		view.HasHourMeterPath = eq.HourMeterSource != ""
 	}
 	if hours.AsOf != nil {
 		s := hours.AsOf.UTC().Format(time.RFC3339)
@@ -240,7 +240,7 @@ func buildMaintenanceRuleView(eff effectiveMaintenanceRule, eq *equipmentItem, h
 // own per-equipment cache (many rules), so the two can never disagree about
 // how an item's hours are computed.
 //
-// An item with no hour_meter_path at all has nothing here for the engine to
+// An item with no hour meter at all (no SignalK source with a runtime counter) has nothing here for the engine to
 // read live (currentEquipmentHours' own doc comment) - checked BEFORE
 // ListHourMeterResets runs (2026-09-27 code-review finding), not after,
 // since a meter-reset history is only ever meaningful for an item with a
@@ -248,7 +248,7 @@ func buildMaintenanceRuleView(eff effectiveMaintenanceRule, eq *equipmentItem, h
 // with no wired meter (a genset with a mechanical-only hour meter, say)
 // used to cost a reset-history query for nothing.
 func equipmentHourReading(eq equipmentItem, now time.Time) (maintenanceHourReading, error) {
-	if strings.TrimSpace(eq.HourMeterPath) == "" {
+	if eq.HourMeterSource == "" {
 		return maintenanceHourReading{}, nil
 	}
 	resets, err := globalDocumentStore.ListHourMeterResets(eq.ID)
@@ -256,7 +256,7 @@ func equipmentHourReading(eq equipmentItem, now time.Time) (maintenanceHourReadi
 		return maintenanceHourReading{}, err
 	}
 	offset := offsetInForceAt(resets, now)
-	return currentEquipmentHours(globalSignalKSnapshot.liveSelfTelemetry(now), eq.HourMeterPath, offset, now), nil
+	return currentEquipmentHours(globalSignalKSnapshot.liveSelfTelemetry(now), eq.HourMeterSource, offset, now), nil
 }
 
 // convertGaugeHoursToTrue looks up equipmentID's own hour-meter reset

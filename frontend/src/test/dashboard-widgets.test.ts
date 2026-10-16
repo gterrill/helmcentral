@@ -28,7 +28,6 @@ import {
   newEmbedWidgetId,
   newGaugeGroupWidgetId,
   newPoiMapWidgetId,
-  rewriteGaugePaths,
   widgetDisplayName,
   type DashboardLayoutItem,
   type PoiMapWidgetConfig,
@@ -329,36 +328,7 @@ describe('duplicateWidget', () => {
   })
 })
 
-describe('rewriteGaugePaths', () => {
-  const gauges = [
-    { path: 'propulsion.port.revolutions', label: 'Port RPM', display: 'radial' as const, quantity: 'frequency', unit: 'rpm' },
-    { path: 'propulsion.port.oilPressure', label: 'Port oil', display: 'bar' as const, quantity: 'pressure', unit: 'psi' },
-    { path: 'environment.depth.belowTransducer', label: 'Depth', display: 'numeric' as const, quantity: 'length', unit: 'ft' },
-  ]
 
-  test('rewrites matching paths and leaves labels alone', () => {
-    const next = rewriteGaugePaths(gauges, 'port', 'starboard')
-    expect(next[0].path).toBe('propulsion.starboard.revolutions')
-    expect(next[1].path).toBe('propulsion.starboard.oilPressure')
-    expect(next[2].path).toBe('environment.depth.belowTransducer')
-    expect(next[0].label).toBe('Port RPM')
-  })
-
-  test('replaces every occurrence, not just the first', () => {
-    const next = rewriteGaugePaths([{ ...gauges[0], path: 'a.port.b.port' }], 'port', 'stbd')
-    expect(next[0].path).toBe('a.stbd.b.stbd')
-  })
-
-  test('is a no-op when the search text is blank or absent', () => {
-    expect(rewriteGaugePaths(gauges, '', 'starboard')).toEqual(gauges)
-    expect(rewriteGaugePaths(gauges, 'nothing-matches', 'x')).toEqual(gauges)
-  })
-
-  test('does not mutate the input', () => {
-    rewriteGaugePaths(gauges, 'port', 'starboard')
-    expect(gauges[0].path).toBe('propulsion.port.revolutions')
-  })
-})
 
 /**
  * Go's JSON decoder drops any field/id it doesn't recognise, silently: a

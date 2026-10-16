@@ -655,7 +655,7 @@ func equipmentProfile(equipmentID string) (engineProfile, bool) {
 // not fully set up (no bank chosen, no linked profile, or the profile's
 // full_soc/charge_warn slots not yet filled) publishes nothing at all --
 // the plan's "nothing is seeded or evaluated for an unconfigured detector".
-func computeAnomalyBattery(snapshot *signalKSnapshot, vessel vesselSettings, valid fullBankChargingValidityFunc, voltageHistory *voltageHistoryTracker, now time.Time, reading *anomalyReading) {
+func computeAnomalyBattery(snapshot *signalKSnapshot, vessel vesselView, valid fullBankChargingValidityFunc, voltageHistory *voltageHistoryTracker, now time.Time, reading *anomalyReading) {
 	hb := vessel.HouseBank
 	if hb == nil || strings.TrimSpace(hb.Path) == "" || hb.CapacityAh <= 0 || hb.Cells <= 0 {
 		return
@@ -768,7 +768,7 @@ func formatEngineResidualEvidence(engineName string, absoluteUnit, deltaUnit str
 // numbers indefinitely instead of going quiet. A nil valid trusts every
 // input, matching fullBankChargingLevel's own "nil means trust everything"
 // contract for tests that have no reason to exercise staleness.
-func computeAnomalyEngineDifferentials(snapshot *signalKSnapshot, vessel vesselSettings, valid func(path string) bool, steadiness *twinSteadinessTrackers, now time.Time, reading *anomalyReading) {
+func computeAnomalyEngineDifferentials(snapshot *signalKSnapshot, vessel vesselView, valid func(path string) bool, steadiness *twinSteadinessTrackers, now time.Time, reading *anomalyReading) {
 	engines := vessel.Engines
 	if len(engines) < 2 {
 		return
@@ -923,7 +923,7 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 		ComputedAt: now,
 	}
 
-	vessel, err := loadVesselSettings(settingsPath)
+	vessel, err := loadVesselView(settingsPath)
 	if err != nil {
 		log.Printf("anomaly detector: vessel settings unavailable, skipping this tick: %v", err)
 		return reading
@@ -1177,7 +1177,7 @@ func refreshEngineBaseline() {
 // configured" branch above never has to build a settingsPath/vessel lookup
 // it will not use.
 func learnAndSaveEngineBaseline(path string) error {
-	vessel, err := loadVesselSettings(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
 		return fmt.Errorf("vessel settings: %w", err)
 	}

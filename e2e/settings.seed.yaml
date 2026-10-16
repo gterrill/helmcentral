@@ -29,11 +29,6 @@ signalk:
     port: 9
 ui:
     forecast_warnings_provider: bom
-    tank_labels:
-        freshWater.0: PORT
-        freshWater.3: STBD
-        fuel.2: PORT FWD
-        fuel.5: STBD FWD
     tide_auto_station: false
     tide_provider: bom
     tide_station_id: QLD_TP018

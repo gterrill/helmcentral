@@ -33,14 +33,17 @@ crawling into the compartment to read the data plate:
   mean to carry. On board can be zero: a Racor seal kit you've used and not
   replaced is still a record, and it shows as below what you carry until
   you restock it.
-- **Hour meter.** Optional. Gear with an engine-hours reading - engines,
-  generators, transmissions, thrusters, stabilisers, watermakers - takes it
-  from the vessel telemetry this item's runtime comes from, picked from the
-  live instrument data your boat actually publishes. Leave it blank for gear
-  with no hour meter: navigation electronics, safety gear, plumbing, galley
-  appliances, deck hardware. It sits at the top of the record's Maintenance
-  section. Service rules counted in hours need a meter; without one they
-  cannot count hours, and the Maintenance section says so.
+- **SignalK source.** Optional. An engine, battery, alternator, solar
+  controller, tank, generator, charger or inverter owns the one thing the boat
+  reports for it, picked from the live instrument data your boat actually
+  publishes. The item's name is then the name tiles, alarms and Mate use for
+  it. A battery item also holds its bank's cell count and capacity. Leave it
+  empty for gear the boat does not report on. See
+  [Set up your vessel](../how-to/set-up-your-vessel.md).
+- **Hour meter.** Not entered. An engine or a generator reads its runtime
+  counter from its SignalK source, and the Maintenance section shows it read
+  only, or **Not reporting**. Service rules counted in hours need one; without
+  it they cannot count hours, and the Maintenance section says so.
 - **Aliases.** What the crew actually calls it. "Genset" finds the
   generator.
 - **Photos.** Any number, taken with the camera or picked from the library,

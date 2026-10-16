@@ -190,11 +190,11 @@ type sensorHealthEntry struct {
 // an error.
 type sensorNamer struct {
 	snapshot *signalKSnapshot
-	vessel   vesselSettings
+	vessel   vesselView
 	devices  map[string]sourceDevice
 }
 
-func newSensorNamer(snapshot *signalKSnapshot, vessel vesselSettings, devices map[string]sourceDevice) *sensorNamer {
+func newSensorNamer(snapshot *signalKSnapshot, vessel vesselView, devices map[string]sourceDevice) *sensorNamer {
 	return &sensorNamer{snapshot: snapshot, vessel: vessel, devices: devices}
 }
 
@@ -541,42 +541,5 @@ func disambiguateSensorEntries(entries []sensorHealthEntry) []sensorHealthEntry 
 		}
 		out[i] = e
 	}
-	return out
-}
-
-// normalizeVesselBatteries tidies the operator's battery names for saving:
-// trimmed, blanks and duplicates dropped, ordered by instance. A blank name
-// means "no operator name", so it is not stored.
-func normalizeVesselBatteries(in []vesselBatterySetting) []vesselBatterySetting {
-	seen := map[string]bool{}
-	out := []vesselBatterySetting{}
-	for _, b := range in {
-		instance := strings.TrimSpace(b.Instance)
-		name := strings.TrimSpace(b.Name)
-		if instance == "" || name == "" || seen[instance] {
-			continue
-		}
-		seen[instance] = true
-		out = append(out, vesselBatterySetting{Instance: instance, Name: name})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Instance < out[j].Instance })
-	return out
-}
-
-// normalizeVesselSolar tidies the operator's solar controller names for
-// saving, the same way normalizeVesselBatteries does for batteries.
-func normalizeVesselSolar(in []vesselSolarSetting) []vesselSolarSetting {
-	seen := map[string]bool{}
-	out := []vesselSolarSetting{}
-	for _, s := range in {
-		instance := strings.TrimSpace(s.Instance)
-		name := strings.TrimSpace(s.Name)
-		if instance == "" || name == "" || seen[instance] {
-			continue
-		}
-		seen[instance] = true
-		out = append(out, vesselSolarSetting{Instance: instance, Name: name})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Instance < out[j].Instance })
 	return out
 }

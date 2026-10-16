@@ -117,7 +117,7 @@ header. The **Export** button on each page makes both. See
 - Tracks imported from GPX files carry no readings, so their battery, wind,
   fuel and water figures show `--`. Speed is worked out from the positions.
 - Fuel, battery and water figures need the matching sensors on the boat's
-  network, and the house bank chosen under Vessel settings for the battery.
+  network, and the house bank chosen under Settings → SignalK → Roles for the battery.
 - Distances are in nautical miles and speeds in knots. Volumes follow the
   Units choice in Settings, General: litres for Metric, US gallons for
   Imperial.

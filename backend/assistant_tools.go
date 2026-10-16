@@ -269,7 +269,7 @@ func fuelAboardM3FromDerivedPaths() (float64, bool) {
 // distinct from not-configured.
 func configuredEngineInstances(settingsPath string) func() ([]string, error) {
 	return func() ([]string, error) {
-		vessel, err := loadVesselSettings(settingsPath)
+		vessel, err := loadVesselView(settingsPath)
 		if err != nil {
 			return nil, err
 		}

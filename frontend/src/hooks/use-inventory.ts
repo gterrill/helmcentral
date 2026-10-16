@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
+import type { SourceKind } from '@/lib/vessel-settings'
 
 // ADR 0123: the Inventory panel's data layer - the equipment registry and
 // its zones/bins. Reads go through useApiQuery and writes through apiRequest
@@ -145,7 +146,17 @@ export interface EquipmentItem {
   bin_code: string
   location_detail: string
   install_date: string
-  hour_meter_path: string
+  /** The one SignalK node this item owns, such as 'propulsion.port'; '' when it owns none. */
+  signalk_source: string
+  /** A battery item's bank figures; 0 means not entered (warn/high: use the profile's thresholds). */
+  capacity_ah: number
+  cells: number
+  warn_voltage: number
+  high_voltage: number
+  /** Derived from signalk_source on every read: 'engine', 'battery', ... or ''. */
+  source_kind: SourceKind | ''
+  /** The live hour meter derived from the source, such as 'propulsion.port.runTime'; '' when it has none. */
+  hour_meter_source: string
   profile_id: string
   aliases: string[]
   verified_aboard: boolean
@@ -188,7 +199,11 @@ export interface EquipmentInput {
   bin_id: string | null
   location_detail: string
   install_date: string
-  hour_meter_path: string
+  signalk_source: string
+  capacity_ah: number
+  cells: number
+  warn_voltage: number
+  high_voltage: number
   profile_id: string
   aliases: string[]
   verified_aboard: boolean
@@ -216,7 +231,11 @@ export const BLANK_DRAFT: EquipmentInput = {
   bin_id: null,
   location_detail: '',
   install_date: '',
-  hour_meter_path: '',
+  signalk_source: '',
+  capacity_ah: 0,
+  cells: 0,
+  warn_voltage: 0,
+  high_voltage: 0,
   profile_id: '',
   aliases: [],
   verified_aboard: false,
@@ -249,6 +268,7 @@ const DECKS = '/api/inventory/decks'
 // Owned by use-maintenance.ts. An equipment write can change its schedule
 // (profile, stored/deployed), so it invalidates the same prefix.
 const MAINTENANCE_RULES = '/api/inventory/maintenance/rules'
+const DISCOVERY = '/api/vessel/discovery'
 
 const NO_ITEMS: EquipmentItem[] = []
 const NO_DOCUMENTS: EquipmentDocument[] = []
@@ -274,6 +294,9 @@ function equipmentListsChanged() {
 function equipmentChanged() {
   invalidateQueries([EQUIPMENT])
   invalidateQueries([MAINTENANCE_RULES])
+  // An item owns a SignalK source, so Discovery's "assigned to" column and the
+  // roles' vessel checks read from it.
+  invalidateQueries([DISCOVERY])
 }
 
 // An item is gone. The equipment lists re-read (the promise settles when they
@@ -281,6 +304,7 @@ function equipmentChanged() {
 // maintenance rules re-read in the background, and the deleted item's own
 // rules are left alone: a read of them would only answer 404.
 function equipmentDeleted(id: string): Promise<void> {
+  void invalidateQueries([DISCOVERY])
   void invalidateQueries([MAINTENANCE_RULES], (key) => {
     const filter = key[1] as { equipment?: string } | undefined
     return filter?.equipment === id
@@ -459,7 +483,11 @@ export function toEquipmentInput(item: EquipmentItem): EquipmentInput {
     bin_id: item.bin_id,
     location_detail: item.location_detail,
     install_date: item.install_date,
-    hour_meter_path: item.hour_meter_path,
+    signalk_source: item.signalk_source,
+    capacity_ah: item.capacity_ah,
+    cells: item.cells,
+    warn_voltage: item.warn_voltage,
+    high_voltage: item.high_voltage,
     profile_id: item.profile_id,
     aliases: item.aliases,
     verified_aboard: item.verified_aboard,

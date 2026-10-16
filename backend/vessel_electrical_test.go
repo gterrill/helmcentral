@@ -40,37 +40,42 @@ const electricalInstancesTree = `{"electrical":{
 	"dc":{"24v":{"voltage":{"value":24.4}}}
 }}`
 
-func saveElectricalVessel(t *testing.T, v vesselSettings) vesselSettings {
+func saveElectricalVessel(t *testing.T, v vesselView) vesselView {
 	t.Helper()
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := saveVesselSettings(settingsPath, v); err != nil {
+	if err := saveVesselFixture(t, settingsPath, v); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := loadVesselSettings(settingsPath)
+	loaded, err := loadVesselView(settingsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return loaded
 }
 
-func TestValidateVesselElectrical(t *testing.T) {
+func TestValidateVesselRolesElectrical(t *testing.T) {
+	items := []sourceItem{
+		{ID: "g3", Name: "Genset", Source: "electrical.generator.3", Group: sourceGenerator, Instance: "3"},
+		{ID: "c276", Name: "Charger", Source: "electrical.chargers.276", Group: sourceCharger, Instance: "276"},
+		{ID: "i5", Name: "Inverter", Source: "electrical.inverters.5", Group: sourceInverter, Instance: "5"},
+		{ID: "b239", Name: "Aft house", Source: "electrical.batteries.239", Group: sourceBattery, Instance: "239"},
+	}
 	cases := []struct {
 		name    string
-		in      vesselElectricalSettings
+		in      vesselRoles
 		wantErr string
 	}{
-		{"all unset", vesselElectricalSettings{}, ""},
-		{"zero is an instance", vesselElectricalSettings{GeneratorInstance: "0"}, ""},
-		{"all set", vesselElectricalSettings{GeneratorInstance: "3", GeneratorACInstance: "5", ShoreChargerInstance: "276", InverterInstance: "5", VoltageReadoutBattery: "239"}, ""},
-		{"dotted generator", vesselElectricalSettings{GeneratorInstance: "0.state"}, "vessel.electrical.generator_instance"},
-		{"slash ac", vesselElectricalSettings{GeneratorACInstance: "a/b"}, "vessel.electrical.generator_ac_instance"},
-		{"space charger", vesselElectricalSettings{ShoreChargerInstance: "a b"}, "vessel.electrical.shore_charger_instance"},
-		{"dotted inverter", vesselElectricalSettings{InverterInstance: "5.x"}, "vessel.electrical.inverter_instance"},
-		{"dotted readout", vesselElectricalSettings{VoltageReadoutBattery: "../x"}, "vessel.electrical.voltage_readout_battery"},
+		{"all unset", vesselRoles{}, ""},
+		{"all set", vesselRoles{Generator: "g3", GeneratorACInstance: "5", ShoreCharger: "c276", Inverter: "i5", VoltageReadoutBattery: "b239"}, ""},
+		{"generator is a charger", vesselRoles{Generator: "c276"}, "roles.generator"},
+		{"charger is a generator", vesselRoles{ShoreCharger: "g3"}, "roles.shore_charger"},
+		{"inverter missing", vesselRoles{Inverter: "gone"}, "roles.inverter"},
+		{"readout is an inverter", vesselRoles{VoltageReadoutBattery: "i5"}, "roles.voltage_readout_battery"},
+		{"slash ac", vesselRoles{GeneratorACInstance: "a/b"}, "roles.generator_ac_instance"},
 	}
 	for _, c := range cases {
-		got := validateVesselElectrical(c.in)
+		got := validateVesselRoles(c.in, items, nil)
 		switch {
 		case c.wantErr == "" && got != nil:
 			t.Errorf("%s: unexpected error %+v", c.name, got)
@@ -80,21 +85,31 @@ func TestValidateVesselElectrical(t *testing.T) {
 	}
 }
 
-func TestUpdateSettingsSavesTrimsAndRejectsElectricalAndSolar(t *testing.T) {
+func TestUpdateSettingsSavesAndRejectsElectricalRoles(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
 	withTempAlarmRules(t)
+	store := vesselFixtureStore(t)
+	mk := func(name, source string) string {
+		item, err := store.CreateEquipment(equipmentItem{Name: name, SignalKSource: source})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return item.ID
+	}
+	gen := mk("Genset", "electrical.generator.3")
+	charger := mk("Shore charger", "electrical.chargers.276")
+	inverter := mk("Inverter", "electrical.inverters.5")
+	readout := mk("Aft house", "electrical.batteries.239")
+	solar := mk("Port array", "electrical.solar.289")
 
 	code, _ := postSettings(t, settingsPath, func(p *settingsPayload) {
-		p.Vessel = &vesselSettings{
-			Electrical: vesselElectricalSettings{GeneratorInstance: " 3 ", GeneratorACInstance: "5", ShoreChargerInstance: " 276", InverterInstance: "5 ", VoltageReadoutBattery: " 239 "},
-			Solar:      []vesselSolarSetting{{Instance: " 289 ", Name: " Port "}, {Instance: "288", Name: "Starboard"}, {Instance: "290", Name: "  "}, {Instance: "288", Name: "Dup"}},
-		}
+		p.Roles = &vesselRoles{Generator: gen, GeneratorACInstance: " 5 ", ShoreCharger: charger, Inverter: inverter, VoltageReadoutBattery: readout}
 	})
 	if code != http.StatusOK {
 		t.Fatalf("got %d", code)
 	}
-	saved, err := loadVesselSettings(settingsPath)
+	saved, err := loadVesselView(settingsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,24 +117,24 @@ func TestUpdateSettingsSavesTrimsAndRejectsElectricalAndSolar(t *testing.T) {
 	if saved.Electrical != want {
 		t.Fatalf("electrical: got %+v", saved.Electrical)
 	}
-	if len(saved.Solar) != 2 || saved.Solar[0] != (vesselSolarSetting{Instance: "288", Name: "Starboard"}) || saved.Solar[1] != (vesselSolarSetting{Instance: "289", Name: "Port"}) {
-		t.Fatalf("solar names: got %+v", saved.Solar)
+	if len(saved.Solar) != 1 || saved.Solar[0] != (vesselSolarSetting{Instance: "289", Name: "Port array"}) {
+		t.Fatalf("solar names come from the mapped item: got %+v", saved.Solar)
 	}
 
 	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
-		p.Vessel = &vesselSettings{Electrical: vesselElectricalSettings{GeneratorInstance: "0.state"}}
+		p.Roles = &vesselRoles{Generator: solar}
 	})
 	if code == http.StatusOK {
-		t.Fatalf("a dotted generator id must be rejected, body %v", body)
+		t.Fatalf("a solar controller cannot be the generator, body %v", body)
 	}
-	saved, _ = loadVesselSettings(settingsPath)
+	saved, _ = loadVesselView(settingsPath)
 	if saved.Electrical.GeneratorInstance != "3" {
 		t.Fatalf("a rejected save must not change the stored value, got %+v", saved.Electrical)
 	}
 }
 
 func TestElectricalStateReadsTheConfiguredInstances(t *testing.T) {
-	vessel := saveElectricalVessel(t, vesselSettings{
+	vessel := saveElectricalVessel(t, vesselView{
 		Electrical: vesselElectricalSettings{GeneratorACInstance: "5", ShoreChargerInstance: "5", InverterInstance: "5", VoltageReadoutBattery: "239"},
 		Batteries:  []vesselBatterySetting{{Instance: "239", Name: "Aft House"}},
 	})
@@ -144,7 +159,7 @@ func TestElectricalStateReadsTheConfiguredInstances(t *testing.T) {
 }
 
 func TestElectricalStateWithNothingSetReadsNoInstanceFigures(t *testing.T) {
-	vessel := saveElectricalVessel(t, vesselSettings{})
+	vessel := saveElectricalVessel(t, vesselView{})
 	seedSelfTree(t, electricalInstancesTree)
 
 	state, err := fetchSignalKElectricalState(vessel)
@@ -166,7 +181,7 @@ func TestElectricalStateWithNothingSetReadsNoInstanceFigures(t *testing.T) {
 }
 
 func TestElectricalStateInverterReadsOnlyTheChosenInstance(t *testing.T) {
-	vessel := saveElectricalVessel(t, vesselSettings{Electrical: vesselElectricalSettings{InverterInstance: "9"}})
+	vessel := saveElectricalVessel(t, vesselView{Electrical: vesselElectricalSettings{InverterInstance: "9"}})
 	seedSelfTree(t, electricalInstancesTree)
 	state, err := fetchSignalKElectricalState(vessel)
 	if err != nil {
@@ -179,7 +194,7 @@ func TestElectricalStateInverterReadsOnlyTheChosenInstance(t *testing.T) {
 
 func TestElectricalStateInverterAcceptsEachLeafVariant(t *testing.T) {
 	for _, leaf := range []string{`"ac":{"output":{"power":{"value":77}}}`, `"acout":{"power":{"value":77}}`, `"acOutputPower":{"value":77}`} {
-		vessel := saveElectricalVessel(t, vesselSettings{Electrical: vesselElectricalSettings{InverterInstance: "7"}})
+		vessel := saveElectricalVessel(t, vesselView{Electrical: vesselElectricalSettings{InverterInstance: "7"}})
 		seedSelfTree(t, `{"electrical":{"inverters":{"7":{`+leaf+`}}}}`)
 		state, err := fetchSignalKElectricalState(vessel)
 		if err != nil {
@@ -191,24 +206,34 @@ func TestElectricalStateInverterAcceptsEachLeafVariant(t *testing.T) {
 	}
 }
 
-func TestElectricalStateVoltageReadoutLabelFallsBackToBusNameThenId(t *testing.T) {
+func TestElectricalStateVoltageReadoutLabelIsTheItemsName(t *testing.T) {
 	seedSelfTree(t, electricalInstancesTree)
 
-	vessel := saveElectricalVessel(t, vesselSettings{Electrical: vesselElectricalSettings{VoltageReadoutBattery: "51"}})
+	vessel := saveElectricalVessel(t, vesselView{
+		Electrical: vesselElectricalSettings{VoltageReadoutBattery: "51"},
+		Batteries:  []vesselBatterySetting{{Instance: "51", Name: "Aft House"}},
+	})
 	state, _ := fetchSignalKElectricalState(vessel)
-	if state.VoltageReadoutV != 26.1 || state.VoltageReadoutLabel != "Bus name" {
-		t.Errorf("bus name: got %v %q", state.VoltageReadoutV, state.VoltageReadoutLabel)
+	if state.VoltageReadoutV != 26.1 || state.VoltageReadoutLabel != "Aft House" {
+		t.Errorf("item name: got %v %q", state.VoltageReadoutV, state.VoltageReadoutLabel)
 	}
+}
 
-	vessel = saveElectricalVessel(t, vesselSettings{Electrical: vesselElectricalSettings{VoltageReadoutBattery: "239"}})
-	state, _ = fetchSignalKElectricalState(vessel)
-	if state.VoltageReadoutLabel != "Battery 239" {
-		t.Errorf("id label: got %q", state.VoltageReadoutLabel)
+// The label falls back to the name the bus publishes, then "Battery <id>", for
+// a battery no item is mapped to.
+func TestVoltageReadoutLabelFallsBackToBusNameThenId(t *testing.T) {
+	seedSelfTree(t, electricalInstancesTree)
+	telemetry := globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC())
+	if got := voltageReadoutLabel(telemetry, vesselView{}, "51"); got != "Bus name" {
+		t.Errorf("bus name: got %q", got)
+	}
+	if got := voltageReadoutLabel(telemetry, vesselView{}, "239"); got != "Battery 239" {
+		t.Errorf("id label: got %q", got)
 	}
 }
 
 func TestElectricalStateVoltageReadoutChosenButSilentIsHiddenNotSubstituted(t *testing.T) {
-	vessel := saveElectricalVessel(t, vesselSettings{
+	vessel := saveElectricalVessel(t, vesselView{
 		Electrical: vesselElectricalSettings{VoltageReadoutBattery: "999"},
 		HouseBank:  &vesselHouseBankSetting{Path: "electrical.batteries.239"},
 	})
@@ -220,7 +245,7 @@ func TestElectricalStateVoltageReadoutChosenButSilentIsHiddenNotSubstituted(t *t
 }
 
 func TestElectricalPayloadCarriesTheVoltageReadoutAndNotTheOld24VField(t *testing.T) {
-	saveElectricalVessel(t, vesselSettings{
+	saveElectricalVessel(t, vesselView{
 		Electrical: vesselElectricalSettings{VoltageReadoutBattery: "239"},
 		Batteries:  []vesselBatterySetting{{Instance: "239", Name: "Aft House"}},
 	})
@@ -235,7 +260,7 @@ func TestElectricalPayloadCarriesTheVoltageReadoutAndNotTheOld24VField(t *testin
 }
 
 func TestElectricalPayloadLogsUnsetElectricalInstancesOnce(t *testing.T) {
-	saveElectricalVessel(t, vesselSettings{})
+	saveElectricalVessel(t, vesselView{})
 	resetVesselReadLog()
 	resetElectricalUnsetLog()
 	var buf bytes.Buffer
@@ -245,7 +270,7 @@ func TestElectricalPayloadLogsUnsetElectricalInstancesOnce(t *testing.T) {
 
 	buildElectricalStatePayload()
 	buildElectricalStatePayload()
-	if n := strings.Count(buf.String(), "not set in Vessel settings"); n < 1 {
+	if n := strings.Count(buf.String(), "not chosen under Settings > SignalK > Roles"); n < 1 {
 		t.Fatalf("expected a log line naming what is unset, got %q", buf.String())
 	}
 	first := strings.Count(buf.String(), "shore charger")
@@ -255,7 +280,7 @@ func TestElectricalPayloadLogsUnsetElectricalInstancesOnce(t *testing.T) {
 }
 
 func TestVesselStateReadsTheConfiguredGenerator(t *testing.T) {
-	saveElectricalVessel(t, vesselSettings{Electrical: vesselElectricalSettings{GeneratorInstance: "3"}})
+	saveElectricalVessel(t, vesselView{Electrical: vesselElectricalSettings{GeneratorInstance: "3"}})
 	seedSelfTree(t, electricalInstancesTree)
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
@@ -268,7 +293,7 @@ func TestVesselStateReadsTheConfiguredGenerator(t *testing.T) {
 }
 
 func TestVesselStateWithNoGeneratorSetHasNoGeneratorFields(t *testing.T) {
-	saveElectricalVessel(t, vesselSettings{})
+	saveElectricalVessel(t, vesselView{})
 	seedSelfTree(t, electricalInstancesTree)
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
@@ -280,20 +305,20 @@ func TestVesselStateWithNoGeneratorSetHasNoGeneratorFields(t *testing.T) {
 }
 
 func TestGeneratorBasePath(t *testing.T) {
-	got, problem := generatorBasePath(vesselSettings{Electrical: vesselElectricalSettings{GeneratorInstance: "3"}})
+	got, problem := generatorBasePath(vesselView{Electrical: vesselElectricalSettings{GeneratorInstance: "3"}})
 	if problem != "" || got != "/signalk/v1/api/vessels/self/electrical/generator/3" {
 		t.Fatalf("got %q %q", got, problem)
 	}
-	if _, problem := generatorBasePath(vesselSettings{}); !strings.Contains(problem, "not set up in Vessel settings") {
+	if _, problem := generatorBasePath(vesselView{}); !strings.Contains(problem, "not chosen under Settings > SignalK > Roles") {
 		t.Fatalf("unset: got %q", problem)
 	}
-	if _, problem := generatorBasePath(vesselSettings{Electrical: vesselElectricalSettings{GeneratorInstance: "0/../../x"}}); problem == "" {
+	if _, problem := generatorBasePath(vesselView{Electrical: vesselElectricalSettings{GeneratorInstance: "0/../../x"}}); problem == "" {
 		t.Fatal("an id with path characters must be refused before it reaches a URL")
 	}
 }
 
 func TestGeneratorStartAndStopAre409WhenNoGeneratorIsSet(t *testing.T) {
-	saveElectricalVessel(t, vesselSettings{})
+	saveElectricalVessel(t, vesselView{})
 	for name, handler := range map[string]echo.HandlerFunc{"start": postGeneratorStartHandler, "stop": postGeneratorStopHandler} {
 		rec := httptest.NewRecorder()
 		c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/api/generator/"+name, strings.NewReader(`{}`)), rec)
@@ -305,14 +330,14 @@ func TestGeneratorStartAndStopAre409WhenNoGeneratorIsSet(t *testing.T) {
 		}
 		var body map[string]string
 		_ = json.Unmarshal(rec.Body.Bytes(), &body)
-		if !strings.Contains(body["error"], "not set up in Vessel settings") {
+		if !strings.Contains(body["error"], "not chosen under Settings > SignalK > Roles") {
 			t.Fatalf("%s: error %q", name, body["error"])
 		}
 	}
 }
 
 func TestSolarControllersAreNamedByIdFromVesselSettings(t *testing.T) {
-	vessel := vesselSettings{Solar: []vesselSolarSetting{{Instance: "289", Name: "Starboard arch"}}}
+	vessel := vesselView{Solar: []vesselSolarSetting{{Instance: "289", Name: "Starboard arch"}}}
 	seedSelfTree(t, `{"electrical":{"solar":{
 		"288":{"panelPower":{"value":100}},
 		"289":{"panelPower":{"value":200}},
@@ -334,7 +359,7 @@ func TestSolarControllersAreNamedByIdFromVesselSettings(t *testing.T) {
 func TestSolarPayloadLogsAnUnreadableVesselBlock(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles: [not, a, block]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	resetVesselReadLog()
@@ -344,7 +369,7 @@ func TestSolarPayloadLogsAnUnreadableVesselBlock(t *testing.T) {
 	seedSelfTree(t, `{"electrical":{"solar":{"288":{"panelPower":{"value":100}}}}}`)
 
 	payload := buildSolarStatePayload()
-	if !strings.Contains(buf.String(), "vessel settings unreadable") {
+	if !strings.Contains(buf.String(), "vessel unreadable") {
 		t.Fatalf("expected a log line, got %q", buf.String())
 	}
 	controllers, _ := payload["controllers"].([]map[string]any)
@@ -382,78 +407,97 @@ func TestVesselCandidatesListElectricalInstancesWithFreshReadings(t *testing.T) 
 	snapshot.setSelfContext("vessels.self")
 	withGlobalSnapshot(t, snapshot)
 
-	got := vesselCandidates(globalSignalKSnapshot, vesselSettings{})
+	got := vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil)
 
-	if len(got.Generators) != 3 || got.Generators[0].Instance != "0" || got.Generators[1].Instance != "7" || got.Generators[2].Instance != "12" {
-		t.Fatalf("generators: %+v", got.Generators)
+	metric := func(r discoveryRow, label string) string {
+		for _, m := range r.Metrics {
+			if m.Label == label {
+				return m.Text
+			}
+		}
+		return ""
 	}
-	if got.Generators[2].State == nil || *got.Generators[2].State != "running" {
-		t.Errorf("generator 12 state: %v", got.Generators[2].State)
+	ids := func(rows []discoveryRow) string {
+		var out []string
+		for _, r := range rows {
+			out = append(out, r.Instance)
+		}
+		return strings.Join(out, ",")
 	}
-	if got.Generators[1].State != nil {
-		t.Errorf("a stale generator state must not read as live, got %v", *got.Generators[1].State)
+
+	generators := discoveryGroupRows(got, "generator")
+	if ids(generators) != "0,7,12" {
+		t.Fatalf("generators: %+v", generators)
 	}
-	if len(got.AC) != 2 || got.AC[0].Instance != "5" || got.AC[1].Instance != "40" {
-		t.Fatalf("ac: %+v", got.AC)
+	if metric(generators[2], "State") != "running" {
+		t.Errorf("generator 12 state: %+v", generators[2].Metrics)
 	}
-	if got.AC[0].RealPower == nil || *got.AC[0].RealPower != 1250 || got.AC[1].RealPower == nil || *got.AC[1].RealPower != 15 {
-		t.Errorf("ac power: %+v", got.AC)
+	if metric(generators[1], "State") != "" {
+		t.Errorf("a stale generator state must not read as live, got %q", metric(generators[1], "State"))
 	}
-	if len(got.Chargers) != 2 || got.Chargers[0].Instance != "0" || got.Chargers[1].Instance != "276" {
-		t.Fatalf("chargers: %+v", got.Chargers)
+	ac := discoveryGroupRows(got, "ac")
+	if ids(ac) != "5,40" {
+		t.Fatalf("ac: %+v", ac)
 	}
-	if got.Chargers[1].Current == nil || *got.Chargers[1].Current != 20 || got.Chargers[1].ACInCurrent == nil || *got.Chargers[1].ACInCurrent != 6 {
-		t.Errorf("charger 276: %+v", got.Chargers[1])
+	if metric(ac[0], "Real power") != "1250 W" || metric(ac[1], "Real power") != "15 W" {
+		t.Errorf("ac power: %+v", ac)
 	}
-	if got.Chargers[0].ACInCurrent != nil {
-		t.Errorf("charger 0 has no AC input reading, got %v", *got.Chargers[0].ACInCurrent)
+	chargers := discoveryGroupRows(got, "charger")
+	if ids(chargers) != "0,276" {
+		t.Fatalf("chargers: %+v", chargers)
 	}
-	if len(got.Inverters) != 2 || got.Inverters[0].Instance != "5" || got.Inverters[1].Instance != "276" {
-		t.Fatalf("inverters: %+v", got.Inverters)
+	if metric(chargers[1], "Output") != "20.0 A" || metric(chargers[1], "AC in") != "6.0 A" {
+		t.Errorf("charger 276: %+v", chargers[1])
 	}
-	if got.Inverters[0].ACOut == nil || *got.Inverters[0].ACOut != 420 || got.Inverters[1].ACOut == nil || *got.Inverters[1].ACOut != 5 {
-		t.Errorf("inverter output: %+v", got.Inverters)
+	if metric(chargers[0], "AC in") != "" {
+		t.Errorf("charger 0 has no AC input reading, got %q", metric(chargers[0], "AC in"))
 	}
-	if len(got.Solar) != 3 || got.Solar[0].Instance != "288" || got.Solar[1].Instance != "289" || got.Solar[2].Instance != "291" {
-		t.Fatalf("solar: %+v", got.Solar)
+	inverters := discoveryGroupRows(got, "inverter")
+	if ids(inverters) != "5,276" {
+		t.Fatalf("inverters: %+v", inverters)
 	}
-	if got.Solar[1].PanelPower == nil || *got.Solar[1].PanelPower != 210 {
-		t.Errorf("solar 289: %+v", got.Solar[1])
+	if metric(inverters[0], "AC out") != "420 W" || metric(inverters[1], "AC out") != "5 W" {
+		t.Errorf("inverter output: %+v", inverters)
 	}
-	if got.Solar[2].PanelPower != nil {
-		t.Errorf("a stale solar reading must not read as live, got %v", *got.Solar[2].PanelPower)
+	solar := discoveryGroupRows(got, "solar")
+	if ids(solar) != "288,289,291" {
+		t.Fatalf("solar: %+v", solar)
+	}
+	if metric(solar[1], "Panel power") != "210 W" {
+		t.Errorf("solar 289: %+v", solar[1])
+	}
+	if metric(solar[2], "Panel power") != "" {
+		t.Errorf("a stale solar reading must not read as live, got %q", metric(solar[2], "Panel power"))
 	}
 }
 
-func TestVesselCandidatesElectricalListsAreEmptyArraysNotNull(t *testing.T) {
+func TestVesselDiscoveryListsAreEmptyArraysNotNull(t *testing.T) {
 	seedSelfTree(t, `{}`)
-	body, err := json.Marshal(vesselCandidates(globalSignalKSnapshot, vesselSettings{}))
+	body, err := json.Marshal(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"generators", "ac", "chargers", "inverters", "solar"} {
-		if !strings.Contains(string(body), `"`+key+`":[]`) {
-			t.Errorf("%s must serialise as [], got %s", key, body)
-		}
+	if strings.Contains(string(body), `"rows":null`) || strings.Contains(string(body), `"metrics":null`) {
+		t.Errorf("rows and metrics must serialise as [], got %s", body)
 	}
 }
 
 func TestElectricalPayloadSaysWhetherAGeneratorIsSetUp(t *testing.T) {
 	seedSelfTree(t, electricalInstancesTree)
 
-	saveElectricalVessel(t, vesselSettings{})
+	saveElectricalVessel(t, vesselView{})
 	if got := buildElectricalStatePayload()["generator_configured"]; got != false {
 		t.Fatalf("unset: got %v", got)
 	}
 
-	saveElectricalVessel(t, vesselSettings{Electrical: vesselElectricalSettings{GeneratorInstance: "0"}})
+	saveElectricalVessel(t, vesselView{Electrical: vesselElectricalSettings{GeneratorInstance: "0"}})
 	if got := buildElectricalStatePayload()["generator_configured"]; got != true {
 		t.Fatalf("instance 0 is a real choice: got %v", got)
 	}
 }
 
 func TestElectricalPayloadGeneratorConfiguredDoesNotDependOnTheFeed(t *testing.T) {
-	saveElectricalVessel(t, vesselSettings{Electrical: vesselElectricalSettings{GeneratorInstance: "3"}})
+	saveElectricalVessel(t, vesselView{Electrical: vesselElectricalSettings{GeneratorInstance: "3"}})
 	withGlobalSnapshot(t, newSignalKSnapshot()) // SignalK has dropped: no self data
 	if got := buildElectricalStatePayload()["generator_configured"]; got != true {
 		t.Fatalf("a dropped feed must not read as not set up, got %v", got)
@@ -463,7 +507,7 @@ func TestElectricalPayloadGeneratorConfiguredDoesNotDependOnTheFeed(t *testing.T
 func TestElectricalPayloadGeneratorConfiguredIsUnknownWhenSettingsAreUnreadable(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
 	t.Setenv("SETTINGS_FILE", settingsPath)
-	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles: [not, a, block]\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	resetVesselReadLog()
@@ -481,33 +525,38 @@ func TestElectricalPayloadGeneratorConfiguredIsUnknownWhenSettingsAreUnreadable(
 	}
 }
 
-func TestVesselCandidatesOfferOnlyACNodesThatCarryRealPower(t *testing.T) {
+func TestVesselDiscoveryOffersOnlyACNodesThatCarryRealPower(t *testing.T) {
 	seedSelfTree(t, `{"electrical":{"ac":{
 		"5":{"phase":{"A":{"realPower":{"value":10}}}},
 		"6":{"phaseA":{"realPower":{"value":null}}},
 		"7":{"realPower":{"value":3}},
 		"loads":{"total":{"power":{"value":99}}},
 		"9":{"phase":{"A":{"current":{"value":2}}}}}}}`)
-	got := vesselCandidates(globalSignalKSnapshot, vesselSettings{})
+	got := vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil)
 	var ids []string
-	for _, a := range got.AC {
+	for _, a := range discoveryGroupRows(got, "ac") {
 		ids = append(ids, a.Instance)
 	}
 	if strings.Join(ids, ",") != "5,6,7" {
 		t.Fatalf("got %v, want 5,6,7", ids)
 	}
+	for _, g := range got.Groups {
+		if g.Kind == "ac" && g.Mappable {
+			t.Fatalf("an AC input is not something an item can own")
+		}
+	}
 }
 
-func TestLoadVesselSettingsTrimsElectricalIds(t *testing.T) {
+func TestLoadVesselRolesTrimsTheACInstance(t *testing.T) {
 	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
-	if err := os.WriteFile(settingsPath, []byte("vessel:\n  electrical:\n    generator_instance: ' 3 '\n    voltage_readout_battery: ' 239'\n"), 0o600); err != nil {
+	if err := os.WriteFile(settingsPath, []byte("roles:\n  generator_ac_instance: ' 5 '\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	v, err := loadVesselSettings(settingsPath)
+	v, err := loadVesselView(settingsPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Electrical.GeneratorInstance != "3" || v.Electrical.VoltageReadoutBattery != "239" {
+	if v.Electrical.GeneratorACInstance != "5" {
 		t.Fatalf("got %+v", v.Electrical)
 	}
 }
