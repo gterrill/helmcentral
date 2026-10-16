@@ -2,7 +2,7 @@ module helmcentral
 
 go 1.26.0
 
-toolchain go1.26.6
+toolchain go1.26.9
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
@@ -17,7 +17,7 @@ require (
 	github.com/tetratelabs/wazero v1.9.0
 	github.com/xeipuuv/gojsonschema v1.2.0
 	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.58.0
+	golang.org/x/net v0.60.0
 	golang.org/x/sync v0.23.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.34.4
