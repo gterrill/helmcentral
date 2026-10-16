@@ -101,4 +101,13 @@ describe('ConfirmDelete', () => {
     )
     expect(screen.getByText('Also delete 2 photos only this item uses')).toBeInTheDocument()
   })
+
+  it('keeps the confirm button off while the caller says something must be known first', () => {
+    const onConfirm = vi.fn()
+    render(<ConfirmDelete open onOpenChange={vi.fn()} title="Delete?" onConfirm={onConfirm} confirmDisabled />)
+    const button = screen.getByRole('button', { name: 'Delete' })
+    expect(button).toBeDisabled()
+    fireEvent.click(button)
+    expect(onConfirm).not.toHaveBeenCalled()
+  })
 })

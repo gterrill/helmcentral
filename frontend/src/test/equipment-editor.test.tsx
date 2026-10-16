@@ -6,6 +6,7 @@ import type { EquipmentItem, EquipmentDocument, InventoryZone } from '@/hooks/us
 import { ITEM_RULE_PROVENANCE } from './maintenance-fixtures'
 import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { downloadDocument } from '@/lib/document-download'
+import type { EquipmentDependants } from '@/lib/equipment-dependants'
 import { testRouter } from './helpers/router'
 import { invalidateQueries, setQueryData } from '@/lib/api-query'
 
@@ -130,6 +131,9 @@ const discoveryBody = {
 }
 
 let currentItem: EquipmentItem
+/** What GET .../dependants answers: by default nothing uses the item. */
+const NO_DEPENDANTS: EquipmentDependants = { item_id: 'eq-1', tiles: [], roles: [], alarm_rules: [], features: [] }
+let dependantsBody: EquipmentDependants
 let currentDocuments: EquipmentDocument[]
 // When set, every item GET fails with this server message.
 let failItemGetsWith: string | null
@@ -187,6 +191,9 @@ function stubFetch() {
       ]
       currentItem = { ...currentItem, photo_ids: currentItem.photo_ids.filter((id) => !body.remove.includes(id)) }
       return Promise.resolve({ ok: true, status: 204, json: async () => ({}) })
+    }
+    if (u.endsWith('/dependants')) {
+      return Promise.resolve({ ok: true, json: async () => dependantsBody })
     }
     // Generic, not just eq-1: once a draft's create POST assigns 'eq-new'
     // (below), the useEquipmentItem hook immediately GETs that new id -
@@ -315,6 +322,7 @@ beforeEach(() => {
   failingPhotoUploadNames = new Set()
   deletedWithPhotos = false
   profilePreviewBody = { kept: [], leaving: [], new: [] }
+  dependantsBody = NO_DEPENDANTS
   stubFetch()
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-url')
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
@@ -1114,6 +1122,7 @@ describe('EquipmentEditor', () => {
     expect(screen.getByText('Delete "Generator"?')).toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === 'DELETE')).toBe(false)
 
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => expect(onDeleted).toHaveBeenCalled())
@@ -1139,6 +1148,7 @@ describe('EquipmentEditor', () => {
         return Promise.resolve({ ok: true, json: async () => ({ item: currentItem, documents: currentDocuments }) })
       }
       if (u.includes('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+      if (u.endsWith('/dependants')) return Promise.resolve({ ok: true, json: async () => NO_DEPENDANTS })
       if (u.includes('/api/equipment-profiles')) return Promise.resolve({ ok: true, json: async () => ({ profiles, problems: [] }) })
       if (u.includes('/api/signalk/paths')) return Promise.resolve({ ok: true, json: async () => ({ paths: [] }) })
       if (u.includes('/maintenance/meter-resets')) return Promise.resolve({ ok: true, json: async () => ({ resets: [] }) })
@@ -1158,6 +1168,161 @@ describe('EquipmentEditor', () => {
 
     await openDeleteDialog()
     expect(screen.getByText("This removes the equipment record. It can't be undone.")).toBeInTheDocument()
+  })
+
+  // ── dependants: what uses an item, before its source goes or it is deleted ──
+
+  const USED: EquipmentDependants = {
+    item_id: 'eq-1',
+    tiles: [
+      { page_id: 'p1', page_name: 'Underway', tile_id: 'cluster:a', title: 'Port' },
+      { page_id: 'p2', page_name: 'Wall', tile_id: 'gauge-group:b', title: 'Engines: Port' },
+    ],
+    roles: [{ role: 'house_bank', label: 'House bank' }],
+    alarm_rules: [
+      { id: 'r1', label: 'House low', kind: 'state_of_charge' },
+      { id: 'r2', label: 'House critical', kind: 'state_of_charge' },
+      { id: 'r3', label: 'House full', kind: 'state_of_charge' },
+    ],
+    features: ['Anchor auto-raise', 'Engine checks'],
+  }
+
+  const putCall = () => fetchMock.mock.calls.find(([url, init]) =>
+    String(url).endsWith('/api/inventory/equipment/eq-1') && (init as RequestInit | undefined)?.method === 'PUT')
+
+  it('lists what uses the item in the delete confirmation', async () => {
+    dependantsBody = USED
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    await openDeleteDialog()
+    const notice = await screen.findByTestId('equipment-dependants')
+    expect(notice).toHaveTextContent(
+      'Used by 2 tiles (Underway: Port, Wall: Engines: Port), anchor auto-raise, engine checks, the House bank role, 3 state-of-charge alarm rules.',
+    )
+  })
+
+  it('keeps Delete off until what uses the item is known, and when it cannot be read', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const base = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/dependants')) {
+        await gate
+        return { ok: false, status: 500, json: async () => ({ error: 'store down' }) }
+      }
+      return base(url, init)
+    })
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    await openDeleteDialog()
+    expect(screen.getByText('Checking what uses this item…')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
+    release()
+    expect(await screen.findByText(/Could not check what uses this item: store down/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
+  })
+
+  it('asks nothing extra to delete an item that nothing uses', async () => {
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    await openDeleteDialog()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).not.toBeDisabled())
+    expect(screen.queryByTestId('equipment-dependants')).not.toBeInTheDocument()
+  })
+
+  it('confirms before clearing the source of an item that something uses, and saves only once confirmed', async () => {
+    currentItem = makeItem({ signalk_source: 'electrical.generator.0', source_kind: 'generator', hour_meter_source: 'electrical.generator.0.runtime' })
+    dependantsBody = USED
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('Clear the source of "Generator"?')).toBeInTheDocument()
+    expect(screen.getByTestId('equipment-dependants')).toHaveTextContent('Used by 2 tiles (Underway: Port, Wall: Engines: Port)')
+    expect(screen.getByTestId('equipment-dependants')).toHaveTextContent('Tiles stay and show Not mapped')
+    expect(putCall()).toBeUndefined()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear source' }))
+    await waitFor(() => expect(putCall()).toBeDefined())
+    expect(JSON.parse(String((putCall()?.[1] as RequestInit).body)).signalk_source).toBe('')
+  })
+
+  it('saves nothing when the operator backs out of clearing the source', async () => {
+    currentItem = makeItem({ signalk_source: 'electrical.generator.0', source_kind: 'generator', hour_meter_source: 'electrical.generator.0.runtime' })
+    dependantsBody = USED
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await screen.findByText('Clear the source of "Generator"?')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByText('Clear the source of "Generator"?')).not.toBeInTheDocument())
+    expect(putCall()).toBeUndefined()
+    // The draft is still there to save or discard.
+    expect((screen.getByLabelText('Source') as HTMLSelectElement).value).toBe('')
+  })
+
+  it('confirms moving the source of an item that something uses', async () => {
+    currentItem = makeItem({ signalk_source: 'electrical.generator.7', source_kind: 'generator', hour_meter_source: 'electrical.generator.7.runtime' })
+    dependantsBody = USED
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+
+    const picker = await screen.findByLabelText('Source')
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'electrical.generator.0 · stopped' })).toBeInTheDocument())
+    fireEvent.change(picker, { target: { value: 'electrical.generator.0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText('Change the source of "Generator"?')).toBeInTheDocument()
+    expect(screen.getByTestId('equipment-dependants')).toHaveTextContent('follows the item to the new source')
+    fireEvent.click(screen.getByRole('button', { name: 'Change source' }))
+    await waitFor(() => expect(putCall()).toBeDefined())
+  })
+
+  it('saves a source change without asking when nothing uses the item, and never asks for a first mapping', async () => {
+    currentItem = makeItem({ signalk_source: 'electrical.generator.7', source_kind: 'generator', hour_meter_source: 'electrical.generator.7.runtime' })
+    const { unmount } = render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(putCall()).toBeDefined())
+    expect(screen.queryByText(/Clear the source of/)).not.toBeInTheDocument()
+    unmount()
+
+    // Mapping an item that has no source yet takes nothing from anything.
+    fetchMock.mockClear()
+    currentItem = makeItem()
+    dependantsBody = USED
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    const picker = await screen.findByLabelText('Source')
+    await waitFor(() => expect(within(picker).getByRole('option', { name: 'electrical.generator.0 · stopped' })).toBeInTheDocument())
+    fireEvent.change(picker, { target: { value: 'electrical.generator.0' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(putCall()).toBeDefined())
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/dependants'))).toBe(false)
+  })
+
+  it('does not save a source change when what uses the item cannot be checked', async () => {
+    currentItem = makeItem({ signalk_source: 'electrical.generator.7', source_kind: 'generator', hour_meter_source: 'electrical.generator.7.runtime' })
+    const base = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<unknown>
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => (
+      String(url).endsWith('/dependants') ? { ok: false, status: 500, json: async () => ({ error: 'store down' }) } : base(url, init)
+    ))
+    render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+    await waitForLoaded()
+    fireEvent.change(await screen.findByLabelText('Source'), { target: { value: '' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+    expect(await screen.findByText(/store down/)).toBeInTheDocument()
+    expect(putCall()).toBeUndefined()
   })
 
   // ── photos (ADR 0127) ────────────────────────────────────────────────
@@ -1686,6 +1851,7 @@ describe('EquipmentEditor', () => {
     const hiddenInput = checkboxSpan.parentElement!.querySelector('input[type="checkbox"]') as HTMLInputElement
     fireEvent.click(hiddenInput)
     expect(hiddenInput).toBeChecked()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => expect(onDeleted).toHaveBeenCalled())
@@ -1699,6 +1865,7 @@ describe('EquipmentEditor', () => {
     await waitForLoaded()
 
     await openDeleteDialog()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).not.toBeDisabled())
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
 
     await waitFor(() => expect(onDeleted).toHaveBeenCalled())

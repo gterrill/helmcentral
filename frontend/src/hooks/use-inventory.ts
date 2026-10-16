@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
+import type { EquipmentDependants } from '@/lib/equipment-dependants'
 import type { SourceKind } from '@/lib/vessel-settings'
 
 // ADR 0123: the Inventory panel's data layer - the equipment registry and
@@ -461,6 +462,13 @@ export async function fetchEquipment(id: string): Promise<EquipmentItem> {
     if (err instanceof ApiError && err.status === 404) throw new EquipmentNotFoundError(err.message)
     throw err
   }
+}
+
+/** GET /api/inventory/equipment/:id/dependants - the tiles, roles, alarm rules
+ * and features that read this item, asked for just before the operator takes
+ * its source away or deletes it. Never cached: the answer is only useful live. */
+export function fetchEquipmentDependants(id: string): Promise<EquipmentDependants> {
+  return apiRequest<EquipmentDependants>(`${itemPath(id)}/dependants`)
 }
 
 /** Strips an equipmentItem down to its own editable EquipmentInput shape -

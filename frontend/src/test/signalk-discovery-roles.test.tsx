@@ -187,6 +187,16 @@ describe('Settings -> SignalK: Discovery', () => {
       expect(put).toBeDefined()
       expect(JSON.parse(String((put![1] as RequestInit).body))).toMatchObject({ name: 'Starboard engine', notes: 'serviced in March', signalk_source: 'propulsion.starboard' })
     })
+    // Discovery offers only items with no source, so assigning takes a source
+    // from nothing: no dependants are looked up and nothing is confirmed.
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/dependants'))).toBe(false)
+  })
+
+  it('has no way to take a source off the item that owns it', async () => {
+    render(<SignalKDiscoverySection />)
+    await screen.findByText('propulsion.port')
+    const port = screen.getByText('propulsion.port').closest('div.grid') as HTMLElement
+    expect(within(port).queryByRole('button', { name: /assign|unassign|clear|remove/i })).toBeNull()
   })
 
   it('creates an item from just a name and the kind, and maps it', async () => {
