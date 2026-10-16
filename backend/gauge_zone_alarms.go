@@ -26,15 +26,16 @@ const zoneDerivedAlarmRuleIDPrefix = "zone:"
 // come first. 18 is where the old telltales began (2 + 4 corners * 4 rows, before
 // a corner held one row), a position that shipped; a telltale moved onto an arc
 // keeps its own old index (dashboardGaugeConfig.ZoneIndex), so no issued id
-// changes. The footer and the right arc are new in this release, so they follow
-// without gaps: footer slot i is clusterFooterZoneIndexBase+i, in the order the
-// frontend's CLUSTER_FOOTER_SLOTS lists (a test pins the two together).
+// changes. The footer and both arcs' defaults are new in this release, so they
+// follow without gaps and never share a telltale's: footer slot i is
+// clusterFooterZoneIndexBase+i, in the order the frontend's
+// CLUSTER_FOOTER_SLOTS lists (a test pins the two together).
 const (
 	clusterTelltaleZoneIndexBase = 18
-	clusterLeftArcZoneIndex      = clusterTelltaleZoneIndexBase
 	clusterFooterZoneIndexBase   = 24
 	clusterFooterSlotCount       = 8
 	clusterRightArcZoneIndex     = clusterFooterZoneIndexBase + clusterFooterSlotCount
+	clusterLeftArcZoneIndex      = clusterRightArcZoneIndex + 1
 )
 
 const (
