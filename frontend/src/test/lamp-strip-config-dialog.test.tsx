@@ -226,4 +226,15 @@ describe('LampStripConfigDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(onSave.mock.calls[0][0].lamps[0]).toMatchObject({ equipmentId: 'eng-s', suffix: 'revolutions' })
   })
+
+  test('the lamp reading is picked from the usual signal and what the boat reports under the source, never typed', () => {
+    items = enginesAndGenerator
+    mockedUseSignalKPaths.mockReturnValue({
+      paths: [{ path: 'propulsion.port.revolutions', value: 1 }, { path: 'propulsion.port.coolantTemperature', value: 1 }, { path: 'propulsion.starboard.state', value: 1 }],
+    })
+    render(<LampStripConfigDialog widget={{ id: 'lamps:m1x8abcd', lamps: { title: 'S', lamps: [{ path: '', equipmentId: 'eng-p', suffix: 'revolutions', label: 'Port' }], showCheck: true } }} onCancel={vi.fn()} onSave={vi.fn()} />)
+    const reading = screen.getByLabelText('Reading') as HTMLSelectElement
+    expect(reading.tagName).toBe('SELECT')
+    expect(Array.from(reading.querySelectorAll('option')).map((o) => o.value)).toEqual(['', 'coolantTemperature', 'revolutions'])
+  })
 })

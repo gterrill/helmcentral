@@ -63,7 +63,7 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
 
   const kind = (config.equipmentKind ?? '') as SourceKind | ''
   const item = findItem(ctx, config.equipmentId)
-  const zoneEditing = useSlotZoneEditing(ctx, item, config.gauges)
+  const zoneEditing = useSlotZoneEditing(ctx, item, config.gauges, paths)
   const { profile } = zoneEditing
 
   const setKind = (next: SourceKind | '') =>

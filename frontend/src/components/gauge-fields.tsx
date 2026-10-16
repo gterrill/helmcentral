@@ -55,6 +55,8 @@ export interface GaugeEquipmentMode {
   /** The profile's bands for this reading; undefined when the profile has no gauge for it. */
   zones?: GaugeZone[]
   onZonesChange: (zones: GaugeZone[]) => void
+  /** Readings the boat reports under the item's source that the profile has no gauge for. */
+  reportedSuffixes?: readonly string[]
   /** Says what editing the zones touches. */
   zoneNotice: string
   /** The slot still holds zones of its own, with none on the profile gauge to hold them, so its own unit applies. */
@@ -164,19 +166,35 @@ export function GaugeFields({ value, onChange, paths, idPrefix, equipment }: Gau
       {equipment ? (
         <Field>
           <FieldLabel htmlFor={`${idPrefix}-suffix`}>Reading</FieldLabel>
-          <Input
+          <select
             id={`${idPrefix}-suffix`}
-            list={`${idPrefix}-suffix-options`}
+            className={SELECT_CLASS}
             value={value.suffix ?? ''}
             onChange={(e) => chooseSuffix(e.target.value)}
-            placeholder="oilPressure"
-          />
-          <datalist id={`${idPrefix}-suffix-options`}>
-            {equipment.profileGauges.map((g) => <option key={g.path_suffix} value={g.path_suffix}>{g.label}</option>)}
-          </datalist>
+          >
+            <option value="">Pick a reading…</option>
+            {equipment.profileGauges.length > 0 && (
+              <optgroup label="From the profile">
+                {equipment.profileGauges.map((g) => (
+                  <option key={g.path_suffix} value={g.path_suffix}>{g.label} ({g.path_suffix})</option>
+                ))}
+              </optgroup>
+            )}
+            {(equipment.reportedSuffixes ?? []).length > 0 && (
+              <optgroup label="Reported by the boat">
+                {(equipment.reportedSuffixes ?? []).map((suffix) => <option key={suffix} value={suffix}>{suffix}</option>)}
+              </optgroup>
+            )}
+            {(value.suffix ?? '') !== ''
+              && !equipment.profileGauges.some((g) => g.path_suffix === value.suffix)
+              && !(equipment.reportedSuffixes ?? []).includes(value.suffix ?? '') && (
+              <option value={value.suffix}>{value.suffix} (not reported now)</option>
+            )}
+          </select>
           <FieldDescription>
-            The reading under the equipment's source. Pick one from its profile to fill in the scale and
-            units, or type another the equipment reports.
+            {equipment.profileGauges.length === 0 && (equipment.reportedSuffixes ?? []).length === 0
+              ? "Nothing to pick yet: the equipment has no profile and the boat reports nothing under its source."
+              : "Pick a reading from the equipment's profile, or one the boat reports under its source. A reading from the profile fills in the scale and units."}
           </FieldDescription>
         </Field>
       ) : (

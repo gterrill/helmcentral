@@ -277,6 +277,28 @@ describe('GaugeGroupConfigDialog', () => {
       expect(saved.equipmentId).toBe('eng-port')
     })
 
+    test('the Reading is picked, never typed: the profile gauges plus what the boat reports under the source', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => Promise.resolve({
+        ok: true,
+        json: async () => (String(url).includes('signalk') || String(url).includes('paths')
+          ? { paths: [
+            { path: 'propulsion.port.revolutions' }, { path: 'propulsion.port.exhaustTemperature' },
+            { path: 'propulsion.starboard.revolutions' }, { path: 'environment.depth.belowTransducer' },
+          ] }
+          : {}),
+      })))
+      render(<GaugeGroupConfigDialog widget={widget(equipmentGroup)} onCancel={vi.fn()} onSave={vi.fn()} />)
+      const reading = screen.getByLabelText('Reading') as HTMLSelectElement
+      expect(reading.tagName).toBe('SELECT')
+      await vi.waitFor(() => {
+        const options = Array.from(reading.querySelectorAll('option')).map((o) => o.value)
+        // The profile's two gauges, then only what the boat reports under propulsion.port.
+        expect(options).toEqual(['', 'oilPressure', 'revolutions', 'exhaustTemperature'])
+      })
+      fireEvent.change(reading, { target: { value: 'revolutions' } })
+      expect((screen.getByLabelText('Unit') as HTMLSelectElement).value).toBe('rpm')
+    })
+
     test('the unit of a reading on the profile is the profile unit and cannot be changed here', () => {
       render(<GaugeGroupConfigDialog widget={widget({ ...equipmentGroup, gauges: [{ ...equipmentGroup.gauges[0], quantity: 'pressure', unit: 'bar' }] })} onCancel={vi.fn()} onSave={vi.fn()} />)
       expect(screen.getByLabelText('Quantity')).toBeDisabled()

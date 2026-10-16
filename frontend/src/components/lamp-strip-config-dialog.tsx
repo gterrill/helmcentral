@@ -61,6 +61,17 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
   const { paths } = useSignalKPaths(widget !== null)
   const ctx = useEquipmentTileContext(widget !== null)
   const mappedItems = ctx.items.filter((i) => i.signalk_source !== '')
+  // The readings a lamp for an item can watch: the signal a lamp of that kind
+  // usually watches, plus whatever the boat reports under the item's source,
+  // plus the one already chosen so the field never goes blank.
+  const lampReadings = (itemId: string | undefined, current = ''): string[] => {
+    const picked = mappedItems.find((i) => i.id === itemId)
+    if (!picked) return []
+    const prefix = `${picked.signalk_source}.`
+    const reported = paths.filter((p) => p.path.startsWith(prefix)).map((p) => p.path.slice(prefix.length))
+    const known = picked.source_kind ? (LAMP_READINGS[picked.source_kind] ?? []) : []
+    return [...new Set([...known, ...reported, ...(current ? [current] : [])])].sort()
+  }
   const [config, setConfig] = useState<LampStripWidgetConfig>(() => defaultStripConfig(widget?.id ?? ''))
 
   // Re-seed per instance, so editing one strip never shows another's settings.
@@ -204,12 +215,15 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
                 {lamp.equipmentId !== undefined && (
                   <Field>
                     <FieldLabel htmlFor={`lamp-${index}-suffix`}>Reading</FieldLabel>
-                    <Input
+                    <select
                       id={`lamp-${index}-suffix`}
+                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                       value={lamp.suffix ?? ''}
                       onChange={(e) => setLamp(index, { suffix: e.target.value })}
-                      placeholder="revolutions"
-                    />
+                    >
+                      <option value="">Pick a reading…</option>
+                      {lampReadings(lamp.equipmentId, lamp.suffix ?? '').map((suffix) => <option key={suffix} value={suffix}>{suffix}</option>)}
+                    </select>
                   </Field>
                 )}
               </div>

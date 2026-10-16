@@ -38,7 +38,7 @@ export type ZoneChoice = 'profile' | 'tile'
  * linked, so there is no separate action to remember. Nothing is dropped
  * without a choice.
  */
-export function useSlotZoneEditing(ctx: EquipmentTileContext, item: TileItem | undefined, slots: readonly GaugeWidgetConfig[] = []) {
+export function useSlotZoneEditing(ctx: EquipmentTileContext, item: TileItem | undefined, slots: readonly GaugeWidgetConfig[] = [], paths: readonly { path: string }[] = []) {
   const profile = item ? profileOf(ctx, item) : undefined
   const [edits, setEdits] = useState<Record<string, ZoneEdit>>({})
   const [choices, setChoices] = useState<Record<number, ZoneChoice>>({})
@@ -57,6 +57,16 @@ export function useSlotZoneEditing(ctx: EquipmentTileContext, item: TileItem | u
     [item, slots],
   )
 
+  // What the boat reports under the item's source, as suffixes, for the Reading pick.
+  const reportedSuffixes = useMemo(() => {
+    if (!item || item.signalk_source === '') return []
+    const prefix = `${item.signalk_source}.`
+    const inProfile = new Set((profile?.gauges ?? []).map((g) => g.path_suffix))
+    return [...new Set(paths.filter((p) => p.path.startsWith(prefix)).map((p) => p.path.slice(prefix.length)))]
+      .filter((suffix) => suffix !== '' && !inProfile.has(suffix))
+      .sort()
+  }, [item, profile, paths])
+
   const notice = profile
     ? `Applies to every tile and alarm using ${profile.name} (${itemsUsingProfile(ctx, profile.id).join(', ')}). Saved to the profile when you save this tile.`
     : ''
@@ -69,10 +79,11 @@ export function useSlotZoneEditing(ctx: EquipmentTileContext, item: TileItem | u
       profileGauges: profile?.gauges ?? [],
       zones: gauge ? (edits[suffix]?.bands ?? profileBands(gauge, min, max)) : undefined,
       onZonesChange: (bands) => setEdits((current) => ({ ...current, [suffix]: { bands, min, max } })),
+      reportedSuffixes,
       zoneNotice: notice,
       holdsOwnZones: (slot.zones?.length ?? 0) > 0 && !gaugeHasZones(gauge),
     }
-  }, [profile, edits, notice])
+  }, [profile, edits, notice, reportedSuffixes])
 
   const unresolved = plan.conflicts.filter((c) => choices[c.index] === undefined).length
   const dirty = Object.keys(edits).length > 0 || plan.moves.length > 0 || plan.conflicts.length > 0

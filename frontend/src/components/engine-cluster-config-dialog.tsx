@@ -15,6 +15,7 @@ import { GaugeFields, slotFromProfileGauge } from '@/components/gauge-fields'
 import { Input } from '@/components/ui/input'
 import { EquipmentPicker } from '@/components/equipment-picker'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
+import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import { useSlotZoneEditing } from '@/hooks/use-slot-zone-editing'
 import { ZoneConflicts } from '@/components/zone-conflicts'
 import {
@@ -129,6 +130,7 @@ interface EngineClusterConfigDialogProps {
 
 export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineClusterConfigDialogProps) {
   const ctx = useEquipmentTileContext(widget !== null)
+  const { paths } = useSignalKPaths(widget !== null)
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -139,7 +141,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   }, [widget?.id, widget?.cluster])
 
   const item = findItem(ctx, config?.equipmentId)
-  const zoneEditing = useSlotZoneEditing(ctx, item, config ? clusterSlotList(config) : [])
+  const zoneEditing = useSlotZoneEditing(ctx, item, config ? clusterSlotList(config) : [], paths)
   const { profile } = zoneEditing
 
   const setSlot = (update: (current: EngineClusterConfig) => EngineClusterConfig) =>

@@ -13,9 +13,12 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
 
 1. Turn on **Layout** mode and choose **Add tile → Engine Cluster…**.
 2. Under **Engine**, choose the engine. The list shows your mapped engines. An
-   item that is not mapped to anything yet is listed under **Not mapped yet**;
-   see below.
-3. Choose **Fill slots from profile**. The ring, the hours, the corner cards and
+   item that is not mapped to anything yet is listed under **Not mapped yet** only
+   if it could be an engine (it is in the Propulsion system, or follows an engine
+   profile), never a spare, a tool or a consumable; see below. Two items with the
+   same name are told apart by where they are and their serial number.
+3. Choose **Fill slots from profile**, or pick each slot's **Reading** from the
+   list of the profile's readings and the ones the boat reports for that engine. The ring, the hours, the corner cards and
    the telltales are filled from the engine's profile. Change any slot after.
 4. Leave **Title** blank to show the engine's name, or type your own.
 5. To add a fuel rail, choose **Add fuel rail**, then choose a tank for each bar.
