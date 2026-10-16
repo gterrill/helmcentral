@@ -140,22 +140,6 @@ export function resolveSlot(item: TileItem, profile: EngineProfile | undefined, 
   }
 }
 
-/**
- * Every slot of a cluster in a fixed order: ring, centre, corner rows, the two
- * arcs, then the footer in CLUSTER_FOOTER_SLOTS order. Unset arcs and footer
- * slots are skipped.
- */
-function slotsOf(config: EngineClusterConfig): GaugeWidgetConfig[] {
-  const footer = CLUSTER_FOOTER_SLOTS.map((key) => config.footer?.[key])
-  return [
-    config.ring, config.centre, ...config.corners.flatMap((c) => c.rows),
-    config.arcs?.left, config.arcs?.right, ...footer,
-  ].filter((s): s is GaugeWidgetConfig => s !== undefined)
-}
-
-/** Every slot of a cluster, for callers that need to walk them. */
-export const clusterSlots = slotsOf
-
 export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileContext): Resolved<ResolvedClusterConfig> {
   if (!config.equipmentId) return { ok: false, problem: EMPTY_PROBLEM }
   const item = findItem(ctx, config.equipmentId)

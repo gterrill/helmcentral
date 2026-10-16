@@ -1,7 +1,6 @@
 import { Thermometer, Zap } from 'lucide-react'
 import { useMemo, type CSSProperties, type ReactNode } from 'react'
 
-import { zoneColor } from '@/components/ui/dial-ring'
 import { CoolantIcon, ExhaustIcon, GearboxIcon } from '@/components/ui/telltale-icons'
 import { useTelemetryHistory } from '@/hooks/use-telemetry-history'
 import { CLUSTER_ICONS, iconForSlot } from '@/lib/cluster-icons'
@@ -10,12 +9,13 @@ import {
   bulletFor, chargeStageLabel, type BulletBand, type BulletMark, type BulletModel, type BulletTone,
 } from '@/lib/engine-cluster-bullet'
 import {
-  DIAL_CX, FUEL_R_AFT, FUEL_R_FWD, GAP_ARCS, fuelArc, fuelFeet, fuelLegendPoint, fuelScaleLabels,
+  FUEL_R_AFT, FUEL_R_FWD, GAP_ARCS, fuelArc, fuelFeet, fuelLegendPoint, fuelScaleLabels,
   fuelTicks, fuelTitleLeft, fuelTotalX, gapArcLabelAt, gapArcMark, gapArcPath, type GapArcName,
 } from '@/lib/engine-cluster-layout'
 import { reading } from '@/lib/cluster-readings'
+import { isStale } from '@/lib/staleness'
 import { convertFromSI, formatQuantity, unitOption } from '@/lib/quantities'
-import { severityFill } from '@/lib/severity'
+import { zoneColor, zoneIndexAt } from '@/lib/dial-geometry'
 import type { ClusterSide } from '@/lib/dashboard-widgets'
 
 type Values = Record<string, number | null>
@@ -29,17 +29,20 @@ type Ages = Record<string, number | null> | undefined
 
 /** Inline style for a card surface: one outline, one fill, both tokens. */
 export function cardStyle(tone: BulletTone = 'neutral'): CSSProperties {
-  const stroke = tone === 'alarm' ? severityFill('alarm') : tone === 'warn' ? severityFill('warn')
-    : tone === 'alert' ? severityFill('alert') : 'hsl(var(--cluster-stroke))'
   return {
     background: 'hsl(var(--cluster-surface))',
-    boxShadow: `inset 0 0 0 ${tone === 'neutral' ? 1.5 : 2.5}px ${stroke}`,
+    boxShadow: `inset 0 0 0 ${tone === 'neutral' ? 1.5 : 2.5}px ${toneStroke(tone)}`,
   }
 }
 
+/** The state colour of a tone, or null for neutral: the one mapping every stroke and fill reads. */
+function toneAccent(tone: BulletTone): string | null {
+  return tone === 'neutral' ? null : zoneColor(tone)
+}
+
+/** An outline in a tone: the state colour, or the card's own hairline when nothing is wrong. */
 export function toneStroke(tone: BulletTone): string {
-  return tone === 'alarm' ? severityFill('alarm') : tone === 'warn' ? severityFill('warn')
-    : tone === 'alert' ? severityFill('alert') : 'hsl(var(--cluster-stroke))'
+  return toneAccent(tone) ?? 'hsl(var(--cluster-stroke))'
 }
 
 /** Text colour for a value in a tone. Amber and red are state colours, not decoration. */
@@ -54,8 +57,9 @@ export function toneText(tone: BulletTone): string {
 
 const LABEL = 'text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground'
 
+/** A bar or arc fill in a tone: the state colour, or neutral foreground. */
 function fillOf(tone: BulletTone): string {
-  return tone === 'neutral' ? 'hsl(var(--foreground))' : severityFill(tone === 'alarm' ? 'alarm' : tone === 'warn' ? 'warn' : 'alert')
+  return toneAccent(tone) ?? 'hsl(var(--foreground))'
 }
 
 function bandOpacity(active: boolean): string {
@@ -189,8 +193,7 @@ export function GapArc({ name, slot, values, ages }: {
       {(slot.zones ?? []).map((zone, i) => {
         const from = frac(Math.min(zone.from, zone.to))
         const to = frac(Math.max(zone.from, zone.to))
-        const active = model.converted !== null
-          && model.converted >= Math.min(zone.from, zone.to) && model.converted <= Math.max(zone.from, zone.to)
+        const active = i === zoneIndexAt(model.converted, slot.zones)
         return <path key={i} data-band={zone.state} data-band-active={active ? 'true' : undefined}
           d={gapArcPath(name, from, to)} fill="none" strokeWidth={10}
           style={{ stroke: zoneColor(zone.state), opacity: bandOpacity(active) }} />
@@ -234,7 +237,8 @@ export function FuelFan({ config, title, side, values, ages }: {
   const bars = config.bars.slice(0, radii.length).map((bar, i) => {
     const level = bulletFor(bar.level, values, ages)
     const rawLevel = level.stale ? null : (values[bar.level.path] ?? null)
-    const rawCap = values[bar.capacity.path] ?? null
+    // A capacity that has gone stale is as unknown as a stale level: the total must not mix an old figure in.
+    const rawCap = isStale(ages?.[bar.capacity.path] ?? null) ? null : (values[bar.capacity.path] ?? null)
     const volume = rawLevel === null || rawCap === null ? null : rawLevel * rawCap
     const percent = level.converted
     return {
@@ -516,4 +520,3 @@ export const FOOTER_ICONS = {
   egt: <ExhaustIcon className="size-[18px]" />,
 }
 
-export { DIAL_CX }

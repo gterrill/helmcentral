@@ -153,6 +153,46 @@ describe('the dial and its hours tab', () => {
   })
 })
 
+/**
+ * The chip says RUN only for an engine known to be turning with live data.
+ * A stale or missing reading, a lost feed or a quiet engine must not read RUN
+ * beside a STALE border.
+ */
+describe('the status chip', () => {
+  const allStale = Object.fromEntries(Object.keys(values).map((p) => [p, 300]))
+
+  test('is not drawn when every reading is stale', () => {
+    renderCluster(full, values, { ages: allStale })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
+  })
+
+  test('is not drawn when the rpm itself is stale or missing', () => {
+    const { unmount } = renderCluster(full, values, { ages: { 'propulsion.port.revolutions': 300 } })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
+    unmount()
+    renderCluster(full, { ...values, 'propulsion.port.revolutions': null })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
+  })
+
+  test('is not drawn for an engine whose feed is lost', () => {
+    renderCluster(full, values, { engines: { port: { state: 'lost', lastUpdate: '2026-10-06T04:30:00Z' } } })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
+  })
+
+  test('is not drawn for an engine that is not turning', () => {
+    renderCluster(full, { ...values, 'propulsion.port.revolutions': 0 })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
+  })
+
+  test('says RUN for a live, turning engine, whether or not the server has classified it', () => {
+    const { unmount } = renderCluster()
+    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
+    unmount()
+    renderCluster(full, values, { engines: { port: { state: 'running' } } })
+    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
+  })
+})
+
 describe('readout cards', () => {
   test('renders four cards, each with its own reading', () => {
     renderCluster()
@@ -267,6 +307,18 @@ describe('dial gap arcs', () => {
     expect(container.querySelector('[data-gap-arc="right"]')).toBeNull()
   })
 
+  // The card's bullet lights the first band the reading is in; the arc must
+  // agree, not light every band that happens to contain it.
+  test('lights the same single band the bullet graph would for overlapping zones', () => {
+    const overlapping: ResolvedClusterConfig = {
+      ...full,
+      arcs: { left: { ...arcs.left, zones: [{ from: 0, to: 100, state: 'normal' }, { from: 60, to: 100, state: 'warn' }] } },
+    }
+    const { container } = renderCluster(overlapping, { ...values, 'propulsion.port.temperature': 80 + 273.15 })
+    expect(container.querySelectorAll('[data-gap-arc="left"] [data-band-active="true"]')).toHaveLength(1)
+    expect(container.querySelector('[data-gap-arc="left"] [data-band-active="true"]')).toHaveAttribute('data-band', 'normal')
+  })
+
   test('is amber past a band with no alarm configured, never red', () => {
     const { container } = renderCluster(full, { ...values, 'propulsion.port.temperature': 361.15 })
     expect(container.querySelector('[data-gap-arc="left"]')).toHaveAttribute('data-tone', 'warn')
@@ -342,6 +394,23 @@ describe('fuel fan', () => {
     const { container } = renderCluster({ ...full, fuel }, { ...values, 'tanks.fuel.4.currentLevel': null })
     expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
     expect(container.querySelector('[data-fuel-bar="1"]')).toHaveAttribute('data-bar-state', 'absent')
+  })
+})
+
+describe('fuel fan staleness', () => {
+  const railed = { ...full, fuel }
+
+  test('a stale level blanks the fill, the percentage and the total together', () => {
+    const { container } = renderCluster(railed, values, { ages: { 'tanks.fuel.4.currentLevel': 300 } })
+    expect(container.querySelector('[data-fuel-bar="1"]')).toHaveAttribute('data-bar-state', 'absent')
+    expect(container.querySelector('[data-fuel-legend="1"]')).toBeNull()
+    expect(container.querySelector('[data-fuel-bar="1"] path[stroke-width="18"]:not([stroke-dasharray])')).toBeNull()
+    expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
+  })
+
+  test('a stale capacity blanks the total rather than totalling with an old figure', () => {
+    renderCluster(railed, values, { ages: { 'tanks.fuel.4.capacity': 300 } })
+    expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
   })
 })
 
@@ -611,7 +680,8 @@ describe('engine off (ADR 0163)', () => {
     })
     expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
     expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
-    expect(screen.getByTestId('cluster-chip')).not.toHaveTextContent('OFF')
+    // Not RUN beside a STALE border either: a lost feed has no status word.
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
   test('a running engine, or one the backend says nothing about, is unchanged', () => {

@@ -1,5 +1,6 @@
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { reading } from '@/lib/cluster-readings'
+import { zoneIndexAt } from '@/lib/dial-geometry'
 
 /**
  * A bullet graph for one cluster slot, derived entirely from that slot's
@@ -82,9 +83,7 @@ export function bulletFor(
 
   const zones = slot.zones ?? []
   const epsilon = span * 0.001
-  const hit = r.converted === null
-    ? -1
-    : zones.findIndex((z) => r.converted! >= Math.min(z.from, z.to) && r.converted! <= Math.max(z.from, z.to))
+  const hit = zoneIndexAt(r.converted, zones)
 
   const bands: BulletBand[] = zones
     .map((z, index) => {

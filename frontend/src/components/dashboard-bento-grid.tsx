@@ -6,7 +6,7 @@ import '@/styles/dashboard-bento-grid.css'
 import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
-import { CLUSTER_H, CLUSTER_W } from '@/lib/engine-cluster-layout'
+import { CLUSTER_H } from '@/lib/engine-cluster-layout'
 import { GRID_COLUMNS, GRID_MARGIN, GRID_ROW_HEIGHT, TILE_INSET_H, WALL_ROW_MARGIN, gridPixelHeight, rowsForHeight } from '@/lib/grid-metrics'
 import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, isPoiMapWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId, type GaugeDisplay } from '@/lib/dashboard-widgets'
 import { TileErrorBoundary } from '@/components/tile-error-boundary'
@@ -83,8 +83,18 @@ const CLUSTER_WIDGET_CONSTRAINTS = {
   minH: rowsForHeight(TILE_CHROME_H + CLUSTER_H),
 }
 
-/** The width the cluster's card is drawn for, for anything that wants to say so. */
-export const CLUSTER_DESIGN_W = CLUSTER_W
+/**
+ * A cluster saved before the v2 card is narrower than the card needs, and drawn
+ * at that width it scales to half. It is lifted to the minimum width when drawn
+ * (and committed with the next layout change), pulled back inside the board if
+ * the extra width would push it off the right edge. Height is left as saved: it
+ * is a floor for resizing only, and a wall page lays a cluster out short on
+ * purpose.
+ */
+export function liftClusterBox(box: { x: number; w: number }): { x: number; w: number } {
+  const w = Math.max(box.w, CLUSTER_WIDGET_CONSTRAINTS.minW)
+  return { x: Math.min(box.x, Math.max(0, GRID_COLUMNS - w)), w }
+}
 
 export { CLUSTER_WIDGET_CONSTRAINTS, WIDGET_CONSTRAINTS }
 
@@ -192,33 +202,36 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
   )
 
   const rglLayout = useMemo<LayoutItem[]>(
-    () => widgets.map((w) => ({
-      i: w.id,
-      x: w.x,
-      y: w.y,
-      w: w.w,
-      h: rows[w.id] ?? w.h,
-      // The hero's grid slot is frozen (ADR 0072): react-grid-layout's own
-      // compaction skips `static` items entirely (they neither move nor get
-      // moved), so every other tile keeps exactly the position it was
-      // authored at whether or not a hero is currently promoted. The hero's
-      // real content renders separately in the row above; this entry exists
-      // purely so the rectangle still reads as occupied.
-      ...(w.id === heroId ? { static: true } : {}),
-      ...(isClusterWidgetId(w.id)
-        ? CLUSTER_WIDGET_CONSTRAINTS
-        : isLampStripWidgetId(w.id)
-        ? LAMP_STRIP_WIDGET_CONSTRAINTS
-        : isEmbedWidgetId(w.id)
-        ? EMBED_WIDGET_CONSTRAINTS
-        : isGaugeGroupWidgetId(w.id)
-          ? GAUGE_GROUP_WIDGET_CONSTRAINTS
-          : isGaugeWidgetId(w.id)
-            ? gaugeWidgetConstraints(w.gauge?.display)
-            : isPoiMapWidgetId(w.id)
-              ? { ...POI_MAP_WIDGET_CONSTRAINTS, ...(w.poiMap?.layout === 'split' ? { minW: POI_MAP_SPLIT_MIN_W } : {}) }
-              : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
-    })),
+    () => widgets.map((w) => {
+      const box = isClusterWidgetId(w.id) ? liftClusterBox({ x: w.x, w: w.w }) : { x: w.x, w: w.w }
+      return {
+        i: w.id,
+        x: box.x,
+        y: w.y,
+        w: box.w,
+        h: rows[w.id] ?? w.h,
+        // The hero's grid slot is frozen (ADR 0072): react-grid-layout's own
+        // compaction skips `static` items entirely (they neither move nor get
+        // moved), so every other tile keeps exactly the position it was
+        // authored at whether or not a hero is currently promoted. The hero's
+        // real content renders separately in the row above; this entry exists
+        // purely so the rectangle still reads as occupied.
+        ...(w.id === heroId ? { static: true } : {}),
+        ...(isClusterWidgetId(w.id)
+          ? CLUSTER_WIDGET_CONSTRAINTS
+          : isLampStripWidgetId(w.id)
+          ? LAMP_STRIP_WIDGET_CONSTRAINTS
+          : isEmbedWidgetId(w.id)
+          ? EMBED_WIDGET_CONSTRAINTS
+          : isGaugeGroupWidgetId(w.id)
+            ? GAUGE_GROUP_WIDGET_CONSTRAINTS
+            : isGaugeWidgetId(w.id)
+              ? gaugeWidgetConstraints(w.gauge?.display)
+              : isPoiMapWidgetId(w.id)
+                ? { ...POI_MAP_WIDGET_CONSTRAINTS, ...(w.poiMap?.layout === 'split' ? { minW: POI_MAP_SPLIT_MIN_W } : {}) }
+                : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
+      }
+    }),
     [widgets, heroId, rows],
   )
 

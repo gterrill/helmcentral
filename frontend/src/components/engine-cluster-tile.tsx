@@ -78,8 +78,15 @@ interface EngineClusterTileProps {
   onConfigure: () => void
 }
 
-/** The tab chip: what a running engine is doing, in one word. An engine that is off says so once, in the title's OFF pill. */
-function chipFor(state: ZoneState | null): { text: string; className: string } {
+/**
+ * The tab chip: what a running engine is doing, in one word, or null. It is
+ * drawn only for an engine known to be turning on live data: not for one that is
+ * off (the title's OFF pill says so once), whose feed is lost, whose rpm is
+ * stale, missing or zero, or whose tile is stale. Stale data carries no word
+ * beside the STALE border.
+ */
+function chipFor(running: boolean, state: ZoneState | null): { text: string; className: string } | null {
+  if (!running) return null
   if (state === 'alarm' || state === 'emergency') return { text: 'ALARM', className: 'bg-red-600 text-white' }
   if (state === 'warn' || state === 'alert') return { text: 'WARN', className: 'bg-amber-500 text-black' }
   return { text: 'RUN', className: 'text-foreground' }
@@ -132,7 +139,8 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   const staleLabel = tileStale ? formatDataAge(Math.max(...knownAges.map((r) => r.age as number))) : undefined
 
   const footer = config.footer ?? {}
-  const chip = chipFor(state)
+  const running = !off && !tileStale && engineStatus?.state !== 'lost' && ring.converted !== null && ring.converted > 0
+  const chip = chipFor(running, state)
   const stbd = side === 'stbd'
 
   const cornerTones = config.corners.slice(0, 4).map((corner) => {
@@ -248,7 +256,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
 
         {/* The tabs ride the card's top edge: the state chip on the outer side
             and the engine hours on the inner one, mirrored with the tile. */}
-        {!off && <div data-testid="cluster-chip-tab"
+        {chip && <div data-testid="cluster-chip-tab"
           className="absolute top-1 flex h-10 items-center gap-2.5 rounded-[20px] px-4"
           style={{ ...cardStyle(), [stbd ? 'right' : 'left']: 52 }}>
           <span data-testid="cluster-chip"

@@ -8,6 +8,7 @@ import {
   POI_MAP_WIDGET_CONSTRAINTS,
   WIDGET_CONSTRAINTS,
   gaugeWidgetConstraints,
+  liftClusterBox,
   raiseGaugeHeight,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
@@ -140,5 +141,30 @@ describe('raiseGaugeHeight', () => {
   test('never lowers a taller tile', () => {
     expect(raiseGaugeHeight(6, 'numeric')).toBe(6)
     expect(raiseGaugeHeight(5, 'radial')).toBe(5)
+  })
+})
+
+
+/**
+ * A cluster saved before the v2 card is narrower than the card needs, and drawn
+ * at that width it scales to half. It is lifted to the new minimum width when
+ * drawn and stays inside the board.
+ */
+describe('liftClusterBox', () => {
+  const min = CLUSTER_WIDGET_CONSTRAINTS
+
+  test('widens a saved cluster to the minimum', () => {
+    expect(liftClusterBox({ x: 0, w: 4 })).toEqual({ x: 0, w: min.minW })
+    expect(liftClusterBox({ x: 0, w: 5 }).w).toBe(min.minW)
+  })
+
+  test('keeps a tile that is wide enough exactly as saved', () => {
+    expect(liftClusterBox({ x: 2, w: 8 })).toEqual({ x: 2, w: 8 })
+  })
+
+  test('pulls a widened tile back inside the twelve columns', () => {
+    const lifted = liftClusterBox({ x: 9, w: 3 })
+    expect(lifted.x + lifted.w).toBeLessThanOrEqual(12)
+    expect(lifted.w).toBe(min.minW)
   })
 })

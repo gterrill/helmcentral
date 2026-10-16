@@ -28,6 +28,16 @@ export function markingAt(v: number, zones: GaugeZone[] | undefined): GaugeZone[
   return hit ? hit.state : null
 }
 
+/**
+ * The first zone a value is inside, or -1. One rule for "the band the reading is
+ * in", so a bullet graph, an arc and a text colour never disagree where bands
+ * overlap.
+ */
+export function zoneIndexAt(v: number | null, zones: readonly GaugeZone[] | undefined): number {
+  if (v === null || !zones) return -1
+  return zones.findIndex((z) => v >= Math.min(z.from, z.to) && v <= Math.max(z.from, z.to))
+}
+
 /** Point at `angleDeg` (clockwise from three o'clock, SVG's convention) and radius `r` round (cx, cy). */
 export function polar(cx: number, cy: number, angleDeg: number, r: number): [number, number] {
   const a = angleDeg * D2R
