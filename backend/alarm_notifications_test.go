@@ -950,6 +950,22 @@ func TestSignalKNotificationsKeepsADistressWhileItsBeaconIsStillBeingHeard(t *te
 	}
 }
 
+// SignalK files a SAR transponder under "sar." rather than "vessels."; a
+// live beacon heard there must keep its distress (fail safe).
+func TestSignalKNotificationsKeepsADistressWhileItsBeaconIsHeardUnderAnotherContext(t *testing.T) {
+	for _, ctx := range []string{"sar.urn:mrn:imo:mmsi:970028911", "atons.urn:mrn:imo:mmsi:970028911", "aircraft.urn:mrn:imo:mmsi:970028911"} {
+		snapshot := sartSnapshot()
+		late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+		snapshot.applyDelta(signalKDelta{
+			Context: ctx,
+			Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.position", Value: map[string]any{"latitude": 1.0, "longitude": 2.0}}}}},
+		}, late.Add(-30*time.Second))
+		if got := signalKNotifications(snapshot, ownsNothing, late); len(got) != 1 {
+			t.Fatalf("%s: a beacon heard recently must keep its distress, got %+v", ctx, got)
+		}
+	}
+}
+
 func TestSignalKNotificationsDropsADistressOnceItsBeaconHasBeenQuiet(t *testing.T) {
 	snapshot := sartSnapshot()
 	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
