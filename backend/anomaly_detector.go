@@ -281,12 +281,30 @@ type anomalyTrackers struct {
 	// pack half of level 2's OR condition). One tracker, not a map: there
 	// is exactly one house bank.
 	voltageHistory voltageHistoryTracker
+
+	// stumble is the engine-stumble detector's trailing rpm windows and
+	// detected dips (anomaly_stumble.go). stumbleNames holds every engine
+	// discovered so far with its operator-set name when one exists;
+	// stumbleSeen is the last rpm reading time fed per engine, so each
+	// reading is observed once however often the tick runs;
+	// stumbleSeeded/stumbleSeedTry track alarm-rule seeding.
+	stumble        *engineStumbleTracker
+	stumbleNames   map[string]string
+	stumbleSeen    map[string]time.Time
+	stumbleSeeded  map[string]bool
+	stumbleSeedTry map[string]time.Time
 }
 
 func newAnomalyTrackers() *anomalyTrackers {
 	return &anomalyTrackers{
 		frozen:      map[string]*frozenTrackerState{},
 		frozenPaths: map[string]bool{},
+
+		stumble:        newEngineStumbleTracker(),
+		stumbleNames:   map[string]string{},
+		stumbleSeen:    map[string]time.Time{},
+		stumbleSeeded:  map[string]bool{},
+		stumbleSeedTry: map[string]time.Time{},
 	}
 }
 
@@ -924,15 +942,20 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	}
 
 	vessel, err := loadVesselView(settingsPath)
-	if err != nil {
-		log.Printf("anomaly detector: vessel settings unavailable, skipping this tick: %v", err)
-		return reading
-	}
 
 	// The operator's own exclusions from the frozen/impossible/silent-source
 	// alarm card's "Ignore this sensor" action (alarm_ignored_sensors.go) --
 	// Pikorua's dead exhaust senders, on the boat, never shipped config.
 	ignored := ignoredSensorSet()
+
+	// Engine stumble needs no vessel setup, so it runs even when vessel
+	// settings are unavailable (vessel then only supplies display names).
+	computeAnomalyEngineStumble(snapshot, vessel.Engines, ignored, trackers, now, &reading)
+
+	if err != nil {
+		log.Printf("anomaly detector: vessel settings unavailable, skipping this tick: %v", err)
+		return reading
+	}
 	namer := newSensorNamer(snapshot, vessel, globalSourceDevices.get())
 
 	// Impossible readings: no setup needed, scans whatever the boat
@@ -1119,6 +1142,7 @@ func startAnomalyDetector(ctx context.Context, interval time.Duration) {
 		case now := <-ticker.C:
 			reading := computeAnomalyReading(globalSignalKSnapshot, settingsPath, trackers, steadiness, now.UTC())
 			globalAnomalySlot.set(reading)
+			seedDiscoveredStumbleRules(trackers, now.UTC())
 		}
 	}
 }

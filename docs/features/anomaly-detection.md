@@ -1,11 +1,13 @@
 # Anomaly detection
 
-Three checks that watch for the kind of trouble a normal gauge threshold
-never catches: an instrument that has quietly stopped telling the truth, a
-house bank still being pushed by its alternators after it has finished
-charging, and one engine of a pair pulling away from its twin at the same
-rpm. Each one raises an ordinary alarm, with everything Alarms already does
-(severity, dwell, acknowledge, notifications, the alarm log) behind it. See
+An engine that is struggling often shows it first as rpm that stumbles for a
+second or two and recovers, long before it quits. These checks watch for
+that, and for other trouble a normal gauge threshold never catches: an
+instrument that has quietly stopped telling the truth, a house bank still
+being pushed by its alternators after it has finished charging, and one
+engine of a pair pulling away from its twin at the same rpm. Each one raises
+an ordinary alarm, with everything Alarms already does (severity, dwell,
+acknowledge, notifications, the alarm log) behind it. See
 [Alarms](alarms.md) for how the alarm system itself behaves.
 
 See [Set up your vessel](../how-to/set-up-your-vessel.md) for picking the
@@ -84,3 +86,31 @@ steady run proves the difference has genuinely gone away, rather than
 clearing the moment the numbers touch back down.
 
 Needs at least two engine items assigned to propulsion sources in Settings → SignalK.
+
+## Engine stumble
+
+With the engine held at a steady throttle, rpm that dips 40 rpm or more (or
+3% of the steady figure, whichever is greater) for a few seconds and then
+comes back is a stumble. One now and then is nothing. A run of them, with
+the throttle untouched, is an engine that is not getting what it asks for.
+Helmcentral counts the stumbles on each engine over the last ten minutes and
+raises a warning, titled with the engine's name (for example "Port Engine
+RPM Dips"), when the count reaches three. The card gives the count and the
+worst dip, for example "6 RPM dips in 10 min · up to 140 rpm below 1170 rpm".
+It clears once ten minutes pass without a stumble. Helmcentral reports what
+the engine did; it does not know why.
+
+What does not count:
+
+- A throttle change. If rpm drops and stays down, you moved the lever.
+- Anything under 800 rpm, so idling and shutdown never trip it.
+- A dip on both engines of a twin at about the same moment. Both propellers
+  unloading on the same wave is the sea, not an engine. A dip on one engine
+  alone still counts, and a single-engine boat gets no such filtering.
+
+This needs nothing set up. Every engine the boat reports rpm for is watched
+from the moment it starts, the warning arrives switched on, and an engine
+that first appears later gets its own warning then. An engine with an
+equipment item is titled with the item's name; otherwise the title uses the
+engine's own identifier ("Port"). The alarm rule can be edited or removed in
+Alarms like any other, and removing it is not undone by a restart.

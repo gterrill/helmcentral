@@ -214,6 +214,10 @@ func TestComputeAnomalyReadingOffForFewerThanTwoEngines(t *testing.T) {
 		if path == anomalySensorFrozenCountPath || path == anomalySensorOutOfRangeCountPath || path == anomalySensorSilentSourceCountPath {
 			continue
 		}
+		// Stumble counts need no pair of engines, so a lone engine has one.
+		if strings.HasSuffix(path, ".stumbleCount") {
+			continue
+		}
 		t.Fatalf("expected no engine residual values for a single configured engine, got %s", path)
 	}
 }
