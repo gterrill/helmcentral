@@ -26,13 +26,16 @@ shape produced an `undefined` somewhere downstream.
 ## Decision
 
 **The set is closed, as structs on the Go side.** `mateEvent` is an interface
-with an unexported marker method, implemented by exactly five types:
-`mateStatusEvent`, `mateDeltaEvent`, `mateRetractEvent`, `mateMessageEvent` and
-`mateErrorEvent`. The emitter and the run log take a `mateEvent`, never a name
-and an `any`, so a sixth event cannot be sent without adding a type. The old
-payload builders are gone. A status carries either `text` or `kind: "waiting"`,
-never both; the JSON tags and field order reproduce the bytes the maps
-produced.
+with a marker method, implemented by six types: `mateStatusEvent`,
+`mateWaitingEvent` (also a `status` on the wire), `mateDeltaEvent`,
+`mateRetractEvent`, `mateMessageEvent` and `mateErrorEvent`. The emitter and
+the run log take a `mateEvent`, never a name and an `any`. Everything lives in
+package `main`, so the language does not stop another type implementing the
+marker; the set is closed by convention, enforced by the fixture test (every
+shape has a golden frame) and by the browser decoder, which rejects anything
+outside the set. A status carries either `text` (always present, even when
+empty) or `kind: "waiting"`, never both, which is why they are two types. The
+JSON tags and field order reproduce the bytes the maps produced.
 
 **Golden fixtures are the contract between the languages.**
 `backend/testdata/mate_events/` holds one SSE frame per shape: `status_text`,
@@ -55,7 +58,9 @@ the wrong type, a status with both `text` and `kind` or with neither, and a
 new variant fails the type check until it is handled. On a `MateEventError` the
 chat hook logs the detail, shows a plain sentence in its existing error state
 and clears the draft; the background answer watcher logs it and raises an
-error toast. Skipping an unknown event would have hidden exactly the breakage
+error toast with a Reload action. Both say the reply could not be shown and
+that reloading will show it, because the server run carries on and stores the
+answer; a decode failure never cancels it. Skipping an unknown event would have hidden exactly the breakage
 this change is meant to expose. Aborts are not errors and are not caught
 here. If the callback throws, the reader cancels the underlying stream.
 
@@ -84,7 +89,8 @@ give it two places to drift.
 - When Mate gains structured tool calls on the stream, the new events take
   AG-UI's names (for example `TOOL_CALL_START`) so a later move to that
   protocol is a rename of fields, not a redesign.
-- A server that sends an event this client does not know now produces a failed
-  reply on an out-of-date open page, where it used to produce a silent gap.
-  The version-reload check already prompts for a refresh after an update.
+- A server that sends an event this client does not know now produces a
+  "couldn't be shown, reload to see it" message on an out-of-date open page,
+  where it used to produce a silent gap. The stored answer is there after the
+  reload.
 - Wire output is unchanged, so no stored state or setting is affected.

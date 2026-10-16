@@ -437,7 +437,7 @@ describe('useAssistantChat', () => {
       })
       expect(await sendPromise).toBeNull()
       expect(result.current.draft).toBeNull()
-      expect(result.current.error).toBe("Mate's reply couldn't be read. Try asking again.")
+      expect(result.current.error).toBe("Mate's reply couldn't be shown. Reload to see it.")
       expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('ping'))
       consoleError.mockRestore()
     })

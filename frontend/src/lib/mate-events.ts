@@ -1,4 +1,4 @@
-import type { ConversationApi, MessageApi } from '@/hooks/use-assistant-chat'
+import type { ConversationApi, MessageApi } from '@/lib/mate-api'
 import { readServerSentEvents } from '@/lib/sse-reader'
 
 /**
@@ -15,6 +15,12 @@ export type MateEvent =
   | { type: 'retract' }
   | { type: 'message'; message: MessageApi; conversation: ConversationApi }
   | { type: 'error'; error: string }
+
+/**
+ * What the operator reads when a frame cannot be decoded. The server run
+ * carries on and stores the answer, so the advice is to reload, not to ask again.
+ */
+export const MATE_REPLY_NOT_SHOWN = "Mate's reply couldn't be shown. Reload to see it."
 
 /** A frame on the stream that does not decode to a MateEvent. */
 export class MateEventError extends Error {

@@ -74,3 +74,19 @@ func TestMateEventFixtures(t *testing.T) {
 		})
 	}
 }
+
+// An empty-text status keeps its "text" key: the wire has always said
+// {"text":""}, and the browser's decoder requires a string.
+func TestMateStatusEventEmptyTextKeepsKey(t *testing.T) {
+	got, err := json.Marshal(mateStatusEvent{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != `{"text":""}` {
+		t.Fatalf("empty status marshals %s", got)
+	}
+	got, _ = json.Marshal(mateWaitingStatus())
+	if string(got) != `{"kind":"waiting"}` {
+		t.Fatalf("waiting status marshals %s", got)
+	}
+}

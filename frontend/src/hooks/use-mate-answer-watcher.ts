@@ -2,22 +2,9 @@ import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 
 import { apiBaseUrl } from '@/config/api'
-import { MateEventError, readMateEvents } from '@/lib/mate-events'
+import type { ConversationApi, MessageApi } from '@/lib/mate-api'
+import { MATE_REPLY_NOT_SHOWN, MateEventError, readMateEvents } from '@/lib/mate-events'
 import { getMateWatchSnapshot, removeMateWatch, subscribeMateWatch } from '@/lib/mate-watch-store'
-
-interface ConversationApi {
-  id: string
-  title: string
-  created_at: string
-  updated_at: string
-}
-
-interface MessageApi {
-  id: string
-  conversation_id: string
-  role: 'user' | 'assistant' | 'watch'
-  created_at: string
-}
 
 function firstLine(text: string): string {
   const index = text.indexOf('\n')
@@ -150,8 +137,8 @@ async function watchOneConversation(
     if (signal.aborted) return
     if (err instanceof MateEventError) {
       console.error(`use-mate-answer-watcher: ${err.message}`)
-      toast.error("Mate's reply couldn't be read", {
-        action: { label: 'Open', onClick: () => onOpen(conversationId) },
+      toast.error(MATE_REPLY_NOT_SHOWN, {
+        action: { label: 'Reload', onClick: () => globalThis.location.reload() },
       })
       return
     }

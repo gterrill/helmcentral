@@ -136,7 +136,9 @@ describe('useMateAnswerWatcher', () => {
 
     renderHook(() => useMateAnswerWatcher(new Set(), vi.fn()))
 
-    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("Mate's reply couldn't be read", expect.anything()))
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("Mate's reply couldn't be shown. Reload to see it.", expect.objectContaining({
+      action: expect.objectContaining({ label: 'Reload' }),
+    })))
     expect(consoleError).toHaveBeenCalled()
     consoleError.mockRestore()
   })

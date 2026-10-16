@@ -283,16 +283,22 @@ type mateEvent interface {
 	mateEventName() string
 }
 
-// mateStatusEvent says what the run is doing. It carries either Text (a
-// tool call, a skipped call) or Kind "waiting" (waiting on the model, no tool
-// running, so the browser chooses the words), never both.
+// mateStatusEvent says what the run is doing: a tool call, a skipped call.
+// Text is always on the wire, even when empty.
 type mateStatusEvent struct {
-	Text string `json:"text,omitempty"`
-	Kind string `json:"kind,omitempty"`
+	Text string `json:"text"`
 }
 
-// mateWaitingStatus is the status for "waiting on the model, no tool running".
-func mateWaitingStatus() mateStatusEvent { return mateStatusEvent{Kind: "waiting"} }
+// mateWaitingEvent is the status for "waiting on the model, no tool running".
+// It carries a kind and no text, so the browser chooses the words. It is a
+// "status" on the wire, distinct from mateStatusEvent so the two shapes can
+// never mix.
+type mateWaitingEvent struct {
+	Kind string `json:"kind"`
+}
+
+// mateWaitingStatus builds the waiting status.
+func mateWaitingStatus() mateWaitingEvent { return mateWaitingEvent{Kind: "waiting"} }
 
 // mateDeltaEvent is one fragment of the round's answer text as it streams in.
 type mateDeltaEvent struct {
@@ -317,6 +323,7 @@ type mateErrorEvent struct {
 }
 
 func (mateStatusEvent) mateEventName() string  { return "status" }
+func (mateWaitingEvent) mateEventName() string { return "status" }
 func (mateDeltaEvent) mateEventName() string   { return "delta" }
 func (mateRetractEvent) mateEventName() string { return "retract" }
 func (mateMessageEvent) mateEventName() string { return "message" }

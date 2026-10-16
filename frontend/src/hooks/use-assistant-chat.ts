@@ -1,46 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
-import { MateEventError, readMateEvents } from '@/lib/mate-events'
+import { MATE_REPLY_NOT_SHOWN, MateEventError, readMateEvents } from '@/lib/mate-events'
 import { todayISO } from '@/lib/local-date'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
-import { mapFormDraft, mapProposal, type AssistantConversation, type AssistantMessage, type FormDraftApi, type ProposalApi } from '@/hooks/use-assistant-conversations'
-
-interface MessageAttachmentApi {
-  document_id: string
-  filename: string
-}
-
-export interface MessageApi {
-  id: string
-  conversation_id: string
-  seq: number
-  role: 'user' | 'assistant' | 'watch'
-  content: string
-  model?: string
-  prompt_tokens?: number
-  cached_tokens?: number
-  completion_tokens?: number
-  cost_usd?: number
-  tool_rounds?: number
-  created_at: string
-  attachments?: MessageAttachmentApi[]
-  proposals?: ProposalApi[]
-  form_drafts?: FormDraftApi[]
-}
-
-export interface ConversationApi {
-  id: string
-  title: string
-  created_at: string
-  updated_at: string
-}
+import { mapFormDraft, mapProposal, type AssistantConversation, type AssistantMessage } from '@/hooks/use-assistant-conversations'
+import type { ConversationApi, MessageApi } from '@/lib/mate-api'
 
 /** What the operator reads when the stream fails; a malformed frame is logged in full and shown plainly. */
 function streamErrorText(err: unknown): string {
-  if (err instanceof MateEventError) {
-    console.error(err.message)
-    return "Mate's reply couldn't be read. Try asking again."
-  }
+  if (err instanceof MateEventError) return MATE_REPLY_NOT_SHOWN
   return err instanceof Error ? err.message : String(err)
 }
 
@@ -382,6 +350,12 @@ export function useAssistantChat() {
       return await consumeStream(response.body, controller, options?.onConversation, options?.onMessage)
     } catch (err) {
       if (controller.signal.aborted) return null
+      if (err instanceof MateEventError) {
+        // The server run carries on and stores the answer; this page just
+        // cannot read the stream. A superseded stream does nothing at all.
+        if (!isCurrent()) return null
+        console.error(err.message)
+      }
       removeMateWatch(conversationId)
       if (isCurrent()) {
         setError(streamErrorText(err))
@@ -451,6 +425,7 @@ export function useAssistantChat() {
       return await consumeStream(response.body, controller, onConversation, onMessage)
     } catch (err) {
       if (controller.signal.aborted) return null
+      if (err instanceof MateEventError && isCurrent()) console.error(err.message)
       if (isCurrent()) {
         setError(streamErrorText(err))
         clearDraft()

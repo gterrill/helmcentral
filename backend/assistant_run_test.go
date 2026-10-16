@@ -350,7 +350,9 @@ func recordingEmitter() (assistantEmitter, *[]recordedEvent) {
 		rec := recordedEvent{event: ev.mateEventName()}
 		switch e := ev.(type) {
 		case mateStatusEvent:
-			rec.text, rec.kind = e.Text, e.Kind
+			rec.text = e.Text
+		case mateWaitingEvent:
+			rec.kind = e.Kind
 		case mateDeltaEvent:
 			rec.text = e.Text
 		}

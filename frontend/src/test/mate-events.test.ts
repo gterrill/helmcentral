@@ -57,6 +57,17 @@ describe('readMateEvents golden fixtures', () => {
     expect(event.message.form_drafts).toHaveLength(1)
     expect(event.conversation.title).toBe('Can you fill this form in for me ?')
   })
+  it('decodes a status with empty text (the wire says {"text":""})', async () => {
+    expect(await decode(frame('status', '{"text":""}'))).toEqual([{ type: 'status', text: '' }])
+  })
+  it('treats a frame with no event name as a message event and validates it as one', async () => {
+    const data = '{"message":{"id":"m"},"conversation":{"id":"c"}}'
+    const [event] = await decode(`data: ${data}\n\n`)
+    expect(event.type).toBe('message')
+    const err = await decode('data: {"text":"x"}\n\n').then(() => null, (e: unknown) => e)
+    expect(err).toBeInstanceOf(MateEventError)
+    expect((err as MateEventError).event).toBe('message')
+  })
   it('decodes several frames in order', async () => {
     const events = await decode(fixture('status_waiting') + fixture('delta') + fixture('retract'))
     expect(events.map((e) => e.type)).toEqual(['status', 'delta', 'retract'])
@@ -83,6 +94,20 @@ describe('readMateEvents rejections', () => {
     expect(err).toBeInstanceOf(MateEventError)
     expect((err as MateEventError).event).toBe(name)
     expect((err as MateEventError).message).toContain(String(name))
+  })
+
+  it('aborting the read leaves no unhandled rejection and no error', async () => {
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    const controller = new AbortController()
+    const body = new ReadableStream<Uint8Array>({ start() {} })
+    const done = readMateEvents(body, () => {}, controller.signal)
+    controller.abort()
+    await expect(done).resolves.toBeUndefined()
+    await new Promise((r) => setTimeout(r, 10))
+    process.off('unhandledRejection', onUnhandled)
+    expect(unhandled).toEqual([])
   })
 
   it('delivers the events before the bad one', async () => {
