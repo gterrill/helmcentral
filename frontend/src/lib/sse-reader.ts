@@ -102,6 +102,11 @@ export async function readServerSentEvents(
       buffer = rest
       for (const event of events) onEvent(event)
     }
+  } catch (err) {
+    // A throwing onEvent (a frame the caller rejects) must not leave the
+    // connection streaming into nothing.
+    void reader.cancel()
+    throw err
   } finally {
     signal?.removeEventListener('abort', onAbort)
   }

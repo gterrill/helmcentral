@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
-import { readServerSentEvents } from '@/lib/sse-reader'
+import { MateEventError, readMateEvents } from '@/lib/mate-events'
 import { todayISO } from '@/lib/local-date'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 import { mapFormDraft, mapProposal, type AssistantConversation, type AssistantMessage, type FormDraftApi, type ProposalApi } from '@/hooks/use-assistant-conversations'
@@ -10,7 +10,7 @@ interface MessageAttachmentApi {
   filename: string
 }
 
-interface MessageApi {
+export interface MessageApi {
   id: string
   conversation_id: string
   seq: number
@@ -28,11 +28,20 @@ interface MessageApi {
   form_drafts?: FormDraftApi[]
 }
 
-interface ConversationApi {
+export interface ConversationApi {
   id: string
   title: string
   created_at: string
   updated_at: string
+}
+
+/** What the operator reads when the stream fails; a malformed frame is logged in full and shown plainly. */
+function streamErrorText(err: unknown): string {
+  if (err instanceof MateEventError) {
+    console.error(err.message)
+    return "Mate's reply couldn't be read. Try asking again."
+  }
+  return err instanceof Error ? err.message : String(err)
 }
 
 function mapMessage(api: MessageApi): AssistantMessage {
@@ -204,34 +213,40 @@ export function useAssistantChat() {
     const isCurrent = () => abortRef.current === controller
     let resolved: AssistantMessage | null = null
 
-    await readServerSentEvents(body, (event) => {
+    await readMateEvents(body, (event) => {
       if (!isCurrent()) return
 
-      if (event.event === 'status') {
-        const data = JSON.parse(event.data) as { text?: string }
-        setStatusText(typeof data.text === 'string' ? data.text : null)
-      } else if (event.event === 'delta') {
-        const data = JSON.parse(event.data) as { text?: string }
-        if (typeof data.text === 'string' && data.text !== '') {
-          draftBufferRef.current += data.text
-          scheduleDraftFlush()
+      switch (event.type) {
+        case 'status':
+          setStatusText('text' in event ? event.text : null)
+          break
+        case 'delta':
+          if (event.text !== '') {
+            draftBufferRef.current += event.text
+            scheduleDraftFlush()
+          }
+          break
+        case 'retract':
+          // The round that produced this draft turned into tool calls
+          // instead of an answer (ADR 0093 §2/ADR 0105) - discard it.
+          clearDraft()
+          break
+        case 'message':
+          resolved = mapMessage(event.message)
+          deliveredRef.current = true
+          setDeliveredMessageId(resolved.id)
+          onMessage?.(resolved)
+          clearDraft()
+          onConversation?.(mapConversation(event.conversation))
+          break
+        case 'error':
+          setError(event.error !== '' ? event.error : 'assistant error')
+          clearDraft()
+          break
+        default: {
+          const unhandled: never = event
+          throw new Error(`unhandled Mate event ${JSON.stringify(unhandled)}`)
         }
-      } else if (event.event === 'retract') {
-        // The round that produced this draft turned into tool calls
-        // instead of an answer (ADR 0093 §2/ADR 0105) - discard it.
-        clearDraft()
-      } else if (event.event === 'message') {
-        const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
-        resolved = mapMessage(data.message)
-        deliveredRef.current = true
-        setDeliveredMessageId(resolved.id)
-        onMessage?.(resolved)
-        clearDraft()
-        onConversation?.(mapConversation(data.conversation))
-      } else if (event.event === 'error') {
-        const data = JSON.parse(event.data) as { error?: string }
-        setError(typeof data.error === 'string' && data.error !== '' ? data.error : 'assistant error')
-        clearDraft()
       }
     }, controller.signal)
 
@@ -369,7 +384,7 @@ export function useAssistantChat() {
       if (controller.signal.aborted) return null
       removeMateWatch(conversationId)
       if (isCurrent()) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(streamErrorText(err))
         clearDraft()
       }
       return null
@@ -437,7 +452,7 @@ export function useAssistantChat() {
     } catch (err) {
       if (controller.signal.aborted) return null
       if (isCurrent()) {
-        setError(err instanceof Error ? err.message : String(err))
+        setError(streamErrorText(err))
         clearDraft()
       }
       return null

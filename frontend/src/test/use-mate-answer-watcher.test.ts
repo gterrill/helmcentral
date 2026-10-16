@@ -125,6 +125,22 @@ describe('useMateAnswerWatcher', () => {
     expect(toastMock).not.toHaveBeenCalled()
   })
 
+  it('toasts that the reply could not be read when the stream carries an unknown event (ADR 0189)', async () => {
+    registerMateWatch('c1', 1000)
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: sseStream(['event: ping\ndata: {}\n\n']),
+    }))
+
+    renderHook(() => useMateAnswerWatcher(new Set(), vi.fn()))
+
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith("Mate's reply couldn't be read", expect.anything()))
+    expect(consoleError).toHaveBeenCalled()
+    consoleError.mockRestore()
+  })
+
   it('shows no toast for a "stopped" error - that is operator-initiated', async () => {
     registerMateWatch('c1', 1000)
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({

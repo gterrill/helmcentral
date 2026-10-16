@@ -2,7 +2,7 @@ import { useEffect, useRef, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 
 import { apiBaseUrl } from '@/config/api'
-import { readServerSentEvents } from '@/lib/sse-reader'
+import { MateEventError, readMateEvents } from '@/lib/mate-events'
 import { getMateWatchSnapshot, removeMateWatch, subscribeMateWatch } from '@/lib/mate-watch-store'
 
 interface ConversationApi {
@@ -104,14 +104,23 @@ async function watchOneConversation(
     let resolvedConversationTitle = ''
     let errorText: string | null = null
 
-    await readServerSentEvents(response.body, (event) => {
-      if (event.event === 'message') {
-        const data = JSON.parse(event.data) as { message: MessageApi; conversation: ConversationApi }
-        resolvedConversationId = data.conversation.id
-        resolvedConversationTitle = data.conversation.title
-      } else if (event.event === 'error') {
-        const data = JSON.parse(event.data) as { error?: string }
-        errorText = typeof data.error === 'string' && data.error !== '' ? data.error : 'assistant error'
+    await readMateEvents(response.body, (event) => {
+      switch (event.type) {
+        case 'message':
+          resolvedConversationId = event.conversation.id
+          resolvedConversationTitle = event.conversation.title
+          break
+        case 'error':
+          errorText = event.error !== '' ? event.error : 'assistant error'
+          break
+        case 'status':
+        case 'delta':
+        case 'retract':
+          break
+        default: {
+          const unhandled: never = event
+          throw new Error(`unhandled Mate event ${JSON.stringify(unhandled)}`)
+        }
       }
     }, signal)
 
@@ -139,6 +148,13 @@ async function watchOneConversation(
     // it via send() if there's something new to watch for.
   } catch (err) {
     if (signal.aborted) return
+    if (err instanceof MateEventError) {
+      console.error(`use-mate-answer-watcher: ${err.message}`)
+      toast.error("Mate's reply couldn't be read", {
+        action: { label: 'Open', onClick: () => onOpen(conversationId) },
+      })
+      return
+    }
     console.error(`use-mate-answer-watcher: watching conversation ${conversationId} failed`, err)
   }
 }

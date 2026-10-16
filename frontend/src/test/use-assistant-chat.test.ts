@@ -417,9 +417,10 @@ describe('useAssistantChat', () => {
       expect(raf.pending()).toBe(false)
     })
 
-    it('ignores unknown event types and still resolves the message', async () => {
+    it('shows a plain message and clears the draft when the stream carries an unknown event (ADR 0189)', async () => {
       installFakeRaf()
-      const { stream, push, close } = controllableSseStream()
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const { stream, push } = controllableSseStream()
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }))
 
       const { result } = renderHook(() => useAssistantChat())
@@ -430,19 +431,15 @@ describe('useAssistantChat', () => {
       })
 
       await act(async () => {
+        push('event: delta\ndata: {"text":"partial"}\n\n')
         push('event: ping\ndata: {"whatever":true}\n\n')
         await flushMicrotasks()
       })
+      expect(await sendPromise).toBeNull()
       expect(result.current.draft).toBeNull()
-      expect(result.current.error).toBeNull()
-
-      await act(async () => {
-        push(`data: ${JSON.stringify({ message: messageApi, conversation: conversationApi })}\n\n`)
-        close()
-        await flushMicrotasks()
-      })
-      const reply = await sendPromise
-      expect(reply).toMatchObject({ id: 'm2' })
+      expect(result.current.error).toBe("Mate's reply couldn't be read. Try asking again.")
+      expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('ping'))
+      consoleError.mockRestore()
     })
   })
 
