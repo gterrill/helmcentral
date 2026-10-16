@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage worktree prune-merged
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage worktree prune-merged check-vite-config
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -53,7 +53,18 @@ worktree:
 prune-merged:
 	@CONFIRM="$(CONFIRM)" sh scripts/prune-merged.sh
 
-dev:
+# Vite loads frontend/vite.config.js ahead of vite.config.ts. An old tsc -b
+# left one there (gitignored, so git status never shows it), and the dev
+# server ran on that stale config until a page died on a missing define.
+# Stop rather than delete it, so whatever wrote it gets noticed.
+check-vite-config:
+	@if [ -e frontend/vite.config.js ]; then \
+		echo "frontend/vite.config.js shadows frontend/vite.config.ts; Vite would load it instead."; \
+		echo "It is a stale compiler emit: rm -f frontend/vite.config.js frontend/vite.config.d.ts"; \
+		exit 1; \
+	fi
+
+dev: check-vite-config
 	# --force-recreate: frontend-dev only runs `npm install` once at container
 	# startup, so `up -d` on an already-running container (whose config hasn't
 	# changed) skips it and leaves the frontend_node_modules volume stale
@@ -86,7 +97,7 @@ build-status:
 # but against a throwaway settings file and state volume, so scripts that
 # click Save can't touch ./settings.yaml or ./backend/data. Safe to tear down
 # and recreate at will — unlike the dev stack, nothing here is shared.
-e2e-up:
+e2e-up: check-vite-config
 	docker compose -f docker-compose.dev.yml --profile e2e up -d --force-recreate backend-e2e frontend-e2e
 	@echo "E2E dashboard: http://localhost:5174  (API: http://localhost:8090)"
 
