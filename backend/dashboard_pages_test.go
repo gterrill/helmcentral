@@ -2929,9 +2929,8 @@ func validClusterConfig() *dashboardClusterConfig {
 			{Label: "Oil", Rows: []dashboardGaugeConfig{
 				{Suffix: "oilPressure", Label: "Oil", Display: "numeric", Quantity: "pressure", Unit: "psi"},
 			}},
-			{Label: "Temps", Rows: []dashboardGaugeConfig{
-				{Suffix: "temperature", Label: "Coolant", Display: "numeric", Quantity: "temperature", Unit: "C"},
-				{Suffix: "transmission.oilTemperature", Label: "Gearbox", Display: "numeric", Quantity: "temperature", Unit: "C"},
+			{Label: "Load", Rows: []dashboardGaugeConfig{
+				{Suffix: "engineLoad", Label: "Load", Display: "numeric", Quantity: "ratio", Unit: "percent"},
 			}},
 		},
 	}
@@ -2970,14 +2969,30 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 	badRow := validClusterConfig()
 	badRow.Corners[0].Rows[0].Display = "hologram"
 
-	badTelltale := validClusterConfig()
-	badTelltale.Telltales = []dashboardGaugeConfig{{Suffix: "a.b", Display: "hologram", Quantity: "raw", Unit: "raw"}}
+	// Engine Cluster v2 draws one reading per corner card.
+	tooManyRows := validClusterConfig()
+	tooManyRows.Corners[0].Rows = append(tooManyRows.Corners[0].Rows,
+		dashboardGaugeConfig{Suffix: "a.b", Display: "numeric", Quantity: "raw", Unit: "raw"})
 
-	tooManyTelltales := validClusterConfig()
-	tooManyTelltales.Telltales = make([]dashboardGaugeConfig, clusterMaxTelltales+1)
-	for i := range tooManyTelltales.Telltales {
-		tooManyTelltales.Telltales[i] = dashboardGaugeConfig{Suffix: "a.b", Display: "numeric", Quantity: "raw", Unit: "raw"}
-	}
+	badSide := validClusterConfig()
+	badSide.Side = "starboard"
+
+	badArc := validClusterConfig()
+	badArc.Arcs = &dashboardClusterArcs{Left: &dashboardGaugeConfig{Suffix: "temperature", Display: "hologram", Quantity: "raw", Unit: "raw"}}
+
+	badFooter := validClusterConfig()
+	badFooter.Footer = &dashboardClusterFooter{Egt: &dashboardGaugeConfig{Suffix: "exhaustTemperature", Display: "hologram", Quantity: "raw", Unit: "raw"}}
+
+	// A footer slot holds a suffix like any other; a typed path is refused.
+	pathFooter := validClusterConfig()
+	pathFooter.Footer = &dashboardClusterFooter{Battery: &dashboardGaugeConfig{Path: "electrical.batteries.292.voltage", Display: "numeric", Quantity: "raw", Unit: "raw"}}
+
+	// A footer slot that names its own item still needs a reading.
+	noReading := validClusterConfig()
+	noReading.Footer = &dashboardClusterFooter{Battery: &dashboardGaugeConfig{EquipmentID: "battery-1", Display: "numeric", Quantity: "raw", Unit: "raw"}}
+
+	telltales := validClusterConfig()
+	telltales.Telltales = []dashboardGaugeConfig{{Suffix: "temperature", Display: "numeric", Quantity: "temperature", Unit: "C"}}
 
 	cases := []struct {
 		name   string
@@ -2992,8 +3007,13 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 		{"too many corners", clusterWidget("cluster:abcd1234", tooManyCorners)},
 		{"corner with no rows", clusterWidget("cluster:abcd1234", emptyCorner)},
 		{"bad row", clusterWidget("cluster:abcd1234", badRow)},
-		{"bad telltale", clusterWidget("cluster:abcd1234", badTelltale)},
-		{"too many telltales", clusterWidget("cluster:abcd1234", tooManyTelltales)},
+		{"two rows in a corner", clusterWidget("cluster:abcd1234", tooManyRows)},
+		{"unknown side", clusterWidget("cluster:abcd1234", badSide)},
+		{"bad arc", clusterWidget("cluster:abcd1234", badArc)},
+		{"bad footer slot", clusterWidget("cluster:abcd1234", badFooter)},
+		{"a footer slot that holds a path", clusterWidget("cluster:abcd1234", pathFooter)},
+		{"a footer slot with its own item and no reading", clusterWidget("cluster:abcd1234", noReading)},
+		{"a save that still carries telltales", clusterWidget("cluster:abcd1234", telltales)},
 	}
 
 	for _, tc := range cases {
@@ -3003,24 +3023,63 @@ func TestValidateClusterRejectsBadInput(t *testing.T) {
 	}
 }
 
-func TestGaugeBoundPathsIncludesClusterTelltales(t *testing.T) {
-	itemID := newTileItem(t, "Port engine", "propulsion.port", "")
-	cluster := validClusterConfig()
-	cluster.EquipmentID = itemID
-	cluster.Telltales = []dashboardGaugeConfig{
-		{Suffix: "temperature", Display: "numeric", Quantity: "temperature", Unit: "C"},
+func TestValidateClusterAcceptsSideArcsAndFooter(t *testing.T) {
+	g := func(suffix string) *dashboardGaugeConfig {
+		return &dashboardGaugeConfig{Suffix: suffix, Display: "numeric", Quantity: "raw", Unit: "raw"}
 	}
+	own := func(item, suffix string) *dashboardGaugeConfig {
+		slot := g(suffix)
+		slot.EquipmentID = item
+		return slot
+	}
+	cluster := validClusterConfig()
+	cluster.Side = "stbd"
+	cluster.Arcs = &dashboardClusterArcs{Left: g("temperature")}
+	cluster.Footer = &dashboardClusterFooter{
+		Battery: own("battery-1", "voltage"), AltAmps: own("alt-1", "current"),
+		TransPressure: g("transmission.oilPressure"), Egt: own("exhaust-1", "exhaustTemperature"),
+	}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", cluster)}, ""); msg != "" {
+		t.Fatalf("expected side, arcs and footer to be accepted, got %q", msg)
+	}
+}
 
+// Arcs and footer slots are bound paths like any other: the item's source plus
+// the suffix, and for a footer slot that names its own item, that item's.
+func TestGaugeBoundPathsIncludesClusterArcsAndFooter(t *testing.T) {
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	alt := newTileItem(t, "Port alternator", "electrical.alternator.2", "")
+	batt := newTileItem(t, "Port start battery", "electrical.batteries.292", "")
+	exhaust := newTileItem(t, "Port exhaust", "propulsion.0", "")
+
+	g := func(item, suffix string) *dashboardGaugeConfig {
+		return &dashboardGaugeConfig{EquipmentID: item, Suffix: suffix, Display: "numeric", Quantity: "raw", Unit: "raw"}
+	}
+	cluster := validClusterConfig()
+	cluster.EquipmentID = engine
+	cluster.Arcs = &dashboardClusterArcs{Left: g("", "temperature"), Right: g("", "transmission.oilTemperature")}
+	cluster.Footer = &dashboardClusterFooter{
+		Battery: g(batt, "voltage"), AltAmps: g(alt, "current"), AltWatts: g(alt, "power"),
+		AltTemp: g(alt, "temperature"), AltStage: g(alt, "chargingModeNumber"),
+		TransPressure: g("", "transmission.oilPressure"),
+		Egt:           g(exhaust, "exhaustTemperature"),
+	}
 	withPages(t, clusterWidget("cluster:abcd1234", cluster))
 
-	var found bool
+	got := map[string]bool{}
 	for _, p := range gaugeBoundPaths() {
-		if p == "propulsion.port.temperature" {
-			found = true
-		}
+		got[p] = true
 	}
-	if !found {
-		t.Fatalf("telltale path missing from gaugeBoundPaths: %v", gaugeBoundPaths())
+	for _, want := range []string{
+		"propulsion.port.temperature", "propulsion.port.transmission.oilTemperature",
+		"electrical.batteries.292.voltage", "electrical.alternator.2.current", "electrical.alternator.2.power",
+		"electrical.alternator.2.temperature", "electrical.alternator.2.chargingModeNumber",
+		"propulsion.port.transmission.oilPressure",
+		"propulsion.0.exhaustTemperature",
+	} {
+		if !got[want] {
+			t.Fatalf("%s missing from gaugeBoundPaths: %v", want, gaugeBoundPaths())
+		}
 	}
 }
 
@@ -3050,11 +3109,10 @@ func TestGaugeBoundPathsIncludesClusterSlots(t *testing.T) {
 	withPages(t, clusterWidget("cluster:abcd1234", cluster))
 
 	want := []string{
+		"propulsion.port.engineLoad",
 		"propulsion.port.fuel.rate",
 		"propulsion.port.oilPressure",
 		"propulsion.port.revolutions",
-		"propulsion.port.temperature",
-		"propulsion.port.transmission.oilTemperature",
 	}
 	paths := gaugeBoundPaths()
 	if len(paths) != len(want) {
@@ -3302,7 +3360,6 @@ func TestClusterFuelRailRoundTripsEveryRenderedField(t *testing.T) {
 
 	raw := `{
 	  "side": "right",
-	  "totalLabel": "Aboard",
 	  "bars": [{"tankId": "tank-2", "label": "Fwd"}]
 	}`
 	var rail dashboardClusterFuelRail
@@ -3327,9 +3384,6 @@ func TestClusterFuelRailRoundTripsEveryRenderedField(t *testing.T) {
 	}
 	if got.Side != "right" {
 		t.Errorf("side did not survive: %q", got.Side)
-	}
-	if got.TotalLabel != "Aboard" {
-		t.Errorf("totalLabel did not survive: %q", got.TotalLabel)
 	}
 	if len(got.Bars) != 1 {
 		t.Fatalf("expected one bar, got %d", len(got.Bars))

@@ -21,9 +21,21 @@ import (
 
 const zoneDerivedAlarmRuleIDPrefix = "zone:"
 
-// Where a cluster's telltales start in the flat index space, past every corner
-// row a cluster can hold, so adding a corner row cannot renumber an alarm.
-const clusterTelltaleZoneIndexBase = 2 + clusterMaxCorners*clusterMaxCornerRows
+// Where a cluster's arcs and footer sit in the flat index space of the ids of
+// zones a slot still holds (see collectSlot). The ring, centre and corner rows
+// come first. 18 is where the old telltales began (2 + 4 corners * 4 rows, before
+// a corner held one row), a position that shipped; a telltale moved onto an arc
+// keeps its own old index (dashboardGaugeConfig.ZoneIndex), so no issued id
+// changes. The footer and the right arc are new in this release, so they follow
+// without gaps: footer slot i is clusterFooterZoneIndexBase+i, in the order the
+// frontend's CLUSTER_FOOTER_SLOTS lists (a test pins the two together).
+const (
+	clusterTelltaleZoneIndexBase = 18
+	clusterLeftArcZoneIndex      = clusterTelltaleZoneIndexBase
+	clusterFooterZoneIndexBase   = 24
+	clusterFooterSlotCount       = 8
+	clusterRightArcZoneIndex     = clusterFooterZoneIndexBase + clusterFooterSlotCount
+)
 
 const (
 	// A value hovering at a threshold is the reason people switch marine
@@ -186,6 +198,16 @@ func zoneDerivedAlarmRules() []alarmRule {
 		if suffix == "" {
 			return
 		}
+		// A slot that names its own item reads that item or nothing: if it is gone
+		// or unmapped there is no reading and no alarm, never the engine's source.
+		if slot.EquipmentID != "" {
+			if own, found := ix.items[slot.EquipmentID]; !found || own.Source == "" {
+				return
+			}
+		}
+		if slot.ZoneIndex != nil {
+			index = *slot.ZoneIndex
+		}
 		item, hasItem := ix.items[equipmentID]
 		if hasItem && item.Source != "" {
 			if profile, ok := ix.profiles[item.ProfileID]; ok {
@@ -264,8 +286,20 @@ func zoneDerivedAlarmRules() []alarmRule {
 						index++
 					}
 				}
-				for i, telltale := range c.Telltales {
-					collectSlot(widget.ID, clusterTelltaleZoneIndexBase+i, c.EquipmentID, c.Source, c.Title, telltale)
+				for i, slot := range c.Arcs.slots() {
+					if slot == nil {
+						continue
+					}
+					at := clusterLeftArcZoneIndex
+					if i == 1 {
+						at = clusterRightArcZoneIndex
+					}
+					collectSlot(widget.ID, at, slotItem(c.EquipmentID, *slot), c.Source, c.Title, *slot)
+				}
+				for i, slot := range c.Footer.slots() {
+					if slot != nil {
+						collectSlot(widget.ID, clusterFooterZoneIndexBase+i, slotItem(c.EquipmentID, *slot), c.Source, c.Title, *slot)
+					}
 				}
 				if c.Fuel != nil {
 					for _, bar := range c.Fuel.Bars {
@@ -280,6 +314,15 @@ func zoneDerivedAlarmRules() []alarmRule {
 	// unique by construction.
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	return rules
+}
+
+// slotItem is the item a slot reads: its own when it names one (a footer slot),
+// else the tile's.
+func slotItem(tileItem string, slot dashboardGaugeConfig) string {
+	if slot.EquipmentID != "" {
+		return slot.EquipmentID
+	}
+	return tileItem
 }
 
 func firstNonEmpty(values ...string) string {

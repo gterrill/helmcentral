@@ -149,10 +149,12 @@ type dashboardLampStripConfig struct {
 const clusterWidgetIDPrefix = "cluster:"
 
 const (
-	clusterMaxCorners    = 4
-	clusterMaxCornerRows = 4
-	clusterMaxTelltales  = 6
-	clusterMaxFuelBars   = 4
+	clusterMaxCorners = 4
+	// One reading per corner card and two tanks on the fuel fan (Engine
+	// Cluster v2): a cap above what is drawn would accept a config the tile
+	// silently ignores.
+	clusterMaxCornerRows = 1
+	clusterMaxFuelBars   = 2
 )
 
 // Which edge of the tile the fuel rail sits on, not which side of the boat the
@@ -278,8 +280,16 @@ type dashboardClusterConfig struct {
 	Centre     dashboardGaugeConfig     `json:"centre"`
 	CentreIcon string                   `json:"centreIcon,omitempty"`
 	Corners    []dashboardClusterCorner `json:"corners,omitempty"`
-	// Readings shown as a telltale under the dial rather than a box of their
-	// own: icon, label, value, coloured by zone.
+	// Side is port or stbd: which way the tile is laid out. Empty is port.
+	Side string `json:"side,omitempty"`
+	// Arcs are the two temperature arcs in the dial's gap; Footer the cards
+	// under it. A slot not set is absent, and the tile draws nothing for it.
+	Arcs   *dashboardClusterArcs   `json:"arcs,omitempty"`
+	Footer *dashboardClusterFooter `json:"footer,omitempty"`
+	// Telltales is what a cluster held before Engine Cluster v2. Only
+	// moveLegacyTelltales reads it (it moves the coolant and gearbox readings
+	// onto the arcs and footer and clears it); a save that still carries one is
+	// refused.
 	Telltales []dashboardGaugeConfig `json:"telltales,omitempty"`
 	// A fuel rail down one edge (ADR 0061). Every field the renderer reads has
 	// to reach the struct below: the decoder drops unknown keys in silence, so
@@ -311,9 +321,8 @@ type dashboardClusterFuelBar struct {
 // dashboardClusterFuelRail is the curved bar gauge down one edge of the tile
 // (ADR 0061).
 type dashboardClusterFuelRail struct {
-	Side       string                    `json:"side"`
-	Bars       []dashboardClusterFuelBar `json:"bars"`
-	TotalLabel string                    `json:"totalLabel,omitempty"`
+	Side string                    `json:"side"`
+	Bars []dashboardClusterFuelBar `json:"bars"`
 }
 
 type dashboardGaugeGroupConfig struct {
@@ -366,15 +375,24 @@ type dashboardGaugeConfig struct {
 	Path string `json:"path"`
 	// Suffix replaces Path on a slot of a tile that shows an equipment item:
 	// the reading under the item's source, such as oilPressure or fuel.rate.
-	Suffix   string      `json:"suffix,omitempty"`
-	Label    string      `json:"label"`
-	Display  string      `json:"display"`
-	Quantity string      `json:"quantity"`
-	Unit     string      `json:"unit"`
-	Decimals *int        `json:"decimals,omitempty"`
-	Min      *float64    `json:"min,omitempty"`
-	Max      *float64    `json:"max,omitempty"`
-	Zones    []gaugeZone `json:"zones,omitempty"`
+	Suffix string `json:"suffix,omitempty"`
+	// EquipmentID reads this slot from another item than the tile's own, for the
+	// cluster's footer: the starter battery, the alternator and the exhaust are
+	// different pieces of equipment from the engine. Empty reads the tile's item.
+	EquipmentID string `json:"equipmentId,omitempty"`
+	// ZoneIndex is the position in the id (zone:<tile>:<index>:<n>) of the zones
+	// this slot still holds, when it is not where its position would put it. Set
+	// only when a slot moves (a telltale onto an arc), so the alarm it already
+	// raised keeps its id. Never sent by a client.
+	ZoneIndex *int        `json:"zoneIndex,omitempty"`
+	Label     string      `json:"label"`
+	Display   string      `json:"display"`
+	Quantity  string      `json:"quantity"`
+	Unit      string      `json:"unit"`
+	Decimals  *int        `json:"decimals,omitempty"`
+	Min       *float64    `json:"min,omitempty"`
+	Max       *float64    `json:"max,omitempty"`
+	Zones     []gaugeZone `json:"zones,omitempty"`
 
 	// Every field the renderer reads has to live here. Go's JSON decoder drops
 	// unknown keys without complaint, so one missing from this struct is
@@ -869,6 +887,21 @@ func loadDashboardPages() {
 			}
 			anyStripped := false
 			for _, p := range loaded.Pages {
+				for i := range p.Widgets {
+					// Only once the equipment conversion has run: before it a
+					// telltale still holds a path that conversion turns into a
+					// suffix, and that is what decides where it goes.
+					cl := p.Widgets[i].Cluster
+					if cl == nil {
+						continue
+					}
+					if loaded.EquipmentConverted && moveLegacyTelltales(cl) {
+						anyStripped = true
+					}
+					if normalizeClusterCaps(p.Name, cl) {
+						anyStripped = true
+					}
+				}
 				if kept, changed := stripRetiredWidgets(p.Widgets); changed {
 					p.Widgets = kept
 					anyStripped = true
@@ -1496,11 +1529,25 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 			}
 		}
 	}
-	if len(w.Cluster.Telltales) > clusterMaxTelltales {
-		return "cluster has too many telltales: " + w.ID
+	if len(w.Cluster.Telltales) > 0 {
+		return "a cluster's telltales are now its arcs and footer: " + w.ID
 	}
-	for _, telltale := range w.Cluster.Telltales {
-		if msg := validateSlotConfig(telltale, hasItem, w.ID+" telltale"); msg != "" {
+	if !validClusterSides[w.Cluster.Side] {
+		return "unknown cluster side: " + w.Cluster.Side
+	}
+	for i, slot := range w.Cluster.Arcs.slots() {
+		if slot == nil {
+			continue
+		}
+		if msg := validateClusterSlot(*slot, hasItem, fmt.Sprintf("%s arc %d", w.ID, i+1)); msg != "" {
+			return msg
+		}
+	}
+	for i, slot := range w.Cluster.Footer.slots() {
+		if slot == nil {
+			continue
+		}
+		if msg := validateClusterSlot(*slot, hasItem, fmt.Sprintf("%s footer slot %d", w.ID, i+1)); msg != "" {
 			return msg
 		}
 	}
@@ -1532,9 +1579,6 @@ func validateClusterFuelRail(rail *dashboardClusterFuelRail, id string) string {
 	}
 	if len(rail.Bars) > clusterMaxFuelBars {
 		return "cluster fuel rail has too many bars: " + id
-	}
-	if len(rail.TotalLabel) > gaugeLabelMaxLen {
-		return "cluster fuel total label too long: " + id
 	}
 	for i, bar := range rail.Bars {
 		ctx := fmt.Sprintf("%s fuel bar %d", id, i+1)
@@ -1825,8 +1869,15 @@ func gaugeBoundPaths() []string {
 						addSlot(id, row)
 					}
 				}
-				for _, telltale := range widget.Cluster.Telltales {
-					addSlot(id, telltale)
+				for _, slot := range widget.Cluster.Arcs.slots() {
+					if slot != nil {
+						addSlot(id, *slot)
+					}
+				}
+				for _, slot := range widget.Cluster.Footer.slots() {
+					if slot != nil {
+						addSlot(id, *slot)
+					}
 				}
 				if widget.Cluster.Fuel != nil {
 					for _, bar := range widget.Cluster.Fuel.Bars {

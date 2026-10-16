@@ -280,3 +280,61 @@ describe('zones a converted tile still holds', () => {
     expect(planTileZones(bare, [{ ...heldOil, suffix: 'exhaust' }]).stays).toEqual(['Oil'])
   })
 })
+
+describe('resolveCluster: the arcs and footer of Engine Cluster v2', () => {
+  const alternatorProfile: EngineProfile = {
+    id: 'alt-prof', name: 'Alternator', kind: 'alternator',
+    gauges: [{
+      path_suffix: 'current', label: 'Amps', display: 'numeric', quantity: 'current', unit: 'A', min: 0, max: 200,
+      zones: [{ direction: 'above', threshold: 150, state: 'warn' }],
+    }],
+  }
+  const alt = item({ id: 'alt-2', name: 'Port alternator', signalk_source: 'electrical.alternator.2', source_kind: 'alternator', profile_id: 'alt-prof' })
+  const batt = item({ id: 'batt', name: 'Port start battery', signalk_source: 'electrical.batteries.292', source_kind: 'battery', profile_id: '' })
+  const withFooter: EngineClusterConfig = {
+    ...cluster,
+    fuel: undefined,
+    arcs: { left: slot('temperature') },
+    footer: {
+      transPressure: slot('transmission.oilPressure'),
+      altAmps: slot('current', { equipmentId: 'alt-2' }),
+      battery: slot('voltage', { equipmentId: 'batt', quantity: 'potential', unit: 'V' }),
+      egt: slot('exhaustTemperature', { equipmentId: 'gone' }),
+    },
+  }
+  const c = ctx([item(), alt, batt], { profiles: [yanmar, alternatorProfile] })
+
+  it('reads the arcs and the transmission from the cluster\'s engine', () => {
+    const r = resolveCluster(withFooter, c)
+    if (!r.ok) throw new Error('expected a resolved cluster')
+    expect(r.config.arcs?.left?.path).toBe('propulsion.port.temperature')
+    expect(r.config.arcs?.right).toBeUndefined()
+    expect(r.config.footer?.transPressure?.path).toBe('propulsion.port.transmission.oilPressure')
+  })
+
+  it('reads a footer slot that names its own item from that item\'s source', () => {
+    const r = resolveCluster(withFooter, c)
+    if (!r.ok) throw new Error('expected a resolved cluster')
+    expect(r.config.footer?.battery?.path).toBe('electrical.batteries.292.voltage')
+    expect(r.config.footer?.altAmps?.path).toBe('electrical.alternator.2.current')
+  })
+
+  it('takes the zones and unit from that item\'s profile, not the engine\'s', () => {
+    const r = resolveCluster(withFooter, c)
+    if (!r.ok) throw new Error('expected a resolved cluster')
+    expect(r.config.footer?.altAmps?.zones).toEqual([{ from: 150, to: 200, state: 'warn' }])
+    expect(r.config.footer?.altAmps?.unit).toBe('A')
+  })
+
+  it('a slot whose own item is gone reads as no data and never falls back to the engine', () => {
+    const r = resolveCluster(withFooter, c)
+    if (!r.ok) throw new Error('expected a resolved cluster')
+    expect(r.config.footer?.egt?.path).toBe('')
+  })
+
+  it('a slot whose own item is not mapped reads as no data too', () => {
+    const r = resolveCluster(withFooter, ctx([item(), { ...batt, signalk_source: '' }, alt], { profiles: [yanmar, alternatorProfile] }))
+    if (!r.ok) throw new Error('expected a resolved cluster')
+    expect(r.config.footer?.battery?.path).toBe('')
+  })
+})

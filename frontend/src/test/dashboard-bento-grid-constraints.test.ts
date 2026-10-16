@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
 import {
-  CLUSTER_FUEL_MIN_W,
   CLUSTER_WIDGET_CONSTRAINTS,
   GRID_MARGIN,
   GRID_ROW_HEIGHT,
@@ -9,6 +8,8 @@ import {
   POI_MAP_WIDGET_CONSTRAINTS,
   WIDGET_CONSTRAINTS,
   gaugeWidgetConstraints,
+  CLUSTER_DEFAULT_SIZE,
+  liftClusterBox,
   raiseGaugeHeight,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
@@ -32,12 +33,11 @@ describe('grid row maths', () => {
 
 describe('the engine cluster resize floor', () => {
   /**
-   * Measured in the browser at scale 1, which is the shortest the tile can
-   * be: the canvas only grows past this, so a wider column costs no extra
-   * height. 32px of tile header and top padding, 228.4px of canvas,
-   * 8px of bottom padding.
+   * The card is drawn 800 x 592 and only grows past that, so 592 is the
+   * shortest the tile can be at scale 1: 32px of tile header and top padding,
+   * the canvas, 8px of bottom padding.
    */
-  const MEASURED_TILE_HEIGHT = 32 + 228.4 + 8
+  const MEASURED_TILE_HEIGHT = 32 + 592 + 8
 
   test('holds the whole tile', () => {
     expect(gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH))
@@ -48,21 +48,11 @@ describe('the engine cluster resize floor', () => {
     const slack = gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH) - MEASURED_TILE_HEIGHT
     expect(slack).toBeLessThan(GRID_ROW_HEIGHT + GRID_MARGIN)
   })
-})
 
-/**
- * A fuel rail widens the design the canvas scales against by a fifth, so the
- * floor that was fine for a bare cluster leaves a railed one scaled to nothing.
- * The height is untouched, since the rail is exactly as tall as the body.
- */
-describe('the fuel rail', () => {
-  test('costs the cluster no extra rows', () => {
-    expect(gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH))
-      .toBeGreaterThanOrEqual(32 + 228.4 + 8)
-  })
-
-  test('needs a wider column than a bare cluster', () => {
-    expect(CLUSTER_FUEL_MIN_W).toBeGreaterThan(CLUSTER_WIDGET_CONSTRAINTS.minW)
+  // The fuel fan is part of the 800-wide card, so a railed cluster needs no
+  // wider column than a bare one.
+  test('asks for half the board across', () => {
+    expect(CLUSTER_WIDGET_CONSTRAINTS.minW).toBe(6)
   })
 })
 
@@ -152,5 +142,42 @@ describe('raiseGaugeHeight', () => {
   test('never lowers a taller tile', () => {
     expect(raiseGaugeHeight(6, 'numeric')).toBe(6)
     expect(raiseGaugeHeight(5, 'radial')).toBe(5)
+  })
+})
+
+
+/**
+ * A cluster saved before the v2 card is narrower than the card needs, and drawn
+ * at that width it scales to half. It is lifted to the new minimum width when
+ * drawn and stays inside the board.
+ */
+describe('liftClusterBox', () => {
+  const min = CLUSTER_WIDGET_CONSTRAINTS
+
+  test('widens a saved cluster to the minimum', () => {
+    expect(liftClusterBox({ x: 0, w: 4 })).toEqual({ x: 0, w: min.minW })
+    expect(liftClusterBox({ x: 0, w: 5 }).w).toBe(min.minW)
+  })
+
+  test('keeps a tile that is wide enough exactly as saved', () => {
+    expect(liftClusterBox({ x: 2, w: 8 })).toEqual({ x: 2, w: 8 })
+  })
+
+  test('pulls a widened tile back inside the twelve columns', () => {
+    const lifted = liftClusterBox({ x: 9, w: 3 })
+    expect(lifted.x + lifted.w).toBeLessThanOrEqual(12)
+    expect(lifted.w).toBe(min.minW)
+  })
+})
+
+/**
+ * A new cluster tile is placed at the card's own minimum. At the old 6 x 7 the
+ * 592-tall card overflowed its tile and spilled its footer onto whatever sat
+ * below, found placing one through the real UI.
+ */
+describe('a new engine cluster tile', () => {
+  test('is placed at the minimum size, so the card fits its tile', () => {
+    expect(CLUSTER_DEFAULT_SIZE).toEqual({ w: CLUSTER_WIDGET_CONSTRAINTS.minW, h: CLUSTER_WIDGET_CONSTRAINTS.minH })
+    expect(gridPixelHeight(CLUSTER_DEFAULT_SIZE.h)).toBeGreaterThanOrEqual(32 + 592 + 8)
   })
 })

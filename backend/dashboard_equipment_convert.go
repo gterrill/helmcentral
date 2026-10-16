@@ -321,6 +321,8 @@ func (c *tileConverter) convertCluster(page, id string, cl *dashboardClusterConf
 		}
 	}
 	cl.Telltales = telltales
+	// Engine Cluster v2 has no telltale strip: the readings move onto its arcs and footer.
+	moveLegacyTelltales(cl)
 
 	if cl.Fuel != nil {
 		for bi := range cl.Fuel.Bars {

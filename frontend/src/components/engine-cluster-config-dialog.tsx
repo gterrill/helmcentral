@@ -16,15 +16,18 @@ import { Input } from '@/components/ui/input'
 import { EquipmentPicker } from '@/components/equipment-picker'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
+import { useVesselRoles } from '@/hooks/use-vessel-roles'
 import { useSlotZoneEditing } from '@/hooks/use-slot-zone-editing'
 import { ZoneConflicts } from '@/components/zone-conflicts'
 import {
   CLUSTER_MAX_CORNERS,
   CLUSTER_MAX_CORNER_ROWS,
   CLUSTER_MAX_FUEL_BARS,
-  CLUSTER_MAX_TELLTALES,
+  CLUSTER_FOOTER_SLOTS,
   GAUGE_GROUP_TITLE_MAX_LENGTH,
+  type ClusterFooterSlot,
   type ClusterFuelRailRef,
+  type ClusterSide,
   type DashboardLayoutItem,
   type EngineClusterConfig,
   type FuelBarRef,
@@ -32,25 +35,22 @@ import {
   type GaugeZone,
 } from '@/lib/dashboard-widgets'
 import { CLUSTER_ICON_NAMES, iconForSlot } from '@/lib/cluster-icons'
-import { findItem, profileGaugeFor } from '@/lib/equipment-tiles'
+import { findItem, profileGaugeFor, profileOf, type EquipmentTileContext } from '@/lib/equipment-tiles'
 import type { EngineProfile } from '@/lib/engine-profiles'
 
 /**
- * The slots a cluster fills from a profile, and the suffix each looks for.
- * Anything the profile does not cover keeps the suffix and is set by hand.
+ * The slots a cluster fills from the engine's profile, and the suffix each looks
+ * for. Anything the profile does not cover keeps the suffix and is set by hand.
  */
 const SLOT_SUFFIXES = {
   ring: 'revolutions',
-  // Hours in the notch, not fuel rate: hours barely move and suit a small
-  // badge, while fuel rate changes with every throttle input and earns a full
-  // readout with a scale under it.
+  // Hours in the tab, not fuel rate: hours barely move and suit a small badge,
+  // while fuel rate changes with every throttle input and earns a full readout
+  // with a scale under it.
   centre: 'runTime',
   corners: [
     { label: 'Oil', suffixes: ['oilPressure'] },
     { label: 'Boost', suffixes: ['boostPressure'] },
-    // Load rather than the temperatures. Four boxes of one reading each keeps
-    // them the same size, and a temperature is something you check by glancing
-    // for a colour, which is what the telltale strip is for.
     { label: 'Load', suffixes: ['engineLoad'] },
     // Burn rate only. Economy is a vessel figure, not an engine one: SignalK's
     // per-engine fuel.economy reads roughly twice the boat's on a twin, so
@@ -58,14 +58,73 @@ const SLOT_SUFFIXES = {
     // engines running (ADR 0055).
     { label: 'Fuel', suffixes: ['fuel.rate'] },
   ],
-  // Exhaust is absent: on this vessel it lives under propulsion.0, outside the
-  // engine's own source, so a tile that reads one engine cannot show it.
-  telltales: ['temperature', 'transmission.oilTemperature'],
+  // The two arcs in the dial's gap: the engine's coolant on the left, the
+  // gearbox oil temperature on the right (the engine has no oil temperature
+  // sensor of its own).
+  arcLeft: 'temperature',
+  arcRight: 'transmission.oilTemperature',
+  transPressure: 'transmission.oilPressure',
 } as const
 
-/** Every slot of a cluster in a fixed order: ring, centre, corner rows, telltales. */
+/**
+ * The footer slots that read another item than the engine: the kind of item
+ * each takes, the reading it starts on, and a blank slot's own quantity and
+ * scale (used until the item's profile has a gauge for the reading). None
+ * carries a threshold: those come from the item's profile.
+ */
+const FOREIGN_SLOTS: Record<'battery' | 'altAmps' | 'altWatts' | 'altTemp' | 'altStage' | 'altLimit' | 'egt', {
+  kind: 'battery' | 'alternator' | 'engine'
+  suffix: string
+  slot: GaugeWidgetConfig
+}> = {
+  battery: { kind: 'battery', suffix: 'voltage', slot: { path: '', label: 'Battery', display: 'numeric', quantity: 'potential', unit: 'V', decimals: 1, min: 20, max: 30 } },
+  altAmps: { kind: 'alternator', suffix: 'current', slot: { path: '', label: 'Alternator', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0, min: 0, max: 200 } },
+  altWatts: { kind: 'alternator', suffix: 'power', slot: { path: '', label: 'Alt output', display: 'numeric', quantity: 'power', unit: 'W', decimals: 0 } },
+  altTemp: { kind: 'alternator', suffix: 'temperature', slot: { path: '', label: 'Alt temp', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0, min: 0, max: 150 } },
+  // The regulator reports its stage as a number; the tile names it.
+  altStage: { kind: 'alternator', suffix: 'chargingModeNumber', slot: { path: '', label: 'Charge stage', display: 'numeric', quantity: 'raw', unit: 'raw', decimals: 0 } },
+  altLimit: { kind: 'alternator', suffix: '', slot: { path: '', label: 'Charge limit', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 } },
+  // A wet exhaust reads tens of degrees after water injection, not hundreds: a
+  // 0-100 C scale, with an above band (raw-water loss) left for the exhaust
+  // item's profile.
+  egt: { kind: 'engine', suffix: 'exhaustTemperature', slot: { path: '', label: 'Exhaust', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0, min: 0, max: 100 } },
+}
+
+const FOOTER_TITLES: Record<ClusterFooterSlot, string> = {
+  battery: 'Starter battery voltage',
+  altAmps: 'Alternator current (also drawn as a one-hour trace)',
+  altWatts: 'Alternator output power',
+  altTemp: 'Alternator temperature',
+  altStage: 'Charge stage (regulator state number)',
+  altLimit: 'Charge current limit from the battery management system',
+  transPressure: 'Transmission oil pressure',
+  egt: 'Exhaust temperature',
+}
+
+/** Port or starboard from an engine's source, `propulsion.starboard` and so on; port when it says neither. */
+function sideOf(source: string | undefined): ClusterSide {
+  return /starboard|stbd/i.test(source ?? '') ? 'stbd' : 'port'
+}
+
+/** A fuel rail's edge follows the engine it belongs to: the outer edge. */
+function fuelEdge(side: ClusterSide): ClusterFuelRailRef['side'] {
+  return side === 'stbd' ? 'right' : 'left'
+}
+
+const isForeign = (key: ClusterFooterSlot): key is keyof typeof FOREIGN_SLOTS => key in FOREIGN_SLOTS
+
+/**
+ * The slots read from the cluster's own engine, in a fixed order: ring, centre,
+ * corner rows, the two arcs, then the transmission slots. Their zones are the
+ * engine profile's and are edited here. The footer slots that name their own
+ * item are not in this list: their zones live on that item's profile.
+ */
 function clusterSlotList(c: EngineClusterConfig): GaugeWidgetConfig[] {
-  return [c.ring, c.centre, ...c.corners.flatMap((corner) => corner.rows), ...(c.telltales ?? [])]
+  return [
+    c.ring, c.centre, ...c.corners.flatMap((corner) => corner.rows),
+    ...(c.arcs?.left ? [c.arcs.left] : []), ...(c.arcs?.right ? [c.arcs.right] : []),
+    ...(c.footer?.transPressure ? [c.footer.transPressure] : []),
+  ]
 }
 
 /** The cluster with the zones that now live on the profile taken off the slots at `cleared`. */
@@ -75,8 +134,13 @@ function withoutSettledZones(c: EngineClusterConfig, cleared: Set<number>): Engi
   const ring = settle(c.ring)
   const centre = settle(c.centre)
   const corners = c.corners.map((corner) => ({ ...corner, rows: corner.rows.map(settle) }))
-  const telltales = c.telltales?.map(settle)
-  return { ...c, ring, centre, corners, telltales }
+  const arcs = c.arcs && {
+    ...(c.arcs.left ? { left: settle(c.arcs.left) } : {}),
+    ...(c.arcs.right ? { right: settle(c.arcs.right) } : {}),
+  }
+  const footer = c.footer && { ...c.footer }
+  if (footer?.transPressure) footer.transPressure = settle(footer.transPressure)
+  return { ...c, ring, centre, corners, arcs, footer }
 }
 
 function blankSlot(label: string): GaugeWidgetConfig {
@@ -88,8 +152,19 @@ function blankFuelBar(label: string): FuelBarRef {
   return { tankId: '', label }
 }
 
-/** Builds the slots of a cluster from a profile; the equipment is already chosen. */
-function clusterFromProfile(profile: EngineProfile, current: EngineClusterConfig): EngineClusterConfig {
+/** An empty footer or arc slot: no reading yet, so the tile draws nothing for it. */
+function blankArc(label: string, min: number, max: number): GaugeWidgetConfig {
+  return { ...blankSlot(label), quantity: 'temperature', unit: 'C', decimals: 0, min, max }
+}
+
+/**
+ * Builds the slots of a cluster from the engine's profile; the equipment is
+ * already chosen. The alternator is the one the Roles setting names for this
+ * engine's side, when it names one: there is no default and no guess otherwise.
+ */
+function clusterFromProfile(
+  profile: EngineProfile, current: EngineClusterConfig, ctx: EquipmentTileContext, roles: { port_alternator: string; starboard_alternator: string } | null,
+): EngineClusterConfig {
   // Zones a slot still holds are not the profile's to replace: carry them to
   // the new slot for the same reading, so filling never drops one.
   const held = new Map(clusterSlotList(current).filter((s) => (s.zones?.length ?? 0) > 0).map((s) => [s.suffix, s]))
@@ -108,17 +183,85 @@ function clusterFromProfile(profile: EngineProfile, current: EngineClusterConfig
   ring.labelDivisor = 100
   if (ring.max === undefined) ring.max = 3000
 
+  const engine = findItem(ctx, current.equipmentId)
+  const side = sideOf(engine?.signalk_source)
+  const alternatorId = (side === 'stbd' ? roles?.starboard_alternator : roles?.port_alternator) ?? ''
+
+  const footer: NonNullable<EngineClusterConfig['footer']> = {}
+  for (const key of CLUSTER_FOOTER_SLOTS) {
+    if (!isForeign(key)) continue
+    const spec = FOREIGN_SLOTS[key]
+    // What the operator already chose for this slot stays; only blanks are seeded.
+    const existing = (current.footer?.[key]?.suffix ?? '').trim() !== '' ? current.footer?.[key] : undefined
+    footer[key] = existing ?? { ...spec.slot, suffix: spec.suffix, ...(spec.kind === 'alternator' && alternatorId ? { equipmentId: alternatorId } : {}) }
+  }
+  footer.transPressure = { ...pick(SLOT_SUFFIXES.transPressure, 'Gear press'), decimals: 0 }
+
   return {
     ...current,
+    side,
     ring,
     centre: pick(SLOT_SUFFIXES.centre, 'Hours'),
     corners: SLOT_SUFFIXES.corners.map((corner) => ({
       label: corner.label,
       rows: corner.suffixes.map((suffix) => pick(suffix, corner.label)),
     })),
-    // Whole degrees in a strip: a tenth of a degree of coolant is noise at a
-    // glance, and the strip is all glance.
-    telltales: SLOT_SUFFIXES.telltales.map((suffix) => ({ ...pick(suffix, 'Temp'), decimals: 0 })),
+    arcs: {
+      // Whole degrees on an arc: a tenth of a degree of coolant is noise at a glance.
+      left: { ...pick(SLOT_SUFFIXES.arcLeft, 'Coolant'), decimals: 0 },
+      right: { ...pick(SLOT_SUFFIXES.arcRight, 'Gearbox'), decimals: 0 },
+    },
+    footer,
+    ...(current.fuel ? { fuel: { ...current.fuel, side: fuelEdge(side) } } : {}),
+  }
+}
+
+/** Every optional slot present, blank where unset, so each has a form to fill. */
+function withBlankSlots(config: EngineClusterConfig): EngineClusterConfig {
+  const footer: NonNullable<EngineClusterConfig['footer']> = { ...config.footer }
+  for (const key of CLUSTER_FOOTER_SLOTS) {
+    if (footer[key]) continue
+    footer[key] = isForeign(key)
+      ? { ...FOREIGN_SLOTS[key].slot, suffix: '' }
+      : { ...blankSlot('Gear press'), suffix: '' }
+  }
+  return {
+    ...config,
+    arcs: {
+      left: config.arcs?.left ?? blankArc('Coolant', 0, 120),
+      right: config.arcs?.right ?? blankArc('Gearbox', 0, 120),
+    },
+    footer,
+  }
+}
+
+/**
+ * Drops every optional slot with no reading, so an unbound slot is absent from
+ * the saved config rather than a placeholder the tile and the backend would
+ * each have to interpret. A foreign slot with a reading but no item is dropped
+ * too: it could read nothing.
+ */
+function pruneUnbound(config: EngineClusterConfig): EngineClusterConfig {
+  const bound = (slot: GaugeWidgetConfig | undefined, needsItem = false) =>
+    slot && (slot.suffix ?? '').trim() !== '' && (!needsItem || (slot.equipmentId ?? '') !== '') ? slot : undefined
+
+  const left = bound(config.arcs?.left)
+  const right = bound(config.arcs?.right)
+  const footer: NonNullable<EngineClusterConfig['footer']> = {}
+  for (const key of CLUSTER_FOOTER_SLOTS) {
+    const slot = bound(config.footer?.[key], isForeign(key))
+    if (slot) footer[key] = slot
+  }
+
+  const { arcs: _arcs, footer: _footer, ...rest } = config
+  void _arcs
+  void _footer
+  return {
+    ...rest,
+    ...(left || right ? { arcs: { ...(left ? { left } : {}), ...(right ? { right } : {}) } } : {}),
+    ...(Object.keys(footer).length > 0 ? { footer } : {}),
+    // The fan always sits on the outer edge of the tile.
+    ...(config.fuel ? { fuel: { ...config.fuel, side: fuelEdge(config.side ?? 'port') } } : {}),
   }
 }
 
@@ -130,13 +273,14 @@ interface EngineClusterConfigDialogProps {
 
 export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineClusterConfigDialogProps) {
   const ctx = useEquipmentTileContext(widget !== null)
+  const roles = useVesselRoles(widget !== null)
   const { paths } = useSignalKPaths(widget !== null)
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
   useEffect(() => {
-    setConfig(widget?.cluster ? structuredClone(widget.cluster) : null)
+    setConfig(widget?.cluster ? withBlankSlots(structuredClone(widget.cluster)) : null)
     setSaveError(null)
   }, [widget?.id, widget?.cluster])
 
@@ -151,7 +295,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
     setSlot((c) => (c.fuel ? { ...c, fuel: update(c.fuel) } : c))
 
   const slotsFilled = (c: EngineClusterConfig) =>
-    [c.ring, c.centre, ...c.corners.flatMap((corner) => corner.rows), ...(c.telltales ?? [])]
+    [c.ring, c.centre, ...c.corners.flatMap((corner) => corner.rows)]
       .every((slot) => (slot.suffix ?? '').trim() !== '')
 
   const canSave =
@@ -165,13 +309,13 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
     if (!config) return
     // Nothing to write to a profile: save the tile at once, in the same tick.
     if (!zoneEditing.dirty) {
-      onSave(config)
+      onSave(pruneUnbound(config))
       return
     }
     setSaving(true)
     setSaveError(null)
     try {
-      onSave(withoutSettledZones(config, await zoneEditing.commit()))
+      onSave(pruneUnbound(withoutSettledZones(config, await zoneEditing.commit())))
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Could not save the profile zones')
     } finally {
@@ -189,8 +333,8 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
         <DialogHeader>
           <DialogTitle>Engine Cluster</DialogTitle>
           <DialogDescription>
-            A ticked ring with the primary reading inside it and four corner cards. Pick the engine, fill
-            the slots from its profile, then adjust any slot.
+            One engine as a tachometer with four readout cards, two temperature arcs, a fuel fan and a
+            footer. Pick the engine, fill the slots from its profile, then adjust any slot.
           </DialogDescription>
         </DialogHeader>
 
@@ -209,7 +353,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
               <Button
                 variant="secondary"
                 disabled={!profile}
-                onClick={() => setSlot((c) => clusterFromProfile(profile!, c))}
+                onClick={() => setSlot((c) => clusterFromProfile(profile!, c, ctx, roles))}
               >
                 Fill slots from profile
               </Button>
@@ -224,12 +368,12 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
           <FieldDescription>
             The tile reads this engine's readings live and takes its zones from the engine's profile.
             {item && !profile ? ' This engine has no profile, so there is nothing to fill from and no zones.' : ''}
-            {profile ? ' Filling replaces every slot.' : ''}
+            {profile ? ' Filling replaces the engine slots and seeds the footer; a footer slot you have already set is kept.' : ''}
           </FieldDescription>
 
           {config && (
             <>
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-3">
                 <Field>
                   <FieldLabel htmlFor="cluster-title">Title</FieldLabel>
                   <Input id="cluster-title" maxLength={GAUGE_GROUP_TITLE_MAX_LENGTH} value={config.title}
@@ -237,7 +381,20 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                   <FieldDescription>Blank shows the engine's name.</FieldDescription>
                 </Field>
                 <Field>
-                  <FieldLabel htmlFor="cluster-centre-icon">Centre icon</FieldLabel>
+                  <FieldLabel htmlFor="cluster-side">Engine side</FieldLabel>
+                  <select id="cluster-side" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                    value={config.side ?? 'port'}
+                    onChange={(e) => setSlot((c) => {
+                      const side = e.target.value as ClusterSide
+                      return { ...c, side, ...(c.fuel ? { fuel: { ...c.fuel, side: fuelEdge(side) } } : {}) }
+                    })}>
+                    <option value="port">Port</option>
+                    <option value="stbd">Starboard</option>
+                  </select>
+                  <FieldDescription>Starboard mirrors the card.</FieldDescription>
+                </Field>
+                <Field>
+                  <FieldLabel htmlFor="cluster-centre-icon">Hours icon</FieldLabel>
                   <select id="cluster-centre-icon" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
                     value={config.centreIcon ?? ''}
                     onChange={(e) => setSlot((c) => ({ ...c, centreIcon: e.target.value === '' ? undefined : e.target.value }))}>
@@ -286,36 +443,16 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                     </Button>
                   </div>
 
-                  {corner.rows.map((row, rowIndex) => (
-                    <div key={rowIndex} className="mb-2 border-b border-border/60 pb-2 last:border-b-0">
+                  {corner.rows.slice(0, CLUSTER_MAX_CORNER_ROWS).map((row, rowIndex) => (
+                    <div key={rowIndex}>
                       {slotForm(row, `cluster-${cornerIndex}-${rowIndex}`, (next) => setSlot((c) => ({
                         ...c,
                         corners: c.corners.map((x, i) => (i === cornerIndex
                           ? { ...x, rows: x.rows.map((r, j) => (j === rowIndex ? next : r)) }
                           : x)),
                       })))}
-                      <Button size="sm" variant="ghost" aria-label={`Remove corner ${cornerIndex + 1} row ${rowIndex + 1}`}
-                        onClick={() => setSlot((c) => ({
-                          ...c,
-                          corners: c.corners.map((x, i) => (i === cornerIndex
-                            ? { ...x, rows: x.rows.filter((_, j) => j !== rowIndex) }
-                            : x)),
-                        }))}>
-                        <Trash2 className="size-3.5" /> Remove row
-                      </Button>
                     </div>
                   ))}
-
-                  <Button variant="ghost" className="w-fit"
-                    disabled={corner.rows.length >= CLUSTER_MAX_CORNER_ROWS}
-                    onClick={() => setSlot((c) => ({
-                      ...c,
-                      corners: c.corners.map((x, i) => (i === cornerIndex
-                        ? { ...x, rows: [...x.rows, blankSlot('')] }
-                        : x)),
-                    }))}>
-                    <Plus className="size-3.5" /> Add row
-                  </Button>
                 </div>
               ))}
 
@@ -324,40 +461,36 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 <Plus className="size-3.5" /> Add corner
               </Button>
 
-              <div className="rounded-md border border-border p-3">
-                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Telltales</p>
-                <FieldDescription className="mb-2">
-                  Shown as a strip under the dial: icon, label, value, coloured by zone. For the
-                  readings you check by glancing for a colour rather than reading a number.
-                </FieldDescription>
+              <SlotSection title="Dial arc, left (coolant)">
+                {slotForm(config.arcs?.left ?? blankArc('Coolant', 0, 120), 'cluster-arc-left',
+                  (next) => setSlot((c) => ({ ...c, arcs: { ...c.arcs, left: next } })))}
+              </SlotSection>
+              <SlotSection title="Dial arc, right (gearbox oil temperature)">
+                {slotForm(config.arcs?.right ?? blankArc('Gearbox', 0, 120), 'cluster-arc-right',
+                  (next) => setSlot((c) => ({ ...c, arcs: { ...c.arcs, right: next } })))}
+              </SlotSection>
 
-                {(config.telltales ?? []).map((telltale, index) => (
-                  <div key={index} className="mb-2 border-b border-border/60 pb-2 last:border-b-0">
-                    {slotForm(telltale, `cluster-telltale-${index}`, (next) => setSlot((c) => ({
-                      ...c,
-                      telltales: (c.telltales ?? []).map((t, i) => (i === index ? next : t)),
-                    })))}
-                    <Button size="sm" variant="ghost" aria-label={`Remove telltale ${index + 1}`}
-                      onClick={() => setSlot((c) => ({
-                        ...c,
-                        telltales: (c.telltales ?? []).filter((_, i) => i !== index),
-                      }))}>
-                      <Trash2 className="size-3.5" /> Remove telltale
-                    </Button>
-                  </div>
-                ))}
-
-                <Button variant="ghost" className="w-fit"
-                  disabled={(config.telltales ?? []).length >= CLUSTER_MAX_TELLTALES}
-                  onClick={() => setSlot((c) => ({ ...c, telltales: [...(c.telltales ?? []), blankSlot('')] }))}>
-                  <Plus className="size-3.5" /> Add telltale
-                </Button>
-              </div>
+              {CLUSTER_FOOTER_SLOTS.map((key) => {
+                const slot = config.footer?.[key]
+                const set = (next: GaugeWidgetConfig) => setSlot((c) => ({ ...c, footer: { ...c.footer, [key]: next } }))
+                return (
+                  <SlotSection key={key} title={`Footer: ${FOOTER_TITLES[key]}`}>
+                    {isForeign(key) ? (
+                      <ForeignSlotForm
+                        idPrefix={`cluster-footer-${key}`} slotKey={key} slot={slot ?? { ...FOREIGN_SLOTS[key].slot, suffix: '' }}
+                        ctx={ctx} onChange={set}
+                      />
+                    ) : (
+                      slotForm(slot ?? blankSlot(''), `cluster-footer-${key}`, set)
+                    )}
+                  </SlotSection>
+                )
+              })}
 
               <div className="rounded-md border border-border p-3">
                 <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Fuel rail</p>
                 <FieldDescription className="mb-2">
-                  A bar per tank down one edge of the tile, with the side's total underneath. Pick the
+                  An arc per tank (forward and aft) on the outer edge of the tile, with the total underneath. Pick the
                   tank items; their level and capacity are read live.
                 </FieldDescription>
 
@@ -365,10 +498,9 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                   <Button variant="ghost" className="w-fit"
                     onClick={() => setSlot((c) => ({
                       ...c,
-                      // Left for a cluster titled Port, right otherwise, so a
-                      // facing pair puts its rails outboard without being told.
+                      // The outer edge of the tile, which is the engine's side.
                       fuel: {
-                        side: /^p(ort)?\b/i.test((c.title.trim() || item?.name || '')) ? 'left' : 'right',
+                        side: fuelEdge(c.side ?? 'port'),
                         bars: [blankFuelBar('Fwd'), blankFuelBar('Aft')],
                       },
                     }))}>
@@ -376,26 +508,6 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                   </Button>
                 ) : (
                   <>
-                    <Field className="mb-2">
-                      {/* "Edge", not "side": which side of the boat the tanks
-                          are on is the tanks' own business. */}
-                      <FieldLabel htmlFor="cluster-fuel-side">Tile edge</FieldLabel>
-                      <select id="cluster-fuel-side"
-                        className="h-9 rounded-md border bg-transparent px-3 text-sm"
-                        value={config.fuel.side}
-                        onChange={(e) => setFuel((f) => ({ ...f, side: e.target.value as ClusterFuelRailRef['side'] }))}>
-                        <option value="left">Left</option>
-                        <option value="right">Right</option>
-                      </select>
-                    </Field>
-
-                    <Field className="mb-2">
-                      <FieldLabel htmlFor="cluster-fuel-total">Total caption</FieldLabel>
-                      <Input id="cluster-fuel-total" value={config.fuel.totalLabel ?? ''}
-                        placeholder="Total"
-                        onChange={(e) => setFuel((f) => ({ ...f, totalLabel: e.target.value }))} />
-                    </Field>
-
                     {config.fuel.bars.map((bar, index) => (
                       <div key={index} className="mb-2 grid gap-2 border-b border-border/60 pb-2 last:border-b-0">
                         <EquipmentPicker
@@ -459,6 +571,52 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * A footer slot that reads another item than the engine: pick the item (the
+ * starter battery, the alternator, the exhaust's node) and the reading under its
+ * source. Its zones come from that item's profile and are edited there, not
+ * here. Leaving the reading empty leaves the slot out.
+ */
+function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, onChange }: {
+  idPrefix: string
+  slotKey: keyof typeof FOREIGN_SLOTS
+  slot: GaugeWidgetConfig
+  ctx: EquipmentTileContext
+  onChange: (next: GaugeWidgetConfig) => void
+}) {
+  const spec = FOREIGN_SLOTS[slotKey]
+  const item = findItem(ctx, slot.equipmentId)
+  const profile = item ? profileOf(ctx, item) : undefined
+  const suffixes = (profile?.gauges ?? []).map((g) => g.path_suffix)
+  const set = (patch: Partial<GaugeWidgetConfig>) => {
+    const next = { ...slot, ...patch }
+    // A reading on the item's profile brings the profile's quantity, unit and scale.
+    const gauge = profileGaugeFor(item ? profileOf(ctx, findItem(ctx, next.equipmentId) ?? item) : undefined, (next.suffix ?? '').trim())
+    onChange(gauge ? slotFromProfileGauge({ ...next, zones: undefined }, gauge) : next)
+  }
+  return (
+    <div className="grid gap-2">
+      <EquipmentPicker
+        idPrefix={idPrefix} label="Equipment" kind={spec.kind} value={slot.equipmentId ?? ''} ctx={ctx}
+        onChange={(id) => set({ equipmentId: id === '' ? undefined : id })}
+      />
+      <Field>
+        <FieldLabel htmlFor={`${idPrefix}-suffix`}>Reading</FieldLabel>
+        <Input id={`${idPrefix}-suffix`} list={`${idPrefix}-suffixes`} value={slot.suffix ?? ''}
+          placeholder={spec.suffix || 'reading under the equipment'}
+          onChange={(e) => set({ suffix: e.target.value })} />
+        <datalist id={`${idPrefix}-suffixes`}>
+          {[spec.suffix, ...suffixes].filter((v, i, a) => v !== '' && a.indexOf(v) === i).map((v) => <option key={v} value={v} />)}
+        </datalist>
+        <FieldDescription>
+          {item && !profile ? 'This equipment has no profile, so the reading has no zones.' : 'Zones come from the equipment\'s profile; edit them on the equipment.'}
+          {' '}Leave empty to leave this out.
+        </FieldDescription>
+      </Field>
+    </div>
   )
 }
 

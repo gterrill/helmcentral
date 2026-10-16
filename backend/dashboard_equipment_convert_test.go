@@ -151,7 +151,7 @@ func TestConvertDashboardTilesToEquipment(t *testing.T) {
 
 	// The gearbox zone the tile held differs from the profile's own, so it stays
 	// on the tile, inert, until the operator chooses.
-	if gb := pc.Telltales[0]; gb.Suffix != "transmission.oilTemperature" || len(gb.Zones) != 1 {
+	if gb := pc.Arcs.Right; gb == nil || gb.Suffix != "transmission.oilTemperature" || len(gb.Zones) != 1 {
 		t.Errorf("the gearbox zone stays on the tile: %+v", gb)
 	}
 

@@ -1,238 +1,50 @@
 import { Gauge as GaugeIcon, Settings2 } from 'lucide-react'
+import { memo } from 'react'
 
-import { CoolantIcon, ExhaustIcon, GearboxIcon } from '@/components/ui/telltale-icons'
-import { memo, type CSSProperties } from 'react'
-
-import { DialRing, zoneColor } from '@/components/ui/dial-ring'
-import { Tile, tilePillButtonClass } from '@/components/ui/tile'
-import { CLUSTER_ICONS, iconForSlot } from '@/lib/cluster-icons'
-import { reading, zoneFor, zoneTextClass } from '@/lib/cluster-readings'
+import {
+  AlternatorCard, BatteryCard, FOOTER_ICONS, FuelFan, GapArc, ReadingCard, ReadoutContent, SlotIcon,
+  cardStyle, gapArcNames, toneStroke,
+} from '@/components/engine-cluster-parts'
 import { FitCanvas } from '@/components/fit-canvas'
-import { CLUSTER_CANVAS, CLUSTER_RAIL, clusterDesignWidth, computeCornerMasks } from '@/lib/cluster-canvas'
-import { FuelRail } from '@/components/ui/fuel-rail'
-import type { ClusterCorner, GaugeWidgetConfig, ResolvedClusterConfig } from '@/lib/dashboard-widgets'
 import { majorStepFor } from '@/components/gauge-tile'
+import { ClusterDial, CLUSTER_DIAL_SIZE } from '@/components/ui/cluster-dial'
+import { Tile, tilePillButtonClass } from '@/components/ui/tile'
+import type { EngineStates } from '@/hooks/use-gauge-values'
+import { reading } from '@/lib/cluster-readings'
+import type { GaugeWidgetConfig, ResolvedClusterConfig } from '@/lib/dashboard-widgets'
+import { CLUSTER_FOOTER_SLOTS } from '@/lib/dashboard-widgets'
+import { toneFor } from '@/lib/engine-cluster-bullet'
+import {
+  CLUSTER_H, CLUSTER_INNER_H, CLUSTER_INNER_TOP, CLUSTER_W, DIAL_CX, DIAL_CY, clusterLayout,
+} from '@/lib/engine-cluster-layout'
 import { severityTextClass, worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge } from '@/lib/staleness'
-import type { EngineStates } from '@/hooks/use-gauge-values'
 
 /**
- * An engine cluster (ADR 0054).
+ * An engine cluster: one engine as an 800 x 616 card. A ticked dial with the
+ * rpm inside it, two arcs in the gap at its foot, four readout cards cut round
+ * it, a fuel fan on the outer edge and a footer for battery, alternator,
+ * transmission and exhaust.
  *
- * The layout is wind-tile.tsx's, with the geometry shared via lib/cluster-canvas:
- * a fixed canvas so each corner card's inner edge can be mask-cut along a circle
- * that lines up with the ring, scaled down to whatever column it lands in.
+ * One tile is one engine. `side` mirrors the layout so a facing pair keep their
+ * fuel on the outer edges and their readouts on the inner ones.
  *
- * DialRing's rim sits at 130 in a 280 viewBox, the same proportion the compass
- * uses, so the default radiusRatio carries over unchanged.
+ * Every slot is a GaugeWidgetConfig, and every band, tick and colour on the
+ * card is drawn from that slot's zones: the graphs and the alarms are the same
+ * thresholds.
  */
-const CLUSTER_MASKS = computeCornerMasks(CLUSTER_CANVAS)
 
 /**
- * The mask cuts a circle out of each card's ring-facing corner, so a reading
- * laid out edge to edge gets its unit sliced off. Content is padded away from
- * that side and aligned toward the outer corner instead.
+ * The hub reads revs the way the reference does: whole revs rounded to the
+ * nearest ten, as plain rpm. The scale around it is divided by a hundred and
+ * says so, so the two never read as different numbers.
  */
-const CORNER_LAYOUT = [
-  { align: 'items-start text-left', pad: 'pr-12' },
-  { align: 'items-end text-right', pad: 'pl-12' },
-  { align: 'items-start text-left', pad: 'pr-12' },
-  { align: 'items-end text-right', pad: 'pl-12' },
-] as const
-
-/**
- * A hairline of the reading's own scale, using the room the mask leaves in the
- * outer half of each card. The profile's advisory bands were invisible before
- * this: they existed in the config and appeared nowhere.
- */
-function ZoneBar({ slot, value }: { slot: GaugeWidgetConfig; value: number | null }) {
-  const zones = slot.zones ?? []
-  if (zones.length === 0 || slot.min === undefined || slot.max === undefined) return null
-
-  const span = slot.max - slot.min
-  if (span <= 0) return null
-  const at = (v: number) => Math.max(0, Math.min(1, (v - slot.min!) / span)) * 100
-
-  return (
-    <svg data-zone-bar="" viewBox="0 0 100 4" preserveAspectRatio="none"
-      className="mt-1 h-1 w-full max-w-[86px]" aria-hidden="true">
-      <rect x="0" y="1.5" width="100" height="1" fill="hsl(var(--muted))" />
-      {zones.map((zone, index) => {
-        const from = at(Math.min(zone.from, zone.to))
-        const to = at(Math.max(zone.from, zone.to))
-        return <rect key={index} x={from} y="1.5" width={Math.max(0, to - from)} height="1" fill={zoneColor(zone.state)} />
-      })}
-      {value !== null && (
-        <rect x={Math.max(0, at(value) - 0.9)} y="0" width="1.8" height="4" fill="hsl(var(--foreground))" />
-      )}
-    </svg>
-  )
+function hubText(ring: ReturnType<typeof reading>, unit: string): string | null {
+  if (ring.converted === null) return null
+  return unit === 'rpm' ? String(Math.round(ring.converted / 10) * 10) : ring.text
 }
 
-/** The chosen icon, or the one inferred from what the box is measuring. */
-function SlotIcon({ name, slot, className }: {
-  name: string | undefined
-  slot: { path: string; quantity: string }
-  className: string
-}) {
-  const Icon = CLUSTER_ICONS[name ?? ''] ?? CLUSTER_ICONS[iconForSlot(slot)] ?? CLUSTER_ICONS.gauge
-  return <Icon className={className} aria-hidden="true" />
-}
-
-function CornerCard({ corner, values, ages, style, index }: {
-  corner: ClusterCorner
-  values: Record<string, number | null>
-  ages?: Record<string, number | null>
-  style: CSSProperties
-  index: number
-}) {
-  const { align, pad } = CORNER_LAYOUT[index] ?? CORNER_LAYOUT[0]
-  // One reading gets the hero treatment; several share the card and step down.
-  const stacked = corner.rows.length > 1
-
-  return (
-    <div
-      data-testid={`cluster-corner-${index}`}
-      // One hairline, no fill: the tile already has a border and the mask
-      // paints a stroke along the cut edge, so a filled card made three border
-      // treatments in one composition.
-      className={`absolute flex flex-col justify-center rounded-2xl border px-3 py-2 ${
-        stacked ? 'gap-1.5' : 'gap-1'
-      } ${align} ${pad}`}
-      style={style}
-    >
-      {corner.rows.map((row, rowIndex) => {
-        const { text, unit, converted, zone, stale, age } = reading(row, values, ages)
-        const label = row.label.trim() || row.path.split('.').slice(-1)[0]
-        return (
-          <div key={rowIndex} className={`flex min-w-0 max-w-full flex-col gap-0.5 ${align}`}>
-            <span className={`flex max-w-full items-center gap-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground ${
-              align.includes('end') ? 'flex-row-reverse' : ''
-            }`}>
-              {/* One icon per box, on the first row: a stacked card of three
-                  temperatures wants one thermometer, not three. */}
-              {rowIndex === 0 && (
-                <SlotIcon name={corner.icon} slot={row} className="size-3 shrink-0 text-gauge-secondary" />
-              )}
-              <span className="truncate">{label}</span>
-              {/* A frozen row carries its own badge (ADR 0083) rather than
-                  staling the whole card: one dead sensor among several must
-                  not blank readings that are still live. */}
-              {stale && (
-                <span className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs leading-none text-amber-600 dark:text-amber-400">
-                  Stale {formatDataAge(age)}
-                </span>
-              )}
-            </span>
-            <span className={`font-display leading-none tabular-nums ${zoneTextClass(zone)} ${stacked ? 'text-base' : 'text-2xl'}`}>
-              {text ?? '--'}
-              {unit && <span className="ml-0.5 text-xs text-muted-foreground">{unit}</span>}
-            </span>
-            {/* The bar exists to use the dead space in a single-reading card.
-                A card stacking three has none, and colour alone carries the
-                state there. */}
-            {!stacked && <ZoneBar slot={row} value={converted} />}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-/**
- * The symbol a telltale gets, from what it is measuring. Not configurable: the
- * three are a fixed set that exists precisely so the row needs no labels, and a
- * chooser would let an operator break the one thing they are for.
- */
-function telltaleIcon(path: string) {
-  const p = path.toLowerCase()
-  if (p.includes('transmission') || p.includes('gearbox')) return { kind: 'gearbox', Icon: GearboxIcon }
-  if (p.includes('exhaust')) return { kind: 'exhaust', Icon: ExhaustIcon }
-  return { kind: 'coolant', Icon: CoolantIcon }
-}
-
-/**
- * A telltale is a warning light, so it uses the warning-light vocabulary rather
- * than the readout one: grey when there is nothing to say, green while the
- * reading sits in its normal band, red once it is past.
- *
- * Amber covers the tiers in between. A warn band is neither normal operating
- * range nor too hot, and painting it green would be the telltale hiding the one
- * thing it exists to show.
- */
-function telltaleClass(state: ReturnType<typeof zoneFor>, value: number | null): string {
-  if (value === null) return 'text-muted-foreground'
-  // A reading with no bands configured, or one sitting inside its normal
-  // band, still means the engine is turning and nothing has flagged it,
-  // which is what green says - the telltale's own fallback rather than
-  // severityTextClass's caller-supplied default. Above the band the profile
-  // calls normal, but this engine's warn and alarm thresholds are null in
-  // the profile - nobody has filled them in from the manual yet - so every
-  // reading over the normal band lands on `outside`, which severityTextClass
-  // maps to warn's amber. Red would claim an overheat the configuration
-  // cannot actually know about.
-  return severityTextClass(state, 'text-emerald-500')
-}
-
-/**
- * The same telltale reading, translated to the tile-edge vocabulary (ADR
- * 0081) instead of a text class. A telltale's own colour logic above already
- * decides "past alarm", "in between" and "normal" - this reuses that same
- * `state`/`value` pair rather than asking the zones a second question, so the
- * two can never disagree about which tier a telltale is in.
- */
-function telltaleZoneState(state: ReturnType<typeof zoneFor>, value: number | null): ZoneState | null {
-  if (value === null) return null
-  if (state === 'alarm' || state === 'emergency') return 'alarm'
-  if (state === null || state === 'normal') return 'normal'
-  return 'warn' // 'outside', 'warn' and 'alert' all read as the telltale's amber tier.
-}
-
-/**
- * The telltale row, under the hours notch at the dial's foot. It sits in the
- * wedge the 250-degree sweep leaves at the bottom, so it costs the composition
- * nothing and puts the lights where the eye already is.
- */
-function Telltales({ slots, values, ages }: {
-  slots: GaugeWidgetConfig[]
-  values: Record<string, number | null>
-  ages?: Record<string, number | null>
-}) {
-  return (
-    <div data-testid="cluster-telltales" className="mt-1.5 flex items-center justify-center gap-3">
-      {slots.map((slot, index) => {
-        // A stale telltale reads exactly as a never-reported one (grey,
-        // ADR 0083): reading() already blanks converted/zone when stale, and
-        // telltaleClass already renders a null value grey.
-        const { text, converted, zone } = reading(slot, values, ages)
-        const { kind, Icon } = telltaleIcon(slot.path)
-        return (
-          <span key={index} data-telltale={kind}
-            className={`flex items-center gap-1 ${telltaleClass(zone, converted)}`}>
-            <Icon className="size-4 shrink-0" />
-            <span className="font-display text-xs leading-none tabular-nums">{text ?? '--'}</span>
-          </span>
-        )
-      })}
-    </div>
-  )
-}
-
-interface EngineClusterTileProps {
-  config: ResolvedClusterConfig
-  values: Record<string, number | null>
-  /** Age in seconds behind each bound path (ADR 0083); absent is unknown. */
-  ages?: Record<string, number | null>
-  /**
-   * Whether each engine reads as switched off (its computer powers down with
-   * the key, so its readings just stop). Absent or unknown changes nothing.
-   */
-  engines?: EngineStates
-  editing: boolean
-  onConfigure: () => void
-}
-
-/** The `<id>` of a `propulsion.<id>.*` path, or null. */
+/** `propulsion.<id>.*` -> id, or null. */
 function propulsionId(path: string): string | null {
   const match = /^propulsion\.([^.]+)\./.exec(path)
   return match ? match[1] : null
@@ -252,69 +64,89 @@ function offSinceLabel(lastUpdate: string | undefined): string {
   return `Off since ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`
 }
 
+interface EngineClusterTileProps {
+  config: ResolvedClusterConfig
+  values: Record<string, number | null>
+  /** Age in seconds behind each bound path (ADR 0083); absent is unknown. */
+  ages?: Record<string, number | null>
+  /**
+   * Whether each engine reads as switched off (its computer powers down with
+   * the key, so its readings just stop). Absent or unknown changes nothing.
+   */
+  engines?: EngineStates
+  editing: boolean
+  onConfigure: () => void
+}
+
+/**
+ * The tab chip: what a running engine is doing, in one word, or null. It is
+ * drawn only for an engine known to be turning on live data: not for one that is
+ * off (the title's OFF pill says so once), whose feed is lost, whose rpm is
+ * stale, missing or zero, or whose tile is stale. Stale data carries no word
+ * beside the STALE border.
+ */
+function chipFor(running: boolean, state: ZoneState | null): { text: string; className: string } | null {
+  if (!running) return null
+  if (state === 'alarm' || state === 'emergency') return { text: 'ALARM', className: 'bg-red-600 text-white' }
+  if (state === 'warn' || state === 'alert') return { text: 'WARN', className: 'bg-amber-500 text-black' }
+  return { text: 'RUN', className: 'text-foreground' }
+}
+
+/** Every bound slot on the card, for the tile's worst-of and staleness. */
+function allSlots(config: ResolvedClusterConfig): GaugeWidgetConfig[] {
+  const slots: Array<GaugeWidgetConfig | undefined> = [
+    config.ring,
+    config.centre,
+    ...config.corners.flatMap((c) => c.rows.slice(0, 1)),
+    config.arcs?.left,
+    config.arcs?.right,
+    ...CLUSTER_FOOTER_SLOTS.map((key) => config.footer?.[key]),
+    ...(config.fuel?.bars ?? []).map((b) => b.level),
+  ]
+  return slots.filter((s): s is GaugeWidgetConfig => s !== undefined && s.path.trim() !== '')
+}
+
 export const EngineClusterTile = memo(function EngineClusterTile({
   config, values: liveValues, ages: liveAges, engines, editing, onConfigure,
 }: EngineClusterTileProps) {
+  const side = config.side ?? 'port'
+
   // A switched-off engine's last readings are idle numbers, not facts: its
   // own paths read as absent (the dash) and carry no age, so nothing on the
-  // tile is stale. Other bound paths, such as the fuel rail's tank, are live.
+  // tile is stale. Other bound paths, such as the fuel tank, are live.
   const engineId = propulsionId(config.ring.path)
   const engineStatus = engineId ? engines?.[engineId] : undefined
   const off = engineStatus?.state === 'off'
   const values = off && engineId ? withoutEnginePaths(liveValues, engineId)! : liveValues
   const ages = off && engineId ? withoutEnginePaths(liveAges, engineId) : liveAges
 
-  // The rail widens only the design the canvas is scaled against. The body
-  // keeps its own 520-wide coordinate space, which is what every corner mask
-  // was computed in.
-  const fuel = config.fuel
-  const designWidth = clusterDesignWidth(Boolean(fuel))
-  const bodyLeft = fuel?.side === 'left' ? CLUSTER_RAIL.width + CLUSTER_RAIL.gap : 0
-  const railLeft = fuel?.side === 'left' ? 0 : CLUSTER_CANVAS.width + CLUSTER_RAIL.gap
-
   const title = config.title.trim() || 'Engine'
+  const layout = clusterLayout(side)
 
   const ring = reading(config.ring, values, ages)
   const centre = reading(config.centre, values, ages)
   const ringMin = config.ring.min ?? 0
-  const ringMax = config.ring.max ?? 100
+  const ringMax = config.ring.max ?? 3000
+  const ringStep = majorStepFor(ringMin, ringMax)
 
-  const telltales = config.telltales ?? []
-  const { width, height, ringBox, ringTop, topCardW, bottomCardW } = CLUSTER_CANVAS
-  const { topCardH, bottomCardH, bottomCardTop } = CLUSTER_MASKS.geometry
-  // The telltales live inside the dial now, so the canvas is exactly the block
-  // of boxes again and the disc still spans it.
-  const canvasH = height
-
-  const cornerReadings = config.corners.flatMap((corner) => corner.rows.map((row) => reading(row, values, ages)))
-  const telltaleReadings = telltales.map((slot) => reading(slot, values, ages))
-
-  // The tile edge carries the worst of everything the cluster reads (ADR
-  // 0081): the ring, the centre, every corner row, and the telltales in
-  // their own vocabulary via telltaleZoneState above. reading() already
-  // blanks a stale slot's zone to null (ADR 0083), so a frozen reading drops
-  // out of this worst-of the same way an absent one always has.
-  const state = worstZoneState([
-    ring.zone,
-    centre.zone,
-    ...cornerReadings.map((r) => r.zone),
-    ...telltaleReadings.map((r) => telltaleZoneState(r.zone, r.converted)),
-  ])
-
-  // The tile itself only goes stale once every slot whose age is actually
-  // known has frozen (ADR 0083) -- the shape a dead engine feed takes, where
-  // the ring, the corners and the telltales all stop together. A cluster
-  // with no known ages at all is neither fresh nor stale.
-  const allReadings = [ring, centre, ...cornerReadings, ...telltaleReadings]
-  const knownAges = allReadings.filter((r) => r.age !== null)
+  // The tile edge carries the worst of everything the card reads (ADR 0081),
+  // each slot's zone already blanked when its reading is stale (ADR 0083). An
+  // engine that is off carries no state at all: neutral border, OFF pill.
+  const readings = allSlots(config).map((slot) => reading(slot, values, ages))
+  const state = off ? null : worstZoneState(readings.map((r) => r.zone))
+  const knownAges = readings.filter((r) => r.age !== null)
   const tileStale = knownAges.length > 0 && knownAges.every((r) => r.stale)
   const staleLabel = tileStale ? formatDataAge(Math.max(...knownAges.map((r) => r.age as number))) : undefined
-  const cardStyles: CSSProperties[] = [
-    { left: 0, top: 0, width: topCardW, height: topCardH, ...CLUSTER_MASKS.tl },
-    { left: width - topCardW, top: 0, width: topCardW, height: topCardH, ...CLUSTER_MASKS.tr },
-    { left: 0, top: bottomCardTop, width: bottomCardW, height: bottomCardH, ...CLUSTER_MASKS.bl },
-    { left: width - bottomCardW, top: bottomCardTop, width: bottomCardW, height: bottomCardH, ...CLUSTER_MASKS.br },
-  ]
+
+  const footer = config.footer ?? {}
+  const running = !off && !tileStale && engineStatus?.state !== 'lost' && ring.converted !== null && ring.converted > 0
+  const chip = chipFor(running, state)
+  const stbd = side === 'stbd'
+
+  const cornerTones = config.corners.slice(0, 4).map((corner) => {
+    const row = corner.rows[0]
+    return row ? toneFor(reading(row, values, ages).zone) : 'neutral'
+  })
 
   return (
     <Tile
@@ -334,94 +166,112 @@ export const EngineClusterTile = memo(function EngineClusterTile({
         ) : undefined
       }
     >
-      {/* FitCanvas scales the design to whatever the tile gives it and centres
-          it. The canvas is a fixed designWidth x canvasH box (shrink-free, so
-          the corner cards keep the 520-space offsets their masks were cut
-          for); the scale is what handles both narrow and roomy tiles. */}
-      <FitCanvas
-        designWidth={designWidth}
-        designHeight={canvasH}
-        canvasProps={{ 'data-cluster-canvas': '' }}
-      >
-          {fuel && (
-            <div className="absolute" style={{ left: railLeft, top: 0 }}>
-              <FuelRail config={fuel} values={values} height={canvasH} />
-            </div>
-          )}
+      <FitCanvas designWidth={CLUSTER_W} designHeight={CLUSTER_H} canvasProps={{ 'data-cluster-canvas': '', 'data-side': side }}>
+        <div className="absolute left-0" style={{ top: CLUSTER_INNER_TOP, width: CLUSTER_W, height: CLUSTER_INNER_H }}>
+          {/* The card outlines and the fuel fan share one SVG layer under the
+              dial: outlines first, so nothing they paint lands on a reading. */}
+          <svg width={CLUSTER_W} height={CLUSTER_INNER_H} viewBox={`0 0 ${CLUSTER_W} ${CLUSTER_INNER_H}`}
+            className="absolute left-0 top-0" aria-hidden="true">
+            {config.fuel && (
+              <path data-fuel-card="" d={layout.fuelCard} strokeWidth={1.5}
+                style={{ fill: 'hsl(var(--cluster-surface))', stroke: 'hsl(var(--cluster-stroke))' }} />
+            )}
+            {layout.readouts.map((box, i) => (
+              <path key={i} data-card-outline={i} d={box.path}
+                strokeWidth={cornerTones[i] === 'neutral' ? 1.5 : 2.5}
+                style={{ fill: 'hsl(var(--cluster-surface))', stroke: toneStroke(cornerTones[i] ?? 'neutral') }} />
+            ))}
+            {config.fuel && <FuelFan config={config.fuel} title={title} side={side} values={values} ages={ages} />}
+          </svg>
 
-          {/* The body keeps the canvas's own width whatever the rail does, so
-              the cards sit at the offsets their masks were cut for. */}
-          <div data-cluster-body="" className="absolute" style={{ left: bodyLeft, top: 0, width, height: canvasH }}>
-          <div
-            data-cluster-dial=""
-            className="absolute"
-            style={{
-              left: (width - ringBox) / 2, top: ringTop, width: ringBox, height: ringBox,
-              // The dial's bezel paints into the gap the corner masks leave.
-              '--dial-bezel-overhang': `${CLUSTER_MASKS.geometry.bezelOverhang}px`,
-            } as CSSProperties}
-          >
-            <DialRing
+          <div data-cluster-dial="" className="absolute"
+            style={{ left: DIAL_CX - CLUSTER_DIAL_SIZE / 2, top: DIAL_CY - CLUSTER_DIAL_SIZE / 2 }}>
+            <ClusterDial
               value={ring.converted}
               min={ringMin}
               max={ringMax}
-              majorStep={majorStepFor(ringMin, ringMax)}
+              majorStep={ringStep}
               labelDivisor={config.ring.labelDivisor}
-              labelEvery={2}
               zones={config.ring.zones}
             >
-              {/* The centre belongs to the ring reading alone.
-                  Two groups, not one stack: the reading is centred on the dial
-                  and the hours notch and telltales hang off its foot. Stacked
-                  together they came to half the dial's height, which pushed the
-                  reading up off the middle and straight through the scale
-                  numbers - the widest part of the readout meeting the narrowest
-                  part of the face. */}
-              <div data-testid="cluster-centre" className="flex flex-col items-center">
+              <div data-testid="cluster-centre" className="flex flex-col items-center gap-1.5">
                 <span data-testid="cluster-centre-value"
-                  className={`font-display text-4xl leading-none tracking-tight tabular-nums ${zoneTextClass(ring.zone)}`}>
-                  {ring.text ?? '--'}
+                  className={`font-display text-6xl font-semibold leading-[0.9] tracking-tight tabular-nums ${
+                    severityTextClass(ring.zone, 'text-foreground')}`}>
+                  {hubText(ring, config.ring.unit) ?? '--'}
                 </span>
-                {/* A rule between the reading and what it is measured in. It
-                    is what separates an instrument face from a number with a
-                    caption under it, and it costs one div. */}
-                <div className="mt-1.5 h-0.5 w-[68px] bg-foreground/25" />
-                {/* The divisor belongs with the unit it scales, not floating
-                    at the dial's foot where the notch now sits. */}
-                <span className="mt-1.5 text-xs font-semibold uppercase tracking-[0.16em] text-foreground">
+                <div className="h-0.5 w-[118px] bg-foreground/25" />
+                <span className="text-2xl font-semibold uppercase tracking-[0.16em] text-foreground">
                   {config.ring.label.trim() || ring.unit}
-                  {config.ring.labelDivisor ? ` x${config.ring.labelDivisor}` : ''}
                 </span>
-              </div>
-
-              {/* The foot: the hours notch and the telltale row, in the wedge
-                  the 250-degree sweep leaves at the bottom. Pinned there rather
-                  than stacked under the reading, so neither group moves when
-                  the other changes height. 15% clears the rim at the width the
-                  row runs to. */}
-              <div data-testid="cluster-foot"
-                className="absolute bottom-[15%] left-0 right-0 flex flex-col items-center">
-                {/* Smaller than the reading it sits under by more than one
-                    step. Hours are a number you look up, not one you monitor,
-                    and at text-sm the pill crowded the unit caption above it. */}
-                <span data-testid="cluster-notch"
-                  className="flex items-center gap-1.5 rounded-full border bg-card/90 px-2 py-0.5">
-                  <SlotIcon name={config.centreIcon} slot={config.centre} className="size-3 shrink-0 text-gauge-secondary" />
-                  <span className="font-display text-xs leading-none tabular-nums text-gauge-secondary">
-                    {centre.text ?? '--'}
+                {config.ring.labelDivisor ? (
+                  <span data-testid="cluster-scale-note" className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                    scale x{config.ring.labelDivisor}
                   </span>
-                  {centre.unit && <span className="text-[9px] text-muted-foreground">{centre.unit}</span>}
-                </span>
-
-                {telltales.length > 0 && <Telltales slots={telltales} values={values} ages={ages} />}
+                ) : null}
               </div>
-            </DialRing>
+            </ClusterDial>
           </div>
 
-          {config.corners.slice(0, CORNER_LAYOUT.length).map((corner, index) => (
-            <CornerCard key={index} index={index} corner={corner} values={values} ages={ages} style={cardStyles[index]} />
-          ))}
+          <svg width={CLUSTER_W} height={CLUSTER_INNER_H} viewBox={`0 0 ${CLUSTER_W} ${CLUSTER_INNER_H}`}
+            className="pointer-events-none absolute left-0 top-0" aria-hidden="true">
+            {gapArcNames().map((name) => (
+              <GapArc key={name} name={name} slot={config.arcs?.[name]} values={values} ages={ages} />
+            ))}
+          </svg>
+
+          {config.corners.slice(0, 4).map((corner, i) => {
+            const row = corner.rows[0]
+            const box = layout.readouts[i]
+            if (!row) return null
+            return (
+              <div key={i} className="absolute" style={{ left: box.left, top: box.top, width: box.width }}>
+                <ReadoutContent
+                  index={i} slot={row} icon={corner.icon} label={corner.label.trim() || row.label.trim()}
+                  values={values} ages={ages} side={side} width={box.width} bulletWidth={layout.bulletWidth}
+                />
+              </div>
+            )
+          })}
+
+          <div data-testid="cluster-footer" className="absolute flex items-center gap-3"
+            style={{ left: 40, top: 536, width: 720, height: 100, flexDirection: stbd ? 'row-reverse' : 'row' }}>
+            <BatteryCard slot={footer.battery} values={values} ages={ages} />
+            <AlternatorCard footer={footer} values={values} ages={ages}
+              historyEnabled={!off && footer.altAmps !== undefined} />
+            <ReadingCard
+              testId="cluster-trans" label="Trans" icon={FOOTER_ICONS.trans}
+              slot={footer.transPressure}
+              flex={`0 0 ${layout.bulletWidth + 40}px`} values={values} ages={ages}
+              bulletWidth={layout.bulletWidth} side={side}
+            />
+            <ReadingCard
+              testId="cluster-egt" label="EGT" icon={FOOTER_ICONS.egt}
+              slot={footer.egt}
+              flex={`0 0 ${layout.bulletWidth + 24}px`} values={values} ages={ages}
+              bulletWidth={layout.bulletWidth} side={side}
+            />
           </div>
+        </div>
+
+        {/* The tabs ride the card's top edge: the state chip on the outer side
+            and the engine hours on the inner one, mirrored with the tile. */}
+        {chip && <div data-testid="cluster-chip-tab"
+          className="absolute top-1 flex h-10 items-center gap-2.5 rounded-[20px] px-4"
+          style={{ ...cardStyle(), [stbd ? 'right' : 'left']: 52 }}>
+          <span data-testid="cluster-chip"
+            className={`rounded-md px-3 font-display text-sm font-semibold leading-7 tracking-[0.14em] ${chip.className}`}
+            style={{ boxShadow: `inset 0 0 0 1.5px ${chip.text === 'RUN' ? 'hsl(var(--cluster-stroke))' : 'transparent'}` }}>
+            {chip.text}
+          </span>
+        </div>}
+        <div data-testid="cluster-notch"
+          className="absolute top-1 flex h-10 items-center gap-2.5 rounded-[20px] px-4"
+          style={{ ...cardStyle(), [stbd ? 'left' : 'right']: 52 }}>
+          <SlotIcon name={config.centreIcon} slot={config.centre} className="size-5 shrink-0 text-primary" />
+          <span className="font-display text-lg font-semibold tabular-nums text-foreground">{centre.text ?? '--'}</span>
+          <span className="text-xs font-semibold tracking-[0.16em] text-muted-foreground">HRS</span>
+        </div>
       </FitCanvas>
     </Tile>
   )

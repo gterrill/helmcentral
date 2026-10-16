@@ -1,7 +1,7 @@
 import { useId, type CSSProperties, type ReactNode } from 'react'
 
 import type { GaugeZone } from '@/lib/dashboard-widgets'
-import { severityFill } from '@/lib/severity'
+import { markingAt, polar, scaleTicks, sweepMapper, sweepStart as sweepStartAngle, zoneColor } from '@/lib/dial-geometry'
 
 /**
  * A ticked instrument dial (ADR 0054).
@@ -29,23 +29,12 @@ const R_LABEL = 96 // scale numbers
 // the reference's own 5-of-480.
 const NEEDLE_DASH = 0.46
 
-const D2R = Math.PI / 180
-
 function pt(angleDeg: number, r: number): [number, number] {
-  const a = angleDeg * D2R
-  return [C + r * Math.cos(a), C + r * Math.sin(a)]
+  return polar(C, C, angleDeg, r)
 }
 
-/**
- * Alarm severities (ADR 0038), the same vocabulary the gauges already use.
- *
- * Exported so the cluster's zone bar and the fuel rail read the one palette
- * rather than each keeping a copy. Deliberately literal rather than tokenized:
- * a skin that could recolour these is a skin that could hide an alarm.
- */
-export function zoneColor(state: GaugeZone['state']): string {
-  return severityFill(state)
-}
+// Re-exported: the cluster's zone bar and the fuel rail import it from here.
+export { zoneColor }
 
 /**
  * The arc says how much, the pointer says where — the redundancy every
@@ -81,21 +70,6 @@ function Needle({ angle }: { angle: number }) {
 }
 
 /**
- * The band a position on the scale falls in, ignoring the normal one.
- *
- * A redline is a marking on the scale itself, which is what the reference gets
- * right and a rim segment alone does not: it is legible from the angle a helm
- * dial is actually read at. Normal is deliberately not marked, because a scale
- * painted green everywhere it is fine leaves the redline nothing to mark.
- */
-function markingAt(v: number, zones: GaugeZone[] | undefined): GaugeZone['state'] | null {
-  const hit = (zones ?? []).find(
-    (z) => z.state !== 'normal' && v >= Math.min(z.from, z.to) && v <= Math.max(z.from, z.to),
-  )
-  return hit ? hit.state : null
-}
-
-/**
  * Where the sweep ends, as a fraction of the dial box's height.
  *
  * Exported because a layout placing things against the dial has to derive that
@@ -103,9 +77,9 @@ function markingAt(v: number, zones: GaugeZone[] | undefined): GaugeZone['state'
  * edge of the zone rim, which sits further out than the value arc.
  */
 export function arcEndFraction(sweep: number): number {
-  const start = 90 + (360 - sweep) / 2
+  const start = sweepStartAngle(sweep)
   const outermost = R_OUTER + 5 + 3.5 // zone rim centreline plus half its width
-  return (C + outermost * Math.sin(start * D2R)) / V
+  return (C + outermost * Math.sin((start * Math.PI) / 180)) / V
 }
 
 export interface DialRingProps {
@@ -140,9 +114,7 @@ export function DialRing({
   const gradientId = useId()
 
   const span = max > min ? max - min : 1
-  const start = 90 + (360 - sweep) / 2
-  const angleFor = (v: number) => start + sweep * ((v - min) / span)
-  const fractionFor = (v: number) => Math.max(0, Math.min(1, (v - min) / span))
+  const { start, angleFor, fractionFor } = sweepMapper(min, max, sweep)
 
   // The swept fraction of a full circle, in pathLength-100 units.
   const sweepDash = (sweep / 360) * 100
@@ -161,22 +133,7 @@ export function DialRing({
     return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`
   }
 
-  const majors: number[] = []
-  for (let v = min; v <= max + span * 1e-9; v += majorStep) majors.push(v)
-
-  const minors: number[] = []
-  if (minorPerMajor > 1) {
-    const minorStep = majorStep / minorPerMajor
-    for (let i = 0; i < majors.length - 1; i += 1) {
-      for (let k = 1; k < minorPerMajor; k += 1) minors.push(majors[i] + minorStep * k)
-    }
-    // The stretch above the last whole major step. A range whose top is not a
-    // round number of them, such as a 3300 rpm redline on a 500 rpm scale, used
-    // to stop ticking at 3000 and leave bare exactly the part the red marks.
-    for (let v = majors[majors.length - 1] + minorStep; v <= max + span * 1e-9; v += minorStep) {
-      minors.push(v)
-    }
-  }
+  const { majors, minors } = scaleTicks(min, max, majorStep, minorPerMajor)
 
   return (
     <div className={`relative ${className ?? ''}`}>

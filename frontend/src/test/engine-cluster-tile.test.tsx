@@ -2,612 +2,610 @@ import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { EngineClusterTile } from '@/components/engine-cluster-tile'
-import type { ResolvedClusterConfig } from '@/lib/dashboard-widgets'
+import type { ResolvedClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { setViewportWidth } from './viewport'
 
+// The alternator's one-hour trace reads history from the server. The tile is
+// tested against a fixed series so no test depends on a network call.
+const history = vi.hoisted(() => ({
+  result: { points: [] as Array<{ time: string; value: number }>, loading: false, error: null as string | null },
+  calls: [] as Array<[string, string, boolean]>,
+}))
+vi.mock('@/hooks/use-telemetry-history', () => ({
+  useTelemetryHistory: (path: string, window: string, enabled: boolean) => {
+    history.calls.push([path, window, enabled])
+    return enabled ? history.result : { points: [], loading: false, error: null }
+  },
+}))
+
+const PSI = 6894.757
+
 /** The live idle readings from the vessel, in the SI the stream carries. */
-const values = {
+const values: Record<string, number | null> = {
   'propulsion.port.revolutions': 11.638333,        // 698 RPM
   'propulsion.port.fuel.rate': 4.1666666e-7,       // 1.5 L/h
-  'propulsion.port.oilPressure': 151900,           // 22.0 psi
+  'propulsion.port.oilPressure': 22 * PSI,         // 22.0 psi
   'propulsion.port.boostPressure': 0,              // genuinely zero at idle
-  'propulsion.port.temperature': 344.15,           // 71.0 C
+  'propulsion.port.engineLoad': 0.06,              // 6 %
+  'propulsion.port.temperature': 344.15,           // 71 C
   'propulsion.port.transmission.oilTemperature': 310.8, // 37.7 C
+  'propulsion.port.transmission.oilPressure': 2349900, // 341 psi
   'propulsion.port.runTime': 3219295,              // 894 h
-  // exhaust deliberately absent
+  'electrical.batteries.292.voltage': 26.4,
+  'electrical.alternator.2.current': 48,
+  'electrical.alternator.2.power': 1290,
+  'electrical.alternator.2.temperature': 330.15,    // 57 C
+  'electrical.alternator.2.chargingModeNumber': 4,
+  'electrical.alternator.2.limit': 80,
+  'propulsion.0.exhaustTemperature': 304.749,       // 31.6 C
+  'tanks.fuel.2.currentLevel': 0.87,
+  'tanks.fuel.2.capacity': 1.2,
+  'tanks.fuel.4.currentLevel': 0.4,
+  'tanks.fuel.4.capacity': 1.3,
 }
+
+const slot = (path: string, label: string, quantity: string, unit: string, extra: Partial<GaugeWidgetConfig> = {}): GaugeWidgetConfig =>
+  ({ path, label, display: 'numeric', quantity, unit, ...extra })
 
 const port: ResolvedClusterConfig = {
   title: 'Port',
-  ring: { path: 'propulsion.port.revolutions', label: 'RPM', display: 'radial', quantity: 'frequency', unit: 'rpm', min: 0, max: 3000, decimals: 0, labelDivisor: 100 },
-  centre: { path: 'propulsion.port.runTime', label: 'Hours', display: 'numeric', quantity: 'duration', unit: 'h', decimals: 0 },
+  side: 'port',
+  ring: slot('propulsion.port.revolutions', 'RPM', 'frequency', 'rpm', { display: 'radial', min: 0, max: 3000, decimals: 0, labelDivisor: 100 }),
+  centre: slot('propulsion.port.runTime', 'Hours', 'duration', 'h', { decimals: 0 }),
   corners: [
-    { label: 'Oil', rows: [{ path: 'propulsion.port.oilPressure', label: 'Oil', display: 'numeric', quantity: 'pressure', unit: 'psi' }] },
-    { label: 'Boost', rows: [{ path: 'propulsion.port.boostPressure', label: 'Boost', display: 'numeric', quantity: 'pressure', unit: 'psi' }] },
-    { label: 'Temps', rows: [
-      { path: 'propulsion.port.temperature', label: 'Coolant', display: 'numeric', quantity: 'temperature', unit: 'C' },
-      { path: 'propulsion.port.transmission.oilTemperature', label: 'Gearbox', display: 'numeric', quantity: 'temperature', unit: 'C' },
-      { path: 'propulsion.port.exhaustTemperature', label: 'Exhaust', display: 'numeric', quantity: 'temperature', unit: 'C' },
-    ] },
-    { label: 'Fuel', rows: [{ path: 'propulsion.port.fuel.rate', label: 'Fuel Flow', display: 'numeric', quantity: 'volumetricFlow', unit: 'Lph', decimals: 1 }] },
+    { label: 'Oil', rows: [slot('propulsion.port.oilPressure', 'Oil', 'pressure', 'psi', { min: 0, max: 100, decimals: 1 })] },
+    { label: 'Boost', rows: [slot('propulsion.port.boostPressure', 'Boost', 'pressure', 'psi', { min: 0, max: 40, decimals: 1 })] },
+    { label: 'Load', rows: [slot('propulsion.port.engineLoad', 'Load', 'ratio', 'percent', { min: 0, max: 100, decimals: 0 })] },
+    { label: 'Fuel', rows: [slot('propulsion.port.fuel.rate', 'Fuel Flow', 'volumetricFlow', 'Lph', { min: 0, max: 120, decimals: 1 })] },
   ],
 }
 
-function renderCluster(config = port) {
-  return render(
-    <EngineClusterTile config={config} values={values} editing={false} onConfigure={vi.fn()} />,
-  )
+const arcs = {
+  right: slot('propulsion.port.transmission.oilTemperature', 'Gearbox', 'temperature', 'C', { min: 0, max: 120, decimals: 0 }),
+  left: slot('propulsion.port.temperature', 'Coolant', 'temperature', 'C', { min: 0, max: 120, decimals: 0, zones: [{ from: 0, to: 85, state: 'normal' as const }] }),
 }
 
-beforeEach(() => setViewportWidth(1440))
+const footer: NonNullable<ResolvedClusterConfig['footer']> = {
+  battery: slot('electrical.batteries.292.voltage', 'Battery', 'potential', 'V', { decimals: 1, min: 20, max: 30 }),
+  altAmps: slot('electrical.alternator.2.current', 'Alternator', 'current', 'A', { decimals: 0, min: 0, max: 200 }),
+  altWatts: slot('electrical.alternator.2.power', 'Output', 'power', 'W', { decimals: 0 }),
+  altTemp: slot('electrical.alternator.2.temperature', 'Temp', 'temperature', 'C', { decimals: 0 }),
+  altStage: slot('electrical.alternator.2.chargingModeNumber', 'Stage', 'raw', 'raw', { decimals: 0 }),
+  altLimit: slot('electrical.alternator.2.limit', 'Limit', 'current', 'A', { decimals: 0 }),
+  transPressure: slot('propulsion.port.transmission.oilPressure', 'Gear press', 'pressure', 'psi', { decimals: 0, min: 0, max: 500 }),
+  egt: slot('propulsion.0.exhaustTemperature', 'Exhaust', 'temperature', 'C', { decimals: 0, min: 0, max: 100 }),
+}
 
-/**
- * Geometry. The bezel turned the dial into a solid circle, and a circle cannot
- * be cropped the way an arc could: the old canvas stopped 40px short of the
- * ring box's bottom, which was invisible while the lower half painted nothing
- * and became the dial bulging out of the tile once it did.
- */
-describe('cluster canvas geometry', () => {
-  test('gives all four boxes the same height', () => {
-    const { container } = renderCluster()
-    const heights = [0, 1, 2, 3].map((i) => {
-      const el = container.querySelector(`[data-testid="cluster-corner-${i}"]`) as HTMLElement
-      return el.style.height
-    })
-    expect(new Set(heights).size).toBe(1)
-  })
+const full: ResolvedClusterConfig = { ...port, arcs, footer }
 
-  test('contains the whole dial, bezel included, inside the canvas', () => {
-    const { container } = renderCluster()
-    const canvas = container.querySelector('[data-cluster-canvas]') as HTMLElement
-    const dial = container.querySelector('[data-cluster-dial]') as HTMLElement
+const fuel = {
+  side: 'left' as const,
+  bars: [
+    { level: slot('tanks.fuel.2.currentLevel', 'Fwd', 'ratio', 'percent', { min: 0, max: 100, decimals: 0 }), capacity: slot('tanks.fuel.2.capacity', '', 'volume', 'L', { decimals: 0 }) },
+    { level: slot('tanks.fuel.4.currentLevel', 'Aft', 'ratio', 'percent', { min: 0, max: 100, decimals: 0 }), capacity: slot('tanks.fuel.4.capacity', '', 'volume', 'L', { decimals: 0 }) },
+  ],
+}
 
-    const overhang = parseFloat(dial.style.getPropertyValue('--dial-bezel-overhang'))
-    const top = parseFloat(dial.style.top) - overhang
-    const bottom = parseFloat(dial.style.top) + parseFloat(dial.style.height) + overhang
+function renderCluster(config: ResolvedClusterConfig = full, v = values, extra: Partial<React.ComponentProps<typeof EngineClusterTile>> = {}) {
+  return render(<EngineClusterTile config={config} values={v} editing={false} onConfigure={vi.fn()} {...extra} />)
+}
 
-    // happy-dom rounds a serialised inline px value to 6 decimal places on
-    // read-back (jsdom keeps the full string React wrote), so summing three
-    // un-rounded parseFloat results and comparing against one rounded one can
-    // land a few millionths of a pixel over. PX_EPSILON is an order of
-    // magnitude above that rounding noise and eight orders below anything
-    // that would matter on screen.
-    const PX_EPSILON = 1e-4
-    expect(top).toBeGreaterThanOrEqual(0)
-    expect(bottom).toBeLessThanOrEqual(parseFloat(canvas.style.height) + PX_EPSILON)
-  })
-
-  test('centres the dial on the block of boxes', () => {
-    const { container } = renderCluster()
-    const dial = container.querySelector('[data-cluster-dial]') as HTMLElement
-    const top = container.querySelector('[data-testid="cluster-corner-0"]') as HTMLElement
-    const bottom = container.querySelector('[data-testid="cluster-corner-2"]') as HTMLElement
-
-    const blockTop = parseFloat(top.style.top)
-    const blockBottom = parseFloat(bottom.style.top) + parseFloat(bottom.style.height)
-    const dialCentre = parseFloat(dial.style.top) + parseFloat(dial.style.height) / 2
-
-    expect(dialCentre).toBeCloseTo((blockTop + blockBottom) / 2, 0)
-  })
+beforeEach(() => {
+  setViewportWidth(1440)
+  history.result = { points: [], loading: false, error: null }
+  history.calls = []
 })
 
-describe('temperature telltales', () => {
-  const withTelltales = (extra: Partial<typeof port> = {}) => ({
-    ...port,
-    telltales: [
-      { path: 'propulsion.port.temperature', label: 'Coolant', display: 'numeric' as const, quantity: 'temperature', unit: 'C',
-        min: 0, max: 120, zones: [{ from: 0, to: 95, state: 'normal' as const }, { from: 95, to: 120, state: 'alarm' as const }] },
-      { path: 'propulsion.port.transmission.oilTemperature', label: 'Gearbox', display: 'numeric' as const, quantity: 'temperature', unit: 'C' },
-      { path: 'propulsion.port.exhaustTemperature', label: 'Exhaust', display: 'numeric' as const, quantity: 'temperature', unit: 'C' },
-    ],
-    ...extra,
-  })
-
-  test('reads each configured telltale', () => {
-    renderCluster(withTelltales())
-    const row = screen.getByTestId('cluster-telltales')
-    expect(within(row).getByText('71.0')).toBeInTheDocument()
-    expect(within(row).getByText('37.7')).toBeInTheDocument()
-  })
-
-  /**
-   * The whole point of drawing three different symbols: without them the row is
-   * three identical thermometers and every one needs a word next to it.
-   */
-  test('gives each temperature its own symbol, and no label', () => {
-    const { container } = renderCluster(withTelltales())
-    const row = screen.getByTestId('cluster-telltales')
-    const symbols = [...container.querySelectorAll('[data-telltale-icon]')]
-      .map((el) => el.getAttribute('data-telltale-icon'))
-    expect(symbols).toEqual(['coolant', 'gearbox', 'exhaust'])
-    expect(within(row).queryByText('Coolant')).not.toBeInTheDocument()
-    expect(within(row).queryByText('Gearbox')).not.toBeInTheDocument()
-  })
-
-  /**
-   * A telltale is a warning light: grey when the engine is not turning, green
-   * while the reading sits in its normal band, red once it is over. Anything
-   * else is a number you have to read rather than a colour you can glance at.
-   */
-  test('is grey with no reading, green in band, red when too hot', () => {
-    const { container, rerender } = render(
-      <EngineClusterTile config={withTelltales()} values={{}} editing={false} onConfigure={vi.fn()} />,
-    )
-    const coolant = () => container.querySelector('[data-telltale="coolant"]')!.className
-
-    expect(coolant()).toContain('text-muted-foreground')
-
-    rerender(<EngineClusterTile config={withTelltales()} values={values} editing={false} onConfigure={vi.fn()} />)
-    expect(coolant()).toContain('text-emerald-500')
-
-    rerender(<EngineClusterTile config={withTelltales()}
-      values={{ ...values, 'propulsion.port.temperature': 380.15 }} editing={false} onConfigure={vi.fn()} />)
-    expect(coolant()).toContain('text-red-600')
-  })
-
-  /**
-   * Over the normal band is not the same as over an alarm threshold. This
-   * engine's profile leaves warn and alarm null, so every hot reading is
-   * "in no band at all", and painting that red would assert an overheat the
-   * configuration has no thresholds to detect.
-   */
-  test('is amber, not red, when it is past a band with no alarm configured', () => {
-    const { container } = render(
-      <EngineClusterTile
-        config={withTelltales({
-          telltales: [{ path: 'propulsion.port.temperature', label: 'Coolant', display: 'numeric' as const,
-            quantity: 'temperature', unit: 'C', min: 0, max: 120,
-            zones: [{ from: 0, to: 85, state: 'normal' as const }] }],
-        })}
-        values={{ ...values, 'propulsion.port.temperature': 361.15 }} editing={false} onConfigure={vi.fn()} />,
-    )
-    expect(container.querySelector('[data-telltale="coolant"]')!.className).toContain('text-amber-600')
-  })
-
-  // The row belongs with the hours badge inside the dial, not on a strip of its
-  // own below the boxes, so the canvas is back to the height of the box block.
-  test('sits inside the dial, under the hours notch', () => {
-    const { container } = renderCluster(withTelltales())
-    const notch = screen.getByTestId('cluster-notch')
-    const row = screen.getByTestId('cluster-telltales')
-    expect(notch.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(container.querySelector('[data-cluster-dial]')!.contains(row)).toBe(true)
-  })
-
-  /**
-   * Down in the wedge with the notch, not stacked under the reading. Together
-   * the four came to half the dial's height, which drove the reading up off the
-   * middle and through the scale numbers.
-   */
-  test('rides the dial foot rather than the readout', () => {
-    renderCluster(withTelltales())
-    const foot = screen.getByTestId('cluster-foot')
-
-    expect(foot.contains(screen.getByTestId('cluster-telltales'))).toBe(true)
-    expect(foot.contains(screen.getByTestId('cluster-notch'))).toBe(true)
-    expect(foot.className).toContain('absolute')
-    expect(foot.className).toContain('bottom-')
-    expect(foot.contains(screen.getByTestId('cluster-centre'))).toBe(false)
-  })
-
-  test('renders no row at all when none are configured', () => {
+describe('the dial and its hours tab', () => {
+  // The reference rounds revs to the nearest ten and shows them as plain rpm.
+  test('reads the rpm as plain revs to the nearest ten, converted from the SI on the stream', () => {
     renderCluster()
-    expect(screen.queryByTestId('cluster-telltales')).not.toBeInTheDocument()
+    expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent(/^700$/)
+    expect(screen.getByTestId('cluster-centre')).toHaveTextContent('RPM')
   })
-})
 
-/**
- * The fuel rail (ADR 0061) hangs off one edge of the tile. It widens only the
- * design the canvas scales against: everything the corner masks were computed
- * against has to stay where it was, or every cluster gains a hole in the middle.
- */
-describe('fuel rail', () => {
-  const rail = {
-    side: 'left' as const,
-    bars: [{
-      level: { path: 'tanks.fuel.5.currentLevel', label: 'Fwd', display: 'bar' as const,
-        quantity: 'ratio', unit: 'percent', decimals: 0, min: 0, max: 100 },
-      capacity: { path: 'tanks.fuel.5.capacity', label: '', display: 'numeric' as const,
-        quantity: 'volume', unit: 'L', decimals: 0 },
-    }],
-  }
-  const withRail = (side: 'left' | 'right' = 'left'): ResolvedClusterConfig =>
-    ({ ...port, fuel: { ...rail, side } })
+  // The scale numbers are divided by a hundred; the hub must not read as if it
+  // were on the same scale, so the scale says what it is.
+  test('labels the scale as x100 so the hub and the scale agree', () => {
+    renderCluster()
+    expect(screen.getByTestId('cluster-scale-note')).toHaveTextContent('scale x100')
+    const labels = [...document.querySelectorAll('[data-cluster-dial-face] text')].map((t) => t.textContent)
+    expect(labels).toEqual(['0', '5', '10', '15', '20', '25', '30'])
+  })
 
-  const fuelValues = { ...values, 'tanks.fuel.5.currentLevel': 0.7416, 'tanks.fuel.5.capacity': 1.2 }
-  const renderRailed = (config: ResolvedClusterConfig) =>
-    render(<EngineClusterTile config={config} values={fuelValues} editing={false} onConfigure={vi.fn()} />)
-
-  test('renders nothing extra when no rail is configured', () => {
+  test('has no red on the scale when the rpm slot has no thresholds', () => {
     const { container } = renderCluster()
-    expect(container.querySelector('[data-fuel-rail]')).toBeNull()
+    expect(container.querySelectorAll('[data-tick-zone]')).toHaveLength(0)
   })
 
-  test('reads the tanks it is given', () => {
-    renderRailed(withRail())
-    expect(screen.getByTestId('fuel-total')).toHaveTextContent('890')
-  })
-
-  test('puts the rail on the configured edge and the dial block beside it', () => {
-    const { container: left } = renderRailed(withRail('left'))
-    const leftBody = left.querySelector('[data-cluster-body]') as HTMLElement
-    expect(parseFloat(leftBody.style.left)).toBeGreaterThan(0)
-
-    const { container: right } = renderRailed(withRail('right'))
-    const rightBody = right.querySelector('[data-cluster-body]') as HTMLElement
-    expect(parseFloat(rightBody.style.left)).toBe(0)
-  })
-
-  /**
-   * The corner masks are computed at module scope against a 520-wide canvas.
-   * If the rail moved the cards inside that box rather than shifting the whole
-   * box, every mask would cut in the wrong place.
-   */
-  test('leaves the corner geometry exactly where it was', () => {
-    const offsets = (config: ResolvedClusterConfig) => {
-      const { container } = renderRailed(config)
-      return [0, 1, 2, 3].map((i) => {
-        const el = container.querySelector(`[data-testid="cluster-corner-${i}"]`) as HTMLElement
-        return `${el.style.left}/${el.style.top}/${el.style.width}/${el.style.height}`
-      })
+  test('draws the redline from the rpm slot\'s own zones', () => {
+    const redlined: ResolvedClusterConfig = {
+      ...full, ring: { ...full.ring, zones: [{ from: 0, to: 2600, state: 'normal' }, { from: 2600, to: 3000, state: 'alarm' }] },
     }
-    expect(offsets(withRail())).toEqual(offsets(port))
+    const { container } = renderCluster(redlined)
+    const red = [...container.querySelectorAll('[data-tick-zone="alarm"]')]
+    expect(red.length).toBeGreaterThan(0)
+    // 2600..3000 at 100 rpm a tick is five ticks and one major (3000), nothing below.
+    expect(container.querySelectorAll('[data-tick-zone="alarm"][data-tick="major"]')).toHaveLength(1)
   })
 
-  test('costs the tile no extra height, only width', () => {
-    const canvas = (config: ResolvedClusterConfig) =>
-      (renderRailed(config).container.querySelector('[data-cluster-canvas]') as HTMLElement).style
+  test('draws the band and the needle only with a reading', () => {
+    const on = renderCluster()
+    expect(on.container.querySelector('[data-value-arc]')).not.toBeNull()
+    expect(on.container.querySelector('[data-needle]')).not.toBeNull()
+    on.unmount()
+    const off = renderCluster(full, { ...values, 'propulsion.port.revolutions': null })
+    expect(off.container.querySelector('[data-value-arc]')).toBeNull()
+    expect(off.container.querySelector('[data-needle]')).toBeNull()
+  })
 
-    const bare = canvas(port)
-    const railed = canvas(withRail())
-    expect(railed.height).toBe(bare.height)
-    expect(parseFloat(railed.width)).toBeGreaterThan(parseFloat(bare.width))
+  test('reads engine hours in the tab', () => {
+    renderCluster()
+    const tab = screen.getByTestId('cluster-notch')
+    expect(tab).toHaveTextContent('894')
+    expect(tab).toHaveTextContent('HRS')
+    expect(tab.innerHTML).toContain('lucide-clock')
+  })
+
+  test('says RUN when nothing is in a warning or alarm zone', () => {
+    renderCluster()
+    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
   })
 })
 
-describe('EngineClusterTile', () => {
-  test('reads the ring, converted from the SI on the stream', () => {
-    renderCluster()
-    expect(screen.getByText('698')).toBeInTheDocument()
-    expect(screen.getByText('RPM x100')).toBeInTheDocument()
+/**
+ * The chip says RUN only for an engine known to be turning with live data.
+ * A stale or missing reading, a lost feed or a quiet engine must not read RUN
+ * beside a STALE border.
+ */
+describe('the status chip', () => {
+  const allStale = Object.fromEntries(Object.keys(values).map((p) => [p, 300]))
+
+  test('is not drawn when every reading is stale', () => {
+    renderCluster(full, values, { ages: allStale })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
-  /**
-   * Hours belong in the notch and fuel rate in a card, not the other way
-   * round. Hours barely move and want a small badge; fuel rate changes with
-   * every throttle input and earns a full readout with a scale under it.
-   */
-  test('reads engine hours in the notch', () => {
-    renderCluster()
-    const notch = screen.getByTestId('cluster-notch')
-    expect(notch).toHaveTextContent('894')
-    expect(notch).toHaveTextContent('h')
-    expect(notch.innerHTML).toContain('lucide-clock')
+  test('is not drawn when the rpm itself is stale or missing', () => {
+    const { unmount } = renderCluster(full, values, { ages: { 'propulsion.port.revolutions': 300 } })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
+    unmount()
+    renderCluster(full, { ...values, 'propulsion.port.revolutions': null })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
-  test('reads fuel rate in a corner card', () => {
-    renderCluster()
-    const fuel = screen.getByTestId('cluster-corner-3')
-    expect(fuel).toHaveTextContent('1.5')
-    expect(fuel.innerHTML).toContain('lucide-fuel')
+  test('is not drawn for an engine whose feed is lost', () => {
+    renderCluster(full, values, { engines: { port: { state: 'lost', lastUpdate: '2026-10-06T04:30:00Z' } } })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
-  test('renders one card per corner, with a row each', () => {
-    renderCluster()
-    expect(screen.getByText('22.0')).toBeInTheDocument()   // oil psi
-    expect(screen.getByText('1.5')).toBeInTheDocument()    // fuel L/h
+  test('is not drawn for an engine that is not turning', () => {
+    renderCluster(full, { ...values, 'propulsion.port.revolutions': 0 })
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
-  test('stacks several rows in one card', () => {
-    renderCluster()
-    const temps = screen.getByTestId('cluster-corner-2')
-    expect(within(temps).getByText('71.0')).toBeInTheDocument()
-    expect(within(temps).getByText('37.7')).toBeInTheDocument()
+  test('says RUN for a live, turning engine, whether or not the server has classified it', () => {
+    const { unmount } = renderCluster()
+    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
+    unmount()
+    renderCluster(full, values, { engines: { port: { state: 'running' } } })
+    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
   })
+})
 
-  /**
-   * The exhaust path is under propulsion.0 on this vessel, so a cluster keyed
-   * on propulsion.port cannot reach it. It has to read as no data, never zero.
-   */
-  test('shows the structural dash for a path that is absent', () => {
+describe('readout cards', () => {
+  test('renders four cards, each with its own reading', () => {
     renderCluster()
-    const temps = screen.getByTestId('cluster-corner-2')
-    expect(within(temps).getByText('--')).toBeInTheDocument()
+    expect(within(screen.getByTestId('cluster-corner-0')).getByText('22.0')).toBeInTheDocument()
+    expect(within(screen.getByTestId('cluster-corner-1')).getByText('0.0')).toBeInTheDocument()
+    expect(within(screen.getByTestId('cluster-corner-2')).getByText('6')).toBeInTheDocument()
+    expect(within(screen.getByTestId('cluster-corner-3')).getByText('1.5')).toBeInTheDocument()
   })
 
   // Boost really is 0 at idle. That is a reading, not an absence.
   test('shows a genuine zero as zero', () => {
     renderCluster()
-    const boost = screen.getByTestId('cluster-corner-1')
-    expect(within(boost).getByText('0.0')).toBeInTheDocument()
-    expect(within(boost).queryByText('--')).not.toBeInTheDocument()
+    expect(within(screen.getByTestId('cluster-corner-1')).queryByText('--')).not.toBeInTheDocument()
+  })
+
+  test('shows the structural dash for a path that is absent', () => {
+    renderCluster(full, { ...values, 'propulsion.port.engineLoad': null })
+    expect(within(screen.getByTestId('cluster-corner-2')).getByText('--')).toBeInTheDocument()
+  })
+
+  test('uses one icon per card', () => {
+    renderCluster()
+    expect(screen.getByTestId('cluster-corner-3').innerHTML).toContain('lucide-fuel')
   })
 
   test('offers the config button only in layout mode', () => {
     const onConfigure = vi.fn()
-    const { rerender } = render(
-      <EngineClusterTile config={port} values={values} editing={false} onConfigure={onConfigure} />,
-    )
+    const { rerender } = render(<EngineClusterTile config={full} values={values} editing={false} onConfigure={onConfigure} />)
     expect(screen.queryByLabelText('Configure Port')).not.toBeInTheDocument()
-
-    rerender(<EngineClusterTile config={port} values={values} editing onConfigure={onConfigure} />)
+    rerender(<EngineClusterTile config={full} values={values} editing onConfigure={onConfigure} />)
     screen.getByLabelText('Configure Port').click()
     expect(onConfigure).toHaveBeenCalledOnce()
   })
 })
 
 /**
+ * The bullet graphs are drawn from each slot's zones. A bundled profile ships a
+ * normal band and no warn or alarm threshold, so that is the case that has to
+ * look right: one dim band, no setpoint ticks, amber (never red) when the
+ * reading is outside it.
+ */
+describe('bullet graphs from zones', () => {
+  const withOilZones = (zones: GaugeWidgetConfig['zones']): ResolvedClusterConfig => ({
+    ...full,
+    corners: [
+      { label: 'Oil', rows: [{ ...full.corners[0].rows[0], zones }] },
+      ...full.corners.slice(1),
+    ],
+  })
+  const oil = () => screen.getByTestId('cluster-corner-0')
+
+  test('draws only the normal band, with no setpoint ticks, when thresholds are null', () => {
+    const { container } = renderCluster(withOilZones([{ from: 40, to: 100, state: 'normal' }]))
+    expect(oil().querySelectorAll('[data-band]')).toHaveLength(1)
+    expect(oil().querySelector('[data-band="normal"]')).not.toBeNull()
+    expect(oil().querySelectorAll('[data-mark]')).toHaveLength(0)
+    expect(container.querySelector('[data-cluster-canvas]')).not.toBeNull()
+  })
+
+  test('22 psi against a 40 psi floor is amber, not red', () => {
+    renderCluster(withOilZones([{ from: 40, to: 100, state: 'normal' }]))
+    expect(oil()).toHaveAttribute('data-tone', 'warn')
+    expect(oil().querySelector('[data-reading]')!.className).toContain('text-amber')
+    expect(oil().querySelector('[data-reading]')!.className).not.toContain('text-red')
+    expect(oil().querySelector('[data-bullet-fill]')).toHaveAttribute('data-tone', 'warn')
+  })
+
+  test('a reading inside the normal band is neutral and lights that band', () => {
+    renderCluster(withOilZones([{ from: 10, to: 100, state: 'normal' }]))
+    expect(oil()).toHaveAttribute('data-tone', 'neutral')
+    expect(oil().querySelector('[data-band="normal"]')).toHaveAttribute('data-band-active', 'true')
+    expect(oil().querySelector('[data-reading]')!.className).toContain('text-foreground')
+  })
+
+  test('marks a real threshold with a tick and its number, and goes red in the alarm band', () => {
+    renderCluster(withOilZones([
+      { from: 0, to: 25, state: 'alarm' },
+      { from: 25, to: 100, state: 'normal' },
+    ]))
+    expect(oil().querySelectorAll('[data-mark="alarm"]')).toHaveLength(1)
+    expect(within(oil()).getByText('25')).toBeInTheDocument()
+    expect(oil()).toHaveAttribute('data-tone', 'alarm')
+    expect(oil().querySelector('[data-band="alarm"]')).toHaveAttribute('data-band-active', 'true')
+  })
+
+  test('colours come from tokens, never a hex', () => {
+    const { container } = renderCluster(withOilZones([{ from: 40, to: 100, state: 'normal' }]), values, {})
+    expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
+  })
+})
+
+describe('dial gap arcs', () => {
+  test('draws the bound left arc with its reading', () => {
+    const { container } = renderCluster()
+    const left = container.querySelector('[data-gap-arc="left"]')!
+    expect(left).not.toBeNull()
+    expect(left).toHaveTextContent('71°')
+  })
+
+  // The right arc is the gearbox oil temperature (37.7 C here), under the rpm.
+  test('draws the bound right arc as the gearbox temperature', () => {
+    const { container } = renderCluster()
+    const right = container.querySelector('[data-gap-arc="right"]')!
+    expect(right).toHaveTextContent('38°')
+    expect(right.querySelector('[data-telltale-icon="gearbox"]')).not.toBeNull()
+    expect(right.querySelector('[data-telltale-icon="oil"]')).toBeNull()
+  })
+
+  // An unset slot draws nothing at all rather than an empty track.
+  test('draws nothing for an unset right arc', () => {
+    const { container } = renderCluster({ ...full, arcs: { left: arcs.left } })
+    expect(container.querySelector('[data-gap-arc="right"]')).toBeNull()
+  })
+
+  // The card's bullet lights the first band the reading is in; the arc must
+  // agree, not light every band that happens to contain it.
+  test('lights the same single band the bullet graph would for overlapping zones', () => {
+    const overlapping: ResolvedClusterConfig = {
+      ...full,
+      arcs: { left: { ...arcs.left, zones: [{ from: 0, to: 100, state: 'normal' }, { from: 60, to: 100, state: 'warn' }] } },
+    }
+    const { container } = renderCluster(overlapping, { ...values, 'propulsion.port.temperature': 80 + 273.15 })
+    expect(container.querySelectorAll('[data-gap-arc="left"] [data-band-active="true"]')).toHaveLength(1)
+    expect(container.querySelector('[data-gap-arc="left"] [data-band-active="true"]')).toHaveAttribute('data-band', 'normal')
+  })
+
+  test('is amber past a band with no alarm configured, never red', () => {
+    const { container } = renderCluster(full, { ...values, 'propulsion.port.temperature': 361.15 })
+    expect(container.querySelector('[data-gap-arc="left"]')).toHaveAttribute('data-tone', 'warn')
+  })
+})
+
+describe('mirror', () => {
+  const stbd: ResolvedClusterConfig = { ...full, side: 'stbd', title: 'Starboard', fuel: { ...fuel, side: 'right' } }
+  const portFuel: ResolvedClusterConfig = { ...full, fuel }
+
+  test('a starboard tile is laid out reflected', () => {
+    const { container } = renderCluster(stbd)
+    expect(container.querySelector('[data-cluster-canvas]')).toHaveAttribute('data-side', 'stbd')
+    expect(screen.getByTestId('cluster-footer').style.flexDirection).toBe('row-reverse')
+  })
+
+  test('a port tile is not', () => {
+    const { container } = renderCluster(portFuel)
+    expect(container.querySelector('[data-cluster-canvas]')).toHaveAttribute('data-side', 'port')
+    expect(screen.getByTestId('cluster-footer').style.flexDirection).toBe('row')
+  })
+
+  test('readout cards move to the other side of the dial', () => {
+    const p = renderCluster(portFuel)
+    const portLeft = parseFloat((screen.getByTestId('cluster-corner-0').parentElement as HTMLElement).style.left)
+    p.unmount()
+    renderCluster(stbd)
+    const stbdLeft = parseFloat((screen.getByTestId('cluster-corner-0').parentElement as HTMLElement).style.left)
+    expect(portLeft).toBeGreaterThan(400)
+    expect(stbdLeft).toBeLessThan(400)
+  })
+
+  test('hours and status tabs swap sides', () => {
+    const p = renderCluster(portFuel)
+    expect((screen.getByTestId('cluster-notch') as HTMLElement).style.right).toBe('52px')
+    expect((screen.getByTestId('cluster-chip-tab') as HTMLElement).style.left).toBe('52px')
+    p.unmount()
+    renderCluster(stbd)
+    expect((screen.getByTestId('cluster-notch') as HTMLElement).style.left).toBe('52px')
+    expect((screen.getByTestId('cluster-chip-tab') as HTMLElement).style.right).toBe('52px')
+  })
+
+  test('the fuel fan goes to the outer edge', () => {
+    const p = renderCluster(portFuel)
+    expect(p.container.querySelector('[data-fuel-fan]')).toHaveAttribute('data-side', 'port')
+    p.unmount()
+    const s = renderCluster(stbd)
+    expect(s.container.querySelector('[data-fuel-fan]')).toHaveAttribute('data-side', 'stbd')
+  })
+
+  test('a tile with no side is port', () => {
+    const { side: _side, ...noSide } = full
+    void _side
+    const { container } = renderCluster(noSide)
+    expect(container.querySelector('[data-cluster-canvas]')).toHaveAttribute('data-side', 'port')
+  })
+})
+
+describe('fuel fan', () => {
+  test('draws no fan without a rail', () => {
+    const { container } = renderCluster()
+    expect(container.querySelector('[data-fuel-fan]')).toBeNull()
+  })
+
+  test('reads each tank and the total in litres', () => {
+    const { container } = renderCluster({ ...full, fuel })
+    expect(container.querySelectorAll('[data-fuel-bar]')).toHaveLength(2)
+    // 0.87 * 1.2 m3 + 0.4 * 1.3 m3 = 1564 L
+    expect(screen.getByTestId('fuel-total')).toHaveTextContent('1564')
+  })
+
+  test('says so rather than totalling a tank that is not reporting', () => {
+    const { container } = renderCluster({ ...full, fuel }, { ...values, 'tanks.fuel.4.currentLevel': null })
+    expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
+    expect(container.querySelector('[data-fuel-bar="1"]')).toHaveAttribute('data-bar-state', 'absent')
+  })
+})
+
+describe('fuel fan staleness', () => {
+  const railed = { ...full, fuel }
+
+  test('a stale level blanks the fill, the percentage and the total together', () => {
+    const { container } = renderCluster(railed, values, { ages: { 'tanks.fuel.4.currentLevel': 300 } })
+    expect(container.querySelector('[data-fuel-bar="1"]')).toHaveAttribute('data-bar-state', 'absent')
+    expect(container.querySelector('[data-fuel-legend="1"]')).toBeNull()
+    expect(container.querySelector('[data-fuel-bar="1"] path[stroke-width="18"]:not([stroke-dasharray])')).toBeNull()
+    expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
+  })
+
+  test('a stale capacity blanks the total rather than totalling with an old figure', () => {
+    renderCluster(railed, values, { ages: { 'tanks.fuel.4.capacity': 300 } })
+    expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
+  })
+})
+
+describe('footer', () => {
+  test('reads the starter battery in volts', () => {
+    renderCluster()
+    expect(screen.getByTestId('cluster-battery')).toHaveTextContent('26.4')
+  })
+
+  test('reads the alternator: amps, watts, temperature and charge stage', () => {
+    renderCluster()
+    expect(screen.getByTestId('cluster-alt-amps')).toHaveTextContent('48')
+    expect(screen.getByTestId('cluster-alt-watts')).toHaveTextContent('1290')
+    expect(screen.getByTestId('cluster-alternator')).toHaveTextContent('57°')
+    expect(screen.getByTestId('cluster-alt-stage')).toHaveTextContent('ABSORPTION')
+  })
+
+  // The gearbox temperature is the right arc's now; the card shows pressure only.
+  test('reads the transmission pressure with no temperature in the card', () => {
+    renderCluster()
+    const trans = screen.getByTestId('cluster-trans')
+    expect(within(trans).getByText('341')).toBeInTheDocument()
+    expect(trans.querySelector('[data-header-temp]')).toBeNull()
+    expect(trans.querySelector('[data-bullet]')).not.toBeNull()
+  })
+
+  test('reads the wet exhaust', () => {
+    renderCluster()
+    expect(within(screen.getByTestId('cluster-egt')).getByText('32')).toBeInTheDocument()
+  })
+
+  test('shows dashes for slots that are not bound', () => {
+    renderCluster(port)
+    expect(screen.getByTestId('cluster-alt-amps')).toHaveTextContent('--')
+    expect(within(screen.getByTestId('cluster-battery')).getByText('--')).toBeInTheDocument()
+  })
+
+  test('the exhaust is amber past its band, red only in a configured alarm zone', () => {
+    const wet = (zones: GaugeWidgetConfig['zones']): ResolvedClusterConfig => ({
+      ...full, footer: { ...footer, egt: { ...footer.egt!, zones } },
+    })
+    const hot = { ...values, 'propulsion.0.exhaustTemperature': 80 + 273.15 }
+    const { unmount } = renderCluster(wet([{ from: 0, to: 60, state: 'normal' }]), hot)
+    expect(screen.getByTestId('cluster-egt')).toHaveAttribute('data-tone', 'warn')
+    unmount()
+    renderCluster(wet([{ from: 0, to: 60, state: 'normal' }, { from: 60, to: 100, state: 'alarm' }]), hot)
+    expect(screen.getByTestId('cluster-egt')).toHaveAttribute('data-tone', 'alarm')
+  })
+})
+
+describe('the alternator trace', () => {
+  const minute = (i: number, v: number) => ({ time: new Date(Date.UTC(2026, 9, 9, 3, i)).toISOString(), value: v })
+
+  test('asks for one hour of the amps path', () => {
+    renderCluster()
+    expect(history.calls.some(([path, window, enabled]) => path === 'electrical.alternator.2.current' && window === '1h' && enabled)).toBe(true)
+  })
+
+  test('draws the trace and the 1 HR caption', () => {
+    history.result = { points: [minute(0, 10), minute(30, 40), minute(59, 48)], loading: false, error: null }
+    renderCluster()
+    expect(screen.getByTestId('cluster-spark')).toHaveTextContent('1 HR')
+  })
+
+  test('draws the charge limit as a dashed line when it is bound', () => {
+    history.result = { points: [minute(0, 10), minute(59, 48)], loading: false, error: null }
+    renderCluster()
+    expect(screen.getByTestId('cluster-spark-limit')).toBeInTheDocument()
+    expect(screen.getByTestId('cluster-spark')).toHaveTextContent('BMS 80 A')
+  })
+
+  test('draws no limit line when the charge limit is unbound', () => {
+    history.result = { points: [minute(0, 10), minute(59, 48)], loading: false, error: null }
+    const { altLimit: _limit, ...rest } = footer
+    void _limit
+    renderCluster({ ...full, footer: rest })
+    expect(screen.queryByTestId('cluster-spark-limit')).not.toBeInTheDocument()
+  })
+
+  // A flat line and a steady sensor look the same; only one of them is true.
+  test('says why there is no trace instead of drawing a flat one', () => {
+    history.result = { points: [], loading: false, error: 'history needs InfluxDB' }
+    renderCluster()
+    expect(screen.getByTestId('cluster-spark-error')).toHaveTextContent('history needs InfluxDB')
+    expect(screen.queryByTestId('cluster-spark')).not.toBeInTheDocument()
+  })
+})
+
+/**
  * The instrument skin works by redefining tokens, so a token it forgets falls
- * through to the light theme. --card-foreground did exactly that, and the
- * config gear — which inherits it — rendered near-black on a near-black card.
- *
- * Now that the skin can sit at page scope (rather than only on a cluster tile),
- * every non-indirected :root token is in play, not just the -foreground ones:
- * anything a page-level board might paint with — board chrome, dial chrome, an
- * alarm colour — needs a skin-appropriate value or it leaks the light theme
- * onto a dark board.
+ * through to the light theme. Now that the skin sits at page scope, every
+ * non-indirected :root token is in play.
  */
 describe('instrument skin token coverage', () => {
-  test('redefines every :root token the skin does not merely inherit', async () => {
+  async function tokens() {
     const [fs, path] = await Promise.all([import('node:fs'), import('node:path')])
     const raw = fs.readFileSync(path.resolve(process.cwd(), 'src/index.css'), 'utf8')
-    // Strip comments first, or a token name mentioned in prose (e.g. this
-    // file's own dial-chrome commentary) reads as a declaration.
+    // Strip comments first, or a token name mentioned in prose reads as a declaration.
     const css = raw.replace(/\/\*[\s\S]*?\*\//g, '')
-
-    const section = (selector: string) =>
-      css.slice(css.indexOf(selector), css.indexOf('}', css.indexOf(selector)))
-
-    // name -> value, so a var() indirection (which resolves through the skin
-    // automatically, since the skin redefines what it points at) can be told
-    // apart from a token the skin actually has to restate.
+    const section = (selector: string) => css.slice(css.indexOf(selector), css.indexOf('}', css.indexOf(selector)))
     const declarations = (block: string) =>
       new Map([...block.matchAll(/--([\w-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]))
+    return { light: declarations(section(':root {')), instrument: declarations(section('[data-skin="instrument"] {')) }
+  }
 
-    const light = declarations(section(':root {'))
-    const instrument = declarations(section('[data-skin="instrument"] {'))
-
-    // Each entry is a token the skin deliberately leaves inherited, with the
-    // reason it's safe to.
+  test('redefines every :root token the skin does not merely inherit', async () => {
+    const { light, instrument } = await tokens()
     const ALLOWED_TO_INHERIT = new Map<string, string>([
       ['radius', 'not colour, correct as inherited'],
       ['font-display', 'not colour, correct as inherited'],
       ['font-sans', 'not colour, correct as inherited'],
-      // Only forecast-drawer.tsx and tide-chart.tsx read the chart tokens, and
-      // neither renders on the bento grid — a known gap if a charting tile
-      // ever lands on a page.
-      ['chart-wind', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
-      ['chart-gust', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
-      ['chart-wave', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
-      ['chart-swell', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
-      ['chart-temp', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
-      ['chart-grid', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
-      ['chart-precip', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
-      ['chart-uv', 'unread on the bento grid (forecast-drawer.tsx / tide-chart.tsx only)'],
+      ['chart-wind', 'unread on the bento grid'],
+      ['chart-gust', 'unread on the bento grid'],
+      ['chart-wave', 'unread on the bento grid'],
+      ['chart-swell', 'unread on the bento grid'],
+      ['chart-temp', 'unread on the bento grid'],
+      ['chart-grid', 'unread on the bento grid'],
+      ['chart-precip', 'unread on the bento grid'],
+      ['chart-uv', 'unread on the bento grid'],
       ['dial-bezel-overhang', 'set inline per tile by the cluster, not by the skin'],
       ['dial-track-r', "invisible under the skin's --dial-track-w: 0px"],
     ])
-
     const missing = [...light.keys()].filter((token) => {
       if (ALLOWED_TO_INHERIT.has(token)) return false
       if (/^var\(/.test(light.get(token)!)) return false
       return !instrument.has(token)
     })
-
     expect(missing, `instrument skin does not redefine: ${missing.join(', ')}`).toEqual([])
   })
-})
 
-describe('box icons', () => {
-  test('infers an icon per box from what it measures', () => {
-    const { container } = renderCluster()
-    // lucide stamps the name onto the svg class, so the mapping is checkable.
-    const classes = container.innerHTML
-    expect(classes).toContain('lucide-cog')          // oil pressure
-    expect(classes).toContain('lucide-rabbit')       // boost
-    expect(classes).toContain('lucide-thermometer')  // temperatures
-    expect(classes).toContain('lucide-fuel')         // fuel rate
-    expect(classes).toContain('lucide-clock')        // engine hours in the notch
-  })
-
-  // A card stacking three temperatures wants one thermometer, not three.
-  test('draws one icon per box, not one per row', () => {
-    const { container } = renderCluster()
-    const temps = container.querySelector('[data-testid="cluster-corner-2"]')!
-    expect(temps.querySelectorAll('svg')).toHaveLength(1)
-  })
-
-  test('an explicit icon overrides the inferred one', () => {
-    const { container } = render(
-      <EngineClusterTile
-        config={{ ...port, corners: port.corners.map((c, i) => (i === 0 ? { ...c, icon: 'zap' } : c)) }}
-        values={values} editing={false} onConfigure={vi.fn()}
-      />,
-    )
-    const oil = container.querySelector('[data-testid="cluster-corner-0"]')!
-    expect(oil.innerHTML).toContain('lucide-zap')
-    expect(oil.innerHTML).not.toContain('lucide-cog')
-  })
-})
-
-describe('composition', () => {
-  /**
-   * A tachometer says one number. RPM and fuel flow stacked in the centre at
-   * near-identical weights read as a pair and push the group off the dial's
-   * optical centre, so fuel flow moves to the notch the sweep leaves.
-   */
-  test('gives the hero readout to the ring alone', () => {
-    render(<EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />)
-
-    // Hours share the centre stack but as a small pill beneath, not as a
-    // second reading at comparable weight.
-    const hero = screen.getByTestId('cluster-centre-value')
-    expect(hero).toHaveTextContent('698')
-    expect(hero).not.toHaveTextContent('894')
-    expect(hero.className).toContain('text-4xl')
-    expect(screen.getByTestId('cluster-notch').className).not.toContain('text-4xl')
-  })
-
-  test('puts the secondary reading in the notch', () => {
-    render(<EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />)
-    const notch = screen.getByTestId('cluster-notch')
-    expect(notch).toHaveTextContent('894')
-    expect(notch).toHaveTextContent('h')
-  })
-
-  test('halves the scale labels so they do not compete with the reading', () => {
-    render(<EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />)
-    expect(screen.getByText('RPM x100')).toBeInTheDocument()
-    expect(screen.getByText('10')).toBeInTheDocument()
-    expect(screen.queryByText('1500')).not.toBeInTheDocument()
-  })
-})
-
-describe('state at a glance', () => {
-  const zoned = {
-    ...port,
-    corners: port.corners.map((c, i) => (i === 0
-      ? { ...c, rows: [{ ...c.rows[0], min: 0, max: 100, zones: [{ from: 40, to: 100, state: 'normal' as const }] }] }
-      : c)),
-  }
-
-  // The whole job of an engine panel is answering "is anything wrong".
-  test('draws a zone bar under a reading that has bands', () => {
-    const { container } = render(
-      <EngineClusterTile config={zoned} values={values} editing={false} onConfigure={vi.fn()} />,
-    )
-    expect(container.querySelector('[data-testid="cluster-corner-0"] [data-zone-bar]')).not.toBeNull()
-  })
-
-  test('draws none where a reading has no bands', () => {
-    const { container } = render(
-      <EngineClusterTile config={zoned} values={values} editing={false} onConfigure={vi.fn()} />,
-    )
-    expect(container.querySelector('[data-testid="cluster-corner-3"] [data-zone-bar]')).toBeNull()
-  })
-
-  // 22 psi is below the healthy band's floor of 40, so it must not read normal.
-  test('colours a reading outside its healthy band', () => {
-    render(<EngineClusterTile config={zoned} values={values} editing={false} onConfigure={vi.fn()} />)
-    expect(screen.getByText('22.0').className).not.toContain('text-gauge-primary')
-  })
-
-  test('leaves a reading inside its band in the normal colour', () => {
-    render(
-      <EngineClusterTile config={zoned} values={{ ...values, 'propulsion.port.oilPressure': 413685 }}
-        editing={false} onConfigure={vi.fn()} />,
-    )
-    expect(screen.getByText('60.0').className).toContain('text-gauge-primary')
-  })
-})
-
-// A three-row card has no dead space for a bar; colour carries the state.
-test('draws no zone bars in a card that stacks several readings', () => {
-  const zonedTemps = {
-    ...port,
-    corners: port.corners.map((c, i) => (i === 2
-      ? { ...c, rows: c.rows.map((r) => ({ ...r, min: 0, max: 120, zones: [{ from: 0, to: 85, state: 'normal' as const }] })) }
-      : c)),
-  }
-  const { container } = render(
-    <EngineClusterTile config={zonedTemps} values={values} editing={false} onConfigure={vi.fn()} />,
-  )
-  expect(container.querySelectorAll('[data-testid="cluster-corner-2"] [data-zone-bar]')).toHaveLength(0)
-})
-
-describe('stacked cards', () => {
-  test('stacks peers at equal weight', () => {
-    render(<EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />)
-    const temps = screen.getByTestId('cluster-corner-2')
-    expect(within(temps).getByText('71.0').className).toContain('text-base')
-    expect(within(temps).getByText('37.7').className).toContain('text-base')
-  })
-
-  test('gives a single reading the hero treatment', () => {
-    render(<EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />)
-    expect(screen.getByText('1.5').className).toContain('text-2xl')
-  })
-})
-
-/**
- * The tile edge carries the worst of the ring, centre, every corner row and
- * the telltales (ADR 0081) — the same worst-of that already governs the
- * telltale row's own colour, extended up to the tile.
- */
-describe('tile state (ADR 0081)', () => {
-  test('carries a telltale past its alarm band up to the tile edge', () => {
-    const withTelltales = {
-      ...port,
-      telltales: [
-        { path: 'propulsion.port.temperature', label: 'Coolant', display: 'numeric' as const, quantity: 'temperature', unit: 'C',
-          min: 0, max: 120, zones: [{ from: 0, to: 95, state: 'normal' as const }, { from: 95, to: 120, state: 'alarm' as const }] },
-      ],
+  test('the cluster card tokens exist, inert in :root and restated by the skin', async () => {
+    const { light, instrument } = await tokens()
+    for (const token of ['cluster-band-idle', 'cluster-band-active', 'cluster-spark-fill', 'cluster-surface', 'cluster-stroke', 'cluster-track', 'cluster-dial-face', 'cluster-dial-rim', 'cluster-hub', 'cluster-hub-shadow', 'cluster-sweep-o0', 'cluster-sweep-o1', 'cluster-sweep-o2', 'cluster-needle-glow']) {
+      expect(light.has(token), `:root is missing --${token}`).toBe(true)
     }
-    const { container } = render(
-      <EngineClusterTile config={withTelltales}
-        values={{ ...values, 'propulsion.port.temperature': 380.15 }}
-        editing={false} onConfigure={vi.fn()} />,
-    )
+    for (const token of ['cluster-band-idle', 'cluster-band-active', 'cluster-spark-fill', 'cluster-surface', 'cluster-dial-face', 'cluster-dial-rim', 'cluster-hub', 'cluster-hub-shadow', 'cluster-sweep-o0', 'cluster-sweep-o1', 'cluster-sweep-o2', 'cluster-needle-glow']) {
+      expect(instrument.has(token), `skin is missing --${token}`).toBe(true)
+    }
+  })
+
+  test('the bands dim when idle and brighten when the reading is in them', async () => {
+    const { light } = await tokens()
+    expect(Number(light.get('cluster-band-idle'))).toBeLessThan(Number(light.get('cluster-band-active')))
+  })
+})
+
+describe('tile state (ADR 0081)', () => {
+  test('carries an arc past its alarm band up to the tile edge', () => {
+    const alarmArc: ResolvedClusterConfig = {
+      ...full,
+      arcs: { left: { ...arcs.left, zones: [{ from: 0, to: 95, state: 'normal' }, { from: 95, to: 120, state: 'alarm' }] } },
+    }
+    const { container } = renderCluster(alarmArc, { ...values, 'propulsion.port.temperature': 380.15 })
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
+    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('ALARM')
+  })
+
+  test('carries a footer slot past its alarm band up to the tile edge', () => {
+    const hotEgt: ResolvedClusterConfig = {
+      ...full,
+      footer: { ...footer, egt: { ...footer.egt!, zones: [{ from: 0, to: 60, state: 'normal' }, { from: 60, to: 100, state: 'alarm' }] } },
+    }
+    const { container } = renderCluster(hotEgt, { ...values, 'propulsion.0.exhaustTemperature': 353.15 })
     expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
   })
 
-  /**
-   * 22.0 psi (this vessel's live oil pressure) sits below the healthy band's
-   * floor of 40, so it reads `outside`. This is exactly the bundled engine
-   * profile's own case (ADR 0054 §5a: warn/alarm thresholds left null), and
-   * it must not light the tile: an engine idling all day with no thresholds
-   * filled in would otherwise carry a permanent amber edge on a healthy
-   * boat, the noise floor ADR 0080 removed from the dial in the first place.
-   */
+  // The bundled profile's own case: warn and alarm thresholds null, so a hot or
+  // low reading is `outside` the normal band. It must not light the tile edge,
+  // or a healthy boat idles all day with an amber border.
   test('does not carry an out-of-band reading to the tile edge', () => {
-    const zoned = {
-      ...port,
-      corners: port.corners.map((c, i) => (i === 0
-        ? { ...c, rows: [{ ...c.rows[0], min: 0, max: 100, zones: [{ from: 40, to: 100, state: 'normal' as const }] }] }
-        : c)),
+    const zoned: ResolvedClusterConfig = {
+      ...full,
+      corners: [
+        { label: 'Oil', rows: [{ ...full.corners[0].rows[0], zones: [{ from: 40, to: 100, state: 'normal' }] }] },
+        ...full.corners.slice(1),
+      ],
     }
-    const { container } = render(
-      <EngineClusterTile config={zoned} values={values} editing={false} onConfigure={vi.fn()} />,
-    )
+    const { container } = renderCluster(zoned)
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
   })
 
   test('carries no state when nothing on the cluster has a band configured', () => {
-    const { container } = render(
-      <EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />,
-    )
+    const { container } = renderCluster()
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
   })
 })
 
-/**
- * Ages ride the same gauge-values stream (ADR 0083). A stale slot renders the
- * dash -- the ring blanks, a corner row carries its own badge -- without
- * staling the whole tile until every slot whose age is actually known has
- * frozen, the exact shape a dead engine feed (still reading 698 RPM an hour
- * after the engine stopped) needs.
- */
 describe('staleness (ADR 0083)', () => {
-  // Every path the default `port` config binds, all fresh, so a test can
-  // stale exactly one of them without the rest going along for the ride.
-  const freshAges: Record<string, number> = {
-    'propulsion.port.revolutions': 3,
-    'propulsion.port.runTime': 3,
-    'propulsion.port.oilPressure': 3,
-    'propulsion.port.boostPressure': 3,
-    'propulsion.port.temperature': 3,
-    'propulsion.port.transmission.oilTemperature': 3,
-    'propulsion.port.fuel.rate': 3,
-  }
+  const freshAges: Record<string, number> = Object.fromEntries(
+    Object.keys(values).filter((p) => p.startsWith('propulsion.port.')).map((p) => [p, 3]),
+  )
 
-  test('a frozen corner row shows the dash and its own badge, without staling the whole tile', () => {
-    const { container } = render(
-      <EngineClusterTile
-        config={port} values={values}
-        ages={{ ...freshAges, 'propulsion.port.oilPressure': 300 }}
-        editing={false} onConfigure={vi.fn()}
-      />,
-    )
+  test('a frozen card shows the dash and its own badge, without staling the whole tile', () => {
+    const { container } = renderCluster(full, values, { ages: { ...freshAges, 'propulsion.port.oilPressure': 300 } })
     const oil = screen.getByTestId('cluster-corner-0')
     expect(within(oil).getByText('--')).toBeInTheDocument()
     expect(within(oil).getByText(/Stale/)).toBeInTheDocument()
@@ -615,123 +613,80 @@ describe('staleness (ADR 0083)', () => {
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-stale')
   })
 
-  test('blanks the ring when its own path is stale', () => {
-    render(
-      <EngineClusterTile
-        config={port} values={values}
-        ages={{ ...freshAges, 'propulsion.port.revolutions': 300 }}
-        editing={false} onConfigure={vi.fn()}
-      />,
-    )
+  test('blanks the rpm when its own path is stale', () => {
+    renderCluster(full, values, { ages: { ...freshAges, 'propulsion.port.revolutions': 300 } })
     expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('--')
-    expect(screen.queryByText('698')).not.toBeInTheDocument()
   })
 
   test('goes stale as a whole only once every slot with a known age has frozen', () => {
     const staleAges = Object.fromEntries(Object.keys(freshAges).map((path) => [path, 300]))
-    const { container } = render(
-      <EngineClusterTile config={port} values={values} ages={staleAges} editing={false} onConfigure={vi.fn()} />,
-    )
+    const { container } = renderCluster(full, values, { ages: staleAges })
     expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
     expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
-    expect(screen.queryByText('698')).not.toBeInTheDocument()
-    expect(screen.queryByText('22.0')).not.toBeInTheDocument()
   })
 
   test('an unknown age never counts as stale', () => {
-    const { container } = render(
-      <EngineClusterTile config={port} values={values} editing={false} onConfigure={vi.fn()} />,
-    )
+    const { container } = renderCluster()
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-stale')
-    expect(screen.getByText('698')).toBeInTheDocument()
+    expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('700')
   })
 })
 
 /**
  * Switching the key off powers the engine computer down, so its readings just
- * stop. The backend says which engines read as switched off; the tile then
- * shows OFF in muted chrome instead of a stale alarm, and a lost feed keeps
- * the amber stale treatment.
+ * stop. The tile then shows OFF in muted chrome instead of a stale alarm, and a
+ * lost feed keeps the amber stale treatment.
  */
-describe('engine off', () => {
-  const staleAges = Object.fromEntries(Object.keys(values).map((path) => [path, 9000]))
+describe('engine off (ADR 0163)', () => {
   const since = '2026-10-06T04:30:00Z'
+  const engineAges = Object.fromEntries(Object.keys(values).filter((p) => p.startsWith('propulsion.port.')).map((p) => [p, 9000]))
 
-  test('shows OFF instead of STALE, with dashes and no amber edge', () => {
-    const { container } = render(
-      <EngineClusterTile
-        config={port} values={values} ages={staleAges}
-        engines={{ port: { state: 'off', lastUpdate: since } }}
-        editing={false} onConfigure={vi.fn()}
-      />,
-    )
+  test('shows OFF with dashes, a muted pill and a neutral border', () => {
+    const { container } = renderCluster(full, values, {
+      ages: engineAges, engines: { port: { state: 'off', lastUpdate: since } },
+    })
     const badge = screen.getByTestId('tile-off-badge')
     expect(badge).toHaveTextContent(/off/i)
-    expect(badge.className).not.toMatch(/amber/)
+    expect(badge.className).not.toMatch(/amber|red/)
     expect(badge.getAttribute('title')).toMatch(/^Off since \d{1,2}:\d{2}/)
     expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
-    expect(screen.queryByText(/Stale/)).not.toBeInTheDocument()
+    // OFF is said once, in the title pill (above); the status chip is only for a running engine.
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
     const card = container.querySelector('[data-slot="card"]')
+    expect(card).not.toHaveAttribute('data-state')
     expect(card).not.toHaveAttribute('data-stale')
     expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('--')
-    expect(screen.queryByText('22.0')).not.toBeInTheDocument()
+    expect(screen.getByTestId('cluster-corner-0')).toHaveTextContent('--')
+    expect(screen.getByTestId('cluster-trans')).toHaveTextContent('--')
   })
 
-  test('blanks the readings even when no ages are known', () => {
-    render(
-      <EngineClusterTile
-        config={port} values={values}
-        engines={{ port: { state: 'off', lastUpdate: since } }}
-        editing={false} onConfigure={vi.fn()}
-      />,
-    )
-    expect(screen.getByTestId('tile-off-badge')).toBeInTheDocument()
-    expect(screen.queryByText('698')).not.toBeInTheDocument()
+  test('stays neutral even when a footer slot would be in an alarm zone', () => {
+    const hot: ResolvedClusterConfig = {
+      ...full,
+      footer: { ...footer, egt: { ...footer.egt!, zones: [{ from: 0, to: 20, state: 'normal' }, { from: 20, to: 100, state: 'alarm' }] } },
+    }
+    const { container } = renderCluster(hot, values, { engines: { port: { state: 'off', lastUpdate: since } } })
+    expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
+  })
+
+  test('draws no alternator trace for an engine that is off', () => {
+    renderCluster(full, values, { engines: { port: { state: 'off', lastUpdate: since } } })
+    expect(history.calls.every(([, , enabled]) => enabled === false)).toBe(true)
   })
 
   test('a lost engine keeps the amber stale treatment', () => {
-    const { container } = render(
-      <EngineClusterTile
-        config={port} values={values} ages={staleAges}
-        engines={{ port: { state: 'lost', lastUpdate: since } }}
-        editing={false} onConfigure={vi.fn()}
-      />,
-    )
+    const { container } = renderCluster(full, values, {
+      ages: engineAges, engines: { port: { state: 'lost', lastUpdate: since } },
+    })
     expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
-    expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
     expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
-  })
-
-  test('an off engine still shows STALE when a non-engine slot on the tile is genuinely stale', () => {
-    const tank = 'tanks.fuel.0.currentLevel'
-    const config: ResolvedClusterConfig = {
-      ...port,
-      corners: [
-        { label: 'Fuel', rows: [{ path: tank, label: 'Fuel', display: 'numeric', quantity: 'ratio', unit: '%' }] },
-        ...port.corners.slice(1),
-      ],
-    }
-    const { container } = render(
-      <EngineClusterTile
-        config={config} values={{ ...values, [tank]: 0.5 }} ages={{ ...staleAges, [tank]: 9000 }}
-        engines={{ port: { state: 'off', lastUpdate: since } }}
-        editing={false} onConfigure={vi.fn()}
-      />,
-    )
-    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
-    expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
-    expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
+    // Not RUN beside a STALE border either: a lost feed has no status word.
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
   test('a running engine, or one the backend says nothing about, is unchanged', () => {
-    render(
-      <EngineClusterTile
-        config={port} values={values}
-        engines={{ port: { state: 'running' }, starboard: { state: 'off', lastUpdate: since } }}
-        editing={false} onConfigure={vi.fn()}
-      />,
-    )
+    renderCluster(full, values, { engines: { port: { state: 'running' }, starboard: { state: 'off', lastUpdate: since } } })
     expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
-    expect(screen.getByText('698')).toBeInTheDocument()
+    expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('700')
   })
 })

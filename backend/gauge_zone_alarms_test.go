@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"sort"
@@ -468,5 +469,135 @@ func TestZoneDerivedAlarmRulesRaiseLowFuelFromABarsOwnZones(t *testing.T) {
 		Fuel:   &dashboardClusterFuelRail{Side: "left", Bars: []dashboardClusterFuelBar{{TankID: tank, Zones: []gaugeZone{{From: 40, To: 60, State: alarmStateWarn}}}}},
 	}}}, ""); msg == "" {
 		t.Fatal("a mid-scale fuel zone cannot raise an alarm and must be refused")
+	}
+}
+
+// Engine Cluster v2 keeps the ids of zones a slot still holds where they were:
+// the coolant arc is index 18, which was the first telltale, and the footer and
+// the second arc are appended after the old telltale cap. Append only.
+func TestClusterHeldZoneIndexSpaceKeepsIssuedIDs(t *testing.T) {
+	if clusterLeftArcZoneIndex != 18 {
+		t.Fatalf("the coolant arc must stay at index 18, the first telltale's, got %d", clusterLeftArcZoneIndex)
+	}
+	if clusterFooterZoneIndexBase < 24 {
+		t.Fatalf("the footer must start past the old telltale cap (18..23), got %d", clusterFooterZoneIndexBase)
+	}
+	if clusterRightArcZoneIndex != clusterFooterZoneIndexBase+len((&dashboardClusterFooter{}).slots()) {
+		t.Fatalf("the right arc follows the footer without a gap: %d", clusterRightArcZoneIndex)
+	}
+}
+
+// A footer slot reads its own item, so its zones come from that item's profile
+// and the alarm is keyed by that item and reading, like any other.
+func TestZoneDerivedAlarmRulesCoverAFooterSlotsOwnItem(t *testing.T) {
+	min, max, hot := 0.0, 200.0, 150.0
+	useProfiles(t, engineProfile{
+		SchemaVersion: 1, Kind: "alternator", ID: "alt-prof", Name: "Alternator",
+		Gauges: []engineProfileGauge{{
+			PathSuffix: "current", Label: "Amps", Display: "numeric", Quantity: "current", Unit: "A", Min: &min, Max: &max,
+			Zones: []engineProfileZone{{Direction: "above", Threshold: &hot, State: alarmStateWarn}},
+		}},
+	})
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	alt := newTileItem(t, "Port alternator", "electrical.alternator.2", "alt-prof")
+	withPages(t, dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 14,
+		Cluster: &dashboardClusterConfig{
+			EquipmentID: engine, Title: "Port",
+			Ring:   dashboardGaugeConfig{Suffix: "revolutions", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+			Centre: dashboardGaugeConfig{Suffix: "runTime", Display: "numeric", Quantity: "duration", Unit: "h"},
+			Footer: &dashboardClusterFooter{AltAmps: &dashboardGaugeConfig{EquipmentID: alt, Suffix: "current", Display: "numeric", Quantity: "current", Unit: "A"}},
+		},
+	})
+
+	rules := zoneDerivedAlarmRules()
+	want := fmt.Sprintf("%sitem:%s:current:0", zoneDerivedAlarmRuleIDPrefix, alt)
+	if len(rules) != 1 || rules[0].ID != want || rules[0].Path != "electrical.alternator.2.current" {
+		t.Fatalf("expected one rule %q on the alternator's current, got %+v", want, rules)
+	}
+}
+
+// Zones a slot still holds keep their old ids where there is no profile to
+// take them, and an unbound slot raises and renumbers nothing.
+func TestZoneDerivedAlarmRulesKeepHeldFooterAndArcZoneIDs(t *testing.T) {
+	held := *zoneGaugeConfig(0, 120, gaugeZone{From: 100, To: 120, State: alarmStateAlarm})
+	held.Suffix = "temperature"
+	egt := *zoneGaugeConfig(0, 100, gaugeZone{From: 80, To: 100, State: alarmStateWarn})
+	egt.Suffix = "exhaustTemperature"
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+
+	withPages(t, dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 14,
+		Cluster: &dashboardClusterConfig{
+			EquipmentID: engine, Title: "Port",
+			Ring:   dashboardGaugeConfig{Suffix: "revolutions", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+			Centre: dashboardGaugeConfig{Suffix: "runTime", Display: "numeric", Quantity: "duration", Unit: "h"},
+			Arcs:   &dashboardClusterArcs{Left: &held},
+			Footer: &dashboardClusterFooter{Egt: &egt},
+		},
+	})
+
+	ids := map[string]bool{}
+	for _, r := range zoneDerivedAlarmRules() {
+		ids[r.ID] = true
+	}
+	for _, want := range []string{
+		fmt.Sprintf("%scluster:abcd1234:%d:0", zoneDerivedAlarmRuleIDPrefix, clusterLeftArcZoneIndex),
+		fmt.Sprintf("%scluster:abcd1234:%d:0", zoneDerivedAlarmRuleIDPrefix, clusterFooterZoneIndexBase+7),
+	} {
+		if !ids[want] {
+			t.Fatalf("expected held-zone rule %q, got %v", want, ids)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected exactly the two bound slots to raise, got %v", ids)
+	}
+}
+
+// A v1 cluster's telltales become the coolant arc and the gearbox arc; the
+// exhaust, read from another node, has no place and is dropped, never guessed.
+func TestMoveLegacyTelltalesPlacesThemOnTheV2Card(t *testing.T) {
+	cl := &dashboardClusterConfig{Title: "Port", Telltales: []dashboardGaugeConfig{
+		{Suffix: "temperature", Label: "Coolant"},
+		{Suffix: "transmission.oilTemperature", Label: "Gearbox"},
+		{Suffix: "exhaustTemperature", Label: "Exhaust"},
+	}}
+	if !moveLegacyTelltales(cl) {
+		t.Fatal("expected a change")
+	}
+	if cl.Arcs == nil || cl.Arcs.Left == nil || cl.Arcs.Left.Label != "Coolant" {
+		t.Fatalf("coolant belongs on the left arc: %+v", cl.Arcs)
+	}
+	if cl.Arcs.Right == nil || cl.Arcs.Right.Label != "Gearbox" {
+		t.Fatalf("the gearbox temperature belongs on the right arc: %+v", cl.Arcs)
+	}
+	if cl.Footer != nil {
+		t.Fatalf("nothing lands on the footer, and the exhaust is not guessed at: %+v", cl.Footer)
+	}
+	if len(cl.Telltales) != 0 || moveLegacyTelltales(cl) {
+		t.Fatal("telltales are cleared and moving them again is a no-op")
+	}
+}
+
+// A footer slot that names its own item reads nothing once that item is gone or
+// unmapped, and so raises nothing: it never falls back to the engine's source.
+func TestZoneDerivedAlarmRulesSkipAFooterSlotWhoseOwnItemIsGone(t *testing.T) {
+	held := *zoneGaugeConfig(0, 100, gaugeZone{From: 80, To: 100, State: alarmStateWarn})
+	held.Path, held.Suffix, held.EquipmentID = "", "exhaustTemperature", "deleted-item"
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	unmapped := newTileItem(t, "Exhaust node", "", "")
+	own := held
+	own.EquipmentID = unmapped
+	withPages(t, dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 14,
+		Cluster: &dashboardClusterConfig{
+			EquipmentID: engine, Source: "propulsion.port", Title: "Port",
+			Ring:   dashboardGaugeConfig{Suffix: "revolutions", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+			Centre: dashboardGaugeConfig{Suffix: "runTime", Display: "numeric", Quantity: "duration", Unit: "h"},
+			Footer: &dashboardClusterFooter{Egt: &held, Battery: &own},
+		},
+	})
+	if rules := zoneDerivedAlarmRules(); len(rules) != 0 {
+		t.Fatalf("no alarm on a reading that cannot be read, got %+v", rules)
 	}
 }

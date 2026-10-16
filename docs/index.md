@@ -20,6 +20,7 @@ meets your needs.
 - [The dashboard](features/dashboard.md), instrument tiles, gauges, embeds and pages.
 - [Forecast](features/forecast.md), weather, wind, wave and tide, and the
   heavy-weather warning signs the wave graph watches for.
+- [Engine Cluster](features/engine-cluster.md), one engine's dial, readouts, fuel and electrical footer.
 - [Anchor watch](features/anchor-watch.md), including the rode planner.
 - [Alarms](features/alarms.md), rules, transports and the decisions behind them.
 - [Passages](features/passages.md), the logbook: every leg the boat has run,
