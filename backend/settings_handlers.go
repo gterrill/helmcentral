@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v4"
 	"gopkg.in/yaml.v3"
@@ -193,6 +194,9 @@ func updateSettingsHandler(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
 	}
+
+	settingsWriteMu.Lock()
+	defer settingsWriteMu.Unlock()
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	settings, err := readSettings(settingsPath)
@@ -962,6 +966,12 @@ func testSignalKConnectionHandler(c echo.Context) error {
 		"vessel_name": strings.TrimSpace(firstNonEmptyString(lookupString(payload, "name"), lookupString(payload, "design", "name"))),
 	})
 }
+
+// settingsWriteMu serialises every read-modify-write of settings.yaml: the
+// settings save, the tide station auto-update and the role clear on an item
+// delete. Without it, two of them read the same file and the later write
+// silently undoes the earlier one. Hold it from the read to the write.
+var settingsWriteMu sync.Mutex
 
 func writeSettings(settingsPath string, settings map[string]any) error {
 

@@ -161,6 +161,8 @@ func rolesBlockMap(r vesselRoles) (map[string]any, error) {
 // returns the roles it cleared. A settings file that cannot be read or written
 // is an error: the caller must not report a clean delete.
 func clearRolesForItem(settingsPath, itemID string) ([]string, error) {
+	settingsWriteMu.Lock()
+	defer settingsWriteMu.Unlock()
 	settings, err := readSettings(settingsPath)
 	if err != nil {
 		return nil, fmt.Errorf("roles settings: reading %s: %w", settingsPath, err)

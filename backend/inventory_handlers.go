@@ -551,11 +551,9 @@ func deleteEquipmentHandler(c echo.Context) error {
 	reseedAnomalyRulesAfterItemSave(id)
 	// No role keeps pointing at an item that no longer exists; the figure it
 	// fed shows Not set. Tiles stay and say Equipment removed.
-	if _, err := clearRolesForItem(getEnv("SETTINGS_FILE", "../settings.yaml"), id); err != nil {
-		log.Printf("inventory: delete equipment %s: %v", id, err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": "the item was deleted, but the roles that named it could not be cleared; check Settings > SignalK > Roles",
-		})
+	_, rolesErr := clearRolesForItem(getEnv("SETTINGS_FILE", "../settings.yaml"), id)
+	if rolesErr != nil {
+		log.Printf("inventory: delete equipment %s: %v", id, rolesErr)
 	}
 
 	failed := 0
@@ -571,9 +569,19 @@ func deleteEquipmentHandler(c echo.Context) error {
 			failed++
 		}
 	}
+	// Photo files go whether or not the roles could be cleared; whatever failed
+	// is reported, and the message keeps the "the item was deleted" prefix the
+	// editor looks for.
+	var problems []string
+	if rolesErr != nil {
+		problems = append(problems, "the roles that named it could not be cleared (check Settings > SignalK > Roles)")
+	}
 	if failed > 0 {
+		problems = append(problems, fmt.Sprintf("%d of its photo files could not be removed from disk", failed))
+	}
+	if len(problems) > 0 {
 		return c.JSON(http.StatusInternalServerError, map[string]string{
-			"error": fmt.Sprintf("the item was deleted, but %d of its photo files could not be removed from disk", failed),
+			"error": "the item was deleted, but " + strings.Join(problems, " and "),
 		})
 	}
 

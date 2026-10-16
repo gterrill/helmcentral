@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // dependantsFixture is a boat with an engine and a house bank. The engine is
@@ -278,5 +280,64 @@ func TestDeletingAnItemKeepsOtherRoles(t *testing.T) {
 	roles, _ := loadVesselRoles(settingsPath)
 	if roles.HouseBank != f.bankID || roles.VoltageReadoutBattery != f.bankID || roles.GeneratorACInstance != "ac1" {
 		t.Fatalf("unrelated roles must be untouched, got %+v", roles)
+	}
+}
+
+// A roles block that cannot be cleared must not leave the item's photo files
+// behind: the files go regardless and the operator is told about both.
+func TestDeleteReportsUnclearableRolesAndStillRemovesPhotos(t *testing.T) {
+	withTestDocumentStore(t)
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	withTempAlarmRules(t)
+
+	item, err := globalDocumentStore.CreateEquipment(equipmentItem{Name: "Adhesives bin", Category: "general"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c1, _ := newInventoryPhotoUploadContext(t, item.ID, []documentUploadField{{name: "file", filename: "a.jpg", content: validJPEGBytes}})
+	if err := uploadEquipmentPhotoHandler(c1); err != nil {
+		t.Fatal(err)
+	}
+	// A roles block that does not parse stops the clear.
+	raw, _ := os.ReadFile(settingsPath)
+	if err := os.WriteFile(settingsPath, append(raw, []byte("\nroles: [1, 2]\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	invalidateSettingsCache(settingsPath)
+
+	c, rec := newDocumentEchoContext(http.MethodDelete, "/api/inventory/equipment/"+item.ID+"?delete_photos=true", "", item.ID)
+	if err := deleteEquipmentHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "roles") {
+		t.Fatalf("expected a 500 naming the roles, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if entries := documentsDirEntries(t); len(entries) != 0 {
+		t.Fatalf("the photo file must still be removed, found %v", entries)
+	}
+}
+
+// Settings writers are serialised: clearing roles waits for a save in flight.
+func TestClearRolesForItemWaitsForOtherSettingsWriters(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	settingsWriteMu.Lock()
+	done := make(chan struct{})
+	go func() {
+		_, _ = clearRolesForItem(settingsPath, "x")
+		close(done)
+	}()
+	select {
+	case <-done:
+		settingsWriteMu.Unlock()
+		t.Fatal("clearRolesForItem ran while another writer held the settings lock")
+	case <-time.After(100 * time.Millisecond):
+	}
+	settingsWriteMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("clearRolesForItem never ran after the lock was released")
 	}
 }
