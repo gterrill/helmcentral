@@ -43,13 +43,11 @@ type dashboardClusterFooter struct {
 
 func (f *dashboardClusterFooter) slots() []*dashboardGaugeConfig {
 	if f == nil {
-		return make([]*dashboardGaugeConfig, 9)
+		return make([]*dashboardGaugeConfig, clusterFooterSlotCount)
 	}
 	return []*dashboardGaugeConfig{
 		f.Battery, f.AltAmps, f.AltWatts, f.AltTemp, f.AltStage, f.AltLimit,
-		// Index 7 was the gearbox temperature, which moved to the right arc. It is
-		// held as a gap so the exhaust keeps its index and no id is renumbered.
-		f.TransPressure, nil, f.Egt,
+		f.TransPressure, f.Egt,
 	}
 }
 
@@ -57,6 +55,9 @@ func (f *dashboardClusterFooter) slots() []*dashboardGaugeConfig {
 func validateClusterSlot(g dashboardGaugeConfig, hasItem bool, ctx string) string {
 	if len(g.EquipmentID) > equipmentIDMaxLen {
 		return "slot equipment id too long: " + ctx
+	}
+	if g.ZoneIndex != nil && (*g.ZoneIndex < 0 || *g.ZoneIndex > 255) {
+		return "slot zone index out of range: " + ctx
 	}
 	// A slot that names its own item does not need the tile's.
 	return validateSlotConfig(g, hasItem || g.EquipmentID != "", ctx)
@@ -70,8 +71,12 @@ func moveLegacyTelltales(cl *dashboardClusterConfig) bool {
 	if len(cl.Telltales) == 0 {
 		return false
 	}
-	for _, t := range cl.Telltales {
+	for i, t := range cl.Telltales {
 		t := t
+		// The zones a telltale held were issued ids by its old position. The
+		// slot keeps that id wherever it lands.
+		index := clusterTelltaleZoneIndexBase + i
+		t.ZoneIndex = &index
 		switch strings.TrimSpace(t.Suffix) {
 		case "temperature":
 			if cl.Arcs == nil {
@@ -93,4 +98,31 @@ func moveLegacyTelltales(cl *dashboardClusterConfig) bool {
 	}
 	cl.Telltales = nil
 	return true
+}
+
+// normalizeClusterCaps brings a cluster saved under the old caps (a corner of
+// several rows, a rail of up to four tanks) within the new ones, so a page that
+// holds one is still editable. What is dropped is logged. It reports whether it
+// changed anything.
+func normalizeClusterCaps(page string, cl *dashboardClusterConfig) bool {
+	changed := false
+	for ci := range cl.Corners {
+		if rows := cl.Corners[ci].Rows; len(rows) > clusterMaxCornerRows {
+			for _, dropped := range rows[clusterMaxCornerRows:] {
+				log.Printf("dashboard: %s, cluster %q: corner %q holds one reading now; dropped %q",
+					page, cl.Title, cl.Corners[ci].Label, firstNonEmpty(dropped.Suffix, dropped.Path, dropped.Label))
+			}
+			cl.Corners[ci].Rows = rows[:clusterMaxCornerRows]
+			changed = true
+		}
+	}
+	if cl.Fuel != nil && len(cl.Fuel.Bars) > clusterMaxFuelBars {
+		for _, dropped := range cl.Fuel.Bars[clusterMaxFuelBars:] {
+			log.Printf("dashboard: %s, cluster %q: the fuel fan draws two tanks; dropped %q",
+				page, cl.Title, firstNonEmpty(dropped.Label, dropped.TankID, dropped.Source))
+		}
+		cl.Fuel.Bars = cl.Fuel.Bars[:clusterMaxFuelBars]
+		changed = true
+	}
+	return changed
 }

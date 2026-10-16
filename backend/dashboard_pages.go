@@ -379,15 +379,20 @@ type dashboardGaugeConfig struct {
 	// EquipmentID reads this slot from another item than the tile's own, for the
 	// cluster's footer: the starter battery, the alternator and the exhaust are
 	// different pieces of equipment from the engine. Empty reads the tile's item.
-	EquipmentID string      `json:"equipmentId,omitempty"`
-	Label       string      `json:"label"`
-	Display     string      `json:"display"`
-	Quantity    string      `json:"quantity"`
-	Unit        string      `json:"unit"`
-	Decimals    *int        `json:"decimals,omitempty"`
-	Min         *float64    `json:"min,omitempty"`
-	Max         *float64    `json:"max,omitempty"`
-	Zones       []gaugeZone `json:"zones,omitempty"`
+	EquipmentID string `json:"equipmentId,omitempty"`
+	// ZoneIndex is the position in the id (zone:<tile>:<index>:<n>) of the zones
+	// this slot still holds, when it is not where its position would put it. Set
+	// only when a slot moves (a telltale onto an arc), so the alarm it already
+	// raised keeps its id. Never sent by a client.
+	ZoneIndex *int        `json:"zoneIndex,omitempty"`
+	Label     string      `json:"label"`
+	Display   string      `json:"display"`
+	Quantity  string      `json:"quantity"`
+	Unit      string      `json:"unit"`
+	Decimals  *int        `json:"decimals,omitempty"`
+	Min       *float64    `json:"min,omitempty"`
+	Max       *float64    `json:"max,omitempty"`
+	Zones     []gaugeZone `json:"zones,omitempty"`
 
 	// Every field the renderer reads has to live here. Go's JSON decoder drops
 	// unknown keys without complaint, so one missing from this struct is
@@ -886,7 +891,14 @@ func loadDashboardPages() {
 					// Only once the equipment conversion has run: before it a
 					// telltale still holds a path that conversion turns into a
 					// suffix, and that is what decides where it goes.
-					if cl := p.Widgets[i].Cluster; cl != nil && loaded.EquipmentConverted && moveLegacyTelltales(cl) {
+					cl := p.Widgets[i].Cluster
+					if cl == nil {
+						continue
+					}
+					if loaded.EquipmentConverted && moveLegacyTelltales(cl) {
+						anyStripped = true
+					}
+					if normalizeClusterCaps(p.Name, cl) {
 						anyStripped = true
 					}
 				}

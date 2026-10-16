@@ -21,16 +21,20 @@ import (
 
 const zoneDerivedAlarmRuleIDPrefix = "zone:"
 
-// Where a cluster's slots sit in the flat index space of the ids of zones a
-// slot still holds (see collectSlot). The ids are fixed once issued, so this
-// only ever appends. 18 is where the old telltales began (2 + 4 corners * 4
-// rows, before a corner held one row), and it is the engine-coolant arc now,
-// the reading the first telltale always was. The footer follows past the old
-// telltale cap, and the second arc after it.
+// Where a cluster's arcs and footer sit in the flat index space of the ids of
+// zones a slot still holds (see collectSlot). The ring, centre and corner rows
+// come first. 18 is where the old telltales began (2 + 4 corners * 4 rows, before
+// a corner held one row), a position that shipped; a telltale moved onto an arc
+// keeps its own old index (dashboardGaugeConfig.ZoneIndex), so no issued id
+// changes. The footer and the right arc are new in this release, so they follow
+// without gaps: footer slot i is clusterFooterZoneIndexBase+i, in the order the
+// frontend's CLUSTER_FOOTER_SLOTS lists (a test pins the two together).
 const (
-	clusterLeftArcZoneIndex    = 18
-	clusterFooterZoneIndexBase = 24
-	clusterRightArcZoneIndex   = clusterFooterZoneIndexBase + 16
+	clusterTelltaleZoneIndexBase = 18
+	clusterLeftArcZoneIndex      = clusterTelltaleZoneIndexBase
+	clusterFooterZoneIndexBase   = 24
+	clusterFooterSlotCount       = 8
+	clusterRightArcZoneIndex     = clusterFooterZoneIndexBase + clusterFooterSlotCount
 )
 
 const (
@@ -193,6 +197,16 @@ func zoneDerivedAlarmRules() []alarmRule {
 		suffix := strings.TrimSpace(slot.Suffix)
 		if suffix == "" {
 			return
+		}
+		// A slot that names its own item reads that item or nothing: if it is gone
+		// or unmapped there is no reading and no alarm, never the engine's source.
+		if slot.EquipmentID != "" {
+			if own, found := ix.items[slot.EquipmentID]; !found || own.Source == "" {
+				return
+			}
+		}
+		if slot.ZoneIndex != nil {
+			index = *slot.ZoneIndex
 		}
 		item, hasItem := ix.items[equipmentID]
 		if hasItem && item.Source != "" {
