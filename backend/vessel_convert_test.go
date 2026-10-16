@@ -200,7 +200,7 @@ func TestConvertLegacyVesselMapsItemsAndWritesRoles(t *testing.T) {
 		"the port alternator was electrical.alternator.2; no equipment item is assigned to it now",
 		"the inverter was electrical.inverters.5",
 		`created equipment item "Port Engine Starter Battery" for electrical.batteries.3`,
-		`created equipment item "PORT FWD" for tanks.fuel.5`,
+		`created equipment item "Fuel PORT FWD" for tanks.fuel.5`,
 		`created equipment item "Port array" for electrical.solar.289`,
 		"watermaker.runtime",
 	} {
@@ -406,14 +406,14 @@ func TestConvertLegacyVesselCreatesItemsForNamedSourcesWithNoItem(t *testing.T) 
 		}
 	}
 	want := map[string]string{
-		"tanks.blackWater.1":     "PORT",
-		"tanks.blackWater.3":     "STBD",
-		"tanks.fuel.2":           "STBD FWD",
-		"tanks.fuel.4":           "PORT AFT",
-		"tanks.fuel.5":           "PORT FWD",
-		"tanks.fuel.7":           "STBD AFT",
-		"tanks.freshWater.0":     "FWD",
-		"tanks.freshWater.6":     "AFT",
+		"tanks.blackWater.1":     "Black water PORT",
+		"tanks.blackWater.3":     "Black water STBD",
+		"tanks.fuel.2":           "Fuel STBD FWD",
+		"tanks.fuel.4":           "Fuel PORT AFT",
+		"tanks.fuel.5":           "Fuel PORT FWD",
+		"tanks.fuel.7":           "Fuel STBD AFT",
+		"tanks.freshWater.0":     "Fresh water FWD",
+		"tanks.freshWater.6":     "Fresh water AFT",
 		"electrical.batteries.3": "Port Engine Starter Battery",
 		"electrical.solar.289":   "Port array",
 		"propulsion.port":        "Port",
@@ -434,7 +434,7 @@ func TestConvertLegacyVesselCreatesItemsForNamedSourcesWithNoItem(t *testing.T) 
 	if got := bySource["propulsion.starboard"]; got.ID != stbd.ID {
 		t.Errorf("a named engine with a link keeps its own item: %+v", got)
 	}
-	if !strings.Contains(logs.String(), `created equipment item "PORT FWD" for tanks.fuel.5`) {
+	if !strings.Contains(logs.String(), `created equipment item "Fuel PORT FWD" for tanks.fuel.5`) {
 		t.Errorf("each created item is logged, got:\n%s", logs.String())
 	}
 

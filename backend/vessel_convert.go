@@ -250,7 +250,13 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 		}
 		for key, v := range tankLabels {
 			label, _ := v.(string)
-			nameOnto(sourcePath(sourceTank, strings.TrimSpace(key)), label, "tank", true)
+			// The old labels were per type ("PORT" for the black water tank and for
+			// the fresh water one), and an item name has to stand alone.
+			key = strings.TrimSpace(key)
+			if label = strings.TrimSpace(label); label != "" {
+				label = tankTypeWords(key) + " " + label
+			}
+			nameOnto(sourcePath(sourceTank, key), label, "tank", true)
 		}
 
 		// A hand-typed hour meter path becomes the item's source when it names
@@ -383,4 +389,32 @@ func adoptHouseBankRules(socPath string) error {
 		return errors.New("saving alarm rules: " + err.Error())
 	}
 	return nil
+}
+
+// tankTypeWords is how an operator says what a tank holds, from the SignalK
+// category at the front of a tank key (fresh water, black water, fuel).
+func tankTypeWords(key string) string {
+	category, _, _ := strings.Cut(key, ".")
+	switch strings.ToLower(category) {
+	case "freshwater":
+		return "Fresh water"
+	case "blackwater":
+		return "Black water"
+	case "greywater", "graywater":
+		return "Grey water"
+	case "wastewater":
+		return "Waste water"
+	case "livewell":
+		return "Live well"
+	case "lubrication":
+		return "Lubrication"
+	case "fuel":
+		return "Fuel"
+	case "water":
+		return "Water"
+	}
+	if category == "" {
+		return "Tank"
+	}
+	return strings.ToUpper(category[:1]) + category[1:]
 }
