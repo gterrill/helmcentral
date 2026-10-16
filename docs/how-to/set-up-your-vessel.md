@@ -55,12 +55,16 @@ ticked none.
    your bank needs a different number than the profile gives.
 6. Choose **Save** in the bar across the top of the screen.
 
-This is the bank the Battery & Power tile reads for state of charge, voltage,
-current and power. If the bank reports its own nominal capacity, that figure is
-used; otherwise the capacity you entered here is. The overnight dawn projection
-and the state-of-charge bands follow the same bank. With no house bank picked,
-the tile shows `--` for those figures, and the bands and dawn figure are
-absent. See [Set battery state-of-charge bands](set-battery-state-of-charge-bands.md).
+This is the bank the Battery & Power tile reads for state of charge, current and
+power. If the bank reports its own nominal capacity, that figure is used;
+otherwise the capacity you entered here is. The overnight dawn projection and
+the state-of-charge bands follow the same bank. With no house bank picked, the
+tile says "No house bank picked. Choose it in Settings, Vessel, under Power." in
+place of the state-of-charge figure, and the Net card, the bands and the dawn
+figure are absent. Solar, Loads, the Shore line and the readout battery's
+voltage still show. A bank that is picked but not reporting shows a dash (—)
+instead.
+See [Set battery state-of-charge bands](set-battery-state-of-charge-bands.md).
 
 ## Battery names
 

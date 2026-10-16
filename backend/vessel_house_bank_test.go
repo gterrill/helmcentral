@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"log"
 	"os"
 	"strings"
@@ -192,5 +193,39 @@ func TestUnreadableVesselBlockIsLoggedOncePerDistinctError(t *testing.T) {
 	buildElectricalStatePayload()
 	if n := strings.Count(buf.String(), "vessel settings unreadable"); n != 2 {
 		t.Fatalf("expected a second line after a clean read, got %d", n)
+	}
+}
+
+func TestElectricalPayloadSaysWhetherAHouseBankIsPicked(t *testing.T) {
+	useHouseBank(t, nil)
+	seedSelfTree(t, houseBankTree)
+	if got := buildElectricalStatePayload()["house_bank_configured"]; got != false {
+		t.Fatalf("unset: got %v", got)
+	}
+
+	useHouseBank(t, &vesselHouseBankSetting{Path: "electrical.batteries.51"})
+	if got := buildElectricalStatePayload()["house_bank_configured"]; got != true {
+		t.Fatalf("picked: got %v", got)
+	}
+}
+
+func TestElectricalPayloadHouseBankConfiguredDoesNotDependOnTheFeed(t *testing.T) {
+	useHouseBank(t, &vesselHouseBankSetting{Path: "electrical.batteries.51"})
+	withGlobalSnapshot(t, newSignalKSnapshot()) // SignalK has dropped: no self data
+	if got := buildElectricalStatePayload()["house_bank_configured"]; got != true {
+		t.Fatalf("a dropped feed must not read as not picked, got %v", got)
+	}
+}
+
+func TestElectricalPayloadHouseBankConfiguredIsUnknownWhenSettingsAreUnreadable(t *testing.T) {
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	if err := os.WriteFile(settingsPath, []byte("vessel: [not, a, block]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resetVesselReadLog()
+	seedSelfTree(t, houseBankTree)
+	if body, _ := json.Marshal(buildElectricalStatePayload()); !strings.Contains(string(body), `"house_bank_configured":null`) {
+		t.Fatalf("got %s", body)
 	}
 }

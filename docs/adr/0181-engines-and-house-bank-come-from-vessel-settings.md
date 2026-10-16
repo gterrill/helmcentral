@@ -81,3 +81,16 @@ another battery no longer colours the tile. The chosen bank is now the single
 pinned path ADR 0077 section 4 wanted, set where the rest of the vessel is set.
 The Generator, shore charger, inverter and the 24 V row still read fixed
 instances; they are the next change.
+
+## Amendment (2026-10-17)
+
+The electrical state now carries `house_bank_configured`: true or false from the
+`vessel.house_bank` setting, and null when the vessel block is unreadable. It is
+independent of the SignalK feed. The Battery & Power tile uses it to say that no
+bank is picked, in place of the bank's figures, instead of drawing dashes that
+look like a bank that is not reporting. Solar, Loads, Shore and the readout
+battery's voltage keep showing, since none of them depend on the house bank.
+
+`soc_path` could not serve for this: it is also absent when the SignalK fetch
+fails or the settings are unreadable, so its absence does not mean no bank is
+picked.

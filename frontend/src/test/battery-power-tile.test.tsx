@@ -571,3 +571,64 @@ test('the voltage row is hidden when no readout battery is set', () => {
   // The charge rate beside it still reads.
   expect(screen.getByText('%/h')).toBeInTheDocument()
 })
+
+test('before the first payload the tile shows a placeholder, not a setup message', () => {
+  render(<BatteryPowerTile {...baseProps} houseBankConfigured={null} />)
+
+  expect(screen.queryByText(/No house bank picked/)).not.toBeInTheDocument()
+  expect(screen.getByText('Net')).toBeInTheDocument()
+  expect(screen.getByText('%')).toBeInTheDocument()
+})
+
+test('with no house bank picked the readout battery voltage still shows', () => {
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={null}
+      chargingCurrentA={null}
+      chargingPowerW={null}
+      voltageReadoutV={12.84}
+      voltageReadoutLabel="Start"
+      houseBankConfigured={false}
+    />,
+  )
+
+  expect(screen.getByText('12.84')).toBeInTheDocument()
+  expect(screen.getByText('Start')).toBeInTheDocument()
+  expect(screen.queryByText('%/h')).not.toBeInTheDocument()
+})
+
+test('with no house bank picked the bank card gives way to the message and Solar and Loads stay', () => {
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={null}
+      chargingCurrentA={null}
+      chargingPowerW={null}
+      houseBankConfigured={false}
+    />,
+  )
+
+  expect(screen.getByText(/No house bank picked\. Choose it in Settings, Vessel, under Power\./)).toBeInTheDocument()
+  expect(screen.queryByText('%')).not.toBeInTheDocument()
+  expect(screen.queryByText('Net')).not.toBeInTheDocument()
+  expect(screen.getByText('Solar')).toBeInTheDocument()
+  expect(screen.getByText('520')).toBeInTheDocument()
+  expect(screen.getByText('Loads')).toBeInTheDocument()
+  expect(screen.getByText('924')).toBeInTheDocument()
+})
+
+test('a picked bank that is silent keeps the ordinary dash layout', () => {
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      batterySocPercent={null}
+      chargingCurrentA={null}
+      chargingPowerW={null}
+      houseBankConfigured={true}
+    />,
+  )
+
+  expect(screen.queryByText(/No house bank picked/)).not.toBeInTheDocument()
+  expect(screen.getByText('%')).toBeInTheDocument()
+})

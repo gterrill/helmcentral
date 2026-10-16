@@ -11,6 +11,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- The Battery & Power tile now says "No house bank picked. Choose it in
+  Settings, Vessel, under Power." when no house bank has been chosen, in place of
+  the bank's figures, which looked like a bank that had stopped reporting. Solar,
+  Loads, the Shore line and the readout battery's voltage still show.
+
 ## [0.46.0] - 2026-10-15
 
 ### Breaking

@@ -1049,6 +1049,7 @@ function AppShell() {
     lastUpdateAgeS: electricalLastUpdateAgeS,
     batterySocPercent,
     socPath,
+    houseBankConfigured,
     chargingCurrentA,
     chargingPowerW,
     solarOutputW,
@@ -1858,6 +1859,7 @@ function AppShell() {
             batteryRatePercentPerHour={batteryRatePercentPerHour}
             timeToGoHours={timeToGoHours}
             lastUpdateAgeS={electricalLastUpdateAgeS}
+            houseBankConfigured={houseBankConfigured}
             socBands={socBands}
             overnight={overnight}
           />

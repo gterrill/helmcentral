@@ -91,8 +91,10 @@ func buildElectricalStatePayload() map[string]any {
 	// SignalK drop never reads as "not set up". It is null (unknown) when the
 	// vessel block cannot be read.
 	var generatorConfigured any
+	var houseBankConfigured any
 	if vesselErr == nil {
 		generatorConfigured = vessel.Electrical.GeneratorInstance != ""
+		houseBankConfigured = vessel.houseBankPath() != ""
 	}
 
 	if signalkURL != "" {
@@ -121,6 +123,7 @@ func buildElectricalStatePayload() map[string]any {
 		"ac_loads_w":                 state.ACLoadsW,
 		"generator_real_power_w":     state.GeneratorRealPowerW,
 		"generator_configured":       generatorConfigured,
+		"house_bank_configured":      houseBankConfigured,
 		"alternator_0_current_a":     state.Alternator0.CurrentA,
 		"alternator_0_voltage_v":     state.Alternator0.VoltageV,
 		"alternator_0_power_w":       state.Alternator0.PowerW,

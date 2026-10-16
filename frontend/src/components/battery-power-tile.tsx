@@ -24,6 +24,11 @@ export interface BatteryPowerTileProps {
   /** Seconds since the electrical feed last reported, or null if unknown. */
   lastUpdateAgeS: number | null
   /**
+   * A house bank is picked in Vessel settings. Null before the first payload,
+   * false when none is picked (the tile says so instead of drawing dashes).
+   */
+  houseBankConfigured?: boolean | null
+  /**
    * Warn/alarm SoC thresholds derived from the operator's alarm rules
    * (use-soc-bands.ts). Undefined or both-null means no rule exists yet, and
    * the tile falls back to today's plain, uncoloured behaviour rather than
@@ -258,6 +263,10 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
   // the night ahead instead of a night behind.
   const onShorePower = charger0AcIn1CurrentA !== null && charger0AcIn1CurrentA > 0.5
 
+  // Solar, Loads and Shore do not depend on the house bank, so with none
+  // picked only the bank's own figures give way to the message.
+  const bankPicked = props.houseBankConfigured !== false
+
   return (
     <Tile
       title="Battery & Power"
@@ -270,112 +279,135 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     >
       <div className="mt-1 space-y-2">
         <div className="rounded-md border bg-background/60 px-3 py-3">
-          <div className="flex items-start justify-between gap-2">
-            <div className="flex min-w-0 items-baseline gap-1">
-              <span className={`font-display text-6xl leading-none tabular-nums md:text-5xl lg:text-7xl ${socClass}`}>
-                {socLabel}
-              </span>
-              <span className="shrink-0 font-display text-2xl leading-none text-muted-foreground md:text-xl md:leading-7 lg:text-2xl lg:leading-8">
-                %
-              </span>
-            </div>
-            <div className="min-w-0 shrink-0 text-right">
-              <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                {timeToGoLabel}
+          {!bankPicked ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                No house bank picked. Choose it in Settings, Vessel, under Power.
               </p>
-              <p className={`mt-1 truncate font-display text-2xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-3xl lg:leading-9 ${readoutClass}`}>
-                {timeToGoValue}
-              </p>
-            </div>
-          </div>
-          <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-muted/60">
-            {socBands.alarmBelow !== null && (
-              <div
-                data-testid="soc-band-alarm"
-                className="absolute inset-y-0 left-0 bg-red-600/15"
-                style={{ width: `${socBands.alarmBelow}%` }}
-              />
-            )}
-            {socBands.warnBelow !== null && (
-              <div
-                data-testid="soc-band-warn"
-                className="absolute inset-y-0 bg-amber-500/15"
-                style={{
-                  left: `${socBands.alarmBelow ?? 0}%`,
-                  width: `${Math.max(0, socBands.warnBelow - (socBands.alarmBelow ?? 0))}%`,
-                }}
-              />
-            )}
-            <div
-              className={`h-full rounded-full ${socSeverityState === null ? 'bg-gauge-primary' : ''}`}
-              style={socFillStyle}
-            />
-          </div>
-          {/* Two rows, not one: at the 768 band a single row has to truncate and the
-              first thing the ellipsis eats is the dawn percentage, which is the
-              figure the footer exists to show. */}
-          <div className="mt-2 space-y-1 font-display text-xs tabular-nums text-muted-foreground">
-            <span className="block truncate">
+              {/* The readout battery is picked separately from the house bank,
+                  so its voltage stays; the charge rate beside it is derived
+                  from the bank and goes. */}
               {voltageReadoutShown && (
-                <>
+                <p className="mt-2 truncate font-display text-xs tabular-nums text-muted-foreground">
                   <span title={voltageReadoutLabel ?? undefined}>{voltageReadoutV.toFixed(2)}</span>
                   <span className="font-display text-muted-foreground">V</span>
                   {' '}
                   <span className="font-display text-muted-foreground">{voltageReadoutLabel}</span>
-                  {' · '}
-                </>
+                </p>
               )}
-              <span className={readoutClass}>{chargeRateLabel}</span>
-              <span className="ml-1 font-display text-muted-foreground">%/h</span>
-            </span>
-            {overnightProjection !== null && (
-              <span
-                className="block truncate"
-                title={
-                  onShorePower
-                    ? 'The charger is on shore power; the bank is not expected to discharge overnight'
-                    : dawn === null
-                      ? (overnightProjection.reason ?? 'No estimate')
-                      : dawn.basis === 'history'
-                        ? historyBasisTitle(overnightProjection)
-                        : `Current rate held until sunrise${overnightProjection.reason ? `; ${overnightProjection.reason}` : ''}`
-                }
-              >
-                {'Dawn '}
-                {overnightProjection.sunrise.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                {' · '}
-                <span data-testid="dawn-estimate" className={onShorePower ? 'text-muted-foreground' : dawnEstimateClass}>
-                  {onShorePower ? 'on shore power' : dawnEstimateText}
-                </span>
-                {!onShorePower && dawn !== null && (
-                  <span className="hidden lg:inline"> · {dawnBasisLabel}</span>
+            </>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-baseline gap-1">
+                  <span className={`font-display text-6xl leading-none tabular-nums md:text-5xl lg:text-7xl ${socClass}`}>
+                    {socLabel}
+                  </span>
+                  <span className="shrink-0 font-display text-2xl leading-none text-muted-foreground md:text-xl md:leading-7 lg:text-2xl lg:leading-8">
+                    %
+                  </span>
+                </div>
+                <div className="min-w-0 shrink-0 text-right">
+                  <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+                    {timeToGoLabel}
+                  </p>
+                  <p className={`mt-1 truncate font-display text-2xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-3xl lg:leading-9 ${readoutClass}`}>
+                    {timeToGoValue}
+                  </p>
+                </div>
+              </div>
+              <div className="relative mt-3 h-2 overflow-hidden rounded-full bg-muted/60">
+                {socBands.alarmBelow !== null && (
+                  <div
+                    data-testid="soc-band-alarm"
+                    className="absolute inset-y-0 left-0 bg-red-600/15"
+                    style={{ width: `${socBands.alarmBelow}%` }}
+                  />
                 )}
-              </span>
-            )}
-            {/* Below lg the basis gets a row of its own instead of being dropped:
-                a tablet has no hover, so a tooltip-only basis would leave the
-                iPad, the primary helm target, unable to tell "4 nights" from
-                "at current rate", which is the one distinction the label exists
-                to make. On shore power there is no basis to show, so this row
-                is skipped along with the inline token above. */}
-            {overnightProjection !== null && dawn !== null && !onShorePower && (
-              <span className="block truncate lg:hidden">{dawnBasisLabel}</span>
-            )}
-          </div>
+                {socBands.warnBelow !== null && (
+                  <div
+                    data-testid="soc-band-warn"
+                    className="absolute inset-y-0 bg-amber-500/15"
+                    style={{
+                      left: `${socBands.alarmBelow ?? 0}%`,
+                      width: `${Math.max(0, socBands.warnBelow - (socBands.alarmBelow ?? 0))}%`,
+                    }}
+                  />
+                )}
+                <div
+                  className={`h-full rounded-full ${socSeverityState === null ? 'bg-gauge-primary' : ''}`}
+                  style={socFillStyle}
+                />
+              </div>
+              {/* Two rows, not one: at the 768 band a single row has to truncate and the
+                  first thing the ellipsis eats is the dawn percentage, which is the
+                  figure the footer exists to show. */}
+              <div className="mt-2 space-y-1 font-display text-xs tabular-nums text-muted-foreground">
+                <span className="block truncate">
+                  {voltageReadoutShown && (
+                    <>
+                      <span title={voltageReadoutLabel ?? undefined}>{voltageReadoutV.toFixed(2)}</span>
+                      <span className="font-display text-muted-foreground">V</span>
+                      {' '}
+                      <span className="font-display text-muted-foreground">{voltageReadoutLabel}</span>
+                      {' · '}
+                    </>
+                  )}
+                  <span className={readoutClass}>{chargeRateLabel}</span>
+                  <span className="ml-1 font-display text-muted-foreground">%/h</span>
+                </span>
+                {overnightProjection !== null && (
+                  <span
+                    className="block truncate"
+                    title={
+                      onShorePower
+                        ? 'The charger is on shore power; the bank is not expected to discharge overnight'
+                        : dawn === null
+                          ? (overnightProjection.reason ?? 'No estimate')
+                          : dawn.basis === 'history'
+                            ? historyBasisTitle(overnightProjection)
+                            : `Current rate held until sunrise${overnightProjection.reason ? `; ${overnightProjection.reason}` : ''}`
+                    }
+                  >
+                    {'Dawn '}
+                    {overnightProjection.sunrise.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    {' · '}
+                    <span data-testid="dawn-estimate" className={onShorePower ? 'text-muted-foreground' : dawnEstimateClass}>
+                      {onShorePower ? 'on shore power' : dawnEstimateText}
+                    </span>
+                    {!onShorePower && dawn !== null && (
+                      <span className="hidden lg:inline"> · {dawnBasisLabel}</span>
+                    )}
+                  </span>
+                )}
+                {/* Below lg the basis gets a row of its own instead of being dropped:
+                    a tablet has no hover, so a tooltip-only basis would leave the
+                    iPad, the primary helm target, unable to tell "4 nights" from
+                    "at current rate", which is the one distinction the label exists
+                    to make. On shore power there is no basis to show, so this row
+                    is skipped along with the inline token above. */}
+                {overnightProjection !== null && dawn !== null && !onShorePower && (
+                  <span className="block truncate lg:hidden">{dawnBasisLabel}</span>
+                )}
+              </div>
+            </>
+          )}
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
-            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Net</p>
-            <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}>
-              {chargingPowerLabel}
-              <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
-            </p>
-            <p className="mt-1 truncate font-display text-xs tabular-nums text-muted-foreground">
-              <span className={readoutClass}>{chargingCurrentLabel}</span>
-              <span className="ml-1 font-display text-muted-foreground">A</span>
-            </p>
-          </div>
+        <div className={`grid gap-2 ${bankPicked ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {bankPicked && (
+            <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
+              <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Net</p>
+              <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}>
+                {chargingPowerLabel}
+                <span className="ml-1 font-display text-xl text-muted-foreground md:text-sm lg:text-xl">W</span>
+              </p>
+              <p className="mt-1 truncate font-display text-xs tabular-nums text-muted-foreground">
+                <span className={readoutClass}>{chargingCurrentLabel}</span>
+                <span className="ml-1 font-display text-muted-foreground">A</span>
+              </p>
+            </div>
+          )}
           <div className="min-w-0 rounded-md border bg-background/60 px-3 py-2">
             <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">Solar</p>
             <p className={`mt-1 truncate font-display text-4xl leading-none tabular-nums md:text-xl md:leading-7 lg:text-4xl lg:leading-10 ${readoutClass}`}>

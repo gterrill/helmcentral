@@ -99,6 +99,12 @@ this device, so you can watch the last ten minutes against the whole day.
 
 ## Battery & Power fields
 
+Until a house bank is picked under Settings, Vessel, Power, the state-of-charge
+figure gives way to the sentence "No house bank picked. Choose it in Settings,
+Vessel, under Power." and the Net card is hidden. Solar, Loads and the Shore
+line carry on as normal. Once a bank is picked, a bank that is not reporting
+shows a dash (—) in its cards.
+
 Four cards, plus a Shore line that appears once the shore charger reports
 anything:
 
@@ -118,7 +124,8 @@ anything:
 The footer's left side shows the voltage of the **Voltage readout battery** you
 picked under Electrical, with the name you gave that battery, followed by the
 charge rate. With no readout battery picked, or one that is not reporting, the
-voltage is left out rather than replaced by another battery's.
+voltage is left out rather than replaced by another battery's. With no house
+bank picked, the voltage still shows under the message, without the charge rate.
 
 The state-of-charge number and bar only turn amber or red once you have set
 a matching alarm rule; see [Set battery state-of-charge
