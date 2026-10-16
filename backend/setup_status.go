@@ -16,7 +16,7 @@ import (
 // for the two questions the anomaly checks also ask. Nothing is stored: every
 // call works from the live vessel view and discovery, so a step that becomes
 // undone (a renumbered instance, a deleted item, a cleared role) is a todo
-// again with no dismiss flag to forget (ADR 0189).
+// again with no dismiss flag to forget (ADR 0190).
 
 const (
 	setupDone    = "done"
