@@ -236,3 +236,23 @@ does not carry dashboard records, so nothing there changed.
   is one small query.
 - Discovery and the source picker both depend on a live connection to know
   what exists; with none, saved items still show and say Not reporting.
+
+## Amendment (2026-10-17)
+
+The electrical state payload carries `house_bank_configured`, beside
+`generator_configured`. It is true when the house bank role names a bank and
+false when it does not, and null when the vessel view cannot be read. It comes
+from the settings alone and does not depend on the SignalK fetch.
+
+`soc_path` could not serve for this. It is also absent when the SignalK fetch
+fails or the vessel view is unreadable, so a fresh install with no bank chosen
+looked the same as a chosen bank that was not reporting: dashes everywhere and
+no hint where to go.
+
+The Battery & Power tile reads it. Null or true draws the ordinary layout, a
+chosen bank that is not reporting showing dashes. False replaces the bank
+contents of the state-of-charge card with a message linking to Settings,
+SignalK, Roles, keeps the readout battery's voltage under it, drops the
+bank-derived charge rate, hides the Net card and lets Solar span the row. Solar,
+Loads and the Shore line are unaffected. The Generator tile's not-set-up message
+links to the same place.

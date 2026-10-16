@@ -5,6 +5,8 @@ import { Tile } from '@/components/ui/tile'
 import { apiRequest } from '@/lib/api-query'
 
 interface GeneratorTileProps {
+  /** Opens Settings, SignalK, Roles; absent on the wall display, where it is plain text. */
+  onOpenRoles?: () => void
   /** A generator instance is chosen in the roles; null while that is not known. */
   generatorConfigured: boolean | null
   generatorState: string | null
@@ -48,6 +50,7 @@ function formatRunReason(condition: string | null): string | null {
 
 export const GeneratorTile = memo(function GeneratorTile({
   generatorConfigured,
+  onOpenRoles,
   generatorState,
   generatorManualStart,
   generatorManualStartTimer,
@@ -127,7 +130,10 @@ export const GeneratorTile = memo(function GeneratorTile({
     return (
       <Tile title="Generator">
         <p className="mt-2 text-sm text-muted-foreground">
-          The generator is not set up. Choose it in Settings, Vessel, under Electrical.
+          The generator is not set up. Choose it under{' '}
+          {onOpenRoles
+            ? <button type="button" className="underline" onClick={onOpenRoles}>Settings, SignalK, Roles</button>
+            : 'Settings, SignalK, Roles'}.
         </p>
       </Tile>
     )

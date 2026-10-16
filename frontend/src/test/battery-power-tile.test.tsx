@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import { BatteryPowerTile } from '@/components/battery-power-tile'
@@ -570,4 +570,55 @@ test('the voltage row is hidden when no readout battery is set', () => {
   expect(container.textContent).not.toContain('Aft House')
   // The charge rate beside it still reads.
   expect(screen.getByText('%/h')).toBeInTheDocument()
+})
+
+test('with houseBankConfigured unknown the tile draws the ordinary layout', () => {
+  render(<BatteryPowerTile {...baseProps} houseBankConfigured={null} />)
+
+  expect(screen.getByText('%')).toBeInTheDocument()
+  expect(screen.getByText('Net')).toBeInTheDocument()
+  expect(screen.queryByText(/No house bank chosen/)).not.toBeInTheDocument()
+})
+
+test('with no house bank chosen the hero card says where to choose one and the bank readouts go', () => {
+  render(
+    <BatteryPowerTile
+      {...baseProps}
+      houseBankConfigured={false}
+      batterySocPercent={null}
+      batteryRatePercentPerHour={null}
+      timeToGoHours={null}
+      voltageReadoutV={12.84}
+      voltageReadoutLabel="Start"
+    />,
+  )
+
+  expect(screen.getByText(/No house bank chosen\./)).toBeInTheDocument()
+  expect(screen.getByText(/Settings, SignalK, Roles/)).toBeInTheDocument()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  expect(screen.queryByText('%')).not.toBeInTheDocument()
+  expect(screen.queryByText('%/h')).not.toBeInTheDocument()
+  expect(screen.queryByText('Net')).not.toBeInTheDocument()
+  expect(screen.getByText('Solar')).toBeInTheDocument()
+  expect(screen.getByText('520')).toBeInTheDocument()
+  expect(screen.getByText('Loads')).toBeInTheDocument()
+  expect(screen.getByText('924')).toBeInTheDocument()
+  expect(screen.getByText('12.84')).toBeInTheDocument()
+  expect(screen.getByText('Start')).toBeInTheDocument()
+})
+
+test('a chosen bank that is not reporting keeps the ordinary layout with a dash', () => {
+  render(<BatteryPowerTile {...baseProps} houseBankConfigured batterySocPercent={null} />)
+
+  expect(screen.getByText('%')).toBeInTheDocument()
+  expect(screen.getByText('Net')).toBeInTheDocument()
+  expect(screen.queryByText(/No house bank chosen/)).not.toBeInTheDocument()
+})
+
+test('with no house bank chosen, Settings, SignalK, Roles is a button that opens Roles when the tile can', () => {
+  const onOpenRoles = vi.fn()
+  render(<BatteryPowerTile {...baseProps} houseBankConfigured={false} onOpenRoles={onOpenRoles} />)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Settings, SignalK, Roles' }))
+  expect(onOpenRoles).toHaveBeenCalledTimes(1)
 })

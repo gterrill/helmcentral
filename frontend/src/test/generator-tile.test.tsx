@@ -1,5 +1,5 @@
-import { render, screen } from '@testing-library/react'
-import { expect, test } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { expect, test, vi } from 'vitest'
 
 import { GeneratorTile } from '@/components/generator-tile'
 
@@ -168,7 +168,8 @@ test('says the generator is not set up, and offers no Start or Stop, when none i
   )
 
   expect(screen.getByText(/not set up/i)).toBeInTheDocument()
-  expect(screen.getByText(/Settings/)).toBeInTheDocument()
+  expect(screen.getByText(/Settings, SignalK, Roles/)).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Settings, SignalK, Roles' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Start' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
 })
@@ -193,4 +194,12 @@ test('shows 0 W for a measured zero', () => {
   render(<GeneratorTile {...baseProps} generatorState="stopped" generatorRealPowerW={0} batterySocPercent={null} batteryRatePercentPerHour={null} />)
 
   expect(screen.getByText('Power').nextElementSibling).toHaveTextContent('0W')
+})
+
+test('the not-set-up message offers a button to Roles when the tile can open it', () => {
+  const onOpenRoles = vi.fn()
+  render(<GeneratorTile {...baseProps} generatorConfigured={false} generatorState={null} generatorRealPowerW={null} batterySocPercent={null} batteryRatePercentPerHour={null} onOpenRoles={onOpenRoles} />)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Settings, SignalK, Roles' }))
+  expect(onOpenRoles).toHaveBeenCalledTimes(1)
 })

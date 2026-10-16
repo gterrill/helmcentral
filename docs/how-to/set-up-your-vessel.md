@@ -78,8 +78,11 @@ This is the bank the Battery & Power tile reads for state of charge, voltage,
 current and power. If the bank reports its own nominal capacity, that figure is
 used; otherwise the capacity on the item is. The overnight dawn projection and
 the state-of-charge bands follow the same bank. With no house bank chosen, the
-tile shows `--` for those figures, and the bands and dawn figure are absent. See
-[Set battery state-of-charge bands](set-battery-state-of-charge-bands.md).
+tile says "No house bank chosen" and links to **Settings, SignalK, Roles**, and
+the bands and dawn figure are absent. Solar, Loads, Shore and the voltage of the
+readout battery still show. A bank that is chosen but not reporting shows a dash
+(—). See [Set battery state-of-charge
+bands](set-battery-state-of-charge-bands.md).
 
 If you later move the house bank, either by choosing another item or by giving
 the item another source, the state-of-charge bands move with it.
@@ -124,7 +127,8 @@ What each one does:
 
 - **Generator.** The Generator tile reads its state and runtime from it, and its
   Start and Stop buttons control it. With none chosen the tile says the generator
-  is not set up and offers no Start or Stop.
+  is not set up, links to **Settings, SignalK, Roles**, and offers no Start or
+  Stop.
 - **Generator AC input** is the Generator tile's Power card. Not set shows `--`.
 - **Shore charger** is the Shore line on the Battery & Power tile.
 - **Inverter** is the AC part of Loads on the Battery & Power tile. Not set

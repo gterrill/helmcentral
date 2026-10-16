@@ -95,6 +95,14 @@ func buildElectricalStatePayload() map[string]any {
 		generatorConfigured = vessel.Electrical.GeneratorInstance != ""
 	}
 
+	// Likewise for the house bank: a chosen bank comes from the roles alone,
+	// so a missing state-of-charge reading cannot tell "no bank chosen" from
+	// "bank not reporting". Null when the vessel block cannot be read.
+	var houseBankConfigured any
+	if vesselErr == nil {
+		houseBankConfigured = vessel.houseBankPath() != ""
+	}
+
 	if signalkURL != "" {
 		electrical, fetchErr := fetchSignalKElectricalState(vessel)
 		if fetchErr == nil {
@@ -121,6 +129,7 @@ func buildElectricalStatePayload() map[string]any {
 		"ac_loads_w":                 state.ACLoadsW,
 		"generator_real_power_w":     state.GeneratorRealPowerW,
 		"generator_configured":       generatorConfigured,
+		"house_bank_configured":      houseBankConfigured,
 		"alternator_0_current_a":     state.Alternator0.CurrentA,
 		"alternator_0_voltage_v":     state.Alternator0.VoltageV,
 		"alternator_0_power_w":       state.Alternator0.PowerW,

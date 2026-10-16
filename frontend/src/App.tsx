@@ -1058,6 +1058,7 @@ function AppShell() {
     voltageReadoutLabel,
     generatorRealPowerW,
     generatorConfigured,
+    houseBankConfigured,
     alternator0,
     alternator1,
     charger0CurrentA,
@@ -1845,6 +1846,9 @@ function AppShell() {
             lastUpdateAgeS={electricalLastUpdateAgeS}
             socBands={socBands}
             overnight={overnight}
+            houseBankConfigured={houseBankConfigured}
+            // The wall display shares this render; a kiosk has no Settings to go to.
+            onOpenRoles={isDisplay ? undefined : () => openSettingsSection('signalk')}
           />
         )
       case 'solar':
@@ -1870,6 +1874,7 @@ function AppShell() {
             generatorRuntime={generatorRuntime}
             generatorRealPowerW={generatorRealPowerW}
             generatorConfigured={generatorConfigured}
+            onOpenRoles={isDisplay ? undefined : () => openSettingsSection('signalk')}
             batterySocPercent={batterySocPercent}
             batteryRatePercentPerHour={batteryRatePercentPerHour}
             readOnly={!canWrite}
