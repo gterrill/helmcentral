@@ -50,9 +50,10 @@ has stopped, on the exhaust equipment's profile.
 
 ## When the engine is off
 
-A switched-off engine shows `--` in its readings and a plain border, and says
-`OFF` once, in a grey marker in the tile's title (the status marker above the
-card is for a running engine). See Staleness in [Tiles](../reference/tiles.md).
+A switched-off engine shows `--` in its readings and says `OFF` once, in a grey
+marker in the tile's title (the status marker above the card is for a running
+engine). The border goes plain unless a reading from other equipment, such as
+the starter battery, is in a warning or alarm band: that still shows. See Staleness in [Tiles](../reference/tiles.md).
 
 ## Which equipment each part reads
 

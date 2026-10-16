@@ -660,10 +660,25 @@ describe('engine off (ADR 0163)', () => {
     expect(screen.getByTestId('cluster-trans')).toHaveTextContent('--')
   })
 
-  test('stays neutral even when a footer slot would be in an alarm zone', () => {
+  // Off neutralises the engine's own readings only. A footer slot reading
+  // another item (the exhaust node, the starter battery) is live, and an alarm
+  // on it must still reach the tile's border.
+  test('a footer slot on another item still lights the border when it is in an alarm zone', () => {
     const hot: ResolvedClusterConfig = {
       ...full,
       footer: { ...footer, egt: { ...footer.egt!, zones: [{ from: 0, to: 20, state: 'normal' }, { from: 20, to: 100, state: 'alarm' }] } },
+    }
+    const { container } = renderCluster(hot, values, { engines: { port: { state: 'off', lastUpdate: since } } })
+    expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
+    // Still off: no status chip, the engine's own readings are dashes.
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
+    expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('--')
+  })
+
+  test('the engine\'s own zones never light the border while it is off', () => {
+    const hot: ResolvedClusterConfig = {
+      ...full,
+      ring: { ...full.ring, zones: [{ from: 0, to: 5000, state: 'alarm' }] },
     }
     const { container } = renderCluster(hot, values, { engines: { port: { state: 'off', lastUpdate: since } } })
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')

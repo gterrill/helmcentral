@@ -131,9 +131,11 @@ export const EngineClusterTile = memo(function EngineClusterTile({
 
   // The tile edge carries the worst of everything the card reads (ADR 0081),
   // each slot's zone already blanked when its reading is stale (ADR 0083). An
-  // engine that is off carries no state at all: neutral border, OFF pill.
+  // engine that is off has no readings of its own (they were removed above), so
+  // it adds no state: neutral border, OFF pill. A slot reading another item (the
+  // starter battery, a tank) is live and still counts.
   const readings = allSlots(config).map((slot) => reading(slot, values, ages))
-  const state = off ? null : worstZoneState(readings.map((r) => r.zone))
+  const state = worstZoneState(readings.map((r) => r.zone))
   const knownAges = readings.filter((r) => r.age !== null)
   const tileStale = knownAges.length > 0 && knownAges.every((r) => r.stale)
   const staleLabel = tileStale ? formatDataAge(Math.max(...knownAges.map((r) => r.age as number))) : undefined
