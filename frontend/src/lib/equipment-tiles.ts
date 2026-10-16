@@ -22,7 +22,8 @@ import type {
  */
 
 /** The part of an equipment item a tile needs. */
-export type TileItem = Pick<EquipmentItem, 'id' | 'name' | 'signalk_source' | 'source_kind' | 'profile_id'>
+export type TileItem = Pick<EquipmentItem, 'id' | 'name' | 'signalk_source' | 'source_kind' | 'profile_id'> &
+  Partial<Pick<EquipmentItem, 'system' | 'status' | 'quantity' | 'required_quantity' | 'part_number' | 'serial' | 'zone_name' | 'bin_code' | 'location_detail'>>
 
 export interface EquipmentTileContext {
   items: readonly TileItem[]

@@ -299,3 +299,30 @@ function UnreadableHarness() {
   latestDraft = draft
   return <SignalKRolesSection draft={draft} onChange={(patch) => setDraft((previous) => ({ ...previous, ...patch }))} />
 }
+
+describe('Discovery with SignalK not connected', () => {
+  it('still lists the saved mappings by kind, each marked Not reporting', async () => {
+    discoveryBody = { connected: false, groups: [], detectors: {} }
+    render(<SignalKDiscoverySection />)
+    expect(await screen.findByText(/no data from SignalK yet/)).toBeInTheDocument()
+    for (const source of ['propulsion.port', 'electrical.batteries.512', 'electrical.generator.0']) {
+      expect(await screen.findByText(source)).toBeInTheDocument()
+    }
+    expect(screen.getByText('Port engine')).toBeInTheDocument()
+    expect(screen.getByText('Lithium bank')).toBeInTheDocument()
+    expect(screen.getAllByText('Not reporting').length).toBeGreaterThanOrEqual(6)
+    expect(screen.getByRole('heading', { name: 'Engines' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Batteries' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Generators' })).toBeInTheDocument()
+  })
+})
+
+describe('Assign to item offers only items that could be that kind', () => {
+  it('lists the starboard engine for an engine source, not a spare impeller', async () => {
+    render(<SignalKDiscoverySection />)
+    const starboard = (await screen.findByText('propulsion.starboard')).closest('div')!.parentElement!
+    fireEvent.click(within(starboard).getByRole('button', { name: 'Assign to item' }))
+    const options = Array.from((await screen.findByLabelText('Item for propulsion.starboard')).querySelectorAll('option')).map((o) => o.textContent)
+    expect(options).toEqual(['Choose an item…', 'Starboard engine'])
+  })
+})

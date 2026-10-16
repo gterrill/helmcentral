@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { FormSection } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import type { EngineProfile } from '@/lib/engine-profiles'
 import { useOptionalAppRouter } from '@/hooks/use-app-location'
 import {
   BLANK_DRAFT,
@@ -13,7 +14,9 @@ import {
   useEquipment,
   type EquipmentItem,
 } from '@/hooks/use-inventory'
+import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
+import { candidateItems, candidateLabels } from '@/lib/equipment-candidates'
 import {
   SOURCE_KINDS,
   SOURCE_KIND_LABELS,
@@ -37,10 +40,7 @@ export function SignalKDiscoverySection() {
   const { discovery, loading, error } = useVesselDiscovery()
   const { items } = useEquipment({})
 
-  const unassigned = useMemo(
-    () => items.filter((item) => item.signalk_source === '').sort((a, b) => a.name.localeCompare(b.name)),
-    [items],
-  )
+  const { profiles } = useEquipmentProfiles(true)
 
   const groups = useMemo(
     () => SOURCE_KINDS
@@ -48,6 +48,31 @@ export function SignalKDiscoverySection() {
       .filter((g): g is DiscoveryGroup => g !== undefined && g.rows.length > 0),
     [discovery.groups],
   )
+
+  // With no connection to SignalK nothing is being reported, but the mappings
+  // already saved are still real: list them, by kind, each marked Not reporting,
+  // so they never seem to have vanished.
+  const savedGroups = useMemo(
+    () => SOURCE_KINDS
+      .map((kind): DiscoveryGroup => ({
+        kind,
+        mappable: true,
+        rows: items
+          .filter((item) => item.signalk_source !== '' && item.source_kind === kind)
+          .map((item): DiscoveryRow => ({
+            source: item.signalk_source,
+            instance: item.signalk_source.split('.').slice(1).join('.'),
+            bus_name: '',
+            charger_input: false,
+            reporting: false,
+            metrics: [],
+            item: { id: item.id, name: item.name },
+          })),
+      }))
+      .filter((g) => g.rows.length > 0),
+    [items],
+  )
+  const shownGroups = discovery.connected ? groups : savedGroups
 
   return (
     <FormSection
@@ -64,13 +89,13 @@ export function SignalKDiscoverySection() {
       {!loading && !error && discovery.connected && groups.length === 0 && (
         <p className="text-sm text-muted-foreground">The boat is not reporting any engines, batteries, tanks or other equipment yet.</p>
       )}
-      {discovery.connected && groups.map((group) => (
+      {shownGroups.map((group) => (
         <div key={group.kind} className="flex flex-col gap-2">
           <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
             {SOURCE_KIND_LABELS[group.kind as SourceKind]}
           </h3>
           {group.rows.map((row) => (
-            <DiscoveryRowView key={row.source} row={row} kind={group.kind as SourceKind} unassigned={unassigned} />
+            <DiscoveryRowView key={row.source} row={row} kind={group.kind as SourceKind} items={items} profiles={profiles} />
           ))}
         </div>
       ))}
@@ -81,10 +106,17 @@ export function SignalKDiscoverySection() {
 interface DiscoveryRowViewProps {
   row: DiscoveryRow
   kind: SourceKind
-  unassigned: EquipmentItem[]
+  items: EquipmentItem[]
+  profiles: EngineProfile[]
 }
 
-function DiscoveryRowView({ row, kind, unassigned }: DiscoveryRowViewProps) {
+function DiscoveryRowView({ row, kind, items, profiles }: DiscoveryRowViewProps) {
+  // Only items that could be this kind of equipment, not the whole inventory.
+  const unassigned = useMemo(
+    () => candidateItems(kind, items, profiles).sort((a, b) => a.name.localeCompare(b.name)),
+    [kind, items, profiles],
+  )
+  const labels = useMemo(() => candidateLabels(unassigned), [unassigned])
   const router = useOptionalAppRouter()
   const [mode, setMode] = useState<'idle' | 'assign' | 'create'>('idle')
   const [pickedId, setPickedId] = useState('')
@@ -169,7 +201,7 @@ function DiscoveryRowView({ row, kind, unassigned }: DiscoveryRowViewProps) {
               onChange={(e) => setPickedId(e.target.value)}
             >
               <option value="">Choose an item…</option>
-              {unassigned.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              {unassigned.map((item) => <option key={item.id} value={item.id}>{labels.get(item.id) ?? item.name}</option>)}
             </select>
             <Button type="button" size="sm" onClick={assign} disabled={busy || pickedId === ''}>Assign</Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setMode('idle')} disabled={busy}>Cancel</Button>

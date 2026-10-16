@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
 import { fetchEquipment, toEquipmentInput, updateEquipment } from '@/hooks/use-inventory'
+import { formatAppLocation } from '@/lib/app-location'
+import { candidateItems, candidateLabels } from '@/lib/equipment-candidates'
 import type { EquipmentTileContext } from '@/lib/equipment-tiles'
 import { SOURCE_KIND_NOUNS, discoveryRows, type SourceKind } from '@/lib/vessel-settings'
 
@@ -31,8 +33,13 @@ interface EquipmentPickerProps {
  */
 export function EquipmentPicker({ idPrefix, label, kind, value, onChange, ctx }: EquipmentPickerProps) {
   const mapped = ctx.items.filter((i) => i.source_kind === kind)
-  const unmapped = ctx.items.filter((i) => i.signalk_source === '')
   const chosen = ctx.items.find((i) => i.id === value)
+  // Items with no source are offered only if they could be this kind of
+  // equipment (an engine for an engine tile), never the whole inventory. The one
+  // already chosen stays listed so the field never goes blank under the operator.
+  const unmapped = candidateItems(kind, ctx.items, ctx.profiles)
+  if (chosen && chosen.signalk_source === '' && !unmapped.some((i) => i.id === chosen.id)) unmapped.unshift(chosen)
+  const labels = candidateLabels(unmapped)
   const noun = SOURCE_KIND_NOUNS[kind]
 
   return (
@@ -56,12 +63,17 @@ export function EquipmentPicker({ idPrefix, label, kind, value, onChange, ctx }:
           )}
           {unmapped.length > 0 && (
             <optgroup label="Not mapped yet">
-              {unmapped.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+              {unmapped.map((i) => <option key={i.id} value={i.id}>{labels.get(i.id) ?? i.name}</option>)}
             </optgroup>
           )}
         </select>
         {mapped.length === 0 && unmapped.length === 0 && (
-          <FieldDescription>No equipment is set up yet. Add an item under Inventory, or create one from Discovery in Settings.</FieldDescription>
+          <FieldDescription data-testid="no-candidates">
+            No {noun} is set up yet. Add one in{' '}
+            <a className="underline" href={formatAppLocation({ panel: 'inventory', route: { view: 'index', section: 'equipment' } }, { firstPageId: null })}>Inventory</a>
+            , or create one from{' '}
+            <a className="underline" href={formatAppLocation({ panel: 'settings', route: { view: 'section', section: 'signalk' } }, { firstPageId: null })}>Settings, SignalK, Discovery</a>.
+          </FieldDescription>
         )}
       </Field>
       {chosen && chosen.signalk_source === '' && <MapHere itemId={chosen.id} itemName={chosen.name} kind={kind} idPrefix={idPrefix} />}

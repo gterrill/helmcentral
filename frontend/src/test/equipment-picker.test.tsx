@@ -19,7 +19,11 @@ vi.mock('@/hooks/use-vessel-discovery', () => ({ useVesselDiscovery: () => ({ di
 
 const items: TileItem[] = [
   { id: 'eng-port', name: 'Port engine', signalk_source: 'propulsion.port', source_kind: 'engine', profile_id: '' },
-  { id: 'spare', name: 'Spare engine', signalk_source: '', source_kind: '', profile_id: '' },
+  { id: 'spare', name: 'Spare engine', signalk_source: '', source_kind: '', profile_id: '', system: 'propulsion' },
+  { id: 'saw', name: 'Hacksaw', signalk_source: '', source_kind: '', profile_id: '', system: 'other' },
+  { id: 'filters', name: 'Fuel filter spares', signalk_source: '', source_kind: '', profile_id: '', system: 'propulsion', required_quantity: 4, quantity: 2 },
+  { id: 'twin-a', name: 'Cummins QSB 6.7', signalk_source: '', source_kind: '', profile_id: '', system: 'propulsion', serial: '1001' },
+  { id: 'twin-b', name: 'Cummins QSB 6.7', signalk_source: '', source_kind: '', profile_id: '', system: 'propulsion', serial: '1002' },
   { id: 'bank', name: 'House bank', signalk_source: 'electrical.batteries.1', source_kind: 'battery', profile_id: '' },
 ]
 const ctx: EquipmentTileContext = { items, profiles: [], reporting: null }
@@ -27,10 +31,21 @@ const ctx: EquipmentTileContext = { items, profiles: [], reporting: null }
 beforeEach(() => { vi.restoreAllMocks() })
 
 describe('EquipmentPicker', () => {
-  test('lists mapped items of the right kind, then items not mapped yet, and no other kind', () => {
+  test('points to Inventory and Discovery, instead of listing the inventory, when nothing could be this kind', () => {
+    const none: EquipmentTileContext = { items: [items[2]], profiles: [], reporting: null }
+    render(<EquipmentPicker idPrefix="p" label="Engine" kind="engine" value="" onChange={vi.fn()} ctx={none} />)
+    const options = Array.from(screen.getByLabelText('Engine').querySelectorAll('option')).map((o) => o.textContent)
+    expect(options).toEqual(['Pick engine…'])
+    const line = screen.getByTestId('no-candidates')
+    expect(line).toHaveTextContent('Inventory')
+    expect(line).toHaveTextContent('Settings, SignalK, Discovery')
+  })
+
+
+  test('lists mapped items of the right kind, then only unmapped items that could be one, told apart when they share a name', () => {
     render(<EquipmentPicker idPrefix="p" label="Engine" kind="engine" value="" onChange={vi.fn()} ctx={ctx} />)
     const names = Array.from(screen.getByLabelText('Engine').querySelectorAll('option')).map((o) => o.textContent)
-    expect(names).toEqual(['Pick engine…', 'Port engine', 'Spare engine'])
+    expect(names).toEqual(['Pick engine…', 'Port engine', 'Spare engine', 'Cummins QSB 6.7 · serial 1001', 'Cummins QSB 6.7 · serial 1002'])
   })
 
   test('an unmapped item offers to map it right there, warning that it changes the item everywhere', () => {
