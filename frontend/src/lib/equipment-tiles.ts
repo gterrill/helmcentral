@@ -157,7 +157,9 @@ export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileCo
     if (!s.equipmentId) return slot(s)
     const own = findItem(ctx, s.equipmentId)
     if (!own || own.signalk_source === '') return { ...s, path: '', zones: undefined }
-    return resolveSlot(own, profileOf(ctx, own), s)
+    // Its scale is its own item's profile gauge's, the one the alarm raised from
+    // the same zones uses, so a scale the slot once carried cannot bend a band.
+    return resolveSlot(own, profileOf(ctx, own), { ...s, min: undefined, max: undefined })
   }
   const footer = config.footer && Object.fromEntries(
     CLUSTER_FOOTER_SLOTS.flatMap((key) => {

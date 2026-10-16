@@ -68,26 +68,25 @@ const SLOT_SUFFIXES = {
 
 /**
  * The footer slots that read another item than the engine: the kind of item
- * each takes, the reading it starts on, and a blank slot's own quantity and
- * scale (used until the item's profile has a gauge for the reading). None
- * carries a threshold: those come from the item's profile.
+ * each takes, the reading it starts on, and a blank slot's own quantity (used
+ * until the item's profile has a gauge for the reading). None carries a scale or
+ * a threshold: both come from the item's profile.
  */
 const FOREIGN_SLOTS: Record<'battery' | 'altAmps' | 'altWatts' | 'altTemp' | 'altStage' | 'altLimit' | 'egt', {
   kind: 'battery' | 'alternator' | 'engine'
   suffix: string
   slot: GaugeWidgetConfig
 }> = {
-  battery: { kind: 'battery', suffix: 'voltage', slot: { path: '', label: 'Battery', display: 'numeric', quantity: 'potential', unit: 'V', decimals: 1, min: 20, max: 30 } },
-  altAmps: { kind: 'alternator', suffix: 'current', slot: { path: '', label: 'Alternator', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0, min: 0, max: 200 } },
+  battery: { kind: 'battery', suffix: 'voltage', slot: { path: '', label: 'Battery', display: 'numeric', quantity: 'potential', unit: 'V', decimals: 1 } },
+  altAmps: { kind: 'alternator', suffix: 'current', slot: { path: '', label: 'Alternator', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 } },
   altWatts: { kind: 'alternator', suffix: 'power', slot: { path: '', label: 'Alt output', display: 'numeric', quantity: 'power', unit: 'W', decimals: 0 } },
-  altTemp: { kind: 'alternator', suffix: 'temperature', slot: { path: '', label: 'Alt temp', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0, min: 0, max: 150 } },
+  altTemp: { kind: 'alternator', suffix: 'temperature', slot: { path: '', label: 'Alt temp', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0 } },
   // The regulator reports its stage as a number; the tile names it.
   altStage: { kind: 'alternator', suffix: 'chargingModeNumber', slot: { path: '', label: 'Charge stage', display: 'numeric', quantity: 'raw', unit: 'raw', decimals: 0 } },
   altLimit: { kind: 'alternator', suffix: '', slot: { path: '', label: 'Charge limit', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 } },
-  // A wet exhaust reads tens of degrees after water injection, not hundreds: a
-  // 0-100 C scale, with an above band (raw-water loss) left for the exhaust
-  // item's profile.
-  egt: { kind: 'engine', suffix: 'exhaustTemperature', slot: { path: '', label: 'Exhaust', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0, min: 0, max: 100 } },
+  // The scale and any band (raw-water loss on a wet exhaust) are the exhaust
+  // item's profile's to hold.
+  egt: { kind: 'engine', suffix: 'exhaustTemperature', slot: { path: '', label: 'Exhaust', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0 } },
 }
 
 const FOOTER_TITLES: Record<ClusterFooterSlot, string> = {
