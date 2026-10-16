@@ -21,9 +21,17 @@ import (
 
 const zoneDerivedAlarmRuleIDPrefix = "zone:"
 
-// Where a cluster's telltales start in the flat index space, past every corner
-// row a cluster can hold, so adding a corner row cannot renumber an alarm.
-const clusterTelltaleZoneIndexBase = 2 + clusterMaxCorners*clusterMaxCornerRows
+// Where a cluster's slots sit in the flat index space of the ids of zones a
+// slot still holds (see collectSlot). The ids are fixed once issued, so this
+// only ever appends. 18 is where the old telltales began (2 + 4 corners * 4
+// rows, before a corner held one row), and it is the engine-coolant arc now,
+// the reading the first telltale always was. The footer follows past the old
+// telltale cap, and the second arc after it.
+const (
+	clusterLeftArcZoneIndex    = 18
+	clusterFooterZoneIndexBase = 24
+	clusterRightArcZoneIndex   = clusterFooterZoneIndexBase + 16
+)
 
 const (
 	// A value hovering at a threshold is the reason people switch marine
@@ -264,8 +272,20 @@ func zoneDerivedAlarmRules() []alarmRule {
 						index++
 					}
 				}
-				for i, telltale := range c.Telltales {
-					collectSlot(widget.ID, clusterTelltaleZoneIndexBase+i, c.EquipmentID, c.Source, c.Title, telltale)
+				for i, slot := range c.Arcs.slots() {
+					if slot == nil {
+						continue
+					}
+					at := clusterLeftArcZoneIndex
+					if i == 1 {
+						at = clusterRightArcZoneIndex
+					}
+					collectSlot(widget.ID, at, slotItem(c.EquipmentID, *slot), c.Source, c.Title, *slot)
+				}
+				for i, slot := range c.Footer.slots() {
+					if slot != nil {
+						collectSlot(widget.ID, clusterFooterZoneIndexBase+i, slotItem(c.EquipmentID, *slot), c.Source, c.Title, *slot)
+					}
 				}
 				if c.Fuel != nil {
 					for _, bar := range c.Fuel.Bars {
@@ -280,6 +300,15 @@ func zoneDerivedAlarmRules() []alarmRule {
 	// unique by construction.
 	sort.Slice(rules, func(i, j int) bool { return rules[i].ID < rules[j].ID })
 	return rules
+}
+
+// slotItem is the item a slot reads: its own when it names one (a footer slot),
+// else the tile's.
+func slotItem(tileItem string, slot dashboardGaugeConfig) string {
+	if slot.EquipmentID != "" {
+		return slot.EquipmentID
+	}
+	return tileItem
 }
 
 func firstNonEmpty(values ...string) string {

@@ -225,6 +225,10 @@ func gaugeHasZones(g engineProfileGauge) bool {
 // slot that still holds zones of its own, with none on the profile to hold
 // them, keeps them, and its own unit and scale.
 func (ix equipmentIndex) resolveSlot(equipmentID string, slot dashboardGaugeConfig) (dashboardGaugeConfig, equipmentRef, bool) {
+	// A footer slot may read another item than the tile's own.
+	if slot.EquipmentID != "" {
+		equipmentID = slot.EquipmentID
+	}
 	item, found := ix.items[equipmentID]
 	if !found || item.Source == "" || strings.TrimSpace(slot.Suffix) == "" {
 		return dashboardGaugeConfig{}, item, false
