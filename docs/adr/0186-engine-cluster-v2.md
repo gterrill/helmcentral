@@ -48,17 +48,23 @@ battery, the alternator and the exhaust are not the engine.
    not part of either engine.
 4. **Alarm ids.** Zones on a profile alarm as one rule per item and reading
    (`zone:item:<item>:<suffix>:<n>`), whichever tile shows them, so a footer
-   slot's zones alarm under its own item. Zones a slot still holds (a converted
-   tile with no profile) keep the index ids of ADR 0185: the coolant arc is
-   index 18, which was the first telltale, the footer starts at 24 (past the old
-   telltale cap of six) in the fixed order of the footer's slots, and the right arc (the gearbox temperature) sits after the footer's reserved sixteen,
-   at 40. The footer's old gearbox-temperature position (7) is a held gap. Append only. The backend tests
-   pin the constants.
+   slot's zones alarm under its own item. A footer slot whose own item is gone or
+   unmapped reads nothing and raises nothing; it never falls back to the
+   engine's source. Zones a slot still holds (a converted tile with no profile)
+   keep the index ids of ADR 0185. The old telltales shipped at index 18 and up,
+   and a telltale moved onto an arc keeps the index of its own old position
+   (`zoneIndex` on the slot), so no issued id changes, whichever order the
+   telltales were in. The coolant arc is 18 by default. The footer and the right
+   arc are new and follow without gaps: footer slot i is 24 + i in the order of
+   the frontend's `CLUSTER_FOOTER_SLOTS`, the right arc 32. A fixture read by both
+   the Go and the frontend tests pins that order. Append only from here.
 5. **Telltales move.** `telltales` is a legacy field only the conversion and a
    load-time step read: the engine temperature goes to the left arc and the
    gearbox temperature to the right arc; anything else (the exhaust read
    from another node) is dropped and logged. A save that still carries one is
-   refused.
+   refused. A cluster saved under the old caps (a corner of several rows, a rail
+   of up to four tanks) is trimmed to the new ones at load and logged, so its
+   page stays editable; one narrower than the card is drawn at the minimum width.
 6. **Bars from zones.** A bullet graph draws only the bands the slot has,
    brightens the one the reading is in, ticks only real end-anchored
    thresholds, and keeps fill and value neutral until the reading is in an
@@ -105,7 +111,11 @@ battery, the alternator and the exhaust are not the engine.
 13. **The hub and the scale agree.** The hub shows revs as plain rpm rounded to
     the nearest ten, as the reference does, and the scale (divided by 100) is
     captioned "scale x100".
-14. **Off is said once.** An engine that is off shows `--`, a neutral border and
+14. **The chip is for a running engine.** RUN, WARN and ALARM are drawn only
+    when the engine is known to be turning on live data: not when it is off, its
+    feed is lost, its rpm is stale, missing or zero, or the tile is stale, so a
+    stale border never has RUN beside it.
+15. **Off is said once.** An engine that is off shows `--`, a neutral border and
     the muted OFF pill in the title (ADR 0163). The card's status chip is for a
     running engine and is not drawn when it is off, so OFF does not appear twice.
     No history request is made for an off engine.

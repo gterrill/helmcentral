@@ -97,6 +97,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   own source (for example `propulsion.0`), because it is not part of either
   engine. The alarms from a footer or arc reading's zones are named for its
   equipment and start with no history.
+  A cluster that held several readings in a corner or more than two tanks keeps
+  the first reading of each corner and the first two tanks (the startup log says
+  what was dropped), and a cluster narrower than the new card is drawn six
+  columns wide.
 
 ### Changed
 
@@ -112,8 +116,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   with litres, and a footer with the starter battery voltage, the alternator
   (current, power, temperature, charge stage, a one-hour trace and the battery
   management system's charge limit), the gearbox oil pressure and the exhaust. A starboard
-  tile is a mirror of a port one, and an engine that is switched off says `OFF`
-  once, in the tile's title. The tile needs half the board's width. The
+  tile is a mirror of a port one. An engine that is switched off says `OFF` once,
+  in the tile's title, and the status word (RUN, WARN or ALARM) appears only
+  while the engine is turning on live readings. The tile needs half the board's width. The
   alternator, battery and exhaust are equipment items like the engine: choose
   them in the tile's settings, and **Fill slots from profile** takes the
   alternator the Roles setting names for the engine's side.
