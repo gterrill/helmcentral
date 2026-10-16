@@ -67,7 +67,7 @@ import {
   dependantsBlock,
 } from '@/components/inventory/equipment-dependants-notice'
 import { useEquipmentDependants } from '@/hooks/use-equipment-dependants'
-import { describeDependants, hasDependants, type EquipmentDependants } from '@/lib/equipment-dependants'
+import { hasDependants, type EquipmentDependants } from '@/lib/equipment-dependants'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
 // equipment record - `id === null` is the "New item" draft, everything else is
@@ -739,12 +739,12 @@ export function EquipmentEditor(
       // Unmapping or moving the source of an item that something uses is
       // confirmed first, with what uses it. An item that nothing uses, or one
       // being mapped for the first time, asks nothing.
-      if (id !== null && item && item.signalk_source !== '' && draft.signalk_source !== item.signalk_source) {
+      if (id !== null && item && item.signalk_source.trim() !== '' && draft.signalk_source.trim() !== item.signalk_source.trim()) {
         const dependants = await fetchEquipmentDependants(id)
         if (hasDependants(dependants)) {
           await new Promise<void>((resolve, reject) => {
             sourceDecision.current = { resolve, reject }
-            setSourceChange({ dependants, clearing: draft.signalk_source === '' })
+            setSourceChange({ dependants, clearing: draft.signalk_source.trim() === '' })
           })
         }
       }
@@ -1384,9 +1384,10 @@ export function EquipmentEditor(
         onConfirm={() => decideSourceChange(true)}
       >
         {sourceChange && (
-          <p data-testid="equipment-dependants" className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
-            {describeDependants(sourceChange.dependants)} {sourceChange.clearing ? CLEAR_SOURCE_CONSEQUENCE : CHANGE_SOURCE_CONSEQUENCE}
-          </p>
+          <EquipmentDependantsNotice
+            state={{ status: 'ready', dependants: sourceChange.dependants }}
+            consequence={sourceChange.clearing ? CLEAR_SOURCE_CONSEQUENCE : CHANGE_SOURCE_CONSEQUENCE}
+          />
         )}
       </ConfirmDelete>
 

@@ -22,6 +22,14 @@ describe('a tile that shows equipment', () => {
     expect(common.onConfigure).toHaveBeenCalled()
   })
 
+  test('says Equipment removed for a deleted item, and Choose different equipment works outside Layout mode', () => {
+    const onConfigure = vi.fn()
+    render(<EngineClusterHost {...common} editing={false} onConfigure={onConfigure} config={cluster} ctx={ctxOf([])} />)
+    expect(screen.getByText('Equipment removed')).toBeInTheDocument()
+    screen.getByRole('button', { name: /choose different equipment/i }).click()
+    expect(onConfigure).toHaveBeenCalled()
+  })
+
   test('says Not mapped and links to the item', () => {
     render(<EngineClusterHost {...common} config={cluster} ctx={ctxOf([item({ signalk_source: '', source_kind: '' })])} />)
     expect(screen.getByText('Not mapped')).toBeInTheDocument()

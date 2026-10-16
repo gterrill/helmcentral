@@ -306,6 +306,8 @@ function equipmentChanged() {
 // rules are left alone: a read of them would only answer 404.
 function equipmentDeleted(id: string): Promise<void> {
   void invalidateQueries([DISCOVERY])
+  // Deleting an item clears the roles that named it in settings.
+  void invalidateQueries(['/api/settings'])
   void invalidateQueries([MAINTENANCE_RULES], (key) => {
     const filter = key[1] as { equipment?: string } | undefined
     return filter?.equipment === id

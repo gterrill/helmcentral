@@ -17,6 +17,15 @@ export type DependantsState =
  */
 export function useEquipmentDependants(id: string | null): DependantsState {
   const [result, setResult] = useState<{ id: string; state: DependantsState } | null>(null)
+  // An answer is good for one opening of the dialog. Whenever the id changes,
+  // including to null and back to the same item, drop it in the same render,
+  // so the earlier answer is never shown (with Confirm on) while the new one
+  // is still being fetched.
+  const [forId, setForId] = useState(id)
+  if (forId !== id) {
+    setForId(id)
+    setResult(null)
+  }
 
   useEffect(() => {
     if (id === null) return
@@ -31,5 +40,5 @@ export function useEquipmentDependants(id: string | null): DependantsState {
   }, [id])
 
   if (id === null) return { status: 'idle' }
-  return result !== null && result.id === id ? result.state : { status: 'loading' }
+  return result !== null && result.id === id && forId === id ? result.state : { status: 'loading' }
 }
