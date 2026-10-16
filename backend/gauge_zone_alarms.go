@@ -280,11 +280,28 @@ func zoneDerivedAlarmRules() []alarmRule {
 				c := widget.Cluster
 				collectSlot(widget.ID, 0, c.EquipmentID, c.Source, c.Title, c.Ring)
 				collectSlot(widget.ID, 1, c.EquipmentID, c.Source, c.Title, c.Centre)
+				// A row may carry the index it was issued (ZoneIndex); the
+				// counter must not hand the same one to a row without.
+				claimed := map[int]bool{}
+				for _, corner := range c.Corners {
+					for _, row := range corner.Rows {
+						if row.ZoneIndex != nil {
+							claimed[*row.ZoneIndex] = true
+						}
+					}
+				}
 				index := 2
 				for _, corner := range c.Corners {
 					for _, row := range corner.Rows {
+						if row.ZoneIndex == nil {
+							for claimed[index] {
+								index++
+							}
+						}
 						collectSlot(widget.ID, index, c.EquipmentID, c.Source, c.Title, row)
-						index++
+						if row.ZoneIndex == nil {
+							index++
+						}
 					}
 				}
 				for i, slot := range c.Arcs.slots() {

@@ -295,6 +295,9 @@ func (c *tileConverter) convertCluster(page, id string, cl *dashboardClusterConf
 			slot.Path, slot.Suffix, slot.Zones = "", "", nil
 		}
 	}
+	// Rows that cannot stay are dropped below; the rows after them keep the
+	// alarm id they were issued.
+	stampCornerRowZoneIndexes(cl)
 	for ci := range cl.Corners {
 		rows := cl.Corners[ci].Rows[:0]
 		for ri := range cl.Corners[ci].Rows {

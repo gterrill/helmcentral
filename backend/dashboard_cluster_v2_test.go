@@ -119,3 +119,45 @@ func TestFooterSlotOrderMatchesTheSharedFixture(t *testing.T) {
 		}
 	}
 }
+
+// A corner row's held-zone id is its position in the flat list (2, 3, ...).
+// Trimming a corner to one row, or dropping an unconvertible row, must not
+// move the ids of the rows after it.
+func TestCornerRowsKeepTheirIssuedAlarmIDsWhenEarlierRowsAreTrimmed(t *testing.T) {
+	held := func(suffix string) dashboardGaugeConfig {
+		g := zoneGaugeConfig(0, 120, gaugeZone{From: 100, To: 120, State: alarmStateAlarm})
+		g.Path, g.Suffix = "", suffix
+		return *g
+	}
+	cl := &dashboardClusterConfig{
+		Title:  "Port",
+		Ring:   dashboardGaugeConfig{Suffix: "revolutions", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+		Centre: dashboardGaugeConfig{Suffix: "runTime", Display: "numeric", Quantity: "duration", Unit: "h"},
+		Corners: []dashboardClusterCorner{
+			{Label: "A", Rows: []dashboardGaugeConfig{held("temperature"), held("transmission.oilTemperature")}},
+			{Label: "B", Rows: []dashboardGaugeConfig{held("exhaustTemperature")}},
+		},
+	}
+	if !normalizeClusterCaps("Underway", cl) {
+		t.Fatal("expected the first corner to be trimmed")
+	}
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	cl.EquipmentID = engine
+	withPages(t, dashboardLayoutItem{ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 14, Cluster: cl})
+	ids := map[string]bool{}
+	for _, r := range zoneDerivedAlarmRules() {
+		ids[r.ID] = true
+	}
+	// B's row was the third row in the old list: index 4.
+	for _, want := range []string{
+		fmt.Sprintf("%scluster:abcd1234:2:0", zoneDerivedAlarmRuleIDPrefix),
+		fmt.Sprintf("%scluster:abcd1234:4:0", zoneDerivedAlarmRuleIDPrefix),
+	} {
+		if !ids[want] {
+			t.Fatalf("expected %q, got %v", want, ids)
+		}
+	}
+	if len(ids) != 2 {
+		t.Fatalf("expected two rules, got %v", ids)
+	}
+}

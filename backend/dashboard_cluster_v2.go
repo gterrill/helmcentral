@@ -106,6 +106,12 @@ func moveLegacyTelltales(cl *dashboardClusterConfig) bool {
 // changed anything.
 func normalizeClusterCaps(page string, cl *dashboardClusterConfig) bool {
 	changed := false
+	for _, corner := range cl.Corners {
+		if len(corner.Rows) > clusterMaxCornerRows {
+			stampCornerRowZoneIndexes(cl)
+			break
+		}
+	}
 	for ci := range cl.Corners {
 		if rows := cl.Corners[ci].Rows; len(rows) > clusterMaxCornerRows {
 			for _, dropped := range rows[clusterMaxCornerRows:] {
@@ -125,4 +131,22 @@ func normalizeClusterCaps(page string, cl *dashboardClusterConfig) bool {
 		changed = true
 	}
 	return changed
+}
+
+// stampCornerRowZoneIndexes records each corner row's position in the flat
+// list the held-zone ids count (ring 0, centre 1, then rows from 2), on the
+// rows that do not carry one yet. Call it before rows are trimmed or dropped,
+// so the rows after them keep the id they were issued.
+func stampCornerRowZoneIndexes(cl *dashboardClusterConfig) {
+	index := 2
+	for ci := range cl.Corners {
+		for ri := range cl.Corners[ci].Rows {
+			row := &cl.Corners[ci].Rows[ri]
+			if row.ZoneIndex == nil {
+				at := index
+				row.ZoneIndex = &at
+			}
+			index++
+		}
+	}
 }
