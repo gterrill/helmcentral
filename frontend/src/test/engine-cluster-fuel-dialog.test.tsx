@@ -15,6 +15,7 @@ const ctx: EquipmentTileContext = {
   reporting: null,
 }
 vi.mock('@/hooks/use-equipment-tile-context', () => ({ useEquipmentTileContext: () => ctx }))
+vi.mock('@/hooks/use-vessel-roles', () => ({ useVesselRoles: () => null }))
 vi.mock('@/hooks/use-vessel-discovery', () => ({
   useVesselDiscovery: () => ({ discovery: { connected: true, groups: [], detectors: {} }, loading: false, error: null }),
 }))
@@ -57,25 +58,44 @@ describe('the fuel rail section', () => {
   test('starts a rail with a forward and an aft tank to pick', () => {
     open()
     fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
-    expect(screen.getByLabelText(/tile edge/i)).toBeInTheDocument()
     expect(tankSelect(0)).toBeInTheDocument()
     expect(tankSelect(1)).toBeInTheDocument()
   })
 
-  /**
-   * A cluster titled Port puts its rail outboard without being asked. The
-   * facing pair is the whole reason the edge is configurable at all.
-   */
-  test('seeds the edge from the cluster title', () => {
-    open({ title: 'Port' })
+  test('offers no more than two tanks, the two arcs the fan draws', () => {
+    open()
     fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
-    expect(screen.getByLabelText(/tile edge/i)).toHaveValue('left')
+    expect(screen.getByRole('button', { name: /add tank/i })).toBeDisabled()
   })
 
-  test('seeds a starboard cluster to the other edge', () => {
-    open({ title: 'Starboard' })
+  /**
+   * The fan sits on the outer edge of the tile, which is the engine's own
+   * side. There is no separate edge to pick, so the two can never disagree.
+   */
+  function saveWithRail(onSave: ReturnType<typeof vi.fn>) {
+    fireEvent.change(tankSelect(0), { target: { value: 'tank-5' } })
+    fireEvent.change(tankSelect(1), { target: { value: 'tank-4' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    return vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
+  }
+
+  test("puts a port engine's fan on the left edge", async () => {
+    const onSave = open({ side: 'port' })
     fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
-    expect(screen.getByLabelText(/tile edge/i)).toHaveValue('right')
+    expect((await saveWithRail(onSave)).fuel!.side).toBe('left')
+  })
+
+  test("puts a starboard engine's fan on the right edge", async () => {
+    const onSave = open({ side: 'stbd' })
+    fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
+    expect((await saveWithRail(onSave)).fuel!.side).toBe('right')
+  })
+
+  test('moves the fan with the engine side', async () => {
+    const onSave = open({ side: 'port' })
+    fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
+    fireEvent.change(screen.getByLabelText(/engine side/i), { target: { value: 'stbd' } })
+    expect((await saveWithRail(onSave)).fuel!.side).toBe('right')
   })
 
   test('offers the tanks and stores the one picked', () => {
@@ -103,6 +123,6 @@ describe('the fuel rail section', () => {
     open()
     fireEvent.click(screen.getByRole('button', { name: /add fuel rail/i }))
     fireEvent.click(screen.getByRole('button', { name: /remove fuel rail/i }))
-    expect(screen.queryByLabelText(/tile edge/i)).not.toBeInTheDocument()
+    expect(tankSelect(0)).toBeNull()
   })
 })

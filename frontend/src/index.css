@@ -243,6 +243,29 @@
        bars there have a tight emissive core and a wide bloom, which is two
        stacked drop-shadows. `none` is the valid no-op. */
     --fuel-bar-glow: none;
+    /* The engine cluster's readout cards, bullet graphs and footer. Opacities
+       are plain numbers, so the skin restates them; the colours indirect, so it
+       does not need to.
+
+       A band is a marking until it is a state: dim while the reading is
+       elsewhere, bright while the reading is inside it. */
+    --cluster-band-idle: 0.2;
+    --cluster-band-active: 0.5;
+    --cluster-spark-fill: 0.14;
+    --cluster-surface: var(--card);
+    --cluster-stroke: var(--border);
+    --cluster-track: var(--muted);
+    /* The cluster's tachometer (components/ui/cluster-dial.tsx). Plain in the
+       flat themes: a card-coloured face with a hairline rim, no hub, no glow.
+       The skin turns the lit face on. */
+    --cluster-dial-face: hsl(var(--card));
+    --cluster-dial-rim: inset 0 0 0 1.5px hsl(var(--cluster-stroke));
+    --cluster-hub: none;
+    --cluster-hub-shadow: none;
+    --cluster-sweep-o0: 0.03;
+    --cluster-sweep-o1: 0.3;
+    --cluster-sweep-o2: 0.82;
+    --cluster-needle-glow: 0 0 0 transparent;
     --font-display: 'Geist Mono';
     --font-sans: 'Geist Sans';
     --sidebar-background: var(--card);
@@ -365,6 +388,24 @@
     --fuel-bar-glow:
       drop-shadow(0 0 2px hsl(var(--fuel-bar) / 0.9))
       drop-shadow(0 0 10px hsl(var(--fuel-bar) / 0.5));
+    /* Cluster cards sit a step above the board so their outline is not the only
+       thing separating them from it. */
+    --cluster-band-idle: 0.2;
+    --cluster-band-active: 0.5;
+    --cluster-spark-fill: 0.14;
+    --cluster-surface: 222 45% 11%;
+    --cluster-stroke: 205 30% 28%;
+    --cluster-dial-face: radial-gradient(circle at 50% 30%, hsl(229 50% 22%) 0%, hsl(230 60% 12%) 55%, hsl(230 63% 8%) 100%);
+    --cluster-dial-rim:
+      inset 0 0 0 3px hsl(220 60% 75% / 0.3),
+      inset 0 8px 40px hsl(0 0% 0% / 0.6),
+      0 0 60px hsl(220 70% 27% / 0.35);
+    --cluster-hub: radial-gradient(circle at 50% 25%, hsl(231 51% 17%) 0%, hsl(231 62% 12%) 60%, hsl(230 63% 8%) 100%);
+    --cluster-hub-shadow: inset 0 0 0 2px hsl(220 50% 70% / 0.18), 0 10px 30px hsl(0 0% 0% / 0.55);
+    --cluster-sweep-o0: 0.03;
+    --cluster-sweep-o1: 0.3;
+    --cluster-sweep-o2: 0.82;
+    --cluster-needle-glow: 0 0 8px hsl(var(--primary));
   }
 
   .dark {

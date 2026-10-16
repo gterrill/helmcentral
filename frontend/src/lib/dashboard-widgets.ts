@@ -260,6 +260,12 @@ export interface GaugeWidgetConfig {
   path: string
   /** The reading under the item's source, such as oilPressure or fuel.rate. */
   suffix?: string
+  /**
+   * A cluster footer slot that reads another item than the tile's own: the
+   * starter battery, the alternator and the exhaust are different equipment from
+   * the engine. Empty reads the tile's item.
+   */
+  equipmentId?: string
   label: string
   display: GaugeDisplay
   quantity: string
@@ -372,15 +378,12 @@ export interface FuelBarRef {
 export interface ClusterFuelRail {
   side: 'left' | 'right'
   bars: FuelBarConfig[]
-  /** Caption over the total. "Total" when unset. */
-  totalLabel?: string
 }
 
 /** The fuel rail as stored. */
 export interface ClusterFuelRailRef {
   side: 'left' | 'right'
   bars: FuelBarRef[]
-  totalLabel?: string
 }
 
 /**
@@ -407,14 +410,49 @@ export interface EngineClusterConfig {
   centreIcon?: string
   corners: ClusterCorner[]
   /**
-   * Readings that get a telltale in the strip under the dial rather than a box
-   * of their own: icon, short label, value, coloured by zone. For the ones you
-   * check by glancing for a colour, not by reading a number.
+   * Which engine this tile is. `port` lays out as drawn (fuel on the left,
+   * readout cards on the right); `stbd` mirrors it, so a facing pair put their
+   * fuel on the outer edges. Absent is port.
    */
-  telltales?: GaugeWidgetConfig[]
-  /** A fuel rail down one edge (ADR 0061). */
+  side?: ClusterSide
+  /** The two arcs in the gap at the foot of the dial. */
+  arcs?: ClusterArcs
+  /** The cards under the dial: starter battery, alternator, transmission, exhaust. */
+  footer?: ClusterFooter
+  /** The fuel fan on the outer edge (ADR 0061). Its `side` follows the cluster's. */
   fuel?: ClusterFuelRailRef
 }
+
+export type ClusterSide = 'port' | 'stbd'
+
+/**
+ * The two temperature arcs in the dial's gap, readings of the cluster's engine.
+ * A slot that is not set is absent, and the tile draws nothing for it.
+ */
+export interface ClusterArcs {
+  /** Engine coolant. */
+  left?: GaugeWidgetConfig
+  /** Engine oil temperature. Most boats have no sensor for it, and the gearbox is not a substitute. */
+  right?: GaugeWidgetConfig
+}
+
+/**
+ * The footer slots, in the order the backend indexes them for the ids of zones
+ * a slot still holds. Appending is the only legal change.
+ */
+export const CLUSTER_FOOTER_SLOTS = [
+  'battery', 'altAmps', 'altWatts', 'altTemp', 'altStage', 'altLimit',
+  'transPressure', 'transTemp', 'egt',
+] as const
+
+export type ClusterFooterSlot = (typeof CLUSTER_FOOTER_SLOTS)[number]
+
+/**
+ * Each footer slot is a gauge slot, bound or absent. Transmission slots read
+ * the cluster's engine; the battery, alternator and exhaust name their own
+ * equipment item (`equipmentId`) and read a suffix of its source.
+ */
+export type ClusterFooter = { [K in ClusterFooterSlot]?: GaugeWidgetConfig }
 
 /** What the cluster tile draws: every slot has its path and zones, the rail its tanks' paths. */
 export type ResolvedClusterConfig = Omit<EngineClusterConfig, 'fuel'> & { fuel?: ClusterFuelRail }
@@ -453,10 +491,10 @@ export const POI_MAP_SUMMARY_CYCLE_SECONDS_MAX = 120
 export const POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT = 10
 
 export const CLUSTER_MAX_CORNERS = 4
-export const CLUSTER_MAX_CORNER_ROWS = 4
-export const CLUSTER_MAX_TELLTALES = 6
+/** Mirrors clusterMaxCornerRows in backend/dashboard_pages.go: one reading per card. */
+export const CLUSTER_MAX_CORNER_ROWS = 1
 /** Mirrors clusterMaxFuelBars in backend/dashboard_pages.go. */
-export const CLUSTER_MAX_FUEL_BARS = 4
+export const CLUSTER_MAX_FUEL_BARS = 2
 
 export const LAMP_STRIP_MAX_LAMPS = 16
 export const LAMP_LABEL_MAX_LENGTH = 12

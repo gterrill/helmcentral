@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'vitest'
 
 import {
-  CLUSTER_FUEL_MIN_W,
   CLUSTER_WIDGET_CONSTRAINTS,
   GRID_MARGIN,
   GRID_ROW_HEIGHT,
@@ -32,12 +31,11 @@ describe('grid row maths', () => {
 
 describe('the engine cluster resize floor', () => {
   /**
-   * Measured in the browser at scale 1, which is the shortest the tile can
-   * be: the canvas only grows past this, so a wider column costs no extra
-   * height. 32px of tile header and top padding, 228.4px of canvas,
-   * 8px of bottom padding.
+   * The card is drawn 800 x 592 and only grows past that, so 592 is the
+   * shortest the tile can be at scale 1: 32px of tile header and top padding,
+   * the canvas, 8px of bottom padding.
    */
-  const MEASURED_TILE_HEIGHT = 32 + 228.4 + 8
+  const MEASURED_TILE_HEIGHT = 32 + 592 + 8
 
   test('holds the whole tile', () => {
     expect(gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH))
@@ -48,21 +46,11 @@ describe('the engine cluster resize floor', () => {
     const slack = gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH) - MEASURED_TILE_HEIGHT
     expect(slack).toBeLessThan(GRID_ROW_HEIGHT + GRID_MARGIN)
   })
-})
 
-/**
- * A fuel rail widens the design the canvas scales against by a fifth, so the
- * floor that was fine for a bare cluster leaves a railed one scaled to nothing.
- * The height is untouched, since the rail is exactly as tall as the body.
- */
-describe('the fuel rail', () => {
-  test('costs the cluster no extra rows', () => {
-    expect(gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH))
-      .toBeGreaterThanOrEqual(32 + 228.4 + 8)
-  })
-
-  test('needs a wider column than a bare cluster', () => {
-    expect(CLUSTER_FUEL_MIN_W).toBeGreaterThan(CLUSTER_WIDGET_CONSTRAINTS.minW)
+  // The fuel fan is part of the 800-wide card, so a railed cluster needs no
+  // wider column than a bare one.
+  test('asks for half the board across', () => {
+    expect(CLUSTER_WIDGET_CONSTRAINTS.minW).toBe(6)
   })
 })
 

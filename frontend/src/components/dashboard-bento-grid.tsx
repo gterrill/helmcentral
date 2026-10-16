@@ -6,7 +6,7 @@ import '@/styles/dashboard-bento-grid.css'
 import { Copy, GripVertical, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
-import { CLUSTER_CANVAS } from '@/lib/cluster-canvas'
+import { CLUSTER_H, CLUSTER_W } from '@/lib/engine-cluster-layout'
 import { GRID_COLUMNS, GRID_MARGIN, GRID_ROW_HEIGHT, TILE_INSET_H, WALL_ROW_MARGIN, gridPixelHeight, rowsForHeight } from '@/lib/grid-metrics'
 import { isClusterWidgetId, isGaugeGroupWidgetId, isGaugeWidgetId, isEmbedWidgetId, isLampStripWidgetId, isMultiInstanceWidgetId, isPoiMapWidgetId, mergeLayoutGeometry, widgetDisplayName, type BuiltinWidgetId, type DashboardLayoutItem, type DashboardWidgetId, type GaugeDisplay } from '@/lib/dashboard-widgets'
 import { TileErrorBoundary } from '@/components/tile-error-boundary'
@@ -76,18 +76,15 @@ const TILE_CHROME_H = TILE_INSET_H + 24 + 8
  * can be and a wider column costs no extra rows.
  */
 const CLUSTER_WIDGET_CONSTRAINTS = {
-  minW: 4,
-  minH: rowsForHeight(TILE_CHROME_H + CLUSTER_CANVAS.height),
+  // The card is 800 wide and every label on it is drawn for that width: at
+  // half a column set it scales to about 0.8, the smallest the readout cards'
+  // labels stay readable at.
+  minW: 6,
+  minH: rowsForHeight(TILE_CHROME_H + CLUSTER_H),
 }
 
-/**
- * A cluster carrying a fuel rail needs a wider column (ADR 0061). The rail adds
- * 126 to a 520-wide design, so at the bare floor of 4 the whole canvas scales
- * to about 0.6 and the corner labels drop under the legibility floor. Applied
- * per widget rather than raising the constant, so a cluster with no rail keeps
- * the width it has always had.
- */
-export const CLUSTER_FUEL_MIN_W = 5
+/** The width the cluster's card is drawn for, for anything that wants to say so. */
+export const CLUSTER_DESIGN_W = CLUSTER_W
 
 export { CLUSTER_WIDGET_CONSTRAINTS, WIDGET_CONSTRAINTS }
 
@@ -209,7 +206,7 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       // purely so the rectangle still reads as occupied.
       ...(w.id === heroId ? { static: true } : {}),
       ...(isClusterWidgetId(w.id)
-        ? { ...CLUSTER_WIDGET_CONSTRAINTS, ...(w.cluster?.fuel ? { minW: CLUSTER_FUEL_MIN_W } : {}) }
+        ? CLUSTER_WIDGET_CONSTRAINTS
         : isLampStripWidgetId(w.id)
         ? LAMP_STRIP_WIDGET_CONSTRAINTS
         : isEmbedWidgetId(w.id)

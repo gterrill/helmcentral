@@ -1,13 +1,14 @@
 import type { EquipmentItem } from '@/hooks/use-inventory'
 import type { EngineProfile, EngineProfileGauge, EngineProfileZone } from '@/lib/engine-profiles'
 import { convertBetweenUnits } from '@/lib/quantities'
-import type {
-  EngineClusterConfig,
-  GaugeGroupWidgetConfig,
-  GaugeWidgetConfig,
-  GaugeZone,
-  LampStripWidgetConfig,
-  ResolvedClusterConfig,
+import {
+  CLUSTER_FOOTER_SLOTS,
+  type EngineClusterConfig,
+  type GaugeGroupWidgetConfig,
+  type GaugeWidgetConfig,
+  type GaugeZone,
+  type LampStripWidgetConfig,
+  type ResolvedClusterConfig,
 } from '@/lib/dashboard-widgets'
 
 /**
@@ -139,8 +140,17 @@ export function resolveSlot(item: TileItem, profile: EngineProfile | undefined, 
   }
 }
 
+/**
+ * Every slot of a cluster in a fixed order: ring, centre, corner rows, the two
+ * arcs, then the footer in CLUSTER_FOOTER_SLOTS order. Unset arcs and footer
+ * slots are skipped.
+ */
 function slotsOf(config: EngineClusterConfig): GaugeWidgetConfig[] {
-  return [config.ring, config.centre, ...config.corners.flatMap((c) => c.rows), ...(config.telltales ?? [])]
+  const footer = CLUSTER_FOOTER_SLOTS.map((key) => config.footer?.[key])
+  return [
+    config.ring, config.centre, ...config.corners.flatMap((c) => c.rows),
+    config.arcs?.left, config.arcs?.right, ...footer,
+  ].filter((s): s is GaugeWidgetConfig => s !== undefined)
 }
 
 /** Every slot of a cluster, for callers that need to walk them. */
@@ -155,9 +165,24 @@ export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileCo
 
   const profile = profileOf(ctx, item)
   const slot = (s: GaugeWidgetConfig) => resolveSlot(item, profile, s)
+  // A footer slot may read another item (the starter battery, the alternator,
+  // the exhaust). One whose item is gone or unmapped has no path and reads as
+  // no data; it does not fall back to the tile's engine.
+  const slotOf = (s: GaugeWidgetConfig | undefined): GaugeWidgetConfig | undefined => {
+    if (!s) return undefined
+    if (!s.equipmentId) return slot(s)
+    const own = findItem(ctx, s.equipmentId)
+    if (!own || own.signalk_source === '') return { ...s, path: '', zones: undefined }
+    return resolveSlot(own, profileOf(ctx, own), s)
+  }
+  const footer = config.footer && Object.fromEntries(
+    CLUSTER_FOOTER_SLOTS.flatMap((key) => {
+      const resolved = slotOf(config.footer?.[key])
+      return resolved ? [[key, resolved]] : []
+    }),
+  )
   const fuel = config.fuel && {
     side: config.fuel.side,
-    totalLabel: config.fuel.totalLabel,
     bars: config.fuel.bars.map((bar) => {
       const tank = findItem(ctx, bar.tankId)
       const source = tank && tank.source_kind === 'tank' ? tank.signalk_source : ''
@@ -180,7 +205,8 @@ export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileCo
       ring: slot(config.ring),
       centre: slot(config.centre),
       corners: config.corners.map((corner) => ({ ...corner, rows: corner.rows.map(slot) })),
-      telltales: config.telltales?.map(slot),
+      arcs: config.arcs && { left: slotOf(config.arcs.left), right: slotOf(config.arcs.right) },
+      footer,
       fuel,
     },
   }
