@@ -887,3 +887,244 @@ func TestNotificationAcknowledgedAtLogsAnObjectStampOnceWithoutPanicking(t *test
 		t.Fatalf("logged %d times for one unchanged object stamp, want 1:\n%s", n, buf.String())
 	}
 }
+
+// ── AIS distress notifications clear when the beacon is gone (ADR 0185) ─────
+//
+// signalk-ais-distress raises received.distress.ais-<stamp>-<MMSI> once and
+// never withdraws it. The beacon is gone once nothing has arrived for its
+// vessel context for distressBeaconGoneAfter, provided the SignalK feed itself
+// has been up and delivering for longer than that.
+
+const (
+	sartContext = "vessels.urn:mrn:imo:mmsi:970028911"
+	sartPath    = "notifications.received.distress.ais-2026-10-16T000510416Z-970028911"
+)
+
+func sartDistressValue() map[string]any {
+	return map[string]any{
+		"state":   "emergency",
+		"message": "AIS distress: SART active, 3.1 nautical miles south. Monitor channel 16.",
+		"status":  map[string]any{"canClear": false, "canAcknowledge": true, "canSilence": true},
+	}
+}
+
+func applySARTPosition(snapshot *signalKSnapshot, at time.Time) {
+	snapshot.applyDelta(signalKDelta{
+		Context: sartContext,
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 0.0}}}},
+	}, at)
+}
+
+func applySelfHeartbeat(snapshot *signalKSnapshot, at time.Time) {
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: "navigation.speedOverGround", Value: 0.0}}}},
+	}, at)
+}
+
+func applySARTNotification(snapshot *signalKSnapshot, path string, at time.Time) {
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: path, Value: sartDistressValue()}}}},
+	}, at)
+}
+
+// sartSnapshot has a SART heard at alarmNow, its distress raised, and a feed
+// connected since alarmNow.
+func sartSnapshot() *signalKSnapshot {
+	snapshot := newSignalKSnapshot()
+	snapshot.setSelfContext("vessels.self")
+	snapshot.setConnected(true)
+	snapshot.markStreamConnected(alarmNow)
+	applySARTPosition(snapshot, alarmNow)
+	applySARTNotification(snapshot, sartPath, alarmNow)
+	return snapshot
+}
+
+func TestSignalKNotificationsKeepsADistressWhileItsBeaconIsStillBeingHeard(t *testing.T) {
+	snapshot := sartSnapshot()
+	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+	applySARTPosition(snapshot, late.Add(-30*time.Second))
+	if got := signalKNotifications(snapshot, ownsNothing, late); len(got) != 1 {
+		t.Fatalf("a beacon heard recently must keep its distress, got %+v", got)
+	}
+}
+
+func TestSignalKNotificationsDropsADistressOnceItsBeaconHasBeenQuiet(t *testing.T) {
+	snapshot := sartSnapshot()
+	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+	applySelfHeartbeat(snapshot, late.Add(-10*time.Second))
+	if got := signalKNotifications(snapshot, ownsNothing, late); len(got) != 0 {
+		t.Fatalf("a beacon quiet past the window must not surface, got %+v", got)
+	}
+	// Quiet context that was evicted (absent) counts the same.
+	snapshot.evictStaleVesselContexts(late.Add(vesselContextStaleAfter))
+	applySelfHeartbeat(snapshot, late.Add(vesselContextStaleAfter))
+	if got := signalKNotifications(snapshot, ownsNothing, late.Add(vesselContextStaleAfter)); len(got) != 0 {
+		t.Fatalf("an evicted beacon must not surface, got %+v", got)
+	}
+}
+
+// During an outage, or just after a reconnect, silence proves nothing.
+func TestSignalKNotificationsNeverDeclaresABeaconGoneWithoutAHealthyFeed(t *testing.T) {
+	// Feed down: connection cleared.
+	down := sartSnapshot()
+	down.setConnected(false)
+	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+	applySelfHeartbeat(down, late.Add(-10*time.Second))
+	if got := signalKNotifications(down, ownsNothing, late); len(got) != 1 {
+		t.Fatalf("a disconnected feed must not clear a distress, got %+v", got)
+	}
+
+	// Just reconnected: connection younger than the window.
+	fresh := sartSnapshot()
+	fresh.setConnected(false)
+	fresh.setConnected(true)
+	fresh.markStreamConnected(late.Add(-time.Minute))
+	applySelfHeartbeat(fresh, late.Add(-10*time.Second))
+	if got := signalKNotifications(fresh, ownsNothing, late); len(got) != 1 {
+		t.Fatalf("a just-reconnected feed must not clear a distress, got %+v", got)
+	}
+
+	// Connected for long enough but nothing delivered in the last minute.
+	silent := sartSnapshot()
+	applySelfHeartbeat(silent, late.Add(-2*time.Minute))
+	if got := signalKNotifications(silent, ownsNothing, late); len(got) != 1 {
+		t.Fatalf("a feed that has gone silent must not clear a distress, got %+v", got)
+	}
+}
+
+// Once set aside it stays set aside while the feed cannot be trusted (a
+// reconnect replays the last known state); a real new transmission arrives
+// under a new key.
+func TestSignalKNotificationsLatchesAClearedDistressWhileTheFeedIsUntrusted(t *testing.T) {
+	snapshot := sartSnapshot()
+	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+	applySelfHeartbeat(snapshot, late.Add(-10*time.Second))
+	if got := signalKNotifications(snapshot, ownsNothing, late); len(got) != 0 {
+		t.Fatalf("setup: expected the distress cleared, got %+v", got)
+	}
+
+	// The feed drops and reconnects; the context is replayed right away.
+	snapshot.setConnected(false)
+	snapshot.setConnected(true)
+	snapshot.markStreamConnected(late.Add(time.Second))
+	applySARTPosition(snapshot, late.Add(2*time.Second))
+	if got := signalKNotifications(snapshot, ownsNothing, late.Add(3*time.Second)); len(got) != 0 {
+		t.Fatalf("a cleared distress must not return on a reconnect replay, got %+v", got)
+	}
+
+	newKey := "notifications.received.distress.ais-2026-10-16T031500000Z-970028911"
+	applySARTNotification(snapshot, newKey, late.Add(3*time.Second))
+	if got := signalKNotifications(snapshot, ownsNothing, late.Add(4*time.Second)); len(got) != 1 {
+		t.Fatalf("a new transmission under a new key must surface, got %+v", got)
+	}
+}
+
+// A beacon that drifts out of range and is then genuinely heard again, with the
+// feed healthy, brings its alarm back: the plugin will not raise a new key for
+// the same event.
+func TestSignalKNotificationsReleasesTheLatchWhenTheBeaconIsHeardAgain(t *testing.T) {
+	snapshot := sartSnapshot()
+	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+	applySelfHeartbeat(snapshot, late.Add(-10*time.Second))
+	if got := signalKNotifications(snapshot, ownsNothing, late); len(got) != 0 {
+		t.Fatalf("setup: expected the distress cleared, got %+v", got)
+	}
+
+	heardAgain := late.Add(time.Minute)
+	applySARTPosition(snapshot, heardAgain)
+	if got := signalKNotifications(snapshot, ownsNothing, heardAgain.Add(time.Second)); len(got) != 1 {
+		t.Fatalf("a beacon heard again on a healthy feed must bring its alarm back, got %+v", got)
+	}
+}
+
+// A replayed or cached update carrying an old timestamp is not the beacon
+// being heard now.
+func TestSignalKNotificationsIgnoresAReplayedBeaconUpdate(t *testing.T) {
+	snapshot := sartSnapshot()
+	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+	snapshot.applyDelta(signalKDelta{
+		Context: sartContext,
+		Updates: []signalKUpdate{{
+			Timestamp: alarmNow.UTC().Format(time.RFC3339Nano),
+			Values:    []signalKValue{{Path: "navigation.speedOverGround", Value: 0.0}},
+		}},
+	}, late.Add(-5*time.Second))
+	if got := signalKNotifications(snapshot, ownsNothing, late); len(got) != 0 {
+		t.Fatalf("a replayed old update must not keep the beacon heard, got %+v", got)
+	}
+}
+
+// The latch is bounded: once the label has left the notifications tree its
+// entry goes too.
+func TestSignalKNotificationsPrunesTheLatchOnceTheLabelIsGone(t *testing.T) {
+	snapshot := sartSnapshot()
+	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+	applySelfHeartbeat(snapshot, late.Add(-10*time.Second))
+	signalKNotifications(snapshot, ownsNothing, late)
+	if !snapshot.distressLatched(sartPath[len("notifications."):]) {
+		t.Fatalf("setup: expected the label latched")
+	}
+
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{Values: []signalKValue{{Path: sartPath, Value: map[string]any{"state": "normal"}}}}},
+	}, late.Add(time.Second))
+	signalKNotifications(snapshot, ownsNothing, late.Add(2*time.Second))
+	if snapshot.distressLatched(sartPath[len("notifications."):]) {
+		t.Fatalf("a latch entry for a label no longer in the tree must be pruned")
+	}
+}
+
+// Only the ais plugin's keys are subject to this; others stay visible.
+func TestSignalKNotificationsKeepsOtherDistressKeysAndUnparseableOnes(t *testing.T) {
+	for _, path := range []string{
+		"notifications.received.distress.something-odd",
+		"notifications.received.distress.ais-no-mmsi",
+		"notifications.received.distress.dsc-2026-10-16-970028911",
+	} {
+		snapshot := newSignalKSnapshot()
+		snapshot.setSelfContext("vessels.self")
+		snapshot.setConnected(true)
+		snapshot.markStreamConnected(alarmNow)
+		applySARTNotification(snapshot, path, alarmNow)
+		late := alarmNow.Add(24 * time.Hour)
+		applySelfHeartbeat(snapshot, late.Add(-time.Second))
+		if got := signalKNotifications(snapshot, ownsNothing, late); len(got) != 1 {
+			t.Errorf("%s must stay visible, got %+v", path, got)
+		}
+	}
+}
+
+func TestBusNotificationWatcherClearsAndLogsADistressOnceItsBeaconIsGone(t *testing.T) {
+	snapshot := sartSnapshot()
+
+	watcher := newBusNotificationWatcher(snapshot)
+	watcher.dwell = time.Second
+
+	var logBuf bytes.Buffer
+	originalOutput := log.Writer()
+	log.SetOutput(&logBuf)
+	t.Cleanup(func() { log.SetOutput(originalOutput) })
+
+	watcher.check(alarmNow)
+	events := watcher.check(alarmNow.Add(2 * time.Second))
+	if len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("setup: expected a raise, got %+v", events)
+	}
+
+	late := alarmNow.Add(distressBeaconGoneAfter + time.Minute)
+	applySelfHeartbeat(snapshot, late.Add(-5*time.Second))
+	events = watcher.check(late)
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected a clear once the beacon is gone, got %+v", events)
+	}
+	watcher.check(late.Add(time.Second))
+	if got := strings.Count(logBuf.String(), "set aside as cleared"); got != 1 {
+		t.Fatalf("expected one distress log line, got %d: %s", got, logBuf.String())
+	}
+	if !strings.Contains(logBuf.String(), "970028911") || strings.Contains(logBuf.String(), "as stale") {
+		t.Fatalf("log must be distress-specific and name the MMSI: %s", logBuf.String())
+	}
+}

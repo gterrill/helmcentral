@@ -48,6 +48,7 @@ func TestPresentNotificationGeneric(t *testing.T) {
 		{"navigation.depth", "Already.", "Navigation Depth", "Already."},
 		{"navigation.depth", "", "Navigation Depth", ""},
 		{"navigation.depth", "navigation.depth", "Navigation Depth", ""},
+		{"received.distress.dsc-whatever", "Distress relayed.", "Distress Received", "Distress relayed."},
 	}
 	for _, c := range cases {
 		title, body := presentNotification(c.path, c.message, nil)
@@ -109,6 +110,7 @@ func TestPresentNotificationWrittenTitles(t *testing.T) {
 	cases := []struct{ path, message, title, body string }{
 		{"navigation.closestApproach", "No GPS position received for more than 32 seconds", "Collision Watch Fault", "No GPS position received for more than 32 seconds."},
 		{"navigation.anchor", "Anchor dragging!", "Anchor Alarm", "Anchor dragging."},
+		{"received.distress.ais-2026-10-16T000510416Z-970028911", "AIS distress: SART active, 3.1 nautical miles south. Monitor channel 16.", "AIS Distress", "AIS distress: SART active, 3.1 nautical miles south. Monitor channel 16."},
 	}
 	for _, c := range cases {
 		title, body := presentNotification(c.path, c.message, nil)

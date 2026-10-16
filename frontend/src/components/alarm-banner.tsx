@@ -229,11 +229,11 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen, onAcknowl
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {acknowledgeable.length > 0 && (
-          <Button size="sm" variant="outline" className="shrink-0" onClick={() => void acknowledge()} disabled={acking}>
+          <Button size="sm" variant="outline" className="shrink-0 text-foreground" onClick={() => void acknowledge()} disabled={acking}>
             {acknowledgeable.length === 1 ? 'Acknowledge' : 'Acknowledge all'}
           </Button>
         )}
-        <Button size="sm" variant="outline" className="shrink-0" onClick={onOpen}>
+        <Button size="sm" variant="outline" className="shrink-0 text-foreground" onClick={onOpen}>
           View
         </Button>
       </div>

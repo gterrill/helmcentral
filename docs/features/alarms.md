@@ -120,6 +120,17 @@ when the plotter stops sending route updates and drops these two alarms from
 the board on its own within a few minutes, rather than leaving them showing
 for as long as the boat keeps running.
 
+An AIS distress alarm (a SART, man-overboard beacon or EPIRB heard over AIS) is
+titled "AIS Distress" and carries the position sentence the receiver gave, such
+as how far away it is and which way. The receiver raises it once and never
+withdraws it, so Helmcentral clears it for you about ten minutes after the
+beacon was last heard. It never does so while the feed from the instrument
+network is down, nor until that feed has been back for ten minutes, because
+silence during a loss of data says nothing about the beacon. A cleared alarm
+does not come back when the feed reconnects and replays the beacon's last
+position, but it does come back if the beacon is genuinely heard again. Helmcentral never acknowledges an
+emergency for you.
+
 ## Anomaly detection
 
 A separate set of checks (frozen and impossible sensor readings, charging

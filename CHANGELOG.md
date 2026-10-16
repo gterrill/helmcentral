@@ -11,6 +11,19 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- AIS distress alarms are now titled "AIS Distress" instead of showing the
+  receiver's internal name, and they clear on their own about ten minutes
+  after the beacon was last heard, never while the SignalK feed is down or has
+  just reconnected. Before, a SART that had stopped
+  transmitting stayed on the board indefinitely.
+
+### Fixed
+
+- The Acknowledge and View buttons in the alarm banner are readable on an
+  emergency. They were white on white.
+
 ## [0.46.0] - 2026-10-15
 
 ### Breaking

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -71,6 +72,12 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 	var out []alarmStatus
 	collectSignalKNotifications(root, nil, &out)
 
+	labels := make([]string, len(out))
+	for i, status := range out {
+		labels[i] = status.Label
+	}
+	distress := newDistressChecker(snapshot, now, labels)
+	defer distress.flush()
 	live := out[:0]
 	for _, status := range out {
 		// Label is set to exactly the bare path by notificationStatus below,
@@ -90,6 +97,11 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 			if stale, _, _, _ := nmeaNotificationIsStale(snapshot, leaf, now); stale {
 				continue
 			}
+		}
+		// ADR 0185: a received AIS distress whose beacon has left the
+		// snapshot is no longer a live alarm.
+		if gone, _ := distress.gone(status.Label); gone {
+			continue
 		}
 		// Label is also the real SignalK data path the notification is
 		// about -- Path is "notifications."+Label, which carries no meta of
@@ -196,6 +208,102 @@ func nmeaNotificationIsStale(snapshot *signalKSnapshot, leaf map[string]any, now
 	return now.Sub(listenSince) > nmeaNotificationStaleAfter, sentence, time.Time{}, false
 }
 
+const (
+	// distressReceivedPrefix is where any received distress call is filed;
+	// distressAISPrefix is the signalk-ais-distress plugin's own keys, the
+	// only ones the clear below applies to.
+	distressReceivedPrefix = "received.distress."
+	distressAISPrefix      = distressReceivedPrefix + "ais-"
+
+	// distressBeaconGoneAfter is how long a beacon's vessel context may go
+	// without a delta before its distress counts as over (ADR 0185).
+	distressBeaconGoneAfter = 10 * time.Minute
+	// distressFeedFreshWithin is how recently the stream must have delivered
+	// anything for silence to mean something.
+	distressFeedFreshWithin = time.Minute
+)
+
+// distressNotificationKey picks the beacon MMSI off the end of a
+// received.distress.ais-<stamp>-<MMSI> label.
+var distressNotificationKey = regexp.MustCompile(`-(\d{9})$`)
+
+// distressChecker decides whether received AIS distress labels are over
+// (ADR 0185). It is built from the labels in hand and reads the snapshot once,
+// in one locked call, covering only those labels' contexts; flush then writes
+// every latch change in one call.
+type distressChecker struct {
+	snapshot *signalKSnapshot
+	now      time.Time
+	mmsi     map[string]string // candidate label -> MMSI
+	view     distressView
+	latch    []string
+	release  []string
+	known    map[string]bool // labels already decided this call
+}
+
+func newDistressChecker(snapshot *signalKSnapshot, now time.Time, labels []string) *distressChecker {
+	c := &distressChecker{now: now, mmsi: map[string]string{}, known: map[string]bool{}}
+	contexts := map[string]string{}
+	for _, label := range labels {
+		if !strings.HasPrefix(label, distressAISPrefix) {
+			continue
+		}
+		if m := distressNotificationKey.FindStringSubmatch(label); m != nil {
+			c.mmsi[label] = m[1]
+			contexts[label] = signalKHistoryContextPrefix + m[1]
+		}
+	}
+	c.view = snapshot.distressView(now, distressBeaconGoneAfter, distressFeedFreshWithin, contexts)
+	c.snapshot = snapshot
+	return c
+}
+
+// gone reports whether label is a received AIS distress whose beacon has not
+// been heard for distressBeaconGoneAfter while the SignalK feed was healthy.
+// signalk-ais-distress raises the notification once and never withdraws it, so
+// the beacon going quiet is the only clear there is.
+//
+// A label declared gone stays gone while the feed cannot be trusted (a
+// reconnect replays the last known state), and is released the moment the feed
+// is trusted again and the beacon has genuinely been heard within the window.
+// A label that does not parse to an MMSI is never reported gone.
+func (c *distressChecker) gone(label string) (gone bool, mmsi string) {
+	mmsi, ok := c.mmsi[label]
+	if !ok {
+		return false, ""
+	}
+	if c.known[label] {
+		return c.view.latched[label], mmsi
+	}
+	c.known[label] = true
+
+	heardRecently := false
+	if heard, ok := c.view.heard[signalKHistoryContextPrefix+mmsi]; ok && c.now.Sub(heard) <= distressBeaconGoneAfter {
+		heardRecently = true
+	}
+	latched := c.view.latched[label]
+	switch {
+	case !c.view.trusted:
+		// keep whatever we had
+	case heardRecently && latched:
+		c.release = append(c.release, label)
+		delete(c.view.latched, label)
+	case !heardRecently && !latched:
+		c.latch = append(c.latch, label)
+		c.view.latched[label] = true
+	}
+	return c.view.latched[label], mmsi
+}
+
+// flush writes latch changes and prunes entries whose notification has left
+// the tree, in a single call, and only when there is something to change.
+func (c *distressChecker) flush() {
+	if len(c.latch)+len(c.release)+len(c.view.orphans) == 0 {
+		return
+	}
+	c.snapshot.applyDistressLatch(c.latch, c.release, c.view.orphans)
+}
+
 // notificationLeafAt walks an already-fetched notifications subtree (as
 // snapshot.nodeAt(notificationsRoot) returns it) to the leaf at a dotted
 // label -- the same string notificationStatus sets as Label -- returning nil
@@ -224,6 +332,9 @@ type nmeaStaleInfo struct {
 	Sentence string
 	LastSeen time.Time
 	EverSeen bool
+	// DistressMMSI is set instead of Sentence when the notification is a
+	// received AIS distress set aside because its beacon is gone (ADR 0185).
+	DistressMMSI string
 }
 
 // staleNMEANotificationLabels returns every currently-live (per SignalK's own
@@ -244,7 +355,17 @@ func staleNMEANotificationLabels(snapshot *signalKSnapshot, root map[string]any,
 	collectSignalKNotifications(root, nil, &out)
 
 	stale := map[string]nmeaStaleInfo{}
+	labels := make([]string, len(out))
+	for i, status := range out {
+		labels[i] = status.Label
+	}
+	distress := newDistressChecker(snapshot, now, labels)
+	defer distress.flush()
 	for _, status := range out {
+		if gone, mmsi := distress.gone(status.Label); gone {
+			stale[status.Label] = nmeaStaleInfo{DistressMMSI: mmsi}
+			continue
+		}
 		leaf := notificationLeafAt(root, status.Label)
 		if leaf == nil {
 			continue
