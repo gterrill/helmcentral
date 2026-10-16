@@ -45,16 +45,26 @@ type roleSpec struct {
 	title string // how a list names it to the operator
 	group sourceGroup
 	get   func(*vesselRoles) *string
+	// optional marks a part a boat can lack, so "none" is a valid answer.
+	// The house bank and the voltage readout battery are not optional.
+	optional bool
 }
 
+// roleNone is the stored answer "this boat has none". It is distinct from a
+// blank role (not answered yet): it completes setup, and every reader treats
+// it exactly like unset for data. No item id can equal it (ids are UUIDs), and
+// no instance id is called "none" in practice, so it is reserved for the
+// generator's AC input too.
+const roleNone = "none"
+
 var roleSpecs = []roleSpec{
-	{"house_bank", "the house bank", "House bank", sourceBattery, func(r *vesselRoles) *string { return &r.HouseBank }},
-	{"port_alternator", "the port alternator", "Port alternator", sourceAlternator, func(r *vesselRoles) *string { return &r.PortAlternator }},
-	{"starboard_alternator", "the starboard alternator", "Starboard alternator", sourceAlternator, func(r *vesselRoles) *string { return &r.StarboardAlternator }},
-	{"voltage_readout_battery", "the voltage readout battery", "Voltage readout battery", sourceBattery, func(r *vesselRoles) *string { return &r.VoltageReadoutBattery }},
-	{"shore_charger", "the shore charger", "Shore charger", sourceCharger, func(r *vesselRoles) *string { return &r.ShoreCharger }},
-	{"inverter", "the inverter", "Inverter", sourceInverter, func(r *vesselRoles) *string { return &r.Inverter }},
-	{"generator", "the generator", "Generator", sourceGenerator, func(r *vesselRoles) *string { return &r.Generator }},
+	{"house_bank", "the house bank", "House bank", sourceBattery, func(r *vesselRoles) *string { return &r.HouseBank }, false},
+	{"port_alternator", "the port alternator", "Port alternator", sourceAlternator, func(r *vesselRoles) *string { return &r.PortAlternator }, true},
+	{"starboard_alternator", "the starboard alternator", "Starboard alternator", sourceAlternator, func(r *vesselRoles) *string { return &r.StarboardAlternator }, true},
+	{"voltage_readout_battery", "the voltage readout battery", "Voltage readout battery", sourceBattery, func(r *vesselRoles) *string { return &r.VoltageReadoutBattery }, false},
+	{"shore_charger", "the shore charger", "Shore charger", sourceCharger, func(r *vesselRoles) *string { return &r.ShoreCharger }, true},
+	{"inverter", "the inverter", "Inverter", sourceInverter, func(r *vesselRoles) *string { return &r.Inverter }, true},
+	{"generator", "the generator", "Generator", sourceGenerator, func(r *vesselRoles) *string { return &r.Generator }, true},
 }
 
 func normalizeVesselRoles(r vesselRoles) vesselRoles {
@@ -89,6 +99,12 @@ func validateVesselRoles(r vesselRoles, items []sourceItem, current *vesselRoles
 		if current != nil && *spec.get(current) == id {
 			continue
 		}
+		if id == roleNone {
+			if !spec.optional {
+				return &settingsValidationError{Field: "roles." + spec.field, Message: spec.label + " can't be \"none\": choose an equipment item"}
+			}
+			continue
+		}
 		it, ok := byID[id]
 		if !ok {
 			return &settingsValidationError{Field: "roles." + spec.field, Message: spec.label + " must be an equipment item that is assigned a SignalK source"}
@@ -97,7 +113,7 @@ func validateVesselRoles(r vesselRoles, items []sourceItem, current *vesselRoles
 			return &settingsValidationError{Field: "roles." + spec.field, Message: fmt.Sprintf("%s must be a %s item, and %q is assigned to %s", spec.label, spec.group, it.Name, it.Source)}
 		}
 	}
-	if r.PortAlternator != "" && r.PortAlternator == r.StarboardAlternator {
+	if r.PortAlternator != "" && r.PortAlternator != roleNone && r.PortAlternator == r.StarboardAlternator {
 		return &settingsValidationError{Field: "roles.starboard_alternator", Message: "port and starboard must be different alternators"}
 	}
 	if r.GeneratorACInstance != "" && !alternatorInstanceIDRe.MatchString(r.GeneratorACInstance) {

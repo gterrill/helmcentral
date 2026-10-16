@@ -8,7 +8,25 @@
  * single part, such as the house bank. Roles hold item ids, never paths.
  */
 
-/** Every role is an equipment item id except the generator's AC input, which is an instance id. '' is not set. */
+/**
+ * The stored answer "this boat has none". Distinct from '' (not answered yet):
+ * it completes setup, and everything that reads a role treats it like unset
+ * for data. Only the optional roles accept it (see OPTIONAL_ROLE_FIELDS).
+ * Mirrors roleNone in backend/vessel_roles.go.
+ */
+export const ROLE_NONE = 'none'
+
+/** The roles a boat can lack. The house bank and the voltage readout battery are not on the list. */
+export const OPTIONAL_ROLE_FIELDS: readonly (keyof VesselRoles)[] = [
+  'port_alternator',
+  'starboard_alternator',
+  'shore_charger',
+  'inverter',
+  'generator',
+  'generator_ac_instance',
+]
+
+/** Every role is an equipment item id except the generator's AC input, which is an instance id. '' is not set; ROLE_NONE is "this boat has none". */
 export interface VesselRoles {
   house_bank: string
   port_alternator: string

@@ -84,15 +84,19 @@ func buildElectricalStatePayload() map[string]any {
 		vessel = vesselView{}
 	} else {
 		noteHouseBank(vessel.HouseBank)
-		noteElectricalInstances(vessel.Electrical)
+		noteElectricalInstances(vessel)
 	}
 
 	// Whether a generator is chosen comes from the settings alone, so a
 	// SignalK drop never reads as "not set up". It is null (unknown) when the
 	// vessel block cannot be read.
 	var generatorConfigured any
+	// generator_none is the operator's answer "this boat has none": unlike a
+	// blank role it is not a gap to fix, so the tile says so plainly.
+	generatorNone := false
 	if vesselErr == nil {
 		generatorConfigured = vessel.Electrical.GeneratorInstance != ""
+		generatorNone = vessel.RolesNone["generator"]
 	}
 
 	// Likewise for the house bank: a chosen bank comes from the roles alone,
@@ -129,6 +133,7 @@ func buildElectricalStatePayload() map[string]any {
 		"ac_loads_w":                 state.ACLoadsW,
 		"generator_real_power_w":     state.GeneratorRealPowerW,
 		"generator_configured":       generatorConfigured,
+		"generator_none":             generatorNone,
 		"house_bank_configured":      houseBankConfigured,
 		"alternator_0_current_a":     state.Alternator0.CurrentA,
 		"alternator_0_voltage_v":     state.Alternator0.VoltageV,
@@ -183,23 +188,31 @@ func resetElectricalUnsetLog() {
 	electricalUnsetLogged.last = ""
 }
 
-// noteElectricalInstances logs, once, which of the generator, generator AC
-// input, shore charger, inverter and voltage readout battery are not set in
-// Vessel settings, and so show no data.
-func noteElectricalInstances(e vesselElectricalSettings) {
+// electricalUnsetLine names, comma separated, the generator, generator AC
+// input, shore charger, inverter and voltage readout battery that are not
+// chosen under Settings > SignalK > Roles. A role answered "This boat has none"
+// is an answer, not a gap, and is left out.
+func electricalUnsetLine(v vesselView) string {
+	e := v.Electrical
 	var unset []string
-	for _, item := range []struct{ name, value string }{
-		{"generator", e.GeneratorInstance},
-		{"generator AC input", e.GeneratorACInstance},
-		{"shore charger", e.ShoreChargerInstance},
-		{"inverter", e.InverterInstance},
-		{"voltage readout battery", e.VoltageReadoutBattery},
+	for _, item := range []struct{ name, field, value string }{
+		{"generator", "generator", e.GeneratorInstance},
+		{"generator AC input", "generator_ac_instance", e.GeneratorACInstance},
+		{"shore charger", "shore_charger", e.ShoreChargerInstance},
+		{"inverter", "inverter", e.InverterInstance},
+		{"voltage readout battery", "voltage_readout_battery", e.VoltageReadoutBattery},
 	} {
-		if strings.TrimSpace(item.value) == "" {
+		if strings.TrimSpace(item.value) == "" && !v.RolesNone[item.field] {
 			unset = append(unset, item.name)
 		}
 	}
-	line := strings.Join(unset, ", ")
+	return strings.Join(unset, ", ")
+}
+
+// noteElectricalInstances logs, once, which of those roles are not chosen, and
+// so show no data.
+func noteElectricalInstances(v vesselView) {
+	line := electricalUnsetLine(v)
 
 	electricalUnsetLogged.mu.Lock()
 	defer electricalUnsetLogged.mu.Unlock()

@@ -223,6 +223,29 @@ re-subscribe. Helmcentral discards orphaned registrations at boot and logs
 the count, rather than allowing pushes to fail silently. Back up
 `backend/data/secrets.sqlite` and `backend/data/secrets.key` together.
 
+## Roles
+
+Which equipment item plays each single-choice part is chosen under **Settings →
+SignalK → Roles** and kept in the `roles:` block of `settings.yaml`. Each value
+is an equipment item's id, except the generator AC input, which is the AC
+circuit's instance id.
+
+| Key | Takes | Optional |
+| --- | --- | --- |
+| `house_bank` | battery item | no |
+| `voltage_readout_battery` | battery item | no |
+| `port_alternator`, `starboard_alternator` | alternator item (must differ) | yes |
+| `shore_charger` | charger item | yes |
+| `inverter` | inverter item | yes |
+| `generator` | generator item | yes |
+| `generator_ac_instance` | AC circuit instance id | yes |
+
+An empty value means the question has not been answered. An optional role also
+accepts the value `none`, which is the **This boat has none** choice: it counts
+as answered for the Setup list, and shows no figures, exactly like an empty
+role. `none` is refused for the house bank and the voltage readout battery.
+Deleting an item blanks the roles that named it and leaves `none` answers alone.
+
 ## Plugins
 
 Tide, weather, wave, points-of-interest, forecast-warning and upper-air data

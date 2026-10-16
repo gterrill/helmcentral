@@ -11,7 +11,31 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Setup list.** **Settings → SignalK** opens with a **Setup** list: connect to
+  SignalK, assign engines, choose the house bank, then the charging and power
+  sources. Only the next step shows its detail and a button that goes to the
+  exact control. On the dashboard, a quiet line under the header ("Setup: 2 of 4 done · Next: House bank") opens
+  the same place. It is worked out from the boat's
+  current state, so a step that becomes undone, such as a deleted item or a
+  cleared role, comes back by itself, and both go away when setup is done. They
+  do not appear on wall displays.
+- **Roles lists what the boat reports.** Each dropdown under **Settings →
+  SignalK → Roles** now lists, after your items, a **From the boat** group of
+  sources the boat reports that no item owns, with a live reading. Choosing one
+  makes an equipment item named after the role and picks it; the item exists at
+  once, while the role itself is saved with Save. When the boat
+  reports nothing of that kind, or SignalK isn't connected, the dropdown says so.
+- **This boat has none.** The alternators, shore charger, inverter, generator and
+  generator AC input can be answered **This boat has none**, which finishes the
+  setup step and shows no figures, the same as **Not set**. The house bank and
+  the voltage readout battery still need an item.
+
 ### Changed
+
+- The Battery & Power and Generator tiles' **Settings, SignalK, Roles** links now
+  open the house bank and generator dropdowns directly.
 
 - The Battery & Power tile now says "No house bank chosen" and links to
   **Settings, SignalK, Roles** when no house bank is chosen, instead of showing

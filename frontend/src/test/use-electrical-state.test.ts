@@ -106,6 +106,15 @@ describe('useElectricalState voltage readout and generator', () => {
     expect(result.current.generatorConfigured).toBe(false)
   })
 
+  it('says when the boat has no generator', () => {
+    const { result } = renderHook(() => useElectricalState())
+    expect(result.current.generatorNone).toBe(false)
+    emit({ datetime: '2026-09-14T00:00:00Z', generator_configured: false, generator_none: true })
+    expect(result.current.generatorNone).toBe(true)
+    emit({ datetime: '2026-09-14T00:00:00Z', generator_configured: false, generator_none: false })
+    expect(result.current.generatorNone).toBe(false)
+  })
+
   it('does not know whether a generator is set up until the backend says (initially, or null)', () => {
     const { result } = renderHook(() => useElectricalState())
     expect(result.current.generatorConfigured).toBeNull()

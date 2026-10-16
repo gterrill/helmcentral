@@ -113,16 +113,20 @@ anything:
 - **Shore**: the charger's mode and AC input current. Absent, not blank,
   while nothing is plugged in. A charger error always shows, in red, even
   before anything else about the charger has reported. It reads the shore
-  charger you picked under Settings, SignalK, Roles.
+  charger you picked under Settings, SignalK, Roles. If the boat has no shore
+  charger, answer **This boat has none** there; the line stays absent either way.
 
 The footer's left side shows the voltage of the **Voltage readout battery** you
 picked under Settings, SignalK, Roles, with the name you gave that battery,
-followed by the charge rate. With no readout battery picked, or one that is not reporting, the
+followed by the charge rate. Each Roles list offers your items first, then a
+**From the boat** group of batteries the boat reports that no item owns, with a
+live reading; choosing one makes the item and picks it. With no readout battery picked, or one that is not reporting, the
 voltage is left out rather than replaced by another battery's.
 
 With no house bank chosen, the State card is replaced by a message, "No house
 bank chosen. Choose one under Settings, SignalK, Roles", with the last part a
-link to that page. The Net card goes and Solar takes the whole row. Solar, Loads
+link to the house bank list there. The house bank, unlike the other roles, has
+no **This boat has none** answer. The Net card goes and Solar takes the whole row. Solar, Loads
 and the Shore line read as usual, and the footer still shows the voltage of the
 Voltage readout battery, but not the charge rate. A bank that is chosen but not
 reporting keeps the full layout and shows a dash (—) for its figures.
@@ -162,6 +166,19 @@ Without a position there is no sunrise to project and the segment drops
 out; with a stale feed, or the live-rate fallback switched off and too
 little history, it reads a dash. The projected percentage takes the alarm
 band colours the same as the live figure does.
+
+## Generator fields
+
+The Generator tile reads the generator you picked under Settings, SignalK,
+Roles: its state, runtime, and the power on the generator AC input, with Start
+and Stop buttons. The Roles list offers your generator items, then a **From the
+boat** group of generators the boat reports that no item owns; choosing one makes
+the item and picks it.
+
+With no generator chosen, the tile says "The generator is not set up" and links
+to the Roles list, and offers no Start or Stop. If the boat has no generator,
+choose **This boat has none** there: the tile then reads "This boat has no
+generator." with no link, and the Setup list counts the question as answered.
 
 ## Wall display fields
 

@@ -46,6 +46,10 @@ type vesselView struct {
 	// Tanks maps "<category>.<id>" (fuel.2), lower-cased, to the mapped item's
 	// name. The tank tile lists a tank only when it has one.
 	Tanks map[string]string
+	// RolesNone holds the roles (by field name, "generator_ac_instance"
+	// included) the operator answered "this boat has none". It reads as unset
+	// everywhere else in this view; only the setup status looks at it.
+	RolesNone map[string]bool
 }
 
 // vesselElectricalSettings holds bare SignalK instance ids as strings, so "0"
@@ -284,7 +288,7 @@ func resolveVesselView(roles vesselRoles, items []sourceItem) vesselView {
 	// pick resolves a role to its item, or logs once and returns false.
 	pick := func(spec roleSpec) (sourceItem, bool) {
 		id := *spec.get(&roles)
-		if id == "" {
+		if id == "" || id == roleNone {
 			noteVesselRead("role:"+spec.field, nil, "")
 			return sourceItem{}, false
 		}
@@ -324,8 +328,25 @@ func resolveVesselView(roles vesselRoles, items []sourceItem) vesselView {
 			v.Electrical.GeneratorInstance = it.Instance
 		}
 	}
-	v.Electrical.GeneratorACInstance = roles.GeneratorACInstance
+	if roles.GeneratorACInstance != roleNone {
+		v.Electrical.GeneratorACInstance = roles.GeneratorACInstance
+	}
+	for _, spec := range roleSpecs {
+		if *spec.get(&roles) == roleNone {
+			v.markRoleNone(spec.field)
+		}
+	}
+	if roles.GeneratorACInstance == roleNone {
+		v.markRoleNone("generator_ac_instance")
+	}
 	return v
+}
+
+func (v *vesselView) markRoleNone(field string) {
+	if v.RolesNone == nil {
+		v.RolesNone = map[string]bool{}
+	}
+	v.RolesNone[field] = true
 }
 
 // houseBankPath is the house bank's SignalK path, trimmed, or "" when no bank

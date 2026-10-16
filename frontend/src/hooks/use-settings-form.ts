@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { apiRequest, setQueryData } from '@/lib/api-query'
+import { apiRequest, invalidateQueries, setQueryData } from '@/lib/api-query'
 import { publishAppConfigSettings } from '@/hooks/use-app-config'
 import type { VesselRoles } from '@/lib/vessel-settings'
 
@@ -180,6 +180,9 @@ export function useSettingsForm(): UseSettingsFormResult {
       // The response is the whole document, the shape other readers of the
       // shared entry (the tide settings) take, so they follow the save.
       setQueryData(['/api/settings'], data)
+      // Saved roles (and a changed SignalK address) move the setup steps.
+      void invalidateQueries(['/api/setup/status'])
+      void invalidateQueries(['/api/vessel/discovery'])
       // Units and anchor geometry drive rendering across the dashboard, not
       // just this form, so push the authoritative response to those consumers
       // rather than making the operator reload.

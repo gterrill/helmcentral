@@ -17,6 +17,29 @@ such item owns the one thing the boat reports for it, called its SignalK source
 the name you see on tiles and alarms. A few single-choice parts, such as which
 battery is the house bank, are then picked from those items under **Roles**.
 
+## Follow the Setup list
+
+On a fresh install, **Settings → SignalK** opens with a **Setup** list, and the
+dashboard shows one quiet line under the header: "Setup: 2 of 4 done · Next:
+House bank". Choose that line, or the button under the next step in the list, and
+Helmcentral takes you to the exact control and puts the cursor on it. The steps,
+in order:
+
+1. **Connect to SignalK.** Enter the address and port, choose **Test
+   Connection**, then **Save**.
+2. **Engines.** In **Discovery**, create an item for each engine the boat reports.
+3. **House bank.** Under **Roles**, choose the house bank.
+4. **Charging and power sources.** Under **Roles**, answer the port and
+   starboard alternators, the shore charger, the inverter, the generator and the
+   generator AC input. Each takes an item, or **This boat has none**. The step
+   names the ones still open.
+
+A step counts when it is saved. Until SignalK is connected on a new install, the
+other steps wait for it. Once you have set things up, a dropped connection does
+not reopen the list; the tiles' stale indicators say so instead. The list and the dashboard line work out where you are every time you
+look, so if an instrument is renumbered, an item is deleted or a role is
+cleared, the step comes back by itself. Both go away when the last step is done.
+
 ## Assign each source to an item
 
 1. Open **Settings → SignalK**. Once Helmcentral is connected, **Discovery**
@@ -29,6 +52,15 @@ battery is the house bank, are then picked from those items under **Roles**.
    type a name such as "Port engine" and choose **Create**. A new item starts
    with just that name and the right system; fill in the rest on its own page.
 3. A row that names an item is done. Choose **Open** to go to the item.
+
+You do not have to visit Discovery first for the Roles. Each dropdown under
+**Roles** lists your items for that kind, then a **From the boat** group of
+sources the boat reports that no item owns, with a live reading, for example
+"electrical.batteries.512 · 13.24 V · 87%". Choosing one creates an item named
+after the role, such as "House bank", and picks it. If the item cannot be made,
+you are told why and the role stays as it was. When the boat reports nothing of
+that kind, the dropdown says so ("The boat isn't reporting any batteries.") or
+says SignalK isn't connected.
 
 A source belongs to one item. If another item already has it, Helmcentral says
 which one, and you free it there first. A source an item still owns that the
@@ -99,8 +131,8 @@ number is port and which is starboard.
    Discovery.
 2. Under **Roles**, set **Port alternator** and **Starboard alternator**. An
    item chosen for one side cannot be chosen for the other.
-3. Leave a side as **Not set** if the boat has no alternator there. With only one
-   side set, the tile shows a single alternator.
+3. Choose **This boat has none** if the boat has no alternator on that side. With
+   only one side set, the tile shows a single alternator.
 4. Choose **Save** in the bar across the top of the screen.
 
 A side that is not set shows no reading on the Alternators tile. Until you set
@@ -120,8 +152,9 @@ reinstalled, so Helmcentral does not assume which number is which.
    is not an item: AC meters are not equipment, so the list shows each circuit
    the boat reports with its live power. Start the generator and pick the one
    that reads load.
-4. Leave any of them as **Not set** if the boat has none. Choose **Save** in the
-   bar across the top of the screen.
+4. Choose **This boat has none** for any the boat lacks. That is an answer, and
+   it finishes the setup step; **Not set** means you have not answered yet. Both
+   show no figures. Choose **Save** in the bar across the top of the screen.
 
 What each one does:
 
@@ -157,6 +190,9 @@ Assigning a source or creating an item takes effect at once, like any change on
 an item's own page. The roles save together with the rest of Settings. The bar
 appears as soon as you change one, **Discard** puts it back, and if you try to
 leave Settings with changes unsaved you are asked first.
+
+The house bank and the voltage readout battery do not offer **This boat has
+none**: the bank is needed for most of the electrical tiles.
 
 Under **Roles**, each check shows whether it is ready, or what is still
 missing, so you always know what saving will turn on.

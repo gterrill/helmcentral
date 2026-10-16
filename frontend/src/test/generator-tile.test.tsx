@@ -174,6 +174,26 @@ test('says the generator is not set up, and offers no Start or Stop, when none i
   expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
 })
 
+test('says the boat has no generator, with no link and no controls, when the answer is none', () => {
+  render(
+    <GeneratorTile
+      {...baseProps}
+      generatorConfigured={false}
+      generatorNone
+      onOpenRoles={() => {}}
+      generatorState={null}
+      generatorRealPowerW={null}
+      batterySocPercent={null}
+      batteryRatePercentPerHour={null}
+    />,
+  )
+
+  const line = screen.getByText('This boat has no generator.')
+  expect(line).toHaveClass('text-sm', 'text-muted-foreground')
+  expect(screen.queryByText(/not set up/i)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+})
+
 test('shows neither the not-set-up message nor Start and Stop while it is not yet known whether a generator is set up', () => {
   render(<GeneratorTile {...baseProps} generatorConfigured={null} batterySocPercent={null} batteryRatePercentPerHour={null} />)
 
