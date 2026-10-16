@@ -95,10 +95,17 @@ var equipmentRefsCache = struct {
 	at    time.Time
 	refs  []equipmentRef
 	ok    bool
+	// generation counts invalidations, so a read that straddled one is not
+	// cached.
+	generation uint64
 }{}
+
+// equipmentRefsReadDone is a test seam, called between the read and the store.
+var equipmentRefsReadDone func()
 
 func invalidateEquipmentRefs() {
 	equipmentRefsCache.mu.Lock()
+	equipmentRefsCache.generation++
 	equipmentRefsCache.ok = false
 	equipmentRefsCache.refs = nil
 	equipmentRefsCache.mu.Unlock()
@@ -115,14 +122,22 @@ func listEquipmentRefs() ([]equipmentRef, error) {
 		equipmentRefsCache.mu.Unlock()
 		return refs, nil
 	}
+	generation := equipmentRefsCache.generation
 	equipmentRefsCache.mu.Unlock()
 
 	refs, err := store.EquipmentRefs()
 	if err != nil {
 		return nil, err
 	}
+	if equipmentRefsReadDone != nil {
+		equipmentRefsReadDone()
+	}
 	equipmentRefsCache.mu.Lock()
-	equipmentRefsCache.store, equipmentRefsCache.refs, equipmentRefsCache.at, equipmentRefsCache.ok = store, refs, time.Now(), true
+	// An invalidate that landed during the read means these refs may predate
+	// the edit: return them to this caller, but do not cache them as fresh.
+	if equipmentRefsCache.generation == generation {
+		equipmentRefsCache.store, equipmentRefsCache.refs, equipmentRefsCache.at, equipmentRefsCache.ok = store, refs, time.Now(), true
+	}
 	equipmentRefsCache.mu.Unlock()
 	return refs, nil
 }
