@@ -1,0 +1,34 @@
+{
+  "message": {
+    "id": "0b6415af-2b90-487b-828e-c5db090bca36",
+    "conversation_id": "c70a565c-16b4-4c96-af8b-30abc117beef",
+    "seq": 4,
+    "role": "assistant",
+    "content": "I've filled in the declaration form.\n\n### What you need to do\n\n1. **Open the completed PDF** using the card below.\n2. Sign the declaration on page 2.",
+    "model": "openai/gpt-chat-latest",
+    "prompt_tokens": 57418,
+    "completion_tokens": 607,
+    "cost_usd": 0.10024399999999999,
+    "tool_rounds": 3,
+    "created_at": "2026-10-08T01:15:00Z",
+    "form_drafts": [
+      {
+        "id": "875f43ba-e37e-4104-a855-450759a8cd30",
+        "message_id": "0b6415af-2b90-487b-828e-c5db090bca36",
+        "source_document_id": "a10ef655-4f36-404d-a321-47a6b55afa1d",
+        "title": "Pikorua Pantaenius Named Tropical Storm Declaration 2026",
+        "folder": "Insurance/2026",
+        "filename": "Named Tropical Storm Contingency Declaration form (filled in).pdf",
+        "page_count": 2,
+        "status": "draft",
+        "created_at": "2026-10-08T01:14:57Z"
+      }
+    ]
+  },
+  "conversation": {
+    "id": "c70a565c-16b4-4c96-af8b-30abc117beef",
+    "title": "Can you fill this form in for me ?",
+    "created_at": "2026-10-08T01:13:27Z",
+    "updated_at": "2026-10-08T01:15:00Z"
+  }
+}

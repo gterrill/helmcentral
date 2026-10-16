@@ -275,48 +275,58 @@ func assistantForcedFinalToolLogText(log []assistantForcedFinalToolLogEntry) str
 	return b.String()
 }
 
-// assistantEmitter pushes one named progress event to the SSE stream a
-// caller is writing (assistant_handlers.go). This file emits "status"
-// events with a {"text": "..."} payload (see assistantStatus), or {"kind":"waiting"} (assistantWaitingStatus), "delta"
-// events carrying a fragment of the round's answer text as it streams in
-// (assistantDelta), and "retract" events with an empty payload
-// (assistantRetractPayload) telling the browser to discard whatever delta
-// text it has shown for the round just finished; "message" and "error" are
-// the handler's own, sent once run has returned.
-type assistantEmitter func(event string, payload any)
-
-// assistantStatus builds the payload every status event carries.
-func assistantStatus(text string) any {
-	return map[string]string{"text": text}
+// mateEvent is one event on Mate's browser stream. The set is closed: only
+// the five types below implement it, and the frontend decodes exactly these
+// (frontend/src/lib/mate-events.ts). testdata/mate_events holds the bytes
+// each one puts on the wire, shared by both sides' tests (ADR 0189).
+type mateEvent interface {
+	mateEventName() string
 }
 
-// assistantWaitingStatus is the status payload for "waiting on the model, no
-// tool running": it carries a kind and no text, so the browser chooses what
-// to show rather than the server fixing one English phrase.
-func assistantWaitingStatus() any {
-	return map[string]string{"kind": "waiting"}
+// mateStatusEvent says what the run is doing. It carries either Text (a
+// tool call, a skipped call) or Kind "waiting" (waiting on the model, no tool
+// running, so the browser chooses the words), never both.
+type mateStatusEvent struct {
+	Text string `json:"text,omitempty"`
+	Kind string `json:"kind,omitempty"`
 }
 
-// assistantDelta builds the payload every delta event carries: one
-// fragment of the round's answer text, to be appended to whatever the
-// operator's browser has shown for this round so far. Typed the same as
-// assistantStatus's payload (a plain map[string]string) so a test's
-// recordingEmitter can read either kind of event's text the same way.
-func assistantDelta(text string) any {
-	return map[string]string{"text": text}
+// mateWaitingStatus is the status for "waiting on the model, no tool running".
+func mateWaitingStatus() mateStatusEvent { return mateStatusEvent{Kind: "waiting"} }
+
+// mateDeltaEvent is one fragment of the round's answer text as it streams in.
+type mateDeltaEvent struct {
+	Text string `json:"text"`
 }
 
-// assistantRetractPayload builds the payload every retract event carries:
-// an intentionally empty object. A retract event exists purely to tell the
-// browser "throw away what I showed you for this round" - the round's text
-// doesn't need to travel again to say that, and typing it as
-// map[string]string{} (rather than, say, struct{}{}) keeps it in the same
-// family as assistantStatus/assistantDelta's payloads so a test helper that
-// only knows how to read a map[string]string off an event payload still
-// works uniformly across all three event kinds.
-func assistantRetractPayload() any {
-	return map[string]string{}
+// mateRetractEvent tells the browser to discard the delta text it has shown
+// for the round just finished (the round ended in a tool call).
+type mateRetractEvent struct{}
+
+// mateMessageEvent is the stored reply and its conversation, sent once when
+// the run succeeds. Conversation is declared first to keep the key order the
+// wire has always had.
+type mateMessageEvent struct {
+	Conversation assistantConversation `json:"conversation"`
+	Message      assistantMessage      `json:"message"`
 }
+
+// mateErrorEvent ends a run that failed or was stopped.
+type mateErrorEvent struct {
+	Error string `json:"error"`
+}
+
+func (mateStatusEvent) mateEventName() string  { return "status" }
+func (mateDeltaEvent) mateEventName() string   { return "delta" }
+func (mateRetractEvent) mateEventName() string { return "retract" }
+func (mateMessageEvent) mateEventName() string { return "message" }
+func (mateErrorEvent) mateEventName() string   { return "error" }
+
+// assistantEmitter pushes one progress event to the SSE stream a caller is
+// writing (assistant_handlers.go). The runner emits status, delta and
+// retract; "message" and "error" are the handler's own, sent once run has
+// returned.
+type assistantEmitter func(mateEvent)
 
 // assistantToolExecutor is the minimal seam the loop needs from its tool
 // dependencies. assistantToolDeps (assistant_tools.go) satisfies it in
@@ -658,7 +668,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	var reply assistantReply
 
 	for round := 0; ; round++ {
-		r.emit("status", assistantWaitingStatus())
+		r.emit(mateWaitingStatus())
 
 		// session_id makes OpenRouter keep this conversation on one
 		// provider, so its prompt cache is reused. Without it the routing
@@ -739,7 +749,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			if safeLen <= emittedLen {
 				return
 			}
-			r.emit("delta", assistantDelta(text[emittedLen:safeLen]))
+			r.emit(mateDeltaEvent{Text: text[emittedLen:safeLen]})
 			emittedLen = safeLen
 			deltaEmitted = true
 		}
@@ -781,7 +791,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			// was still withholding, so the operator sees the reply in
 			// full rather than missing its last few bytes.
 			if tail := content[emittedLen:]; tail != "" {
-				r.emit("delta", assistantDelta(tail))
+				r.emit(mateDeltaEvent{Text: tail})
 			}
 			reply.Content = content
 			return reply, nil
@@ -798,7 +808,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		// whatever was shown has to be visibly withdrawn before the tool
 		// statuses below start arriving (ADR 0093 §2).
 		if deltaEmitted {
-			r.emit("retract", assistantRetractPayload())
+			r.emit(mateRetractEvent{})
 		}
 
 		toolMessages, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
@@ -926,7 +936,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			}
 			log.Printf("assistant: tool %s REFUSED, round already at the %d-call limit", call.Function.Name, assistantMaxToolCallsPerRound)
 			mu.Lock()
-			r.emit("status", assistantStatus(fmt.Sprintf("%s was not run: this round asked for more than %d tool calls", call.Function.Name, assistantMaxToolCallsPerRound)))
+			r.emit(mateStatusEvent{Text: fmt.Sprintf("%s was not run: this round asked for more than %d tool calls", call.Function.Name, assistantMaxToolCallsPerRound)})
 			mu.Unlock()
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
 			continue
@@ -951,7 +961,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			}
 			log.Printf("assistant: tool %s WITHHELD, already failed %d times", call.Function.Name, assistantMaxToolFailures)
 			mu.Lock()
-			r.emit("status", assistantStatus(fmt.Sprintf("%s is unavailable after %d failures, skipping", call.Function.Name, assistantMaxToolFailures)))
+			r.emit(mateStatusEvent{Text: fmt.Sprintf("%s is unavailable after %d failures, skipping", call.Function.Name, assistantMaxToolFailures)})
 			mu.Unlock()
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
 			continue
@@ -974,7 +984,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 		}
 
 		mu.Lock()
-		r.emit("status", assistantStatus(describeAssistantToolCall(call.Function.Name, args)))
+		r.emit(mateStatusEvent{Text: describeAssistantToolCall(call.Function.Name, args)})
 		mu.Unlock()
 		log.Printf("assistant: tool %s %s", call.Function.Name, compactAssistantToolArgs(args))
 
@@ -1001,7 +1011,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 				}
 				result = string(errBody)
 				mu.Lock()
-				r.emit("status", assistantStatus(fmt.Sprintf("%s failed: %s", call.Function.Name, oneLine)))
+				r.emit(mateStatusEvent{Text: fmt.Sprintf("%s failed: %s", call.Function.Name, oneLine)})
 				mu.Unlock()
 			} else {
 				log.Printf("assistant: tool %s -> %d chars in %s%s", call.Function.Name, len(result), elapsed, assistantFindPlacesLogSuffix(call.Function.Name, result))

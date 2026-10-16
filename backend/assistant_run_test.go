@@ -346,16 +346,15 @@ type recordedEvent struct {
 
 func recordingEmitter() (assistantEmitter, *[]recordedEvent) {
 	events := make([]recordedEvent, 0)
-	emit := func(event string, payload any) {
-		text := ""
-		if m, ok := payload.(map[string]string); ok {
-			text = m["text"]
+	emit := func(ev mateEvent) {
+		rec := recordedEvent{event: ev.mateEventName()}
+		switch e := ev.(type) {
+		case mateStatusEvent:
+			rec.text, rec.kind = e.Text, e.Kind
+		case mateDeltaEvent:
+			rec.text = e.Text
 		}
-		kind := ""
-		if m, ok := payload.(map[string]string); ok {
-			kind = m["kind"]
-		}
-		events = append(events, recordedEvent{event: event, text: text, kind: kind})
+		events = append(events, rec)
 	}
 	return emit, &events
 }

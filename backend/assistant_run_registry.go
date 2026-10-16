@@ -71,12 +71,10 @@ func newAssistantRun(cancelFn context.CancelFunc) *assistantRun {
 }
 
 // append adds one event to the log and wakes every current subscriber.
-// Marshalling happens once, here, rather than once per subscriber - the
-// same shape assistantEmitter's callers already expect (assistant_run.go's
-// assistantStatus/assistantDelta/assistantRetractPayload all return a plain
-// value meant to be marshalled, not JSON already).
-func (r *assistantRun) append(event string, payload any) {
-	data, err := json.Marshal(payload)
+// Marshalling happens once, here, rather than once per subscriber.
+func (r *assistantRun) append(ev mateEvent) {
+	event := ev.mateEventName()
+	data, err := json.Marshal(ev)
 	if err != nil {
 		log.Printf("assistant: marshal %s event for run: %v", event, err)
 		return

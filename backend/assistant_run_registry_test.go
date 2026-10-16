@@ -42,7 +42,7 @@ func TestAssistantRun_StalledSubscriberDoesNotBlockAppends(t *testing.T) {
 	// Seed one event so the stalled subscriber's first snapshot read has
 	// something to write and gets stuck on that Write call, exactly like a
 	// client whose socket never drains.
-	run.append("status", assistantStatus("Thinking…"))
+	run.append(mateStatusEvent{Text: "Thinking…"})
 	go streamAssistantRun(subscriberCtx, run, 0, stalled)
 
 	// Give the stalled goroutine a moment to actually reach the blocking
@@ -54,9 +54,9 @@ func TestAssistantRun_StalledSubscriberDoesNotBlockAppends(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		for i := 0; i < 5000; i++ {
-			run.append("delta", assistantDelta("x"))
+			run.append(mateDeltaEvent{Text: "x"})
 		}
-		run.append("message", map[string]string{"content": "done"})
+		run.append(mateMessageEvent{Message: assistantMessage{Content: "done"}})
 		run.finish()
 		close(done)
 	}()
@@ -76,8 +76,8 @@ func TestAssistantRun_StalledSubscriberDoesNotBlockAppends(t *testing.T) {
 // is called - after, not before, the final event is visible.
 func TestAssistantRun_ReplaysLogThenLiveEvents(t *testing.T) {
 	run := newAssistantRun(func() {})
-	run.append("status", assistantStatus("Thinking…"))
-	run.append("delta", assistantDelta("Tongue "))
+	run.append(mateStatusEvent{Text: "Thinking…"})
+	run.append(mateDeltaEvent{Text: "Tongue "})
 
 	var sb strings.Builder
 	w := &syncBufferSSEWriter{sb: &sb}
@@ -90,10 +90,10 @@ func TestAssistantRun_ReplaysLogThenLiveEvents(t *testing.T) {
 
 	waitForSubstring(t, w, "event: delta\ndata: {\"text\":\"Tongue \"}", time.Second)
 
-	run.append("delta", assistantDelta("Bay"))
+	run.append(mateDeltaEvent{Text: "Bay"})
 	waitForSubstring(t, w, "event: delta\ndata: {\"text\":\"Bay\"}", time.Second)
 
-	run.append("message", map[string]string{"content": "Tongue Bay"})
+	run.append(mateMessageEvent{Message: assistantMessage{Content: "Tongue Bay"}})
 	run.finish()
 
 	select {
