@@ -13,6 +13,7 @@ import {
   type EquipmentTileContext,
   type TileItem,
 } from '@/lib/equipment-tiles'
+import { convertBetweenUnits } from '@/lib/quantities'
 
 const yanmar: EngineProfile = {
   id: 'yanmar-4jh', name: 'Yanmar 4JH', kind: 'engine',
@@ -273,6 +274,17 @@ describe('zones a converted tile still holds', () => {
     expect(plan.conflicts).toHaveLength(1)
     expect(plan.conflicts[0].profileText).toBe('below 2 bar, warn')
     expect(plan.conflicts[0].tileText).toMatch(/^below 1\.0\d* bar, alarm$/)
+  })
+
+  it('stays on the tile when a unit is not one the quantity knows, never converted by guess', () => {
+    expect(convertBetweenUnits(1, 'pressure', 'furlongs', 'bar')).toBeNull()
+    expect(convertBetweenUnits(1, 'pressure', 'psi', 'furlongs')).toBeNull()
+    expect(convertBetweenUnits(1, 'nonsense', 'psi', 'bar')).toBeNull()
+    expect(convertBetweenUnits(14.5038, 'pressure', 'psi', 'bar')).toBeCloseTo(1, 2)
+    const plan = planTileZones(bare, [{ ...heldOil, unit: 'furlongs' }])
+    expect(plan.moves).toEqual([])
+    expect(plan.conflicts).toEqual([])
+    expect(plan.stays).toEqual(['Oil'])
   })
 
   it('stays on the tile when there is no profile, or no gauge for the reading', () => {
