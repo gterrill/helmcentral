@@ -86,6 +86,23 @@ func offerableSources(disc discoveryResponse, kind string) int {
 	return n
 }
 
+// batteryChoices counts what the Roles picker lists for the house bank: the
+// battery items that own a source, then the unowned sources the boat reports.
+func batteryChoices(disc discoveryResponse) int {
+	n := offerableSources(disc, "battery")
+	for _, g := range disc.Groups {
+		if g.Kind != "battery" {
+			continue
+		}
+		for _, r := range g.Rows {
+			if r.Item != nil {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // anythingSetUp is true once an item owns a SignalK source or any role has
 // been answered. From then on a dropped feed is the stale indicators' business,
 // not the checklist's.
@@ -234,8 +251,8 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse) setupStatus {
 		bank.State, bank.Detail = blockedBy()
 	default:
 		bank.State = setupTodo
-		if reporting := offerableSources(disc, "battery"); reporting > 0 {
-			bank.Detail = "Choose which of the " + countOf(reporting, "battery", "batteries") + " the boat reports is the house bank."
+		if choices := batteryChoices(disc); choices > 0 {
+			bank.Detail = "Choose which of the " + countOf(choices, "battery", "batteries") + " is the house bank."
 		} else {
 			bank.Detail = "The boat isn't reporting any batteries."
 		}
