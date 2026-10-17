@@ -335,7 +335,9 @@ func resolveVesselView(roles vesselRoles, items []sourceItem) vesselView {
 	if id := roles.HouseBank; id != "" && id != roleNone && v.HouseBank == nil {
 		v.HouseBankUnresolved = true
 	}
-	if roles.GeneratorACInstance != roleNone {
+	// With no generator there is no generator AC input, whatever an earlier
+	// choice left in the block.
+	if roles.GeneratorACInstance != roleNone && roles.Generator != roleNone {
 		v.Electrical.GeneratorACInstance = roles.GeneratorACInstance
 	}
 	for _, spec := range roleSpecs {

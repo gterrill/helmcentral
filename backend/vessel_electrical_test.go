@@ -647,3 +647,10 @@ func TestElectricalPayloadHouseBankWithoutASourceIsUnresolvedNotUnchosen(t *test
 		t.Fatalf("no bank: configured=%v unresolved=%v", p["house_bank_configured"], p["house_bank_unresolved"])
 	}
 }
+
+func TestElectricalUnsetLineLeavesOutTheGeneratorACInputWhenThereIsNoGenerator(t *testing.T) {
+	got := electricalUnsetLine(vesselView{RolesNone: map[string]bool{"generator": true}})
+	if strings.Contains(got, "generator") {
+		t.Fatalf("no generator means no AC input to choose: %q", got)
+	}
+}

@@ -179,3 +179,15 @@ func TestRoleNamingAnItemWithoutASourceIsFlaggedUnresolved(t *testing.T) {
 		t.Fatal("a blank role is not unresolved")
 	}
 }
+
+// A stale generator AC input saved before the generator was set to none must
+// not keep feeding generator power.
+func TestGeneratorNoneIgnoresAStaleACInput(t *testing.T) {
+	v := resolveVesselView(vesselRoles{Generator: roleNone, GeneratorACInstance: "3"}, nil)
+	if v.Electrical.GeneratorACInstance != "" {
+		t.Fatalf("got AC input %q with no generator", v.Electrical.GeneratorACInstance)
+	}
+	if v := resolveVesselView(vesselRoles{GeneratorACInstance: "3"}, nil); v.Electrical.GeneratorACInstance != "3" {
+		t.Fatalf("an unset generator keeps the AC input, got %q", v.Electrical.GeneratorACInstance)
+	}
+}

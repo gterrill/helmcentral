@@ -206,6 +206,10 @@ func electricalUnsetLine(v vesselView) string {
 		{"inverter", "inverter", e.InverterInstance},
 		{"voltage readout battery", "voltage_readout_battery", e.VoltageReadoutBattery},
 	} {
+		// No generator means no generator AC input to choose.
+		if item.field == "generator_ac_instance" && v.RolesNone["generator"] {
+			continue
+		}
 		if strings.TrimSpace(item.value) == "" && !v.RolesNone[item.field] {
 			unset = append(unset, item.name)
 		}
