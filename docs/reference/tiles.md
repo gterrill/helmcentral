@@ -131,6 +131,11 @@ and the Shore line read as usual, and the footer still shows the voltage of the
 Voltage readout battery, but not the charge rate. A bank that is chosen but not
 reporting keeps the full layout and shows a dash (—) for its figures.
 
+If the item chosen as the house bank has lost its SignalK source, or has been
+deleted, the same card says "The house bank's item has no SignalK source.
+Choose it again under Settings, SignalK, Roles", and the House bank setup step
+says the same. Roles shows the choice as "Item no longer assigned".
+
 The state-of-charge number and bar only turn amber or red once you have set
 a matching alarm rule; see [Set battery state-of-charge
 bands](../how-to/set-battery-state-of-charge-bands.md).

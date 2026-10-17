@@ -344,3 +344,12 @@ func TestSetupStatusAnItemOwningASourceCountsAsSetUp(t *testing.T) {
 		t.Fatal("an item that owns a source means setup exists")
 	}
 }
+
+func TestSetupStatusHouseBankItemWithoutASourceSaysSo(t *testing.T) {
+	for _, connected := range []bool{true, false} {
+		st := stepByID(t, buildSetupStatus(vesselView{HouseBankUnresolved: true}, discoveryResponse{Connected: connected}), "house_bank")
+		if st.State != setupTodo || !strings.Contains(st.Detail, "has no SignalK source") {
+			t.Errorf("connected=%v: %+v", connected, st)
+		}
+	}
+}

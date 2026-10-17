@@ -30,6 +30,10 @@ import (
 type vesselView struct {
 	Engines   []vesselEngineSetting
 	HouseBank *vesselHouseBankSetting
+	// HouseBankUnresolved is true when the house bank role holds an item id
+	// but that item has no SignalK source (or no longer exists), so HouseBank
+	// is nil though the operator did choose one.
+	HouseBankUnresolved bool
 	// Batteries are the mapped items' names for electrical.batteries.<id>
 	// instances (sensor_names.go). An instance with no item has no operator
 	// name.
@@ -327,6 +331,9 @@ func resolveVesselView(roles vesselRoles, items []sourceItem) vesselView {
 		case "generator":
 			v.Electrical.GeneratorInstance = it.Instance
 		}
+	}
+	if id := roles.HouseBank; id != "" && id != roleNone && v.HouseBank == nil {
+		v.HouseBankUnresolved = true
 	}
 	if roles.GeneratorACInstance != roleNone {
 		v.Electrical.GeneratorACInstance = roles.GeneratorACInstance

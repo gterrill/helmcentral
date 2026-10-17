@@ -622,3 +622,14 @@ test('with no house bank chosen, Settings, SignalK, Roles is a button that opens
   fireEvent.click(screen.getByRole('button', { name: 'Settings, SignalK, Roles' }))
   expect(onOpenRoles).toHaveBeenCalledTimes(1)
 })
+
+test('a house bank whose item lost its SignalK source says to choose it again, not that none is chosen', () => {
+  const onOpenRoles = vi.fn()
+  render(<BatteryPowerTile {...baseProps} houseBankConfigured houseBankUnresolved batterySocPercent={null} onOpenRoles={onOpenRoles} />)
+
+  expect(screen.getByText(/The house bank's item has no SignalK source\./)).toBeInTheDocument()
+  expect(screen.queryByText(/No house bank chosen/)).not.toBeInTheDocument()
+  expect(screen.queryByText('%')).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Settings, SignalK, Roles' }))
+  expect(onOpenRoles).toHaveBeenCalledTimes(1)
+})

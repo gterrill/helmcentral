@@ -88,3 +88,6 @@ generator could never finish.
   everywhere else. Deleting an item leaves other roles' `none` answers alone.
 - The status counts saved state: a role chosen in the Roles form counts once the
   Save bar has saved it.
+- A house bank role whose item has lost its source is distinct from no bank
+  chosen: the electrical state carries `house_bank_unresolved`, the tile and the
+  House bank step tell the operator to choose the item again.

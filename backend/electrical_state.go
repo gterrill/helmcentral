@@ -102,9 +102,12 @@ func buildElectricalStatePayload() map[string]any {
 	// Likewise for the house bank: a chosen bank comes from the roles alone,
 	// so a missing state-of-charge reading cannot tell "no bank chosen" from
 	// "bank not reporting". Null when the vessel block cannot be read.
-	var houseBankConfigured any
+	// house_bank_unresolved is the bank the operator did choose whose item has
+	// since lost its SignalK source.
+	var houseBankConfigured, houseBankUnresolved any
 	if vesselErr == nil {
-		houseBankConfigured = vessel.houseBankPath() != ""
+		houseBankConfigured = vessel.houseBankPath() != "" || vessel.HouseBankUnresolved
+		houseBankUnresolved = vessel.HouseBankUnresolved
 	}
 
 	if signalkURL != "" {
@@ -135,6 +138,7 @@ func buildElectricalStatePayload() map[string]any {
 		"generator_configured":       generatorConfigured,
 		"generator_none":             generatorNone,
 		"house_bank_configured":      houseBankConfigured,
+		"house_bank_unresolved":      houseBankUnresolved,
 		"alternator_0_current_a":     state.Alternator0.CurrentA,
 		"alternator_0_voltage_v":     state.Alternator0.VoltageV,
 		"alternator_0_power_w":       state.Alternator0.PowerW,

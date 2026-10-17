@@ -52,6 +52,10 @@ func enginesAssigned(v vesselView) bool { return len(v.Engines) >= 1 }
 // battery source.
 func houseBankChosen(v vesselView) bool { return v.houseBankPath() != "" }
 
+// houseBankUnresolvedDetail is said wherever the house bank role names an item
+// that has lost its SignalK source: the tile and the setup step.
+const houseBankUnresolvedDetail = "The house bank's item has no SignalK source. Choose it again under Settings, SignalK, Roles."
+
 // powerRoles are the parts the "Charging and power sources" step asks about,
 // in the order they are offered. Each is answered by choosing an item or "This
 // boat has none".
@@ -247,6 +251,8 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse) setupStatus {
 	switch {
 	case houseBankChosen(vessel):
 		bank.State, bank.Detail = setupDone, "A house bank is chosen."
+	case vessel.HouseBankUnresolved:
+		bank.State, bank.Detail = setupTodo, houseBankUnresolvedDetail
 	case !connected:
 		bank.State, bank.Detail = blockedBy()
 	default:

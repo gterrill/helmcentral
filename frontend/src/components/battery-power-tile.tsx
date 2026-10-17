@@ -45,6 +45,8 @@ export interface BatteryPowerTileProps {
    * ordinary layout, a chosen bank that is not reporting showing dashes.
    */
   houseBankConfigured?: boolean | null
+  /** The chosen house bank's item has lost its SignalK source: choose it again. */
+  houseBankUnresolved?: boolean
   /**
    * Opens Settings, SignalK, Roles. Absent on the wall display, where the
    * message is plain text because a kiosk has nowhere to go.
@@ -193,7 +195,8 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
     : '—'
 
   // False only when the roles say so; null (not yet known) draws the usual tile.
-  const noBank = props.houseBankConfigured === false
+  const bankUnresolved = props.houseBankUnresolved === true
+  const noBank = props.houseBankConfigured === false || bankUnresolved
   // With no readout battery chosen the voltage is not shown at all, rather than
   // a dash under a name nothing has been picked for.
   const voltageReadoutShown = voltageReadoutV !== null && voltageReadoutLabel !== null
@@ -294,7 +297,9 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
           {noBank ? (
             <>
               <p className="text-sm text-muted-foreground">
-                No house bank chosen. Choose one under{' '}
+                {bankUnresolved
+                  ? "The house bank's item has no SignalK source. Choose it again under"
+                  : 'No house bank chosen. Choose one under'}{' '}
                 {props.onOpenRoles
                   ? <button type="button" className="underline" onClick={props.onOpenRoles}>Settings, SignalK, Roles</button>
                   : 'Settings, SignalK, Roles'}.
