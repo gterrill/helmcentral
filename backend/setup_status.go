@@ -302,14 +302,16 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse) setupStatus {
 
 // GET /api/setup/status
 func getSetupStatusHandler(c echo.Context) error {
-	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	roles, err := loadVesselRoles(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read the vessel"})
 	}
+	// The items are read once and shared by the vessel view and discovery.
 	items, err := listSourceItems()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read equipment items"})
 	}
+	vessel := resolveVesselView(roles, items)
 	return c.JSON(http.StatusOK, buildSetupStatus(vessel, vesselDiscovery(globalSignalKSnapshot, vessel, items)))
 }
 
