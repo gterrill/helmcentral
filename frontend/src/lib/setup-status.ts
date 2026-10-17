@@ -74,12 +74,6 @@ export function clearPendingSetupFocus(): void {
   pending = null
 }
 
-export function takePendingSetupFocus(): string | null {
-  const control = peekPendingSetupFocus()
-  pending = null
-  return control
-}
-
 /** Scrolls to and focuses the control with this DOM id. False when it is not drawn (yet). */
 export function focusSetupControl(control: string): boolean {
   const el = document.getElementById(control)

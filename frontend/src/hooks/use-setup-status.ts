@@ -7,7 +7,7 @@ const KEY = ['/api/setup/status']
  * How far first-run setup has got (GET /api/setup/status): SignalK connected,
  * engines, house bank, charging and power sources. Computed on the server from
  * live state on every read, so a step that becomes undone comes back by itself.
- * Re-read every 15 s while setup is unfinished; once complete, every 5 minutes.
+ * Re-read every minute while setup is unfinished; once complete, every 5 minutes.
  * Saves and equipment changes invalidate it, so a step that becomes undone shows
  * at once.
  *
@@ -20,7 +20,7 @@ export function useSetupStatus(enabled = true) {
     queryKey: KEY,
     path: '/api/setup/status',
     enabled,
-    refetchInterval: complete ? 300_000 : 15_000,
+    refetchInterval: complete ? 300_000 : 60_000,
     select: (body: SetupStatus) => ({
       steps: Array.isArray(body.steps) ? body.steps : [],
       complete: body.complete === true,
