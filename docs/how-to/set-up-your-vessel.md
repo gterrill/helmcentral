@@ -33,6 +33,8 @@ in order:
    starboard alternators, the shore charger, the inverter, the generator and the
    generator AC input. Each takes an item, or **This boat has none**. The step
    names the ones still open.
+   Setting the generator to **This boat has none** also clears the generator AC
+   input, which the generator no longer needs.
 
 A step counts when it is saved. Until SignalK is connected on a new install, the
 other steps wait for it. Once you have set things up, a dropped connection does

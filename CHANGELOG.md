@@ -11,38 +11,44 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-10-17
+
 ### Added
 
 - **Setup list.** **Settings → SignalK** opens with a **Setup** list: connect to
   SignalK, assign engines, choose the house bank, then the charging and power
-  sources. Only the next step shows its detail and a button that goes to the
-  exact control. On the dashboard, a quiet line under the header ("Setup: 2 of 4 done · Next: House bank") opens
-  the same place. It is worked out from the boat's
-  current state, so a step that becomes undone, such as a deleted item or a
-  cleared role, comes back by itself, and both go away when setup is done. They
-  do not appear on wall displays.
+  sources. Only the next step shows its detail, with a button that goes to the
+  exact control. On the dashboard, a quiet line under the header ("Setup: 2 of
+  4 done · Next: House bank") opens the same place. Both are worked out from
+  what is saved, so a step that comes undone, such as a deleted item or a
+  cleared role, comes back by itself, and both go away when setup is done. A
+  SignalK dropout does not reopen a finished setup. Neither appears on wall
+  displays.
 - **Roles lists what the boat reports.** Each dropdown under **Settings →
   SignalK → Roles** now lists, after your items, a **From the boat** group of
-  sources the boat reports that no item owns, with a live reading. Choosing one
-  makes an equipment item named after the role and picks it; the item exists at
-  once, while the role itself is saved with Save. When the boat
-  reports nothing of that kind, or SignalK isn't connected, the dropdown says so.
-- **This boat has none.** The alternators, shore charger, inverter, generator and
-  generator AC input can be answered **This boat has none**, which finishes the
-  setup step and shows no figures, the same as **Not set**. The house bank and
-  the voltage readout battery still need an item.
+  sources no item owns, with the boat's own name and a live reading. Choosing
+  one makes an equipment item named after the role and picks it; the item
+  exists at once, while the role itself is saved with **Save**. When the boat
+  reports nothing of that kind, or SignalK isn't connected, the dropdown says
+  so.
+- **This boat has none.** The alternators, shore charger, inverter, generator
+  and generator AC input can be answered **This boat has none**, which finishes
+  that setup step and shows no figures, the same as **Not set**. With no
+  generator, its AC input is not needed and is cleared. The house bank and the
+  voltage readout battery still need an item.
 
 ### Changed
 
-- The Battery & Power and Generator tiles' **Settings, SignalK, Roles** links now
-  open the house bank and generator dropdowns directly.
-
 - The Battery & Power tile now says "No house bank chosen" and links to
   **Settings, SignalK, Roles** when no house bank is chosen, instead of showing
-  dashes that looked like a bank that had stopped reporting. Solar, Loads, Shore
-  and the readout battery's voltage still show. A chosen bank that is not
-  reporting still shows a dash (—). The Generator tile's "not set up" message
-  also points to Roles now, where it used to name Settings, Vessel.
+  dashes that looked like a bank that had stopped reporting. If the chosen
+  bank's item has lost its SignalK source, it says that instead. Solar, Loads,
+  Shore and the readout battery's voltage still show. A chosen bank that is not
+  reporting still shows a dash (—).
+- The Generator tile's "not set up" message points to **Settings, SignalK,
+  Roles**, where it used to name Settings, Vessel. With the generator answered
+  **This boat has none**, it says the boat has no generator.
+- Both tiles' links open the house bank and generator dropdowns directly.
 
 ## [0.47.0] - 2026-10-16
 
@@ -1383,7 +1389,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.47.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.48.0...HEAD
+[0.48.0]: https://github.com/gterrill/helmcentral/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/gterrill/helmcentral/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/gterrill/helmcentral/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/gterrill/helmcentral/compare/v0.44.0...v0.45.0

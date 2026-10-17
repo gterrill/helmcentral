@@ -628,3 +628,29 @@ func TestElectricalUnsetLineLeavesOutRolesAnsweredNone(t *testing.T) {
 		t.Fatalf("unanswered roles are listed: %q", got)
 	}
 }
+
+// A role holding an item that has lost its source is not "no bank chosen":
+// the tile has to say the item needs choosing again.
+func TestElectricalPayloadHouseBankWithoutASourceIsUnresolvedNotUnchosen(t *testing.T) {
+	vesselFixtureStore(t)
+	settingsPath := writeVesselTestSettings(t, "roles:\n  house_bank: gone-item\n")
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	seedSelfTree(t, electricalInstancesTree)
+	p := buildElectricalStatePayload()
+	if p["house_bank_configured"] != true || p["house_bank_unresolved"] != true {
+		t.Fatalf("configured=%v unresolved=%v", p["house_bank_configured"], p["house_bank_unresolved"])
+	}
+
+	saveElectricalVessel(t, vesselView{})
+	p = buildElectricalStatePayload()
+	if p["house_bank_configured"] != false || p["house_bank_unresolved"] != false {
+		t.Fatalf("no bank: configured=%v unresolved=%v", p["house_bank_configured"], p["house_bank_unresolved"])
+	}
+}
+
+func TestElectricalUnsetLineLeavesOutTheGeneratorACInputWhenThereIsNoGenerator(t *testing.T) {
+	got := electricalUnsetLine(vesselView{RolesNone: map[string]bool{"generator": true}})
+	if strings.Contains(got, "generator") {
+		t.Fatalf("no generator means no AC input to choose: %q", got)
+	}
+}

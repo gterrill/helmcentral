@@ -1069,6 +1069,7 @@ function AppShell() {
     generatorConfigured,
     generatorNone,
     houseBankConfigured,
+    houseBankUnresolved,
     alternator0,
     alternator1,
     charger0CurrentA,
@@ -1857,6 +1858,7 @@ function AppShell() {
             socBands={socBands}
             overnight={overnight}
             houseBankConfigured={houseBankConfigured}
+            houseBankUnresolved={houseBankUnresolved}
             // The wall display shares this render; a kiosk has no Settings to go to.
             onOpenRoles={isDisplay ? undefined : () => openSetupStep('signalk', 'role-house_bank')}
           />

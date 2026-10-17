@@ -380,6 +380,24 @@ describe('Settings -> SignalK -> Roles: choosing from what the boat reports', ()
     expect(screen.getByText(/no generator/i)).toBeInTheDocument()
   })
 
+  it('does not list a saved "none" AC input as an instance that is not reporting', async () => {
+    renderRoles({ ...emptyVesselRoles, generator_ac_instance: 'none' })
+
+    const ac = await screen.findByLabelText('Generator AC input')
+    expect((ac as HTMLSelectElement).value).toBe('none')
+    expect(within(ac).getAllByRole('option', { name: 'This boat has none' })).toHaveLength(1)
+    expect(within(ac).queryByRole('option', { name: /not reporting/ })).toBeNull()
+  })
+
+  it('clears the generator AC input when the generator is set to none', async () => {
+    renderRoles({ ...emptyVesselRoles, generator: 'gen-1', generator_ac_instance: '5' })
+
+    const generator = await screen.findByLabelText('Generator')
+    fireEvent.change(generator, { target: { value: 'none' } })
+
+    await waitFor(() => expect(pendingRoles()).toEqual({ ...emptyVesselRoles, generator: 'none', generator_ac_instance: '' }))
+  })
+
   it('says the boat is not reporting any of a kind when there is nothing to choose', async () => {
     renderRoles()
 

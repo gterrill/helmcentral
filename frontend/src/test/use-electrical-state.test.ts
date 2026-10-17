@@ -133,4 +133,13 @@ describe('useElectricalState voltage readout and generator', () => {
     emit({ datetime: '2026-09-14T00:00:00Z', house_bank_configured: null })
     expect(result.current.houseBankConfigured).toBeNull()
   })
+
+  it('says when the chosen house bank has lost its SignalK source', () => {
+    const { result } = renderHook(() => useElectricalState())
+    expect(result.current.houseBankUnresolved).toBe(false)
+    emit({ datetime: '2026-09-14T00:00:00Z', house_bank_configured: true, house_bank_unresolved: true })
+    expect(result.current.houseBankUnresolved).toBe(true)
+    emit({ datetime: '2026-09-14T00:00:00Z', house_bank_configured: true })
+    expect(result.current.houseBankUnresolved).toBe(false)
+  })
 })

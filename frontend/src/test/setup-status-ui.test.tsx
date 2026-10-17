@@ -11,7 +11,7 @@ import { initialRegularSettingsDraft, type RegularSettingsDraft } from '@/compon
 import { SetupLine } from '@/components/setup-line'
 import { SignalKSetupSection } from '@/components/settings/sections/signalk-setup-section'
 import { resetQueryStore } from '@/lib/api-query'
-import { takePendingSetupFocus, requestSetupFocus, type SetupStatus } from '@/lib/setup-status'
+import { clearPendingSetupFocus, peekPendingSetupFocus, requestSetupFocus, type SetupStatus } from '@/lib/setup-status'
 
 const step = (id: string, title: string, state: 'done' | 'todo' | 'blocked', detail: string, control: string) => ({
   id, title, state, detail, target: { section: 'signalk', control },
@@ -38,7 +38,7 @@ beforeEach(() => {
   fetchMock.mockReset()
   fetchMock.mockImplementation(() => Promise.resolve({ ok, status: ok ? 200 : 500, json: async () => body }))
   vi.stubGlobal('fetch', fetchMock)
-  takePendingSetupFocus()
+  clearPendingSetupFocus()
 })
 
 describe('Settings -> SignalK -> Setup', () => {
@@ -137,7 +137,7 @@ describe('Dashboard setup line', () => {
     render(<StrictMode><Harness /></StrictMode>)
 
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('SignalK address')))
-    expect(takePendingSetupFocus()).toBeNull()
+    expect(peekPendingSetupFocus()).toBeNull()
   })
 
   it('ignores a focus request older than five seconds, and clears it', () => {
@@ -145,10 +145,10 @@ describe('Dashboard setup line', () => {
     try {
       requestSetupFocus('role-house_bank')
       vi.advanceTimersByTime(6000)
-      expect(takePendingSetupFocus()).toBeNull()
+      expect(peekPendingSetupFocus()).toBeNull()
       requestSetupFocus('role-house_bank')
       vi.advanceTimersByTime(4000)
-      expect(takePendingSetupFocus()).toBe('role-house_bank')
+      expect(peekPendingSetupFocus()).toBe('role-house_bank')
     } finally {
       vi.useRealTimers()
     }
@@ -172,13 +172,15 @@ describe('Dashboard setup line', () => {
     act(() => requestSetupFocus('signalk-port'))
 
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('SignalK port')))
-    expect(takePendingSetupFocus()).toBeNull()
+    expect(peekPendingSetupFocus()).toBeNull()
   })
 
   it('keeps a requested focus for Settings to pick up', () => {
     requestSetupFocus('role-house_bank')
-    expect(takePendingSetupFocus()).toBe('role-house_bank')
-    expect(takePendingSetupFocus()).toBeNull()
+    expect(peekPendingSetupFocus()).toBe('role-house_bank')
+    expect(peekPendingSetupFocus()).toBe('role-house_bank')
+    clearPendingSetupFocus()
+    expect(peekPendingSetupFocus()).toBeNull()
   })
 })
 
@@ -195,12 +197,14 @@ describe('useSetupStatus polling', () => {
     // Let the first answer land so the hook can see whether setup is complete.
     await act(async () => { await vi.advanceTimersByTimeAsync(100) })
     fetchMock.mockClear()
-    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(180_000) })
     return fetchMock.mock.calls.length
   }
 
-  it('polls every 15 seconds while setup is unfinished', async () => {
-    expect(await poll(false)).toBeGreaterThanOrEqual(3)
+  it('polls every minute while setup is unfinished', async () => {
+    const calls = await poll(false)
+    expect(calls).toBeGreaterThanOrEqual(2)
+    expect(calls).toBeLessThanOrEqual(4)
   })
 
   it('slows to every 5 minutes once setup is complete', async () => {

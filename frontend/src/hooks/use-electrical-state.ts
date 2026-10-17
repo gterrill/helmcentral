@@ -32,6 +32,8 @@ interface ElectricalState {
   generator_none?: boolean
   /** A house bank is chosen in the roles; null when the backend cannot read them. */
   house_bank_configured: boolean | null
+  /** The chosen house bank's item has no SignalK source (or is gone). */
+  house_bank_unresolved?: boolean | null
   alternator_0_current_a: number
   alternator_0_voltage_v: number
   alternator_0_power_w: number
@@ -72,6 +74,7 @@ export function useElectricalState() {
   const [generatorConfigured, setGeneratorConfigured] = useState<boolean | null>(null)
   const [generatorNone, setGeneratorNone] = useState(false)
   const [houseBankConfigured, setHouseBankConfigured] = useState<boolean | null>(null)
+  const [houseBankUnresolved, setHouseBankUnresolved] = useState(false)
   const [acLoadsW, setAcLoadsW] = useState<number | null>(null)
   const [generatorRealPowerW, setGeneratorRealPowerW] = useState<number | null>(null)
   const [alternator0, setAlternator0] = useState<AlternatorInstance>({ currentA: null, voltageV: null, powerW: null, temperatureC: null })
@@ -108,6 +111,7 @@ export function useElectricalState() {
         setGeneratorConfigured(typeof data.generator_configured === 'boolean' ? data.generator_configured : null)
         setGeneratorNone(data.generator_none === true)
         setHouseBankConfigured(typeof data.house_bank_configured === 'boolean' ? data.house_bank_configured : null)
+        setHouseBankUnresolved(data.house_bank_unresolved === true)
         setAcLoadsW(typeof data.ac_loads_w === 'number' && data.ac_loads_w >= 0 ? data.ac_loads_w : null)
         setGeneratorRealPowerW(typeof data.generator_real_power_w === 'number' && data.generator_real_power_w >= 0 ? data.generator_real_power_w : null)
         setAlternator0({ currentA: parseAlt(data.alternator_0_current_a), voltageV: parseAlt(data.alternator_0_voltage_v), powerW: parseAlt(data.alternator_0_power_w), temperatureC: parseAlt(data.alternator_0_temperature_c) })
@@ -172,6 +176,7 @@ export function useElectricalState() {
     generatorConfigured,
     generatorNone,
     houseBankConfigured,
+    houseBankUnresolved,
     alternator0,
     alternator1,
     charger0CurrentA,

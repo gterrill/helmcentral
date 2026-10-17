@@ -52,6 +52,10 @@ func enginesAssigned(v vesselView) bool { return len(v.Engines) >= 1 }
 // battery source.
 func houseBankChosen(v vesselView) bool { return v.houseBankPath() != "" }
 
+// houseBankUnresolvedDetail is said wherever the house bank role names an item
+// that has lost its SignalK source: the tile and the setup step.
+const houseBankUnresolvedDetail = "The house bank's item has no SignalK source. Choose it again under Settings, SignalK, Roles."
+
 // powerRoles are the parts the "Charging and power sources" step asks about,
 // in the order they are offered. Each is answered by choosing an item or "This
 // boat has none".
@@ -79,6 +83,23 @@ func offerableSources(disc discoveryResponse, kind string) int {
 		}
 		for _, r := range g.Rows {
 			if r.Reporting && r.Item == nil && !(kind == "battery" && r.ChargerInput) {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+// batteryChoices counts what the Roles picker lists for the house bank: the
+// battery items that own a source, then the unowned sources the boat reports.
+func batteryChoices(disc discoveryResponse) int {
+	n := offerableSources(disc, "battery")
+	for _, g := range disc.Groups {
+		if g.Kind != "battery" {
+			continue
+		}
+		for _, r := range g.Rows {
+			if r.Item != nil {
 				n++
 			}
 		}
@@ -230,12 +251,14 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse) setupStatus {
 	switch {
 	case houseBankChosen(vessel):
 		bank.State, bank.Detail = setupDone, "A house bank is chosen."
+	case vessel.HouseBankUnresolved:
+		bank.State, bank.Detail = setupTodo, houseBankUnresolvedDetail
 	case !connected:
 		bank.State, bank.Detail = blockedBy()
 	default:
 		bank.State = setupTodo
-		if reporting := offerableSources(disc, "battery"); reporting > 0 {
-			bank.Detail = "Choose which of the " + countOf(reporting, "battery", "batteries") + " the boat reports is the house bank."
+		if choices := batteryChoices(disc); choices > 0 {
+			bank.Detail = "Choose which of the " + countOf(choices, "battery", "batteries") + " is the house bank."
 		} else {
 			bank.Detail = "The boat isn't reporting any batteries."
 		}
@@ -279,14 +302,16 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse) setupStatus {
 
 // GET /api/setup/status
 func getSetupStatusHandler(c echo.Context) error {
-	vessel, err := loadVesselView(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	roles, err := loadVesselRoles(getEnv("SETTINGS_FILE", "../settings.yaml"))
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read the vessel"})
 	}
+	// The items are read once and shared by the vessel view and discovery.
 	items, err := listSourceItems()
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read equipment items"})
 	}
+	vessel := resolveVesselView(roles, items)
 	return c.JSON(http.StatusOK, buildSetupStatus(vessel, vesselDiscovery(globalSignalKSnapshot, vessel, items)))
 }
 

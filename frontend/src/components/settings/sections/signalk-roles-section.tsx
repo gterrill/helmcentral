@@ -128,7 +128,9 @@ export function SignalKRolesSection({ draft, onChange }: SignalKRolesSectionProp
   const choose = async (field: Exclude<keyof VesselRoles, 'generator_ac_instance'>, label: string, kind: SourceKind, value: string) => {
     setErrors((prev) => ({ ...prev, [field]: '' }))
     if (!value.startsWith(SOURCE_PREFIX)) {
-      setRole({ [field]: value })
+      // No generator means no generator AC input: drop the old choice so a
+      // stale value is not saved behind the disabled select.
+      setRole(field === 'generator' && value === ROLE_NONE ? { generator: value, generator_ac_instance: '' } : { [field]: value })
       return
     }
     setBusyField(field)
@@ -156,7 +158,7 @@ export function SignalKRolesSection({ draft, onChange }: SignalKRolesSectionProp
   }
   const acRows = discoveryRows(discovery, 'ac')
   const noGenerator = roles.generator === ROLE_NONE
-  const acMissing = roles.generator_ac_instance !== '' && !acRows.some((r) => r.instance === roles.generator_ac_instance)
+  const acMissing = roles.generator_ac_instance !== '' && roles.generator_ac_instance !== ROLE_NONE && !acRows.some((r) => r.instance === roles.generator_ac_instance)
 
   return (
     <FormSection

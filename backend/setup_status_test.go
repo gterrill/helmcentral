@@ -286,8 +286,22 @@ func TestSetupStatusHouseBankCountMatchesThePicker(t *testing.T) {
 		{Source: "electrical.batteries.3", Reporting: true},
 	}}
 	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(batteries)), "house_bank")
-	if !strings.Contains(st.Detail, "2 batteries") {
-		t.Errorf("only unassigned, non-charger batteries are offered: %q", st.Detail)
+	if !strings.Contains(st.Detail, "3 batteries") {
+		t.Errorf("battery items and unassigned non-charger sources are offered, charger inputs are not: %q", st.Detail)
+	}
+}
+
+// The Roles picker lists battery items first, then unowned sources. When every
+// battery already has an item the step still has something to choose from.
+func TestSetupStatusHouseBankCountsBatteryItemsTheRolesPickerOffers(t *testing.T) {
+	batteries := discoveryGroup{Kind: "battery", Mappable: true, Rows: []discoveryRow{
+		{Source: "electrical.batteries.0", Reporting: true, Item: &discoveryItemRef{ID: "a", Name: "Bank"}},
+		{Source: "electrical.batteries.1", Reporting: true, Item: &discoveryItemRef{ID: "b", Name: "Starter"}},
+		{Source: "electrical.batteries.2", Reporting: true, ChargerInput: true},
+	}}
+	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(batteries)), "house_bank")
+	if st.State != setupTodo || strings.Contains(st.Detail, "isn't reporting") || !strings.Contains(st.Detail, "2 batteries") {
+		t.Errorf("two battery items are choices: %+v", st)
 	}
 }
 
@@ -328,5 +342,14 @@ func TestSetupStatusAnItemOwningASourceCountsAsSetUp(t *testing.T) {
 	}}}}
 	if stepByID(t, buildSetupStatus(vesselView{}, disc), "connection").State != "done" {
 		t.Fatal("an item that owns a source means setup exists")
+	}
+}
+
+func TestSetupStatusHouseBankItemWithoutASourceSaysSo(t *testing.T) {
+	for _, connected := range []bool{true, false} {
+		st := stepByID(t, buildSetupStatus(vesselView{HouseBankUnresolved: true}, discoveryResponse{Connected: connected}), "house_bank")
+		if st.State != setupTodo || !strings.Contains(st.Detail, "has no SignalK source") {
+			t.Errorf("connected=%v: %+v", connected, st)
+		}
 	}
 }
