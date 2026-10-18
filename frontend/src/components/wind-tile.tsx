@@ -55,6 +55,7 @@ function WindMetricCard({ title, titleChip, value, align = 'left', className = '
   // whatever ends up behind it rather than a known colour. bg-card is opaque
   // and gives --gauge-primary a fixed backdrop to clear: 3.20:1 in :root,
   // 8.69:1 in .dark, 8.94:1 in the instrument skin (see wind-tile.test.tsx).
+  // eslint-disable-next-line helm/no-arbitrary-color -- 8% slate drop shadow on the card, one value in both themes
   const sharedClassName = `relative flex flex-col justify-start gap-0.5 rounded-2xl border bg-card px-4 py-2 shadow-[0_10px_24px_rgba(15,23,42,0.08)] ${alignmentClass} ${className}`.trim()
 
   if (onClick) {

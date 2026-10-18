@@ -81,3 +81,10 @@ export function resolveMarkerLabelSuppression(
 export function markerScaleForZoom(zoom: number): number {
   return Math.max(0.45, Math.min(1, (zoom - 10) / (14 - 10)))
 }
+
+/**
+ * Dark halo that keeps white marker labels legible on any map tile. The map is
+ * not themed, so this is a fixed colour on purpose.
+ */
+// eslint-disable-next-line helm/no-arbitrary-color -- label halo on the non-themed map, black in day and night
+export const MAP_LABEL_HALO = 'drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]'

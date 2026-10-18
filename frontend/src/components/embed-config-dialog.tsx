@@ -60,7 +60,7 @@ export function EmbedConfigDialog({ widget, open, onOpenChange, onSave }: EmbedC
         <DialogHeader>
           <DialogTitle>Embed</DialogTitle>
           <DialogDescription>
-            Show an external page — a Grafana panel, a Node-RED dashboard — inside this widget.
+            Show an external page — a Grafana panel, a Node-RED dashboard — inside this tile.
           </DialogDescription>
         </DialogHeader>
 

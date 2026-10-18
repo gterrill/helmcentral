@@ -9,7 +9,7 @@ import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { MapPlaceLabels } from '@/components/map-place-labels'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
-import { resolveMarkerLabelSuppression, type MarkerLabelPoint } from '@/lib/marker-labels'
+import { MAP_LABEL_HALO, resolveMarkerLabelSuppression, type MarkerLabelPoint } from '@/lib/marker-labels'
 import { fitCameraAroundPoint, formatBearing, framePlaceWithBoat, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
 import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
 import { usePoi } from '@/hooks/use-poi'
@@ -767,7 +767,7 @@ export default function PoiMapTileImpl({
                           )}
                         </div>
                         {!suppressed && feature.name && (
-                          <div className="mt-0.5 max-w-28 truncate text-center text-xs font-semibold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                          <div className={`mt-0.5 max-w-28 truncate text-center text-xs font-semibold text-white ${MAP_LABEL_HALO}`}>
                             {feature.name}
                           </div>
                         )}
