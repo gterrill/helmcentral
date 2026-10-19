@@ -219,10 +219,11 @@ const anomalyEngineResidualPathPrefix = derivedPathPrefix + "anomaly.engines."
 // unitForAlarmPath resolves the SI unit an alarm should report for a path,
 // derived-aware the same way derivedAwareAlarmReader is: a helmcentral.* path
 // reports the unit its own derivation carries (derivedPathUnits), everything
-// else defers to whatever the vessel published under meta.units on the real
-// data node. An unknown path, or one that has never carried meta, reports ""
-// -- absence, not a guessed unit -- and the caller is expected to treat that
-// as "omit", not "unitless".
+// else defers to the telemetry view's one unit lookup: meta.units on the
+// real data node, then the unit this boat last declared for the path
+// (signalk_units.go). An unknown path, or one that
+// has never declared a unit, reports "" -- absence, not a guessed unit --
+// and the caller is expected to treat that as "omit", not "unitless".
 func unitForAlarmPath(snapshot *signalKSnapshot, path string) string {
 	if isDerivedPath(path) {
 		if unit, ok := derivedPathUnits[path]; ok {

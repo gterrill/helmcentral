@@ -98,6 +98,7 @@ type telemetrySample struct {
 // a handful of leaves and must never pay for a whole-tree copy.
 type telemetryView struct {
 	tree     map[string]any
+	units    map[string]string // copied views: the self vessel's units at construction
 	live     bool
 	snapshot *signalKSnapshot
 	context  string
@@ -123,6 +124,7 @@ func (s *signalKSnapshot) selfTelemetryAt(now time.Time) *telemetryView {
 	}
 	view.tree = s.treeFor(view.context)
 	view.hasSelf = view.tree != nil
+	view.units = s.unitsCopy()
 	return view
 }
 
@@ -453,7 +455,7 @@ func (t *telemetryView) Sample(path string) telemetrySample {
 		sample.Value = t.escape(value)
 		sample.Source, _ = leaf["$source"].(string)
 		sample.Timestamp, _ = leaf["timestamp"].(string)
-		sample.Units = unitsFor(leaf)
+		sample.Units = t.unitOf(path, leaf)
 		stamp, stamped = newestTimestamp(leaf)
 		sample.Received = arrived(path)
 	})
@@ -510,27 +512,47 @@ func (t *telemetryView) Children(path string) []string {
 // and walked and sorted outside it, so the delta stream is not held up for
 // the walk.
 func (t *telemetryView) Paths() []signalKPath {
-	root := t.tree
+	root, units := t.tree, t.units
 	if t.live {
-		root = t.snapshot.treeFor(t.context)
+		root, units = t.snapshot.treeAndUnits(t.context)
 	}
 	if root == nil {
 		return nil
 	}
-	return collectSignalKPaths(root)
+	return collectSignalKPaths(root, func(path string, node map[string]any) string {
+		if u := unitsFor(node); u != "" {
+			return u
+		}
+		return units[path]
+	})
 }
 
-// unitsAt is SignalK's own unit declaration (meta.units) on whatever node
-// sits at path, leaf or not, "" when it declares none.
+// unitOf resolves one unit for path, the one lookup every reader shares:
+// meta.units on the tree node (the REST tree carries it), else the unit the
+// self vessel last declared, else "". A copied view reads the map it took at
+// construction; a live view reads the snapshot's map, so call it only from
+// inside withRoot, which holds the read lock. It never takes the lock itself.
+func (t *telemetryView) unitOf(path string, node map[string]any) string {
+	if units := unitsFor(node); units != "" {
+		return units
+	}
+	if t.live {
+		return t.snapshot.rememberedUnits[path]
+	}
+	return t.units[path]
+}
+
+// unitsAt is the unit declared for whatever sits at path, leaf or not, ""
+// when none is: a path with meta but no value still has its unit.
 func (t *telemetryView) unitsAt(path string) string {
 	var units string
 	if segments := telemetrySegments(path); segments != nil {
 		t.withRoot(func(root map[string]any, _ arrivalFunc) {
-			if node, ok := walkTelemetry(root, segments); ok {
-				if asMap, isMap := node.(map[string]any); isMap {
-					units = unitsFor(asMap)
-				}
+			var node map[string]any
+			if found, ok := walkTelemetry(root, segments); ok {
+				node, _ = found.(map[string]any)
 			}
+			units = t.unitOf(path, node)
 		})
 	}
 	return units

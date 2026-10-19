@@ -27,15 +27,20 @@ const signalKPathMaxDepth = 12
 // Nothing enumerated paths before this: every accessor was a fixed key chain,
 // so a widget could only show a value a developer had already wired. This is
 // what the delta stream (ADR 0037) made possible.
-func collectSignalKPaths(tree map[string]any) []signalKPath {
+//
+// unitOf resolves each leaf's unit (nil: the node's own meta.units only).
+func collectSignalKPaths(tree map[string]any, unitOf func(path string, node map[string]any) string) []signalKPath {
+	if unitOf == nil {
+		unitOf = func(_ string, node map[string]any) string { return unitsFor(node) }
+	}
 	var out []signalKPath
-	walkSignalKPaths(tree, nil, 0, &out)
+	walkSignalKPaths(tree, nil, 0, &out, unitOf)
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out
 }
 
-func walkSignalKPaths(node map[string]any, prefix []string, depth int, out *[]signalKPath) {
+func walkSignalKPaths(node map[string]any, prefix []string, depth int, out *[]signalKPath, unitOf func(path string, node map[string]any) string) {
 	if depth > signalKPathMaxDepth {
 		return
 	}
@@ -57,7 +62,8 @@ func walkSignalKPaths(node map[string]any, prefix []string, depth int, out *[]si
 			return
 		}
 
-		entry := signalKPath{Path: strings.Join(prefix, "."), Units: unitsFor(node)}
+		entry := signalKPath{Path: strings.Join(prefix, ".")}
+		entry.Units = unitOf(entry.Path, node)
 		if number, isNumber := raw.(float64); isNumber {
 			entry.Value = &number
 		}
@@ -76,7 +82,7 @@ func walkSignalKPaths(node map[string]any, prefix []string, depth int, out *[]si
 		if !ok {
 			continue
 		}
-		walkSignalKPaths(asMap, append(append([]string{}, prefix...), key), depth+1, out)
+		walkSignalKPaths(asMap, append(append([]string{}, prefix...), key), depth+1, out, unitOf)
 	}
 }
 
@@ -195,7 +201,7 @@ func (t *telemetryView) pathSamples() []signalKPathSample {
 					sample: signalKPathSample{
 						Path:      path,
 						Value:     t.escape(raw),
-						Units:     unitsFor(node),
+						Units:     t.unitOf(path, node),
 						Source:    source,
 						Timestamp: timestamp,
 					},

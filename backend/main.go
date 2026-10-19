@@ -484,6 +484,22 @@ func main() {
 	// outage rather than being papered over.
 	streamCtx, cancelStream := context.WithCancel(context.Background())
 	defer cancelStream()
+	// Units each SignalK path last declared, loaded before the stream feeds
+	// the snapshot (ADR 0193). Fail fast: without it alarms lose their units
+	// whenever a device is off.
+	unitStore, err := newSignalKUnitStore(globalDocumentStore)
+	if err != nil {
+		log.Fatalf("signalk unit store: %v", err)
+	}
+	if err := globalSignalKSnapshot.useUnitStore(unitStore); err != nil {
+		log.Fatalf("signalk unit store: %v", err)
+	}
+	// Writes the declared units in batches, off the stream goroutine. Pending
+	// units reach disk within about 2 s. main has no signal handling, so
+	// streamCtx never ends in production and no final flush runs: a restart
+	// inside that window loses them until the device declares them again,
+	// which SignalK does on every subscribe.
+	go globalSignalKSnapshot.runUnitFlusher(streamCtx)
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	go newRadarPoller(globalRadarTargetStore, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	// The document indexer (above): started once at boot and woken

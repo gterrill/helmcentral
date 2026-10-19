@@ -15,7 +15,7 @@ import (
 func pathsFrom(t *testing.T, body string) []signalKPath {
 	t.Helper()
 	seedSelfTree(t, body)
-	return collectSignalKPaths(globalSignalKSnapshot.selfTree())
+	return collectSignalKPaths(globalSignalKSnapshot.selfTree(), nil)
 }
 
 func pathNames(paths []signalKPath) []string {
@@ -135,7 +135,7 @@ func TestCollectSignalKPathsHandlesStringValues(t *testing.T) {
 }
 
 func TestCollectSignalKPathsEmptyTree(t *testing.T) {
-	if paths := collectSignalKPaths(map[string]any{}); len(paths) != 0 {
+	if paths := collectSignalKPaths(map[string]any{}, nil); len(paths) != 0 {
 		t.Fatalf("expected no paths, got %v", pathNames(paths))
 	}
 }

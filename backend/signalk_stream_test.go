@@ -100,9 +100,9 @@ func TestBuildSignalKStreamURLMapsSchemeAndDisablesImplicitSubscription(t *testi
 		port    int
 		want    string
 	}{
-		{"bare host and port", "100.103.214.1", 3000, "ws://100.103.214.1:3000/signalk/v1/stream?subscribe=none"},
-		{"http prefixed address", "http://boat.local:3000", 0, "ws://boat.local:3000/signalk/v1/stream?subscribe=none"},
-		{"https prefixed address becomes wss", "https://boat.local", 0, "wss://boat.local/signalk/v1/stream?subscribe=none"},
+		{"bare host and port", "100.103.214.1", 3000, "ws://100.103.214.1:3000/signalk/v1/stream?subscribe=none&sendMeta=all"},
+		{"http prefixed address", "http://boat.local:3000", 0, "ws://boat.local:3000/signalk/v1/stream?subscribe=none&sendMeta=all"},
+		{"https prefixed address becomes wss", "https://boat.local", 0, "wss://boat.local/signalk/v1/stream?subscribe=none&sendMeta=all"},
 	}
 
 	for _, tc := range cases {
@@ -406,6 +406,9 @@ func TestBuildSignalKStreamURLDisablesImplicitSubscription(t *testing.T) {
 	got := buildSignalKStreamURL("boat.local", 3000)
 	if !strings.Contains(got, "subscribe=none") {
 		t.Fatalf("stream URL must disable implicit subscription, got %q", got)
+	}
+	if !strings.Contains(got, "sendMeta=all") {
+		t.Fatalf("stream URL must ask for meta or units never arrive, got %q", got)
 	}
 }
 

@@ -20,7 +20,12 @@ import (
 // overwritten before anything reads it, because nothing here consumes faster
 // than 1Hz (alarm evaluator 1s, anchor drag 5s, SSE telemetry stream 1s).
 // Asking for what we actually use is the only way to say that.
-const signalKStreamPath = "/signalk/v1/stream?subscribe=none"
+//
+// sendMeta=all makes the server send each path's meta (units, display hints)
+// as updates of their own. Without it the stream never carries a unit, and
+// nothing else in this process supplies one (ADR 0193). Measured against the
+// boat: ~600 meta frames, none over 1.3KB, in the first burst.
+const signalKStreamPath = "/signalk/v1/stream?subscribe=none&sendMeta=all"
 
 // streamSubscription is sent immediately after the handshake. It caps the rate
 // without narrowing coverage:

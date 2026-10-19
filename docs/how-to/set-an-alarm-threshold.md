@@ -15,6 +15,9 @@ directly or from a gauge.
 5. Set **Condition** and **Threshold**. When the reading publishes a unit,
    the drawer shows the converted value under the threshold field as you
    type, so you can check it reads what you expect before saving.
+   Helmcentral remembers the last unit each reading declared, so this still
+   works when the instrument is switched off. A reading that has never
+   declared a unit is shown as it arrives.
 6. Set **Severity**. Every severity except Healthy also raises an alarm
    through your configured transports once the rule fires.
 7. Open **Advanced** if the defaults don't suit this reading, to set
