@@ -113,7 +113,7 @@ normal gap.
 | --- | --- | --- |
 | Frozen sensor reading | Any frozen-count above 0 | alert |
 | Impossible sensor reading | Any out-of-range count above 0 | alert |
-| Silent sensor source | Any silent-source count above 0 | warn |
+| Instrument Silent (titled with the device's name when only one is quiet, for example "Vesper Cortex Silent") | Any silent-source count above 0 | warn |
 | Charging into a full house bank | Full-bank charging level 1 or higher | warn |
 | House bank overcharge risk | Full-bank charging level 2 (switched off until tuned) | alarm |
 | Engine RPM dips (one per engine, titled with its name, for example "Port Engine RPM Dips") | Stumble count of 3 or more; clears when it falls back to 0 | warn |

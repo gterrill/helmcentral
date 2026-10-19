@@ -241,6 +241,12 @@ type sourceHealth struct {
 	// $source id that never carried a bus type). Plugins report on events,
 	// not on a schedule, and are software rather than devices.
 	Plugin bool
+	// BusType is the source's declared bus type, "NMEA0183" for a serial
+	// talker. An ignored connection id excludes every 0183 source on it.
+	BusType string
+	// Sentences are the NMEA 0183 sentence ids the source has carried; they
+	// say what the source sends, which its talker id does not.
+	Sentences map[string]bool
 }
 
 // silentSourceKeyOffWindow is how close to a quiet engine source's last
@@ -300,6 +306,8 @@ func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
 			Count:       entry.Count,
 			EngineBound: entry.EngineBound,
 			EngineLast:  entry.EngineLast,
+			BusType:     entry.BusType,
+			Sentences:   entry.Sentences,
 			// A server plugin publishes under its bare id with no bus type;
 			// hardware inputs are dotted or carry a source.type.
 			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,
@@ -331,6 +339,30 @@ func sourceConnection(source string) string {
 	return conn
 }
 
+// split0183Source splits an NMEA 0183 $source "<connection>.<talker>" at the
+// LAST dot: the talker is always the two-letter segment after it, and a
+// connection id the operator typed in SignalK may itself contain dots.
+func split0183Source(source string) (connection, talker string) {
+	if i := strings.LastIndex(source, "."); i > 0 {
+		return source[:i], source[i+1:]
+	}
+	return source, ""
+}
+
+// healthConnection is the connection a source arrives through. sourceConnection
+// cuts at the first dot because an NMEA 2000 or Venus id carries a dotted
+// device name after its connection ("venus.com.victronenergy.battery.278");
+// a 0183 id carries only a talker, so its connection is everything before the
+// last dot. Every connection grouping (engine key-off, the silent-source card)
+// goes through here so they cannot disagree about the same id.
+func healthConnection(s sourceHealth) string {
+	if s.BusType == busTypeNMEA0183 {
+		c, _ := split0183Source(s.Source)
+		return c
+	}
+	return sourceConnection(s.Source)
+}
+
 // engineKeyOff reports whether engine-bound source e going quiet can be read
 // as the engines being turned off, rather than its connection failing. That
 // holds when its connection is alive: some non-engine-bound source on the same
@@ -340,10 +372,10 @@ func sourceConnection(source string) string {
 // is an engine computer dropping out while running. sources is the full list,
 // not just the quiet ones.
 func engineKeyOff(e sourceHealth, sources []sourceHealth, now time.Time) bool {
-	conn := sourceConnection(e.Source)
+	conn := healthConnection(e)
 	others := false
 	for _, s := range sources {
-		if s.EngineBound || sourceConnection(s.Source) != conn {
+		if s.EngineBound || healthConnection(s) != conn {
 			continue
 		}
 		others = true
@@ -386,6 +418,14 @@ func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duratio
 	var out []string
 	for _, s := range quiet {
 		if s.Plugin {
+			continue
+		}
+		// Ignoring a 0183 connection hides the device from this alarm only.
+		// It is deliberately not applied in quietSources: that set also gates
+		// which readings the detectors trust, and ignoring a connection must
+		// not make a stale reading from it trusted (ignoring one full $source
+		// id has always done so; the connection id must not widen that).
+		if s.BusType == busTypeNMEA0183 && excluded[healthConnection(s)] {
 			continue
 		}
 		if s.EngineBound {

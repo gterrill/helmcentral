@@ -1003,14 +1003,12 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 	health := sourceHealthFor(snapshot, self)
 	_, lastMessage := snapshot.status()
 	silent := silentSources(health, now, now.Sub(lastMessage), ignored)
-	reading.Values[anomalySensorSilentSourceCountPath] = float64(len(silent))
+	// The count is the cards' entries (devices), so it agrees with the card.
+	silentEntries := disambiguateSensorEntries(namer.silentSourceEntries(silent, health, now))
+	reading.Values[anomalySensorSilentSourceCountPath] = float64(len(silentEntries))
 	if len(silent) > 0 {
 		reading.Evidence[anomalySensorSilentSourceCountPath] = strings.Join(silent, ", ")
-		var entries []sensorHealthEntry
-		for _, source := range silent {
-			entries = append(entries, namer.silentSourceEntry(source))
-		}
-		reading.Sensors[anomalySensorSilentSourceCountPath] = disambiguateSensorEntries(entries)
+		reading.Sensors[anomalySensorSilentSourceCountPath] = silentEntries
 	}
 
 	// Frozen: needs at least one configured engine.

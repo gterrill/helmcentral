@@ -50,6 +50,14 @@ func anomalyEngineSeedMarker(instance string) string {
 	return "anomaly-v1:engine:" + strings.ToLower(strings.TrimSpace(instance))
 }
 
+// silentSourceLabel is the seeded title; silentSourceLegacyLabel is what boats
+// seeded earlier carry on disk. alarmTitleFor replaces either with the name of
+// the quiet device.
+const (
+	silentSourceLabel       = "Instrument Silent"
+	silentSourceLegacyLabel = "Silent sensor source"
+)
+
 const (
 	anomalyImpossibleRuleID    = "helmcentral:anomaly-impossible-reading"
 	anomalySilentSourceRuleID  = "helmcentral:anomaly-silent-source"
@@ -68,7 +76,7 @@ func anomalyBaseSeedRules() []alarmRule {
 			DwellSeconds: 30, State: alarmStateAlert,
 		},
 		{
-			ID: anomalySilentSourceRuleID, Label: "Silent sensor source", Enabled: true,
+			ID: anomalySilentSourceRuleID, Label: silentSourceLabel, Enabled: true,
 			Path: anomalySensorSilentSourceCountPath, Op: alarmOpAbove, Value: 0.5,
 			DwellSeconds: 60, State: alarmStateWarn,
 		},

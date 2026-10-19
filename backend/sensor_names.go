@@ -183,6 +183,9 @@ type sensorHealthEntry struct {
 	Quantity   string `json:"quantity,omitempty"`
 	Label      string `json:"label"`
 	Text       string `json:"text"`
+	// Partial is set on a grouped device entry when some of its sources still
+	// send. Not sent to clients; the alarm title reads it.
+	Partial bool `json:"-"`
 }
 
 // sensorNamer resolves names from the live snapshot, the vessel settings and
@@ -401,6 +404,12 @@ func (n *sensorNamer) pathEntry(path string) sensorHealthEntry {
 const unnamedSourceName = "An instrument"
 
 func (n *sensorNamer) sourceName(source string) string {
+	return n.sourceNameTyped(source, n.busTypeOf(source))
+}
+
+// sourceNameTyped is sourceName for a source whose bus type the caller
+// already holds.
+func (n *sensorNamer) sourceNameTyped(source, busType string) string {
 	context := n.snapshot.selfContext()
 	if instances := n.snapshot.batteryInstancesPublishedBy(context, source); len(instances) == 1 &&
 		len(n.snapshot.batteryPublishersFor(context, instances[0])) == 1 {
@@ -417,13 +426,213 @@ func (n *sensorNamer) sourceName(source string) string {
 			return d.Manufacturer + " device"
 		}
 	}
+	if busType == busTypeNMEA0183 {
+		conn, _ := split0183Source(source)
+		if name := connectionDisplayName(conn); name != "" {
+			return name
+		}
+	}
 	// The $source id stays in Identifier for Ignore; it never reaches a card.
 	return unnamedSourceName
 }
 
+// busTypeNMEA0183 is the "type" a SignalK update's source object carries for
+// a serial NMEA 0183 input.
+//
+// A 0183 source is recognised by that declared type, not by the shape of its
+// id ("<connection>.<two letters>"). The type is what SignalK itself says the
+// input is; a shape test would also claim a plugin or a future bus whose
+// address happens to be two capitals, and would quietly misname it. A source
+// whose type was never seen is simply not treated as 0183 and falls through
+// to "An instrument", rather than being guessed at.
+const busTypeNMEA0183 = "NMEA0183"
+
+// busTypeOf is the declared bus type recorded for a $source ("" when unseen).
+func (n *sensorNamer) busTypeOf(source string) string {
+	if n.snapshot == nil {
+		return ""
+	}
+	return n.snapshot.sourceBusType(n.snapshot.selfContext(), source)
+}
+
+// connectionDisplayName makes a SignalK connection id readable: the
+// operator's own name for the device, from the SignalK config, with the
+// underscores and hyphens of an id turned into spaces ("Vesper_Cortex" is
+// "Vesper Cortex").
+func connectionDisplayName(connection string) string {
+	return strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(connection)), " ")
+}
+
+// sentenceGroups says what a device sends, in the order a card lists it. The
+// talker id does not say: one multiplexer carries wind, depth and boat speed
+// under its "AI" talker, so the sentence ids a source published are the
+// evidence. Sentences not listed are dropped.
+var sentenceGroups = []struct {
+	word      string
+	sentences []string
+}{
+	{"AIS", []string{"VDM", "VDO"}},
+	{"position", []string{"RMC", "GGA", "GLL", "GNS", "VTG", "GSV", "GSA", "ZDA"}},
+	{"heading", []string{"HDG", "HDT", "HDM", "THS"}},
+	{"wind", []string{"MWV", "MWD", "VWR", "VWT"}},
+	{"depth", []string{"DPT", "DBT", "DBS"}},
+	{"boat speed", []string{"VHW"}},
+	{"log", []string{"VLW"}},
+	{"water temperature", []string{"MTW"}},
+	{"weather", []string{"MDA", "XDR"}},
+}
+
+// sentenceWords is the set of group words the given sentence sets cover.
+func sentenceWords(sets ...map[string]bool) map[string]bool {
+	words := map[string]bool{}
+	for _, set := range sets {
+		for _, g := range sentenceGroups {
+			for _, sent := range g.sentences {
+				if set[sent] {
+					words[g.word] = true
+				}
+			}
+		}
+	}
+	return words
+}
+
+// joinWords is "a", "a and b", "a, b and c".
+func joinWords(words []string) string {
+	switch len(words) {
+	case 0:
+		return ""
+	case 1:
+		return words[0]
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
+// silentPhrase says what a connection has stopped sending. When every source
+// on it is silent the device has stopped, and all it carried is named. When
+// some still send, only what the silent ones carry exclusively is named; if
+// they carry nothing the others do not, the card says "some of its data". With
+// no known sentences it says nothing more.
+func silentPhrase(silent, sending []sourceHealth) string {
+	silentSets := make([]map[string]bool, len(silent))
+	for i, s := range silent {
+		silentSets[i] = s.Sentences
+	}
+	words := sentenceWords(silentSets...)
+	if len(words) == 0 {
+		return ""
+	}
+	if len(sending) > 0 {
+		sendingSets := make([]map[string]bool, len(sending))
+		for i, s := range sending {
+			sendingSets[i] = s.Sentences
+		}
+		for w := range sentenceWords(sendingSets...) {
+			delete(words, w)
+		}
+		if len(words) == 0 {
+			return "some of its data"
+		}
+	}
+	var ordered []string
+	for _, g := range sentenceGroups {
+		if words[g.word] {
+			ordered = append(ordered, g.word)
+		}
+	}
+	return joinWords(ordered)
+}
+
+// is0183Connection reports whether id is the connection of a source seen
+// publishing NMEA 0183.
+func (n *sensorNamer) is0183Connection(id string) bool {
+	if n.snapshot == nil {
+		return false
+	}
+	for source, entry := range n.snapshot.sourcesFor(n.snapshot.selfContext()) {
+		if entry.BusType == busTypeNMEA0183 {
+			if c, _ := split0183Source(source); c == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (n *sensorNamer) silentSourceEntry(source string) sensorHealthEntry {
-	name := n.sourceName(source)
+	return n.silentSourceEntryTyped(source, n.busTypeOf(source))
+}
+
+func (n *sensorNamer) silentSourceEntryTyped(source, busType string) sensorHealthEntry {
+	name := n.sourceNameTyped(source, busType)
 	return sensorHealthEntry{Identifier: source, Name: name, Label: name, Text: name + " has stopped sending"}
+}
+
+// silentSourceEntries turns the silent $source ids into card entries. NMEA
+// 0183 sources sharing a connection are one device, so they become one entry
+// whose Identifier is the connection id (Ignore then hides the whole device
+// from this alarm). NMEA 2000 sources are never grouped: a gateway carries many
+// devices behind one connection. health lists every source seen. A sibling
+// talker counts as still sending only when it was heard within its own quiet
+// threshold; one that is ignored, unwatched or key-off-excluded but quiet is
+// not sending, and when unsure it is treated as not sending.
+func (n *sensorNamer) silentSourceEntries(silent []string, health []sourceHealth, now time.Time) []sensorHealthEntry {
+	byConn := map[string][]sourceHealth{}
+	byID := map[string]sourceHealth{}
+	for _, h := range health {
+		byID[h.Source] = h
+		if h.BusType == busTypeNMEA0183 {
+			c := healthConnection(h)
+			byConn[c] = append(byConn[c], h)
+		}
+	}
+
+	var entries []sensorHealthEntry
+	done := map[string]bool{}
+	for _, source := range silent {
+		h, known := byID[source]
+		if !known || h.BusType != busTypeNMEA0183 {
+			entries = append(entries, n.silentSourceEntry(source))
+			continue
+		}
+		conn := healthConnection(h)
+		if done[conn] {
+			continue
+		}
+		done[conn] = true
+		var quiet, sending []sourceHealth
+		silentOnConn := 0
+		for _, c := range byConn[conn] {
+			if now.Sub(c.Last) <= sourceQuietThreshold(c) {
+				sending = append(sending, c)
+				continue
+			}
+			quiet = append(quiet, c)
+		}
+		for _, s := range silent {
+			if c, ok := byID[s]; ok && c.BusType == busTypeNMEA0183 && healthConnection(c) == conn {
+				silentOnConn++
+			}
+		}
+		name := connectionDisplayName(conn)
+		// One silent source keeps sourceName's order (bank, installation,
+		// model, manufacturer, then the connection name).
+		if silentOnConn == 1 {
+			if e := n.silentSourceEntryTyped(source, h.BusType); e.Name != name {
+				entries = append(entries, e)
+				continue
+			}
+		}
+		if name == "" {
+			name = unnamedSourceName
+		}
+		text := name + " has stopped sending"
+		if phrase := silentPhrase(quiet, sending); phrase != "" {
+			text += " " + phrase
+		}
+		entries = append(entries, sensorHealthEntry{Identifier: conn, Name: name, Label: name, Text: text, Partial: len(sending) > 0})
+	}
+	return entries
 }
 
 func (n *sensorNamer) frozenEntry(path string) sensorHealthEntry {
@@ -441,10 +650,18 @@ func (n *sensorNamer) identifierEntry(identifier string) sensorHealthEntry {
 		e.Text = e.Label
 		return e
 	}
+	// An identifier that is a known 0183 connection is a device ignored as a
+	// whole.
+	if n.is0183Connection(identifier) {
+		if name := connectionDisplayName(identifier); name != "" {
+			return sensorHealthEntry{Identifier: identifier, Name: name, Label: name, Text: name}
+		}
+	}
 	e := n.silentSourceEntry(identifier)
 	e.Text = e.Label
 	return e
 }
+
 
 // --- Impossible readings -----------------------------------------------------
 
