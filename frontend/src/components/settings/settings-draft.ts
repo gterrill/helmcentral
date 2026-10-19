@@ -1,4 +1,4 @@
-import type { DeepPartial, SettingsPayload } from '@/hooks/use-settings-form'
+import type { DeepPartial, PassageLimitBandPayload, PassageLimitsPayload, SettingsPayload } from '@/hooks/use-settings-form'
 import { emptyVesselRoles, type VesselRoles } from '@/lib/vessel-settings'
 
 // Keep in step with defaultWebSearchModel in backend/assistant_web_search.go.
@@ -9,6 +9,121 @@ export type HullType = 'power_cat' | 'sail_mono' | 'power_mono' | 'sail_cat'
 export type ScopeMethod = 'catenary' | 'ratio'
 
 export type AssistantCostTier = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** A band while editing: strings, so partial typing survives. '' is unset. */
+export interface PassageBandDraft {
+  marginal: string
+  noGo: string
+}
+export interface PassageSectorDraft {
+  wind: PassageBandDraft
+  gust: PassageBandDraft
+  wave: PassageBandDraft
+}
+export interface PassageLimitsDraft {
+  ahead: PassageSectorDraft
+  abeam: PassageSectorDraft
+  astern: PassageSectorDraft
+  tide: PassageBandDraft
+  daylightArrival: boolean
+}
+
+const blankBand = (): PassageBandDraft => ({ marginal: '', noGo: '' })
+const blankSector = (): PassageSectorDraft => ({ wind: blankBand(), gust: blankBand(), wave: blankBand() })
+export const blankPassageLimits = (): PassageLimitsDraft => ({
+  ahead: blankSector(),
+  abeam: blankSector(),
+  astern: blankSector(),
+  tide: blankBand(),
+  daylightArrival: false,
+})
+
+const bandFromPayload = (b: PassageLimitBandPayload | undefined): PassageBandDraft => ({
+  marginal: typeof b?.marginal === 'number' ? String(b.marginal) : '',
+  noGo: typeof b?.no_go === 'number' ? String(b.no_go) : '',
+})
+
+function passageLimitsFromPayload(p: PassageLimitsPayload | undefined): PassageLimitsDraft {
+  const sector = (s: PassageLimitsPayload['ahead']): PassageSectorDraft => ({
+    wind: bandFromPayload(s?.wind_kn),
+    gust: bandFromPayload(s?.gust_kn),
+    wave: bandFromPayload(s?.wave_m),
+  })
+  return {
+    ahead: sector(p?.ahead),
+    abeam: sector(p?.abeam),
+    astern: sector(p?.astern),
+    tide: bandFromPayload(p?.wind_against_tide?.wind_kn),
+    daylightArrival: p?.daylight_arrival === true,
+  }
+}
+
+/**
+ * A limit as typed: blank is null (never 0), one comma may stand for the
+ * decimal point ("12,5"), and anything else that is not a plain number is NaN
+ * so passageLimitErrors can say so.
+ */
+const parseLimit = (value: string): number | null => {
+  const trimmed = value.trim()
+  if (trimmed === '') return null
+  const text = /^[^.,]*,[^.,]*$/.test(trimmed) ? trimmed.replace(',', '.') : trimmed
+  return /^-?(\d+\.?\d*|\.\d+)$/.test(text) ? Number(text) : Number.NaN
+}
+
+/** The number to save. Unparseable text is null here; passageLimitErrors blocks Save before it is sent. */
+const limitNumber = (value: string): number | null => {
+  const n = parseLimit(value)
+  return n === null || Number.isNaN(n) ? null : n
+}
+
+const bandToPayload = (b: PassageBandDraft) => ({ marginal: limitNumber(b.marginal), no_go: limitNumber(b.noGo) })
+
+function passageLimitsToPayload(l: PassageLimitsDraft) {
+  const sector = (s: PassageSectorDraft) => ({
+    wind_kn: bandToPayload(s.wind),
+    gust_kn: bandToPayload(s.gust),
+    wave_m: bandToPayload(s.wave),
+  })
+  return {
+    ahead: sector(l.ahead),
+    abeam: sector(l.abeam),
+    astern: sector(l.astern),
+    wind_against_tide: { wind_kn: bandToPayload(l.tide) },
+    daylight_arrival: l.daylightArrival,
+  }
+}
+
+const bandsOf = (l: PassageLimitsDraft): Array<{ key: string; label: string; band: PassageBandDraft }> => [
+  ...(['ahead', 'abeam', 'astern'] as const).flatMap((sec) => {
+    const name = sec[0].toUpperCase() + sec.slice(1)
+    return [
+      { key: `${sec}.wind`, label: `${name} wind`, band: l[sec].wind },
+      { key: `${sec}.gust`, label: `${name} gust`, band: l[sec].gust },
+      { key: `${sec}.wave`, label: `${name} wave height`, band: l[sec].wave },
+    ]
+  }),
+  { key: 'tide', label: 'Wind against tide', band: l.tide },
+]
+
+/** Same rules as the server: numbers, 0 or more, and marginal below no-go. Keyed by band, e.g. "abeam.gust". */
+export function passageLimitErrors(draft: RegularSettingsDraft): Record<string, string> {
+  const errors: Record<string, string> = {}
+  for (const { key, label, band } of bandsOf(draft.assistantPassageLimits)) {
+    const values = [band.marginal, band.noGo]
+    if (values.some((v) => Number.isNaN(parseLimit(v)))) {
+      errors[key] = `${label}: enter a number`
+      continue
+    }
+    const [m, n] = [limitNumber(band.marginal), limitNumber(band.noGo)]
+    if ((m !== null && m < 0) || (n !== null && n < 0)) errors[key] = `${label}: enter 0 or more`
+    else if (m !== null && n !== null && m >= n) errors[key] = `${label}: marginal must be below no-go`
+  }
+  return errors
+}
+
+function passageLimitsEqual(a: PassageLimitsDraft, b: PassageLimitsDraft): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
+}
 
 function rolesEqual(a: VesselRoles | null, b: VesselRoles | null): boolean {
   if (a === null || b === null) return a === b
@@ -69,6 +184,7 @@ export interface RegularSettingsDraft {
   assistantWakeWord: boolean
   assistantWebSearch: boolean
   assistantWebSearchModel: string
+  assistantPassageLimits: PassageLimitsDraft
   /**
    * null until the server's roles block has been read. It stays null if the
    * settings fetch fell back without one, and the patch then omits `roles`
@@ -122,6 +238,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantWakeWord: false,
   assistantWebSearch: false,
   assistantWebSearchModel: defaultWebSearchModel,
+  assistantPassageLimits: blankPassageLimits(),
   roles: null,
 }
 
@@ -219,6 +336,8 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.assistant?.web_search === 'boolean') draft.assistantWebSearch = settings.assistant.web_search
   if (typeof settings.assistant?.web_search_model === 'string') draft.assistantWebSearchModel = settings.assistant.web_search_model
 
+  draft.assistantPassageLimits = passageLimitsFromPayload(settings.assistant?.passage_limits)
+
   if (settings.roles) draft.roles = { ...emptyVesselRoles, ...settings.roles }
 
   return draft
@@ -279,6 +398,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantWakeWord !== b.assistantWakeWord) return false
   if (a.assistantWebSearch !== b.assistantWebSearch) return false
   if (a.assistantWebSearchModel !== b.assistantWebSearchModel) return false
+  if (!passageLimitsEqual(a.assistantPassageLimits, b.assistantPassageLimits)) return false
 
   if (!rolesEqual(a.roles, b.roles)) return false
 
@@ -361,6 +481,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       wake_word: draft.assistantWakeWord,
       web_search: draft.assistantWebSearch,
       web_search_model: draft.assistantWebSearchModel.trim(),
+      passage_limits: passageLimitsToPayload(draft.assistantPassageLimits),
     },
     // Omitted while the roles block was never read (see the draft field).
     ...(draft.roles === null ? {} : { roles: draft.roles }),

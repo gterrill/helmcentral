@@ -385,6 +385,7 @@ describe('assistant settings-draft plumbing', () => {
       wake_word: false,
       web_search: false,
       web_search_model: 'google/gemini-2.5-flash-lite',
+      passage_limits: expect.objectContaining({ daylight_arrival: false }),
     })
   })
 

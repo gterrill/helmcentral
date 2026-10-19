@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -37,6 +38,9 @@ type setupStep struct {
 	State  string      `json:"state"`
 	Detail string      `json:"detail"`
 	Target setupTarget `json:"target"`
+	// Optional steps are offered but never hold setup open: Complete ignores
+	// them.
+	Optional bool `json:"optional"`
 }
 
 type setupStatus struct {
@@ -200,9 +204,48 @@ func verbAre(n int) string {
 	return " are "
 }
 
+// setupMate is what the optional Mate steps read: whether Mate is on, and the
+// passage limits the operator has entered.
+type setupMate struct {
+	Enabled bool
+	Limits  passageLimits
+	// LimitsErr is set when the stored limits could not be read.
+	LimitsErr error
+}
+
+// passageLimitsStep is the optional "Passage limits" step. It is done when
+// every wind sector has its no-go wind limit; otherwise it names the open
+// sectors. Nothing else reads the limits, so the caller lists it only while
+// Mate is on.
+func passageLimitsStep(l passageLimits, readErr error) setupStep {
+	step := setupStep{
+		ID: "passage_limits", Title: "Passage limits", Optional: true,
+		Target: setupTarget{"assistant", "passage-limits"},
+	}
+	if readErr != nil {
+		step.State, step.Detail = setupBlocked, "The saved passage limits couldn't be read. Check settings.yaml."
+		return step
+	}
+	var open []string
+	for _, sec := range []struct {
+		name string
+		s    passageSectorLimits
+	}{{"ahead", l.Ahead}, {"abeam", l.Abeam}, {"astern", l.Astern}} {
+		if sec.s.WindKn.NoGo == nil {
+			open = append(open, sec.name)
+		}
+	}
+	if len(open) == 0 {
+		step.State, step.Detail = setupDone, "Limits are set for every wind sector."
+	} else {
+		step.State, step.Detail = setupTodo, "Still open: "+strings.Join(open, ", ")+"."
+	}
+	return step
+}
+
 // buildSetupStatus works the steps out from the resolved vessel and what the
 // boat is reporting. It is a pure function so a test states the state it wants.
-func buildSetupStatus(vessel vesselView, disc discoveryResponse) setupStatus {
+func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate) setupStatus {
 	connected := disc.Connected
 	setUp := anythingSetUp(vessel, disc)
 	// Steps are judged from saved configuration whatever the feed is doing. A
@@ -291,9 +334,13 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse) setupStatus {
 	}
 	steps = append(steps, power)
 
+	if mate.Enabled {
+		steps = append(steps, passageLimitsStep(mate.Limits, mate.LimitsErr))
+	}
+
 	complete := true
 	for _, s := range steps {
-		if s.State != setupDone {
+		if !s.Optional && s.State != setupDone {
 			complete = false
 		}
 	}
@@ -311,8 +358,24 @@ func getSetupStatusHandler(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read equipment items"})
 	}
+	// Settings only feed the optional Mate step. If they cannot be read the
+	// rest of the list still returns; the step is omitted, since whether Mate
+	// is on is not known.
+	var mate setupMate
+	if settings, err := readSettings(getEnv("SETTINGS_FILE", "../settings.yaml")); err != nil {
+		log.Printf("setup status: settings unreadable, passage limits step omitted: %v", err)
+	} else {
+		assistant := buildSettingsPayload(settings).Assistant
+		mate.Enabled = assistant.Enabled
+		if am, ok := settings["assistant"].(map[string]any); ok {
+			mate.Limits, mate.LimitsErr = passageLimitsFromSettings(am["passage_limits"])
+		}
+		if mate.LimitsErr != nil {
+			log.Printf("setup status: %v", mate.LimitsErr)
+		}
+	}
 	vessel := resolveVesselView(roles, items)
-	return c.JSON(http.StatusOK, buildSetupStatus(vessel, vesselDiscovery(globalSignalKSnapshot, vessel, items)))
+	return c.JSON(http.StatusOK, buildSetupStatus(vessel, vesselDiscovery(globalSignalKSnapshot, vessel, items), mate))
 }
 
 func setupRoutes() []apiRoute {

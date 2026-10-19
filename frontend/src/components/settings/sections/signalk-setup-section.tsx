@@ -2,8 +2,10 @@ import { Check } from 'lucide-react'
 
 import { FormSection } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
+import { useOptionalAppRouter } from '@/hooks/use-app-location'
 import { useSetupStatus } from '@/hooks/use-setup-status'
-import { focusSetupControl, nextSetupStep, SETUP_ACTION_LABELS } from '@/lib/setup-status'
+import type { SettingsSectionId } from '@/components/settings/settings-nav'
+import { clearPendingSetupFocus, focusSetupControl, nextSetupStep, requestSetupFocus, SETUP_ACTION_LABELS, type SetupStep } from '@/lib/setup-status'
 
 /**
  * Settings -> SignalK -> Setup: the chain from a fresh install to tiles with
@@ -18,6 +20,20 @@ import { focusSetupControl, nextSetupStep, SETUP_ACTION_LABELS } from '@/lib/set
 export function SignalKSetupSection() {
   const { status, loaded, error } = useSetupStatus()
   const next = nextSetupStep(status)
+  const router = useOptionalAppRouter()
+
+  // A step in this section focuses its control here. One that lives in another
+  // section (the optional passage limits are under Mate) asks for the focus,
+  // then opens that section, which acts on the request once it has drawn.
+  const openStep = (step: SetupStep) => {
+    if (step.target.section === 'signalk' || router === null) {
+      focusSetupControl(step.target.control)
+      return
+    }
+    requestSetupFocus(step.target.control)
+    // A guard can hold the move (unsaved edits); then the request must not linger.
+    if (!router.navigate({ panel: 'settings', route: { view: 'section', section: step.target.section as SettingsSectionId } })) clearPendingSetupFocus()
+  }
 
   return (
     <FormSection title="Setup" description="What a fresh install needs before its tiles show real data. A choice counts once it is saved.">
@@ -31,6 +47,9 @@ export function SignalKSetupSection() {
                 <li key={step.id} className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
                   <Check className="h-4 w-4 shrink-0" aria-hidden />
                   <span className="min-w-0 truncate">{step.title}</span>
+                  {step.optional ? (
+                    <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.14em]">Optional</span>
+                  ) : null}
                   <span className="sr-only">Done</span>
                 </li>
               )
@@ -41,7 +60,25 @@ export function SignalKSetupSection() {
                   <p className="text-sm font-medium text-foreground">{step.title}</p>
                   <p className="text-sm text-muted-foreground">{step.detail}</p>
                   <div>
-                    <Button type="button" size="sm" variant="outline" onClick={() => focusSetupControl(step.target.control)}>
+                    <Button type="button" size="sm" variant="outline" onClick={() => openStep(step)}>
+                      {SETUP_ACTION_LABELS[step.id] ?? 'Go to the control'}
+                    </Button>
+                  </div>
+                </li>
+              )
+            }
+            // An open optional step is offered in full, but is never the next
+            // step and holds nothing up.
+            if (step.optional) {
+              return (
+                <li key={step.id} className="flex min-w-0 flex-col gap-2 rounded-md border border-border p-3">
+                  <p className="flex min-w-0 items-center gap-2 text-sm font-medium text-foreground">
+                    <span className="min-w-0 truncate">{step.title}</span>
+                    <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground">Optional</span>
+                  </p>
+                  <p className="text-sm text-muted-foreground">{step.detail}</p>
+                  <div>
+                    <Button type="button" size="sm" variant="outline" onClick={() => openStep(step)}>
                       {SETUP_ACTION_LABELS[step.id] ?? 'Go to the control'}
                     </Button>
                   </div>
@@ -55,6 +92,9 @@ export function SignalKSetupSection() {
                   {step.title}
                   {step.state === 'blocked' ? ` · ${step.detail}` : ''}
                 </span>
+                {step.optional ? (
+                  <span className="shrink-0 text-[10px] font-medium uppercase tracking-[0.14em]">Optional</span>
+                ) : null}
               </li>
             )
           })}

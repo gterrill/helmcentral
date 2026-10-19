@@ -28,6 +28,8 @@ export interface SaveBarProps {
   error?: string | null
   onSave: () => void
   onDiscard: () => void
+  /** Blocks Save, e.g. while the form holds a value the server would refuse. */
+  saveDisabled?: boolean
   saveLabel?: string
   discardLabel?: string
   className?: string
@@ -39,6 +41,7 @@ export function SaveBar({
   error = null,
   onSave,
   onDiscard,
+  saveDisabled = false,
   saveLabel = 'Save',
   discardLabel = 'Discard',
   className,
@@ -74,7 +77,7 @@ export function SaveBar({
       <Button type="button" variant="outline" onClick={onDiscard} disabled={saving}>
         {discardLabel}
       </Button>
-      <Button type="button" onClick={onSave} disabled={saving}>
+      <Button type="button" onClick={onSave} disabled={saving || saveDisabled}>
         {saving ? 'Saving…' : saveLabel}
       </Button>
     </div>,

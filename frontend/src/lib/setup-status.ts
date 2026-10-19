@@ -13,6 +13,8 @@ export interface SetupStep {
   detail: string
   /** Where the step lands: a Settings section id and the DOM id of the control inside it. */
   target: { section: string; control: string }
+  /** An optional step is offered but never holds setup open. Absent on older servers. */
+  optional?: boolean
 }
 
 export interface SetupStatus {
@@ -22,13 +24,19 @@ export interface SetupStatus {
 
 export const emptySetupStatus: SetupStatus = { steps: [], complete: false }
 
-/** The first step still to do, or null when nothing is waiting. */
-export function nextSetupStep(status: SetupStatus): SetupStep | null {
-  return status.steps.find((s) => s.state === 'todo') ?? null
+/** The steps that hold setup open: everything but the optional ones. */
+export function requiredSetupSteps(status: SetupStatus): SetupStep[] {
+  return status.steps.filter((s) => !s.optional)
 }
 
+/** The first required step still to do, or null when nothing is waiting. */
+export function nextSetupStep(status: SetupStatus): SetupStep | null {
+  return requiredSetupSteps(status).find((s) => s.state === 'todo') ?? null
+}
+
+/** Required steps done; optional steps are neither counted nor part of the total. */
 export function doneSetupCount(status: SetupStatus): number {
-  return status.steps.filter((s) => s.state === 'done').length
+  return requiredSetupSteps(status).filter((s) => s.state === 'done').length
 }
 
 /** A concrete verb for each step's button. */
@@ -37,6 +45,7 @@ export const SETUP_ACTION_LABELS: Record<string, string> = {
   engines: 'Assign engines',
   house_bank: 'Choose the house bank',
   power: 'Choose power sources',
+  passage_limits: 'Set limits',
 }
 
 // A control to focus once Settings has drawn it. The dashboard line and the

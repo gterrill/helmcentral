@@ -135,11 +135,21 @@ not. The angle is taken per segment of the leg, from that segment's bearing,
 so a leg that turns the corner at a headland is judged on both courses. There
 is also a wind-against-tide limit, and a daylight-arrival toggle.
 
+**Wind against tide has no stream-speed threshold.** Helmcentral's tide data
+gives the stream's direction (from the leg's flood set) and timing (from high
+and low water), not its rate. So the limit is a wind band that applies while
+the stream runs against the wind through the strongest part of the flood or
+ebb. It is assessed only for legs with a known flood set. A leg without one
+shows "wind against tide not assessed", and never passes the check by
+default.
+
 **The limits live in Mate's settings,** as a Passage limits group. Nothing
 ships with Pikorua's values. If no limits are set, the tool returns an error
 naming what is missing, and Mate says so. It does not assess against invented
-defaults. A sector left blank is an error for any leg segment that falls in
-it, not a pass.
+defaults. Each sector needs at least a no-go wind limit. A leg segment
+that falls in a sector without one is an error, not a pass. Gust, wave and
+marginal levels are optional; a measure left blank is shown on the card as
+not checked.
 
 **Missing data is shown, not filled.** A leg with no forecast for its date
 shows `no data` in that cell, not `go`. The same applies to a missing wave

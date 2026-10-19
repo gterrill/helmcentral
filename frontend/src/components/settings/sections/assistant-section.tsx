@@ -1,13 +1,24 @@
 import { useState } from 'react'
 import { FormSection, SettingsLayout } from '@/components/patterns'
+import { useSetupFocus } from '@/hooks/use-setup-focus'
 import { SecretFieldGroup } from '@/components/settings/secret-field-group'
-import { defaultWebSearchModel, type RegularSettingsDraft } from '@/components/settings/settings-draft'
+import {
+  defaultWebSearchModel,
+  passageLimitErrors,
+  type PassageBandDraft,
+  type PassageLimitsDraft,
+  type PassageSectorDraft,
+  type RegularSettingsDraft,
+} from '@/components/settings/settings-draft'
 import { Button } from '@/components/ui/button'
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ModelCatalogDialog, ModelPicker } from '@/components/settings/sections/model-picker'
 import { Switch } from '@/components/ui/switch'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+
+const isAssistantSetupControl = (control: string) => control === 'passage-limits'
 
 interface AssistantSectionProps {
   draft: RegularSettingsDraft
@@ -88,11 +99,169 @@ function ModelChipRow({
   )
 }
 
+type SectorKey = 'ahead' | 'abeam' | 'astern'
+type MeasureKey = 'wind' | 'gust' | 'wave'
+
+const passageSectors: Array<{ key: SectorKey; label: string; angles: string }> = [
+  { key: 'ahead', label: 'Ahead', angles: '0–60°' },
+  { key: 'abeam', label: 'Abeam', angles: '60–120°' },
+  { key: 'astern', label: 'Astern', angles: '120–180°' },
+]
+
+const passageMeasures: Array<{ key: MeasureKey; label: string; unit: string }> = [
+  { key: 'wind', label: 'Wind', unit: 'kn' },
+  { key: 'gust', label: 'Gust', unit: 'kn' },
+  { key: 'wave', label: 'Wave', unit: 'm' },
+]
+
+function LimitInput({
+  label,
+  placeholder,
+  value,
+  invalid,
+  onChange,
+}: {
+  label: string
+  placeholder: string
+  value: string
+  invalid: boolean
+  onChange: (value: string) => void
+}) {
+  return (
+    <Input
+      type="text"
+      inputMode="decimal"
+      value={value}
+      placeholder={placeholder}
+      aria-label={label}
+      aria-invalid={invalid || undefined}
+      onChange={(e) => onChange(e.target.value)}
+      className="h-9 min-w-0 px-2 text-sm tabular-nums"
+    />
+  )
+}
+
+// A marginal and a no-go box side by side. Empty means unset.
+function BandInputs({
+  name,
+  unit,
+  band,
+  invalid,
+  onChange,
+}: {
+  name: string
+  unit: string
+  band: PassageBandDraft
+  invalid: boolean
+  onChange: (band: PassageBandDraft) => void
+}) {
+  return (
+    <div className="grid min-w-0 grid-cols-2 gap-1.5">
+      <LimitInput
+        label={`${name} marginal (${unit})`}
+        placeholder="Marginal"
+        value={band.marginal}
+        invalid={invalid}
+        onChange={(marginal) => onChange({ ...band, marginal })}
+      />
+      <LimitInput
+        label={`${name} no-go (${unit})`}
+        placeholder="No-go"
+        value={band.noGo}
+        invalid={invalid}
+        onChange={(noGo) => onChange({ ...band, noGo })}
+      />
+    </div>
+  )
+}
+
+// Sector rows by measure columns. Below sm each sector stacks and every
+// measure carries its own label, so nothing runs off a phone screen.
+function PassageLimitsFields({
+  limits,
+  errors,
+  onChange,
+}: {
+  limits: PassageLimitsDraft
+  errors: Record<string, string>
+  onChange: (next: PassageLimitsDraft) => void
+}) {
+  const setSector = (key: SectorKey, measure: MeasureKey, band: PassageBandDraft) =>
+    onChange({ ...limits, [key]: { ...limits[key], [measure]: band } as PassageSectorDraft })
+
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <div className="hidden gap-3 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground sm:grid sm:grid-cols-[7rem_repeat(3,minmax(0,1fr))]">
+        <span />
+        {passageMeasures.map((m) => (
+          <span key={m.key}>
+            {m.label} {m.unit}
+          </span>
+        ))}
+      </div>
+      {passageSectors.map((sector) => (
+        <div
+          key={sector.key}
+          className="grid min-w-0 gap-2 rounded-md border border-border p-2 sm:grid-cols-[7rem_repeat(3,minmax(0,1fr))] sm:items-center sm:gap-3 sm:border-0 sm:p-0"
+        >
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium text-foreground">{sector.label}</p>
+            <p className="truncate text-xs text-muted-foreground">{sector.angles}</p>
+          </div>
+          {passageMeasures.map((m) => (
+            <div key={m.key} className="flex min-w-0 flex-col gap-1">
+              <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground sm:hidden">
+                {m.label} {m.unit}
+              </span>
+              <BandInputs
+                name={`${sector.label} ${m.label.toLowerCase()}`}
+                unit={m.unit}
+                band={limits[sector.key][m.key]}
+                invalid={`${sector.key}.${m.key}` in errors}
+                onChange={(band) => setSector(sector.key, m.key, band)}
+              />
+            </div>
+          ))}
+        </div>
+      ))}
+
+      <div className="flex min-w-0 flex-col gap-1.5 border-t border-border pt-3">
+        <p className="text-sm font-medium text-foreground">Wind against tide</p>
+        <p className="text-xs text-muted-foreground">
+          Wind limits that apply while the tidal stream is running against the wind, through the strongest part of the
+          flood or ebb. Only used for legs with a known flood direction.
+        </p>
+        <div className="max-w-xs">
+          <BandInputs
+            name="Wind against tide"
+            unit="kn"
+            band={limits.tide}
+            invalid={'tide' in errors}
+            onChange={(tide) => onChange({ ...limits, tide })}
+          />
+        </div>
+      </div>
+
+      {Object.keys(errors).length > 0 ? (
+        <ul role="alert" className="flex flex-col gap-0.5">
+          {Object.entries(errors).map(([key, message]) => (
+            <li key={key} className="text-xs text-destructive">
+              {message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
+}
+
 // ADR 0093: onboard assistant over OpenRouter (BYOK). Off by default,
 // operator-triggered, key read from the encrypted secrets store, never
 // via LoadIntoEnv, and standing notes injected verbatim into every system
 // prompt.
 export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
+  // The setup checklist can ask for the passage limits group to be focused.
+  useSetupFocus(isAssistantSetupControl)
   const [autoDialogOpen, setAutoDialogOpen] = useState(false)
   const isAutoModel = draft.assistantModel.trim().toLowerCase() === 'openrouter/auto'
 
@@ -272,6 +441,35 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
               ) : null}
             </FieldGroup>
           </FormSection>
+
+          {/* tabIndex so the setup checklist can scroll to and focus this group. */}
+          <div id="passage-limits" tabIndex={-1} className="min-w-0 outline-hidden">
+            <FormSection
+              title="Passage limits"
+              description="Mate checks passages against these limits. Sectors are the true wind angle off your course. Each sector needs at least a no-go wind limit before Mate will assess a leg in it; gust, wave and marginal levels are optional, and any left blank are shown as not checked. Marginal must be below no-go."
+            >
+              <FieldGroup>
+                <PassageLimitsFields
+                  limits={draft.assistantPassageLimits}
+                  errors={passageLimitErrors(draft)}
+                  onChange={(assistantPassageLimits) => onChange({ assistantPassageLimits })}
+                />
+                <Field orientation="horizontal">
+                  <Switch
+                    checked={draft.assistantPassageLimits.daylightArrival}
+                    onCheckedChange={(daylightArrival) =>
+                      onChange({ assistantPassageLimits: { ...draft.assistantPassageLimits, daylightArrival } })
+                    }
+                    aria-label="Daylight arrival"
+                  />
+                  <FieldContent>
+                    <FieldLabel>Daylight arrival</FieldLabel>
+                    <FieldDescription>Flag any leg that would arrive after sunset.</FieldDescription>
+                  </FieldContent>
+                </Field>
+              </FieldGroup>
+            </FormSection>
+          </div>
 
           <FormSection title="Standing notes">
             <FieldGroup>

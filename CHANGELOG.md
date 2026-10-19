@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Passage limits.** **Settings → Mate** has a new **Passage limits** group:
+  marginal and no-go levels for wind, gusts and wave height, set separately for
+  wind ahead, abeam and astern, plus a wind-against-tide limit and a
+  daylight-arrival switch. Nothing is filled in for you. While Mate is on, the
+  Setup list shows **Passage limits** as an optional step that never holds up
+  the rest of setup.
+
 ### Fixed
 
 - **Silent instrument alarm.** A serial (NMEA 0183) instrument that goes quiet

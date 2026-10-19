@@ -8,6 +8,8 @@ import { SettingsFormProvider } from '@/components/settings/settings-form-contex
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 import { initialRegularSettingsDraft, type RegularSettingsDraft } from '@/components/settings/settings-draft'
 
+import { AppRouterContext } from '@/hooks/use-app-location'
+import type { AppRouter } from '@/lib/app-router'
 import { SetupLine } from '@/components/setup-line'
 import { SignalKSetupSection } from '@/components/settings/sections/signalk-setup-section'
 import { resetQueryStore } from '@/lib/api-query'
@@ -86,6 +88,62 @@ describe('Settings -> SignalK -> Setup', () => {
     body = { error: 'boom' }
     render(<SignalKSetupSection />)
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not read the setup status')
+  })
+})
+
+const optionalStep = (state: 'done' | 'todo') => ({
+  id: 'passage_limits', title: 'Passage limits', state, detail: 'Still open: ahead, astern.', optional: true,
+  target: { section: 'assistant', control: 'passage-limits' },
+})
+
+describe('Optional setup steps', () => {
+  it('shows an open optional step with its detail and a Set limits button, still labelled Optional', async () => {
+    body = { complete: true, steps: [...partial.steps.map((s) => ({ ...s, state: 'done' as const })), optionalStep('todo')] }
+    render(<SignalKSetupSection />)
+    expect(await screen.findByText('Passage limits')).toBeInTheDocument()
+    expect(screen.getByText('Optional')).toBeInTheDocument()
+    expect(screen.getByText('Still open: ahead, astern.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Set limits' })).toBeInTheDocument()
+  })
+
+  it('the button opens the Mate settings section and asks for #passage-limits to be focused', async () => {
+    body = { complete: true, steps: [...partial.steps.map((s) => ({ ...s, state: 'done' as const })), optionalStep('todo')] }
+    const navigate = vi.fn().mockReturnValue(true)
+    render(
+      <AppRouterContext.Provider value={{ navigate } as unknown as AppRouter}>
+        <SignalKSetupSection />
+      </AppRouterContext.Provider>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Set limits' }))
+    expect(navigate).toHaveBeenCalledWith({ panel: 'settings', route: { view: 'section', section: 'assistant' } })
+    expect(peekPendingSetupFocus()).toBe('passage-limits')
+  })
+
+  it('does not make the optional step the "next" one while a required step is open', async () => {
+    body = { complete: false, steps: [...partial.steps, optionalStep('todo')] }
+    render(<SignalKSetupSection />)
+    expect(await screen.findByRole('button', { name: 'Choose the house bank' })).toBeInTheDocument()
+    expect(document.querySelectorAll('[aria-current="step"]')).toHaveLength(1)
+  })
+
+  it('keeps optional steps out of the dashboard counter and the "next" step', async () => {
+    body = { complete: false, steps: [...partial.steps, optionalStep('todo')] }
+    render(<SetupLine enabled onOpen={() => {}} />)
+    expect(await screen.findByRole('button', { name: 'Setup: 2 of 4 done · Next: House bank' })).toBeInTheDocument()
+  })
+
+  it('does not count a done optional step as progress', async () => {
+    body = { complete: false, steps: [...partial.steps, optionalStep('done')] }
+    render(<SetupLine enabled onOpen={() => {}} />)
+    expect(await screen.findByRole('button', { name: 'Setup: 2 of 4 done · Next: House bank' })).toBeInTheDocument()
+  })
+
+  it('draws no setup line when only an optional step is open', async () => {
+    body = { complete: true, steps: [...partial.steps.map((s) => ({ ...s, state: 'done' as const })), optionalStep('todo')] }
+    const { container } = render(<SetupLine enabled onOpen={() => {}} />)
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 20))
+    expect(container).toBeEmptyDOMElement()
   })
 })
 
