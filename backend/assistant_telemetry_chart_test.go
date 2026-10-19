@@ -875,3 +875,14 @@ func TestShowTelemetryChart_MainsFrequencyStaysInHertz(t *testing.T) {
 		t.Errorf("mean = %v, want 50", got)
 	}
 }
+
+func TestShowTelemetryChart_RolePathIsCheckedBeforeFlux(t *testing.T) {
+	f := &tcFake{series: map[string][]telemetryPoint{}}
+	v := tcVessel()
+	v.HouseBank = &vesselHouseBankSetting{Path: `electrical.batteries.${x}`}
+	d := tcDeps(f, v, "metric")
+	_, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"role":"house_bank_soc"}],%s}`, tcRange))
+	if err == nil || !strings.Contains(err.Error(), "must not contain") {
+		t.Fatalf("got %v", err)
+	}
+}

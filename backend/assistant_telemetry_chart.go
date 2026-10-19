@@ -433,14 +433,14 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 				return "", err
 			}
 		} else {
-			if len(path) > gaugePathMaxLen {
-				return "", fmt.Errorf("show_telemetry_chart: path is too long")
-			}
-			// Interpolated into Flux.
-			if containsFluxInterpolationSyntax(path) {
-				return "", fmt.Errorf("show_telemetry_chart: path must not contain '$' or '{'")
-			}
 			label = chartPathWords(path)
+		}
+		// Every path, typed or resolved from a role, is interpolated into Flux.
+		if len(path) > gaugePathMaxLen {
+			return "", fmt.Errorf("show_telemetry_chart: path is too long")
+		}
+		if containsFluxInterpolationSyntax(path) {
+			return "", fmt.Errorf("show_telemetry_chart: path must not contain '$' or '{'")
 		}
 		source := strings.TrimSpace(a.Source)
 		if len(source) > gaugePathMaxLen || containsFluxInterpolationSyntax(source) {
