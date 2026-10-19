@@ -1021,7 +1021,10 @@ var mateToolAssessPassageWindow = mateTool{
 			"headland the route rounds. Get coordinates from find_places. For each leg give exactly one of " +
 			"passage_hours (from estimate_passage) or speed_kn. Give flood_set_deg only from the operator's " +
 			"standing notes or after asking them; never guess it. Dates beyond the forecast show no_data. A card " +
-			"is attached to your reply, so do not repeat the grid as a table.",
+			"is attached to your reply, so do not repeat the grid as a table. " +
+			fmt.Sprintf("The operator sets only a no-go wind (required) and no-go wave (optional) per sector, plus an optional wind against tide reduction. "+
+				"Marginal is worked out as %.0f%% of no-go and gusts are judged against the no-go wind plus %g kn, "+
+				"so never ask the operator to set marginal or gust limits.", passageMarginalFraction*100, passageGustAboveWindKn),
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

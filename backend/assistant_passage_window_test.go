@@ -1132,3 +1132,21 @@ func TestAssessItinerary_ZeroGustAmongRealGustsIsACalmHour(t *testing.T) {
 		t.Fatalf("got %s %+v, want no_go limited by gust", c.State, c.Limiting)
 	}
 }
+
+// The model must know that only no-go limits are set, so it never tells the
+// operator to set marginal or gust limits.
+func TestAssessPassageWindowDescription_SaysOnlyNoGoLimitsAreSet(t *testing.T) {
+	d := mateToolAssessPassageWindow.function.Description
+	for _, want := range []string{
+		"no-go wind (required)",
+		"wave (optional)",
+		"wind against tide",
+		fmt.Sprintf("%.0f%% of no-go", passageMarginalFraction*100),
+		fmt.Sprintf("no-go wind plus %g kn", passageGustAboveWindKn),
+		"never ask the operator to set marginal or gust limits",
+	} {
+		if !strings.Contains(d, want) {
+			t.Errorf("description lacks %q", want)
+		}
+	}
+}
