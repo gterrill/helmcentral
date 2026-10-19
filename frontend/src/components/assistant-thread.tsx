@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent, type Keyboard
 import { toast } from 'sonner'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
+import { AssistantCard } from '@/components/assistant-card'
 import { AssistantFormDraftCard } from '@/components/assistant-form-draft-card'
 import { AssistantProposalCard } from '@/components/assistant-proposal-card'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
@@ -572,6 +573,10 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                                 canWrite={canWrite}
                                 onChange={session.updateFormDraft}
                               />
+                            ))}
+                            {/* ADR 0191: cards built from tool results. */}
+                            {message.cards?.map((card, i) => (
+                              <AssistantCard key={i} card={card} />
                             ))}
                             <div className="flex items-center gap-2">
                               <MessageFooter

@@ -1192,3 +1192,28 @@ describe('scroll to the start of a delivered reply', () => {
     await waitFor(() => expect(scrollToMessageSpy).toHaveBeenCalledWith('m9', expect.objectContaining({ align: 'start' })))
   })
 })
+
+describe('cards under a reply (ADR 0191)', () => {
+  it('shows an error entry as a visible error card', () => {
+    const session = fakeMateSession({
+      messages: [assistantMessage({ content: 'Here you go', cards: [{ kind: 'error', reason: 'message card 0: unknown kind "mystery"', rawKind: 'mystery' }] })],
+    })
+    render(<AssistantThread canWrite session={session} />)
+    expect(screen.getByText(/This card couldn't be shown: message card 0: unknown kind "mystery"/)).toBeInTheDocument()
+  })
+
+  it('renders a passage window card', async () => {
+    const { passageWindowCard } = await import('./helpers/passage-window-fixture')
+    const session = fakeMateSession({ messages: [assistantMessage({ content: 'Here you go', cards: [passageWindowCard()] })] })
+    render(<AssistantThread canWrite session={session} />)
+    expect(await screen.findByText('Passage window')).toBeInTheDocument()
+  })
+
+  it('renders a message without cards as before', () => {
+    const session = fakeMateSession({ messages: [assistantMessage({ content: 'Plain answer' })] })
+    render(<AssistantThread canWrite session={session} />)
+    expect(screen.getByText('Plain answer')).toBeInTheDocument()
+    expect(screen.queryByText(/This card couldn't be shown/)).toBeNull()
+    expect(screen.queryByText('Passage window')).toBeNull()
+  })
+})

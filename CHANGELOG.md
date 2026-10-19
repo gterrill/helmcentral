@@ -19,6 +19,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   daylight-arrival switch. Nothing is filled in for you. While Mate is on, the
   Setup list shows **Passage limits** as an optional step that never holds up
   the rest of setup.
+- **Which days can we go?** Ask Mate about a trip in legs, with stays along
+  the way, and the answer comes with a grid card: one row for each departure
+  day, one column for each leg, and in each cell go, marginal, no-go or no
+  data, with the times and the figure that decided it. Each leg is judged on
+  the day it would actually sail, against your passage limits for the wind
+  angle on that part of the course. Anything not checked, such as wave height
+  with no wave forecast, is listed rather than passed.
 
 ### Fixed
 

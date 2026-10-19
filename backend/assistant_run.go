@@ -356,6 +356,13 @@ type assistantUsageReporter interface {
 	drainUsage() openRouterUsage
 }
 
+// assistantCardSource is implemented by a tool executor whose tools build a
+// card out of band (see assistantCardSink); takeCards returns the card the
+// call that produced result left behind, if any.
+type assistantCardSource interface {
+	takeCards(result string) []mateCard
+}
+
 // assistantRunner drives one assistant reply's agentic tool loop.
 type assistantRunner struct {
 	doer       openRouterDoer
@@ -852,6 +859,9 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 				if cerr := tool.collect(result, &reply); cerr != nil {
 					return assistantReply{}, cerr
 				}
+			}
+			if src, ok := r.tools.(assistantCardSource); ok {
+				reply.Cards = append(reply.Cards, src.takeCards(result)...)
 			}
 			toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
 				Name:   call.Function.Name,

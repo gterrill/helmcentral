@@ -71,7 +71,16 @@ fixture for `message` grows a card.
 each have a status the operator changes (applied, dismissed, saved). Cards
 have none: they are read-only displays. One table with a `kind` column,
 rather than one table per card, keeps adding a third card down to a struct, a
-`collect` and a component. The payload is versioned by `kind`: a kind
+`collect` and a component.
+
+**A card does not travel through the model's tool result.** Proposals and
+form drafts are lifted back out of the tool result by `collect`. A card can be
+far larger than the chat budget for a tool result (a 7-day, 6-leg grid is), so
+the tool hands the full card to a per-turn card sink and gives the model a
+compact summary, capped by dropping detail before verdicts. The run takes the
+card from the sink after the round. A refused, withheld or truncated call
+leaves nothing in the sink, so it produces no card and never fails the
+reply. The payload is versioned by `kind`: a kind
 whose shape changes incompatibly gets a new name (`passage_window_v2`), so a
 stored card is never decoded against the wrong shape. With one operator and no
 installed base, an unknown kind on read is an error, not a skip.

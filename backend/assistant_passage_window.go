@@ -1,0 +1,1063 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"math"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+)
+
+// assess_passage_window (ADR 0191) judges an itinerary of legs against the
+// operator's own passage limits, one row per candidate departure date and one
+// cell per leg on its scheduled date. The assessment is a pure function; the
+// tool wraps it with the configured providers and lifts the result into a
+// passage_window card.
+
+type passageRoutePoint struct {
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+	Name string  `json:"name"`
+}
+
+type passageLegArgs struct {
+	Name         string              `json:"name"`
+	Route        []passageRoutePoint `json:"route"`
+	PassageHours *float64            `json:"passage_hours"`
+	SpeedKn      *float64            `json:"speed_kn"`
+	FloodSetDeg  *float64            `json:"flood_set_deg"`
+	DepartTime   string              `json:"depart_time"`
+}
+
+type passageWindowArgs struct {
+	Legs           []passageLegArgs `json:"legs"`
+	StaysNights    []int            `json:"stays_nights"`
+	DepartureDates []string         `json:"departure_dates"`
+	DepartTime     string           `json:"depart_time"`
+}
+
+type passageWindowLimiting struct {
+	Factor string  `json:"factor"`
+	Sector *string `json:"sector"`
+	Text   string  `json:"text"`
+}
+
+type passageWindowCell struct {
+	Leg        int                    `json:"leg"`
+	Date       string                 `json:"date"`
+	Depart     string                 `json:"depart"`
+	Arrive     string                 `json:"arrive"`
+	State      string                 `json:"state"`
+	Limiting   *passageWindowLimiting `json:"limiting"`
+	Note       string                 `json:"note,omitempty"`
+	NotChecked []string               `json:"not_checked"`
+}
+
+type passageWindowRow struct {
+	DepartDate string              `json:"depart_date"`
+	Verdict    string              `json:"verdict"`
+	Cells      []passageWindowCell `json:"cells"`
+}
+
+type passageWindowLeg struct {
+	Name            string `json:"name"`
+	StayNightsAfter *int   `json:"stay_nights_after"`
+}
+
+type passageWindowPayload struct {
+	Timezone          string             `json:"timezone"`
+	ForecastFetchedAt string             `json:"forecast_fetched_at"`
+	Provider          string             `json:"provider"`
+	WaveProvider      string             `json:"wave_provider"`
+	Legs              []passageWindowLeg `json:"legs"`
+	Rows              []passageWindowRow `json:"rows"`
+}
+
+// passageHour is one forecast hour at one point, in SI units.
+type passageHour struct {
+	WindMS, GustMS, WindDirDeg float64
+	HasWave                    bool
+	WaveM, WaveDirDeg          float64
+	HasWaveDir                 bool
+}
+
+// passageForecast is one point's hourly forecast keyed by the unix time of the
+// hour, and when the provider data it came from was fetched.
+type passageForecast struct {
+	Hours     map[int64]passageHour
+	FetchedAt time.Time
+}
+
+// forecastSource yields hourly forecasts.
+type forecastSource struct {
+	Provider, WaveProvider string
+	Fetch                  func(ctx context.Context, lat, lon float64) (passageForecast, error)
+}
+
+type tideSource func(ctx context.Context, lat, lon float64, from, to time.Time) ([]tideExtremePoint, error)
+
+const (
+	passageWindowMaxLegs        = 6
+	passageWindowMaxStayNights  = 14
+	passageWindowSampleSplitNM  = 30.0
+	passageWindowTideMinAssist  = 0.5
+	passageWindowTideWindowDeg  = 60.0
+	passageWindowNoForecastNote = "No forecast this far ahead"
+	passageWindowInstruction    = "A card showing this grid is attached; do not repeat it as a table — say which days look best and why."
+)
+
+var passageClockRE = regexp.MustCompile(`^([01]\d|2[0-3]):([0-5]\d)$`)
+
+func passageClock(s string) (h, m int, ok bool) {
+	g := passageClockRE.FindStringSubmatch(s)
+	if g == nil {
+		return 0, 0, false
+	}
+	fmt.Sscanf(g[1]+" "+g[2], "%d %d", &h, &m)
+	return h, m, true
+}
+
+// parsePassageWindowArgs decodes strictly (an unknown argument is an error)
+// and validates; every message names the argument.
+func parsePassageWindowArgs(raw json.RawMessage) (passageWindowArgs, error) {
+	var a passageWindowArgs
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&a); err != nil {
+		return passageWindowArgs{}, fmt.Errorf("assess_passage_window: arguments: %w", err)
+	}
+	if err := a.validate(); err != nil {
+		return passageWindowArgs{}, err
+	}
+	return a, nil
+}
+
+func (a passageWindowArgs) validate() error {
+	fail := func(format string, v ...any) error {
+		return fmt.Errorf("assess_passage_window: "+format, v...)
+	}
+	if n := len(a.Legs); n < 1 || n > passageWindowMaxLegs {
+		return fail("legs must hold 1 to %d legs, got %d", passageWindowMaxLegs, n)
+	}
+	for i, l := range a.Legs {
+		if n := len(l.Route); n < 2 || n > 10 {
+			return fail("legs[%d].route must hold 2 to 10 points (start, any vias, end), got %d", i, n)
+		}
+		for j, p := range l.Route {
+			if p.Lat < -90 || p.Lat > 90 {
+				return fail("legs[%d].route[%d].lat must be between -90 and 90", i, j)
+			}
+			if p.Lon < -180 || p.Lon > 180 {
+				return fail("legs[%d].route[%d].lon must be between -180 and 180", i, j)
+			}
+		}
+		if (l.PassageHours == nil) == (l.SpeedKn == nil) {
+			return fail("legs[%d]: give exactly one of passage_hours or speed_kn", i)
+		}
+		if l.PassageHours != nil && !(*l.PassageHours >= 0.5 && *l.PassageHours <= 36) {
+			return fail("legs[%d].passage_hours must be between 0.5 and 36", i)
+		}
+		if l.SpeedKn != nil && !(*l.SpeedKn >= 1 && *l.SpeedKn <= 25) {
+			return fail("legs[%d].speed_kn must be between 1 and 25", i)
+		}
+		if l.FloodSetDeg != nil && !(*l.FloodSetDeg >= 0 && *l.FloodSetDeg <= 360) {
+			return fail("legs[%d].flood_set_deg must be between 0 and 360", i)
+		}
+		if l.DepartTime != "" {
+			if _, _, ok := passageClock(l.DepartTime); !ok {
+				return fail("legs[%d].depart_time must be HH:MM, 24-hour local", i)
+			}
+		}
+	}
+	if len(a.StaysNights) != len(a.Legs)-1 {
+		return fail("stays_nights must have one entry per gap between legs (%d), got %d", len(a.Legs)-1, len(a.StaysNights))
+	}
+	for i, n := range a.StaysNights {
+		if n < 0 || n > passageWindowMaxStayNights {
+			return fail("stays_nights[%d] must be between 0 and %d", i, passageWindowMaxStayNights)
+		}
+	}
+	if n := len(a.DepartureDates); n < 1 || n > 7 {
+		return fail("departure_dates must hold 1 to 7 dates, got %d", n)
+	}
+	for i, d := range a.DepartureDates {
+		if _, err := time.Parse("2006-01-02", d); err != nil {
+			return fail("departure_dates[%d] must be YYYY-MM-DD", i)
+		}
+	}
+	if a.DepartTime == "" {
+		return fail("depart_time is required (HH:MM, 24-hour local)")
+	}
+	if _, _, ok := passageClock(a.DepartTime); !ok {
+		return fail("depart_time must be HH:MM, 24-hour local")
+	}
+	return nil
+}
+
+// passageRowVerdict is a row's worst cell: no_go, then no_data, marginal, go.
+func passageRowVerdict(states []string) string {
+	has := map[string]bool{}
+	for _, s := range states {
+		has[s] = true
+	}
+	switch {
+	case has["no_go"]:
+		return "no_go"
+	case has["no_data"]:
+		return "no_data"
+	case has["marginal"]:
+		return "marginal"
+	}
+	return "go"
+}
+
+func (b passageLimitBand) set() bool { return b.Marginal != nil || b.NoGo != nil }
+
+func (l passageLimits) sector(name string) passageSectorLimits {
+	switch name {
+	case "ahead":
+		return l.Ahead
+	case "abeam":
+		return l.Abeam
+	}
+	return l.Astern
+}
+
+func (l passageLimits) anyWindNoGo() bool {
+	return l.Ahead.WindKn.NoGo != nil || l.Abeam.WindKn.NoGo != nil || l.Astern.WindKn.NoGo != nil
+}
+
+// passageSector is the true wind angle's sector: ahead under 60 degrees,
+// abeam to 120, astern beyond.
+func passageSector(angle float64) string {
+	switch {
+	case angle < 60:
+		return "ahead"
+	case angle < 120:
+		return "abeam"
+	}
+	return "astern"
+}
+
+// angleBetween is the smallest angle between two compass directions, 0-180.
+func angleBetween(a, b float64) float64 {
+	d := math.Mod(math.Abs(a-b), 360)
+	if d > 180 {
+		d = 360 - d
+	}
+	return d
+}
+
+type passageSegment struct {
+	from, to        passageRoutePoint
+	startM, lengthM float64
+	bearing         float64
+	label           string // "from → to", or the leg name when a point is unnamed
+}
+
+type passageLegPlan struct {
+	name     string
+	args     passageLegArgs
+	segs     []passageSegment
+	totalM   float64
+	hours    float64
+	samples  []passageRoutePoint
+	dailyEnd passageRoutePoint
+}
+
+func planPassageLeg(i int, l passageLegArgs) passageLegPlan {
+	first, last := l.Route[0], l.Route[len(l.Route)-1]
+	name := strings.TrimSpace(l.Name)
+	if name == "" {
+		if first.Name != "" && last.Name != "" {
+			name = first.Name + " → " + last.Name
+		} else {
+			name = fmt.Sprintf("Leg %d", i+1)
+		}
+	}
+	p := passageLegPlan{name: name, args: l, dailyEnd: last}
+	for j := 0; j+1 < len(l.Route); j++ {
+		a, b := l.Route[j], l.Route[j+1]
+		seg := passageSegment{from: a, to: b, startM: p.totalM, lengthM: haversineMeters(a.Lat, a.Lon, b.Lat, b.Lon), bearing: bearingDeg(a.Lat, a.Lon, b.Lat, b.Lon), label: name}
+		if a.Name != "" && b.Name != "" {
+			seg.label = a.Name + " → " + b.Name
+		}
+		p.totalM += seg.lengthM
+		p.segs = append(p.segs, seg)
+		p.samples = append(p.samples, a)
+		if seg.lengthM/metersPerNauticalMile > passageWindowSampleSplitNM {
+			p.samples = append(p.samples, passageRoutePoint{Lat: (a.Lat + b.Lat) / 2, Lon: (a.Lon + b.Lon) / 2})
+		}
+	}
+	p.samples = append(p.samples, last)
+	if l.PassageHours != nil {
+		p.hours = *l.PassageHours
+	} else {
+		p.hours = p.totalM / metersPerNauticalMile / *l.SpeedKn
+	}
+	return p
+}
+
+// at is the position and segment a fraction of the way along the route.
+func (p passageLegPlan) at(frac float64) (lat, lon float64, seg passageSegment) {
+	d := math.Max(0, math.Min(1, frac)) * p.totalM
+	idx := len(p.segs) - 1
+	for i, s := range p.segs {
+		if d < s.startM+s.lengthM {
+			idx = i
+			break
+		}
+	}
+	s := p.segs[idx]
+	u := 0.0
+	if s.lengthM > 0 {
+		u = math.Min(1, (d-s.startM)/s.lengthM)
+	}
+	return s.from.Lat + (s.to.Lat-s.from.Lat)*u, s.from.Lon + (s.to.Lon-s.from.Lon)*u, s
+}
+
+func (p passageLegPlan) nearestSample(lat, lon float64) passageRoutePoint {
+	best, bd := p.samples[0], math.MaxFloat64
+	for _, s := range p.samples {
+		if d := haversineMeters(lat, lon, s.Lat, s.Lon); d < bd {
+			best, bd = s, d
+		}
+	}
+	return best
+}
+
+type passageCandidate struct {
+	sev    int
+	ratio  float64
+	factor string
+	sector string
+	text   string
+}
+
+func (c passageCandidate) beats(o passageCandidate) bool {
+	if c.sev != o.sev {
+		return c.sev > o.sev
+	}
+	return c.ratio > o.ratio
+}
+
+// judge compares a value with a band: 2 no-go, 1 marginal, else 0, with the
+// ratio of value to the threshold that applied.
+func judge(v float64, b passageLimitBand) (sev int, ratio float64) {
+	ratioTo := func(th float64) float64 {
+		if th <= 0 {
+			return 1e9
+		}
+		return v / th
+	}
+	switch {
+	case b.NoGo != nil && v >= *b.NoGo:
+		return 2, ratioTo(*b.NoGo)
+	case b.Marginal != nil && v >= *b.Marginal:
+		return 1, ratioTo(*b.Marginal)
+	case b.Marginal != nil:
+		return 0, ratioTo(*b.Marginal)
+	case b.NoGo != nil:
+		return 0, ratioTo(*b.NoGo)
+	}
+	return 0, 0
+}
+
+type passageTideResult struct {
+	ext []tideExtremePoint
+	err error
+}
+
+type passageAssessor struct {
+	limits passageLimits
+	fc     forecastSource
+	tides  tideSource
+	sun    func(date time.Time, lat, lon float64) (rise, set time.Time, ok bool)
+	loc    *time.Location
+
+	// cache holds every sample point's hours, fetched up front and read-only
+	// after. fetchedAt is the oldest source time among them.
+	cache     map[string]map[int64]passageHour
+	fetchedAt time.Time
+	// tideSpans is the span each tide start point is needed for across the
+	// whole itinerary; tideCache holds what its one fetch returned.
+	tideSpans map[string][2]time.Time
+	tideCache map[string]passageTideResult
+}
+
+func passagePointKey(pt passageRoutePoint) string { return fmt.Sprintf("%.2f,%.2f", pt.Lat, pt.Lon) }
+
+const passageWindowFetchWorkers = 4
+
+// prefetch fetches the forecast at every distinct point, at most
+// passageWindowFetchWorkers at a time. Results land by index, so the outcome
+// and the first error reported do not depend on which fetch finished first.
+// ctx is checked before every provider call: once it is done no further call
+// is made and its error is returned.
+func (as *passageAssessor) prefetch(ctx context.Context, pts []passageRoutePoint) error {
+	type result struct {
+		f   passageForecast
+		err error
+	}
+	out := make([]result, len(pts))
+	sem := make(chan struct{}, passageWindowFetchWorkers)
+	var wg sync.WaitGroup
+launch:
+	for i, pt := range pts {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			break launch
+		}
+		if ctx.Err() != nil {
+			<-sem
+			break
+		}
+		wg.Add(1)
+		go func(i int, pt passageRoutePoint) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			if err := ctx.Err(); err != nil {
+				out[i].err = err
+				return
+			}
+			f, err := as.fc.Fetch(ctx, pt.Lat, pt.Lon)
+			if err != nil {
+				out[i].err = fmt.Errorf("assess_passage_window: forecast at %.2f, %.2f: %w", pt.Lat, pt.Lon, err)
+				return
+			}
+			out[i].f = f
+		}(i, pt)
+	}
+	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("assess_passage_window: %w", err)
+	}
+	for i, r := range out {
+		if r.err != nil {
+			return r.err
+		}
+		as.cache[passagePointKey(pts[i])] = r.f.Hours
+		if !r.f.FetchedAt.IsZero() && (as.fetchedAt.IsZero() || r.f.FetchedAt.Before(as.fetchedAt)) {
+			as.fetchedAt = r.f.FetchedAt
+		}
+	}
+	return nil
+}
+
+func (as *passageAssessor) hoursAt(pt passageRoutePoint) (map[int64]passageHour, error) {
+	h, ok := as.cache[passagePointKey(pt)]
+	if !ok {
+		return nil, fmt.Errorf("assess_passage_window: no forecast was fetched at %.2f, %.2f", pt.Lat, pt.Lon)
+	}
+	return h, nil
+}
+
+// tideExtremes fetches a start point's tide once, over the span the whole
+// itinerary needs there. A failure is kept too, so it is not retried per cell.
+func (as *passageAssessor) tideExtremes(ctx context.Context, pt passageRoutePoint) ([]tideExtremePoint, error) {
+	key := passagePointKey(pt)
+	if r, ok := as.tideCache[key]; ok {
+		return r.ext, r.err
+	}
+	span := as.tideSpans[key]
+	ext, err := as.tides(ctx, pt.Lat, pt.Lon, span[0], span[1])
+	as.tideCache[key] = passageTideResult{ext, err}
+	return ext, err
+}
+
+var passageNotCheckedOrder = []string{"wind_marginal", "gust", "wave", "wind_against_tide", "daylight"}
+
+func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPlan, depart time.Time) (passageWindowCell, error) {
+	arrive := depart.Add(time.Duration(plan.hours * float64(time.Hour)))
+	cell := passageWindowCell{
+		Leg: idx, Date: depart.Format("2006-01-02"),
+		Depart: depart.Format(time.RFC3339), Arrive: arrive.Format(time.RFC3339),
+	}
+	notChecked := map[string]bool{}
+	var worst passageCandidate
+	haveWorst := false
+	consider := func(c passageCandidate) {
+		if !haveWorst || c.beats(worst) {
+			worst, haveWorst = c, true
+		}
+	}
+	missing := false
+
+	// Wind against tide: only for a leg with a known flood set and a band.
+	var cycles []tidalHalfCycle
+	tideOn := false
+	if plan.args.FloodSetDeg != nil && as.limits.WindAgainstTide.WindKn.set() {
+		ext, err := as.tideExtremes(ctx, plan.args.Route[0])
+		if cerr := ctx.Err(); cerr != nil {
+			return cell, fmt.Errorf("assess_passage_window: %w", cerr)
+		}
+		if err == nil {
+			cycles, err = tidalHalfCycles(ext, 0, depart.Truncate(time.Hour), arrive)
+		}
+		tideOn = err == nil
+	}
+	if !tideOn {
+		notChecked["wind_against_tide"] = true
+	}
+
+	// Forecast values are stamped on the hour, so the two stamps around the
+	// arrival both bear on it: the last one at or before and the first one at
+	// or after.
+	lastStamp := arrive.Truncate(time.Hour)
+	if lastStamp.Before(arrive) {
+		lastStamp = lastStamp.Add(time.Hour)
+	}
+	for t := depart.Truncate(time.Hour); !t.After(lastStamp); t = t.Add(time.Hour) {
+		frac := 0.0
+		if arrive.After(depart) {
+			frac = float64(t.Sub(depart)) / float64(arrive.Sub(depart))
+		}
+		lat, lon, seg := plan.at(frac)
+		hours, err := as.hoursAt(plan.nearestSample(lat, lon))
+		if err != nil {
+			return cell, err
+		}
+		h, ok := hours[t.Unix()]
+		if !ok {
+			missing = true
+			continue
+		}
+		windKn := h.WindMS * metersPerSecondToKnots
+		gustKn := h.GustMS * metersPerSecondToKnots
+		sector := passageSector(angleBetween(h.WindDirDeg, seg.bearing))
+		lim := as.limits.sector(sector)
+		if lim.WindKn.NoGo == nil {
+			return cell, fmt.Errorf("assess_passage_window: Passage limits have no wind no-go for the %s sector, and %s runs in it. Set it in Settings → Mate → Passage limits", sector, plan.name)
+		}
+		if lim.WindKn.Marginal == nil {
+			notChecked["wind_marginal"] = true
+		}
+		sev, ratio := judge(windKn, lim.WindKn)
+		consider(passageCandidate{sev, ratio, "wind", sector,
+			fmt.Sprintf("Wind %s %d kn %s · %s", degreesToDirection(h.WindDirDeg), int(math.Round(windKn)), sector, seg.label)})
+
+		if lim.GustKn.set() {
+			sev, ratio := judge(gustKn, lim.GustKn)
+			consider(passageCandidate{sev, ratio, "gust", sector,
+				fmt.Sprintf("Gusts %d kn %s · %s", int(math.Round(gustKn)), sector, seg.label)})
+		} else {
+			notChecked["gust"] = true
+		}
+
+		if !h.HasWave {
+			notChecked["wave"] = true
+		} else {
+			waveSector := sector
+			if h.HasWaveDir {
+				waveSector = passageSector(angleBetween(h.WaveDirDeg, seg.bearing))
+			}
+			if band := as.limits.sector(waveSector).WaveM; band.set() {
+				sev, ratio := judge(h.WaveM, band)
+				consider(passageCandidate{sev, ratio, "wave", waveSector,
+					fmt.Sprintf("Waves %.1f m %s · %s", roundTo1(h.WaveM), waveSector, seg.label)})
+			} else {
+				notChecked["wave"] = true
+			}
+		}
+
+		if tideOn {
+			tt := t
+			if tt.Before(depart) {
+				tt = depart
+			}
+			a := tidalAssist(cycles, tt, 1)
+			if math.Abs(a) >= passageWindowTideMinAssist {
+				set, phase := *plan.args.FloodSetDeg, "flood"
+				if a < 0 {
+					set, phase = math.Mod(set+180, 360), "ebb"
+				}
+				if angleBetween(set, h.WindDirDeg) <= passageWindowTideWindowDeg {
+					sev, ratio := judge(windKn, as.limits.WindAgainstTide.WindKn)
+					consider(passageCandidate{sev, ratio, "wind_against_tide", "",
+						fmt.Sprintf("Wind %d kn against the %s · %s", int(math.Round(windKn)), phase, plan.name)})
+				}
+			}
+		}
+	}
+
+	if as.limits.DaylightArrival {
+		end := plan.dailyEnd
+		rise, set, ok := as.sun(arrive.In(as.loc), end.Lat, end.Lon)
+		switch {
+		case !ok:
+			notChecked["daylight"] = true
+		case arrive.Before(rise):
+			consider(passageCandidate{2, 1, "daylight", "",
+				fmt.Sprintf("Arrives %s, before sunrise %s · %s", arrive.In(as.loc).Format("15:04"), rise.In(as.loc).Format("15:04"), plan.name)})
+		case arrive.After(set):
+			consider(passageCandidate{2, 1, "daylight", "",
+				fmt.Sprintf("Arrives %s, after sunset %s · %s", arrive.In(as.loc).Format("15:04"), set.In(as.loc).Format("15:04"), plan.name)})
+		}
+	}
+
+	switch {
+	case haveWorst && worst.sev == 2:
+		cell.State = "no_go"
+	case missing:
+		cell.State = "no_data"
+	case haveWorst && worst.sev == 1:
+		cell.State = "marginal"
+	default:
+		cell.State = "go"
+	}
+	if cell.State == "no_data" {
+		cell.Note = passageWindowNoForecastNote
+	} else if haveWorst {
+		l := &passageWindowLimiting{Factor: worst.factor, Text: worst.text}
+		if worst.sector != "" {
+			sec := worst.sector
+			l.Sector = &sec
+		}
+		cell.Limiting = l
+	}
+	cell.NotChecked = []string{}
+	for _, k := range passageNotCheckedOrder {
+		if notChecked[k] {
+			cell.NotChecked = append(cell.NotChecked, k)
+		}
+	}
+	return cell, nil
+}
+
+// assessItinerary schedules every leg for each candidate departure date and
+// judges it against the operator's limits. It never fills a gap: a leg with no
+// forecast is no_data, and a measure that could not be read is listed in the
+// cell's not_checked.
+func assessItinerary(ctx context.Context, args passageWindowArgs, limits passageLimits, now time.Time, fc forecastSource, tides tideSource, sun func(date time.Time, lat, lon float64) (rise, set time.Time, ok bool)) (passageWindowPayload, error) {
+	if err := args.validate(); err != nil {
+		return passageWindowPayload{}, err
+	}
+	if !limits.anyWindNoGo() {
+		return passageWindowPayload{}, fmt.Errorf("assess_passage_window: Passage limits aren't set: Settings → Mate → Passage limits")
+	}
+	firstPoint := args.Legs[0].Route[0]
+	loc := vesselLocalLocation(firstPoint.Lon)
+	as := &passageAssessor{limits: limits, fc: fc, tides: tides, sun: sun, loc: loc,
+		cache: map[string]map[int64]passageHour{}, tideSpans: map[string][2]time.Time{}, tideCache: map[string]passageTideResult{}}
+
+	plans := make([]passageLegPlan, len(args.Legs))
+	out := passageWindowPayload{
+		Timezone:     vesselLocalTimezoneName(firstPoint.Lon),
+		Provider:     fc.Provider,
+		WaveProvider: fc.WaveProvider,
+		Legs:         make([]passageWindowLeg, len(args.Legs)),
+		Rows:         make([]passageWindowRow, 0, len(args.DepartureDates)),
+	}
+	for i, l := range args.Legs {
+		plans[i] = planPassageLeg(i, l)
+		out.Legs[i].Name = plans[i].name
+		if i < len(args.StaysNights) {
+			n := args.StaysNights[i]
+			out.Legs[i].StayNightsAfter = &n
+		}
+	}
+
+	departAt := func(date time.Time, clock string) time.Time {
+		h, m, _ := passageClock(clock)
+		return time.Date(date.Year(), date.Month(), date.Day(), h, m, 0, 0, loc)
+	}
+	clockFor := func(i int) string {
+		if c := args.Legs[i].DepartTime; c != "" {
+			return c
+		}
+		return args.DepartTime
+	}
+
+	// Schedule first: every leg's departure on every candidate date. The
+	// schedule does not depend on any forecast, so the forecast and tide
+	// spans the whole itinerary needs are known before the first fetch.
+	departs := make([][]time.Time, len(args.DepartureDates))
+	for r, ds := range args.DepartureDates {
+		day, _ := time.ParseInLocation("2006-01-02", ds, loc)
+		depart := departAt(day, clockFor(0))
+		for i, plan := range plans {
+			departs[r] = append(departs[r], depart)
+			if i+1 == len(plans) {
+				break
+			}
+			arrive := depart.Add(time.Duration(plan.hours * float64(time.Hour)))
+			ay, am, ad := arrive.Date()
+			if n := args.StaysNights[i]; n > 0 {
+				depart = departAt(time.Date(ay, am, ad+n, 0, 0, 0, 0, loc), clockFor(i+1))
+			} else {
+				depart = departAt(time.Date(ay, am, ad, 0, 0, 0, 0, loc), clockFor(i+1))
+				if !depart.After(arrive) {
+					depart = departAt(time.Date(ay, am, ad+1, 0, 0, 0, 0, loc), clockFor(i+1))
+				}
+			}
+		}
+	}
+	if limits.WindAgainstTide.WindKn.set() {
+		for r := range departs {
+			for i, plan := range plans {
+				if plan.args.FloodSetDeg == nil {
+					continue
+				}
+				from := departs[r][i].Truncate(time.Hour)
+				to := departs[r][i].Add(time.Duration(plan.hours * float64(time.Hour)))
+				key := passagePointKey(plan.args.Route[0])
+				if sp, ok := as.tideSpans[key]; ok {
+					if sp[0].Before(from) {
+						from = sp[0]
+					}
+					if sp[1].After(to) {
+						to = sp[1]
+					}
+				}
+				as.tideSpans[key] = [2]time.Time{from, to}
+			}
+		}
+	}
+
+	var points []passageRoutePoint
+	seen := map[string]bool{}
+	for _, plan := range plans {
+		for _, pt := range plan.samples {
+			if k := passagePointKey(pt); !seen[k] {
+				seen[k] = true
+				points = append(points, pt)
+			}
+		}
+	}
+	if err := as.prefetch(ctx, points); err != nil {
+		return passageWindowPayload{}, err
+	}
+	fetched := now
+	if !as.fetchedAt.IsZero() {
+		fetched = as.fetchedAt
+	}
+	out.ForecastFetchedAt = fetched.In(loc).Format(time.RFC3339)
+
+	for r, ds := range args.DepartureDates {
+		row := passageWindowRow{DepartDate: ds, Cells: make([]passageWindowCell, 0, len(plans))}
+		states := make([]string, 0, len(plans))
+		for i, plan := range plans {
+			cell, err := as.cell(ctx, i, plan, departs[r][i])
+			if err != nil {
+				return passageWindowPayload{}, err
+			}
+			row.Cells = append(row.Cells, cell)
+			states = append(states, cell.State)
+		}
+		row.Verdict = passageRowVerdict(states)
+		out.Rows = append(out.Rows, row)
+	}
+	return out, nil
+}
+
+// passageHoursFromBundles keys a point's weather and wave hours by the unix
+// time of the hour. A wave hour the provider does not have is absent, never
+// zero, and an hour with no weather point is absent too.
+func passageHoursFromBundles(wb weatherForecastBundle, vb *waveForecastBundle) map[int64]passageHour {
+	out := map[int64]passageHour{}
+	for _, hp := range wb.Hourly {
+		if hp.Time.IsZero() {
+			continue
+		}
+		out[hp.Time.Truncate(time.Hour).Unix()] = passageHour{WindMS: hp.WindSpeedMS, GustMS: hp.WindGustMS, WindDirDeg: hp.WindDirectionDeg}
+	}
+	if vb != nil {
+		for _, wp := range vb.Hourly {
+			k := wp.Time.Truncate(time.Hour).Unix()
+			if h, ok := out[k]; ok {
+				h.HasWave, h.WaveM, h.WaveDirDeg, h.HasWaveDir = true, wp.WaveHeightM, wp.WaveDirectionDeg, true
+				out[k] = h
+			}
+		}
+	}
+	return out
+}
+
+// passageModelResult is what the model reads: a compact summary of the grid
+// (every row's verdict, and per cell the state, what limited it and the local
+// times), not the card's payload. The card carries the full figures and goes
+// out of band (assistantCardSink), so the chat result cap never cuts it.
+type passageModelResult struct {
+	Legs        []string          `json:"legs"`
+	Rows        []passageModelRow `json:"rows"`
+	Instruction string            `json:"instruction"`
+
+	level, next int
+}
+
+type passageModelRow struct {
+	DepartDate string             `json:"depart_date"`
+	Verdict    string             `json:"verdict"`
+	Cells      []passageModelCell `json:"cells,omitempty"`
+}
+
+type passageModelCell struct {
+	Leg   int    `json:"leg"`
+	State string `json:"state"`
+	Why   string `json:"why,omitempty"`
+	Times string `json:"times,omitempty"`
+}
+
+func newPassageModelResult(p passageWindowPayload) *passageModelResult {
+	m := &passageModelResult{Instruction: passageWindowInstruction, Legs: make([]string, len(p.Legs)), Rows: make([]passageModelRow, len(p.Rows))}
+	for i, l := range p.Legs {
+		m.Legs[i] = l.Name
+	}
+	clock := func(s string) string {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return ""
+		}
+		return t.Format("15:04")
+	}
+	for i, r := range p.Rows {
+		row := passageModelRow{DepartDate: r.DepartDate, Verdict: r.Verdict, Cells: make([]passageModelCell, len(r.Cells))}
+		for j, c := range r.Cells {
+			mc := passageModelCell{Leg: c.Leg, State: c.State, Why: c.Note}
+			if c.Limiting != nil {
+				mc.Why = c.Limiting.Text
+			}
+			if d, a := clock(c.Depart), clock(c.Arrive); d != "" && a != "" {
+				mc.Times = d + "→" + a
+			}
+			row.Cells[j] = mc
+		}
+		m.Rows[i] = row
+	}
+	return m
+}
+
+// trim removes one level of detail from a row and reports whether anything
+// was there to remove: go cells' reasons, then every reason, then the times,
+// then the cells themselves. A row's verdict is never removed.
+func (r *passageModelRow) trim(level int) bool {
+	changed := false
+	switch level {
+	case 0, 1:
+		for i := range r.Cells {
+			if r.Cells[i].Why != "" && (level == 1 || r.Cells[i].State == "go") {
+				r.Cells[i].Why, changed = "", true
+			}
+		}
+	case 2:
+		for i := range r.Cells {
+			if r.Cells[i].Times != "" {
+				r.Cells[i].Times, changed = "", true
+			}
+		}
+	case 3:
+		if r.Cells != nil {
+			r.Cells, changed = nil, true
+		}
+	}
+	return changed
+}
+
+// shrink is capToolResultJSON's trim: one row's detail per call, the last row
+// first, a level at a time. It reports false only once only verdicts remain.
+func (m *passageModelResult) shrink() bool {
+	for m.level < 4 {
+		for m.next < len(m.Rows) {
+			row := &m.Rows[len(m.Rows)-1-m.next]
+			m.next++
+			if row.trim(m.level) {
+				return true
+			}
+		}
+		m.level, m.next = m.level+1, 0
+	}
+	return false
+}
+
+func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	args, err := parsePassageWindowArgs(raw)
+	if err != nil {
+		return "", err
+	}
+	if d.passageLimits == nil {
+		return "", fmt.Errorf("assess_passage_window: passage limits are not available")
+	}
+	if d.cards == nil {
+		return "", fmt.Errorf("assess_passage_window: cards are not available")
+	}
+	limits, err := d.passageLimits()
+	if err != nil {
+		return "", fmt.Errorf("assess_passage_window: %w", err)
+	}
+	wx, wxID, err := d.weather()
+	if err != nil {
+		return "", fmt.Errorf("assess_passage_window: %w", err)
+	}
+
+	// A provider gap is logged once per cause per call, naming the provider
+	// and the first point it hit.
+	var logMu sync.Mutex
+	logged := map[string]bool{}
+	logOnce := func(cause, format string, v ...any) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		if !logged[cause] {
+			logged[cause] = true
+			log.Printf("assistant: assess_passage_window: "+format, v...)
+		}
+	}
+
+	// No wave provider is a gap the card shows as "wave not checked", not an
+	// error and never calm seas.
+	var wv waveProvider
+	var wvID string
+	if d.waves != nil {
+		p, id, werr := d.waves()
+		if werr != nil {
+			logOnce("waves:"+werr.Error(), "wave provider unavailable, waves not checked: %v", werr)
+		} else {
+			wv, wvID = p, id
+		}
+	}
+	const days = assistantMaxForecastDays
+	now := d.now()
+	fc := forecastSource{Provider: wxID, WaveProvider: wvID, Fetch: func(ctx context.Context, lat, lon float64) (passageForecast, error) {
+		if err := ctx.Err(); err != nil {
+			return passageForecast{}, err
+		}
+		wb, err := wx.FetchForecast(lat, lon, days, vesselLocalTimezoneName(lon))
+		if err != nil {
+			return passageForecast{}, fmt.Errorf("weather provider %q: %w", wxID, err)
+		}
+		fetchedAt := now
+		if wb.Cached && !wb.CachedAt.IsZero() {
+			fetchedAt = wb.CachedAt
+		}
+		var vb *waveForecastBundle
+		if wv != nil {
+			if err := ctx.Err(); err != nil {
+				return passageForecast{}, err
+			}
+			if b, werr := wv.FetchWaves(lat, lon, days); werr != nil {
+				logOnce("wavefetch:"+wvID+":"+werr.Error(), "wave provider %q failed at %.2f, %.2f, waves not checked: %v", wvID, lat, lon, werr)
+			} else {
+				vb = &b
+				if b.Cached && !b.CachedAt.IsZero() && b.CachedAt.Before(fetchedAt) {
+					fetchedAt = b.CachedAt
+				}
+			}
+		}
+		return passageForecast{Hours: passageHoursFromBundles(wb, vb), FetchedAt: fetchedAt}, nil
+	}}
+	tides := func(ctx context.Context, lat, lon float64, from, to time.Time) ([]tideExtremePoint, error) {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if d.tides == nil {
+			return nil, fmt.Errorf("no tide provider")
+		}
+		st, err := d.resolveTideStation("assess_passage_window", lat, lon)
+		if err != nil {
+			_, id, _ := d.tides()
+			logOnce("tides:"+id+":"+err.Error(), "tide provider %q failed at %.2f, %.2f, wind against tide not checked: %v", id, lat, lon, err)
+			return nil, err
+		}
+		return st.chart.Extremes, nil
+	}
+	payload, err := assessItinerary(ctx, args, limits, now, fc, tides, sunTimes)
+	if err != nil {
+		return "", err
+	}
+	card, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("assess_passage_window card: %w", err)
+	}
+	model := newPassageModelResult(payload)
+	text, err := capToolResultJSON(model, model.shrink)
+	if err != nil {
+		return "", err
+	}
+	d.cards.put(text, mateCard{Kind: "passage_window", Payload: card})
+	return text, nil
+}
+
+var mateToolAssessPassageWindow = mateTool{
+	name: "assess_passage_window",
+	function: openRouterFunctionDef{
+		Description: "Judge an itinerary against the operator's own passage limits and show it as a grid card: one " +
+			"row per candidate departure date, one cell per leg on the date it would be sailed, each go, marginal, " +
+			"no_go or no_data with the limiting factor. Use it for \"which day should I leave\" and multi-leg trips " +
+			"with stays (leave Thursday, two nights at Cape Upstart, then Bowen). The limits come from the " +
+			"operator's settings; if they are not set the tool says so and you must tell the operator, never " +
+			"assume numbers. Wind is judged by its angle to each segment of the route, so add a via point at every " +
+			"headland the route rounds. Get coordinates from find_places. For each leg give exactly one of " +
+			"passage_hours (from estimate_passage) or speed_kn. Give flood_set_deg only from the operator's " +
+			"standing notes or after asking them; never guess it. Dates beyond the forecast show no_data. A card " +
+			"is attached to your reply, so do not repeat the grid as a table.",
+		Parameters: json.RawMessage(`{
+					"type": "object",
+					"properties": {
+						"legs": {
+							"type": "array", "minItems": 1, "maxItems": 6,
+							"description": "The legs in sailing order.",
+							"items": {
+								"type": "object",
+								"properties": {
+									"name": {"type": "string", "description": "Optional. Defaults to \"<start> → <end>\" from the point names."},
+									"route": {
+										"type": "array", "minItems": 2, "maxItems": 10,
+										"description": "Start, any via points, end. Use find_places for coordinates and add a via at each headland the route rounds.",
+										"items": {
+											"type": "object",
+											"properties": {
+												"lat": {"type": "number"},
+												"lon": {"type": "number"},
+												"name": {"type": "string", "description": "Place name, used in the limiting text."}
+											},
+											"required": ["lat", "lon"]
+										}
+									},
+									"passage_hours": {"type": "number", "minimum": 0.5, "maximum": 36, "description": "Hours under way. Give this or speed_kn, not both."},
+									"speed_kn": {"type": "number", "minimum": 1, "maximum": 25, "description": "Planned speed in knots; hours are then the route distance over the speed. Give this or passage_hours, not both."},
+									"flood_set_deg": {"type": "number", "minimum": 0, "maximum": 360, "description": "Direction in degrees true the flood stream sets toward. Only from standing notes or the operator; omit if unknown."},
+									"depart_time": {"type": "string", "description": "Optional HH:MM local, overriding the itinerary's departure time for this leg."}
+								},
+								"required": ["route"]
+							}
+						},
+						"stays_nights": {
+							"type": "array", "items": {"type": "integer", "minimum": 0, "maximum": 14},
+							"description": "One entry per gap between legs (legs minus one): nights spent at the end of leg i before leg i+1. With 1 or more, the next leg leaves that many days after the arrival date. With 0, the next leg leaves the same local date as arrival if its departure time is later than the arrival time, otherwise the next day. Use [] for a single leg."
+						},
+						"departure_dates": {
+							"type": "array", "minItems": 1, "maxItems": 7, "items": {"type": "string"},
+							"description": "Local dates YYYY-MM-DD the first leg could leave."
+						},
+						"depart_time": {"type": "string", "description": "Local departure time HH:MM for every leg unless a leg gives its own."}
+					},
+					"required": ["legs", "stays_nights", "departure_dates", "depart_time"]
+				}`),
+	},
+	execute: assistantToolDeps.executeAssessPassageWindow,
+	describe: func(args json.RawMessage) string {
+		return "Checking the forecast along the route against your passage limits…"
+	},
+}
+
+// passageLimitsFromSettingsFile reads assistant.passage_limits fresh on every
+// call, so a change on the Settings page applies to the next question. An
+// unreadable settings file or block is an error, never empty limits.
+func passageLimitsFromSettingsFile(settingsPath string) func() (passageLimits, error) {
+	return func() (passageLimits, error) {
+		settings, err := readSettings(settingsPath)
+		if err != nil {
+			return passageLimits{}, fmt.Errorf("settings are unreadable: %w", err)
+		}
+		am, _ := settings["assistant"].(map[string]any)
+		return passageLimitsFromSettings(am["passage_limits"])
+	}
+}
