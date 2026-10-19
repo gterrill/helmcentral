@@ -30,8 +30,8 @@ watchful eye. No-go means you would wait.
 4. Under **Wind against tide**, set the wind speeds at which a stream running
    against the wind becomes marginal or no-go for you. This is checked only
    for legs where Mate knows which way the flood runs.
-5. Turn on **Daylight arrival** if a leg that would arrive after sunset should
-   count as no-go.
+5. Turn on **Daylight arrival** if a leg that would arrive in the dark, before
+   sunrise or after sunset, should count as no-go.
 6. Choose **Save** in the bar at the bottom of the page.
 
 Decimals can be typed with a point or a comma. A value Helmcentral cannot read

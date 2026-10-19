@@ -99,7 +99,7 @@ type forecastSource struct {
 	Fetch                  func(ctx context.Context, lat, lon float64) (passageForecast, error)
 }
 
-type tideSource func(ctx context.Context, lat, lon float64, from, to time.Time) ([]tideExtremePoint, error)
+type tideSource func(ctx context.Context, lat, lon float64) ([]tideExtremePoint, error)
 
 const (
 	passageWindowMaxLegs        = 6
@@ -185,10 +185,15 @@ func (a passageWindowArgs) validate() error {
 	if n := len(a.DepartureDates); n < 1 || n > 7 {
 		return fail("departure_dates must hold 1 to 7 dates, got %d", n)
 	}
+	seenDates := map[string]bool{}
 	for i, d := range a.DepartureDates {
 		if _, err := time.Parse("2006-01-02", d); err != nil {
 			return fail("departure_dates[%d] must be YYYY-MM-DD", i)
 		}
+		if seenDates[d] {
+			return fail("departure_dates[%d] is a duplicate of %s; list each date once", i, d)
+		}
+		seenDates[d] = true
 	}
 	if a.DepartTime == "" {
 		return fail("depart_time is required (HH:MM, 24-hour local)")
@@ -244,6 +249,24 @@ func passageSector(angle float64) string {
 	return "astern"
 }
 
+// lerpLon is the longitude u of the way from a to b by the shorter way round,
+// so a route over the 180th meridian does not swing through Greenwich.
+func lerpLon(a, b, u float64) float64 {
+	d := math.Mod(b-a, 360)
+	if d > 180 {
+		d -= 360
+	} else if d < -180 {
+		d += 360
+	}
+	lon := math.Mod(a+d*u, 360)
+	if lon > 180 {
+		lon -= 360
+	} else if lon < -180 {
+		lon += 360
+	}
+	return lon
+}
+
 // angleBetween is the smallest angle between two compass directions, 0-180.
 func angleBetween(a, b float64) float64 {
 	d := math.Mod(math.Abs(a-b), 360)
@@ -291,7 +314,7 @@ func planPassageLeg(i int, l passageLegArgs) passageLegPlan {
 		p.segs = append(p.segs, seg)
 		p.samples = append(p.samples, a)
 		if seg.lengthM/metersPerNauticalMile > passageWindowSampleSplitNM {
-			p.samples = append(p.samples, passageRoutePoint{Lat: (a.Lat + b.Lat) / 2, Lon: (a.Lon + b.Lon) / 2})
+			p.samples = append(p.samples, passageRoutePoint{Lat: (a.Lat + b.Lat) / 2, Lon: lerpLon(a.Lon, b.Lon, 0.5)})
 		}
 	}
 	p.samples = append(p.samples, last)
@@ -318,7 +341,7 @@ func (p passageLegPlan) at(frac float64) (lat, lon float64, seg passageSegment) 
 	if s.lengthM > 0 {
 		u = math.Min(1, (d-s.startM)/s.lengthM)
 	}
-	return s.from.Lat + (s.to.Lat-s.from.Lat)*u, s.from.Lon + (s.to.Lon-s.from.Lon)*u, s
+	return s.from.Lat + (s.to.Lat-s.from.Lat)*u, lerpLon(s.from.Lon, s.to.Lon, u), s
 }
 
 func (p passageLegPlan) nearestSample(lat, lon float64) passageRoutePoint {
@@ -387,10 +410,10 @@ type passageAssessor struct {
 	// after. fetchedAt is the oldest source time among them.
 	cache     map[string]map[int64]passageHour
 	fetchedAt time.Time
-	// tideSpans is the span each tide start point is needed for across the
-	// whole itinerary; tideCache holds what its one fetch returned.
-	tideSpans map[string][2]time.Time
+	// tideCache holds what each tide start point's one fetch returned. A
+	// provider returns the station's own predicted window, not a span asked for.
 	tideCache map[string]passageTideResult
+	tideGaps  map[string]bool
 }
 
 func passagePointKey(pt passageRoutePoint) string { return fmt.Sprintf("%.2f,%.2f", pt.Lat, pt.Lon) }
@@ -461,15 +484,13 @@ func (as *passageAssessor) hoursAt(pt passageRoutePoint) (map[int64]passageHour,
 	return h, nil
 }
 
-// tideExtremes fetches a start point's tide once, over the span the whole
-// itinerary needs there. A failure is kept too, so it is not retried per cell.
+// tideExtremes fetches a start point's tide once. A failure is kept too, so it is not retried per cell.
 func (as *passageAssessor) tideExtremes(ctx context.Context, pt passageRoutePoint) ([]tideExtremePoint, error) {
 	key := passagePointKey(pt)
 	if r, ok := as.tideCache[key]; ok {
 		return r.ext, r.err
 	}
-	span := as.tideSpans[key]
-	ext, err := as.tides(ctx, pt.Lat, pt.Lon, span[0], span[1])
+	ext, err := as.tides(ctx, pt.Lat, pt.Lon)
 	as.tideCache[key] = passageTideResult{ext, err}
 	return ext, err
 }
@@ -502,6 +523,10 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		}
 		if err == nil {
 			cycles, err = tidalHalfCycles(ext, 0, depart.Truncate(time.Hour), arrive)
+			if key := passagePointKey(plan.args.Route[0]); err != nil && !as.tideGaps[key+err.Error()] {
+				as.tideGaps[key+err.Error()] = true
+				log.Printf("assess_passage_window: wind against tide not checked for %s: %v", plan.name, err)
+			}
 		}
 		tideOn = err == nil
 	}
@@ -650,7 +675,7 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 	firstPoint := args.Legs[0].Route[0]
 	loc := vesselLocalLocation(firstPoint.Lon)
 	as := &passageAssessor{limits: limits, fc: fc, tides: tides, sun: sun, loc: loc,
-		cache: map[string]map[int64]passageHour{}, tideSpans: map[string][2]time.Time{}, tideCache: map[string]passageTideResult{}}
+		cache: map[string]map[int64]passageHour{}, tideCache: map[string]passageTideResult{}, tideGaps: map[string]bool{}}
 
 	plans := make([]passageLegPlan, len(args.Legs))
 	out := passageWindowPayload{
@@ -704,28 +729,6 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 			}
 		}
 	}
-	if limits.WindAgainstTide.WindKn.set() {
-		for r := range departs {
-			for i, plan := range plans {
-				if plan.args.FloodSetDeg == nil {
-					continue
-				}
-				from := departs[r][i].Truncate(time.Hour)
-				to := departs[r][i].Add(time.Duration(plan.hours * float64(time.Hour)))
-				key := passagePointKey(plan.args.Route[0])
-				if sp, ok := as.tideSpans[key]; ok {
-					if sp[0].Before(from) {
-						from = sp[0]
-					}
-					if sp[1].After(to) {
-						to = sp[1]
-					}
-				}
-				as.tideSpans[key] = [2]time.Time{from, to}
-			}
-		}
-	}
-
 	var points []passageRoutePoint
 	seen := map[string]bool{}
 	for _, plan := range plans {
@@ -959,7 +962,7 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 		}
 		return passageForecast{Hours: passageHoursFromBundles(wb, vb), FetchedAt: fetchedAt}, nil
 	}}
-	tides := func(ctx context.Context, lat, lon float64, from, to time.Time) ([]tideExtremePoint, error) {
+	tides := func(ctx context.Context, lat, lon float64) ([]tideExtremePoint, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

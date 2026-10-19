@@ -464,7 +464,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                   />
                   <FieldContent>
                     <FieldLabel>Daylight arrival</FieldLabel>
-                    <FieldDescription>Flag any leg that would arrive after sunset.</FieldDescription>
+                    <FieldDescription>Flag any leg that would arrive in the dark, before sunrise or after sunset.</FieldDescription>
                   </FieldContent>
                 </Field>
               </FieldGroup>

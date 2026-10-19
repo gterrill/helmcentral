@@ -119,6 +119,56 @@ describe('Optional setup steps', () => {
     expect(peekPendingSetupFocus()).toBe('passage-limits')
   })
 
+  function heldRouter(location: Record<string, unknown>) {
+    const listeners = new Set<() => void>()
+    let snapshot: Record<string, unknown> = { location, pending: { target: {} } }
+    return {
+      listeners,
+      router: {
+        navigate: vi.fn().mockReturnValue(false),
+        subscribe: (l: () => void) => (listeners.add(l), () => listeners.delete(l)),
+        getSnapshot: () => snapshot,
+      },
+      settle: (next: Record<string, unknown>) => {
+        snapshot = next
+        listeners.forEach((l) => l())
+      },
+    }
+  }
+
+  it('a move held by the unsaved-edits guard keeps the focus request for when the operator continues', async () => {
+    body = { complete: true, steps: [...partial.steps.map((s) => ({ ...s, state: 'done' as const })), optionalStep('todo')] }
+    const here = { panel: 'settings', route: { view: 'section', section: 'signalk' } }
+    const there = { panel: 'settings', route: { view: 'section', section: 'assistant' } }
+    const { router, settle, listeners } = heldRouter(here)
+    render(
+      <AppRouterContext.Provider value={router as unknown as AppRouter}>
+        <SignalKSetupSection />
+      </AppRouterContext.Provider>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Set limits' }))
+    expect(peekPendingSetupFocus()).toBeNull()
+    // Save and continue: the move happens, and the section is asked to focus.
+    settle({ location: there, pending: null })
+    expect(peekPendingSetupFocus()).toBe('passage-limits')
+    expect(listeners.size).toBe(0)
+  })
+
+  it('a held move that the operator cancels leaves no focus request behind', async () => {
+    body = { complete: true, steps: [...partial.steps.map((s) => ({ ...s, state: 'done' as const })), optionalStep('todo')] }
+    const here = { panel: 'settings', route: { view: 'section', section: 'signalk' } }
+    const { router, settle, listeners } = heldRouter(here)
+    render(
+      <AppRouterContext.Provider value={router as unknown as AppRouter}>
+        <SignalKSetupSection />
+      </AppRouterContext.Provider>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: 'Set limits' }))
+    settle({ location: here, pending: null })
+    expect(peekPendingSetupFocus()).toBeNull()
+    expect(listeners.size).toBe(0)
+  })
+
   it('does not make the optional step the "next" one while a required step is open', async () => {
     body = { complete: false, steps: [...partial.steps, optionalStep('todo')] }
     render(<SignalKSetupSection />)

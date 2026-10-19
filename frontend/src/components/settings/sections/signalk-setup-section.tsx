@@ -30,9 +30,19 @@ export function SignalKSetupSection() {
       focusSetupControl(step.target.control)
       return
     }
-    requestSetupFocus(step.target.control)
-    // A guard can hold the move (unsaved edits); then the request must not linger.
-    if (!router.navigate({ panel: 'settings', route: { view: 'section', section: step.target.section as SettingsSectionId } })) clearPendingSetupFocus()
+    const { control } = step.target
+    const section = step.target.section as SettingsSectionId
+    requestSetupFocus(control)
+    if (router.navigate({ panel: 'settings', route: { view: 'section', section } })) return
+    // A guard holds the move (unsaved edits) while the operator decides, which
+    // can outlast the request. Ask again if the move is made, drop it if not.
+    clearPendingSetupFocus()
+    const stop = router.subscribe(() => {
+      const { pending, location } = router.getSnapshot()
+      if (pending !== null) return
+      stop()
+      if (location.panel === 'settings' && location.route.view === 'section' && location.route.section === section) requestSetupFocus(control)
+    })
   }
 
   return (

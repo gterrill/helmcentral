@@ -76,20 +76,48 @@ export function buildTimeRows(body: TelemetrySeriesBody, nSeries: number): TimeR
     }
     return r
   }
-  body.series.slice(0, nSeries).forEach((s, i) => {
+  const kept = body.series.slice(0, nSeries).map((s) => ({
+    pts: s.points.map((p) => ({ t: Date.parse(p.t), mean: p.mean })).sort((a, b) => a.t - b.t),
+    gaps: s.gaps.map((g) => ({ from: Date.parse(g.from), to: Date.parse(g.to) })),
+  }))
+  // breaks[i] is every timestamp at which series i is deliberately null.
+  const breaks = kept.map(() => new Set<number>())
+  kept.forEach(({ pts, gaps }, i) => {
     const key = seriesKey(i)
-    const pts = s.points.map((p) => ({ t: Date.parse(p.t), mean: p.mean })).sort((a, b) => a.t - b.t)
     pts.forEach((p, j) => {
       row(p.t)[key] = p.mean
       const next = pts[j + 1]
-      if (next && step > 0 && next.t - p.t > step * 2) row(p.t + step)[key] = null
+      if (next && step > 0 && next.t - p.t > step * 2) {
+        row(p.t + step)[key] = null
+        breaks[i].add(p.t + step)
+      }
     })
-    for (const g of s.gaps) {
-      const from = Date.parse(g.from)
-      if (!Number.isNaN(from)) row(from)[key] = null
+    for (const g of gaps) {
+      if (!Number.isNaN(g.from)) {
+        row(g.from)[key] = null
+        breaks[i].add(g.from)
+      }
     }
   })
-  return [...rows.values()].sort((a, b) => a.t - b.t)
+  const out = [...rows.values()].sort((a, b) => a.t - b.t)
+  // A row made for one series' break must not cut another series that runs
+  // through that instant: where it has points on both sides, close together
+  // and outside any gap of its own, it continues on the straight line it
+  // would have been drawn along.
+  kept.forEach(({ pts, gaps }, i) => {
+    const key = seriesKey(i)
+    for (const r of out) {
+      if (r[key] !== null || breaks[i].has(r.t)) continue
+      if (gaps.some((g) => r.t >= g.from && r.t <= g.to)) continue
+      const after = pts.findIndex((p) => p.t > r.t)
+      if (after <= 0) continue
+      const a = pts[after - 1]
+      const b = pts[after]
+      if (step > 0 && b.t - a.t > step * 2) continue
+      r[key] = a.mean + ((b.mean - a.mean) * (r.t - a.t)) / (b.t - a.t)
+    }
+  })
+  return out
 }
 
 export interface XYResult {

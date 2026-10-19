@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Charting units. A logged series is in SignalK's SI unit; the chart card and
 // Mate's summary show the operator's display unit. The SI unit of a path is
@@ -75,8 +78,13 @@ func chartDisplayUnitID(quantity, system string) string {
 // boat declares for it. It returns the display label and the conversion from
 // SI. An undeclared unit ("") or one with no display mapping keeps the
 // declared unit, unconverted.
-func chartDisplayFor(siUnit, system string) (string, func(float64) float64, error) {
+func chartDisplayFor(path, siUnit, system string) (string, func(float64) float64, error) {
 	identity := func(v float64) float64 { return v }
+	// Hz is the SI unit of every frequency, but only an engine's revolutions
+	// are read in rpm; a mains frequency stays in hertz.
+	if siUnit == "Hz" && !strings.HasSuffix(path, ".revolutions") {
+		return siUnit, identity, nil
+	}
 	q, ok := chartSIQuantity[siUnit]
 	if !ok {
 		return siUnit, identity, nil
