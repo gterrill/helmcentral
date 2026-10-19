@@ -15,7 +15,7 @@ export interface PassageLimitsPayload {
   ahead?: PassageSectorLimitsPayload
   abeam?: PassageSectorLimitsPayload
   astern?: PassageSectorLimitsPayload
-  /** Knots to take off every wind limit while the stream runs against the wind. */
+  /** Knots to take off the no-go wind while the stream runs against the wind. */
   wind_against_tide_offset_kn?: number | null
   daylight_arrival?: boolean
 }

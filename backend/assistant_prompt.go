@@ -959,7 +959,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		// that routine is mandatory for passages in the forecast range and
 		// did not mention the tool.
 		"When the operator asks whether or when to go, which day to leave, or for the outlook on a trip of " +
-		"one or more legs that starts within the forecast range, call assess_passage_window in addition to the " +
+		"one or more legs whose first leg leaves from the boat's position within the forecast range, call " +
+		"assess_passage_window in addition to the " +
 		"briefing, not instead of it. Pass every leg and every stay, with candidate departure dates that cover " +
 		"the days they asked about. The card carries the grid of days and legs, so do not repeat it as a table; " +
 		"summarise the best and worst days in a sentence or two and let the briefing explain the reasons. If the " +

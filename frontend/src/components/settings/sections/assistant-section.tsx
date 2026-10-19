@@ -187,9 +187,9 @@ function PassageLimitsFields({
       <div className="flex min-w-0 flex-col gap-1.5 border-t border-border pt-3">
         <p className="text-sm font-medium text-foreground">Wind against tide</p>
         <p className="text-xs text-muted-foreground">
-          While the tidal stream is running against the wind, through the strongest part of the flood or ebb, every
-          wind limit above is lowered by this many knots. Only used for legs with a known flood direction. Leave it
-          blank to skip the check.
+          While the tidal stream is running against the wind, through the strongest part of the flood or ebb, the
+          no-go wind above is lowered by this many knots, and marginal follows at 70% of the lowered figure. Gust
+          limits are not changed. Only used for legs with a known flood direction. Leave it blank to skip the check.
         </p>
         <div className="max-w-xs">
           <LimitInput

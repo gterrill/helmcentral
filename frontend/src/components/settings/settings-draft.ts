@@ -19,7 +19,7 @@ export interface PassageLimitsDraft {
   ahead: PassageSectorDraft
   abeam: PassageSectorDraft
   astern: PassageSectorDraft
-  /** Knots taken off every wind limit while the stream runs against the wind. */
+  /** Knots taken off the no-go wind while the stream runs against the wind. */
   tideOffset: string
   daylightArrival: boolean
 }
@@ -79,7 +79,7 @@ function passageLimitsToPayload(l: PassageLimitsDraft) {
 }
 
 /**
- * Same rules as the server: numbers, 0 or more, and a wind against tide
+ * Same rules as the server: numbers above 0, and a wind against tide
  * reduction above 0 and below every sector's no-go wind. Keyed by field,
  * e.g. "abeam.wind", "astern.wave" or "tide".
  */
@@ -92,7 +92,7 @@ export function passageLimitErrors(draft: RegularSettingsDraft): Record<string, 
     for (const [field, label] of [['wind', `${name} wind`], ['wave', `${name} wave height`]] as const) {
       const n = parseLimit(limits[sec][field])
       if (Number.isNaN(n)) errors[`${sec}.${field}`] = `${label}: enter a number`
-      else if (n !== null && n < 0) errors[`${sec}.${field}`] = `${label}: enter 0 or more`
+      else if (n !== null && n <= 0) errors[`${sec}.${field}`] = `${label}: enter more than 0`
     }
   }
   const offset = parseLimit(limits.tideOffset)

@@ -500,7 +500,7 @@ func (as *passageAssessor) tideExtremes(ctx context.Context, pt passageRoutePoin
 	return ext, err
 }
 
-var passageNotCheckedOrder = []string{"wave", "wind_against_tide", "daylight"}
+var passageNotCheckedOrder = []string{"gust", "wave", "wind_against_tide", "daylight"}
 
 func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPlan, depart time.Time) (passageWindowCell, error) {
 	arrive := depart.Add(time.Duration(plan.hours * float64(time.Hour)))
@@ -576,10 +576,16 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		consider(passageCandidate{sev, ratio, "wind", sector,
 			fmt.Sprintf("Wind %s %d kn %s%s · %s", degreesToDirection(h.WindDirDeg), int(windKn), sector, marginalNote(sev, windNoGo), seg.label)})
 
-		gustNoGo := windNoGo + passageGustAboveWindKn
-		sev, ratio = judge(gustKn, rawGustKn, gustNoGo)
-		consider(passageCandidate{sev, ratio, "gust", sector,
-			fmt.Sprintf("Gusts %d kn %s%s · %s", int(gustKn), sector, marginalNote(sev, gustNoGo), seg.label)})
+		// Providers leave a gust they do not have at 0. That is not a calm
+		// gust, so it is listed as not checked rather than passed.
+		if h.GustMS > 0 {
+			gustNoGo := windNoGo + passageGustAboveWindKn
+			sev, ratio = judge(gustKn, rawGustKn, gustNoGo)
+			consider(passageCandidate{sev, ratio, "gust", sector,
+				fmt.Sprintf("Gusts %d kn %s%s · %s", int(gustKn), sector, marginalNote(sev, gustNoGo), seg.label)})
+		} else {
+			notChecked["gust"] = true
+		}
 
 		if !h.HasWave {
 			notChecked["wave"] = true

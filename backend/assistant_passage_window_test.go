@@ -1093,3 +1093,18 @@ func TestAssessItinerary_TideDataThatStopsShortIsLoggedAsTheReason(t *testing.T)
 		t.Errorf("the reason was not logged: %q", buf.String())
 	}
 }
+
+// A forecast hour with no gust figure (providers leave it 0) is not a calm
+// gust: the cell lists gusts as not checked and does not pass them.
+func TestAssessItinerary_MissingGustIsNotCheckedNotPassed(t *testing.T) {
+	fc := pwUniform(10, 180, 0, nil, 0, pwDay(19, 0), pwDay(25, 23))
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(), fc))
+	if c.State != "go" || !pwHas(c.NotChecked, "gust") {
+		t.Fatalf("got %s, not_checked %v; want go with gust listed", c.State, c.NotChecked)
+	}
+	// With a gust figure the check runs and gusts are not listed.
+	c = pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(), pwWeek(10, 180)))
+	if pwHas(c.NotChecked, "gust") {
+		t.Fatalf("gusts were checked, not_checked = %v", c.NotChecked)
+	}
+}

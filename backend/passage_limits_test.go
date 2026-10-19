@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -198,5 +199,50 @@ func TestSaveOmitsPassageLimitsKeyWhenNoneSet(t *testing.T) {
 	assistant, _ := saved["assistant"].(map[string]any)
 	if _, present := assistant["passage_limits"]; present {
 		t.Fatalf("untouched limits must not write the key: %v", assistant)
+	}
+}
+
+// A tab still on the old bundle posts the v0.49.0 shape. That must be refused,
+// never decoded to empty limits and saved over the operator's values.
+func TestPostSettings_RefusesPassageLimitsInTheOldShape(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	appendSettings(t, settingsPath, "assistant:\n    enabled: true\n    passage_limits:\n        ahead:\n            wind_kn_no_go: 15\n")
+	current, _ := readSettings(settingsPath)
+	raw, _ := json.Marshal(buildSettingsPayload(current))
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	m["assistant"].(map[string]any)["passage_limits"] = map[string]any{
+		"ahead": map[string]any{"wind_kn": map[string]any{"marginal": 12, "no_go": 15}},
+	}
+	body, _ := json.Marshal(m)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := updateSettingsHandler(echo.New().NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "passage_limits") {
+		t.Fatalf("got %d %s, want 400 naming passage_limits", rec.Code, rec.Body.String())
+	}
+	after, _ := readSettings(settingsPath)
+	if got := buildSettingsPayload(after).Assistant.PassageLimits; got.Ahead.WindKnNoGo == nil || *got.Ahead.WindKnNoGo != 15 {
+		t.Fatalf("stored limits were changed: %+v", got)
+	}
+}
+
+func TestPostSettings_RejectsZeroNoGo(t *testing.T) {
+	for name, set := range map[string]func(*passageLimits){
+		"wind": func(l *passageLimits) { l.Ahead.WindKnNoGo = fp(0) },
+		"wave": func(l *passageLimits) { l.Abeam.WaveMNoGo = fp(0) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+			code, body := postSettings(t, settingsPath, func(p *settingsPayload) { set(&p.Assistant.PassageLimits) })
+			msg, _ := body["error"].(string)
+			if code == http.StatusOK || !strings.Contains(msg, "more than 0") {
+				t.Fatalf("got %d %q, want a rejection saying more than 0", code, msg)
+			}
+		})
 	}
 }

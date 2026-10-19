@@ -72,7 +72,15 @@ describe('Passage limits settings', () => {
   it('rejects a negative value', () => {
     const { latest } = renderSection()
     fireEvent.change(screen.getByLabelText('Astern no-go wave height (m)'), { target: { value: '-1' } })
-    expect(screen.getByText('Astern wave height: enter 0 or more')).toBeInTheDocument()
+    expect(screen.getByText('Astern wave height: enter more than 0')).toBeInTheDocument()
+    expect(Object.keys(passageLimitErrors(latest()))).toHaveLength(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('rejects a no-go of 0, which would make any wind against tide reduction unsavable', () => {
+    const { latest } = renderSection()
+    fireEvent.change(screen.getByLabelText('Ahead no-go wind (kn)'), { target: { value: '0' } })
+    expect(screen.getByText('Ahead wind: enter more than 0')).toBeInTheDocument()
     expect(Object.keys(passageLimitErrors(latest()))).toHaveLength(1)
     vi.unstubAllGlobals()
   })

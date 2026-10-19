@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -60,15 +61,14 @@ type passageLimits struct {
 
 // legacyPassageLimits is the shape v0.49.0 stored: marginal and no-go for wind,
 // gust and waves per sector, and a wind-against-tide band. Read only to carry
-// the no-go figures over.
+// the no-go wind and wave figures over; marginal and gust figures are not
+// read at all, so a bad value there is ignored, not an error.
 type legacyPassageLimitBand struct {
 	NoGo *float64 `yaml:"no_go"`
 }
 type legacyPassageSector struct {
 	WindKn legacyPassageLimitBand `yaml:"wind_kn"`
 	WaveM  legacyPassageLimitBand `yaml:"wave_m"`
-	// GustKn is read so a bad stored value is still an error.
-	GustKn legacyPassageLimitBand `yaml:"gust_kn"`
 }
 type legacyPassageLimits struct {
 	Ahead           legacyPassageSector `yaml:"ahead"`
@@ -95,10 +95,16 @@ func isLegacyPassageLimits(m map[string]any) bool {
 	return false
 }
 
+// legacyTideBandLogged keeps the dropped-band notice to once per process: the
+// block is decoded on every settings read and tool call.
+var legacyTideBandLogged sync.Once
+
 func (l legacyPassageLimits) convert() passageLimits {
 	if len(l.WindAgainstTide) > 0 {
 		// A band has no offset equivalent; the operator sets one afresh.
-		log.Printf("assistant.passage_limits: dropped the old wind against tide band; set \"Reduce wind limits by\" in Settings if wanted")
+		legacyTideBandLogged.Do(func() {
+			log.Printf("assistant.passage_limits: dropped the old wind against tide band; set \"Reduce wind limits by\" in Settings if wanted")
+		})
 	}
 	sector := func(s legacyPassageSector) passageSectorLimits {
 		return passageSectorLimits{WindKnNoGo: s.WindKn.NoGo, WaveMNoGo: s.WaveM.NoGo}
@@ -152,8 +158,8 @@ func passageLimitsToSettings(l passageLimits) (map[string]any, error) {
 }
 
 func validateNoGo(label string, v *float64) string {
-	if v != nil && *v < 0 {
-		return label + " must be 0 or more"
+	if v != nil && *v <= 0 {
+		return label + " must be more than 0"
 	}
 	return ""
 }

@@ -1211,6 +1211,7 @@ func TestBuildAssistantSystemPrompt_PassageWindowRule(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(basePromptContext())
 	for _, want := range []string{
 		"call assess_passage_window",
+		"whose first leg leaves from the boat's position within the forecast range",
 		"whether or when to go",
 		"in addition to the briefing",
 		"every leg and every stay",

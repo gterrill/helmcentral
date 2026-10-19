@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -202,7 +205,41 @@ func getSettingsHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, payload)
 }
 
+// checkPassageLimitsShape refuses a passage_limits block the current shape
+// cannot read, such as the one a tab on an older bundle still posts. The
+// binder ignores unknown fields, so without this the block would decode to
+// empty limits and be saved over the operator's values.
+func checkPassageLimitsShape(body []byte) error {
+	var probe struct {
+		Assistant struct {
+			PassageLimits json.RawMessage `json:"passage_limits"`
+		} `json:"assistant"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		return nil // c.Bind reports an unreadable body
+	}
+	raw := probe.Assistant.PassageLimits
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var l passageLimits
+	if err := dec.Decode(&l); err != nil {
+		return fmt.Errorf("assistant.passage_limits could not be read: %w. Reload the page and enter the limits again", err)
+	}
+	return nil
+}
+
 func updateSettingsHandler(c echo.Context) error {
+	body, err := io.ReadAll(c.Request().Body)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
+	}
+	c.Request().Body = io.NopCloser(bytes.NewReader(body))
+	if err := checkPassageLimitsShape(body); err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"field": "assistant.passage_limits", "error": err.Error()})
+	}
 	var req settingsPayload
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid request payload"})
