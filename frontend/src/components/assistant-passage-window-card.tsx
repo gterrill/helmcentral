@@ -68,15 +68,20 @@ function localDay(iso: string, timeZone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(iso))
 }
 
-/** "06:00 → 14:30", with the arrival weekday appended when it lands on a later local day. */
-function formatSpan(cell: PassageWindowCell, timeZone: string): string {
-  const span = `${formatTime(cell.depart, timeZone)} → ${formatTime(cell.arrive, timeZone)}`
+/**
+ * "06:00 → 14:30", with the arrival weekday appended when it lands on a later
+ * local day and the departure weekday prefixed when the leg sails on another
+ * day than its row's departure date ("Thu 06:00 → 11:34").
+ */
+function formatSpan(cell: PassageWindowCell, rowDate: string, timeZone: string): string {
+  const lead = cell.date !== rowDate ? `${new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short' }).format(new Date(cell.depart))} ` : ''
+  const span = `${lead}${formatTime(cell.depart, timeZone)} → ${formatTime(cell.arrive, timeZone)}`
   if (localDay(cell.arrive, timeZone) <= localDay(cell.depart, timeZone)) return span
   return `${span} ${new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short' }).format(new Date(cell.arrive))}`
 }
 
-function cellTitle(cell: PassageWindowCell, timeZone: string): string {
-  const times = formatSpan(cell, timeZone)
+function cellTitle(cell: PassageWindowCell, rowDate: string, timeZone: string): string {
+  const times = formatSpan(cell, rowDate, timeZone)
   const text = cell.limiting?.text ?? cell.note
   return text ? `${text} (${times})` : times
 }
@@ -149,7 +154,7 @@ export function AssistantPassageWindowCard({ card }: { card: PassageWindowCard }
                 <div
                   key={cell.leg}
                   role="cell"
-                  title={cellTitle(cell, card.timezone)}
+                  title={cellTitle(cell, row.departDate, card.timezone)}
                   className="flex min-w-0 flex-col items-start gap-1"
                 >
                   <span className="min-w-0 max-w-full truncate text-xs text-muted-foreground sm:hidden">{leg.name}
@@ -157,7 +162,7 @@ export function AssistantPassageWindowCard({ card }: { card: PassageWindowCard }
                   </span>
                   <StateChip state={cell.state} />
                   <span className="min-w-0 max-w-full truncate text-xs tabular-nums text-muted-foreground">
-                    {formatSpan(cell, card.timezone)}
+                    {formatSpan(cell, row.departDate, card.timezone)}
                   </span>
                   {detail && <span className="line-clamp-2 min-w-0 text-xs text-muted-foreground">{detail}</span>}
                 </div>

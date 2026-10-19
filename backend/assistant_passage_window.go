@@ -347,13 +347,16 @@ func (c passageCandidate) beats(o passageCandidate) bool {
 }
 
 // judge compares a value with a band: 2 no-go, 1 marginal, else 0, with the
-// ratio of value to the threshold that applied.
-func judge(v float64, b passageLimitBand) (sev int, ratio float64) {
+// ratio of value to the threshold that applied. shown is the value rounded as
+// the card prints it and decides the level; raw only orders candidates of the
+// same level, so a 12.4 kn reading still outranks a 12.0 kn one.
+func judge(shown, raw float64, b passageLimitBand) (sev int, ratio float64) {
+	v := shown
 	ratioTo := func(th float64) float64 {
 		if th <= 0 {
 			return 1e9
 		}
-		return v / th
+		return raw / th
 	}
 	switch {
 	case b.NoGo != nil && v >= *b.NoGo:
@@ -528,8 +531,11 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			missing = true
 			continue
 		}
-		windKn := h.WindMS * metersPerSecondToKnots
-		gustKn := h.GustMS * metersPerSecondToKnots
+		// Judged at the precision the card prints, so what the operator
+		// reads is what was compared with the limit.
+		rawWindKn := h.WindMS * metersPerSecondToKnots
+		rawGustKn := h.GustMS * metersPerSecondToKnots
+		windKn, gustKn, waveM := math.Round(rawWindKn), math.Round(rawGustKn), roundTo1(h.WaveM)
 		sector := passageSector(angleBetween(h.WindDirDeg, seg.bearing))
 		lim := as.limits.sector(sector)
 		if lim.WindKn.NoGo == nil {
@@ -538,14 +544,14 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		if lim.WindKn.Marginal == nil {
 			notChecked["wind_marginal"] = true
 		}
-		sev, ratio := judge(windKn, lim.WindKn)
+		sev, ratio := judge(windKn, rawWindKn, lim.WindKn)
 		consider(passageCandidate{sev, ratio, "wind", sector,
-			fmt.Sprintf("Wind %s %d kn %s · %s", degreesToDirection(h.WindDirDeg), int(math.Round(windKn)), sector, seg.label)})
+			fmt.Sprintf("Wind %s %d kn %s · %s", degreesToDirection(h.WindDirDeg), int(windKn), sector, seg.label)})
 
 		if lim.GustKn.set() {
-			sev, ratio := judge(gustKn, lim.GustKn)
+			sev, ratio := judge(gustKn, rawGustKn, lim.GustKn)
 			consider(passageCandidate{sev, ratio, "gust", sector,
-				fmt.Sprintf("Gusts %d kn %s · %s", int(math.Round(gustKn)), sector, seg.label)})
+				fmt.Sprintf("Gusts %d kn %s · %s", int(gustKn), sector, seg.label)})
 		} else {
 			notChecked["gust"] = true
 		}
@@ -558,9 +564,9 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 				waveSector = passageSector(angleBetween(h.WaveDirDeg, seg.bearing))
 			}
 			if band := as.limits.sector(waveSector).WaveM; band.set() {
-				sev, ratio := judge(h.WaveM, band)
+				sev, ratio := judge(waveM, h.WaveM, band)
 				consider(passageCandidate{sev, ratio, "wave", waveSector,
-					fmt.Sprintf("Waves %.1f m %s · %s", roundTo1(h.WaveM), waveSector, seg.label)})
+					fmt.Sprintf("Waves %.1f m %s · %s", waveM, waveSector, seg.label)})
 			} else {
 				notChecked["wave"] = true
 			}
@@ -578,9 +584,9 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 					set, phase = math.Mod(set+180, 360), "ebb"
 				}
 				if angleBetween(set, h.WindDirDeg) <= passageWindowTideWindowDeg {
-					sev, ratio := judge(windKn, as.limits.WindAgainstTide.WindKn)
+					sev, ratio := judge(windKn, rawWindKn, as.limits.WindAgainstTide.WindKn)
 					consider(passageCandidate{sev, ratio, "wind_against_tide", "",
-						fmt.Sprintf("Wind %d kn against the %s · %s", int(math.Round(windKn)), phase, plan.name)})
+						fmt.Sprintf("Wind %d kn against the %s · %s", int(windKn), phase, plan.name)})
 				}
 			}
 		}

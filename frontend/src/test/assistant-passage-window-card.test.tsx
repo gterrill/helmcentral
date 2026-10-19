@@ -51,7 +51,24 @@ describe('AssistantPassageWindowCard', () => {
   it('shows depart and arrive times visibly in each cell', () => {
     render(<AssistantPassageWindowCard card={passageWindowCard()} />)
     expect(screen.getAllByText('06:00 → 14:30').length).toBe(2)
-    expect(screen.getAllByText('06:00 → 12:00').length).toBe(2)
+  })
+
+  it('prefixes the departure weekday on a later leg that sails on another day than its row', () => {
+    render(<AssistantPassageWindowCard card={passageWindowCard()} />)
+    // Row 23 Oct, leg 1 sails on 25 Oct (Sun); row 24 Oct, leg 1 on 26 Oct (Mon).
+    expect(screen.getAllByText('Sun 06:00 → 12:00').length).toBe(1)
+    expect(screen.getAllByText('Mon 06:00 → 12:00').length).toBe(1)
+    expect(screen.getByTitle('Sun 06:00 → 12:00')).toBeInTheDocument()
+    // The first leg departs on its row's date and stays bare.
+    expect(screen.queryByText(/Fri 06:00 → 14:30/)).toBeNull()
+  })
+
+  it('puts the departure weekday before an overnight arrival suffix on a later leg', () => {
+    const card = passageWindowCard()
+    card.rows[0].cells[1].depart = '2026-10-25T20:00:00+10:00'
+    card.rows[0].cells[1].arrive = '2026-10-26T02:10:00+10:00'
+    render(<AssistantPassageWindowCard card={card} />)
+    expect(screen.getByText('Sun 20:00 → 02:10 Mon')).toBeInTheDocument()
   })
 
   it('adds the weekday when arrival is on a later local date', () => {

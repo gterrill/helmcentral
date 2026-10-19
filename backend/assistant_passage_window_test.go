@@ -990,3 +990,37 @@ func TestAssessItinerary_TheForecastHourAfterArrivalIsJudged(t *testing.T) {
 		t.Fatalf("the 15:00 hour covers a 14:30 arrival, got %+v", c)
 	}
 }
+
+// The cell judges the figure it prints: a gust that reads "24 kn" against a
+// marginal of 24 is marginal, whatever the raw forecast said.
+func TestAssessItinerary_JudgesTheFigureAsDisplayed(t *testing.T) {
+	gustLimits := func() passageLimits {
+		l := pwLimitsAll()
+		l.Abeam.GustKn = passageLimitBand{Marginal: pwF(24), NoGo: pwF(30)}
+		return l
+	}
+	waveLimits := func() passageLimits {
+		l := pwLimitsAll()
+		l.Ahead.WaveM = passageLimitBand{Marginal: pwF(1.0), NoGo: pwF(1.8)}
+		return l
+	}
+	cases := []struct {
+		name  string
+		l     passageLimits
+		fc    forecastSource
+		state string
+		text  string
+	}{
+		{"gust 23.6 reads 24 and is marginal", gustLimits(), pwUniform(10, 90, 23.6, nil, 0, pwDay(19, 0), pwDay(25, 23)), "marginal", "Gusts 24 kn abeam · Alpha → Bravo"},
+		{"gust 23.4 reads 23 and is go", gustLimits(), pwUniform(10, 90, 23.4, nil, 0, pwDay(19, 0), pwDay(25, 23)), "go", "Gusts 23 kn abeam · Alpha → Bravo"},
+		{"wave 1.75 reads 1.8 and is no-go", waveLimits(), pwUniform(5, 180, 5, pwF(1.75), 0, pwDay(19, 0), pwDay(25, 23)), "no_go", "Waves 1.8 m ahead · Alpha → Bravo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), tc.l, tc.fc))
+			if c.State != tc.state || c.Limiting == nil || c.Limiting.Text != tc.text {
+				t.Fatalf("got %s / %+v, want %s / %q", c.State, c.Limiting, tc.state, tc.text)
+			}
+		})
+	}
+}
