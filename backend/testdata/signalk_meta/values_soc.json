@@ -1,0 +1,1 @@
+{"context":"vessels.urn:mrn:imo:mmsi:518999323","updates":[{"$source":"venus.com.victronenergy.battery.512","timestamp":"2026-10-19T20:18:36.581Z","values":[{"path":"electrical.batteries.512.capacity.stateOfCharge","value":1}]}]}

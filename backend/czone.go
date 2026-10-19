@@ -133,6 +133,9 @@ func fetchSignalKSwitches(signalkURL string, switchesPath string) ([]czoneSwitch
 func walkSwitchTree(node map[string]any, prefix string, out *[]czoneSwitch) {
 	childIDs := make([]string, 0, len(node))
 	for key, val := range node {
+		if key == "meta" {
+			continue
+		}
 		if _, ok := val.(map[string]any); ok {
 			childIDs = append(childIDs, key)
 		}

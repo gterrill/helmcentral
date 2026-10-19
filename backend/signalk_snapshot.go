@@ -18,10 +18,21 @@ import (
 // snapshot that remains compatible with the existing lookupString/lookupNumber/
 // lookupBool functions.
 type signalKSnapshot struct {
-	mu         sync.RWMutex
-	contexts   map[string]map[string]any  // context string → nested tree
-	pathSeen   map[string]time.Time       // "<context>|<dotted path>" → last update time
-	sourceSeen map[string]sourceSeenEntry // "<context>|<$source>" → publishing history
+	mu sync.RWMutex
+	// The unit each of the self vessel's paths declared in its meta
+	// (signalk_units.go, ADR 0193). Meta never enters the tree.
+	// rememberedUnits is the single map every reader consults; it holds the
+	// current self vessel's units only. pendingUnits are the declarations
+	// not yet written to unitStore, keyed by vessel and path.
+	rememberedUnits map[string]string
+	pendingUnits    map[unitKey]string
+	unitStore       unitPersister
+	unitNotify      chan struct{}
+	unitFlushMu     sync.Mutex
+	unitFlushDelay  time.Duration
+	contexts        map[string]map[string]any  // context string → nested tree
+	pathSeen        map[string]time.Time       // "<context>|<dotted path>" → last update time
+	sourceSeen      map[string]sourceSeenEntry // "<context>|<$source>" → publishing history
 	// batteryPublishers is, per "<context>|<battery id>", every $source that
 	// has published any electrical.batteries.<id>.* path. The tree leaf only
 	// keeps whoever wrote last, but several devices can share one instance
@@ -260,6 +271,7 @@ type signalKUpdate struct {
 	SourceRef string         `json:"$source,omitempty"`
 	Timestamp string         `json:"timestamp,omitempty"`
 	Values    []signalKValue `json:"values"`
+	Meta      []signalKMeta  `json:"meta,omitempty"`
 }
 
 // signalKValue is a single path-value pair within an update.
@@ -272,6 +284,9 @@ type signalKValue struct {
 func newSignalKSnapshot() *signalKSnapshot {
 	return &signalKSnapshot{
 		contexts:          make(map[string]map[string]any),
+		rememberedUnits:   make(map[string]string),
+		pendingUnits:      make(map[unitKey]string),
+		unitNotify:        make(chan struct{}, 1),
 		pathSeen:          make(map[string]time.Time),
 		controlStamps:     make(map[string]controlStampEntry),
 		controlStampCount: make(map[string]int),
@@ -373,6 +388,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 	tree := s.contexts[d.Context]
 
 	for _, update := range d.Updates {
+		// Meta rides in updates of its own, with no values and no $source.
+		s.applyMetaLocked(d.Context, update.Meta)
+
 		// Tracked once per update block, independent of which (if any)
 		// individual values below get kept: the silent-source check cares
 		// about this $source's publishing cadence, not which paths a given
@@ -659,8 +677,20 @@ func (s *signalKSnapshot) setSelfContext(context string) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	changed := s.selfCtx != trimmed
 	s.selfCtx = trimmed
+	if changed {
+		// Units belong to the vessel that declared them.
+		s.rememberedUnits = make(map[string]string)
+	}
+	store := s.unitStore
+	s.mu.Unlock()
+
+	if changed && store != nil {
+		if err := s.reloadUnits(trimmed); err != nil {
+			log.Printf("signalk snapshot: could not load remembered units for %s: %v", trimmed, err)
+		}
+	}
 }
 
 func (s *signalKSnapshot) selfContext() string {
@@ -1506,4 +1536,21 @@ func leafNotificationIsLive(leaf map[string]any) bool {
 		return false
 	}
 	return notificationValueIsLive(value)
+}
+
+// treeAndUnits copies context's tree and the self vessel's unit map under one
+// read lock, for a walk that then runs outside it.
+func (s *signalKSnapshot) treeAndUnits(context string) (map[string]any, map[string]string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	tree, ok := s.contexts[context]
+	if !ok {
+		return nil, nil
+	}
+	atomic.AddInt64(&snapshotWholeTreeCopies, 1)
+	units := make(map[string]string, len(s.rememberedUnits))
+	for path, u := range s.rememberedUnits {
+		units[path] = u
+	}
+	return deepCopyMap(tree), units
 }

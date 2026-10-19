@@ -34,6 +34,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Alarm units.** Alarm cards and notifications for readings that come from
+  the boat's instruments (battery, tank, engine, wind and the rest) now show the
+  reading in your units. They had been showing the raw figure with no unit and
+  no conversion, such as a battery at 12 per cent as 0.12 or a pressure in
+  pascals, because Helmcentral never received the unit the boat declares for
+  each reading. It now does, and it remembers the last unit each reading
+  declared, so an alarm on a device that is switched off, or that has not
+  reported since Helmcentral restarted, still names its unit. A reading that
+  has never declared a unit still shows none. Nothing to do on upgrade.
 - **Silent instrument alarm.** A serial (NMEA 0183) instrument that goes quiet
   is now named for its connection, once, instead of as six "An instrument (1
   of 6)" rows. The card says what the device carried ("Vesper Cortex has stopped
