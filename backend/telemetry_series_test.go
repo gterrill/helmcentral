@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -193,7 +194,7 @@ func TestTelemetrySeriesNoDataAnywhereIs404NamingEveryPath(t *testing.T) {
 	}
 }
 
-func TestTelemetrySeriesQueriesPathsConcurrentlyButBounded(t *testing.T) {
+func TestTelemetrySeriesQueriesPathsConcurrently(t *testing.T) {
 	stubSeries(t, true, nil)
 	var mu sync.Mutex
 	inflight, peak := 0, 0
@@ -234,8 +235,8 @@ func TestTelemetrySeriesQueriesPathsConcurrentlyButBounded(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("paths were queried one after another")
 	}
-	if peak < 2 || peak > telemetrySeriesMaxPaths {
-		t.Errorf("peak concurrency %d, want 2..%d", peak, telemetrySeriesMaxPaths)
+	if peak < 2 {
+		t.Errorf("peak concurrency %d, want at least 2", peak)
 	}
 }
 
@@ -342,5 +343,34 @@ func TestTelemetrySeriesInfluxErrorIs502(t *testing.T) {
 	rec := seriesGet(t, []string{"a.b"}, "2026-10-18T12:00:00Z", "2026-10-19T12:00:00Z")
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("expected 502, got %d", rec.Code)
+	}
+}
+
+func TestTelemetrySeriesInnerTimeoutIs504(t *testing.T) {
+	stubSeries(t, true, nil)
+	telemetrySeriesIO.stat = func(context.Context, string, string, time.Time, time.Time, string, string) ([]telemetryPoint, error) {
+		return nil, fmt.Errorf("query: %w", context.DeadlineExceeded)
+	}
+	rec := seriesGet(t, []string{"a.b"}, "2026-10-18T12:00:00Z", "2026-10-19T12:00:00Z")
+	if rec.Code != http.StatusGatewayTimeout || !strings.Contains(rec.Body.String(), "shorter range") {
+		t.Fatalf("expected 504, got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTelemetrySeriesClientGoneWritesNothing(t *testing.T) {
+	stubSeries(t, true, nil)
+	reqCtx, cancelReq := context.WithCancel(context.Background())
+	telemetrySeriesIO.stat = func(ctx context.Context, _, _ string, _, _ time.Time, _, _ string) ([]telemetryPoint, error) {
+		cancelReq()
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/series?path=a.b&from=2026-10-18T12:00:00Z&to=2026-10-19T12:00:00Z", nil).WithContext(reqCtx)
+	rec := httptest.NewRecorder()
+	if err := telemetrySeriesHandler(echo.New().NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("a client that went away must get no 502, wrote %d %s", rec.Code, rec.Body)
 	}
 }

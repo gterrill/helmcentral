@@ -574,6 +574,17 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 	return out, nil
 }
 
+// inPlaceholders builds the "?, ?, ?" list and matching args for a
+// "WHERE message_id IN (...)" clause.
+func inPlaceholders(ids []string) (string, []any) {
+	marks := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		marks[i], args[i] = "?", id
+	}
+	return strings.Join(marks, ","), args
+}
+
 // attachmentsForMessages returns every message_attachments row for the
 // given message ids, grouped by message_id and position-ordered - the
 // batch read behind ListMessages, one query rather than one per message.
@@ -585,16 +596,11 @@ func attachmentsForMessages(q sqlQueryer, messageIDs []string) (map[string][]ass
 		return nil, nil
 	}
 
-	placeholders := make([]string, len(messageIDs))
-	args := make([]any, len(messageIDs))
-	for i, id := range messageIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
+	marks, args := inPlaceholders(messageIDs)
 
 	rows, err := q.Query(
 		`SELECT message_id, document_id, filename FROM message_attachments
-		 WHERE message_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY message_id, position`,
+		 WHERE message_id IN (`+marks+`) ORDER BY message_id, position`,
 		args...)
 	if err != nil {
 		return nil, fmt.Errorf("list message attachments: %w", err)

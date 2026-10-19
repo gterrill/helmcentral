@@ -220,29 +220,37 @@ func telemetrySeriesHandler(c echo.Context) error {
 	ctx, cancel := context.WithTimeout(c.Request().Context(), telemetrySeriesTimeout)
 	defer cancel()
 
-	// Paths are queried concurrently, at most telemetrySeriesMaxPaths at once,
-	// and results land by index so the first error is the first by path order.
+	// Paths (at most telemetrySeriesMaxPaths) are queried concurrently, and
+	// results land by index so the first error is the first by path order.
 	results := make([]pathHistoryBuckets, len(paths))
 	errs := make([]error, len(paths))
-	sem := make(chan struct{}, telemetrySeriesMaxPaths)
 	var wg sync.WaitGroup
 	for i, p := range paths {
 		wg.Add(1)
-		sem <- struct{}{}
 		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
 			results[i], errs[i] = queryPathHistoryBuckets(ctx, telemetrySeriesIO, p, "", from, to, []string{"mean"}, false, telemetrySeriesBucketWidth)
 		}()
 	}
 	wg.Wait()
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+	tookTooLong := func() error {
 		return c.JSON(http.StatusGatewayTimeout, map[string]string{
 			"error": "the history query took too long. Try a shorter range.",
 		})
 	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return tookTooLong()
+	}
 	for _, err := range errs {
-		if err != nil {
+		switch {
+		case err == nil:
+		case errors.Is(err, context.DeadlineExceeded):
+			// An inner per-query timeout, not only the overall one.
+			return tookTooLong()
+		case errors.Is(err, context.Canceled):
+			// The client went away; nobody is left to read a response.
+			return nil
+		default:
 			return c.JSON(http.StatusBadGateway, map[string]string{"error": "InfluxDB query failed: " + err.Error()})
 		}
 	}

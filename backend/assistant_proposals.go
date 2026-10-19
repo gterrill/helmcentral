@@ -144,15 +144,10 @@ func proposalsForMessages(q sqlQueryer, messageIDs []string) (map[string][]assis
 	if len(messageIDs) == 0 {
 		return nil, nil
 	}
-	placeholders := make([]string, len(messageIDs))
-	args := make([]any, len(messageIDs))
-	for i, id := range messageIDs {
-		placeholders[i] = "?"
-		args[i] = id
-	}
+	marks, args := inPlaceholders(messageIDs)
 	rows, err := q.Query(
 		`SELECT `+assistantProposalColumns+` FROM assistant_message_proposals
-		 WHERE message_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY message_id, position`, args...)
+		 WHERE message_id IN (`+marks+`) ORDER BY message_id, position`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list message proposals: %w", err)
 	}

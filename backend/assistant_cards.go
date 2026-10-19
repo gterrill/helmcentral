@@ -59,12 +59,8 @@ func cardsForMessages(q sqlQueryer, messageIDs []string) (map[string][]mateCard,
 	if len(messageIDs) == 0 {
 		return nil, nil
 	}
-	placeholders := make([]string, len(messageIDs))
-	args := make([]any, len(messageIDs))
-	for i, id := range messageIDs {
-		placeholders[i], args[i] = "?", id
-	}
-	rows, err := q.Query(`SELECT message_id, kind, payload_json FROM assistant_message_cards WHERE message_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY message_id, ordinal`, args...)
+	marks, args := inPlaceholders(messageIDs)
+	rows, err := q.Query(`SELECT message_id, kind, payload_json FROM assistant_message_cards WHERE message_id IN (`+marks+`) ORDER BY message_id, ordinal`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list message cards: %w", err)
 	}
