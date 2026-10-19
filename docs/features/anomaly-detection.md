@@ -48,9 +48,10 @@ connection. When all of it has gone quiet the card says what it carried:
 "Vesper Cortex has stopped sending AIS, position, heading, wind, depth, boat
 speed, log and weather". If only part has gone quiet, the card lists what only
 that part carried, or says "some of its data" when the rest still arrives. The
-card is titled for the device ("Vesper Cortex Silent"), or "Instruments Silent"
-when more than one has gone quiet, and has one **Ignore** action for the whole
-device.
+card is titled for the device ("Vesper Cortex Silent", or "Vesper Cortex Partly
+Silent" when some of it still sends), or "Instruments Silent" when more than one
+has gone quiet. The title is set when the alarm is raised and does not change
+while it is up. The card has one **Ignore** action for the whole device.
 
 The impossible-reading check looks at batteries, not at chargers. A solar
 charger reports its panel array's voltage under a battery number on some

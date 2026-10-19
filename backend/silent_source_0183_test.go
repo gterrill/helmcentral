@@ -31,16 +31,27 @@ var vesperSentences = map[string][]string{
 	"GP": {"GSV"}, "GA": {"GSV"}, "GB": {"GSV"}, "GQ": {"GSV"},
 }
 
-func vesperHealth(extra ...sourceHealth) []sourceHealth {
+var entryNow = time.Date(2026, 10, 19, 7, 0, 0, 0, time.UTC)
+
+// vesperHealth lists the six talkers, each sending now except those named in
+// silent, which last published ten minutes ago.
+func vesperHealth(silent ...string) []sourceHealth {
 	var h []sourceHealth
 	for _, s := range vesperTalkers {
 		set := map[string]bool{}
 		for _, sent := range vesperSentences[s[len(s)-2:]] {
 			set[sent] = true
 		}
-		h = append(h, sourceHealth{Source: s, BusType: busTypeNMEA0183, Sentences: set})
+		last := entryNow
+		for _, q := range silent {
+			if q == s {
+				last = entryNow.Add(-10 * time.Minute)
+			}
+		}
+		h = append(h, sourceHealth{Source: s, BusType: busTypeNMEA0183, Sentences: set,
+			First: entryNow.Add(-time.Hour), Last: last, Count: 500})
 	}
-	return append(h, extra...)
+	return h
 }
 
 func TestSilent0183SourcesGroupByConnection(t *testing.T) {
@@ -57,28 +68,28 @@ func TestSilent0183SourcesGroupByConnection(t *testing.T) {
 		{
 			name:   "every Vesper talker silent is one device",
 			silent: vesperTalkers,
-			health: vesperHealth(),
+			health: vesperHealth(vesperTalkers...),
 			want: []sensorHealthEntry{{Identifier: "Vesper_Cortex", Name: "Vesper Cortex", Label: "Vesper Cortex",
 				Text: "Vesper Cortex has stopped sending AIS, position, heading, wind, depth, boat speed, log and weather"}},
 		},
 		{
 			name:   "silent talkers whose data others also carry",
 			silent: []string{"Vesper_Cortex.GA", "Vesper_Cortex.GB"},
-			health: vesperHealth(),
-			want: []sensorHealthEntry{{Identifier: "Vesper_Cortex", Name: "Vesper Cortex", Label: "Vesper Cortex",
+			health: vesperHealth("Vesper_Cortex.GA", "Vesper_Cortex.GB"),
+			want: []sensorHealthEntry{{Identifier: "Vesper_Cortex", Name: "Vesper Cortex", Label: "Vesper Cortex", Partial: true,
 				Text: "Vesper Cortex has stopped sending some of its data"}},
 		},
 		{
 			name:   "only the AI talker silent lists what only it carries",
 			silent: []string{"Vesper_Cortex.AI"},
-			health: vesperHealth(),
-			want: []sensorHealthEntry{{Identifier: "Vesper_Cortex", Name: "Vesper Cortex", Label: "Vesper Cortex",
+			health: vesperHealth("Vesper_Cortex.AI"),
+			want: []sensorHealthEntry{{Identifier: "Vesper_Cortex", Name: "Vesper Cortex", Label: "Vesper Cortex", Partial: true,
 				Text: "Vesper Cortex has stopped sending AIS, heading, wind, depth, boat speed, log and weather"}},
 		},
 		{
 			name:   "no known sentences says nothing more",
 			silent: []string{"Foo-Bar.ZZ"},
-			health: []sourceHealth{{Source: "Foo-Bar.ZZ", BusType: busTypeNMEA0183, Sentences: map[string]bool{"ZZZ": true}}},
+			health: []sourceHealth{{Source: "Foo-Bar.ZZ", BusType: busTypeNMEA0183, Sentences: map[string]bool{"ZZZ": true}, Last: entryNow.Add(-time.Hour)}},
 			want: []sensorHealthEntry{{Identifier: "Foo-Bar", Name: "Foo Bar", Label: "Foo Bar",
 				Text: "Foo Bar has stopped sending"}},
 		},
@@ -94,7 +105,7 @@ func TestSilent0183SourcesGroupByConnection(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := namer.silentSourceEntries(tc.silent, tc.health)
+			got := namer.silentSourceEntries(tc.silent, tc.health, entryNow)
 			if len(got) != len(tc.want) {
 				t.Fatalf("got %d entries %+v, want %d", len(got), got, len(tc.want))
 			}
@@ -119,58 +130,117 @@ func TestSilentSourceNamedFromRecordedBusType(t *testing.T) {
 	}
 }
 
-func TestIgnoringAConnectionSilencesItsTalkersOnly(t *testing.T) {
-	now := time.Date(2026, 10, 19, 7, 0, 0, 0, time.UTC)
-	quiet := func(h sourceHealth) sourceHealth {
-		h.First, h.Last, h.Count = now.Add(-time.Hour), now.Add(-10*time.Minute), 500
-		return h
-	}
-	var sources []sourceHealth
-	for _, h := range vesperHealth(sourceHealth{Source: "can0.23", BusType: "NMEA2000"}) {
-		sources = append(sources, quiet(h))
-	}
+func TestIgnoringAConnectionHidesTheAlarmButNotTheTrustGate(t *testing.T) {
+	now := entryNow
+	sources := vesperHealth(vesperTalkers...)
+	sources = append(sources, sourceHealth{Source: "can0.23", BusType: "NMEA2000",
+		First: now.Add(-time.Hour), Last: now.Add(-10 * time.Minute), Count: 500})
 	if got := silentSources(sources, now, time.Second, nil); len(got) != 7 {
 		t.Fatalf("unignored: %v, want 7 silent", got)
 	}
-	got := silentSources(sources, now, time.Second, map[string]bool{"Vesper_Cortex": true})
+	ignored := map[string]bool{"Vesper_Cortex": true}
+	got := silentSources(sources, now, time.Second, ignored)
 	if len(got) != 1 || got[0] != "can0.23" {
 		t.Errorf("connection ignored: %v, want only can0.23", got)
+	}
+	// The set that gates which readings the detectors trust is untouched:
+	// a stale path from the ignored connection is still distrusted.
+	if got := quietSources(sources, now, time.Second, ignored); len(got) != 7 {
+		t.Errorf("quietSources with a connection ignored = %d sources, want all 7 still quiet", len(got))
+	}
+}
+
+func TestUnwatchedOrIgnoredSiblingIsNotStillSending(t *testing.T) {
+	namer := newSensorNamer(newAnomalyTestSnapshot(), vesselView{}, nil)
+	health := vesperHealth(vesperTalkers...)
+	// GN is quiet but excluded (not in the silent list); it must not count as
+	// sending, so the device reads as fully stopped.
+	got := namer.silentSourceEntries([]string{"Vesper_Cortex.AI"}, health, entryNow)
+	if len(got) != 1 || got[0].Partial {
+		t.Errorf("entries = %+v, want one non-partial entry", got)
+	}
+}
+
+func TestDottedConnectionIdsSplitAtTheLastDot(t *testing.T) {
+	c, talker := split0183Source("My.Gps.GP")
+	if c != "My.Gps" || talker != "GP" {
+		t.Errorf("split = %q %q", c, talker)
+	}
+	h := sourceHealth{Source: "My.Gps.GP", BusType: busTypeNMEA0183}
+	if healthConnection(h) != "My.Gps" {
+		t.Errorf("0183 connection = %q", healthConnection(h))
+	}
+	if sourceConnection("venus.com.victronenergy.battery.278") != "venus" {
+		t.Errorf("N2K/venus connection keeps the first-dot split")
+	}
+}
+
+func TestSilentCountIsTheNumberOfDevices(t *testing.T) {
+	namer := newSensorNamer(newAnomalyTestSnapshot(), vesselView{}, nil)
+	got := namer.silentSourceEntries(vesperTalkers, vesperHealth(vesperTalkers...), entryNow)
+	if len(got) != 1 {
+		t.Errorf("six silent talkers = %d entries, want 1 (the count the rule reads)", len(got))
+	}
+}
+
+func TestAlarmTitleIsFixedAtRaiseAndUsedByClearedMessage(t *testing.T) {
+	rule := alarmRule{ID: anomalySilentSourceRuleID, Label: silentSourceLabel, Path: anomalySensorSilentSourceCountPath,
+		Op: alarmOpAbove, Value: 0.5, State: alarmStateWarn}
+	vesper := sensorHealthEntry{Name: "Vesper Cortex", Text: "Vesper Cortex has stopped sending"}
+	partial := vesper
+	partial.Partial = true
+	if got := alarmTitleFor(rule, []sensorHealthEntry{partial}); got != "Vesper Cortex Partly Silent" {
+		t.Errorf("partial title = %q", got)
+	}
+	if got := alarmTitleFor(rule, []sensorHealthEntry{vesper}); got != "Vesper Cortex Silent" {
+		t.Errorf("title = %q", got)
+	}
+
+	now := time.Now()
+	withSlot := func(entries []sensorHealthEntry, count float64) {
+		prev := globalAnomalySlot
+		globalAnomalySlot = &anomalySlot{}
+		globalAnomalySlot.set(anomalyReading{ComputedAt: now, Sensors: map[string][]sensorHealthEntry{rule.Path: entries}})
+		t.Cleanup(func() { globalAnomalySlot = prev })
+	}
+	withSlot([]sensorHealthEntry{vesper}, 1)
+	status := &alarmStatus{RuleID: rule.ID, Phase: alarmPhaseNormal}
+	// Raise.
+	status.Label = rule.Label
+	ev, ok := advanceAlarmRule(rule, status, alarmSample{Present: true, Value: 1.0, LastSeen: now}, now)
+	if !ok || ev.Kind != alarmEventRaised || status.Label != "Vesper Cortex Silent" {
+		t.Fatalf("raise: ok=%v kind=%v label=%q", ok, ev.Kind, status.Label)
+	}
+	// The slot now says two devices; the alarm keeps its title.
+	withSlot([]sensorHealthEntry{vesper, {Name: "Wind"}}, 2)
+	// Clear.
+	ev, ok = advanceAlarmRule(rule, status, alarmSample{Present: true, Value: 0, LastSeen: now}, now)
+	if !ok || ev.Kind != alarmEventCleared || ev.Status.Message != "Vesper Cortex Silent cleared" {
+		t.Errorf("cleared: ok=%v message=%q", ok, ev.Status.Message)
 	}
 }
 
 func TestIgnoredConnectionIsNamedReadably(t *testing.T) {
-	namer := newSensorNamer(newAnomalyTestSnapshot(), vesselView{}, nil)
+	snapshot := newAnomalyTestSnapshot()
+	feed0183(snapshot, time.Now(), map[string]string{"Vesper_Cortex.GP": "NMEA0183"})
+	namer := newSensorNamer(snapshot, vesselView{}, nil)
 	e := namer.identifierEntry("Vesper_Cortex")
 	if e.Label != "Vesper Cortex" || e.Text != "Vesper Cortex" || e.Identifier != "Vesper_Cortex" {
 		t.Errorf("identifierEntry = %+v", e)
 	}
 }
 
-func TestSilentSourceTitleNamesTheDevice(t *testing.T) {
-	now := time.Now()
-	rule := alarmRule{ID: anomalySilentSourceRuleID, Label: silentSourceLabel, Path: anomalySensorSilentSourceCountPath}
-	set := func(t *testing.T, entries ...sensorHealthEntry) {
-		prev := globalAnomalySlot
-		globalAnomalySlot = &anomalySlot{}
-		globalAnomalySlot.set(anomalyReading{ComputedAt: now, Sensors: map[string][]sensorHealthEntry{rule.Path: entries}})
-		t.Cleanup(func() { globalAnomalySlot = prev })
-	}
-	vesper := sensorHealthEntry{Name: "Vesper Cortex", Text: "Vesper Cortex has stopped sending"}
-	set(t, vesper)
-	if got := alarmTitleFor(rule, now); got != "Vesper Cortex Silent" {
-		t.Errorf("one device title = %q", got)
-	}
-	set(t, vesper, sensorHealthEntry{Name: "Wind"})
-	if got := alarmTitleFor(rule, now); got != "Instruments Silent" {
+func TestSilentSourceTitleCounts(t *testing.T) {
+	rule := alarmRule{ID: anomalySilentSourceRuleID, Label: silentSourceLabel}
+	vesper := sensorHealthEntry{Name: "Vesper Cortex"}
+	if got := alarmTitleFor(rule, []sensorHealthEntry{vesper, {Name: "Wind"}}); got != "Instruments Silent" {
 		t.Errorf("two devices title = %q", got)
 	}
-	set(t, sensorHealthEntry{Name: unnamedSourceName})
-	if got := alarmTitleFor(rule, now); got != "Instrument Silent" {
+	if got := alarmTitleFor(rule, []sensorHealthEntry{{Name: unnamedSourceName}}); got != "Instrument Silent" {
 		t.Errorf("unnamed title = %q", got)
 	}
-	set(t, vesper)
 	rule.Label = "My own label"
-	if got := alarmTitleFor(rule, now); got != "My own label" {
+	if got := alarmTitleFor(rule, []sensorHealthEntry{vesper}); got != "My own label" {
 		t.Errorf("operator label overwritten: %q", got)
 	}
 }

@@ -102,9 +102,9 @@ func engineStates(sources []sourceHealth, now time.Time, streamAge time.Duration
 // connectionCarriesOthers reports whether any source that is not engine-bound
 // shares e's connection, live or not.
 func connectionCarriesOthers(e sourceHealth, sources []sourceHealth) bool {
-	conn := sourceConnection(e.Source)
+	conn := healthConnection(e)
 	for _, s := range sources {
-		if !s.EngineBound && sourceConnection(s.Source) == conn {
+		if !s.EngineBound && healthConnection(s) == conn {
 			return true
 		}
 	}

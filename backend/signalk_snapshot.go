@@ -858,6 +858,14 @@ func (s *signalKSnapshot) knownContexts() []string {
 	return result
 }
 
+// sourceBusType is the declared bus type of one $source under context, a
+// single-key lookup under the read lock.
+func (s *signalKSnapshot) sourceBusType(context, source string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sourceSeen[context+"|"+source].BusType
+}
+
 // sourcesFor returns a copy of every $source seen under context, keyed by
 // the bare source id (not "<context>|<$source>"). A copy, like nodeAt's, so
 // a caller (anomaly_sensor_health.go's silentSources) can iterate it without

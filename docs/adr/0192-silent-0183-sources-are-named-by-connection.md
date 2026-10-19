@@ -36,12 +36,29 @@ rows, "An instrument (1 of 6)", with six Ignore buttons.
   words it carried are named. If some still send, only words carried
   exclusively by the silent ones are named; if none, "some of its data". With
   no known sentences the text is just "has stopped sending".
-- Ignore posts the connection id; the silent-source check skips any 0183
-  source whose connection is ignored. The settings list names it the same way.
-- The seeded title is "Instrument Silent". The engine replaces it when the
-  rule still carries that or the old "Silent sensor source" title: "Vesper
-  Cortex Silent" with one quiet device, "Instruments Silent" with more. A
-  title the operator edited is left alone.
+- Ignore posts the connection id; the silent-source alarm skips any 0183
+  source whose connection is ignored. This is applied only to the alarm, not to
+  the quiet-source set that decides which readings the detectors trust, so
+  ignoring a connection never makes a stale reading from it trusted. The
+  settings list names the identifier when it is a known 0183 connection.
+- The connection of a 0183 source is everything before its last dot (the talker
+  is the segment after it); other buses keep the first-dot split. One helper
+  serves the card grouping, engine key-off and the engine-state check, so they
+  agree about the same id.
+- A sibling talker counts as still sending only when heard within its own quiet
+  threshold. Ignored, unwatched or key-off-excluded talkers that are quiet are
+  not sending. If unsure, not sending.
+- A single silent source keeps the earlier naming order (bank, installation,
+  model, manufacturer, then the connection name, then "An instrument"). The
+  silent count the rule reads is the number of card entries, devices not talkers.
+- The seeded title is "Instrument Silent". It is replaced once, at raise, from
+  the entries the alarm freezes, and stays for the alarm's life, including the
+  escalation and cleared messages: "Vesper Cortex Silent" when every source on
+  the connection is quiet, "Vesper Cortex Partly Silent" when some still send,
+  "Instruments Silent" with more than one device. A title the operator edited
+  is left alone.
+- The device name in the title is the SignalK connection id, which the operator
+  typed in the SignalK admin, so it is their own name for it.
 
 ## Consequences
 
