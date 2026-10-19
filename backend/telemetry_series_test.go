@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,12 +21,26 @@ var seriesTestNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 
 // stubSeries wires the series handler to canned data. means maps a path to its
 // bucketed means; a path absent from the map has no raw samples at all.
+// seriesDeclared is what the boat declares (meta.units) per path.
+var seriesDeclared = map[string]string{
+	"propulsion.port.revolutions":                   "Hz",
+	"electrical.batteries.1.capacity.stateOfCharge": "ratio",
+	"propulsion.port.temperature":                   "K",
+	"electrical.alternator.12.current":              "A",
+}
+
 func stubSeries(t *testing.T, configured bool, means map[string][]telemetryPoint) {
 	t.Helper()
 	oldIO, oldCfg, oldNow := telemetrySeriesIO, telemetrySeriesConfigured, telemetrySeriesNow
 	t.Cleanup(func() { telemetrySeriesIO, telemetrySeriesConfigured, telemetrySeriesNow = oldIO, oldCfg, oldNow })
 	telemetrySeriesConfigured = func() bool { return configured }
 	telemetrySeriesNow = func() time.Time { return seriesTestNow }
+	oldUnit := telemetrySeriesSIUnit
+	t.Cleanup(func() { telemetrySeriesSIUnit = oldUnit })
+	telemetrySeriesSIUnit = func(path string) string { return seriesDeclared[path] }
+	oldSrc := telemetrySeriesPathSources
+	t.Cleanup(func() { telemetrySeriesPathSources = oldSrc })
+	telemetrySeriesPathSources = func(context.Context, string, time.Time, time.Time) ([]string, error) { return nil, nil }
 	telemetrySeriesIO = pathHistoryIO{
 		stat: func(_ context.Context, path, _ string, _, _ time.Time, _, aggFn string) ([]telemetryPoint, error) {
 			if aggFn != "mean" {
@@ -372,5 +387,166 @@ func TestTelemetrySeriesClientGoneWritesNothing(t *testing.T) {
 	}
 	if rec.Body.Len() != 0 {
 		t.Fatalf("a client that went away must get no 502, wrote %d %s", rec.Code, rec.Body)
+	}
+}
+
+// ── per-series source and unit ──────────────────────────────────────────
+
+// stubSeriesSources is stubSeries that also records the source each path was
+// queried with.
+func stubSeriesSources(t *testing.T, means map[string][]telemetryPoint) *sync.Map {
+	t.Helper()
+	stubSeries(t, true, means)
+	seen := &sync.Map{}
+	telemetrySeriesIO.stat = func(_ context.Context, path, source string, _, _ time.Time, _, _ string) ([]telemetryPoint, error) {
+		seen.Store(path, source)
+		return means[path], nil
+	}
+	return seen
+}
+
+func seriesGetValues(t *testing.T, q url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+	q.Set("from", "2026-10-18T12:00:00Z")
+	q.Set("to", "2026-10-19T12:00:00Z")
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/telemetry/series?"+q.Encode(), nil)
+	rec := httptest.NewRecorder()
+	if err := telemetrySeriesHandler(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	return rec
+}
+
+func TestTelemetrySeriesSourceRestrictsTheQueryPerPath(t *testing.T) {
+	pt := []telemetryPoint{{Timestamp: seriesTestNow.Add(-time.Hour), Value: 1}}
+	seen := stubSeriesSources(t, map[string][]telemetryPoint{"a.one": pt, "b.two": pt})
+	rec := seriesGetValues(t, url.Values{"path": {"a.one", "b.two"}, "source": {"venus.x", ""}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	if v, _ := seen.Load("a.one"); v != "venus.x" {
+		t.Errorf("a.one queried with source %v", v)
+	}
+	if v, _ := seen.Load("b.two"); v != "" {
+		t.Errorf("b.two queried with source %v", v)
+	}
+}
+
+func TestTelemetrySeriesUnitConvertsAndIsEchoed(t *testing.T) {
+	t0 := seriesTestNow.Add(-time.Hour)
+	stubSeries(t, true, map[string][]telemetryPoint{
+		"propulsion.port.revolutions":                   {{Timestamp: t0, Value: 20}},
+		"electrical.batteries.1.capacity.stateOfCharge": {{Timestamp: t0, Value: 0.85}},
+		"propulsion.port.temperature":                   {{Timestamp: t0, Value: 353.15}},
+		"electrical.alternator.12.current":              {{Timestamp: t0, Value: 40}},
+	})
+	rec := seriesGetValues(t, url.Values{
+		"path": {"propulsion.port.revolutions", "electrical.batteries.1.capacity.stateOfCharge", "propulsion.port.temperature", "electrical.alternator.12.current"},
+		"unit": {"rpm", "%", "°C", ""},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	var resp telemetrySeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	want := []struct {
+		unit string
+		mean float64
+	}{{"rpm", 1200}, {"%", 85}, {"°C", 80}, {"", 40}}
+	for i, w := range want {
+		s := resp.Series[i]
+		if s.Unit != w.unit || len(s.Points) != 1 || math.Abs(s.Points[0].Mean-w.mean) > 1e-6 {
+			t.Errorf("series %d: unit %q points %+v, want %q %v", i, s.Unit, s.Points, w.unit, w.mean)
+		}
+	}
+	if !strings.Contains(rec.Body.String(), `"unit":""`) {
+		t.Errorf("a series without a conversion still echoes unit: %s", rec.Body)
+	}
+}
+
+func TestTelemetrySeriesRejectsMismatchedOrImpossibleSourceAndUnit(t *testing.T) {
+	stubSeries(t, true, nil)
+	cases := []struct {
+		name string
+		q    url.Values
+		want []string
+	}{
+		{"source count", url.Values{"path": {"a.b", "c.d"}, "source": {"x"}}, []string{"source"}},
+		{"unit count", url.Values{"path": {"a.b"}, "unit": {"A", "V"}}, []string{"unit"}},
+		{"unknown unit for the quantity", url.Values{"path": {"propulsion.port.revolutions"}, "unit": {"furlongs"}}, []string{"propulsion.port.revolutions", "furlongs"}},
+		{"path with no declared unit", url.Values{"path": {"some.odd.thing"}, "unit": {"rpm"}}, []string{"the boat does not report a unit for some.odd.thing"}},
+		{"source with flux syntax", url.Values{"path": {"a.b"}, "source": {"${x}"}}, []string{"source"}},
+	}
+	for _, tc := range cases {
+		rec := seriesGetValues(t, tc.q)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: got %d %s", tc.name, rec.Code, rec.Body)
+			continue
+		}
+		for _, w := range tc.want {
+			if !strings.Contains(rec.Body.String(), w) {
+				t.Errorf("%s: error should name %q: %s", tc.name, w, rec.Body)
+			}
+		}
+	}
+}
+
+func TestTelemetrySeriesSIUnitConvertsWithoutLiveMeta(t *testing.T) {
+	t0 := seriesTestNow.Add(-time.Hour)
+	stubSeries(t, true, map[string][]telemetryPoint{"stored.rpm": {{Timestamp: t0, Value: 20}}, "x.angle": {{Timestamp: t0, Value: 1.5}}})
+	// Live meta is gone: the lookup says "".
+	telemetrySeriesSIUnit = func(string) string { return "" }
+	rec := seriesGetValues(t, url.Values{"path": {"stored.rpm", "x.angle"}, "si_unit": {"Hz", "rad"}, "unit": {"rpm", "rad"}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	var resp telemetrySeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.Series[0].Points[0].Mean; math.Abs(got-1200) > 1e-6 || resp.Series[0].Unit != "rpm" {
+		t.Errorf("stored.rpm = %v %q, want 1200 rpm", got, resp.Series[0].Unit)
+	}
+	if got := resp.Series[1].Points[0].Mean; got != 1.5 || resp.Series[1].Unit != "rad" {
+		t.Errorf("x.angle = %v %q, want 1.5 rad unchanged", got, resp.Series[1].Unit)
+	}
+	rec = seriesGetValues(t, url.Values{"path": {"a.b", "c.d"}, "si_unit": {"Hz"}})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "si_unit") {
+		t.Errorf("si_unit count mismatch: %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTelemetrySeriesEmptySourceWithSeveralLoggersIs409(t *testing.T) {
+	pt := []telemetryPoint{{Timestamp: seriesTestNow.Add(-time.Hour), Value: 1}}
+	seen := stubSeriesSources(t, map[string][]telemetryPoint{"a.one": pt, "b.two": pt})
+	var asked sync.Map
+	telemetrySeriesPathSources = func(_ context.Context, path string, _, _ time.Time) ([]string, error) {
+		asked.Store(path, true)
+		return []string{"venus.x", "can0.12"}, nil
+	}
+	rec := seriesGetValues(t, url.Values{"path": {"a.one", "b.two"}, "source": {"", "venus.x"}})
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	for _, w := range []string{"a.one", "venus.x", "can0.12"} {
+		if !strings.Contains(rec.Body.String(), w) {
+			t.Errorf("409 should name %q: %s", w, rec.Body)
+		}
+	}
+	if _, ok := asked.Load("b.two"); ok {
+		t.Error("a path with a source must not be checked")
+	}
+	// One logger is fine, and the query still runs.
+	telemetrySeriesPathSources = func(context.Context, string, time.Time, time.Time) ([]string, error) {
+		return []string{"venus.x"}, nil
+	}
+	if rec := seriesGetValues(t, url.Values{"path": {"a.one"}}); rec.Code != http.StatusOK {
+		t.Fatalf("single source: %d %s", rec.Code, rec.Body)
+	}
+	if _, ok := seen.Load("a.one"); !ok {
+		t.Error("a.one was never queried")
 	}
 }

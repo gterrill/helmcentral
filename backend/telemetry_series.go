@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -133,6 +134,12 @@ var (
 	telemetrySeriesIO         = pathHistoryIO{stat: queryInfluxPathStatRange, firstLast: queryInfluxPathFirstLast}
 	telemetrySeriesConfigured = influxTelemetryConfigured
 	telemetrySeriesNow        = time.Now
+	// telemetrySeriesSIUnit is the SI unit the boat declares for a path.
+	telemetrySeriesSIUnit = func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) }
+
+	// telemetrySeriesPathSources lists the $source values that logged a path in
+	// a range; show_telemetry_chart's source check, reused by the endpoint.
+	telemetrySeriesPathSources = queryInfluxPathSources
 
 	// The overall deadline on one request.
 	telemetrySeriesTimeout = 20 * time.Second
@@ -146,6 +153,7 @@ type telemetrySeriesPoint struct {
 type telemetrySeriesEntry struct {
 	Path   string                    `json:"path"`
 	Found  bool                      `json:"found"`
+	Unit   string                    `json:"unit"` // the unit the points are in; "" is the stored unit
 	Points []telemetrySeriesPoint    `json:"points"`
 	Gaps   []assistantPathHistoryGap `json:"gaps"`
 }
@@ -157,11 +165,71 @@ type telemetrySeriesResponse struct {
 	Series []telemetrySeriesEntry `json:"series"`
 }
 
+// multiSourceError is a path with no source chosen that more than one device
+// logged in the requested range. Never averaged: the operator picks one.
+type multiSourceError struct {
+	path    string
+	sources []string
+}
+
+func (e *multiSourceError) Error() string {
+	return fmt.Sprintf("%s was logged by more than one source (%s); choose one", e.path, strings.Join(e.sources, ", "))
+}
+
+// ambiguousSources reports the sorted $sources that logged path in [from, to)
+// when there is more than one, nil otherwise.
+func ambiguousSources(ctx context.Context, list func(context.Context, string, time.Time, time.Time) ([]string, error), path string, from, to time.Time) ([]string, error) {
+	srcs, err := list(ctx, path, from, to)
+	if err != nil {
+		return nil, err
+	}
+	if len(srcs) < 2 {
+		return nil, nil
+	}
+	srcs = append([]string(nil), srcs...)
+	sort.Strings(srcs)
+	return srcs, nil
+}
+
+// runBounded runs fn(0..n-1) with at most limit in flight. Once ctx is done no
+// further call starts and the remaining slots report ctx's error. Errors land
+// by index, so the caller picks the first by order, not by time.
+func runBounded(ctx context.Context, n, limit int, fn func(i int) error) []error {
+	errs := make([]error, n)
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			errs[i] = ctx.Err()
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			<-sem
+			errs[i] = err
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			errs[i] = fn(i)
+		}()
+	}
+	wg.Wait()
+	return errs
+}
+
 func seriesBadRequest(c echo.Context, msg string) error {
 	return c.JSON(http.StatusBadRequest, map[string]string{"error": msg})
 }
 
-// GET /api/telemetry/series?path=a&path=b&from=RFC3339&to=RFC3339
+// GET /api/telemetry/series?path=a&path=b&source=s&source=&unit=A&unit=&from=RFC3339&to=RFC3339
+//
+// source and unit, when given, are aligned with path by index. A source
+// restricts that path to one $source; a unit converts it from SI into that
+// display unit (telemetry_units.go) and is echoed on the series.
 func telemetrySeriesHandler(c echo.Context) error {
 	var paths []string
 	for _, p := range c.QueryParams()["path"] {
@@ -183,6 +251,52 @@ func telemetrySeriesHandler(c echo.Context) error {
 	}
 	if len(paths) > telemetrySeriesMaxPaths {
 		return seriesBadRequest(c, fmt.Sprintf("at most %d paths", telemetrySeriesMaxPaths))
+	}
+
+	// source and unit are aligned with path by index; "" is no source / no
+	// conversion.
+	sources := c.QueryParams()["source"]
+	units := c.QueryParams()["unit"]
+	if len(sources) == 0 {
+		sources = make([]string, len(paths))
+	}
+	if len(units) == 0 {
+		units = make([]string, len(paths))
+	}
+	if len(sources) != len(paths) {
+		return seriesBadRequest(c, fmt.Sprintf("source must be given once per path (%d paths, %d sources); use an empty value for none", len(paths), len(sources)))
+	}
+	if len(units) != len(paths) {
+		return seriesBadRequest(c, fmt.Sprintf("unit must be given once per path (%d paths, %d units); use an empty value for none", len(paths), len(units)))
+	}
+	// si_unit, when given, is the unit the points are stored in, taken from the
+	// card; without it the boat's live declaration is used.
+	siUnits := c.QueryParams()["si_unit"]
+	if len(siUnits) != 0 && len(siUnits) != len(paths) {
+		return seriesBadRequest(c, fmt.Sprintf("si_unit must be given once per path (%d paths, %d si_units); use an empty value for none", len(paths), len(siUnits)))
+	}
+	converters := make([]func(float64) float64, len(paths))
+	for i := range paths {
+		sources[i] = strings.TrimSpace(sources[i])
+		units[i] = strings.TrimSpace(units[i])
+		if len(sources[i]) > gaugePathMaxLen {
+			return seriesBadRequest(c, "source is too long")
+		}
+		// Interpolated into Flux, like the path.
+		if containsFluxInterpolationSyntax(sources[i]) {
+			return seriesBadRequest(c, "source must not contain '$' or '{'")
+		}
+		si := ""
+		if len(siUnits) != 0 {
+			si = strings.TrimSpace(siUnits[i])
+		} else {
+			si = telemetrySeriesSIUnit(paths[i])
+		}
+		conv, err := chartConvertFromSI(si, paths[i], units[i])
+		if err != nil {
+			return seriesBadRequest(c, err.Error())
+		}
+		converters[i] = conv
 	}
 
 	from, err := time.Parse(time.RFC3339, c.QueryParam("from"))
@@ -229,7 +343,18 @@ func telemetrySeriesHandler(c echo.Context) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i], errs[i] = queryPathHistoryBuckets(ctx, telemetrySeriesIO, p, "", from, to, []string{"mean"}, false, telemetrySeriesBucketWidth)
+			if sources[i] == "" {
+				srcs, err := ambiguousSources(ctx, telemetrySeriesPathSources, p, from, to)
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				if srcs != nil {
+					errs[i] = &multiSourceError{path: p, sources: srcs}
+					return
+				}
+			}
+			results[i], errs[i] = queryPathHistoryBuckets(ctx, telemetrySeriesIO, p, sources[i], from, to, []string{"mean"}, false, telemetrySeriesBucketWidth)
 		}()
 	}
 	wg.Wait()
@@ -241,6 +366,7 @@ func telemetrySeriesHandler(c echo.Context) error {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return tookTooLong()
 	}
+	var multi *multiSourceError
 	for _, err := range errs {
 		switch {
 		case err == nil:
@@ -250,6 +376,8 @@ func telemetrySeriesHandler(c echo.Context) error {
 		case errors.Is(err, context.Canceled):
 			// The client went away; nobody is left to read a response.
 			return nil
+		case errors.As(err, &multi):
+			return c.JSON(http.StatusConflict, map[string]string{"error": multi.Error()})
 		default:
 			return c.JSON(http.StatusBadGateway, map[string]string{"error": "InfluxDB query failed: " + err.Error()})
 		}
@@ -265,7 +393,7 @@ func telemetrySeriesHandler(c echo.Context) error {
 			if m.Mean == nil {
 				continue
 			}
-			points = append(points, telemetrySeriesPoint{T: m.T.UTC().Format(time.RFC3339), Mean: *m.Mean})
+			points = append(points, telemetrySeriesPoint{T: m.T.UTC().Format(time.RFC3339), Mean: converters[i](*m.Mean)})
 		}
 		gaps := h.Gaps
 		if gaps == nil || !h.Found {
@@ -274,7 +402,7 @@ func telemetrySeriesHandler(c echo.Context) error {
 		if !h.Found {
 			missing = append(missing, p)
 		}
-		entries = append(entries, telemetrySeriesEntry{Path: p, Found: h.Found, Points: points, Gaps: gaps})
+		entries = append(entries, telemetrySeriesEntry{Path: p, Found: h.Found, Unit: units[i], Points: points, Gaps: gaps})
 	}
 	if len(missing) == len(paths) {
 		return c.JSON(http.StatusNotFound, map[string]string{

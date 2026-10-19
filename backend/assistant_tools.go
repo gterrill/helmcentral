@@ -203,6 +203,20 @@ type assistantToolDeps struct {
 	// (assistant.passage_limits) fresh on every call, for
 	// assess_passage_window. nil is an error, never empty limits.
 	passageLimits func() (passageLimits, error)
+	// vesselView reads the operator's roles (house bank, alternators,
+	// engines) fresh on every call, for show_telemetry_chart. nil is an
+	// error, never an empty vessel.
+	vesselView func() (vesselView, error)
+	// displayUnits is the Settings units choice, "metric" or "imperial",
+	// which show_telemetry_chart converts SI values into. nil is an error.
+	displayUnits func() (string, error)
+	// siUnit is the SI unit the boat declares for a path (meta.units), or ""
+	// when it declares none.
+	siUnit func(path string) string
+	// influxPathSources lists the distinct $source values that logged a path
+	// in a range, so show_telemetry_chart can refuse to average two devices.
+	// Production wires queryInfluxPathSources; nil is an error.
+	influxPathSources func(ctx context.Context, path string, start, stop time.Time) ([]string, error)
 	// cards is the turn's side channel for card payloads too large for the
 	// model's tool result. nil means the tools put no card out of band.
 	cards *assistantCardSink
@@ -298,6 +312,10 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		watches:                    globalAssistantWatches,
 		conversations:              func() *assistantStore { return globalAssistantStore },
 		passageLimits:              passageLimitsFromSettingsFile(settingsPath),
+		vesselView:                 func() (vesselView, error) { return loadVesselView(settingsPath) },
+		displayUnits:               displayUnitsFromSettingsFile(settingsPath),
+		siUnit:                     func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) },
+		influxPathSources:          queryInfluxPathSources,
 		cards:                      newAssistantCardSink(),
 	}
 }
@@ -398,6 +416,7 @@ var mateTools = []mateTool{
 	mateToolCheckSignalKPaths,
 	mateToolGetLastRecorded,
 	mateToolGetPathHistory,
+	mateToolShowTelemetryChart,
 	mateToolListPassages,
 	mateToolFindEquipment,
 	mateToolListMaintenance,

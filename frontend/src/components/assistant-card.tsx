@@ -8,6 +8,10 @@ const AssistantPassageWindowCard = lazy(() =>
   import('./assistant-passage-window-card').then((m) => ({ default: m.AssistantPassageWindowCard })),
 )
 
+const AssistantTelemetryChartCard = lazy(() =>
+  import('./assistant-telemetry-chart-card').then((m) => ({ default: m.AssistantTelemetryChartCard })),
+)
+
 /** One card under a Mate reply (ADR 0191), chosen by `kind`. An `error` entry
  * is shown, not hidden: the operator should know a card was meant to be here. */
 export function AssistantCard({ card }: { card: MateCard }) {
@@ -18,6 +22,14 @@ export function AssistantCard({ card }: { card: MateCard }) {
           fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
         >
           <AssistantPassageWindowCard card={card} />
+        </Suspense>
+      )
+    case 'telemetry_chart':
+      return (
+        <Suspense
+          fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
+        >
+          <AssistantTelemetryChartCard card={card} />
         </Suspense>
       )
     case 'error':

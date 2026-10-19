@@ -79,6 +79,24 @@
             }
           ]
         }
+      },
+      {
+        "kind": "telemetry_chart",
+        "payload": {
+          "title": "Alternator current against house bank SOC",
+          "view": "xy",
+          "xy": {"x": 1, "y": 0},
+          "timezone": "Etc/GMT-10",
+          "series": [
+            {"path": "electrical.alternator.12.current", "source": "venus.c0619ab9d0ee", "label": "Starboard alternator current", "unit": "A", "si_unit": "A", "axis": "left"},
+            {"path": "electrical.batteries.1.capacity.stateOfCharge", "source": null, "label": "House bank state of charge", "unit": "%", "si_unit": "ratio", "axis": "right"}
+          ],
+          "range": {"from": "2026-10-12T00:00:00+10:00", "to": "2026-10-19T00:00:00+10:00"},
+          "compare": [
+            {"label": "Before regulator change", "from": "2026-10-12T00:00:00+10:00", "to": "2026-10-15T00:00:00+10:00"},
+            {"label": "After", "from": "2026-10-15T00:00:00+10:00", "to": "2026-10-19T00:00:00+10:00"}
+          ]
+        }
       }
     ]
   },

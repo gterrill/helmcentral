@@ -189,9 +189,17 @@ Arguments:
 - **The view:** `time`, or `xy` with the series for each axis.
 
 The server checks that each series is actually logged in each range, and
-returns an error naming any that is not. Values are converted from SignalK's
+returns an error naming any that is not. A path logged by more than one
+device in a drawn range needs an explicit source: the tool and the endpoint
+both refuse to average devices, including after the operator moves the
+card's dates. Values are converted from SignalK's
 SI units into the operator's display units (Hz to RPM, ratio to %, K to
-°C) with the existing quantity conversions. Series are assigned to axes by
+°C) with the existing quantity conversions. The SI unit is the one the boat
+declares in SignalK's meta for that path, the same lookup alarms use, never
+one guessed from the path's name. A path that declares none is drawn
+unconverted and labelled "unit not reported". The card stores the declared
+unit, so a chart reopened later converts the same way even if that meta is no
+longer live. Series are assigned to axes by
 unit. More than two units on a time chart is an error, not a chart with a
 hidden axis. The tool's result to the model is a short summary: per series
 and per range, the min, mean and max; for `xy`, a fitted line or binned means

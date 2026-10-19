@@ -3,7 +3,7 @@
  * keyed by `kind`. `error` is not a server kind: it is what the decoder makes
  * of an entry it cannot read, so the thread can say so for that message.
  */
-export type MateCard = PassageWindowCard | { kind: 'error'; reason: string; rawKind?: string }
+export type MateCard = PassageWindowCard | TelemetryChartCard | { kind: 'error'; reason: string; rawKind?: string }
 
 export type PassageState = 'go' | 'marginal' | 'no_go' | 'no_data'
 export type PassageFactor = 'wind' | 'gust' | 'wave' | 'wind_against_tide' | 'daylight'
@@ -34,6 +34,36 @@ export interface PassageWindowCard {
   waveProvider: string
   legs: { name: string; stayNightsAfter: number | null }[]
   rows: { departDate: string; verdict: PassageState; cells: PassageWindowCell[] }[]
+}
+
+export interface TelemetryChartSeries {
+  path: string
+  /** The `$source` the series is restricted to; null for any. */
+  source: string | null
+  label: string
+  /** The operator's display unit; the endpoint converts into it. */
+  unit: string
+  /** The unit the boat declared for the path when the tool ran; "" if undeclared. */
+  siUnit: string
+  axis: 'left' | 'right'
+}
+
+export interface TelemetryChartRange {
+  from: string
+  to: string
+}
+
+/** A telemetry chart (ADR 0191): the reference only; the card fetches the points. */
+export interface TelemetryChartCard {
+  kind: 'telemetry_chart'
+  title: string
+  view: 'time' | 'xy'
+  /** Indices into `series`; set only when `view` is "xy". */
+  xy: { x: number; y: number } | null
+  timezone: string
+  series: TelemetryChartSeries[]
+  range: TelemetryChartRange
+  compare: (TelemetryChartRange & { label: string })[]
 }
 
 const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
@@ -139,6 +169,62 @@ function decodePassageWindow(raw: unknown): PassageWindowCard {
   }
 }
 
+function decodeTelemetryChart(raw: unknown): TelemetryChartCard {
+  const p = obj(raw, 'payload')
+  const series = arr(p.series, 'series').map((s, i): TelemetryChartSeries => {
+    const o = obj(s, `series[${i}]`)
+    const source = o.source
+    if (source !== null && typeof source !== 'string') bad(`series[${i}].source`, 'expected a string or null')
+    return {
+      path: str(o.path, `series[${i}].path`),
+      source: source as string | null,
+      label: str(o.label, `series[${i}].label`),
+      unit: str(o.unit, `series[${i}].unit`),
+      siUnit: str(o.si_unit, `series[${i}].si_unit`),
+      axis: oneOf<'left' | 'right'>(o.axis, ['left', 'right'], `series[${i}].axis`),
+    }
+  })
+  if (series.length < 1 || series.length > 4) bad('series', 'expected 1 to 4 series')
+  const view = oneOf<'time' | 'xy'>(p.view, ['time', 'xy'], 'view')
+  let xy: TelemetryChartCard['xy'] = null
+  if (view === 'xy') {
+    if (p.xy === null || p.xy === undefined) bad('xy', 'expected x and y series indices for an xy view')
+    const o = obj(p.xy, 'xy')
+    const index = (v: unknown, path: string) => {
+      if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v >= series.length) bad(path, 'expected a series index')
+      return v as number
+    }
+    xy = { x: index(o.x, 'xy.x'), y: index(o.y, 'xy.y') }
+    if (xy.x === xy.y) bad('xy', 'expected two different series')
+  } else if (p.xy !== null && p.xy !== undefined) {
+    bad('xy', 'expected null for a time view')
+  }
+  const range = (v: unknown, path: string): TelemetryChartRange => {
+    const o = obj(v, path)
+    return { from: stamp(o.from, `${path}.from`), to: stamp(o.to, `${path}.to`) }
+  }
+  const compare = arr(p.compare, 'compare').map((c, i) => ({
+    label: str(obj(c, `compare[${i}]`).label, `compare[${i}].label`),
+    ...range(c, `compare[${i}]`),
+  }))
+  if (compare.length > 3) bad('compare', 'expected at most 3 ranges')
+  return {
+    kind: 'telemetry_chart',
+    title: str(p.title, 'title'),
+    view,
+    xy,
+    timezone: zone(p.timezone, 'timezone'),
+    series,
+    range: range(p.range, 'range'),
+    compare,
+  }
+}
+
+const DECODERS: Record<string, (payload: unknown) => MateCard> = {
+  passage_window: decodePassageWindow,
+  telemetry_chart: decodeTelemetryChart,
+}
+
 /**
  * Decode the `cards` field of a stored message. An absent field is no cards.
  * An entry this build cannot read (no kind, or a kind it does not know) becomes
@@ -151,9 +237,10 @@ export function decodeMateCards(raw: unknown): MateCard[] {
   return raw.map((entry, i): MateCard => {
     const kind = typeof entry === 'object' && entry !== null ? (entry as { kind?: unknown }).kind : undefined
     if (typeof kind !== 'string') return { kind: 'error', reason: `message card ${i}: missing kind` }
-    if (kind === 'passage_window') {
+    const decode = Object.prototype.hasOwnProperty.call(DECODERS, kind) ? DECODERS[kind] : undefined
+    if (decode) {
       try {
-        return decodePassageWindow((entry as { payload?: unknown }).payload)
+        return decode((entry as { payload?: unknown }).payload)
       } catch (err) {
         if (!(err instanceof CardFieldError)) throw err
         return { kind: 'error', reason: `message card ${i}: ${err.message}`, rawKind: kind }

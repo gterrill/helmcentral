@@ -237,6 +237,39 @@ the tide station's high and low water, not on its speed. The card shows how
 old the forecast was when Mate checked it, and says so once that is more than
 six hours ago. For a fresh answer, ask again.
 
+## Charting what the boat logged
+
+Mate can draw a chart of any reading your boat logs, so you can see a change
+rather than read a summary of it:
+
+> Show the starboard alternator current against house bank state of charge
+> for 1–5 October and for 12–16 October. I changed the regulator settings on
+> the 8th.
+
+The chart appears under the answer. Over time, each reading is a line, with
+up to two scales: amps on the left and percent on the right, say. Plotted
+one against the other, each point is one stretch of time in which both were
+logged. That is usually the fairer comparison: an alternator puts out less
+as the bank fills, so a before-and-after on amps alone can mislead if the
+bank was fuller in one period. With two date ranges, each range gets its own
+colour, so you can see whether the cloud of points moved.
+
+You can ask for the readings Helmcentral already knows by their job: house
+bank state of charge, current and voltage, each alternator's current, and
+each engine's RPM, load and coolant temperature. Any other logged reading
+works by name too. Mate needs you to say which dates to compare; it does not
+guess when a change was made.
+
+Change the dates on the chart itself and it redraws without asking Mate
+again. Figures are in your units, using the unit the boat itself reports for
+each reading. A reading whose unit the boat does not report is drawn as
+logged and labelled "unit not reported". A reading with nothing logged in a
+range is named under the chart rather than drawn as a flat line, and when
+two devices report the same reading, Mate asks which one you mean rather than
+averaging them.
+
+Charts need the boat's history log (InfluxDB).
+
 ## Watching a reading
 
 A watch follows up to six live readings once a second for between one and

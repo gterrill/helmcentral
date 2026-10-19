@@ -26,6 +26,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the day it would actually sail, against your passage limits for the wind
   angle on that part of the course. Anything not checked, such as wave height
   with no wave forecast, is listed rather than passed.
+- **Charts from Mate.** Ask Mate to chart any logged reading, such as
+  alternator current against house bank state of charge or engine RPM against
+  load, over time or one against the other, and across date ranges you name
+  for a before-and-after. The chart appears under the answer and redraws when
+  you change its dates.
 
 ### Fixed
 
