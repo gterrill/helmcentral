@@ -225,6 +225,9 @@ func TestPostSettings_RefusesPassageLimitsInTheOldShape(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "passage_limits") {
 		t.Fatalf("got %d %s, want 400 naming passage_limits", rec.Code, rec.Body.String())
 	}
+	if b := rec.Body.String(); strings.Contains(b, "json:") || strings.Contains(b, "unknown field") || !strings.Contains(b, "Reload the page and save again") {
+		t.Fatalf("message should be plain operator text, got %s", b)
+	}
 	after, _ := readSettings(settingsPath)
 	if got := buildSettingsPayload(after).Assistant.PassageLimits; got.Ahead.WindKnNoGo == nil || *got.Ahead.WindKnNoGo != 15 {
 		t.Fatalf("stored limits were changed: %+v", got)

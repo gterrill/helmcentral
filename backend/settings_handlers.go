@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -226,7 +227,8 @@ func checkPassageLimitsShape(body []byte) error {
 	dec.DisallowUnknownFields()
 	var l passageLimits
 	if err := dec.Decode(&l); err != nil {
-		return fmt.Errorf("assistant.passage_limits could not be read: %w. Reload the page and enter the limits again", err)
+		log.Printf("settings: assistant.passage_limits refused: %v", err)
+		return errors.New("assistant.passage_limits: Passage limits were sent by a page from before the last update. Reload the page and save again")
 	}
 	return nil
 }
