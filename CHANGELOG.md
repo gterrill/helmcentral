@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-10-20
+
 ### Breaking
 
 - **Passage limits are no-go only.** **Settings → Mate → Passage limits** now
@@ -1460,7 +1462,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.49.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.50.0...HEAD
+[0.50.0]: https://github.com/gterrill/helmcentral/compare/v0.49.0...v0.50.0
 [0.49.0]: https://github.com/gterrill/helmcentral/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/gterrill/helmcentral/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/gterrill/helmcentral/compare/v0.46.0...v0.47.0
