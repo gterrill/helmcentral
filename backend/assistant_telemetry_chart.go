@@ -468,7 +468,7 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 	for i := range series {
 		s := &series[i]
 		s.siUnit = d.siUnit(s.path)
-		unit, conv, err := chartDisplayFor(s.siUnit, system)
+		unit, conv, err := chartDisplayFor(s.path, s.siUnit, system)
 		if err != nil {
 			return "", fmt.Errorf("show_telemetry_chart: %w", err)
 		}

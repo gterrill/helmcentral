@@ -845,3 +845,33 @@ func TestShowTelemetryChart_EngineWithoutAnInstanceSaysSo(t *testing.T) {
 		t.Fatalf("got %v, want %q", err, want)
 	}
 }
+
+func TestShowTelemetryChart_MainsFrequencyStaysInHertz(t *testing.T) {
+	const shore = "electrical.ac.shore.frequency"
+	f := &tcFake{series: map[string][]telemetryPoint{
+		shore: tcHourly(tcStart(), 3, func(int) float64 { return 50 }),
+	}}
+	d := tcDeps(f, tcVessel(), "metric")
+	prev := d.siUnit
+	d.siUnit = func(p string) string {
+		if p == shore {
+			return "Hz"
+		}
+		return prev(p)
+	}
+	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":%q}],%s}`, shore, tcRange))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := tcPayload(t, d, res)
+	if p.Series[0].Unit != "Hz" {
+		t.Errorf("unit = %q, want Hz", p.Series[0].Unit)
+	}
+	var m chartModelResult
+	if err := json.Unmarshal([]byte(res), &m); err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Series[0].Ranges[0].Mean; got == nil || *got != 50 {
+		t.Errorf("mean = %v, want 50", got)
+	}
+}
