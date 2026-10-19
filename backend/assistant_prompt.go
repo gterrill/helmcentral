@@ -954,6 +954,18 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"seas, so say so and say when the fair-tide departure lands in it. Do not use it for the planning " +
 		"question above.\n\n" +
 
+		// Go/no-go card: on the boat a passage question got the briefing
+		// routine above and never reached assess_passage_window, because
+		// that routine is mandatory for passages in the forecast range and
+		// did not mention the tool.
+		"When the operator asks whether or when to go, which day to leave, or for the outlook on a trip of " +
+		"one or more legs that starts within the forecast range, call assess_passage_window in addition to the " +
+		"briefing, not instead of it. Pass every leg and every stay, with candidate departure dates that cover " +
+		"the days they asked about. The card carries the grid of days and legs, so do not repeat it as a table; " +
+		"summarise the best and worst days in a sentence or two and let the briefing explain the reasons. If the " +
+		"tool says the passage limits are not set, tell the operator to set them in Settings → Mate → Passage " +
+		"limits, and carry on with the briefing without the card.\n\n" +
+
 		// Open-plan continuity: the operator asked about an outer-reef window,
 		// got "no window through Thursday, Friday possible"; moved anchorage
 		// and asked only "what do the conditions look like now?"; Mate ran a

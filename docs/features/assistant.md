@@ -222,9 +222,13 @@ cell **GO**, **MARGINAL**, **NO-GO** or **NO DATA**, with departure and
 arrival times and the figure that decided it ("Wind SE 27 kn ahead · Cape
 Bowling Green → Cape Upstart"). A day is only as good as its worst leg.
 
-The grading uses your [passage limits](../how-to/set-passage-limits.md), set
-separately for wind ahead, abeam and astern of your course, so the same
-twenty knots can be a go on a downwind leg and a no-go on a beat. Mate works
+The grading uses your [passage limits](../how-to/set-passage-limits.md): a
+no-go wind, and if you want it, a no-go wave height, set separately for wind
+ahead, abeam and astern of your course, so the same twenty knots can be a go
+on a downwind leg and a no-go on a beat. Marginal is worked out as 70% of no-go,
+and gusts are judged against the no-go wind plus 10 knots. When you ask
+whether or when to go, Mate runs this check alongside its usual briefing and
+shows the card; it does not repeat the grid as a table. Mate works
 the angle out for each part of a leg, including after it rounds a headland.
 Until you set the limits, Mate says so and does not grade the trip.
 
