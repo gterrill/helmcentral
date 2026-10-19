@@ -231,7 +231,7 @@ func passageLimitsStep(l passageLimits, readErr error) setupStep {
 		name string
 		s    passageSectorLimits
 	}{{"ahead", l.Ahead}, {"abeam", l.Abeam}, {"astern", l.Astern}} {
-		if sec.s.WindKn.NoGo == nil {
+		if sec.s.WindKnNoGo == nil {
 			open = append(open, sec.name)
 		}
 	}

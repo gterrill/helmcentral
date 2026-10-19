@@ -1,4 +1,4 @@
-import type { DeepPartial, PassageLimitBandPayload, PassageLimitsPayload, SettingsPayload } from '@/hooks/use-settings-form'
+import type { DeepPartial, PassageLimitsPayload, SettingsPayload } from '@/hooks/use-settings-form'
 import { emptyVesselRoles, type VesselRoles } from '@/lib/vessel-settings'
 
 // Keep in step with defaultWebSearchModel in backend/assistant_web_search.go.
@@ -10,50 +10,41 @@ export type ScopeMethod = 'catenary' | 'ratio'
 
 export type AssistantCostTier = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
-/** A band while editing: strings, so partial typing survives. '' is unset. */
-export interface PassageBandDraft {
-  marginal: string
-  noGo: string
-}
+/** A sector's no-go figures while editing: strings, so partial typing survives. '' is unset. */
 export interface PassageSectorDraft {
-  wind: PassageBandDraft
-  gust: PassageBandDraft
-  wave: PassageBandDraft
+  wind: string
+  wave: string
 }
 export interface PassageLimitsDraft {
   ahead: PassageSectorDraft
   abeam: PassageSectorDraft
   astern: PassageSectorDraft
-  tide: PassageBandDraft
+  /** Knots taken off every wind limit while the stream runs against the wind. */
+  tideOffset: string
   daylightArrival: boolean
 }
 
-const blankBand = (): PassageBandDraft => ({ marginal: '', noGo: '' })
-const blankSector = (): PassageSectorDraft => ({ wind: blankBand(), gust: blankBand(), wave: blankBand() })
+const blankSector = (): PassageSectorDraft => ({ wind: '', wave: '' })
 export const blankPassageLimits = (): PassageLimitsDraft => ({
   ahead: blankSector(),
   abeam: blankSector(),
   astern: blankSector(),
-  tide: blankBand(),
+  tideOffset: '',
   daylightArrival: false,
 })
 
-const bandFromPayload = (b: PassageLimitBandPayload | undefined): PassageBandDraft => ({
-  marginal: typeof b?.marginal === 'number' ? String(b.marginal) : '',
-  noGo: typeof b?.no_go === 'number' ? String(b.no_go) : '',
-})
+const numberText = (n: number | null | undefined): string => (typeof n === 'number' ? String(n) : '')
 
 function passageLimitsFromPayload(p: PassageLimitsPayload | undefined): PassageLimitsDraft {
   const sector = (s: PassageLimitsPayload['ahead']): PassageSectorDraft => ({
-    wind: bandFromPayload(s?.wind_kn),
-    gust: bandFromPayload(s?.gust_kn),
-    wave: bandFromPayload(s?.wave_m),
+    wind: numberText(s?.wind_kn_no_go),
+    wave: numberText(s?.wave_m_no_go),
   })
   return {
     ahead: sector(p?.ahead),
     abeam: sector(p?.abeam),
     astern: sector(p?.astern),
-    tide: bandFromPayload(p?.wind_against_tide?.wind_kn),
+    tideOffset: numberText(p?.wind_against_tide_offset_kn),
     daylightArrival: p?.daylight_arrival === true,
   }
 }
@@ -76,47 +67,45 @@ const limitNumber = (value: string): number | null => {
   return n === null || Number.isNaN(n) ? null : n
 }
 
-const bandToPayload = (b: PassageBandDraft) => ({ marginal: limitNumber(b.marginal), no_go: limitNumber(b.noGo) })
-
 function passageLimitsToPayload(l: PassageLimitsDraft) {
-  const sector = (s: PassageSectorDraft) => ({
-    wind_kn: bandToPayload(s.wind),
-    gust_kn: bandToPayload(s.gust),
-    wave_m: bandToPayload(s.wave),
-  })
+  const sector = (s: PassageSectorDraft) => ({ wind_kn_no_go: limitNumber(s.wind), wave_m_no_go: limitNumber(s.wave) })
   return {
     ahead: sector(l.ahead),
     abeam: sector(l.abeam),
     astern: sector(l.astern),
-    wind_against_tide: { wind_kn: bandToPayload(l.tide) },
+    wind_against_tide_offset_kn: limitNumber(l.tideOffset),
     daylight_arrival: l.daylightArrival,
   }
 }
 
-const bandsOf = (l: PassageLimitsDraft): Array<{ key: string; label: string; band: PassageBandDraft }> => [
-  ...(['ahead', 'abeam', 'astern'] as const).flatMap((sec) => {
-    const name = sec[0].toUpperCase() + sec.slice(1)
-    return [
-      { key: `${sec}.wind`, label: `${name} wind`, band: l[sec].wind },
-      { key: `${sec}.gust`, label: `${name} gust`, band: l[sec].gust },
-      { key: `${sec}.wave`, label: `${name} wave height`, band: l[sec].wave },
-    ]
-  }),
-  { key: 'tide', label: 'Wind against tide', band: l.tide },
-]
-
-/** Same rules as the server: numbers, 0 or more, and marginal below no-go. Keyed by band, e.g. "abeam.gust". */
+/**
+ * Same rules as the server: numbers, 0 or more, and a wind against tide
+ * reduction above 0 and below every sector's no-go wind. Keyed by field,
+ * e.g. "abeam.wind", "astern.wave" or "tide".
+ */
 export function passageLimitErrors(draft: RegularSettingsDraft): Record<string, string> {
   const errors: Record<string, string> = {}
-  for (const { key, label, band } of bandsOf(draft.assistantPassageLimits)) {
-    const values = [band.marginal, band.noGo]
-    if (values.some((v) => Number.isNaN(parseLimit(v)))) {
-      errors[key] = `${label}: enter a number`
-      continue
+  const limits = draft.assistantPassageLimits
+  const sectors = ['ahead', 'abeam', 'astern'] as const
+  for (const sec of sectors) {
+    const name = sec[0].toUpperCase() + sec.slice(1)
+    for (const [field, label] of [['wind', `${name} wind`], ['wave', `${name} wave height`]] as const) {
+      const n = parseLimit(limits[sec][field])
+      if (Number.isNaN(n)) errors[`${sec}.${field}`] = `${label}: enter a number`
+      else if (n !== null && n < 0) errors[`${sec}.${field}`] = `${label}: enter 0 or more`
     }
-    const [m, n] = [limitNumber(band.marginal), limitNumber(band.noGo)]
-    if ((m !== null && m < 0) || (n !== null && n < 0)) errors[key] = `${label}: enter 0 or more`
-    else if (m !== null && n !== null && m >= n) errors[key] = `${label}: marginal must be below no-go`
+  }
+  const offset = parseLimit(limits.tideOffset)
+  if (Number.isNaN(offset)) errors.tide = 'Wind against tide: enter a number'
+  else if (offset !== null && offset <= 0) errors.tide = 'Wind against tide: enter more than 0'
+  else if (offset !== null) {
+    for (const sec of sectors) {
+      const noGo = limitNumber(limits[sec].wind)
+      if (noGo !== null && offset >= noGo) {
+        errors.tide = `Wind against tide: must be less than the ${sec} no-go wind (${noGo} kn)`
+        break
+      }
+    }
   }
   return errors
 }

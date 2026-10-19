@@ -5,9 +5,7 @@ import { SecretFieldGroup } from '@/components/settings/secret-field-group'
 import {
   defaultWebSearchModel,
   passageLimitErrors,
-  type PassageBandDraft,
   type PassageLimitsDraft,
-  type PassageSectorDraft,
   type RegularSettingsDraft,
 } from '@/components/settings/settings-draft'
 import { Button } from '@/components/ui/button'
@@ -100,7 +98,7 @@ function ModelChipRow({
 }
 
 type SectorKey = 'ahead' | 'abeam' | 'astern'
-type MeasureKey = 'wind' | 'gust' | 'wave'
+type MeasureKey = 'wind' | 'wave'
 
 const passageSectors: Array<{ key: SectorKey; label: string; angles: string }> = [
   { key: 'ahead', label: 'Ahead', angles: '0–60°' },
@@ -108,21 +106,18 @@ const passageSectors: Array<{ key: SectorKey; label: string; angles: string }> =
   { key: 'astern', label: 'Astern', angles: '120–180°' },
 ]
 
-const passageMeasures: Array<{ key: MeasureKey; label: string; unit: string }> = [
-  { key: 'wind', label: 'Wind', unit: 'kn' },
-  { key: 'gust', label: 'Gust', unit: 'kn' },
-  { key: 'wave', label: 'Wave', unit: 'm' },
+const passageMeasures: Array<{ key: MeasureKey; column: string; name: string; unit: string }> = [
+  { key: 'wind', column: 'No-go wind', name: 'no-go wind', unit: 'kn' },
+  { key: 'wave', column: 'No-go wave height', name: 'no-go wave height', unit: 'm' },
 ]
 
 function LimitInput({
   label,
-  placeholder,
   value,
   invalid,
   onChange,
 }: {
   label: string
-  placeholder: string
   value: string
   invalid: boolean
   onChange: (value: string) => void
@@ -132,7 +127,6 @@ function LimitInput({
       type="text"
       inputMode="decimal"
       value={value}
-      placeholder={placeholder}
       aria-label={label}
       aria-invalid={invalid || undefined}
       onChange={(e) => onChange(e.target.value)}
@@ -141,41 +135,7 @@ function LimitInput({
   )
 }
 
-// A marginal and a no-go box side by side. Empty means unset.
-function BandInputs({
-  name,
-  unit,
-  band,
-  invalid,
-  onChange,
-}: {
-  name: string
-  unit: string
-  band: PassageBandDraft
-  invalid: boolean
-  onChange: (band: PassageBandDraft) => void
-}) {
-  return (
-    <div className="grid min-w-0 grid-cols-2 gap-1.5">
-      <LimitInput
-        label={`${name} marginal (${unit})`}
-        placeholder="Marginal"
-        value={band.marginal}
-        invalid={invalid}
-        onChange={(marginal) => onChange({ ...band, marginal })}
-      />
-      <LimitInput
-        label={`${name} no-go (${unit})`}
-        placeholder="No-go"
-        value={band.noGo}
-        invalid={invalid}
-        onChange={(noGo) => onChange({ ...band, noGo })}
-      />
-    </div>
-  )
-}
-
-// Sector rows by measure columns. Below sm each sector stacks and every
+// Sector rows by no-go columns. Below sm each sector stacks and every
 // measure carries its own label, so nothing runs off a phone screen.
 function PassageLimitsFields({
   limits,
@@ -186,23 +146,23 @@ function PassageLimitsFields({
   errors: Record<string, string>
   onChange: (next: PassageLimitsDraft) => void
 }) {
-  const setSector = (key: SectorKey, measure: MeasureKey, band: PassageBandDraft) =>
-    onChange({ ...limits, [key]: { ...limits[key], [measure]: band } as PassageSectorDraft })
+  const setSector = (key: SectorKey, measure: MeasureKey, value: string) =>
+    onChange({ ...limits, [key]: { ...limits[key], [measure]: value } })
 
   return (
     <div className="flex min-w-0 flex-col gap-3">
-      <div className="hidden gap-3 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground sm:grid sm:grid-cols-[7rem_repeat(3,minmax(0,1fr))]">
+      <div className="hidden gap-3 text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground sm:grid sm:grid-cols-[7rem_repeat(2,minmax(0,1fr))]">
         <span />
         {passageMeasures.map((m) => (
           <span key={m.key}>
-            {m.label} {m.unit}
+            {m.column} {m.unit}
           </span>
         ))}
       </div>
       {passageSectors.map((sector) => (
         <div
           key={sector.key}
-          className="grid min-w-0 gap-2 rounded-md border border-border p-2 sm:grid-cols-[7rem_repeat(3,minmax(0,1fr))] sm:items-center sm:gap-3 sm:border-0 sm:p-0"
+          className="grid min-w-0 gap-2 rounded-md border border-border p-2 sm:grid-cols-[7rem_repeat(2,minmax(0,1fr))] sm:items-center sm:gap-3 sm:border-0 sm:p-0"
         >
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-foreground">{sector.label}</p>
@@ -211,14 +171,13 @@ function PassageLimitsFields({
           {passageMeasures.map((m) => (
             <div key={m.key} className="flex min-w-0 flex-col gap-1">
               <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground sm:hidden">
-                {m.label} {m.unit}
+                {m.column} {m.unit}
               </span>
-              <BandInputs
-                name={`${sector.label} ${m.label.toLowerCase()}`}
-                unit={m.unit}
-                band={limits[sector.key][m.key]}
+              <LimitInput
+                label={`${sector.label} ${m.name} (${m.unit})`}
+                value={limits[sector.key][m.key]}
                 invalid={`${sector.key}.${m.key}` in errors}
-                onChange={(band) => setSector(sector.key, m.key, band)}
+                onChange={(value) => setSector(sector.key, m.key, value)}
               />
             </div>
           ))}
@@ -228,16 +187,16 @@ function PassageLimitsFields({
       <div className="flex min-w-0 flex-col gap-1.5 border-t border-border pt-3">
         <p className="text-sm font-medium text-foreground">Wind against tide</p>
         <p className="text-xs text-muted-foreground">
-          Wind limits that apply while the tidal stream is running against the wind, through the strongest part of the
-          flood or ebb. Only used for legs with a known flood direction.
+          While the tidal stream is running against the wind, through the strongest part of the flood or ebb, every
+          wind limit above is lowered by this many knots. Only used for legs with a known flood direction. Leave it
+          blank to skip the check.
         </p>
         <div className="max-w-xs">
-          <BandInputs
-            name="Wind against tide"
-            unit="kn"
-            band={limits.tide}
+          <LimitInput
+            label="Reduce wind limits by (kn)"
+            value={limits.tideOffset}
             invalid={'tide' in errors}
-            onChange={(tide) => onChange({ ...limits, tide })}
+            onChange={(tideOffset) => onChange({ ...limits, tideOffset })}
           />
         </div>
       </div>
@@ -446,7 +405,7 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
           <div id="passage-limits" tabIndex={-1} className="min-w-0 outline-hidden">
             <FormSection
               title="Passage limits"
-              description="Mate checks passages against these limits. Sectors are the true wind angle off your course. Each sector needs at least a no-go wind limit before Mate will assess a leg in it; gust, wave and marginal levels are optional, and any left blank are shown as not checked. Marginal must be below no-go."
+              description="Mate checks passages against these limits. Sectors are the true wind angle off your course. Each sector needs a no-go wind before Mate will assess a leg in it; a blank no-go wave height is shown as not checked. Marginal is 70% of no-go, and gusts are judged against no-go wind plus 10 kn."
             >
               <FieldGroup>
                 <PassageLimitsFields

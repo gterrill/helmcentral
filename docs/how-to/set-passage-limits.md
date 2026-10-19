@@ -17,22 +17,33 @@ your course:
 | Abeam | 60–120° |
 | Astern | 120–180° |
 
-Each sector has a **Marginal** and a **No-go** level for sustained wind,
-gusts and significant wave height. Marginal means you would go, but with a
-watchful eye. No-go means you would wait.
+You enter only the **No-go** levels: the wind speed and, if you want it
+checked, the wave height at which you would wait. Mate works out the rest.
+
+- **Marginal** is 70% of no-go. With a no-go wind of 20 knots, 14 knots and
+  above is marginal: you would go, but with a watchful eye.
+- **Gusts** are judged against the sector's no-go wind plus 10 knots. With a
+  no-go wind of 20 knots, gusts of 30 knots are no-go and gusts from 21 knots
+  are marginal.
 
 1. Open **Settings → Mate** and scroll to **Passage limits**.
-2. For each sector, enter at least a **No-go** wind speed in knots. Mate
-   will not grade a leg that falls in a sector without one.
-3. Add **Marginal** levels, gust limits and wave limits where they matter to
-   you. Any you leave blank are shown as not checked, never as passed.
-   Marginal must be below no-go.
-4. Under **Wind against tide**, set the wind speeds at which a stream running
-   against the wind becomes marginal or no-go for you. This is checked only
-   for legs where Mate knows which way the flood runs.
+2. For each sector, enter the **No-go wind** in knots. Mate will not grade a
+   leg that falls in a sector without one.
+3. Enter a **No-go wave height** in metres where it matters to you. A sector
+   left blank is shown as not checked for waves, never as passed.
+4. Under **Wind against tide**, enter how many knots to **Reduce wind limits
+   by** while a stream runs against the wind, through the strongest part of
+   the flood or ebb. With a no-go wind of 20 knots and a reduction of 5, wind
+   against the stream is no-go from 15 knots and marginal from 10.5. It must
+   be more than 0 and less than every no-go wind. Leave it blank to skip the
+   check. It is applied only for legs where Mate knows which way the flood
+   runs.
 5. Turn on **Daylight arrival** if a leg that would arrive in the dark, before
    sunrise or after sunset, should count as no-go.
 6. Choose **Save** in the bar at the bottom of the page.
+
+On the weather window card, a marginal cell says which figure made it so, for
+example "Wind SE 12 kn ahead (marginal from 10.5)".
 
 Decimals can be typed with a point or a comma. A value Helmcentral cannot read
 is marked on the field, and Save stays unavailable until you correct it.

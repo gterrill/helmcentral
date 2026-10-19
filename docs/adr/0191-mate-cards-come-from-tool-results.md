@@ -12,6 +12,9 @@ collected cards), [ADR 0155](0155-mate-times-departures-for-a-fair-tide.md)
 [ADR 0166](0166-mate-reads-logged-telemetry-for-history-questions.md)
 (logged telemetry for history questions).
 
+Amended by [ADR 0194](0194-passage-limits-are-no-go-only.md): the limits are
+no-go only; marginal, gusts and the tide band are worked out.
+
 ## Context
 
 Mate answers in markdown. That works for prose and small tables. It fails for
