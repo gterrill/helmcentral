@@ -71,6 +71,10 @@ dev: check-vite-config
 	# whenever package.json gains a dependency. Recreating on every `make dev`
 	# guarantees it reruns; npm install is a fast no-op when nothing changed.
 	docker compose -f docker-compose.dev.yml --profile dev up -d --force-recreate backend-dev frontend-dev
+	@echo ""
+	@echo "Dashboard: http://localhost:5173  (ready once npm install finishes; make logs to watch)"
+	@lan=$$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print $$1}'); \
+	if [ -n "$$lan" ]; then echo "On the LAN: http://$$lan:5173"; fi
 
 down:
 	docker compose -f docker-compose.dev.yml --profile dev down
