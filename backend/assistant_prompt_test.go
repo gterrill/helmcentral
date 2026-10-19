@@ -1202,3 +1202,24 @@ func TestAssistantScreenSentence_DocumentsPanelWithoutDocumentIsUnchanged(t *tes
 		t.Fatalf("unexpected sentence %q", got)
 	}
 }
+
+// A passage question inside the forecast range gets the go/no-go card from
+// assess_passage_window as well as the briefing. Without this rule the
+// pilotage-briefing routine above is the only one the model follows and the
+// tool is never called.
+func TestBuildAssistantSystemPrompt_PassageWindowRule(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"call assess_passage_window",
+		"whose first leg leaves from the boat's position within the forecast range",
+		"whether or when to go",
+		"in addition to the briefing",
+		"every leg and every stay",
+		"The card carries the grid",
+		"Settings → Mate → Passage limits",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the passage window rule to contain %q", want)
+		}
+	}
+}

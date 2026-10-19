@@ -4,16 +4,10 @@ import { apiRequest, invalidateQueries, setQueryData } from '@/lib/api-query'
 import { publishAppConfigSettings } from '@/hooks/use-app-config'
 import type { VesselRoles } from '@/lib/vessel-settings'
 
-/** One measure's thresholds; null/absent is unset (never 0). */
-export interface PassageLimitBandPayload {
-  marginal?: number | null
-  no_go?: number | null
-}
-
+/** A sector's no-go figures; null/absent is unset (never 0). Marginal and gust limits are worked out, not stored. */
 export interface PassageSectorLimitsPayload {
-  wind_kn?: PassageLimitBandPayload
-  gust_kn?: PassageLimitBandPayload
-  wave_m?: PassageLimitBandPayload
+  wind_kn_no_go?: number | null
+  wave_m_no_go?: number | null
 }
 
 /** Mate's go/no-go limits (assistant.passage_limits). Sectors are true wind angle off the course. */
@@ -21,7 +15,8 @@ export interface PassageLimitsPayload {
   ahead?: PassageSectorLimitsPayload
   abeam?: PassageSectorLimitsPayload
   astern?: PassageSectorLimitsPayload
-  wind_against_tide?: { wind_kn?: PassageLimitBandPayload }
+  /** Knots to take off the no-go wind while the stream runs against the wind. */
+  wind_against_tide_offset_kn?: number | null
   daylight_arrival?: boolean
 }
 

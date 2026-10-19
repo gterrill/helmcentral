@@ -69,6 +69,7 @@ export interface TelemetryChartCard {
 const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
 const FACTORS: readonly string[] = ['wind', 'gust', 'wave', 'wind_against_tide', 'daylight']
 const SECTORS: readonly string[] = ['ahead', 'abeam', 'astern']
+// wind_marginal is only on cards saved by v0.49.0 chats; marginal is worked out now.
 const MEASURES: readonly string[] = ['wind_marginal', 'gust', 'wave', 'wind_against_tide', 'daylight']
 
 class CardFieldError extends Error {}

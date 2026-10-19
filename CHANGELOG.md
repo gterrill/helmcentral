@@ -11,6 +11,33 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Passage limits are no-go only.** **Settings → Mate → Passage limits** now
+  asks for two figures per wind sector: the no-go wind and, if you want waves
+  checked, the no-go wave height. Marginal is worked out as 70% of no-go, and
+  gusts are judged against the no-go wind plus 10 knots, so there are no gust
+  or marginal boxes any more. **Wind against tide** is now one number, **Reduce
+  wind limits by**, in knots: while the stream runs against the wind, the no-go
+  wind comes down by that much, marginal follows at 70% of the lowered figure,
+  and gust limits do not change. A marginal cell on the weather window card
+  says what made it so, such as "Wind SE 12 kn ahead (marginal from 10.5)".
+  What to do on upgrade: open **Settings → Mate → Passage limits** and check
+  your no-go wind and wave figures, which carry over. Your marginal and gust
+  figures are dropped, because they are worked out now; compare the card's
+  marginal and gust results with what you meant. If you had set a wind against
+  tide band, it is dropped too, and the check stays off until you enter a
+  reduction. Settings pages left open from before the upgrade must be reloaded
+  before saving.
+
+### Fixed
+
+- **Mate now grades your passage.** Asking whether or when to go, or for the
+  outlook on a trip, now makes Mate check the trip against your passage limits
+  and show the go/no-go card alongside its briefing. Before, it gave the
+  briefing alone and the card never appeared. If the limits are not set, Mate
+  tells you to set them in **Settings → Mate → Passage limits**.
+
 ## [0.49.0] - 2026-10-20
 
 ### Added

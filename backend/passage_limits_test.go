@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -27,10 +29,10 @@ func TestPassageLimitsAbsentIsAllNil(t *testing.T) {
 func TestPassageLimitsRoundTrip(t *testing.T) {
 	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
 	want := passageLimits{
-		Ahead:           passageSectorLimits{WindKn: passageLimitBand{Marginal: fp(10), NoGo: fp(15)}, WaveM: passageLimitBand{NoGo: fp(1.5)}},
-		Astern:          passageSectorLimits{GustKn: passageLimitBand{Marginal: fp(25), NoGo: fp(30)}},
-		WindAgainstTide: passageWindAgainstTide{WindKn: passageLimitBand{NoGo: fp(12)}},
-		DaylightArrival: true,
+		Ahead:                   passageSectorLimits{WindKnNoGo: fp(15), WaveMNoGo: fp(1.5)},
+		Astern:                  passageSectorLimits{WindKnNoGo: fp(35)},
+		WindAgainstTideOffsetKn: fp(5),
+		DaylightArrival:         true,
 	}
 	code, body := postSettings(t, settingsPath, func(p *settingsPayload) { p.Assistant.PassageLimits = want })
 	if code != http.StatusOK {
@@ -41,19 +43,16 @@ func TestPassageLimitsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := buildSettingsPayload(saved).Assistant.PassageLimits
-	if got.Ahead.WindKn.Marginal == nil || *got.Ahead.WindKn.Marginal != 10 || *got.Ahead.WindKn.NoGo != 15 {
-		t.Fatalf("ahead wind lost: %+v", got.Ahead.WindKn)
+	if got.Ahead.WindKnNoGo == nil || *got.Ahead.WindKnNoGo != 15 || got.Abeam.WindKnNoGo != nil {
+		t.Fatalf("ahead wind lost or abeam not nil: %+v", got)
 	}
-	if got.Ahead.WindKn.NoGo == nil || got.Ahead.GustKn.NoGo != nil || got.Abeam.WindKn.NoGo != nil {
-		t.Fatalf("unset bands must stay nil: %+v", got)
+	if got.Ahead.WaveMNoGo == nil || *got.Ahead.WaveMNoGo != 1.5 || got.Astern.WaveMNoGo != nil {
+		t.Fatalf("wave no-go lost: %+v", got)
 	}
-	if got.Ahead.WaveM.NoGo == nil || *got.Ahead.WaveM.NoGo != 1.5 || got.Ahead.WaveM.Marginal != nil {
-		t.Fatalf("one-sided band lost: %+v", got.Ahead.WaveM)
+	if got.Astern.WindKnNoGo == nil || *got.Astern.WindKnNoGo != 35 {
+		t.Fatalf("astern wind lost: %+v", got.Astern)
 	}
-	if got.Astern.GustKn.Marginal == nil || *got.Astern.GustKn.NoGo != 30 {
-		t.Fatalf("astern gust lost: %+v", got.Astern.GustKn)
-	}
-	if got.WindAgainstTide.WindKn.NoGo == nil || *got.WindAgainstTide.WindKn.NoGo != 12 || !got.DaylightArrival {
+	if got.WindAgainstTideOffsetKn == nil || *got.WindAgainstTideOffsetKn != 5 || !got.DaylightArrival {
 		t.Fatalf("tide/daylight lost: %+v", got)
 	}
 }
@@ -76,10 +75,13 @@ func TestPostSettings_RejectsBadPassageLimits(t *testing.T) {
 		set   func(*passageLimits)
 		field string
 	}{
-		{"negative", func(l *passageLimits) { l.Ahead.WindKn.NoGo = fp(-1) }, "ahead"},
-		{"marginal not below no-go", func(l *passageLimits) { l.Abeam.GustKn = passageLimitBand{Marginal: fp(20), NoGo: fp(20)} }, "abeam"},
-		{"astern wave inverted", func(l *passageLimits) { l.Astern.WaveM = passageLimitBand{Marginal: fp(3), NoGo: fp(2)} }, "astern"},
-		{"tide inverted", func(l *passageLimits) { l.WindAgainstTide.WindKn = passageLimitBand{Marginal: fp(9), NoGo: fp(8)} }, "wind against tide"},
+		{"negative wind", func(l *passageLimits) { l.Ahead.WindKnNoGo = fp(-1) }, "ahead"},
+		{"negative wave", func(l *passageLimits) { l.Astern.WaveMNoGo = fp(-2) }, "astern"},
+		{"offset zero", func(l *passageLimits) { l.WindAgainstTideOffsetKn = fp(0) }, "wind against tide"},
+		{"offset not below a sector no-go", func(l *passageLimits) {
+			l.Ahead.WindKnNoGo, l.Abeam.WindKnNoGo = fp(15), fp(22)
+			l.WindAgainstTideOffsetKn = fp(15)
+		}, "ahead"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -127,12 +129,63 @@ func TestGetSettingsFailsWhenStoredPassageLimitsAreUnreadable(t *testing.T) {
 }
 
 func TestPassageLimitsConversionReturnsErrors(t *testing.T) {
-	if _, err := passageLimitsFromSettings(map[string]any{"ahead": map[string]any{"wind_kn": map[string]any{"no_go": "15kn"}}}); err == nil {
-		t.Fatal("a bad stored value must be an error")
+	for name, raw := range map[string]map[string]any{
+		"bad new value":    {"ahead": map[string]any{"wind_kn_no_go": "15kn"}},
+		"bad legacy value": {"ahead": map[string]any{"wind_kn": map[string]any{"no_go": "15kn"}}},
+	} {
+		if _, err := passageLimitsFromSettings(raw); err == nil {
+			t.Fatalf("%s must be an error", name)
+		}
 	}
 	got, err := passageLimitsFromSettings(nil)
 	if err != nil || got != (passageLimits{}) {
 		t.Fatalf("nil block = %+v, %v", got, err)
+	}
+}
+
+// The v0.49.0 shape stored marginal, no-go and gust figures. The no-go wind
+// and wave figures carry over; marginal, gust and the old tide band do not.
+func TestPassageLimitsReadsTheOldShape(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	appendSettings(t, settingsPath, `assistant:
+    enabled: true
+    passage_limits:
+        ahead:
+            wind_kn: {marginal: 12, no_go: 15}
+            gust_kn: {marginal: 20, no_go: 25}
+            wave_m: {marginal: 1, no_go: 1.3}
+        abeam:
+            wind_kn: {marginal: 15, no_go: 22}
+            gust_kn: {marginal: 25, no_go: 30}
+            wave_m: {marginal: 1.2, no_go: 2}
+        astern:
+            wind_kn: {marginal: 25, no_go: 35}
+            gust_kn: {marginal: 30, no_go: 40}
+        wind_against_tide:
+            wind_kn: {marginal: 8, no_go: 12}
+        daylight_arrival: true
+`)
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	am, _ := saved["assistant"].(map[string]any)
+	got, err := passageLimitsFromSettings(am["passage_limits"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := passageLimits{
+		Ahead:           passageSectorLimits{WindKnNoGo: fp(15), WaveMNoGo: fp(1.3)},
+		Abeam:           passageSectorLimits{WindKnNoGo: fp(22), WaveMNoGo: fp(2)},
+		Astern:          passageSectorLimits{WindKnNoGo: fp(35)},
+		DaylightArrival: true,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v want %+v", got, want)
+	}
+	// The settings page shows the carried-over values.
+	if p := buildSettingsPayload(saved).Assistant.PassageLimits; !reflect.DeepEqual(p, want) {
+		t.Fatalf("payload %+v", p)
 	}
 }
 
@@ -146,5 +199,50 @@ func TestSaveOmitsPassageLimitsKeyWhenNoneSet(t *testing.T) {
 	assistant, _ := saved["assistant"].(map[string]any)
 	if _, present := assistant["passage_limits"]; present {
 		t.Fatalf("untouched limits must not write the key: %v", assistant)
+	}
+}
+
+// A tab still on the old bundle posts the v0.49.0 shape. That must be refused,
+// never decoded to empty limits and saved over the operator's values.
+func TestPostSettings_RefusesPassageLimitsInTheOldShape(t *testing.T) {
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	appendSettings(t, settingsPath, "assistant:\n    enabled: true\n    passage_limits:\n        ahead:\n            wind_kn_no_go: 15\n")
+	current, _ := readSettings(settingsPath)
+	raw, _ := json.Marshal(buildSettingsPayload(current))
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	m["assistant"].(map[string]any)["passage_limits"] = map[string]any{
+		"ahead": map[string]any{"wind_kn": map[string]any{"marginal": 12, "no_go": 15}},
+	}
+	body, _ := json.Marshal(m)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", strings.NewReader(string(body)))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	if err := updateSettingsHandler(echo.New().NewContext(req, rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "passage_limits") {
+		t.Fatalf("got %d %s, want 400 naming passage_limits", rec.Code, rec.Body.String())
+	}
+	after, _ := readSettings(settingsPath)
+	if got := buildSettingsPayload(after).Assistant.PassageLimits; got.Ahead.WindKnNoGo == nil || *got.Ahead.WindKnNoGo != 15 {
+		t.Fatalf("stored limits were changed: %+v", got)
+	}
+}
+
+func TestPostSettings_RejectsZeroNoGo(t *testing.T) {
+	for name, set := range map[string]func(*passageLimits){
+		"wind": func(l *passageLimits) { l.Ahead.WindKnNoGo = fp(0) },
+		"wave": func(l *passageLimits) { l.Abeam.WaveMNoGo = fp(0) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+			code, body := postSettings(t, settingsPath, func(p *settingsPayload) { set(&p.Assistant.PassageLimits) })
+			msg, _ := body["error"].(string)
+			if code == http.StatusOK || !strings.Contains(msg, "more than 0") {
+				t.Fatalf("got %d %q, want a rejection saying more than 0", code, msg)
+			}
+		})
 	}
 }

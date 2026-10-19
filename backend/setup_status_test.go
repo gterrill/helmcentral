@@ -368,11 +368,11 @@ func limitsWithNoGo(sectors ...string) passageLimits {
 	for _, s := range sectors {
 		switch s {
 		case "ahead":
-			l.Ahead.WindKn.NoGo = fp(15)
+			l.Ahead.WindKnNoGo = fp(15)
 		case "abeam":
-			l.Abeam.WindKn.NoGo = fp(20)
+			l.Abeam.WindKnNoGo = fp(20)
 		case "astern":
-			l.Astern.WindKn.NoGo = fp(25)
+			l.Astern.WindKnNoGo = fp(25)
 		}
 	}
 	return l
@@ -419,9 +419,9 @@ func TestSetupStatusPassageLimitsNamesOpenSectors(t *testing.T) {
 	if st.State != "todo" || st.Detail != "Still open: ahead, astern." {
 		t.Fatalf("detail = %q (%s)", st.Detail, st.State)
 	}
-	// A marginal alone is not enough: the no-go wind limit is what counts.
+	// A wave no-go alone is not enough: the no-go wind limit is what counts.
 	l := limitsWithNoGo("ahead", "abeam")
-	l.Astern.WindKn.Marginal = fp(10)
+	l.Astern.WaveMNoGo = fp(2)
 	st = stepByID(t, buildSetupStatus(setupBoatComplete(), connectedDiscovery(), setupMate{Enabled: true, Limits: l}), "passage_limits")
 	if st.Detail != "Still open: astern." {
 		t.Fatalf("detail = %q", st.Detail)

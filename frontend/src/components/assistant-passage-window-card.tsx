@@ -22,6 +22,7 @@ const STATE_CHIP: Record<PassageState, string> = {
 }
 
 const MEASURE_WORDS: Record<PassageMeasure, string> = {
+  // Only on cards saved by v0.49.0 chats; marginal is worked out now and never listed.
   wind_marginal: 'marginal wind limit',
   gust: 'gusts',
   wave: 'wave height',

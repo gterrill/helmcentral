@@ -52,9 +52,9 @@ func pwWeek(windKn, fromDeg float64) forecastSource {
 
 func pwLimitsAll() passageLimits {
 	return passageLimits{
-		Ahead:  passageSectorLimits{WindKn: passageLimitBand{Marginal: pwF(15), NoGo: pwF(20)}},
-		Abeam:  passageSectorLimits{WindKn: passageLimitBand{Marginal: pwF(20), NoGo: pwF(30)}},
-		Astern: passageSectorLimits{WindKn: passageLimitBand{Marginal: pwF(28), NoGo: pwF(35)}},
+		Ahead:  passageSectorLimits{WindKnNoGo: pwF(20)},
+		Abeam:  passageSectorLimits{WindKnNoGo: pwF(30)},
+		Astern: passageSectorLimits{WindKnNoGo: pwF(35)},
 	}
 }
 
@@ -132,9 +132,9 @@ func TestAssessItinerary_SameWindPassesAsternAndFailsAhead(t *testing.T) {
 		t.Fatalf("text = %q, want %q", ahead.Limiting.Text, want)
 	}
 
-	astern := pwCell0(t, pwAssess(t, a, pwLimitsAll(), pwWeek(25, 180)))
+	astern := pwCell0(t, pwAssess(t, a, pwLimitsAll(), pwWeek(24, 180)))
 	if astern.State != "go" {
-		t.Fatalf("25 kn from astern must be go, got %+v", astern)
+		t.Fatalf("24 kn from astern must be go, got %+v", astern)
 	}
 }
 
@@ -146,7 +146,7 @@ func TestAssessItinerary_ViaAtAHeadlandChangesSectorMidLeg(t *testing.T) {
 		SpeedKn: pwF(6),
 	}
 	l := pwLimitsAll()
-	l.Abeam.WindKn = passageLimitBand{Marginal: pwF(30), NoGo: pwF(40)}
+	l.Abeam.WindKnNoGo = pwF(40)
 	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", leg), l, pwWeek(25, 90)))
 	if c.State != "no_go" || c.Limiting == nil {
 		t.Fatalf("the eastbound segment is on the nose, got %+v", c)
@@ -267,14 +267,12 @@ func pwTides(_ context.Context, lat, lon float64) ([]tideExtremePoint, error) {
 
 func pwTideLimits() passageLimits {
 	l := pwLimitsAll()
-	l.Ahead.WindKn = passageLimitBand{Marginal: pwF(80), NoGo: pwF(90)}
-	l.Astern.WindKn = passageLimitBand{Marginal: pwF(80), NoGo: pwF(90)}
-	l.WindAgainstTide = passageWindAgainstTideFor(10, 15)
+	// Ahead and astern no-go 30 less the 15 kn reduction: 15 kn no-go and
+	// 10.5 kn marginal while the wind runs against the stream.
+	l.Ahead.WindKnNoGo = pwF(30)
+	l.Astern.WindKnNoGo = pwF(30)
+	l.WindAgainstTideOffsetKn = pwF(15)
 	return l
-}
-
-func passageWindAgainstTideFor(marginal, nogo float64) passageWindAgainstTide {
-	return passageWindAgainstTide{WindKn: passageLimitBand{Marginal: pwF(marginal), NoGo: pwF(nogo)}}
 }
 
 func pwTideLeg(hours float64) passageLegArgs {
@@ -312,7 +310,7 @@ func TestAssessItinerary_WindAgainstTheFlood(t *testing.T) {
 	a := pwArgs([]string{"2026-10-20"}, "10:00", pwTideLeg(5))
 	p, _ := assessItinerary(context.Background(), a, pwTideLimits(), pwNow, pwWeek(12, 0), pwTides, pwNoSun)
 	c := pwCell0(t, p)
-	if c.State != "marginal" || c.Limiting == nil || c.Limiting.Text != "Wind 12 kn against the flood · Alpha → Bravo" {
+	if c.State != "marginal" || c.Limiting == nil || c.Limiting.Text != "Wind 12 kn against the flood (marginal from 10.5) · Alpha → Bravo" {
 		t.Fatalf("got %+v", c)
 	}
 }
@@ -361,32 +359,51 @@ func TestAssessItinerary_BeyondTheForecastIsNoData(t *testing.T) {
 
 func TestAssessItinerary_BlankLimitsAreNotChecked(t *testing.T) {
 	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(),
-		pwUniform(5, 180, 40, pwF(3), 0, pwDay(19, 0), pwDay(25, 23))))
+		pwUniform(5, 180, 20, pwF(3), 0, pwDay(19, 0), pwDay(25, 23))))
 	if c.State != "go" {
-		t.Fatalf("blank gust and wave limits must not fail the cell, got %+v", c)
+		t.Fatalf("blank wave limits must not fail the cell, got %+v", c)
 	}
-	for _, want := range []string{"gust", "wave", "wind_against_tide"} {
+	for _, want := range []string{"wave", "wind_against_tide"} {
 		if !pwHas(c.NotChecked, want) {
 			t.Errorf("not_checked = %v, missing %s", c.NotChecked, want)
 		}
 	}
-	if pwHas(c.NotChecked, "wind_marginal") {
-		t.Errorf("wind marginal is set: %v", c.NotChecked)
+	for _, bad := range []string{"wind_marginal", "gust"} {
+		if pwHas(c.NotChecked, bad) {
+			t.Errorf("%s is always worked out now, but not_checked = %v", bad, c.NotChecked)
+		}
 	}
 }
 
-func TestAssessItinerary_BlankMarginalIsNamed(t *testing.T) {
-	l := pwLimitsAll()
-	l.Astern.WindKn.Marginal = nil
-	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, pwWeek(25, 180)))
-	if !pwHas(c.NotChecked, "wind_marginal") {
-		t.Fatalf("not_checked = %v", c.NotChecked)
+// Marginal is 70% of no-go: astern no-go 35 is marginal from 24.5, and the
+// card says so.
+func TestAssessItinerary_MarginalIsComputedFromNoGoAndNamed(t *testing.T) {
+	cases := []struct {
+		name  string
+		wind  float64
+		state string
+		text  string
+	}{
+		{"just under marginal", 24, "go", ""},
+		{"marginal", 25, "marginal", "Wind S 25 kn astern (marginal from 24.5) · Alpha → Bravo"},
+		{"no-go", 35, "no_go", "Wind S 35 kn astern · Alpha → Bravo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(), pwWeek(tc.wind, 180)))
+			if c.State != tc.state {
+				t.Fatalf("state = %s, want %s (%+v)", c.State, tc.state, c.Limiting)
+			}
+			if tc.text != "" && (c.Limiting == nil || c.Limiting.Text != tc.text) {
+				t.Fatalf("limiting = %+v, want %q", c.Limiting, tc.text)
+			}
+		})
 	}
 }
 
 func TestAssessItinerary_WaveHeightAgainstItsSectorLimit(t *testing.T) {
 	l := pwLimitsAll()
-	l.Ahead.WaveM = passageLimitBand{Marginal: pwF(1.5), NoGo: pwF(2)}
+	l.Ahead.WaveMNoGo = pwF(2)
 	// Wave from the north on a northbound leg is ahead.
 	fc := pwUniform(5, 180, 5, pwF(2.14), 0, pwDay(19, 0), pwDay(25, 23))
 	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, fc))
@@ -395,20 +412,37 @@ func TestAssessItinerary_WaveHeightAgainstItsSectorLimit(t *testing.T) {
 	}
 }
 
-func TestAssessItinerary_GustAgainstItsSectorLimit(t *testing.T) {
-	l := pwLimitsAll()
-	l.Abeam.GustKn = passageLimitBand{NoGo: pwF(33)}
-	fc := pwUniform(20, 90, 34, nil, 0, pwDay(19, 0), pwDay(25, 23))
-	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, fc))
-	if c.State != "no_go" || c.Limiting == nil || c.Limiting.Text != "Gusts 34 kn abeam · Alpha → Bravo" {
-		t.Fatalf("got %+v / %+v", c, c.Limiting)
+// Gusts are judged against the sector's no-go wind plus 10 kn, marginal at
+// 70% of that: abeam no-go 30 gives gust no-go 40 and gust marginal 28.
+func TestAssessItinerary_GustsAreJudgedFromTheSectorNoGoWind(t *testing.T) {
+	cases := []struct {
+		name  string
+		gust  float64
+		state string
+		text  string
+	}{
+		{"under the gust marginal", 27, "go", ""},
+		{"gust marginal", 34, "marginal", "Gusts 34 kn abeam (marginal from 28) · Alpha → Bravo"},
+		{"gust no-go", 41, "no_go", "Gusts 41 kn abeam · Alpha → Bravo"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := pwUniform(20, 90, tc.gust, nil, 0, pwDay(19, 0), pwDay(25, 23))
+			c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(), fc))
+			if c.State != tc.state {
+				t.Fatalf("state = %s, want %s (%+v)", c.State, tc.state, c.Limiting)
+			}
+			if tc.text != "" && (c.Limiting == nil || c.Limiting.Text != tc.text) {
+				t.Fatalf("limiting = %+v, want %q", c.Limiting, tc.text)
+			}
+		})
 	}
 }
 
 func TestAssessItinerary_MissingWaveDataIsNotCalm(t *testing.T) {
 	l := pwLimitsAll()
-	l.Ahead.WaveM = passageLimitBand{NoGo: pwF(2)}
-	l.Astern.WaveM = passageLimitBand{NoGo: pwF(2)}
+	l.Ahead.WaveMNoGo = pwF(2)
+	l.Astern.WaveMNoGo = pwF(2)
 	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, pwWeek(5, 180)))
 	if !pwHas(c.NotChecked, "wave") {
 		t.Fatalf("no wave forecast must read as not checked, got %v", c.NotChecked)
@@ -426,7 +460,7 @@ func TestAssessItinerary_NoLimitsIsAnError(t *testing.T) {
 
 func TestAssessItinerary_SectorWithoutWindNoGoIsAnError(t *testing.T) {
 	l := pwLimitsAll()
-	l.Abeam.WindKn.NoGo = nil
+	l.Abeam.WindKnNoGo = nil
 	leg := pwNorthLeg()
 	leg.Name = "Alpha to Bravo"
 	_, err := assessItinerary(context.Background(), pwArgs([]string{"2026-10-20"}, "06:00", leg), l, pwNow, pwWeek(25, 90), pwNoTides, pwNoSun)
@@ -569,7 +603,7 @@ func TestAssessPassageWindowTool_ARefusedCallThroughTheRunIsMatesReplyNotAFailed
 func pwBigArgs() string {
 	var legs []string
 	for i := 0; i < 6; i++ {
-		legs = append(legs, fmt.Sprintf(`{"name":"Leg number %d to a long anchorage name","route":[{"lat":%.2f,"lon":147,"name":"Port %d"},{"lat":%.2f,"lon":147,"name":"Port %d"}],"passage_hours":2}`, i, -19+float64(i)*0.3, i, -19+float64(i)*0.3+0.3, i+1))
+		legs = append(legs, fmt.Sprintf(`{"name":"Leg number %d to a long anchorage name","route":[{"lat":%.2f,"lon":147,"name":"Port %d Anchorage Bay"},{"lat":%.2f,"lon":147,"name":"Port %d Anchorage Bay"}],"passage_hours":2}`, i, -19+float64(i)*0.3, i, -19+float64(i)*0.3+0.3, i+1))
 	}
 	return `{"legs":[` + strings.Join(legs, ",") + `],"stays_nights":[0,0,0,0,0],"departure_dates":["2026-10-20","2026-10-21","2026-10-22","2026-10-23","2026-10-24","2026-10-25","2026-10-26"],"depart_time":"05:00"}`
 }
@@ -749,9 +783,9 @@ func pwCaptured(t *testing.T) forecastSource {
 func TestAssessItinerary_CapturedForecastTownsvilleUpstartBowen(t *testing.T) {
 	fc := pwCaptured(t)
 	l := passageLimits{
-		Ahead:  passageSectorLimits{WindKn: passageLimitBand{Marginal: pwF(11), NoGo: pwF(14)}, WaveM: passageLimitBand{Marginal: pwF(1.2), NoGo: pwF(2)}},
-		Abeam:  passageSectorLimits{WindKn: passageLimitBand{Marginal: pwF(20), NoGo: pwF(28)}, WaveM: passageLimitBand{Marginal: pwF(1.8), NoGo: pwF(2.5)}},
-		Astern: passageSectorLimits{WindKn: passageLimitBand{Marginal: pwF(25), NoGo: pwF(33)}, WaveM: passageLimitBand{Marginal: pwF(2), NoGo: pwF(3)}},
+		Ahead:  passageSectorLimits{WindKnNoGo: pwF(14), WaveMNoGo: pwF(2)},
+		Abeam:  passageSectorLimits{WindKnNoGo: pwF(28), WaveMNoGo: pwF(2.5)},
+		Astern: passageSectorLimits{WindKnNoGo: pwF(33), WaveMNoGo: pwF(3)},
 	}
 	a := passageWindowArgs{
 		Legs: []passageLegArgs{
@@ -769,15 +803,17 @@ func TestAssessItinerary_CapturedForecastTownsvilleUpstartBowen(t *testing.T) {
 	if len(p.Rows) != 4 {
 		t.Fatalf("rows = %d", len(p.Rows))
 	}
-	// By hand from the captured hours: 20 October peaks at 12-13 kn from the
-	// east on a south-easterly leg (marginal, under the 14 kn no-go); 21 and
-	// 22 October stay at or under 10 kn.
-	if got := p.Rows[0]; got.Verdict != "marginal" || got.Cells[0].State != "marginal" || got.Cells[0].Limiting == nil ||
-		got.Cells[0].Limiting.Factor != "wind" || !strings.HasPrefix(got.Cells[0].Limiting.Text, "Wind E ") || !strings.HasSuffix(got.Cells[0].Limiting.Text, " kn ahead · Cape Bowling Green → Cape Upstart") {
-		t.Fatalf("20 October = %+v", got)
+	// By hand from the captured hours: 20 October has gusts of 32 kn on the
+	// south-easterly leg, past the ahead sector's gust no-go (14 + 10 = 24 kn),
+	// while its wind peaks at 12-13 kn, which is only marginal against the 14 kn
+	// no-go. 21 October's gusts reach 22 kn, past the 16.8 kn gust marginal.
+	if got := p.Rows[0]; got.Verdict != "no_go" || got.Cells[0].State != "no_go" || got.Cells[0].Limiting == nil ||
+		got.Cells[0].Limiting.Factor != "gust" || got.Cells[0].Limiting.Text != "Gusts 32 kn ahead · Cape Bowling Green → Cape Upstart" {
+		t.Fatalf("20 October = %+v / %+v", got, got.Cells[0].Limiting)
 	}
-	if got := p.Rows[1]; got.Verdict != "go" {
-		t.Fatalf("21 October = %+v", got)
+	if got := p.Rows[1]; got.Verdict != "marginal" || got.Cells[0].Limiting == nil ||
+		got.Cells[0].Limiting.Text != "Gusts 22 kn ahead (marginal from 16.8) · Townsville → Cape Bowling Green" {
+		t.Fatalf("21 October = %+v / %+v", got, got.Cells[0].Limiting)
 	}
 	// Leaving the 25th, the second leg is on the 26th: beyond the captured week.
 	if got := p.Rows[3]; got.Verdict != "no_data" || got.Cells[1].State != "no_data" {
@@ -914,7 +950,7 @@ func TestAssessPassageWindowTool_ProviderGapsAreLoggedOncePerCauseAndStayNotChec
 	}
 	args := `{"legs":[{"route":[{"lat":-19,"lon":147,"name":"Alpha"},{"lat":-18.5,"lon":147},{"lat":-18,"lon":147,"name":"Bravo"}],"speed_kn":6,"flood_set_deg":0}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`
 	l := pwLimitsAll()
-	l.WindAgainstTide = passageWindAgainstTideFor(10, 15)
+	l.WindAgainstTideOffsetKn = pwF(5)
 	d.passageLimits = func() (passageLimits, error) { return l, nil }
 	d.tides = func() (tideProvider, string, error) { return nil, "tide-x", errors.New("tide provider offline") }
 	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(args))
@@ -983,17 +1019,18 @@ func TestAssessItinerary_TheForecastHourAfterArrivalIsJudged(t *testing.T) {
 	}
 }
 
-// The cell judges the figure it prints: a gust that reads "24 kn" against a
-// marginal of 24 is marginal, whatever the raw forecast said.
+// The cell judges the figure it prints: a gust that reads "25 kn" against a
+// marginal of 24.5 is marginal, whatever the raw forecast said.
 func TestAssessItinerary_JudgesTheFigureAsDisplayed(t *testing.T) {
+	// Abeam no-go 25 gives gust no-go 35 and gust marginal 24.5.
 	gustLimits := func() passageLimits {
 		l := pwLimitsAll()
-		l.Abeam.GustKn = passageLimitBand{Marginal: pwF(24), NoGo: pwF(30)}
+		l.Abeam.WindKnNoGo = pwF(25)
 		return l
 	}
 	waveLimits := func() passageLimits {
 		l := pwLimitsAll()
-		l.Ahead.WaveM = passageLimitBand{Marginal: pwF(1.0), NoGo: pwF(1.8)}
+		l.Ahead.WaveMNoGo = pwF(1.8)
 		return l
 	}
 	cases := []struct {
@@ -1003,8 +1040,8 @@ func TestAssessItinerary_JudgesTheFigureAsDisplayed(t *testing.T) {
 		state string
 		text  string
 	}{
-		{"gust 23.6 reads 24 and is marginal", gustLimits(), pwUniform(10, 90, 23.6, nil, 0, pwDay(19, 0), pwDay(25, 23)), "marginal", "Gusts 24 kn abeam · Alpha → Bravo"},
-		{"gust 23.4 reads 23 and is go", gustLimits(), pwUniform(10, 90, 23.4, nil, 0, pwDay(19, 0), pwDay(25, 23)), "go", "Gusts 23 kn abeam · Alpha → Bravo"},
+		{"gust 24.6 reads 25 and is marginal", gustLimits(), pwUniform(10, 90, 24.6, nil, 0, pwDay(19, 0), pwDay(25, 23)), "marginal", "Gusts 25 kn abeam (marginal from 24.5) · Alpha → Bravo"},
+		{"gust 24.4 reads 24 and is go", gustLimits(), pwUniform(10, 90, 24.4, nil, 0, pwDay(19, 0), pwDay(25, 23)), "go", "Gusts 24 kn abeam · Alpha → Bravo"},
 		{"wave 1.75 reads 1.8 and is no-go", waveLimits(), pwUniform(5, 180, 5, pwF(1.75), 0, pwDay(19, 0), pwDay(25, 23)), "no_go", "Waves 1.8 m ahead · Alpha → Bravo"},
 	}
 	for _, tc := range cases {
@@ -1054,5 +1091,20 @@ func TestAssessItinerary_TideDataThatStopsShortIsLoggedAsTheReason(t *testing.T)
 	}
 	if !strings.Contains(buf.String(), "tide extremes end") {
 		t.Errorf("the reason was not logged: %q", buf.String())
+	}
+}
+
+// A forecast hour with no gust figure (providers leave it 0) is not a calm
+// gust: the cell lists gusts as not checked and does not pass them.
+func TestAssessItinerary_MissingGustIsNotCheckedNotPassed(t *testing.T) {
+	fc := pwUniform(10, 180, 0, nil, 0, pwDay(19, 0), pwDay(25, 23))
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(), fc))
+	if c.State != "go" || !pwHas(c.NotChecked, "gust") {
+		t.Fatalf("got %s, not_checked %v; want go with gust listed", c.State, c.NotChecked)
+	}
+	// With a gust figure the check runs and gusts are not listed.
+	c = pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(), pwWeek(10, 180)))
+	if pwHas(c.NotChecked, "gust") {
+		t.Fatalf("gusts were checked, not_checked = %v", c.NotChecked)
 	}
 }
