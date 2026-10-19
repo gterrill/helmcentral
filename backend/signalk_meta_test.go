@@ -621,3 +621,38 @@ func TestSignalKPathsListsUnitsForRealPaths(t *testing.T) {
 	}
 	t.Fatalf("%s not listed", socPath)
 }
+
+// afterLoadUnits runs a hook once the real load has read the table, to place
+// a declaration and its flush between the load and the map swap.
+type afterLoadUnits struct {
+	inner *signalKUnitStore
+	hook  func()
+}
+
+func (a *afterLoadUnits) load(vessel string) (map[string]string, error) {
+	m, err := a.inner.load(vessel)
+	if a.hook != nil {
+		a.hook()
+	}
+	return m, err
+}
+func (a *afterLoadUnits) save(c []rememberedUnit) error { return a.inner.save(c) }
+
+func TestReloadKeepsAUnitDeclaredAndFlushedWhileItLoaded(t *testing.T) {
+	_, inner := openUnitStore(t, filepath.Join(t.TempDir(), "helmcentral.sqlite"))
+	p := &afterLoadUnits{inner: inner}
+	s := newSignalKSnapshot()
+	if err := s.useUnitStore(p); err != nil {
+		t.Fatal(err)
+	}
+	vessel := metaFixture(t, "hello.json").Self
+	p.hook = func() {
+		declareUnit(s, vessel, "late.path", "m")
+		s.flushUnits()
+		p.hook = nil
+	}
+	s.setSelfContext(vessel)
+	if got := s.rememberedUnit("late.path"); got != "m" {
+		t.Fatalf("late.path unit = %q, want m", got)
+	}
+}

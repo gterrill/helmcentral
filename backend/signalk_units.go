@@ -143,8 +143,8 @@ func (s *signalKSnapshot) useUnitStore(store unitPersister) error {
 	return s.reloadUnits(vessel)
 }
 
-// reloadUnits replaces the in-memory units with vessel's stored ones, plus
-// any of its declarations still waiting to be written. It does nothing if
+// reloadUnits loads vessel's stored units under the declarations made since
+// the units were cleared for it, plus any still waiting to be written. It does nothing if
 // vessel is no longer the self vessel by the time the load returns.
 func (s *signalKSnapshot) reloadUnits(vessel string) error {
 	s.mu.RLock()
@@ -161,6 +161,12 @@ func (s *signalKSnapshot) reloadUnits(vessel string) error {
 	defer s.mu.Unlock()
 	if s.selfCtx != vessel {
 		return nil
+	}
+	// Whatever is in memory now was declared since the units were cleared for
+	// this vessel, so it is newer than the table, and may already have been
+	// flushed and dropped from pending after the load read.
+	for path, units := range s.rememberedUnits {
+		loaded[path] = units
 	}
 	for key, units := range s.pendingUnits {
 		if key.vessel == vessel {
