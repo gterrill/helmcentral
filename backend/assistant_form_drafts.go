@@ -137,12 +137,8 @@ func formDraftsForMessages(q sqlQueryer, messageIDs []string) (map[string][]assi
 	if len(messageIDs) == 0 {
 		return nil, nil
 	}
-	placeholders := make([]string, len(messageIDs))
-	args := make([]any, len(messageIDs))
-	for i, id := range messageIDs {
-		placeholders[i], args[i] = "?", id
-	}
-	rows, err := q.Query(`SELECT `+formDraftColumns+` FROM assistant_form_drafts WHERE message_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY message_id, position`, args...)
+	marks, args := inPlaceholders(messageIDs)
+	rows, err := q.Query(`SELECT `+formDraftColumns+` FROM assistant_form_drafts WHERE message_id IN (`+marks+`) ORDER BY message_id, position`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list message form drafts: %w", err)
 	}

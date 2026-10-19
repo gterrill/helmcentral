@@ -158,3 +158,24 @@ mayara:
 #   # Off by default: it costs battery and, in Chrome, streams continuously
 #   # to Google.
 #   wake_word: false
+#   # Mate checks passages against these limits. Nothing is set by default
+#   # and nothing here is a recommendation. Sectors are the true wind angle
+#   # off your course: ahead 0-60 degrees, abeam 60-120, astern 120-180. Each
+#   # sector needs at least a no-go wind limit before Mate will assess a leg
+#   # in it; gust, wave and marginal levels are optional, and any left blank
+#   # are shown as not checked. Marginal must be below no-go. Wind and gust
+#   # are knots, wave height is metres.
+#   passage_limits:
+#     ahead:
+#       wind_kn: { marginal: , no_go:  }
+#       gust_kn: { marginal: , no_go:  }
+#       wave_m:  { marginal: , no_go:  }
+#     abeam: {}
+#     astern: {}
+#     # Wind limits that apply while the tidal stream is running against the
+#     # wind, through the strongest part of the flood or ebb. Only used for
+#     # legs with a known flood direction.
+#     wind_against_tide:
+#       wind_kn: { marginal: , no_go:  }
+#     # Flag an arrival after sunset.
+#     daylight_arrival: false

@@ -66,6 +66,7 @@ Steps for specific tasks.
 - [Write the boat's manual](how-to/write-the-boats-manual.md), capturing,
   filing, ordering and illustrating the sections.
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
+- [Set passage limits](how-to/set-passage-limits.md)
 - [Set up your vessel](how-to/set-up-your-vessel.md), picking the engines and
   house bank anomaly detection watches, and entering owner and insurance
   details.

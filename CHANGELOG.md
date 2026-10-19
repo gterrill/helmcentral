@@ -11,6 +11,27 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Passage limits.** **Settings → Mate** has a new **Passage limits** group:
+  marginal and no-go levels for wind, gusts and wave height, set separately for
+  wind ahead, abeam and astern, plus a wind-against-tide limit and a
+  daylight-arrival switch. Nothing is filled in for you. While Mate is on, the
+  Setup list shows **Passage limits** as an optional step that never holds up
+  the rest of setup.
+- **Which days can we go?** Ask Mate about a trip in legs, with stays along
+  the way, and the answer comes with a grid card: one row for each departure
+  day, one column for each leg, and in each cell go, marginal, no-go or no
+  data, with the times and the figure that decided it. Each leg is judged on
+  the day it would actually sail, against your passage limits for the wind
+  angle on that part of the course. Anything not checked, such as wave height
+  with no wave forecast, is listed rather than passed.
+- **Charts from Mate.** Ask Mate to chart any logged reading, such as
+  alternator current against house bank state of charge or engine RPM against
+  load, over time or one against the other, and across date ranges you name
+  for a before-and-after. The chart appears under the answer and redraws when
+  you change its dates.
+
 ### Fixed
 
 - **Silent instrument alarm.** A serial (NMEA 0183) instrument that goes quiet

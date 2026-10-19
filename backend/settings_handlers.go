@@ -149,6 +149,10 @@ type settingsPayload struct {
 		// while WebSearch is on: a blank value is rejected on save and never
 		// replaced by the default at search time.
 		WebSearchModel string `json:"web_search_model"`
+		// PassageLimits are the operator's go/no-go thresholds for Mate's
+		// passage assessment (ADR 0191). No defaults: every value is unset
+		// until the operator enters it.
+		PassageLimits passageLimits `json:"passage_limits"`
 	} `json:"assistant"`
 	Auth struct {
 		Mode string `json:"mode"`
@@ -173,6 +177,15 @@ func getSettingsHandler(c echo.Context) error {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings"})
+	}
+
+	// Unreadable passage limits fail the read: blanks sent to the page would
+	// be saved straight back over the operator's values.
+	if assistantMap, ok := settings["assistant"].(map[string]any); ok {
+		if _, err := passageLimitsFromSettings(assistantMap["passage_limits"]); err != nil {
+			log.Printf("settings: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings: passage_limits is unreadable"})
+		}
 	}
 
 	payload := buildSettingsPayload(settings)
@@ -330,6 +343,15 @@ func updateSettingsHandler(c echo.Context) error {
 		"web_search":           normalized.Assistant.WebSearch,
 		"web_search_model":     normalized.Assistant.WebSearchModel,
 	}
+	// No limit set: the key stays out of settings.yaml altogether.
+	if normalized.Assistant.PassageLimits != (passageLimits{}) {
+		block, err := passageLimitsToSettings(normalized.Assistant.PassageLimits)
+		if err != nil {
+			log.Printf("settings: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save settings: passage_limits could not be converted"})
+		}
+		settings["assistant"].(map[string]any)["passage_limits"] = block
+	}
 	settings["units"] = normalized.Units
 
 	// roles is only touched when the request carries it (see the Roles
@@ -415,6 +437,10 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 			Field:   "assistant.web_search_model",
 			Message: "choose a search model before turning on web search",
 		}
+	}
+
+	if invalid := validatePassageLimits(next.Assistant.PassageLimits); invalid != nil {
+		return invalid
 	}
 
 	if next.Roles != nil {
@@ -665,6 +691,14 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if v, ok := assistantMap["web_search"].(bool); ok {
 			payload.Assistant.WebSearch = v
 		}
+		// Callers that must not proceed on a bad block (GET /api/settings, the
+		// setup status) decode it themselves with passageLimitsFromSettings
+		// and fail; here an unreadable block is logged and left unset.
+		limits, err := passageLimitsFromSettings(assistantMap["passage_limits"])
+		if err != nil {
+			log.Printf("settings: %v", err)
+		}
+		payload.Assistant.PassageLimits = limits
 	}
 
 	if authMap, ok := settings["auth"].(map[string]any); ok {
@@ -815,6 +849,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.WakeWord = req.Assistant.WakeWord
 	normalized.Assistant.WebSearch = req.Assistant.WebSearch
 	normalized.Assistant.WebSearchModel = strings.TrimSpace(req.Assistant.WebSearchModel)
+	normalized.Assistant.PassageLimits = req.Assistant.PassageLimits
 
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {

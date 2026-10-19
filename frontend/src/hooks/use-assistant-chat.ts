@@ -3,33 +3,13 @@ import { apiBaseUrl } from '@/config/api'
 import { MATE_REPLY_NOT_SHOWN, MateEventError, readMateEvents } from '@/lib/mate-events'
 import { todayISO } from '@/lib/local-date'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
-import { mapFormDraft, mapProposal, type AssistantConversation, type AssistantMessage } from '@/hooks/use-assistant-conversations'
-import type { ConversationApi, MessageApi } from '@/lib/mate-api'
+import { mapMessage, type AssistantConversation, type AssistantMessage } from '@/hooks/use-assistant-conversations'
+import type { ConversationApi } from '@/lib/mate-api'
 
 /** What the operator reads when the stream fails; a malformed frame is logged in full and shown plainly. */
 function streamErrorText(err: unknown): string {
   if (err instanceof MateEventError) return MATE_REPLY_NOT_SHOWN
   return err instanceof Error ? err.message : String(err)
-}
-
-function mapMessage(api: MessageApi): AssistantMessage {
-  return {
-    id: api.id,
-    conversationId: api.conversation_id,
-    seq: api.seq,
-    role: api.role,
-    content: api.content,
-    model: api.model,
-    promptTokens: api.prompt_tokens,
-    cachedTokens: api.cached_tokens,
-    completionTokens: api.completion_tokens,
-    costUsd: api.cost_usd,
-    toolRounds: api.tool_rounds,
-    createdAt: api.created_at,
-    attachments: api.attachments?.map((a) => ({ documentId: a.document_id, filename: a.filename })),
-    proposals: api.proposals?.map(mapProposal),
-    formDrafts: api.form_drafts?.map(mapFormDraft),
-  }
 }
 
 function mapConversation(api: ConversationApi): AssistantConversation {

@@ -207,6 +207,69 @@ See [What Mate can look up](../reference/mate-tools.md) for exactly which
 provider each of these draws on, what counts as "nearby" for a place
 search, and what a failed or unconfigured lookup looks like.
 
+## Waiting for a weather window
+
+When you are waiting to make a run in stages, ask Mate which days work:
+
+> We want to leave Townsville for Cape Upstart, spend two nights there, then
+> go on to Bowen. Which departure days this week look good?
+
+Mate checks every leg of the trip on the day it would actually sail. Leaving
+Thursday with two nights at Cape Upstart puts the Bowen leg on Saturday, and
+that leg is judged on Saturday's forecast. The answer comes with a card under
+it: one row for each departure day, one column for each leg, and in every
+cell **GO**, **MARGINAL**, **NO-GO** or **NO DATA**, with departure and
+arrival times and the figure that decided it ("Wind SE 27 kn ahead · Cape
+Bowling Green → Cape Upstart"). A day is only as good as its worst leg.
+
+The grading uses your [passage limits](../how-to/set-passage-limits.md), set
+separately for wind ahead, abeam and astern of your course, so the same
+twenty knots can be a go on a downwind leg and a no-go on a beat. Mate works
+the angle out for each part of a leg, including after it rounds a headland.
+Until you set the limits, Mate says so and does not grade the trip.
+
+The card does not fill gaps. A leg past the end of the forecast is **NO
+DATA**, not go. Anything it could not check is listed under the grid ("Not
+checked: wave height, wind against tide"), for example when no wave forecast
+is available or Mate does not know which way the flood runs on that leg.
+Wind against tide is judged on the direction and timing of the stream from
+the tide station's high and low water, not on its speed. The card shows how
+old the forecast was when Mate checked it, and says so once that is more than
+six hours ago. For a fresh answer, ask again.
+
+## Charting what the boat logged
+
+Mate can draw a chart of any reading your boat logs, so you can see a change
+rather than read a summary of it:
+
+> Show the starboard alternator current against house bank state of charge
+> for 1–5 October and for 12–16 October. I changed the regulator settings on
+> the 8th.
+
+The chart appears under the answer. Over time, each reading is a line, with
+up to two scales: amps on the left and percent on the right, say. Plotted
+one against the other, each point is one stretch of time in which both were
+logged. That is usually the fairer comparison: an alternator puts out less
+as the bank fills, so a before-and-after on amps alone can mislead if the
+bank was fuller in one period. With two date ranges, each range gets its own
+colour, so you can see whether the cloud of points moved.
+
+You can ask for the readings Helmcentral already knows by their job: house
+bank state of charge, current and voltage, each alternator's current, and
+each engine's RPM, load and coolant temperature. Any other logged reading
+works by name too. Mate needs you to say which dates to compare; it does not
+guess when a change was made.
+
+Change the dates on the chart itself and it redraws without asking Mate
+again. Figures are in your units, using the unit the boat itself reports for
+each reading. A reading whose unit the boat does not report is drawn as
+logged and labelled "unit not reported". A reading with nothing logged in a
+range is named under the chart rather than drawn as a flat line, and when
+two devices report the same reading, Mate asks which one you mean rather than
+averaging them.
+
+Charts need the boat's history log (InfluxDB).
+
 ## Watching a reading
 
 A watch follows up to six live readings once a second for between one and

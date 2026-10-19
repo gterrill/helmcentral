@@ -1,5 +1,5 @@
 import { useSetupStatus } from '@/hooks/use-setup-status'
-import { doneSetupCount, nextSetupStep, type SetupStep } from '@/lib/setup-status'
+import { doneSetupCount, nextSetupStep, requiredSetupSteps, type SetupStep } from '@/lib/setup-status'
 
 interface SetupLineProps {
   /** False on a wall display or for a read-only session: nothing is fetched or drawn. */
@@ -16,7 +16,7 @@ interface SetupLineProps {
 export function SetupLine({ enabled, onOpen }: SetupLineProps) {
   const { status, loaded } = useSetupStatus(enabled)
   if (!enabled || !loaded || status.complete) return null
-  const next = nextSetupStep(status) ?? status.steps.find((s) => s.state !== 'done')
+  const next = nextSetupStep(status) ?? requiredSetupSteps(status).find((s) => s.state !== 'done')
   if (!next) return null
 
   return (
@@ -26,7 +26,7 @@ export function SetupLine({ enabled, onOpen }: SetupLineProps) {
         className="min-w-0 truncate text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
         onClick={() => onOpen(next)}
       >
-        {`Setup: ${doneSetupCount(status)} of ${status.steps.length} done · Next: ${next.title}`}
+        {`Setup: ${doneSetupCount(status)} of ${requiredSetupSteps(status).length} done · Next: ${next.title}`}
       </button>
     </div>
   )

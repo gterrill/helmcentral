@@ -111,6 +111,9 @@ type assistantReply struct {
 	// FormDrafts are the filled-in forms (ADR 0165) fill_form made during
 	// this run, in call order. Saved with the assistant message like Proposals.
 	FormDrafts []assistantFormDraft
+	// Cards are the cards (ADR 0191) tools built from their results during
+	// this run, in call order. Saved with the assistant message like Proposals.
+	Cards []mateCard
 }
 
 // assistantToolFailures counts, per tool name, how many times a tool call
@@ -351,6 +354,13 @@ type assistantToolExecutor interface {
 // the last call.
 type assistantUsageReporter interface {
 	drainUsage() openRouterUsage
+}
+
+// assistantCardSource is implemented by a tool executor whose tools build a
+// card out of band (see assistantCardSink); takeCards returns the card the
+// call that produced result left behind, if any.
+type assistantCardSource interface {
+	takeCards(result string) []mateCard
 }
 
 // assistantRunner drives one assistant reply's agentic tool loop.
@@ -849,6 +859,9 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 				if cerr := tool.collect(result, &reply); cerr != nil {
 					return assistantReply{}, cerr
 				}
+			}
+			if src, ok := r.tools.(assistantCardSource); ok {
+				reply.Cards = append(reply.Cards, src.takeCards(result)...)
 			}
 			toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
 				Name:   call.Function.Name,

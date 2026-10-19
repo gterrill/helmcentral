@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { FormSection, SettingsLayout } from '@/components/patterns'
@@ -11,7 +11,7 @@ import { SignalKSetupSection } from '@/components/settings/sections/signalk-setu
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { useSignalKDiscovery } from '@/hooks/use-signalk-discovery'
 import { apiRequest } from '@/lib/api-query'
-import { clearPendingSetupFocus, focusSetupControl, peekPendingSetupFocus, subscribeSetupFocus } from '@/lib/setup-status'
+import { useSetupFocus } from '@/hooks/use-setup-focus'
 
 interface SignalKConnectionSectionProps {
   draft: RegularSettingsDraft
@@ -23,39 +23,8 @@ export function SignalKConnectionSection({ draft, onChange }: SignalKConnectionS
   const [testError, setTestError] = useState<string | null>(null)
   const [testSuccess, setTestSuccess] = useState<string | null>(null)
 
-  // The dashboard's setup line and the tiles open this page asking for one
-  // control. Roles and Discovery draw a moment after the page, so keep trying
-  // for a few seconds before giving up. A request made while this section is
-  // already showing is acted on too. The request is peeked, never taken:
-  // StrictMode runs this effect twice, and it is cleared only once met or
-  // given up on.
-  useEffect(() => {
-    let frame = 0
-    const run = () => {
-      cancelAnimationFrame(frame)
-      const control = peekPendingSetupFocus()
-      if (control === null) return
-      let tries = 0
-      const attempt = () => {
-        if (focusSetupControl(control)) {
-          clearPendingSetupFocus()
-          return
-        }
-        if (++tries >= 300 || peekPendingSetupFocus() !== control) {
-          if (peekPendingSetupFocus() === control) clearPendingSetupFocus()
-          return
-        }
-        frame = requestAnimationFrame(attempt)
-      }
-      frame = requestAnimationFrame(attempt)
-    }
-    run()
-    const unsubscribe = subscribeSetupFocus(run)
-    return () => {
-      unsubscribe()
-      cancelAnimationFrame(frame)
-    }
-  }, [])
+  // The dashboard's setup line and the tiles open this page asking for one control.
+  useSetupFocus()
 
   const { servers, scannedSubnet, scanning, error: discoveryError, discover, reset: resetDiscovery } = useSignalKDiscovery()
 

@@ -29,6 +29,7 @@ import {
   draftsEqual,
   hydrateDraftFromSettings,
   initialRegularSettingsDraft,
+  passageLimitErrors,
   type RegularSettingsDraft,
 } from '@/components/settings/settings-draft'
 interface SettingsPageProps {
@@ -162,6 +163,9 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // callers — the page's own button handler, and App.tsx's "Save and
   // Continue" navigation-guard action — can each decide how to react.
   const performSave = useCallback(async () => {
+    // The Save bar shows why (saveBarError); this stops the other callers.
+    const limitProblems = Object.values(passageLimitErrors(draft))
+    if (limitProblems.length > 0) throw new Error(`Passage limits: ${limitProblems[0]}`)
     await Promise.all([
       // The snapshot moves as soon as THIS request lands, not once all three
       // have: if a sibling fails, Discard must not roll the form back behind
@@ -235,7 +239,11 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     setParticularsSaveError(null)
   }, [savedDraftSnapshot, resetTouched, transportsReset, particularsReset])
 
-  const saveBarError = [settingsSaveError, secretsSaveError, transportsSaveError, particularsSaveError].filter(Boolean).join('. ') || null
+  // The server refuses limits it cannot use; so does the Save bar.
+  const limitErrors = Object.values(passageLimitErrors(draft))
+  const limitsInvalid = limitErrors.length > 0
+
+  const saveBarError = [limitsInvalid ? `Passage limits: ${limitErrors[0]}` : null, settingsSaveError, secretsSaveError, transportsSaveError, particularsSaveError].filter(Boolean).join('. ') || null
 
   const activeSection = (() => {
     switch (activeSectionId) {
@@ -302,6 +310,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
           dirty={dirty}
           saving={isSavingSettings}
           error={saveBarError}
+          saveDisabled={limitsInvalid}
           onSave={() => void handleSaveSettings()}
           onDiscard={handleDiscard}
         />

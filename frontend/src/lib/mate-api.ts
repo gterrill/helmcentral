@@ -22,6 +22,7 @@ export interface MessageApi {
   attachments?: MessageAttachmentApi[]
   proposals?: ProposalApi[]
   form_drafts?: FormDraftApi[]
+  cards?: unknown
 }
 
 export interface ConversationApi {

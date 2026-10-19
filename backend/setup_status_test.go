@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,7 +34,7 @@ func fullPowerNone() map[string]bool {
 }
 
 func TestSetupStatusStepOrderAndTitles(t *testing.T) {
-	s := buildSetupStatus(vesselView{}, connectedDiscovery())
+	s := buildSetupStatus(vesselView{}, connectedDiscovery(), setupMate{})
 	var ids []string
 	for _, st := range s.Steps {
 		ids = append(ids, st.ID)
@@ -58,7 +59,7 @@ func TestSetupStatusStepOrderAndTitles(t *testing.T) {
 }
 
 func TestSetupStatusNotConnectedBlocksTheRest(t *testing.T) {
-	s := buildSetupStatus(vesselView{}, discoveryResponse{Connected: false})
+	s := buildSetupStatus(vesselView{}, discoveryResponse{Connected: false}, setupMate{})
 	if stepByID(t, s, "connection").State != "todo" {
 		t.Fatalf("connection should be todo: %+v", s.Steps)
 	}
@@ -78,7 +79,7 @@ func TestSetupStatusProgressesAndNoneCountsAsDone(t *testing.T) {
 		Engines:   []vesselEngineSetting{{Instance: "port", EquipmentID: "e1"}},
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.512", EquipmentID: "b1"},
 	}
-	s := buildSetupStatus(vessel, connectedDiscovery())
+	s := buildSetupStatus(vessel, connectedDiscovery(), setupMate{})
 	if stepByID(t, s, "connection").State != "done" || stepByID(t, s, "engines").State != "done" || stepByID(t, s, "house_bank").State != "done" {
 		t.Fatalf("first three done: %+v", s.Steps)
 	}
@@ -94,7 +95,7 @@ func TestSetupStatusProgressesAndNoneCountsAsDone(t *testing.T) {
 
 	// Answering "none" for everything, with no figures, completes it.
 	vessel.RolesNone = fullPowerNone()
-	s = buildSetupStatus(vessel, connectedDiscovery())
+	s = buildSetupStatus(vessel, connectedDiscovery(), setupMate{})
 	if st := stepByID(t, s, "power"); st.State != "done" {
 		t.Fatalf("none counts as done: %+v", st)
 	}
@@ -108,7 +109,7 @@ func TestSetupStatusDetailNamesOnlyTheOpenPowerRoles(t *testing.T) {
 		Alternators: vesselAlternatorSettings{PortInstance: "2"},
 		RolesNone:   map[string]bool{"inverter": true, "generator": true, "generator_ac_instance": true},
 	}
-	st := stepByID(t, buildSetupStatus(vessel, connectedDiscovery()), "power")
+	st := stepByID(t, buildSetupStatus(vessel, connectedDiscovery(), setupMate{}), "power")
 	if strings.Contains(st.Detail, "Port alternator") || strings.Contains(st.Detail, "Inverter") {
 		t.Errorf("answered roles must not be listed: %q", st.Detail)
 	}
@@ -127,17 +128,17 @@ func TestSetupStatusRegressesWhenAStepBecomesUndone(t *testing.T) {
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.512"},
 		RolesNone: fullPowerNone(),
 	}
-	if !buildSetupStatus(vessel, connectedDiscovery()).Complete {
+	if !buildSetupStatus(vessel, connectedDiscovery(), setupMate{}).Complete {
 		t.Fatal("expected complete")
 	}
 	vessel.HouseBank = nil
-	s := buildSetupStatus(vessel, connectedDiscovery())
+	s := buildSetupStatus(vessel, connectedDiscovery(), setupMate{})
 	if s.Complete || stepByID(t, s, "house_bank").State != "todo" {
 		t.Fatalf("a cleared house bank is todo again: %+v", s)
 	}
 	vessel.HouseBank = &vesselHouseBankSetting{Path: "electrical.batteries.512"}
 	vessel.Engines = nil
-	if buildSetupStatus(vessel, connectedDiscovery()).Complete {
+	if buildSetupStatus(vessel, connectedDiscovery(), setupMate{}).Complete {
 		t.Fatal("a deleted engine item reopens the engines step")
 	}
 }
@@ -150,7 +151,7 @@ func TestSetupStatusCountsOnlyEngineSourcesThatCarryFigures(t *testing.T) {
 		{Source: "propulsion.port", Instance: "port", Reporting: true, Metrics: fig},
 		{Source: "propulsion.starboard", Instance: "starboard", Reporting: true, Metrics: fig},
 	}}
-	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines)), "engines")
+	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
 	if strings.Contains(st.Detail, "4") || strings.Contains(st.Detail, "propulsion.") {
 		t.Errorf("figureless sources must not be counted, and no raw paths: %q", st.Detail)
 	}
@@ -160,14 +161,14 @@ func TestSetupStatusCountsOnlyEngineSourcesThatCarryFigures(t *testing.T) {
 
 	// All carry figures: each one is an engine.
 	engines.Rows = engines.Rows[2:3]
-	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines)), "engines")
+	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
 	if !strings.Contains(st.Detail, "1 engine source is reporting rpm and coolant") {
 		t.Errorf("engines detail: %q", st.Detail)
 	}
 
 	// Sources but no figures anywhere.
 	engines.Rows = []discoveryRow{{Source: "propulsion.0", Instance: "0", Reporting: true}}
-	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines)), "engines")
+	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
 	if !strings.Contains(st.Detail, "no figures") {
 		t.Errorf("engines detail: %q", st.Detail)
 	}
@@ -177,12 +178,12 @@ func TestSetupStatusGeneratorNoneAnswersItsACInput(t *testing.T) {
 	vessel := vesselView{RolesNone: map[string]bool{
 		"port_alternator": true, "starboard_alternator": true, "shore_charger": true, "inverter": true, "generator": true,
 	}}
-	st := stepByID(t, buildSetupStatus(vessel, connectedDiscovery()), "power")
+	st := stepByID(t, buildSetupStatus(vessel, connectedDiscovery(), setupMate{}), "power")
 	if st.State != "done" {
 		t.Fatalf("no generator means no generator AC input to answer: %+v", st)
 	}
 	vessel.RolesNone["generator"] = false
-	st = stepByID(t, buildSetupStatus(vessel, connectedDiscovery()), "power")
+	st = stepByID(t, buildSetupStatus(vessel, connectedDiscovery(), setupMate{}), "power")
 	if st.State != "todo" || !strings.Contains(st.Detail, "Generator") {
 		t.Fatalf("with a generator unanswered the AC input is open too: %+v", st)
 	}
@@ -190,11 +191,11 @@ func TestSetupStatusGeneratorNoneAnswersItsACInput(t *testing.T) {
 
 func TestSetupStatusDetailSaysWhatTheBoatReports(t *testing.T) {
 	var st setupStep
-	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery()), "engines")
+	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(), setupMate{}), "engines")
 	if !strings.Contains(st.Detail, "isn't reporting any engines") {
 		t.Errorf("engines detail with nothing reporting: %q", st.Detail)
 	}
-	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery()), "house_bank")
+	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(), setupMate{}), "house_bank")
 	if !strings.Contains(st.Detail, "isn't reporting any batteries") {
 		t.Errorf("house bank detail with nothing reporting: %q", st.Detail)
 	}
@@ -211,7 +212,7 @@ func TestDetectorsAgreeWithSetupSteps(t *testing.T) {
 	for i, v := range cases {
 		disc := vesselDiscovery(newAnomalyTestSnapshot(), v, nil)
 		disc.Connected = true // the steps are blocked without a feed; the checks do not care
-		s := buildSetupStatus(v, disc)
+		s := buildSetupStatus(v, disc, setupMate{})
 		if got, want := disc.Detectors["frozen"].Ready, stepByID(t, s, "engines").State == "done"; got != want {
 			t.Errorf("case %d: frozen ready=%v but engines step done=%v", i, got, want)
 		}
@@ -285,7 +286,7 @@ func TestSetupStatusHouseBankCountMatchesThePicker(t *testing.T) {
 		{Source: "electrical.batteries.2", Reporting: true, Item: &discoveryItemRef{ID: "x", Name: "Starter"}},
 		{Source: "electrical.batteries.3", Reporting: true},
 	}}
-	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(batteries)), "house_bank")
+	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(batteries), setupMate{}), "house_bank")
 	if !strings.Contains(st.Detail, "3 batteries") {
 		t.Errorf("battery items and unassigned non-charger sources are offered, charger inputs are not: %q", st.Detail)
 	}
@@ -299,7 +300,7 @@ func TestSetupStatusHouseBankCountsBatteryItemsTheRolesPickerOffers(t *testing.T
 		{Source: "electrical.batteries.1", Reporting: true, Item: &discoveryItemRef{ID: "b", Name: "Starter"}},
 		{Source: "electrical.batteries.2", Reporting: true, ChargerInput: true},
 	}}
-	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(batteries)), "house_bank")
+	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(batteries), setupMate{}), "house_bank")
 	if st.State != setupTodo || strings.Contains(st.Detail, "isn't reporting") || !strings.Contains(st.Detail, "2 batteries") {
 		t.Errorf("two battery items are choices: %+v", st)
 	}
@@ -313,7 +314,7 @@ func TestSetupStatusFinishedBoatStaysCompleteWhenSignalKDrops(t *testing.T) {
 		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.512"},
 		RolesNone: fullPowerNone(),
 	}
-	s := buildSetupStatus(vessel, discoveryResponse{Connected: false})
+	s := buildSetupStatus(vessel, discoveryResponse{Connected: false}, setupMate{})
 	if !s.Complete {
 		t.Fatalf("a dropped feed must not reopen setup: %+v", s.Steps)
 	}
@@ -324,7 +325,7 @@ func TestSetupStatusFinishedBoatStaysCompleteWhenSignalKDrops(t *testing.T) {
 
 func TestSetupStatusPartlyDoneAndDisconnectedBlocksOnlyWhatIsUndone(t *testing.T) {
 	vessel := vesselView{Engines: []vesselEngineSetting{{Instance: "port"}}}
-	s := buildSetupStatus(vessel, discoveryResponse{Connected: false})
+	s := buildSetupStatus(vessel, discoveryResponse{Connected: false}, setupMate{})
 	if stepByID(t, s, "engines").State != "done" {
 		t.Fatalf("a done step stays done: %+v", s.Steps)
 	}
@@ -340,16 +341,177 @@ func TestSetupStatusAnItemOwningASourceCountsAsSetUp(t *testing.T) {
 	disc := discoveryResponse{Connected: false, Groups: []discoveryGroup{{Kind: "tank", Rows: []discoveryRow{
 		{Source: "tanks.fuel.0", Item: &discoveryItemRef{ID: "t", Name: "Fuel"}},
 	}}}}
-	if stepByID(t, buildSetupStatus(vesselView{}, disc), "connection").State != "done" {
+	if stepByID(t, buildSetupStatus(vesselView{}, disc, setupMate{}), "connection").State != "done" {
 		t.Fatal("an item that owns a source means setup exists")
 	}
 }
 
 func TestSetupStatusHouseBankItemWithoutASourceSaysSo(t *testing.T) {
 	for _, connected := range []bool{true, false} {
-		st := stepByID(t, buildSetupStatus(vesselView{HouseBankUnresolved: true}, discoveryResponse{Connected: connected}), "house_bank")
+		st := stepByID(t, buildSetupStatus(vesselView{HouseBankUnresolved: true}, discoveryResponse{Connected: connected}, setupMate{}), "house_bank")
 		if st.State != setupTodo || !strings.Contains(st.Detail, "has no SignalK source") {
 			t.Errorf("connected=%v: %+v", connected, st)
 		}
 	}
+}
+
+func setupBoatComplete() vesselView {
+	return vesselView{
+		Engines:   []vesselEngineSetting{{Instance: "port"}},
+		HouseBank: &vesselHouseBankSetting{Path: "electrical.batteries.512"},
+		RolesNone: fullPowerNone(),
+	}
+}
+
+func limitsWithNoGo(sectors ...string) passageLimits {
+	var l passageLimits
+	for _, s := range sectors {
+		switch s {
+		case "ahead":
+			l.Ahead.WindKn.NoGo = fp(15)
+		case "abeam":
+			l.Abeam.WindKn.NoGo = fp(20)
+		case "astern":
+			l.Astern.WindKn.NoGo = fp(25)
+		}
+	}
+	return l
+}
+
+func TestSetupStatusPassageLimitsAbsentWhileMateIsOff(t *testing.T) {
+	s := buildSetupStatus(setupBoatComplete(), connectedDiscovery(), setupMate{Enabled: false})
+	for _, st := range s.Steps {
+		if st.ID == "passage_limits" {
+			t.Fatalf("step must not be listed with Mate off: %+v", st)
+		}
+	}
+}
+
+func TestSetupStatusPassageLimitsOptionalTodoLeavesSetupComplete(t *testing.T) {
+	s := buildSetupStatus(setupBoatComplete(), connectedDiscovery(), setupMate{Enabled: true})
+	st := stepByID(t, s, "passage_limits")
+	if st.State != "todo" || !st.Optional || st.Title != "Passage limits" {
+		t.Fatalf("step = %+v", st)
+	}
+	if st.Target.Section != "assistant" || st.Target.Control != "passage-limits" {
+		t.Fatalf("target = %+v", st.Target)
+	}
+	if !s.Complete {
+		t.Fatal("an open optional step must not hold setup open")
+	}
+	for _, id := range []string{"connection", "engines", "house_bank", "power"} {
+		if stepByID(t, s, id).Optional {
+			t.Errorf("%s must not be optional", id)
+		}
+	}
+}
+
+func TestSetupStatusRequiredTodoStillBlocksCompleteWithOptionalPresent(t *testing.T) {
+	s := buildSetupStatus(vesselView{}, connectedDiscovery(), setupMate{Enabled: true, Limits: limitsWithNoGo("ahead", "abeam", "astern")})
+	if s.Complete {
+		t.Fatal("required steps open: not complete")
+	}
+}
+
+func TestSetupStatusPassageLimitsNamesOpenSectors(t *testing.T) {
+	s := buildSetupStatus(setupBoatComplete(), connectedDiscovery(), setupMate{Enabled: true, Limits: limitsWithNoGo("abeam")})
+	st := stepByID(t, s, "passage_limits")
+	if st.State != "todo" || st.Detail != "Still open: ahead, astern." {
+		t.Fatalf("detail = %q (%s)", st.Detail, st.State)
+	}
+	// A marginal alone is not enough: the no-go wind limit is what counts.
+	l := limitsWithNoGo("ahead", "abeam")
+	l.Astern.WindKn.Marginal = fp(10)
+	st = stepByID(t, buildSetupStatus(setupBoatComplete(), connectedDiscovery(), setupMate{Enabled: true, Limits: l}), "passage_limits")
+	if st.Detail != "Still open: astern." {
+		t.Fatalf("detail = %q", st.Detail)
+	}
+}
+
+func TestSetupStatusPassageLimitsDoneWhenEverySectorHasNoGoWind(t *testing.T) {
+	s := buildSetupStatus(setupBoatComplete(), connectedDiscovery(), setupMate{Enabled: true, Limits: limitsWithNoGo("ahead", "abeam", "astern")})
+	st := stepByID(t, s, "passage_limits")
+	if st.State != "done" || st.Detail != "Limits are set for every wind sector." {
+		t.Fatalf("step = %+v", st)
+	}
+}
+
+func TestGetSetupStatusHandlerListsPassageLimitsWhileMateIsOn(t *testing.T) {
+	prev := globalSignalKSnapshot
+	globalSignalKSnapshot = newVesselCandidatesSnapshot(t)
+	t.Cleanup(func() { globalSignalKSnapshot = prev })
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	vesselFixtureStore(t)
+
+	get := func() setupStatus {
+		rec := httptest.NewRecorder()
+		if err := getSetupStatusHandler(echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/setup/status", nil), rec)); err != nil {
+			t.Fatal(err)
+		}
+		var got setupStatus
+		if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	has := func(s setupStatus) bool {
+		for _, st := range s.Steps {
+			if st.ID == "passage_limits" {
+				return true
+			}
+		}
+		return false
+	}
+	if has(get()) {
+		t.Fatal("Mate is off: no passage limits step")
+	}
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.Enabled = true
+		p.Assistant.Model = "m"
+		p.Assistant.PassageLimits = limitsWithNoGo("ahead")
+	})
+	if code != http.StatusOK {
+		t.Fatalf("save: %d %v", code, body)
+	}
+	got := get()
+	if !has(got) || !strings.Contains(stepByID(t, got, "passage_limits").Detail, "abeam, astern") {
+		t.Fatalf("expected the step with open sectors: %+v", got.Steps)
+	}
+}
+
+func TestSetupStatusPassageLimitsBlockedWhenLimitsUnreadable(t *testing.T) {
+	s := buildSetupStatus(setupBoatComplete(), connectedDiscovery(), setupMate{Enabled: true, LimitsErr: errors.New("bad")})
+	st := stepByID(t, s, "passage_limits")
+	if st.State != "blocked" || !strings.Contains(st.Detail, "couldn't be read") {
+		t.Fatalf("step = %+v", st)
+	}
+	if !s.Complete {
+		t.Fatal("an optional step must not hold setup open")
+	}
+}
+
+func TestGetSetupStatusHandlerSurvivesUnreadablePassageLimits(t *testing.T) {
+	prev := globalSignalKSnapshot
+	globalSignalKSnapshot = newVesselCandidatesSnapshot(t)
+	t.Cleanup(func() { globalSignalKSnapshot = prev })
+	settingsPath := writeTestSettings(t, "127.0.0.1", 3000)
+	appendSettings(t, settingsPath, "assistant:\n    enabled: true\n    passage_limits:\n        ahead:\n            wind_kn:\n                no_go: 15kn\n")
+	t.Setenv("SETTINGS_FILE", settingsPath)
+	vesselFixtureStore(t)
+	rec := httptest.NewRecorder()
+	if err := getSetupStatusHandler(echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/setup/status", nil), rec)); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var got setupStatus
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if st := stepByID(t, got, "passage_limits"); st.State != "blocked" {
+		t.Fatalf("step = %+v", st)
+	}
+	stepByID(t, got, "connection")
 }

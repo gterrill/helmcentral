@@ -7,6 +7,7 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -198,6 +199,70 @@ type assistantToolDeps struct {
 	// globalAssistantStore; nil, or a nil store, makes both tools fail
 	// plainly.
 	conversations func() *assistantStore
+	// passageLimits reads the operator's go/no-go thresholds
+	// (assistant.passage_limits) fresh on every call, for
+	// assess_passage_window. nil is an error, never empty limits.
+	passageLimits func() (passageLimits, error)
+	// vesselView reads the operator's roles (house bank, alternators,
+	// engines) fresh on every call, for show_telemetry_chart. nil is an
+	// error, never an empty vessel.
+	vesselView func() (vesselView, error)
+	// displayUnits is the Settings units choice, "metric" or "imperial",
+	// which show_telemetry_chart converts SI values into. nil is an error.
+	displayUnits func() (string, error)
+	// siUnit is the SI unit the boat declares for a path (meta.units), or ""
+	// when it declares none.
+	siUnit func(path string) string
+	// influxPathSources lists the distinct $source values that logged a path
+	// in a range, so show_telemetry_chart can refuse to average two devices.
+	// Production wires queryInfluxPathSources; nil is an error.
+	influxPathSources func(ctx context.Context, path string, start, stop time.Time) ([]string, error)
+	// cards is the turn's side channel for card payloads too large for the
+	// model's tool result. nil means the tools put no card out of band.
+	cards *assistantCardSink
+}
+
+// assistantCardSink carries a card from the tool that built it to the run,
+// beside the capped text the model reads. A tool puts the card under the exact
+// result text it returned; the run takes it back out under that same text once
+// the round is done. Results that are equal text hold equal cards, so a
+// duplicated call hands out one card per call and none is lost or shared.
+type assistantCardSink struct {
+	mu       sync.Mutex
+	byResult map[string][]mateCard
+}
+
+func newAssistantCardSink() *assistantCardSink {
+	return &assistantCardSink{byResult: map[string][]mateCard{}}
+}
+
+func (s *assistantCardSink) put(result string, c mateCard) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.byResult[result] = append(s.byResult[result], c)
+}
+
+func (s *assistantCardSink) take(result string) []mateCard {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q := s.byResult[result]
+	if len(q) == 0 {
+		return nil
+	}
+	if len(q) == 1 {
+		delete(s.byResult, result)
+	} else {
+		s.byResult[result] = q[1:]
+	}
+	return q[:1]
+}
+
+// takeCards makes assistantToolDeps an assistantCardSource.
+func (d assistantToolDeps) takeCards(result string) []mateCard {
+	if d.cards == nil {
+		return nil
+	}
+	return d.cards.take(result)
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
@@ -246,6 +311,12 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
 		watches:                    globalAssistantWatches,
 		conversations:              func() *assistantStore { return globalAssistantStore },
+		passageLimits:              passageLimitsFromSettingsFile(settingsPath),
+		vesselView:                 func() (vesselView, error) { return loadVesselView(settingsPath) },
+		displayUnits:               displayUnitsFromSettingsFile(settingsPath),
+		siUnit:                     func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) },
+		influxPathSources:          queryInfluxPathSources,
+		cards:                      newAssistantCardSink(),
 	}
 }
 
@@ -334,6 +405,7 @@ var mateTools = []mateTool{
 	mateToolGetTides,
 	mateToolEstimatePassage,
 	mateToolPlanTidalDeparture,
+	mateToolAssessPassageWindow,
 	mateToolReadHelp,
 	mateToolSearchDocuments,
 	mateToolReadDocument,
@@ -344,6 +416,7 @@ var mateTools = []mateTool{
 	mateToolCheckSignalKPaths,
 	mateToolGetLastRecorded,
 	mateToolGetPathHistory,
+	mateToolShowTelemetryChart,
 	mateToolListPassages,
 	mateToolFindEquipment,
 	mateToolListMaintenance,

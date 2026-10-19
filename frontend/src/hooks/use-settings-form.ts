@@ -4,6 +4,27 @@ import { apiRequest, invalidateQueries, setQueryData } from '@/lib/api-query'
 import { publishAppConfigSettings } from '@/hooks/use-app-config'
 import type { VesselRoles } from '@/lib/vessel-settings'
 
+/** One measure's thresholds; null/absent is unset (never 0). */
+export interface PassageLimitBandPayload {
+  marginal?: number | null
+  no_go?: number | null
+}
+
+export interface PassageSectorLimitsPayload {
+  wind_kn?: PassageLimitBandPayload
+  gust_kn?: PassageLimitBandPayload
+  wave_m?: PassageLimitBandPayload
+}
+
+/** Mate's go/no-go limits (assistant.passage_limits). Sectors are true wind angle off the course. */
+export interface PassageLimitsPayload {
+  ahead?: PassageSectorLimitsPayload
+  abeam?: PassageSectorLimitsPayload
+  astern?: PassageSectorLimitsPayload
+  wind_against_tide?: { wind_kn?: PassageLimitBandPayload }
+  daylight_arrival?: boolean
+}
+
 export type SettingsPayload = {
   signalk?: {
     address?: string
@@ -73,6 +94,7 @@ export type SettingsPayload = {
     wake_word?: boolean
     web_search?: boolean
     web_search_model?: string
+    passage_limits?: PassageLimitsPayload
   }
   // Which equipment item plays each single-choice part (house bank, port
   // alternator, ...). Saved with the rest of Settings. A payload that omits it

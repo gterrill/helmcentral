@@ -568,6 +568,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, tanksRoutes()...)
 	routes = append(routes, telemetryStreamRoutes()...)
 	routes = append(routes, telemetryHistoryRoutes()...)
+	routes = append(routes, telemetrySeriesRoutes()...)
 	routes = append(routes, signalkRoutes()...)
 	routes = append(routes, settingsRoutes()...)
 	routes = append(routes, secretsRoutes()...)
