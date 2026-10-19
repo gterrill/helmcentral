@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,7 +62,7 @@ func pwNoSun(date time.Time, lat, lon float64) (time.Time, time.Time, bool) {
 	return time.Time{}, time.Time{}, false
 }
 
-func pwNoTides(_ context.Context, lat, lon float64, from, to time.Time) ([]tideExtremePoint, error) {
+func pwNoTides(_ context.Context, lat, lon float64) ([]tideExtremePoint, error) {
 	return nil, fmt.Errorf("no tide station")
 }
 
@@ -256,7 +257,7 @@ func TestAssessItinerary_SunUnknownIsNotCheckedNotPassed(t *testing.T) {
 // ── wind against tide ───────────────────────────────────────────────────
 
 // pwTides: HW 03:00, LW 09:15, HW 15:30, LW 21:45 on 20 October.
-func pwTides(_ context.Context, lat, lon float64, from, to time.Time) ([]tideExtremePoint, error) {
+func pwTides(_ context.Context, lat, lon float64) ([]tideExtremePoint, error) {
 	at := func(h, m int) time.Time { return time.Date(2026, 10, 20, h, m, 0, 0, pwLoc) }
 	return []tideExtremePoint{
 		{Time: at(3, 0), High: true}, {Time: at(9, 15)}, {Time: at(15, 30), High: true}, {Time: at(21, 45)},
@@ -852,11 +853,9 @@ func (d assistantToolDeps) mustWeatherStub(t *testing.T) *pwWeather {
 func TestAssessItinerary_TideIsFetchedOncePerDistinctStartPoint(t *testing.T) {
 	var mu sync.Mutex
 	calls := map[string]int{}
-	spans := map[string][2]time.Time{}
-	tides := func(_ context.Context, lat, lon float64, from, to time.Time) ([]tideExtremePoint, error) {
+	tides := func(_ context.Context, lat, lon float64) ([]tideExtremePoint, error) {
 		mu.Lock()
 		calls[fmt.Sprintf("%.2f,%.2f", lat, lon)]++
-		spans[fmt.Sprintf("%.2f,%.2f", lat, lon)] = [2]time.Time{from, to}
 		mu.Unlock()
 		var ext []tideExtremePoint
 		for t0, high := pwDay(18, 0), true; t0.Before(pwDay(30, 0)); t0, high = t0.Add(6*time.Hour+12*time.Minute), !high {
@@ -872,13 +871,6 @@ func TestAssessItinerary_TideIsFetchedOncePerDistinctStartPoint(t *testing.T) {
 	}
 	if len(calls) != 2 || calls["-19.00,147.00"] != 1 || calls["-18.00,147.00"] != 1 {
 		t.Fatalf("tide fetches = %v, want one per distinct start point", calls)
-	}
-	// Alpha is left at 06:00 on the 20th-22nd, 4 h each; Bravo the day after.
-	if sp := spans["-19.00,147.00"]; sp[0].After(pwDay(20, 6)) || sp[1].Before(pwDay(22, 10)) {
-		t.Fatalf("Alpha span %v does not cover the whole itinerary", sp)
-	}
-	if sp := spans["-18.00,147.00"]; sp[0].After(pwDay(21, 6)) || sp[1].Before(pwDay(23, 10)) {
-		t.Fatalf("Bravo span %v does not cover the whole itinerary", sp)
 	}
 }
 
@@ -1022,5 +1014,45 @@ func TestAssessItinerary_JudgesTheFigureAsDisplayed(t *testing.T) {
 				t.Fatalf("got %s / %+v, want %s / %q", c.State, c.Limiting, tc.state, tc.text)
 			}
 		})
+	}
+}
+
+func TestPassageWindowArgs_DuplicateDepartureDatesAreRejected(t *testing.T) {
+	a := pwArgs([]string{"2026-10-21", "2026-10-22", "2026-10-21"}, "07:00", pwNorthLeg())
+	_, err := assessItinerary(context.Background(), a, pwLimitsAll(), pwNow, pwWeek(10, 0), pwNoTides, pwNoSun)
+	if err == nil || !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPassageLeg_RoutePointsAcrossTheDateLineInterpolateTheShortWay(t *testing.T) {
+	leg := passageLegArgs{Route: []passageRoutePoint{{Lat: -17, Lon: 179}, {Lat: -17, Lon: -179}}, SpeedKn: pwF(6)}
+	p := planPassageLeg(0, leg)
+	_, lon, _ := p.at(0.5)
+	if math.Abs(math.Abs(lon)-180) > 0.01 {
+		t.Errorf("midpoint lon = %v, want +-180", lon)
+	}
+	for _, s := range p.samples {
+		if math.Abs(s.Lon) < 170 {
+			t.Errorf("sample at lon %v is on the wrong side of the world", s.Lon)
+		}
+	}
+}
+
+func TestAssessItinerary_TideDataThatStopsShortIsLoggedAsTheReason(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	// pwTides ends at 04:00 on the 21st; a 22:00 departure runs past it.
+	a := pwArgs([]string{"2026-10-20"}, "22:00", pwTideLeg(8))
+	p, err := assessItinerary(context.Background(), a, pwTideLimits(), pwNow, pwWeek(18, 180), pwTides, pwNoSun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := pwCell0(t, p); !pwHas(c.NotChecked, "wind_against_tide") {
+		t.Fatalf("not_checked = %v", c.NotChecked)
+	}
+	if !strings.Contains(buf.String(), "tide extremes end") {
+		t.Errorf("the reason was not logged: %q", buf.String())
 	}
 }
