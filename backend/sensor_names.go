@@ -417,13 +417,163 @@ func (n *sensorNamer) sourceName(source string) string {
 			return d.Manufacturer + " device"
 		}
 	}
+	if n.busTypeOf(source) == busTypeNMEA0183 {
+		if name := connectionDisplayName(connectionOfSource(source)); name != "" {
+			return name
+		}
+	}
 	// The $source id stays in Identifier for Ignore; it never reaches a card.
 	return unnamedSourceName
+}
+
+// busTypeNMEA0183 is the "type" a SignalK update's source object carries for
+// a serial NMEA 0183 input.
+//
+// A 0183 source is recognised by that declared type, not by the shape of its
+// id ("<connection>.<two letters>"). The type is what SignalK itself says the
+// input is; a shape test would also claim a plugin or a future bus whose
+// address happens to be two capitals, and would quietly misname it. A source
+// whose type was never seen is simply not treated as 0183 and falls through
+// to "An instrument", rather than being guessed at.
+const busTypeNMEA0183 = "NMEA0183"
+
+// busTypeOf is the declared bus type recorded for a $source ("" when unseen).
+func (n *sensorNamer) busTypeOf(source string) string {
+	if n.snapshot == nil {
+		return ""
+	}
+	return n.snapshot.sourcesFor(n.snapshot.selfContext())[source].BusType
+}
+
+// connectionOfSource is the SignalK connection id of a "<connection>.<talker
+// or address>" $source id: everything before the last dot.
+func connectionOfSource(source string) string {
+	if i := strings.LastIndex(source, "."); i > 0 {
+		return source[:i]
+	}
+	return source
+}
+
+// connectionDisplayName makes a SignalK connection id readable: the
+// operator's own name for the device, from the SignalK config, with the
+// underscores and hyphens of an id turned into spaces ("Vesper_Cortex" is
+// "Vesper Cortex").
+func connectionDisplayName(connection string) string {
+	return strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(connection)), " ")
+}
+
+// satelliteTalkers are the NMEA 0183 talker ids of satellite receivers. A
+// device whose every talker is silent has lost its position fix, whichever
+// constellations it reported, so they collapse into one phrase.
+var satelliteTalkers = map[string]bool{"GP": true, "GN": true, "GA": true, "GB": true, "BD": true, "GQ": true, "GL": true}
+
+const satellitePhrase = "satellite positions"
+
+// talkerWords names what a talker id sends, for the card. Unknown codes have
+// no entry and are never printed.
+var talkerWords = map[string]string{
+	"AI": "AIS", "GP": "GPS", "GN": "GNSS", "GA": "Galileo", "GB": "BeiDou", "BD": "BeiDou",
+	"GQ": "QZSS", "GL": "GLONASS", "II": "instrument data", "IN": "instrument data",
+	"SD": "depth", "WI": "weather", "HC": "heading", "HE": "heading",
+}
+
+// joinWords is "a", "a and b", "a, b and c".
+func joinWords(words []string) string {
+	switch len(words) {
+	case 0:
+		return ""
+	case 1:
+		return words[0]
+	}
+	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
+}
+
+// talkerPhrase says what the silent talkers carry. When every talker the
+// connection has published is silent the device has stopped, so what it sends
+// is named collapsed (any set of satellite talkers reads "satellite
+// positions"). When some still send, the silent ones are listed by name.
+func talkerPhrase(silent []string, allSilent bool) string {
+	var words []string
+	seen := map[string]bool{}
+	add := func(w string) {
+		if !seen[w] {
+			seen[w] = true
+			words = append(words, w)
+		}
+	}
+	for _, t := range silent {
+		if allSilent && satelliteTalkers[t] {
+			add(satellitePhrase)
+			continue
+		}
+		if w, ok := talkerWords[t]; ok {
+			add(w)
+		}
+	}
+	return joinWords(words)
 }
 
 func (n *sensorNamer) silentSourceEntry(source string) sensorHealthEntry {
 	name := n.sourceName(source)
 	return sensorHealthEntry{Identifier: source, Name: name, Label: name, Text: name + " has stopped sending"}
+}
+
+// silentSourceEntries turns the silent $source ids into card entries. NMEA
+// 0183 sources sharing a connection are one device, so they become one entry
+// whose Identifier is the connection id (Ignore then silences the whole
+// device, see quietSources). NMEA 2000 sources are never grouped: a gateway
+// carries many devices behind one connection. health lists every source seen,
+// which says whether the connection has talkers that are still sending.
+func (n *sensorNamer) silentSourceEntries(silent []string, health []sourceHealth) []sensorHealthEntry {
+	busType := map[string]string{}
+	talkersOf := map[string][]string{}
+	for _, h := range health {
+		busType[h.Source] = h.BusType
+		if h.BusType == busTypeNMEA0183 {
+			c := connectionOfSource(h.Source)
+			talkersOf[c] = append(talkersOf[c], h.Source)
+		}
+	}
+	silentSet := map[string]bool{}
+	for _, s := range silent {
+		silentSet[s] = true
+	}
+
+	var entries []sensorHealthEntry
+	done := map[string]bool{}
+	for _, source := range silent {
+		if busType[source] != busTypeNMEA0183 {
+			entries = append(entries, n.silentSourceEntry(source))
+			continue
+		}
+		conn := connectionOfSource(source)
+		if done[conn] {
+			continue
+		}
+		done[conn] = true
+		allSilent := true
+		for _, s := range talkersOf[conn] {
+			if !silentSet[s] {
+				allSilent = false
+			}
+		}
+		var codes []string
+		for _, s := range silent {
+			if busType[s] == busTypeNMEA0183 && connectionOfSource(s) == conn {
+				codes = append(codes, strings.TrimPrefix(s, conn+"."))
+			}
+		}
+		name := connectionDisplayName(conn)
+		if name == "" {
+			name = unnamedSourceName
+		}
+		text := name + " has stopped sending"
+		if phrase := talkerPhrase(codes, allSilent); phrase != "" {
+			text += " " + phrase
+		}
+		entries = append(entries, sensorHealthEntry{Identifier: conn, Name: name, Label: name, Text: text})
+	}
+	return entries
 }
 
 func (n *sensorNamer) frozenEntry(path string) sensorHealthEntry {
@@ -440,6 +590,13 @@ func (n *sensorNamer) identifierEntry(identifier string) sensorHealthEntry {
 		e := n.pathEntry(identifier)
 		e.Text = e.Label
 		return e
+	}
+	// A bare id (no dot) is a connection ignored as a whole device; a path
+	// always has dots, a plugin never reaches the silent list.
+	if !strings.Contains(identifier, ".") {
+		if name := connectionDisplayName(identifier); name != "" {
+			return sensorHealthEntry{Identifier: identifier, Name: name, Label: name, Text: name}
+		}
 	}
 	e := n.silentSourceEntry(identifier)
 	e.Text = e.Label

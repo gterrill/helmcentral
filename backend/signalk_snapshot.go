@@ -109,6 +109,10 @@ type sourceSeenEntry struct {
 	Count       int
 	EngineBound bool
 	BusTyped    bool
+	// BusType is the source object's own "type" ("NMEA0183", "NMEA2000"),
+	// latest non-empty value seen. The silent-source card reads it to tell a
+	// serial NMEA 0183 talker from an NMEA 2000 device.
+	BusType string
 	// EngineLast is, for every <id> in a propulsion.<id>.* path this source
 	// has published, the newest declared timestamp of an update carrying it
 	// (the same event time as Last). One source relaying several engines
@@ -397,6 +401,7 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			entry.Count++
 			if t, _ := update.Source["type"].(string); t != "" {
 				entry.BusTyped = true
+				entry.BusType = t
 			}
 			for _, val := range update.Values {
 				if strings.HasPrefix(val.Path, "propulsion.") {

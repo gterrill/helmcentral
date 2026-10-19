@@ -241,6 +241,9 @@ type sourceHealth struct {
 	// $source id that never carried a bus type). Plugins report on events,
 	// not on a schedule, and are software rather than devices.
 	Plugin bool
+	// BusType is the source's declared bus type, "NMEA0183" for a serial
+	// talker. An ignored connection id excludes every 0183 source on it.
+	BusType string
 }
 
 // silentSourceKeyOffWindow is how close to a quiet engine source's last
@@ -271,7 +274,7 @@ func quietSources(sources []sourceHealth, now time.Time, streamAge time.Duration
 
 	var out []sourceHealth
 	for _, s := range sources {
-		if excluded[s.Source] {
+		if excluded[s.Source] || (s.BusType == busTypeNMEA0183 && excluded[connectionOfSource(s.Source)]) {
 			continue
 		}
 		watched := s.Count >= silentSourceMinUpdates &&
@@ -300,6 +303,7 @@ func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
 			Count:       entry.Count,
 			EngineBound: entry.EngineBound,
 			EngineLast:  entry.EngineLast,
+			BusType:     entry.BusType,
 			// A server plugin publishes under its bare id with no bus type;
 			// hardware inputs are dotted or carry a source.type.
 			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,

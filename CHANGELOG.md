@@ -13,6 +13,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Silent instrument alarm.** A serial (NMEA 0183) instrument that goes quiet
+  is now named for its connection, once, instead of as six "An instrument (1
+  of 6)" rows. The card reads "Vesper Cortex has stopped sending AIS and
+  satellite positions", is titled "Vesper Cortex Silent" (or "Instruments
+  Silent" when several are quiet), and has a single **Ignore Vesper Cortex**
+  button.
 - The **Embed** tile's settings now say "inside this tile", not "inside this
   widget".
 

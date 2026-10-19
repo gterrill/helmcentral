@@ -277,7 +277,7 @@ func (e *alarmEngine) evaluate(rules []alarmRule, read alarmReader, now time.Tim
 			status = &alarmStatus{RuleID: rule.ID, Phase: alarmPhaseNormal, State: alarmStateNormal}
 			e.statuses[rule.ID] = status
 		}
-		status.Label = rule.Label
+		status.Label = alarmTitleFor(rule, now)
 		status.Path = rule.Path
 		status.Op = rule.Op
 		status.Unit = e.unitForPath(rule.Path)
@@ -374,7 +374,7 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 	if sensorHealthCountPaths[rule.Path] {
 		status.Sensors = sensorEntriesFor(rule.Path, now)
 		if len(status.Sensors) > 0 {
-			status.Message = sensorHealthMessage(rule.Label, status.Sensors)
+			status.Message = sensorHealthMessage(alarmTitleFor(rule, now), status.Sensors)
 		}
 	}
 	return alarmEvent{Kind: alarmEventRaised, Rule: rule, Status: *status}, true
@@ -537,6 +537,25 @@ func sensorEntriesFor(path string, now time.Time) []sensorHealthEntry {
 		return nil
 	}
 	return reading.Sensors[path]
+}
+
+// alarmTitleFor is the card title for rule. Only the silent-source alarm has a
+// dynamic one: it names the device ("Vesper Cortex Silent") when exactly one
+// is quiet and says "Instruments Silent" when several are, so the title is the
+// event and the rows below it carry the detail. An operator-edited label is
+// left alone.
+func alarmTitleFor(rule alarmRule, now time.Time) string {
+	if rule.ID != anomalySilentSourceRuleID || (rule.Label != silentSourceLegacyLabel && rule.Label != silentSourceLabel) {
+		return rule.Label
+	}
+	entries := sensorEntriesFor(rule.Path, now)
+	switch {
+	case len(entries) > 1:
+		return "Instruments Silent"
+	case len(entries) == 1 && entries[0].Name != unnamedSourceName:
+		return entries[0].Name + " Silent"
+	}
+	return silentSourceLabel
 }
 
 // sensorHealthMessage is the plain-text line every non-browser notification
