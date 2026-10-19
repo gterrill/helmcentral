@@ -25,10 +25,17 @@ rows, "An instrument (1 of 6)", with six Ignore buttons.
 - Silent 0183 sources on one connection are one entry, identified by the
   connection id. NMEA 2000 sources are never grouped: a gateway carries many
   devices.
-- Phrase: if every talker the connection has published is silent, the device
-  has stopped and what it sends is named collapsed (any satellite talkers read
-  "satellite positions"). If some still send, the silent talkers are listed by
-  name. Unknown talker codes are never printed.
+- Phrase: a talker id does not say what was sent (the boat's Vesper Cortex
+  relays wind, depth, heading and speed under its `AI` talker), so the words
+  come from the NMEA 0183 sentence ids each source published, recorded per
+  `$source` from the update's source object and bounded. Fixed order, deduped:
+  AIS (VDM, VDO), position (RMC, GGA, GLL, GNS, VTG, GSV, GSA, ZDA), heading
+  (HDG, HDT, HDM, THS), wind (MWV, MWD, VWR, VWT), depth (DPT, DBT, DBS), boat
+  speed (VHW), log (VLW), water temperature (MTW), weather (MDA, XDR). Unknown
+  sentences are dropped. If every source on the connection is silent, all the
+  words it carried are named. If some still send, only words carried
+  exclusively by the silent ones are named; if none, "some of its data". With
+  no known sentences the text is just "has stopped sending".
 - Ignore posts the connection id; the silent-source check skips any 0183
   source whose connection is ignored. The settings list names it the same way.
 - The seeded title is "Instrument Silent". The engine replaces it when the
@@ -39,5 +46,4 @@ rows, "An instrument (1 of 6)", with six Ignore buttons.
 ## Consequences
 
 A talker that has published too few updates to be watched yet counts as still
-sending, so it can turn a "stopped sending satellite positions" into a list of
-named talkers. Ignored entries stored earlier as a full source id keep working.
+sending, so it can turn a full list into a shorter one. Ignored entries stored earlier as a full source id keep working.

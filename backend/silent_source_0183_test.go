@@ -22,10 +22,23 @@ var vesperTalkers = []string{
 	"Vesper_Cortex.GN", "Vesper_Cortex.GP", "Vesper_Cortex.GQ",
 }
 
+// vesperSentences are the sentences the boat's Vesper Cortex publishes under
+// each talker (captured from the live sources tree): the AI talker relays the
+// whole instrument network.
+var vesperSentences = map[string][]string{
+	"AI": {"MWV", "VDM", "RMC", "HDG", "VHW", "DPT", "VLW", "MDA", "VDO"},
+	"GN": {"VTG", "GGA", "GLL"},
+	"GP": {"GSV"}, "GA": {"GSV"}, "GB": {"GSV"}, "GQ": {"GSV"},
+}
+
 func vesperHealth(extra ...sourceHealth) []sourceHealth {
 	var h []sourceHealth
 	for _, s := range vesperTalkers {
-		h = append(h, sourceHealth{Source: s, BusType: busTypeNMEA0183})
+		set := map[string]bool{}
+		for _, sent := range vesperSentences[s[len(s)-2:]] {
+			set[sent] = true
+		}
+		h = append(h, sourceHealth{Source: s, BusType: busTypeNMEA0183, Sentences: set})
 	}
 	return append(h, extra...)
 }
@@ -46,19 +59,26 @@ func TestSilent0183SourcesGroupByConnection(t *testing.T) {
 			silent: vesperTalkers,
 			health: vesperHealth(),
 			want: []sensorHealthEntry{{Identifier: "Vesper_Cortex", Name: "Vesper Cortex", Label: "Vesper Cortex",
-				Text: "Vesper Cortex has stopped sending AIS and satellite positions"}},
+				Text: "Vesper Cortex has stopped sending AIS, position, heading, wind, depth, boat speed, log and weather"}},
 		},
 		{
-			name:   "some talkers still sending lists the silent ones",
+			name:   "silent talkers whose data others also carry",
 			silent: []string{"Vesper_Cortex.GA", "Vesper_Cortex.GB"},
 			health: vesperHealth(),
 			want: []sensorHealthEntry{{Identifier: "Vesper_Cortex", Name: "Vesper Cortex", Label: "Vesper Cortex",
-				Text: "Vesper Cortex has stopped sending Galileo and BeiDou"}},
+				Text: "Vesper Cortex has stopped sending some of its data"}},
 		},
 		{
-			name:   "unknown talker code is never printed",
+			name:   "only the AI talker silent lists what only it carries",
+			silent: []string{"Vesper_Cortex.AI"},
+			health: vesperHealth(),
+			want: []sensorHealthEntry{{Identifier: "Vesper_Cortex", Name: "Vesper Cortex", Label: "Vesper Cortex",
+				Text: "Vesper Cortex has stopped sending AIS, heading, wind, depth, boat speed, log and weather"}},
+		},
+		{
+			name:   "no known sentences says nothing more",
 			silent: []string{"Foo-Bar.ZZ"},
-			health: []sourceHealth{{Source: "Foo-Bar.ZZ", BusType: busTypeNMEA0183}},
+			health: []sourceHealth{{Source: "Foo-Bar.ZZ", BusType: busTypeNMEA0183, Sentences: map[string]bool{"ZZZ": true}}},
 			want: []sensorHealthEntry{{Identifier: "Foo-Bar", Name: "Foo Bar", Label: "Foo Bar",
 				Text: "Foo Bar has stopped sending"}},
 		},
@@ -152,5 +172,22 @@ func TestSilentSourceTitleNamesTheDevice(t *testing.T) {
 	rule.Label = "My own label"
 	if got := alarmTitleFor(rule, now); got != "My own label" {
 		t.Errorf("operator label overwritten: %q", got)
+	}
+}
+
+func TestSnapshotRecordsSentencesPerSource(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+	at := time.Now()
+	for _, sent := range []string{"MWV", "DPT", "MWV"} {
+		snapshot.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{
+			SourceRef: "Vesper_Cortex.AI",
+			Source:    map[string]any{"type": "NMEA0183", "sentence": sent},
+			Timestamp: at.Format(time.RFC3339),
+			Values:    []signalKValue{{Path: "environment.depth.belowTransducer", Value: 3.0}},
+		}}}, at)
+	}
+	got := snapshot.sourcesFor(snapshot.selfContext())["Vesper_Cortex.AI"].Sentences
+	if len(got) != 2 || !got["MWV"] || !got["DPT"] {
+		t.Errorf("sentences = %v, want MWV and DPT", got)
 	}
 }

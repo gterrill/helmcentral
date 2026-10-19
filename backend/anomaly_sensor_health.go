@@ -244,6 +244,9 @@ type sourceHealth struct {
 	// BusType is the source's declared bus type, "NMEA0183" for a serial
 	// talker. An ignored connection id excludes every 0183 source on it.
 	BusType string
+	// Sentences are the NMEA 0183 sentence ids the source has carried; they
+	// say what the source sends, which its talker id does not.
+	Sentences map[string]bool
 }
 
 // silentSourceKeyOffWindow is how close to a quiet engine source's last
@@ -304,6 +307,7 @@ func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
 			EngineBound: entry.EngineBound,
 			EngineLast:  entry.EngineLast,
 			BusType:     entry.BusType,
+			Sentences:   entry.Sentences,
 			// A server plugin publishes under its bare id with no bus type;
 			// hardware inputs are dotted or carry a source.type.
 			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,

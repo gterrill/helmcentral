@@ -462,19 +462,38 @@ func connectionDisplayName(connection string) string {
 	return strings.Join(strings.Fields(strings.NewReplacer("_", " ", "-", " ").Replace(connection)), " ")
 }
 
-// satelliteTalkers are the NMEA 0183 talker ids of satellite receivers. A
-// device whose every talker is silent has lost its position fix, whichever
-// constellations it reported, so they collapse into one phrase.
-var satelliteTalkers = map[string]bool{"GP": true, "GN": true, "GA": true, "GB": true, "BD": true, "GQ": true, "GL": true}
+// sentenceGroups says what a device sends, in the order a card lists it. The
+// talker id does not say: one multiplexer carries wind, depth and boat speed
+// under its "AI" talker, so the sentence ids a source published are the
+// evidence. Sentences not listed are dropped.
+var sentenceGroups = []struct {
+	word      string
+	sentences []string
+}{
+	{"AIS", []string{"VDM", "VDO"}},
+	{"position", []string{"RMC", "GGA", "GLL", "GNS", "VTG", "GSV", "GSA", "ZDA"}},
+	{"heading", []string{"HDG", "HDT", "HDM", "THS"}},
+	{"wind", []string{"MWV", "MWD", "VWR", "VWT"}},
+	{"depth", []string{"DPT", "DBT", "DBS"}},
+	{"boat speed", []string{"VHW"}},
+	{"log", []string{"VLW"}},
+	{"water temperature", []string{"MTW"}},
+	{"weather", []string{"MDA", "XDR"}},
+}
 
-const satellitePhrase = "satellite positions"
-
-// talkerWords names what a talker id sends, for the card. Unknown codes have
-// no entry and are never printed.
-var talkerWords = map[string]string{
-	"AI": "AIS", "GP": "GPS", "GN": "GNSS", "GA": "Galileo", "GB": "BeiDou", "BD": "BeiDou",
-	"GQ": "QZSS", "GL": "GLONASS", "II": "instrument data", "IN": "instrument data",
-	"SD": "depth", "WI": "weather", "HC": "heading", "HE": "heading",
+// sentenceWords is the set of group words the given sentence sets cover.
+func sentenceWords(sets ...map[string]bool) map[string]bool {
+	words := map[string]bool{}
+	for _, set := range sets {
+		for _, g := range sentenceGroups {
+			for _, sent := range g.sentences {
+				if set[sent] {
+					words[g.word] = true
+				}
+			}
+		}
+	}
+	return words
 }
 
 // joinWords is "a", "a and b", "a, b and c".
@@ -488,29 +507,39 @@ func joinWords(words []string) string {
 	return strings.Join(words[:len(words)-1], ", ") + " and " + words[len(words)-1]
 }
 
-// talkerPhrase says what the silent talkers carry. When every talker the
-// connection has published is silent the device has stopped, so what it sends
-// is named collapsed (any set of satellite talkers reads "satellite
-// positions"). When some still send, the silent ones are listed by name.
-func talkerPhrase(silent []string, allSilent bool) string {
-	var words []string
-	seen := map[string]bool{}
-	add := func(w string) {
-		if !seen[w] {
-			seen[w] = true
-			words = append(words, w)
+// silentPhrase says what a connection has stopped sending. When every source
+// on it is silent the device has stopped, and all it carried is named. When
+// some still send, only what the silent ones carry exclusively is named; if
+// they carry nothing the others do not, the card says "some of its data". With
+// no known sentences it says nothing more.
+func silentPhrase(silent, sending []sourceHealth) string {
+	silentSets := make([]map[string]bool, len(silent))
+	for i, s := range silent {
+		silentSets[i] = s.Sentences
+	}
+	words := sentenceWords(silentSets...)
+	if len(words) == 0 {
+		return ""
+	}
+	if len(sending) > 0 {
+		sendingSets := make([]map[string]bool, len(sending))
+		for i, s := range sending {
+			sendingSets[i] = s.Sentences
+		}
+		for w := range sentenceWords(sendingSets...) {
+			delete(words, w)
+		}
+		if len(words) == 0 {
+			return "some of its data"
 		}
 	}
-	for _, t := range silent {
-		if allSilent && satelliteTalkers[t] {
-			add(satellitePhrase)
-			continue
-		}
-		if w, ok := talkerWords[t]; ok {
-			add(w)
+	var ordered []string
+	for _, g := range sentenceGroups {
+		if words[g.word] {
+			ordered = append(ordered, g.word)
 		}
 	}
-	return joinWords(words)
+	return joinWords(ordered)
 }
 
 func (n *sensorNamer) silentSourceEntry(source string) sensorHealthEntry {
@@ -525,13 +554,13 @@ func (n *sensorNamer) silentSourceEntry(source string) sensorHealthEntry {
 // carries many devices behind one connection. health lists every source seen,
 // which says whether the connection has talkers that are still sending.
 func (n *sensorNamer) silentSourceEntries(silent []string, health []sourceHealth) []sensorHealthEntry {
+	byConn := map[string][]sourceHealth{}
 	busType := map[string]string{}
-	talkersOf := map[string][]string{}
 	for _, h := range health {
 		busType[h.Source] = h.BusType
 		if h.BusType == busTypeNMEA0183 {
 			c := connectionOfSource(h.Source)
-			talkersOf[c] = append(talkersOf[c], h.Source)
+			byConn[c] = append(byConn[c], h)
 		}
 	}
 	silentSet := map[string]bool{}
@@ -551,16 +580,12 @@ func (n *sensorNamer) silentSourceEntries(silent []string, health []sourceHealth
 			continue
 		}
 		done[conn] = true
-		allSilent := true
-		for _, s := range talkersOf[conn] {
-			if !silentSet[s] {
-				allSilent = false
-			}
-		}
-		var codes []string
-		for _, s := range silent {
-			if busType[s] == busTypeNMEA0183 && connectionOfSource(s) == conn {
-				codes = append(codes, strings.TrimPrefix(s, conn+"."))
+		var quiet, sending []sourceHealth
+		for _, h := range byConn[conn] {
+			if silentSet[h.Source] {
+				quiet = append(quiet, h)
+			} else {
+				sending = append(sending, h)
 			}
 		}
 		name := connectionDisplayName(conn)
@@ -568,7 +593,7 @@ func (n *sensorNamer) silentSourceEntries(silent []string, health []sourceHealth
 			name = unnamedSourceName
 		}
 		text := name + " has stopped sending"
-		if phrase := talkerPhrase(codes, allSilent); phrase != "" {
+		if phrase := silentPhrase(quiet, sending); phrase != "" {
 			text += " " + phrase
 		}
 		entries = append(entries, sensorHealthEntry{Identifier: conn, Name: name, Label: name, Text: text})

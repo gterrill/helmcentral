@@ -82,6 +82,10 @@ type signalKSnapshot struct {
 // first" has for genuine path growth.
 const signalKSentenceSeenMaxDistinct = 200
 
+// signalKSourceMaxSentences bounds the sentence ids kept per $source; a real
+// talker carries a dozen.
+const signalKSourceMaxSentences = 32
+
 // sourceSeenEntry tracks one $source's publishing history within a context:
 // enough for the sensor-health "silent source" check (anomaly_sensor_health.go)
 // to tell a source that has gone quiet mid-stream from one that never
@@ -113,6 +117,10 @@ type sourceSeenEntry struct {
 	// latest non-empty value seen. The silent-source card reads it to tell a
 	// serial NMEA 0183 talker from an NMEA 2000 device.
 	BusType string
+	// Sentences is the set of NMEA 0183 sentence ids ("RMC", "MWV") this
+	// source has carried, bounded by signalKSourceMaxSentences. Treated as
+	// immutable once stored: a new set is cloned, as with EngineLast.
+	Sentences map[string]bool
 	// EngineLast is, for every <id> in a propulsion.<id>.* path this source
 	// has published, the newest declared timestamp of an update carrying it
 	// (the same event time as Last). One source relaying several engines
@@ -402,6 +410,15 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			if t, _ := update.Source["type"].(string); t != "" {
 				entry.BusTyped = true
 				entry.BusType = t
+			}
+			if sent, _ := update.Source["sentence"].(string); sent != "" && !entry.Sentences[sent] &&
+				len(entry.Sentences) < signalKSourceMaxSentences {
+				next := maps.Clone(entry.Sentences)
+				if next == nil {
+					next = map[string]bool{}
+				}
+				next[sent] = true
+				entry.Sentences = next
 			}
 			for _, val := range update.Values {
 				if strings.HasPrefix(val.Path, "propulsion.") {

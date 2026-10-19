@@ -42,13 +42,15 @@ Battery voltage 75.7 V · above the 70 V any 12, 24 or 48 V bank reaches", or
 batteries and engines, which come from the names of their equipment items; where a source has no item, the
 card uses what the boat's own instruments call it.
 
-A serial instrument that sends several kinds of sentence, such as a combined
-AIS and GPS unit, is one device on the card, named for its connection:
-"Vesper Cortex has stopped sending AIS and satellite positions". If only some of
-what it sends has gone quiet, the card lists those by name ("Vesper Cortex has
-stopped sending Galileo and BeiDou"). The card is titled for the device ("Vesper
-Cortex Silent"), or "Instruments Silent" when more than one has gone quiet, and
-has one **Ignore** action for the whole device.
+A serial instrument that sends several kinds of data, such as a combined
+AIS, GPS and instrument multiplexer, is one device on the card, named for its
+connection. When all of it has gone quiet the card says what it carried:
+"Vesper Cortex has stopped sending AIS, position, heading, wind, depth, boat
+speed, log and weather". If only part has gone quiet, the card lists what only
+that part carried, or says "some of its data" when the rest still arrives. The
+card is titled for the device ("Vesper Cortex Silent"), or "Instruments Silent"
+when more than one has gone quiet, and has one **Ignore** action for the whole
+device.
 
 The impossible-reading check looks at batteries, not at chargers. A solar
 charger reports its panel array's voltage under a battery number on some
