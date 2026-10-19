@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2026-10-19). Builds on
+Accepted (2026-10-20). Builds on
 [ADR 0172](0172-mate-tools-are-one-record-each.md) (tool registry and `collect`),
 [ADR 0189](0189-mates-stream-is-one-typed-event-set.md) (typed stream),
 [ADR 0158](0158-mate-changes-records-through-changesets.md) and
