@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
+import type { MessageApi } from '@/lib/mate-api'
+import { decodeMateCards, type MateCard } from '@/lib/mate-cards'
 
 // ADR 0093: the wire shape (Conversation/Message) is snake_case, persisted
 // as-is by the assistant's SQLite store. Mapped to camelCase here the same
@@ -13,11 +15,6 @@ interface ConversationApi {
   updated_at: string
   /** The note this conversation was summarised into, when it still exists. */
   summary_note_id?: string
-}
-
-interface MessageAttachmentApi {
-  document_id: string
-  filename: string
 }
 
 export type AssistantProposalStatus = 'pending' | 'applied' | 'dismissed' | 'stale'
@@ -50,24 +47,6 @@ export interface ProposalApi {
   resolved_at?: string
   /** What Apply did, one entry per operation: present once applied. */
   result?: { ops: ProposalOpResultApi[] }
-}
-
-interface MessageApi {
-  id: string
-  conversation_id: string
-  seq: number
-  role: 'user' | 'assistant' | 'watch'
-  content: string
-  model?: string
-  prompt_tokens?: number
-  cached_tokens?: number
-  completion_tokens?: number
-  cost_usd?: number
-  tool_rounds?: number
-  created_at: string
-  attachments?: MessageAttachmentApi[]
-  proposals?: ProposalApi[]
-  form_drafts?: FormDraftApi[]
 }
 
 export type AssistantFormDraftStatus = 'draft' | 'saved' | 'dismissed'
@@ -180,6 +159,8 @@ export interface AssistantMessage {
   proposals?: AssistantProposal[]
   /** Filled-in forms (ADR 0165) - only ever on an assistant reply. */
   formDrafts?: AssistantFormDraft[]
+  /** Cards built from tool results (ADR 0191) - only ever on an assistant reply. */
+  cards?: MateCard[]
 }
 
 export function mapProposal(api: ProposalApi): AssistantProposal {
@@ -220,7 +201,7 @@ function mapConversation(api: ConversationApi): AssistantConversation {
   return { id: api.id, title: api.title, createdAt: api.created_at, updatedAt: api.updated_at }
 }
 
-function mapMessage(api: MessageApi): AssistantMessage {
+export function mapMessage(api: MessageApi): AssistantMessage {
   return {
     id: api.id,
     conversationId: api.conversation_id,
@@ -237,6 +218,7 @@ function mapMessage(api: MessageApi): AssistantMessage {
     attachments: api.attachments?.map((a) => ({ documentId: a.document_id, filename: a.filename })),
     proposals: api.proposals?.map(mapProposal),
     formDrafts: api.form_drafts?.map(mapFormDraft),
+    cards: api.cards === undefined ? undefined : decodeMateCards(api.cards),
   }
 }
 

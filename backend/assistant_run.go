@@ -111,6 +111,9 @@ type assistantReply struct {
 	// FormDrafts are the filled-in forms (ADR 0165) fill_form made during
 	// this run, in call order. Saved with the assistant message like Proposals.
 	FormDrafts []assistantFormDraft
+	// Cards are the cards (ADR 0191) tools built from their results during
+	// this run, in call order. Saved with the assistant message like Proposals.
+	Cards []mateCard
 }
 
 // assistantToolFailures counts, per tool name, how many times a tool call

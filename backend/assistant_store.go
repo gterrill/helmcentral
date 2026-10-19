@@ -67,6 +67,9 @@ type assistantMessage struct {
 	// assistant message, each with the status it has right now (draft, saved
 	// or dismissed). Saved with the row, read back by ListMessages.
 	FormDrafts []assistantFormDraft `json:"form_drafts,omitempty"`
+	// Cards are the cards (ADR 0191) Mate's tools attached to this assistant
+	// message, ordinal-ordered. Saved with the row, read back by ListMessages.
+	Cards []mateCard `json:"cards,omitempty"`
 }
 
 // assistantAttachment is one row of message_attachments: a document (ADR
@@ -213,7 +216,10 @@ func createAssistantSchema(db *sql.DB) error {
 	if err := createAssistantProposalsSchema(db); err != nil {
 		return err
 	}
-	return createAssistantFormDraftsSchema(db)
+	if err := createAssistantFormDraftsSchema(db); err != nil {
+		return err
+	}
+	return createAssistantCardsSchema(db)
 }
 
 // newAssistantStore opens (creating if necessary) the SQLite database at
@@ -490,6 +496,15 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 		}
 	}
 
+	if len(m.Cards) > 0 {
+		if m.Role != "assistant" {
+			return assistantMessage{}, fmt.Errorf("insert message cards: only an assistant message can carry them, got role %q", m.Role)
+		}
+		if err := insertAssistantCardsTx(tx, m.ID, m.Cards, now); err != nil {
+			return assistantMessage{}, err
+		}
+	}
+
 	if _, err := tx.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now.Unix(), m.ConversationID); err != nil {
 		return assistantMessage{}, fmt.Errorf("bump conversation updated_at: %w", err)
 	}
@@ -545,7 +560,12 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 	if err != nil {
 		return nil, err
 	}
+	cardsByMessage, err := cardsForMessages(s.db, ids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
+		out[i].Cards = cardsByMessage[out[i].ID]
 		out[i].Attachments = attachmentsByMessage[out[i].ID]
 		out[i].Proposals = proposalsByMessage[out[i].ID]
 		out[i].FormDrafts = draftsByMessage[out[i].ID]
