@@ -1,6 +1,7 @@
 import tseslintPlugin from '@typescript-eslint/eslint-plugin';
 import tseslintParser from '@typescript-eslint/parser';
 import reactHooksPlugin from 'eslint-plugin-react-hooks';
+import helmPlugin from './eslint-rules/index.js';
 
 export default [
   {
@@ -40,6 +41,7 @@ export default [
     plugins: {
       '@typescript-eslint': tseslintPlugin,
       'react-hooks': reactHooksPlugin,
+      helm: helmPlugin,
     },
     rules: {
       ...tseslintPlugin.configs.recommended.rules,
@@ -50,6 +52,11 @@ export default [
       // rules until that's actually on the roadmap.
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
+      // AGENTS.md "Tiles And Widgets": the operator-visible word is "tile";
+      // "widget" must not appear in JSX text, in aria-label, title,
+      // placeholder, alt, label, description and similar attributes, or in
+      // toast messages. Text the server returns is not covered.
+      'helm/no-widget-in-ui-text': 'error',
       // ADR 0142: a CRUD surface (an index or a details page) is built from
       // components/patterns (Page/IndexTable/IndexFilters/...), not from
       // ui/table directly - that's exactly the hand-rolled-per-page drift
@@ -67,6 +74,22 @@ export default [
           ],
         },
       ],
+    },
+  },
+  {
+    // The class-token rules read string literals anywhere in a file, so test
+    // fixtures that spell out a bad class on purpose are left alone.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['**/*.test.*', 'src/test/**', '**/__tests__/**'],
+    rules: {
+      // AGENTS.md "Micro-Typography Scale": a text size (text-[Npx],
+      // text-[Nrem], JSX fontSize, fontSize properties) is allowed only at
+      // 9px, 10px or 12px and above (0 hides text); text-[11px] is retired.
+      'helm/text-size-scale': 'error',
+      // AGENTS.md "Anti-Slop Constraints": no hex, rgb() or hsl() colour
+      // escapes in class tokens, SVG fill/stroke/color/stopColor or style
+      // colour properties; use a semantic token.
+      'helm/no-arbitrary-color': 'error',
     },
   },
   {

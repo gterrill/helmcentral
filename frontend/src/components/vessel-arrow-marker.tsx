@@ -24,6 +24,7 @@ export function VesselArrow({ headingDeg, scale }: VesselArrowProps) {
       }}
     >
       <svg width="22" height="32" viewBox="0 0 22 32" fill="none">
+        {/* eslint-disable-next-line helm/no-arbitrary-color -- own-ship marker drawn on the non-themed map, same blue in day and night */}
         <path d="M11 2 L20 26 L11 22 L2 26 Z" fill="white" stroke="#0ea5e9" strokeWidth="1.5" />
       </svg>
     </div>

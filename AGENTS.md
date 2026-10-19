@@ -170,7 +170,7 @@ Two rules follow. Do not introduce "widget" into anything the operator
 perceives. Do not rename the persisted `widgets` field, the backend's
 `validDashboardWidgetIDs`, or the config types to "tile" either: they are the
 record layer, renaming them buys nothing and costs a coordinated change
-against stored state.
+against stored state. `helm/no-widget-in-ui-text` enforces the UI-text half: it rejects "widget" in JSX text, in the text attributes (`aria-label`, `aria-description`, `title`, `placeholder`, `alt`, `label`, `description` and similar) and in `toast` messages. It does not check text in data objects rendered later, or text returned by the server.
 
 `docs/adr/` is exempt from all of this. Thirty-four ADRs say "widget" because
 that was the word when they were written, and they are the historical record.
@@ -261,14 +261,13 @@ Build an inclusive, quietly dense, highly glanceable dashboard interface using T
 The floor for anything the operator reads as a value is `text-xs` (12px). That covers readouts, unit suffixes, sub-readouts next to a KPI, and any mixed-case text. Below 12px there are exactly two sizes, and neither carries a value:
 
 - `text-[10px]` — uppercase, letter-spaced micro-labels only: axis labels, chart legends, KPI identifier labels. Capitals at 10px stand taller than lowercase at 11px, and a label is recognised by shape rather than read, so it can go smaller than a value.
-- `text-[9px]` — dense map/marker annotation only (vessel tags, badges). This is the legibility floor; never go smaller (no `text-[8px]` or below).
-- `text-[11px]` is retired. Mixed-case text at 11px leaves lowercase glyphs about 5.5px tall, which fails at arm's length in glare. Use `text-xs` for values or `text-[10px]` for uppercase labels.
+- `text-[9px]` — dense map/marker annotation only (vessel tags, badges). This is the legibility floor. `text-[11px]` is retired: mixed-case text at 11px leaves lowercase glyphs about 5.5px tall, which fails at arm's length in glare. ESLint enforces the sizes (`helm/text-size-scale`): a `text-[Npx]` or `text-[Nrem]` class, a JSX `fontSize` or a `fontSize` object property that is not 9px, 10px or 12px and above is an error (0 is allowed). It does not check MapLibre layer sizes, `em` values, or sizes held in variables.
 - Do not stack low-opacity color modifiers (e.g. `text-white/50`, `text-white/60`) on text below `text-xs` — reduced contrast on already-tiny glyphs is illegible in daylight glare. On themed surfaces, use `text-muted-foreground` for de-emphasis instead of opacity. On non-themed overlays (e.g. map HUDs), don't go below `/80` opacity for text this small.
 - SVG `<text>` chart labels follow the same rules as DOM text: use a `fontSize` from the scale above (as a bare string, e.g. `fontSize="10"`), and set `fill` from a theme token (`hsl(var(--muted-foreground))` for axis/legend labels, `hsl(var(--primary))` for accent/emphasis labels) rather than a hardcoded `rgba()`/hex value — otherwise the chart silently stops adapting to dark mode and drifts from the DOM styling.
 
 ### Anti-Slop Constraints
 
-- No hex improvisation. Never write raw arbitrary color values (e.g., `bg-[#f4f3ef]`, `text-[#334455]`). Use the project's semantic tokens (see Telemetry & Color Mapping above) or, for alert semantics only, the standard Tailwind palette scale. Arbitrary values for type size/tracking fine-tuning (e.g., `tracking-[0.16em]`) remain expected, but the sizes themselves must come from the Micro-Typography Scale above — this rule targets color escapes and undisciplined sizing, not fine-tuning in general.
+- No hex improvisation. Never write raw arbitrary color values (e.g., `bg-[#f4f3ef]`, `text-[#334455]`). Use the project's semantic tokens (see Telemetry & Color Mapping above) or, for alert semantics only, the standard Tailwind palette scale. Arbitrary values for type size/tracking fine-tuning (e.g., `tracking-[0.16em]`) remain expected, but the sizes themselves must come from the Micro-Typography Scale above — this rule targets color escapes and undisciplined sizing, not fine-tuning in general. Hex, `rgb()`, `hsl()` and `oklch()` colour escapes in class tokens, and hex/`rgb()`/`hsl()` values in SVG `fill`/`stroke`/`color`/`stopColor` and in style-object colour properties, are enforced by `helm/no-arbitrary-color`; colours held in variables or data objects are not checked.
 - Maintain zero-state integrity. Do not use fake marketing metrics or placeholder strings. Use structural dashes (`--`), realistic operational defaults (`0.0`), or clear state toggles (`ON` / `OFF`).
 
 ## Papercuts

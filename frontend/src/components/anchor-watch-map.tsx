@@ -28,6 +28,7 @@ import {
   radiusStepM,
 } from '@/lib/anchor-adjust'
 import {
+  MAP_LABEL_HALO,
   resolveMarkerLabelSuppression,
   markerScaleForZoom,
   LABEL_COLLISION_RADIUS_PX,
@@ -1723,7 +1724,7 @@ export function AnchorWatchMap({
                       to answer, not disappear. The marker dot itself always
                       stays put either way. */}
                   {(isSelected || !suppressedAisLabelIds.has(vessel.id)) && (
-                    <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                    <div className={`mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white ${MAP_LABEL_HALO}`}>
                       <div className="truncate">{vessel.name}</div>
                       <div className="whitespace-nowrap text-[9px] font-medium tracking-normal">
                         {formatRange(distanceM)} · {bearing}°
@@ -1792,7 +1793,7 @@ export function AnchorWatchMap({
                     style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
                   />
                 </div>
-                <div className="mt-0.5 max-w-24 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                <div className={`mt-0.5 max-w-24 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white ${MAP_LABEL_HALO}`}>
                   <div className="whitespace-nowrap">
                     RDR {formatRange(distanceM)} · {bearing}°
                   </div>
@@ -1886,7 +1887,8 @@ export function AnchorWatchMap({
                   >
                     <MapPin
                       className={cn(
-                        'h-6 w-6 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]',
+                        'h-6 w-6',
+                        MAP_LABEL_HALO,
                         isSelected ? 'text-fuchsia-300' : 'text-fuchsia-400',
                       )}
                     />
@@ -1896,7 +1898,7 @@ export function AnchorWatchMap({
                       way so a crowded anchorage doesn't fill up with opaque
                       boxes; only interactive controls (the Pin tooltip, the
                       Remove button) get a solid background. */}
-                  <div className="mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-fuchsia-300 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]">
+                  <div className={`mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-fuchsia-300 ${MAP_LABEL_HALO}`}>
                     {pm.label && <div className="truncate">{pm.label}</div>}
                     <div className="whitespace-nowrap text-[9px] font-medium tracking-normal text-white">
                       {formatRange(distanceM)} · {bearing}°
@@ -1922,7 +1924,7 @@ export function AnchorWatchMap({
         {pinCandidate && (
           <Marker latitude={pinCandidate.lat} longitude={pinCandidate.lon} style={{ zIndex: 1200 }}>
             <div className="flex flex-col items-center" data-testid="pin-candidate">
-              <MapPin className="h-6 w-6 text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)]" />
+              <MapPin className={`h-6 w-6 text-white ${MAP_LABEL_HALO}`} />
               <div className="mt-1 flex items-center gap-1.5 rounded-full bg-black/80 py-1 pl-2.5 pr-1 backdrop-blur-sm">
                 <span className="whitespace-nowrap font-mono text-xs text-white">
                   {formatRange(Math.round(haversineMeters(vesselLat, vesselLon, pinCandidate.lat, pinCandidate.lon)))}

@@ -11,6 +11,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- The **Embed** tile's settings now say "inside this tile", not "inside this
+  widget".
+
 ## [0.48.0] - 2026-10-17
 
 ### Added
