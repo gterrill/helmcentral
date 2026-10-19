@@ -517,6 +517,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		}
 	}
 	missing := false
+	anyGust := false
 
 	// Wind against tide: only for a leg with a known flood set and a band.
 	var cycles []tidalHalfCycle
@@ -576,15 +577,16 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		consider(passageCandidate{sev, ratio, "wind", sector,
 			fmt.Sprintf("Wind %s %d kn %s%s · %s", degreesToDirection(h.WindDirDeg), int(windKn), sector, marginalNote(sev, windNoGo), seg.label)})
 
-		// Providers leave a gust they do not have at 0. That is not a calm
-		// gust, so it is listed as not checked rather than passed.
+		// Providers leave a gust they do not have at 0. An hour at 0 beside
+		// hours with a figure is a calm hour (0 cannot exceed a positive
+		// limit); only a leg with no gust figure at all is listed as not
+		// checked, below.
 		if h.GustMS > 0 {
+			anyGust = true
 			gustNoGo := windNoGo + passageGustAboveWindKn
 			sev, ratio = judge(gustKn, rawGustKn, gustNoGo)
 			consider(passageCandidate{sev, ratio, "gust", sector,
 				fmt.Sprintf("Gusts %d kn %s%s · %s", int(gustKn), sector, marginalNote(sev, gustNoGo), seg.label)})
-		} else {
-			notChecked["gust"] = true
 		}
 
 		if !h.HasWave {
@@ -661,6 +663,9 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			l.Sector = &sec
 		}
 		cell.Limiting = l
+	}
+	if haveWorst && !anyGust {
+		notChecked["gust"] = true
 	}
 	cell.NotChecked = []string{}
 	for _, k := range passageNotCheckedOrder {
