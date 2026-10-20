@@ -78,7 +78,7 @@ var powerRoles = []struct {
 }
 
 // offerableSources counts the sources the Roles picker offers for kind: the
-// boat reports them, no item owns them, and (for batteries) they are not a
+// boat reports or has logged them, no item owns them, and (for batteries) they are not a
 // charger's own input.
 func offerableSources(disc discoveryResponse, kind string) int {
 	n := 0
@@ -87,7 +87,7 @@ func offerableSources(disc discoveryResponse, kind string) int {
 			continue
 		}
 		for _, r := range g.Rows {
-			if r.Reporting && r.Item == nil && !(kind == "battery" && r.ChargerInput) {
+			if r.Item == nil && !(kind == "battery" && r.ChargerInput) {
 				n++
 			}
 		}
@@ -228,6 +228,23 @@ func engineSourcesWithFigures(disc discoveryResponse) (sources []string, figurel
 	return sources, figureless
 }
 
+// loggedEngineSources counts the unowned engine sources offered from logged
+// history while not reporting now.
+func loggedEngineSources(disc discoveryResponse) int {
+	n := 0
+	for _, g := range disc.Groups {
+		if g.Kind != "engine" {
+			continue
+		}
+		for _, r := range g.Rows {
+			if !r.Reporting && r.Item == nil && r.LastLogged != nil {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 // engineFigureNames is the figures the engine sources carry, lower case, in the
 // order first seen: "rpm and coolant".
 func engineFigureNames(disc discoveryResponse) string {
@@ -351,6 +368,8 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 		eng.State = setupTodo
 		if sources, figureless := engineSourcesWithFigures(disc); len(sources) > 0 {
 			eng.Detail = countOf(len(sources), "engine source", "engine sources") + strings.TrimRight(verbAre(len(sources)), " ") + " reporting " + engineFigureNames(disc) + ". In Discovery, create an item for each one that shows figures."
+		} else if logged := loggedEngineSources(disc); logged > 0 {
+			eng.Detail = countOf(logged, "engine source", "engine sources") + " in the boat's logged history, not reporting now. In Discovery, create an item for each one."
 		} else if figureless > 0 {
 			eng.Detail = "The boat lists engine sources, but they carry no figures yet."
 		} else {

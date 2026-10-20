@@ -275,3 +275,12 @@ func TestDiscoveryHandlerOffersLoggedEnginesAndSaysWhenHistoryIsGone(t *testing.
 		t.Fatalf("history down: %+v", body)
 	}
 }
+
+func TestSetupEnginesStepOffersLoggedEnginesWhenNoneIsAssigned(t *testing.T) {
+	disc := vesselDiscovery(newAnomalyTestSnapshot(), vesselView{}, nil, signatureHistoryFixture(t))
+	disc.Connected = true
+	st := stepByID(t, buildSetupStatus(vesselView{}, disc, setupMate{}), "engines")
+	if st.State != setupTodo || !strings.Contains(st.Detail, "2 engine sources in the boat's logged history") {
+		t.Fatalf("step = %+v", st)
+	}
+}
