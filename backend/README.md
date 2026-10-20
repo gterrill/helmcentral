@@ -61,14 +61,7 @@ docker run -p 8080:8080 helmcentral-backend
 - `GET /api/weather-forecast` - 6-day daily forecast including sustained wind and gusts. Response shape includes `days`, `cached`, `updated_at`, and `ttl_seconds`. Cached for 60 minutes per rounded vessel position; returns `502` when upstream forecast data cannot be fetched.
 - `GET /api/tide-today` - Current and upcoming tide conditions
 - `GET /api/tracks?since=<RFC3339>` - Incremental self and AIS trail updates sampled by the server
-- `GET /api/routes` - List saved routes
-- `POST /api/routes` - Create a route (`name`, `waypoints`)
-- `GET /api/routes/:id` - Fetch a single route
-- `PATCH /api/routes/:id` - Update a route's name and/or waypoints
-- `DELETE /api/routes/:id` - Delete a route
-- `POST /api/routes/:id/activate` - Push a route to SignalK and set it as the vessel's active route
-- `POST /api/routes/deactivate` - Clear the active route on SignalK
-- `GET /api/routes/active` - Current active-route status from SignalK
+- `GET /api/routes/active` - The route SignalK is navigating (name and waypoints read from its route resource) and its next point
 
 ## Configuration
 
@@ -83,7 +76,7 @@ Non-secret settings use environment variables. The backend reads them through `o
 | `HELMCENTRAL_STATE_DIR` | *(unset)* | Roots all runtime state (`data/`, `cache/`) at this directory instead of the working directory. Used by the E2E stack to keep its writes out of the working tree — see [../docs/adr/0026-e2e-stack-isolation.md](../docs/adr/0026-e2e-stack-isolation.md) |
 | `HELMCENTRAL_MASTER_KEY` | *(auto-generated)* | Override for the secrets-store encryption key, otherwise generated on first run |
 
-Individual state paths (`ROUTES_FILE`, `SECRETS_DB_PATH`, `TILE_CACHE_PATH`, …) can each be overridden by name and take precedence over `HELMCENTRAL_STATE_DIR`; see `cacheFilePath` in `weather_tide.go`.
+Individual state paths (`DASHBOARD_PAGES_FILE`, `SECRETS_DB_PATH`, `TILE_CACHE_PATH`, …) can each be overridden by name and take precedence over `HELMCENTRAL_STATE_DIR`; see `cacheFilePath` in `weather_tide.go`.
 
 Secrets (SignalK credentials, `INFLUXDB_TOKEN`, `WEATHERKIT_*`) live in an encrypted-at-rest SQLite store instead, managed via the Settings UI's Secrets panel (`GET`/`POST /api/settings/secrets`). See [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md).
 
@@ -98,8 +91,8 @@ Trail-handling decisions are documented in:
 - [../docs/adr/0003-motoring-seed-downsampling.md](../docs/adr/0003-motoring-seed-downsampling.md) (superseded by ADR-0020)
 - [../docs/adr/0004-gnss-validation-gate.md](../docs/adr/0004-gnss-validation-gate.md)
 - [../docs/adr/0005-signalk-tracks-backed-ais-trails.md](../docs/adr/0005-signalk-tracks-backed-ais-trails.md)
-- [../docs/adr/0006-manual-route-planning.md](../docs/adr/0006-manual-route-planning.md)
-- [../docs/adr/0007-signalk-route-activation.md](../docs/adr/0007-signalk-route-activation.md)
+- [../docs/adr/0006-manual-route-planning.md](../docs/adr/0006-manual-route-planning.md) (superseded by ADR-0195)
+- [../docs/adr/0007-signalk-route-activation.md](../docs/adr/0007-signalk-route-activation.md) (superseded by ADR-0195)
 - [../docs/adr/0012-configurable-bento-dashboard.md](../docs/adr/0012-configurable-bento-dashboard.md)
 - [../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md](../docs/adr/0020-in-memory-telemetry-history-optional-influxdb.md)
 - [../docs/adr/0023-encrypted-secrets-store.md](../docs/adr/0023-encrypted-secrets-store.md)

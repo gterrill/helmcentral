@@ -209,12 +209,11 @@ commonly name the same plugin but need not.
 `place_name_at` is called on a widening ladder (400m, 1500m, 5000m,
 stopping at the first named answer) by the host, not the plugin - the
 plugin only ever answers one radius per call. `search_places`' `broad` flag
-tells the plugin whether the host already has a saved-route-waypoint match
-for this query: when true, a plugin is free to run a more expensive
-broadened search if its cheap exact-name search comes back empty; when
-false, the plugin should still run its cheap search (it is the only way the
-plugin's own copy of a feature's position reaches the model) but can skip
-straight to reporting no broader match. An upstream failure - a bad status,
+tells the plugin whether it may run a more expensive broadened search when
+its cheap exact-name search comes back empty. The host sends `true`; a
+plugin that receives `false` should still run its cheap search (it is the
+only way the plugin's own copy of a feature's position reaches the model)
+but can skip straight to reporting no broader match. An upstream failure - a bad status,
 an unparseable body, a rate limit, or (Overpass specifically) a `remark`
 field reporting a runtime error - must be returned as a call error, never
 masked as an empty result. See

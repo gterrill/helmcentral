@@ -6,7 +6,6 @@ cache/
 helmcentral
 data/*.sqlite
 data/secrets.key
-data/routes.json
 data/dashboard-layout.json
 data/dashboard-pages.json
 # Removed feature (ADR 0113). This Dockerfile does `COPY . .`, so

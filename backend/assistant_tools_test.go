@@ -91,8 +91,8 @@ func (f *fakeSearchPlacesProvider) lastCall() placeSearchInput {
 
 // findPlacesDeps builds the minimal assistantToolDeps find_places needs: a
 // fixed vessel position, the given fake provider wired as the configured
-// place-names provider, and the given routes.
-func findPlacesDeps(vesselLat, vesselLon float64, provider placeNameProvider, routes func() []routeData) assistantToolDeps {
+// place-names provider.
+func findPlacesDeps(vesselLat, vesselLon float64, provider placeNameProvider) assistantToolDeps {
 	// The result cache is package-level; start every test cold.
 	placeSearchCache.reset()
 	return assistantToolDeps{
@@ -100,94 +100,10 @@ func findPlacesDeps(vesselLat, vesselLon float64, provider placeNameProvider, ro
 			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
 		},
 		placeNames: func() (placeNameProvider, string, error) { return provider, provider.ID(), nil },
-		routes:     routes,
 	}
 }
 
 // ── find_places ─────────────────────────────────────────────────────────
-
-func TestExecuteFindPlaces_MergesRouteWaypointDedupesAndSorts(t *testing.T) {
-	vesselLat, vesselLon := -20.10, 149.10
-
-	// The provider's own copy of the same Tongue Bay, ~110m from the
-	// waypoint - well inside the 500m dedupe radius, so it must collapse
-	// into the waypoint entry (added first) rather than appearing a second
-	// time.
-	nearDupLat, nearDupLon := vesselLat+0.001, vesselLon
-
-	// A second, distinct real-world place that happens to share the exact
-	// name "Tongue Bay" (duplicate place names are common enough), ~11km
-	// (~6nm) away, so sort-by-distance has something to prove.
-	farLat, farLon := vesselLat+0.1, vesselLon
-
-	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{
-		Search:   "exact",
-		RadiusNm: 100,
-		Results: []placeSearchMatch{
-			{Name: "Tongue Bay", Kind: "bay", Lat: nearDupLat, Lon: nearDupLon},
-			{Name: "Tongue Bay", Kind: "anchorage", Lat: farLat, Lon: farLon},
-		},
-	}}
-	routes := func() []routeData {
-		return []routeData{{
-			Name: "Whitsundays Loop",
-			Waypoints: []routeWaypoint{
-				{Name: "Tongue Bay", Lat: vesselLat, Lon: vesselLon},
-			},
-		}}
-	}
-	deps := findPlacesDeps(vesselLat, vesselLon, provider, routes)
-
-	// Query exactly matches the waypoint name, so it's a waypoint hit -
-	// suppressing the provider's own broader rung (broad=false) - but the
-	// provider's cheap exact-name search still always runs.
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue Bay"}`))
-	if err != nil {
-		t.Fatalf("execute find_places: %v", err)
-	}
-	if provider.callCount() != 1 {
-		t.Fatalf("expected exactly one search_places call, got %d", provider.callCount())
-	}
-	if provider.lastCall().Broad {
-		t.Errorf("expected broad=false: the query already matched a saved waypoint")
-	}
-
-	var result assistantFindPlacesResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		t.Fatalf("unmarshal result: %v (raw: %s)", err, raw)
-	}
-
-	if len(result.Results) != 2 {
-		t.Fatalf("expected 2 results (the near duplicate deduped, the far one distinct), got %d: %+v", len(result.Results), result.Results)
-	}
-	if result.Results[0].Name != "Tongue Bay" {
-		t.Errorf("expected the nearer Tongue Bay first, got %q", result.Results[0].Name)
-	}
-	if result.Results[0].Source != "route:Whitsundays Loop" {
-		t.Errorf("expected the route waypoint to win the dedupe (added first), got source %q", result.Results[0].Source)
-	}
-	if result.Results[0].DistanceNm != 0 {
-		t.Errorf("expected the waypoint's distance to be ~0nm, got %v", result.Results[0].DistanceNm)
-	}
-	if result.Results[1].DistanceNm <= result.Results[0].DistanceNm {
-		t.Errorf("expected the far result to be sorted after the near one")
-	}
-	if result.Results[1].BearingDeg < 0 || result.Results[1].BearingDeg > 360 {
-		t.Errorf("expected a valid compass bearing, got %d", result.Results[1].BearingDeg)
-	}
-	if result.Results[1].Source != "fake-places" {
-		t.Errorf("expected the far, non-waypoint result's source to be the provider id, got %q", result.Results[1].Source)
-	}
-	if result.Results[1].Kind != "anchorage" {
-		t.Errorf("expected kind=anchorage as returned by the provider, got %q", result.Results[1].Kind)
-	}
-	if result.Search != "waypoints" {
-		t.Errorf("expected search=waypoints, got %q", result.Search)
-	}
-	if result.RadiusNm != 100 {
-		t.Errorf("expected radius_nm=100 (as returned by the provider), got %v", result.RadiusNm)
-	}
-}
 
 func TestExecuteFindPlaces_NoWaypointHitRunsBroadSearch(t *testing.T) {
 	vesselLat, vesselLon := -20.1, 149.1
@@ -196,7 +112,7 @@ func TestExecuteFindPlaces_NoWaypointHitRunsBroadSearch(t *testing.T) {
 		RadiusNm: 100,
 		Results:  []placeSearchMatch{{Name: "Shag Cove", Kind: "bay", Lat: -20.11, Lon: 149.1}},
 	}}
-	deps := findPlacesDeps(vesselLat, vesselLon, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(vesselLat, vesselLon, provider)
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
 	if err != nil {
@@ -224,45 +140,9 @@ func TestExecuteFindPlaces_NoWaypointHitRunsBroadSearch(t *testing.T) {
 	}
 }
 
-func TestExecuteFindPlaces_WaypointHitStillIncludesProviderResults(t *testing.T) {
-	vesselLat, vesselLon := -20.1, 149.1
-	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "none", RadiusNm: 100}}
-	routes := func() []routeData {
-		return []routeData{{
-			Name: "Whitsundays Loop",
-			Waypoints: []routeWaypoint{
-				{Name: "Tongue Bay", Lat: vesselLat, Lon: vesselLon},
-			},
-		}}
-	}
-	deps := findPlacesDeps(vesselLat, vesselLon, provider, routes)
-
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue"}`))
-	if err != nil {
-		t.Fatalf("execute find_places: %v", err)
-	}
-	if provider.callCount() != 1 {
-		t.Fatalf("expected the provider's exact-name rung to still run even after a waypoint hit, got %d calls", provider.callCount())
-	}
-	if provider.lastCall().Broad {
-		t.Errorf("expected broad=false: the query already matched a saved waypoint")
-	}
-
-	var result assistantFindPlacesResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
-	}
-	if len(result.Results) != 1 || result.Results[0].Source != "route:Whitsundays Loop" {
-		t.Fatalf("expected only the waypoint hit, got %+v", result.Results)
-	}
-	if result.Search != "waypoints" {
-		t.Errorf("expected search=waypoints, got %q", result.Search)
-	}
-}
-
 func TestExecuteFindPlaces_NoteMentionsRadiusWhenNothingFound(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "none", RadiusNm: 20}}
-	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(-20.1, 149.1, provider)
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
 	if err != nil {
@@ -288,7 +168,7 @@ func TestExecuteFindPlaces_ProviderNoteIsPreservedEvenWithResults(t *testing.T) 
 		Results:  []placeSearchMatch{{Name: "Tongue Point", Kind: "cape", Lat: -20.15, Lon: 149.12}},
 		Note:     "widened past the usual radius",
 	}}
-	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(-20.1, 149.1, provider)
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue"}`))
 	if err != nil {
@@ -305,7 +185,7 @@ func TestExecuteFindPlaces_ProviderNoteIsPreservedEvenWithResults(t *testing.T) 
 
 func TestExecuteFindPlaces_ProviderErrorIsNeverSwallowed(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", err: fmt.Errorf("network unreachable")}
-	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(-20.1, 149.1, provider)
 
 	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
 	if err == nil {
@@ -328,7 +208,7 @@ func TestExecuteFindPlaces_ProviderErrorIsNeverSwallowed(t *testing.T) {
 // filler text) is rejected outright, and never reaches the provider.
 func TestExecuteFindPlaces_OverlongQueryRejectedBeforeReachingTheProvider(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "exact"}}
-	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(-20.1, 149.1, provider)
 
 	longQuery := "Bona Bay " + strings.Repeat("smuggled anchorage name filler text ", 5)
 	if len(longQuery) <= assistantFindPlacesMaxQueryRunes {
@@ -358,7 +238,7 @@ func TestExecuteFindPlaces_OverlongQueryRejectedBeforeReachingTheProvider(t *tes
 // to the provider.
 func TestExecuteFindPlaces_QueryWithDisallowedCharactersRejected(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "exact"}}
-	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(-20.1, 149.1, provider)
 
 	raw, err := json.Marshal(map[string]string{"query": "Bay <script>alert(1)</script>; lat=-20.1"})
 	if err != nil {
@@ -382,7 +262,7 @@ func TestExecuteFindPlaces_QueryWithDisallowedCharactersRejected(t *testing.T) {
 // resolution behaviour the way this one does.
 func TestExecuteFindPlaces_OrdinaryCompoundQueryStillAccepted(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "exact"}}
-	deps := findPlacesDeps(-20.1, 149.1, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(-20.1, 149.1, provider)
 
 	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
 	if err != nil {
@@ -403,7 +283,6 @@ func TestExecuteFindPlaces_ProviderResolutionErrorSurfaces(t *testing.T) {
 		placeNames: func() (placeNameProvider, string, error) {
 			return nil, "", fmt.Errorf("unknown place-names provider configured: %q", "no-such-plugin")
 		},
-		routes: func() []routeData { return nil },
 	}
 
 	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
@@ -424,7 +303,7 @@ func TestExecuteFindPlaces_CentredOnEchoesProviderQualifierHit(t *testing.T) {
 		CentredOn: &placeSearchCentre{Name: "Gloucester Island", Lat: qualifierLat, Lon: qualifierLon},
 		Results:   []placeSearchMatch{{Name: "Bona Bay", Kind: "bay", Lat: qualifierLat, Lon: qualifierLon}},
 	}}
-	deps := findPlacesDeps(vesselLat, vesselLon, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(vesselLat, vesselLon, provider)
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
 	if err != nil {
@@ -445,7 +324,7 @@ func TestExecuteFindPlaces_CentredOnEchoesProviderQualifierHit(t *testing.T) {
 func TestExecuteFindPlaces_NoCentredOnKeepsVesselCentre(t *testing.T) {
 	vesselLat, vesselLon := -20.1, 149.1
 	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "none", RadiusNm: 20}}
-	deps := findPlacesDeps(vesselLat, vesselLon, provider, func() []routeData { return nil })
+	deps := findPlacesDeps(vesselLat, vesselLon, provider)
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
 	if err != nil {
@@ -468,7 +347,6 @@ func TestExecuteFindPlaces_NoFixAndNoNearArgsReturnsNoteNotError(t *testing.T) {
 	deps := assistantToolDeps{
 		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -1, Longitude: -1}, nil },
 		placeNames:  func() (placeNameProvider, string, error) { return provider, provider.ID(), nil },
-		routes:      func() []routeData { return nil },
 	}
 
 	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue Bay"}`))

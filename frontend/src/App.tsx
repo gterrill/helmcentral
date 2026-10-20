@@ -11,7 +11,6 @@ import {
   MicOff,
   Minimize,
   Radar as RadarIcon,
-  Route,
   Settings,
   Ship,
   Sparkles,
@@ -54,7 +53,6 @@ const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-rou
 const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
 const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((mod) => ({ default: mod.ForecastDrawer })))
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
-const RoutePlannerDrawer = lazy(() => import('@/components/route-planner-drawer').then((mod) => ({ default: mod.RoutePlannerDrawer })))
 const SettingsRoutePanel = lazy(() => import('@/components/settings/settings-route-panel').then((mod) => ({ default: mod.SettingsRoutePanel })))
 // MateSheet and HelpSheet (unlike the panels above) fetch nothing and run
 // no effects until they've actually been opened - see the `hasOpened`
@@ -85,8 +83,6 @@ import { LayoutToolbar } from '@/components/layout-toolbar'
 import { EmptyPagePrompt } from '@/components/empty-page-prompt'
 import type { AddTileMultiInstanceEntry } from '@/components/add-tile-picker'
 import { Toaster } from '@/components/ui/sonner'
-import { useRoutes } from '@/hooks/use-routes'
-import { useDashboardRouteId } from '@/hooks/use-dashboard-route'
 import { useDashboardPages, type DashboardPage, type CreatePageInit } from '@/hooks/use-dashboard-pages'
 import { useDashboardRibbon } from '@/hooks/use-dashboard-ribbon'
 import { useActiveDashboardPageId } from '@/hooks/use-active-dashboard-page'
@@ -227,10 +223,10 @@ import { cn } from '@/lib/utils'
 /**
  * Ordered the way the boat is actually run, not the order the panels were
  * built in: what you want at a glance underway first (Alarms, Anchor Watch,
- * Forecast, Radar, Routes), then the reference material you go and look
+ * Forecast, Radar), then the reference material you go and look
  * something up in (Documents, Inventory, Mate), then the rows you touch once
  * and leave alone (Wall displays, Settings). ADR 0123 put Inventory right
- * after Documents rather than after Routes - the equipment registry links
+ * after Documents rather than after Passages - the equipment registry links
  * documents on every read, so the two panels sit next to each other in the
  * sidebar the way they already do in the code. Maintenance belongs after
  * Inventory once that panel exists. Dashboard is pinned above this list and
@@ -250,7 +246,6 @@ const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; i
   { id: 'anchor-watch', label: 'Anchor Watch', icon: Anchor },
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
   { id: 'radar', label: 'Radar', icon: RadarIcon },
-  { id: 'routes', label: 'Routes', icon: Route },
   { id: 'passages', label: 'Passages', icon: Ship },
   { id: 'documents', label: 'Documents', icon: FileText },
   { id: 'inventory', label: 'Inventory', icon: Wrench },
@@ -556,16 +551,7 @@ function AppShell() {
     const id = window.setTimeout(() => { prefetchNoteEditor() }, NOTE_EDITOR_PREFETCH_IDLE_TIMEOUT_MS)
     return () => window.clearTimeout(id)
   }, [isDisplay])
-  const { routes, loading: routesLoading, error: routesError, createRoute, updateRoute, deleteRoute } = useRoutes()
-  const [dashboardRouteId, setDashboardRouteId] = useDashboardRouteId()
-  const {
-    status: routeActivationStatus,
-    activating: routeActivating,
-    deactivating: routeDeactivating,
-    activateError: routeActivateError,
-    activate: activateRoute,
-    deactivate: deactivateRoute,
-  } = useRouteActivation()
+  const { status: routeActivationStatus } = useRouteActivation()
   const { pages, loading: pagesLoading, error: pagesError, refetch: refetchPages, createPage, updatePage, deletePage, reorderPages, reordering } = useDashboardPages()
   // ADR 0110: the wall display records themselves. Fetched here (not inside
   // the wall branch further down) because the ordinary shell needs the list
@@ -1174,36 +1160,28 @@ function AppShell() {
   // ~550m grid cell — see PLACE_NAME_REFRESH_SECONDS (config/app-config.ts).
   const placeName = usePlaceName(latitude, longitude, PLACE_NAME_REFRESH_SECONDS)
   // The clock wall-display tile's trip-ETA line (ADR 0092, ADR 0125):
-  // computeClockTripEta (lib/next-waypoint.ts) picks between a
-  // Helmcentral-activated route's FINAL waypoint (etaToRouteEnd) and a bare
-  // Course API destination (etaToDestination, GET /api/routes/active's
-  // `destination`, backend/route_activation.go) - the latter covers both an
-  // inactive chartplotter go-to AND a route activated somewhere other than
-  // Helmcentral, so the tile still reports something rather than showing
-  // nothing just because the trip wasn't planned inside Helmcentral. See
-  // that function's own doc comment for the full decision.
+  // computeClockTripEta (lib/next-waypoint.ts) reports to the final waypoint
+  // of the route SignalK is navigating, or to the Course API's bare next
+  // point (GET /api/routes/active's `destination`, backend/active_route.go)
+  // when a chartplotter go-to has no route behind it.
   const clockTripEta = useMemo(
-    () => computeClockTripEta(routeActivationStatus, routes, latitude, longitude, speedOverGroundKts, new Date()),
-    [routeActivationStatus, routes, latitude, longitude, speedOverGroundKts],
+    () => computeClockTripEta(routeActivationStatus, latitude, longitude, speedOverGroundKts, new Date()),
+    [routeActivationStatus, latitude, longitude, speedOverGroundKts],
   )
-  // The Nearby map's route layer (this cycle's own addition): the same
-  // routeActivationStatus/routes/nextWaypoint pieces as clockTripEta
-  // above, combined once here so the poi-map tile never has to know route
-  // activation exists - it only draws whatever waypoints and next-index it's
-  // handed. null whenever no route is active, its id isn't in `routes`, or
-  // the route has no waypoints. `waypoints` is traversalOrder's array, not
-  // necessarily route.waypoints' authored order, since nextIndex is an index
-  // into that traversal order (see next-waypoint.ts's own comment on why a
-  // reversed activation makes the two differ).
+  // The Nearby map's route layer: the route SignalK is navigating, combined
+  // once here so the poi-map tile never has to know route activation exists -
+  // it only draws whatever waypoints and next-index it's handed. null
+  // whenever no route is active or it has no waypoints. `waypoints` is
+  // traversalOrder's array, not necessarily the authored order, since
+  // nextIndex is an index into that traversal order (see next-waypoint.ts's
+  // own comment on why a reversed activation makes the two differ).
   const activeRoute = useMemo(() => {
-    if (!routeActivationStatus || routeActivationStatus.state !== 'active' || routeActivationStatus.routeId === null) return null
-    const route = routes.find((r) => r.id === routeActivationStatus.routeId)
-    if (!route) return null
-    const waypoint = nextWaypoint(route, routeActivationStatus)
-    const traversal = traversalOrder(route, routeActivationStatus)
+    if (routeActivationStatus.state !== 'active') return null
+    const waypoint = nextWaypoint(routeActivationStatus)
+    const traversal = traversalOrder(routeActivationStatus)
     if (!waypoint || !traversal) return null
-    return { name: route.name, waypoints: traversal, nextIndex: waypoint.index }
-  }, [routeActivationStatus, routes])
+    return { name: routeActivationStatus.route.name.trim() !== '' ? routeActivationStatus.route.name : 'Active route', waypoints: traversal, nextIndex: waypoint.index }
+  }, [routeActivationStatus])
   const depthTrend = useDepthTrend('3h', 60)
   // Item B: only the czone-switches widget reads this; poll it only while
   // the active page (or the wall's current page) actually has one placed.
@@ -1562,7 +1540,6 @@ function AppShell() {
   // onOpen just navigates — these take no widget-specific argument, so a
   // single stable callback per destination covers every call site.
   const openForecastPanel = useCallback(() => navigate.toPanel('forecast'), [navigate])
-  const openRoutesPanel = useCallback(() => navigate.toPanel('routes'), [navigate])
   const openAlarmsPanel = useCallback(() => navigate.toPanel('alarms'), [navigate])
   const openAnchorWatchPanel = useCallback(() => navigate.toPanel('anchor-watch'), [navigate])
   const openRibbonDialog = useCallback(() => setRibbonDialogOpen(true), [])
@@ -1810,10 +1787,10 @@ function AppShell() {
       case 'route':
         return (
           <RouteTile
+            status={routeActivationStatus}
+            latitude={latitude}
+            longitude={longitude}
             speedKts={speedOverGroundKts ?? 0}
-            routes={routes}
-            dashboardRouteId={dashboardRouteId}
-            onOpen={openRoutesPanel}
           />
         )
       case 'nearby-vessels':
@@ -2226,7 +2203,6 @@ function AppShell() {
     switch (panel) {
       case 'forecast': return 'forecast'
       case 'alarms': return 'alarms'
-      case 'routes': return 'routes'
       case 'radar': return 'radar'
       case 'assistant': return 'Mate'
       case 'settings': return 'settings'
@@ -2283,29 +2259,6 @@ function AppShell() {
             deleteRule={deleteAlarmRule}
             collisionTuningUrl={collisionTuningHref}
             forecastWarnings={activeForecastWarning}
-          />
-        )
-      case 'routes':
-        return (
-          <RoutePlannerDrawer
-            isDarkTheme={isDarkTheme}
-            currentSpeedKts={speedOverGroundKts}
-            vesselLat={latitude}
-            vesselLon={longitude}
-            routes={routes}
-            loading={routesLoading}
-            error={routesError}
-            createRoute={createRoute}
-            updateRoute={updateRoute}
-            deleteRoute={deleteRoute}
-            dashboardRouteId={dashboardRouteId}
-            onSetDashboardRouteId={setDashboardRouteId}
-            activationStatus={routeActivationStatus}
-            activating={routeActivating}
-            deactivating={routeDeactivating}
-            activateError={routeActivateError}
-            onActivate={activateRoute}
-            onDeactivate={deactivateRoute}
           />
         )
       case 'radar':
@@ -2887,7 +2840,7 @@ function AppShell() {
                 PANEL_SETTINGS_SECTIONS have a matching Settings section for
                 it to open, so it's absent everywhere else - Dashboard,
                 Settings itself, and every panel with no section of its own
-                (Routes, Documents, Inventory, Forecast, Wall displays). Hidden
+                (Documents, Inventory, Forecast, Wall displays). Hidden
                 below `sm`: on a phone the right cluster is already full, and
                 the breadcrumb is the slack absorber, so this button squeezed
                 the page name down to one letter. Settings stays one sidebar

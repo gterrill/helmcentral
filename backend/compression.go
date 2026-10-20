@@ -108,15 +108,6 @@ var noCompressRoutePatterns = map[string]bool{
 	// against. Many of the served MIME types (PDF, JPEG, PNG, WebP) are
 	// already-compressed anyway.
 	"/api/documents/:id/content": true,
-
-	// gshhg.go: gshhgCoastlineHandler gzips its own response once at
-	// startup (gshhgCoastlineGzipped) and negotiates Content-Encoding
-	// itself against the request's Accept-Encoding, exactly like the
-	// gzip middleware this route is skipping would have. Recompressing an
-	// already-gzipped body here would be wasted CPU on every request for a
-	// payload that never changes (backend perf audit Tier 3: measured
-	// +90-110ms on the boat before this fix).
-	"/api/gshhg-coastline": true,
 }
 
 // noCompressExtensions covers static files served from the embedded SPA

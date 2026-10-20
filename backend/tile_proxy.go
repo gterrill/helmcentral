@@ -96,13 +96,11 @@ func clampTileCoords(z, x, y, maxZoom int) (int, int, int) {
 	return maxZoom, x >> shift, y >> shift
 }
 
-// mapRoutes returns the /api routes for map imagery, the Carto basemap proxy and the coastline layer.
+// mapRoutes returns the /api routes for map imagery and the Carto basemap proxy.
 // Each row carries its own auth tier (docs/adr/0177).
 func mapRoutes(tileFetchClient *http.Client) []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/world-imagery/:z/:x/:y", tierRead, proxyWorldImageryTileHandler(globalTileCache, tileFetchClient)},
-		{http.MethodGet, "/api/world-imagery/prefetch/:jobId", tierRead, prefetchStatusHandler()},
-		{http.MethodGet, "/api/gshhg-coastline", tierRead, gshhgCoastlineHandler},
 
 		// Carto vector basemap proxy + offline cache (ADR 0067) - same
 		// tierRead as world-imagery above: read-only, no session write
@@ -112,7 +110,6 @@ func mapRoutes(tileFetchClient *http.Client) []apiRoute {
 		{http.MethodGet, "/api/basemap/tiles/:z/:x/:y", tierRead, basemapVectorTileHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/basemap/fonts/:fontstack/:range", tierRead, basemapFontsHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/basemap/sprite/:name", tierRead, basemapSpriteHandler(globalTileCache, tileFetchClient)},
-		{http.MethodPost, "/api/world-imagery/prefetch", tierWrite, prefetchWorldImageryHandler(globalTileCache, tileFetchClient)},
 		{http.MethodDelete, "/api/world-imagery/cache", tierWrite, deleteWorldImageryCacheHandler(globalTileCache)},
 	}
 }

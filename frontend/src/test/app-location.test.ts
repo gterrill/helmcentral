@@ -53,7 +53,11 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/dashboard/%E0%A4%A')).toEqual({ panel: null, pageId: null })
   })
 
-  it.each(['forecast', 'routes', 'radar', 'anchor-watch', 'alarms'] as const)(
+  it('sends the retired /routes path to the dashboard', () => {
+    expect(parseAppLocation('/routes')).toEqual({ panel: null, pageId: null })
+  })
+
+  it.each(['forecast', 'radar', 'anchor-watch', 'alarms'] as const)(
     'parses /%s as that panel',
     (panel) => {
       expect(parseAppLocation(`/${panel}`)).toEqual({ panel })
@@ -318,7 +322,7 @@ describe('formatAppLocation', () => {
     expect(formatAppLocation({ panel: null, pageId: 'a b' }, ctx)).toBe('/dashboard/a%20b')
   })
 
-  it.each(['forecast', 'routes', 'radar', 'anchor-watch', 'alarms'] as const)(
+  it.each(['forecast', 'radar', 'anchor-watch', 'alarms'] as const)(
     'formats a panel as /%s',
     (panel) => {
       expect(formatAppLocation({ panel }, ctx)).toBe(`/${panel}`)
@@ -474,7 +478,7 @@ describe('formatAppLocation', () => {
 
 describe('parse/format fixed point', () => {
   const paths = [
-    '/', '/dashboard/p2', '/dashboard/a%20b', '/forecast', '/routes',
+    '/', '/dashboard/p2', '/dashboard/a%20b', '/forecast',
     '/radar', '/anchor-watch', '/alarms', '/mate', '/mate/12345', '/settings', '/settings/signalk',
     '/display', '/display/flybridge',
     '/wall-displays', '/wall-displays/flybridge',

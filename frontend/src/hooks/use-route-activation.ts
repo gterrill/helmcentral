@@ -1,37 +1,36 @@
-import { useCallback, useMemo, useState } from 'react'
-import { apiRequest, useApiQuery } from '@/lib/api-query'
+import { useMemo } from 'react'
+import { useApiQuery } from '@/lib/api-query'
+import type { RouteWaypoint } from '@/lib/route-calc'
 
-/** A chartplotter go-to destination with no Helmcentral route behind it (ADR 0125): SignalK's Course API `nextPoint`, reverse-geocoded server-side. `name` is `''` until the backend's cache resolves it - see GET /api/routes/active's own doc comment (backend/route_activation.go). */
+/** SignalK's Course API `nextPoint` (ADR 0125), reverse-geocoded server-side. `name` is `''` until the backend's cache resolves it - see GET /api/routes/active's own doc comment (backend/active_route.go). */
 export interface RouteActivationDestination {
   lat: number
   lon: number
   name: string
 }
 
+/** The route SignalK is navigating, read from its route resource in authored order. */
+export interface ActiveRoute {
+  name: string
+  waypoints: RouteWaypoint[]
+}
+
 export type ActiveRouteStatus =
-  | { state: 'unknown' }
+  /** `loading`: the first poll has not been answered. `error`: the poll failed or the answer was unusable. */
+  | { state: 'unknown'; reason: 'loading' | 'error' }
   | { state: 'inactive'; destination: RouteActivationDestination | null }
   | {
       state: 'active'
-      routeId: string | null
+      route: ActiveRoute
       pointIndex: number
       reverse: boolean
-      /**
-       * The Course API's nextPoint (ADR 0125), same as the inactive state's
-       * own `destination` - present whenever GET /api/routes/active sent
-       * one, which it does whenever the Course API carries a nextPoint,
-       * REGARDLESS of whether routeId matched a Helmcentral route. A route
-       * activated outside Helmcentral (routeId null here) has no leg-by-leg
-       * ETA to compute, but the chartplotter's own destination is still
-       * available - see App.tsx's clockTripEta.
-       */
+      /** The Course API's nextPoint, present whenever the backend sent one. */
       destination: RouteActivationDestination | null
     }
 
 interface ActiveRouteResponse {
   active: boolean
-  route_id?: string | null
-  route_name?: string
+  route?: { name: string; waypoints: RouteWaypoint[] }
   point_index?: number
   reverse?: boolean
   destination?: { lat: number; lon: number; name: string }
@@ -39,28 +38,28 @@ interface ActiveRouteResponse {
 
 const DEFAULT_POLL_INTERVAL_SECONDS = 15
 const ACTIVE_KEY = ['/api/routes/active'] as const
-const UNKNOWN: ActiveRouteStatus = { state: 'unknown' }
+const LOADING: ActiveRouteStatus = { state: 'unknown', reason: 'loading' }
+const ERRORED: ActiveRouteStatus = { state: 'unknown', reason: 'error' }
 
 function toStatus(data: ActiveRouteResponse): ActiveRouteStatus {
   const destination = data.destination
     ? { lat: data.destination.lat, lon: data.destination.lon, name: data.destination.name }
     : null
   if (!data.active) return { state: 'inactive', destination }
+  // Active with no route to show is an unusable answer, not an inactive route.
+  if (!data.route) return ERRORED
   return {
     state: 'active',
-    routeId: data.route_id ?? null,
+    route: { name: data.route.name, waypoints: data.route.waypoints },
     pointIndex: typeof data.point_index === 'number' ? data.point_index : 0,
     reverse: data.reverse === true,
     destination,
   }
 }
 
+/** Polls what SignalK is navigating. Read-only: Helmcentral no longer starts or stops routes. */
 export function useRouteActivation(pollIntervalSeconds = DEFAULT_POLL_INTERVAL_SECONDS) {
-  const [activating, setActivating] = useState(false)
-  const [deactivating, setDeactivating] = useState(false)
-  const [activateError, setActivateError] = useState<string | null>(null)
-
-  const { data, error, refetch } = useApiQuery<ActiveRouteResponse>({
+  const { data, error } = useApiQuery<ActiveRouteResponse>({
     queryKey: ACTIVE_KEY,
     path: '/api/routes/active',
     refetchInterval: pollIntervalSeconds * 1000,
@@ -68,43 +67,9 @@ export function useRouteActivation(pollIntervalSeconds = DEFAULT_POLL_INTERVAL_S
   // Don't assume inactive on a failed poll: the route may still be active on
   // the boat's N2K bus even if we can't reach SignalK to confirm.
   const status = useMemo<ActiveRouteStatus>(
-    () => (error !== null || data === undefined ? UNKNOWN : toStatus(data)),
+    () => (error !== null ? ERRORED : data === undefined ? LOADING : toStatus(data)),
     [data, error],
   )
 
-  const settle = useCallback(async () => {
-    await refetch()
-  }, [refetch])
-
-  const activate = useCallback(async (routeId: string): Promise<boolean> => {
-    setActivateError(null)
-    setActivating(true)
-    try {
-      await apiRequest<unknown>(`/api/routes/${routeId}/activate`, { method: 'POST' })
-      await settle()
-      return true
-    } catch (err) {
-      setActivateError(err instanceof Error ? err.message : 'Failed to activate route')
-      return false
-    } finally {
-      setActivating(false)
-    }
-  }, [settle])
-
-  const deactivate = useCallback(async (): Promise<boolean> => {
-    setActivateError(null)
-    setDeactivating(true)
-    try {
-      await apiRequest<unknown>('/api/routes/deactivate', { method: 'POST' })
-      await settle()
-      return true
-    } catch (err) {
-      setActivateError(err instanceof Error ? err.message : 'Failed to deactivate route')
-      return false
-    } finally {
-      setDeactivating(false)
-    }
-  }, [settle])
-
-  return { status, activating, deactivating, activateError, activate, deactivate }
+  return { status }
 }

@@ -19,11 +19,9 @@ func cacheTestResult() placeSearchResult {
 	}}
 }
 
-func noRoutes() []routeData { return nil }
-
 func TestFindPlacesCache_IdenticalCallsHitProviderOnce(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "p", result: cacheTestResult()}
-	deps := findPlacesDeps(-19.2, 146.8, provider, noRoutes)
+	deps := findPlacesDeps(-19.2, 146.8, provider)
 	a, err := findPlacesRaw(t, deps, `{"query":"Breakwater Marina"}`)
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +40,7 @@ func TestFindPlacesCache_IdenticalCallsHitProviderOnce(t *testing.T) {
 
 func TestFindPlacesCache_QueryWhitespaceSharesEntryCaseDoesNot(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "p", result: cacheTestResult()}
-	deps := findPlacesDeps(-19.2, 146.8, provider, noRoutes)
+	deps := findPlacesDeps(-19.2, 146.8, provider)
 	for _, q := range []string{"Breakwater Marina", "  Breakwater   Marina "} {
 		if _, err := findPlacesRaw(t, deps, fmt.Sprintf(`{"query":%q}`, q)); err != nil {
 			t.Fatal(err)
@@ -83,14 +81,10 @@ func TestPlaceSearchCache_ClearKeepsClockResetRestoresIt(t *testing.T) {
 func TestFindPlacesCache_DistinctInputsAreSeparateEntries(t *testing.T) {
 	p1 := &fakeSearchPlacesProvider{id: "p1", result: cacheTestResult()}
 	p2 := &fakeSearchPlacesProvider{id: "p2", result: cacheTestResult()}
-	d1 := findPlacesDeps(-19.2, 146.8, p1, noRoutes)
+	d1 := findPlacesDeps(-19.2, 146.8, p1)
 	// findPlacesDeps resets the cache, so build every deps before any call.
-	d2 := findPlacesDeps(-19.2, 146.8, p2, noRoutes)
-	dFar := findPlacesDeps(-19.5, 146.8, p1, noRoutes)
-	withWaypoint := func() []routeData {
-		return []routeData{{Name: "R", Waypoints: []routeWaypoint{{Name: "Breakwater Marina", Lat: -19.2, Lon: 146.8}}}}
-	}
-	dBroad := findPlacesDeps(-19.2, 146.8, p1, withWaypoint)
+	d2 := findPlacesDeps(-19.2, 146.8, p2)
+	dFar := findPlacesDeps(-19.5, 146.8, p1)
 
 	calls := []struct {
 		deps assistantToolDeps
@@ -100,7 +94,6 @@ func TestFindPlacesCache_DistinctInputsAreSeparateEntries(t *testing.T) {
 		{d1, `{"query":"Other Marina"}`},
 		{d1, `{"query":"Breakwater Marina","max_results":3}`},
 		{dFar, `{"query":"Breakwater Marina"}`},
-		{dBroad, `{"query":"Breakwater Marina"}`},
 		{d2, `{"query":"Breakwater Marina"}`},
 	}
 	for _, c := range calls {
@@ -108,8 +101,8 @@ func TestFindPlacesCache_DistinctInputsAreSeparateEntries(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := p1.callCount(); got != 5 {
-		t.Errorf("p1 calls = %d, want 5", got)
+	if got := p1.callCount(); got != 4 {
+		t.Errorf("p1 calls = %d, want 4", got)
 	}
 	if got := p2.callCount(); got != 1 {
 		t.Errorf("p2 calls = %d, want 1", got)
@@ -118,8 +111,8 @@ func TestFindPlacesCache_DistinctInputsAreSeparateEntries(t *testing.T) {
 
 func TestFindPlacesCache_SameCellDifferentCentreStillCachedButDistanceFresh(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "p", result: cacheTestResult()}
-	dNear := findPlacesDeps(-19.200, 146.800, provider, noRoutes)
-	dNudge := findPlacesDeps(-19.204, 146.800, provider, noRoutes)
+	dNear := findPlacesDeps(-19.200, 146.800, provider)
+	dNudge := findPlacesDeps(-19.204, 146.800, provider)
 	a, _ := findPlacesRaw(t, dNear, `{"query":"Breakwater Marina"}`)
 	b, _ := findPlacesRaw(t, dNudge, `{"query":"Breakwater Marina"}`)
 	if provider.callCount() != 1 {
@@ -132,7 +125,7 @@ func TestFindPlacesCache_SameCellDifferentCentreStillCachedButDistanceFresh(t *t
 
 func TestFindPlacesCache_ErrorNotCachedAndReturned(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "p", err: fmt.Errorf("network unreachable")}
-	deps := findPlacesDeps(-19.2, 146.8, provider, noRoutes)
+	deps := findPlacesDeps(-19.2, 146.8, provider)
 	for i := 0; i < 2; i++ {
 		if _, err := findPlacesRaw(t, deps, `{"query":"Breakwater Marina"}`); err == nil {
 			t.Fatal("expected error")
@@ -145,7 +138,7 @@ func TestFindPlacesCache_ErrorNotCachedAndReturned(t *testing.T) {
 
 func TestFindPlacesCache_ExpiredEntryNotServedOnProviderError(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "p", result: cacheTestResult()}
-	deps := findPlacesDeps(-19.2, 146.8, provider, noRoutes)
+	deps := findPlacesDeps(-19.2, 146.8, provider)
 	clock := time.Now()
 	placeSearchCache.now = func() time.Time { return clock }
 	if _, err := findPlacesRaw(t, deps, `{"query":"Breakwater Marina"}`); err != nil {
@@ -202,7 +195,7 @@ func TestPlaceSearchCache_EvictsOldestAtBound(t *testing.T) {
 // six hours.
 func TestFindPlacesCache_EmptyResultWithNoteIsNotCached(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "p", result: placeSearchResult{Search: "none", RadiusNm: 50, Note: "the place-name service did not answer"}}
-	deps := findPlacesDeps(-19.2, 146.8, provider, noRoutes)
+	deps := findPlacesDeps(-19.2, 146.8, provider)
 	for i := 0; i < 2; i++ {
 		if _, err := findPlacesRaw(t, deps, `{"query":"Nowhere Cove"}`); err != nil {
 			t.Fatal(err)
@@ -215,7 +208,7 @@ func TestFindPlacesCache_EmptyResultWithNoteIsNotCached(t *testing.T) {
 
 func TestFindPlacesCache_GenuinelyEmptyResultIsCached(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "p", result: placeSearchResult{Search: "none", RadiusNm: 50}}
-	deps := findPlacesDeps(-19.2, 146.8, provider, noRoutes)
+	deps := findPlacesDeps(-19.2, 146.8, provider)
 	for i := 0; i < 2; i++ {
 		if _, err := findPlacesRaw(t, deps, `{"query":"Nowhere Cove"}`); err != nil {
 			t.Fatal(err)

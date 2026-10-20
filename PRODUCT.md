@@ -21,7 +21,7 @@ responsible is asleep, off the boat, or busy with something else.
 ## Product Purpose
 
 A dashboard and alarm system for SignalK. It puts anchor watch, tides, weather,
-routes, tanks and electrical monitoring on one screen at the helm, and sends
+tanks and electrical monitoring on one screen at the helm, and sends
 notifications off the boat when a rule fires.
 
 Failures must be visible to the operator. Stale readings must be distinguishable
@@ -51,7 +51,7 @@ Design for two viewing conditions:
 - **A helm touchscreen in daylight.** Direct sun and glare, read at arm's
   length, by someone doing something else at the same time.
 - **A laptop at the nav station.** Longer sessions with a pointer and keyboard:
-  planning routes, arranging layouts, configuring alarms and settings.
+  arranging layouts, configuring alarms and settings.
 
 Phones receive off-boat alarm notifications. Phone use was considered but is
 not a primary design target.
@@ -83,8 +83,7 @@ Shipped:
   minutes for up to 24 hours, every attempt logged.
 - A watchdog on the delta stream raises an alarm if the SignalK connection is
   lost. An external service can monitor a periodic off-boat heartbeat.
-- Route planning that pushes an active route to SignalK for the autopilot,
-  autopilot control on SignalK's v2 API, ARPA radar targets, embedded weather
+- A Route tile that follows the route SignalK is navigating, autopilot control on SignalK's v2 API, ARPA radar targets, embedded weather
   radar.
 - Tides, weather, waves and forecast warnings as sandboxed WASM plugins loaded
   from a directory (Extism/wazero, no filesystem or process access, per-plugin

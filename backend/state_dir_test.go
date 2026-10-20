@@ -6,7 +6,7 @@ import (
 )
 
 // cacheFilePath is the single choke point every runtime state path goes
-// through (routes.json, secrets.sqlite, the caches, ...). Rooting it at
+// through (secrets.sqlite, the caches, ...). Rooting it at
 // HELMCENTRAL_STATE_DIR is what lets an isolated stack — E2E runs in
 // particular — keep its writes out of the developer's working tree without
 // having to enumerate a separate env var per file.
@@ -14,7 +14,7 @@ import (
 func TestCacheFilePathDefaultsToRelativeFallback(t *testing.T) {
 	t.Setenv("HELMCENTRAL_STATE_DIR", "")
 
-	if got := cacheFilePath("ROUTES_FILE", "data/routes.json"); got != "data/routes.json" {
+	if got := cacheFilePath("DASHBOARD_PAGES_FILE", "data/dashboard-pages.json"); got != "data/dashboard-pages.json" {
 		t.Fatalf("expected bare fallback when no state dir is set, got %q", got)
 	}
 }
@@ -23,8 +23,8 @@ func TestCacheFilePathRootsFallbackAtStateDir(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("HELMCENTRAL_STATE_DIR", stateDir)
 
-	want := filepath.Join(stateDir, "data/routes.json")
-	if got := cacheFilePath("ROUTES_FILE", "data/routes.json"); got != want {
+	want := filepath.Join(stateDir, "data/dashboard-pages.json")
+	if got := cacheFilePath("DASHBOARD_PAGES_FILE", "data/dashboard-pages.json"); got != want {
 		t.Fatalf("expected fallback rooted at state dir\n want: %q\n  got: %q", want, got)
 	}
 }
@@ -56,11 +56,11 @@ func TestCacheFilePathStateDirCoversEveryStatePath(t *testing.T) {
 
 func TestCacheFilePathExplicitEnvOverrideWinsOverStateDir(t *testing.T) {
 	t.Setenv("HELMCENTRAL_STATE_DIR", t.TempDir())
-	t.Setenv("ROUTES_FILE", "/var/lib/helmcentral/routes.json")
+	t.Setenv("DASHBOARD_PAGES_FILE", "/var/lib/helmcentral/dashboard-pages.json")
 
 	// An operator who names an exact path means it; the state dir is only a
 	// root for the *defaults*.
-	if got := cacheFilePath("ROUTES_FILE", "data/routes.json"); got != "/var/lib/helmcentral/routes.json" {
+	if got := cacheFilePath("DASHBOARD_PAGES_FILE", "data/dashboard-pages.json"); got != "/var/lib/helmcentral/dashboard-pages.json" {
 		t.Fatalf("explicit override should win over state dir, got %q", got)
 	}
 }

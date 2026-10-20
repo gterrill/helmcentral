@@ -84,7 +84,7 @@ func failingFetcher() *fakeTileFetcher {
 // this proxy, and everything the frontend pins by name must survive. A
 // regression in either direction silently breaks the maps - a stale URL
 // breaks offline, a renamed source/layer breaks ADR 0066's label layers and
-// the hybrid-satellite restyling in route-planner-map.tsx.
+// the map layers that attach to them by name.
 func TestBasemapStyleHandler_RewritesURLsAndPreservesSourceAndLayerIDs(t *testing.T) {
 	cache := newTestTileCache(t)
 	fetcher := respondingFetcher("positron-gl-style/style.json", "application/json", fakeCartoStyleJSON)
@@ -136,8 +136,8 @@ func TestBasemapStyleHandler_RewritesURLsAndPreservesSourceAndLayerIDs(t *testin
 			}
 		}
 	}
-	// route-planner-map.tsx pins these by name (HYBRID_HIDDEN_LAYER_IDS,
-	// HYBRID_LABEL_LAYER_IDS, BASE_STYLE_FIRST_LAYER_ID).
+	// The frontend pins these by name (BASE_STYLE_FIRST_LAYER_ID and the
+	// place-label layers).
 	for _, want := range []string{"background", "landcover", "water", "watername_lake", "place_town", "place_city_dot_z7"} {
 		if !ids[want] {
 			t.Errorf("rewritten style dropped layer id %q", want)

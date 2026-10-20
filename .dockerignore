@@ -10,7 +10,6 @@ backend/cache/
 backend/helmcentral
 backend/data/*.sqlite
 backend/data/secrets.key
-backend/data/routes.json
 backend/data/dashboard-layout.json
 backend/data/dashboard-pages.json
 # Removed feature (ADR 0113). Dockerfile does `COPY backend/. .`, so

@@ -32,7 +32,7 @@ export interface PoiMapActiveRouteWaypoint {
 
 /**
  * The currently active route (ADR 0092's next-waypoint line, reused here):
- * App.tsx derives this once from useRoutes/useRouteActivation and
+ * App.tsx derives this once from useRouteActivation and
  * nextWaypoint, so this tile never has to know route activation exists, only
  * how to draw one. `waypoints` is in traversal order - the order `nextIndex`
  * indexes into - which is not always the route's authored order; see
@@ -619,8 +619,7 @@ export default function PoiMapTileImpl({
                 dragRotate={false}
                 onLoad={declutterLabels}
                 onMoveEnd={declutterLabels}
-                // Same reasoning as anchor-watch-map.tsx and
-                // route-planner-map.tsx: OpenSeaMap requires attribution, and
+                // Same reasoning as anchor-watch-map.tsx: OpenSeaMap requires attribution, and
                 // compact keeps it to a single "i" until tapped rather than a
                 // permanent credit strip. useCollapsedMapAttribution's own
                 // doc covers why this can't be done in CSS.
@@ -629,8 +628,7 @@ export default function PoiMapTileImpl({
               >
                 {/* Sourceless anchor layer, mounted first so later rasters
                     (OpenSeaMap) have a stable beforeId to pin themselves under
-                    the vector labels — see route-planner-map.tsx's identical
-                    comment for the full reasoning. */}
+                    the vector labels. */}
                 <Layer id="raster-overlay-anchor" type="background" paint={{ 'background-opacity': 0 }} />
 
                 <MapPlaceLabels isDarkTheme={dark} overImagery={false} />

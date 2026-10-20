@@ -275,13 +275,6 @@ func TestBuildAssistantSystemPrompt_PlanningHorizonGuidance(t *testing.T) {
 	}
 }
 
-func TestBuildAssistantSystemPrompt_AsksToCreateRouteForPassage(t *testing.T) {
-	prompt := buildAssistantSystemPrompt(basePromptContext())
-	if !strings.Contains(prompt, "Would you like me to create a route for this passage?") {
-		t.Fatalf("expected the prompt to tell Mate to offer route creation as a follow-up, got:\n%s", prompt)
-	}
-}
-
 // The operator asked about an outer-reef day trip; Mate said there was no
 // window through Thursday but Friday looked possible (13-16 kts, 1.4-1.5m).
 // The operator then moved anchorage to Dunk Island and asked only "What do

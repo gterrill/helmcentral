@@ -14,8 +14,8 @@ var mateToolFindPlaces = mateTool{
 	name: "find_places",
 	function: openRouterFunctionDef{
 		Description: "Resolve a place name (a bay, anchorage, island, reef, marina, harbour or similar) " +
-			"to one or more candidate positions with distance and bearing, searching the vessel's saved " +
-			"route waypoints first and then the configured place-names plugin. Centres on the vessel's " +
+			"to one or more candidate positions with distance and bearing, searching the " +
+			"configured place-names plugin. Centres on the vessel's " +
 			"current position unless near_lat/near_lon are given. Call this before any forecast or tide " +
 			"tool for a place you only know by name. Pass the bare feature name (e.g. \"Bona Bay\", not " +
 			"\"Bona Bay, Gloucester Island\"). For a place well away from the vessel, or when a lookup " +
@@ -105,12 +105,8 @@ type assistantFindPlacesResult struct {
 
 // dedupeAssistantPlaceCandidates drops a later candidate that shares a
 // case-insensitive name with, and sits within 500m of, an earlier one
-// already kept - the same real-world feature returned twice (a saved
-// waypoint and the place-names provider's own copy of it, most often)
-// rather than two distinct features that happen to share a name. Earlier
-// candidates win, which in practice means a route waypoint (added before
-// the provider's results) is preferred over the provider's guess at the
-// same place.
+// already kept - the same real-world feature returned twice rather than two
+// distinct features that happen to share a name. Earlier candidates win.
 func dedupeAssistantPlaceCandidates(candidates []assistantPlaceCandidate) []assistantPlaceCandidate {
 	const dedupeDistanceM = 500.0
 
@@ -134,12 +130,10 @@ func dedupeAssistantPlaceCandidates(candidates []assistantPlaceCandidate) []assi
 	return out
 }
 
-// executeFindPlaces searches the vessel's saved route waypoints first, then
-// hands the query to the configured place-names provider's search_places
-// (ADR 0101) - the provider owns the actual search ladder (an exact-name
-// rung, and a broader rung it runs only when told to); this host only ever
-// does what it always has for every provider: compute distance/bearing,
-// dedupe against waypoints, sort, and trim to maxResults.
+// executeFindPlaces hands the query to the configured place-names provider's
+// search_places (ADR 0101) - the provider owns the actual search ladder (an
+// exact-name rung, and a broader rung it runs when told to); this host
+// computes distance/bearing, dedupes, sorts, and trims to maxResults.
 func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -194,30 +188,6 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 	}
 
 	var candidates []assistantPlaceCandidate
-	waypointHit := false
-	for _, route := range d.routes() {
-		for _, wp := range route.Waypoints {
-			name := strings.TrimSpace(wp.Name)
-			// A waypoint has no MMSI-like identifier of its own, so id is
-			// always "" here - assistantNameOrExactIDMatches then reduces to
-			// the case-insensitive substring check this line always did
-			// (shared with matchAssistantNearbyVessels and
-			// latestContactsByName - code-review finding, 2026-09-25).
-			if !assistantNameOrExactIDMatches(name, "", query) {
-				continue
-			}
-			waypointHit = true
-			candidates = append(candidates, assistantPlaceCandidate{
-				Name:       name,
-				Kind:       "waypoint",
-				Lat:        wp.Lat,
-				Lon:        wp.Lon,
-				DistanceNm: roundTo1(haversineMeters(lat, lon, wp.Lat, wp.Lon) / metersPerNauticalMile),
-				BearingDeg: int(math.Round(bearingDeg(lat, lon, wp.Lat, wp.Lon))),
-				Source:     "route:" + route.Name,
-			})
-		}
-	}
 
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -228,18 +198,12 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		return "", fmt.Errorf("find_places: %w", err)
 	}
 
-	// Broad tells the provider whether its broader (and more expensive)
-	// search rung is worth running at all: a waypoint hit means the
-	// operator's own answer is already in hand, so only the provider's
-	// cheap exact-name search runs - it's still always run, even after a
-	// waypoint hit, since it's the only way the provider's own position for
-	// the same place ever reaches the model.
 	searchResult, err := searchPlacesCached(provider, providerID, placeSearchInput{
 		Query:      query,
 		Lat:        lat,
 		Lon:        lon,
 		MaxResults: maxResults,
-		Broad:      !waypointHit,
+		Broad:      true,
 	})
 	if err != nil {
 		return "", fmt.Errorf("find_places: %w", err)
@@ -263,11 +227,6 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		candidates = candidates[:maxResults]
 	}
 
-	search := searchResult.Search
-	if waypointHit {
-		search = "waypoints"
-	}
-
 	centre := assistantLatLon{Lat: lat, Lon: lon}
 	centredOn := ""
 	if searchResult.CentredOn != nil {
@@ -279,7 +238,7 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		Centre:    &centre,
 		CentredOn: centredOn,
 		RadiusNm:  searchResult.RadiusNm,
-		Search:    search,
+		Search:    searchResult.Search,
 		Results:   candidates,
 		Note:      searchResult.Note,
 	}

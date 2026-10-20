@@ -147,7 +147,7 @@ describe('wall-display tiles fit their registered grid constraint', () => {
         sunsetTime="7:41PM"
         moonPhase="waxingGibbous"
         placeName="Airlie Beach, Queensland"
-        tripEta={{ label: 'Mooloolaba Marina', etaAt: new Date('2026-06-15T04:00:00Z'), basis: 'plan' }}
+        tripEta={{ label: 'Mooloolaba Marina', etaAt: new Date('2026-06-15T04:00:00Z') }}
       />,
       columnsToPx(minW!),
       gridPixelHeight(minH!),

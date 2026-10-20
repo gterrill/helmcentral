@@ -257,7 +257,7 @@ func (c *signalKStreamClient) dial(ctx context.Context, streamURL, httpBaseURL s
 		return conn, nil
 	}
 
-	// Mirrors the write paths' retry-once idiom (route_activation.go): a
+	// Mirrors the write paths' retry-once idiom (signalk_rest.go): a
 	// rejected token is nearly always an expired one.
 	if token == "" || response == nil || response.StatusCode != http.StatusUnauthorized {
 		return nil, withDialStatus(err, response)

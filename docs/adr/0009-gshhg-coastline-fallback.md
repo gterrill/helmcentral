@@ -1,7 +1,7 @@
 # ADR 0009: GSHHG Coastline Fallback Layer for the Route Planner Map
 
 ## Status
-Accepted
+Accepted. Superseded by ADR 0195, which removes the route planner map and with it the coastline layer.
 
 ## Context
 ADR 0006 (Manual Route Planning) explicitly decided against any chart licensing dependency, and the route planner map currently has no land/coastline reference layer beyond whatever the underlying Carto basemap style happens to render and the OpenSeaMap seamark overlay. A route can currently be drawn straight through a landmass with zero visual cue beyond the basemap's own (non-marine-purposed) land rendering. ADR 0066 later narrows the "whatever the basemap happens to render" part for place names, by adding our own style layers on the Carto vector source. That is independent of the coastline geometry this ADR is about.

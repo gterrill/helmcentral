@@ -39,9 +39,9 @@ moment to appear the first time a given area is searched; after that the
 answer is cached for a few hours, so re-opening the same stretch of coast is
 fast.
 
-Activate a route and its line appears on the Nearby map automatically, the
-leg you're on drawn brighter and thicker than the rest - nothing to turn on,
-and nothing shows while no route is active.
+When SignalK is navigating a route, its line appears on the Nearby map
+automatically, the leg you're on drawn brighter and thicker than the rest -
+nothing to turn on, and nothing shows while no route is active.
 
 Add more than one Nearby map to a page, or to different pages, each with its
 own range and categories: a wide "Anchorages" map at 10 nm on the passage
