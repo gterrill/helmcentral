@@ -490,27 +490,64 @@ func TestPassageRowVerdict(t *testing.T) {
 
 // ── arguments ───────────────────────────────────────────────────────────
 
+// On the boat the model sent both passage_hours and speed_kn three times and
+// retried identically, so no card appeared. Both are accepted: the hours win
+// and the result says the speed was ignored.
+func TestAssessPassageWindowTool_BothHoursAndSpeedUseTheHoursAndSayTheSpeedWasIgnored(t *testing.T) {
+	d := pwToolDeps(pwLimitsAll())
+	both := strings.Replace(pwToolArgs, `"speed_kn":6`, `"passage_hours":10,"speed_kn":6`, 1)
+	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(both))
+	if err != nil {
+		t.Fatalf("both fields must be accepted: %v", err)
+	}
+	if !strings.Contains(result, "speed_kn 6 was ignored") || !strings.Contains(result, "legs[0]") {
+		t.Fatalf("the result must say the speed was ignored for the leg: %s", result)
+	}
+	cards := d.takeCards(result)
+	if len(cards) != 1 {
+		t.Fatalf("cards = %+v", cards)
+	}
+	args, err := parsePassageWindowArgs(json.RawMessage(both))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan := planPassageLeg(0, args.Legs[0]); plan.hours != 10 {
+		t.Fatalf("passage_hours must win over speed_kn, plan hours = %v", plan.hours)
+	}
+	if strings.Contains(pwToolResultWithoutBoth(t, d), "was ignored") {
+		t.Fatalf("a leg with one field has nothing to note")
+	}
+}
+
+func pwToolResultWithoutBoth(t *testing.T, d assistantToolDeps) string {
+	t.Helper()
+	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
 func TestParsePassageWindowArgs_NamesTheBadArgument(t *testing.T) {
 	good := `{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`
 	if _, err := parsePassageWindowArgs(json.RawMessage(good)); err != nil {
 		t.Fatalf("good args: %v", err)
 	}
 	for name, tc := range map[string]struct{ args, want string }{
-		"both hours and speed": {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10,"speed_kn":6}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "legs[0]"},
-		"neither":              {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}]}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "passage_hours"},
-		"one point":            {`{"legs":[{"route":[{"lat":-19,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "route"},
-		"hours too long":       {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":40}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "passage_hours"},
-		"speed too low":        {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"speed_kn":0.5}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "speed_kn"},
-		"bad lat":              {`{"legs":[{"route":[{"lat":-99,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "lat"},
-		"bad flood":            {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10,"flood_set_deg":400}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "flood_set_deg"},
-		"no legs":              {`{"legs":[],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "legs"},
-		"stays length":         {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"stays_nights":[1],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "stays_nights"},
-		"stay too long":        {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10},{"route":[{"lat":-18,"lon":147},{"lat":-17,"lon":147}],"passage_hours":10}],"stays_nights":[15],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "stays_nights"},
-		"no dates":             {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":[],"depart_time":"06:00"}`, "departure_dates"},
-		"bad date":             {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["20/10/2026"],"depart_time":"06:00"}`, "departure_dates"},
-		"missing depart":       {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"]}`, "depart_time"},
-		"bad depart":           {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"],"depart_time":"6am"}`, "depart_time"},
-		"bad leg depart":       {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10,"depart_time":"25:00"}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "depart_time"},
+		"neither":        {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}]}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "passage_hours"},
+		"one point":      {`{"legs":[{"route":[{"lat":-19,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "route"},
+		"hours too long": {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":40}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "passage_hours"},
+		"speed too low":  {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"speed_kn":0.5}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "speed_kn"},
+		"bad lat":        {`{"legs":[{"route":[{"lat":-99,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "lat"},
+		"bad flood":      {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10,"flood_set_deg":400}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "flood_set_deg"},
+		"no legs":        {`{"legs":[],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "legs"},
+		"stays length":   {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"stays_nights":[1],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "stays_nights"},
+		"stay too long":  {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10},{"route":[{"lat":-18,"lon":147},{"lat":-17,"lon":147}],"passage_hours":10}],"stays_nights":[15],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "stays_nights"},
+		"no dates":       {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":[],"depart_time":"06:00"}`, "departure_dates"},
+		"bad date":       {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["20/10/2026"],"depart_time":"06:00"}`, "departure_dates"},
+		"missing depart": {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"]}`, "depart_time"},
+		"bad depart":     {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10}],"departure_dates":["2026-10-20"],"depart_time":"6am"}`, "depart_time"},
+		"bad leg depart": {`{"legs":[{"route":[{"lat":-19,"lon":147},{"lat":-18,"lon":147}],"passage_hours":10,"depart_time":"25:00"}],"departure_dates":["2026-10-20"],"depart_time":"06:00"}`, "depart_time"},
 	} {
 		_, err := parsePassageWindowArgs(json.RawMessage(tc.args))
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
