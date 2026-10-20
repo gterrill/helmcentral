@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -63,12 +62,47 @@ const (
 // sourceHistoryLookbackDays is how far back logged history counts.
 const sourceHistoryLookbackDays = 90
 
-// sourceHistory is what the boat has logged for the signature paths: the last
-// time each was recorded. Err is set when it could not be read, in which case
-// nothing may be concluded from Last.
+// sourceHistory is what the boat has logged under the equipment groups: the
+// last time each path was recorded (Last), and, per source, the last time
+// anything under it was recorded (Active). Err is set when it could not be
+// read, in which case nothing may be concluded from the rest.
+//
+// Active is what tells "missing" from "no recent data": propulsion.0 logged
+// exhaust temperature and never revolutions, so it is alive and wrong; a
+// source with nothing logged at all (laid up, or a short retention) is merely
+// silent and must never be flagged.
 type sourceHistory struct {
-	Last map[string]time.Time
-	Err  error
+	Last   map[string]time.Time
+	Active map[string]time.Time
+	Err    error
+}
+
+// newSourceHistory builds the history from the last-logged time of each path.
+func newSourceHistory(last map[string]time.Time) sourceHistory {
+	h := sourceHistory{Last: last, Active: map[string]time.Time{}}
+	for path, at := range last {
+		source, ok := sourceOfPath(path)
+		if !ok {
+			continue
+		}
+		if prev, seen := h.Active[source]; !seen || at.After(prev) {
+			h.Active[source] = at
+		}
+	}
+	return h
+}
+
+// sourceOfPath is the source (propulsion.port, tanks.fuel.2) a path belongs
+// to: the shortest leading part of the path that is one.
+func sourceOfPath(path string) (string, bool) {
+	parts := strings.Split(path, ".")
+	for n := 2; n <= 3 && n < len(parts); n++ {
+		prefix := strings.Join(parts[:n], ".")
+		if _, _, ok := parseSource(prefix); ok {
+			return prefix, true
+		}
+	}
+	return "", false
 }
 
 // signaturePaths lists the signature paths of source.
@@ -125,9 +159,10 @@ func liveCarriesSignature(t telemetryReader, group sourceGroup, source string) b
 	return false
 }
 
-// signatureState judges an instance: carried when live or logged, missing when
-// history was read and holds none, unknown when history could not be read and
-// the live tree does not carry it.
+// signatureState judges an instance: carried when live or logged; missing only
+// when history was read and shows the source alive without ever carrying the
+// signature; unknown when history could not be read, or the source logged
+// nothing at all (no recent data, so nothing can be said against it).
 func signatureState(live bool, h sourceHistory, group sourceGroup, source string) string {
 	if live {
 		return signatureCarried
@@ -138,35 +173,34 @@ func signatureState(live bool, h sourceHistory, group sourceGroup, source string
 	if _, ok := h.lastLogged(group, source); ok {
 		return signatureCarried
 	}
-	return signatureMissing
+	if _, active := h.Active[source]; active {
+		return signatureMissing
+	}
+	return signatureUnknown
 }
 
-// signatureFluxRegex is the anchored measurement regex matching every
-// signature path of every kind.
-func signatureFluxRegex() string {
+// historyFluxRegex is the anchored measurement regex matching every path under
+// every equipment source shape (propulsion.<id>., electrical.batteries.<id>.,
+// tanks.<category>.<id>. and so on). Reading every path, not only signature
+// leaves, is what lets a source that is alive but never carried its signature
+// be told from one that logged nothing.
+func historyFluxRegex() string {
 	var alts []string
 	for _, group := range sourceGroupOrder {
-		var shape *regexp.Regexp
 		for _, s := range sourceShapes {
 			if s.group == group {
-				shape = s.re
+				alts = append(alts, strings.TrimSuffix(strings.TrimPrefix(s.re.String(), "^"), "$"))
 			}
 		}
-		prefix := strings.TrimSuffix(strings.TrimPrefix(shape.String(), "^"), "$")
-		var leaves []string
-		for _, leaf := range sourceSignatures[group].leaves {
-			leaves = append(leaves, regexp.QuoteMeta(leaf))
-		}
-		alts = append(alts, prefix+`\.(`+strings.Join(leaves, "|")+")")
 	}
-	return "^(" + strings.Join(alts, "|") + ")$"
+	return `^(` + strings.Join(alts, "|") + `)\.`
 }
 
-// buildInfluxSourceSignatureFlux is the query for the last time each signature
-// path was logged. An anchored regex on the measurement pushes down to
-// storage, so it stays cheap over the whole lookback (about half a second on
-// the boat, 90 days).
-func buildInfluxSourceSignatureFlux(bucket, field string, lookbackDays int) (string, error) {
+// buildInfluxSourceHistoryFlux is the query for the last time each path under
+// the equipment sources was logged. An anchored regex on the measurement
+// pushes down to storage; on the boat it returns about 270 paths over 90 days
+// in well under a second.
+func buildInfluxSourceHistoryFlux(bucket, field string, lookbackDays int) (string, error) {
 	bucketLiteral, err := fluxStringLiteral(bucket)
 	if err != nil {
 		return "", fmt.Errorf("bucket: %w", err)
@@ -187,54 +221,112 @@ func buildInfluxSourceSignatureFlux(bucket, field string, lookbackDays int) (str
 			"  |> sort(columns: [\"_time\"])\n"+
 			"  |> last()\n"+
 			"  |> keep(columns: [\"_measurement\", \"_time\"])",
-		bucketLiteral, lookbackDays, fieldLiteral, signatureFluxRegex(),
+		bucketLiteral, lookbackDays, fieldLiteral, historyFluxRegex(),
 	), nil
 }
 
-// sourceHistoryTTL is how long a successful read of the history is reused.
-// Discovery and the setup status are read together and often; the answer
-// changes only when an instrument first logs a signature path.
-const sourceHistoryTTL = time.Minute
+const (
+	// sourceHistoryTTL is how long a successful read is reused. Discovery and
+	// the setup status are read together and often.
+	sourceHistoryTTL = time.Minute
+	// sourceHistoryFailureTTL is how long a failed read is reused, so an
+	// InfluxDB that is down is asked about twice a minute, not on every request.
+	sourceHistoryFailureTTL = 30 * time.Second
+	// sourceHistoryTimeout bounds one query.
+	sourceHistoryTimeout = 8 * time.Second
+)
 
-var sourceHistoryCache struct {
-	mu   sync.Mutex
-	at   time.Time
-	last map[string]time.Time
+// sourceHistoryCall is one query in flight; its waiters receive result when
+// done closes.
+type sourceHistoryCall struct {
+	done   chan struct{}
+	result sourceHistory
 }
 
-// loadSourceHistory reads the logged signature history. It is a variable so
-// handler tests can supply history without an InfluxDB. A failure is returned
-// in Err, never replaced by an empty history, and is not cached.
+var sourceHistoryState struct {
+	mu       sync.Mutex
+	at       time.Time
+	have     bool
+	result   sourceHistory
+	inflight *sourceHistoryCall
+	failing  bool
+}
+
+// fetchSourceHistory and sourceHistoryNow are variables so tests can supply a
+// blocking or failing loader and a clock.
+var (
+	fetchSourceHistory = queryInfluxSourceHistory
+	sourceHistoryNow   = time.Now
+)
+
+// loadSourceHistory reads the logged history. It is a variable so handler
+// tests can supply history without an InfluxDB. A failure is returned in Err,
+// never replaced by an empty history.
 var loadSourceHistory = readSourceHistory
 
+// readSourceHistory is single-flight: one query at a time, the other callers
+// wait for its result. A success is reused for sourceHistoryTTL and a failure
+// for sourceHistoryFailureTTL. The mutex is never held across the query. A
+// failure is logged once per streak, and recovery once.
 func readSourceHistory() sourceHistory {
-	sourceHistoryCache.mu.Lock()
-	defer sourceHistoryCache.mu.Unlock()
-	if sourceHistoryCache.last != nil && time.Since(sourceHistoryCache.at) < sourceHistoryTTL {
-		return sourceHistory{Last: sourceHistoryCache.last}
+	st := &sourceHistoryState
+	st.mu.Lock()
+	if st.have {
+		ttl := sourceHistoryTTL
+		if st.result.Err != nil {
+			ttl = sourceHistoryFailureTTL
+		}
+		if sourceHistoryNow().Sub(st.at) < ttl {
+			r := st.result
+			st.mu.Unlock()
+			return r
+		}
 	}
-	last, err := queryInfluxSourceHistory()
+	if call := st.inflight; call != nil {
+		st.mu.Unlock()
+		<-call.done
+		return call.result
+	}
+	call := &sourceHistoryCall{done: make(chan struct{})}
+	st.inflight = call
+	st.mu.Unlock()
+
+	last, err := fetchSourceHistory()
+	var result sourceHistory
 	if err != nil {
-		log.Printf("source history: %v", err)
-		return sourceHistory{Err: err}
+		result = sourceHistory{Err: err}
+	} else {
+		result = newSourceHistory(last)
 	}
-	sourceHistoryCache.at, sourceHistoryCache.last = time.Now(), last
-	return sourceHistory{Last: last}
+
+	st.mu.Lock()
+	if err != nil && !st.failing {
+		log.Printf("source history: %v; Discovery lists only sources reporting now", err)
+	}
+	if err == nil && st.failing {
+		log.Printf("source history: logged history is readable again")
+	}
+	st.failing = err != nil
+	st.at, st.have, st.result, st.inflight = sourceHistoryNow(), true, result, nil
+	st.mu.Unlock()
+	call.result = result
+	close(call.done)
+	return result
 }
 
-// queryInfluxSourceHistory returns the last time each signature path was
-// logged within sourceHistoryLookbackDays.
+// queryInfluxSourceHistory returns the last time each path under the equipment
+// sources was logged within sourceHistoryLookbackDays.
 func queryInfluxSourceHistory() (map[string]time.Time, error) {
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {
 		return nil, fmt.Errorf("influxdb is not configured")
 	}
 	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
-	flux, err := buildInfluxSourceSignatureFlux(bucket, field, sourceHistoryLookbackDays)
+	flux, err := buildInfluxSourceHistoryFlux(bucket, field, sourceHistoryLookbackDays)
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), sourceHistoryTimeout)
 	defer cancel()
 	result, err := client.QueryAPI(org).Query(ctx, flux)
 	if err != nil {

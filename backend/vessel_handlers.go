@@ -330,7 +330,7 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 			if row.Reporting {
 				row.Metrics = sourceMetrics(telemetry, group, id)
 			}
-			if group == sourceBattery && row.Reporting {
+			if group == sourceBattery {
 				row.BusName = namer.busBatteryName(id)
 				row.ChargerInput = namer.isChargerInstance(id)
 			}

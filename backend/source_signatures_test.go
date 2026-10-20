@@ -1,30 +1,35 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
-// signatureHistoryFixture reads the signature paths the boat's InfluxDB held
-// on 2026-10-21 (90 days, captured from the real server): the engines logged
-// under propulsion.port and propulsion.starboard, none under propulsion.0/1.
+// signatureHistoryFixture reads the paths under the equipment sources that the
+// boat's InfluxDB held on 2026-10-21 (90 days, captured from the real server):
+// the engines logged revolutions under propulsion.port and propulsion.starboard,
+// and only exhaustTemperature under propulsion.0/1.
 func signatureHistoryFixture(t *testing.T) sourceHistory {
 	t.Helper()
-	raw, err := os.ReadFile("testdata/source_signatures/influx-signature-history-2026-10-21.csv")
+	raw, err := os.ReadFile("testdata/source_signatures/influx-history-2026-10-21.csv")
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := sourceHistory{Last: map[string]time.Time{}}
+	last := map[string]time.Time{}
 	for _, line := range strings.Split(string(raw), "\n") {
 		f := strings.Split(strings.TrimSpace(line), ",")
 		if len(f) != 5 || f[1] != "" || f[3] == "_time" {
@@ -34,12 +39,12 @@ func signatureHistoryFixture(t *testing.T) sourceHistory {
 		if err != nil {
 			continue
 		}
-		h.Last[f[4]] = at
+		last[f[4]] = at
 	}
-	if len(h.Last) < 30 {
-		t.Fatalf("fixture parsed %d paths", len(h.Last))
+	if len(last) < 200 {
+		t.Fatalf("fixture parsed %d paths", len(last))
 	}
-	return h
+	return newSourceHistory(last)
 }
 
 // The boat as found on 2026-10-21: engines off, so propulsion.port and
@@ -60,30 +65,44 @@ func cumminsItems() []sourceItem {
 	}
 }
 
-func TestSignatureFluxRegexMatchesSignaturesOnly(t *testing.T) {
-	flux, err := buildInfluxSourceSignatureFlux("SignalK_Data", "value", sourceHistoryLookbackDays)
+func TestHistoryFluxRegexMatchesEveryPathUnderASource(t *testing.T) {
+	flux, err := buildInfluxSourceHistoryFlux("SignalK_Data", "value", sourceHistoryLookbackDays)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(flux, "${") {
 		t.Fatalf("flux holds interpolation syntax: %s", flux)
 	}
-	re := regexp.MustCompile(signatureFluxRegex())
+	re := regexp.MustCompile(historyFluxRegex())
 	for _, path := range []string{
-		"propulsion.port.revolutions", "electrical.batteries.239.voltage", "tanks.fuel.2.currentLevel",
-		"electrical.inverters.276.acout.power", "electrical.solar.288.panelPower", "electrical.generator.0.state",
+		"propulsion.port.revolutions", "propulsion.0.exhaustTemperature", "propulsion.port.transmission.oilPressure",
+		"electrical.batteries.239.voltage", "electrical.batteries.3.capacity.timeRemaining", "tanks.fuel.2.currentLevel",
+		"electrical.inverters.5.operatingState", "electrical.solar.288.panelPower",
 	} {
 		if !re.MatchString(path) {
-			t.Errorf("%s should be a signature path", path)
+			t.Errorf("%s is under an equipment source", path)
 		}
 	}
-	for _, path := range []string{
-		"propulsion.0.exhaustTemperature", "propulsion.port.fuel.rate", "propulsion.port.transmission.oilPressure",
-		"electrical.batteries.3.capacity.timeRemaining", "electrical.inverters.5.operatingState",
-	} {
+	for _, path := range []string{"navigation.speedOverGround", "electrical.ac.5.phase.A.realPower", "environment.depth.belowTransducer"} {
 		if re.MatchString(path) {
-			t.Errorf("%s is not a signature path", path)
+			t.Errorf("%s is not under an equipment source", path)
 		}
+	}
+}
+
+func TestSourceOfPath(t *testing.T) {
+	for path, want := range map[string]string{
+		"propulsion.port.fuel.rate":                     "propulsion.port",
+		"electrical.batteries.0.capacity.stateOfCharge": "electrical.batteries.0",
+		"tanks.fuel.2.currentLevel":                     "tanks.fuel.2",
+		"electrical.inverters.276.acout.power":          "electrical.inverters.276",
+	} {
+		if got, ok := sourceOfPath(path); !ok || got != want {
+			t.Errorf("%s -> %q %v, want %q", path, got, ok, want)
+		}
+	}
+	if _, ok := sourceOfPath("navigation.speedOverGround"); ok {
+		t.Error("navigation is not a source")
 	}
 }
 
@@ -282,5 +301,151 @@ func TestSetupEnginesStepOffersLoggedEnginesWhenNoneIsAssigned(t *testing.T) {
 	st := stepByID(t, buildSetupStatus(vesselView{}, disc, setupMate{}), "engines")
 	if st.State != setupTodo || !strings.Contains(st.Detail, "2 engine sources in the boat's logged history") {
 		t.Fatalf("step = %+v", st)
+	}
+}
+
+// "Missing" means alive in the logged history and never carrying the signature.
+// A source with nothing logged at all (laid up, short retention) is unknown:
+// it is never flagged and never reopens setup.
+func TestSilentSourceIsUnknownNotMissing(t *testing.T) {
+	h := signatureHistoryFixture(t)
+	if got := signatureState(false, h, sourceEngine, "propulsion.0"); got != signatureMissing {
+		t.Errorf("propulsion.0 logged exhaust temperature and never RPM: %s", got)
+	}
+	if got := signatureState(false, h, sourceEngine, "propulsion.2"); got != signatureUnknown {
+		t.Errorf("propulsion.2 logged nothing: %s", got)
+	}
+
+	vessel := vesselView{Engines: []vesselEngineSetting{{Instance: "2", Name: "Laid-up engine", EquipmentID: "e2"}}}
+	items := []sourceItem{{ID: "e2", Name: "Laid-up engine", Source: "propulsion.2", Group: sourceEngine, Instance: "2"}}
+	disc := vesselDiscovery(newAnomalyTestSnapshot(), vessel, items, h)
+	disc.Connected = true
+	var row discoveryRow
+	for _, r := range discoveryGroupRows(disc, "engine") {
+		if r.Source == "propulsion.2" {
+			row = r
+		}
+	}
+	if row.Signature != signatureUnknown {
+		t.Fatalf("row = %+v", row)
+	}
+	st := stepByID(t, buildSetupStatus(vessel, disc, setupMate{}), "engines")
+	if st.State != setupDone || !strings.Contains(st.Detail, "couldn't check") {
+		t.Fatalf("a silent source must not reopen setup: %+v", st)
+	}
+}
+
+// A charger's own battery input that was logged but is not in the live tree
+// stays marked as a charger input, so it is not offered as a house bank.
+func TestLoggedChargerInputKeepsItsFlag(t *testing.T) {
+	globalSourceDevices.set(loadSensorSourcesFixture(t))
+	t.Cleanup(func() { globalSourceDevices.set(nil) })
+	snapshot := newAnomalyTestSnapshot()
+	loadSensorBatteriesFixture(t, snapshot)
+	// Instance 77 is the charger input "1" once more, seen only in the log.
+	ctx := snapshot.selfContext()
+	snapshot.mu.Lock()
+	snapshot.batteryPublishers[ctx+"|77"] = snapshot.batteryPublishers[ctx+"|1"]
+	snapshot.mu.Unlock()
+	h := newSourceHistory(map[string]time.Time{"electrical.batteries.77.voltage": time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)})
+
+	var row discoveryRow
+	for _, r := range discoveryGroupRows(vesselDiscovery(snapshot, vesselView{}, nil, h), "battery") {
+		if r.Instance == "77" {
+			row = r
+		}
+	}
+	if row.Source == "" || row.Reporting || !row.ChargerInput {
+		t.Fatalf("logged charger input: %+v", row)
+	}
+}
+
+// ── history loading ─────────────────────────────────────────────────────
+
+func resetSourceHistoryLoader(t *testing.T) {
+	t.Helper()
+	prevFetch, prevNow := fetchSourceHistory, sourceHistoryNow
+	sourceHistoryState.mu.Lock()
+	sourceHistoryState.have, sourceHistoryState.inflight, sourceHistoryState.failing = false, nil, false
+	sourceHistoryState.mu.Unlock()
+	t.Cleanup(func() {
+		fetchSourceHistory, sourceHistoryNow = prevFetch, prevNow
+		sourceHistoryState.mu.Lock()
+		sourceHistoryState.have, sourceHistoryState.inflight, sourceHistoryState.failing = false, nil, false
+		sourceHistoryState.mu.Unlock()
+	})
+}
+
+func TestSourceHistoryLoaderIsSingleFlight(t *testing.T) {
+	resetSourceHistoryLoader(t)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	fetchSourceHistory = func() (map[string]time.Time, error) {
+		calls.Add(1)
+		<-release
+		return map[string]time.Time{"propulsion.port.revolutions": time.Unix(1, 0)}, nil
+	}
+	var wg sync.WaitGroup
+	results := make([]sourceHistory, 5)
+	for i := range results {
+		wg.Add(1)
+		go func() { defer wg.Done(); results[i] = readSourceHistory() }()
+	}
+	time.Sleep(50 * time.Millisecond) // let every caller reach the wait
+	close(release)
+	wg.Wait()
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("queries = %d, want 1 in flight for all callers", n)
+	}
+	for i, r := range results {
+		if r.Err != nil || len(r.Last) != 1 {
+			t.Errorf("caller %d: %+v", i, r)
+		}
+	}
+}
+
+func TestSourceHistoryLoaderCachesFailuresBrieflyAndLogsOncePerStreak(t *testing.T) {
+	resetSourceHistoryLoader(t)
+	var logs bytes.Buffer
+	prevOut := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(prevOut) })
+
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	sourceHistoryNow = func() time.Time { return now }
+	var calls int
+	var fail = true
+	fetchSourceHistory = func() (map[string]time.Time, error) {
+		calls++
+		if fail {
+			return nil, errors.New("connection refused")
+		}
+		return map[string]time.Time{}, nil
+	}
+
+	for i := 0; i < 3; i++ {
+		if r := readSourceHistory(); r.Err == nil {
+			t.Fatal("a failure must be returned, not an empty history")
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("a failure is reused for %v: queries = %d", sourceHistoryFailureTTL, calls)
+	}
+	now = now.Add(sourceHistoryFailureTTL + time.Second)
+	readSourceHistory()
+	if calls != 2 {
+		t.Fatalf("after the failure window the loader asks again: %d", calls)
+	}
+	if n := strings.Count(logs.String(), "connection refused"); n != 1 {
+		t.Fatalf("a failure streak logs once, got %d:\n%s", n, logs.String())
+	}
+
+	fail = false
+	now = now.Add(sourceHistoryFailureTTL + time.Second)
+	if r := readSourceHistory(); r.Err != nil {
+		t.Fatal(r.Err)
+	}
+	if !strings.Contains(logs.String(), "readable again") {
+		t.Fatalf("recovery is logged once:\n%s", logs.String())
 	}
 }
