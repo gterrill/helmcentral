@@ -517,6 +517,7 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		}
 	}
 	missing := false
+	anyGust := false
 
 	// Wind against tide: only for a leg with a known flood set and a band.
 	var cycles []tidalHalfCycle
@@ -576,15 +577,16 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 		consider(passageCandidate{sev, ratio, "wind", sector,
 			fmt.Sprintf("Wind %s %d kn %s%s · %s", degreesToDirection(h.WindDirDeg), int(windKn), sector, marginalNote(sev, windNoGo), seg.label)})
 
-		// Providers leave a gust they do not have at 0. That is not a calm
-		// gust, so it is listed as not checked rather than passed.
+		// Providers leave a gust they do not have at 0. An hour at 0 beside
+		// hours with a figure is a calm hour (0 cannot exceed a positive
+		// limit); only a leg with no gust figure at all is listed as not
+		// checked, below.
 		if h.GustMS > 0 {
+			anyGust = true
 			gustNoGo := windNoGo + passageGustAboveWindKn
 			sev, ratio = judge(gustKn, rawGustKn, gustNoGo)
 			consider(passageCandidate{sev, ratio, "gust", sector,
 				fmt.Sprintf("Gusts %d kn %s%s · %s", int(gustKn), sector, marginalNote(sev, gustNoGo), seg.label)})
-		} else {
-			notChecked["gust"] = true
 		}
 
 		if !h.HasWave {
@@ -661,6 +663,9 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 			l.Sector = &sec
 		}
 		cell.Limiting = l
+	}
+	if haveWorst && !anyGust {
+		notChecked["gust"] = true
 	}
 	cell.NotChecked = []string{}
 	for _, k := range passageNotCheckedOrder {
@@ -1016,7 +1021,10 @@ var mateToolAssessPassageWindow = mateTool{
 			"headland the route rounds. Get coordinates from find_places. For each leg give exactly one of " +
 			"passage_hours (from estimate_passage) or speed_kn. Give flood_set_deg only from the operator's " +
 			"standing notes or after asking them; never guess it. Dates beyond the forecast show no_data. A card " +
-			"is attached to your reply, so do not repeat the grid as a table.",
+			"is attached to your reply, so do not repeat the grid as a table. " +
+			fmt.Sprintf("The operator sets only a no-go wind (required) and no-go wave (optional) per sector, plus an optional wind against tide reduction. "+
+				"Marginal is worked out as %.0f%% of no-go and gusts are judged against the no-go wind plus %g kn, "+
+				"so never ask the operator to set marginal or gust limits.", passageMarginalFraction*100, passageGustAboveWindKn),
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

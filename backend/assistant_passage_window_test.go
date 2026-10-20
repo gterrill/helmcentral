@@ -1108,3 +1108,45 @@ func TestAssessItinerary_MissingGustIsNotCheckedNotPassed(t *testing.T) {
 		t.Fatalf("gusts were checked, not_checked = %v", c.NotChecked)
 	}
 }
+
+// One hour with a 0 gust among hours with real figures is a calm hour: it
+// passes, the other hours are still judged, and gusts are not listed as not
+// checked.
+func TestAssessItinerary_ZeroGustAmongRealGustsIsACalmHour(t *testing.T) {
+	hours := map[int64]passageHour{}
+	for h := pwDay(19, 0); !h.After(pwDay(25, 23)); h = h.Add(time.Hour) {
+		g := 60.0
+		if h.Hour() == 9 {
+			g = 0
+		}
+		hours[h.Unix()] = passageHour{WindMS: kn(10), GustMS: kn(g), WindDirDeg: 180}
+	}
+	fc := forecastSource{Provider: "test-wx", Fetch: func(_ context.Context, lat, lon float64) (passageForecast, error) {
+		return passageForecast{Hours: hours}, nil
+	}}
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(), fc))
+	if pwHas(c.NotChecked, "gust") {
+		t.Fatalf("gusts were judged on the other hours, not_checked = %v", c.NotChecked)
+	}
+	if c.State != "no_go" || c.Limiting == nil || c.Limiting.Factor != "gust" {
+		t.Fatalf("got %s %+v, want no_go limited by gust", c.State, c.Limiting)
+	}
+}
+
+// The model must know that only no-go limits are set, so it never tells the
+// operator to set marginal or gust limits.
+func TestAssessPassageWindowDescription_SaysOnlyNoGoLimitsAreSet(t *testing.T) {
+	d := mateToolAssessPassageWindow.function.Description
+	for _, want := range []string{
+		"no-go wind (required)",
+		"wave (optional)",
+		"wind against tide",
+		fmt.Sprintf("%.0f%% of no-go", passageMarginalFraction*100),
+		fmt.Sprintf("no-go wind plus %g kn", passageGustAboveWindKn),
+		"never ask the operator to set marginal or gust limits",
+	} {
+		if !strings.Contains(d, want) {
+			t.Errorf("description lacks %q", want)
+		}
+	}
+}
