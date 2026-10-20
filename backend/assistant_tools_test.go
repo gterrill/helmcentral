@@ -985,42 +985,62 @@ func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
 	}
 }
 
-// An engine item mapped to a SignalK instance that never logged fuel.rate
-// (propulsion.0 carries only exhaust temperature on the real boat) is a
-// mapping problem, and the error says which item and path.
-func TestExecuteEstimatePassage_SilentEnginePathNamesTheItemAndPath(t *testing.T) {
-	series := singleBandPerformanceSeries()
-	for _, tc := range []struct{ missing, want string }{
-		{"propulsion.starboard.fuel.rate", "propulsion.starboard.fuel.rate"},
-		{"propulsion.port.fuel.rate", "propulsion.port.fuel.rate"},
-		{"propulsion.port.revolutions", "propulsion.port.revolutions"},
-	} {
-		without := map[string][]telemetryPoint{}
-		for k, v := range series {
-			if k != tc.missing {
-				without[k] = v
-			}
-		}
-		deps := assistantToolDeps{
-			now:         func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
-			influxRange: stubInfluxRangeByPath(without),
-			fuelRateInstances: func() ([]vesselEngineSetting, error) {
-				return []vesselEngineSetting{{Instance: "port", Name: "Cummins QSB 6.7"}, {Instance: "starboard", Name: "Cummins QSB 6.7"}}, nil
-			},
-		}
-		_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"days":30}`))
-		if err == nil {
-			t.Fatalf("%s: expected an error", tc.missing)
-		}
-		for _, want := range []string{"nothing logged for " + tc.want, "last 30 days", "Cummins QSB 6.7", "Settings > SignalK"} {
+// An engine item mapped to a SignalK instance that is alive in the log but
+// never carried RPM (propulsion.0 carries only exhaust temperature on the real
+// boat) is a mapping problem, and the error says which item and path.
+func TestExecuteEstimatePassage_SilentEnginePathOnAMissingSignatureBlamesTheMapping(t *testing.T) {
+	for _, missing := range []string{"propulsion.starboard.fuel.rate", "propulsion.port.fuel.rate", "propulsion.port.revolutions"} {
+		err := estimatePassageWithout(t, missing, signatureMissing)
+		for _, want := range []string{"nothing logged for " + missing, "last 30 days", "Cummins QSB 6.7", "never reported RPM", "Settings > SignalK"} {
 			if !strings.Contains(err.Error(), want) {
-				t.Errorf("%s: error %q lacks %q", tc.missing, err.Error(), want)
+				t.Errorf("%s: error %q lacks %q", missing, err.Error(), want)
 			}
 		}
 		if strings.Contains(err.Error(), "no underway history") {
-			t.Errorf("%s: a silent path is not an empty join: %q", tc.missing, err.Error())
+			t.Errorf("%s: a silent path is not an empty join: %q", missing, err.Error())
 		}
 	}
+}
+
+// An engine that merely did not run (or has no recent log) is not a mapping
+// problem: the error names the engine and the missing figure, without blame.
+func TestExecuteEstimatePassage_SilentEnginePathWithoutProofDoesNotBlameTheMapping(t *testing.T) {
+	for _, state := range []string{signatureCarried, signatureUnknown} {
+		err := estimatePassageWithout(t, "propulsion.starboard.fuel.rate", state)
+		for _, want := range []string{`"Cummins QSB 6.7"`, "logged nothing for propulsion.starboard.fuel.rate", "last 30 days"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error %q lacks %q", state, err.Error(), want)
+			}
+		}
+		for _, banned := range []string{"Settings", "set to", "never reported"} {
+			if strings.Contains(err.Error(), banned) {
+				t.Errorf("%s: error %q must not blame the mapping (%q)", state, err.Error(), banned)
+			}
+		}
+	}
+}
+
+func estimatePassageWithout(t *testing.T, missing, signature string) error {
+	t.Helper()
+	without := map[string][]telemetryPoint{}
+	for k, v := range singleBandPerformanceSeries() {
+		if k != missing {
+			without[k] = v
+		}
+	}
+	deps := assistantToolDeps{
+		now:         func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange: stubInfluxRangeByPath(without),
+		fuelRateInstances: func() ([]vesselEngineSetting, error) {
+			return []vesselEngineSetting{{Instance: "port", Name: "Cummins QSB 6.7"}, {Instance: "starboard", Name: "Cummins QSB 6.7"}}, nil
+		},
+		engineSignature: func(string) string { return signature },
+	}
+	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"days":30}`))
+	if err == nil {
+		t.Fatalf("%s: expected an error", missing)
+	}
+	return err
 }
 
 func TestExecuteEstimatePassage_NoEnginesConfiguredSaysEnginesAreNotSetUp(t *testing.T) {

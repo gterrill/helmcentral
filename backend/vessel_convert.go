@@ -245,13 +245,13 @@ func convertLegacyVessel(settingsPath string, store *documentStore) error {
 			}
 		}
 		for _, b := range legacy.Batteries {
-			nameOnto(sourcePath(sourceBattery, strings.TrimSpace(b.Instance)), b.Name, "battery", true)
+			nameOnto(sourcePath(sourceBattery, strings.TrimSpace(b.Instance)), b.Name, sourceKindNouns[sourceBattery], true)
 		}
 		for _, s := range legacy.Solar {
-			nameOnto(sourcePath(sourceSolar, strings.TrimSpace(s.Instance)), s.Name, "solar controller", true)
+			nameOnto(sourcePath(sourceSolar, strings.TrimSpace(s.Instance)), s.Name, sourceKindNouns[sourceSolar], true)
 		}
 		for _, e := range legacy.Engines {
-			nameOnto(sourcePath(sourceEngine, strings.TrimSpace(e.Instance)), e.Name, "engine", strings.TrimSpace(e.EquipmentID) == "")
+			nameOnto(sourcePath(sourceEngine, strings.TrimSpace(e.Instance)), e.Name, sourceKindNouns[sourceEngine], strings.TrimSpace(e.EquipmentID) == "")
 		}
 		for key, v := range tankLabels {
 			label, _ := v.(string)

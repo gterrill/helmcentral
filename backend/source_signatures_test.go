@@ -299,7 +299,7 @@ func TestSetupEnginesStepOffersLoggedEnginesWhenNoneIsAssigned(t *testing.T) {
 	disc := vesselDiscovery(newAnomalyTestSnapshot(), vesselView{}, nil, signatureHistoryFixture(t))
 	disc.Connected = true
 	st := stepByID(t, buildSetupStatus(vesselView{}, disc, setupMate{}), "engines")
-	if st.State != setupTodo || !strings.Contains(st.Detail, "2 engine sources in the boat's logged history") {
+	if st.State != setupTodo || !strings.Contains(st.Detail, "2 engine sources are available") {
 		t.Fatalf("step = %+v", st)
 	}
 }
@@ -447,5 +447,48 @@ func TestSourceHistoryLoaderCachesFailuresBrieflyAndLogsOncePerStreak(t *testing
 	}
 	if !strings.Contains(logs.String(), "readable again") {
 		t.Fatalf("recovery is logged once:\n%s", logs.String())
+	}
+}
+
+// One noun table serves the setup sentences and the conversion; a kind
+// without a noun or a signature is a coding error caught here, not a panic
+// or a blank in a sentence.
+func TestEverySourceKindHasANounAndASignature(t *testing.T) {
+	for _, group := range sourceGroupOrder {
+		if sourceKindNouns[group] == "" {
+			t.Errorf("%s has no noun", group)
+		}
+		if sig := sourceSignatures[group]; sig.label == "" || len(sig.leaves) == 0 {
+			t.Errorf("%s has no signature", group)
+		}
+	}
+	if got := withArticle(""); got != "" {
+		t.Errorf("withArticle of nothing = %q", got)
+	}
+	if got := withArticle("engine"); got != "an engine" {
+		t.Errorf("withArticle = %q", got)
+	}
+}
+
+// The power step judges the items chosen for the power roles, not every
+// alternator, charger, inverter or generator item.
+func TestSetupPowerStepJudgesOnlyChosenItems(t *testing.T) {
+	vessel := vesselView{
+		Alternators: vesselAlternatorSettings{PortInstance: "1"},
+		RolesNone:   fullPowerNone(),
+	}
+	alternators := discoveryGroup{Kind: "alternator", Mappable: true, SignatureLabel: "output current", Rows: []discoveryRow{
+		{Source: "electrical.alternator.1", Instance: "1", Item: &discoveryItemRef{ID: "a1", Name: "Port alternator"}, Signature: signatureCarried},
+		{Source: "electrical.alternator.9", Instance: "9", Item: &discoveryItemRef{ID: "a9", Name: "Old alternator"}, Signature: signatureMissing},
+	}}
+	st := stepByID(t, buildSetupStatus(vessel, connectedDiscovery(alternators), setupMate{}), "power")
+	if st.State != setupDone || strings.Contains(st.Detail, "Old alternator") {
+		t.Fatalf("an item no role reads must not hold the step open: %+v", st)
+	}
+
+	alternators.Rows[0].Signature = signatureMissing
+	st = stepByID(t, buildSetupStatus(vessel, connectedDiscovery(alternators), setupMate{}), "power")
+	if st.State != setupTodo || !strings.Contains(st.Detail, "Port alternator") || strings.Contains(st.Detail, "Old alternator") {
+		t.Fatalf("the chosen port alternator is judged: %+v", st)
 	}
 }

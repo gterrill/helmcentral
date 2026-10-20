@@ -141,12 +141,6 @@ func countOf(n int, one, many string) string {
 	return strconv.Itoa(n) + " " + many
 }
 
-// sourceKindNouns is how a kind is worded in a sentence to the operator.
-var sourceKindNouns = map[string]string{
-	"engine": "engine", "battery": "battery", "alternator": "alternator", "solar": "solar controller",
-	"tank": "tank", "generator": "generator", "charger": "charger", "inverter": "inverter",
-}
-
 // signatureCheck is what the discovery rows say about the items owning sources
 // of some kinds: the sentences for those on a source that carries nothing the
 // kind needs (history was read and holds none), and how many could not be
@@ -157,9 +151,9 @@ type signatureCheck struct {
 	unchecked int
 }
 
-// checkSignatures judges the items owning sources of kinds. onlyItem, when
-// set, narrows it to that item.
-func checkSignatures(disc discoveryResponse, onlyItem string, kinds ...string) signatureCheck {
+// checkSignatures judges the items owning sources of kinds whose row keep
+// accepts (nil keeps every row).
+func checkSignatures(disc discoveryResponse, keep func(discoveryRow) bool, kinds ...string) signatureCheck {
 	var out signatureCheck
 	for _, g := range disc.Groups {
 		wanted := false
@@ -170,13 +164,13 @@ func checkSignatures(disc discoveryResponse, onlyItem string, kinds ...string) s
 			continue
 		}
 		for _, r := range g.Rows {
-			if r.Item == nil || (onlyItem != "" && r.Item.ID != onlyItem) {
+			if r.Item == nil || (keep != nil && !keep(r)) {
 				continue
 			}
 			switch r.Signature {
 			case signatureMissing:
 				out.problems = append(out.problems, fmt.Sprintf("%s is set to %s, %s source that has not reported %s.",
-					r.Item.Name, r.Source, withArticle(sourceKindNouns[g.Kind]), g.SignatureLabel))
+					r.Item.Name, r.Source, withArticle(sourceKindNouns[sourceGroup(g.Kind)]), g.SignatureLabel))
 			case signatureUnknown:
 				out.unchecked++
 			}
@@ -185,7 +179,30 @@ func checkSignatures(disc discoveryResponse, onlyItem string, kinds ...string) s
 	return out
 }
 
+// chosenPowerSource keeps the rows of the sources chosen for the power roles,
+// so an item that no role reads is not judged.
+func chosenPowerSource(v vesselView) func(discoveryRow) bool {
+	chosen := map[string]bool{}
+	for group, instance := range map[sourceGroup]string{
+		sourceCharger: v.Electrical.ShoreChargerInstance, sourceInverter: v.Electrical.InverterInstance,
+		sourceGenerator: v.Electrical.GeneratorInstance,
+	} {
+		if instance != "" {
+			chosen[sourcePath(group, instance)] = true
+		}
+	}
+	for _, instance := range []string{v.Alternators.PortInstance, v.Alternators.StarboardInstance} {
+		if instance != "" {
+			chosen[sourcePath(sourceAlternator, instance)] = true
+		}
+	}
+	return func(r discoveryRow) bool { return chosen[r.Source] }
+}
+
 func withArticle(noun string) string {
+	if noun == "" {
+		return noun
+	}
 	if strings.ContainsRune("aeiou", rune(noun[0])) {
 		return "an " + noun
 	}
@@ -204,45 +221,23 @@ func (c signatureCheck) detail(done, fix, historyError string) (problem bool, te
 	return false, done
 }
 
-// engineSourcesWithFigures lists the engine sources that carry live figures,
-// and counts the reporting ones that carry none. A bus can list empty numbered
-// sources beside named ones with rpm. Helmcentral cannot tell whether they are
-// the same engines, so it does not guess: only a source that shows figures is
-// offered to the operator as an engine to make an item for.
-func engineSourcesWithFigures(disc discoveryResponse) (sources []string, figureless int) {
+// unownedEngineSources are the engine sources an operator could make an item
+// for: offered by Discovery (live now, or logged) and owned by no item. The
+// server offers a source only if it carries RPM, so a numbered duplicate with
+// one stray reading is not among them.
+func unownedEngineSources(disc discoveryResponse) []discoveryRow {
+	var rows []discoveryRow
 	for _, g := range disc.Groups {
 		if g.Kind != "engine" {
 			continue
 		}
 		for _, r := range g.Rows {
-			if !r.Reporting {
-				continue
-			}
-			if len(r.Metrics) > 0 {
-				sources = append(sources, r.Source)
-			} else {
-				figureless++
+			if r.Item == nil {
+				rows = append(rows, r)
 			}
 		}
 	}
-	return sources, figureless
-}
-
-// loggedEngineSources counts the unowned engine sources offered from logged
-// history while not reporting now.
-func loggedEngineSources(disc discoveryResponse) int {
-	n := 0
-	for _, g := range disc.Groups {
-		if g.Kind != "engine" {
-			continue
-		}
-		for _, r := range g.Rows {
-			if !r.Reporting && r.Item == nil && r.LastLogged != nil {
-				n++
-			}
-		}
-	}
-	return n
+	return rows
 }
 
 // engineFigureNames is the figures the engine sources carry, lower case, in the
@@ -257,7 +252,7 @@ func engineFigureNames(disc discoveryResponse) string {
 		for _, r := range g.Rows {
 			for _, m := range r.Metrics {
 				l := strings.ToLower(m.Label)
-				if r.Reporting && !seen[l] {
+				if r.Reporting && r.Item == nil && !seen[l] {
 					seen[l] = true
 					names = append(names, l)
 				}
@@ -355,7 +350,7 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 	eng := setupStep{ID: "engines", Title: "Engines", Target: setupTarget{"signalk", "discovery-engine"}}
 	switch {
 	case enginesAssigned(vessel):
-		bad, text := checkSignatures(disc, "", "engine").detail(
+		bad, text := checkSignatures(disc, nil, "engine").detail(
 			"Assigned to a propulsion source: "+countOf(len(vessel.Engines), "engine", "engines")+".",
 			"Choose the engine source that does.", disc.HistoryError)
 		eng.State, eng.Detail = setupDone, text
@@ -366,12 +361,12 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 		eng.State, eng.Detail = blockedBy()
 	default:
 		eng.State = setupTodo
-		if sources, figureless := engineSourcesWithFigures(disc); len(sources) > 0 {
-			eng.Detail = countOf(len(sources), "engine source", "engine sources") + strings.TrimRight(verbAre(len(sources)), " ") + " reporting " + engineFigureNames(disc) + ". In Discovery, create an item for each one that shows figures."
-		} else if logged := loggedEngineSources(disc); logged > 0 {
-			eng.Detail = countOf(logged, "engine source", "engine sources") + " in the boat's logged history, not reporting now. In Discovery, create an item for each one."
-		} else if figureless > 0 {
-			eng.Detail = "The boat lists engine sources, but they carry no figures yet."
+		if sources := unownedEngineSources(disc); len(sources) > 0 {
+			eng.Detail = countOf(len(sources), "engine source", "engine sources") + strings.TrimRight(verbAre(len(sources)), " ") + " available"
+			if figs := engineFigureNames(disc); figs != "" {
+				eng.Detail += ", reporting " + figs
+			}
+			eng.Detail += ". In Discovery, create an item for each one."
 		} else {
 			eng.Detail = "The boat isn't reporting any engines."
 		}
@@ -386,7 +381,7 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 		if vessel.HouseBank != nil {
 			bankID = vessel.HouseBank.EquipmentID
 		}
-		bad, text := checkSignatures(disc, bankID, "battery").detail("A house bank is chosen.", "Choose the battery that does.", disc.HistoryError)
+		bad, text := checkSignatures(disc, func(r discoveryRow) bool { return r.Item.ID == bankID }, "battery").detail("A house bank is chosen.", "Choose the battery that does.", disc.HistoryError)
 		bank.State, bank.Detail = setupDone, text
 		if bad {
 			bank.State = setupTodo
@@ -423,7 +418,7 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 	}
 	switch {
 	case len(open) == 0:
-		bad, text := checkSignatures(disc, "", "alternator", "charger", "inverter", "generator").detail(
+		bad, text := checkSignatures(disc, chosenPowerSource(vessel), "alternator", "charger", "inverter", "generator").detail(
 			"Every charging and power source is chosen or marked as not on this boat.", "Choose the source that does.", disc.HistoryError)
 		power.State, power.Detail = setupDone, text
 		if bad {

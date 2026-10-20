@@ -573,13 +573,18 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 	return capToolResultJSON(&result, shrink)
 }
 
-// silentEnginePathError names the engine item and the path behind an empty
-// engine series. The usual cause is an engine item mapped to a SignalK
-// instance that never carried that reading, so the error points at the item's
-// source rather than at the history window.
-func silentEnginePathError(engine vesselEngineSetting, path string, days int) error {
-	return fmt.Errorf("estimate_passage: nothing logged for %s in the last %d days; the engine %q is set to propulsion.%s - check its source in Settings > SignalK",
-		path, days, engine.Name, engine.Instance)
+// silentEnginePathError explains an empty engine series. When the engine's
+// source is known never to carry RPM (it is alive in the log with other
+// readings) the item is mapped to the wrong source, and the error says so and
+// where to fix it. Otherwise the engine simply logged nothing in the window
+// (it did not run, or the log is short) and the mapping is not blamed.
+func (d assistantToolDeps) silentEnginePathError(engine vesselEngineSetting, path string, days int) error {
+	if d.engineSignature(engine.Instance) == signatureMissing {
+		return fmt.Errorf("estimate_passage: nothing logged for %s in the last %d days; the engine %q is set to propulsion.%s, which has never reported RPM - check its source in Settings > SignalK",
+			path, days, engine.Name, engine.Instance)
+	}
+	return fmt.Errorf("estimate_passage: the engine %q logged nothing for %s in the last %d days (it may not have run in that time)",
+		engine.Name, path, days)
 }
 
 // executeEstimatePassage joins this vessel's own logged speed over ground,
@@ -643,7 +648,7 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 			return "", fmt.Errorf("estimate_passage: %w", ferr)
 		}
 		if len(series) == 0 {
-			return "", silentEnginePathError(engine, path, days)
+			return "", d.silentEnginePathError(engine, path, days)
 		}
 		fuelRates = append(fuelRates, series)
 	}
@@ -663,7 +668,7 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 		return "", fmt.Errorf("estimate_passage: %w", err)
 	}
 	if len(rpm) == 0 {
-		return "", silentEnginePathError(engines[0], rpmPath, days)
+		return "", d.silentEnginePathError(engines[0], rpmPath, days)
 	}
 
 	table := buildPerformanceTable(sog, fuelRates, rpm, assistantPerformanceMinSOGKts)
