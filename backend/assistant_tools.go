@@ -86,11 +86,11 @@ type assistantToolDeps struct {
 	// buckets. Production wires queryInfluxPathRange (influx.go); tests
 	// supply a canned series with no InfluxDB connection at all.
 	influxRange func(path string, start, stop time.Time, every string) ([]telemetryPoint, error)
-	// fuelRateInstances names the propulsion instances the operator chose
-	// in Vessel settings, so estimate_passage never guesses engine names.
-	// nil when none is configured - executeEstimatePassage then says
-	// engines are not set up.
-	fuelRateInstances func() ([]string, error)
+	// fuelRateInstances names the engines (item name and propulsion instance)
+	// the operator mapped, so estimate_passage never guesses engine names and
+	// can say which item a silent path belongs to. nil when none is
+	// configured - executeEstimatePassage then says engines are not set up.
+	fuelRateInstances func() ([]vesselEngineSetting, error)
 	// fuelAboardM3 is the vessel's current fuel volume (helmcentral.fuel.volume,
 	// ADR 0084 - the same derived path the Tanks tile reads), for
 	// estimate_passage's fuel margin. ok is false whenever the figure is
@@ -335,16 +335,16 @@ func fuelAboardM3FromDerivedPaths() (float64, bool) {
 // It returns nil, nil when none is configured, which estimate_passage reports
 // as engines not being set up. An unreadable vessel block is an error, kept
 // distinct from not-configured.
-func configuredEngineInstances(settingsPath string) func() ([]string, error) {
-	return func() ([]string, error) {
+func configuredEngineInstances(settingsPath string) func() ([]vesselEngineSetting, error) {
+	return func() ([]vesselEngineSetting, error) {
 		vessel, err := loadVesselView(settingsPath)
 		if err != nil {
 			return nil, err
 		}
-		var instances []string
+		var instances []vesselEngineSetting
 		for _, engine := range vessel.Engines {
 			if engine.Instance != "" {
-				instances = append(instances, engine.Instance)
+				instances = append(instances, engine)
 			}
 		}
 		return instances, nil
