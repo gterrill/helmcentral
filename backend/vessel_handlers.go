@@ -53,12 +53,12 @@ type discoveryRow struct {
 	Reporting    bool              `json:"reporting"`
 	Metrics      []discoveryMetric `json:"metrics"`
 	Item         *discoveryItemRef `json:"item"`
-	// LastLogged is when the boat last logged this source's signature path;
-	// null when it never has within the lookback.
-	LastLogged *time.Time `json:"last_logged"`
+	// LastSeen is when Helmcentral last saw this source's signature path
+	// reported; null when it never has.
+	LastSeen *time.Time `json:"last_seen"`
 	// Signature is whether the source carries what its kind needs: "carried",
-	// "missing" (history was read and holds none) or "unknown" (history could
-	// not be read). Only a source an item owns can be anything but carried,
+	// "missing" (the source reports other readings, the record spans enough
+	// time to judge, and it never has this one) or "unknown". Only a source an item owns can be anything but carried,
 	// since an unowned source is listed only when it carries its signature.
 	Signature string `json:"signature"`
 }
@@ -82,15 +82,25 @@ type vesselDetectorStatus struct {
 	Missing string `json:"missing,omitempty"`
 }
 
+// discoveryTracking describes the record Discovery was built from. Since is
+// null until tracking has begun; Seeded says it was started from InfluxDB
+// history; Covers says it spans enough time to call a source missing its
+// signature.
+type discoveryTracking struct {
+	Since  *time.Time `json:"since"`
+	Seeded bool       `json:"seeded"`
+	Covers bool       `json:"covers"`
+}
+
 type discoveryResponse struct {
 	// Connected is false while Helmcentral has no vessel data from SignalK, so
 	// the page can say so instead of showing an empty list.
 	Connected bool                            `json:"connected"`
 	Groups    []discoveryGroup                `json:"groups"`
 	Detectors map[string]vesselDetectorStatus `json:"detectors"`
-	// HistoryError is why logged history could not be read; empty when it was.
-	// While set, only sources reporting now are listed.
-	HistoryError string `json:"history_error"`
+	// Tracking says how long Helmcentral has been watching this boat, so the
+	// page can be honest about an engine it has not yet seen report.
+	Tracking discoveryTracking `json:"tracking"`
 }
 
 var (
@@ -277,7 +287,7 @@ func acInputRows(t telemetryReader, paths []signalKPath) []discoveryRow {
 // source that carries its kind's signature (source_signatures.go), live now or
 // logged, plus every source an item owns even if it carries none, each with the item that owns it, and each detector's
 // current setup status against vessel.
-func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourceItem, history sourceHistory) discoveryResponse {
+func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourceItem, record sourceRecord) discoveryResponse {
 	telemetry := snapshot.liveSelfTelemetry(time.Now().UTC())
 	paths := telemetry.Paths()
 	live := discoveredInstances(telemetry, paths)
@@ -291,7 +301,7 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 	groups := make([]discoveryGroup, 0, len(sourceGroupOrder)+1)
 	for _, group := range sourceGroupOrder {
 		// An instance is offered only when it carries its kind's signature,
-		// now or in the logged history; an instance an item owns is always
+		// now or in the record; an instance an item owns is always
 		// listed, with a verdict on whether it carries the signature.
 		inTree := map[string]bool{}
 		carriedLive := map[string]bool{}
@@ -303,7 +313,7 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 				ids[id] = true
 			}
 		}
-		for _, id := range history.loggedInstances(group) {
+		for _, id := range record.loggedInstances(group) {
 			ids[id] = true
 		}
 		for _, it := range items {
@@ -322,10 +332,10 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 			source := sourcePath(group, id)
 			row := discoveryRow{
 				Source: source, Instance: id, Reporting: inTree[id], Metrics: []discoveryMetric{},
-				Signature: signatureState(carriedLive[id], history, group, source),
+				Signature: signatureState(carriedLive[id], record, group, source),
 			}
-			if at, ok := history.lastLogged(group, source); ok {
-				row.LastLogged = &at
+			if at, ok := record.lastLogged(group, source); ok {
+				row.LastSeen = &at
 			}
 			if row.Reporting {
 				row.Metrics = sourceMetrics(telemetry, group, id)
@@ -344,8 +354,10 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 	groups = append(groups, discoveryGroup{Kind: "ac", Mappable: false, Rows: acInputRows(telemetry, paths)})
 
 	resp := discoveryResponse{Connected: snapshot.selfTelemetry().HasSelf(), Groups: groups, Detectors: vesselDetectorStatuses(vessel)}
-	if history.Err != nil {
-		resp.HistoryError = history.Err.Error()
+	resp.Tracking = discoveryTracking{Seeded: record.Seeded, Covers: record.Covers}
+	if !record.Since.IsZero() {
+		since := record.Since
+		resp.Tracking.Since = &since
 	}
 	return resp
 }
@@ -394,7 +406,7 @@ func getVesselDiscoveryHandler(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read equipment items"})
 	}
-	return c.JSON(http.StatusOK, vesselDiscovery(globalSignalKSnapshot, vessel, items, loadSourceHistory()))
+	return c.JSON(http.StatusOK, vesselDiscovery(globalSignalKSnapshot, vessel, items, currentSourceRecord()))
 }
 
 // instanceLess orders instance ids naturally: numeric ids by value (1, 2, 12),

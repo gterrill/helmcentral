@@ -362,7 +362,7 @@ func configuredEngineInstances(settingsPath string) func() ([]vesselEngineSettin
 func liveEngineSignature(instance string) string {
 	source := sourcePath(sourceEngine, instance)
 	live := liveCarriesSignature(globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()), sourceEngine, source)
-	return signatureState(live, loadSourceHistory(), sourceEngine, source)
+	return signatureState(live, currentSourceRecord(), sourceEngine, source)
 }
 
 // ── tool definitions (OpenRouter/OpenAI function-calling schemas) ──────────

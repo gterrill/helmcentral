@@ -153,8 +153,8 @@ func TestSetupStatusCountsUnownedEngineSources(t *testing.T) {
 	engines := discoveryGroup{Kind: "engine", Mappable: true, Rows: []discoveryRow{
 		{Source: "propulsion.port", Instance: "port", Reporting: true, Metrics: fig, Item: &discoveryItemRef{ID: "p", Name: "Port"}},
 		{Source: "propulsion.starboard", Instance: "starboard", Reporting: true, Metrics: fig},
-		{Source: "propulsion.centre", Instance: "centre", Reporting: true, LastLogged: &logged},
-		{Source: "propulsion.wing", Instance: "wing", LastLogged: &logged},
+		{Source: "propulsion.centre", Instance: "centre", Reporting: true, LastSeen: &logged},
+		{Source: "propulsion.wing", Instance: "wing", LastSeen: &logged},
 	}}
 	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
 	if st.State != setupTodo || strings.Contains(st.Detail, "propulsion.") {
@@ -170,7 +170,7 @@ func TestSetupStatusCountsUnownedEngineSources(t *testing.T) {
 		t.Errorf("engines detail: %q", st.Detail)
 	}
 
-	engines.Rows = []discoveryRow{{Source: "propulsion.wing", Instance: "wing", LastLogged: &logged}}
+	engines.Rows = []discoveryRow{{Source: "propulsion.wing", Instance: "wing", LastSeen: &logged}}
 	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
 	if !strings.Contains(st.Detail, "1 engine source is available. In Discovery") {
 		t.Errorf("engines detail: %q", st.Detail)
@@ -213,7 +213,7 @@ func TestDetectorsAgreeWithSetupSteps(t *testing.T) {
 		{Engines: []vesselEngineSetting{{Instance: "a"}, {Instance: "b"}}, HouseBank: &vesselHouseBankSetting{}},
 	}
 	for i, v := range cases {
-		disc := vesselDiscovery(newAnomalyTestSnapshot(), v, nil, sourceHistory{})
+		disc := vesselDiscovery(newAnomalyTestSnapshot(), v, nil, sourceRecord{})
 		disc.Connected = true // the steps are blocked without a feed; the checks do not care
 		s := buildSetupStatus(v, disc, setupMate{})
 		if got, want := disc.Detectors["frozen"].Ready, stepByID(t, s, "engines").State == "done"; got != want {

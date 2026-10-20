@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -59,37 +57,48 @@ const (
 	signatureUnknown = "unknown"
 )
 
-// sourceHistoryLookbackDays is how far back logged history counts.
+// sourceHistoryLookbackDays is how far back the one-time InfluxDB seed reads.
 const sourceHistoryLookbackDays = 90
 
-// sourceHistory is what the boat has logged under the equipment groups: the
-// last time each path was recorded (Last), and, per source, the last time
-// anything under it was recorded (Active). Err is set when it could not be
-// read, in which case nothing may be concluded from the rest.
+// sourceRecord is what Helmcentral has seen the boat report under the
+// equipment sources (source_registry.go): the last time each path was seen
+// (Last) and, per source, the last time anything under it was (Active). Since
+// is when Helmcentral began watching this vessel, Seeded says the record was
+// started from InfluxDB history, and Covers says the record spans enough time
+// to call a source that never carried its signature "missing" (a seed, or
+// sourceRecordMinTracking of watching).
 //
-// Active is what tells "missing" from "no recent data": propulsion.0 logged
-// exhaust temperature and never revolutions, so it is alive and wrong; a
-// source with nothing logged at all (laid up, or a short retention) is merely
-// silent and must never be flagged.
-type sourceHistory struct {
+// Active is what tells "missing" from "no record": propulsion.0 was seen
+// carrying exhaust temperature and never revolutions, so it is alive and
+// wrong; a source never seen at all (laid up, or not yet watched long enough)
+// is merely silent and must never be flagged.
+type sourceRecord struct {
 	Last   map[string]time.Time
 	Active map[string]time.Time
-	Err    error
+	Since  time.Time
+	Seeded bool
+	Covers bool
 }
 
-// newSourceHistory builds the history from the last-logged time of each path.
-func newSourceHistory(last map[string]time.Time) sourceHistory {
-	h := sourceHistory{Last: last, Active: map[string]time.Time{}}
+// sourceRecordMinTracking is how long Helmcentral must have watched a vessel
+// without a seed before it will call a source "missing" its signature. An
+// engine that is switched off for a few days would otherwise look like one
+// that never reports RPM; a week of watching has normally seen the boat run.
+const sourceRecordMinTracking = 7 * 24 * time.Hour
+
+// activeSources derives, per source, the latest time any of its paths was seen.
+func activeSources(last map[string]time.Time) map[string]time.Time {
+	active := map[string]time.Time{}
 	for path, at := range last {
 		source, ok := sourceOfPath(path)
 		if !ok {
 			continue
 		}
-		if prev, seen := h.Active[source]; !seen || at.After(prev) {
-			h.Active[source] = at
+		if prev, seen := active[source]; !seen || at.After(prev) {
+			active[source] = at
 		}
 	}
-	return h
+	return active
 }
 
 // sourceOfPath is the source (propulsion.port, tanks.fuel.2) a path belongs
@@ -116,7 +125,7 @@ func signaturePaths(group sourceGroup, source string) []string {
 }
 
 // lastLogged is the latest time any signature path of source was logged.
-func (h sourceHistory) lastLogged(group sourceGroup, source string) (time.Time, bool) {
+func (h sourceRecord) lastLogged(group sourceGroup, source string) (time.Time, bool) {
 	var latest time.Time
 	found := false
 	for _, p := range signaturePaths(group, source) {
@@ -129,7 +138,7 @@ func (h sourceHistory) lastLogged(group sourceGroup, source string) (time.Time, 
 
 // loggedInstances lists the instance ids of group that have a logged
 // signature path.
-func (h sourceHistory) loggedInstances(group sourceGroup) []string {
+func (h sourceRecord) loggedInstances(group sourceGroup) []string {
 	seen := map[string]bool{}
 	var ids []string
 	for path := range h.Last {
@@ -159,21 +168,18 @@ func liveCarriesSignature(t telemetryReader, group sourceGroup, source string) b
 	return false
 }
 
-// signatureState judges an instance: carried when live or logged; missing only
-// when history was read and shows the source alive without ever carrying the
-// signature; unknown when history could not be read, or the source logged
-// nothing at all (no recent data, so nothing can be said against it).
-func signatureState(live bool, h sourceHistory, group sourceGroup, source string) string {
+// signatureState judges an instance: carried when live or recorded; missing
+// only when the record covers enough time and shows the source alive without
+// ever carrying the signature; unknown otherwise (the record is too young, or
+// the source was never seen, so nothing can be said against it).
+func signatureState(live bool, h sourceRecord, group sourceGroup, source string) string {
 	if live {
 		return signatureCarried
-	}
-	if h.Err != nil {
-		return signatureUnknown
 	}
 	if _, ok := h.lastLogged(group, source); ok {
 		return signatureCarried
 	}
-	if _, active := h.Active[source]; active {
+	if _, active := h.Active[source]; active && h.Covers {
 		return signatureMissing
 	}
 	return signatureUnknown
@@ -225,97 +231,21 @@ func buildInfluxSourceHistoryFlux(bucket, field string, lookbackDays int) (strin
 	), nil
 }
 
-const (
-	// sourceHistoryTTL is how long a successful read is reused. Discovery and
-	// the setup status are read together and often.
-	sourceHistoryTTL = time.Minute
-	// sourceHistoryFailureTTL is how long a failed read is reused, so an
-	// InfluxDB that is down is asked about twice a minute, not on every request.
-	sourceHistoryFailureTTL = 30 * time.Second
-	// sourceHistoryTimeout bounds one query.
-	sourceHistoryTimeout = 8 * time.Second
-)
+// sourceHistoryTimeout bounds the one seed query.
+const sourceHistoryTimeout = 8 * time.Second
 
-// sourceHistoryCall is one query in flight; its waiters receive result when
-// done closes.
-type sourceHistoryCall struct {
-	done   chan struct{}
-	result sourceHistory
-}
-
-var sourceHistoryState struct {
-	mu       sync.Mutex
-	at       time.Time
-	have     bool
-	result   sourceHistory
-	inflight *sourceHistoryCall
-	failing  bool
-}
-
-// fetchSourceHistory and sourceHistoryNow are variables so tests can supply a
-// blocking or failing loader and a clock.
-var (
-	fetchSourceHistory = queryInfluxSourceHistory
-	sourceHistoryNow   = time.Now
-)
-
-// loadSourceHistory reads the logged history. It is a variable so handler
-// tests can supply history without an InfluxDB. A failure is returned in Err,
-// never replaced by an empty history.
-var loadSourceHistory = readSourceHistory
-
-// readSourceHistory is single-flight: one query at a time, the other callers
-// wait for its result. A success is reused for sourceHistoryTTL and a failure
-// for sourceHistoryFailureTTL. The mutex is never held across the query. A
-// failure is logged once per streak, and recovery once.
-func readSourceHistory() sourceHistory {
-	st := &sourceHistoryState
-	st.mu.Lock()
-	if st.have {
-		ttl := sourceHistoryTTL
-		if st.result.Err != nil {
-			ttl = sourceHistoryFailureTTL
-		}
-		if sourceHistoryNow().Sub(st.at) < ttl {
-			r := st.result
-			st.mu.Unlock()
-			return r
-		}
+// currentSourceRecord is what Helmcentral has seen the boat report. It is a
+// variable so handler tests can supply a record without a running registry.
+var currentSourceRecord = func() sourceRecord {
+	if globalSourceRegistry == nil {
+		return sourceRecord{}
 	}
-	if call := st.inflight; call != nil {
-		st.mu.Unlock()
-		<-call.done
-		return call.result
-	}
-	call := &sourceHistoryCall{done: make(chan struct{})}
-	st.inflight = call
-	st.mu.Unlock()
-
-	last, err := fetchSourceHistory()
-	var result sourceHistory
-	if err != nil {
-		result = sourceHistory{Err: err}
-	} else {
-		result = newSourceHistory(last)
-	}
-
-	st.mu.Lock()
-	if err != nil && !st.failing {
-		log.Printf("source history: %v; Discovery lists only sources reporting now", err)
-	}
-	if err == nil && st.failing {
-		log.Printf("source history: logged history is readable again")
-	}
-	st.failing = err != nil
-	st.at, st.have, st.result, st.inflight = sourceHistoryNow(), true, result, nil
-	st.mu.Unlock()
-	call.result = result
-	close(call.done)
-	return result
+	return globalSourceRegistry.record(time.Now().UTC())
 }
 
 // queryInfluxSourceHistory returns the last time each path under the equipment
-// sources was logged within sourceHistoryLookbackDays.
+// sources was logged within sourceHistoryLookbackDays. It runs once per vessel,
+// to seed the registry, and never at request time.
 func queryInfluxSourceHistory() (map[string]time.Time, error) {
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {

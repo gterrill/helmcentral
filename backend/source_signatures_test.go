@@ -1,18 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
-	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -23,7 +18,7 @@ import (
 // boat's InfluxDB held on 2026-10-21 (90 days, captured from the real server):
 // the engines logged revolutions under propulsion.port and propulsion.starboard,
 // and only exhaustTemperature under propulsion.0/1.
-func signatureHistoryFixture(t *testing.T) sourceHistory {
+func signatureHistoryFixture(t *testing.T) sourceRecord {
 	t.Helper()
 	raw, err := os.ReadFile("testdata/source_signatures/influx-history-2026-10-21.csv")
 	if err != nil {
@@ -44,7 +39,7 @@ func signatureHistoryFixture(t *testing.T) sourceHistory {
 	if len(last) < 200 {
 		t.Fatalf("fixture parsed %d paths", len(last))
 	}
-	return newSourceHistory(last)
+	return sourceRecord{Last: last, Active: activeSources(last), Seeded: true, Covers: true}
 }
 
 // The boat as found on 2026-10-21: engines off, so propulsion.port and
@@ -124,11 +119,8 @@ func TestDiscoveryOffersLoggedEnginesNotStrayInstances(t *testing.T) {
 		t.Errorf("port is off: %+v", port)
 	}
 	want := time.Date(2026, 10, 16, 0, 56, 35, 331000000, time.UTC)
-	if port.LastLogged == nil || !port.LastLogged.Equal(want) {
-		t.Errorf("port last logged = %v", port.LastLogged)
-	}
-	if got.HistoryError != "" {
-		t.Errorf("history error = %q", got.HistoryError)
+	if port.LastSeen == nil || !port.LastSeen.Equal(want) {
+		t.Errorf("port last logged = %v", port.LastSeen)
 	}
 	if label := discoveryGroupLabel(got, "engine"); label != "RPM" {
 		t.Errorf("engine signature label = %q", label)
@@ -146,7 +138,7 @@ func TestDiscoveryFlagsAnItemOnASourceThatNeverReportsItsSignature(t *testing.T)
 	}
 	for _, src := range []string{"propulsion.0", "propulsion.1"} {
 		r := by[src]
-		if r.Item == nil || r.Signature != signatureMissing || r.LastLogged != nil {
+		if r.Item == nil || r.Signature != signatureMissing || r.LastSeen != nil {
 			t.Errorf("%s should be owned and missing RPM: %+v", src, r)
 		}
 	}
@@ -157,20 +149,24 @@ func TestDiscoveryFlagsAnItemOnASourceThatNeverReportsItsSignature(t *testing.T)
 
 func TestDiscoveryQualifiesOnTheLiveTreeWithoutHistory(t *testing.T) {
 	snapshot := newVesselCandidatesSnapshot(t)
-	got := vesselDiscovery(snapshot, vesselView{}, nil, sourceHistory{})
+	got := vesselDiscovery(snapshot, vesselView{}, nil, sourceRecord{})
 	rows := discoveryGroupRows(got, "engine")
-	if len(rows) != 2 || !rows[0].Reporting || rows[0].LastLogged != nil || rows[0].Signature != signatureCarried {
+	if len(rows) != 2 || !rows[0].Reporting || rows[0].LastSeen != nil || rows[0].Signature != signatureCarried {
 		t.Fatalf("live engines: %+v", rows)
 	}
 }
 
-func TestDiscoveryWithoutHistoryListsLiveOnlyAndSaysSo(t *testing.T) {
+// A young record (Helmcentral has only just started watching) lists what
+// reports now, flags nothing, and says since when it has been watching.
+func TestDiscoveryWithAYoungRecordListsLiveOnlyAndFlagsNothing(t *testing.T) {
 	snapshot := exhaustOnlySnapshot(t)
 	applyNumeric(snapshot, "vessels.self", "propulsion.port.revolutions", 30, anomalyDetectorTestNow)
-	h := sourceHistory{Err: errors.New("influxdb is not configured")}
-	got := vesselDiscovery(snapshot, vesselView{}, cumminsItems(), h)
-	if !strings.Contains(got.HistoryError, "not configured") {
-		t.Fatalf("history error = %q", got.HistoryError)
+	since := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	last := map[string]time.Time{"propulsion.0.exhaustTemperature": since.Add(time.Hour)}
+	young := sourceRecord{Last: last, Active: activeSources(last), Since: since}
+	got := vesselDiscovery(snapshot, vesselView{}, cumminsItems(), young)
+	if got.Tracking.Since == nil || !got.Tracking.Since.Equal(since) || got.Tracking.Covers || got.Tracking.Seeded {
+		t.Fatalf("tracking = %+v", got.Tracking)
 	}
 	by := map[string]discoveryRow{}
 	for _, r := range discoveryGroupRows(got, "engine") {
@@ -179,9 +175,8 @@ func TestDiscoveryWithoutHistoryListsLiveOnlyAndSaysSo(t *testing.T) {
 	if by["propulsion.port"].Signature != signatureCarried || by["propulsion.starboard"].Source != "" {
 		t.Errorf("only the live engine is offered: %+v", by)
 	}
-	// Unknown is not bad: the item's source is not live and history is gone.
 	if by["propulsion.0"].Signature != signatureUnknown {
-		t.Errorf("propulsion.0 = %+v", by["propulsion.0"])
+		t.Errorf("propulsion.0 is not yet called missing: %+v", by["propulsion.0"])
 	}
 }
 
@@ -224,13 +219,13 @@ func TestSetupEnginesStepFlagsAnEngineOnASourceWithoutRPM(t *testing.T) {
 	}
 }
 
-func TestSetupEnginesStepDoesNotReopenOnAnUncheckableSource(t *testing.T) {
+func TestSetupEnginesStepDoesNotReopenOnAYoungRecord(t *testing.T) {
 	vessel := vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port", EquipmentID: "p"}}}
 	items := []sourceItem{{ID: "p", Name: "Port", Source: "propulsion.port", Group: sourceEngine, Instance: "port"}}
-	disc := vesselDiscovery(newAnomalyTestSnapshot(), vessel, items, sourceHistory{Err: errors.New("down")})
+	disc := vesselDiscovery(newAnomalyTestSnapshot(), vessel, items, sourceRecord{Since: time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)})
 	disc.Connected = true
 	st := stepByID(t, buildSetupStatus(vessel, disc, setupMate{}), "engines")
-	if st.State != setupDone || !strings.Contains(st.Detail, "couldn't check") {
+	if st.State != setupDone || !strings.Contains(st.Detail, "couldn't check yet") || !strings.Contains(st.Detail, "watching the boat since 20 Oct") {
 		t.Fatalf("step = %+v", st)
 	}
 }
@@ -257,11 +252,11 @@ func discoveryGroupLabel(r discoveryResponse, kind string) string {
 
 // Both read endpoints share one candidate list, so the equipment page's
 // Source select, Discovery and Roles cannot disagree.
-func TestDiscoveryHandlerOffersLoggedEnginesAndSaysWhenHistoryIsGone(t *testing.T) {
+func TestDiscoveryHandlerOffersLoggedEngines(t *testing.T) {
 	prevSnapshot := globalSignalKSnapshot
 	globalSignalKSnapshot = exhaustOnlySnapshot(t)
-	prevLoad := loadSourceHistory
-	t.Cleanup(func() { globalSignalKSnapshot, loadSourceHistory = prevSnapshot, prevLoad })
+	prevLoad := currentSourceRecord
+	t.Cleanup(func() { globalSignalKSnapshot, currentSourceRecord = prevSnapshot, prevLoad })
 	t.Setenv("SETTINGS_FILE", filepath.Join(t.TempDir(), "settings.yaml"))
 	store := vesselFixtureStore(t)
 	if _, err := store.CreateEquipment(equipmentItem{Name: "Cummins QSB 6.7", SignalKSource: "propulsion.0"}); err != nil {
@@ -282,17 +277,16 @@ func TestDiscoveryHandlerOffersLoggedEnginesAndSaysWhenHistoryIsGone(t *testing.
 	}
 
 	h := signatureHistoryFixture(t)
-	loadSourceHistory = func() sourceHistory { return h }
-	rows := discoveryGroupRows(read(), "engine")
-	if len(rows) != 3 || rows[0].Signature != signatureMissing || rows[1].Source != "propulsion.port" || rows[1].LastLogged == nil {
+	currentSourceRecord = func() sourceRecord { return h }
+	got := read()
+	rows := discoveryGroupRows(got, "engine")
+	if got.Tracking.Since != nil || !got.Tracking.Covers {
+		t.Errorf("tracking = %+v", got.Tracking)
+	}
+	if len(rows) != 3 || rows[0].Signature != signatureMissing || rows[1].Source != "propulsion.port" || rows[1].LastSeen == nil {
 		t.Fatalf("rows = %+v", rows)
 	}
 
-	loadSourceHistory = func() sourceHistory { return sourceHistory{Err: errors.New("influx: connection refused")} }
-	body := read()
-	if body.HistoryError == "" || discoveryGroupRows(body, "engine")[0].Signature != signatureUnknown {
-		t.Fatalf("history down: %+v", body)
-	}
 }
 
 func TestSetupEnginesStepOffersLoggedEnginesWhenNoneIsAssigned(t *testing.T) {
@@ -347,7 +341,8 @@ func TestLoggedChargerInputKeepsItsFlag(t *testing.T) {
 	snapshot.mu.Lock()
 	snapshot.batteryPublishers[ctx+"|77"] = snapshot.batteryPublishers[ctx+"|1"]
 	snapshot.mu.Unlock()
-	h := newSourceHistory(map[string]time.Time{"electrical.batteries.77.voltage": time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)})
+	last := map[string]time.Time{"electrical.batteries.77.voltage": time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)}
+	h := sourceRecord{Last: last, Active: activeSources(last), Covers: true}
 
 	var row discoveryRow
 	for _, r := range discoveryGroupRows(vesselDiscovery(snapshot, vesselView{}, nil, h), "battery") {
@@ -357,96 +352,6 @@ func TestLoggedChargerInputKeepsItsFlag(t *testing.T) {
 	}
 	if row.Source == "" || row.Reporting || !row.ChargerInput {
 		t.Fatalf("logged charger input: %+v", row)
-	}
-}
-
-// ── history loading ─────────────────────────────────────────────────────
-
-func resetSourceHistoryLoader(t *testing.T) {
-	t.Helper()
-	prevFetch, prevNow := fetchSourceHistory, sourceHistoryNow
-	sourceHistoryState.mu.Lock()
-	sourceHistoryState.have, sourceHistoryState.inflight, sourceHistoryState.failing = false, nil, false
-	sourceHistoryState.mu.Unlock()
-	t.Cleanup(func() {
-		fetchSourceHistory, sourceHistoryNow = prevFetch, prevNow
-		sourceHistoryState.mu.Lock()
-		sourceHistoryState.have, sourceHistoryState.inflight, sourceHistoryState.failing = false, nil, false
-		sourceHistoryState.mu.Unlock()
-	})
-}
-
-func TestSourceHistoryLoaderIsSingleFlight(t *testing.T) {
-	resetSourceHistoryLoader(t)
-	release := make(chan struct{})
-	var calls atomic.Int32
-	fetchSourceHistory = func() (map[string]time.Time, error) {
-		calls.Add(1)
-		<-release
-		return map[string]time.Time{"propulsion.port.revolutions": time.Unix(1, 0)}, nil
-	}
-	var wg sync.WaitGroup
-	results := make([]sourceHistory, 5)
-	for i := range results {
-		wg.Add(1)
-		go func() { defer wg.Done(); results[i] = readSourceHistory() }()
-	}
-	time.Sleep(50 * time.Millisecond) // let every caller reach the wait
-	close(release)
-	wg.Wait()
-	if n := calls.Load(); n != 1 {
-		t.Fatalf("queries = %d, want 1 in flight for all callers", n)
-	}
-	for i, r := range results {
-		if r.Err != nil || len(r.Last) != 1 {
-			t.Errorf("caller %d: %+v", i, r)
-		}
-	}
-}
-
-func TestSourceHistoryLoaderCachesFailuresBrieflyAndLogsOncePerStreak(t *testing.T) {
-	resetSourceHistoryLoader(t)
-	var logs bytes.Buffer
-	prevOut := log.Writer()
-	log.SetOutput(&logs)
-	t.Cleanup(func() { log.SetOutput(prevOut) })
-
-	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	sourceHistoryNow = func() time.Time { return now }
-	var calls int
-	var fail = true
-	fetchSourceHistory = func() (map[string]time.Time, error) {
-		calls++
-		if fail {
-			return nil, errors.New("connection refused")
-		}
-		return map[string]time.Time{}, nil
-	}
-
-	for i := 0; i < 3; i++ {
-		if r := readSourceHistory(); r.Err == nil {
-			t.Fatal("a failure must be returned, not an empty history")
-		}
-	}
-	if calls != 1 {
-		t.Fatalf("a failure is reused for %v: queries = %d", sourceHistoryFailureTTL, calls)
-	}
-	now = now.Add(sourceHistoryFailureTTL + time.Second)
-	readSourceHistory()
-	if calls != 2 {
-		t.Fatalf("after the failure window the loader asks again: %d", calls)
-	}
-	if n := strings.Count(logs.String(), "connection refused"); n != 1 {
-		t.Fatalf("a failure streak logs once, got %d:\n%s", n, logs.String())
-	}
-
-	fail = false
-	now = now.Add(sourceHistoryFailureTTL + time.Second)
-	if r := readSourceHistory(); r.Err != nil {
-		t.Fatal(r.Err)
-	}
-	if !strings.Contains(logs.String(), "readable again") {
-		t.Fatalf("recovery is logged once:\n%s", logs.String())
 	}
 }
 

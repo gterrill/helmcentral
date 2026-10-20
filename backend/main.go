@@ -499,6 +499,15 @@ func main() {
 	// inside that window loses them until the device declares them again,
 	// which SignalK does on every subscribe.
 	go globalSignalKSnapshot.runUnitFlusher(streamCtx)
+	// Helmcentral's own record of which equipment sources the boat has
+	// reported (ADR 0196), so an engine that is switched off is still listed.
+	// InfluxDB is only an optional one-time seed for it, never read per request.
+	sourceStore, err := newSourceRegistryStore(globalDocumentStore)
+	if err != nil {
+		log.Fatalf("source registry: %v", err)
+	}
+	globalSourceRegistry = newSourceRegistry(sourceStore, influxTelemetryConfigured, queryInfluxSourceHistory)
+	go globalSourceRegistry.run(streamCtx, globalSignalKSnapshot)
 	go newSignalKStreamClient(globalSignalKSnapshot, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	go newRadarPoller(globalRadarTargetStore, getEnv("SETTINGS_FILE", "../settings.yaml")).run(streamCtx)
 	// The document indexer (above): started once at boot and woken
