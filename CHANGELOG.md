@@ -27,9 +27,32 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Engine and equipment lists offer only real sources.** A source is offered
+  for an engine only if it reports RPM, and likewise voltage for a battery,
+  level for a tank and so on for each kind. A source that carries a single stray
+  reading, such as `propulsion.0` with only exhaust temperature, is no longer
+  listed. Engines that are switched off are still offered from what the boat
+  logged in the last 90 days, marked "Not reporting now" with the day they were
+  last logged. This applies to Discovery, the Roles lists and the Source list on
+  an item's page. If the logged history can't be read, those pages say so and
+  list only what is reporting now.
 - **Mate no longer works from saved routes.** It no longer finds waypoints from
   saved routes when you ask about a place, and it no longer offers to create a
   route after a passage recommendation.
+
+### Fixed
+
+- **An engine set to a source that never reports RPM is flagged.** An item whose
+  source has not reported its reading in the logged history shows a red warning
+  in Discovery, under its role and on its own page, and the Engines step in
+  Setup stays open and names the item and the source. If the history can't be
+  read the step stays done and says it couldn't check. If an engine item was
+  set to the wrong source, choose the one that reports RPM on the item's page.
+- **Mate's passage time estimate says which engine reading is missing.** When
+  an engine's fuel rate or RPM was never logged, the answer names the engine
+  and the source it is set to, instead of "no underway history".
+- **The weather window card no longer fails when Mate gives both a passage time
+  and a speed.** The passage time is used and Mate is told the speed was ignored.
 
 ## [0.50.0] - 2026-10-20
 

@@ -28,6 +28,8 @@ in order:
 1. **Connect to SignalK.** Enter the address and port, choose **Test
    Connection**, then **Save**.
 2. **Engines.** In **Discovery**, create an item for each engine the boat reports.
+   An engine item counts only if its source has reported RPM; one set to a source
+   that never has stays open, and the step names it.
 3. **House bank.** Under **Roles**, choose the house bank.
 4. **Charging and power sources.** Under **Roles**, answer the port and
    starboard alternators, the shore charger, the inverter, the generator and the
@@ -66,11 +68,44 @@ says SignalK isn't connected.
 
 A source belongs to one item. If another item already has it, Helmcentral says
 which one, and you free it there first. A source an item still owns that the
-boat has stopped reporting stays in the list and says **Not reporting**.
+boat has stopped reporting stays in the list and says **Not reporting now**.
 
 You can also set a source from the item itself: open the item in Inventory and
-use **Source** under **SignalK source**. The list holds only what the boat
-reports now, plus the source the item already owns, so there is nothing to type.
+use **Source** under **SignalK source**. The list is the same one Discovery and
+Roles use, so there is nothing to type.
+
+## Only real sources are offered
+
+The bus sometimes publishes a numbered source that carries one stray reading
+beside the source that carries the rest. On a twin-engine boat, for example,
+`propulsion.0` and `propulsion.1` may carry only exhaust temperature while
+`propulsion.port` and `propulsion.starboard` carry RPM, fuel rate and engine
+hours. Helmcentral offers a source only when it reports what that kind of
+equipment needs:
+
+| Kind | Must report |
+| --- | --- |
+| Engine | RPM |
+| Battery | voltage |
+| Alternator | output current |
+| Solar controller | panel power |
+| Tank | level |
+| Generator | state or run time |
+| Charger | output current |
+| Inverter | AC output power |
+
+Reporting now is not required. Helmcentral also looks at what the boat has
+logged over the last 90 days, so an engine that is switched off is still
+offered, shown as **Not reporting now · last logged 16 Oct**. If the history
+cannot be read, Settings and the item's page say so and list only the sources
+reporting now; an engine that is off will not appear until it is running.
+
+If an item is already set to a source that has not reported its reading in the
+logged history, Helmcentral says so in red on that source (in Discovery, under
+the role, and on the item's page), and the Setup step stays open with the item's
+name and the source. Open the item and choose the source that does report it.
+When the history cannot be read, Helmcentral does not guess: the step stays
+done and notes that it could not check.
 
 Names come only from items. There are no separate battery names, solar names,
 engine names or tank labels any more. A tank shows on the Tanks tile once an

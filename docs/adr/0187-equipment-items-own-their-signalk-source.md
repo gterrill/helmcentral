@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-16). Supersedes
+Accepted (2026-10-16). Amended by [ADR 0196](0196-equipment-sources-must-carry-their-signature.md): discovery offers only sources that carry their kind's signature. Supersedes
 [ADR 0181](0181-engines-and-house-bank-come-from-vessel-settings.md) and
 [ADR 0182](0182-electrical-instances-and-solar-names-are-vessel-settings.md).
 Builds on [ADR 0180](0180-alternator-instances-are-a-vessel-setting.md), whose

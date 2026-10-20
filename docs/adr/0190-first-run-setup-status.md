@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-17). Builds on
+Accepted (2026-10-17). Amended by [ADR 0196](0196-equipment-sources-must-carry-their-signature.md): the Engines step flags an engine on a source that never reports RPM. Builds on
 [ADR 0187](0187-equipment-items-own-their-signalk-source.md), whose items and
 roles the steps read.
 
