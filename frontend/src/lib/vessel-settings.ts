@@ -151,9 +151,9 @@ export interface VesselDiscoveryResponse {
 
 export const emptyVesselDiscovery: VesselDiscoveryResponse = { connected: false, groups: [], detectors: {}, history_error: '' }
 
-/** "16 Oct": the day a source's signature reading was last logged. */
-export function loggedDay(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+/** "16 Oct": the day a source's signature reading was last logged, in the vessel's own time zone (the browser's until it is known). */
+export function loggedDay(iso: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone, day: 'numeric', month: 'short' }).format(new Date(iso))
 }
 
 /** The row for an exact source, or undefined. */
@@ -176,8 +176,8 @@ export function signatureWarning(found: { row: DiscoveryRow; label: string } | u
 }
 
 /** "not reporting now · last logged 16 Oct", or "not reporting now" when never logged. */
-export function notReportingText(row: DiscoveryRow): string {
-  return row.last_logged ? `not reporting now · last logged ${loggedDay(row.last_logged)}` : 'not reporting now'
+export function notReportingText(row: DiscoveryRow, timeZone?: string): string {
+  return row.last_logged ? `not reporting now · last logged ${loggedDay(row.last_logged, timeZone)}` : 'not reporting now'
 }
 
 /** The rows of one kind, or none. */

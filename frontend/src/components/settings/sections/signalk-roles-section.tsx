@@ -6,6 +6,7 @@ import { useSettingsFormContext } from '@/components/settings/settings-form-cont
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { BLANK_DRAFT, createEquipment, useEquipment, type EquipmentItem } from '@/hooks/use-inventory'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
+import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
 import {
   OPTIONAL_ROLE_FIELDS,
   ROLE_NONE,
@@ -41,8 +42,8 @@ const ITEM_ROLES: { field: Exclude<keyof VesselRoles, 'generator_ac_instance'>; 
 const SOURCE_PREFIX = 'source:'
 
 /** "PORT START BATT · electrical.batteries.0 · 28.24 V · 100%": the boat's own name when it gives one, the source, and whatever readings discovery has. */
-function sourceOptionLabel(row: DiscoveryRow): string {
-  return [row.bus_name, row.source, ...row.metrics.map((m) => m.text), row.reporting ? '' : notReportingText(row)].filter((part) => part !== '').join(' · ')
+function sourceOptionLabel(row: DiscoveryRow, timeZone: string | undefined): string {
+  return [row.bus_name, row.source, ...row.metrics.map((m) => m.text), row.reporting ? '' : notReportingText(row, timeZone)].filter((part) => part !== '').join(' · ')
 }
 
 /** Sources of a kind that no item owns yet, reporting now or logged by the boat. A charger's own battery input is not a battery. */
@@ -74,6 +75,7 @@ export function SignalKRolesSection({ draft, onChange }: SignalKRolesSectionProp
   const { settings: savedSettings, loading: settingsLoading } = useSettingsFormContext()
   const { items } = useEquipment({})
   const { discovery, loading: discoveryLoading } = useVesselDiscovery()
+  const timeZone = useVesselTimeZone()
   const roles = draft.roles
   // The latest roles, so a choice that waits on creating an item lands on what
   // the draft holds when the item exists, not on what it held when it started.
@@ -203,7 +205,7 @@ export function SignalKRolesSection({ draft, onChange }: SignalKRolesSectionProp
                 {sources.length > 0 && (
                   <optgroup label="From the boat">
                     {sources.map((row) => (
-                      <option key={row.source} value={SOURCE_PREFIX + row.source}>{sourceOptionLabel(row)}</option>
+                      <option key={row.source} value={SOURCE_PREFIX + row.source}>{sourceOptionLabel(row, timeZone)}</option>
                     ))}
                   </optgroup>
                 )}

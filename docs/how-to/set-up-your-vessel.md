@@ -100,11 +100,12 @@ offered, shown as **Not reporting now · last logged 16 Oct**. If the history
 cannot be read, Settings and the item's page say so and list only the sources
 reporting now; an engine that is off will not appear until it is running.
 
-If an item is already set to a source that has not reported its reading in the
-logged history, Helmcentral says so in red on that source (in Discovery, under
+If an item is already set to a source that is active in the logged history but
+has never reported its reading, Helmcentral says so in red on that source (in Discovery, under
 the role, and on the item's page), and the Setup step stays open with the item's
 name and the source. Open the item and choose the source that does report it.
-When the history cannot be read, Helmcentral does not guess: the step stays
+When the history cannot be read, or the source has logged nothing at all (an
+engine laid up, or a short log), Helmcentral does not guess: the step stays
 done and notes that it could not check.
 
 Names come only from items. There are no separate battery names, solar names,

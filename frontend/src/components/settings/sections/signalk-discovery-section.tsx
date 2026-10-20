@@ -16,6 +16,7 @@ import {
 } from '@/hooks/use-inventory'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
+import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
 import { candidateItems, candidateLabels } from '@/lib/equipment-candidates'
 import {
   SOURCE_KINDS,
@@ -145,6 +146,7 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
   const [error, setError] = useState<string | null>(null)
 
   const warning = signatureWarning({ row, label: signatureLabel })
+  const timeZone = useVesselTimeZone()
   const reading = row.metrics.map((m) => `${m.label} ${m.text}`).join(' · ')
 
   const run = async (action: () => Promise<unknown>) => {
@@ -186,7 +188,7 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
             numbered duplicate of an engine that does carry figures. */}
         <p className={`truncate font-mono text-xs ${row.reporting && row.metrics.length === 0 ? 'text-muted-foreground' : 'text-foreground'}`}>{row.source}</p>
         <p className="mt-1 truncate text-xs tabular-nums text-muted-foreground">
-          {row.reporting ? (reading === '' ? 'Reporting, no figures yet' : reading) : sentenceCase(notReportingText(row))}
+          {row.reporting ? (reading === '' ? 'Reporting, no figures yet' : reading) : sentenceCase(notReportingText(row, timeZone))}
         </p>
         {warning !== '' && <p role="alert" className="text-xs text-destructive">{warning}</p>}
         {kind === 'battery' && row.reporting && (

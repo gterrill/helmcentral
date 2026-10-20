@@ -5,6 +5,7 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import type { EquipmentInput } from '@/hooks/use-inventory'
+import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
 import {
   SOURCE_KINDS,
   SOURCE_KIND_LABELS,
@@ -25,9 +26,9 @@ interface EquipmentSourceSectionProps {
   canWrite: boolean
 }
 
-function rowLabel(row: DiscoveryRow): string {
+function rowLabel(row: DiscoveryRow, timeZone: string | undefined): string {
   const reading = row.metrics.map((m) => m.text).join(' · ')
-  if (!row.reporting) return `${row.source} · ${notReportingText(row)}`
+  if (!row.reporting) return `${row.source} · ${notReportingText(row, timeZone)}`
   return reading === '' ? row.source : `${row.source} · ${reading}`
 }
 
@@ -45,6 +46,7 @@ function rowLabel(row: DiscoveryRow): string {
 export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrite }: EquipmentSourceSectionProps) {
   const kind = sourceKindOf(draft.signalk_source)
   const known = discovery.groups.some((g) => g.rows.some((r) => r.source === draft.signalk_source))
+  const timeZone = useVesselTimeZone()
   const warning = signatureWarning(discoveryRowFor(discovery, draft.signalk_source))
   const noData = !discovery.connected && discovery.groups.length === 0
 
@@ -92,7 +94,7 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
                     const takenBy = row.item && row.item.id !== id ? row.item.name : null
                     return (
                       <option key={row.source} value={row.source} disabled={takenBy !== null}>
-                        {takenBy ? `${row.source} · assigned to ${takenBy}` : rowLabel(row)}
+                        {takenBy ? `${row.source} · assigned to ${takenBy}` : rowLabel(row, timeZone)}
                       </option>
                     )
                   })}
@@ -109,7 +111,7 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
             </FieldDescription>
           )}
           {warning !== '' && <p role="alert" className="text-sm text-destructive">{warning}</p>}
-          {discovery.history_error !== '' && (
+          {!noData && discovery.history_error !== '' && (
             <FieldDescription>Logged history isn&apos;t available ({discovery.history_error}), so only sources reporting now are listed.</FieldDescription>
           )}
         </Field>

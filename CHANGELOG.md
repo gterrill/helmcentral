@@ -43,14 +43,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 ### Fixed
 
 - **An engine set to a source that never reports RPM is flagged.** An item whose
-  source has not reported its reading in the logged history shows a red warning
+  source is active in the logged history but has never reported its reading
+  shows a red warning
   in Discovery, under its role and on its own page, and the Engines step in
   Setup stays open and names the item and the source. If the history can't be
-  read the step stays done and says it couldn't check. If an engine item was
+  read, or the source has logged nothing at all, the step stays done and says
+  it couldn't check. If an engine item was
   set to the wrong source, choose the one that reports RPM on the item's page.
 - **Mate's passage time estimate says which engine reading is missing.** When
-  an engine's fuel rate or RPM was never logged, the answer names the engine
-  and the source it is set to, instead of "no underway history".
+  an engine's fuel rate or RPM was not logged in the window, the answer names
+  the engine instead of "no underway history", and points at its source in
+  Settings when that source has never reported RPM.
 - **The weather window card no longer fails when Mate gives both a passage time
   and a speed.** The passage time is used and Mate is told the speed was ignored.
 

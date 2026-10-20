@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
+import { invalidateQueries } from '@/lib/api-query'
 
 const body = {
   connected: true,
@@ -23,6 +24,18 @@ describe('useVesselDiscovery', () => {
     expect(result.current.discovery.groups[0].rows[0].metrics).toEqual([])
     expect(result.current.discovery.detectors.battery.missing).toBe('Choose your house bank under Roles')
     expect(result.current.error).toBeNull()
+  })
+
+  it('never leaves the history error or signature label undefined', async () => {
+    await invalidateQueries(['/api/vessel/discovery'])
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => body })))
+
+    const { result } = renderHook(() => useVesselDiscovery())
+    await waitFor(() => expect(result.current.discovery.connected).toBe(true))
+
+    expect(result.current.discovery.history_error).toBe('')
+    expect(result.current.discovery.groups[0].signature_label).toBe('')
+    expect(result.current.discovery.groups[0].rows[0].last_logged).toBeNull()
   })
 
   it('surfaces a failure rather than masking it', async () => {

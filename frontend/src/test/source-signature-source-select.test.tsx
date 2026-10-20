@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 
 import { EquipmentSourceSection } from '@/components/inventory/equipment-source-section'
 import { BLANK_DRAFT } from '@/hooks/use-inventory'
-import type { DiscoveryRow, VesselDiscoveryResponse } from '@/lib/vessel-settings'
+import { loggedDay, type DiscoveryRow, type VesselDiscoveryResponse } from '@/lib/vessel-settings'
 
 // The Source select on an equipment item's page is fed by the same discovery
 // list as Settings -> SignalK. On 2026-10-21 the engines were off and the Port
@@ -56,5 +56,28 @@ describe('EquipmentSourceSection: Source select', () => {
 
     expect(screen.queryByRole('alert')).toBeNull()
     expect(screen.getByText(/Logged history isn't available \(influxdb is not configured\)/)).toBeInTheDocument()
+  })
+
+  it('says one thing, not two, when SignalK has no data at all', () => {
+    render(
+      <EquipmentSourceSection
+        id="c0"
+        draft={{ ...BLANK_DRAFT, signalk_source: '' }}
+        setDraft={vi.fn()}
+        discovery={{ connected: false, groups: [], detectors: {}, history_error: 'influxdb is not configured' }}
+        canWrite
+      />,
+    )
+
+    expect(screen.getByText(/no data from SignalK yet/)).toBeInTheDocument()
+    expect(screen.queryByText(/Logged history isn't available/)).toBeNull()
+    expect(screen.queryByText(/now or in the logged history/)).toBeNull()
+  })
+})
+
+describe('loggedDay', () => {
+  it('names the day in the time zone it is given', () => {
+    expect(loggedDay('2026-10-16T23:30:00Z', 'UTC')).toBe('16 Oct')
+    expect(loggedDay('2026-10-16T23:30:00Z', 'Australia/Brisbane')).toBe('17 Oct')
   })
 })

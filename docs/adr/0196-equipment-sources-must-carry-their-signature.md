@@ -55,8 +55,15 @@ that never had data, silently.
    that only sources reporting now are listed. History is never replaced by an
    empty result.
 5. **Existing assignments are judged.** A row an item owns has a `signature` of
-   carried, missing (history was read and holds none) or unknown (history could
-   not be read and the source is not live). Missing shows an inline warning in
+   carried, missing or unknown. Missing means the source is alive in the log
+   (something under it was recorded in the last 90 days) but never carried its
+   signature, as `propulsion.0` logged exhaust temperature and never RPM.
+   Unknown means history could not be read, or the source logged nothing at all
+   (laid up, or a short retention): silence is not evidence against a mapping.
+   The history query therefore reads the last time of every path under the
+   equipment sources, not only the signature paths (about 270 paths on the
+   boat, under a second). It is loaded single-flight, a failure is reused for
+   30 seconds, and a failure streak is logged once. Missing shows an inline warning in
    Discovery, under the role and on the item's page, and reopens the Setup step
    (Engines, House bank, or Charging and power sources) with the item, the
    source and the fix. Unknown never reopens a step: it stays done and says it
@@ -65,7 +72,9 @@ that never had data, silently.
    source that has ever reported its signature is carried.
 6. **Mate says which mapping is silent.** `estimate_passage` returns an error
    naming the engine item and path when an engine's fuel rate or RPM has no
-   points in the window, keeping "no underway history" for a genuinely empty
+   points in the window. It blames the mapping only when the source is known
+   to be missing its signature; otherwise it says the engine logged nothing in
+   the window. It keeps "no underway history" for a genuinely empty
    join. `assess_passage_window` accepts both `passage_hours` and `speed_kn`
    on a leg (the hours win, and the result notes the speed was ignored); the
    model sent both three times and retried identically, so no card appeared.
