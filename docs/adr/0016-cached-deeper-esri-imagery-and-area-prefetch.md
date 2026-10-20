@@ -1,7 +1,7 @@
 # ADR 0016: Cached, Deeper-Zoom Esri World Imagery + In-App Area Prefetch
 
 ## Status
-Accepted
+Accepted. Superseded in part by ADR 0195: the in-app area prefetch and its endpoints are gone. The Esri imagery cache, the deeper-zoom degradation and the cache-clearing endpoint remain.
 
 ## Context
 TimeZero Pro's "PhotoFusion" feature blends satellite photo imagery into the

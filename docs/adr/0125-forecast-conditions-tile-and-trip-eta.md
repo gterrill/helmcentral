@@ -1,7 +1,7 @@
 # ADR 0125: Forecast Conditions Tile And Trip ETA
 
 ## Status
-Accepted. Supersedes ADR 0092 §5 (the forecast-days/sea-state tile split) and §2 (the clock tile's next-waypoint ETA).
+Accepted. Supersedes ADR 0092 §5 (the forecast-days/sea-state tile split) and §2 (the clock tile's next-waypoint ETA). Amended by ADR 0195, which removes saved Helmcentral routes: the trip ETA now follows the route SignalK is navigating, at speed over the ground alone, with no planning speed.
 
 ## Context
 

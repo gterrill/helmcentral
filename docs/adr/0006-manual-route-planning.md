@@ -1,7 +1,7 @@
 # ADR 0006: Manual Route Planning with Smart Helpers
 
 ## Status
-Accepted
+Accepted. Superseded by ADR 0195, which removes the Routes page and saved routes.
 
 ## Context
 Operators wanted a way to plan multi-leg routes (sequences of waypoints) ahead of a passage, with automatic distance/bearing/ETA so they don't have to do chart math by hand.

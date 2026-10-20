@@ -165,10 +165,8 @@ func resolveBasemapDocument(cache *tileCache, cachePath string, fetch func() (da
 //     map-place-labels.tsx pins BASE_VECTOR_SOURCE_ID = 'carto' and
 //     attaches every place-name label layer to a source with that exact id
 //     (ADR 0066).
-//   - every layer id: route-planner-map.tsx's HYBRID_HIDDEN_LAYER_IDS and
-//     HYBRID_LABEL_LAYER_IDS reference Carto's own layer ids by name for
-//     the hybrid-satellite restyling, and BASE_STYLE_FIRST_LAYER_ID =
-//     'background' pins the first layer as a beforeId anchor (ADR 0016).
+//   - every layer id: BASE_STYLE_FIRST_LAYER_ID = 'background' pins the
+//     first layer as a beforeId anchor (ADR 0016).
 //
 // A missing/wrong-shaped field at any of the three rewrite points is
 // treated as an upstream-shape failure (an error, not a best-effort partial

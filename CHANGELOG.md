@@ -11,6 +11,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **The Routes page is gone.** Saved routes are no longer kept; plan and
+  activate routes on your chartplotter or in a SignalK app. The Route tile now
+  shows the route SignalK is navigating, or the next waypoint when the plotter
+  only sends a go-to, and does nothing when tapped. The arrival time uses your
+  speed over the ground alone, so it is blank while you are stopped. The
+  Nearby map and the clock follow the same route. What to do on upgrade: if you
+  want to keep a route you planned here, recreate it on your plotter first; the
+  old `routes.json` file in the data folder is no longer read and can be
+  deleted. The `ROUTES_FILE` environment variable is gone too; remove it from
+  your compose file if you set it. A bookmark to `/routes` now opens the
+  dashboard.
+
+### Changed
+
+- **Mate no longer works from saved routes.** It no longer finds waypoints from
+  saved routes when you ask about a place, and it no longer offers to create a
+  route after a passage recommendation.
+
 ## [0.50.0] - 2026-10-20
 
 ### Breaking

@@ -418,7 +418,6 @@ func main() {
 		recordAnchorWatchLoadFailure(err)
 	}
 	loadAnchorPlacemarks()
-	loadRoutes()
 	loadDashboardPages()
 	// The built-in profile catalogue is compiled in; an invalid one is a
 	// build defect, so stop here rather than serve a broken catalogue.
@@ -598,7 +597,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, anchorRoutes()...)
 	routes = append(routes, dashboardRoutes()...)
 	routes = append(routes, displayRoutes()...)
-	routes = append(routes, plannedRouteRoutes()...)
+	routes = append(routes, activeRouteRoutes()...)
 	routes = append(routes, trackRoutes()...)
 	routes = append(routes, passageRoutes()...)
 	routes = append(routes, profileRoutes()...)

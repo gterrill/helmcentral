@@ -58,7 +58,7 @@ type radarCapabilitiesProbe struct {
 
 // fetchMayaraCapabilities GETs one radar's capabilities through the
 // already-configured SignalK connection (signalkRequestJSONWithAuthBody,
-// route_activation.go:144), exactly as fetchMayaraTargets does
+// signalk_rest.go), exactly as fetchMayaraTargets does
 // (radar_source.go) — mayara has no host/port of its own on this path either,
 // only the plugin's proxy, reached at the SignalK address already configured
 // for everything else.

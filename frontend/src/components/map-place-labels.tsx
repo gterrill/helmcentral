@@ -75,11 +75,8 @@ interface LabelPaint {
   'text-halo-width': number
 }
 
-// The hybrid-satellite treatment: white text on a heavy black halo, matching
-// HYBRID_LABEL_TEXT_COLOR/HALO_COLOR/HALO_WIDTH in route-planner-map.tsx
-// (lines 72-74), which applies the same values to the base style's own
-// label layers when satellite imagery shows through. These labels need to
-// read the same way against the same photographic imagery.
+// The hybrid-satellite treatment: white text on a heavy black halo, so labels
+// stay legible against photographic imagery.
 const HYBRID_PAINT: LabelPaint = { 'text-color': '#ffffff', 'text-halo-color': '#000000', 'text-halo-width': 1.5 }
 
 // Light and dark values lifted from the corresponding Carto style layers
@@ -107,7 +104,7 @@ function useLabelPaint(isDarkTheme: boolean, overImagery: boolean): { land: Labe
 
 export interface MapPlaceLabelsProps {
   isDarkTheme: boolean
-  /** True when a raster satellite layer is showing through the basemap - see route-planner-map's showHybridSatellite / anchor-watch-map's showImageryLayer. */
+  /** True when a raster satellite layer is showing through the basemap - see anchor-watch-map's showImageryLayer. */
   overImagery: boolean
 }
 

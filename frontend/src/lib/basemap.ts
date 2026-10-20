@@ -1,6 +1,5 @@
-// Shared basemap constants, previously duplicated verbatim in
-// anchor-watch-map.tsx and route-planner-map.tsx. Both maps now import from
-// here so a style or tile URL only ever needs changing in one place.
+// Shared basemap constants, imported by the maps so a style or
+// tile URL only ever needs changing in one place.
 
 // Carto basemap styles, served by our own backend rather than fetched
 // from basemaps.cartocdn.com directly: the backend rewrites the style's

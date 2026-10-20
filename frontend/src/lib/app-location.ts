@@ -14,11 +14,11 @@ import { parseDisplayOptions, type DisplayOptions } from '@/lib/displays'
 // its own carries a `route`, a single union of that panel's views, so going
 // to a view replaces the whole slice and no sibling field is ever left
 // behind to clear.
-export const PANEL_IDS = ['forecast', 'routes', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'passages'] as const
+export const PANEL_IDS = ['forecast', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'passages'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 /** The panels with a single view and nothing to remember beyond being open. */
-export type PlainPanelId = 'forecast' | 'routes' | 'radar' | 'anchor-watch' | 'alarms'
+export type PlainPanelId = 'forecast' | 'radar' | 'anchor-watch' | 'alarms'
 
 /** `/settings/<section>`, or the Import wizard at `/settings/import/<runId>`
  * ("new" is the upload page). The bare `/settings/import` list is the

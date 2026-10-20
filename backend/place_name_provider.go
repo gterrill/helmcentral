@@ -59,9 +59,7 @@ type placeSearchMatch struct {
 
 // placeSearchInput is one search_places call's arguments. Broad tells the
 // provider whether to run its more expensive, broadened search (e.g. a
-// partial-name regex rung) - the host, not the provider, knows whether a
-// saved route waypoint already answered the query, so it alone decides
-// whether that's worth the extra cost.
+// partial-name regex rung). find_places always asks for it.
 type placeSearchInput struct {
 	Query      string
 	Lat        float64

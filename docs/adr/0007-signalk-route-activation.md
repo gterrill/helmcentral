@@ -1,7 +1,7 @@
 # ADR 0007: SignalK Route Activation
 
 ## Status
-Accepted
+Accepted. Superseded by ADR 0195. Helmcentral no longer pushes routes to SignalK; it only reads the route SignalK is navigating.
 
 ## Context
 ADR 0006 added manual route planning (CRUD + waypoint/distance/ETA helpers) but explicitly excluded any form of active route-following: no cross-track error, no bearing-to-waypoint live nav UI, no autopilot integration. That scope boundary remains unchanged here.

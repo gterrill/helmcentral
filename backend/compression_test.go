@@ -30,15 +30,17 @@ func newCompressedTestEcho() *echo.Echo {
 	return e
 }
 
-// TestCompression_LargeJSONRouteIsGzipped exercises the real, dependency-free
-// gshhg-coastline handler - a ~1.5MB embedded JSON blob and exactly one of
-// the oversized payloads the performance audit named - and checks a client
+// TestCompression_LargeJSONRouteIsGzipped serves a large JSON payload (the
+// kind of oversized response the performance audit named) and checks a client
 // that offers gzip gets back a smaller, correctly round-tripping body.
 func TestCompression_LargeJSONRouteIsGzipped(t *testing.T) {
+	source := []byte(`{"items":[` + strings.Repeat(`{"name":"Hook Island","lat":-20.05,"lon":148.9},`, 5000) + `{}]}`)
 	e := newCompressedTestEcho()
-	e.GET("/api/gshhg-coastline", gshhgCoastlineHandler)
+	e.GET("/api/large-json", func(c echo.Context) error {
+		return c.JSONBlob(http.StatusOK, source)
+	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/gshhg-coastline", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/large-json", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -49,8 +51,8 @@ func TestCompression_LargeJSONRouteIsGzipped(t *testing.T) {
 	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
 		t.Fatalf("Content-Encoding = %q, want gzip", got)
 	}
-	if rec.Body.Len() >= len(gshhgCoastlineJSON) {
-		t.Fatalf("compressed body (%d bytes) is not smaller than the source (%d bytes)", rec.Body.Len(), len(gshhgCoastlineJSON))
+	if rec.Body.Len() >= len(source) {
+		t.Fatalf("compressed body (%d bytes) is not smaller than the source (%d bytes)", rec.Body.Len(), len(source))
 	}
 
 	gz, err := gzip.NewReader(rec.Body)
@@ -62,8 +64,8 @@ func TestCompression_LargeJSONRouteIsGzipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading gzip body: %v", err)
 	}
-	if string(decoded) != string(gshhgCoastlineJSON) {
-		t.Fatalf("decompressed body does not match the source coastline JSON")
+	if string(decoded) != string(source) {
+		t.Fatalf("decompressed body does not match the source JSON")
 	}
 }
 
@@ -332,9 +334,6 @@ func TestCompression_SkipperExcludesStreamingAndBinaryRoutes(t *testing.T) {
 		{"/api/basemap/sprite/:name", false},
 		{"/api/weather-forecast", false},
 		{"/api/wave-forecast", false},
-		// gshhg.go now gzips itself once at startup and is on the skip list
-		// so the middleware never wraps it a second time (Tier 3).
-		{"/api/gshhg-coastline", true},
 		{"/api/vessel-state", false},
 		{"/api/assistant/conversations/:id", false},
 	}

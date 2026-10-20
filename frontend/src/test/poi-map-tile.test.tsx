@@ -456,8 +456,8 @@ describe('PoiMapTile', () => {
     })
   })
 
-  // The compact "i" attribution icon (ADR: same as anchor-watch-map.tsx and
-  // route-planner-map.tsx). useCollapsedMapAttribution has its own dedicated
+  // The compact "i" attribution icon (ADR: same as anchor-watch-map.tsx).
+  // useCollapsedMapAttribution has its own dedicated
   // unit tests for the collapse behaviour itself; this only checks the tile
   // wires the control on in the first place.
   describe('attribution', () => {

@@ -17,9 +17,8 @@ import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
  */
 export interface ClockTileTripEta {
   label: string | null
-  /** null when SOG (and, for a route, planning speed) can't produce an honest ETA (e.g. becalmed, or a bare destination with no SOG to steer by). */
+  /** null when SOG can't produce an honest ETA (e.g. becalmed, or a bare destination with no SOG to steer by). */
   etaAt: Date | null
-  basis: 'sog' | 'plan'
 }
 
 export interface ClockTileProps {
@@ -84,8 +83,7 @@ export const ClockTile = memo(function ClockTile({
     const etaClock = formatClock(tripEta.etaAt, timeZone)
     const time = `${dayPrefix}${hhmm(etaClock.timePart)}${etaClock.meridiem ? ` ${etaClock.meridiem}` : ''}`
     const labelPart = tripEta.label ? `${tripEta.label} ` : ''
-    const planSuffix = tripEta.basis === 'plan' ? ' (plan)' : ''
-    return `ETA ${labelPart}${time}${planSuffix}`
+    return `ETA ${labelPart}${time}`
   })()
 
   return (

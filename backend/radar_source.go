@@ -200,7 +200,7 @@ func newRadarPoller(store *radarTargetStore, settingsPath string) *radarPoller {
 
 // fetchMayaraTargets GETs one radar's current target list through the
 // already-configured SignalK connection (signalkRequestJSONWithAuthBody,
-// route_activation.go:144). mayara has no host or port of its own in
+// signalk_rest.go). mayara has no host or port of its own in
 // Helmcentral — only the plugin's proxy path, reached at the SignalK address
 // already configured for everything else (ADR 0062 amendment: "no mayara
 // host or port in Helmcentral"). The endpoint answered unauthenticated in

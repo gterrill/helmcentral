@@ -565,7 +565,6 @@ func assistantHullTypePhrase(hullType string) string {
 // still tells the model something, just not a pretty label.
 var assistantPanelLabels = map[string]string{
 	"forecast":     "Forecast",
-	"routes":       "Routes",
 	"radar":        "Radar",
 	"anchor-watch": "Anchor Watch",
 	"alarms":       "Alarms",
@@ -928,8 +927,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"and fuel margin; pass that bearing as course_deg to get_wind_forecast for the destination and read " +
 		"the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, quarter, " +
 		"following); do not work the angle out yourself. A power catamaran runs comfortably in a following " +
-		"sea and slows and burns more into a head sea. Say which it is for this passage. If the answer includes " +
-		"a passage recommendation, end with a brief follow-up question: \"Would you like me to create a route for this passage?\"\n\n" +
+		"sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
 
 		// Fair-tide departures: the tide plugins give high and low water
 		// times only, and a model asked to time a departure to the stream

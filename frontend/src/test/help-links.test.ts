@@ -28,7 +28,6 @@ describe('helpTargetFor', () => {
   it('sends every panel without sections to its own table entry', () => {
     const plain: AppLocation[] = [
       { panel: 'forecast' },
-      { panel: 'routes' },
       { panel: 'radar' },
       { panel: 'anchor-watch' },
       { panel: 'alarms' },

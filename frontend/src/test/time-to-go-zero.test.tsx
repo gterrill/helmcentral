@@ -181,17 +181,11 @@ vi.mock('@/hooks/use-active-dashboard-page', () => ({
   useActiveDashboardPageId: () => ['p1', vi.fn()],
 }))
 
-vi.mock('@/hooks/use-routes', () => ({
-  useRoutes: () => ({ routes: [], loading: false, error: null, refetch: vi.fn(), createRoute: vi.fn(), updateRoute: vi.fn(), deleteRoute: vi.fn() }),
-}))
-
-vi.mock('@/hooks/use-dashboard-route', () => ({
-  useDashboardRouteId: () => [null, vi.fn()],
-}))
-
-vi.mock('@/hooks/use-route-activation', () => ({
-  useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
-}))
+vi.mock('@/hooks/use-route-activation', () => {
+  // One object, so a re-render does not look like a new route status.
+  const result = { status: { state: 'inactive', destination: null } }
+  return { useRouteActivation: () => result }
+})
 
 vi.mock('@/hooks/use-forecast-warnings', () => ({
   useForecastWarnings: () => ({ activeWarning: null }),

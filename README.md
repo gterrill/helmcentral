@@ -11,7 +11,7 @@
 > on other platforms.
 
 A dashboard and alarm system for [SignalK](https://signalk.org/). It puts anchor
-watch, tides, weather, routes, tanks, points of interest and electrical
+watch, tides, weather, tanks, points of interest and electrical
 monitoring on one screen at the helm, drives a wall display on its own, and
 sends alarm notifications to your phone when you are off the boat.
 
@@ -284,8 +284,8 @@ list of what is due, overdue and done, with the service log kept against the
 equipment it belongs to. Records already in YachtWave
 [import](docs/features/import.md) rather than being retyped.
 
-Other features include route planning that pushes an active route to SignalK for your
-autopilot, autopilot control on SignalK's v2 API, ARPA radar targets, and an
+Other features include a Route tile that follows the route SignalK is navigating,
+autopilot control on SignalK's v2 API, ARPA radar targets, and an
 embedded weather radar.
 
 Out of scope: hazard avoidance, weather routing, live

@@ -113,12 +113,12 @@ describe('navigate: push or replace', () => {
 
   it('replaces for the first write, so the first click after a clean deep link does not eat its own entry', () => {
     const { router, history } = setup('/forecast', null)
-    router.navigate({ panel: 'routes' })
+    router.navigate({ panel: 'radar' })
     expect(history.entries).toEqual(['/forecast']) // not ready: location moves, the address waits
     router.setContext(READY)
-    expect(history.entries).toEqual(['/routes']) // the first write rewrites the opening entry
+    expect(history.entries).toEqual(['/radar']) // the first write rewrites the opening entry
     router.navigate(forecast)
-    expect(history.entries).toEqual(['/routes', '/forecast'])
+    expect(history.entries).toEqual(['/radar', '/forecast'])
   })
 
   it('writes nothing until the shell is visible', () => {

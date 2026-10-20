@@ -2,7 +2,7 @@
  * Item D end-to-end check: an SSE tick that changes something App reads
  * (gaugeValues) must re-render App, but must NOT re-render a memoized tile
  * whose own props didn't change — proving the stable-callback fix
- * (configureHandlerFor / openRoutesPanel etc., App.tsx) actually holds up
+ * (configureHandlerFor etc., App.tsx) actually holds up
  * once the whole component tree is wired together, not just in isolation.
  *
  * RouteTile and GaugeTile are wrapped (not replaced) below: the wrapper is
@@ -84,8 +84,7 @@ vi.mock('@/components/gauge-tile', async (importOriginal) => {
   return { ...actual, GaugeTile: Spy }
 })
 
-// ── a dashboard page with one route tile (reads App.tsx's now-stable
-// openRoutesPanel) and one gauge tile bound to the path the test ticks. ────
+// ── a dashboard page with one route tile and one gauge tile bound to the path the test ticks. ────
 vi.mock('@/hooks/use-dashboard-pages', () => ({
   useDashboardPages: () => ({
     pages: [{
@@ -217,23 +216,11 @@ vi.mock('@/hooks/use-app-config', () => ({
   publishAppConfigSettings: vi.fn(),
 }))
 
-// A fixed reference, not a fresh `[]` literal per call: the real useRoutes()
-// holds `routes` in useState, stable across renders that don't change it —
-// a naive mock returning a new array every call would make RouteTile's
-// `routes` prop "change" every render regardless of this test's fix, which
-// isn't what the real hook does and would make this test prove nothing.
-const STABLE_EMPTY_ROUTES: unknown[] = []
-vi.mock('@/hooks/use-routes', () => ({
-  useRoutes: () => ({ routes: STABLE_EMPTY_ROUTES, loading: false, error: null, refetch: vi.fn(), createRoute: vi.fn(), updateRoute: vi.fn(), deleteRoute: vi.fn() }),
-}))
-
-vi.mock('@/hooks/use-dashboard-route', () => ({
-  useDashboardRouteId: () => [null, vi.fn()],
-}))
-
-vi.mock('@/hooks/use-route-activation', () => ({
-  useRouteActivation: () => ({ status: null, activating: false, deactivating: false, activateError: null, activate: vi.fn(), deactivate: vi.fn() }),
-}))
+vi.mock('@/hooks/use-route-activation', () => {
+  // One object, so a re-render does not look like a new route status.
+  const result = { status: { state: 'inactive', destination: null } }
+  return { useRouteActivation: () => result }
+})
 
 vi.mock('@/hooks/use-forecast-warnings', () => ({
   useForecastWarnings: () => ({ activeWarning: null }),
@@ -265,7 +252,7 @@ describe('App tile memoization (item D)', () => {
     // gaugeValues' object identity legitimately changes both times, which
     // must re-render GaugeTile (it reads gaugeValues[widget.gauge.path]) —
     // proving the emits actually propagate through App. RouteTile reads
-    // none of gaugeValues; its own props (routes, dashboardRouteId, onOpen,
+    // none of gaugeValues; its own props (status, position,
     // speedKts) are all unchanged, so its memo should bail out both times.
     emitGaugeValues({ values: { 'a.path': 1 }, ages: {} })
     emitGaugeValues({ values: { 'a.path': 2 }, ages: {} })

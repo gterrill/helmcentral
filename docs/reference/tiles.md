@@ -21,6 +21,12 @@ Clock, Current Conditions and Forecast Conditions were sized for a wall
 display's fold first, the narrowest being a flybridge instrument strip.
 Nothing stops placing them on an ordinary page too.
 
+- **Route**: the route SignalK is navigating, with the distance left to its end
+  and the time to get there at your speed over the ground. When the plotter
+  sends only the waypoint you are heading for, the tile shows that waypoint, or
+  "Next waypoint" until the place has a name. It reads `--` when nothing is set
+  and `--` with "Route unavailable" when the route can't be read. Tapping it does
+  nothing; start and stop routes on your plotter.
 - **Clock**: the time, date, sunrise, sunset, moon phase, where the boat is
   and when it gets where it's going.
 - **Current Conditions**: depth, true wind speed with a small arrow for its
@@ -44,14 +50,13 @@ drops the strip and falls back to the hourly and daily outlook rather than
 guessing.
 
 The clock's arrival time follows whatever you are steering to. With a route
-running in Helmcentral it is the arrival at the route's last waypoint, at
-your speed over the ground, or at the route's planning speed when you are
-barely moving (marked "plan"). With only a destination set on the
-chartplotter it is the arrival at that point, named after the nearest place
-once one is found, and blank while you are stopped. With a TimeZero route,
-the boat's instruments only pass on the waypoint you are heading for, so the
-time shown is the arrival at that waypoint, not the end of the passage. An
-arrival that falls on another day carries the day, as in "Thu 09:40 AM".
+active in SignalK it is the arrival at the route's last waypoint, at your
+speed over the ground, and blank while you are stopped. With only a
+destination set on the chartplotter it is the arrival at that point, named
+after the nearest place once one is found. With a TimeZero route, the boat's
+instruments only pass on the waypoint you are heading for, so the time shown
+is the arrival at that waypoint, not the end of the passage. An arrival that
+falls on another day carries the day, as in "Thu 09:40 AM".
 
 ## Tiles you configure yourself
 

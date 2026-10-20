@@ -47,7 +47,7 @@ for the full catalog and every tile's fields.
 One strip of labelled status cells and a CHK cell, pinned above the grid on every
 dashboard page, inside whatever skin that page uses. The strip belongs to the
 vessel, not to the page: same lamps, same order, wherever you look, so a
-glance always means the same thing. It stays off the Forecast, Routes, Radar,
+glance always means the same thing. It stays off the Forecast, Radar,
 Anchor Watch and Settings panels, which rely on the alarm banner instead, and
 off wall displays, where it would spend a third of a 360px-tall strip on the
 least page-specific information on screen.
@@ -187,7 +187,6 @@ The address bar follows the panel you are on, so you can link straight to it.
 | `/` | The dashboard; on first load, this browser's remembered page if it still exists, otherwise the first page. |
 | `/dashboard/<page id>` | The dashboard, that page. |
 | `/forecast` | The forecast drawer. |
-| `/routes` | Route planning. |
 | `/radar` | Radar targets. |
 | `/anchor-watch` | Anchor watch. |
 | `/alarms` | The alarms panel. |
@@ -200,7 +199,7 @@ a different one comes first and the address follows, without switching the
 page you are looking at.
 
 Back and Forward move between panels the way they move between pages on any
-other site: open Forecast, then Routes, and Back returns you to Forecast
+other site: open Forecast, then Radar, and Back returns you to Forecast
 rather than closing the app. Tapping an alarm notification on your phone
 opens the Alarms panel, not the dashboard.
 
@@ -271,7 +270,7 @@ there, then flies straight on to each next one in a high arc that rises far
 enough to show the boat and the whole area on the way. After the last match it
 pulls back out to the view centred on the boat and rests on it before starting
 again. A longer Summary cycle, 15 to 20 seconds, gives each
-place a longer hold. An active route shows as a line, with the leg
+place a longer hold. The route SignalK is navigating shows as a line, with the leg
 you're on drawn brighter.
 
 See [Add a Nearby map](../how-to/add-a-nearby-map.md) for setup, and [POI
@@ -284,14 +283,14 @@ and how well your cruising ground is likely to be mapped.
 
 Its own page. See [Anchor watch](anchor-watch.md).
 
-### Route planning
+### Following the route
 
-Multi-leg waypoint sequences with per-leg distance, bearing and ETA. Activate
-a saved route and Helmcentral pushes it out as the vessel's active route, for
-autopilots and MFDs to follow.
-
-You plan the waypoints yourself. Helmcentral offers no hazard avoidance, no
-weather routing and no live navigation, and it needs no chart licence.
+Helmcentral does not plan or activate routes. Plan them on your chartplotter,
+or in a SignalK app such as Freeboard, and activate them there. The Route tile
+shows the route SignalK is navigating, with the distance left to its end and
+the arrival time at your speed over the ground. When the plotter only sends the
+waypoint you are heading for, the tile shows that waypoint instead. See
+[Tiles](../reference/tiles.md).
 
 ### Autopilot
 

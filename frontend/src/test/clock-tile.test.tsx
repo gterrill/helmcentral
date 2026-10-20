@@ -119,7 +119,7 @@ describe('ClockTile', () => {
   test('shows an ETA line with the waypoint label and time when a route is active', () => {
     const etaAt = new Date('2026-06-14T18:05:00Z')
     renderClockTile({
-      tripEta: { label: 'WP 3', etaAt, basis: 'sog' },
+      tripEta: { label: 'WP 3', etaAt },
     })
 
     const eta = screen.getByTestId('clock-eta')
@@ -134,7 +134,7 @@ describe('ClockTile', () => {
   test('includes the AM/PM meridiem in the ETA line, not just hh:mm', () => {
     const etaAt = new Date('2026-06-14T18:05:00Z')
     renderClockTile({
-      tripEta: { label: 'WP 3', etaAt, basis: 'sog' },
+      tripEta: { label: 'WP 3', etaAt },
     })
 
     const eta = screen.getByTestId('clock-eta')
@@ -142,17 +142,9 @@ describe('ClockTile', () => {
     expect(eta).toHaveTextContent(formatClock(etaAt).meridiem)
   })
 
-  test('marks a planning-speed ETA with a plan suffix', () => {
-    renderClockTile({
-      tripEta: { label: 'Mooloolaba', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' },
-    })
-
-    expect(screen.getByTestId('clock-eta')).toHaveTextContent(/plan/i)
-  })
-
   test('shows the waypoint label with a dash for the time when no honest ETA exists', () => {
     renderClockTile({
-      tripEta: { label: 'WP 1', etaAt: null, basis: 'plan' },
+      tripEta: { label: 'WP 1', etaAt: null },
     })
 
     expect(screen.getByText(/WP 1/)).toBeInTheDocument()
@@ -169,7 +161,7 @@ describe('ClockTile', () => {
   // rather than inventing a label.
   test('shows the ETA time with no label when the destination has none', () => {
     const etaAt = new Date('2026-06-14T15:05:00Z')
-    renderClockTile({ tripEta: { label: null, etaAt, basis: 'sog' } })
+    renderClockTile({ tripEta: { label: null, etaAt } })
 
     const eta = screen.getByTestId('clock-eta')
     expect(eta).toHaveTextContent('ETA')
@@ -182,7 +174,7 @@ describe('ClockTile', () => {
   test('prefixes the ETA with a 3-letter weekday when it falls on a different vessel-local day than today', () => {
     // Vessel-local (UTC) "now" is Jun 14; the ETA below is two days later.
     renderClockTile(
-      { tripEta: { label: 'Hook Island', etaAt: new Date('2026-06-16T09:40:00Z'), basis: 'plan' } },
+      { tripEta: { label: 'Hook Island', etaAt: new Date('2026-06-16T09:40:00Z') } },
       { datetime: NOW.toISOString(), timezone: 'UTC' },
     )
 
@@ -191,7 +183,7 @@ describe('ClockTile', () => {
 
   test('carries no weekday prefix when the ETA falls on the same vessel-local day as today', () => {
     renderClockTile(
-      { tripEta: { label: 'Hook Island', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' } },
+      { tripEta: { label: 'Hook Island', etaAt: new Date('2026-06-14T18:05:00Z') } },
       { datetime: NOW.toISOString(), timezone: 'UTC' },
     )
 
@@ -238,7 +230,7 @@ describe('ClockTile', () => {
       sunsetTime: '7:41PM',
       moonPhase: 'waxingGibbous',
       placeName: 'Airlie Beach',
-      tripEta: { label: 'Mooloolaba Marina', etaAt: new Date('2026-09-16T18:05:00Z'), basis: 'plan' },
+      tripEta: { label: 'Mooloolaba Marina', etaAt: new Date('2026-09-16T18:05:00Z') },
     })
 
     expect(screen.getByText('Airlie Beach')).toBeInTheDocument()
@@ -253,7 +245,7 @@ describe('ClockTile', () => {
   test('renders the ETA line inside the same block as the place name, not as a separate element below it', () => {
     renderClockTile({
       placeName: 'Airlie Beach',
-      tripEta: { label: 'Mooloolaba Marina', etaAt: new Date('2026-06-14T18:05:00Z'), basis: 'plan' },
+      tripEta: { label: 'Mooloolaba Marina', etaAt: new Date('2026-06-14T18:05:00Z') },
     })
 
     const place = screen.getByText('Airlie Beach')

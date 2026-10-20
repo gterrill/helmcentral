@@ -81,7 +81,6 @@ type assistantToolDeps struct {
 	// placeNameProviderResolver shape place_name.go uses - read fresh on
 	// every call so a Settings change takes effect on the very next lookup.
 	placeNames placeNameProviderResolver
-	routes     func() []routeData
 	// influxRange is estimate_passage's only I/O dependency: any SignalK
 	// path's history over an explicit range, aggregated to fixed-size
 	// buckets. Production wires queryInfluxPathRange (influx.go); tests
@@ -266,8 +265,7 @@ func (d assistantToolDeps) takeCards(result string) []mateCard {
 }
 
 // assistantProductionToolDeps wires the real dependencies: the live vessel
-// state, the settings-configured weather/wave/tide/place-names providers,
-// and a snapshot of the saved routes.
+// state and the settings-configured weather/wave/tide/place-names providers.
 func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 	return assistantToolDeps{
 		now:         time.Now,
@@ -287,7 +285,6 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		placeNames: func() (placeNameProvider, string, error) {
 			return resolvePlaceNameProvider(settingsPath)
 		},
-		routes:            assistantRouteSnapshot,
 		influxRange:       queryInfluxPathRange,
 		fuelRateInstances: configuredEngineInstances(settingsPath),
 		fuelAboardM3:      fuelAboardM3FromDerivedPaths,
@@ -352,23 +349,6 @@ func configuredEngineInstances(settingsPath string) func() ([]string, error) {
 		}
 		return instances, nil
 	}
-}
-
-// assistantRouteSnapshot copies the saved routes under routesMu's read lock
-// (routes.go) so find_places never holds that lock while it does
-// place-names provider I/O or JSON work - the same "copy under the lock,
-// work outside it"
-// discipline resolveAndPinAnchorWatchPlaceName (place_name.go) already
-// follows for anchorWatchMu.
-func assistantRouteSnapshot() []routeData {
-	routesMu.RLock()
-	defer routesMu.RUnlock()
-
-	out := make([]routeData, 0, len(routesState))
-	for _, r := range routesState {
-		out = append(out, *r)
-	}
-	return out
 }
 
 // ── tool definitions (OpenRouter/OpenAI function-calling schemas) ──────────

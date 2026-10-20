@@ -28,7 +28,6 @@ func liveFindPlacesDeps(t *testing.T) assistantToolDeps {
 	return assistantToolDeps{
 		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -1, Longitude: -1}, nil },
 		placeNames:  func() (placeNameProvider, string, error) { return provider, provider.ID(), nil },
-		routes:      func() []routeData { return nil },
 	}
 }
 
