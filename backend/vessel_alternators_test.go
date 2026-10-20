@@ -60,7 +60,7 @@ func discoveryGroupRows(r discoveryResponse, kind string) []discoveryRow {
 
 func TestVesselDiscoverySortsAlternatorsNumerically(t *testing.T) {
 	seedSelfTree(t, alternatorTree)
-	got := discoveryGroupRows(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil), "alternator")
+	got := discoveryGroupRows(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil, sourceHistory{}), "alternator")
 	if len(got) != 3 || got[0].Instance != "1" || got[1].Instance != "2" || got[2].Instance != "12" {
 		t.Fatalf("got %+v", got)
 	}
@@ -193,7 +193,7 @@ func TestUpdateSettingsSavesAndRejectsAlternatorRoles(t *testing.T) {
 
 func TestVesselDiscoveryListsAlternatorInstancesWithLiveCurrent(t *testing.T) {
 	seedSelfTree(t, alternatorTree)
-	rows := discoveryGroupRows(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil), "alternator")
+	rows := discoveryGroupRows(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil, sourceHistory{}), "alternator")
 	if len(rows) != 3 {
 		t.Fatalf("instances: %+v", rows)
 	}

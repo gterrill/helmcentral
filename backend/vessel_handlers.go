@@ -53,14 +53,25 @@ type discoveryRow struct {
 	Reporting    bool              `json:"reporting"`
 	Metrics      []discoveryMetric `json:"metrics"`
 	Item         *discoveryItemRef `json:"item"`
+	// LastLogged is when the boat last logged this source's signature path;
+	// null when it never has within the lookback.
+	LastLogged *time.Time `json:"last_logged"`
+	// Signature is whether the source carries what its kind needs: "carried",
+	// "missing" (history was read and holds none) or "unknown" (history could
+	// not be read). Only a source an item owns can be anything but carried,
+	// since an unowned source is listed only when it carries its signature.
+	Signature string `json:"signature"`
 }
 
 // discoveryGroup is one kind of source. Mappable false marks a group an item
 // cannot own (AC inputs, which only the generator AC input role picks from).
 type discoveryGroup struct {
-	Kind     string         `json:"kind"`
-	Mappable bool           `json:"mappable"`
-	Rows     []discoveryRow `json:"rows"`
+	Kind     string `json:"kind"`
+	Mappable bool   `json:"mappable"`
+	// SignatureLabel is what a source of this kind must report, in the
+	// operator's words ("RPM"); empty for a group an item cannot own.
+	SignatureLabel string         `json:"signature_label"`
+	Rows           []discoveryRow `json:"rows"`
 }
 
 // vesselDetectorStatus is one detector's setup state for the Settings page:
@@ -77,6 +88,9 @@ type discoveryResponse struct {
 	Connected bool                            `json:"connected"`
 	Groups    []discoveryGroup                `json:"groups"`
 	Detectors map[string]vesselDetectorStatus `json:"detectors"`
+	// HistoryError is why logged history could not be read; empty when it was.
+	// While set, only sources reporting now are listed.
+	HistoryError string `json:"history_error"`
 }
 
 var (
@@ -260,10 +274,10 @@ func acInputRows(t telemetryReader, paths []signalKPath) []discoveryRow {
 }
 
 // vesselDiscovery builds the whole GET /api/vessel/discovery response: every
-// source the boat is currently reporting, plus every source an item still owns
-// that has gone quiet, each with the item that owns it, and each detector's
+// source that carries its kind's signature (source_signatures.go), live now or
+// logged, plus every source an item owns even if it carries none, each with the item that owns it, and each detector's
 // current setup status against vessel.
-func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourceItem) discoveryResponse {
+func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourceItem, history sourceHistory) discoveryResponse {
 	telemetry := snapshot.liveSelfTelemetry(time.Now().UTC())
 	paths := telemetry.Paths()
 	live := discoveredInstances(telemetry, paths)
@@ -276,13 +290,21 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 
 	groups := make([]discoveryGroup, 0, len(sourceGroupOrder)+1)
 	for _, group := range sourceGroupOrder {
+		// An instance is offered only when it carries its kind's signature,
+		// now or in the logged history; an instance an item owns is always
+		// listed, with a verdict on whether it carries the signature.
+		inTree := map[string]bool{}
+		carriedLive := map[string]bool{}
 		ids := map[string]bool{}
 		for _, id := range live[group] {
-			ids[id] = true
+			inTree[id] = true
+			if liveCarriesSignature(telemetry, group, sourcePath(group, id)) {
+				carriedLive[id] = true
+				ids[id] = true
+			}
 		}
-		reporting := map[string]bool{}
-		for id := range ids {
-			reporting[id] = true
+		for _, id := range history.loggedInstances(group) {
+			ids[id] = true
 		}
 		for _, it := range items {
 			if it.Group == group {
@@ -298,7 +320,13 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 		rows := make([]discoveryRow, 0, len(sorted))
 		for _, id := range sorted {
 			source := sourcePath(group, id)
-			row := discoveryRow{Source: source, Instance: id, Reporting: reporting[id], Metrics: []discoveryMetric{}}
+			row := discoveryRow{
+				Source: source, Instance: id, Reporting: inTree[id], Metrics: []discoveryMetric{},
+				Signature: signatureState(carriedLive[id], history, group, source),
+			}
+			if at, ok := history.lastLogged(group, source); ok {
+				row.LastLogged = &at
+			}
 			if row.Reporting {
 				row.Metrics = sourceMetrics(telemetry, group, id)
 			}
@@ -311,11 +339,15 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 			}
 			rows = append(rows, row)
 		}
-		groups = append(groups, discoveryGroup{Kind: string(group), Mappable: true, Rows: rows})
+		groups = append(groups, discoveryGroup{Kind: string(group), Mappable: true, SignatureLabel: sourceSignatures[group].label, Rows: rows})
 	}
 	groups = append(groups, discoveryGroup{Kind: "ac", Mappable: false, Rows: acInputRows(telemetry, paths)})
 
-	return discoveryResponse{Connected: snapshot.selfTelemetry().HasSelf(), Groups: groups, Detectors: vesselDetectorStatuses(vessel)}
+	resp := discoveryResponse{Connected: snapshot.selfTelemetry().HasSelf(), Groups: groups, Detectors: vesselDetectorStatuses(vessel)}
+	if history.Err != nil {
+		resp.HistoryError = history.Err.Error()
+	}
+	return resp
 }
 
 // vesselDetectorStatuses names, per detector, whether vessel has completed
@@ -362,7 +394,7 @@ func getVesselDiscoveryHandler(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read equipment items"})
 	}
-	return c.JSON(http.StatusOK, vesselDiscovery(globalSignalKSnapshot, vessel, items))
+	return c.JSON(http.StatusOK, vesselDiscovery(globalSignalKSnapshot, vessel, items, loadSourceHistory()))
 }
 
 // instanceLess orders instance ids naturally: numeric ids by value (1, 2, 12),

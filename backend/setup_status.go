@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -140,6 +141,69 @@ func countOf(n int, one, many string) string {
 	return strconv.Itoa(n) + " " + many
 }
 
+// sourceKindNouns is how a kind is worded in a sentence to the operator.
+var sourceKindNouns = map[string]string{
+	"engine": "engine", "battery": "battery", "alternator": "alternator", "solar": "solar controller",
+	"tank": "tank", "generator": "generator", "charger": "charger", "inverter": "inverter",
+}
+
+// signatureCheck is what the discovery rows say about the items owning sources
+// of some kinds: the sentences for those on a source that carries nothing the
+// kind needs (history was read and holds none), and how many could not be
+// judged because history could not be read. A source the boat reports now is
+// carried, so a SignalK dropout never makes a finished setup a problem.
+type signatureCheck struct {
+	problems  []string
+	unchecked int
+}
+
+// checkSignatures judges the items owning sources of kinds. onlyItem, when
+// set, narrows it to that item.
+func checkSignatures(disc discoveryResponse, onlyItem string, kinds ...string) signatureCheck {
+	var out signatureCheck
+	for _, g := range disc.Groups {
+		wanted := false
+		for _, k := range kinds {
+			wanted = wanted || g.Kind == k
+		}
+		if !wanted {
+			continue
+		}
+		for _, r := range g.Rows {
+			if r.Item == nil || (onlyItem != "" && r.Item.ID != onlyItem) {
+				continue
+			}
+			switch r.Signature {
+			case signatureMissing:
+				out.problems = append(out.problems, fmt.Sprintf("%s is set to %s, %s source that has not reported %s.",
+					r.Item.Name, r.Source, withArticle(sourceKindNouns[g.Kind]), g.SignatureLabel))
+			case signatureUnknown:
+				out.unchecked++
+			}
+		}
+	}
+	return out
+}
+
+func withArticle(noun string) string {
+	if strings.ContainsRune("aeiou", rune(noun[0])) {
+		return "an " + noun
+	}
+	return "a " + noun
+}
+
+// detail words a finished step's check: the problems with the fix, or a note
+// that some sources could not be checked, or the plain done line.
+func (c signatureCheck) detail(done, fix, historyError string) (problem bool, text string) {
+	if len(c.problems) > 0 {
+		return true, strings.Join(c.problems, " ") + " " + fix
+	}
+	if c.unchecked > 0 {
+		return false, done + " Helmcentral couldn't check that they report what they should (" + historyError + ")."
+	}
+	return false, done
+}
+
 // engineSourcesWithFigures lists the engine sources that carry live figures,
 // and counts the reporting ones that carry none. A bus can list empty numbered
 // sources beside named ones with rpm. Helmcentral cannot tell whether they are
@@ -274,7 +338,13 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 	eng := setupStep{ID: "engines", Title: "Engines", Target: setupTarget{"signalk", "discovery-engine"}}
 	switch {
 	case enginesAssigned(vessel):
-		eng.State, eng.Detail = setupDone, "Assigned to a propulsion source: "+countOf(len(vessel.Engines), "engine", "engines")+"."
+		bad, text := checkSignatures(disc, "", "engine").detail(
+			"Assigned to a propulsion source: "+countOf(len(vessel.Engines), "engine", "engines")+".",
+			"Choose the engine source that does.", disc.HistoryError)
+		eng.State, eng.Detail = setupDone, text
+		if bad {
+			eng.State = setupTodo
+		}
 	case !connected:
 		eng.State, eng.Detail = blockedBy()
 	default:
@@ -293,7 +363,15 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 	bank := setupStep{ID: "house_bank", Title: "House bank", Target: setupTarget{"signalk", "role-house_bank"}}
 	switch {
 	case houseBankChosen(vessel):
-		bank.State, bank.Detail = setupDone, "A house bank is chosen."
+		bankID := ""
+		if vessel.HouseBank != nil {
+			bankID = vessel.HouseBank.EquipmentID
+		}
+		bad, text := checkSignatures(disc, bankID, "battery").detail("A house bank is chosen.", "Choose the battery that does.", disc.HistoryError)
+		bank.State, bank.Detail = setupDone, text
+		if bad {
+			bank.State = setupTodo
+		}
 	case vessel.HouseBankUnresolved:
 		bank.State, bank.Detail = setupTodo, houseBankUnresolvedDetail
 	case !connected:
@@ -326,7 +404,12 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 	}
 	switch {
 	case len(open) == 0:
-		power.State, power.Detail = setupDone, "Every charging and power source is chosen or marked as not on this boat."
+		bad, text := checkSignatures(disc, "", "alternator", "charger", "inverter", "generator").detail(
+			"Every charging and power source is chosen or marked as not on this boat.", "Choose the source that does.", disc.HistoryError)
+		power.State, power.Detail = setupDone, text
+		if bad {
+			power.State = setupTodo
+		}
 	case !connected:
 		power.State, power.Detail = blockedBy()
 	default:
@@ -375,7 +458,7 @@ func getSetupStatusHandler(c echo.Context) error {
 		}
 	}
 	vessel := resolveVesselView(roles, items)
-	return c.JSON(http.StatusOK, buildSetupStatus(vessel, vesselDiscovery(globalSignalKSnapshot, vessel, items), mate))
+	return c.JSON(http.StatusOK, buildSetupStatus(vessel, vesselDiscovery(globalSignalKSnapshot, vessel, items, loadSourceHistory()), mate))
 }
 
 func setupRoutes() []apiRoute {

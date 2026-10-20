@@ -210,7 +210,7 @@ func TestDetectorsAgreeWithSetupSteps(t *testing.T) {
 		{Engines: []vesselEngineSetting{{Instance: "a"}, {Instance: "b"}}, HouseBank: &vesselHouseBankSetting{}},
 	}
 	for i, v := range cases {
-		disc := vesselDiscovery(newAnomalyTestSnapshot(), v, nil)
+		disc := vesselDiscovery(newAnomalyTestSnapshot(), v, nil, sourceHistory{})
 		disc.Connected = true // the steps are blocked without a feed; the checks do not care
 		s := buildSetupStatus(v, disc, setupMate{})
 		if got, want := disc.Detectors["frozen"].Ready, stepByID(t, s, "engines").State == "done"; got != want {
