@@ -22,6 +22,8 @@ import {
   SOURCE_KIND_LABELS,
   SOURCE_KIND_NOUNS,
   systemForKind,
+  notReportingText,
+  signatureWarning,
   type DiscoveryGroup,
   type DiscoveryRow,
   type SourceKind,
@@ -57,6 +59,7 @@ export function SignalKDiscoverySection() {
       .map((kind): DiscoveryGroup => ({
         kind,
         mappable: true,
+        signature_label: '',
         rows: items
           .filter((item) => item.signalk_source !== '' && item.source_kind === kind)
           .map((item): DiscoveryRow => ({
@@ -67,6 +70,8 @@ export function SignalKDiscoverySection() {
             reporting: false,
             metrics: [],
             item: { id: item.id, name: item.name },
+            last_logged: null,
+            signature: 'unknown',
           })),
       }))
       .filter((g) => g.rows.length > 0),
@@ -81,6 +86,11 @@ export function SignalKDiscoverySection() {
     >
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {error && <p role="alert" className="text-sm text-destructive">Could not read what the boat reports: {error}</p>}
+      {!loading && !error && discovery.history_error !== '' && (
+        <p role="status" className="text-sm text-muted-foreground">
+          Logged history isn&apos;t available ({discovery.history_error}), so only sources reporting now are listed. An engine that is switched off won&apos;t appear until it is running.
+        </p>
+      )}
       {!loading && !error && !discovery.connected && (
         <p className="text-sm text-muted-foreground">
           Helmcentral has no data from SignalK yet. Discovery lists what the boat reports once the connection above is working.
@@ -104,7 +114,7 @@ export function SignalKDiscoverySection() {
             {SOURCE_KIND_LABELS[group.kind as SourceKind]}
           </h3>
           {group.rows.map((row) => (
-            <DiscoveryRowView key={row.source} row={row} kind={group.kind as SourceKind} items={items} profiles={profiles} />
+            <DiscoveryRowView key={row.source} row={row} kind={group.kind as SourceKind} signatureLabel={group.signature_label} items={items} profiles={profiles} />
           ))}
         </div>
       ))}
@@ -115,11 +125,12 @@ export function SignalKDiscoverySection() {
 interface DiscoveryRowViewProps {
   row: DiscoveryRow
   kind: SourceKind
+  signatureLabel: string
   items: EquipmentItem[]
   profiles: EngineProfile[]
 }
 
-function DiscoveryRowView({ row, kind, items, profiles }: DiscoveryRowViewProps) {
+function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: DiscoveryRowViewProps) {
   // Only items that could be this kind of equipment, not the whole inventory.
   const unassigned = useMemo(
     () => candidateItems(kind, items, profiles).sort((a, b) => a.name.localeCompare(b.name)),
@@ -133,6 +144,7 @@ function DiscoveryRowView({ row, kind, items, profiles }: DiscoveryRowViewProps)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const warning = signatureWarning({ row, label: signatureLabel })
   const reading = row.metrics.map((m) => `${m.label} ${m.text}`).join(' · ')
 
   const run = async (action: () => Promise<unknown>) => {
@@ -174,8 +186,9 @@ function DiscoveryRowView({ row, kind, items, profiles }: DiscoveryRowViewProps)
             numbered duplicate of an engine that does carry figures. */}
         <p className={`truncate font-mono text-xs ${row.reporting && row.metrics.length === 0 ? 'text-muted-foreground' : 'text-foreground'}`}>{row.source}</p>
         <p className="mt-1 truncate text-xs tabular-nums text-muted-foreground">
-          {row.reporting ? (reading === '' ? 'Reporting, no figures yet' : reading) : 'Not reporting'}
+          {row.reporting ? (reading === '' ? 'Reporting, no figures yet' : reading) : sentenceCase(notReportingText(row))}
         </p>
+        {warning !== '' && <p role="alert" className="text-xs text-destructive">{warning}</p>}
         {kind === 'battery' && row.reporting && (
           <p className="truncate text-xs text-muted-foreground">
             {row.bus_name ? `The boat calls it ${row.bus_name}` : 'The boat gives it no name'}
@@ -234,6 +247,10 @@ function DiscoveryRowView({ row, kind, items, profiles }: DiscoveryRowViewProps)
       </div>
     </div>
   )
+}
+
+function sentenceCase(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
 function exampleName(kind: SourceKind): string {

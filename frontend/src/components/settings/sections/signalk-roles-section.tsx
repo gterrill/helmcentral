@@ -10,7 +10,10 @@ import {
   OPTIONAL_ROLE_FIELDS,
   ROLE_NONE,
   SOURCE_KIND_LABELS,
+  discoveryRowFor,
   discoveryRows,
+  notReportingText,
+  signatureWarning,
   systemForKind,
   type DiscoveryRow,
   type SourceKind,
@@ -39,12 +42,12 @@ const SOURCE_PREFIX = 'source:'
 
 /** "PORT START BATT · electrical.batteries.0 · 28.24 V · 100%": the boat's own name when it gives one, the source, and whatever readings discovery has. */
 function sourceOptionLabel(row: DiscoveryRow): string {
-  return [row.bus_name, row.source, ...row.metrics.map((m) => m.text)].filter((part) => part !== '').join(' · ')
+  return [row.bus_name, row.source, ...row.metrics.map((m) => m.text), row.reporting ? '' : notReportingText(row)].filter((part) => part !== '').join(' · ')
 }
 
-/** Sources the boat is reporting for a kind that no item owns yet. A charger's own battery input is not a battery. */
+/** Sources of a kind that no item owns yet, reporting now or logged by the boat. A charger's own battery input is not a battery. */
 function offerableSources(rows: DiscoveryRow[], kind: SourceKind): DiscoveryRow[] {
-  return rows.filter((r) => r.reporting && r.item === null && !(kind === 'battery' && r.charger_input))
+  return rows.filter((r) => r.item === null && !(kind === 'battery' && r.charger_input))
 }
 
 function detectorLine(label: string, status: VesselDetectorStatus | undefined) {
@@ -176,6 +179,8 @@ export function SignalKRolesSection({ draft, onChange }: SignalKRolesSectionProp
           const missing = value !== '' && value !== ROLE_NONE && !options.some((item) => item.id === value)
           const otherAlternator = field === 'port_alternator' ? roles.starboard_alternator : field === 'starboard_alternator' ? roles.port_alternator : ''
           const error = errors[field]
+          const chosenItem = options.find((item) => item.id === value)
+          const warning = chosenItem ? signatureWarning(discoveryRowFor(discovery, chosenItem.signalk_source)) : ''
           const empty = options.length === 0 && sources.length === 0 ? emptyLine(kind) : null
           return (
             <div key={field} className="grid min-w-0 gap-1.5">
@@ -203,6 +208,7 @@ export function SignalKRolesSection({ draft, onChange }: SignalKRolesSectionProp
                   </optgroup>
                 )}
               </select>
+              {warning !== '' && <p role="alert" className="text-xs text-destructive">{warning}</p>}
               {empty && <p className="text-xs text-muted-foreground">{empty}</p>}
               {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
             </div>

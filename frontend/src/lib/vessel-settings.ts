@@ -116,12 +116,22 @@ export interface DiscoveryRow {
   reporting: boolean
   metrics: DiscoveryMetric[]
   item: DiscoveryItemRef | null
+  /** When the boat last logged this source's signature reading (an ISO time); null when it has not within the logged history. */
+  last_logged: string | null
+  /**
+   * Whether the source carries what its kind needs (RPM for an engine).
+   * 'missing': history was read and holds none. 'unknown': history could not
+   * be read. An unowned source is only listed when it carries it.
+   */
+  signature: 'carried' | 'missing' | 'unknown'
 }
 
 export interface DiscoveryGroup {
   /** A SourceKind, or 'ac' for the AC inputs, which no item owns. */
   kind: string
   mappable: boolean
+  /** What a source of this kind must report, in the operator's words ("RPM"). */
+  signature_label: string
   rows: DiscoveryRow[]
 }
 
@@ -135,9 +145,40 @@ export interface VesselDiscoveryResponse {
   connected: boolean
   groups: DiscoveryGroup[]
   detectors: Record<string, VesselDetectorStatus>
+  /** Why logged history could not be read; '' when it was. While set, only sources reporting now are listed. */
+  history_error: string
 }
 
-export const emptyVesselDiscovery: VesselDiscoveryResponse = { connected: false, groups: [], detectors: {} }
+export const emptyVesselDiscovery: VesselDiscoveryResponse = { connected: false, groups: [], detectors: {}, history_error: '' }
+
+/** "16 Oct": the day a source's signature reading was last logged. */
+export function loggedDay(iso: string): string {
+  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+}
+
+/** The row for an exact source, or undefined. */
+export function discoveryRowFor(discovery: VesselDiscoveryResponse, source: string): { row: DiscoveryRow; label: string } | undefined {
+  for (const g of discovery.groups) {
+    const row = g.rows.find((r) => r.source === source)
+    if (row) return { row, label: g.signature_label }
+  }
+  return undefined
+}
+
+/**
+ * The warning for a source an item owns that has never reported what its kind
+ * needs, or '' when there is nothing to say. It is the operator's cue to pick a
+ * different source for the item.
+ */
+export function signatureWarning(found: { row: DiscoveryRow; label: string } | undefined): string {
+  if (!found || found.row.item === null || found.row.signature !== 'missing') return ''
+  return `${found.row.source} has not reported ${found.label} in the logged history, so nothing reads it. Choose the source that does.`
+}
+
+/** "not reporting now · last logged 16 Oct", or "not reporting now" when never logged. */
+export function notReportingText(row: DiscoveryRow): string {
+  return row.last_logged ? `not reporting now · last logged ${loggedDay(row.last_logged)}` : 'not reporting now'
+}
 
 /** The rows of one kind, or none. */
 export function discoveryRows(discovery: VesselDiscoveryResponse, kind: string): DiscoveryRow[] {

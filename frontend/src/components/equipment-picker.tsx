@@ -7,7 +7,7 @@ import { fetchEquipment, toEquipmentInput, updateEquipment } from '@/hooks/use-i
 import { formatAppLocation } from '@/lib/app-location'
 import { candidateItems, candidateLabels } from '@/lib/equipment-candidates'
 import type { EquipmentTileContext } from '@/lib/equipment-tiles'
-import { SOURCE_KIND_NOUNS, discoveryRows, type SourceKind } from '@/lib/vessel-settings'
+import { SOURCE_KIND_NOUNS, discoveryRows, notReportingText, type SourceKind } from '@/lib/vessel-settings'
 
 const SELECT_CLASS = 'h-9 w-full rounded-md border bg-transparent px-3 text-sm'
 
@@ -86,7 +86,7 @@ function MapHere({ itemId, itemName, kind, idPrefix }: { itemId: string; itemNam
   const [source, setSource] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const rows = discoveryRows(discovery, kind).filter((r) => r.item === null && r.reporting)
+  const rows = discoveryRows(discovery, kind).filter((r) => r.item === null)
 
   const map = async () => {
     setBusy(true)
@@ -108,10 +108,10 @@ function MapHere({ itemId, itemName, kind, idPrefix }: { itemId: string; itemNam
       <Field>
         <FieldLabel htmlFor={`${idPrefix}-map-source`}>Map {itemName} to</FieldLabel>
         <select id={`${idPrefix}-map-source`} className={SELECT_CLASS} value={source} onChange={(e) => setSource(e.target.value)}>
-          <option value="">{loading ? 'Looking…' : rows.length === 0 ? 'Nothing unmapped is reporting' : 'Choose what it is…'}</option>
+          <option value="">{loading ? 'Looking…' : rows.length === 0 ? 'No unmapped source to choose' : 'Choose what it is…'}</option>
           {rows.map((r) => (
             <option key={r.source} value={r.source}>
-              {r.source}{r.metrics.length > 0 ? ` · ${r.metrics.map((m) => m.text).join(' · ')}` : ''}
+              {r.source}{r.metrics.length > 0 ? ` · ${r.metrics.map((m) => m.text).join(' · ')}` : ''}{r.reporting ? '' : ` · ${notReportingText(r)}`}
             </option>
           ))}
         </select>

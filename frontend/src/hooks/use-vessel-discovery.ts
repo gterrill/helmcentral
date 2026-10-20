@@ -19,9 +19,11 @@ export function useVesselDiscovery(enabled = true) {
       groups: (Array.isArray(body.groups) ? body.groups : []).map((g) => ({
         kind: g.kind,
         mappable: g.mappable === true,
+        signature_label: g.signature_label,
         rows: (Array.isArray(g.rows) ? g.rows : []).map((r) => ({ ...r, metrics: Array.isArray(r.metrics) ? r.metrics : [] })),
       })),
       detectors: body.detectors ?? {},
+      history_error: body.history_error,
     }),
   })
 

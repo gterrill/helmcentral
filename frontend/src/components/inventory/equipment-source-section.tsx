@@ -8,6 +8,9 @@ import type { EquipmentInput } from '@/hooks/use-inventory'
 import {
   SOURCE_KINDS,
   SOURCE_KIND_LABELS,
+  discoveryRowFor,
+  notReportingText,
+  signatureWarning,
   sourceKindOf,
   type DiscoveryRow,
   type VesselDiscoveryResponse,
@@ -24,7 +27,7 @@ interface EquipmentSourceSectionProps {
 
 function rowLabel(row: DiscoveryRow): string {
   const reading = row.metrics.map((m) => m.text).join(' · ')
-  if (!row.reporting) return `${row.source} · not reporting`
+  if (!row.reporting) return `${row.source} · ${notReportingText(row)}`
   return reading === '' ? row.source : `${row.source} · ${reading}`
 }
 
@@ -42,6 +45,7 @@ function rowLabel(row: DiscoveryRow): string {
 export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrite }: EquipmentSourceSectionProps) {
   const kind = sourceKindOf(draft.signalk_source)
   const known = discovery.groups.some((g) => g.rows.some((r) => r.source === draft.signalk_source))
+  const warning = signatureWarning(discoveryRowFor(discovery, draft.signalk_source))
   const noData = !discovery.connected && discovery.groups.length === 0
 
   const pick = (source: string) => {
@@ -95,12 +99,18 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
                 </optgroup>
               )
             })}
-            {draft.signalk_source !== '' && !known && <option value={draft.signalk_source}>{draft.signalk_source} · not reporting</option>}
+            {draft.signalk_source !== '' && !known && <option value={draft.signalk_source}>{draft.signalk_source} · not reporting now</option>}
           </select>
           {noData ? (
             <FieldDescription>Helmcentral has no data from SignalK yet, so there is nothing to pick from. Check the connection in Settings.</FieldDescription>
           ) : (
-            <FieldDescription>Only sources the boat reports can be chosen. A source belongs to one item.</FieldDescription>
+            <FieldDescription>
+              Only sources that report what this kind of item needs, now or in the logged history, can be chosen. A source belongs to one item.
+            </FieldDescription>
+          )}
+          {warning !== '' && <p role="alert" className="text-sm text-destructive">{warning}</p>}
+          {discovery.history_error !== '' && (
+            <FieldDescription>Logged history isn&apos;t available ({discovery.history_error}), so only sources reporting now are listed.</FieldDescription>
           )}
         </Field>
 

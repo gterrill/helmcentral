@@ -125,6 +125,61 @@ function renderRoles(roles?: unknown) {
 
 const pendingRoles = () => buildRegularSettingsPatch(latestDraft).roles
 
+// The boat as found on 2026-10-21: the engines are off, so propulsion.port and
+// starboard are only in the logged history, and the two Cummins items were
+// assigned to propulsion.0 and .1, which only ever carried exhaust temperature.
+function engineOffBoat() {
+  equipmentItems = [
+    item({ id: 'c0', name: 'Cummins QSB 6.7', system: 'propulsion', signalk_source: 'propulsion.0', source_kind: 'engine' }),
+    item({ id: 'alt-1', name: 'Port alternator', system: 'electrical', signalk_source: 'electrical.alternator.1', source_kind: 'alternator' }),
+  ]
+  discoveryBody = {
+    ...discoveryBody,
+    groups: [
+      { kind: 'engine', mappable: true, signature_label: 'RPM', rows: [
+        row('propulsion.0', '0', [], { reporting: false, item: { id: 'c0', name: 'Cummins QSB 6.7' }, signature: 'missing', last_logged: null }),
+        row('propulsion.port', 'port', [], { reporting: false, signature: 'carried', last_logged: '2026-10-16T12:00:00Z' }),
+        row('propulsion.starboard', 'starboard', [], { reporting: false, signature: 'carried', last_logged: '2026-10-16T12:00:00Z' }),
+      ] },
+      { kind: 'alternator', mappable: true, signature_label: 'output current', rows: [
+        row('electrical.alternator.1', '1', [], { reporting: false, item: { id: 'alt-1', name: 'Port alternator' }, signature: 'missing', last_logged: null }),
+        row('electrical.alternator.12', '12', [], { reporting: false, signature: 'carried', last_logged: '2026-10-16T12:00:00Z' }),
+      ] },
+    ],
+    history_error: '',
+  }
+}
+
+describe('Settings -> SignalK: sources that carry their signature', () => {
+  it('lists an engine that is off from the logged history and flags the item on a source that never reported RPM', async () => {
+    engineOffBoat()
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('propulsion.port')
+    expect(screen.getAllByText('Not reporting now · last logged 16 Oct').length).toBe(3)
+    const alert = screen.getByText(/propulsion\.0 has not reported RPM in the logged history/)
+    expect(alert).toHaveAttribute('role', 'alert')
+    expect(alert.textContent).toContain('Choose the source that does')
+  })
+
+  it('says so when logged history is unavailable', async () => {
+    engineOffBoat()
+    discoveryBody = { ...discoveryBody, history_error: 'influxdb is not configured' }
+    render(<SignalKDiscoverySection />)
+
+    expect(await screen.findByText(/Logged history isn't available \(influxdb is not configured\), so only sources reporting now are listed/)).toBeInTheDocument()
+  })
+
+  it('offers a logged source under From the boat and flags the role whose item is on a source with no signature', async () => {
+    engineOffBoat()
+    renderRoles({ ...emptyVesselRoles, port_alternator: 'alt-1' })
+
+    const select = await screen.findByLabelText('Port alternator')
+    await waitFor(() => expect(within(select).getByRole('option', { name: 'electrical.alternator.12 · not reporting now · last logged 16 Oct' })).toBeInTheDocument())
+    expect(await screen.findByText(/electrical\.alternator\.1 has not reported output current/)).toHaveAttribute('role', 'alert')
+  })
+})
+
 describe('Settings -> SignalK: Discovery', () => {
   it('lists what the boat reports by kind, with live readings', async () => {
     render(<SignalKDiscoverySection />)
@@ -153,7 +208,7 @@ describe('Settings -> SignalK: Discovery', () => {
 
     await screen.findByText('propulsion.wing')
     expect(screen.getByText('Wing engine')).toBeInTheDocument()
-    expect(screen.getByText('Not reporting')).toBeInTheDocument()
+    expect(screen.getByText('Not reporting now')).toBeInTheDocument()
   })
 
   it('names what the bus calls a battery, and marks a charger input', async () => {
@@ -464,7 +519,7 @@ describe('Discovery with SignalK not connected', () => {
     }
     expect(screen.getByText('Port engine')).toBeInTheDocument()
     expect(screen.getByText('Lithium bank')).toBeInTheDocument()
-    expect(screen.getAllByText('Not reporting').length).toBeGreaterThanOrEqual(6)
+    expect(screen.getAllByText('Not reporting now').length).toBeGreaterThanOrEqual(6)
     expect(screen.getByRole('heading', { name: 'Engines' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Batteries' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Generators' })).toBeInTheDocument()
