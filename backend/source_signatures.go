@@ -124,8 +124,8 @@ func signaturePaths(group sourceGroup, source string) []string {
 	return paths
 }
 
-// lastLogged is the latest time any signature path of source was logged.
-func (h sourceRecord) lastLogged(group sourceGroup, source string) (time.Time, bool) {
+// lastSeenAt is the latest time any signature path of source was seen.
+func (h sourceRecord) lastSeenAt(group sourceGroup, source string) (time.Time, bool) {
 	var latest time.Time
 	found := false
 	for _, p := range signaturePaths(group, source) {
@@ -136,9 +136,9 @@ func (h sourceRecord) lastLogged(group sourceGroup, source string) (time.Time, b
 	return latest, found
 }
 
-// loggedInstances lists the instance ids of group that have a logged
+// seenInstances lists the instance ids of group that have a logged
 // signature path.
-func (h sourceRecord) loggedInstances(group sourceGroup) []string {
+func (h sourceRecord) seenInstances(group sourceGroup) []string {
 	seen := map[string]bool{}
 	var ids []string
 	for path := range h.Last {
@@ -176,7 +176,7 @@ func signatureState(live bool, h sourceRecord, group sourceGroup, source string)
 	if live {
 		return signatureCarried
 	}
-	if _, ok := h.lastLogged(group, source); ok {
+	if _, ok := h.lastSeenAt(group, source); ok {
 		return signatureCarried
 	}
 	if _, active := h.Active[source]; active && h.Covers {

@@ -12,6 +12,7 @@ import {
   discoveryRowFor,
   notReportingText,
   signatureWarning,
+  trackingNote,
   sourceKindOf,
   type DiscoveryRow,
   type VesselDiscoveryResponse,
@@ -107,12 +108,12 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
             <FieldDescription>Helmcentral has no data from SignalK yet, so there is nothing to pick from. Check the connection in Settings.</FieldDescription>
           ) : (
             <FieldDescription>
-              Only sources that report what this kind of item needs, now or in the logged history, can be chosen. A source belongs to one item.
+              Only sources that report what this kind of item needs, now or when Helmcentral last saw them, can be chosen. A source belongs to one item.
             </FieldDescription>
           )}
           {warning !== '' && <p role="alert" className="text-sm text-destructive">{warning}</p>}
-          {!noData && discovery.history_error !== '' && (
-            <FieldDescription>Logged history isn&apos;t available ({discovery.history_error}), so only sources reporting now are listed.</FieldDescription>
+          {!noData && trackingNote(discovery.tracking, timeZone) !== '' && (
+            <FieldDescription>{trackingNote(discovery.tracking, timeZone)}</FieldDescription>
           )}
         </Field>
 

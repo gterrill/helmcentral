@@ -25,6 +25,7 @@ import {
   systemForKind,
   notReportingText,
   signatureWarning,
+  trackingNote,
   type DiscoveryGroup,
   type DiscoveryRow,
   type SourceKind,
@@ -41,6 +42,7 @@ import {
  */
 export function SignalKDiscoverySection() {
   const { discovery, loading, error } = useVesselDiscovery()
+  const timeZone = useVesselTimeZone()
   const { items } = useEquipment({})
 
   const { profiles } = useEquipmentProfiles(true)
@@ -71,7 +73,7 @@ export function SignalKDiscoverySection() {
             reporting: false,
             metrics: [],
             item: { id: item.id, name: item.name },
-            last_logged: null,
+            last_seen: null,
             signature: 'unknown',
           })),
       }))
@@ -87,10 +89,8 @@ export function SignalKDiscoverySection() {
     >
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {error && <p role="alert" className="text-sm text-destructive">Could not read what the boat reports: {error}</p>}
-      {!loading && !error && discovery.history_error !== '' && (
-        <p role="status" className="text-sm text-muted-foreground">
-          Logged history isn&apos;t available ({discovery.history_error}), so only sources reporting now are listed. An engine that is switched off won&apos;t appear until it is running.
-        </p>
+      {!loading && !error && trackingNote(discovery.tracking, timeZone) !== '' && (
+        <p role="status" className="text-sm text-muted-foreground">{trackingNote(discovery.tracking, timeZone)}</p>
       )}
       {!loading && !error && !discovery.connected && (
         <p className="text-sm text-muted-foreground">

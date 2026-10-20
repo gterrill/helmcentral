@@ -1,5 +1,5 @@
 import { useApiQuery } from '@/lib/api-query'
-import { emptyVesselDiscovery, type VesselDiscoveryResponse } from '@/lib/vessel-settings'
+import { emptyVesselDiscovery, noTracking, type VesselDiscoveryResponse } from '@/lib/vessel-settings'
 
 /**
  * What the boat is reporting right now, grouped by kind, with the equipment
@@ -20,10 +20,10 @@ export function useVesselDiscovery(enabled = true) {
         kind: g.kind,
         mappable: g.mappable === true,
         signature_label: g.signature_label ?? '',
-        rows: (Array.isArray(g.rows) ? g.rows : []).map((r) => ({ ...r, metrics: Array.isArray(r.metrics) ? r.metrics : [], last_logged: r.last_logged ?? null })),
+        rows: (Array.isArray(g.rows) ? g.rows : []).map((r) => ({ ...r, metrics: Array.isArray(r.metrics) ? r.metrics : [], last_seen: r.last_seen ?? null })),
       })),
       detectors: body.detectors ?? {},
-      history_error: body.history_error ?? '',
+      tracking: body.tracking ?? noTracking,
     }),
   })
 

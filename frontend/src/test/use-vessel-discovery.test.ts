@@ -26,16 +26,16 @@ describe('useVesselDiscovery', () => {
     expect(result.current.error).toBeNull()
   })
 
-  it('never leaves the history error or signature label undefined', async () => {
+  it('never leaves the tracking or signature label undefined', async () => {
     await invalidateQueries(['/api/vessel/discovery'])
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => body })))
 
     const { result } = renderHook(() => useVesselDiscovery())
     await waitFor(() => expect(result.current.discovery.connected).toBe(true))
 
-    expect(result.current.discovery.history_error).toBe('')
+    expect(result.current.discovery.tracking).toEqual({ since: null, seeded: false, covers: false })
     expect(result.current.discovery.groups[0].signature_label).toBe('')
-    expect(result.current.discovery.groups[0].rows[0].last_logged).toBeNull()
+    expect(result.current.discovery.groups[0].rows[0].last_seen).toBeNull()
   })
 
   it('surfaces a failure rather than masking it', async () => {

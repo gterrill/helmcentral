@@ -8,24 +8,24 @@ import { loggedDay, type DiscoveryRow, type VesselDiscoveryResponse } from '@/li
 // The Source select on an equipment item's page is fed by the same discovery
 // list as Settings -> SignalK. On 2026-10-21 the engines were off and the Port
 // Cummins was on propulsion.0, which carries only exhaust temperature: the
-// select must offer propulsion.port and .starboard from the logged history,
+// select must offer propulsion.port and .starboard from Helmcentral's record,
 // not offer .0/.1 as new choices, and warn about the current choice.
 
 const row = (source: string, extra: Partial<DiscoveryRow>): DiscoveryRow => ({
   source, instance: source.split('.')[1], bus_name: '', charger_input: false, reporting: false, metrics: [],
-  item: null, last_logged: null, signature: 'carried', ...extra,
+  item: null, last_seen: null, signature: 'carried', ...extra,
 })
 
 const discovery: VesselDiscoveryResponse = {
   connected: true,
   detectors: {},
-  history_error: '',
+  tracking: { since: '2026-10-01T00:00:00Z', seeded: true, covers: true },
   groups: [{
     kind: 'engine', mappable: true, signature_label: 'RPM', rows: [
       row('propulsion.0', { item: { id: 'c0', name: 'Cummins QSB 6.7' }, signature: 'missing' }),
       row('propulsion.1', { item: { id: 'c1', name: 'Cummins QSB 6.7' }, signature: 'missing' }),
-      row('propulsion.port', { last_logged: '2026-10-16T12:00:00Z' }),
-      row('propulsion.starboard', { last_logged: '2026-10-16T12:00:00Z' }),
+      row('propulsion.port', { last_seen: '2026-10-16T12:00:00Z' }),
+      row('propulsion.starboard', { last_seen: '2026-10-16T12:00:00Z' }),
     ],
   }],
 }
@@ -35,27 +35,27 @@ describe('EquipmentSourceSection: Source select', () => {
     render(<EquipmentSourceSection id="c0" draft={{ ...BLANK_DRAFT, signalk_source: 'propulsion.0' }} setDraft={vi.fn()} discovery={discovery} canWrite />)
 
     const select = screen.getByLabelText('Source')
-    expect(within(select).getByRole('option', { name: 'propulsion.port · not reporting now · last logged 16 Oct' })).not.toBeDisabled()
-    expect(within(select).getByRole('option', { name: 'propulsion.starboard · not reporting now · last logged 16 Oct' })).not.toBeDisabled()
+    expect(within(select).getByRole('option', { name: 'propulsion.port · not reporting now · last seen 16 Oct' })).not.toBeDisabled()
+    expect(within(select).getByRole('option', { name: 'propulsion.starboard · not reporting now · last seen 16 Oct' })).not.toBeDisabled()
     // propulsion.1 belongs to another item: shown as taken, never as a choice.
     expect(within(select).getByRole('option', { name: 'propulsion.1 · assigned to Cummins QSB 6.7' })).toBeDisabled()
-    expect(screen.getByRole('alert')).toHaveTextContent('propulsion.0 has not reported RPM in the logged history')
-    expect(screen.getByText(/now or in the logged history/)).toBeInTheDocument()
+    expect(screen.getByRole('alert')).toHaveTextContent('propulsion.0 reports other readings but has never reported RPM')
+    expect(screen.getByText(/now or when Helmcentral last saw them/)).toBeInTheDocument()
   })
 
-  it('shows no warning on a source that carries its signature, and says when history is unavailable', () => {
+  it('shows no warning on a source that carries its signature, and says since when it has been watching', () => {
     render(
       <EquipmentSourceSection
         id="c0"
         draft={{ ...BLANK_DRAFT, signalk_source: 'propulsion.port' }}
         setDraft={vi.fn()}
-        discovery={{ ...discovery, history_error: 'influxdb is not configured' }}
+        discovery={{ ...discovery, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false } }}
         canWrite
       />,
     )
 
     expect(screen.queryByRole('alert')).toBeNull()
-    expect(screen.getByText(/Logged history isn't available \(influxdb is not configured\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Helmcentral has been watching the boat since 18 Oct/)).toBeInTheDocument()
   })
 
   it('says one thing, not two, when SignalK has no data at all', () => {
@@ -64,14 +64,14 @@ describe('EquipmentSourceSection: Source select', () => {
         id="c0"
         draft={{ ...BLANK_DRAFT, signalk_source: '' }}
         setDraft={vi.fn()}
-        discovery={{ connected: false, groups: [], detectors: {}, history_error: 'influxdb is not configured' }}
+        discovery={{ connected: false, groups: [], detectors: {}, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false } }}
         canWrite
       />,
     )
 
     expect(screen.getByText(/no data from SignalK yet/)).toBeInTheDocument()
-    expect(screen.queryByText(/Logged history isn't available/)).toBeNull()
-    expect(screen.queryByText(/now or in the logged history/)).toBeNull()
+    expect(screen.queryByText(/Helmcentral has been watching/)).toBeNull()
+    expect(screen.queryByText(/now or when Helmcentral last saw them/)).toBeNull()
   })
 })
 

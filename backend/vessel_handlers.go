@@ -313,7 +313,7 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 				ids[id] = true
 			}
 		}
-		for _, id := range record.loggedInstances(group) {
+		for _, id := range record.seenInstances(group) {
 			ids[id] = true
 		}
 		for _, it := range items {
@@ -334,7 +334,7 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 				Source: source, Instance: id, Reporting: inTree[id], Metrics: []discoveryMetric{},
 				Signature: signatureState(carriedLive[id], record, group, source),
 			}
-			if at, ok := record.lastLogged(group, source); ok {
+			if at, ok := record.lastSeenAt(group, source); ok {
 				row.LastSeen = &at
 			}
 			if row.Reporting {

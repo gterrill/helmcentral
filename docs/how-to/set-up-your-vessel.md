@@ -94,19 +94,23 @@ equipment needs:
 | Charger | output current |
 | Inverter | AC output power |
 
-Reporting now is not required. Helmcentral also looks at what the boat has
-logged over the last 90 days, so an engine that is switched off is still
-offered, shown as **Not reporting now · last logged 16 Oct**. If the history
-cannot be read, Settings and the item's page say so and list only the sources
-reporting now; an engine that is off will not appear until it is running.
+Reporting now is not required. Helmcentral keeps its own record of what the
+boat has reported, so an engine that is switched off is still offered once
+Helmcentral has seen it report, shown as **Not reporting now · last seen 16
+Oct**. A new install starts watching when it first connects, so until an engine
+has run, Discovery and the item's page say "Helmcentral has been watching the
+boat since 18 Oct" and list only what has reported since then. If you keep a
+history log in InfluxDB, Helmcentral reads it once, the first time it sees your
+boat, and can list switched-off engines straight away. A log is not required.
 
-If an item is already set to a source that is active in the logged history but
-has never reported its reading, Helmcentral says so in red on that source (in Discovery, under
-the role, and on the item's page), and the Setup step stays open with the item's
-name and the source. Open the item and choose the source that does report it.
-When the history cannot be read, or the source has logged nothing at all (an
-engine laid up, or a short log), Helmcentral does not guess: the step stays
-done and notes that it could not check.
+If an item is already set to a source that reports other readings but has never
+reported its own, Helmcentral says so in red on that source (in Discovery,
+under the role, and on the item's page), and the Setup step stays open with the
+item's name and the source. Open the item and choose the source that does report
+it. Helmcentral makes this call only after it has watched the boat for a week
+(or has read a history log); before that, or for a source it has never seen at
+all (an engine laid up since before it started watching), it does not guess: the
+step stays done and notes that it could not check yet.
 
 Names come only from items. There are no separate battery names, solar names,
 engine names or tank labels any more. A tank shows on the Tanks tile once an

@@ -126,7 +126,7 @@ function renderRoles(roles?: unknown) {
 const pendingRoles = () => buildRegularSettingsPatch(latestDraft).roles
 
 // The boat as found on 2026-10-21: the engines are off, so propulsion.port and
-// starboard are only in the logged history, and the two Cummins items were
+// starboard are only in Helmcentral's record, and the two Cummins items were
 // assigned to propulsion.0 and .1, which only ever carried exhaust temperature.
 function engineOffBoat() {
   equipmentItems = [
@@ -137,37 +137,46 @@ function engineOffBoat() {
     ...discoveryBody,
     groups: [
       { kind: 'engine', mappable: true, signature_label: 'RPM', rows: [
-        row('propulsion.0', '0', [], { reporting: false, item: { id: 'c0', name: 'Cummins QSB 6.7' }, signature: 'missing', last_logged: null }),
-        row('propulsion.port', 'port', [], { reporting: false, signature: 'carried', last_logged: '2026-10-16T12:00:00Z' }),
-        row('propulsion.starboard', 'starboard', [], { reporting: false, signature: 'carried', last_logged: '2026-10-16T12:00:00Z' }),
+        row('propulsion.0', '0', [], { reporting: false, item: { id: 'c0', name: 'Cummins QSB 6.7' }, signature: 'missing', last_seen: null }),
+        row('propulsion.port', 'port', [], { reporting: false, signature: 'carried', last_seen: '2026-10-16T12:00:00Z' }),
+        row('propulsion.starboard', 'starboard', [], { reporting: false, signature: 'carried', last_seen: '2026-10-16T12:00:00Z' }),
       ] },
       { kind: 'alternator', mappable: true, signature_label: 'output current', rows: [
-        row('electrical.alternator.1', '1', [], { reporting: false, item: { id: 'alt-1', name: 'Port alternator' }, signature: 'missing', last_logged: null }),
-        row('electrical.alternator.12', '12', [], { reporting: false, signature: 'carried', last_logged: '2026-10-16T12:00:00Z' }),
+        row('electrical.alternator.1', '1', [], { reporting: false, item: { id: 'alt-1', name: 'Port alternator' }, signature: 'missing', last_seen: null }),
+        row('electrical.alternator.12', '12', [], { reporting: false, signature: 'carried', last_seen: '2026-10-16T12:00:00Z' }),
       ] },
     ],
-    history_error: '',
+    tracking: { since: '2026-10-01T00:00:00Z', seeded: true, covers: true },
   }
 }
 
 describe('Settings -> SignalK: sources that carry their signature', () => {
-  it('lists an engine that is off from the logged history and flags the item on a source that never reported RPM', async () => {
+  it('lists an engine that is off from what the boat has reported and flags the item on a source that never reported RPM', async () => {
     engineOffBoat()
     render(<SignalKDiscoverySection />)
 
     await screen.findByText('propulsion.port')
-    expect(screen.getAllByText('Not reporting now · last logged 16 Oct').length).toBe(3)
-    const alert = screen.getByText(/propulsion\.0 has not reported RPM in the logged history/)
+    expect(screen.getAllByText('Not reporting now · last seen 16 Oct').length).toBe(3)
+    const alert = screen.getByText(/propulsion\.0 reports other readings but has never reported RPM/)
     expect(alert).toHaveAttribute('role', 'alert')
     expect(alert.textContent).toContain('Choose the source that does')
   })
 
-  it('says so when logged history is unavailable', async () => {
+  it('says since when Helmcentral has been watching while the record is young', async () => {
     engineOffBoat()
-    discoveryBody = { ...discoveryBody, history_error: 'influxdb is not configured' }
+    discoveryBody = { ...discoveryBody, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false } }
     render(<SignalKDiscoverySection />)
 
-    expect(await screen.findByText(/Logged history isn't available \(influxdb is not configured\), so only sources reporting now are listed/)).toBeInTheDocument()
+    expect(await screen.findByText(/Helmcentral has been watching the boat since 18 Oct/)).toBeInTheDocument()
+    expect(screen.getByText(/switched off is listed once it has reported since then/)).toBeInTheDocument()
+  })
+
+  it('has no watching note once the record covers enough time', async () => {
+    engineOffBoat()
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('propulsion.port')
+    expect(screen.queryByText(/Helmcentral has been watching/)).toBeNull()
   })
 
   it('offers a logged source under From the boat and flags the role whose item is on a source with no signature', async () => {
@@ -175,8 +184,8 @@ describe('Settings -> SignalK: sources that carry their signature', () => {
     renderRoles({ ...emptyVesselRoles, port_alternator: 'alt-1' })
 
     const select = await screen.findByLabelText('Port alternator')
-    await waitFor(() => expect(within(select).getByRole('option', { name: 'electrical.alternator.12 · not reporting now · last logged 16 Oct' })).toBeInTheDocument())
-    expect(await screen.findByText(/electrical\.alternator\.1 has not reported output current/)).toHaveAttribute('role', 'alert')
+    await waitFor(() => expect(within(select).getByRole('option', { name: 'electrical.alternator.12 · not reporting now · last seen 16 Oct' })).toBeInTheDocument())
+    expect(await screen.findByText(/electrical\.alternator\.1 reports other readings but has never reported output current/)).toHaveAttribute('role', 'alert')
   })
 })
 
