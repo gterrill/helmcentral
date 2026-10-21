@@ -1178,6 +1178,8 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 			CachedTokens:     reply.CachedTokens,
 			CacheWriteTokens: reply.CacheWriteTokens,
 			ToolRounds:       reply.ToolRounds,
+			PromptVersion:    assistantPromptVersion(systemStable),
+			ToolCalls:        reply.ToolCalls,
 			Proposals:        reply.Proposals,
 			FormDrafts:       reply.FormDrafts,
 			Cards:            reply.Cards,
@@ -1313,6 +1315,12 @@ func assistantRoutes() []apiRoute {
 		{http.MethodPost, "/api/assistant/proposals/:id/dismiss", tierWrite, dismissAssistantProposalHandler},
 		{http.MethodPost, "/api/assistant/form-drafts/:id/save", tierWrite, saveFormDraftHandler},
 		{http.MethodPost, "/api/assistant/form-drafts/:id/dismiss", tierWrite, dismissFormDraftHandler},
+
+		// The operator's thumbs on Mate's answers, and the list of rated
+		// answers with their tool calls. Writing a rating is write tier.
+		{http.MethodGet, "/api/assistant/feedback", tierRead, listAssistantFeedbackHandler},
+		{http.MethodPut, "/api/assistant/messages/:id/feedback", tierWrite, putAssistantFeedbackHandler},
+		{http.MethodDelete, "/api/assistant/messages/:id/feedback", tierWrite, deleteAssistantFeedbackHandler},
 		{http.MethodGet, "/api/assistant/models", tierAdmin, assistantModelsHandler},
 	}
 }

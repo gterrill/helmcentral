@@ -33,6 +33,9 @@ export function fakeMateSession(overrides: FakeMateSessionOverrides = {}): MateS
     isAnswering: vi.fn().mockReturnValue(false),
     updateProposal: vi.fn(),
     updateFormDraft: vi.fn(),
+    liveAnswerIds: new Set<string>(),
+    ratings: {},
+    rateAnswer: vi.fn().mockResolvedValue(null),
     ...rest,
     status: {
       sending: false,

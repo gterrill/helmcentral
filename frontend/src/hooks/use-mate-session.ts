@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { apiRequest } from '@/lib/api-query'
 import { MATE_BUSY_MESSAGE, useAssistantChat, type AssistantScreenContext } from '@/hooks/use-assistant-chat'
 import {
   useAssistantConversations,
@@ -49,6 +50,12 @@ export interface MateSendResult {
   refused?: 'busy'
 }
 
+/** The operator's verdict on one answer, as the server holds it. */
+export interface MateAnswerRating {
+  verdict: 'up' | 'down'
+  note: string
+}
+
 export function useMateSession(options: MateSessionOptions = {}) {
   const conversations = useAssistantConversations({ initialId: options.initialId })
   const chat = useAssistantChat()
@@ -67,6 +74,50 @@ export function useMateSession(options: MateSessionOptions = {}) {
     setSummaryNoteId,
   } = conversations
   const { send: chatSend, abort, attach, isStreamingConversation, answerDelivered } = chat
+
+  // Answers delivered live to this surface, by message id and the
+  // conversation they belong to. Only these can be rated (an answer read back
+  // from an earlier visit cannot), so the set is emptied of any other
+  // conversation as soon as the open one changes.
+  const [liveAnswers, setLiveAnswers] = useState<Record<string, string>>({})
+  const markLive = useCallback((message: AssistantMessage) => {
+    if (message.role !== 'assistant') return
+    setLiveAnswers((previous) => ({ ...previous, [message.id]: message.conversationId }))
+  }, [])
+  useEffect(() => {
+    setLiveAnswers((previous) => {
+      const kept = Object.entries(previous).filter(([, conversationId]) => conversationId === activeId)
+      return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept)
+    })
+  }, [activeId])
+  const liveAnswerIds = useMemo<ReadonlySet<string>>(
+    () => new Set(Object.entries(liveAnswers).filter(([, conversationId]) => conversationId === activeId).map(([id]) => id)),
+    [liveAnswers, activeId],
+  )
+
+  const [ratings, setRatings] = useState<Record<string, MateAnswerRating>>({})
+  // Saves the verdict on an answer (a note rides with it), or clears it when
+  // `verdict` is null. Resolves null on success, or the server's words when it
+  // refused; the verdict shown stays the one the server holds.
+  const rateAnswer = useCallback(async (messageId: string, verdict: 'up' | 'down' | null, note = ''): Promise<string | null> => {
+    const path = `/api/assistant/messages/${encodeURIComponent(messageId)}/feedback`
+    try {
+      if (verdict === null) {
+        await apiRequest<void>(path, { method: 'DELETE' })
+        setRatings((previous) => {
+          const next = { ...previous }
+          delete next[messageId]
+          return next
+        })
+      } else {
+        await apiRequest<unknown>(path, { method: 'PUT', json: { verdict, note } })
+        setRatings((previous) => ({ ...previous, [messageId]: { verdict, note } }))
+      }
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err)
+    }
+  }, [])
 
   const screenRef = useRef(options.screen)
   screenRef.current = options.screen
@@ -159,6 +210,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
           answered = true
           if (activeIdRef.current !== askedIn) return
           shown = message
+          markLive(message)
           appendLocal(message)
         },
       })
@@ -173,7 +225,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     } finally {
       release()
     }
-  }, [create, appendLocal, chatSend, refresh, reloadMessages])
+  }, [create, appendLocal, markLive, chatSend, refresh, reloadMessages])
 
   const isAnswering = useCallback(() => {
     const id = activeIdRef.current
@@ -195,11 +247,12 @@ export function useMateSession(options: MateSessionOptions = {}) {
     if (id === null || isStreamingConversation(id)) return
     await attach(id, undefined, (message) => {
       if (activeIdRef.current !== id) return
+      markLive(message)
       appendLocal(message)
     })
     if (activeIdRef.current !== id) return
     await Promise.all([refresh(), reloadMessages(id)])
-  }, [isStreamingConversation, attach, appendLocal, refresh, reloadMessages])
+  }, [isStreamingConversation, attach, appendLocal, markLive, refresh, reloadMessages])
 
   // ADR 0105 ("the answer outlives the page"): whenever the open
   // conversation becomes a real id, on mount or on switching, rejoin
@@ -220,6 +273,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
       await attach(id, undefined, (message) => {
         if (cancelled || activeIdRef.current !== id) return
         delivered = true
+        markLive(message)
         appendLocal(message)
       })
       if (!delivered) return
@@ -228,7 +282,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     return () => {
       cancelled = true
     }
-  }, [activeId, isStreamingConversation, attach, appendLocal, refresh])
+  }, [activeId, isStreamingConversation, attach, appendLocal, markLive, refresh])
 
   const busy = chat.sending || questionPending
   const error = chat.error ?? (busy && refusedIn === activeId ? MATE_BUSY_MESSAGE : null)
@@ -269,6 +323,12 @@ export function useMateSession(options: MateSessionOptions = {}) {
     isAnswering,
     updateProposal,
     updateFormDraft,
+    /** Answers delivered live in the open conversation: the only ones the
+     * operator can rate. */
+    liveAnswerIds,
+    /** Verdicts given this visit, by message id. */
+    ratings,
+    rateAnswer,
   }), [
     conversations.conversations,
     activeId,
@@ -289,6 +349,9 @@ export function useMateSession(options: MateSessionOptions = {}) {
     isAnswering,
     updateProposal,
     updateFormDraft,
+    liveAnswerIds,
+    ratings,
+    rateAnswer,
   ])
 }
 

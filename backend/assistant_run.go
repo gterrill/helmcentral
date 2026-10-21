@@ -114,6 +114,9 @@ type assistantReply struct {
 	// Cards are the cards (ADR 0191) tools built from their results during
 	// this run, in call order. Saved with the assistant message like Proposals.
 	Cards []mateCard
+	// ToolCalls are every tool call this run made, in order, saved with the
+	// assistant message so the answer can be traced.
+	ToolCalls []assistantToolCall
 }
 
 // assistantToolFailures counts, per tool name, how many times a tool call
@@ -828,9 +831,13 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			r.emit(mateRetractEvent{})
 		}
 
-		toolMessages, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
+		toolMessages, calls, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
 		if terr != nil {
 			return assistantReply{}, terr
+		}
+		for _, tc := range calls {
+			tc.Round = reply.ToolRounds
+			reply.ToolCalls = append(reply.ToolCalls, tc)
 		}
 		// Tools that make their own OpenRouter calls (search_web) report what
 		// those cost, so the reply's footer covers them too.
@@ -921,14 +928,17 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 //
 // Whoever adds a tool that mutates shared state must make it safe on its own
 // (its own lock or an idempotency rule) and name it here.
-func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall, failures *assistantToolFailures) ([]openRouterMessage, error) {
+func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterToolCall, failures *assistantToolFailures) ([]openRouterMessage, []assistantToolCall, error) {
 	for _, call := range calls {
 		if call.ID == "" {
-			return nil, fmt.Errorf("assistant requested tool %q with no tool_call id", call.Function.Name)
+			return nil, nil, fmt.Errorf("assistant requested tool %q with no tool_call id", call.Function.Name)
 		}
 	}
 
 	results := make([]openRouterMessage, len(calls))
+	// records is the durable trace of the round, one per call and indexed like
+	// calls (each goroutine writes only its own slot). Round is set by run.
+	records := make([]assistantToolCall, len(calls))
 	sem := make(chan struct{}, assistantMaxConcurrentToolCalls)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
@@ -959,6 +969,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			r.emit(mateStatusEvent{Text: fmt.Sprintf("%s was not run: this round asked for more than %d tool calls", call.Function.Name, assistantMaxToolCallsPerRound)})
 			mu.Unlock()
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
+			records[i] = assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), Result: body, Error: "not run: round already at the call limit"}
 			continue
 		}
 
@@ -984,6 +995,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			r.emit(mateStatusEvent{Text: fmt.Sprintf("%s is unavailable after %d failures, skipping", call.Function.Name, assistantMaxToolFailures)})
 			mu.Unlock()
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
+			records[i] = assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), Result: body, Error: "not run: tool withheld after repeated failures"}
 			continue
 		}
 
@@ -1016,6 +1028,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			toolStart := time.Now()
 			result, terr := r.tools.execute(ctx, call.Function.Name, args)
 			elapsed := time.Since(toolStart).Round(time.Millisecond)
+			rec := assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), ElapsedMs: elapsed.Milliseconds()}
 			if terr != nil {
 				failures.record(call.Function.Name)
 				oneLine := firstErrorLine(terr)
@@ -1030,6 +1043,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 					return
 				}
 				result = string(errBody)
+				rec.Error = oneLine
 				mu.Lock()
 				r.emit(mateStatusEvent{Text: fmt.Sprintf("%s failed: %s", call.Function.Name, oneLine)})
 				mu.Unlock()
@@ -1037,18 +1051,20 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 				log.Printf("assistant: tool %s -> %d chars in %s%s", call.Function.Name, len(result), elapsed, assistantFindPlacesLogSuffix(call.Function.Name, result))
 			}
 
+			rec.Result = result
+			records[i] = rec
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(result), ToolCallID: call.ID}
 		}(i, call, args)
 	}
 
 	wg.Wait()
 	if firstErr != nil {
-		return nil, firstErr
+		return nil, nil, firstErr
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return results, nil
+	return results, records, nil
 }
 
 // compactAssistantToolArgs trims a tool call's raw arguments to 200 runes

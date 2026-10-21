@@ -25,6 +25,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   your compose file if you set it. A bookmark to `/routes` now opens the
   dashboard.
 
+### Added
+
+- **Rate Mate's answers.** Under each answer Mate gives you in the chat there
+  are now a thumbs-up and a thumbs-down, with an optional short note about what
+  was good or what was wrong. Tap the thumb you chose again to take the rating
+  back. Ratings are kept on the boat, and Helmcentral now also keeps which
+  lookups Mate made for each answer, so a rated answer can be traced later.
+  Answers in a conversation you reopen later cannot be rated.
+
 ### Changed
 
 - **Engine and equipment lists offer only real sources.** A source is offered
