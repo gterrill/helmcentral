@@ -38,6 +38,7 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
   const posts: Array<{ conversationId: string; body: Record<string, unknown> }> = []
   const cancels: string[] = []
   const runs: string[] = []
+  const ratings: Array<{ method: string; messageId: string; body?: Record<string, unknown> }> = []
   let counter = 0
 
   const store = (conversationId: string, record: { id: string; role: string; content: string }): MessageRecord => {
@@ -59,6 +60,7 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
     posts,
     cancels,
     runs,
+    ratings,
     messages,
     store,
     answer,
@@ -108,6 +110,14 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
         if (server.readGate) await server.readGate
         const list = messages.get(id) ?? []
         return { ok: true, json: async () => ({ conversation: convo, messages: list }) }
+      }
+      const rating = url.match(/\/api\/assistant\/messages\/([^/]+)\/feedback$/)
+      if (rating && (method === 'PUT' || method === 'DELETE')) {
+        const messageId = decodeURIComponent(rating[1])
+        const body = init?.body ? (JSON.parse(init.body as string) as Record<string, unknown>) : undefined
+        ratings.push({ method, messageId, body })
+        if (method === 'DELETE') return { ok: true, status: 204 }
+        return { ok: true, json: async () => ({ feedback: { message_id: messageId, ...body } }) }
       }
       throw new Error(`Unhandled fetch in test: ${method} ${url}`)
     }),
@@ -655,6 +665,134 @@ describe('useMateSession', () => {
       expect(result.current.status.stopped).toBe(false)
       expect(result.current.messages.map((m) => m.content)).toContain('Turning at 14:10.')
       removeMateWatch('c1')
+    })
+  })
+
+  describe('rating answers', () => {
+    it('offers the rating on an answer delivered live, not on one read back', async () => {
+      const server = fakeMateServer({
+        conversations: [conversation('c1')],
+        messages: { c1: [{ id: 'old', role: 'assistant', content: 'Earlier answer' }] },
+      })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.messages).toHaveLength(1))
+      expect(result.current.liveAnswerIds.has('old')).toBe(false)
+
+      await act(async () => {
+        await result.current.send('Is the tide turning?')
+      })
+      const answer = server.messages.get('c1')!.at(-1)!
+      expect(result.current.liveAnswerIds.has(answer.id)).toBe(true)
+      expect(result.current.liveAnswerIds.has('old')).toBe(false)
+      removeMateWatch('c1')
+    })
+
+    it('forgets which answers were live once another conversation is opened', async () => {
+      const server = fakeMateServer({ conversations: [conversation('c1'), conversation('c2')] })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.activeId).toBe('c1'))
+      await act(async () => {
+        await result.current.send('Is the tide turning?')
+      })
+      const answer = server.messages.get('c1')!.at(-1)!
+      expect(result.current.liveAnswerIds.has(answer.id)).toBe(true)
+
+      await act(async () => {
+        await result.current.select('c2')
+      })
+      await act(async () => {
+        await result.current.select('c1')
+      })
+      expect(result.current.liveAnswerIds.has(answer.id)).toBe(false)
+      removeMateWatch('c1')
+    })
+
+    it('saves a verdict with its note, replaces it, and clears it', async () => {
+      const server = fakeMateServer({ conversations: [conversation('c1')], messages: { c1: [{ id: 'a1', role: 'assistant', content: 'x' }] } })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.messages).toHaveLength(1))
+
+      await act(async () => {
+        await result.current.rateAnswer('a1', 'down', '')
+      })
+      expect(result.current.ratings.a1).toEqual({ verdict: 'down', note: '' })
+      await act(async () => {
+        await result.current.rateAnswer('a1', 'down', 'wrong tank')
+      })
+      expect(result.current.ratings.a1).toEqual({ verdict: 'down', note: 'wrong tank' })
+      await act(async () => {
+        await result.current.rateAnswer('a1', null)
+      })
+      expect(result.current.ratings.a1).toBeUndefined()
+
+      expect(server.ratings).toEqual([
+        { method: 'PUT', messageId: 'a1', body: { verdict: 'down', note: '' } },
+        { method: 'PUT', messageId: 'a1', body: { verdict: 'down', note: 'wrong tank' } },
+        { method: 'DELETE', messageId: 'a1', body: undefined },
+      ])
+      removeMateWatch('c1')
+    })
+
+    it('keeps the old verdict and says so when the server refuses the new one', async () => {
+      const server = fakeMateServer({ conversations: [conversation('c1')], messages: { c1: [{ id: 'a1', role: 'assistant', content: 'x' }] } })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.messages).toHaveLength(1))
+      await act(async () => {
+        await result.current.rateAnswer('a1', 'up', '')
+      })
+      const original = server.fetch.getMockImplementation()!
+      server.fetch.mockImplementation(async (url: string, init?: RequestInit) =>
+        init?.method === 'PUT' ? { ok: false, status: 404, json: async () => ({ error: 'message not found' }) } : original(url, init))
+
+      let failure: string | null = null
+      await act(async () => {
+        failure = await result.current.rateAnswer('a1', 'down', '')
+      })
+      expect(failure).toBeTruthy()
+      expect(result.current.ratings.a1?.verdict).toBe('up')
+    })
+
+    it('shows the rating an answer already has on the server after a reload', async () => {
+      fakeMateServer({
+        conversations: [conversation('c1')],
+        messages: { c1: [
+          { id: 'old', role: 'assistant', content: 'Earlier answer', feedback: { verdict: 'down', note: 'wrong tank' } },
+          { id: 'plain', role: 'assistant', content: 'Unrated' },
+        ] },
+      })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.messages).toHaveLength(2))
+      expect(result.current.ratings.old).toEqual({ verdict: 'down', note: 'wrong tank' })
+      expect(result.current.ratings.plain).toBeUndefined()
+    })
+
+    it('lets a rating that came from the server be changed and cleared', async () => {
+      fakeMateServer({
+        conversations: [conversation('c1')],
+        messages: { c1: [{ id: 'old', role: 'assistant', content: 'Earlier answer', feedback: { verdict: 'down', note: '' } }] },
+      })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.ratings.old).toBeDefined())
+      await act(async () => { await result.current.rateAnswer('old', 'up', 'fine') })
+      expect(result.current.ratings.old).toEqual({ verdict: 'up', note: 'fine' })
+      await act(async () => { await result.current.rateAnswer('old', null) })
+      expect(result.current.ratings.old).toBeUndefined()
+    })
+
+    it('takes the server\'s word again when the thread is read afresh, so a change made on another device shows', async () => {
+      const server = fakeMateServer({
+        conversations: [conversation('c1')],
+        messages: { c1: [{ id: 'old', role: 'assistant', content: 'Earlier answer', feedback: { verdict: 'down', note: '' } }] },
+      })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.ratings.old).toBeDefined())
+      await act(async () => { await result.current.rateAnswer('old', 'up', 'fine') })
+      expect(result.current.ratings.old?.verdict).toBe('up')
+
+      // Another device cleared it.
+      server.messages.set('c1', [{ id: 'old', role: 'assistant', content: 'Earlier answer', conversation_id: 'c1', seq: 1, created_at: '2026-10-15T00:00:00Z' }])
+      await act(async () => { await result.current.select('c1') })
+      await waitFor(() => expect(result.current.ratings.old).toBeUndefined())
     })
   })
 })

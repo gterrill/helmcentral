@@ -68,10 +68,15 @@ type fakeAssistantRunner struct {
 	err       error
 	gotSystem string
 	deltas    []string
+	// gotStable, when set, receives the stable system-prompt part.
+	gotStable *string
 }
 
 func (f *fakeAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 	f.gotSystem = systemStable + systemLive
+	if f.gotStable != nil {
+		*f.gotStable = systemStable
+	}
 	f.emit(mateStatusEvent{Text: "Thinking…"})
 	for _, d := range f.deltas {
 		f.emit(mateDeltaEvent{Text: d})

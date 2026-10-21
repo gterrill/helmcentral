@@ -2252,3 +2252,54 @@ func TestAssistantRunner_SessionIDIsConversationIDOnEveryRoundAndCacheTokensSum(
 		t.Fatalf("unexpected totals: %+v", reply)
 	}
 }
+
+func TestAssistantRunner_RecordsToolCallsForTheReply(t *testing.T) {
+	round0 := chatResponse(t, http.StatusOK, openRouterChatResponse{
+		Choices: []openRouterChoice{{
+			Message: openRouterMessage{
+				Role: "assistant",
+				ToolCalls: []openRouterToolCall{
+					{ID: "call_1", Type: "function", Function: openRouterToolCallFunction{Name: "get_tides", Arguments: openRouterArguments(`{"lat":1}`)}},
+					{ID: "call_2", Type: "function", Function: openRouterToolCallFunction{Name: "get_weather", Arguments: openRouterArguments(`{}`)}},
+				},
+			},
+		}},
+	})
+	round1 := chatResponse(t, http.StatusOK, openRouterChatResponse{
+		Choices: []openRouterChoice{{
+			Message: openRouterMessage{
+				Role: "assistant",
+				ToolCalls: []openRouterToolCall{
+					{ID: "call_3", Type: "function", Function: openRouterToolCallFunction{Name: "get_tides", Arguments: openRouterArguments(`{"lat":2}`)}},
+				},
+			},
+		}},
+	})
+	round2 := finalResponse(t, "done", "m", openRouterUsage{})
+
+	doer := &queuedChatDoer{responses: []*http.Response{round0, round1, round2}, errs: []error{nil, nil, nil}}
+	tools := &fakeToolExecutor{errs: map[string]error{"get_weather": errors.New("offline\nstack")}}
+	emit, _ := recordingEmitter()
+
+	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
+	reply, err := runner.run(context.Background(), "system", "", nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(reply.ToolCalls) != 3 {
+		t.Fatalf("expected 3 recorded calls, got %+v", reply.ToolCalls)
+	}
+	c := reply.ToolCalls
+	if c[0].Round != 0 || c[0].Seq != 0 || c[0].Name != "get_tides" || c[0].Args != `{"lat":1}` || c[0].Error != "" {
+		t.Errorf("call 0: %+v", c[0])
+	}
+	if c[1].Round != 0 || c[1].Seq != 1 || c[1].Name != "get_weather" || c[1].Error != "offline" || c[1].Result != `{"error":"offline"}` {
+		t.Errorf("call 1: %+v", c[1])
+	}
+	if c[2].Round != 1 || c[2].Seq != 0 || c[2].Args != `{"lat":2}` {
+		t.Errorf("call 2: %+v", c[2])
+	}
+	if c[0].Result == "" {
+		t.Errorf("successful call must keep its result")
+	}
+}

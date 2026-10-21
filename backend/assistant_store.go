@@ -38,19 +38,33 @@ type assistantConversation struct {
 // fields are populated on assistant rows and left at their zero value on
 // user rows.
 type assistantMessage struct {
-	ID               string    `json:"id"`
-	ConversationID   string    `json:"conversation_id"`
-	Seq              int       `json:"seq"`
-	Role             string    `json:"role"`
-	Content          string    `json:"content"`
-	Model            string    `json:"model,omitempty"`
-	PromptTokens     int       `json:"prompt_tokens,omitempty"`
-	CompletionTokens int       `json:"completion_tokens,omitempty"`
-	CostUSD          float64   `json:"cost_usd,omitempty"`
-	CachedTokens     int       `json:"cached_tokens,omitempty"`
-	CacheWriteTokens int       `json:"cache_write_tokens,omitempty"`
-	ToolRounds       int       `json:"tool_rounds,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID               string  `json:"id"`
+	ConversationID   string  `json:"conversation_id"`
+	Seq              int     `json:"seq"`
+	Role             string  `json:"role"`
+	Content          string  `json:"content"`
+	Model            string  `json:"model,omitempty"`
+	PromptTokens     int     `json:"prompt_tokens,omitempty"`
+	CompletionTokens int     `json:"completion_tokens,omitempty"`
+	CostUSD          float64 `json:"cost_usd,omitempty"`
+	CachedTokens     int     `json:"cached_tokens,omitempty"`
+	CacheWriteTokens int     `json:"cache_write_tokens,omitempty"`
+	ToolRounds       int     `json:"tool_rounds,omitempty"`
+	// PromptVersion is a short hash of the stable system-prompt part this
+	// answer was written under (assistantPromptVersion). Empty on user rows
+	// and on answers from before it was recorded.
+	PromptVersion string `json:"prompt_version,omitempty"`
+	// ToolCalls are the calls Mate made to write this answer. They are saved
+	// with the row (message_tool_calls) and read through ListToolCalls, never
+	// sent with the message itself: results can be tens of kB.
+	ToolCalls []assistantToolCall `json:"-"`
+	// ToolCallsRecorded marks a row whose tool calls were written with it (even
+	// when there were none), so a missing trace is told apart from "no tools".
+	ToolCallsRecorded bool `json:"-"`
+	// Feedback is the operator's rating of this answer, nil when unrated.
+	// Read by ListMessages; the live "message" event never carries one.
+	Feedback  *assistantFeedbackSummary `json:"feedback,omitempty"`
+	CreatedAt time.Time                 `json:"created_at"`
 	// Attachments are the documents (ADR 0106) attached to this message,
 	// position-ordered, populated by AppendMessage (from its input) and
 	// ListMessages (from message_attachments). Always empty on an assistant
@@ -156,6 +170,8 @@ func createAssistantSchema(db *sql.DB) error {
 			cached_tokens     INTEGER NOT NULL DEFAULT 0,
 			cache_write_tokens INTEGER NOT NULL DEFAULT 0,
 			tool_rounds       INTEGER NOT NULL DEFAULT 0,
+			prompt_version    TEXT NOT NULL DEFAULT '',
+			tool_calls_recorded INTEGER NOT NULL DEFAULT 0,
 			created_at        INTEGER NOT NULL
 		)`); err != nil {
 		return fmt.Errorf("create messages table: %w", err)
@@ -196,6 +212,27 @@ func createAssistantSchema(db *sql.DB) error {
 		}
 	}
 
+	// prompt_version arrived after the table did, like the columns above.
+	var hasPromptVersion int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'prompt_version'`).Scan(&hasPromptVersion); err != nil {
+		return fmt.Errorf("inspect messages table: %w", err)
+	}
+	if hasPromptVersion == 0 {
+		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN prompt_version TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add messages.prompt_version: %w", err)
+		}
+	}
+
+	var hasRecorded int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'tool_calls_recorded'`).Scan(&hasRecorded); err != nil {
+		return fmt.Errorf("inspect messages table: %w", err)
+	}
+	if hasRecorded == 0 {
+		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN tool_calls_recorded INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add messages.tool_calls_recorded: %w", err)
+		}
+	}
+
 	// summary_note_id (ADR 0162) arrived after the table did, and CREATE
 	// TABLE IF NOT EXISTS leaves an existing table alone, so the column is
 	// added by hand when a database from before it opens.
@@ -219,7 +256,10 @@ func createAssistantSchema(db *sql.DB) error {
 	if err := createAssistantFormDraftsSchema(db); err != nil {
 		return err
 	}
-	return createAssistantCardsSchema(db)
+	if err := createAssistantCardsSchema(db); err != nil {
+		return err
+	}
+	return createAssistantFeedbackSchema(db)
 }
 
 // newAssistantStore opens (creating if necessary) the SQLite database at
@@ -459,9 +499,9 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 	m.CreatedAt = now
 
 	if _, err := tx.Exec(
-		`INSERT INTO messages (id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.ConversationID, m.Seq, m.Role, m.Content, m.Model, m.PromptTokens, m.CompletionTokens, m.CostUSD, m.CachedTokens, m.CacheWriteTokens, m.ToolRounds, m.CreatedAt.Unix()); err != nil {
+		`INSERT INTO messages (id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, prompt_version, tool_calls_recorded, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.ConversationID, m.Seq, m.Role, m.Content, m.Model, m.PromptTokens, m.CompletionTokens, m.CostUSD, m.CachedTokens, m.CacheWriteTokens, m.ToolRounds, m.PromptVersion, m.ToolCallsRecorded, m.CreatedAt.Unix()); err != nil {
 		return assistantMessage{}, fmt.Errorf("insert message: %w", err)
 	}
 
@@ -505,6 +545,15 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 		}
 	}
 
+	if len(m.ToolCalls) > 0 {
+		if m.Role != "assistant" {
+			return assistantMessage{}, fmt.Errorf("insert message tool calls: only an assistant message can carry them, got role %q", m.Role)
+		}
+		if err := insertAssistantToolCallsTx(tx, m.ID, m.ToolCalls); err != nil {
+			return assistantMessage{}, err
+		}
+	}
+
 	if _, err := tx.Exec(`UPDATE conversations SET updated_at = ? WHERE id = ?`, now.Unix(), m.ConversationID); err != nil {
 		return assistantMessage{}, fmt.Errorf("bump conversation updated_at: %w", err)
 	}
@@ -522,7 +571,7 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 	defer s.mu.Unlock()
 
 	rows, err := s.db.Query(
-		`SELECT id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, created_at
+		`SELECT id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, prompt_version, created_at
 		 FROM messages WHERE conversation_id = ? ORDER BY seq ASC`, conversationID)
 	if err != nil {
 		return nil, fmt.Errorf("list messages: %w", err)
@@ -534,7 +583,7 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 		var m assistantMessage
 		var created int64
 		if err := rows.Scan(&m.ID, &m.ConversationID, &m.Seq, &m.Role, &m.Content, &m.Model,
-			&m.PromptTokens, &m.CompletionTokens, &m.CostUSD, &m.CachedTokens, &m.CacheWriteTokens, &m.ToolRounds, &created); err != nil {
+			&m.PromptTokens, &m.CompletionTokens, &m.CostUSD, &m.CachedTokens, &m.CacheWriteTokens, &m.ToolRounds, &m.PromptVersion, &created); err != nil {
 			return nil, fmt.Errorf("scan message: %w", err)
 		}
 		m.CreatedAt = time.Unix(created, 0).UTC()
@@ -564,7 +613,12 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 	if err != nil {
 		return nil, err
 	}
+	feedbackByMessage, err := feedbackForMessages(s.db, ids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
+		out[i].Feedback = feedbackByMessage[out[i].ID]
 		out[i].Cards = cardsByMessage[out[i].ID]
 		out[i].Attachments = attachmentsByMessage[out[i].ID]
 		out[i].Proposals = proposalsByMessage[out[i].ID]

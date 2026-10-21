@@ -23,6 +23,7 @@ export interface MessageApi {
   proposals?: ProposalApi[]
   form_drafts?: FormDraftApi[]
   cards?: unknown
+  feedback?: { verdict: 'up' | 'down'; note: string }
 }
 
 export interface ConversationApi {

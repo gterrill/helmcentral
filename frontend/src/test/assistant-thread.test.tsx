@@ -1217,3 +1217,96 @@ describe('cards under a reply (ADR 0191)', () => {
     expect(screen.queryByText('Passage window')).toBeNull()
   })
 })
+
+describe('AssistantThread: rating an answer', () => {
+  it('offers thumbs on an answer delivered live, and saves through the session', async () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const rateAnswer = vi.fn().mockResolvedValue(null)
+    const session = fakeMateSession({
+      messages: [assistantMessage()],
+      liveAnswerIds: new Set(['m1']),
+      rateAnswer,
+    })
+
+    render(<AssistantThread canWrite session={session} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
+
+    await waitFor(() => expect(rateAnswer).toHaveBeenCalledWith('m1', 'up', ''))
+  })
+
+  it('shows no thumbs on an answer read back from an earlier visit', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const session = fakeMateSession({ messages: [assistantMessage()] })
+
+    render(<AssistantThread canWrite session={session} />)
+
+    expect(screen.queryByRole('button', { name: 'Good answer' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Poor answer' })).not.toBeInTheDocument()
+  })
+
+  it('shows no thumbs without write permission', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const session = fakeMateSession({ messages: [assistantMessage()], liveAnswerIds: new Set(['m1']) })
+
+    render(<AssistantThread canWrite={false} session={session} />)
+
+    expect(screen.queryByRole('button', { name: 'Good answer' })).not.toBeInTheDocument()
+  })
+
+  it('shows the held verdict as pressed', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const session = fakeMateSession({
+      messages: [assistantMessage()],
+      liveAnswerIds: new Set(['m1']),
+      ratings: { m1: { verdict: 'down', note: '' } },
+    })
+
+    render(<AssistantThread canWrite session={session} />)
+
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('shows a rated answer from an earlier visit with its verdict and note, and lets it be changed', async () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const rateAnswer = vi.fn().mockResolvedValue(null)
+    const session = fakeMateSession({
+      messages: [assistantMessage()],
+      ratings: { m1: { verdict: 'down', note: 'wrong tank' } },
+      rateAnswer,
+    })
+
+    render(<AssistantThread canWrite session={session} />)
+
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('textbox', { name: 'What was wrong' })).toHaveValue('wrong tank')
+    fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
+    await waitFor(() => expect(rateAnswer).toHaveBeenCalledWith('m1', 'up', 'wrong tank'))
+  })
+
+  it('shows the verdict read-only to someone who cannot write', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const session = fakeMateSession({
+      messages: [assistantMessage()],
+      ratings: { m1: { verdict: 'up', note: 'right call' } },
+    })
+
+    render(<AssistantThread canWrite={false} session={session} />)
+
+    expect(screen.getByRole('button', { name: 'Good answer' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Good answer' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('textbox', { name: 'What was good' })).not.toBeInTheDocument()
+    expect(screen.getByText('right call')).toBeInTheDocument()
+  })
+
+  it('keeps the controls on an answer after its rating is taken back, so it can be rated again', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const rated = fakeMateSession({ messages: [assistantMessage()], ratings: { m1: { verdict: 'down', note: '' } } })
+    const { rerender } = render(<AssistantThread canWrite session={rated} />)
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toBeInTheDocument()
+
+    rerender(<AssistantThread canWrite session={{ ...rated, ratings: {} }} />)
+
+    expect(screen.getByRole('button', { name: 'Good answer' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toBeInTheDocument()
+  })
+})
