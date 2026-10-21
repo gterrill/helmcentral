@@ -305,7 +305,9 @@ func (r *sourceRegistry) tick(snapshot *signalKSnapshot, now time.Time) {
 }
 
 // stashLocked keeps the pending writes of the vessel being left, so the change
-// of self vessel loses no sighting; flushLocked retries them.
+// of self vessel loses no sighting; flushLocked retries them. Writes already
+// stashed for the same vessel (it was left before and the table was never
+// reachable) are merged with the new ones, never replaced.
 func (r *sourceRegistry) stashLocked() {
 	if !r.loaded || (len(r.dirty) == 0 && !r.metaDirty) {
 		return
@@ -319,7 +321,62 @@ func (r *sourceRegistry) stashLocked() {
 		m := r.meta
 		p.meta = &m
 	}
+	if old := r.stash[r.vessel]; old != nil {
+		p = mergePending(old, p)
+	}
 	r.stash[r.vessel] = p
+}
+
+// mergePending combines two sets of pending writes for one vessel: per path the
+// earliest first_seen and latest last_seen, and the record that has watched
+// longest (a seed, once taken, is kept).
+func mergePending(a, b *pendingWrite) *pendingWrite {
+	byPath := map[string]seenRow{}
+	for _, row := range append(append([]seenRow{}, a.rows...), b.rows...) {
+		cur, ok := byPath[row.Path]
+		if !ok {
+			byPath[row.Path] = row
+			continue
+		}
+		if row.First.Before(cur.First) {
+			cur.First = row.First
+		}
+		if row.Last.After(cur.Last) {
+			cur.Last = row.Last
+		}
+		byPath[row.Path] = cur
+	}
+	out := &pendingWrite{}
+	for _, row := range byPath {
+		out.rows = append(out.rows, row)
+	}
+	sort.Slice(out.rows, func(i, j int) bool { return out.rows[i].Path < out.rows[j].Path })
+	switch {
+	case a.meta == nil:
+		out.meta = b.meta
+	case b.meta == nil:
+		out.meta = a.meta
+	default:
+		m := mergeMeta(*a.meta, *b.meta)
+		out.meta = &m
+	}
+	return out
+}
+
+// mergeMeta keeps the earliest tracking start, the longer watched time and a
+// seed if either holds one.
+func mergeMeta(a, b registryMeta) registryMeta {
+	m := b
+	if !a.TrackingSince.IsZero() && (m.TrackingSince.IsZero() || a.TrackingSince.Before(m.TrackingSince)) {
+		m.TrackingSince = a.TrackingSince
+	}
+	if a.Watched > m.Watched {
+		m.Watched = a.Watched
+	}
+	if m.SeededAt.IsZero() && !a.SeededAt.IsZero() {
+		m.SeededAt, m.SeededPaths = a.SeededAt, a.SeededPaths
+	}
+	return m
 }
 
 // loadLocked replaces the in-memory record with vessel's stored one. It starts
@@ -352,7 +409,40 @@ func (r *sourceRegistry) loadLocked(vessel string, now time.Time) bool {
 		r.meta, r.metaDirty = *meta, false
 		r.watchedWritten = meta.Watched
 	}
+	r.applyStashLocked(vessel)
 	return true
+}
+
+// applyStashLocked folds writes that never reached the table, kept when the
+// vessel was last left, back into the freshly loaded record, so returning to a
+// vessel does not show it without them. They stay pending until written.
+func (r *sourceRegistry) applyStashLocked(vessel string) {
+	p := r.stash[vessel]
+	if p == nil {
+		return
+	}
+	delete(r.stash, vessel)
+	for _, row := range p.rows {
+		st := r.paths[row.Path]
+		if st == nil {
+			r.paths[row.Path] = &seenState{first: row.First, last: row.Last}
+		} else {
+			if row.First.Before(st.first) {
+				st.first = row.First
+			}
+			if row.Last.After(st.last) {
+				st.last = row.Last
+			}
+		}
+		r.dirty[row.Path] = true
+	}
+	if p.meta != nil {
+		r.meta = mergeMeta(*p.meta, r.meta)
+		r.metaDirty = true
+		if !r.meta.SeededAt.IsZero() {
+			r.installSeeded = true
+		}
+	}
 }
 
 // observeLocked notes every path under an equipment source that reported

@@ -420,6 +420,39 @@ func TestRegistryKeepsPendingSightingsAcrossAVesselChange(t *testing.T) {
 	}
 }
 
+// Going A -> B -> A -> B while writes keep failing must neither lose the
+// sightings of the first visit when A is current again, nor drop them when A
+// is left a second time.
+func TestRegistryMergesStashesAcrossRepeatedVesselChanges(t *testing.T) {
+	store := newRegistryStore(t)
+	configured, fetch := unconfiguredSeed()
+	reg := newSourceRegistry(store, configured, fetch)
+	a, b := vesselSnapshot("a"), vesselSnapshot("b")
+	store.set(true)
+
+	reportOn(a, "a", "propulsion.port.revolutions", registryT0, time.Second)
+	reg.tick(a, registryT0)
+	reg.tick(b, registryT0.Add(time.Minute))
+
+	back := vesselSnapshot("a")
+	reg.tick(back, registryT0.Add(2*time.Minute))
+	if rec := reg.record(); len(rec.Last) != 1 {
+		t.Fatalf("returning to a vessel serves the sightings still waiting to be written: %v", rec.Last)
+	}
+
+	reportOn(back, "a", "propulsion.starboard.revolutions", registryT0.Add(3*time.Minute), time.Second)
+	reg.tick(back, registryT0.Add(3*time.Minute))
+	reg.tick(b, registryT0.Add(4*time.Minute))
+
+	store.set(false)
+	reg.tick(b, registryT0.Add(5*time.Minute)) // both visits' sightings are written now
+	reg.tick(vesselSnapshot("a"), registryT0.Add(6*time.Minute))
+	rec := reg.record()
+	if _, ok := rec.Last["propulsion.port.revolutions"]; !ok || len(rec.Last) != 2 {
+		t.Fatalf("both visits' sightings survived: %v", rec.Last)
+	}
+}
+
 // If the new vessel's record cannot be read, nothing is served for it (never
 // the previous vessel's paths) and readers are told why.
 func TestRegistryServesNothingAndSaysWhyWhenTheLoadFails(t *testing.T) {
