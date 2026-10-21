@@ -854,13 +854,13 @@ func assistantDocumentLookup(id string) (document, error) {
 // straight through. A package-level var (not a plain function) so tests can
 // substitute a fake whole-run implementation without touching
 // postAssistantMessageHandler.
-var newAssistantRunner = func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+var newAssistantRunner = func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 	return &assistantRunner{
 		doer:       openRouterHTTPClient,
 		apiKey:     apiKey,
 		model:      model,
 		autoRouter: autoRouter,
-		tools:      assistantTurnToolDeps(apiKey, settingsPath, webSearch, today),
+		tools:      tools,
 		emit:       emit,
 	}
 }
@@ -1099,7 +1099,10 @@ func assistantTurnParamsFromSettings(settingsPath string, readiness assistantRea
 func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, messages []assistantMessage, p assistantTurnParams) error {
 	pc := collectAssistantPromptContext(p.settingsPath, time.Now())
 	pc.Spoken = p.spoken
-	pc.WebSearch = mateToolAvailable(assistantTurnToolDeps(p.apiKey, p.settingsPath, p.webSearch, p.today), "search_web")
+	// One construction of the turn's tools: the prompt, the version stamped on
+	// the answer and the runner that sends them to the model all read this.
+	toolDeps := assistantTurnToolDeps(p.apiKey, p.settingsPath, p.webSearch, p.today)
+	pc.WebSearch = mateToolAvailable(toolDeps, "search_web")
 	if p.screen != nil {
 		pc.Screen = *p.screen
 	}
@@ -1109,13 +1112,13 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		pc.ActiveWatch = &watch
 	}
 	systemStable, systemLive := assistantSystemPromptParts(pc)
-	toolDefs := assistantToolDefinitions(assistantTurnToolDeps(p.apiKey, p.settingsPath, p.webSearch, p.today))
+	toolDefs := toolDeps.definitions()
 	history, err := assistantHistoryMessages(messages, assistantDocumentLookup)
 	if err != nil {
 		return err
 	}
 
-	runner := newAssistantRunner(p.apiKey, p.model, p.settingsPath, p.autoRouter, p.webSearch, p.today, run.append)
+	runner := newAssistantRunner(p.apiKey, p.model, toolDeps, p.autoRouter, run.append)
 	// The conversation rides on the run's context so start_watch (ADR 0160)
 	// knows where to report back.
 	runCtx = withAssistantConversationID(runCtx, id)

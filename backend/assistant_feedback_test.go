@@ -183,7 +183,7 @@ func TestAssistantStore_PromptVersionAddedToExistingDatabase(t *testing.T) {
 
 func TestPostAssistantMessageHandler_PersistsToolCallsAndPromptVersion(t *testing.T) {
 	store, _, conv := postAssistantMessageTestSetup(t)
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "ok", Model: "openai/gpt-4o",
 			ToolCalls: []assistantToolCall{{Round: 0, Seq: 0, Name: "get_vessel_state", Args: "{}", Result: "{}", ElapsedMs: 5}},
@@ -559,9 +559,42 @@ func TestAssistantPromptVersion_IsTheRulesAndToolsNotTheBoat(t *testing.T) {
 	}
 }
 
+// The version stamped on an answer is computed from the tools the runner was
+// handed, so it changes with the offered tool set.
+func TestPostAssistantMessageHandler_PromptVersionFollowsTheToolsTheRunnerGets(t *testing.T) {
+	store, _, conv := postAssistantMessageTestSetup(t)
+	var offered assistantToolDeps
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+		offered = tools
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "m"}}
+	})
+	ask := func(webSearch bool) string {
+		body := fmt.Sprintf("assistant:\n    enabled: true\n    model: \"openai/gpt-4o\"\n    web_search: %t\n    web_search_model: \"openai/gpt-4o:online\"\n", webSearch)
+		path := filepath.Join(t.TempDir(), "settings.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("SETTINGS_FILE", path)
+		c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-10-03","content":"hi"}`, conv.ID)
+		if err := postAssistantMessageHandler(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("handler: %v %d", err, rec.Code)
+		}
+		msgs, _ := store.ListMessages(conv.ID)
+		version := msgs[len(msgs)-1].PromptVersion
+		if want := assistantPromptVersion(mateToolAvailable(offered, "search_web"), offered.definitions()); version != want {
+			t.Fatalf("web_search=%t: stored version %q is not the hash of the tools the runner got (%q)", webSearch, version, want)
+		}
+		return version
+	}
+	on, off := ask(true), ask(false)
+	if on == off {
+		t.Fatalf("offering search_web must change the version: %q", on)
+	}
+}
+
 func TestPostAssistantMessageHandler_PromptVersionIgnoresVesselAndOperatorData(t *testing.T) {
 	store, _, conv := postAssistantMessageTestSetup(t)
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "m"}}
 	})
 	ask := func(notes string) string {
