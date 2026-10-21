@@ -32,19 +32,23 @@ export function AssistantAnswerFeedback({ messageId, rating, onRate, readOnly = 
     setNote(savedNote)
   }, [savedNote])
 
-  const rate = async (verdict: 'up' | 'down' | null, text?: string) => {
+  const rate = async (verdict: 'up' | 'down' | null, text?: string): Promise<boolean> => {
     setBusy(true)
     const failure = verdict === null ? await onRate(messageId, null) : await onRate(messageId, verdict, text ?? '')
     setError(failure)
     setBusy(false)
+    return failure === null
   }
 
   // A tap on the held thumb takes the rating back; any other tap sets that
   // verdict and carries the note along, saved or still being typed.
   const tap = (verdict: 'up' | 'down') => {
     if (rating?.verdict === verdict) {
-      setNote('')
-      void rate(null)
+      // The note goes only once the server has taken the rating back; if it
+      // refuses, the rating and its note are both still there.
+      void rate(null).then((cleared) => {
+        if (cleared) setNote('')
+      })
       return
     }
     void rate(verdict, rating ? note.trim() : '')
