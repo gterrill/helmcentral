@@ -145,6 +145,10 @@ export interface VesselDetectorStatus {
 export interface DiscoveryTracking {
   /** When Helmcentral began watching this boat; null before it has. */
   since: string | null
+  /** `since` as a day ("18 Oct") in the vessel's time zone, worded by the server; '' before it has. */
+  since_day: string
+  /** The sentence to show about the record while it is young or unreadable, worded by the server; '' when there is nothing to say. */
+  note: string
   /** The record was started from InfluxDB history. */
   seeded: boolean
   /** The record spans enough time to call a source that never reports its signature missing. */
@@ -153,7 +157,7 @@ export interface DiscoveryTracking {
   error: string
 }
 
-export const noTracking: DiscoveryTracking = { since: null, seeded: false, covers: false, error: '' }
+export const noTracking: DiscoveryTracking = { since: null, since_day: '', note: '', seeded: false, covers: false, error: '' }
 
 export interface VesselDiscoveryResponse {
   /** False while Helmcentral has no vessel data from SignalK. */
@@ -217,15 +221,11 @@ export function sourceKindOf(source: string): SourceKind | null {
 }
 
 /**
- * "Helmcentral has been watching the boat since 18 Oct. ...": said while the
- * record is too young to list an engine that is switched off or to call a
- * source wrong, or why the record could not be read. '' once the record covers
- * enough time (or before it began).
+ * What to say about the record: since when Helmcentral has been watching while
+ * it is too young to list a switched-off engine or call a source wrong, or why
+ * it could not be read. The server words it (day and time zone included), so
+ * the pages and the Setup list cannot disagree; '' when there is nothing to say.
  */
-export function trackingNote(tracking: DiscoveryTracking, timeZone?: string): string {
-  if (tracking.error !== '') {
-    return `Helmcentral couldn't read its record of what the boat has reported (${tracking.error}), so only sources reporting now are listed.`
-  }
-  if (tracking.covers || tracking.since === null) return ''
-  return `Helmcentral has been watching the boat since ${loggedDay(tracking.since, timeZone)}. A source that is switched off is listed once it has reported since then.`
+export function trackingNote(tracking: DiscoveryTracking): string {
+  return tracking.note
 }

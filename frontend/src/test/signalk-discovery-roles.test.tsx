@@ -9,6 +9,8 @@ import { buildRegularSettingsPatch, hydrateDraftFromSettings, type RegularSettin
 import { emptyVesselRoles } from '@/lib/vessel-settings'
 import { invalidateQueries } from '@/lib/api-query'
 
+const YOUNG_NOTE = 'Helmcentral has been watching the boat since 18 Oct. A source that is switched off is listed once it has reported since then.'
+
 // Settings -> SignalK -> Discovery and Roles. Every dependent fetch (the
 // discovery list, equipment items, the settings payload) is routed through one
 // mock, the same pattern equipment-editor.test.tsx uses.
@@ -146,7 +148,7 @@ function engineOffBoat() {
         row('electrical.alternator.12', '12', [], { reporting: false, signature: 'carried', last_seen: '2026-10-16T12:00:00Z' }),
       ] },
     ],
-    tracking: { since: '2026-10-01T00:00:00Z', seeded: true, covers: true, error: '' },
+    tracking: { since: '2026-10-01T00:00:00Z', since_day: '1 Oct', note: '', seeded: true, covers: true, error: '' },
   }
 }
 
@@ -164,7 +166,7 @@ describe('Settings -> SignalK: sources that carry their signature', () => {
 
   it('says since when Helmcentral has been watching while the record is young', async () => {
     engineOffBoat()
-    discoveryBody = { ...discoveryBody, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false, error: '' } }
+    discoveryBody = { ...discoveryBody, tracking: { since: '2026-10-18T12:00:00Z', since_day: '18 Oct', note: YOUNG_NOTE, seeded: false, covers: false, error: '' } }
     render(<SignalKDiscoverySection />)
 
     expect(await screen.findByText(/Helmcentral has been watching the boat since 18 Oct/)).toBeInTheDocument()
@@ -173,7 +175,7 @@ describe('Settings -> SignalK: sources that carry their signature', () => {
 
   it('says plainly when Helmcentral could not read its record', async () => {
     engineOffBoat()
-    discoveryBody = { ...discoveryBody, tracking: { since: null, seeded: false, covers: false, error: 'database is locked' } }
+    discoveryBody = { ...discoveryBody, tracking: { since: null, since_day: '', note: "Helmcentral couldn't read its record of what the boat has reported (database is locked), so only sources reporting now are listed.", seeded: false, covers: false, error: 'database is locked' } }
     render(<SignalKDiscoverySection />)
 
     expect(await screen.findByText(/couldn't read its record of what the boat has reported \(database is locked\)/)).toBeInTheDocument()

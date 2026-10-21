@@ -446,9 +446,13 @@ func TestUnreadableRecordIsSaidInDiscoveryAndSetup(t *testing.T) {
 	}
 }
 
-// "Watching since" is a day in the vessel's own time zone, as the pages show
-// it: 20:00 UTC on 20 Oct is already 21 Oct for a boat at 150 degrees east.
+// "Watching since" is a day in the vessel's time zone, the one the vessel
+// state stream gives the browser: from the trusted fix, not whatever raw
+// position the tree holds. 20:00 UTC on 20 Oct is already 21 Oct for a boat at
+// 150 degrees east.
 func TestWatchingSinceDayIsInTheVesselTimeZone(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
 	snapshot := newAnomalyTestSnapshot()
 	now := time.Now().UTC()
 	snapshot.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{
@@ -456,13 +460,35 @@ func TestWatchingSinceDayIsInTheVesselTimeZone(t *testing.T) {
 	}}}, now)
 	since := time.Date(2026, 10, 20, 20, 0, 0, 0, time.UTC)
 	young := sourceRecord{Since: since}
+	items := []sourceItem{{ID: "p", Name: "Port", Source: "propulsion.port", Group: sourceEngine, Instance: "port"}}
 
-	disc := vesselDiscovery(snapshot, vesselView{}, []sourceItem{{ID: "p", Name: "Port", Source: "propulsion.port", Group: sourceEngine, Instance: "port"}}, young)
+	// A position in the tree that no trusted fix backs gives the stream, and
+	// so this note, UTC.
+	disc := vesselDiscovery(snapshot, vesselView{}, items, young)
+	if disc.Tracking.SinceDay != "20 Oct" {
+		t.Fatalf("with no trusted fix the day is UTC: %q", disc.Tracking.SinceDay)
+	}
+
+	resolveGNSSPosition(-20, 150, true, gnssPositionValidation{Trusted: true})
+	disc = vesselDiscovery(snapshot, vesselView{}, items, young)
 	if disc.Tracking.SinceDay != "21 Oct" {
 		t.Fatalf("since day = %q", disc.Tracking.SinceDay)
 	}
-	if got := vesselDiscovery(newAnomalyTestSnapshot(), vesselView{}, nil, young).Tracking.SinceDay; got != "20 Oct" {
-		t.Errorf("with no position the day is UTC: %q", got)
+	if want := "Helmcentral has been watching the boat since 21 Oct. A source that is switched off is listed once it has reported since then."; disc.Tracking.Note != want {
+		t.Fatalf("note = %q", disc.Tracking.Note)
+	}
+	// The zone the browser is told for the same fix agrees.
+	if got := vesselLocalTimezoneName(trustedVesselLongitude()); got != "Etc/GMT-10" {
+		t.Fatalf("stream zone = %q", got)
+	}
+
+	covered := vesselDiscovery(snapshot, vesselView{}, items, sourceRecord{Since: since, Covers: true})
+	if covered.Tracking.Note != "" {
+		t.Errorf("a record that covers enough time says nothing: %q", covered.Tracking.Note)
+	}
+	broken := vesselDiscovery(snapshot, vesselView{}, items, sourceRecord{Err: errors.New("database is locked")})
+	if !strings.Contains(broken.Tracking.Note, "couldn't read its record") || !strings.Contains(broken.Tracking.Note, "database is locked") {
+		t.Errorf("an unreadable record is said: %q", broken.Tracking.Note)
 	}
 }
 

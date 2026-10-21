@@ -5,6 +5,8 @@ import { EquipmentSourceSection } from '@/components/inventory/equipment-source-
 import { BLANK_DRAFT } from '@/hooks/use-inventory'
 import { loggedDay, type DiscoveryRow, type VesselDiscoveryResponse } from '@/lib/vessel-settings'
 
+const YOUNG_NOTE = 'Helmcentral has been watching the boat since 18 Oct. A source that is switched off is listed once it has reported since then.'
+
 // The Source select on an equipment item's page is fed by the same discovery
 // list as Settings -> SignalK. On 2026-10-21 the engines were off and the Port
 // Cummins was on propulsion.0, which carries only exhaust temperature: the
@@ -19,7 +21,7 @@ const row = (source: string, extra: Partial<DiscoveryRow>): DiscoveryRow => ({
 const discovery: VesselDiscoveryResponse = {
   connected: true,
   detectors: {},
-  tracking: { since: '2026-10-01T00:00:00Z', seeded: true, covers: true, error: '' },
+  tracking: { since: '2026-10-01T00:00:00Z', since_day: '1 Oct', note: '', seeded: true, covers: true, error: '' },
   groups: [{
     kind: 'engine', mappable: true, signature_label: 'RPM', rows: [
       row('propulsion.0', { item: { id: 'c0', name: 'Cummins QSB 6.7' }, signature: 'missing' }),
@@ -49,7 +51,7 @@ describe('EquipmentSourceSection: Source select', () => {
         id="c0"
         draft={{ ...BLANK_DRAFT, signalk_source: 'propulsion.port' }}
         setDraft={vi.fn()}
-        discovery={{ ...discovery, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false, error: '' } }}
+        discovery={{ ...discovery, tracking: { since: '2026-10-18T12:00:00Z', since_day: '18 Oct', note: YOUNG_NOTE, seeded: false, covers: false, error: '' } }}
         canWrite
       />,
     )
@@ -64,7 +66,7 @@ describe('EquipmentSourceSection: Source select', () => {
         id="c0"
         draft={{ ...BLANK_DRAFT, signalk_source: 'propulsion.port' }}
         setDraft={vi.fn()}
-        discovery={{ ...discovery, tracking: { since: null, seeded: false, covers: false, error: 'database is locked' } }}
+        discovery={{ ...discovery, tracking: { since: null, since_day: '', note: "Helmcentral couldn't read its record of what the boat has reported (database is locked), so only sources reporting now are listed.", seeded: false, covers: false, error: 'database is locked' } }}
         canWrite
       />,
     )
@@ -78,7 +80,7 @@ describe('EquipmentSourceSection: Source select', () => {
         id="c0"
         draft={{ ...BLANK_DRAFT, signalk_source: '' }}
         setDraft={vi.fn()}
-        discovery={{ connected: false, groups: [], detectors: {}, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false, error: '' } }}
+        discovery={{ connected: false, groups: [], detectors: {}, tracking: { since: '2026-10-18T12:00:00Z', since_day: '18 Oct', note: YOUNG_NOTE, seeded: false, covers: false, error: '' } }}
         canWrite
       />,
     )
