@@ -249,6 +249,30 @@ func buildInfluxSourceHistoryFlux(bucket, field string, lookbackDays int) (strin
 	), nil
 }
 
+// buildInfluxSourceEarliestFlux finds the oldest equipment point inside the
+// lookback: how far back the seed's knowledge of the boat reaches.
+func buildInfluxSourceEarliestFlux(bucket, field string, lookbackDays int) (string, error) {
+	bucketLiteral, err := fluxStringLiteral(bucket)
+	if err != nil {
+		return "", fmt.Errorf("bucket: %w", err)
+	}
+	fieldLiteral, err := fluxStringLiteral(field)
+	if err != nil {
+		return "", fmt.Errorf("field: %w", err)
+	}
+	return fmt.Sprintf(
+		"from(bucket: %s)\n"+
+			"  |> range(start: -%dd)\n"+
+			"  |> filter(fn: (r) => r._field == %s and r._measurement =~ /%s/)\n"+
+			"  |> first()\n"+
+			"  |> group()\n"+
+			"  |> sort(columns: [\"_time\"])\n"+
+			"  |> first()\n"+
+			"  |> keep(columns: [\"_time\"])",
+		bucketLiteral, lookbackDays, fieldLiteral, historyFluxRegex(),
+	), nil
+}
+
 // sourceHistoryTimeout bounds the one seed query.
 const sourceHistoryTimeout = 8 * time.Second
 
@@ -262,32 +286,51 @@ var currentSourceRecord = func() sourceRecord {
 }
 
 // queryInfluxSourceHistory returns the last time each path under the equipment
-// sources was logged within sourceHistoryLookbackDays. It runs once per vessel,
-// to seed the registry, and never at request time.
-func queryInfluxSourceHistory() (map[string]time.Time, error) {
+// sources was logged within sourceHistoryLookbackDays, and the time of the
+// oldest such point. It runs once per vessel, to seed the registry, and never
+// at request time.
+func queryInfluxSourceHistory() (sourceHistory, error) {
 	client, org, bucket, ok := newInfluxClient()
 	if !ok {
-		return nil, fmt.Errorf("influxdb is not configured")
+		return sourceHistory{}, fmt.Errorf("influxdb is not configured")
 	}
 	field := trimEnvValue(getEnv("INFLUX_DEPTH_FIELD", "value"))
 	flux, err := buildInfluxSourceHistoryFlux(bucket, field, sourceHistoryLookbackDays)
 	if err != nil {
-		return nil, err
+		return sourceHistory{}, err
+	}
+	earliestFlux, err := buildInfluxSourceEarliestFlux(bucket, field, sourceHistoryLookbackDays)
+	if err != nil {
+		return sourceHistory{}, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), sourceHistoryTimeout)
 	defer cancel()
 	result, err := client.QueryAPI(org).Query(ctx, flux)
 	if err != nil {
-		return nil, err
+		return sourceHistory{}, err
 	}
 	defer result.Close()
-	last := map[string]time.Time{}
+	out := sourceHistory{Last: map[string]time.Time{}}
 	for result.Next() {
 		rec := result.Record()
-		last[rec.Measurement()] = rec.Time()
+		out.Last[rec.Measurement()] = rec.Time()
 	}
 	if result.Err() != nil {
-		return nil, result.Err()
+		return sourceHistory{}, result.Err()
 	}
-	return last, nil
+	if len(out.Last) == 0 {
+		return out, nil
+	}
+	first, err := client.QueryAPI(org).Query(ctx, earliestFlux)
+	if err != nil {
+		return sourceHistory{}, fmt.Errorf("earliest equipment point: %w", err)
+	}
+	defer first.Close()
+	for first.Next() {
+		out.Earliest = first.Record().Time()
+	}
+	if first.Err() != nil {
+		return sourceHistory{}, fmt.Errorf("earliest equipment point: %w", first.Err())
+	}
+	return out, nil
 }

@@ -65,8 +65,8 @@ func newRegistryStore(t *testing.T) *flakyRegistryStore {
 	return &flakyRegistryStore{inner: inner}
 }
 
-func unconfiguredSeed() (func() bool, func() (map[string]time.Time, error)) {
-	return func() bool { return false }, func() (map[string]time.Time, error) { panic("seed must not query") }
+func unconfiguredSeed() (func() bool, func() (sourceHistory, error)) {
+	return func() bool { return false }, func() (sourceHistory, error) { panic("seed must not query") }
 }
 
 // reportAt puts a self-vessel reading in the tree that arrived age ago.
@@ -243,9 +243,9 @@ func TestRegistryCountsWatchedTimeNotWallClock(t *testing.T) {
 
 func TestRegistrySeedsOnceFromInfluxHistory(t *testing.T) {
 	store := newRegistryStore(t)
-	history := signatureHistoryFixture(t).Last
+	history := sourceHistory{Last: signatureHistoryFixture(t).Last, Earliest: registryT0.AddDate(0, 0, -30)}
 	var fetches int
-	fetchHistory := func() (map[string]time.Time, error) {
+	fetchHistory := func() (sourceHistory, error) {
 		fetches++
 		return history, nil
 	}
@@ -276,14 +276,61 @@ func TestRegistrySeedsOnceFromInfluxHistory(t *testing.T) {
 	}
 }
 
+// A seed covers only the span of history it read: two days of logging is not
+// the week a source needs to be called missing, but it counts toward it with
+// the time Helmcentral then watches.
+func TestRegistrySeedCoverageFollowsTheSpanItRead(t *testing.T) {
+	seed := func(days int) *sourceRegistry {
+		history := sourceHistory{
+			Last:     map[string]time.Time{"propulsion.0.exhaustTemperature": registryT0},
+			Earliest: registryT0.AddDate(0, 0, -days),
+		}
+		return newSourceRegistry(newRegistryStore(t), func() bool { return true },
+			func() (sourceHistory, error) { return history, nil })
+	}
+	snap := newAnomalyTestSnapshot()
+
+	short := seed(2)
+	short.tick(snap, registryT0)
+	if rec := short.record(); !rec.Seeded || rec.Covers {
+		t.Fatalf("two days of history is a seed but not coverage: %+v", rec)
+	}
+	if got := signatureState(false, short.record(), sourceEngine, "propulsion.0"); got != signatureUnknown {
+		t.Errorf("not judged on two days: %s", got)
+	}
+
+	// Five more days of watching make the week together.
+	now := registryT0
+	for i := 0; i < 5*24*60+10; i++ {
+		now = now.Add(time.Minute)
+		reportAt(snap, "propulsion.0.exhaustTemperature", now, time.Second)
+		short.tick(snap, now)
+	}
+	if rec := short.record(); !rec.Covers {
+		t.Fatalf("two days seeded plus five watched cover the week: %+v", rec)
+	}
+
+	long := seed(30)
+	long.tick(snap, registryT0)
+	if rec := long.record(); !rec.Seeded || !rec.Covers {
+		t.Fatalf("thirty days of history covers: %+v", rec)
+	}
+	// The span survives a restart.
+	long2 := newSourceRegistry(long.store, func() bool { return true }, func() (sourceHistory, error) { t.Fatal("seeded once"); return sourceHistory{}, nil })
+	long2.tick(snap, registryT0.Add(time.Minute))
+	if rec := long2.record(); !rec.Covers {
+		t.Fatalf("coverage is remembered: %+v", rec)
+	}
+}
+
 // A seed that returned nothing under an equipment source is no coverage, and
 // is not repeated.
 func TestRegistryEmptySeedGivesNoCoverageAndIsNotRepeated(t *testing.T) {
 	store := newRegistryStore(t)
 	fetches := 0
-	fetchHistory := func() (map[string]time.Time, error) {
+	fetchHistory := func() (sourceHistory, error) {
 		fetches++
-		return map[string]time.Time{"navigation.speedOverGround": registryT0}, nil
+		return sourceHistory{Last: map[string]time.Time{"navigation.speedOverGround": registryT0}, Earliest: registryT0.AddDate(0, 0, -30)}, nil
 	}
 	reg := newSourceRegistry(store, func() bool { return true }, fetchHistory)
 	snap := newAnomalyTestSnapshot()
@@ -307,9 +354,9 @@ func TestRegistryEmptySeedGivesNoCoverageAndIsNotRepeated(t *testing.T) {
 // InfluxDB logs this boat only, so a new self URN is not seeded again.
 func TestRegistrySeedsAtMostOncePerInstallation(t *testing.T) {
 	store := newRegistryStore(t)
-	history := map[string]time.Time{"propulsion.port.revolutions": registryT0}
+	history := sourceHistory{Last: map[string]time.Time{"propulsion.port.revolutions": registryT0}, Earliest: registryT0.AddDate(0, 0, -30)}
 	fetches := 0
-	reg := newSourceRegistry(store, func() bool { return true }, func() (map[string]time.Time, error) {
+	reg := newSourceRegistry(store, func() bool { return true }, func() (sourceHistory, error) {
 		fetches++
 		return history, nil
 	})
@@ -323,7 +370,7 @@ func TestRegistrySeedsAtMostOncePerInstallation(t *testing.T) {
 		t.Fatalf("the second vessel starts from live tracking: %+v", rec)
 	}
 	// Also after a restart.
-	restarted := newSourceRegistry(store, func() bool { return true }, func() (map[string]time.Time, error) {
+	restarted := newSourceRegistry(store, func() bool { return true }, func() (sourceHistory, error) {
 		fetches++
 		return history, nil
 	})
@@ -342,12 +389,12 @@ func TestRegistryRetriesAFailedSeedButNotAnUnconfiguredOne(t *testing.T) {
 	store := newRegistryStore(t)
 	fetches := 0
 	var failWith error = errors.New("connection refused")
-	reg := newSourceRegistry(store, func() bool { return true }, func() (map[string]time.Time, error) {
+	reg := newSourceRegistry(store, func() bool { return true }, func() (sourceHistory, error) {
 		fetches++
 		if failWith != nil {
-			return nil, failWith
+			return sourceHistory{}, failWith
 		}
-		return map[string]time.Time{"propulsion.port.revolutions": registryT0}, nil
+		return sourceHistory{Last: map[string]time.Time{"propulsion.port.revolutions": registryT0}, Earliest: registryT0.AddDate(0, 0, -30)}, nil
 	})
 	snap := newAnomalyTestSnapshot()
 
@@ -369,9 +416,9 @@ func TestRegistryRetriesAFailedSeedButNotAnUnconfiguredOne(t *testing.T) {
 		t.Fatalf("a failing streak logs once, got %d", n)
 	}
 
-	unconfigured := newSourceRegistry(newRegistryStore(t), func() bool { return false }, func() (map[string]time.Time, error) {
+	unconfigured := newSourceRegistry(newRegistryStore(t), func() bool { return false }, func() (sourceHistory, error) {
 		t.Fatal("an unconfigured Influx is never queried")
-		return nil, nil
+		return sourceHistory{}, nil
 	})
 	unconfigured.tick(snap, registryT0)
 	unconfigured.tick(snap, registryT0.Add(24*time.Hour))

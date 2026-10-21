@@ -465,3 +465,18 @@ func TestWatchingSinceDayIsInTheVesselTimeZone(t *testing.T) {
 		t.Errorf("with no position the day is UTC: %q", got)
 	}
 }
+
+func TestEarliestFluxReadsTheOldestEquipmentPointInTheLookback(t *testing.T) {
+	flux, err := buildInfluxSourceEarliestFlux("SignalK_Data", "value", sourceHistoryLookbackDays)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"range(start: -90d)", "first()", historyFluxRegex(), `"value"`} {
+		if !strings.Contains(flux, want) {
+			t.Errorf("flux lacks %q: %s", want, flux)
+		}
+	}
+	if strings.Contains(flux, "last()") {
+		t.Errorf("the earliest point is not found with last(): %s", flux)
+	}
+}
