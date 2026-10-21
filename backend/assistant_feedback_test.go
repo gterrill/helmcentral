@@ -315,7 +315,7 @@ func pruneFixture(t *testing.T, store *assistantStore, at time.Time) assistantMe
 		t.Fatal(err)
 	}
 	m, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a",
-		ToolCalls: []assistantToolCall{{Name: "t", Args: "{}", Result: "{}"}}})
+		ToolRounds: 1, ToolCalls: []assistantToolCall{{Name: "t", Args: "{}", Result: "{}"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,19 +405,41 @@ func TestAssistantStore_ListFeedbackNamesTheInputThatPromptedTheAnswer(t *testin
 	}
 }
 
-func TestAssistantStore_NewRatingRefusedOnAnswerPastRetentionButExistingOnesStayEditable(t *testing.T) {
+func TestAssistantStore_RatingDependsOnWhetherTheLookupsAreGoneNotOnAge(t *testing.T) {
 	store := newTestAssistantStore(t)
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	old := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
-	rated := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
-	store.now = func() time.Time { return now.Add(-assistantToolCallRetention) }
+	longAgo := now.Add(-assistantToolCallRetention - time.Hour)
+
+	pruned := pruneFixture(t, store, longAgo)
+	store.now = func() time.Time { return now }
+	if n, err := store.PruneToolCalls(); err != nil || n != 1 {
+		t.Fatalf("the prune takes the first answer's lookups: %d, %v", n, err)
+	}
+
+	// Made after the prune ran, so their lookups are still on record although
+	// the answers are older than the retention window.
+	kept := pruneFixture(t, store, longAgo)
+	rated := pruneFixture(t, store, longAgo)
+	conv, _ := store.CreateConversation("y")
+	store.now = func() time.Time { return longAgo }
+	noTools, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "no tools", ToolCallsRecorded: true})
+	store.now = func() time.Time { return longAgo.Add(time.Hour) }
 	if _, err := store.SetMessageFeedback(rated.ID, "up", ""); err != nil {
 		t.Fatalf("rating inside the window: %v", err)
 	}
 	store.now = func() time.Time { return now }
 
-	if _, err := store.SetMessageFeedback(old.ID, "up", ""); !errors.Is(err, errAssistantFeedbackTooOld) {
-		t.Fatalf("new rating on an old unrated answer: %v", err)
+	if _, err := store.SetMessageFeedback(pruned.ID, "up", ""); !errors.Is(err, errAssistantFeedbackTooOld) {
+		t.Fatalf("lookups gone: %v", err)
+	}
+	if _, err := store.SetMessageFeedback(kept.ID, "up", ""); err != nil {
+		t.Fatalf("an old answer whose lookups are still on record can be rated: %v", err)
+	}
+	if n, err := store.PruneToolCalls(); err != nil || n != 0 {
+		t.Fatalf("rated answers keep their lookups: pruned %d, %v", n, err)
+	}
+	if _, err := store.SetMessageFeedback(noTools.ID, "up", ""); err != nil {
+		t.Fatalf("an old answer that used no tools can be rated: %v", err)
 	}
 	if _, err := store.SetMessageFeedback(rated.ID, "down", "changed my mind"); err != nil {
 		t.Fatalf("replacing an existing rating: %v", err)
@@ -425,8 +447,11 @@ func TestAssistantStore_NewRatingRefusedOnAnswerPastRetentionButExistingOnesStay
 	if err := store.ClearMessageFeedback(rated.ID); err != nil {
 		t.Fatalf("clearing: %v", err)
 	}
+	if n, err := store.PruneToolCalls(); err != nil || n != 1 {
+		t.Fatalf("clearing puts it back under the retention rule: pruned %d, %v", n, err)
+	}
 	if _, err := store.SetMessageFeedback(rated.ID, "up", ""); !errors.Is(err, errAssistantFeedbackTooOld) {
-		t.Fatalf("re-rating after a clear is a new rating: %v", err)
+		t.Fatalf("re-rating after the lookups went: %v", err)
 	}
 }
 
@@ -511,6 +536,9 @@ func TestAssistantFeedbackHandlers_ListLimitAndConflict(t *testing.T) {
 	now := time.Now().UTC()
 	old := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
 	store.now = func() time.Time { return now }
+	if _, err := store.PruneToolCalls(); err != nil {
+		t.Fatal(err)
+	}
 	if rec := feedbackRequest(t, http.MethodPut, "/x", old.ID, `{"verdict":"up"}`); rec.Code != http.StatusConflict {
 		t.Errorf("old answer: %d %s", rec.Code, rec.Body.String())
 	}
@@ -553,5 +581,18 @@ func TestPostAssistantMessageHandler_PromptVersionIgnoresVesselAndOperatorData(t
 	a, b := ask("Anchorage A is exposed to the south."), ask("Totally different standing notes.")
 	if a == "" || a != b {
 		t.Fatalf("standing notes are operator data, not a rule: %q vs %q", a, b)
+	}
+}
+
+func TestAssistantStore_ListFeedbackWithNoPrecedingQuestionIsEmptyNotMissing(t *testing.T) {
+	store := newTestAssistantStore(t)
+	conv, _ := store.CreateConversation("x")
+	ans, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "Unprompted."})
+	if _, err := store.SetMessageFeedback(ans.ID, "down", ""); err != nil {
+		t.Fatal(err)
+	}
+	list, _, err := store.ListFeedback(0, "")
+	if err != nil || len(list) != 1 || list[0].Question != "" || list[0].QuestionRole != "" || list[0].Answer != "Unprompted." {
+		t.Fatalf("got %+v %v", list, err)
 	}
 }
