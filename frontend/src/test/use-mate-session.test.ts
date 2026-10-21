@@ -752,6 +752,34 @@ describe('useMateSession', () => {
       expect(result.current.ratings.a1?.verdict).toBe('up')
     })
 
+    it('does not lose a rating to a re-read of the thread that began before it was saved', async () => {
+      const server = fakeMateServer({ conversations: [conversation('c1')] })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.activeId).toBe('c1'))
+      let openGate!: () => void
+      server.readGate = new Promise((resolve) => { openGate = resolve })
+
+      // The answer lands and the thread is re-read, but the read is held at the
+      // server while the operator rates the answer.
+      await act(async () => {
+        await result.current.send('Is the tide turning?')
+      })
+      const answer = server.messages.get('c1')!.at(-1)!
+      await act(async () => {
+        await result.current.rateAnswer(answer.id, 'up', 'spot on')
+      })
+      expect(result.current.ratings[answer.id]).toEqual({ verdict: 'up', note: 'spot on' })
+
+      // The held read answers with a thread that predates the rating.
+      await act(async () => {
+        openGate()
+        await flushMicrotasks()
+      })
+      await waitFor(() => expect(server.log.filter((l) => l.startsWith('GET') && l.endsWith('/c1')).length).toBeGreaterThan(0))
+      expect(result.current.ratings[answer.id]).toEqual({ verdict: 'up', note: 'spot on' })
+      removeMateWatch('c1')
+    })
+
     it('shows the rating an answer already has on the server after a reload', async () => {
       fakeMateServer({
         conversations: [conversation('c1')],

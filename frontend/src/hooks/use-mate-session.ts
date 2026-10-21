@@ -72,6 +72,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     updateProposal,
     updateFormDraft,
     updateFeedback,
+    holdFeedback,
     setSummaryNoteId,
   } = conversations
   const { send: chatSend, abort, attach, isStreamingConversation, answerDelivered } = chat
@@ -91,10 +92,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
       return kept.length === Object.keys(previous).length ? previous : Object.fromEntries(kept)
     })
   }, [activeId])
-  const liveAnswerIds = useMemo<ReadonlySet<string>>(
-    () => new Set(Object.entries(liveAnswers).filter(([, conversationId]) => conversationId === activeId).map(([id]) => id)),
-    [liveAnswers, activeId],
-  )
+  const liveAnswerIds = useMemo<ReadonlySet<string>>(() => new Set(Object.keys(liveAnswers)), [liveAnswers])
 
   // Saves the verdict on an answer (a note rides with it), or clears it when
   // `verdict` is null. Resolves null on success, or the server's words when it
@@ -102,6 +100,9 @@ export function useMateSession(options: MateSessionOptions = {}) {
   // on the message, so reading the thread afresh replaces it with the server's.
   const rateAnswer = useCallback(async (messageId: string, verdict: 'up' | 'down' | null, note = ''): Promise<string | null> => {
     const path = `/api/assistant/messages/${encodeURIComponent(messageId)}/feedback`
+    // Held so a re-read of the thread that began before this request committed
+    // cannot put the older rating back.
+    const settle = holdFeedback(messageId, verdict === null ? undefined : { verdict, note })
     try {
       if (verdict === null) {
         await apiRequest<void>(path, { method: 'DELETE' })
@@ -110,11 +111,13 @@ export function useMateSession(options: MateSessionOptions = {}) {
         await apiRequest<unknown>(path, { method: 'PUT', json: { verdict, note } })
         updateFeedback(messageId, { verdict, note })
       }
+      settle(true)
       return null
     } catch (err) {
+      settle(false)
       return err instanceof Error ? err.message : String(err)
     }
-  }, [updateFeedback])
+  }, [updateFeedback, holdFeedback])
 
   // Verdicts by message id, as the thread holds them.
   const ratings = useMemo(() => {

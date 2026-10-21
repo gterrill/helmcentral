@@ -11,12 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-10-21
+
 ### Breaking
 
 - **The Routes page is gone.** Saved routes are no longer kept; plan and
   activate routes on your chartplotter or in a SignalK app. The Route tile now
   shows the route SignalK is navigating, or the next waypoint when the plotter
-  only sends a go-to, and does nothing when tapped. The arrival time uses your
+  only sends a go-to, and does nothing when tapped. If SignalK names a route
+  that cannot be read, the tile keeps the next waypoint and says why the route
+  details are missing. The arrival time uses your
   speed over the ground alone, so it is blank while you are stopped. The
   Nearby map and the clock follow the same route. What to do on upgrade: if you
   want to keep a route you planned here, recreate it on your plotter first; the
@@ -1521,7 +1525,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.50.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.51.0...HEAD
+[0.51.0]: https://github.com/gterrill/helmcentral/compare/v0.50.0...v0.51.0
 [0.50.0]: https://github.com/gterrill/helmcentral/compare/v0.49.0...v0.50.0
 [0.49.0]: https://github.com/gterrill/helmcentral/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/gterrill/helmcentral/compare/v0.47.0...v0.48.0

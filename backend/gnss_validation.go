@@ -436,6 +436,18 @@ func resolveGNSSPosition(latitude, longitude float64, hasPosition bool, validati
 	return -1, -1
 }
 
+// trustedVesselLongitude is the longitude the vessel state stream publishes
+// (and so the one the browser derives the vessel's time zone from): the last
+// trusted fix, or -1 while none has been trusted.
+func trustedVesselLongitude() float64 {
+	gnssValidationMu.Lock()
+	defer gnssValidationMu.Unlock()
+	if lastTrustedGNSSPositionValid {
+		return lastTrustedGNSSLongitude
+	}
+	return -1
+}
+
 func resetGNSSPositionValidationState() {
 	gnssValidationMu.Lock()
 	defer gnssValidationMu.Unlock()

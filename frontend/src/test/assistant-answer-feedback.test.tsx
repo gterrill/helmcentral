@@ -52,6 +52,28 @@ describe('AssistantAnswerFeedback', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('message not found')
   })
 
+  it('keeps the note when taking the rating back is refused', async () => {
+    const onRate = vi.fn().mockResolvedValue('could not reach the server')
+    setup({ verdict: 'down', note: 'wrong tank' }, onRate)
+    fireEvent.click(screen.getByRole('button', { name: 'Poor answer' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not reach the server')
+    expect(onRate).toHaveBeenCalledWith('a1', null)
+    expect(screen.getByRole('textbox', { name: 'What was wrong' })).toHaveValue('wrong tank')
+    // Saving the note again writes the saved note back, never an empty one.
+    fireEvent.change(screen.getByRole('textbox', { name: 'What was wrong' }), { target: { value: 'wrong tank!' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save note' }))
+    await waitFor(() => expect(onRate).toHaveBeenLastCalledWith('a1', 'down', 'wrong tank!'))
+  })
+
+  it('clears the note once taking the rating back succeeded', async () => {
+    const { rerender, onRate } = setup({ verdict: 'down', note: 'wrong tank' })
+    fireEvent.click(screen.getByRole('button', { name: 'Poor answer' }))
+    await waitFor(() => expect(onRate).toHaveBeenCalledWith('a1', null))
+    rerender(<AssistantAnswerFeedback messageId="a1" rating={undefined} onRate={onRate} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
+    await waitFor(() => expect(onRate).toHaveBeenLastCalledWith('a1', 'up', ''))
+  })
+
   it('is read-only when asked: pressed thumb, note as text, nothing to tap', () => {
     render(<AssistantAnswerFeedback messageId="a1" rating={{ verdict: 'down', note: 'wrong tank' }} onRate={vi.fn()} readOnly />)
     expect(screen.getByRole('button', { name: 'Poor answer' })).toBeDisabled()

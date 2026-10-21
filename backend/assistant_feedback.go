@@ -252,13 +252,17 @@ func (s *assistantStore) SetMessageFeedback(messageID, verdict, note string) (as
 	}
 	now := s.now()
 	// A new rating on an answer whose lookups the retention rule has already
-	// cleared would list as an answer that used no tools. Replacing a
-	// rating that exists is fine: its lookups were kept.
-	var rated, createdAt int64
-	if err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM message_feedback WHERE message_id = ?), created_at FROM messages WHERE id = ?`, messageID, messageID).Scan(&rated, &createdAt); err != nil {
-		return assistantFeedback{}, fmt.Errorf("read message age: %w", err)
+	// cleared would list as an answer that used no tools. What matters is
+	// whether the lookups this rating needs are gone, not how old the answer
+	// is: one that used no tools, or whose lookups are still on record, can be
+	// rated. Replacing a rating that exists is fine: its lookups were kept.
+	var rated, calls, recorded, toolRounds int64
+	if err := tx.QueryRow(`SELECT (SELECT COUNT(*) FROM message_feedback WHERE message_id = ?),
+		(SELECT COUNT(*) FROM message_tool_calls WHERE message_id = ?), tool_calls_recorded, tool_rounds
+		FROM messages WHERE id = ?`, messageID, messageID, messageID).Scan(&rated, &calls, &recorded, &toolRounds); err != nil {
+		return assistantFeedback{}, fmt.Errorf("read message lookups: %w", err)
 	}
-	if rated == 0 && createdAt < now.Add(-assistantToolCallRetention).Unix() {
+	if rated == 0 && calls == 0 && recorded == 0 && toolRounds > 0 {
 		return assistantFeedback{}, errAssistantFeedbackTooOld
 	}
 	if _, err := tx.Exec(`
@@ -353,13 +357,11 @@ func (s *assistantStore) readFeedbackPage(n int, curUpdated int64, curID string)
 	rows, err := s.db.Query(`
 		SELECT f.message_id, f.verdict, f.note, f.created_at, f.updated_at,
 		       m.conversation_id, m.content, m.model, m.prompt_version, m.tool_calls_recorded,
-		       COALESCE((SELECT u.content FROM messages u
-		                 WHERE u.conversation_id = m.conversation_id AND u.role IN ('user', 'watch') AND u.seq < m.seq
-		                 ORDER BY u.seq DESC LIMIT 1), ''),
-		       COALESCE((SELECT u.role FROM messages u
-		                 WHERE u.conversation_id = m.conversation_id AND u.role IN ('user', 'watch') AND u.seq < m.seq
-		                 ORDER BY u.seq DESC LIMIT 1), '')
+		       COALESCE(u.content, ''), COALESCE(u.role, '')
 		FROM message_feedback f JOIN messages m ON m.id = f.message_id
+		LEFT JOIN messages u ON u.id = (SELECT p.id FROM messages p
+		                                WHERE p.conversation_id = m.conversation_id AND p.role IN ('user', 'watch') AND p.seq < m.seq
+		                                ORDER BY p.seq DESC LIMIT 1)
 		WHERE f.updated_at < ? OR (f.updated_at = ? AND f.message_id > ?)
 		ORDER BY f.updated_at DESC, f.message_id ASC
 		LIMIT ?`, curUpdated, curUpdated, curID, n)

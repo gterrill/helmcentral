@@ -416,3 +416,55 @@ func TestGetActiveRouteHandler_SignalKUnreachable(t *testing.T) {
 		t.Fatalf("expected status %d (not 200 active:false) when signalk is unreachable, got %d", http.StatusBadGateway, rec.Code)
 	}
 }
+
+func TestGetActiveRouteHandler_UnreadableRouteKeepsDestinationAndSaysWhy(t *testing.T) {
+	setupSignalKRestTest(t)
+	resetPlaceNameCache(t)
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":{"href":"/resources/routes/gone","pointIndex":2,"reverse":false},`+
+			`"nextPoint":{"position":{"latitude":-18.6675,"longitude":146.48466666666667},"type":"RoutePoint"}}`)
+	rs.on(http.MethodGet, resourcePathPrefix+"gone", http.StatusInternalServerError, `{"message":"resource provider exploded"}`)
+
+	code, payload := getActive(t, rs, srv.URL)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200 with the destination kept, got %d: %v", code, payload)
+	}
+	if payload["active"] != true {
+		t.Fatalf("expected active=true, got %v", payload["active"])
+	}
+	if _, has := payload["route"]; has {
+		t.Fatalf("expected no route part, got %+v", payload)
+	}
+	if dest, ok := payload["destination"].(map[string]any); !ok || dest["lat"] != -18.6675 {
+		t.Fatalf("expected destination, got %+v", payload)
+	}
+	reason, _ := payload["route_error"].(string)
+	if !strings.HasPrefix(reason, "Route details unavailable: ") || !strings.Contains(reason, "resource provider exploded") {
+		t.Fatalf("expected an explicit reason, got %q", reason)
+	}
+}
+
+func TestGetActiveRouteHandler_ForeignHrefWithNextPointKeepsDestinationAndSaysWhy(t *testing.T) {
+	setupSignalKRestTest(t)
+	resetPlaceNameCache(t)
+	srv, rs := newRecordingServer(t)
+	defer srv.Close()
+
+	rs.on(http.MethodGet, courseGetPath, http.StatusOK,
+		`{"activeRoute":{"href":"/resources/waypoints/w1","pointIndex":0,"reverse":false},`+
+			`"nextPoint":{"position":{"latitude":-18.6675,"longitude":146.48466666666667},"type":"Location"}}`)
+
+	code, payload := getActive(t, rs, srv.URL)
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %v", code, payload)
+	}
+	if _, ok := payload["destination"].(map[string]any); !ok {
+		t.Fatalf("expected destination, got %+v", payload)
+	}
+	if reason, _ := payload["route_error"].(string); !strings.HasPrefix(reason, "Route details unavailable: ") {
+		t.Fatalf("expected a reason, got %+v", payload)
+	}
+}

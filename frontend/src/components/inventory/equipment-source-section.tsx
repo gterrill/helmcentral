@@ -112,8 +112,8 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
             </FieldDescription>
           )}
           {warning !== '' && <p role="alert" className="text-sm text-destructive">{warning}</p>}
-          {!noData && trackingNote(discovery.tracking, timeZone) !== '' && (
-            <FieldDescription>{trackingNote(discovery.tracking, timeZone)}</FieldDescription>
+          {!noData && trackingNote(discovery.tracking) !== '' && (
+            <FieldDescription>{trackingNote(discovery.tracking)}</FieldDescription>
           )}
         </Field>
 

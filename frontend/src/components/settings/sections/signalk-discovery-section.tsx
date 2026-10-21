@@ -42,7 +42,6 @@ import {
  */
 export function SignalKDiscoverySection() {
   const { discovery, loading, error } = useVesselDiscovery()
-  const timeZone = useVesselTimeZone()
   const { items } = useEquipment({})
 
   const { profiles } = useEquipmentProfiles(true)
@@ -89,8 +88,8 @@ export function SignalKDiscoverySection() {
     >
       {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
       {error && <p role="alert" className="text-sm text-destructive">Could not read what the boat reports: {error}</p>}
-      {!loading && !error && trackingNote(discovery.tracking, timeZone) !== '' && (
-        <p role="status" className="text-sm text-muted-foreground">{trackingNote(discovery.tracking, timeZone)}</p>
+      {!loading && !error && trackingNote(discovery.tracking) !== '' && (
+        <p role="status" className="text-sm text-muted-foreground">{trackingNote(discovery.tracking)}</p>
       )}
       {!loading && !error && !discovery.connected && (
         <p className="text-sm text-muted-foreground">

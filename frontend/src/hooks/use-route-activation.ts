@@ -18,7 +18,12 @@ export interface ActiveRoute {
 export type ActiveRouteStatus =
   /** `loading`: the first poll has not been answered. `error`: the poll failed or the answer was unusable. */
   | { state: 'unknown'; reason: 'loading' | 'error' }
-  | { state: 'inactive'; destination: RouteActivationDestination | null }
+  | {
+      state: 'inactive'
+      destination: RouteActivationDestination | null
+      /** Set when SignalK names an active route the backend could not read: the destination still stands, this says why the route is missing. */
+      routeError?: string
+    }
   | {
       state: 'active'
       route: ActiveRoute
@@ -33,6 +38,7 @@ interface ActiveRouteResponse {
   route?: { name: string; waypoints: RouteWaypoint[] }
   point_index?: number
   reverse?: boolean
+  route_error?: string
   destination?: { lat: number; lon: number; name: string }
 }
 
@@ -46,6 +52,7 @@ function toStatus(data: ActiveRouteResponse): ActiveRouteStatus {
     ? { lat: data.destination.lat, lon: data.destination.lon, name: data.destination.name }
     : null
   if (!data.active) return { state: 'inactive', destination }
+  if (!data.route && data.route_error) return { state: 'inactive', destination, routeError: data.route_error }
   // Active with no route to show is an unusable answer, not an inactive route.
   if (!data.route) return ERRORED
   return {

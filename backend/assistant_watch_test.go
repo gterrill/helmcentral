@@ -537,9 +537,9 @@ func TestAssistantWatchFollowUp_AppendsReportAndStartsOneTurn(t *testing.T) {
 	var gotHistory []openRouterMessage
 	var gotToday time.Time
 	var gotConversation, gotLive string
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		mu.Lock()
-		gotToday = today
+		gotToday = tools.today
 		mu.Unlock()
 		return assistantRunnerFunc(func(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 			mu.Lock()
@@ -599,7 +599,7 @@ func TestAssistantWatchFollowUp_AppendsReportAndStartsOneTurn(t *testing.T) {
 
 func TestAssistantWatchFollowUp_SkipsWhenMateIsOff(t *testing.T) {
 	store, conv := watchFollowUpSetup(t, false)
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		t.Fatal("no runner may be built while Mate is switched off")
 		return nil
 	})
@@ -613,7 +613,7 @@ func TestAssistantWatchFollowUp_SkipsWhenMateIsOff(t *testing.T) {
 
 func TestAssistantWatchFollowUp_SkipsWhenConversationIsGone(t *testing.T) {
 	store, conv := watchFollowUpSetup(t, true)
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		t.Fatal("no runner may be built for a deleted conversation")
 		return nil
 	})
@@ -778,7 +778,7 @@ func TestAssistantWatchFollowUp_KeepsTheReportWhenTheConversationStaysBusy(t *te
 		t.Fatal("could not register a busy run")
 	}
 	t.Cleanup(func() { globalAssistantRuns.remove(conv.ID, busy) })
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		t.Fatal("no turn may start while the conversation stays busy")
 		return nil
 	})
@@ -1046,7 +1046,7 @@ func TestAssistantWatchFollowUp_KeepsTheReportBeforeWaiting(t *testing.T) {
 	if !ok {
 		t.Fatal("could not register a busy run")
 	}
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		return assistantRunnerFunc(func(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 			return assistantReply{Content: "Steady throughout.", Model: "openai/gpt-4o"}, nil
 		})
@@ -1090,7 +1090,7 @@ func TestAssistantWatchFollowUp_SkipsWhenALaterQuestionAlreadyReadTheReport(t *t
 	if !ok {
 		t.Fatal("could not register a busy run")
 	}
-	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
 		t.Error("no follow-up turn may start once the report has been answered")
 		return nil
 	})

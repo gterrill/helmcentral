@@ -16,6 +16,7 @@ interface RouteReadout {
   name: string
   distanceM: number | null
   etaHours: number | null
+  note: string | null
 }
 
 const MS_PER_HOUR = 3_600_000
@@ -33,6 +34,7 @@ function readout(status: ActiveRouteStatus, latitude: number | null, longitude: 
       name: status.route.name.trim() !== '' ? status.route.name : 'Active route',
       distanceM: eta ? eta.distanceM : null,
       etaHours: eta?.etaAt ? (eta.etaAt.getTime() - now.getTime()) / MS_PER_HOUR : null,
+      note: null,
     }
   }
 
@@ -42,6 +44,7 @@ function readout(status: ActiveRouteStatus, latitude: number | null, longitude: 
       name: status.destination.name.trim() !== '' ? status.destination.name : 'Next waypoint',
       distanceM: eta ? eta.distanceM : null,
       etaHours: eta?.etaAt ? (eta.etaAt.getTime() - now.getTime()) / MS_PER_HOUR : null,
+      note: status.state === 'inactive' ? (status.routeError ?? null) : null,
     }
   }
 
@@ -61,6 +64,7 @@ export const RouteTile = memo(function RouteTile({ status, latitude, longitude, 
               <span>{data.distanceM !== null ? formatNm(data.distanceM) : '--'}</span>
               <span>ETA {data.etaHours !== null ? formatEtaHours(data.etaHours) : '--'}</span>
             </div>
+            {data.note ? <p className="mt-2 truncate text-xs text-muted-foreground">{data.note}</p> : null}
           </>
         ) : (
           <>

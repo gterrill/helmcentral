@@ -92,6 +92,9 @@ type discoveryTracking struct {
 	Covers bool       `json:"covers"`
 	// SinceDay is Since as a day ("21 Oct") in the vessel's own time zone.
 	SinceDay string `json:"since_day"`
+	// Note is the sentence the pages show about the record while it is young
+	// or unreadable ("" when there is nothing to say). It is worded here, once.
+	Note string `json:"note"`
 	// Error is why the record could not be read; set, only sources reporting
 	// now are listed.
 	Error string `json:"error"`
@@ -363,22 +366,34 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 	if !record.Since.IsZero() {
 		since := record.Since
 		resp.Tracking.Since = &since
-		resp.Tracking.SinceDay = vesselLocalDay(since, telemetry)
+		resp.Tracking.SinceDay = vesselLocalDay(since)
 	}
 	if record.Err != nil {
 		resp.Tracking.Error = record.Err.Error()
 	}
+	resp.Tracking.Note = discoveryTrackingNote(resp.Tracking)
 	return resp
 }
 
-// vesselLocalDay words t as a day ("21 Oct") in the vessel's own time zone,
-// from its position; UTC while it has none.
-func vesselLocalDay(t time.Time, telemetry telemetryReader) string {
-	loc := time.UTC
-	if pos, ok := telemetry.Position(); ok && hasUsableVesselPosition(pos.Latitude, pos.Longitude) {
-		loc = vesselLocalLocation(pos.Longitude)
+// vesselLocalDay words t as a day ("21 Oct") in the vessel's time zone, the
+// same one the vessel state stream tells the browser (trustedVesselLongitude);
+// UTC while no fix has been trusted.
+func vesselLocalDay(t time.Time) string {
+	return t.In(vesselLocalLocation(trustedVesselLongitude())).Format("2 Jan")
+}
+
+// discoveryTrackingNote says since when Helmcentral has been watching the boat
+// while the record is too young to list a switched-off engine or call a source
+// wrong, or why the record could not be read; "" once the record covers enough
+// time or before it began.
+func discoveryTrackingNote(t discoveryTracking) string {
+	if t.Error != "" {
+		return "Helmcentral couldn't read its record of what the boat has reported (" + t.Error + "), so only sources reporting now are listed."
 	}
-	return t.In(loc).Format("2 Jan")
+	if t.Covers || t.SinceDay == "" {
+		return ""
+	}
+	return "Helmcentral has been watching the boat since " + t.SinceDay + ". A source that is switched off is listed once it has reported since then."
 }
 
 // vesselDetectorStatuses names, per detector, whether vessel has completed

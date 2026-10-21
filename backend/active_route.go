@@ -168,8 +168,9 @@ func activeRouteRoutes() []apiRoute {
 // GET /api/routes/active
 //
 // Reports exactly what SignalK's Course API says: the active route (read from
-// its route resource) and/or the next point. A failed course or resource
-// read is a 502, never "inactive".
+// its route resource) and/or the next point. A failed course read is a 502,
+// never "inactive". A route that cannot be read keeps the next point and adds
+// route_error saying why; with no next point either it is a 502.
 func getActiveRouteHandler(c echo.Context) error {
 	signalkURL, _ := resolveSignalKURL()
 
@@ -180,19 +181,34 @@ func getActiveRouteHandler(c echo.Context) error {
 
 	result := map[string]any{"active": false}
 	if status.ActiveRouteHref != "" {
+		var name string
+		var waypoints []routeWaypoint
 		routeID := routeIDFromSignalKHref(status.ActiveRouteHref)
+		var routeErr error
 		if routeID == "" {
-			return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("signalk active route %q is not a routes resource", status.ActiveRouteHref)})
+			routeErr = fmt.Errorf("signalk active route %q is not a routes resource", status.ActiveRouteHref)
+		} else {
+			name, waypoints, routeErr = fetchSignalKRoute(signalkURL, routeID)
 		}
-		name, waypoints, err := fetchSignalKRoute(signalkURL, routeID)
-		if err != nil {
-			return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to read the active route from signalk: %v", err)})
-		}
-		result = map[string]any{
-			"active":      true,
-			"point_index": status.PointIndex,
-			"reverse":     status.Reverse,
-			"route":       map[string]any{"name": name, "waypoints": waypoints},
+		switch {
+		case routeErr == nil:
+			result = map[string]any{
+				"active":      true,
+				"point_index": status.PointIndex,
+				"reverse":     status.Reverse,
+				"route":       map[string]any{"name": name, "waypoints": waypoints},
+			}
+		case status.HasNextPoint:
+			// SignalK has a destination even though the route behind it could
+			// not be read: keep the destination and say why the route is missing.
+			result = map[string]any{
+				"active":      true,
+				"point_index": status.PointIndex,
+				"reverse":     status.Reverse,
+				"route_error": fmt.Sprintf("Route details unavailable: %v", routeErr),
+			}
+		default:
+			return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to read the active route from signalk: %v", routeErr)})
 		}
 	}
 
