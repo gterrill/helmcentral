@@ -38,6 +38,19 @@ describe('RouteTile', () => {
     expect(screen.getByText('ETA 6h 00m')).toBeInTheDocument()
   })
 
+  it('shows why route details are missing while keeping the destination', () => {
+    const status: ActiveRouteStatus = {
+      state: 'inactive',
+      destination: { lat: 1, lon: 0, name: 'Hook Island' },
+      routeError: 'Route details unavailable: gone',
+    }
+    render(<RouteTile status={status} latitude={0} longitude={0} speedKts={10} />)
+
+    expect(screen.getByText('Hook Island')).toBeInTheDocument()
+    expect(screen.getByText('ETA 6h 00m')).toBeInTheDocument()
+    expect(screen.getByText('Route details unavailable: gone')).toBeInTheDocument()
+  })
+
   it('calls an unnamed destination "Next waypoint"', () => {
     const status: ActiveRouteStatus = { state: 'inactive', destination: { lat: 1, lon: 0, name: '' } }
     render(<RouteTile status={status} latitude={0} longitude={0} speedKts={10} />)

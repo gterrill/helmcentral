@@ -16,7 +16,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **The Routes page is gone.** Saved routes are no longer kept; plan and
   activate routes on your chartplotter or in a SignalK app. The Route tile now
   shows the route SignalK is navigating, or the next waypoint when the plotter
-  only sends a go-to, and does nothing when tapped. The arrival time uses your
+  only sends a go-to, and does nothing when tapped. If SignalK names a route
+  that cannot be read, the tile keeps the next waypoint and says why the route
+  details are missing. The arrival time uses your
   speed over the ground alone, so it is blank while you are stopped. The
   Nearby map and the clock follow the same route. What to do on upgrade: if you
   want to keep a route you planned here, recreate it on your plotter first; the

@@ -118,6 +118,24 @@ describe('useRouteActivation', () => {
     expect(result.current.status).toEqual({ state: 'unknown', reason: 'loading' })
   })
 
+  it('keeps the destination and the reason when the route could not be read', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        active: true,
+        route_error: 'Route details unavailable: gone',
+        destination: { lat: 1, lon: 2, name: 'Hook Island' },
+      }),
+    }))
+    const { result } = renderHook(() => useRouteActivation())
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.status).toEqual({
+      state: 'inactive',
+      destination: { lat: 1, lon: 2, name: 'Hook Island' },
+      routeError: 'Route details unavailable: gone',
+    })
+  })
+
   it('treats active with no route object as an error, not inactive', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ active: true }) }))
     const { result } = renderHook(() => useRouteActivation())
