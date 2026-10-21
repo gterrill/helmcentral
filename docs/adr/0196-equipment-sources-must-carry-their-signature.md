@@ -45,21 +45,37 @@ that never had data, silently.
    The record is two SQLite tables in helmcentral.sqlite, written through RunTx
    like the remembered units of ADR 0193: `signalk_source_seen(vessel, path,
    first_seen, last_seen)` keyed by vessel and path, and
-   `signalk_source_tracking(vessel, tracking_since, seeded_at, seeded_from)`.
+   `signalk_source_tracking(vessel, tracking_since, watched_seconds, seeded_at,
+   seeded_paths)`.
    Only paths under the equipment source shapes are recorded (about 270 on the
    boat). A goroutine looks at the live tree once a minute, a path counts as seen
    if it reported in the last ten minutes (dated by when it arrived), a new path
    is written at once and a known one at most every five minutes, in one batch;
    a failed write stays pending, is retried on the next pass and is logged once
-   per failing streak. The stream goroutine never touches it. Rows carry
+   per failing streak. The stream goroutine never touches it. Readers get an immutable record
+   published at the end of each tick, so a request builds and locks nothing. A
+   change of self vessel stashes the old vessel's unwritten sightings and
+   retries them; if the new vessel's record cannot be read, nothing is served
+   for it (never the previous vessel's paths) and the error travels with the
+   discovery response (`tracking.error`) and the Setup detail, and the pages say
+   "Helmcentral couldn't read its record of what the boat has reported (…), so
+   only sources reporting now are listed." Rows carry
    `last_seen`, so an engine that is off appears as not reporting now with the
-   day it was last seen. A new install has nothing in the record until an engine
+   day it was last seen. A source that is not reporting now is listed only if it
+   was seen within 90 days (`sourceListLookback`), so a replaced device's old
+   instance does not stay on the list for ever; an item that owns it keeps it,
+   and judging it may use the whole record. A new install has nothing in the record until an engine
    has run, so Discovery says since when Helmcentral has been watching.
-   **InfluxDB is an optional one-time seed, never read per request.** When a
-   vessel has not been seeded and InfluxDB is configured, one query reads the
+   **InfluxDB is an optional one-time seed, never read per request.** InfluxDB
+   logs this boat only, so the seed is taken once per installation, for the
+   first vessel tracked; a later vessel (a new self URN) relies on live
+   tracking and the seven-day rule. When no vessel has been seeded and InfluxDB
+   is configured, one query reads the
    last time each equipment path was logged in the last 90 days (an anchored
    regex pushed down to storage, under a second on the boat); the result is
-   merged under what is known and the seed is recorded (when, and from when). A
+   merged under what is known and the seed is recorded (when, and how many equipment paths it returned). A seed
+   that returned none is remembered, so it is not repeated, but gives no
+   coverage. A
    failed query is logged and retried every 15 minutes; an unconfigured InfluxDB
    is logged once and left alone. Without a seed, tracking from live data alone
    is enough.
@@ -74,10 +90,13 @@ that never had data, silently.
    A row an item owns has a `signature` of carried, missing or unknown. Missing
    means the source has been seen carrying other readings and never its
    signature (`propulsion.0` reported exhaust temperature and never RPM) **and**
-   the record covers enough time: it was seeded from history, or Helmcentral has
-   watched this vessel for at least seven days (`sourceRecordMinTracking`; an
-   engine that is off for a few days must not look like one that never reports
-   RPM). Unknown means anything less: the record is younger than that, or the
+   the record covers enough time: it was seeded from history (with at least one equipment path), or
+   Helmcentral has actually watched this vessel for at least seven days
+   (`sourceRecordMinTracking`). Watched time is persisted (`watched_seconds`)
+   and counts only the intervals between two scans that both saw the live tree
+   being fed, so backend downtime and SignalK outages do not count toward the
+   week. An engine that is off for a few days must not look like one that never
+   reports RPM. Unknown means anything less: the record is younger than that, or the
    source has never been seen at all (laid up). Silence is not evidence against a
    mapping. Missing shows an inline warning in Discovery, under the role and on
    the item's page, and reopens the Setup step (Engines, House bank, or Charging

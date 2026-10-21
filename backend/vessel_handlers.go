@@ -90,6 +90,11 @@ type discoveryTracking struct {
 	Since  *time.Time `json:"since"`
 	Seeded bool       `json:"seeded"`
 	Covers bool       `json:"covers"`
+	// SinceDay is Since as a day ("21 Oct") in the vessel's own time zone.
+	SinceDay string `json:"since_day"`
+	// Error is why the record could not be read; set, only sources reporting
+	// now are listed.
+	Error string `json:"error"`
 }
 
 type discoveryResponse struct {
@@ -358,8 +363,22 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 	if !record.Since.IsZero() {
 		since := record.Since
 		resp.Tracking.Since = &since
+		resp.Tracking.SinceDay = vesselLocalDay(since, telemetry)
+	}
+	if record.Err != nil {
+		resp.Tracking.Error = record.Err.Error()
 	}
 	return resp
+}
+
+// vesselLocalDay words t as a day ("21 Oct") in the vessel's own time zone,
+// from its position; UTC while it has none.
+func vesselLocalDay(t time.Time, telemetry telemetryReader) string {
+	loc := time.UTC
+	if pos, ok := telemetry.Position(); ok && hasUsableVesselPosition(pos.Latitude, pos.Longitude) {
+		loc = vesselLocalLocation(pos.Longitude)
+	}
+	return t.In(loc).Format("2 Jan")
 }
 
 // vesselDetectorStatuses names, per detector, whether vessel has completed

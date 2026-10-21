@@ -23,7 +23,7 @@ export function useVesselDiscovery(enabled = true) {
         rows: (Array.isArray(g.rows) ? g.rows : []).map((r) => ({ ...r, metrics: Array.isArray(r.metrics) ? r.metrics : [], last_seen: r.last_seen ?? null })),
       })),
       detectors: body.detectors ?? {},
-      tracking: body.tracking ?? noTracking,
+      tracking: { ...noTracking, ...body.tracking },
     }),
   })
 

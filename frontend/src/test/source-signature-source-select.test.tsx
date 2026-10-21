@@ -19,7 +19,7 @@ const row = (source: string, extra: Partial<DiscoveryRow>): DiscoveryRow => ({
 const discovery: VesselDiscoveryResponse = {
   connected: true,
   detectors: {},
-  tracking: { since: '2026-10-01T00:00:00Z', seeded: true, covers: true },
+  tracking: { since: '2026-10-01T00:00:00Z', seeded: true, covers: true, error: '' },
   groups: [{
     kind: 'engine', mappable: true, signature_label: 'RPM', rows: [
       row('propulsion.0', { item: { id: 'c0', name: 'Cummins QSB 6.7' }, signature: 'missing' }),
@@ -49,7 +49,7 @@ describe('EquipmentSourceSection: Source select', () => {
         id="c0"
         draft={{ ...BLANK_DRAFT, signalk_source: 'propulsion.port' }}
         setDraft={vi.fn()}
-        discovery={{ ...discovery, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false } }}
+        discovery={{ ...discovery, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false, error: '' } }}
         canWrite
       />,
     )
@@ -58,13 +58,27 @@ describe('EquipmentSourceSection: Source select', () => {
     expect(screen.getByText(/Helmcentral has been watching the boat since 18 Oct/)).toBeInTheDocument()
   })
 
+  it('says plainly when Helmcentral could not read its record', () => {
+    render(
+      <EquipmentSourceSection
+        id="c0"
+        draft={{ ...BLANK_DRAFT, signalk_source: 'propulsion.port' }}
+        setDraft={vi.fn()}
+        discovery={{ ...discovery, tracking: { since: null, seeded: false, covers: false, error: 'database is locked' } }}
+        canWrite
+      />,
+    )
+
+    expect(screen.getByText("Helmcentral couldn't read its record of what the boat has reported (database is locked), so only sources reporting now are listed.")).toBeInTheDocument()
+  })
+
   it('says one thing, not two, when SignalK has no data at all', () => {
     render(
       <EquipmentSourceSection
         id="c0"
         draft={{ ...BLANK_DRAFT, signalk_source: '' }}
         setDraft={vi.fn()}
-        discovery={{ connected: false, groups: [], detectors: {}, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false } }}
+        discovery={{ connected: false, groups: [], detectors: {}, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false, error: '' } }}
         canWrite
       />,
     )

@@ -108,7 +108,7 @@ reported its own, Helmcentral says so in red on that source (in Discovery,
 under the role, and on the item's page), and the Setup step stays open with the
 item's name and the source. Open the item and choose the source that does report
 it. Helmcentral makes this call only after it has watched the boat for a week
-(or has read a history log); before that, or for a source it has never seen at
+(time the connection to SignalK was down does not count), or has read a history log; before that, or for a source it has never seen at
 all (an engine laid up since before it started watching), it does not guess: the
 step stays done and notes that it could not check yet.
 

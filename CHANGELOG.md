@@ -33,7 +33,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   reading, such as `propulsion.0` with only exhaust temperature, is no longer
   listed. Helmcentral now keeps its own record of what the boat reports, so an
   engine that is switched off is still listed once Helmcentral has seen it
-  report, marked "Not reporting now" with the day it was last seen. On a new
+  report, marked "Not reporting now" with the day it was last seen (for up to 90 days). On a new
   install, Discovery says since when it has been watching. If you log to
   InfluxDB, Helmcentral reads that log once to start the record, so
   switched-off engines are listed straight away; InfluxDB is not required. This
@@ -48,7 +48,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   whose source reports other readings but has never reported its own shows a
   red warning in Discovery, under its role and on its own page, and the Engines
   step in Setup stays open and names the item and the source. Helmcentral says
-  this only after watching the boat for a week (or reading a history log); until
+  this only after watching the boat for a week with SignalK connected (or reading a
+  history log); until
   then, and for a source it has never seen, the step stays done and says it
   couldn't check yet. If an engine item was set to the wrong source, choose the
   one that reports RPM on the item's page.

@@ -149,9 +149,11 @@ export interface DiscoveryTracking {
   seeded: boolean
   /** The record spans enough time to call a source that never reports its signature missing. */
   covers: boolean
+  /** Why Helmcentral's record could not be read; '' when it could. While set, only sources reporting now are listed. */
+  error: string
 }
 
-export const noTracking: DiscoveryTracking = { since: null, seeded: false, covers: false }
+export const noTracking: DiscoveryTracking = { since: null, seeded: false, covers: false, error: '' }
 
 export interface VesselDiscoveryResponse {
   /** False while Helmcentral has no vessel data from SignalK. */
@@ -217,9 +219,13 @@ export function sourceKindOf(source: string): SourceKind | null {
 /**
  * "Helmcentral has been watching the boat since 18 Oct. ...": said while the
  * record is too young to list an engine that is switched off or to call a
- * source wrong. '' once the record covers enough time (or before it began).
+ * source wrong, or why the record could not be read. '' once the record covers
+ * enough time (or before it began).
  */
 export function trackingNote(tracking: DiscoveryTracking, timeZone?: string): string {
+  if (tracking.error !== '') {
+    return `Helmcentral couldn't read its record of what the boat has reported (${tracking.error}), so only sources reporting now are listed.`
+  }
   if (tracking.covers || tracking.since === null) return ''
   return `Helmcentral has been watching the boat since ${loggedDay(tracking.since, timeZone)}. A source that is switched off is listed once it has reported since then.`
 }

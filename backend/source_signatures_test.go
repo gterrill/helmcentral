@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -395,5 +396,72 @@ func TestSetupPowerStepJudgesOnlyChosenItems(t *testing.T) {
 	st = stepByID(t, buildSetupStatus(vessel, connectedDiscovery(alternators), setupMate{}), "power")
 	if st.State != setupTodo || !strings.Contains(st.Detail, "Port alternator") || strings.Contains(st.Detail, "Old alternator") {
 		t.Fatalf("the chosen port alternator is judged: %+v", st)
+	}
+}
+
+// A source that is not reporting now is offered only if it was seen within
+// sourceListLookback; a replaced device's old instance falls off the list. An
+// item that still owns an old source keeps it, and judging it may still use
+// the whole record.
+func TestDiscoveryListsANotLiveSourceOnlyWithinTheLookback(t *testing.T) {
+	built := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	last := map[string]time.Time{
+		"propulsion.port.revolutions": built.Add(-10 * 24 * time.Hour),
+		"propulsion.old.revolutions":  built.Add(-(sourceListLookback + 24*time.Hour)),
+	}
+	rec := sourceRecord{Last: last, Active: activeSources(last), Covers: true, Now: built}
+
+	rows := discoveryGroupRows(vesselDiscovery(newAnomalyTestSnapshot(), vesselView{}, nil, rec), "engine")
+	if len(rows) != 1 || rows[0].Source != "propulsion.port" {
+		t.Fatalf("only the recently seen engine is offered: %+v", rows)
+	}
+
+	items := []sourceItem{{ID: "o", Name: "Old engine", Source: "propulsion.old", Group: sourceEngine, Instance: "old"}}
+	rows = discoveryGroupRows(vesselDiscovery(newAnomalyTestSnapshot(), vesselView{}, items, rec), "engine")
+	var old discoveryRow
+	for _, r := range rows {
+		if r.Source == "propulsion.old" {
+			old = r
+		}
+	}
+	if old.Item == nil || old.Signature != signatureCarried || old.LastSeen == nil {
+		t.Fatalf("an owned old source stays, judged on the whole record: %+v", old)
+	}
+}
+
+// An unreadable record is said plainly on the discovery response and in Setup,
+// never a silent empty list.
+func TestUnreadableRecordIsSaidInDiscoveryAndSetup(t *testing.T) {
+	rec := sourceRecord{Err: errors.New("source registry: load: database is locked")}
+	vessel := vesselView{Engines: []vesselEngineSetting{{Instance: "port", Name: "Port", EquipmentID: "p"}}}
+	items := []sourceItem{{ID: "p", Name: "Port", Source: "propulsion.port", Group: sourceEngine, Instance: "port"}}
+	disc := vesselDiscovery(newAnomalyTestSnapshot(), vessel, items, rec)
+	disc.Connected = true
+	if !strings.Contains(disc.Tracking.Error, "database is locked") {
+		t.Fatalf("tracking = %+v", disc.Tracking)
+	}
+	st := stepByID(t, buildSetupStatus(vessel, disc, setupMate{}), "engines")
+	if st.State != setupDone || !strings.Contains(st.Detail, "couldn't read its record of what the boat has reported") || !strings.Contains(st.Detail, "database is locked") {
+		t.Fatalf("step = %+v", st)
+	}
+}
+
+// "Watching since" is a day in the vessel's own time zone, as the pages show
+// it: 20:00 UTC on 20 Oct is already 21 Oct for a boat at 150 degrees east.
+func TestWatchingSinceDayIsInTheVesselTimeZone(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+	now := time.Now().UTC()
+	snapshot.applyDelta(signalKDelta{Context: "vessels.self", Updates: []signalKUpdate{{
+		Timestamp: now.Format(time.RFC3339), Values: []signalKValue{{Path: "navigation.position", Value: map[string]any{"latitude": -20.0, "longitude": 150.0}}},
+	}}}, now)
+	since := time.Date(2026, 10, 20, 20, 0, 0, 0, time.UTC)
+	young := sourceRecord{Since: since}
+
+	disc := vesselDiscovery(snapshot, vesselView{}, []sourceItem{{ID: "p", Name: "Port", Source: "propulsion.port", Group: sourceEngine, Instance: "port"}}, young)
+	if disc.Tracking.SinceDay != "21 Oct" {
+		t.Fatalf("since day = %q", disc.Tracking.SinceDay)
+	}
+	if got := vesselDiscovery(newAnomalyTestSnapshot(), vesselView{}, nil, young).Tracking.SinceDay; got != "20 Oct" {
+		t.Errorf("with no position the day is UTC: %q", got)
 	}
 }

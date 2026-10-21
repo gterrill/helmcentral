@@ -78,6 +78,11 @@ type sourceRecord struct {
 	Since  time.Time
 	Seeded bool
 	Covers bool
+	// Err is why the record could not be read; while set nothing is served
+	// from it and every unowned source judged against it is unknown.
+	Err error
+	// Now is when the record was built, which dates the listing lookback.
+	Now time.Time
 }
 
 // sourceRecordMinTracking is how long Helmcentral must have watched a vessel
@@ -85,6 +90,12 @@ type sourceRecord struct {
 // engine that is switched off for a few days would otherwise look like one
 // that never reports RPM; a week of watching has normally seen the boat run.
 const sourceRecordMinTracking = 7 * 24 * time.Hour
+
+// sourceListLookback is how long ago a source that is not reporting now may
+// have been seen and still be offered. A device that was replaced years ago
+// should not be offered forever; judging a source missing or unknown may
+// still use the whole record.
+const sourceListLookback = 90 * 24 * time.Hour
 
 // activeSources derives, per source, the latest time any of its paths was seen.
 func activeSources(last map[string]time.Time) map[string]time.Time {
@@ -136,12 +147,16 @@ func (h sourceRecord) lastSeenAt(group sourceGroup, source string) (time.Time, b
 	return latest, found
 }
 
-// seenInstances lists the instance ids of group that have a logged
-// signature path.
+// seenInstances lists the instance ids of group whose signature path was seen
+// within sourceListLookback of when the record was built (all of them when the
+// record carries no build time).
 func (h sourceRecord) seenInstances(group sourceGroup) []string {
 	seen := map[string]bool{}
 	var ids []string
-	for path := range h.Last {
+	for path, at := range h.Last {
+		if !h.Now.IsZero() && h.Now.Sub(at) > sourceListLookback {
+			continue
+		}
 		for _, leaf := range sourceSignatures[group].leaves {
 			rest, ok := strings.CutSuffix(path, "."+leaf)
 			if !ok {
@@ -178,6 +193,9 @@ func signatureState(live bool, h sourceRecord, group sourceGroup, source string)
 	}
 	if _, ok := h.lastSeenAt(group, source); ok {
 		return signatureCarried
+	}
+	if h.Err != nil {
+		return signatureUnknown
 	}
 	if _, active := h.Active[source]; active && h.Covers {
 		return signatureMissing
@@ -240,7 +258,7 @@ var currentSourceRecord = func() sourceRecord {
 	if globalSourceRegistry == nil {
 		return sourceRecord{}
 	}
-	return globalSourceRegistry.record(time.Now().UTC())
+	return globalSourceRegistry.record()
 }
 
 // queryInfluxSourceHistory returns the last time each path under the equipment

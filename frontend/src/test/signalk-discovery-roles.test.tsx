@@ -146,7 +146,7 @@ function engineOffBoat() {
         row('electrical.alternator.12', '12', [], { reporting: false, signature: 'carried', last_seen: '2026-10-16T12:00:00Z' }),
       ] },
     ],
-    tracking: { since: '2026-10-01T00:00:00Z', seeded: true, covers: true },
+    tracking: { since: '2026-10-01T00:00:00Z', seeded: true, covers: true, error: '' },
   }
 }
 
@@ -164,11 +164,19 @@ describe('Settings -> SignalK: sources that carry their signature', () => {
 
   it('says since when Helmcentral has been watching while the record is young', async () => {
     engineOffBoat()
-    discoveryBody = { ...discoveryBody, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false } }
+    discoveryBody = { ...discoveryBody, tracking: { since: '2026-10-18T12:00:00Z', seeded: false, covers: false, error: '' } }
     render(<SignalKDiscoverySection />)
 
     expect(await screen.findByText(/Helmcentral has been watching the boat since 18 Oct/)).toBeInTheDocument()
     expect(screen.getByText(/switched off is listed once it has reported since then/)).toBeInTheDocument()
+  })
+
+  it('says plainly when Helmcentral could not read its record', async () => {
+    engineOffBoat()
+    discoveryBody = { ...discoveryBody, tracking: { since: null, seeded: false, covers: false, error: 'database is locked' } }
+    render(<SignalKDiscoverySection />)
+
+    expect(await screen.findByText(/couldn't read its record of what the boat has reported \(database is locked\)/)).toBeInTheDocument()
   })
 
   it('has no watching note once the record covers enough time', async () => {

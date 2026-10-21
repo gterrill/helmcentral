@@ -33,7 +33,7 @@ describe('useVesselDiscovery', () => {
     const { result } = renderHook(() => useVesselDiscovery())
     await waitFor(() => expect(result.current.discovery.connected).toBe(true))
 
-    expect(result.current.discovery.tracking).toEqual({ since: null, seeded: false, covers: false })
+    expect(result.current.discovery.tracking).toEqual({ since: null, seeded: false, covers: false, error: '' })
     expect(result.current.discovery.groups[0].signature_label).toBe('')
     expect(result.current.discovery.groups[0].rows[0].last_seen).toBeNull()
   })

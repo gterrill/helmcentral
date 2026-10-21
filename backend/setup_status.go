@@ -209,12 +209,16 @@ func withArticle(noun string) string {
 	return "a " + noun
 }
 
-// trackingNote says since when Helmcentral has been watching the boat.
+// trackingNote says since when Helmcentral has been watching the boat (a day in
+// the vessel's own time zone), or why the record could not be read.
 func trackingNote(t discoveryTracking) string {
-	if t.Since == nil {
+	if t.Error != "" {
+		return " (Helmcentral couldn't read its record of what the boat has reported: " + t.Error + ")"
+	}
+	if t.SinceDay == "" {
 		return ""
 	}
-	return " (it has been watching the boat since " + t.Since.Format("2 Jan") + ")"
+	return " (it has been watching the boat since " + t.SinceDay + ")"
 }
 
 // detail words a finished step's check: the problems with the fix, or a note
@@ -223,7 +227,7 @@ func (c signatureCheck) detail(done, fix string, tracking discoveryTracking) (pr
 	if len(c.problems) > 0 {
 		return true, strings.Join(c.problems, " ") + " " + fix
 	}
-	if c.unchecked > 0 {
+	if c.unchecked > 0 || tracking.Error != "" {
 		return false, done + " Helmcentral couldn't check yet that they report what they should" + trackingNote(tracking) + "."
 	}
 	return false, done

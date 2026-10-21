@@ -7,6 +7,7 @@ import (
 	"log"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -46,25 +47,34 @@ type seenRow struct {
 	First, Last time.Time
 }
 
-// registryMeta is a vessel's tracking record: when Helmcentral began watching
-// it, and, once seeded, when and from how far back.
+// registryMeta is a vessel's tracking record. Watched is how long the tree was
+// actually being fed while Helmcentral ran, which is what the seven-day rule
+// counts (backend downtime and SignalK outages are not watching). SeededAt is
+// set once the InfluxDB seed ran for this vessel and SeededPaths is how many
+// equipment paths it returned: a seed that found nothing is remembered (so it
+// is not repeated) but does not count as coverage.
 type registryMeta struct {
-	TrackingSince, SeededAt, SeededFrom time.Time
+	TrackingSince time.Time
+	Watched       time.Duration
+	SeededAt      time.Time
+	SeededPaths   int
 }
 
 // sourceRegistryPersister is what the registry needs of the table; tests wrap
-// the real store to count and fail transactions.
+// the real store to count and fail transactions. load also says whether any
+// vessel in the installation has been seeded: InfluxDB logs this boat only, so
+// the seed is taken once per installation.
 type sourceRegistryPersister interface {
-	load(vessel string) ([]seenRow, *registryMeta, error)
+	load(vessel string) (rows []seenRow, meta *registryMeta, installSeeded bool, err error)
 	save(vessel string, rows []seenRow, meta *registryMeta) error
 }
 
 // sourceRegistryStore persists the registry in helmcentral.sqlite:
 //
 //	signalk_source_seen(vessel, path, first_seen, last_seen)  PRIMARY KEY (vessel, path)
-//	signalk_source_tracking(vessel, tracking_since, seeded_at, seeded_from)  PRIMARY KEY (vessel)
+//	signalk_source_tracking(vessel, tracking_since, watched_seconds, seeded_at, seeded_paths)  PRIMARY KEY (vessel)
 //
-// Times are Unix seconds. seeded_at and seeded_from are NULL until seeded.
+// Times are Unix seconds. seeded_at and seeded_paths are NULL until seeded.
 type sourceRegistryStore struct {
 	ds *documentStore
 }
@@ -79,10 +89,11 @@ func newSourceRegistryStore(ds *documentStore) (*sourceRegistryStore, error) {
 			PRIMARY KEY (vessel, path)
 		)`,
 		`CREATE TABLE IF NOT EXISTS signalk_source_tracking (
-			vessel         TEXT PRIMARY KEY,
-			tracking_since INTEGER NOT NULL,
-			seeded_at      INTEGER,
-			seeded_from    INTEGER
+			vessel          TEXT PRIMARY KEY,
+			tracking_since  INTEGER NOT NULL,
+			watched_seconds INTEGER NOT NULL DEFAULT 0,
+			seeded_at       INTEGER,
+			seeded_paths    INTEGER
 		)`,
 	} {
 		if _, err := ds.db.Exec(stmt); err != nil {
@@ -92,9 +103,10 @@ func newSourceRegistryStore(ds *documentStore) (*sourceRegistryStore, error) {
 	return &sourceRegistryStore{ds: ds}, nil
 }
 
-func (s *sourceRegistryStore) load(vessel string) ([]seenRow, *registryMeta, error) {
+func (s *sourceRegistryStore) load(vessel string) ([]seenRow, *registryMeta, bool, error) {
 	var rows []seenRow
 	var meta *registryMeta
+	installSeeded := false
 	err := s.ds.Read(func(q sqlQueryer) error {
 		r, err := q.Query(`SELECT path, first_seen, last_seen FROM signalk_source_seen WHERE vessel = ?`, vessel)
 		if err != nil {
@@ -112,29 +124,35 @@ func (s *sourceRegistryStore) load(vessel string) ([]seenRow, *registryMeta, err
 		if err := r.Err(); err != nil {
 			return err
 		}
-		m, err := q.Query(`SELECT tracking_since, seeded_at, seeded_from FROM signalk_source_tracking WHERE vessel = ?`, vessel)
+		m, err := q.Query(`SELECT vessel, tracking_since, watched_seconds, seeded_at, seeded_paths FROM signalk_source_tracking`)
 		if err != nil {
 			return err
 		}
 		defer m.Close()
-		if m.Next() {
-			var since int64
-			var seededAt, seededFrom sql.NullInt64
-			if err := m.Scan(&since, &seededAt, &seededFrom); err != nil {
+		for m.Next() {
+			var v string
+			var since, watched int64
+			var seededAt, seededPaths sql.NullInt64
+			if err := m.Scan(&v, &since, &watched, &seededAt, &seededPaths); err != nil {
 				return err
 			}
-			meta = &registryMeta{TrackingSince: time.Unix(since, 0).UTC()}
 			if seededAt.Valid {
-				meta.SeededAt = time.Unix(seededAt.Int64, 0).UTC()
-				meta.SeededFrom = time.Unix(seededFrom.Int64, 0).UTC()
+				installSeeded = true
+			}
+			if v != vessel {
+				continue
+			}
+			meta = &registryMeta{TrackingSince: time.Unix(since, 0).UTC(), Watched: time.Duration(watched) * time.Second}
+			if seededAt.Valid {
+				meta.SeededAt, meta.SeededPaths = time.Unix(seededAt.Int64, 0).UTC(), int(seededPaths.Int64)
 			}
 		}
 		return m.Err()
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("source registry: load: %w", err)
+		return nil, nil, false, fmt.Errorf("source registry: load: %w", err)
 	}
-	return rows, meta, nil
+	return rows, meta, installSeeded, nil
 }
 
 func (s *sourceRegistryStore) save(vessel string, rows []seenRow, meta *registryMeta) error {
@@ -149,15 +167,16 @@ func (s *sourceRegistryStore) save(vessel string, rows []seenRow, meta *registry
 			}
 		}
 		if meta != nil {
-			var seededAt, seededFrom any
+			var seededAt, seededPaths any
 			if !meta.SeededAt.IsZero() {
-				seededAt, seededFrom = meta.SeededAt.Unix(), meta.SeededFrom.Unix()
+				seededAt, seededPaths = meta.SeededAt.Unix(), meta.SeededPaths
 			}
-			if _, err := tx.Exec(`INSERT INTO signalk_source_tracking (vessel, tracking_since, seeded_at, seeded_from) VALUES (?, ?, ?, ?)
+			if _, err := tx.Exec(`INSERT INTO signalk_source_tracking (vessel, tracking_since, watched_seconds, seeded_at, seeded_paths) VALUES (?, ?, ?, ?, ?)
 				ON CONFLICT(vessel) DO UPDATE SET
+					watched_seconds = MAX(watched_seconds, excluded.watched_seconds),
 					seeded_at = COALESCE(excluded.seeded_at, seeded_at),
-					seeded_from = COALESCE(excluded.seeded_from, seeded_from)`,
-				vessel, meta.TrackingSince.Unix(), seededAt, seededFrom); err != nil {
+					seeded_paths = COALESCE(excluded.seeded_paths, seeded_paths)`,
+				vessel, meta.TrackingSince.Unix(), int64(meta.Watched/time.Second), seededAt, seededPaths); err != nil {
 				return fmt.Errorf("source registry: save tracking: %w", err)
 			}
 		}
@@ -171,16 +190,36 @@ type seenState struct {
 	first, last, written time.Time
 }
 
+// pendingWrite is what one vessel still has to write.
+type pendingWrite struct {
+	rows []seenRow
+	meta *registryMeta
+}
+
 type sourceRegistry struct {
 	mu     sync.Mutex
 	store  sourceRegistryPersister
 	vessel string
 	loaded bool
-	paths  map[string]*seenState
-	dirty  map[string]bool
-	meta   registryMeta
-	// metaDirty: meta has changes the table does not hold.
-	metaDirty bool
+	// loadErr is why the record for vessel could not be read; while set,
+	// nothing is served for it and readers are told why.
+	loadErr error
+	paths   map[string]*seenState
+	dirty   map[string]bool
+	meta    registryMeta
+	// metaDirty: meta has changes the table does not hold. watchedWritten is
+	// the Watched the table holds.
+	metaDirty      bool
+	watchedWritten time.Duration
+	// installSeeded: some vessel in this installation has been seeded.
+	installSeeded bool
+	// stash holds writes left over from a vessel the boat has since stopped
+	// being, so a change of self vessel loses nothing.
+	stash map[string]*pendingWrite
+	// lastTick dates the watched-time credit; creditCap bounds one tick's.
+	lastTick  time.Time
+	lastFed   bool
+	creditCap time.Duration
 
 	seedConfigured func() bool
 	seedFetch      func() (map[string]time.Time, error)
@@ -189,13 +228,20 @@ type sourceRegistry struct {
 	noInfluxLogged bool
 	writeFailing   bool
 	loadFailing    bool
+
+	// snap is the immutable record readers get; it is rebuilt at the end of
+	// every tick and never changed after publication.
+	snap atomic.Pointer[sourceRecord]
 }
 
 func newSourceRegistry(store sourceRegistryPersister, seedConfigured func() bool, seedFetch func() (map[string]time.Time, error)) *sourceRegistry {
-	return &sourceRegistry{
+	r := &sourceRegistry{
 		store: store, seedConfigured: seedConfigured, seedFetch: seedFetch,
-		paths: map[string]*seenState{}, dirty: map[string]bool{},
+		paths: map[string]*seenState{}, dirty: map[string]bool{}, stash: map[string]*pendingWrite{},
+		creditCap: 2 * sourceRegistryScanInterval,
 	}
+	r.snap.Store(&sourceRecord{})
+	return r
 }
 
 // globalSourceRegistry is nil until main starts it; readers see an empty record.
@@ -215,26 +261,34 @@ func (r *sourceRegistry) run(ctx context.Context, snapshot *signalKSnapshot) {
 	}
 }
 
-// tick is one pass: load the self vessel's record if it changed, note what
-// reports now, seed once from InfluxDB if due, and write what changed.
+// tick is one pass: switch to the self vessel's record if the vessel changed,
+// note what reports now and credit the time watched, seed once from InfluxDB if
+// due, write what changed, and publish a fresh immutable record for readers.
 func (r *sourceRegistry) tick(snapshot *signalKSnapshot, now time.Time) {
 	vessel := snapshot.selfContext()
 	if vessel == "" {
 		return
 	}
 	r.mu.Lock()
-	if !r.loaded || r.vessel != vessel {
-		if !r.loadLocked(vessel, now) {
-			r.mu.Unlock()
-			return
-		}
+	if r.vessel != vessel {
+		r.stashLocked()
+		r.vessel, r.loaded = vessel, false
+		r.paths, r.dirty, r.meta = map[string]*seenState{}, map[string]bool{}, registryMeta{}
+		r.metaDirty, r.watchedWritten, r.lastTick, r.lastFed = false, 0, time.Time{}, false
+		r.seedFailing = false
 	}
-	r.observeLocked(snapshot.liveSelfTelemetry(now), now)
+	if !r.loaded && !r.loadLocked(vessel, now) {
+		r.publishLocked(now)
+		r.mu.Unlock()
+		return
+	}
+	telemetry := snapshot.liveSelfTelemetry(now)
+	fresh := r.observeLocked(telemetry, now)
+	r.creditLocked(fresh, now)
 	due := r.seedDueLocked(now)
 	r.mu.Unlock()
 
-	// The InfluxDB query runs without the lock, so readers are never held
-	// behind it.
+	// The InfluxDB query runs without the lock, so nothing else waits on it.
 	var history map[string]time.Time
 	var err error
 	if due {
@@ -242,51 +296,104 @@ func (r *sourceRegistry) tick(snapshot *signalKSnapshot, now time.Time) {
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if due && r.vessel == vessel {
 		r.applySeedLocked(history, err, now)
 	}
 	r.flushLocked()
+	r.publishLocked(now)
+	r.mu.Unlock()
+}
+
+// stashLocked keeps the pending writes of the vessel being left, so the change
+// of self vessel loses no sighting; flushLocked retries them.
+func (r *sourceRegistry) stashLocked() {
+	if !r.loaded || (len(r.dirty) == 0 && !r.metaDirty) {
+		return
+	}
+	p := &pendingWrite{}
+	for path := range r.dirty {
+		st := r.paths[path]
+		p.rows = append(p.rows, seenRow{Path: path, First: st.first, Last: st.last})
+	}
+	if r.metaDirty {
+		m := r.meta
+		p.meta = &m
+	}
+	r.stash[r.vessel] = p
 }
 
 // loadLocked replaces the in-memory record with vessel's stored one. It starts
 // tracking (the date Helmcentral began watching) for a vessel seen for the
-// first time.
+// first time. A failure is remembered in loadErr, so readers are told rather
+// than shown an empty record.
 func (r *sourceRegistry) loadLocked(vessel string, now time.Time) bool {
-	rows, meta, err := r.store.load(vessel)
+	rows, meta, installSeeded, err := r.store.load(vessel)
 	if err != nil {
 		if !r.loadFailing {
 			log.Printf("source registry: %v; Discovery lists only sources reporting now", err)
 		}
 		r.loadFailing = true
+		r.loadErr = err
 		return false
 	}
-	r.loadFailing = false
-	r.vessel, r.loaded = vessel, true
+	if r.loadFailing {
+		log.Printf("source registry: record readable again")
+	}
+	r.loadFailing, r.loadErr = false, nil
+	r.loaded, r.installSeeded = true, installSeeded
 	r.paths, r.dirty = map[string]*seenState{}, map[string]bool{}
 	for _, row := range rows {
 		r.paths[row.Path] = &seenState{first: row.First, last: row.Last, written: row.Last}
 	}
 	if meta == nil {
 		r.meta, r.metaDirty = registryMeta{TrackingSince: now}, true
+		r.watchedWritten = 0
 	} else {
 		r.meta, r.metaDirty = *meta, false
+		r.watchedWritten = meta.Watched
 	}
 	return true
 }
 
 // observeLocked notes every path under an equipment source that reported
-// recently. A sighting is dated by when the reading arrived, never by now.
-func (r *sourceRegistry) observeLocked(t telemetryReader, now time.Time) {
+// recently, dating a sighting by when the reading arrived, never by now. It
+// reports whether the live tree is being fed at all (any reading fresh).
+func (r *sourceRegistry) observeLocked(t telemetryReader, now time.Time) bool {
+	fed := false
 	for _, p := range t.Paths() {
-		if _, ok := sourceOfPath(p.Path); !ok {
+		_, equipment := sourceOfPath(p.Path)
+		if !equipment && fed {
 			continue
 		}
 		sample := t.Sample(p.Path)
 		if !sample.Present || !sample.AgeKnown || sample.Age > sourceRegistryFreshness {
 			continue
 		}
-		r.seeLocked(p.Path, now.Add(-sample.Age), now)
+		fed = true
+		if equipment {
+			r.seeLocked(p.Path, now.Add(-sample.Age), now)
+		}
+	}
+	return fed
+}
+
+// creditLocked adds to the time watched: the time since the last tick, but only
+// when both ticks saw the tree being fed, and never more than creditCap, so a
+// backend that was down or a SignalK outage does not count toward the week.
+func (r *sourceRegistry) creditLocked(fed bool, now time.Time) {
+	prev, prevFed := r.lastTick, r.lastFed
+	r.lastTick, r.lastFed = now, fed
+	// Only the interval between two fed observations counts.
+	if !fed || !prevFed || prev.IsZero() || !now.After(prev) {
+		return
+	}
+	credit := now.Sub(prev)
+	if credit > r.creditCap {
+		credit = r.creditCap
+	}
+	r.meta.Watched += credit
+	if r.meta.Watched-r.watchedWritten >= sourceRegistryWriteInterval {
+		r.metaDirty = true
 	}
 }
 
@@ -310,11 +417,13 @@ func (r *sourceRegistry) seeLocked(path string, at, now time.Time) {
 	}
 }
 
-// seedDueLocked reports whether the InfluxDB seed should be tried now. An
-// unconfigured InfluxDB is not an error and is not retried by query; a failed
-// query is retried every sourceSeedRetry.
+// seedDueLocked reports whether the InfluxDB seed should be tried now. InfluxDB
+// logs this boat only, so the seed is taken once per installation, for the
+// first vessel tracked; a later vessel relies on live tracking and the
+// seven-day rule. An unconfigured InfluxDB is not an error and is not retried
+// by query; a failed query is retried every sourceSeedRetry.
 func (r *sourceRegistry) seedDueLocked(now time.Time) bool {
-	if !r.meta.SeededAt.IsZero() {
+	if r.installSeeded {
 		return false
 	}
 	if !r.seedConfigured() {
@@ -333,7 +442,9 @@ func (r *sourceRegistry) seedDueLocked(now time.Time) bool {
 
 // applySeedLocked records the result of the seed query: a failure is logged
 // once per streak, a success merges the history under what is already known
-// and remembers that the vessel was seeded.
+// and remembers that the installation was seeded. A seed that returned no
+// equipment path is remembered too (so it is not repeated) but gives no
+// coverage: the seven-day rule applies.
 func (r *sourceRegistry) applySeedLocked(history map[string]time.Time, err error, now time.Time) {
 	if err != nil {
 		if !r.seedFailing {
@@ -343,10 +454,12 @@ func (r *sourceRegistry) applySeedLocked(history map[string]time.Time, err error
 		return
 	}
 	r.seedFailing = false
+	n := 0
 	for path, at := range history {
 		if _, ok := sourceOfPath(path); !ok {
 			continue
 		}
+		n++
 		st := r.paths[path]
 		if st == nil {
 			r.paths[path] = &seenState{first: at, last: at}
@@ -360,58 +473,82 @@ func (r *sourceRegistry) applySeedLocked(history map[string]time.Time, err error
 		}
 		r.dirty[path] = true
 	}
-	r.meta.SeededAt, r.meta.SeededFrom = now, now.AddDate(0, 0, -sourceHistoryLookbackDays)
-	r.metaDirty = true
-	log.Printf("source registry: seeded %d paths from InfluxDB history (last %d days)", len(history), sourceHistoryLookbackDays)
+	r.meta.SeededAt, r.meta.SeededPaths = now, n
+	r.installSeeded, r.metaDirty = true, true
+	if n == 0 {
+		log.Printf("source registry: InfluxDB held no equipment history; tracking from live data only")
+		return
+	}
+	log.Printf("source registry: seeded %d paths from InfluxDB history (last %d days)", n, sourceHistoryLookbackDays)
 }
 
-// flushLocked writes everything pending in one transaction. On failure it
-// logs once per streak and leaves the rows pending for the next pass.
+// flushLocked writes everything pending, the current vessel's and any stashed
+// from a vessel left behind, each in one transaction. On failure it logs once
+// per streak and leaves the rows pending for the next pass.
 func (r *sourceRegistry) flushLocked() {
-	if len(r.dirty) == 0 && !r.metaDirty {
-		return
-	}
-	rows := make([]seenRow, 0, len(r.dirty))
-	for path := range r.dirty {
-		st := r.paths[path]
-		rows = append(rows, seenRow{Path: path, First: st.first, Last: st.last})
-	}
-	sort.Slice(rows, func(i, j int) bool { return rows[i].Path < rows[j].Path })
-	var meta *registryMeta
-	if r.metaDirty {
-		m := r.meta
-		meta = &m
-	}
-	if err := r.store.save(r.vessel, rows, meta); err != nil {
-		if !r.writeFailing {
-			log.Printf("source registry: could not write %d sightings, will retry: %v", len(rows), err)
+	failed := false
+	for vessel, p := range r.stash {
+		if err := r.store.save(vessel, p.rows, p.meta); err != nil {
+			r.noteWriteFailure(len(p.rows), err)
+			failed = true
+			continue
 		}
-		r.writeFailing = true
-		return
+		delete(r.stash, vessel)
 	}
-	if r.writeFailing {
+	if len(r.dirty) > 0 || r.metaDirty {
+		rows := make([]seenRow, 0, len(r.dirty))
+		for path := range r.dirty {
+			st := r.paths[path]
+			rows = append(rows, seenRow{Path: path, First: st.first, Last: st.last})
+		}
+		sort.Slice(rows, func(i, j int) bool { return rows[i].Path < rows[j].Path })
+		var meta *registryMeta
+		if r.metaDirty {
+			m := r.meta
+			meta = &m
+		}
+		if err := r.store.save(r.vessel, rows, meta); err != nil {
+			r.noteWriteFailure(len(rows), err)
+			failed = true
+		} else {
+			for _, row := range rows {
+				r.paths[row.Path].written = row.Last
+			}
+			r.dirty, r.metaDirty = map[string]bool{}, false
+			r.watchedWritten = r.meta.Watched
+		}
+	}
+	if !failed && r.writeFailing {
 		log.Printf("source registry: writing again")
 		r.writeFailing = false
 	}
-	for _, row := range rows {
-		r.paths[row.Path].written = row.Last
+}
+
+func (r *sourceRegistry) noteWriteFailure(n int, err error) {
+	if !r.writeFailing {
+		log.Printf("source registry: could not write %d sightings, will retry: %v", n, err)
 	}
-	r.dirty, r.metaDirty = map[string]bool{}, false
+	r.writeFailing = true
+}
+
+// publishLocked builds the immutable record readers get. Its maps are never
+// changed after this, so readers need no lock.
+func (r *sourceRegistry) publishLocked(now time.Time) {
+	rec := &sourceRecord{Err: r.loadErr, Now: now}
+	if r.loaded {
+		last := make(map[string]time.Time, len(r.paths))
+		for path, st := range r.paths {
+			last[path] = st.last
+		}
+		rec.Last, rec.Active = last, activeSources(last)
+		rec.Since = r.meta.TrackingSince
+		rec.Seeded = !r.meta.SeededAt.IsZero() && r.meta.SeededPaths > 0
+		rec.Covers = rec.Seeded || r.meta.Watched >= sourceRecordMinTracking
+	}
+	r.snap.Store(rec)
 }
 
 // record is what readers see: the sightings, when watching began, and whether
-// that is enough to judge a source missing its signature.
-func (r *sourceRegistry) record(now time.Time) sourceRecord {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	last := make(map[string]time.Time, len(r.paths))
-	for path, st := range r.paths {
-		last[path] = st.last
-	}
-	rec := sourceRecord{Last: last, Active: activeSources(last), Seeded: !r.meta.SeededAt.IsZero()}
-	if r.loaded {
-		rec.Since = r.meta.TrackingSince
-		rec.Covers = rec.Seeded || now.Sub(r.meta.TrackingSince) >= sourceRecordMinTracking
-	}
-	return rec
-}
+// the record is enough to judge a source missing its signature. It is the
+// snapshot built at the last tick.
+func (r *sourceRegistry) record() sourceRecord { return *r.snap.Load() }
