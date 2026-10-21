@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **Equipment that is switched off missing from the source lists.** With
+  history logging on, Helmcentral failed to read the boat's history when it
+  first started, so engines, batteries, tanks and other equipment that were
+  off were not listed, and a wrong engine source was not flagged, until each
+  had reported again. It now reads the history on first start.
+
 ## [0.51.0] - 2026-10-21
 
 ### Breaking

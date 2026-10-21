@@ -241,10 +241,12 @@ func buildInfluxSourceHistoryFlux(bucket, field string, lookbackDays int) (strin
 			"  |> range(start: -%dd)\n"+
 			"  |> filter(fn: (r) => r._field == %s and r._measurement =~ /%s/)\n"+
 			"  |> last()\n"+
+			// _value is dropped before the group(), as in the earliest
+			// query: a path logged as both float and string would collide.
+			"  |> keep(columns: [\"_measurement\", \"_time\"])\n"+
 			"  |> group(columns: [\"_measurement\"])\n"+
 			"  |> sort(columns: [\"_time\"])\n"+
-			"  |> last()\n"+
-			"  |> keep(columns: [\"_measurement\", \"_time\"])",
+			"  |> last(column: \"_time\")",
 		bucketLiteral, lookbackDays, fieldLiteral, historyFluxRegex(),
 	), nil
 }
@@ -265,10 +267,13 @@ func buildInfluxSourceEarliestFlux(bucket, field string, lookbackDays int) (stri
 			"  |> range(start: -%dd)\n"+
 			"  |> filter(fn: (r) => r._field == %s and r._measurement =~ /%s/)\n"+
 			"  |> first()\n"+
+			// Only _time crosses the group(): equipment paths hold both
+			// float and string values (an engine's state), and one table
+			// cannot hold _value as both.
+			"  |> keep(columns: [\"_time\"])\n"+
 			"  |> group()\n"+
 			"  |> sort(columns: [\"_time\"])\n"+
-			"  |> first()\n"+
-			"  |> keep(columns: [\"_time\"])",
+			"  |> first(column: \"_time\")",
 		bucketLiteral, lookbackDays, fieldLiteral, historyFluxRegex(),
 	), nil
 }

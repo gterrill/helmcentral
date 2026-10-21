@@ -505,4 +505,25 @@ func TestEarliestFluxReadsTheOldestEquipmentPointInTheLookback(t *testing.T) {
 	if strings.Contains(flux, "last()") {
 		t.Errorf("the earliest point is not found with last(): %s", flux)
 	}
+	// Equipment paths log both float and string values (an engine's state is
+	// "started"), so grouping every series into one table with _value still
+	// on it fails on the boat with "schema collision detected: column _value
+	// is both of type float and string". Only _time may survive the group().
+	keep := strings.Index(flux, `keep(columns: ["_time"])`)
+	group := strings.Index(flux, "group()")
+	if keep < 0 || group < 0 || keep > group {
+		t.Errorf("_value must be dropped before the series are grouped together: %s", flux)
+	}
+}
+
+func TestHistoryFluxDropsValueBeforeGrouping(t *testing.T) {
+	flux, err := buildInfluxSourceHistoryFlux("SignalK_Data", "value", sourceHistoryLookbackDays)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keep := strings.Index(flux, `keep(columns: ["_measurement", "_time"])`)
+	group := strings.Index(flux, "group(")
+	if keep < 0 || group < 0 || keep > group {
+		t.Errorf("_value must be dropped before the series are grouped: %s", flux)
+	}
 }
