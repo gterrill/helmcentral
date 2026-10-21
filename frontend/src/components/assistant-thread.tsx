@@ -603,14 +603,15 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                                 <SaveAsNoteButton content={message.content} />
                               )}
                             </div>
-                            {/* Rated only while the answer is the live one:
-                                an answer read back from an earlier visit is
-                                not offered for rating. */}
-                            {canWrite && session.liveAnswerIds.has(message.id) && (
+                            {/* Rate in the live chat; a rating stays with
+                                the answer. A rated answer always shows its
+                                verdict; one read back unrated is not offered. */}
+                            {(session.ratings[message.id] !== undefined || (canWrite && session.liveAnswerIds.has(message.id))) && (
                               <AssistantAnswerFeedback
                                 messageId={message.id}
                                 rating={session.ratings[message.id]}
                                 onRate={session.rateAnswer}
+                                readOnly={!canWrite}
                               />
                             )}
                           </MessageContent>

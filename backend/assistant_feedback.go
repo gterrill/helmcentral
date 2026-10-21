@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -45,6 +47,40 @@ type assistantToolCall struct {
 	ElapsedMs int64  `json:"elapsed_ms"`
 	// Error is the failure text when the call failed or was not run.
 	Error string `json:"error,omitempty"`
+	// Truncated says Args or Result was cut to assistantToolCallMaxBytes when
+	// stored; OriginalBytes is then the uncut size of Args plus Result. A
+	// replay must treat such a record as incomplete.
+	Truncated     bool `json:"truncated,omitempty"`
+	OriginalBytes int  `json:"original_bytes,omitempty"`
+}
+
+const (
+	// assistantToolCallMaxBytes bounds each of a stored call's args and result.
+	assistantToolCallMaxBytes = 64 * 1024
+	// assistantToolCallRetention is how long an unrated answer keeps its tool
+	// calls. A rated answer keeps them until the rating is cleared.
+	assistantToolCallRetention = 7 * 24 * time.Hour
+	// assistantToolCallPruneEvery is how often the prune runs after startup.
+	assistantToolCallPruneEvery = 6 * time.Hour
+)
+
+// cutUTF8 returns s cut to at most max bytes without splitting a character.
+func cutUTF8(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	cut := max
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// assistantFeedbackSummary is the verdict and note carried on a rated
+// answer's message.
+type assistantFeedbackSummary struct {
+	Verdict string `json:"verdict"`
+	Note    string `json:"note"`
 }
 
 // assistantFeedback is the operator's verdict on one assistant message.
@@ -96,18 +132,39 @@ func createAssistantFeedbackSchema(db *sql.DB) error {
 			result     TEXT NOT NULL DEFAULT '',
 			elapsed_ms INTEGER NOT NULL DEFAULT 0,
 			error      TEXT NOT NULL DEFAULT '',
+			truncated  INTEGER NOT NULL DEFAULT 0,
+			original_bytes INTEGER,
 			PRIMARY KEY (message_id, round, seq)
 		)`); err != nil {
 		return fmt.Errorf("create message_tool_calls table: %w", err)
+	}
+	// truncated and original_bytes arrived after the table did.
+	for col, def := range map[string]string{"truncated": "INTEGER NOT NULL DEFAULT 0", "original_bytes": "INTEGER"} {
+		var has int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('message_tool_calls') WHERE name = ?`, col).Scan(&has); err != nil {
+			return fmt.Errorf("inspect message_tool_calls table: %w", err)
+		}
+		if has == 0 {
+			if _, err := db.Exec(`ALTER TABLE message_tool_calls ADD COLUMN ` + col + ` ` + def); err != nil {
+				return fmt.Errorf("add message_tool_calls.%s: %w", col, err)
+			}
+		}
 	}
 	return nil
 }
 
 func insertAssistantToolCallsTx(tx *sql.Tx, messageID string, calls []assistantToolCall) error {
 	for _, tc := range calls {
+		args, result := cutUTF8(tc.Args, assistantToolCallMaxBytes), cutUTF8(tc.Result, assistantToolCallMaxBytes)
+		var original sql.NullInt64
+		truncated := 0
+		if len(args) != len(tc.Args) || len(result) != len(tc.Result) {
+			truncated = 1
+			original = sql.NullInt64{Int64: int64(len(tc.Args) + len(tc.Result)), Valid: true}
+		}
 		if _, err := tx.Exec(
-			`INSERT INTO message_tool_calls (message_id, round, seq, name, args, result, elapsed_ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			messageID, tc.Round, tc.Seq, tc.Name, tc.Args, tc.Result, tc.ElapsedMs, tc.Error); err != nil {
+			`INSERT INTO message_tool_calls (message_id, round, seq, name, args, result, elapsed_ms, error, truncated, original_bytes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			messageID, tc.Round, tc.Seq, tc.Name, args, result, tc.ElapsedMs, tc.Error, truncated, original); err != nil {
 			return fmt.Errorf("insert tool call %s: %w", tc.Name, err)
 		}
 	}
@@ -124,7 +181,7 @@ func (s *assistantStore) ListToolCalls(messageID string) ([]assistantToolCall, e
 
 func (s *assistantStore) listToolCallsLocked(messageID string) ([]assistantToolCall, error) {
 	rows, err := s.db.Query(
-		`SELECT round, seq, name, args, result, elapsed_ms, error FROM message_tool_calls WHERE message_id = ? ORDER BY round, seq`, messageID)
+		`SELECT round, seq, name, args, result, elapsed_ms, error, truncated, original_bytes FROM message_tool_calls WHERE message_id = ? ORDER BY round, seq`, messageID)
 	if err != nil {
 		return nil, fmt.Errorf("list tool calls: %w", err)
 	}
@@ -132,9 +189,13 @@ func (s *assistantStore) listToolCallsLocked(messageID string) ([]assistantToolC
 	out := []assistantToolCall{}
 	for rows.Next() {
 		var tc assistantToolCall
-		if err := rows.Scan(&tc.Round, &tc.Seq, &tc.Name, &tc.Args, &tc.Result, &tc.ElapsedMs, &tc.Error); err != nil {
+		var truncated int
+		var original sql.NullInt64
+		if err := rows.Scan(&tc.Round, &tc.Seq, &tc.Name, &tc.Args, &tc.Result, &tc.ElapsedMs, &tc.Error, &truncated, &original); err != nil {
 			return nil, fmt.Errorf("scan tool call: %w", err)
 		}
+		tc.Truncated = truncated != 0
+		tc.OriginalBytes = int(original.Int64)
 		out = append(out, tc)
 	}
 	return out, rows.Err()
@@ -311,4 +372,68 @@ func writeAssistantFeedbackError(c echo.Context, err error) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+}
+
+// PruneToolCalls deletes the tool calls of unrated answers older than
+// assistantToolCallRetention and reports how many rows went. Rated answers
+// keep theirs; clearing a rating puts the answer back under this rule.
+func (s *assistantStore) PruneToolCalls() (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := s.now().Add(-assistantToolCallRetention).Unix()
+	res, err := s.db.Exec(`
+		DELETE FROM message_tool_calls
+		WHERE message_id IN (SELECT id FROM messages WHERE created_at < ?)
+		  AND message_id NOT IN (SELECT message_id FROM message_feedback)`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("prune tool calls: %w", err)
+	}
+	return res.RowsAffected()
+}
+
+// runAssistantToolCallPruner prunes once now and then every
+// assistantToolCallPruneEvery until ctx ends, logging how many rows went.
+func runAssistantToolCallPruner(ctx context.Context, store *assistantStore) {
+	prune := func() {
+		n, err := store.PruneToolCalls()
+		if err != nil {
+			log.Printf("assistant: %v", err)
+			return
+		}
+		log.Printf("assistant: pruned %d stored tool call rows from unrated answers older than %s", n, assistantToolCallRetention)
+	}
+	prune()
+	t := time.NewTicker(assistantToolCallPruneEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			prune()
+		}
+	}
+}
+
+// feedbackForMessages returns the verdict and note for each rated message id.
+func feedbackForMessages(q sqlQueryer, ids []string) (map[string]*assistantFeedbackSummary, error) {
+	out := map[string]*assistantFeedbackSummary{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	marks, args := inPlaceholders(ids)
+	rows, err := q.Query(`SELECT message_id, verdict, note FROM message_feedback WHERE message_id IN (`+marks+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("read message feedback: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var f assistantFeedbackSummary
+		if err := rows.Scan(&id, &f.Verdict, &f.Note); err != nil {
+			return nil, fmt.Errorf("scan message feedback: %w", err)
+		}
+		out[id] = &f
+	}
+	return out, rows.Err()
 }

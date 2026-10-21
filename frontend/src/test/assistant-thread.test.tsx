@@ -1265,4 +1265,36 @@ describe('AssistantThread: rating an answer', () => {
 
     expect(screen.getByRole('button', { name: 'Poor answer' })).toHaveAttribute('aria-pressed', 'true')
   })
+
+  it('shows a rated answer from an earlier visit with its verdict and note, and lets it be changed', async () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const rateAnswer = vi.fn().mockResolvedValue(null)
+    const session = fakeMateSession({
+      messages: [assistantMessage()],
+      ratings: { m1: { verdict: 'down', note: 'wrong tank' } },
+      rateAnswer,
+    })
+
+    render(<AssistantThread canWrite session={session} />)
+
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('textbox', { name: 'What was wrong' })).toHaveValue('wrong tank')
+    fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
+    await waitFor(() => expect(rateAnswer).toHaveBeenCalledWith('m1', 'up', ''))
+  })
+
+  it('shows the verdict read-only to someone who cannot write', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const session = fakeMateSession({
+      messages: [assistantMessage()],
+      ratings: { m1: { verdict: 'up', note: 'right call' } },
+    })
+
+    render(<AssistantThread canWrite={false} session={session} />)
+
+    expect(screen.getByRole('button', { name: 'Good answer' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Good answer' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('textbox', { name: 'What was good' })).not.toBeInTheDocument()
+    expect(screen.getByText('right call')).toBeInTheDocument()
+  })
 })

@@ -546,6 +546,7 @@ func main() {
 	// several times a second per stream client. This refreshes them once on
 	// a shared 30s ticker instead; the builders just read the cache.
 	go startTelemetryInfluxTicker(streamCtx)
+	go runAssistantToolCallPruner(streamCtx, globalAssistantStore)
 
 	go startTrackPoller(streamCtx, trackPollInterval)
 	go startTideAutoUpdater(streamCtx, 30*time.Minute)

@@ -12,6 +12,8 @@ interface AssistantAnswerFeedbackProps {
   rating: MateAnswerRating | undefined
   /** Saves a verdict (with its note), or clears it when null. Resolves null on
    * success or the server's words when it refused. */
+  /** Shows the verdict and note without offering to change them. */
+  readOnly?: boolean
   onRate: (messageId: string, verdict: 'up' | 'down' | null, note?: string) => Promise<string | null>
 }
 
@@ -20,7 +22,7 @@ interface AssistantAnswerFeedbackProps {
  * once a verdict is held. A tap saves at once; tapping the active thumb takes
  * the verdict back. Offered only on answers delivered in the live chat.
  */
-export function AssistantAnswerFeedback({ messageId, rating, onRate }: AssistantAnswerFeedbackProps) {
+export function AssistantAnswerFeedback({ messageId, rating, onRate, readOnly = false }: AssistantAnswerFeedbackProps) {
   const [note, setNote] = useState(rating?.note ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -56,7 +58,7 @@ export function AssistantAnswerFeedback({ messageId, rating, onRate }: Assistant
         size="icon"
         aria-label={verdict === 'up' ? 'Good answer' : 'Poor answer'}
         aria-pressed={pressed}
-        disabled={busy}
+        disabled={busy || readOnly}
         onClick={() => tap(verdict)}
         className={cn(pressed ? 'text-foreground' : 'text-muted-foreground')}
       >
@@ -73,7 +75,8 @@ export function AssistantAnswerFeedback({ messageId, rating, onRate }: Assistant
         {thumb('up')}
         {thumb('down')}
       </div>
-      {rating && (
+      {rating && readOnly && rating.note !== '' && <p className="text-xs text-muted-foreground">{rating.note}</p>}
+      {rating && !readOnly && (
         <form onSubmit={saveNote} className="flex min-w-0 items-center gap-2">
           <Input
             value={note}

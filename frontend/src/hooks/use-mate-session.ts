@@ -95,7 +95,9 @@ export function useMateSession(options: MateSessionOptions = {}) {
     [liveAnswers, activeId],
   )
 
-  const [ratings, setRatings] = useState<Record<string, MateAnswerRating>>({})
+  // What the operator has changed this visit, over what the server holds:
+  // null is a rating taken back.
+  const [changes, setRatings] = useState<Record<string, MateAnswerRating | null>>({})
   // Saves the verdict on an answer (a note rides with it), or clears it when
   // `verdict` is null. Resolves null on success, or the server's words when it
   // refused; the verdict shown stays the one the server holds.
@@ -104,11 +106,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     try {
       if (verdict === null) {
         await apiRequest<void>(path, { method: 'DELETE' })
-        setRatings((previous) => {
-          const next = { ...previous }
-          delete next[messageId]
-          return next
-        })
+        setRatings((previous) => ({ ...previous, [messageId]: null }))
       } else {
         await apiRequest<unknown>(path, { method: 'PUT', json: { verdict, note } })
         setRatings((previous) => ({ ...previous, [messageId]: { verdict, note } }))
@@ -118,6 +116,20 @@ export function useMateSession(options: MateSessionOptions = {}) {
       return err instanceof Error ? err.message : String(err)
     }
   }, [])
+
+  // Verdicts by message id: the ratings the server sent with the thread,
+  // then this visit's changes on top.
+  const ratings = useMemo(() => {
+    const merged: Record<string, MateAnswerRating> = {}
+    for (const message of conversations.messages) {
+      if (message.feedback) merged[message.id] = message.feedback
+    }
+    for (const [id, change] of Object.entries(changes)) {
+      if (change === null) delete merged[id]
+      else merged[id] = change
+    }
+    return merged
+  }, [conversations.messages, changes])
 
   const screenRef = useRef(options.screen)
   screenRef.current = options.screen

@@ -751,5 +751,32 @@ describe('useMateSession', () => {
       expect(failure).toBeTruthy()
       expect(result.current.ratings.a1?.verdict).toBe('up')
     })
+
+    it('shows the rating an answer already has on the server after a reload', async () => {
+      fakeMateServer({
+        conversations: [conversation('c1')],
+        messages: { c1: [
+          { id: 'old', role: 'assistant', content: 'Earlier answer', feedback: { verdict: 'down', note: 'wrong tank' } },
+          { id: 'plain', role: 'assistant', content: 'Unrated' },
+        ] },
+      })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.messages).toHaveLength(2))
+      expect(result.current.ratings.old).toEqual({ verdict: 'down', note: 'wrong tank' })
+      expect(result.current.ratings.plain).toBeUndefined()
+    })
+
+    it('lets a rating that came from the server be changed and cleared', async () => {
+      fakeMateServer({
+        conversations: [conversation('c1')],
+        messages: { c1: [{ id: 'old', role: 'assistant', content: 'Earlier answer', feedback: { verdict: 'down', note: '' } }] },
+      })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.ratings.old).toBeDefined())
+      await act(async () => { await result.current.rateAnswer('old', 'up', 'fine') })
+      expect(result.current.ratings.old).toEqual({ verdict: 'up', note: 'fine' })
+      await act(async () => { await result.current.rateAnswer('old', null) })
+      expect(result.current.ratings.old).toBeUndefined()
+    })
   })
 })

@@ -30,9 +30,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Rate Mate's answers.** Under each answer Mate gives you in the chat there
   are now a thumbs-up and a thumbs-down, with an optional short note about what
   was good or what was wrong. Tap the thumb you chose again to take the rating
-  back. Ratings are kept on the boat, and Helmcentral now also keeps which
-  lookups Mate made for each answer, so a rated answer can be traced later.
-  Answers in a conversation you reopen later cannot be rated.
+  back. A rating stays with the answer and shows again when you reopen the
+  conversation; older answers you never rated cannot be rated later. Helmcentral
+  also keeps which lookups Mate made for each answer so it can be traced:
+  kept for rated answers, cleared after seven days for the rest.
 
 ### Changed
 

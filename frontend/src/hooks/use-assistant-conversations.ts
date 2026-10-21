@@ -161,6 +161,8 @@ export interface AssistantMessage {
   formDrafts?: AssistantFormDraft[]
   /** Cards built from tool results (ADR 0191) - only ever on an assistant reply. */
   cards?: MateCard[]
+  /** The operator's rating of this answer, when it has one. */
+  feedback?: { verdict: 'up' | 'down'; note: string }
 }
 
 export function mapProposal(api: ProposalApi): AssistantProposal {
@@ -219,6 +221,7 @@ export function mapMessage(api: MessageApi): AssistantMessage {
     proposals: api.proposals?.map(mapProposal),
     formDrafts: api.form_drafts?.map(mapFormDraft),
     cards: api.cards === undefined ? undefined : decodeMateCards(api.cards),
+    feedback: api.feedback,
   }
 }
 

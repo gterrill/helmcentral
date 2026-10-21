@@ -51,4 +51,12 @@ describe('AssistantAnswerFeedback', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
     expect(await screen.findByRole('alert')).toHaveTextContent('message not found')
   })
+
+  it('is read-only when asked: pressed thumb, note as text, nothing to tap', () => {
+    render(<AssistantAnswerFeedback messageId="a1" rating={{ verdict: 'down', note: 'wrong tank' }} onRate={vi.fn()} readOnly />)
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.getByText('wrong tank')).toBeInTheDocument()
+  })
 })

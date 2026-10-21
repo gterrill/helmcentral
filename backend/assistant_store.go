@@ -58,7 +58,10 @@ type assistantMessage struct {
 	// with the row (message_tool_calls) and read through ListToolCalls, never
 	// sent with the message itself: results can be tens of kB.
 	ToolCalls []assistantToolCall `json:"-"`
-	CreatedAt time.Time           `json:"created_at"`
+	// Feedback is the operator's rating of this answer, nil when unrated.
+	// Read by ListMessages; the live "message" event never carries one.
+	Feedback  *assistantFeedbackSummary `json:"feedback,omitempty"`
+	CreatedAt time.Time                 `json:"created_at"`
 	// Attachments are the documents (ADR 0106) attached to this message,
 	// position-ordered, populated by AppendMessage (from its input) and
 	// ListMessages (from message_attachments). Always empty on an assistant
@@ -596,7 +599,12 @@ func (s *assistantStore) ListMessages(conversationID string) ([]assistantMessage
 	if err != nil {
 		return nil, err
 	}
+	feedbackByMessage, err := feedbackForMessages(s.db, ids)
+	if err != nil {
+		return nil, err
+	}
 	for i := range out {
+		out[i].Feedback = feedbackByMessage[out[i].ID]
 		out[i].Cards = cardsByMessage[out[i].ID]
 		out[i].Attachments = attachmentsByMessage[out[i].ID]
 		out[i].Proposals = proposalsByMessage[out[i].ID]

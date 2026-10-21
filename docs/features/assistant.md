@@ -637,14 +637,17 @@ what you typed. Tap the thumb you chose again to take the rating back, or the
 other thumb to change your mind.
 
 Both thumbs matter. A thumbs-down says what went wrong; a thumbs-up says what
-Mate got right and must keep getting right. The thumbs appear on answers as
-Mate gives them. If you reopen a conversation later they are not offered on its
-older answers, so a rating always reflects how the answer looked when you
-asked.
+Mate got right and must keep getting right. You rate an answer in the chat as
+Mate gives it, and the rating stays with the answer: reopen the conversation
+later and a rated answer still shows its thumb and note, which you can change or
+take back. Older answers you never rated are not offered for rating, so a rating
+always reflects how the answer looked when you asked.
 
 Alongside each answer Helmcentral keeps which lookups Mate made to write it,
-what each returned, and which version of Mate's standing instructions it was
-working from. Rating an answer does not change how Mate behaves today; the
+what each returned (very large results are cut short and marked as such), and
+which version of Mate's standing instructions it was working from. The lookups
+of answers you rated are kept; for answers you never rated they are cleared
+after seven days. Rating an answer does not change how Mate behaves today; the
 ratings are kept on the boat so that a later improvement to Mate can be checked
 against answers you judged good and poor, and nothing changes in how Mate works
 without you approving it.

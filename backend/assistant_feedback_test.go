@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/labstack/echo/v4"
 )
@@ -279,5 +280,115 @@ func TestAssistantFeedbackHandlers(t *testing.T) {
 	}
 	if list, _ := store.ListFeedback(); len(list) != 0 {
 		t.Errorf("expected cleared")
+	}
+}
+
+func TestAssistantStore_ListMessagesCarriesFeedbackOnRatedAnswers(t *testing.T) {
+	store := newTestAssistantStore(t)
+	user, answer := feedbackFixture(t, store)
+	if _, err := store.SetMessageFeedback(answer.ID, "down", "wrong tank"); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := store.ListMessages(answer.ConversationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msgs[0].ID != user.ID || msgs[0].Feedback != nil {
+		t.Fatalf("user row must carry no feedback: %+v", msgs[0].Feedback)
+	}
+	if fb := msgs[1].Feedback; fb == nil || fb.Verdict != "down" || fb.Note != "wrong tank" {
+		t.Fatalf("rated answer must carry its feedback, got %+v", fb)
+	}
+	raw, _ := json.Marshal(msgs[1])
+	if !strings.Contains(string(raw), `"feedback":{"verdict":"down","note":"wrong tank"}`) {
+		t.Fatalf("unexpected JSON %s", raw)
+	}
+	if err := store.ClearMessageFeedback(answer.ID); err != nil {
+		t.Fatal(err)
+	}
+	msgs, _ = store.ListMessages(answer.ConversationID)
+	if msgs[1].Feedback != nil {
+		t.Fatal("cleared rating must not be listed")
+	}
+}
+
+// pruneFixture appends an answer with one tool call at the store's clock.
+func pruneFixture(t *testing.T, store *assistantStore, at time.Time) assistantMessage {
+	t.Helper()
+	store.now = func() time.Time { return at }
+	conv, err := store.CreateConversation("x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a",
+		ToolCalls: []assistantToolCall{{Name: "t", Args: "{}", Result: "{}"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+func TestAssistantStore_PruneToolCallsDeletesOnlyUnratedPastTheWindow(t *testing.T) {
+	store := newTestAssistantStore(t)
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	old := now.Add(-assistantToolCallRetention - time.Hour)
+	oldUnrated := pruneFixture(t, store, old)
+	oldRated := pruneFixture(t, store, old)
+	fresh := pruneFixture(t, store, now.Add(-time.Hour))
+	if _, err := store.SetMessageFeedback(oldRated.ID, "up", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	store.now = func() time.Time { return now }
+	n, err := store.PruneToolCalls()
+	if err != nil || n != 1 {
+		t.Fatalf("pruned %d, err %v", n, err)
+	}
+	count := func(id string) int { c, _ := store.ListToolCalls(id); return len(c) }
+	if count(oldUnrated.ID) != 0 || count(oldRated.ID) != 1 || count(fresh.ID) != 1 {
+		t.Fatalf("unexpected survivors: %d %d %d", count(oldUnrated.ID), count(oldRated.ID), count(fresh.ID))
+	}
+
+	// Clearing the rating puts the answer back under retention.
+	if err := store.ClearMessageFeedback(oldRated.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n, err = store.PruneToolCalls(); err != nil || n != 1 || count(oldRated.ID) != 0 {
+		t.Fatalf("after clear: pruned %d err %v left %d", n, err, count(oldRated.ID))
+	}
+	if count(fresh.ID) != 1 {
+		t.Fatal("fresh answer must keep its calls")
+	}
+}
+
+func TestAssistantStore_TruncatesOversizeToolCallOnAUTF8Boundary(t *testing.T) {
+	store := newTestAssistantStore(t)
+	conv, _ := store.CreateConversation("x")
+	// "é" is two bytes, so a cut at the cap lands mid-rune when the cap is odd
+	// relative to the prefix.
+	big := "x" + strings.Repeat("é", assistantToolCallMaxBytes)
+	m, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a",
+		ToolCalls: []assistantToolCall{
+			{Name: "big", Args: "{}", Result: big},
+			{Seq: 1, Name: "small", Args: "{}", Result: "ok"},
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, _ := store.ListToolCalls(m.ID)
+	b, s := calls[0], calls[1]
+	if !b.Truncated || b.OriginalBytes != 2+len(big) || len(b.Result) > assistantToolCallMaxBytes || !utf8.ValidString(b.Result) || len(b.Result) < assistantToolCallMaxBytes-3 {
+		t.Fatalf("big call: truncated=%v original=%d len=%d valid=%v", b.Truncated, b.OriginalBytes, len(b.Result), utf8.ValidString(b.Result))
+	}
+	if s.Truncated || s.OriginalBytes != 0 || s.Result != "ok" {
+		t.Fatalf("small call must be whole: %+v", s)
+	}
+
+	args := strings.Repeat("a", assistantToolCallMaxBytes+10)
+	m2, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a",
+		ToolCalls: []assistantToolCall{{Name: "bigargs", Args: args, Result: "ok"}}})
+	c2, _ := store.ListToolCalls(m2.ID)
+	if !c2[0].Truncated || len(c2[0].Args) != assistantToolCallMaxBytes || c2[0].OriginalBytes != len(args)+2 {
+		t.Fatalf("args truncation: %+v", c2[0].Truncated)
 	}
 }
