@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,7 +31,7 @@ func feedbackFixture(t *testing.T, store *assistantStore) (user, answer assistan
 	}
 	answer, err = store.AppendMessage(assistantMessage{
 		ConversationID: conv.ID, Role: "assistant", Content: "About 300 L.", Model: "m",
-		PromptVersion: "abc123def456",
+		PromptVersion: "abc123def456", ToolCallsRecorded: true,
 		ToolCalls: []assistantToolCall{
 			{Round: 0, Seq: 0, Name: "get_vessel_state", Args: `{"a":1}`, Result: `{"fuel":300}`, ElapsedMs: 12},
 			{Round: 0, Seq: 1, Name: "find_places", Args: `{}`, Result: `{"error":"boom"}`, ElapsedMs: 3, Error: "boom"},
@@ -112,7 +114,7 @@ func TestAssistantStore_FeedbackSetReplaceClear(t *testing.T) {
 		t.Fatalf("re-rating must replace the verdict and keep created_at: %+v", fb)
 	}
 
-	list, err := store.ListFeedback()
+	list, _, err := store.ListFeedback(0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +130,7 @@ func TestAssistantStore_FeedbackSetReplaceClear(t *testing.T) {
 	if err := store.ClearMessageFeedback(answer.ID); err != nil {
 		t.Fatal(err)
 	}
-	if list, _ = store.ListFeedback(); len(list) != 0 {
+	if list, _, _ = store.ListFeedback(0, ""); len(list) != 0 {
 		t.Fatalf("expected feedback cleared, got %d", len(list))
 	}
 	// Clearing again is not an error: the answer exists, it just has no rating.
@@ -179,18 +181,10 @@ func TestAssistantStore_PromptVersionAddedToExistingDatabase(t *testing.T) {
 	}
 }
 
-func TestAssistantPromptVersion(t *testing.T) {
-	a := assistantPromptVersion("stable prompt")
-	if len(a) != 12 || a != assistantPromptVersion("stable prompt") || a == assistantPromptVersion("stable prompt!") {
-		t.Fatalf("unexpected version %q", a)
-	}
-}
-
 func TestPostAssistantMessageHandler_PersistsToolCallsAndPromptVersion(t *testing.T) {
 	store, _, conv := postAssistantMessageTestSetup(t)
-	var gotStable string
 	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
-		return &fakeAssistantRunner{emit: emit, gotStable: &gotStable, reply: assistantReply{
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "ok", Model: "openai/gpt-4o",
 			ToolCalls: []assistantToolCall{{Round: 0, Seq: 0, Name: "get_vessel_state", Args: "{}", Result: "{}", ElapsedMs: 5}},
 		}}
@@ -204,8 +198,8 @@ func TestPostAssistantMessageHandler_PersistsToolCallsAndPromptVersion(t *testin
 		t.Fatal(err)
 	}
 	row := msgs[len(msgs)-1]
-	if row.Role != "assistant" || row.PromptVersion == "" || row.PromptVersion != assistantPromptVersion(gotStable) {
-		t.Fatalf("prompt version %q does not match the stable part the run was given", row.PromptVersion)
+	if row.Role != "assistant" || row.PromptVersion == "" {
+		t.Fatalf("prompt version %q is empty", row.PromptVersion)
 	}
 	calls, _ := store.ListToolCalls(row.ID)
 	if len(calls) != 1 || calls[0].Name != "get_vessel_state" {
@@ -278,7 +272,7 @@ func TestAssistantFeedbackHandlers(t *testing.T) {
 	if rec := feedbackRequest(t, http.MethodDelete, base, answer.ID, ""); rec.Code != http.StatusNoContent {
 		t.Errorf("delete: %d", rec.Code)
 	}
-	if list, _ := store.ListFeedback(); len(list) != 0 {
+	if list, _, _ := store.ListFeedback(0, ""); len(list) != 0 {
 		t.Errorf("expected cleared")
 	}
 }
@@ -390,5 +384,174 @@ func TestAssistantStore_TruncatesOversizeToolCallOnAUTF8Boundary(t *testing.T) {
 	c2, _ := store.ListToolCalls(m2.ID)
 	if !c2[0].Truncated || len(c2[0].Args) != assistantToolCallMaxBytes || c2[0].OriginalBytes != len(args)+2 {
 		t.Fatalf("args truncation: %+v", c2[0].Truncated)
+	}
+}
+
+func TestAssistantStore_ListFeedbackNamesTheInputThatPromptedTheAnswer(t *testing.T) {
+	store := newTestAssistantStore(t)
+	conv, _ := store.CreateConversation("x")
+	store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "user", Content: "watch the oil pressure"})
+	store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "watch", Content: "Watch finished: oil pressure"})
+	ans, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "Steady at 4 bar."})
+	if _, err := store.SetMessageFeedback(ans.ID, "up", ""); err != nil {
+		t.Fatal(err)
+	}
+	list, _, err := store.ListFeedback(0, "")
+	if err != nil || len(list) != 1 {
+		t.Fatalf("list: %v %d", err, len(list))
+	}
+	if list[0].Question != "Watch finished: oil pressure" || list[0].QuestionRole != "watch" {
+		t.Fatalf("got %q (%s)", list[0].Question, list[0].QuestionRole)
+	}
+}
+
+func TestAssistantStore_NewRatingRefusedOnAnswerPastRetentionButExistingOnesStayEditable(t *testing.T) {
+	store := newTestAssistantStore(t)
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	old := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
+	rated := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
+	store.now = func() time.Time { return now.Add(-assistantToolCallRetention) }
+	if _, err := store.SetMessageFeedback(rated.ID, "up", ""); err != nil {
+		t.Fatalf("rating inside the window: %v", err)
+	}
+	store.now = func() time.Time { return now }
+
+	if _, err := store.SetMessageFeedback(old.ID, "up", ""); !errors.Is(err, errAssistantFeedbackTooOld) {
+		t.Fatalf("new rating on an old unrated answer: %v", err)
+	}
+	if _, err := store.SetMessageFeedback(rated.ID, "down", "changed my mind"); err != nil {
+		t.Fatalf("replacing an existing rating: %v", err)
+	}
+	if err := store.ClearMessageFeedback(rated.ID); err != nil {
+		t.Fatalf("clearing: %v", err)
+	}
+	if _, err := store.SetMessageFeedback(rated.ID, "up", ""); !errors.Is(err, errAssistantFeedbackTooOld) {
+		t.Fatalf("re-rating after a clear is a new rating: %v", err)
+	}
+}
+
+func TestAssistantStore_ToolCallsRecordedFlag(t *testing.T) {
+	store := newTestAssistantStore(t)
+	conv, _ := store.CreateConversation("x")
+	legacy, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "from before recording"})
+	noTools, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "no tools", ToolCallsRecorded: true})
+	for _, m := range []assistantMessage{legacy, noTools} {
+		if _, err := store.SetMessageFeedback(m.ID, "up", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list, _, _ := store.ListFeedback(0, "")
+	got := map[string]bool{}
+	for _, e := range list {
+		got[e.MessageID] = e.ToolCallsRecorded
+	}
+	if got[legacy.ID] || !got[noTools.ID] {
+		t.Fatalf("legacy must be unrecorded, a recorded answer with no tools must be recorded: %v", got)
+	}
+}
+
+func TestAssistantStore_PruneMarksPrunedAnswersAsNoLongerRecorded(t *testing.T) {
+	store := newTestAssistantStore(t)
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	m := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
+	store.now = func() time.Time { return now }
+	if _, err := store.PruneToolCalls(); err != nil {
+		t.Fatal(err)
+	}
+	var recorded int
+	if err := store.db.QueryRow(`SELECT tool_calls_recorded FROM messages WHERE id = ?`, m.ID).Scan(&recorded); err != nil || recorded != 0 {
+		t.Fatalf("recorded=%d err=%v", recorded, err)
+	}
+}
+
+func TestAssistantStore_ListFeedbackPages(t *testing.T) {
+	store := newTestAssistantStore(t)
+	t0 := time.Date(2026, 10, 21, 8, 0, 0, 0, time.UTC)
+	var ids []string
+	for i := 0; i < 3; i++ {
+		m := pruneFixture(t, store, t0.Add(time.Duration(i)*time.Minute))
+		ids = append(ids, m.ID)
+		if _, err := store.SetMessageFeedback(m.ID, "up", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page1, next, err := store.ListFeedback(2, "")
+	if err != nil || len(page1) != 2 || next == "" {
+		t.Fatalf("page 1: %d next=%q err=%v", len(page1), next, err)
+	}
+	if page1[0].MessageID != ids[2] || page1[1].MessageID != ids[1] {
+		t.Fatalf("newest first expected")
+	}
+	if len(page1[0].ToolCalls) != 1 {
+		t.Fatalf("tool calls must ride with each entry")
+	}
+	page2, next2, err := store.ListFeedback(2, next)
+	if err != nil || len(page2) != 1 || page2[0].MessageID != ids[0] || next2 != "" {
+		t.Fatalf("page 2: %+v next=%q err=%v", page2, next2, err)
+	}
+	if _, _, err := store.ListFeedback(0, "garbage"); !errors.Is(err, errAssistantFeedbackInvalid) {
+		t.Fatalf("bad cursor: %v", err)
+	}
+}
+
+func TestAssistantFeedbackHandlers_ListLimitAndConflict(t *testing.T) {
+	store := withTestAssistantStore(t)
+	_, answer := feedbackFixture(t, store)
+	for _, q := range []string{"?limit=0", "?limit=201", "?limit=abc", "?before=garbage"} {
+		c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/feedback"+q, "", "")
+		if err := listAssistantFeedbackHandler(c); err != nil || rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: %v %d", q, err, rec.Code)
+		}
+	}
+	c, rec := newAssistantEchoContext(http.MethodGet, "/api/assistant/feedback?limit=200", "", "")
+	if err := listAssistantFeedbackHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Errorf("limit=200: %v %d", err, rec.Code)
+	}
+
+	now := time.Now().UTC()
+	old := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
+	store.now = func() time.Time { return now }
+	if rec := feedbackRequest(t, http.MethodPut, "/x", old.ID, `{"verdict":"up"}`); rec.Code != http.StatusConflict {
+		t.Errorf("old answer: %d %s", rec.Code, rec.Body.String())
+	}
+	_ = answer
+}
+
+func TestAssistantPromptVersion_IsTheRulesAndToolsNotTheBoat(t *testing.T) {
+	tools := assistantToolDefinitions(assistantToolDeps{})
+	base := assistantPromptVersion(false, tools)
+	if len(base) != 12 || base != assistantPromptVersion(false, tools) {
+		t.Fatalf("unstable or wrong length %q", base)
+	}
+	if assistantPromptVersion(true, tools) == base {
+		t.Error("a rule that is switched on must change the version")
+	}
+	if assistantPromptVersion(false, tools[:len(tools)-1]) == base {
+		t.Error("the tool list must change the version")
+	}
+}
+
+func TestPostAssistantMessageHandler_PromptVersionIgnoresVesselAndOperatorData(t *testing.T) {
+	store, _, conv := postAssistantMessageTestSetup(t)
+	swapAssistantRunner(t, func(apiKey, model, settingsPath string, autoRouter assistantAutoRouterOptions, webSearch bool, today time.Time, emit assistantEmitter) assistantRunnerFace {
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "m"}}
+	})
+	ask := func(notes string) string {
+		body := fmt.Sprintf("assistant:\n    enabled: true\n    model: \"openai/gpt-4o\"\n    notes: %q\n", notes)
+		path := filepath.Join(t.TempDir(), "settings.yaml")
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("SETTINGS_FILE", path)
+		c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-10-03","content":"hi"}`, conv.ID)
+		if err := postAssistantMessageHandler(c); err != nil || rec.Code != http.StatusOK {
+			t.Fatalf("handler: %v %d", err, rec.Code)
+		}
+		msgs, _ := store.ListMessages(conv.ID)
+		return msgs[len(msgs)-1].PromptVersion
+	}
+	a, b := ask("Anchorage A is exposed to the south."), ask("Totally different standing notes.")
+	if a == "" || a != b {
+		t.Fatalf("standing notes are operator data, not a rule: %q vs %q", a, b)
 	}
 }

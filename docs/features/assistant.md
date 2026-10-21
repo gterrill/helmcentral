@@ -640,7 +640,8 @@ Both thumbs matter. A thumbs-down says what went wrong; a thumbs-up says what
 Mate got right and must keep getting right. You rate an answer in the chat as
 Mate gives it, and the rating stays with the answer: reopen the conversation
 later and a rated answer still shows its thumb and note, which you can change or
-take back. Older answers you never rated are not offered for rating, so a rating
+take back. Older answers you never rated are not offered for rating, and one more than
+seven days old cannot be newly rated, so a rating
 always reflects how the answer looked when you asked.
 
 Alongside each answer Helmcentral keeps which lookups Mate made to write it,

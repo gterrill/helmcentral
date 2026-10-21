@@ -708,9 +708,9 @@ describe('useMateSession', () => {
     })
 
     it('saves a verdict with its note, replaces it, and clears it', async () => {
-      const server = fakeMateServer({ conversations: [conversation('c1')] })
+      const server = fakeMateServer({ conversations: [conversation('c1')], messages: { c1: [{ id: 'a1', role: 'assistant', content: 'x' }] } })
       const { result } = await renderSession({ initialId: 'c1' })
-      await waitFor(() => expect(result.current.activeId).toBe('c1'))
+      await waitFor(() => expect(result.current.messages).toHaveLength(1))
 
       await act(async () => {
         await result.current.rateAnswer('a1', 'down', '')
@@ -734,9 +734,9 @@ describe('useMateSession', () => {
     })
 
     it('keeps the old verdict and says so when the server refuses the new one', async () => {
-      const server = fakeMateServer({ conversations: [conversation('c1')] })
+      const server = fakeMateServer({ conversations: [conversation('c1')], messages: { c1: [{ id: 'a1', role: 'assistant', content: 'x' }] } })
       const { result } = await renderSession({ initialId: 'c1' })
-      await waitFor(() => expect(result.current.activeId).toBe('c1'))
+      await waitFor(() => expect(result.current.messages).toHaveLength(1))
       await act(async () => {
         await result.current.rateAnswer('a1', 'up', '')
       })
@@ -777,6 +777,22 @@ describe('useMateSession', () => {
       expect(result.current.ratings.old).toEqual({ verdict: 'up', note: 'fine' })
       await act(async () => { await result.current.rateAnswer('old', null) })
       expect(result.current.ratings.old).toBeUndefined()
+    })
+
+    it('takes the server\'s word again when the thread is read afresh, so a change made on another device shows', async () => {
+      const server = fakeMateServer({
+        conversations: [conversation('c1')],
+        messages: { c1: [{ id: 'old', role: 'assistant', content: 'Earlier answer', feedback: { verdict: 'down', note: '' } }] },
+      })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.ratings.old).toBeDefined())
+      await act(async () => { await result.current.rateAnswer('old', 'up', 'fine') })
+      expect(result.current.ratings.old?.verdict).toBe('up')
+
+      // Another device cleared it.
+      server.messages.set('c1', [{ id: 'old', role: 'assistant', content: 'Earlier answer', conversation_id: 'c1', seq: 1, created_at: '2026-10-15T00:00:00Z' }])
+      await act(async () => { await result.current.select('c1') })
+      await waitFor(() => expect(result.current.ratings.old).toBeUndefined())
     })
   })
 })

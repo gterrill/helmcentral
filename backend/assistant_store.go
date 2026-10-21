@@ -58,6 +58,9 @@ type assistantMessage struct {
 	// with the row (message_tool_calls) and read through ListToolCalls, never
 	// sent with the message itself: results can be tens of kB.
 	ToolCalls []assistantToolCall `json:"-"`
+	// ToolCallsRecorded marks a row whose tool calls were written with it (even
+	// when there were none), so a missing trace is told apart from "no tools".
+	ToolCallsRecorded bool `json:"-"`
 	// Feedback is the operator's rating of this answer, nil when unrated.
 	// Read by ListMessages; the live "message" event never carries one.
 	Feedback  *assistantFeedbackSummary `json:"feedback,omitempty"`
@@ -168,6 +171,7 @@ func createAssistantSchema(db *sql.DB) error {
 			cache_write_tokens INTEGER NOT NULL DEFAULT 0,
 			tool_rounds       INTEGER NOT NULL DEFAULT 0,
 			prompt_version    TEXT NOT NULL DEFAULT '',
+			tool_calls_recorded INTEGER NOT NULL DEFAULT 0,
 			created_at        INTEGER NOT NULL
 		)`); err != nil {
 		return fmt.Errorf("create messages table: %w", err)
@@ -216,6 +220,16 @@ func createAssistantSchema(db *sql.DB) error {
 	if hasPromptVersion == 0 {
 		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN prompt_version TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add messages.prompt_version: %w", err)
+		}
+	}
+
+	var hasRecorded int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'tool_calls_recorded'`).Scan(&hasRecorded); err != nil {
+		return fmt.Errorf("inspect messages table: %w", err)
+	}
+	if hasRecorded == 0 {
+		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN tool_calls_recorded INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add messages.tool_calls_recorded: %w", err)
 		}
 	}
 
@@ -485,9 +499,9 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 	m.CreatedAt = now
 
 	if _, err := tx.Exec(
-		`INSERT INTO messages (id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, prompt_version, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.ConversationID, m.Seq, m.Role, m.Content, m.Model, m.PromptTokens, m.CompletionTokens, m.CostUSD, m.CachedTokens, m.CacheWriteTokens, m.ToolRounds, m.PromptVersion, m.CreatedAt.Unix()); err != nil {
+		`INSERT INTO messages (id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, prompt_version, tool_calls_recorded, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.ConversationID, m.Seq, m.Role, m.Content, m.Model, m.PromptTokens, m.CompletionTokens, m.CostUSD, m.CachedTokens, m.CacheWriteTokens, m.ToolRounds, m.PromptVersion, m.ToolCallsRecorded, m.CreatedAt.Unix()); err != nil {
 		return assistantMessage{}, fmt.Errorf("insert message: %w", err)
 	}
 

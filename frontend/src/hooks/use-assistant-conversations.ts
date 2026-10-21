@@ -569,6 +569,14 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     )
   }, [])
 
+  // An answer's rating, as just saved (or taken back, when `feedback` is
+  // undefined). Kept on the message, so a fresh read of the thread replaces it.
+  const updateFeedback = useCallback((messageId: string, feedback: AssistantMessage['feedback']) => {
+    setMessages((previous) =>
+      previous.map((message) => (message.id === messageId ? { ...message, feedback } : message)),
+    )
+  }, [])
+
   const errorMessage = error !== null ? describeLoadError(error) : null
 
   return {
@@ -589,6 +597,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     reloadMessages,
     updateProposal,
     updateFormDraft,
+    updateFeedback,
     refresh,
     reload,
   }

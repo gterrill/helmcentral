@@ -24,8 +24,10 @@ be checked against answers that were already good.
    `/api/assistant/messages/:id/feedback` write it (write tier) and refuse an
    unknown id (404), a user or watch message (400), a bad verdict or a note
    over 1000 characters (400). `GET /api/assistant/feedback` lists rated
-   answers with the preceding question, the answer, model, prompt version and
-   tool calls.
+   answers with the preceding input (a question, or the watch report Mate was
+   answering, with its role), the answer, model, prompt version and tool calls.
+   It pages: `limit` (default 50, at most 200) and a `before` cursor, newest
+   first, returning `next` while more remain.
 2. **Thumbs-up counts as well as thumbs-down.** A down case says what to fix;
    an up case says what must keep working. A later replay check needs both, or
    a fix for one answer can only be tested against other failures.
@@ -52,11 +54,20 @@ be checked against answers that were already good.
      knows the record is incomplete and must not treat it as whole.
    - **Retention.** The calls of unrated answers are deleted once the answer is
      seven days old; rated answers keep theirs, and clearing a rating puts the
-     answer back under the seven days. The prune runs at startup and every six
+     answer back under the seven days. A new rating on an unrated answer older
+     than seven days is refused (409), because its calls are already gone;
+     changing or taking back an existing rating stays allowed. The message row
+     carries `tool_calls_recorded`, set when the calls are written and cleared
+     when they are pruned, and the list returns it, so an empty list of calls
+     on an answer that predates recording or was pruned is not read as "used no
+     tools". The prune runs at startup and every six
      hours, and logs how many rows it removed.
 5. **Prompt version.** `messages.prompt_version` is the first 12 hex digits of
-   the SHA-256 of the stable (cached) system-prompt part. The live part
-   changes every turn and is left out. The column is added to an existing
+   the SHA-256 of Mate's instructions: the stable system-prompt text built from
+   an empty context, plus the tool definitions on offer. The vessel, standing
+   notes, help index and other operator data are left out, as is the live part
+   that changes every turn, so editing settings does not look like a prompt
+   change; switching web search on does, since it adds a rule. The column is added to an existing
    database by the same inspect-and-`ALTER` the other message columns use.
 6. **Direction.** The judge for any later replay will be the configured chat
    model, not a separate setting, and any learned prompt rule will take effect

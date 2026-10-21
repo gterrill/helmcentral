@@ -10,10 +10,10 @@ interface AssistantAnswerFeedbackProps {
   messageId: string
   /** The verdict held for this answer, if any. */
   rating: MateAnswerRating | undefined
-  /** Saves a verdict (with its note), or clears it when null. Resolves null on
-   * success or the server's words when it refused. */
   /** Shows the verdict and note without offering to change them. */
   readOnly?: boolean
+  /** Saves a verdict (with its note), or clears it when null. Resolves null on
+   * success or the server's words when it refused. */
   onRate: (messageId: string, verdict: 'up' | 'down' | null, note?: string) => Promise<string | null>
 }
 
@@ -30,7 +30,7 @@ export function AssistantAnswerFeedback({ messageId, rating, onRate, readOnly = 
 
   useEffect(() => {
     setNote(savedNote)
-  }, [savedNote, rating?.verdict])
+  }, [savedNote])
 
   const rate = async (verdict: 'up' | 'down' | null, text?: string) => {
     setBusy(true)
@@ -39,8 +39,15 @@ export function AssistantAnswerFeedback({ messageId, rating, onRate, readOnly = 
     setBusy(false)
   }
 
+  // A tap on the held thumb takes the rating back; any other tap sets that
+  // verdict and carries the note along, saved or still being typed.
   const tap = (verdict: 'up' | 'down') => {
-    void rate(rating?.verdict === verdict ? null : verdict)
+    if (rating?.verdict === verdict) {
+      setNote('')
+      void rate(null)
+      return
+    }
+    void rate(verdict, rating ? note.trim() : '')
   }
 
   const saveNote = (event: FormEvent) => {

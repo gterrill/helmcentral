@@ -458,6 +458,16 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
     if (event.dataTransfer.files.length > 0) uploads.add(event.dataTransfer.files)
   }, [uploads])
 
+  // Answers whose rating controls have been shown in this view. One stays
+  // rateable after its rating is taken back, even though it was only offered
+  // because it carried a rating.
+  const [offeredRatings, setOfferedRatings] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    const shown = session.messages.filter((m) => session.ratings[m.id] !== undefined && !offeredRatings.has(m.id))
+    if (shown.length === 0) return
+    setOfferedRatings((previous) => new Set([...previous, ...shown.map((m) => m.id)]))
+  }, [session.messages, session.ratings, offeredRatings])
+
   const hasMessages = session.messages.length > 0
   // ADR 0105: the draft is the current round's answer text streaming in.
   // While it holds text, it is the thing on screen in place of the status
@@ -606,7 +616,7 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                             {/* Rate in the live chat; a rating stays with
                                 the answer. A rated answer always shows its
                                 verdict; one read back unrated is not offered. */}
-                            {(session.ratings[message.id] !== undefined || (canWrite && session.liveAnswerIds.has(message.id))) && (
+                            {(session.ratings[message.id] !== undefined || (canWrite && (session.liveAnswerIds.has(message.id) || offeredRatings.has(message.id)))) && (
                               <AssistantAnswerFeedback
                                 messageId={message.id}
                                 rating={session.ratings[message.id]}

@@ -1280,7 +1280,7 @@ describe('AssistantThread: rating an answer', () => {
     expect(screen.getByRole('button', { name: 'Poor answer' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('textbox', { name: 'What was wrong' })).toHaveValue('wrong tank')
     fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
-    await waitFor(() => expect(rateAnswer).toHaveBeenCalledWith('m1', 'up', ''))
+    await waitFor(() => expect(rateAnswer).toHaveBeenCalledWith('m1', 'up', 'wrong tank'))
   })
 
   it('shows the verdict read-only to someone who cannot write', () => {
@@ -1296,5 +1296,17 @@ describe('AssistantThread: rating an answer', () => {
     expect(screen.getByRole('button', { name: 'Good answer' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByRole('textbox', { name: 'What was good' })).not.toBeInTheDocument()
     expect(screen.getByText('right call')).toBeInTheDocument()
+  })
+
+  it('keeps the controls on an answer after its rating is taken back, so it can be rated again', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const rated = fakeMateSession({ messages: [assistantMessage()], ratings: { m1: { verdict: 'down', note: '' } } })
+    const { rerender } = render(<AssistantThread canWrite session={rated} />)
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toBeInTheDocument()
+
+    rerender(<AssistantThread canWrite session={{ ...rated, ratings: {} }} />)
+
+    expect(screen.getByRole('button', { name: 'Good answer' })).toHaveAttribute('aria-pressed', 'false')
+    expect(screen.getByRole('button', { name: 'Poor answer' })).toBeInTheDocument()
   })
 })

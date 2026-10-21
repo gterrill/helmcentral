@@ -37,10 +37,10 @@ describe('AssistantAnswerFeedback', () => {
     await waitFor(() => expect(onRate).toHaveBeenCalledWith('a1', 'down', 'wrong tank'))
   })
 
-  it('switches verdict keeping nothing of the old note, and clears on a second tap of the active thumb', async () => {
+  it('switches verdict keeping the saved note, and clears on a second tap of the active thumb', async () => {
     const { onRate } = setup({ verdict: 'down', note: 'wrong tank' })
     fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
-    await waitFor(() => expect(onRate).toHaveBeenCalledWith('a1', 'up', ''))
+    await waitFor(() => expect(onRate).toHaveBeenCalledWith('a1', 'up', 'wrong tank'))
     fireEvent.click(screen.getByRole('button', { name: 'Poor answer' }))
     await waitFor(() => expect(onRate).toHaveBeenCalledWith('a1', null))
   })
@@ -58,5 +58,14 @@ describe('AssistantAnswerFeedback', () => {
     expect(screen.getByRole('button', { name: 'Poor answer' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(screen.getByText('wrong tank')).toBeInTheDocument()
+  })
+
+  it('sends an unsaved draft with a changed verdict and leaves the input as typed', async () => {
+    const { onRate } = setup({ verdict: 'down', note: 'wrong tank' })
+    const box = screen.getByRole('textbox', { name: 'What was wrong' })
+    fireEvent.change(box, { target: { value: 'wrong tank, and late' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Good answer' }))
+    await waitFor(() => expect(onRate).toHaveBeenCalledWith('a1', 'up', 'wrong tank, and late'))
+    expect(screen.getByRole('textbox', { name: /What was/ })).toHaveValue('wrong tank, and late')
   })
 })

@@ -1109,6 +1109,7 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		pc.ActiveWatch = &watch
 	}
 	systemStable, systemLive := assistantSystemPromptParts(pc)
+	toolDefs := assistantToolDefinitions(assistantTurnToolDeps(p.apiKey, p.settingsPath, p.webSearch, p.today))
 	history, err := assistantHistoryMessages(messages, assistantDocumentLookup)
 	if err != nil {
 		return err
@@ -1168,21 +1169,22 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		// client that finds no run in progress (GET .../run -> 204) can
 		// still read the answer straight from GET the conversation.
 		assistantRow, err := globalAssistantStore.AppendMessage(assistantMessage{
-			ConversationID:   id,
-			Role:             "assistant",
-			Content:          reply.Content,
-			Model:            reply.Model,
-			PromptTokens:     reply.PromptTokens,
-			CompletionTokens: reply.CompletionTokens,
-			CostUSD:          reply.CostUSD,
-			CachedTokens:     reply.CachedTokens,
-			CacheWriteTokens: reply.CacheWriteTokens,
-			ToolRounds:       reply.ToolRounds,
-			PromptVersion:    assistantPromptVersion(systemStable),
-			ToolCalls:        reply.ToolCalls,
-			Proposals:        reply.Proposals,
-			FormDrafts:       reply.FormDrafts,
-			Cards:            reply.Cards,
+			ConversationID:    id,
+			Role:              "assistant",
+			Content:           reply.Content,
+			Model:             reply.Model,
+			PromptTokens:      reply.PromptTokens,
+			CompletionTokens:  reply.CompletionTokens,
+			CostUSD:           reply.CostUSD,
+			CachedTokens:      reply.CachedTokens,
+			CacheWriteTokens:  reply.CacheWriteTokens,
+			ToolRounds:        reply.ToolRounds,
+			PromptVersion:     assistantPromptVersion(pc.WebSearch, toolDefs),
+			ToolCallsRecorded: true,
+			ToolCalls:         reply.ToolCalls,
+			Proposals:         reply.Proposals,
+			FormDrafts:        reply.FormDrafts,
+			Cards:             reply.Cards,
 		})
 		if err != nil {
 			log.Printf("assistant: persist reply for conversation %s: %v", id, err)
