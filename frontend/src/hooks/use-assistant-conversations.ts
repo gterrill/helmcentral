@@ -514,6 +514,9 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // Bumped by every local append, so a quiet reload that was already in
   // flight when a new message landed knows its answer is out of date.
   const localAppendsRef = useRef(0)
+  const feedbackVersionRef = useRef(0)
+  const reloadsInFlightRef = useRef(0)
+  const pendingFeedbackRef = useRef(new Map<string, { feedback: AssistantMessage['feedback']; version: number; settled: boolean }>())
 
   // Appends a message already known to the caller - the optimistic user
   // bubble sent before the server has responded, and the final assistant
@@ -532,17 +535,32 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   const reloadMessages = useCallback(async (id: string) => {
     const seq = selectionSeqRef.current
     const appends = localAppendsRef.current
+    const feedbackVersion = feedbackVersionRef.current
+    reloadsInFlightRef.current += 1
     try {
       const data = await apiRequest<{ conversation?: ConversationApi; messages?: MessageApi[] }>(
         `${LIST_PATH}/${encodeURIComponent(id)}`,
       )
       if (selectionSeqRef.current !== seq || localAppendsRef.current !== appends) return
       const fresh = Array.isArray(data.messages) ? data.messages.map(mapMessage) : []
-      setMessages((previous) => mergeReloaded(previous, fresh))
+      // A rating changed after this read began, or still being saved, is newer
+      // than what the read saw: keep it rather than the server's older copy.
+      const newer = fresh.map((message) => {
+        const pending = pendingFeedbackRef.current.get(message.id)
+        return pending && (!pending.settled || pending.version > feedbackVersion) ? { ...message, feedback: pending.feedback } : message
+      })
+      setMessages((previous) => mergeReloaded(previous, newer))
       setSummaryNoteId(data.conversation?.summary_note_id ?? null)
     } catch (err) {
       if (selectionSeqRef.current !== seq) return
       setActionError(wireMessage(err))
+    } finally {
+      reloadsInFlightRef.current -= 1
+      if (reloadsInFlightRef.current === 0) {
+        for (const [messageId, pending] of pendingFeedbackRef.current) {
+          if (pending.settled) pendingFeedbackRef.current.delete(messageId)
+        }
+      }
     }
   }, [])
 
@@ -571,6 +589,27 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
 
   // An answer's rating, as just saved (or taken back, when `feedback` is
   // undefined). Kept on the message, so a fresh read of the thread replaces it.
+  // A rating the operator has just asked for, held until a re-read of the
+  // thread cannot overwrite it with an older copy: from the moment the request
+  // is sent, and (once it has settled) for any read that began before then.
+  // `settle(true)` after the request succeeded, `settle(false)` after it was
+  // refused, which lets the server's copy stand.
+  const holdFeedback = useCallback((messageId: string, feedback: AssistantMessage['feedback']) => {
+    feedbackVersionRef.current += 1
+    const entry = { feedback, version: feedbackVersionRef.current, settled: false }
+    pendingFeedbackRef.current.set(messageId, entry)
+    return (succeeded: boolean) => {
+      if (pendingFeedbackRef.current.get(messageId) !== entry) return
+      if (!succeeded || reloadsInFlightRef.current === 0) {
+        pendingFeedbackRef.current.delete(messageId)
+        return
+      }
+      feedbackVersionRef.current += 1
+      entry.version = feedbackVersionRef.current
+      entry.settled = true
+    }
+  }, [])
+
   const updateFeedback = useCallback((messageId: string, feedback: AssistantMessage['feedback']) => {
     setMessages((previous) =>
       previous.map((message) => (message.id === messageId ? { ...message, feedback } : message)),
@@ -598,6 +637,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     updateProposal,
     updateFormDraft,
     updateFeedback,
+    holdFeedback,
     refresh,
     reload,
   }
