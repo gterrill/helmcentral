@@ -527,7 +527,7 @@ describe('EquipmentEditor', () => {
 
     const picker = await screen.findByLabelText('Source')
     expect((picker as HTMLSelectElement).value).toBe('electrical.generator.9')
-    expect(within(picker).getByRole('option', { name: 'electrical.generator.9 · not reporting' })).toBeInTheDocument()
+    expect(within(picker).getByRole('option', { name: 'electrical.generator.9 · not reporting now' })).toBeInTheDocument()
   })
 
   it('asks for a bank only on a battery item, and clears the figures when the source moves off one', async () => {

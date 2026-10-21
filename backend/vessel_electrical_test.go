@@ -407,7 +407,7 @@ func TestVesselCandidatesListElectricalInstancesWithFreshReadings(t *testing.T) 
 	snapshot.setSelfContext("vessels.self")
 	withGlobalSnapshot(t, snapshot)
 
-	got := vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil)
+	got := vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil, sourceRecord{})
 
 	metric := func(r discoveryRow, label string) string {
 		for _, m := range r.Metrics {
@@ -473,7 +473,7 @@ func TestVesselCandidatesListElectricalInstancesWithFreshReadings(t *testing.T) 
 
 func TestVesselDiscoveryListsAreEmptyArraysNotNull(t *testing.T) {
 	seedSelfTree(t, `{}`)
-	body, err := json.Marshal(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil))
+	body, err := json.Marshal(vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil, sourceRecord{}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +546,7 @@ func TestVesselDiscoveryOffersOnlyACNodesThatCarryRealPower(t *testing.T) {
 		"7":{"realPower":{"value":3}},
 		"loads":{"total":{"power":{"value":99}}},
 		"9":{"phase":{"A":{"current":{"value":2}}}}}}}`)
-	got := vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil)
+	got := vesselDiscovery(globalSignalKSnapshot, vesselView{}, nil, sourceRecord{})
 	var ids []string
 	for _, a := range discoveryGroupRows(got, "ac") {
 		ids = append(ids, a.Instance)

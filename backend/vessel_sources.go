@@ -36,6 +36,14 @@ var sourceGroupOrder = []sourceGroup{
 	sourceTank, sourceGenerator, sourceCharger, sourceInverter,
 }
 
+// sourceKindNouns is how a kind is worded in a sentence to the operator. The
+// one table: the setup status and the one-off conversion both read it, and a
+// test checks that every group has an entry.
+var sourceKindNouns = map[sourceGroup]string{
+	sourceEngine: "engine", sourceBattery: "battery", sourceAlternator: "alternator", sourceSolar: "solar controller",
+	sourceTank: "tank", sourceGenerator: "generator", sourceCharger: "charger", sourceInverter: "inverter",
+}
+
 type sourceShape struct {
 	group sourceGroup
 	re    *regexp.Regexp

@@ -157,13 +157,15 @@ func (a passageWindowArgs) validate() error {
 				return fail("legs[%d].route[%d].lon must be between -180 and 180", i, j)
 			}
 		}
-		if (l.PassageHours == nil) == (l.SpeedKn == nil) {
-			return fail("legs[%d]: give exactly one of passage_hours or speed_kn", i)
+		if l.PassageHours == nil && l.SpeedKn == nil {
+			return fail("legs[%d]: give passage_hours or speed_kn", i)
 		}
 		if l.PassageHours != nil && !(*l.PassageHours >= 0.5 && *l.PassageHours <= 36) {
 			return fail("legs[%d].passage_hours must be between 0.5 and 36", i)
 		}
-		if l.SpeedKn != nil && !(*l.SpeedKn >= 1 && *l.SpeedKn <= 25) {
+		// With both given, passage_hours is used and speed_kn is not read, so
+		// it is not range-checked either (ignoredSpeedNotes says so).
+		if l.PassageHours == nil && !(*l.SpeedKn >= 1 && *l.SpeedKn <= 25) {
 			return fail("legs[%d].speed_kn must be between 1 and 25", i)
 		}
 		if l.FloodSetDeg != nil && !(*l.FloodSetDeg >= 0 && *l.FloodSetDeg <= 360) {
@@ -803,6 +805,18 @@ func passageHoursFromBundles(wb weatherForecastBundle, vb *waveForecastBundle) m
 	return out
 }
 
+// ignoredSpeedNotes names every leg that gave both passage_hours and speed_kn.
+// The hours are used; the model is told, so it does not retry the same call.
+func ignoredSpeedNotes(a passageWindowArgs) []string {
+	var notes []string
+	for i, l := range a.Legs {
+		if l.PassageHours != nil && l.SpeedKn != nil {
+			notes = append(notes, fmt.Sprintf("legs[%d]: speed_kn %g was ignored because passage_hours %g was also given; the hours are used", i, *l.SpeedKn, *l.PassageHours))
+		}
+	}
+	return notes
+}
+
 // passageModelResult is what the model reads: a compact summary of the grid
 // (every row's verdict, and per cell the state, what limited it and the local
 // times), not the card's payload. The card carries the full figures and goes
@@ -811,6 +825,7 @@ type passageModelResult struct {
 	Legs        []string          `json:"legs"`
 	Rows        []passageModelRow `json:"rows"`
 	Instruction string            `json:"instruction"`
+	Notes       []string          `json:"notes,omitempty"`
 
 	level, next int
 }
@@ -1001,6 +1016,7 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 		return "", fmt.Errorf("assess_passage_window card: %w", err)
 	}
 	model := newPassageModelResult(payload)
+	model.Notes = ignoredSpeedNotes(args)
 	text, err := capToolResultJSON(model, model.shrink)
 	if err != nil {
 		return "", err
@@ -1018,8 +1034,8 @@ var mateToolAssessPassageWindow = mateTool{
 			"with stays (leave Thursday, two nights at Cape Upstart, then Bowen). The limits come from the " +
 			"operator's settings; if they are not set the tool says so and you must tell the operator, never " +
 			"assume numbers. Wind is judged by its angle to each segment of the route, so add a via point at every " +
-			"headland the route rounds. Get coordinates from find_places. For each leg give exactly one of " +
-			"passage_hours (from estimate_passage) or speed_kn. Give flood_set_deg only from the operator's " +
+			"headland the route rounds. Get coordinates from find_places. For each leg give " +
+			"passage_hours (from estimate_passage) or speed_kn; if both are given the hours are used. Give flood_set_deg only from the operator's " +
 			"standing notes or after asking them; never guess it. Dates beyond the forecast show no_data. A card " +
 			"is attached to your reply, so do not repeat the grid as a table. " +
 			fmt.Sprintf("The operator sets only a no-go wind (required) and no-go wave (optional) per sector, plus an optional wind against tide reduction. "+
@@ -1048,8 +1064,8 @@ var mateToolAssessPassageWindow = mateTool{
 											"required": ["lat", "lon"]
 										}
 									},
-									"passage_hours": {"type": "number", "minimum": 0.5, "maximum": 36, "description": "Hours under way. Give this or speed_kn, not both."},
-									"speed_kn": {"type": "number", "minimum": 1, "maximum": 25, "description": "Planned speed in knots; hours are then the route distance over the speed. Give this or passage_hours, not both."},
+									"passage_hours": {"type": "number", "minimum": 0.5, "maximum": 36, "description": "Hours under way. Used when given, even if speed_kn is also given."},
+									"speed_kn": {"type": "number", "minimum": 1, "maximum": 25, "description": "Planned speed in knots; hours are then the route distance over the speed. Ignored when passage_hours is also given."},
 									"flood_set_deg": {"type": "number", "minimum": 0, "maximum": 360, "description": "Direction in degrees true the flood stream sets toward. Only from standing notes or the operator; omit if unknown."},
 									"depart_time": {"type": "string", "description": "Optional HH:MM local, overriding the itinerary's departure time for this leg."}
 								},

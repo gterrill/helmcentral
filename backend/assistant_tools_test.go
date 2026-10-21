@@ -782,6 +782,15 @@ func TestExecuteGetTides_EmptyWindowAddsNote(t *testing.T) {
 	}
 }
 
+// testEngines are engine settings for the instances, named "Engine <instance>".
+func testEngines(instances ...string) []vesselEngineSetting {
+	out := make([]vesselEngineSetting, 0, len(instances))
+	for _, in := range instances {
+		out = append(out, vesselEngineSetting{Instance: in, Name: "Engine " + in})
+	}
+	return out
+}
+
 // ── estimate_passage ────────────────────────────────────────────────────
 
 func TestConfiguredEngineInstances_ReadsVesselSettings(t *testing.T) {
@@ -795,7 +804,7 @@ func TestConfiguredEngineInstances_ReadsVesselSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0] != "port" || got[1] != "starboard" {
+	if len(got) != 2 || got[0].Instance != "port" || got[1].Instance != "starboard" {
 		t.Fatalf("expected [port starboard], got %v", got)
 	}
 }
@@ -814,7 +823,7 @@ func TestExecuteEstimatePassage_UnreadableSettingsIsNotReportedAsNotSetUp(t *tes
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() ([]string, error) { return nil, errors.New("boom") },
+		fuelRateInstances: func() ([]vesselEngineSetting, error) { return nil, errors.New("boom") },
 	}
 	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
 	if err == nil || !strings.Contains(err.Error(), "settings could not be read") || strings.Contains(err.Error(), "not set up") {
@@ -870,7 +879,7 @@ func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
+		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 	}
 
 	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
@@ -925,7 +934,7 @@ func TestExecuteEstimatePassage_OmittedSpeedUsesMostSampledBand(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
+		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 	}
 
 	// 97nm at the single band's 9.7kts mean is exactly 10.0 hours, chosen so
@@ -955,10 +964,16 @@ func TestExecuteEstimatePassage_OmittedSpeedUsesMostSampledBand(t *testing.T) {
 }
 
 func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
+	// Every engine path has points but the boat never moved: a genuinely
+	// empty join, which is not a mapping problem.
+	series := singleBandPerformanceSeries()
+	for i := range series["navigation.speedOverGround"] {
+		series["navigation.speedOverGround"][i].Value = 0
+	}
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
-		influxRange:       stubInfluxRangeByPath(map[string][]telemetryPoint{}), // every path comes back empty
-		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
+		influxRange:       stubInfluxRangeByPath(series),
+		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 	}
 
 	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"days":30}`))
@@ -970,11 +985,69 @@ func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
 	}
 }
 
+// An engine item mapped to a SignalK instance that is alive in the log but
+// never carried RPM (propulsion.0 carries only exhaust temperature on the real
+// boat) is a mapping problem, and the error says which item and path.
+func TestExecuteEstimatePassage_SilentEnginePathOnAMissingSignatureBlamesTheMapping(t *testing.T) {
+	for _, missing := range []string{"propulsion.starboard.fuel.rate", "propulsion.port.fuel.rate", "propulsion.port.revolutions"} {
+		err := estimatePassageWithout(t, missing, signatureMissing)
+		for _, want := range []string{"nothing logged for " + missing, "last 30 days", "Cummins QSB 6.7", "never reported RPM", "Settings > SignalK"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error %q lacks %q", missing, err.Error(), want)
+			}
+		}
+		if strings.Contains(err.Error(), "no underway history") {
+			t.Errorf("%s: a silent path is not an empty join: %q", missing, err.Error())
+		}
+	}
+}
+
+// An engine that merely did not run (or has no recent log) is not a mapping
+// problem: the error names the engine and the missing figure, without blame.
+func TestExecuteEstimatePassage_SilentEnginePathWithoutProofDoesNotBlameTheMapping(t *testing.T) {
+	for _, state := range []string{signatureCarried, signatureUnknown} {
+		err := estimatePassageWithout(t, "propulsion.starboard.fuel.rate", state)
+		for _, want := range []string{`"Cummins QSB 6.7"`, "logged nothing for propulsion.starboard.fuel.rate", "last 30 days"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error %q lacks %q", state, err.Error(), want)
+			}
+		}
+		for _, banned := range []string{"Settings", "set to", "never reported"} {
+			if strings.Contains(err.Error(), banned) {
+				t.Errorf("%s: error %q must not blame the mapping (%q)", state, err.Error(), banned)
+			}
+		}
+	}
+}
+
+func estimatePassageWithout(t *testing.T, missing, signature string) error {
+	t.Helper()
+	without := map[string][]telemetryPoint{}
+	for k, v := range singleBandPerformanceSeries() {
+		if k != missing {
+			without[k] = v
+		}
+	}
+	deps := assistantToolDeps{
+		now:         func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
+		influxRange: stubInfluxRangeByPath(without),
+		fuelRateInstances: func() ([]vesselEngineSetting, error) {
+			return []vesselEngineSetting{{Instance: "port", Name: "Cummins QSB 6.7"}, {Instance: "starboard", Name: "Cummins QSB 6.7"}}, nil
+		},
+		engineSignature: func(string) string { return signature },
+	}
+	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"days":30}`))
+	if err == nil {
+		t.Fatalf("%s: expected an error", missing)
+	}
+	return err
+}
+
 func TestExecuteEstimatePassage_NoEnginesConfiguredSaysEnginesAreNotSetUp(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() ([]string, error) { return nil, nil }, // no vessel.engines
+		fuelRateInstances: func() ([]vesselEngineSetting, error) { return nil, nil }, // no vessel.engines
 	}
 
 	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
@@ -990,7 +1063,7 @@ func TestExecuteEstimatePassage_FuelAboardKnownAddsMargin(t *testing.T) {
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
+		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 		fuelAboardM3:      func() (float64, bool) { return 0.6, true }, // 600 L aboard
 	}
 
@@ -1021,7 +1094,7 @@ func TestExecuteEstimatePassage_FuelAboardUnknownOmitsFieldsAndNotesIt(t *testin
 	deps := assistantToolDeps{
 		now:               func() time.Time { return time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC) },
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
-		fuelRateInstances: func() ([]string, error) { return []string{"port", "starboard"}, nil },
+		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 		fuelAboardM3:      func() (float64, bool) { return 0, false },
 	}
 

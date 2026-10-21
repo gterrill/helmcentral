@@ -319,7 +319,7 @@ func TestVesselDiscoveryListsBatteryInstancesWithBusNamesAndSolarFlag(t *testing
 	snapshot := newAnomalyTestSnapshot()
 	loadSensorBatteriesFixture(t, snapshot)
 
-	resp := vesselDiscovery(snapshot, vesselView{Batteries: []vesselBatterySetting{{Instance: "3", Name: "Port Engine Starter Battery"}}}, nil)
+	resp := vesselDiscovery(snapshot, vesselView{Batteries: []vesselBatterySetting{{Instance: "3", Name: "Port Engine Starter Battery"}}}, nil, sourceRecord{})
 	byInstance := map[string]discoveryRow{}
 	for _, b := range discoveryGroupRows(resp, "battery") {
 		byInstance[b.Instance] = b

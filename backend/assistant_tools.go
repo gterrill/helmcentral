@@ -86,11 +86,16 @@ type assistantToolDeps struct {
 	// buckets. Production wires queryInfluxPathRange (influx.go); tests
 	// supply a canned series with no InfluxDB connection at all.
 	influxRange func(path string, start, stop time.Time, every string) ([]telemetryPoint, error)
-	// fuelRateInstances names the propulsion instances the operator chose
-	// in Vessel settings, so estimate_passage never guesses engine names.
-	// nil when none is configured - executeEstimatePassage then says
-	// engines are not set up.
-	fuelRateInstances func() ([]string, error)
+	// fuelRateInstances names the engines (item name and propulsion instance)
+	// the operator mapped, so estimate_passage never guesses engine names and
+	// can say which item a silent path belongs to. nil when none is
+	// configured - executeEstimatePassage then says engines are not set up.
+	fuelRateInstances func() ([]vesselEngineSetting, error)
+	// engineSignature is the signature state (signatureCarried, signatureMissing
+	// or signatureUnknown) of propulsion.<instance>, so an engine with no
+	// logged fuel rate or RPM is blamed on its mapping only when the source is
+	// known never to carry RPM, not when the engine simply did not run.
+	engineSignature func(instance string) string
 	// fuelAboardM3 is the vessel's current fuel volume (helmcentral.fuel.volume,
 	// ADR 0084 - the same derived path the Tanks tile reads), for
 	// estimate_passage's fuel margin. ok is false whenever the figure is
@@ -287,6 +292,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		},
 		influxRange:       queryInfluxPathRange,
 		fuelRateInstances: configuredEngineInstances(settingsPath),
+		engineSignature:   liveEngineSignature,
 		fuelAboardM3:      fuelAboardM3FromDerivedPaths,
 		help:              func() []helpPage { return globalHelp },
 		documents:         func() *documentStore { return globalDocumentStore },
@@ -335,20 +341,28 @@ func fuelAboardM3FromDerivedPaths() (float64, bool) {
 // It returns nil, nil when none is configured, which estimate_passage reports
 // as engines not being set up. An unreadable vessel block is an error, kept
 // distinct from not-configured.
-func configuredEngineInstances(settingsPath string) func() ([]string, error) {
-	return func() ([]string, error) {
+func configuredEngineInstances(settingsPath string) func() ([]vesselEngineSetting, error) {
+	return func() ([]vesselEngineSetting, error) {
 		vessel, err := loadVesselView(settingsPath)
 		if err != nil {
 			return nil, err
 		}
-		var instances []string
+		var instances []vesselEngineSetting
 		for _, engine := range vessel.Engines {
 			if engine.Instance != "" {
-				instances = append(instances, engine.Instance)
+				instances = append(instances, engine)
 			}
 		}
 		return instances, nil
 	}
+}
+
+// liveEngineSignature judges propulsion.<instance> from the live tree and the
+// logged history.
+func liveEngineSignature(instance string) string {
+	source := sourcePath(sourceEngine, instance)
+	live := liveCarriesSignature(globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()), sourceEngine, source)
+	return signatureState(live, currentSourceRecord(), sourceEngine, source)
 }
 
 // ── tool definitions (OpenRouter/OpenAI function-calling schemas) ──────────

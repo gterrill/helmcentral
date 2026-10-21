@@ -116,12 +116,23 @@ export interface DiscoveryRow {
   reporting: boolean
   metrics: DiscoveryMetric[]
   item: DiscoveryItemRef | null
+  /** When Helmcentral last saw this source's signature reading reported (an ISO time); null when it never has. */
+  last_seen: string | null
+  /**
+   * Whether the source carries what its kind needs (RPM for an engine).
+   * 'missing': it reports other readings but never this one, and Helmcentral
+   * has watched long enough to say so. 'unknown': not judged yet. An unowned
+   * source is only listed when it carries it.
+   */
+  signature: 'carried' | 'missing' | 'unknown'
 }
 
 export interface DiscoveryGroup {
   /** A SourceKind, or 'ac' for the AC inputs, which no item owns. */
   kind: string
   mappable: boolean
+  /** What a source of this kind must report, in the operator's words ("RPM"). */
+  signature_label: string
   rows: DiscoveryRow[]
 }
 
@@ -130,14 +141,59 @@ export interface VesselDetectorStatus {
   missing?: string
 }
 
+/** What Helmcentral's own record of the boat covers. */
+export interface DiscoveryTracking {
+  /** When Helmcentral began watching this boat; null before it has. */
+  since: string | null
+  /** The record was started from InfluxDB history. */
+  seeded: boolean
+  /** The record spans enough time to call a source that never reports its signature missing. */
+  covers: boolean
+  /** Why Helmcentral's record could not be read; '' when it could. While set, only sources reporting now are listed. */
+  error: string
+}
+
+export const noTracking: DiscoveryTracking = { since: null, seeded: false, covers: false, error: '' }
+
 export interface VesselDiscoveryResponse {
   /** False while Helmcentral has no vessel data from SignalK. */
   connected: boolean
   groups: DiscoveryGroup[]
   detectors: Record<string, VesselDetectorStatus>
+  /** How long Helmcentral has been watching this boat, which decides what it can say about sources it has not seen report. */
+  tracking: DiscoveryTracking
 }
 
-export const emptyVesselDiscovery: VesselDiscoveryResponse = { connected: false, groups: [], detectors: {} }
+export const emptyVesselDiscovery: VesselDiscoveryResponse = { connected: false, groups: [], detectors: {}, tracking: noTracking }
+
+/** "16 Oct": the day a source's signature reading was last seen, in the vessel's own time zone (the browser's until it is known). */
+export function loggedDay(iso: string, timeZone?: string): string {
+  return new Intl.DateTimeFormat('en-GB', { timeZone, day: 'numeric', month: 'short' }).format(new Date(iso))
+}
+
+/** The row for an exact source, or undefined. */
+export function discoveryRowFor(discovery: VesselDiscoveryResponse, source: string): { row: DiscoveryRow; label: string } | undefined {
+  for (const g of discovery.groups) {
+    const row = g.rows.find((r) => r.source === source)
+    if (row) return { row, label: g.signature_label }
+  }
+  return undefined
+}
+
+/**
+ * The warning for a source an item owns that has never reported what its kind
+ * needs, or '' when there is nothing to say. It is the operator's cue to pick a
+ * different source for the item.
+ */
+export function signatureWarning(found: { row: DiscoveryRow; label: string } | undefined): string {
+  if (!found || found.row.item === null || found.row.signature !== 'missing') return ''
+  return `${found.row.source} reports other readings but has never reported ${found.label}, so nothing reads it. Choose the source that does.`
+}
+
+/** "not reporting now · last seen 16 Oct", or "not reporting now" when never seen. */
+export function notReportingText(row: DiscoveryRow, timeZone?: string): string {
+  return row.last_seen ? `not reporting now · last seen ${loggedDay(row.last_seen, timeZone)}` : 'not reporting now'
+}
 
 /** The rows of one kind, or none. */
 export function discoveryRows(discovery: VesselDiscoveryResponse, kind: string): DiscoveryRow[] {
@@ -158,4 +214,18 @@ const SOURCE_SHAPES: { kind: SourceKind; re: RegExp }[] = [
 /** The kind of item a source belongs to, or null for '' or anything that is not one of the eight shapes. */
 export function sourceKindOf(source: string): SourceKind | null {
   return SOURCE_SHAPES.find((shape) => shape.re.test(source))?.kind ?? null
+}
+
+/**
+ * "Helmcentral has been watching the boat since 18 Oct. ...": said while the
+ * record is too young to list an engine that is switched off or to call a
+ * source wrong, or why the record could not be read. '' once the record covers
+ * enough time (or before it began).
+ */
+export function trackingNote(tracking: DiscoveryTracking, timeZone?: string): string {
+  if (tracking.error !== '') {
+    return `Helmcentral couldn't read its record of what the boat has reported (${tracking.error}), so only sources reporting now are listed.`
+  }
+  if (tracking.covers || tracking.since === null) return ''
+  return `Helmcentral has been watching the boat since ${loggedDay(tracking.since, timeZone)}. A source that is switched off is listed once it has reported since then.`
 }

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -143,33 +144,35 @@ func TestSetupStatusRegressesWhenAStepBecomesUndone(t *testing.T) {
 	}
 }
 
-func TestSetupStatusCountsOnlyEngineSourcesThatCarryFigures(t *testing.T) {
+// The engines step counts one thing: sources Discovery offers that no item
+// owns, live or logged. A source an item owns is not counted, and a source in
+// the tree with no figures but a logged signature is.
+func TestSetupStatusCountsUnownedEngineSources(t *testing.T) {
 	fig := []discoveryMetric{{Label: "RPM", Text: "1800 rpm"}, {Label: "Coolant", Text: "77 °C"}}
+	logged := time.Date(2026, 10, 16, 0, 56, 35, 0, time.UTC)
 	engines := discoveryGroup{Kind: "engine", Mappable: true, Rows: []discoveryRow{
-		{Source: "propulsion.0", Instance: "0", Reporting: true},
-		{Source: "propulsion.1", Instance: "1", Reporting: true},
-		{Source: "propulsion.port", Instance: "port", Reporting: true, Metrics: fig},
+		{Source: "propulsion.port", Instance: "port", Reporting: true, Metrics: fig, Item: &discoveryItemRef{ID: "p", Name: "Port"}},
 		{Source: "propulsion.starboard", Instance: "starboard", Reporting: true, Metrics: fig},
+		{Source: "propulsion.centre", Instance: "centre", Reporting: true, LastSeen: &logged},
+		{Source: "propulsion.wing", Instance: "wing", LastSeen: &logged},
 	}}
 	st := stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
-	if strings.Contains(st.Detail, "4") || strings.Contains(st.Detail, "propulsion.") {
-		t.Errorf("figureless sources must not be counted, and no raw paths: %q", st.Detail)
+	if st.State != setupTodo || strings.Contains(st.Detail, "propulsion.") {
+		t.Errorf("no raw paths: %+v", st)
 	}
-	if !strings.Contains(st.Detail, "2 engine sources are reporting rpm and coolant") || !strings.Contains(st.Detail, "for each one that shows figures") {
+	if !strings.Contains(st.Detail, "3 engine sources are available, reporting rpm and coolant") {
+		t.Errorf("owned port is not counted, the in-tree-no-figures and logged ones are: %q", st.Detail)
+	}
+
+	engines.Rows = engines.Rows[1:2]
+	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
+	if !strings.Contains(st.Detail, "1 engine source is available, reporting rpm and coolant") {
 		t.Errorf("engines detail: %q", st.Detail)
 	}
 
-	// All carry figures: each one is an engine.
-	engines.Rows = engines.Rows[2:3]
+	engines.Rows = []discoveryRow{{Source: "propulsion.wing", Instance: "wing", LastSeen: &logged}}
 	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
-	if !strings.Contains(st.Detail, "1 engine source is reporting rpm and coolant") {
-		t.Errorf("engines detail: %q", st.Detail)
-	}
-
-	// Sources but no figures anywhere.
-	engines.Rows = []discoveryRow{{Source: "propulsion.0", Instance: "0", Reporting: true}}
-	st = stepByID(t, buildSetupStatus(vesselView{}, connectedDiscovery(engines), setupMate{}), "engines")
-	if !strings.Contains(st.Detail, "no figures") {
+	if !strings.Contains(st.Detail, "1 engine source is available. In Discovery") {
 		t.Errorf("engines detail: %q", st.Detail)
 	}
 }
@@ -210,7 +213,7 @@ func TestDetectorsAgreeWithSetupSteps(t *testing.T) {
 		{Engines: []vesselEngineSetting{{Instance: "a"}, {Instance: "b"}}, HouseBank: &vesselHouseBankSetting{}},
 	}
 	for i, v := range cases {
-		disc := vesselDiscovery(newAnomalyTestSnapshot(), v, nil)
+		disc := vesselDiscovery(newAnomalyTestSnapshot(), v, nil, sourceRecord{})
 		disc.Connected = true // the steps are blocked without a feed; the checks do not care
 		s := buildSetupStatus(v, disc, setupMate{})
 		if got, want := disc.Detectors["frozen"].Ready, stepByID(t, s, "engines").State == "done"; got != want {

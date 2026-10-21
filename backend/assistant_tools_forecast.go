@@ -573,6 +573,20 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 	return capToolResultJSON(&result, shrink)
 }
 
+// silentEnginePathError explains an empty engine series. When the engine's
+// source is known never to carry RPM (it is alive in the log with other
+// readings) the item is mapped to the wrong source, and the error says so and
+// where to fix it. Otherwise the engine simply logged nothing in the window
+// (it did not run, or the log is short) and the mapping is not blamed.
+func (d assistantToolDeps) silentEnginePathError(engine vesselEngineSetting, path string, days int) error {
+	if d.engineSignature(engine.Instance) == signatureMissing {
+		return fmt.Errorf("estimate_passage: nothing logged for %s in the last %d days; the engine %q is set to propulsion.%s, which has never reported RPM - check its source in Settings > SignalK",
+			path, days, engine.Name, engine.Instance)
+	}
+	return fmt.Errorf("estimate_passage: the engine %q logged nothing for %s in the last %d days (it may not have run in that time)",
+		engine.Name, path, days)
+}
+
 // executeEstimatePassage joins this vessel's own logged speed over ground,
 // total fuel rate and rpm (buildPerformanceTable, assistant_performance.go)
 // over the requested history window, then reads a burn rate and rpm off
@@ -605,12 +619,17 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	stop := d.now()
 	start := stop.AddDate(0, 0, -days)
 
-	instances, instErr := d.fuelRateInstances()
+	engines, instErr := d.fuelRateInstances()
 	if instErr != nil {
 		return "", fmt.Errorf("estimate_passage: the vessel settings could not be read, so the engines are unknown: %w", instErr)
 	}
-	if len(instances) == 0 {
+	if len(engines) == 0 {
 		return "", fmt.Errorf("estimate_passage: engines are not set up (no engine item is assigned to a propulsion source in Settings > SignalK), so there is no per-engine fuel history to estimate from")
+	}
+
+	instances := make([]string, 0, len(engines))
+	for _, engine := range engines {
+		instances = append(instances, engine.Instance)
 	}
 
 	sog, err := d.influxRange("navigation.speedOverGround", start, stop, assistantPerformanceQueryEvery)
@@ -618,14 +637,18 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 		return "", fmt.Errorf("estimate_passage: %w", err)
 	}
 
-	fuelRates := make([][]telemetryPoint, 0, len(instances))
-	for _, instance := range instances {
+	fuelRates := make([][]telemetryPoint, 0, len(engines))
+	for _, engine := range engines {
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		series, ferr := d.influxRange(fmt.Sprintf("propulsion.%s.fuel.rate", instance), start, stop, assistantPerformanceQueryEvery)
+		path := fmt.Sprintf("propulsion.%s.fuel.rate", engine.Instance)
+		series, ferr := d.influxRange(path, start, stop, assistantPerformanceQueryEvery)
 		if ferr != nil {
 			return "", fmt.Errorf("estimate_passage: %w", ferr)
+		}
+		if len(series) == 0 {
+			return "", d.silentEnginePathError(engine, path, days)
 		}
 		fuelRates = append(fuelRates, series)
 	}
@@ -639,9 +662,13 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	// way, and averaging would need its own timestamp join - with its own
 	// "one instance missing" question - for a figure that is illustrative
 	// context, not the thing estimate_passage is actually estimating.
-	rpm, err := d.influxRange(fmt.Sprintf("propulsion.%s.revolutions", instances[0]), start, stop, assistantPerformanceQueryEvery)
+	rpmPath := fmt.Sprintf("propulsion.%s.revolutions", engines[0].Instance)
+	rpm, err := d.influxRange(rpmPath, start, stop, assistantPerformanceQueryEvery)
 	if err != nil {
 		return "", fmt.Errorf("estimate_passage: %w", err)
+	}
+	if len(rpm) == 0 {
+		return "", d.silentEnginePathError(engines[0], rpmPath, days)
 	}
 
 	table := buildPerformanceTable(sog, fuelRates, rpm, assistantPerformanceMinSOGKts)

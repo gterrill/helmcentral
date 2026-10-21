@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -77,7 +78,7 @@ var powerRoles = []struct {
 }
 
 // offerableSources counts the sources the Roles picker offers for kind: the
-// boat reports them, no item owns them, and (for batteries) they are not a
+// boat reports or has logged them, no item owns them, and (for batteries) they are not a
 // charger's own input.
 func offerableSources(disc discoveryResponse, kind string) int {
 	n := 0
@@ -86,7 +87,7 @@ func offerableSources(disc discoveryResponse, kind string) int {
 			continue
 		}
 		for _, r := range g.Rows {
-			if r.Reporting && r.Item == nil && !(kind == "battery" && r.ChargerInput) {
+			if r.Item == nil && !(kind == "battery" && r.ChargerInput) {
 				n++
 			}
 		}
@@ -140,28 +141,115 @@ func countOf(n int, one, many string) string {
 	return strconv.Itoa(n) + " " + many
 }
 
-// engineSourcesWithFigures lists the engine sources that carry live figures,
-// and counts the reporting ones that carry none. A bus can list empty numbered
-// sources beside named ones with rpm. Helmcentral cannot tell whether they are
-// the same engines, so it does not guess: only a source that shows figures is
-// offered to the operator as an engine to make an item for.
-func engineSourcesWithFigures(disc discoveryResponse) (sources []string, figureless int) {
+// signatureCheck is what the discovery rows say about the items owning sources
+// of some kinds: the sentences for those on a source that carries nothing the
+// kind needs (the record spans enough time and shows it never has), and how many could not be
+// judged because Helmcentral has not watched the boat long enough. A source the boat reports now is
+// carried, so a SignalK dropout never makes a finished setup a problem.
+type signatureCheck struct {
+	problems  []string
+	unchecked int
+}
+
+// checkSignatures judges the items owning sources of kinds whose row keep
+// accepts (nil keeps every row).
+func checkSignatures(disc discoveryResponse, keep func(discoveryRow) bool, kinds ...string) signatureCheck {
+	var out signatureCheck
+	for _, g := range disc.Groups {
+		wanted := false
+		for _, k := range kinds {
+			wanted = wanted || g.Kind == k
+		}
+		if !wanted {
+			continue
+		}
+		for _, r := range g.Rows {
+			if r.Item == nil || (keep != nil && !keep(r)) {
+				continue
+			}
+			switch r.Signature {
+			case signatureMissing:
+				out.problems = append(out.problems, fmt.Sprintf("%s is set to %s, %s source that has not reported %s.",
+					r.Item.Name, r.Source, withArticle(sourceKindNouns[sourceGroup(g.Kind)]), g.SignatureLabel))
+			case signatureUnknown:
+				out.unchecked++
+			}
+		}
+	}
+	return out
+}
+
+// chosenPowerSource keeps the rows of the sources chosen for the power roles,
+// so an item that no role reads is not judged.
+func chosenPowerSource(v vesselView) func(discoveryRow) bool {
+	chosen := map[string]bool{}
+	for group, instance := range map[sourceGroup]string{
+		sourceCharger: v.Electrical.ShoreChargerInstance, sourceInverter: v.Electrical.InverterInstance,
+		sourceGenerator: v.Electrical.GeneratorInstance,
+	} {
+		if instance != "" {
+			chosen[sourcePath(group, instance)] = true
+		}
+	}
+	for _, instance := range []string{v.Alternators.PortInstance, v.Alternators.StarboardInstance} {
+		if instance != "" {
+			chosen[sourcePath(sourceAlternator, instance)] = true
+		}
+	}
+	return func(r discoveryRow) bool { return chosen[r.Source] }
+}
+
+func withArticle(noun string) string {
+	if noun == "" {
+		return noun
+	}
+	if strings.ContainsRune("aeiou", rune(noun[0])) {
+		return "an " + noun
+	}
+	return "a " + noun
+}
+
+// trackingNote says since when Helmcentral has been watching the boat (a day in
+// the vessel's own time zone), or why the record could not be read.
+func trackingNote(t discoveryTracking) string {
+	if t.Error != "" {
+		return " (Helmcentral couldn't read its record of what the boat has reported: " + t.Error + ")"
+	}
+	if t.SinceDay == "" {
+		return ""
+	}
+	return " (it has been watching the boat since " + t.SinceDay + ")"
+}
+
+// detail words a finished step's check: the problems with the fix, or a note
+// that some sources could not be checked, or the plain done line.
+func (c signatureCheck) detail(done, fix string, tracking discoveryTracking) (problem bool, text string) {
+	if len(c.problems) > 0 {
+		return true, strings.Join(c.problems, " ") + " " + fix
+	}
+	if c.unchecked > 0 || tracking.Error != "" {
+		return false, done + " Helmcentral couldn't check yet that they report what they should" + trackingNote(tracking) + "."
+	}
+	return false, done
+}
+
+// unownedEngineSources are the engine sources an operator could make an item
+// for: offered by Discovery (live now, or logged) and owned by no item. The
+// server offers a source only if it carries RPM, so a numbered duplicate with
+// one stray reading is not among them.
+func unownedEngineSources(disc discoveryResponse) []discoveryRow {
+	var rows []discoveryRow
 	for _, g := range disc.Groups {
 		if g.Kind != "engine" {
 			continue
 		}
 		for _, r := range g.Rows {
-			if !r.Reporting {
-				continue
-			}
-			if len(r.Metrics) > 0 {
-				sources = append(sources, r.Source)
-			} else {
-				figureless++
+			if r.Item == nil {
+				rows = append(rows, r)
 			}
 		}
 	}
-	return sources, figureless
+	return rows
 }
 
 // engineFigureNames is the figures the engine sources carry, lower case, in the
@@ -176,7 +264,7 @@ func engineFigureNames(disc discoveryResponse) string {
 		for _, r := range g.Rows {
 			for _, m := range r.Metrics {
 				l := strings.ToLower(m.Label)
-				if r.Reporting && !seen[l] {
+				if r.Reporting && r.Item == nil && !seen[l] {
 					seen[l] = true
 					names = append(names, l)
 				}
@@ -274,15 +362,23 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 	eng := setupStep{ID: "engines", Title: "Engines", Target: setupTarget{"signalk", "discovery-engine"}}
 	switch {
 	case enginesAssigned(vessel):
-		eng.State, eng.Detail = setupDone, "Assigned to a propulsion source: "+countOf(len(vessel.Engines), "engine", "engines")+"."
+		bad, text := checkSignatures(disc, nil, "engine").detail(
+			"Assigned to a propulsion source: "+countOf(len(vessel.Engines), "engine", "engines")+".",
+			"Choose the engine source that does.", disc.Tracking)
+		eng.State, eng.Detail = setupDone, text
+		if bad {
+			eng.State = setupTodo
+		}
 	case !connected:
 		eng.State, eng.Detail = blockedBy()
 	default:
 		eng.State = setupTodo
-		if sources, figureless := engineSourcesWithFigures(disc); len(sources) > 0 {
-			eng.Detail = countOf(len(sources), "engine source", "engine sources") + strings.TrimRight(verbAre(len(sources)), " ") + " reporting " + engineFigureNames(disc) + ". In Discovery, create an item for each one that shows figures."
-		} else if figureless > 0 {
-			eng.Detail = "The boat lists engine sources, but they carry no figures yet."
+		if sources := unownedEngineSources(disc); len(sources) > 0 {
+			eng.Detail = countOf(len(sources), "engine source", "engine sources") + strings.TrimRight(verbAre(len(sources)), " ") + " available"
+			if figs := engineFigureNames(disc); figs != "" {
+				eng.Detail += ", reporting " + figs
+			}
+			eng.Detail += ". In Discovery, create an item for each one."
 		} else {
 			eng.Detail = "The boat isn't reporting any engines."
 		}
@@ -293,7 +389,15 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 	bank := setupStep{ID: "house_bank", Title: "House bank", Target: setupTarget{"signalk", "role-house_bank"}}
 	switch {
 	case houseBankChosen(vessel):
-		bank.State, bank.Detail = setupDone, "A house bank is chosen."
+		bankID := ""
+		if vessel.HouseBank != nil {
+			bankID = vessel.HouseBank.EquipmentID
+		}
+		bad, text := checkSignatures(disc, func(r discoveryRow) bool { return r.Item.ID == bankID }, "battery").detail("A house bank is chosen.", "Choose the battery that does.", disc.Tracking)
+		bank.State, bank.Detail = setupDone, text
+		if bad {
+			bank.State = setupTodo
+		}
 	case vessel.HouseBankUnresolved:
 		bank.State, bank.Detail = setupTodo, houseBankUnresolvedDetail
 	case !connected:
@@ -326,7 +430,12 @@ func buildSetupStatus(vessel vesselView, disc discoveryResponse, mate setupMate)
 	}
 	switch {
 	case len(open) == 0:
-		power.State, power.Detail = setupDone, "Every charging and power source is chosen or marked as not on this boat."
+		bad, text := checkSignatures(disc, chosenPowerSource(vessel), "alternator", "charger", "inverter", "generator").detail(
+			"Every charging and power source is chosen or marked as not on this boat.", "Choose the source that does.", disc.Tracking)
+		power.State, power.Detail = setupDone, text
+		if bad {
+			power.State = setupTodo
+		}
 	case !connected:
 		power.State, power.Detail = blockedBy()
 	default:
@@ -375,7 +484,7 @@ func getSetupStatusHandler(c echo.Context) error {
 		}
 	}
 	vessel := resolveVesselView(roles, items)
-	return c.JSON(http.StatusOK, buildSetupStatus(vessel, vesselDiscovery(globalSignalKSnapshot, vessel, items), mate))
+	return c.JSON(http.StatusOK, buildSetupStatus(vessel, vesselDiscovery(globalSignalKSnapshot, vessel, items, currentSourceRecord()), mate))
 }
 
 func setupRoutes() []apiRoute {

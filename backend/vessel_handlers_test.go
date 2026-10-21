@@ -28,7 +28,7 @@ func newVesselCandidatesSnapshot(t *testing.T) *signalKSnapshot {
 func TestVesselDiscoveryListsEnginesAndBatteriesFromTheLiveTree(t *testing.T) {
 	snapshot := newVesselCandidatesSnapshot(t)
 
-	got := vesselDiscovery(snapshot, vesselView{}, nil)
+	got := vesselDiscovery(snapshot, vesselView{}, nil, sourceRecord{})
 
 	engines := discoveryGroupRows(got, "engine")
 	if len(engines) != 2 {
@@ -63,7 +63,7 @@ func TestVesselDiscoverySingleEngineFixture(t *testing.T) {
 	applyNumeric(snapshot, "vessels.self", "propulsion.main.revolutions", 1200.0/60, anomalyDetectorTestNow)
 	applyNumeric(snapshot, "vessels.self", "propulsion.main.temperature", 345, anomalyDetectorTestNow)
 
-	got := vesselDiscovery(snapshot, vesselView{}, nil)
+	got := vesselDiscovery(snapshot, vesselView{}, nil, sourceRecord{})
 	engines := discoveryGroupRows(got, "engine")
 	if len(engines) != 1 || engines[0].Instance != "main" {
 		t.Fatalf("expected exactly one 'main' engine row, got %+v", engines)
@@ -82,7 +82,7 @@ func TestVesselDiscoveryShowsOwnersAndQuietSources(t *testing.T) {
 		{ID: "e9", Name: "Old engine", Source: "propulsion.centre", Group: sourceEngine, Instance: "centre"},
 	}
 
-	engines := discoveryGroupRows(vesselDiscovery(snapshot, vesselView{}, items), "engine")
+	engines := discoveryGroupRows(vesselDiscovery(snapshot, vesselView{}, items, sourceRecord{}), "engine")
 	byInstance := map[string]discoveryRow{}
 	for _, e := range engines {
 		byInstance[e.Instance] = e
@@ -104,7 +104,7 @@ func TestVesselDiscoveryShowsOwnersAndQuietSources(t *testing.T) {
 func TestVesselDiscoveryDetectorStatusReflectsConfiguration(t *testing.T) {
 	snapshot := newAnomalyTestSnapshot()
 
-	fresh := vesselDiscovery(snapshot, vesselView{}, nil)
+	fresh := vesselDiscovery(snapshot, vesselView{}, nil, sourceRecord{})
 	if fresh.Detectors["frozen"].Ready {
 		t.Fatalf("expected frozen not ready with no engines configured: %+v", fresh.Detectors["frozen"])
 	}
@@ -118,7 +118,7 @@ func TestVesselDiscoveryDetectorStatusReflectsConfiguration(t *testing.T) {
 		t.Fatalf("expected engines not ready with fewer than two configured: %+v", fresh.Detectors["engines"])
 	}
 
-	oneEngine := vesselDiscovery(snapshot, vesselView{Engines: []vesselEngineSetting{{Instance: "port"}}}, nil)
+	oneEngine := vesselDiscovery(snapshot, vesselView{Engines: []vesselEngineSetting{{Instance: "port"}}}, nil, sourceRecord{})
 	if !oneEngine.Detectors["frozen"].Ready {
 		t.Fatalf("expected frozen ready with one engine configured: %+v", oneEngine.Detectors["frozen"])
 	}
@@ -126,7 +126,7 @@ func TestVesselDiscoveryDetectorStatusReflectsConfiguration(t *testing.T) {
 		t.Fatalf("expected differentials still not ready with only one engine: %+v", oneEngine.Detectors["engines"])
 	}
 
-	twoEngines := vesselDiscovery(snapshot, vesselView{Engines: []vesselEngineSetting{{Instance: "port"}, {Instance: "starboard"}}}, nil)
+	twoEngines := vesselDiscovery(snapshot, vesselView{Engines: []vesselEngineSetting{{Instance: "port"}, {Instance: "starboard"}}}, nil, sourceRecord{})
 	if !twoEngines.Detectors["engines"].Ready {
 		t.Fatalf("expected differentials ready with two engines configured: %+v", twoEngines.Detectors["engines"])
 	}
@@ -140,7 +140,7 @@ func TestVesselDiscoveryBatteryReadyOnceProfileComplete(t *testing.T) {
 	vessel := vesselView{HouseBank: &vesselHouseBankSetting{
 		Path: "electrical.batteries.512", EquipmentID: equipmentID, CapacityAh: 400, Cells: 8,
 	}}
-	got := vesselDiscovery(snapshot, vessel, nil)
+	got := vesselDiscovery(snapshot, vessel, nil, sourceRecord{})
 	if !got.Detectors["battery"].Ready {
 		t.Fatalf("expected battery detector ready once the bank and profile are complete: %+v", got.Detectors["battery"])
 	}

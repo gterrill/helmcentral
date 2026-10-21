@@ -27,9 +27,38 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Engine and equipment lists offer only real sources.** A source is offered
+  for an engine only if it reports RPM, and likewise voltage for a battery,
+  level for a tank and so on for each kind. A source that carries a single stray
+  reading, such as `propulsion.0` with only exhaust temperature, is no longer
+  listed. Helmcentral now keeps its own record of what the boat reports, so an
+  engine that is switched off is still listed once Helmcentral has seen it
+  report, marked "Not reporting now" with the day it was last seen (for up to 90 days). On a new
+  install, Discovery says since when it has been watching. If you log to
+  InfluxDB, Helmcentral reads that log once to start the record, so
+  switched-off engines are listed straight away; InfluxDB is not required. This
+  applies to Discovery, the Roles lists and the Source list on an item's page.
 - **Mate no longer works from saved routes.** It no longer finds waypoints from
   saved routes when you ask about a place, and it no longer offers to create a
   route after a passage recommendation.
+
+### Fixed
+
+- **An engine set to a source that never reports RPM is flagged.** An item
+  whose source reports other readings but has never reported its own shows a
+  red warning in Discovery, under its role and on its own page, and the Engines
+  step in Setup stays open and names the item and the source. Helmcentral says
+  this only after watching the boat for a week with SignalK connected (or reading a
+  history log); until
+  then, and for a source it has never seen, the step stays done and says it
+  couldn't check yet. If an engine item was set to the wrong source, choose the
+  one that reports RPM on the item's page.
+- **Mate's passage time estimate says which engine reading is missing.** When
+  an engine's fuel rate or RPM was not logged in the window, the answer names
+  the engine instead of "no underway history", and points at its source in
+  Settings when that source has never reported RPM.
+- **The weather window card no longer fails when Mate gives both a passage time
+  and a speed.** The passage time is used and Mate is told the speed was ignored.
 
 ## [0.50.0] - 2026-10-20
 
