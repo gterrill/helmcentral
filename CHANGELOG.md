@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.52.0] - 2026-10-22
+
 ### Changed
 
 - The engine cluster no longer shows a RUN tab while the engine is healthy;
@@ -1541,7 +1543,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.51.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.52.0...HEAD
+[0.52.0]: https://github.com/gterrill/helmcentral/compare/v0.51.0...v0.52.0
 [0.51.0]: https://github.com/gterrill/helmcentral/compare/v0.50.0...v0.51.0
 [0.50.0]: https://github.com/gterrill/helmcentral/compare/v0.49.0...v0.50.0
 [0.49.0]: https://github.com/gterrill/helmcentral/compare/v0.48.0...v0.49.0
