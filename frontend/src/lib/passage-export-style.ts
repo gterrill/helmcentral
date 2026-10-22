@@ -3,6 +3,15 @@
 // basemap and OpenSeaMap's seamarks are fetched by the reader's own browser.
 // Nothing points back at the boat (ADR 0174).
 
+import type { LayerSpecification, SourceSpecification } from 'maplibre-gl'
+
+import {
+  SAT_HANDOFF_START_ZOOM,
+  WORLD_IMAGERY_OPACITY_EXPRESSION,
+  worldImageryPaint,
+  worldImagerySource,
+} from '@/lib/world-imagery'
+
 export const MAPLIBRE_VERSION = '5.24.0'
 export const MAPLIBRE_JS_URL = `https://cdn.jsdelivr.net/npm/maplibre-gl@${MAPLIBRE_VERSION}/dist/maplibre-gl.js`
 export const MAPLIBRE_CSS_URL = `https://cdn.jsdelivr.net/npm/maplibre-gl@${MAPLIBRE_VERSION}/dist/maplibre-gl.css`
@@ -16,6 +25,32 @@ export const EXPORT_SEAMARK_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x
 export const EXPORT_SEAMARK_ATTRIBUTION = '© OpenSeaMap contributors'
 /** Drawn onto static images, which have no attribution control. */
 export const EXPORT_IMAGE_ATTRIBUTION = '© CARTO · © OpenStreetMap contributors · © OpenSeaMap'
+/** The same, with the imagery credit, for images drawn over satellite imagery. */
+export const EXPORT_IMAGE_ATTRIBUTION_SATELLITE = `${EXPORT_IMAGE_ATTRIBUTION} · Esri, Maxar, Earthstar Geographics`
+export const exportImageAttribution = (satellite: boolean) => (satellite ? EXPORT_IMAGE_ATTRIBUTION_SATELLITE : EXPORT_IMAGE_ATTRIBUTION)
+
+export const IMAGERY_SOURCE_ID = 'hcp-imagery'
+export const IMAGERY_LAYER_ID = 'hcp-imagery'
+
+/** Adds the satellite raster to a still image's map, under `beforeId` (the
+ * style's first label layer) so names stay on top. The tiles are asked for
+ * exactly, so a stand-in tile fails the image instead of being drawn. They come through the boat's own proxy, which works because the image is
+ * drawn in the operator's browser. The blog embed is read elsewhere, so it never
+ * carries this. `origin` makes the tile address absolute. */
+export function addExportImagery(
+  map: { addSource: (id: string, spec: SourceSpecification) => unknown; addLayer: (spec: LayerSpecification, beforeId?: string) => unknown },
+  origin: string,
+  beforeId?: string,
+): void {
+  map.addSource(IMAGERY_SOURCE_ID, worldImagerySource({ origin, exact: true }))
+  map.addLayer({
+    id: IMAGERY_LAYER_ID,
+    type: 'raster',
+    source: IMAGERY_SOURCE_ID,
+    minzoom: SAT_HANDOFF_START_ZOOM,
+    paint: worldImageryPaint(WORLD_IMAGERY_OPACITY_EXPRESSION) as never,
+  }, beforeId)
+}
 
 /** Fixed palette: dark enough to read on the light Voyager basemap. */
 export const EXPORT_COLOURS = ['#0369a1', '#c2410c', '#047857', '#a21caf', '#be123c', '#4338ca'] as const

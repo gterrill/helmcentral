@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeWorldImageryOpacity } from '@/components/anchor-watch-map'
+import { computeWorldImageryOpacity } from '@/lib/world-imagery'
 
 describe('world imagery zoom fade-in', () => {
   it('is fully opaque at and above the handoff end zoom', () => {

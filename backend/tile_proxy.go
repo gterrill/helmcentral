@@ -72,6 +72,14 @@ func proxyWorldImageryTileHandler(cache *tileCache, fetcher tileFetcher) echo.Ha
 			return err
 		}
 
+		if degraded && c.QueryParam("exact") == "1" {
+			// The still-image export asks for exact tiles: a coarser or
+			// blank stand-in would be burned into a picture as if it were
+			// the real photograph, so it gets an error instead.
+			c.Response().Header().Set("Cache-Control", "no-store")
+			return c.NoContent(http.StatusBadGateway)
+		}
+
 		if degraded {
 			// A coarser or blank fallback is never persisted under this
 			// tile's own key (see resolveWorldImageryTile), so the browser

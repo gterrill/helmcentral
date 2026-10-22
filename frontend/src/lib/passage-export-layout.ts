@@ -1,4 +1,4 @@
-import { EXPORT_IMAGE_ATTRIBUTION } from '@/lib/passage-export-style'
+import { exportImageAttribution } from '@/lib/passage-export-style'
 
 // Layout of the static passage images (ADR 0174): where the title, dates,
 // figures and overview go, worked out as plain numbers and strings so it can be
@@ -72,6 +72,8 @@ export interface LayoutSpec {
   dates: string
   stats: { l: string; v: string }[]
   inset: boolean
+  /** The map is drawn over satellite imagery, which needs its credit. */
+  satellite?: boolean
 }
 
 /** Where everything goes on the image. Stats that do not fit are dropped from
@@ -95,7 +97,7 @@ export function composeImageLayout(spec: LayoutSpec, measure: Measure): ImageLay
   const dates: TextItem = { text: spec.dates, x: width - margin, y: row1, font: datesFont, fill: MUTED, align: 'right' }
 
   const attribution: TextItem = {
-    text: EXPORT_IMAGE_ATTRIBUTION, x: width - margin, y: height - 14, font: attrFont, fill: MUTED, align: 'right',
+    text: exportImageAttribution(spec.satellite ?? false), x: width - margin, y: height - 14, font: attrFont, fill: MUTED, align: 'right',
   }
   const statsMax = width - margin * 2 - measure(attribution.text, attrFont) - 28
   const gap = 40

@@ -11,10 +11,10 @@ const flyIn = vi.fn(() => Promise.resolve())
 let lastBoat: { lat: number; lon: number } | null = null
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
-  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null }, ref) {
+  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null; overlay?: React.ReactNode }, ref) {
     useImperativeHandle(ref, () => ({ flyIn }))
     lastBoat = p.boat
-    return <div data-testid="map" />
+    return <div data-testid="map">{p.overlay}</div>
   }),
   InsetMap: () => <div data-testid="inset" />,
 }))

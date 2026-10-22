@@ -30,6 +30,7 @@ import {
   type PlaySeconds,
 } from '@/lib/passage-export'
 import { IMAGE_SIZES, type ImageKind } from '@/lib/passage-export-layout'
+import { useImageryPreference } from '@/lib/passage-imagery-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import type { CruiseStats, PassageDetail } from '@/lib/passages'
 import { saveBlob } from '@/lib/save-blob'
@@ -51,6 +52,8 @@ function failed(action: string, err: unknown) {
 export function PassageExportMenu({ kind, title, passages, cruiseStats, units }: PassageExportMenuProps) {
   const [playSeconds, setPlaySeconds] = useState<PlaySeconds>(DEFAULT_PLAY_SECONDS)
   const [inset, setInset] = useInsetPreference()
+  // Still images follow the passage map: satellite on there, satellite here.
+  const [satellite] = useImageryPreference()
   const [busy, setBusy] = useState(false)
   const [embed, setEmbed] = useState<string | null>(null)
   const hasTrack = exportablePassages(passages).length > 0
@@ -88,7 +91,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
       const input = exportInput()
       const data = prepareExport(input)
       const { renderPassageImage } = await import('@/lib/passage-export-image')
-      const blob = await renderPassageImage(data, imageKind)
+      const blob = await renderPassageImage(data, imageKind, satellite)
       saveBlob(blob, fileName(input, 'png'))
       toast.success('Image saved', { id: toastId })
     } catch (err) {

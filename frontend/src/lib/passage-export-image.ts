@@ -1,5 +1,7 @@
 import maplibregl from 'maplibre-gl'
 
+import { worldImageryVisibleAtZoom } from '@/lib/world-imagery'
+import { addExportImagery } from '@/lib/passage-export-style'
 import type { ExportData } from '@/lib/passage-export'
 import { IMAGE_SIZES, composeImageLayout, mapCropRect, paintOverlay, roundRectPath, type ImageKind, type ImageLayout, type Measure } from '@/lib/passage-export-layout'
 
@@ -22,6 +24,8 @@ interface OffscreenMapOptions {
   zoom?: number
   withTrack: boolean
   withBox: boolean
+  /** Draw the world imagery raster under the seamarks. */
+  satellite?: boolean
 }
 
 function bboxPolygon(b: ExportData['bounds']): GeoJSON.Feature<GeoJSON.Polygon> {
@@ -44,7 +48,7 @@ function trackCollection(data: ExportData): GeoJSON.FeatureCollection {
 
 /** Draws one map into a hidden element and hands back a copy of its canvas once
  * every tile has loaded. Fails, rather than returns a half-drawn map. */
-async function renderMap(data: ExportData, o: OffscreenMapOptions): Promise<HTMLCanvasElement> {
+async function renderMap(data: ExportData, o: OffscreenMapOptions): Promise<{ canvas: HTMLCanvasElement; zoom: number }> {
   const host = document.createElement('div')
   host.style.cssText = `position:fixed;left:-99999px;top:0;width:${o.width}px;height:${o.height}px;`
   document.body.appendChild(host)
@@ -70,6 +74,13 @@ async function renderMap(data: ExportData, o: OffscreenMapOptions): Promise<HTML
         reject(new Error(`The map could not be drawn completely (${e.error?.message ?? 'unknown error'}). Check the internet connection and try again.`))
       })
       m.once('load', () => {
+        // Imagery goes under the style's first label layer, so place and water
+        // names stay readable on top of it. Below the handoff zoom it would be
+        // invisible, so nothing is added and nothing is fetched.
+        if (o.satellite && worldImageryVisibleAtZoom(m.getZoom())) {
+          const firstLabel = m.getStyle().layers.find((l) => l.type === 'symbol')?.id
+          addExportImagery(m, window.location.origin, firstLabel)
+        }
         const seamarks = data.map.seamarks
         m.addSource(seamarks.id, { type: 'raster', tiles: [seamarks.tiles], tileSize: 256 })
         m.addLayer({ id: seamarks.layerId, type: 'raster', source: seamarks.id, paint: { 'raster-opacity': 0.85 } })
@@ -93,7 +104,7 @@ async function renderMap(data: ExportData, o: OffscreenMapOptions): Promise<HTML
         m.triggerRepaint()
       })
     })
-    return copyCanvas(m.getCanvas())
+    return { canvas: copyCanvas(m.getCanvas()), zoom: m.getZoom() }
   } finally {
     map?.remove()
     host.remove()
@@ -111,24 +122,27 @@ function copyCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
 }
 
 /** The finished PNG for one image size. */
-export async function renderPassageImage(data: ExportData, kind: ImageKind): Promise<Blob> {
+export async function renderPassageImage(data: ExportData, kind: ImageKind, satellite = false): Promise<Blob> {
   const size = IMAGE_SIZES[kind]
-  const layout = composeImageLayout(
-    { width: size.width, height: size.height, title: data.title, dates: data.dates, stats: data.stats, inset: data.inset },
-    measureWithCanvas(),
-  )
+  const layoutSpec = { width: size.width, height: size.height, title: data.title, dates: data.dates, stats: data.stats, inset: data.inset }
+  const measure = measureWithCanvas()
+  const padding = composeImageLayout(layoutSpec, measure)
   const mapPromise = renderMap(data, {
-    width: size.width, height: size.height, pixelRatio: 2, bounds: data.bounds, padding: layout.padding,
-    withTrack: true, withBox: false,
+    width: size.width, height: size.height, pixelRatio: 2, bounds: data.bounds, padding: padding.padding,
+    withTrack: true, withBox: false, satellite,
   })
-  const insetPromise = layout.inset
+  const insetPromise = padding.inset
     ? renderMap(data, {
-      width: layout.inset.w, height: layout.inset.h, pixelRatio: 2,
+      width: padding.inset.w, height: padding.inset.h, pixelRatio: 2,
       center: [(data.bounds[0] + data.bounds[2]) / 2, (data.bounds[1] + data.bounds[3]) / 2],
       zoom: data.insetZoom, withTrack: false, withBox: true,
     })
     : Promise.resolve(null)
-  const [mapCanvas, insetCanvas] = await Promise.all([mapPromise, insetPromise])
+  const [mapResult, insetResult] = await Promise.all([mapPromise, insetPromise])
+  const mapCanvas = mapResult.canvas
+  const insetCanvas = insetResult?.canvas ?? null
+  // The Esri credit is owed only when imagery is actually in the picture.
+  const layout = composeImageLayout({ ...layoutSpec, satellite: satellite && worldImageryVisibleAtZoom(mapResult.zoom) }, measure)
 
   const out = document.createElement('canvas')
   out.width = size.width * size.outScale

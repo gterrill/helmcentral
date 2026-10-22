@@ -37,10 +37,15 @@ and open the saved file in a browser.
 In the **Export** menu choose **Download image 1200 × 630** for a header or
 social card, or **Download image 2:1** for a wide picture at twice the size
 (2400 × 1200). Each shows the whole track with its title, dates and figures,
-and the overview map if it is ticked. The file is named from the title and the
+and the overview map if it is ticked. If the satellite button on the
+passage map is on, the picture is drawn over the aerial photographs and carries
+their credit; switch it off first for the plain chart. The file is named from the title and the
 first date, for example `hamilton-island-to-mackay-2026-09-14.png`. Drawing
 takes a few seconds, because the map tiles are fetched first, and it needs the
-boat's screen to be online.
+boat's screen to be online. If the photographs cannot be fetched, even for one
+patch of the map, no picture is saved and you are told so; try again when the
+boat is online, or switch the satellite button off to get the chart. The Esri
+credit is added only when the picture is zoomed in far enough to show photographs.
 
 ## What readers see
 
@@ -64,6 +69,7 @@ figure the boat did not record is left out rather than shown as `--`.
 - The map tiles come from public map servers (Carto for the chart, OpenSeaMap
   for the seamarks) and are fetched by the reader's own browser. Their credits
   show on the map. The map software is loaded from a public software library.
+  The blog map never carries satellite photographs; only a saved picture does.
 - The track and figures are written into the pasted card. Nothing in it points
   at the boat, so readers need no access to your network.
 - The track is thinned to at most about 1,500 points across all the passages,

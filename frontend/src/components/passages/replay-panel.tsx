@@ -105,14 +105,16 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           playedIds={playedIds}
           boat={boat}
           isDarkTheme={isDarkTheme}
+          overlay={
+            insetOn && !flying ? (
+              <InsetMap
+                className="h-32 w-44 overflow-hidden rounded-md border border-border shadow-sm"
+                bounds={bounds}
+                isDarkTheme={isDarkTheme}
+              />
+            ) : null
+          }
         />
-        {insetOn && !flying && (
-          <InsetMap
-            className="absolute right-2 top-2 h-32 w-44 overflow-hidden rounded-md border border-border shadow-sm"
-            bounds={bounds}
-            isDarkTheme={isDarkTheme}
-          />
-        )}
       </div>
       <PassageReplayBar
         clock={replay.clock}
