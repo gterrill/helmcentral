@@ -221,49 +221,6 @@ func TestPatchAnchorWatch_PositionCarriesOtherFieldsForward(t *testing.T) {
 	}
 }
 
-// Test: a position change resets the post-anchor self trail, the same way a
-// POST reposition does — the trail is a record of the boat's movement
-// relative to THIS anchor position, and stops meaning anything once the
-// anchor moves.
-func TestPatchAnchorWatch_PositionResetsSelfTrail(t *testing.T) {
-	anchorPublishEnv(t)
-	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
-		t.Fatalf("drop: %d %v", code, resp)
-	}
-	recordSelfTrailPoint(-20.0001, 149.0001)
-	recordSelfTrailPoint(-20.0002, 149.0002)
-	if pts := getSelfTrailSince(time.Time{}); len(pts) != 2 {
-		t.Fatalf("expected 2 trail points before the adjust, got %d", len(pts))
-	}
-
-	if code, resp := patchAnchorWatchForTest(t, map[string]any{"lat": -20.5, "lon": 149.5}); code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %+v", code, resp)
-	}
-
-	if pts := getSelfTrailSince(time.Time{}); len(pts) != 0 {
-		t.Fatalf("expected the trail reset after a position adjust, got %d points", len(pts))
-	}
-}
-
-// Test: the opposite of the above — a radius-only PATCH must not reset the
-// trail, since the anchor position (what the trail is measured against)
-// hasn't moved.
-func TestPatchAnchorWatch_RadiusOnlyDoesNotResetSelfTrail(t *testing.T) {
-	anchorPublishEnv(t)
-	if code, resp := postAnchorWatch(t, map[string]any{"lat": -20.0, "lon": 149.0}); code != http.StatusOK {
-		t.Fatalf("drop: %d %v", code, resp)
-	}
-	recordSelfTrailPoint(-20.0001, 149.0001)
-
-	if code, resp := patchAnchorWatchForTest(t, map[string]any{"radius_meters": 40.0}); code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %+v", code, resp)
-	}
-
-	if pts := getSelfTrailSince(time.Time{}); len(pts) != 1 {
-		t.Fatalf("expected the trail untouched by a radius-only PATCH, got %d points", len(pts))
-	}
-}
-
 // Test: PATCHing lat/lon with no active watch reports 404, matching the
 // existing field-only PATCH behaviour, and publishes nothing.
 func TestPatchAnchorWatch_PositionWithNoActiveWatchReturns404(t *testing.T) {

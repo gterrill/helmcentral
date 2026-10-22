@@ -35,6 +35,13 @@ func anchorTestEnv(t *testing.T, gpsFromBowM float64) string {
 
 	t.Setenv("ANCHOR_WATCH_FILE", filepath.Join(dir, "anchor_watch.json"))
 
+	// A drop, a move and a raise reset the swing trail (ADR 0199) and fail
+	// without a track store, so every anchor test gets one unless it set up its own.
+	if globalPassageStore == nil {
+		globalPassageStore = newTestPassageStore(t)
+		t.Cleanup(func() { globalPassageStore = nil })
+	}
+
 	settingsPath := filepath.Join(dir, "settings.yaml")
 	body := fmt.Sprintf("signalk:\n  address: %s\nanchor:\n  gps_from_bow_m: %g\n", stub.server.URL, gpsFromBowM)
 	if err := os.WriteFile(settingsPath, []byte(body), 0o644); err != nil {

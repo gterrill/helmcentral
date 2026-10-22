@@ -177,6 +177,9 @@ func createPassageSchema(db *sql.DB) error {
 			return fmt.Errorf("create passage schema: %w", err)
 		}
 	}
+	if err := createAnchorTrailSchema(db); err != nil {
+		return err
+	}
 	if err := addTrackPointSourceColumn(db); err != nil {
 		return err
 	}
