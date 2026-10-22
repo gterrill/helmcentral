@@ -33,6 +33,9 @@ type signalKSnapshot struct {
 	contexts        map[string]map[string]any  // context string → nested tree
 	pathSeen        map[string]time.Time       // "<context>|<dotted path>" → last update time
 	sourceSeen      map[string]sourceSeenEntry // "<context>|<$source>" → publishing history
+	// acSourceSeen is, per self vessel, the latest reading of
+	// each electrical.*.acSource path (anomaly_shore_power.go). Self only.
+	acSourceSeen map[acSourceKey]acSourceEntry
 	// batteryPublishers is, per "<context>|<battery id>", every $source that
 	// has published any electrical.batteries.<id>.* path. The tree leaf only
 	// keeps whoever wrote last, but several devices can share one instance
@@ -291,6 +294,7 @@ func newSignalKSnapshot() *signalKSnapshot {
 		controlStamps:     make(map[string]controlStampEntry),
 		controlStampCount: make(map[string]int),
 		sourceSeen:        make(map[string]sourceSeenEntry),
+		acSourceSeen:      make(map[acSourceKey]acSourceEntry),
 		batteryPublishers: make(map[string]map[string]struct{}),
 		sentenceSeen:      make(map[string]time.Time),
 		contextHeard:      make(map[string]time.Time),
@@ -439,6 +443,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 				entry.Sentences = next
 			}
 			for _, val := range update.Values {
+				if isACSourcePath(val.Path) {
+					s.noteACSourceLocked(d.Context, update.SourceRef, val.Path, val.Value, eventAt)
+				}
 				if strings.HasPrefix(val.Path, "propulsion.") {
 					entry.EngineBound = true
 				}
@@ -682,6 +689,7 @@ func (s *signalKSnapshot) setSelfContext(context string) {
 	if changed {
 		// Units belong to the vessel that declared them.
 		s.rememberedUnits = make(map[string]string)
+		s.acSourceSeen = make(map[acSourceKey]acSourceEntry)
 	}
 	store := s.unitStore
 	s.mu.Unlock()
@@ -855,6 +863,12 @@ func (s *signalKSnapshot) setConnected(connected bool) {
 	defer s.mu.Unlock()
 
 	s.connected = connected
+	if connected {
+		// The stream replays its retained values on connect, stamped with
+		// their old or new times alike: the first AC source reading after a
+		// connect is a first sighting, as after a restart.
+		s.acSourceSeen = make(map[acSourceKey]acSourceEntry)
+	}
 	if !connected {
 		s.connectedSince = time.Time{}
 	}
@@ -903,7 +917,18 @@ func (s *signalKSnapshot) sourceBusType(context, source string) string {
 func (s *signalKSnapshot) sourcesFor(context string) map[string]sourceSeenEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	return s.sourcesLocked(context)
+}
 
+// sourcesAndACFor is sourcesFor plus the AC input state, read under one lock
+// so the two describe the same instant.
+func (s *signalKSnapshot) sourcesAndACFor(context string) (map[string]sourceSeenEntry, acSourceState) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sourcesLocked(context), s.acSourceLocked()
+}
+
+func (s *signalKSnapshot) sourcesLocked(context string) map[string]sourceSeenEntry {
 	prefix := context + "|"
 	result := make(map[string]sourceSeenEntry)
 	for key, entry := range s.sourceSeen {

@@ -53,6 +53,15 @@ Silent" when some of it still sends), or "Instruments Silent" when more than one
 has gone quiet. The title is set when the alarm is raised and does not change
 while it is up. The card has one **Ignore** action for the whole device.
 
+Some equipment goes quiet on purpose. A shore charger loses its power when
+you disconnect shore power, and the card does not report it: when the boat's
+AC input switches to battery, a device whose last report was within a minute
+of the switch, before or after, is left out. This only works when something on
+the boat reports the AC input source (a Victron GX does). A device that goes
+quiet while you are on shore power, more than a minute from the switch, or
+stays quiet after you reconnect shore power, is reported. So is the instrument
+that reports the AC input, and anything behind it if it goes quiet too.
+
 The impossible-reading check looks at batteries, not at chargers. A solar
 charger reports its panel array's voltage under a battery number on some
 boats, and 76 volts is a normal array and an impossible battery. Where

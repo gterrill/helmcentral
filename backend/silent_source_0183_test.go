@@ -135,11 +135,11 @@ func TestIgnoringAConnectionHidesTheAlarmButNotTheTrustGate(t *testing.T) {
 	sources := vesperHealth(vesperTalkers...)
 	sources = append(sources, sourceHealth{Source: "can0.23", BusType: "NMEA2000",
 		First: now.Add(-time.Hour), Last: now.Add(-10 * time.Minute), Count: 500})
-	if got := silentSources(sources, now, time.Second, nil); len(got) != 7 {
+	if got := silentSources(sources, now, time.Second, nil, acSourceState{}); len(got) != 7 {
 		t.Fatalf("unignored: %v, want 7 silent", got)
 	}
 	ignored := map[string]bool{"Vesper_Cortex": true}
-	got := silentSources(sources, now, time.Second, ignored)
+	got := silentSources(sources, now, time.Second, ignored, acSourceState{})
 	if len(got) != 1 || got[0] != "can0.23" {
 		t.Errorf("connection ignored: %v, want only can0.23", got)
 	}

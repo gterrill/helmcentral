@@ -1000,9 +1000,9 @@ func computeAnomalyReading(snapshot *signalKSnapshot, settingsPath string, track
 
 	// Silent source: no setup needed either.
 	self := snapshot.selfContext()
-	health := sourceHealthFor(snapshot, self)
+	health, acSource := sourceHealthAndACFor(snapshot, self)
 	_, lastMessage := snapshot.status()
-	silent := silentSources(health, now, now.Sub(lastMessage), ignored)
+	silent := silentSources(health, now, now.Sub(lastMessage), ignored, acSource)
 	// The count is the cards' entries (devices), so it agrees with the card.
 	silentEntries := disambiguateSensorEntries(namer.silentSourceEntries(silent, health, now))
 	reading.Values[anomalySensorSilentSourceCountPath] = float64(len(silentEntries))
