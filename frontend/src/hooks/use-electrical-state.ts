@@ -135,8 +135,17 @@ export function useElectricalState() {
         const rate =
           batteryCapacityAh !== null && chargingCurrentA !== null ? (chargingCurrentA / batteryCapacityAh) * 100 : null
 
-        if (rate === null || !Number.isFinite(rate) || Math.abs(rate) <= 0.01) {
+        if (rate === null || !Number.isFinite(rate)) {
           setBatteryRatePercentPerHour(null)
+          setTimeToGoHours(null)
+          return
+        }
+
+        // A bank at rest has a known rate of zero and no time to go; keeping
+        // that apart from an unknown rate stops the dawn projection reading
+        // "unknown" as "holding steady".
+        if (Math.abs(rate) <= 0.01) {
+          setBatteryRatePercentPerHour(0)
           setTimeToGoHours(null)
           return
         }

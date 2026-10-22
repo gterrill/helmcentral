@@ -126,8 +126,8 @@ export interface DawnEstimate {
  *   rate is tonight's rate, so it's held to sunrise regardless of what
  *   basis the backend reported, and the result is always labelled `linear`
  *   because that is what it is.
- * - A null live rate means the bank isn't currently charging or
- *   discharging, so it contributes 0 rather than being treated as unknown.
+ * - A null live rate is unknown (no bank capacity, or no current), not a
+ *   bank at rest: no estimate. A bank at rest arrives as a rate of 0.
  */
 export function projectSocAtDawn(input: {
   socPercent: number | null
@@ -135,12 +135,11 @@ export function projectSocAtDawn(input: {
   projection: OvernightProjection | null
   now: Date
 }): DawnEstimate | null {
-  const { socPercent, projection, now } = input
-  if (projection === null || projection.basis === 'none' || socPercent === null) {
+  const { socPercent, projection, now, liveRatePercentPerHour: liveRate } = input
+  if (projection === null || projection.basis === 'none' || socPercent === null || liveRate === null) {
     return null
   }
 
-  const liveRate = input.liveRatePercentPerHour ?? 0
   const { sunset, sunrise } = projection
   const beforeSunset = sunset.getTime() < sunrise.getTime()
 

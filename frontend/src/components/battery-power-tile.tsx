@@ -3,7 +3,7 @@ import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { hoursToBand, socSeverity, type SocBands } from '@/lib/soc-bands'
 import { severityFill, severityTextClass } from '@/lib/severity'
-import { projectSocAtDawn, type OvernightProjection } from '@/lib/soc-projection'
+import { projectSocAtDawn, type DawnEstimate, type OvernightProjection } from '@/lib/soc-projection'
 
 export interface BatteryPowerTileProps {
   batterySocPercent: number | null
@@ -65,6 +65,37 @@ function historyBasisTitle(overnightProjection: OvernightProjection): string {
     ? `; skipped ${nightsExcludedShore} on shore power and ${nightsExcludedGenerator} with the generator running`
     : ''
   return `Median of ${nightsUsed} clean nights from the last ${lookbackNights}${skippedClause}, then the current rate until sunset`
+}
+
+/**
+ * Title for the Dawn footer line. With no rate there is no estimate whatever
+ * the basis, so that case names which half of the rate is missing (the bank
+ * current, or its capacity) and keeps any reason the backend gave as well.
+ */
+function dawnTitle(input: {
+  overnightProjection: OvernightProjection
+  dawn: DawnEstimate | null
+  onShorePower: boolean
+  rateUnknown: boolean
+  chargingCurrentA: number | null
+}): string {
+  const { overnightProjection, dawn, onShorePower, rateUnknown, chargingCurrentA } = input
+  const reasonSuffix = overnightProjection.reason ? `; ${overnightProjection.reason}` : ''
+  if (onShorePower) {
+    return 'The charger is on shore power; the bank is not expected to discharge overnight'
+  }
+  if (dawn === null) {
+    if (rateUnknown) {
+      const missing = chargingCurrentA === null
+        ? 'the house bank is not reporting its current'
+        : "the house bank's capacity in amp-hours is unknown"
+      return `No charge rate: ${missing}${reasonSuffix}`
+    }
+    return overnightProjection.reason ?? 'No estimate'
+  }
+  return dawn.basis === 'history'
+    ? historyBasisTitle(overnightProjection)
+    : `Current rate held until sunrise${reasonSuffix}`
 }
 
 function hasChargerError(errorValue: string | null): boolean {
@@ -368,15 +399,15 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
                 {overnightProjection !== null && (
                   <span
                     className="block truncate"
-                    title={
-                      onShorePower
-                        ? 'The charger is on shore power; the bank is not expected to discharge overnight'
-                        : dawn === null
-                          ? (overnightProjection.reason ?? 'No estimate')
-                          : dawn.basis === 'history'
-                            ? historyBasisTitle(overnightProjection)
-                            : `Current rate held until sunrise${overnightProjection.reason ? `; ${overnightProjection.reason}` : ''}`
-                    }
+                    title={dawnTitle({
+                      overnightProjection,
+                      dawn,
+                      onShorePower,
+                      // Only a missing rate, not a missing SoC or a none basis, is
+                      // the rate's fault.
+                      rateUnknown: overnightProjection.basis !== 'none' && batterySocPercent !== null && batteryRatePercentPerHour === null,
+                      chargingCurrentA,
+                    })}
                   >
                     {'Dawn '}
                     {overnightProjection.sunrise.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}

@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Battery & Power dawn figure no longer shows tonight's state of charge
+  as tomorrow's when the bank's capacity is unknown.** Without a capacity
+  there is no charge rate, and the tile treated that as a bank holding steady:
+  79% at 22:00 read as 79% at dawn while the bank discharged at 35 A. It now
+  shows `—`, and the hover says whether the bank's capacity or its current is
+  missing. A bank sitting at rest now reads `+0.0 %/h` rather than `—`, so a
+  steady bank and an unknown rate no longer look the same.
+
 ## [0.52.0] - 2026-10-22
 
 ### Changed

@@ -168,18 +168,18 @@ describe('projectSocAtDawn', () => {
     expect(Math.round(result!.socPercent)).toBe(49)
   })
 
-  it('treats a null live rate as a flat bank (0) in the history branch', () => {
-    const projection = baseProjection({ basis: 'history', nightRatePercentPerHour: -2.5 })
-    const result = projectSocAtDawn({
-      socPercent: 63,
-      liveRatePercentPerHour: null,
-      projection,
-      now: DAYTIME_NOW,
-    })
-
-    const hoursSunsetToSunrise = (projection.sunrise.getTime() - projection.sunset.getTime()) / 3_600_000
-    const expected = Math.min(100, Math.max(0, 63 + -2.5 * hoursSunsetToSunrise))
-    expect(result?.socPercent).toBeCloseTo(expected, 6)
+  it('returns null when the live rate is unknown, rather than projecting a flat bank', () => {
+    // An unknown rate (no bank capacity, or no current) is not a bank at rest:
+    // holding SoC flat to sunrise would show tonight's 79% as tomorrow's 79%
+    // while the bank discharges at 35 A.
+    const history = baseProjection({ basis: 'history', nightRatePercentPerHour: -2.5 })
+    expect(
+      projectSocAtDawn({ socPercent: 63, liveRatePercentPerHour: null, projection: history, now: DAYTIME_NOW }),
+    ).toBeNull()
+    const night = baseProjection({ basis: 'linear', nightRatePercentPerHour: null, sunset: new Date('2026-09-08T07:57:00Z') })
+    expect(
+      projectSocAtDawn({ socPercent: 79, liveRatePercentPerHour: null, projection: night, now: new Date('2026-09-07T12:00:00Z') }),
+    ).toBeNull()
   })
 
   it('before sunset with basis linear: live rate held to sunrise', () => {

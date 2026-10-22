@@ -444,6 +444,31 @@ test('shows a dash and the backend reason when the basis is none', () => {
   expect(outer).toHaveAttribute('title', expect.stringContaining('need 2 usable nights, have 1'))
 })
 
+test('shows a dash, not the current SoC, when the charge rate is unknown', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture({ basis: 'linear', nightRatePercentPerHour: null, reason: 'need 2 usable nights, have 1' })
+  render(<BatteryPowerTile {...baseProps} batterySocPercent={79} chargingCurrentA={-35.2} batteryRatePercentPerHour={null} overnight={overnight} />)
+
+  expect(screen.getByTestId('dawn-estimate')).toHaveTextContent('—')
+  expect(screen.getByText(/Dawn/)).toHaveAttribute(
+    'title',
+    "No charge rate: the house bank's capacity in amp-hours is unknown; need 2 usable nights, have 1",
+  )
+  expect(screen.queryByText(/at current rate/)).not.toBeInTheDocument()
+})
+
+test('names the missing bank current, not the capacity, when the current is what is absent', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const overnight = overnightFixture({ basis: 'linear', nightRatePercentPerHour: null, reason: null })
+  render(<BatteryPowerTile {...baseProps} batterySocPercent={79} chargingCurrentA={null} batteryRatePercentPerHour={null} overnight={overnight} />)
+
+  expect(screen.getByText(/Dawn/)).toHaveAttribute('title', 'No charge rate: the house bank is not reporting its current')
+})
+
 test('omits the dawn segment entirely when no overnight projection is supplied', () => {
   render(<BatteryPowerTile {...baseProps} />)
 

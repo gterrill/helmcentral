@@ -174,7 +174,10 @@ While on shore power tonight, the line reads `Dawn 6:08 · on shore power`
 instead of a percentage, since the bank is being held rather than run down.
 Without a position there is no sunrise to project and the segment drops
 out; with a stale feed, or the live-rate fallback switched off and too
-little history, it reads a dash. The projected percentage takes the alarm
+little history, it reads a dash. It also reads a dash with no charge rate,
+which needs the bank current and the house bank's capacity in amp-hours; if
+your battery monitor doesn't report a capacity, enter it on the house bank's
+equipment record. The projected percentage takes the alarm
 band colours the same as the live figure does.
 
 ## Generator fields
