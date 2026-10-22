@@ -273,8 +273,8 @@ func sampleTracks(settingsPath string) {
 		state.Longitude >= -180 && state.Longitude <= 180 {
 		recordTrackSelf(state.Latitude, state.Longitude)
 
-		// Also record post-anchor ring-buffer and motoring trail
-		recordSelfTrailPoint(state.Latitude, state.Longitude)
+		// The anchor swing trail (ADR 0199) is stored only while a watch is on.
+		recordAnchorTrailPoint(state.Latitude, state.Longitude, now)
 
 		// AIS trails are no longer refreshed on this tick: getTracksHandler's
 		// own tracksAISTrails.get() already refreshes on demand within its

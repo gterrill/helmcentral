@@ -417,6 +417,9 @@ func main() {
 		log.Printf("ERROR: anchor watch state unreadable, the anchor watch alone is disabled until a new drop or an explicit Raise: %v", err)
 		recordAnchorWatchLoadFailure(err)
 	}
+	if err := startRestoredAnchorTrail(); err != nil {
+		log.Fatalf("failed to start the anchor swing trail for the restored watch: %v", err)
+	}
 	loadAnchorPlacemarks()
 	loadDashboardPages()
 	// The built-in profile catalogue is compiled in; an invalid one is a
