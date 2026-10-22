@@ -118,7 +118,6 @@ func mapRoutes(tileFetchClient *http.Client) []apiRoute {
 		// tierRead as world-imagery above: read-only, no session write
 		// implied by fetching a map tile/style/font/sprite.
 		{http.MethodGet, "/api/basemap/style/:name", tierRead, basemapStyleHandler(globalTileCache, tileFetchClient)},
-		{http.MethodGet, "/api/basemap/tilejson", tierRead, basemapTileJSONHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/basemap/tiles/:z/:x/:y", tierRead, basemapVectorTileHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/basemap/fonts/:fontstack/:range", tierRead, basemapFontsHandler(globalTileCache, tileFetchClient)},
 		{http.MethodGet, "/api/basemap/sprite/:name", tierRead, basemapSpriteHandler(globalTileCache, tileFetchClient)},

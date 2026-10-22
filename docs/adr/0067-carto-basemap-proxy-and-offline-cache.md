@@ -1,7 +1,7 @@
 # ADR 0067: Carto Basemap Proxy and Offline Cache
 
 ## Status
-Accepted
+Accepted. Amended by [ADR 0201](0201-carto-protomaps-basemap-style.md): the style, tiles, glyphs and sprite URLs it rewrites, and the TileJSON endpoint, which was removed.
 
 ## Context
 

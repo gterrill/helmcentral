@@ -50,6 +50,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   to keep reading while an answer was still being written, the view jumped
   away from where you were reading as soon as it finished, often back to an
   earlier question. It now stays where you left it.
+
+- **The chart works again on a new install or after clearing the map cache.**
+  Carto changed the map style Helmcentral draws its chart from, and a boat with
+  nothing stored yet got a blank chart. Helmcentral now reads the new style, and
+  keeps place names for islands, bays, straits, marinas and peaks. Some water
+  names in the Whitsundays (Cid Harbour, Nara Inlet, Hayman Channel) are not in
+  Carto's new data and no longer appear.
+
 - **The Battery & Power dawn figure no longer shows tonight's state of charge
   as tomorrow's when the bank's capacity is unknown.** Without a capacity
   there is no charge rate, and the tile treated that as a bank holding steady:
@@ -57,6 +65,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   shows `—`, and the hover says whether the bank's capacity or its current is
   missing. A bank sitting at rest now reads `+0.0 %/h` rather than `—`, so a
   steady bank and an unknown rate no longer look the same.
+
+### Breaking
+
+- **The stored chart is dropped on the first start after upgrading.** Carto's
+  new map data cannot be drawn from what was saved for the old, so Helmcentral
+  deletes the saved chart tiles, style and fonts and fetches them again as you
+  use the chart. Do this while you have an uplink: open the chart over the
+  areas you will need before heading out of range. Saved satellite imagery is
+  not touched.
 
 ## [0.52.0] - 2026-10-22
 

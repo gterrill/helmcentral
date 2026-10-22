@@ -2,30 +2,34 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
 
 // cartoBasemapMaxZoom is the deepest zoom level Carto's vector tile service
-// actually serves, confirmed directly against the upstream tiles.json
-// response's own "maxzoom" field (14). MapLibre overzooms client-side past
-// a source's declared maxzoom - it keeps re-showing the deepest tile it
-// already fetched, scaled up, rather than requesting one that doesn't
-// exist - so a well-behaved client never asks this proxy for anything
-// deeper. basemapVectorTileHandler enforces the cap anyway: rejecting a
-// z>14 request outright is the only safe option, because "clamp" here
-// would mean handing back a shallower tile's bytes under the deeper
-// request key, which is exactly the MVT tile-local-coordinate mismatch
-// resolveCartoVectorTile's doc comment (tile_cache.go) explains - moved up
-// one layer, from "wrong cached bytes" to "wrong served bytes," but the
-// same hazard either way.
-const cartoBasemapMaxZoom = 14
+// serves, taken from the upstream style's own source "maxzoom" (15; a test
+// pins the two together against a captured copy of the real style).
+// MapLibre overzooms client-side past a source's declared maxzoom - it keeps
+// re-showing the deepest tile it already fetched, scaled up, rather than
+// requesting one that doesn't exist - so a well-behaved client never asks
+// this proxy for anything deeper. basemapVectorTileHandler enforces the cap
+// anyway: rejecting a deeper request outright is the only safe option,
+// because "clamp" here would mean handing back a shallower tile's bytes
+// under the deeper request key, which is exactly the MVT tile-local-
+// coordinate mismatch resolveCartoVectorTile's doc comment (tile_cache.go)
+// explains - moved up one layer, from "wrong cached bytes" to "wrong served
+// bytes," but the same hazard either way.
+const cartoBasemapMaxZoom = 15
 
 // Cache-Control policy for the two shapes of basemap response. The server-
 // side cache (basemap_assets / tiles table) never expires either way - see
@@ -33,65 +37,408 @@ const cartoBasemapMaxZoom = 14
 // keeps its own copy before asking again:
 //   - tiles/glyphs/sprite are immutable in practice (a given z/x/y tile, or
 //     a given font-range PBF, or a given theme's sprite sheet, is the same
-//     bytes forever from Carto's point of view - confirmed against
-//     upstream, which itself sends a 180-day max-age on all three), so
-//     browsers get a long one.
-//   - style.json and tiles.json are the one part of this proxy that could
-//     plausibly change server-side (an app deploy that alters what gets
-//     rewritten, or Carto shipping a new style upstream that this cache
-//     hasn't picked up yet), and they're a handful of KB - cheap enough to
-//     let the browser re-check often.
+//     bytes forever from Carto's point of view; upstream itself sends a
+//     long max-age on all three), so browsers get a long one.
+//   - style.json is the one part of this proxy that could plausibly change
+//     server-side (an app deploy that alters what gets rewritten), and it
+//     is a handful of KB - cheap enough to let the browser re-check often.
 const basemapImmutableCacheControl = "public, max-age=31536000, immutable"
-const basemapDocumentCacheControl = "public, max-age=300"
+const basemapStyleCacheControl = "private, max-age=300"
+
+// basemapAssetPrefix namespaces every basemap_assets row this schema
+// generation writes, and cartoBasemapSource (tile_cache.go) namespaces the
+// tiles. The Carto Protomaps styles (ADR 0201) are a different tile schema
+// from the OpenMapTiles-shaped v1 ones, so rows cached before the switch
+// must never be served for it; newTileCache deletes anything outside this
+// prefix.
+const basemapAssetPrefix = "/api/basemap/v2/"
 
 // cartoStyleUpstreamURLs is a closed allowlist from this proxy's own
 // :name path param to the one upstream URL it's allowed to mean. This is
 // an SSRF guard, not just tidiness: :name comes straight from the request,
-// and if it were interpolated into an upstream URL template (e.g.
-// fmt.Sprintf("https://basemaps.cartocdn.com/gl/%s-gl-style/style.json",
-// name)) this endpoint would let any caller make the server fetch-and-
-// cache an arbitrary path under that host. Looking name up in this fixed
-// map instead means anything not already in it never reaches
-// http.NewRequest at all - see basemapStyleHandler.
+// and if it were interpolated into an upstream URL template this endpoint
+// would let any caller make the server fetch-and-cache an arbitrary path
+// under that host. Looking name up in this fixed map instead means anything
+// not already in it never reaches http.NewRequest at all - see
+// basemapStyleHandler.
 var cartoStyleUpstreamURLs = map[string]string{
 	"positron":    "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
 	"dark-matter": "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
 }
 
-// cartoTileJSONUpstreamURL is Carto's one vector TileJSON document - the
-// same "carto.streets/v1" source both the positron and dark-matter styles
-// reference, which is why there is one tilejson endpoint, not two.
-const cartoTileJSONUpstreamURL = "https://tiles.basemaps.cartocdn.com/vector/carto.streets/v1/tiles.json"
+// cartoAllowedUpstreamHosts is the closed set of hosts this proxy will ever
+// fetch from. The tile, glyph and sprite URL templates come out of the
+// upstream style document, which is data we do not control, so each one is
+// checked against this set (https only, no credentials, no port) by
+// parseCartoUpstream before anything is cached or fetched. A style that
+// points anywhere else is rejected as an upstream-shape error, so a
+// poisoned or hijacked style cannot steer the server at another host.
+var cartoAllowedUpstreamHosts = map[string]bool{
+	"basemaps.cartocdn.com":       true,
+	"tiles.basemaps.cartocdn.com": true,
+}
 
-// cartoGlyphsUpstreamHost is the fixed, hardcoded host every glyph fetch
-// goes to. Unlike the style/sprite allowlists above, the :fontstack and
-// :range path params here are not restricted to a closed set of legal
-// values (there is no fixed list of "every font stack a Carto style might
-// ever reference"), but that's still not an SSRF hole: the host is never
-// attacker-influenced, and url.PathEscape below guarantees neither param
-// can inject a "/" to escape the /fonts/{fontstack}/{range}.pbf path shape
-// onto some other upstream path.
-const cartoGlyphsUpstreamHost = "https://tiles.basemaps.cartocdn.com/fonts"
+// cartoUpstream is what this proxy needs to know from one upstream style:
+// where the vector tiles, glyphs and sprite live right now. Carto puts a
+// release stamp in those paths (".../v/20261001-03/...") and moves it when
+// it republishes, so the paths are read from the style rather than
+// hardcoded. The raw upstream style is what basemap_assets holds; this is
+// parsed from it on demand.
+type cartoUpstream struct {
+	sourceID string
+	tiles    string // contains {z} {x} {y}
+	glyphs   string // contains {fontstack} {range}
+	sprite   string // base URL, no extension
+}
 
-// cartoSpriteUpstreamURLs is the same allowlist-map SSRF guard as
-// cartoStyleUpstreamURLs above, covering the 8 legal (theme, resolution,
-// extension) combinations a Carto style's "sprite" field can expand to:
-// {positron, dark-matter} x {"", "@2x"} x {.json, .png}.
-var cartoSpriteUpstreamURLs = map[string]string{
-	"positron.json":       "https://basemaps.cartocdn.com/gl/positron-gl-style/sprite.json",
-	"positron.png":        "https://basemaps.cartocdn.com/gl/positron-gl-style/sprite.png",
-	"positron@2x.json":    "https://basemaps.cartocdn.com/gl/positron-gl-style/sprite@2x.json",
-	"positron@2x.png":     "https://basemaps.cartocdn.com/gl/positron-gl-style/sprite@2x.png",
-	"dark-matter.json":    "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/sprite.json",
-	"dark-matter.png":     "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/sprite.png",
-	"dark-matter@2x.json": "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/sprite@2x.json",
-	"dark-matter@2x.png":  "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/sprite@2x.png",
+// checkCartoUpstreamURL reports whether raw is an https URL on an
+// allowlisted Carto host with no credentials and no explicit port.
+func checkCartoUpstreamURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("unparseable upstream URL %q: %w", raw, err)
+	}
+	if u.Scheme != "https" {
+		return fmt.Errorf("upstream URL %q is not https", raw)
+	}
+	if u.User != nil || u.Port() != "" || !cartoAllowedUpstreamHosts[u.Hostname()] {
+		return fmt.Errorf("upstream URL %q is not on an allowed Carto host", raw)
+	}
+	return nil
+}
+
+// parseCartoUpstream decodes an upstream style document and extracts its
+// single vector source's tile template, plus the glyphs and sprite URLs,
+// validating every one against the host allowlist. It returns the decoded
+// document too so rewriteCartoStyle does not parse twice. Anything unexpected
+// is an error (fail-fast, repo fallback policy): a style we half understand
+// would draw a blank or subtly wrong chart with no obvious cause.
+func parseCartoUpstream(raw []byte) (*cartoUpstream, map[string]any, error) {
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return nil, nil, fmt.Errorf("decode upstream style: %w", err)
+	}
+
+	sources, ok := doc["sources"].(map[string]any)
+	if !ok {
+		return nil, nil, fmt.Errorf("upstream style has no sources object")
+	}
+	var up cartoUpstream
+	vectorCount := 0
+	for id, s := range sources {
+		src, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t, _ := src["type"].(string); t != "vector" {
+			continue
+		}
+		vectorCount++
+		up.sourceID = id
+	}
+	if vectorCount != 1 {
+		return nil, nil, fmt.Errorf("upstream style has %d vector sources, want exactly 1", vectorCount)
+	}
+	src := sources[up.sourceID].(map[string]any)
+
+	tiles, ok := src["tiles"].([]any)
+	if !ok || len(tiles) != 1 {
+		return nil, nil, fmt.Errorf("upstream style source %q needs a tiles array with exactly one template", up.sourceID)
+	}
+	if up.tiles, ok = tiles[0].(string); !ok {
+		return nil, nil, fmt.Errorf("upstream style source %q has a non-string tiles entry", up.sourceID)
+	}
+	for _, ph := range []string{"{z}", "{x}", "{y}"} {
+		if !strings.Contains(up.tiles, ph) {
+			return nil, nil, fmt.Errorf("upstream tile template %q lacks %s", up.tiles, ph)
+		}
+	}
+
+	if up.glyphs, ok = doc["glyphs"].(string); !ok {
+		return nil, nil, fmt.Errorf("upstream style has no glyphs string")
+	}
+	for _, ph := range []string{"{fontstack}", "{range}"} {
+		if !strings.Contains(up.glyphs, ph) {
+			return nil, nil, fmt.Errorf("upstream glyphs template %q lacks %s", up.glyphs, ph)
+		}
+	}
+	if up.sprite, ok = doc["sprite"].(string); !ok {
+		return nil, nil, fmt.Errorf("upstream style has no sprite string")
+	}
+
+	for _, u := range []string{up.tiles, up.glyphs, up.sprite} {
+		if err := checkCartoUpstreamURL(u); err != nil {
+			return nil, nil, err
+		}
+	}
+	return &up, doc, nil
+}
+
+// cartoUpstreamAssetPath is where the raw upstream style for a theme is
+// cached. Everything the proxy fetches later (tiles, glyphs, sprites) is
+// derived from it, so the cached copy is the single record of which release
+// of Carto's data this install is on.
+func cartoUpstreamAssetPath(name string) string {
+	return basemapAssetPrefix + "upstream/" + name
+}
+
+// cartoUpstreamRaw returns the raw upstream style for a theme from the
+// basemap_assets cache, fetching and validating it on a miss. name must be
+// a key of cartoStyleUpstreamURLs; callers have already checked that.
+func cartoUpstreamRaw(cache *tileCache, fetcher tileFetcher, name string) ([]byte, error) {
+	upstreamURL, ok := cartoStyleUpstreamURLs[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown basemap style %q", name)
+	}
+	raw, _, err := resolveBasemapDocument(cache, cartoUpstreamAssetPath(name), func() ([]byte, string, error) {
+		body, _, fetchErr := fetchBasemapUpstream(fetcher, upstreamURL, "application/json")
+		if fetchErr != nil {
+			return nil, "", fetchErr
+		}
+		// Validate before caching: a document we cannot use must not be
+		// stored, or every later request would fail on the stored copy.
+		if _, _, parseErr := parseCartoUpstream(body); parseErr != nil {
+			return nil, "", parseErr
+		}
+		return body, "application/json; charset=utf-8", nil
+	})
+	return raw, err
+}
+
+// loadCartoUpstream returns a theme's parsed templates. They are held in
+// memory (safe for concurrent use) so a tile miss does not re-read and
+// re-parse the cached style JSON; the first use per theme loads them from
+// basemap_assets, fetching the style if the cache has none yet.
+func loadCartoUpstream(cache *tileCache, fetcher tileFetcher, name string) (*cartoUpstream, error) {
+	cache.upstreamTemplatesMu.RLock()
+	up := cache.upstreamTemplates[name]
+	cache.upstreamTemplatesMu.RUnlock()
+	if up != nil {
+		return up, nil
+	}
+	raw, err := cartoUpstreamRaw(cache, fetcher, name)
+	if err != nil {
+		return nil, err
+	}
+	up, _, err = parseCartoUpstream(raw)
+	if err != nil {
+		return nil, err
+	}
+	return cache.rememberCartoTemplates(name, up), nil
+}
+
+// rememberCartoTemplates stores lazily loaded templates unless some other
+// goroutine already stored some - a slow loader that read the cached style
+// before a refresh replaced it must not put the old templates back. It
+// returns the templates now held.
+func (tc *tileCache) rememberCartoTemplates(name string, up *cartoUpstream) *cartoUpstream {
+	tc.upstreamTemplatesMu.Lock()
+	defer tc.upstreamTemplatesMu.Unlock()
+	if existing := tc.upstreamTemplates[name]; existing != nil {
+		return existing
+	}
+	if tc.upstreamTemplates == nil {
+		tc.upstreamTemplates = map[string]*cartoUpstream{}
+	}
+	tc.upstreamTemplates[name] = up
+	return up
+}
+
+// setCartoTemplates replaces the held templates (a refresh found new ones).
+func (tc *tileCache) setCartoTemplates(name string, up *cartoUpstream) {
+	tc.upstreamTemplatesMu.Lock()
+	if tc.upstreamTemplates == nil {
+		tc.upstreamTemplates = map[string]*cartoUpstream{}
+	}
+	tc.upstreamTemplates[name] = up
+	tc.upstreamTemplatesMu.Unlock()
+}
+
+// basemapStyleError marks a failure to obtain or refresh the upstream style
+// the tile, glyph and sprite templates come from. It is an outage of the
+// proxy's own prerequisite, never "this tile does not exist".
+type basemapStyleError struct{ err error }
+
+func (e *basemapStyleError) Error() string { return e.err.Error() }
+func (e *basemapStyleError) Unwrap() error { return e.err }
+
+// upstreamStatusError is a clean non-200 answer from upstream, as opposed to
+// a transport failure. fetchWithStampRecovery keys off 404 and 410.
+type upstreamStatusError struct{ status int }
+
+func (e *upstreamStatusError) Error() string {
+	return fmt.Sprintf("upstream returned status %d", e.status)
+}
+
+// Refetch pacing per theme. After a refetch that completed (templates
+// changed or not) the next one waits cartoUpstreamRefreshInterval: a real
+// rotation is fixed by the first refetch, and the wait only stops a run of
+// genuinely missing tiles (which also 404) from hammering the style URL.
+// After a refetch that failed, a short backoff applies instead, so one bad
+// moment (uplink blip, upstream 5xx) cannot block recovery for minutes.
+const (
+	cartoUpstreamRefreshInterval = 5 * time.Minute
+	cartoUpstreamRetryBackoff    = 30 * time.Second
+)
+
+// cartoRefreshState is when a theme may next be refetched, and the error the
+// last refetch ended with (nil if it completed). Inside the window callers
+// get that error back, so a failed refresh keeps reading as a failure.
+type cartoRefreshState struct {
+	next time.Time
+	err  error
+}
+
+func sameCartoUpstream(a, b *cartoUpstream) bool {
+	return a.sourceID == b.sourceID && a.tiles == b.tiles && a.glyphs == b.glyphs && a.sprite == b.sprite
+}
+
+// refreshCartoUpstream refetches a theme's upstream style, validates it
+// exactly as the first fetch was, and, when its templates differ from the
+// known ones, replaces the cached copy and the in-memory templates, and drops
+// the cached glyph and sprite files that belong to the old stamp (cached
+// vector tiles stay: same v2 schema, and they are the offline chart). It
+// returns the templates now in force. Concurrent callers share one refetch
+// (singleflight); pacing is described at cartoUpstreamRefreshInterval. A
+// failed or rejected refetch is logged once and returned, and leaves the
+// cache untouched.
+func refreshCartoUpstream(cache *tileCache, fetcher tileFetcher, theme string) (*cartoUpstream, error) {
+	v, err, _ := cache.upstreamRefreshGroup.Do(theme, func() (any, error) {
+		current, err := loadCartoUpstream(cache, fetcher, theme)
+		if err != nil {
+			return nil, err
+		}
+
+		now := cache.clock()
+		cache.upstreamRefreshMu.Lock()
+		if st, ok := cache.upstreamRefreshNext[theme]; ok && now.Before(st.next) {
+			cache.upstreamRefreshMu.Unlock()
+			return current, st.err
+		}
+		cache.upstreamRefreshMu.Unlock()
+
+		fresh, err := fetchAndStoreCartoUpstream(cache, fetcher, theme, current)
+
+		st := cartoRefreshState{next: now.Add(cartoUpstreamRefreshInterval)}
+		if err != nil {
+			err = fmt.Errorf("style refresh failed: %w", err)
+			log.Printf("basemap: refreshing the Carto %s style failed: %v", theme, err)
+			st = cartoRefreshState{next: now.Add(cartoUpstreamRetryBackoff), err: err}
+		}
+		cache.upstreamRefreshMu.Lock()
+		if cache.upstreamRefreshNext == nil {
+			cache.upstreamRefreshNext = map[string]cartoRefreshState{}
+		}
+		cache.upstreamRefreshNext[theme] = st
+		cache.upstreamRefreshMu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		return fresh, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*cartoUpstream), nil
+}
+
+func fetchAndStoreCartoUpstream(cache *tileCache, fetcher tileFetcher, theme string, current *cartoUpstream) (*cartoUpstream, error) {
+	body, _, err := fetchBasemapUpstream(fetcher, cartoStyleUpstreamURLs[theme], "application/json")
+	if err != nil {
+		return nil, err
+	}
+	fresh, _, err := parseCartoUpstream(body)
+	if err != nil {
+		return nil, err
+	}
+	if sameCartoUpstream(current, fresh) {
+		return current, nil
+	}
+	if err := cache.putBasemapAsset(cartoUpstreamAssetPath(theme), body, "application/json; charset=utf-8"); err != nil {
+		return nil, err
+	}
+	cache.setCartoTemplates(theme, fresh)
+	if current.sprite != fresh.sprite {
+		if err := cache.deleteBasemapAssetsWithPrefix(basemapAssetPrefix + "sprite/" + theme); err != nil {
+			return nil, err
+		}
+	}
+	// Fonts are fetched from the light style's glyph template only.
+	if theme == "positron" && current.glyphs != fresh.glyphs {
+		if err := cache.deleteBasemapAssetsWithPrefix(basemapAssetPrefix + "fonts/"); err != nil {
+			return nil, err
+		}
+	}
+	log.Printf("basemap: Carto %s style moved from %s to %s", theme, current.tiles, fresh.tiles)
+	return fresh, nil
+}
+
+// fetchWithStampRecovery runs attempt against a theme's upstream templates.
+// Carto puts a release stamp in those URLs and retires old ones, so a 404 or
+// 410 may mean the stamp moved rather than that the asset is missing. On
+// either, the style is refetched (refreshCartoUpstream: allowlist checked,
+// single-flight, paced) and, if its templates changed, attempt runs once more
+// with the new ones. If the templates are unchanged the original error (the
+// genuine 404/410) is returned. If the refetch failed, the returned error
+// says so and carries the reason: the 404 is then unproven, so it is not
+// reported as one. A missing style is likewise a basemapStyleError. Nothing
+// stands in for the asset.
+func fetchWithStampRecovery(cache *tileCache, fetcher tileFetcher, theme string, attempt func(up *cartoUpstream) ([]byte, string, error)) ([]byte, string, error) {
+	up, err := loadCartoUpstream(cache, fetcher, theme)
+	if err != nil {
+		return nil, "", &basemapStyleError{err}
+	}
+	data, contentType, firstErr := attempt(up)
+	if firstErr == nil {
+		return data, contentType, nil
+	}
+	var status *upstreamStatusError
+	if !errors.As(firstErr, &status) || (status.status != http.StatusNotFound && status.status != http.StatusGone) {
+		return nil, "", firstErr
+	}
+	fresh, err := refreshCartoUpstream(cache, fetcher, theme)
+	if err != nil {
+		return nil, "", &basemapStyleError{fmt.Errorf("%v; %w", firstErr, err)}
+	}
+	if sameCartoUpstream(up, fresh) {
+		return nil, "", firstErr
+	}
+	return attempt(fresh)
+}
+
+// cartoGlyphsUpstreamURL expands the upstream glyph template for one font
+// stack and range. The template's host was validated in parseCartoUpstream;
+// url.PathEscape guarantees neither param can inject a "/" and escape the
+// {fontstack}/{range}.pbf path shape onto some other upstream path.
+func cartoGlyphsUpstreamURL(up *cartoUpstream, fontstack, rangeStr string) string {
+	r := strings.NewReplacer("{fontstack}", url.PathEscape(fontstack), "{range}", url.PathEscape(rangeStr))
+	return r.Replace(up.glyphs)
+}
+
+// cartoSpriteSuffixes are the four files MapLibre asks for from a sprite
+// base URL: it appends ".json" / ".png" (and "@2x" before the extension on
+// high-DPI screens) itself. Together with the two theme names this is the
+// closed 8-name set basemapSpriteHandler accepts, the same SSRF guard the
+// old per-file URL map was.
+var cartoSpriteSuffixes = []string{".json", ".png", "@2x.json", "@2x.png"}
+
+// splitCartoSpriteName splits "dark-matter@2x.png" into ("dark-matter",
+// "@2x.png"), accepting only allowlisted themes and suffixes.
+func splitCartoSpriteName(name string) (theme, suffix string, ok bool) {
+	for _, s := range cartoSpriteSuffixes {
+		if t, found := strings.CutSuffix(name, s); found {
+			if _, known := cartoStyleUpstreamURLs[t]; known {
+				return t, s, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 // fetchBasemapUpstream performs one GET against upstreamURL and returns the
 // response body verbatim plus its Content-Type, falling back to
 // fallbackContentType when upstream sends none. Every basemap asset fetch
-// (style/tilejson before rewriting, glyphs, sprite) goes through this one
+// (upstream style, glyphs, sprite) goes through this one
 // function - same non-200/transport-error/body-read-error handling as
 // fetchWorldImageryUpstream and fetchCartoVectorTileUpstream in
 // tile_cache.go, just without their tile-shaped URL construction.
@@ -109,7 +456,7 @@ func fetchBasemapUpstream(fetcher tileFetcher, upstreamURL, fallbackContentType 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("upstream returned status %d", resp.StatusCode)
+		return nil, "", &upstreamStatusError{status: resp.StatusCode}
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -124,17 +471,16 @@ func fetchBasemapUpstream(fetcher tileFetcher, upstreamURL, fallbackContentType 
 	return body, contentType, nil
 }
 
-// resolveBasemapDocument implements cache-through semantics for the four
-// Carto asset classes that live in basemap_assets rather than the
-// (z,x,y)-keyed tiles table (style.json, tiles.json, glyph PBFs, sprite
-// files): cache hit -> serve; cache miss -> run fetch, cache its result,
-// serve. fetch is a closure so each asset class supplies its own upstream-
-// fetch-and-transform (style/tilejson need a JSON rewrite pass on top of
-// fetchBasemapUpstream; glyphs/sprite serve fetchBasemapUpstream's result
-// unmodified) while sharing one cache-hit/miss/store path. Same fail-fast
-// shape as resolveCartoVectorTile in tile_cache.go: a miss that then fails
-// (upstream unreachable, or - for style/tilejson - a rewrite failure
-// because the upstream document didn't have the shape expected) comes back
+// resolveBasemapDocument implements cache-through semantics for the Carto
+// asset classes that live in basemap_assets rather than the (z,x,y)-keyed
+// tiles table (the upstream style, glyph PBFs, sprite files): cache hit ->
+// serve; cache miss -> run fetch, cache its result, serve. fetch is a
+// closure so each asset class supplies its own upstream fetch (the style
+// adds a validation pass on top of fetchBasemapUpstream; glyphs/sprite serve
+// its result unmodified) while sharing one cache-hit/miss/store path. Same
+// fail-fast shape as resolveCartoVectorTile in tile_cache.go: a miss that
+// then fails (upstream unreachable, or - for the style - a document that
+// didn't have the shape expected) comes back
 // as an error, which every caller here turns into a 502, never a
 // fabricated empty document.
 func resolveBasemapDocument(cache *tileCache, cachePath string, fetch func() (data []byte, contentType string, err error)) ([]byte, string, error) {
@@ -155,52 +501,42 @@ func resolveBasemapDocument(cache *tileCache, cachePath string, fetch func() (da
 	return data, contentType, nil
 }
 
-// rewriteCartoStyle rewrites exactly three URL fields in an upstream Carto
-// style document to point at this same-origin proxy, and returns the
-// re-marshalled document otherwise unchanged. This is the entire reason
-// the style handler decodes and re-encodes JSON instead of piping upstream
-// bytes straight through: everything else in the document is load-bearing
-// frontend state that must survive intact -
-//   - the vector source id "carto": frontend/src/components/
-//     map-place-labels.tsx pins BASE_VECTOR_SOURCE_ID = 'carto' and
+// buildCartoStyle turns a cached upstream Carto style into the document this
+// server hands the browser: the vector source's tiles array, the glyphs URL
+// and the sprite URL are pointed at this same-origin proxy, and everything
+// else is returned unchanged. That is the entire reason the style handler
+// decodes and re-encodes JSON instead of piping upstream bytes through:
+// everything else in the document is load-bearing frontend state that must
+// survive intact -
+//   - the vector source id: frontend/src/components/map-place-labels.tsx
+//     pins BASE_VECTOR_SOURCE_ID to the id the upstream style uses and
 //     attaches every place-name label layer to a source with that exact id
-//     (ADR 0066).
+//     (ADR 0066). The id is left as upstream names it.
 //   - every layer id: BASE_STYLE_FIRST_LAYER_ID = 'background' pins the
 //     first layer as a beforeId anchor (ADR 0016).
 //
-// A missing/wrong-shaped field at any of the three rewrite points is
-// treated as an upstream-shape failure (an error, not a best-effort partial
-// rewrite) - serving a style with a stale/broken glyphs or sprite URL would
-// silently break label/icon rendering with no obvious cause, so this fails
-// loudly instead per the repo's fallback policy.
-func rewriteCartoStyle(raw []byte, styleName string) ([]byte, error) {
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("decode upstream style: %w", err)
+// The URLs are made absolute under origin at serve time, not stored that
+// way: MapLibre rejects a relative sprite ("must be absolute") and aborts
+// the whole style load, and glyphs and the tile template are fetched from a
+// Web Worker that has no document to resolve a relative path against. The
+// dashboard is reached on several hostnames (localhost, the boat's LAN IP,
+// Tailscale), so only the request knows the right origin. The upstream
+// style that is cached is host-independent.
+//
+// A missing or wrong-shaped field is an error (see parseCartoUpstream), never
+// a best-effort partial rewrite: serving a style with a stale or broken URL
+// would silently break the chart with no obvious cause.
+func buildCartoStyle(rawUpstream []byte, styleName, origin string) ([]byte, error) {
+	up, doc, err := parseCartoUpstream(rawUpstream)
+	if err != nil {
+		return nil, err
 	}
 
-	sources, ok := doc["sources"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("upstream style has no sources object")
-	}
-	carto, ok := sources["carto"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("upstream style has no sources.carto object")
-	}
-	if _, ok := carto["url"].(string); !ok {
-		return nil, fmt.Errorf("upstream style sources.carto has no url string")
-	}
-	carto["url"] = "/api/basemap/tilejson"
-
-	if _, ok := doc["glyphs"].(string); !ok {
-		return nil, fmt.Errorf("upstream style has no glyphs string")
-	}
-	doc["glyphs"] = "/api/basemap/fonts/{fontstack}/{range}.pbf"
-
-	if _, ok := doc["sprite"].(string); !ok {
-		return nil, fmt.Errorf("upstream style has no sprite string")
-	}
-	doc["sprite"] = "/api/basemap/sprite/" + styleName
+	src := doc["sources"].(map[string]any)[up.sourceID].(map[string]any)
+	delete(src, "url")
+	src["tiles"] = []string{origin + "/api/basemap/tiles/{z}/{x}/{y}"}
+	doc["glyphs"] = origin + "/api/basemap/fonts/{fontstack}/{range}.pbf"
+	doc["sprite"] = origin + "/api/basemap/sprite/" + styleName
 
 	rewritten, err := json.Marshal(doc)
 	if err != nil {
@@ -209,139 +545,42 @@ func rewriteCartoStyle(raw []byte, styleName string) ([]byte, error) {
 	return rewritten, nil
 }
 
-// rewriteCartoTileJSON rewrites tiles.json's "tiles" array to this proxy's
-// own same-origin template, leaving every other field - minzoom, maxzoom,
-// attribution, bounds, vector_layers, etc. - untouched by only ever
-// touching the one key. Same fail-fast shape as rewriteCartoStyle: a
-// missing/wrong-shaped "tiles" field is an upstream-format error, not
-// something to paper over with a best guess.
-func rewriteCartoTileJSON(raw []byte) ([]byte, error) {
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("decode upstream tilejson: %w", err)
-	}
+// forwardedHostPattern is a plain DNS name, IPv4 address or bracketed IPv6
+// address, with an optional numeric port. Anything else in X-Forwarded-Host
+// (paths, credentials, quotes, whitespace) is ignored, because the value ends
+// up inside URLs in the served style.
+var forwardedHostPattern = regexp.MustCompile(`^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[[0-9A-Fa-f:.]{2,45}\])(?::[0-9]{1,5})?$`)
 
-	if _, ok := doc["tiles"].([]any); !ok {
-		return nil, fmt.Errorf("upstream tilejson has no tiles array")
-	}
-	doc["tiles"] = []string{"/api/basemap/tiles/{z}/{x}/{y}"}
-
-	rewritten, err := json.Marshal(doc)
-	if err != nil {
-		return nil, fmt.Errorf("encode rewritten tilejson: %w", err)
-	}
-	return rewritten, nil
+// firstForwardedValue returns the first comma-separated element of a
+// forwarding header, trimmed.
+func firstForwardedValue(v string) string {
+	first, _, _ := strings.Cut(v, ",")
+	return strings.TrimSpace(first)
 }
 
 // requestOrigin reconstructs the scheme://host the browser actually used to
-// reach this server. Echo's c.Scheme() already honours X-Forwarded-Proto;
-// X-Forwarded-Host gets the same treatment here so the value stays correct
-// behind a reverse proxy. In the normal deployment there is no proxy at all
-// - the backend serves the embedded frontend itself (see static.go), so the
-// request Host is by construction the same origin the app was loaded from.
+// reach this server, honouring X-Forwarded-Proto and X-Forwarded-Host from a
+// reverse proxy. Both are client-supplied unless a proxy overwrites them, so
+// each is reduced to its first value and checked: the scheme must be http or
+// https, the host a plain host[:port]; otherwise the header is ignored and the
+// connection's own scheme and Host are used. In the normal deployment there is
+// no proxy at all - the backend serves the embedded frontend itself (see
+// static.go), so the request Host is by construction the same origin the app
+// was loaded from.
 func requestOrigin(c echo.Context) string {
-	host := c.Request().Header.Get("X-Forwarded-Host")
-	if host == "" {
-		host = c.Request().Host
+	req := c.Request()
+	scheme := "http"
+	if req.TLS != nil {
+		scheme = "https"
 	}
-	return c.Scheme() + "://" + host
-}
-
-// absolutiseSameOrigin turns a rooted path ("/api/basemap/...") into an
-// absolute URL under origin, and leaves anything else alone.
-func absolutiseSameOrigin(value, origin string) string {
-	if strings.HasPrefix(value, "/") {
-		return origin + value
+	if proto := strings.ToLower(firstForwardedValue(req.Header.Get("X-Forwarded-Proto"))); proto == "http" || proto == "https" {
+		scheme = proto
 	}
-	return value
-}
-
-// absolutiseStyleURLs rewrites every same-origin URL in a cached style
-// document (sprite, glyphs, and each source's url) to an absolute URL under
-// origin.
-//
-// Done at serve time rather than baked into the cache because the two
-// requirements pull in opposite directions. MapLibre needs these absolute:
-//
-//   - sprite is validated up front and a relative value is rejected outright
-//     ("Invalid sprite URL ..., must be absolute"), aborting the entire style
-//     load so no source is ever registered.
-//   - glyphs and the vector tile template are fetched from a Web Worker,
-//     which has no document to resolve a relative path against - a relative
-//     value fails at request construction ("Failed to construct 'Request'")
-//     and every tile silently fails to load, leaving a blank basemap.
-//
-// The cache, meanwhile, needs them relative: an absolute URL bakes in one
-// hostname, and this dashboard is reached on several (localhost in dev, the
-// boat's LAN IP, Tailscale). Storing the relative form keeps a single cache
-// entry correct on all of them and confines the host-dependent part to the
-// one place that actually knows the answer, which is the request.
-func absolutiseStyleURLs(raw []byte, origin string) ([]byte, error) {
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("decode cached style: %w", err)
+	host := req.Host
+	if fwd := firstForwardedValue(req.Header.Get("X-Forwarded-Host")); fwd != "" && forwardedHostPattern.MatchString(fwd) {
+		host = fwd
 	}
-
-	sprite, ok := doc["sprite"].(string)
-	if !ok {
-		return nil, fmt.Errorf("cached style has no sprite string")
-	}
-	doc["sprite"] = absolutiseSameOrigin(sprite, origin)
-
-	glyphs, ok := doc["glyphs"].(string)
-	if !ok {
-		return nil, fmt.Errorf("cached style has no glyphs string")
-	}
-	doc["glyphs"] = absolutiseSameOrigin(glyphs, origin)
-
-	if sources, ok := doc["sources"].(map[string]any); ok {
-		for _, src := range sources {
-			srcMap, ok := src.(map[string]any)
-			if !ok {
-				continue
-			}
-			if u, ok := srcMap["url"].(string); ok {
-				srcMap["url"] = absolutiseSameOrigin(u, origin)
-			}
-		}
-	}
-
-	out, err := json.Marshal(doc)
-	if err != nil {
-		return nil, fmt.Errorf("encode style: %w", err)
-	}
-	return out, nil
-}
-
-// absolutiseTileJSONTiles does the same for the TileJSON's tiles array. This
-// is the one that actually matters most: the tile template is consumed
-// entirely inside MapLibre's Web Worker, so a relative value there means not
-// a single vector tile ever loads.
-func absolutiseTileJSONTiles(raw []byte, origin string) ([]byte, error) {
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return nil, fmt.Errorf("decode cached tilejson: %w", err)
-	}
-
-	tiles, ok := doc["tiles"].([]any)
-	if !ok {
-		return nil, fmt.Errorf("cached tilejson has no tiles array")
-	}
-	absolute := make([]string, 0, len(tiles))
-	for _, t := range tiles {
-		u, ok := t.(string)
-		if !ok {
-			return nil, fmt.Errorf("cached tilejson has a non-string tiles entry")
-		}
-		absolute = append(absolute, absolutiseSameOrigin(u, origin))
-	}
-	doc["tiles"] = absolute
-
-	out, err := json.Marshal(doc)
-	if err != nil {
-		return nil, fmt.Errorf("encode tilejson: %w", err)
-	}
-	return out, nil
+	return scheme + "://" + host
 }
 
 // basemapStyleHandler is the GET /api/basemap/style/:name handler factory.
@@ -350,70 +589,28 @@ func absolutiseTileJSONTiles(raw []byte, origin string) ([]byte, error) {
 func basemapStyleHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		name := c.Param("name")
-		upstreamURL, ok := cartoStyleUpstreamURLs[name]
-		if !ok {
+		if _, ok := cartoStyleUpstreamURLs[name]; !ok {
 			return c.NoContent(http.StatusBadRequest)
 		}
 
-		cachePath := "/api/basemap/style/" + name
-		data, contentType, err := resolveBasemapDocument(cache, cachePath, func() ([]byte, string, error) {
-			raw, _, fetchErr := fetchBasemapUpstream(fetcher, upstreamURL, "application/json")
-			if fetchErr != nil {
-				return nil, "", fetchErr
-			}
-			rewritten, rewriteErr := rewriteCartoStyle(raw, name)
-			if rewriteErr != nil {
-				return nil, "", rewriteErr
-			}
-			return rewritten, "application/json; charset=utf-8", nil
-		})
+		raw, err := cartoUpstreamRaw(cache, fetcher, name)
 		if err != nil {
-			// Fail-fast: nothing cached and upstream/rewrite failed is a
-			// real outage, surfaced as 502 with the real reason - never a
+			// Fail-fast: nothing cached and upstream failed is a real
+			// outage, surfaced as 502 with the real reason - never a
 			// fabricated empty style, which would leave both maps
 			// silently blank with no way to tell why.
 			return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap style unavailable: " + err.Error()})
 		}
 
-		absolute, err := absolutiseStyleURLs(data, requestOrigin(c))
+		style, err := buildCartoStyle(raw, name, requestOrigin(c))
 		if err != nil {
 			return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap style unusable: " + err.Error()})
 		}
 
-		c.Response().Header().Set("Cache-Control", basemapDocumentCacheControl)
-		return c.Blob(http.StatusOK, contentType, absolute)
-	}
-}
-
-// basemapTileJSONHandler is the GET /api/basemap/tilejson handler factory.
-// One handler, one cache entry: both styles' rewritten sources.carto.url
-// point at this same path, matching the one upstream TileJSON document
-// both share.
-func basemapTileJSONHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc {
-	return func(c echo.Context) error {
-		const cachePath = "/api/basemap/tilejson"
-		data, contentType, err := resolveBasemapDocument(cache, cachePath, func() ([]byte, string, error) {
-			raw, _, fetchErr := fetchBasemapUpstream(fetcher, cartoTileJSONUpstreamURL, "application/json")
-			if fetchErr != nil {
-				return nil, "", fetchErr
-			}
-			rewritten, rewriteErr := rewriteCartoTileJSON(raw)
-			if rewriteErr != nil {
-				return nil, "", rewriteErr
-			}
-			return rewritten, "application/json; charset=utf-8", nil
-		})
-		if err != nil {
-			return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap tilejson unavailable: " + err.Error()})
-		}
-
-		absolute, err := absolutiseTileJSONTiles(data, requestOrigin(c))
-		if err != nil {
-			return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap tilejson unusable: " + err.Error()})
-		}
-
-		c.Response().Header().Set("Cache-Control", basemapDocumentCacheControl)
-		return c.Blob(http.StatusOK, contentType, absolute)
+		// The served style embeds the request's origin, so no shared cache
+		// may keep it for another viewer.
+		c.Response().Header().Set("Cache-Control", basemapStyleCacheControl)
+		return c.Blob(http.StatusOK, "application/json; charset=utf-8", style)
 	}
 }
 
@@ -441,7 +638,7 @@ func basemapVectorTileHandler(cache *tileCache, fetcher tileFetcher) echo.Handle
 		// for why serving a shallower tile's bytes under this deeper key
 		// would be exactly the coordinate-mismatch hazard this feature
 		// exists to avoid, just moved from the cache into the handler. A
-		// compliant MapLibre client never sends z>14 in the first place
+		// compliant MapLibre client never sends z>15 in the first place
 		// (it overzooms client-side instead), so this only ever fires
 		// against a misbehaving client or a manual request.
 		if zInt < 0 || zInt > cartoBasemapMaxZoom {
@@ -450,16 +647,11 @@ func basemapVectorTileHandler(cache *tileCache, fetcher tileFetcher) echo.Handle
 
 		// x and y are only meaningful in [0, 2^z-1] for this z - the same
 		// reject-don't-clamp reasoning as the zoom check above, one level
-		// down. strconv.Atoi happily parses a negative coordinate, and
-		// Go's % keeps the sign of its dividend, so an unvalidated
-		// negative x or y used to reach
-		// cartoVectorTileHosts[(x+y)%len(cartoVectorTileHosts)]
-		// (tile_cache.go's fetchCartoVectorTileUpstream) as a negative
-		// slice index and panic - caught by middleware.Recover() as a
-		// 500, but still an unvalidated-input panic reachable by anyone.
-		// An x/y past the top of the range is equally meaningless: there
-		// is no "nearest valid tile" for it that isn't actually some
-		// other, wrong, place.
+		// down. strconv.Atoi happily parses a negative coordinate, which
+		// would otherwise be interpolated into the upstream tile URL as a
+		// tile that does not exist. An x/y past the top of the range is
+		// equally meaningless: there is no "nearest valid tile" for it
+		// that isn't actually some other, wrong, place.
 		maxIndex := 1 << uint(zInt)
 		if xInt < 0 || yInt < 0 || xInt >= maxIndex || yInt >= maxIndex {
 			return c.NoContent(http.StatusBadRequest)
@@ -467,13 +659,7 @@ func basemapVectorTileHandler(cache *tileCache, fetcher tileFetcher) echo.Handle
 
 		data, contentType, err := resolveCartoVectorTile(cache, fetcher, zInt, xInt, yInt)
 		if err != nil {
-			// Nothing cached and upstream failed/unreachable: 404, not
-			// 502. MapLibre already treats a missing vector tile as "no
-			// data here" and simply doesn't draw it, which is the correct
-			// behavior for genuinely absent data - unlike the style/
-			// tilejson documents above, where the same situation is a
-			// real outage worth surfacing loudly.
-			return c.NoContent(http.StatusNotFound)
+			return basemapTileError(c, err)
 		}
 
 		c.Response().Header().Set("Cache-Control", basemapImmutableCacheControl)
@@ -499,19 +685,19 @@ func basemapFontsHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc
 			return c.NoContent(http.StatusBadRequest)
 		}
 
-		cachePath := "/api/basemap/fonts/" + fontstack + "/" + rangeStr
+		cachePath := basemapAssetPrefix + "fonts/" + fontstack + "/" + rangeStr
 		data, contentType, err := resolveBasemapDocument(cache, cachePath, func() ([]byte, string, error) {
-			// Re-encode for the upstream call: fontstack/rangeStr arrived
-			// already percent-decoded (see the doc comment above), and
-			// Carto's own server expects the same percent-encoded segment
-			// a browser would have sent it directly. url.PathEscape also
-			// guarantees neither value can smuggle a "/" into the request
-			// path - the SSRF-relevant property this endpoint relies on
-			// instead of a closed allowlist (see cartoGlyphsUpstreamHost's
-			// doc comment).
-			upstreamURL := fmt.Sprintf("%s/%s/%s.pbf",
-				cartoGlyphsUpstreamHost, url.PathEscape(fontstack), url.PathEscape(rangeStr))
-			return fetchBasemapUpstream(fetcher, upstreamURL, "application/x-protobuf")
+			// The glyph template comes from the cached upstream style (its
+			// host already checked against the allowlist). Both themes
+			// share one glyph set, so the light style's is used.
+			// fontstack/rangeStr arrived already percent-decoded (see the
+			// doc comment above); cartoGlyphsUpstreamURL re-encodes them as
+			// single path segments, so neither can smuggle a "/" into the
+			// upstream path - the SSRF-relevant property this endpoint
+			// relies on instead of a closed allowlist.
+			return fetchWithStampRecovery(cache, fetcher, "positron", func(up *cartoUpstream) ([]byte, string, error) {
+				return fetchBasemapUpstream(fetcher, cartoGlyphsUpstreamURL(up, fontstack, rangeStr), "application/x-protobuf")
+			})
 		})
 		if err != nil {
 			return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap glyphs unavailable: " + err.Error()})
@@ -523,14 +709,17 @@ func basemapFontsHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc
 }
 
 // basemapSpriteHandler is the GET /api/basemap/sprite/:name handler
-// factory. :name carries its own suffix (e.g. "positron.json",
-// "positron@2x.png", "dark-matter.png") and must match one of the 8 legal
-// combinations in cartoSpriteUpstreamURLs' SSRF-guard allowlist above -
-// anything else is a 400, not a proxied fetch.
+// factory. The style's sprite field is a base URL with no extension, so
+// MapLibre requests <base>.json, <base>.png and, on high-DPI screens,
+// <base>@2x.json and <base>@2x.png. :name carries that suffix (e.g.
+// "positron.json", "dark-matter@2x.png") and must be one of the 8 legal
+// theme x suffix combinations (splitCartoSpriteName) - anything else is a
+// 400, not a proxied fetch. The upstream base comes from that theme's
+// cached upstream style.
 func basemapSpriteHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		name := c.Param("name")
-		upstreamURL, ok := cartoSpriteUpstreamURLs[name]
+		theme, suffix, ok := splitCartoSpriteName(name)
 		if !ok {
 			return c.NoContent(http.StatusBadRequest)
 		}
@@ -540,9 +729,11 @@ func basemapSpriteHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFun
 			fallbackContentType = "application/json"
 		}
 
-		cachePath := "/api/basemap/sprite/" + name
+		cachePath := basemapAssetPrefix + "sprite/" + name
 		data, contentType, err := resolveBasemapDocument(cache, cachePath, func() ([]byte, string, error) {
-			return fetchBasemapUpstream(fetcher, upstreamURL, fallbackContentType)
+			return fetchWithStampRecovery(cache, fetcher, theme, func(up *cartoUpstream) ([]byte, string, error) {
+				return fetchBasemapUpstream(fetcher, up.sprite+suffix, fallbackContentType)
+			})
 		})
 		if err != nil {
 			return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap sprite unavailable: " + err.Error()})
@@ -551,4 +742,39 @@ func basemapSpriteHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFun
 		c.Response().Header().Set("Cache-Control", basemapImmutableCacheControl)
 		return c.Blob(http.StatusOK, contentType, data)
 	}
+}
+
+// basemapTileError maps a failed vector tile resolve to a response. MapLibre
+// treats a 404 tile as "no data here" and draws nothing, silently, so 404 is
+// kept for the cases where that is true:
+//   - upstream answered 404 or 410 for this tile, after the release-stamp
+//     recovery in fetchWithStampRecovery had its chance;
+//   - upstream could not be reached at all (offline with this tile not
+//     cached, or the circuit breaker open). Nothing is wrong with the
+//     proxy; the tile is simply not available.
+//
+// Everything else is a fault that must not look like empty sea: a local
+// cache error is a 500; a missing, unusable or unrefreshable upstream style,
+// or any other upstream status, is a 502 with the reason.
+func basemapTileError(c echo.Context, err error) error {
+	var local *localCacheError
+	if errors.As(err, &local) {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "basemap cache failed: " + err.Error()})
+	}
+	var styleErr *basemapStyleError
+	if errors.As(err, &styleErr) {
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap style unavailable: " + err.Error()})
+	}
+	var status *upstreamStatusError
+	if errors.As(err, &status) {
+		if status.status == http.StatusNotFound || status.status == http.StatusGone {
+			return c.NoContent(http.StatusNotFound)
+		}
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap tile unavailable: " + err.Error()})
+	}
+	var transport *tileTransportError
+	if errors.As(err, &transport) || errors.Is(err, errTileCircuitBreakerOpen) {
+		return c.NoContent(http.StatusNotFound)
+	}
+	return c.JSON(http.StatusBadGateway, map[string]string{"error": "basemap tile unavailable: " + err.Error()})
 }

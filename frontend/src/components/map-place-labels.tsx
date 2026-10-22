@@ -4,7 +4,8 @@ import type { ExpressionSpecification, FilterSpecification } from 'maplibre-gl'
 
 /**
  * The one vector source both Carto styles (Positron light, Dark Matter dark)
- * declare. Both maps already load one of these styles as their base, so by
+ * declare. Carto's Protomaps-schema styles name it "protomaps"; the backend
+ * passes the id through from the upstream style untouched (docs/adr/0201). Both maps already load one of these styles as their base, so by
  * the time these <Layer> elements try to mount, a source with this id exists
  * in the loaded style. There is deliberately no <Source> wrapper in this
  * file - only layers attached to a source somebody else already created.
@@ -13,32 +14,34 @@ import type { ExpressionSpecification, FilterSpecification } from 'maplibre-gl'
  * that source is ever missing (see warnIfBaseVectorSourceMissing below for
  * the fail-fast check both maps run against exactly that condition).
  */
-export const BASE_VECTOR_SOURCE_ID = 'carto'
+export const BASE_VECTOR_SOURCE_ID = 'protomaps'
 
 /**
  * Font stacks copied verbatim from the Carto style documents' own
- * place/water label layers (positron-gl-style and dark-matter-gl-style
- * share these). Reusing the exact stack means the glyph PBFs these labels
- * need are ones the map fetches already for the basemap's own label layers
- * (place_town, watername_ocean, etc.) - a stack the style has never
- * referenced would mean a fresh glyph request the first time one of these
- * layers paints.
+ * place/water label layers (place_hamlet and watername_lake in
+ * positron-gl-style and dark-matter-gl-style, which share them). Reusing the
+ * exact stack means the glyph PBFs these labels need are ones the map
+ * fetches already for the basemap's own label layers - a stack the style has
+ * never referenced would mean a fresh glyph request the first time one of
+ * these layers paints.
  */
-const PLACE_FONT = ['Montserrat Medium', 'Open Sans Bold', 'Noto Sans Regular', 'HanWangHeiLight Regular', 'NanumBarunGothic Regular']
-const WATER_FONT = ['Montserrat Regular Italic', 'Open Sans Italic', 'Noto Sans Regular', 'HanWangHeiLight Regular', 'NanumBarunGothic Regular']
+const PLACE_FONT = ['Montserrat Medium', 'Open Sans Regular', 'Noto Sans Regular', 'Noto Sans CJK JP Regular']
+const WATER_FONT = ['Montserrat Regular Italic', 'Open Sans Italic', 'Noto Sans Regular', 'Noto Sans CJK JP Regular']
 
 export const PLACE_LABEL_LAYER_IDS = [
   'place-names-water',
+  'place-names-strait',
   'place-names-island',
+  'place-names-islet',
   'place-names-harbor',
   'place-names-peak',
   'place-names-town-topup',
 ] as const
 
 // Same text everywhere: the tile's local name where the source has one,
-// falling back to the English rendering. Carto's own label layers use this
-// exact coalesce.
-const TEXT_FIELD: ExpressionSpecification = ['coalesce', ['get', 'name'], ['get', 'name_en']]
+// falling back to the English rendering (the Protomaps schema carries it as
+// "name:en").
+const TEXT_FIELD: ExpressionSpecification = ['coalesce', ['get', 'name'], ['get', 'name:en']]
 
 // Land labels run one step larger than water labels at every stop, matching
 // place_town's stops vs. watername_lake's - water names read as secondary
@@ -46,27 +49,62 @@ const TEXT_FIELD: ExpressionSpecification = ['coalesce', ['get', 'name'], ['get'
 const LAND_TEXT_SIZE: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 10, 10, 14, 12, 17, 13]
 const WATER_TEXT_SIZE: ExpressionSpecification = ['interpolate', ['linear'], ['zoom'], 10, 9, 14, 11, 17, 12]
 
+// Protomaps basemap schema (see docs/adr/0201): features carry `kind` (and
+// sometimes `kind_detail`) instead of OpenMapTiles' `class`. Each filter
+// below was checked against real tiles around the Whitsundays, Sydney and
+// Auckland.
+
+// Bays are named Point features in the `water` layer. Carto's own
+// watername_* layers draw only ocean, sea and lake/water kinds, so bays never
+// draw without this layer.
 const WATER_FILTER: FilterSpecification = [
   'all',
   ['has', 'name'],
   ['==', ['geometry-type'], 'Point'],
-  ['in', ['get', 'class'], ['literal', ['bay', 'strait']]],
+  ['==', ['get', 'kind'], 'bay'],
 ]
 
-const ISLAND_FILTER: FilterSpecification = ['all', ['has', 'name'], ['==', ['get', 'class'], 'island']]
+// Straits and channels are named LineStrings in the `water` layer, so they
+// need line placement rather than a point anchor.
+const STRAIT_FILTER: FilterSpecification = [
+  'all',
+  ['has', 'name'],
+  ['==', ['geometry-type'], 'LineString'],
+  ['==', ['get', 'kind'], 'strait'],
+]
 
-const HARBOR_FILTER: FilterSpecification = ['all', ['has', 'name'], ['==', ['get', 'class'], 'harbor']]
+// Island names are Point features of kind island in the `earth` layer.
+const ISLAND_FILTER: FilterSpecification = [
+  'all',
+  ['has', 'name'],
+  ['==', ['geometry-type'], 'Point'],
+  ['==', ['get', 'kind'], 'island'],
+]
+
+// Smaller islands (Daydream, Henning, Mid Molle, Ross Islet, Surprise Rock)
+// have no `earth` point at all: they are `pois` of kind coastline. Checked
+// over the Whitsundays and Magnetic Island, `earth` carries only kind island
+// (85 named points), and 39 of 63 named coastline pois had no `earth`
+// counterpart.
+const ISLET_FILTER: FilterSpecification = ['all', ['has', 'name'], ['==', ['get', 'kind'], 'coastline']]
+
+// Marinas are `pois` of kind marina (OpenMapTiles called this class harbor).
+const HARBOR_FILTER: FilterSpecification = ['all', ['has', 'name'], ['==', ['get', 'kind'], 'marina']]
 
 const PEAK_FILTER: FilterSpecification = [
   'all',
   ['has', 'name'],
-  ['in', ['get', 'class'], ['literal', ['peak', 'volcano']]],
+  ['in', ['get', 'kind'], ['literal', ['peak', 'volcano']]],
 ]
 
 const TOWN_TOPUP_FILTER: FilterSpecification = [
   'all',
   ['has', 'name'],
-  ['in', ['get', 'class'], ['literal', ['city', 'town', 'village', 'hamlet', 'suburb']]],
+  [
+    'any',
+    ['all', ['==', ['get', 'kind'], 'locality'], ['in', ['get', 'kind_detail'], ['literal', ['city', 'town', 'village', 'hamlet']]]],
+    ['all', ['==', ['get', 'kind'], 'neighbourhood'], ['==', ['get', 'kind_detail'], 'suburb']],
+  ],
 ]
 
 interface LabelPaint {
@@ -80,8 +118,8 @@ interface LabelPaint {
 const HYBRID_PAINT: LabelPaint = { 'text-color': '#ffffff', 'text-halo-color': '#000000', 'text-halo-width': 1.5 }
 
 // Light and dark values lifted from the corresponding Carto style layers
-// (place_town / place_city_r5 for land, watername_lake / watername_ocean for
-// water, in each of positron-gl-style.json and dark-matter-gl-style.json) so
+// (place_town for land, watername_lake for water, in each of
+// positron-gl-style.json and dark-matter-gl-style.json) so
 // these labels read as native basemap type rather than an overlay bolted on
 // top of it.
 const LIGHT_LAND_PAINT: LabelPaint = { 'text-color': '#697b89', 'text-halo-color': 'rgba(255,255,255,0.6)', 'text-halo-width': 1 }
@@ -110,11 +148,12 @@ export interface MapPlaceLabelsProps {
 
 /**
  * Symbol layers that draw the place names Carto's own style never draws:
- * bays/inlets/channels, islands, marina POIs, peaks, and a top-up of
+ * bays and straits, islands, marina POIs, peaks, and a top-up of
  * town/village names past Carto's own maxzoom cutoffs. All of it is already
  * sitting in the vector tiles the map downloads for the basemap - see
- * docs/adr/0066-basemap-place-name-labels.md for the tile-level evidence and
- * the reasoning against taking on a second tile source.
+ * docs/adr/0066-basemap-place-name-labels.md for the reasoning against taking
+ * on a second tile source (the tile schema it describes has since moved to
+ * Protomaps' layers and attributes, docs/adr/0201).
  *
  * No beforeId on any of these. Both callers mount this component
  * unconditionally, at the top of their layer stack, before any conditional
@@ -131,15 +170,14 @@ export function MapPlaceLabels({ isDarkTheme, overImagery }: MapPlaceLabelsProps
 
   return (
     <>
-      {/* Cid Harbour, Nara Inlet, Macona Inlet, Hayman Channel, The Narrows -
-          water_name's Point-geometry bay/strait class. Carto's own
-          watername_* layers filter to ocean/sea/lake only, so these never
-          draw without this layer. */}
+      {/* Crab Bay, Sydney Cove, Botany Bay - `water` layer Point features of
+          kind bay. Carto's own watername_* layers draw ocean, sea and lake
+          kinds only, so these never draw without this layer. */}
       <Layer
         id="place-names-water"
         type="symbol"
         source={BASE_VECTOR_SOURCE_ID}
-        source-layer="water_name"
+        source-layer="water"
         minzoom={9}
         filter={WATER_FILTER}
         layout={{
@@ -153,15 +191,34 @@ export function MapPlaceLabels({ isDarkTheme, overImagery }: MapPlaceLabelsProps
         paint={paint.water}
       />
 
-      {/* Whitsunday, Hook, Border, Cid, Dent, Hamilton Island. Carto only
-          draws place class island via place_city_dot_z7, clamped minzoom
-          7/maxzoom 8 - a bare dot with no label outside one narrow, mostly
-          unreachable zoom band. */}
+      {/* Rangitoto Channel, Motukorea Channel - straits arrive as named
+          LineStrings in `water`, so the label follows the line. */}
+      <Layer
+        id="place-names-strait"
+        type="symbol"
+        source={BASE_VECTOR_SOURCE_ID}
+        source-layer="water"
+        minzoom={9}
+        filter={STRAIT_FILTER}
+        layout={{
+          'symbol-placement': 'line',
+          'text-field': TEXT_FIELD,
+          'text-font': WATER_FONT,
+          'text-size': WATER_TEXT_SIZE,
+          'text-max-width': 8,
+          'text-padding': 2,
+        }}
+        paint={paint.water}
+      />
+
+      {/* Whitsunday, Hook, Hayman, Cid, Dent, Hamilton Island - Point
+          features of kind island in the `earth` layer. Carto's own style has
+          no layer that labels them. */}
       <Layer
         id="place-names-island"
         type="symbol"
         source={BASE_VECTOR_SOURCE_ID}
-        source-layer="place"
+        source-layer="earth"
         minzoom={9}
         filter={ISLAND_FILTER}
         layout={{
@@ -175,18 +232,37 @@ export function MapPlaceLabels({ isDarkTheme, overImagery }: MapPlaceLabelsProps
         paint={paint.land}
       />
 
-      {/* Coral Sea Marina, Port of Airlie Marina, Whitsunday Sailing Club.
-          No Carto layer references poi class harbor at all - poi_stadium and
-          poi_park are the only poi-source-layer layers in either style.
-          minzoom 14 because OpenMapTiles only generates poi features from
-          z14 up; setting it lower would just filter nothing in and cost a
-          layer evaluation every frame below that zoom. */}
+      {/* Daydream Island, Henning Island, Ross Islet, Surprise Rock - the
+          smaller islands and rocks, which the tiles carry only as `pois` of
+          kind coastline, from z11. */}
+      <Layer
+        id="place-names-islet"
+        type="symbol"
+        source={BASE_VECTOR_SOURCE_ID}
+        source-layer="pois"
+        minzoom={11}
+        filter={ISLET_FILTER}
+        layout={{
+          'text-field': TEXT_FIELD,
+          'text-font': PLACE_FONT,
+          'text-size': LAND_TEXT_SIZE,
+          'text-max-width': 8,
+          'text-padding': 2,
+          'text-anchor': 'center',
+        }}
+        paint={paint.land}
+      />
+
+      {/* Balmain Marina, Sydney Superyacht Marina - `pois` of kind marina.
+          No Carto layer references that kind; poi_stadium and poi_park are
+          the only pois-layer label layers in either style. The tiles carry
+          marinas from z12 up. */}
       <Layer
         id="place-names-harbor"
         type="symbol"
         source={BASE_VECTOR_SOURCE_ID}
-        source-layer="poi"
-        minzoom={14}
+        source-layer="pois"
+        minzoom={12}
         filter={HARBOR_FILTER}
         layout={{
           'text-field': TEXT_FIELD,
@@ -199,14 +275,13 @@ export function MapPlaceLabels({ isDarkTheme, overImagery }: MapPlaceLabelsProps
         paint={paint.land}
       />
 
-      {/* Whitsunday Peak, Hook Peak, Bolton Hill. Zero layers in either
-          Carto style reference mountain_peak - it is decoded straight off
-          the wire, unfiltered by any existing style rule. */}
+      {/* Whitsunday Peak, Bolton Hill, Mount Robinson - `pois` of kind peak
+          or volcano. No layer in either Carto style references them. */}
       <Layer
         id="place-names-peak"
         type="symbol"
         source={BASE_VECTOR_SOURCE_ID}
-        source-layer="mountain_peak"
+        source-layer="pois"
         minzoom={12}
         filter={PEAK_FILTER}
         layout={{
@@ -220,7 +295,7 @@ export function MapPlaceLabels({ isDarkTheme, overImagery }: MapPlaceLabelsProps
         paint={paint.land}
       />
 
-      {/* Airlie Beach, Cannonvale, and every other town/village/hamlet/
+      {/* Airlie Beach, Cannonvale, and every other city/town/village/hamlet/
           suburb - fills the gap Carto's own maxzoom cutoffs leave behind
           (place_town: 14, place_city_r5/r6: 15, place_villages/hamlet/
           suburbs: 16). In the zoom band where Carto still draws these,
@@ -233,7 +308,7 @@ export function MapPlaceLabels({ isDarkTheme, overImagery }: MapPlaceLabelsProps
         id="place-names-town-topup"
         type="symbol"
         source={BASE_VECTOR_SOURCE_ID}
-        source-layer="place"
+        source-layer="places"
         minzoom={14}
         filter={TOWN_TOPUP_FILTER}
         layout={{

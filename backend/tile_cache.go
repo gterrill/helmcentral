@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,11 +29,19 @@ const worldImagerySource = "esri-world-imagery"
 // (.mvt), stored in the same table as worldImagerySource above - the
 // source column exists precisely so a second tile provider needs no schema
 // change. One value, not two: both Carto styles this app loads (Positron
-// light, Dark Matter dark) declare exactly one vector source, "carto",
-// and it is the same tile data either way - only the style document (which
-// this proxy also caches, in basemap_assets below) decides how those tiles
-// get colored. There is no light/dark split at the tile level.
-const cartoBasemapSource = "carto-basemap"
+// light, Dark Matter dark) declare exactly one vector source and it is the
+// same tile data either way - only the style document (which this proxy also
+// caches, in basemap_assets below) decides how those tiles get colored.
+// There is no light/dark split at the tile level.
+//
+// "-v2" is the Protomaps schema generation (ADR 0201). The earlier
+// "carto-basemap" rows hold OpenMapTiles-shaped tiles that the new style's
+// layers cannot read; newTileCache deletes them.
+const cartoBasemapSource = "carto-basemap-v2"
+
+// legacyCartoBasemapSource is the pre-Protomaps tiles.source key, kept only
+// so newTileCache can purge it.
+const legacyCartoBasemapSource = "carto-basemap"
 
 // maxDegradeLevels bounds how many zoom levels coarser than the originally
 // requested tile the cache-through proxy will try before giving up and
@@ -186,7 +196,38 @@ type tileFetcher interface {
 type tileCache struct {
 	db           *sql.DB
 	resolveGroup singleflight.Group
+
+	// upstreamRefresh* back refreshCartoUpstream (basemap_proxy.go): one
+	// style refetch per theme at a time, and at most one per theme per
+	// cartoUpstreamRefreshInterval.
+	upstreamRefreshGroup singleflight.Group
+	upstreamRefreshMu    sync.Mutex
+	upstreamRefreshNext  map[string]cartoRefreshState
+
+	// upstreamTemplates holds each theme's parsed upstream templates so a
+	// tile miss does not re-read and re-parse the cached style JSON. Loaded
+	// lazily from basemap_assets, replaced when a refresh stores a new style,
+	// reset by clear().
+	upstreamTemplatesMu sync.RWMutex
+	upstreamTemplates   map[string]*cartoUpstream
+
+	// now is the clock for the refresh rate limit; nil means time.Now.
+	now func() time.Time
 }
+
+func (tc *tileCache) clock() time.Time {
+	if tc.now != nil {
+		return tc.now()
+	}
+	return time.Now()
+}
+
+// localCacheError marks a failure of the local SQLite cache itself, as
+// opposed to anything upstream, so handlers can answer 500 rather than 502.
+type localCacheError struct{ err error }
+
+func (e *localCacheError) Error() string { return e.err.Error() }
+func (e *localCacheError) Unwrap() error { return e.err }
 
 func tileCachePath() string {
 	return cacheFilePath("TILE_CACHE_PATH", "data/tile-cache.sqlite")
@@ -240,11 +281,11 @@ func newTileCache(dbPath string) (*tileCache, error) {
 		return nil, fmt.Errorf("create tiles table: %w", err)
 	}
 
-	// basemap_assets holds the four Carto basemap asset classes that are
-	// NOT (z,x,y)-addressable, so they don't fit the tiles table above:
-	// style.json (x2, one per theme), tiles.json, glyph PBFs, and sprite
-	// files. "path" is this proxy's own request path (e.g.
-	// "/api/basemap/style/positron"), which already uniquely identifies an
+	// basemap_assets holds the Carto basemap asset classes that are NOT
+	// (z,x,y)-addressable, so they don't fit the tiles table above: the
+	// upstream style.json (x2, one per theme), glyph PBFs, and sprite
+	// files. "path" is a key under basemapAssetPrefix (e.g.
+	// "/api/basemap/v2/upstream/positron"), which already uniquely identifies an
 	// asset - no need for a second addressing scheme on top of it. Same
 	// no-TTL reasoning as tiles: none of these change on human timescales,
 	// so a fetched-once asset is cached forever until an explicit clear.
@@ -256,6 +297,19 @@ func newTileCache(dbPath string) (*tileCache, error) {
 	)`); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("create basemap_assets table: %w", err)
+	}
+
+	// Drop what the OpenMapTiles-shaped Carto styles cached before ADR 0201:
+	// their tiles and style documents are the wrong schema for the current
+	// style, and under the repo's fallback policy nothing serves them as a
+	// stand-in. Idempotent, so it simply finds nothing on later starts.
+	if _, err := db.Exec(`DELETE FROM tiles WHERE source = ?`, legacyCartoBasemapSource); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("purge legacy basemap tiles: %w", err)
+	}
+	if _, err := db.Exec(`DELETE FROM basemap_assets WHERE path NOT LIKE ?`, basemapAssetPrefix+"%"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("purge legacy basemap assets: %w", err)
 	}
 
 	return &tileCache{db: db}, nil
@@ -274,7 +328,7 @@ func (tc *tileCache) get(source string, z, x, y int) (data []byte, contentType s
 		if err == sql.ErrNoRows {
 			return nil, "", false, nil
 		}
-		return nil, "", false, fmt.Errorf("read cached tile: %w", err)
+		return nil, "", false, &localCacheError{fmt.Errorf("read cached tile: %w", err)}
 	}
 	return data, contentType, true, nil
 }
@@ -289,7 +343,7 @@ func (tc *tileCache) put(source string, z, x, y int, data []byte, contentType st
 		source, z, x, y, contentType, data, time.Now().Unix(),
 	)
 	if err != nil {
-		return fmt.Errorf("store cached tile: %w", err)
+		return &localCacheError{fmt.Errorf("store cached tile: %w", err)}
 	}
 	return nil
 }
@@ -308,7 +362,7 @@ func (tc *tileCache) getBasemapAsset(path string) (data []byte, contentType stri
 		if err == sql.ErrNoRows {
 			return nil, "", false, nil
 		}
-		return nil, "", false, fmt.Errorf("read cached basemap asset: %w", err)
+		return nil, "", false, &localCacheError{fmt.Errorf("read cached basemap asset: %w", err)}
 	}
 	return data, contentType, true, nil
 }
@@ -323,13 +377,13 @@ func (tc *tileCache) putBasemapAsset(path string, data []byte, contentType strin
 		path, contentType, data, time.Now().Unix(),
 	)
 	if err != nil {
-		return fmt.Errorf("store cached basemap asset: %w", err)
+		return &localCacheError{fmt.Errorf("store cached basemap asset: %w", err)}
 	}
 	return nil
 }
 
 // clear wipes both the tiles table (Esri imagery + Carto vector basemap
-// tiles) and basemap_assets (style/tilejson/glyph/sprite documents).
+// tiles) and basemap_assets (upstream style/glyph/sprite documents).
 // Deliberate, not an oversight, that DELETE /api/world-imagery/cache below
 // clears both: a stale basemap_assets entry has exactly the same shape as a
 // stale tile - no TTL, cached forever until told otherwise - so a second,
@@ -343,6 +397,21 @@ func (tc *tileCache) clear() error {
 	}
 	if _, err := tc.db.Exec(`DELETE FROM basemap_assets`); err != nil {
 		return fmt.Errorf("clear basemap assets cache: %w", err)
+	}
+	tc.upstreamTemplatesMu.Lock()
+	tc.upstreamTemplates = nil
+	tc.upstreamTemplatesMu.Unlock()
+	tc.upstreamRefreshMu.Lock()
+	tc.upstreamRefreshNext = nil
+	tc.upstreamRefreshMu.Unlock()
+	return nil
+}
+
+// deleteBasemapAssetsWithPrefix removes cached basemap_assets rows whose path
+// starts with prefix. The prefixes used here contain no LIKE wildcards.
+func (tc *tileCache) deleteBasemapAssetsWithPrefix(prefix string) error {
+	if _, err := tc.db.Exec(`DELETE FROM basemap_assets WHERE path LIKE ?`, prefix+"%"); err != nil {
+		return &localCacheError{fmt.Errorf("purge cached basemap assets: %w", err)}
 	}
 	return nil
 }
@@ -483,25 +552,23 @@ func resolveWorldImageryTileUncached(cache *tileCache, fetcher tileFetcher, sour
 	return transparentPNG1x1, "image/png", true, nil
 }
 
-// cartoVectorTileHosts are the 4 subdomains Carto shards vector tile
-// requests across, confirmed directly against the "tiles" array in the
-// upstream tiles.json response (tiles-a/b/c/d.basemaps.cartocdn.com).
-// Picking a host deterministically from the tile coordinate spreads
-// prefetch's concurrent worker-pool load the way a real panning client
-// would, rather than hammering a single subdomain from every worker.
-var cartoVectorTileHosts = [...]string{"tiles-a", "tiles-b", "tiles-c", "tiles-d"}
+// cartoVectorTileURL expands the upstream tile template (taken from the
+// cached upstream style, host already validated by parseCartoUpstream) for
+// one tile. z, x and y are integers, so nothing attacker-controlled reaches
+// the URL text.
+func cartoVectorTileURL(template string, z, x, y int) string {
+	return strings.NewReplacer(
+		"{z}", strconv.Itoa(z), "{x}", strconv.Itoa(x), "{y}", strconv.Itoa(y),
+	).Replace(template)
+}
 
 // fetchCartoVectorTileUpstream performs a single upstream Carto vector
-// tile (.mvt) fetch. Same blanket "non-200/transport/body-read error all
-// become one error" shape as fetchWorldImageryUpstream above - the caller
-// (resolveCartoVectorTile) decides what that means, which here is "give up
-// entirely," not "try a coarser zoom."
-func fetchCartoVectorTileUpstream(fetcher tileFetcher, z, x, y int) ([]byte, string, error) {
-	host := cartoVectorTileHosts[(x+y)%len(cartoVectorTileHosts)]
-	tileURL := fmt.Sprintf(
-		"https://%s.basemaps.cartocdn.com/vectortiles/carto.streets/v1/%d/%d/%d.mvt",
-		host, z, x, y,
-	)
+// tile (.mvt) fetch from template. Same blanket "non-200/transport/body-read
+// error all become one error" shape as fetchWorldImageryUpstream above - the
+// caller (resolveCartoVectorTile) decides what that means, which here is
+// "give up entirely," not "try a coarser zoom."
+func fetchCartoVectorTileUpstream(fetcher tileFetcher, template string, z, x, y int) ([]byte, string, error) {
+	tileURL := cartoVectorTileURL(template, z, x, y)
 
 	req, err := http.NewRequest(http.MethodGet, tileURL, nil)
 	if err != nil {
@@ -516,7 +583,7 @@ func fetchCartoVectorTileUpstream(fetcher tileFetcher, z, x, y int) ([]byte, str
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("upstream returned status %d", resp.StatusCode)
+		return nil, "", &upstreamStatusError{status: resp.StatusCode}
 	}
 
 	body, err := io.ReadAll(resp.Body)
@@ -583,7 +650,18 @@ func resolveCartoVectorTileUncached(cache *tileCache, fetcher tileFetcher, z, x,
 		return data, contentType, nil
 	}
 
-	data, contentType, err := callThroughBreaker(fetchCartoVectorTileUpstream, fetcher, z, x, y)
+	// The template comes from the cached upstream style, so a tile miss on a
+	// brand-new install (or after a cache clear) first fetches that style.
+	// If it cannot be had the tile fails like any other upstream failure:
+	// no hardcoded URL stands in for it.
+	//
+	// If Carto has rotated its release stamp the template 404s; the helper
+	// refetches the style once and retries with the new template.
+	data, contentType, err := fetchWithStampRecovery(cache, fetcher, "positron", func(up *cartoUpstream) ([]byte, string, error) {
+		return callThroughBreaker(func(f tileFetcher, z, x, y int) ([]byte, string, error) {
+			return fetchCartoVectorTileUpstream(f, up.tiles, z, x, y)
+		}, fetcher, z, x, y)
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -597,7 +675,7 @@ func resolveCartoVectorTileUncached(cache *tileCache, fetcher tileFetcher, z, x,
 // deleteWorldImageryCacheHandler is the DELETE /api/world-imagery/cache
 // escape hatch: clears every cached tile (across all sources, so both Esri
 // imagery and Carto vector basemap tiles) AND every cached basemap_assets
-// document (style.json x2, tiles.json, glyphs, sprites) - see tileCache.clear's
+// document (upstream styles, glyphs, sprites) - see tileCache.clear's
 // comment for why the two tables share one clear operation. Kept on its
 // existing /api/world-imagery path rather than adding a second basemap-
 // specific endpoint: from an operator's point of view this is one "wipe

@@ -1,7 +1,7 @@
 # ADR 0066: Place-Name Labels on the Basemap
 
 ## Status
-Accepted
+Accepted. Amended by [ADR 0201](0201-carto-protomaps-basemap-style.md): the source id, source-layer names and attributes its label layers use.
 
 ## Context
 

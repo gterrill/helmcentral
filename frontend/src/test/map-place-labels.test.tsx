@@ -37,60 +37,115 @@ function byId(id: string) {
 }
 
 describe('MapPlaceLabels', () => {
-  it('mounts all five layer ids', () => {
+  it('mounts all seven layer ids', () => {
     render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
 
     const mountedIds = recordedLayers.map((l) => l.id)
     for (const id of PLACE_LABEL_LAYER_IDS) {
       expect(mountedIds).toContain(id)
     }
-    expect(mountedIds).toHaveLength(5)
+    expect(mountedIds).toHaveLength(7)
   })
 
-  it('attaches every layer to the carto source with the right source-layer', () => {
+  it('names the Protomaps source id Carto ships', () => {
+    expect(BASE_VECTOR_SOURCE_ID).toBe('protomaps')
+  })
+
+  it('attaches every layer to the protomaps source with the right source-layer', () => {
     render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
 
-    expect(byId('place-names-water')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'water_name' })
-    expect(byId('place-names-island')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'place' })
-    expect(byId('place-names-harbor')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'poi' })
-    expect(byId('place-names-peak')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'mountain_peak' })
-    expect(byId('place-names-town-topup')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'place' })
+    expect(byId('place-names-water')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'water' })
+    expect(byId('place-names-strait')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'water' })
+    expect(byId('place-names-island')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'earth' })
+    expect(byId('place-names-islet')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'pois' })
+    expect(byId('place-names-harbor')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'pois' })
+    expect(byId('place-names-peak')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'pois' })
+    expect(byId('place-names-town-topup')).toMatchObject({ source: BASE_VECTOR_SOURCE_ID, 'source-layer': 'places' })
   })
 
-  it('gives every layer the coalesce(name, name_en) text field and symbol type', () => {
+  it('uses no OpenMapTiles source-layer or attribute names', () => {
+    render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
+
+    const openMapTilesLayers = ['water_name', 'place', 'poi', 'mountain_peak']
+    for (const layer of recordedLayers) {
+      expect(openMapTilesLayers).not.toContain(layer['source-layer'])
+      const text = JSON.stringify(layer.filter) + JSON.stringify(layer.layout)
+      expect(text).not.toContain('"class"')
+      expect(text).not.toContain('name_en')
+    }
+  })
+
+  it('gives every layer the coalesce(name, name:en) text field and symbol type', () => {
     render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
 
     for (const id of PLACE_LABEL_LAYER_IDS) {
       const layer = byId(id)
       expect(layer?.type).toBe('symbol')
-      expect(layer?.layout?.['text-field']).toEqual(['coalesce', ['get', 'name'], ['get', 'name_en']])
+      expect(layer?.layout?.['text-field']).toEqual(['coalesce', ['get', 'name'], ['get', 'name:en']])
     }
   })
 
-  it('the water filter admits both bay and strait classes', () => {
+  it('the water filter is named Point features of kind bay', () => {
     render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
 
-    const filter = byId('place-names-water')?.filter
-    expect(filter).toEqual([
+    expect(byId('place-names-water')?.filter).toEqual([
       'all',
       ['has', 'name'],
       ['==', ['geometry-type'], 'Point'],
-      ['in', ['get', 'class'], ['literal', ['bay', 'strait']]],
+      ['==', ['get', 'kind'], 'bay'],
     ])
   })
 
-  it('the island filter is class == island', () => {
+  it('straits are named LineStrings of kind strait, labelled along the line', () => {
     render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
 
-    expect(byId('place-names-island')?.filter).toEqual(['all', ['has', 'name'], ['==', ['get', 'class'], 'island']])
+    const strait = byId('place-names-strait')
+    expect(strait?.filter).toEqual([
+      'all',
+      ['has', 'name'],
+      ['==', ['geometry-type'], 'LineString'],
+      ['==', ['get', 'kind'], 'strait'],
+    ])
+    expect(strait?.layout?.['symbol-placement']).toBe('line')
+  })
+
+  it('the island filter is named Point features of kind island', () => {
+    render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
+
+    expect(byId('place-names-island')?.filter).toEqual([
+      'all',
+      ['has', 'name'],
+      ['==', ['geometry-type'], 'Point'],
+      ['==', ['get', 'kind'], 'island'],
+    ])
+  })
+
+  it('smaller islands are named pois of kind coastline', () => {
+    render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
+
+    expect(byId('place-names-islet')?.filter).toEqual(['all', ['has', 'name'], ['==', ['get', 'kind'], 'coastline']])
+  })
+
+  it('the marina, peak and settlement filters use kind and kind_detail', () => {
+    render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
+
+    expect(byId('place-names-harbor')?.filter).toEqual(['all', ['has', 'name'], ['==', ['get', 'kind'], 'marina']])
+    expect(byId('place-names-peak')?.filter).toEqual([
+      'all',
+      ['has', 'name'],
+      ['in', ['get', 'kind'], ['literal', ['peak', 'volcano']]],
+    ])
+    expect(JSON.stringify(byId('place-names-town-topup')?.filter)).toContain('"kind_detail"')
   })
 
   it('sets the documented minzoom per layer', () => {
     render(<MapPlaceLabels isDarkTheme={false} overImagery={false} />)
 
     expect(byId('place-names-water')?.minzoom).toBe(9)
+    expect(byId('place-names-strait')?.minzoom).toBe(9)
     expect(byId('place-names-island')?.minzoom).toBe(9)
-    expect(byId('place-names-harbor')?.minzoom).toBe(14)
+    expect(byId('place-names-islet')?.minzoom).toBe(11)
+    expect(byId('place-names-harbor')?.minzoom).toBe(12)
     expect(byId('place-names-peak')?.minzoom).toBe(12)
     expect(byId('place-names-town-topup')?.minzoom).toBe(14)
   })
@@ -123,7 +178,7 @@ describe('MapPlaceLabels', () => {
 })
 
 describe('warnIfBaseVectorSourceMissing', () => {
-  it('logs an explicit, prefixed error when the carto source is absent', () => {
+  it('logs an explicit, prefixed error when the protomaps source is absent', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     warnIfBaseVectorSourceMissing({ getSource: () => undefined })
@@ -133,7 +188,7 @@ describe('warnIfBaseVectorSourceMissing', () => {
     errorSpy.mockRestore()
   })
 
-  it('does not log when the carto source is present', () => {
+  it('does not log when the protomaps source is present', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     warnIfBaseVectorSourceMissing({ getSource: () => ({}) })

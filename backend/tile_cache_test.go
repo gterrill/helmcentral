@@ -314,6 +314,7 @@ func TestResolveWorldImageryTile_BreakerOpensAfterConsecutiveTransportFailuresAn
 func TestResolveCartoVectorTile_BreakerOpensAndSkipsUpstream(t *testing.T) {
 	resetTileCircuitBreaker(t)
 	cache := newTestTileCache(t)
+	seedCartoUpstream(t, cache)
 	fetcher := transportFailFetcher()
 
 	for i := 0; i < tileCircuitBreakerThreshold; i++ {
@@ -434,6 +435,7 @@ func TestResolveWorldImageryTile_ConcurrentMissesForSameTileCauseOneUpstreamCall
 func TestResolveCartoVectorTile_ConcurrentMissesForSameTileCauseOneUpstreamCall(t *testing.T) {
 	resetTileCircuitBreaker(t)
 	cache := newTestTileCache(t)
+	seedCartoUpstream(t, cache)
 	wantBytes := []byte("upstream-mvt-bytes")
 
 	release := make(chan struct{})
@@ -600,7 +602,7 @@ func TestTileCacheClear_AlsoClearsBasemapAssets(t *testing.T) {
 	if err := cache.put(worldImagerySource, 5, 1, 1, []byte("tile"), "image/jpeg"); err != nil {
 		t.Fatalf("seed tiles: %v", err)
 	}
-	if err := cache.putBasemapAsset("/api/basemap/tilejson", []byte("{}"), "application/json"); err != nil {
+	if err := cache.putBasemapAsset(basemapAssetPrefix+"upstream/positron", []byte("{}"), "application/json"); err != nil {
 		t.Fatalf("seed basemap_assets: %v", err)
 	}
 
@@ -613,7 +615,7 @@ func TestTileCacheClear_AlsoClearsBasemapAssets(t *testing.T) {
 	} else if ok {
 		t.Fatal("expected tiles table cleared")
 	}
-	if _, _, ok, err := cache.getBasemapAsset("/api/basemap/tilejson"); err != nil {
+	if _, _, ok, err := cache.getBasemapAsset(basemapAssetPrefix + "upstream/positron"); err != nil {
 		t.Fatalf("getBasemapAsset after clear: %v", err)
 	} else if ok {
 		t.Fatal("expected basemap_assets table cleared too, per tileCache.clear's documented decision")
@@ -651,6 +653,7 @@ func TestResolveCartoVectorTile_CacheHitServesWithoutInvokingFetcher(t *testing.
 
 func TestResolveCartoVectorTile_CacheMissFetchesOnceThenCachesForRepeat(t *testing.T) {
 	cache := newTestTileCache(t)
+	seedCartoUpstream(t, cache)
 	upstreamBytes := []byte("fresh-mvt-bytes")
 	fetcher := &fakeTileFetcher{responder: func(req *http.Request) (*http.Response, error) {
 		return fakeUpstreamResponse(http.StatusOK, "application/x-protobuf", upstreamBytes), nil
@@ -689,6 +692,7 @@ func TestResolveCartoVectorTile_CacheMissFetchesOnceThenCachesForRepeat(t *testi
 // confidently and silently wrong - worse than a blank tile.
 func TestResolveCartoVectorTile_UpstreamFailureNeverDegradesToACoarserZoom(t *testing.T) {
 	cache := newTestTileCache(t)
+	seedCartoUpstream(t, cache)
 
 	// Seed a REAL, distinct tile at the parent (coarser) coordinate a
 	// degrading resolver (like resolveWorldImageryTile) would have walked
@@ -708,11 +712,13 @@ func TestResolveCartoVectorTile_UpstreamFailureNeverDegradesToACoarserZoom(t *te
 	if _, _, err := resolveCartoVectorTile(cache, fetcher, 10, 500, 600); err == nil {
 		t.Fatal("expected an error on upstream failure with nothing cached at the requested key")
 	}
-	// Exactly one upstream call, at the originally-requested tile - no
-	// parent-tile walk, no second/third/fourth-level attempt the way
-	// resolveWorldImageryTile's maxDegradeLevels loop would make.
-	if fetcher.callCount() != 1 {
-		t.Fatalf("expected exactly 1 fetcher call (no degrade walk), got %d", fetcher.callCount())
+	// One tile request at the originally-requested tile plus one style
+	// refetch (a 404 may mean Carto rotated its release stamp; here the
+	// fetcher 404s the style too, so nothing changes). No parent-tile walk,
+	// no second/third/fourth-level attempt the way resolveWorldImageryTile's
+	// maxDegradeLevels loop would make.
+	if fetcher.callCount() != 2 {
+		t.Fatalf("expected 2 fetcher calls (tile, style refetch; no degrade walk), got %d", fetcher.callCount())
 	}
 
 	// Nothing was cached under the requested key - proves the failure
@@ -730,8 +736,9 @@ func TestResolveCartoVectorTile_UpstreamFailureNeverDegradesToACoarserZoom(t *te
 	if _, _, err := resolveCartoVectorTile(cache, fetcher, 10, 500, 600); err == nil {
 		t.Fatal("expected the repeat request to fail again, not silently serve the parent tile's bytes")
 	}
-	if fetcher.callCount() != 2 {
-		t.Fatalf("expected a second fetcher call on retry (nothing was cached), got %d", fetcher.callCount())
+	// The style refetch is rate limited, so the retry adds only the tile call.
+	if fetcher.callCount() != 3 {
+		t.Fatalf("expected a third fetcher call on retry (nothing was cached), got %d", fetcher.callCount())
 	}
 
 	// The parent tile itself is untouched throughout.
