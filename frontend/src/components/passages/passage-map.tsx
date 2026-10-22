@@ -1,13 +1,19 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
+import type { ReactNode } from 'react'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Layer, Map, Marker, Source } from 'react-map-gl/maplibre'
 
+import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
+import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 import { OPENSEAMAP_TILES, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
+import { useImageryPreference } from '@/lib/passage-imagery-preference'
 import { segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
 import { hasWebGL2 } from '@/lib/webgl'
+import { SAT_HANDOFF_END_ZOOM, SAT_HANDOFF_START_ZOOM, WORLD_IMAGERY_OPACITY_EXPRESSION } from '@/lib/world-imagery'
+import { cn } from '@/lib/utils'
 
 // Map line colours cannot be CSS tokens (MapLibre paints with literal
 // colours), so the passages share one fixed palette, light enough for the
@@ -34,6 +40,8 @@ export interface PassageMapProps {
   boat: { lat: number; lon: number } | null
   isDarkTheme: boolean
   className?: string
+  /** Shown in the top right corner, stacked under the satellite button. */
+  overlay?: ReactNode
 }
 
 const INTRO_START_ZOOM = 1.5
@@ -45,7 +53,7 @@ function centreOf(bounds: [number, number, number, number]) {
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, boat, isDarkTheme, className },
+  { passages, playedIds, boat, isDarkTheme, className, overlay },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -54,6 +62,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   const bounds = useMemo(() => segmentBounds(passages.flatMap((p) => p.segments)), [passages])
   const boundsKey = bounds ? bounds.join(',') : ''
   const loadedRef = useRef(false)
+  const [satellite, setSatellite] = useImageryPreference()
 
   // On load, and whenever the passages change, the whole track is framed.
   const frame = useCallback(() => {
@@ -75,6 +84,9 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
 
   const handleLoad = useCallback(() => {
     loadedRef.current = true
+    const map = mapRef.current?.getMap?.()
+    // Fail fast: the place labels draw from the style's own vector source.
+    if (map) warnIfBaseVectorSourceMissing(map)
     frame()
   }, [frame])
 
@@ -97,7 +109,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
 
   const centre = bounds ? centreOf(bounds) : { longitude: 0, latitude: 0 }
   return (
-    <div className={className} data-testid="passage-map">
+    <div className={cn('relative', className)} data-testid="passage-map">
       <Map
         ref={mapRef}
         mapLib={maplibregl}
@@ -110,9 +122,20 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
         dragRotate={false}
         touchPitch={false}
       >
+        {/* Bottom to top: basemap, imagery, seamarks, place names, then the
+            passage lines. Imagery is anchored under the seamarks so toggling it
+            mid-session cannot land on top of them. */}
         <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
           <Layer id="openseamap-layer" type="raster" paint={{ 'raster-opacity': 0.85 }} />
         </Source>
+        {satellite && (
+          <WorldImageryLayer
+            opacity={[...WORLD_IMAGERY_OPACITY_EXPRESSION]}
+            minzoom={SAT_HANDOFF_START_ZOOM}
+            beforeId="openseamap-layer"
+          />
+        )}
+        <MapPlaceLabels isDarkTheme={isDarkTheme} overImagery={satellite} />
         {passages.map((p, i) => (
           <Source key={p.id} id={`passage-${p.id}`} type="geojson" data={segmentsToGeoJSON(p.segments)}>
             <Layer
@@ -125,6 +148,20 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
                 'line-opacity': playedIds.has(p.id) ? 0.95 : 0.45,
               }}
             />
+            {satellite && (
+              <Layer
+                id={`passage-casing-${p.id}`}
+                type="line"
+                beforeId={`passage-line-${p.id}`}
+                layout={{ 'line-cap': 'round', 'line-join': 'round' }}
+                minzoom={SAT_HANDOFF_START_ZOOM}
+                paint={{
+                  'line-color': '#ffffff',
+                  'line-width': 6.5,
+                  'line-opacity': ['interpolate', ['linear'], ['zoom'], SAT_HANDOFF_START_ZOOM, 0, SAT_HANDOFF_END_ZOOM, playedIds.has(p.id) ? 0.95 : 0.5],
+                }}
+              />
+            )}
           </Source>
         ))}
         {boat && (
@@ -136,6 +173,10 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
           </Marker>
         )}
       </Map>
+      <div className="absolute right-2 top-2 flex flex-col items-end gap-2">
+        <ImageryToggleButton on={satellite} onToggle={() => setSatellite(!satellite)} />
+        {overlay}
+      </div>
     </div>
   )
 })

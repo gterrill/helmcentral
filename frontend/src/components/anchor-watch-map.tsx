@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
-import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Move, Plus, Radar, Satellite, Ship, X } from 'lucide-react'
+import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Move, Plus, Radar, Ship, X } from 'lucide-react'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
 import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
@@ -11,6 +11,8 @@ import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
 import type { TrailPoint } from '@/hooks/use-server-trails'
+import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
+import { computeWorldImageryOpacity } from '@/lib/world-imagery'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 import { AnchorAdjustRadiusToolbar } from '@/components/anchor-adjust-radius-toolbar'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -36,10 +38,6 @@ import {
   type ScreenRect,
 } from '@/lib/marker-labels'
 
-const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
-const SAT_HANDOFF_START_ZOOM = 9
-const SAT_HANDOFF_END_ZOOM = 10
-const WORLD_IMAGERY_MAX_ZOOM = 18
 const ANCHOR_WATCH_ZOOM_STORAGE_KEY = 'anchor-watch-map-zoom'
 const ANCHOR_WATCH_CENTER_STORAGE_KEY = 'anchor-watch-map-center'
 const AIS_TRAIL_MAX_AGE_MS = 24 * 60 * 60 * 1000
@@ -53,16 +51,6 @@ const HIGH_DRIFT_IMPACT_KTS = 1.5
 // worse off than before. A stored zoom that belongs to the current anchor
 // session overrides this outright.
 const DEFAULT_ZOOM_BEFORE_FIT = 14
-
-// World Imagery (Esri/Maxar aerial photography) fades in between zoom 9-10
-// rather than appearing abruptly, since its low-zoom tiles are lower quality.
-export function computeWorldImageryOpacity(currentZoom: number, enabled: boolean): number {
-  if (!enabled) return 0
-  return Math.max(
-    0,
-    Math.min(1, (currentZoom - SAT_HANDOFF_START_ZOOM) / (SAT_HANDOFF_END_ZOOM - SAT_HANDOFF_START_ZOOM)),
-  )
-}
 
 export interface RadarEchoAvailability {
   available: boolean
@@ -1626,24 +1614,7 @@ export function AnchorWatchMap({
           anchor (see above), so the layers stay put and simply draw nothing.
         */}
         {showImageryLayer && worldImageryOpacity > 0 && (
-          <Source
-            id="world-imagery"
-            type="raster"
-            tiles={[WORLD_IMAGERY_TILES]}
-            tileSize={256}
-            maxzoom={WORLD_IMAGERY_MAX_ZOOM}
-            attribution="Source: Esri, Maxar, Earthstar Geographics"
-          >
-            <Layer
-              id="world-imagery-layer"
-              type="raster"
-              beforeId="alarm-circle-fill"
-              paint={{
-                'raster-opacity': worldImageryOpacity,
-                'raster-fade-duration': 250,
-              }}
-            />
-          </Source>
+          <WorldImageryLayer opacity={worldImageryOpacity} beforeId="alarm-circle-fill" />
         )}
 
         <Source
@@ -2102,17 +2073,7 @@ export function AnchorWatchMap({
             </button>
             {expandedControls && (
               <>
-                <button
-                  onClick={handleImageryToggle}
-                  aria-label="Toggle satellite imagery"
-                  className={cn(
-                    'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
-                    showImageryLayer ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-                  )}
-                  style={{ transition: 'background-color 150ms ease-out' }}
-                >
-                  <Satellite className="h-4 w-4" />
-                </button>
+                <ImageryToggleButton on={showImageryLayer} onToggle={handleImageryToggle} />
                 <button
                   onClick={handleRadarEchoToggle}
                   aria-label="Toggle radar echo overlay"

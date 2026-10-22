@@ -1,9 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { saveImageryPreference } from '@/lib/passage-imagery-preference'
 import { PassageExportMenu } from '@/components/passages/passage-export-menu'
 import type { PassageDetail, PassageStats } from '@/lib/passages'
 
+const render_ = vi.hoisted(() => ({ renderPassageImage: vi.fn<(data: unknown, kind: unknown, satellite: boolean) => Promise<Blob>>(async () => new Blob(['x'], { type: 'image/png' })) }))
+vi.mock('@/lib/passage-export-image', () => render_)
+vi.mock('@/lib/save-blob', () => ({ saveBlob: vi.fn() }))
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), loading: vi.fn(), dismiss: vi.fn() }))
 vi.mock('sonner', () => ({ toast }))
 
@@ -31,7 +35,7 @@ function openMenu() {
   fireEvent.click(trigger)
 }
 
-beforeEach(() => { vi.clearAllMocks() })
+beforeEach(() => { vi.clearAllMocks(); saveImageryPreference(true); localStorage.clear() })
 
 describe('PassageExportMenu', () => {
   it('opens the blog embed in a dialog, selected and ready to copy', async () => {
@@ -59,5 +63,22 @@ describe('PassageExportMenu', () => {
   it('is disabled when no track was recorded', () => {
     render(<PassageExportMenu kind="passage" title="Empty" passages={[passage([])]} units="metric" />)
     expect((screen.getByRole('button', { name: 'Export' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('draws the image with the passage map satellite choice, on unless turned off', async () => {
+    localStorage.clear()
+    const { unmount } = render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Download image 2:1' }))
+    await vi.waitFor(() => expect(render_.renderPassageImage).toHaveBeenCalledTimes(1))
+    expect(render_.renderPassageImage.mock.calls[0][2]).toBe(true)
+    unmount()
+
+    localStorage.setItem('passages.satelliteImagery', '0')
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Download image 2:1' }))
+    await vi.waitFor(() => expect(render_.renderPassageImage).toHaveBeenCalledTimes(2))
+    expect(render_.renderPassageImage.mock.calls[1][2]).toBe(false)
   })
 })

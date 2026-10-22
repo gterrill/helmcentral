@@ -57,6 +57,16 @@ Opening a passage shows its track on the chart, with the same basemap and
 OpenSeaMap marks as Anchor Watch. A gap in the log is never bridged with a
 line: if the log has a hole, the track stops and starts again after it.
 
+The satellite button in the top right corner of the map switches between the
+chart and aerial photography. It is on the first time you open a passage, and
+the map remembers your choice from then on, separately from the Anchor Watch
+map. The photographs begin to fade in when the map is about a hundred nautical
+miles across and are fully in at about half that, so a regional view stays
+the chart and a bay or approach shows the shore. The track gets a white edge
+while the photographs show, so it stays clear against them. Place names stay
+on top. The photographs come from the boat's internet connection, so the map
+shows the chart alone when the boat is offline.
+
 The map opens with the whole track framed. Pressing **Play** from the start
 brings the map down from high above onto the track, then runs the replay with a
 boat marker. The slider scrubs to any point, and Play from the middle just
@@ -109,7 +119,9 @@ unfiled.
 
 A passage, a cruise or a selection of passages can go on your blog as an
 animated map your readers replay, or out as a still picture for a post's
-header. The **Export** button on each page makes both. See
+header. The **Export** button on each page makes both. A still picture shows
+the satellite photographs when the map is showing them, with the credit added
+along the bottom; the blog map is always the chart. See
 [Share a passage on your blog](../how-to/share-a-passage-on-your-blog.md).
 
 ## Limits

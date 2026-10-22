@@ -743,3 +743,51 @@ func TestResolveCartoVectorTile_UpstreamFailureNeverDegradesToACoarserZoom(t *te
 		t.Fatalf("parent tile bytes changed unexpectedly: got %q", parentData)
 	}
 }
+
+func newExactTileProxyRequest(z, x, y string) (echo.Context, *httptest.ResponseRecorder) {
+	c, rec := newTileProxyRequest(z, x, y)
+	c.SetRequest(httptest.NewRequest(http.MethodGet, "/api/world-imagery/"+z+"/"+x+"/"+y+"?exact=1", nil))
+	return c, rec
+}
+
+func TestProxyWorldImageryTileHandler_ExactRefusesDegradedTile(t *testing.T) {
+	cache := newTestTileCache(t)
+	fetcher := &fakeTileFetcher{}
+	fetcher.responder = func(req *http.Request) (*http.Response, error) {
+		if bytes.Contains([]byte(req.URL.Path), []byte("/tile/10/")) {
+			return fakeUpstreamResponse(http.StatusNotFound, "text/plain", nil), nil
+		}
+		return fakeUpstreamResponse(http.StatusOK, "image/jpeg", []byte("parent")), nil
+	}
+	handler := proxyWorldImageryTileHandler(cache, fetcher)
+
+	c, rec := newExactTileProxyRequest("10", "500", "600")
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("expected 502 for a degraded tile with exact=1, got %d", rec.Code)
+	}
+	if rec.Body.Len() != 0 {
+		t.Fatalf("expected no body, got %q", rec.Body.Bytes())
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Fatalf("expected Cache-Control no-store, got %q", cc)
+	}
+}
+
+func TestProxyWorldImageryTileHandler_ExactServesRealTile(t *testing.T) {
+	cache := newTestTileCache(t)
+	fetcher := &fakeTileFetcher{}
+	fetcher.responder = func(req *http.Request) (*http.Response, error) {
+		return fakeUpstreamResponse(http.StatusOK, "image/jpeg", []byte("real")), nil
+	}
+	handler := proxyWorldImageryTileHandler(cache, fetcher)
+	c, rec := newExactTileProxyRequest("10", "500", "600")
+	if err := handler(c); err != nil {
+		t.Fatalf("handler returned error: %v", err)
+	}
+	if rec.Code != http.StatusOK || rec.Body.String() != "real" {
+		t.Fatalf("expected the real tile, got %d %q", rec.Code, rec.Body.String())
+	}
+}

@@ -11,6 +11,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **The passage map can show satellite photographs.** A satellite button in the
+  top right corner switches the map between the chart and aerial photography,
+  with the track edged in white and place names kept on top. It is on by
+  default and remembers your choice separately from the Anchor Watch map. Saved
+  pictures (the 1200 × 630 and 2:1 images) follow the button and carry the
+  photograph credit when photographs show; if any of the photographs cannot be
+  fetched the picture is not saved, rather than saved with a patch missing.
+  The blog embed is unchanged and always shows the chart. The overview map in
+  the replay moves down a little to make room for the button.
 ### Changed
 
 - **The anchor swing trail now shows everything since the anchor went down,
