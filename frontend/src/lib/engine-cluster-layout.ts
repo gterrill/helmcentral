@@ -1,24 +1,26 @@
 import type { ClusterSide } from '@/lib/dashboard-widgets'
 
 /**
- * Geometry for the Engine Cluster tile: an 800 x 616 card with a 380 px dial,
+ * Geometry for the Engine Cluster tile: an 800 x 540 card with a 380 px dial,
  * four readout cards cut round it, a fuel fan on the outer edge and a footer.
  *
  * Pure functions of the side, so the mirror is testable without rendering:
  * a starboard tile is the port one reflected about the vertical centre line.
  * Only the dial, its two gap arcs and the footer's contents stay put.
  *
- * Coordinates are the design's inner space, 800 wide and 672 tall; the visible
- * card starts 56 down it (CANVAS_TOP), which is how the dial centre ends up at
- * 320 while the card is 616 high.
+ * Coordinates are the design's inner space, 800 wide and 648 tall; the visible
+ * card starts 108 down it (CLUSTER_INNER_TOP), 11px above the first readout
+ * card, which is how the dial centre ends up at 320 while the card is 540 high.
+ * The band above that once held the status and hours tabs; the hours are in
+ * the hub now and the status chip in the tile's title row.
  */
 
 export const CLUSTER_W = 800
 // The card ends 12px under the footer: the design's frame padded 20px past it, which the tile's own border now does.
-export const CLUSTER_H = 592
+export const CLUSTER_H = 540
 /** The inner space starts this far above the visible card. */
-export const CLUSTER_INNER_TOP = -56
-export const CLUSTER_INNER_H = 672
+export const CLUSTER_INNER_TOP = -108
+export const CLUSTER_INNER_H = CLUSTER_H - CLUSTER_INNER_TOP
 
 export const DIAL_CX = 400
 export const DIAL_CY = 320

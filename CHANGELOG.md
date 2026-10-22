@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- The engine cluster no longer shows a RUN tab while the engine is healthy;
+  WARN or ALARM now shows in the tile's title row. Engine hours sit in the dial
+  centre, under the scale note. The card is shorter, and the tile can be
+  resized down to five columns by eight rows (it was six by fourteen), so it
+  no longer carries empty space above and below the card.
+
 ### Fixed
 
 - **Disconnecting shore power no longer raises "Instruments Silent" for the

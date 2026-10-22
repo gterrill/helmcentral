@@ -1,13 +1,27 @@
 import { describe, expect, test } from 'vitest'
 
 import {
-  CLUSTER_W, clusterLayout, fuelArc, fuelPoint, fuelTitleLeft, gapArcPath, mirrorX,
+  CARD_TOPS, CLUSTER_H, CLUSTER_INNER_H, CLUSTER_INNER_TOP, CLUSTER_W, clusterLayout, fuelArc, fuelPoint, fuelTitleLeft, gapArcPath, mirrorX,
 } from '@/lib/engine-cluster-layout'
 
 /** Pulls every "x y" pair out of an SVG path built from M/L/Q commands. */
 function points(d: string): Array<[number, number]> {
   return [...d.matchAll(/(-?\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)/g)].map((m) => [Number(m[1]), Number(m[2])])
 }
+
+// Nothing rides the card's top edge any more, so the card starts just above
+// the first readout card rather than leaving a band for tabs.
+describe('engine cluster layout: the visible card', () => {
+  test('starts no more than 12px above the first readout card', () => {
+    const gap = CARD_TOPS[0] + CLUSTER_INNER_TOP
+    expect(gap).toBeGreaterThanOrEqual(0)
+    expect(gap).toBeLessThanOrEqual(12)
+  })
+
+  test('ends where the inner space ends', () => {
+    expect(CLUSTER_H - CLUSTER_INNER_TOP).toBe(CLUSTER_INNER_H)
+  })
+})
 
 describe('engine cluster layout: the starboard tile is the port tile reflected', () => {
   test('mirrorX reflects about the vertical centre line and leaves port alone', () => {

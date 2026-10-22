@@ -3,12 +3,13 @@ import { memo } from 'react'
 
 import {
   AlternatorCard, BatteryCard, FOOTER_ICONS, FuelFan, GapArc, ReadingCard, ReadoutContent, SlotIcon,
-  cardStyle, gapArcNames, toneStroke,
+  gapArcNames, toneStroke,
 } from '@/components/engine-cluster-parts'
 import { FitCanvas } from '@/components/fit-canvas'
 import { majorStepFor } from '@/components/gauge-tile'
 import { ClusterDial, CLUSTER_DIAL_SIZE } from '@/components/ui/cluster-dial'
-import { Tile, tilePillButtonClass } from '@/components/ui/tile'
+import { Tile, tilePillButtonClass, tilePillClass } from '@/components/ui/tile'
+import { cn } from '@/lib/utils'
 import type { EngineStates } from '@/hooks/use-gauge-values'
 import { reading } from '@/lib/cluster-readings'
 import type { GaugeWidgetConfig, ResolvedClusterConfig } from '@/lib/dashboard-widgets'
@@ -79,7 +80,8 @@ interface EngineClusterTileProps {
 }
 
 /**
- * The tab chip: what a running engine is doing, in one word, or null. It is
+ * The title-row chip: WARN or ALARM for a running engine, or null. A healthy engine
+ * has no chip; the turning needle already says it is running. It is
  * drawn only for an engine known to be turning on live data: not for one that is
  * off (the title's OFF pill says so once), whose feed is lost, whose rpm is
  * stale, missing or zero, or whose tile is stale. Stale data carries no word
@@ -89,7 +91,7 @@ function chipFor(running: boolean, state: ZoneState | null): { text: string; cla
   if (!running) return null
   if (state === 'alarm' || state === 'emergency') return { text: 'ALARM', className: 'bg-red-600 text-white' }
   if (state === 'warn' || state === 'alert') return { text: 'WARN', className: 'bg-amber-500 text-black' }
-  return { text: 'RUN', className: 'text-foreground' }
+  return null
 }
 
 /** Every bound slot on the card, for the tile's worst-of and staleness. */
@@ -161,10 +163,20 @@ export const EngineClusterTile = memo(function EngineClusterTile({
       offLabel={off ? offSinceLabel(engineStatus?.lastUpdate) : undefined}
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
-        editing ? (
-          <button type="button" className={tilePillButtonClass} onClick={onConfigure} aria-label={`Configure ${title}`}>
-            <Settings2 className="size-3.5" />
-          </button>
+        chip || editing ? (
+          <>
+            {chip && (
+              <span data-testid="cluster-chip"
+                className={cn(tilePillClass, 'font-semibold', chip.className)}>
+                {chip.text}
+              </span>
+            )}
+            {editing && (
+              <button type="button" className={tilePillButtonClass} onClick={onConfigure} aria-label={`Configure ${title}`}>
+                <Settings2 className="size-3.5" />
+              </button>
+            )}
+          </>
         ) : undefined
       }
     >
@@ -211,6 +223,11 @@ export const EngineClusterTile = memo(function EngineClusterTile({
                     scale x{config.ring.labelDivisor}
                   </span>
                 ) : null}
+                <span data-testid="cluster-hours" className="mt-1 flex items-center gap-2">
+                  <SlotIcon name={config.centreIcon} slot={config.centre} className="size-4 shrink-0 text-primary" />
+                  <span className="font-display text-lg font-semibold tabular-nums text-foreground">{centre.text ?? '--'}</span>
+                  <span className="text-xs font-semibold tracking-[0.16em] text-muted-foreground">HRS</span>
+                </span>
               </div>
             </ClusterDial>
           </div>
@@ -256,24 +273,6 @@ export const EngineClusterTile = memo(function EngineClusterTile({
           </div>
         </div>
 
-        {/* The tabs ride the card's top edge: the state chip on the outer side
-            and the engine hours on the inner one, mirrored with the tile. */}
-        {chip && <div data-testid="cluster-chip-tab"
-          className="absolute top-1 flex h-10 items-center gap-2.5 rounded-[20px] px-4"
-          style={{ ...cardStyle(), [stbd ? 'right' : 'left']: 52 }}>
-          <span data-testid="cluster-chip"
-            className={`rounded-md px-3 font-display text-sm font-semibold leading-7 tracking-[0.14em] ${chip.className}`}
-            style={{ boxShadow: `inset 0 0 0 1.5px ${chip.text === 'RUN' ? 'hsl(var(--cluster-stroke))' : 'transparent'}` }}>
-            {chip.text}
-          </span>
-        </div>}
-        <div data-testid="cluster-notch"
-          className="absolute top-1 flex h-10 items-center gap-2.5 rounded-[20px] px-4"
-          style={{ ...cardStyle(), [stbd ? 'left' : 'right']: 52 }}>
-          <SlotIcon name={config.centreIcon} slot={config.centre} className="size-5 shrink-0 text-primary" />
-          <span className="font-display text-lg font-semibold tabular-nums text-foreground">{centre.text ?? '--'}</span>
-          <span className="text-xs font-semibold tracking-[0.16em] text-muted-foreground">HRS</span>
-        </div>
       </FitCanvas>
     </Tile>
   )

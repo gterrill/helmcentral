@@ -45,7 +45,7 @@ import { ROLE_NONE } from '@/lib/vessel-settings'
  */
 const SLOT_SUFFIXES = {
   ring: 'revolutions',
-  // Hours in the tab, not fuel rate: hours barely move and suit a small badge,
+  // Hours in the hub, not fuel rate: hours barely move and suit a small line,
   // while fuel rate changes with every throttle input and earns a full readout
   // with a scale under it.
   centre: 'runTime',
