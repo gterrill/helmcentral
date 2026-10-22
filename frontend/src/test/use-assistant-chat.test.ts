@@ -170,7 +170,10 @@ describe('useAssistantChat', () => {
       costUsd: 0.0184,
       toolRounds: 2,
       createdAt: '2026-09-11T00:00:00Z',
+      // The reply takes over the row the streamed draft was shown in.
+      clientKey: expect.stringMatching(/^draft-\d+$/),
     })
+    expect(result.current.draftKey).toMatch(/^draft-\d+$/)
     // statusText clears once the send settles.
     expect(result.current.statusText).toBeNull()
     expect(result.current.sending).toBe(false)
@@ -697,6 +700,7 @@ describe('useAssistantChat', () => {
         costUsd: 0.0184,
         toolRounds: 2,
         createdAt: '2026-09-11T00:00:00Z',
+        clientKey: expect.stringMatching(/^draft-\d+$/),
       })
       expect(result.current.draft).toBeNull()
       expect(result.current.sending).toBe(false)

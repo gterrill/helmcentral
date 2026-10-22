@@ -1146,6 +1146,30 @@ describe('scroll to the start of a delivered reply', () => {
     await waitFor(() => expect(scrollToMessageSpy).toHaveBeenCalledWith('m9', expect.objectContaining({ align: 'start' })))
   })
 
+  it('hands the streamed draft\'s row to the delivered reply instead of swapping rows', async () => {
+    const session = fakeMateSession({ messages: [assistantMessage({ id: 'm0', content: 'Earlier answer' })] })
+    const drafting: MateSession = {
+      ...session,
+      status: { ...session.status, sending: true, draft: 'Blue Pearl Bay', draftKey: 'draft-1' },
+    }
+    const { container, rerender } = render(<AssistantThread canWrite session={drafting} />)
+    const draftRow = container.querySelector('[data-message-id="draft"]')
+    expect(draftRow).not.toBeNull()
+
+    const delivered: MateSession = {
+      ...session,
+      messages: [...session.messages, assistantMessage({ id: 'm9', content: 'Blue Pearl Bay first.', clientKey: 'draft-1' })],
+      status: { ...session.status, sending: true, draft: null, draftKey: 'draft-1', deliveredMessageId: 'm9' },
+    }
+    rerender(<AssistantThread canWrite session={delivered} />)
+
+    // The scroller re-anchors when its rows are swapped; the same node must
+    // carry the reply so it never sees a swap.
+    expect(draftRow?.isConnected).toBe(true)
+    expect(draftRow?.getAttribute('data-message-id')).toBe('m9')
+    expect(container.querySelector('[data-message-id="m9"]')).toBe(draftRow)
+  })
+
   it('does not scroll for a reply that was already delivered when the thread mounted', async () => {
     render(<AssistantThread canWrite session={fakeMateSession({ status: { deliveredMessageId: 'm9' } })} />)
     await act(async () => { await new Promise((r) => setTimeout(r, 20)) })

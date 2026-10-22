@@ -97,6 +97,11 @@ async function readErrorMessage(response: Response): Promise<string> {
  * `abort()` (the Stop button) actually tells the server to give up, via
  * `POST .../run/cancel`.
  */
+// Draft row keys outlive the hook: the reply keeps its key as `clientKey`
+// through reloads, so a remounted hook must not hand the same key out again.
+let draftKeyCounter = 0
+const nextDraftKey = () => `draft-${++draftKeyCounter}`
+
 export function useAssistantChat() {
   const [sending, setSending] = useState(false)
   const [statusText, setStatusText] = useState<string | null>(null)
@@ -104,6 +109,10 @@ export function useAssistantChat() {
   // Id of the last reply whose final frame arrived on this hook's streams;
   // the thread scrolls to the start of it once it is in the DOM.
   const [deliveredMessageId, setDeliveredMessageId] = useState<string | null>(null)
+  // Display key of the current stream's draft row. The delivered reply takes
+  // the same key (its `clientKey`) so the thread keeps one DOM row from the
+  // first streamed word to the finished answer.
+  const [draftKey, setDraftKey] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   // Whether the current stream's final message frame has arrived. Reset when
@@ -160,6 +169,8 @@ export function useAssistantChat() {
   ): Promise<AssistantMessage | null> => {
     const isCurrent = () => abortRef.current === controller
     let resolved: AssistantMessage | null = null
+    let streamKey = nextDraftKey()
+    setDraftKey(streamKey)
 
     await readMateEvents(body, (event) => {
       if (!isCurrent()) return
@@ -180,10 +191,13 @@ export function useAssistantChat() {
           clearDraft()
           break
         case 'message':
-          resolved = mapMessage(event.message)
+          resolved = { ...mapMessage(event.message), clientKey: streamKey }
           deliveredRef.current = true
           setDeliveredMessageId(resolved.id)
           onMessage?.(resolved)
+          // Any later frame on this stream is another row.
+          streamKey = nextDraftKey()
+          setDraftKey(streamKey)
           clearDraft()
           onConversation?.(mapConversation(event.conversation))
           break
@@ -422,5 +436,5 @@ export function useAssistantChat() {
 
   const answerDelivered = useCallback(() => deliveredRef.current, [])
 
-  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation, answerDelivered, deliveredMessageId }
+  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation, answerDelivered, deliveredMessageId, draftKey }
 }

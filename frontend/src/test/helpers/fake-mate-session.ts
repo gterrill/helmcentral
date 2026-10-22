@@ -44,6 +44,7 @@ export function fakeMateSession(overrides: FakeMateSessionOverrides = {}): MateS
       error: null,
       stopped: false,
       deliveredMessageId: null,
+      draftKey: null,
       ...status,
     },
   }

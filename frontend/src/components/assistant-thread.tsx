@@ -527,7 +527,11 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                 </section>
               ) : (
                 <>
-                  {session.messages.map((message) => (
+                  {/* The draft shares this array, and its key with the reply
+                      that replaces it, so delivery keeps one row. A swap of
+                      one row for another makes the scroller re-anchor to a
+                      question it has not yet handled. */}
+                  {[...session.messages.map((message) => (
                     <MessageScrollerItem
                       key={message.clientKey ?? message.id}
                       messageId={message.id}
@@ -628,10 +632,9 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                         </Message>
                       )}
                     </MessageScrollerItem>
-                  ))}
-
-                  {showDraft && (
-                    <MessageScrollerItem messageId="draft">
+                  )),
+                  ...(showDraft ? [
+                    <MessageScrollerItem key={status.draftKey ?? 'draft'} messageId="draft">
                       <Message>
                         <MessageContent>
                           <Bubble variant="ghost">
@@ -641,8 +644,8 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                           </Bubble>
                         </MessageContent>
                       </Message>
-                    </MessageScrollerItem>
-                  )}
+                    </MessageScrollerItem>,
+                  ] : [])]}
                 </>
               )}
             </MessageScrollerContent>
