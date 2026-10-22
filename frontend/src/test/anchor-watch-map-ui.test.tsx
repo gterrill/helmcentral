@@ -24,7 +24,7 @@ const easeToMock = vi.fn()
 // Toggled per-test to exercise the map-place-labels fail-fast guard - every
 // other test wants the source present so its layers behave like the real
 // Carto style.
-let mockCartoSourcePresent = true
+let mockBaseSourcePresent = true
 
 // Every prop a <Layer> mounts with, captured in full so tests can inspect
 // the label layers' filter/paint/source-layer/minzoom without the mock
@@ -75,7 +75,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           easeTo: easeToMock,
           getMap: () => ({
             isStyleLoaded: () => true,
-            getSource: (id: string) => (id === 'carto' && !mockCartoSourcePresent ? undefined : {}),
+            getSource: (id: string) => (id === 'protomaps' && !mockBaseSourcePresent ? undefined : {}),
           }),
         }))
         return <div data-testid="map-root">{children}</div>
@@ -95,7 +95,7 @@ vi.mock('react-map-gl/maplibre', async () => {
 })
 
 beforeEach(() => {
-  mockCartoSourcePresent = true
+  mockBaseSourcePresent = true
   recordedLayers = []
 })
 
@@ -365,7 +365,7 @@ describe('AnchorWatchMap controls and AIS selection', () => {
 })
 
 describe('AnchorWatchMap place-name labels', () => {
-  it('mounts all five label layers on the existing carto source, and overImagery tracks showImageryLayer', () => {
+  it('mounts all seven label layers on the existing protomaps source, and overImagery tracks showImageryLayer', () => {
     const { rerender } = renderMap(defaultAisVessels, { showImageryLayer: false })
 
     for (const id of PLACE_LABEL_LAYER_IDS) {
@@ -373,7 +373,7 @@ describe('AnchorWatchMap place-name labels', () => {
     }
 
     const water = recordedLayers.filter((l) => l.id === 'place-names-water').at(-1)
-    expect(water?.source).toBe('carto')
+    expect(water?.source).toBe('protomaps')
     // showImageryLayer is off: theme-native water color, not the hybrid
     // white-on-black override.
     expect(water?.paint).toMatchObject({ 'text-color': '#7a96a0' })
@@ -394,11 +394,13 @@ describe('AnchorWatchMap place-name labels', () => {
 
     const byId = (id: string) => recordedLayers.find((l) => l.id === id)
 
-    expect(byId('place-names-water')).toMatchObject({ 'source-layer': 'water_name', minzoom: 9 })
-    expect(byId('place-names-island')).toMatchObject({ 'source-layer': 'place', minzoom: 9 })
-    expect(byId('place-names-harbor')).toMatchObject({ 'source-layer': 'poi', minzoom: 14 })
-    expect(byId('place-names-peak')).toMatchObject({ 'source-layer': 'mountain_peak', minzoom: 12 })
-    expect(byId('place-names-town-topup')).toMatchObject({ 'source-layer': 'place', minzoom: 14 })
+    expect(byId('place-names-water')).toMatchObject({ 'source-layer': 'water', minzoom: 9 })
+    expect(byId('place-names-strait')).toMatchObject({ 'source-layer': 'water', minzoom: 9 })
+    expect(byId('place-names-island')).toMatchObject({ 'source-layer': 'earth', minzoom: 9 })
+    expect(byId('place-names-islet')).toMatchObject({ 'source-layer': 'pois', minzoom: 11 })
+    expect(byId('place-names-harbor')).toMatchObject({ 'source-layer': 'pois', minzoom: 12 })
+    expect(byId('place-names-peak')).toMatchObject({ 'source-layer': 'pois', minzoom: 12 })
+    expect(byId('place-names-town-topup')).toMatchObject({ 'source-layer': 'places', minzoom: 14 })
   })
 
   it('mounts the label layers above alarm-circle-fill and its rasters - no beforeId means it lands on top of everything mounted before it', () => {
@@ -415,9 +417,9 @@ describe('AnchorWatchMap place-name labels', () => {
     }
   })
 
-  it('logs an explicit error once when the carto vector source is missing from the loaded style', () => {
+  it('logs an explicit error once when the base vector source is missing from the loaded style', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
-    mockCartoSourcePresent = false
+    mockBaseSourcePresent = false
 
     renderMap()
     act(() => {
@@ -434,7 +436,7 @@ describe('AnchorWatchMap place-name labels', () => {
     errorSpy.mockRestore()
   })
 
-  it('does not log a missing-source error when the carto source is present', () => {
+  it('does not log a missing-source error when the base vector source is present', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     renderMap()

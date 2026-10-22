@@ -77,7 +77,7 @@ var noCompressRoutePatterns = map[string]bool{
 	// JPEG/WebP map tiles gain nothing from a second compression pass, and
 	// it would spend CPU on every proxied fetch for no smaller a response.
 	//
-	// basemap_proxy.go's style/tilejson/vector-tile/glyph routes used to
+	// basemap_proxy.go's style/vector-tile/glyph routes used to
 	// sit here too, on the same "already compressed" assumption - but they
 	// aren't (backend perf audit Tier 3). fetchBasemapUpstream
 	// (basemap_proxy.go) fetches through newWorldImageryHTTPClient's plain

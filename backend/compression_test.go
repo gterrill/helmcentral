@@ -435,14 +435,6 @@ func TestCompression_SpritePNGStaysSkippedButSpriteJSONDoesNot(t *testing.T) {
 	}
 }
 
-// fakeCartoStylePadding pads a style document past compressionMinLength
-// (1024 bytes) with an inert extra field, purely so this test exercises the
-// real gzip-or-not decision instead of MinLength suppressing it - the real
-// upstream style document is comfortably over 1024 bytes; the package's own
-// fakeCartoStyleJSON fixture (basemap_proxy_test.go) is trimmed down to
-// ~800 for readability and would not.
-var fakeCartoStylePadding = `,"metadata":"` + strings.Repeat("x", 512) + `"`
-
 // TestCompression_BasemapStyleJSONIsGzippedToAGzipClientAndDecodesCorrectly
 // is item 4's required end-to-end test: through the real compression
 // middleware and the real basemapStyleHandler (not just the Skipper table
@@ -452,11 +444,12 @@ var fakeCartoStylePadding = `,"metadata":"` + strings.Repeat("x", 512) + `"`
 // rewrite that happens on top of it.
 func TestCompression_BasemapStyleJSONIsGzippedToAGzipClientAndDecodesCorrectly(t *testing.T) {
 	cache := newTestTileCache(t)
-	padded := strings.TrimSuffix(fakeCartoStyleJSON, "}") + fakeCartoStylePadding + "}"
-	if len(padded) <= compressionMinLength {
-		t.Fatalf("test fixture (%d bytes) must exceed compressionMinLength (%d) to exercise gzip at all", len(padded), compressionMinLength)
+	// The real captured style, comfortably over compressionMinLength.
+	style := cartoFixture(t, "positron")
+	if len(style) <= compressionMinLength {
+		t.Fatalf("test fixture (%d bytes) must exceed compressionMinLength (%d) to exercise gzip at all", len(style), compressionMinLength)
 	}
-	fetcher := respondingFetcher("positron-gl-style/style.json", "application/json", padded)
+	fetcher := respondingFetcher("positron-gl-style/style.json", "application/json", style)
 
 	e := newCompressedTestEcho()
 	e.GET("/api/basemap/style/:name", basemapStyleHandler(cache, fetcher))
@@ -487,15 +480,13 @@ func TestCompression_BasemapStyleJSONIsGzippedToAGzipClientAndDecodesCorrectly(t
 	if err := json.Unmarshal(decoded, &doc); err != nil {
 		t.Fatalf("decompressed body is not valid JSON: %v\nbody: %s", err, decoded)
 	}
-	// basemapStyleHandler absolutises same-origin URLs against the request
-	// (absolutiseStyleURLs) after the rewrite this is really checking for,
-	// so the served value carries http://example.com (httptest's default
-	// request host), not the bare "/api/basemap/tilejson" the cache itself
-	// holds.
+	// The served value is absolute against the request (httptest's default
+	// host is example.com).
 	sources, _ := doc["sources"].(map[string]any)
-	carto, _ := sources["carto"].(map[string]any)
-	if url, _ := carto["url"].(string); url != "http://example.com/api/basemap/tilejson" {
-		t.Fatalf("rewritten sources.carto.url = %q, want http://example.com/api/basemap/tilejson - the gzip round trip lost the rewrite", url)
+	src, _ := sources["protomaps"].(map[string]any)
+	tiles, _ := src["tiles"].([]any)
+	if len(tiles) != 1 || tiles[0] != "http://example.com/api/basemap/tiles/{z}/{x}/{y}" {
+		t.Fatalf("rewritten tiles = %v - the gzip round trip lost the rewrite", src["tiles"])
 	}
 }
 

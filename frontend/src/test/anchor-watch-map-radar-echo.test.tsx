@@ -198,7 +198,7 @@ beforeEach(() => {
   mockMap = {
     isStyleLoaded: vi.fn(() => true),
     getSource: vi.fn((id: string) => {
-      if (id === 'carto') return {} // keep map-place-labels' fail-fast warning quiet; unrelated to this suite
+      if (id === 'protomaps') return {} // keep map-place-labels' fail-fast warning quiet; unrelated to this suite
       if (id !== 'radar-echo') return undefined
       return mockMap.addSource.mock.calls.length > 0 ? { setCoordinates: setCoordinatesSpy } : undefined
     }),

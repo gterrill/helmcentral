@@ -1438,7 +1438,7 @@ export function AnchorWatchMap({
         // the browser fetching them from CARTO directly, showing that credit
         // is our obligation, not the CDN's. MapLibre's own control collects
         // the attribution string every active source declares - Carto/OSM
-        // through the proxied TileJSON, plus OpenSeaMap, Esri and any
+        // through the proxied style's vector source, plus OpenSeaMap, Esri and any
         // uploaded chart - so it stays correct as layers come and go.
         // Compact keeps it to a single small "i" until tapped, which suits a
         // dense helm display better than a permanent strip of credits.
