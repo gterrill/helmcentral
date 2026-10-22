@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -296,7 +297,14 @@ func quietSources(sources []sourceHealth, now time.Time, streamAge time.Duration
 // sourceHealthFor lists every $source seen under context as sourceHealth, the
 // full list engineKeyOff and silentSources expect.
 func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
-	sources := snapshot.sourcesFor(context)
+	health, _ := sourceHealthAndACFor(snapshot, context)
+	return health
+}
+
+// sourceHealthAndACFor is sourceHealthFor plus the AC input state, read under
+// one snapshot lock.
+func sourceHealthAndACFor(snapshot *signalKSnapshot, context string) ([]sourceHealth, acSourceState) {
+	sources, ac := snapshot.sourcesAndACFor(context)
 	health := make([]sourceHealth, 0, len(sources))
 	for source, entry := range sources {
 		health = append(health, sourceHealth{
@@ -313,7 +321,7 @@ func sourceHealthFor(snapshot *signalKSnapshot, context string) []sourceHealth {
 			Plugin: !strings.Contains(source, ".") && !entry.BusTyped,
 		})
 	}
-	return health
+	return health, ac
 }
 
 // sourceQuietThreshold is how long s may go without an update before it is
@@ -404,7 +412,7 @@ func engineKeyOff(e sourceHealth, sources []sourceHealth, now time.Time) bool {
 //     vessel's AC input switching to battery (ac, anomaly_shore_power.go):
 //     a shore charger loses its power with the shore. Nothing is excused
 //     when no source publishes an AC source, once shore is back, or for the
-//     source publishing the AC source.
+//     source reporting the AC source or anything on its connection while it is quiet.
 //
 // The result is sorted by source id, so it is deterministic for a golden-text
 // caller the way anomaly_battery.go's evidence formatter already is.
@@ -417,6 +425,15 @@ func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duratio
 		if s.EngineBound && engineKeyOff(s, sources, now) {
 			keyOff[s.Source] = true
 			keyOffAt = append(keyOffAt, s.Last)
+		}
+	}
+
+	// Connections whose AC source publisher is itself quiet: a crashed GX,
+	// not a shore charger without power.
+	var acDown []string
+	for _, q := range quiet {
+		if ac.publishes(q.Source) {
+			acDown = append(acDown, sourceConnection(q.Source))
 		}
 	}
 
@@ -439,18 +456,19 @@ func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duratio
 			}
 			continue
 		}
-		// Shore charger and the like: went down with the shore power.
-		if ac.excusesQuietAt(s.Source, s.Last) {
-			continue
-		}
-		withEngine := false
+		wentDown := false
 		for _, off := range keyOffAt {
-			if d := s.Last.Sub(off); d >= -silentSourceKeyOffWindow && d <= silentSourceKeyOffWindow {
-				withEngine = true
+			if withinKeyOffWindow(s.Last, off) {
+				wentDown = true
 				break
 			}
 		}
-		if !withEngine {
+		// A shore charger and the like went down with the shore power, unless
+		// it is behind the connection that reports the AC input.
+		if !wentDown && !ac.BatteryAt.IsZero() && !ac.publishes(s.Source) && !slices.Contains(acDown, sourceConnection(s.Source)) && withinKeyOffWindow(s.Last, ac.BatteryAt) {
+			wentDown = true
+		}
+		if !wentDown {
 			out = append(out, s.Source)
 		}
 	}

@@ -43,17 +43,28 @@ source instead of an engine.
    readings was to battery (a tie goes to non-battery). `acSourceFor` hands
    `silentSources` that time (`BatteryAt`) and the set of publishing sources.
 3. **A quiet source is not reported** when the vessel reads battery and the
-   source's last update falls within `silentSourceKeyOffWindow` (60 s) of
-   `BatteryAt`. No device classification is needed, so both views of the
+   source's last update falls within `silentSourceKeyOffWindow` (60 s, either
+   side) of `BatteryAt`. The window is symmetric because the N2K view of the
+   charger went quiet before the GX did. The comparison is the one the engine
+   key-off rule uses (`withinKeyOffWindow`). No device classification is needed, so both views of the
    charger are covered.
 4. **Fail fast.** With no AC source publisher, nothing changes. Once the AC
    source returns to grid, shore or generator, a device still quiet is
    reported. A device quiet while on shore, or more than 60 s from the switch,
    is reported. A source that publishes an AC source path is never excused, so
-   the GX going quiet is still raised.
-5. **A first sighting is not a transition.** After a backend restart while on
-   battery the time of the switch is unknown, so nothing is excused until the
-   next change.
+   the GX going quiet is still raised, and when such a source is itself quiet
+   nothing on its connection is excused (a GX crash just after unplugging
+   reports every `venus.*` service). While it is live, its other services, the
+   GX view of the charger among them, are excused.
+5. **Only recognised readings count.** Battery is `battery` or 240; grid,
+   shore and generator (or 1, 2, 3) are off battery. Null, `NA`, 0 and
+   anything unrecognised are ignored, as are readings older than the last
+   change.
+6. **A first sighting is not a transition.** After a backend restart or a
+   SignalK stream reconnect, whose dump restamps retained values, the time of
+   the switch is unknown, so nothing is excused until the next change. The
+   tracking is cleared on reconnect and when the self vessel changes, and is
+   capped at 32 readings (logged when full).
 
 `quietSources` is unchanged, as in ADR 0147: the detectors keep distrusting a
 reading whose source has gone quiet. Only the operator-facing list narrows.
@@ -79,7 +90,7 @@ reading whose source has gone quiet. Only the operator-facing list narrows.
   answer there.
 - A device that fails within a minute of the switch is missed until the next
   time the AC input changes.
-- A restart while on battery loses the switch time (decision 5), so a charger
+- A restart or reconnect while on battery loses the switch time (decision 6), so a charger
   silent since before the restart is raised until shore returns.
 - The same charger still appears under two source ids (bus and GX). Joining
   them looks feasible through the N2K product name against the GX service, but

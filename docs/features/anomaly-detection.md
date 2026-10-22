@@ -55,12 +55,12 @@ while it is up. The card has one **Ignore** action for the whole device.
 
 Some equipment goes quiet on purpose. A shore charger loses its power when
 you disconnect shore power, and the card does not report it: when the boat's
-AC input switches to battery and a device stops within a minute of that, it is
-left out. This only works when something on the boat reports the AC input
-source (a Victron GX does). A device that goes quiet while you are still on
-shore power, or more than a minute from the switch, is reported, and so is a
-device that stays quiet after you reconnect shore power. The instrument that
-reports the AC input is never excused this way.
+AC input switches to battery, a device whose last report was within a minute
+of the switch, before or after, is left out. This only works when something on
+the boat reports the AC input source (a Victron GX does). A device that goes
+quiet while you are on shore power, more than a minute from the switch, or
+stays quiet after you reconnect shore power, is reported. So is the instrument
+that reports the AC input, and anything behind it if it goes quiet too.
 
 The impossible-reading check looks at batteries, not at chargers. A solar
 charger reports its panel array's voltage under a battery number on some

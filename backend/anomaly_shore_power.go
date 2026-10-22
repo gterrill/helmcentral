@@ -1,6 +1,8 @@
 package main
 
 import (
+	"log"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,12 +21,17 @@ const venusACSourceBattery = 240
 // sources or paths cannot grow it without limit.
 const signalKACSourceMaxTracked = 32
 
+// acSourceKey is one source's one acSource path. Only the self vessel is
+// tracked, so no context is part of the key.
+type acSourceKey struct{ source, path string }
+
 // acSourceEntry is one source's reading of one acSource path.
 type acSourceEntry struct {
 	OnBattery bool
 	// Changed is when the reading last changed (the declared timestamp of
 	// the update that changed it), not when it was last repeated. Zero for a
-	// first sighting: a restart cannot know when an earlier switch happened.
+	// first sighting: a restart or reconnect cannot know when an earlier
+	// switch happened.
 	Changed time.Time
 }
 
@@ -33,9 +40,11 @@ type acSourceState struct {
 	// BatteryAt is when the AC source last changed to battery; zero unless it
 	// reads battery now.
 	BatteryAt time.Time
-	// Publishers is every source that publishes an acSource path. Such a
-	// source is the evidence for this rule, so it is never excused by it.
-	Publishers map[string]bool
+	// Sources are the sources publishing an acSource path. They are the
+	// evidence for this rule and are never excused by it. When one of them is
+	// itself quiet, nothing on its connection is excused either: a GX crash
+	// just after the unplugging must still report every service behind it.
+	Sources []string
 }
 
 // isACSourcePath reports whether path is an electrical.*.acSource or
@@ -45,18 +54,27 @@ func isACSourcePath(path string) bool {
 		(strings.HasSuffix(path, ".acSource") || strings.HasSuffix(path, ".acSourceNumber"))
 }
 
-// acSourceIsBattery reads an acSource value: the string "battery" or the Venus
-// number 240.
-func acSourceIsBattery(v any) bool {
+// acSourceReading classifies an acSource value. known is false for anything
+// that is neither battery nor a recognised off-battery source (null, "NA",
+// 0 not available, unrecognised): such a value says nothing and is ignored.
+func acSourceReading(v any) (onBattery, known bool) {
 	switch x := v.(type) {
 	case string:
-		return strings.EqualFold(strings.TrimSpace(x), "battery")
+		switch strings.ToLower(strings.TrimSpace(x)) {
+		case "battery":
+			return true, true
+		case "grid", "shore", "generator":
+			return false, true
+		}
 	case float64:
-		return x == venusACSourceBattery
-	case int:
-		return x == venusACSourceBattery
+		switch x {
+		case venusACSourceBattery:
+			return true, true
+		case 1, 2, 3:
+			return false, true
+		}
 	}
-	return false
+	return false, false
 }
 
 // noteACSourceLocked records one acSource reading. Callers hold s.mu.
@@ -64,39 +82,37 @@ func (s *signalKSnapshot) noteACSourceLocked(context, source, path string, value
 	if s.selfCtx == "" || context != s.selfCtx {
 		return
 	}
-	key := context + "|" + source + "|" + path
-	onBattery := acSourceIsBattery(value)
-	prev, known := s.acSourceSeen[key]
+	onBattery, known := acSourceReading(value)
 	if !known {
+		return
+	}
+	key := acSourceKey{source, path}
+	prev, seen := s.acSourceSeen[key]
+	if !seen {
 		if len(s.acSourceSeen) >= signalKACSourceMaxTracked {
+			log.Printf("signalk snapshot: not tracking AC source %s from %s: %d readings already tracked", path, source, signalKACSourceMaxTracked)
 			return
 		}
 		s.acSourceSeen[key] = acSourceEntry{OnBattery: onBattery}
 		return
 	}
-	if prev.OnBattery == onBattery {
+	// An older reading arriving late says nothing about now.
+	if at.Before(prev.Changed) || prev.OnBattery == onBattery {
 		return
 	}
 	s.acSourceSeen[key] = acSourceEntry{OnBattery: onBattery, Changed: at}
 }
 
-// acSourceFor reports the AC input state for context. The vessel reads
-// battery when the most recent change among its acSource readings was to
-// battery; a tie goes to the reading that is not battery.
-func (s *signalKSnapshot) acSourceFor(context string) acSourceState {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	state := acSourceState{Publishers: map[string]bool{}}
-	prefix := context + "|"
+// acSourceLocked reports the self vessel's AC input state. The vessel reads
+// battery when the most recent change among its readings was to battery; a
+// tie goes to the reading that is not battery. Callers hold s.mu.
+func (s *signalKSnapshot) acSourceLocked() acSourceState {
+	var state acSourceState
 	var latest acSourceEntry
 	for key, e := range s.acSourceSeen {
-		rest, ok := strings.CutPrefix(key, prefix)
-		if !ok {
-			continue
+		if !slices.Contains(state.Sources, key.source) {
+			state.Sources = append(state.Sources, key.source)
 		}
-		source, _, _ := strings.Cut(rest, "|")
-		state.Publishers[source] = true
 		if e.Changed.After(latest.Changed) || (e.Changed.Equal(latest.Changed) && !e.OnBattery) {
 			latest = e
 		}
@@ -107,13 +123,21 @@ func (s *signalKSnapshot) acSourceFor(context string) acSourceState {
 	return state
 }
 
-// excusesQuietAt reports whether a source whose last update was at last went
-// quiet with the shore power: the vessel now reads battery and the source's
-// last update falls within silentSourceKeyOffWindow of the switch.
-func (a acSourceState) excusesQuietAt(source string, last time.Time) bool {
-	if a.BatteryAt.IsZero() || a.Publishers[source] {
-		return false
-	}
-	d := last.Sub(a.BatteryAt)
+// acSourceFor is acSourceLocked under the read lock.
+func (s *signalKSnapshot) acSourceFor() acSourceState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.acSourceLocked()
+}
+
+// publishes reports whether source is one of those publishing an AC source.
+func (a acSourceState) publishes(source string) bool {
+	return slices.Contains(a.Sources, source)
+}
+
+// withinKeyOffWindow reports whether last falls within silentSourceKeyOffWindow
+// of off, the moment something it depends on went down.
+func withinKeyOffWindow(last, off time.Time) bool {
+	d := last.Sub(off)
 	return d >= -silentSourceKeyOffWindow && d <= silentSourceKeyOffWindow
 }
