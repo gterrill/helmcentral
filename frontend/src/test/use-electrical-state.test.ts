@@ -54,6 +54,13 @@ describe('useElectricalState charge rate', () => {
     expect(result.current.batteryRatePercentPerHour).toBeCloseTo(-0.5, 4)
   })
 
+  it('reports a zero rate, not an unknown one, for a bank at rest', () => {
+    const { result } = renderHook(() => useElectricalState())
+    emit({ datetime: '2026-09-14T00:00:00Z', battery_soc_percent: 50, battery_capacity_ah: 200, charging_current_a: 0 })
+    expect(result.current.batteryRatePercentPerHour).toBe(0)
+    expect(result.current.timeToGoHours).toBeNull()
+  })
+
   it('still reports a real discharge', () => {
     const { result } = renderHook(() => useElectricalState())
     emit({ datetime: '2026-09-14T00:00:00Z', battery_soc_percent: 50, battery_capacity_ah: 200, charging_current_a: -10 })
