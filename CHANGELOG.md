@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **Disconnecting shore power no longer raises "Instruments Silent" for the
+  shore charger.** When your boat reports its AC input switching to battery
+  (a Victron GX does), any device that stops sending within a minute of the
+  switch is left off the card. A device that goes quiet on shore power, or
+  later, is still reported.
+
 ## [0.51.0] - 2026-10-21
 
 ### Breaking

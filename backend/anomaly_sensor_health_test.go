@@ -155,7 +155,7 @@ func TestSilentSourcesFiresForAWatchedQuietSource(t *testing.T) {
 	sources := []sourceHealth{
 		{Source: "venus.battery.512", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200},
 	}
-	got := silentSources(sources, now, 2*time.Second, nil)
+	got := silentSources(sources, now, 2*time.Second, nil, acSourceState{})
 	if len(got) != 1 || got[0] != "venus.battery.512" {
 		t.Fatalf("silentSources: got %v, want [venus.battery.512]", got)
 	}
@@ -168,7 +168,7 @@ func TestSilentSourcesNotWatchedYet(t *testing.T) {
 	sources := []sourceHealth{
 		{Source: "new.device", First: now.Add(-1 * time.Minute), Last: now.Add(-45 * time.Second), Count: 5},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected an unwatched (too-new) source not to fire, got %v", got)
 	}
 }
@@ -179,7 +179,7 @@ func TestSilentSourcesNotEnoughUpdatesYet(t *testing.T) {
 	sources := []sourceHealth{
 		{Source: "slow.device", First: now.Add(-6 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 10},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected a source under 30 updates not to be watched yet, got %v", got)
 	}
 }
@@ -189,7 +189,7 @@ func TestSilentSourcesStillFreshDoesNotFire(t *testing.T) {
 	sources := []sourceHealth{
 		{Source: "venus.battery.512", First: now.Add(-10 * time.Minute), Last: now.Add(-30 * time.Second), Count: 200},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected a source quiet for only 30s not to fire, got %v", got)
 	}
 }
@@ -201,7 +201,7 @@ func TestSilentSourcesSuppressedWhenStreamItselfIsStale(t *testing.T) {
 	}
 	// The whole stream is 15s old -- a dead SignalK connection, a different
 	// and already-alarmed failure, not this source specifically going quiet.
-	if got := silentSources(sources, now, 15*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 15*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected silentSources to suppress everything while the stream itself is stale, got %v", got)
 	}
 }
@@ -224,7 +224,7 @@ func TestSilentSourcesToleratesASourceThatOnlyReportsOnChange(t *testing.T) {
 		// source's own scaled threshold.
 		{Source: "n2k.switch.bilge-pump", First: now.Add(-60 * time.Minute), Last: now.Add(-10 * time.Minute), Count: 31},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected an on-change source quiet for only 10 minutes (under its own ~16.7min scaled threshold) not to fire, got %v", got)
 	}
 }
@@ -238,7 +238,7 @@ func TestSilentSourcesStillFiresOnceQuietPastItsOwnScaledCadence(t *testing.T) {
 		// between two ordinary updates.
 		{Source: "n2k.switch.bilge-pump", First: now.Add(-70 * time.Minute), Last: now.Add(-20 * time.Minute), Count: 31},
 	}
-	got := silentSources(sources, now, 2*time.Second, nil)
+	got := silentSources(sources, now, 2*time.Second, nil, acSourceState{})
 	if len(got) != 1 || got[0] != "n2k.switch.bilge-pump" {
 		t.Fatalf("expected a source quiet well past its own scaled cadence to still fire, got %v", got)
 	}
@@ -266,7 +266,7 @@ func TestSilentSourcesFiresForATightlyClusteredButStaleBurst(t *testing.T) {
 		// silentSourceMinUpdates on the burst alone -- and nothing since.
 		{Source: "n2k.switch.bilge-pump", First: burstAt, Last: burstAt.Add(30 * time.Millisecond), Count: 40},
 	}
-	got := silentSources(sources, now, 2*time.Second, nil)
+	got := silentSources(sources, now, 2*time.Second, nil, acSourceState{})
 	if len(got) != 1 || got[0] != "n2k.switch.bilge-pump" {
 		t.Fatalf("expected a tightly-clustered but stale burst to fire once watched, got %v", got)
 	}
@@ -277,7 +277,7 @@ func TestSilentSourcesSkipsPluginOutputs(t *testing.T) {
 	sources := []sourceHealth{
 		{Source: "some-plugin", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200, Plugin: true},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected a quiet plugin output never to be reported, got %v", got)
 	}
 }
@@ -289,7 +289,7 @@ func TestSilentSourcesStillReportsDottedSourceWithoutBusType(t *testing.T) {
 	sources := []sourceHealth{
 		{Source: "gx.alternator.0", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200},
 	}
-	got := silentSources(sources, now, 2*time.Second, nil)
+	got := silentSources(sources, now, 2*time.Second, nil, acSourceState{})
 	if len(got) != 1 || got[0] != "gx.alternator.0" {
 		t.Fatalf("silentSources: got %v, want [gx.alternator.0]", got)
 	}
@@ -300,7 +300,7 @@ func TestSilentSourcesSkipsEngineBoundSources(t *testing.T) {
 	sources := []sourceHealth{
 		{Source: "n2k.engine.port", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200, EngineBound: true},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected a quiet engine-bound source not to be reported, got %v", got)
 	}
 }
@@ -311,7 +311,7 @@ func TestSilentSourcesExcludedSetStillApplies(t *testing.T) {
 		{Source: "n2k.chartplotter", First: now.Add(-10 * time.Minute), Last: now.Add(-3 * time.Minute), Count: 200},
 	}
 	excluded := map[string]bool{"n2k.chartplotter": true}
-	if got := silentSources(sources, now, 2*time.Second, excluded); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, excluded, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected an ignored source never to fire, got %v", got)
 	}
 }
@@ -324,7 +324,7 @@ func TestSilentSourcesExcusesDeviceThatWentQuietWithTheEngine(t *testing.T) {
 		{Source: "n2k.dcdc.1", First: now.Add(-20 * time.Minute), Last: engineLast.Add(-12 * time.Second), Count: 200},
 		{Source: "n2k.gps", First: now.Add(-20 * time.Minute), Last: now.Add(-1 * time.Second), Count: 1200},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected a device quiet within the key-off window of the engine not to be reported, got %v", got)
 	}
 }
@@ -337,7 +337,7 @@ func TestSilentSourcesReportsDeviceThatWentQuietLongAfterTheEngine(t *testing.T)
 		{Source: "n2k.dcdc.1", First: now.Add(-40 * time.Minute), Last: engineLast.Add(10 * time.Minute), Count: 200},
 		{Source: "n2k.gps", First: now.Add(-40 * time.Minute), Last: now.Add(-1 * time.Second), Count: 2400},
 	}
-	got := silentSources(sources, now, 2*time.Second, nil)
+	got := silentSources(sources, now, 2*time.Second, nil, acSourceState{})
 	if len(got) != 1 || got[0] != "n2k.dcdc.1" {
 		t.Fatalf("silentSources: got %v, want [n2k.dcdc.1]", got)
 	}
@@ -349,7 +349,7 @@ func TestSilentSourcesReportsDeviceQuietWhileTheEngineIsStillLive(t *testing.T) 
 		{Source: "n2k.engine.port", First: now.Add(-20 * time.Minute), Last: now.Add(-1 * time.Second), Count: 1200, EngineBound: true},
 		{Source: "n2k.dcdc.1", First: now.Add(-20 * time.Minute), Last: now.Add(-5 * time.Minute), Count: 200},
 	}
-	got := silentSources(sources, now, 2*time.Second, nil)
+	got := silentSources(sources, now, 2*time.Second, nil, acSourceState{})
 	if len(got) != 1 || got[0] != "n2k.dcdc.1" {
 		t.Fatalf("silentSources: got %v, want [n2k.dcdc.1]", got)
 	}
@@ -366,7 +366,7 @@ func TestSilentSourcesReportsGatewayOutageAcrossEngineAndDevices(t *testing.T) {
 		{Source: "n2k.depth", First: now.Add(-20 * time.Minute), Last: last, Count: 200},
 		{Source: "gx.dcdc.1", First: now.Add(-20 * time.Minute), Last: last.Add(-12 * time.Second), Count: 200},
 	}
-	got := silentSources(sources, now, 2*time.Second, nil)
+	got := silentSources(sources, now, 2*time.Second, nil, acSourceState{})
 	want := []string{"gx.dcdc.1", "n2k.depth", "n2k.engine.port"}
 	if len(got) != len(want) {
 		t.Fatalf("silentSources: got %v, want %v", got, want)
@@ -386,7 +386,7 @@ func TestSilentSourcesKeyOffWithConnectionAliveReportsNothing(t *testing.T) {
 		{Source: "n2k.gps", First: now.Add(-20 * time.Minute), Last: now.Add(-1 * time.Second), Count: 1200},
 		{Source: "gx.dcdc.1", First: now.Add(-20 * time.Minute), Last: engineLast.Add(12 * time.Second), Count: 200},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected a key-off with a live connection to report nothing, got %v", got)
 	}
 }
@@ -398,7 +398,7 @@ func TestSilentSourcesDedicatedEngineConnectionIsAcceptedAsKeyOff(t *testing.T) 
 	sources := []sourceHealth{
 		{Source: "eng.port", First: now.Add(-20 * time.Minute), Last: now.Add(-5 * time.Minute), Count: 200, EngineBound: true},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected a dedicated engine connection going quiet not to be reported, got %v", got)
 	}
 }
@@ -414,7 +414,7 @@ func TestSilentSourcesExcusesCompanionBeforeEngineSourceCountsAsQuiet(t *testing
 		{Source: "n2k.gps", First: now.Add(-20 * time.Minute), Last: now.Add(-1 * time.Second), Count: 1200},
 		{Source: "gx.dcdc.1", First: now.Add(-20 * time.Minute), Last: engineLast.Add(-12 * time.Second), Count: 200},
 	}
-	if got := silentSources(sources, now, 2*time.Second, nil); len(got) != 0 {
+	if got := silentSources(sources, now, 2*time.Second, nil, acSourceState{}); len(got) != 0 {
 		t.Fatalf("expected the companion to be excused while the engine source is not yet quiet, got %v", got)
 	}
 }
@@ -438,7 +438,7 @@ func TestSilentSourcesAgainstCapturedFixture(t *testing.T) {
 		health = append(health, sourceHealth{Source: source, First: entry.First, Last: entry.Last, Count: entry.Count})
 	}
 
-	got := silentSources(health, lastDeltaAt, 0, nil)
+	got := silentSources(health, lastDeltaAt, 0, nil, acSourceState{})
 	if len(got) != 0 {
 		t.Fatalf("expected no silent sources evaluated at the fixture's own last timestamp, got %v", got)
 	}
@@ -486,7 +486,7 @@ func TestApplyDeltaFlagsASourceDeadBeforeBackendStart(t *testing.T) {
 	}
 	health := []sourceHealth{{Source: deadSource, First: entry.First, Last: entry.Last, Count: entry.Count}}
 
-	got := silentSources(health, restartAt.Add(45*time.Millisecond), 0, nil)
+	got := silentSources(health, restartAt.Add(45*time.Millisecond), 0, nil, acSourceState{})
 	if len(got) != 1 || got[0] != deadSource {
 		t.Fatalf("expected the dead-before-start source flagged silent immediately, got %v (tracked entry=%+v)", got, entry)
 	}
@@ -536,7 +536,7 @@ func TestApplyDeltaDoesNotFlagAHealthyOnChangeSourceReplayedAtRestart(t *testing
 	// exactly the window the old arrival-based design falsely fired in.
 	evalAt := restartAt.Add(6 * time.Minute)
 	health := []sourceHealth{{Source: source, First: entry.First, Last: entry.Last, Count: entry.Count}}
-	got := silentSources(health, evalAt, 0, nil)
+	got := silentSources(health, evalAt, 0, nil, acSourceState{})
 	if len(got) != 0 {
 		t.Fatalf("expected a healthy on-change source not to false-alarm 6 minutes after an ordinary restart, got %v (tracked entry=%+v)", got, entry)
 	}

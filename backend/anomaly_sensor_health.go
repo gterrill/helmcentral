@@ -400,10 +400,15 @@ func engineKeyOff(e sourceHealth, sources []sourceHealth, now time.Time) bool {
 //     threshold: they share the ignition circuit and went down with it. A
 //     live engine source's last update is about now, so it never matches a
 //     device that is already quiet.
+//   - Devices whose last update falls within silentSourceKeyOffWindow of the
+//     vessel's AC input switching to battery (ac, anomaly_shore_power.go):
+//     a shore charger loses its power with the shore. Nothing is excused
+//     when no source publishes an AC source, once shore is back, or for the
+//     source publishing the AC source.
 //
 // The result is sorted by source id, so it is deterministic for a golden-text
 // caller the way anomaly_battery.go's evidence formatter already is.
-func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duration, excluded map[string]bool) []string {
+func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duration, excluded map[string]bool, ac acSourceState) []string {
 	quiet := quietSources(sources, now, streamAge, excluded)
 
 	var keyOffAt []time.Time
@@ -432,6 +437,10 @@ func silentSources(sources []sourceHealth, now time.Time, streamAge time.Duratio
 			if !keyOff[s.Source] {
 				out = append(out, s.Source)
 			}
+			continue
+		}
+		// Shore charger and the like: went down with the shore power.
+		if ac.excusesQuietAt(s.Source, s.Last) {
 			continue
 		}
 		withEngine := false

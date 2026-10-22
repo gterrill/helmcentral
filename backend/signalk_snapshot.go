@@ -33,6 +33,9 @@ type signalKSnapshot struct {
 	contexts        map[string]map[string]any  // context string → nested tree
 	pathSeen        map[string]time.Time       // "<context>|<dotted path>" → last update time
 	sourceSeen      map[string]sourceSeenEntry // "<context>|<$source>" → publishing history
+	// acSourceSeen is, per "<context>|<$source>|<path>", the latest reading of
+	// each electrical.*.acSource path (anomaly_shore_power.go). Self only.
+	acSourceSeen map[string]acSourceEntry
 	// batteryPublishers is, per "<context>|<battery id>", every $source that
 	// has published any electrical.batteries.<id>.* path. The tree leaf only
 	// keeps whoever wrote last, but several devices can share one instance
@@ -291,6 +294,7 @@ func newSignalKSnapshot() *signalKSnapshot {
 		controlStamps:     make(map[string]controlStampEntry),
 		controlStampCount: make(map[string]int),
 		sourceSeen:        make(map[string]sourceSeenEntry),
+		acSourceSeen:      make(map[string]acSourceEntry),
 		batteryPublishers: make(map[string]map[string]struct{}),
 		sentenceSeen:      make(map[string]time.Time),
 		contextHeard:      make(map[string]time.Time),
@@ -439,6 +443,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 				entry.Sentences = next
 			}
 			for _, val := range update.Values {
+				if isACSourcePath(val.Path) {
+					s.noteACSourceLocked(d.Context, update.SourceRef, val.Path, val.Value, eventAt)
+				}
 				if strings.HasPrefix(val.Path, "propulsion.") {
 					entry.EngineBound = true
 				}
