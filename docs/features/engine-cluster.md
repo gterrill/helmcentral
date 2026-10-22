@@ -7,8 +7,11 @@ you the engine is charging and cooling properly. Place one tile per engine.
 ## What the tile shows
 
 - **Tachometer.** Revs in the middle of a ticked dial, with the engine hours
-  in a tab above the card. A coloured mark on the scale appears only for a
-  band you have set.
+  underneath them. A coloured mark on the scale appears only for a band you
+  have set.
+- **Warning or alarm.** While a running engine has a reading in an amber or red
+  band, `WARN` or `ALARM` shows in the tile's title. A healthy engine shows
+  nothing there.
 - **Four readout cards** on the inner side of the dial: oil pressure, boost,
   load and fuel flow. Each has a bar showing where the reading sits against its
   normal range. The bar stays neutral while the reading is in range. It turns
@@ -26,9 +29,8 @@ you the engine is charging and cooling properly. Place one tile per engine.
 ## Port and starboard
 
 Choose **Port** or **Starboard** for each tile. A starboard tile is a mirror
-image: the fuel arcs and the run/warning/alarm marker sit on the outer edge, and the
-readout cards and engine hours on the side facing the other engine, so a pair placed side by
-side reads symmetrically.
+image: the fuel arcs sit on the outer edge and the readout cards on the side
+facing the other engine, so a pair placed side by side reads symmetrically.
 
 ## Colours and alarms
 
@@ -51,8 +53,8 @@ has stopped, on the exhaust equipment's profile.
 ## When the engine is off
 
 A switched-off engine shows `--` in its readings and says `OFF` once, in a grey
-marker in the tile's title (the status marker above the card is for a running
-engine). The border goes plain unless a reading from other equipment, such as
+marker in the tile's title, where a running engine's `WARN` or `ALARM` would
+be. The border goes plain unless a reading from other equipment, such as
 the starter battery, is in a warning or alarm band: that still shows. See Staleness in [Tiles](../reference/tiles.md).
 
 ## Which equipment each part reads

@@ -65,22 +65,30 @@ export const POI_MAP_SPLIT_MIN_W = 8
 const TILE_CHROME_H = TILE_INSET_H + 24 + 8
 
 /**
+ * The smallest scale the cluster card is drawn at: what five columns draw it
+ * at. The operator chose a narrower, shorter tile over the card's smallest
+ * labels staying at full legibility (they fall to about 6-7px here). The
+ * height floor holds the card at this scale, not at full size, or a narrow
+ * tile carries a band of empty space above and below the card that cannot be
+ * resized away.
+ */
+export const CLUSTER_MIN_SCALE = 0.6
+
+/**
  * Derived from the canvas rather than written down beside it. The number here
  * used to be nine rows against a comment claiming a 460x300 canvas, and it
  * outlived two rebuilds of the cluster: by the time the canvas settled at 228px
  * tall the floor was 120px above what the tile needed, and the tile could not be
  * resized down at all.
  *
- * The canvas is drawn at design size at this floor and grows with the tile
- * beyond it (see FitCanvas), so its design height is the shortest the tile
- * can be and a wider column costs no extra rows.
+ * The canvas is drawn at CLUSTER_MIN_SCALE at this floor and grows with the
+ * tile beyond it (see FitCanvas), so a wider column costs no extra rows.
  */
 const CLUSTER_WIDGET_CONSTRAINTS = {
   // The card is 800 wide and every label on it is drawn for that width: at
-  // half a column set it scales to about 0.8, the smallest the readout cards'
-  // labels stay readable at.
-  minW: 6,
-  minH: rowsForHeight(TILE_CHROME_H + CLUSTER_H),
+  // five columns it scales to about CLUSTER_MIN_SCALE.
+  minW: 5,
+  minH: rowsForHeight(TILE_CHROME_H + Math.ceil(CLUSTER_H * CLUSTER_MIN_SCALE)),
 }
 
 /** Where a new cluster tile is placed: the card's own minimum, so it fits. */

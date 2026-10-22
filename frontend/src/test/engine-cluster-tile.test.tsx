@@ -96,7 +96,7 @@ beforeEach(() => {
   history.calls = []
 })
 
-describe('the dial and its hours tab', () => {
+describe('the dial and its hours', () => {
   // The reference rounds revs to the nearest ten and shows them as plain rpm.
   test('reads the rpm as plain revs to the nearest ten, converted from the SI on the stream', () => {
     renderCluster()
@@ -139,24 +139,27 @@ describe('the dial and its hours tab', () => {
     expect(off.container.querySelector('[data-needle]')).toBeNull()
   })
 
-  test('reads engine hours in the tab', () => {
+  test('reads engine hours in the hub, under the scale note', () => {
     renderCluster()
-    const tab = screen.getByTestId('cluster-notch')
-    expect(tab).toHaveTextContent('894')
-    expect(tab).toHaveTextContent('HRS')
-    expect(tab.innerHTML).toContain('lucide-clock')
+    expect(screen.queryByTestId('cluster-notch')).not.toBeInTheDocument()
+    const hours = screen.getByTestId('cluster-hours')
+    expect(screen.getByTestId('cluster-centre')).toContainElement(hours)
+    expect(hours).toHaveTextContent('894')
+    expect(hours).toHaveTextContent('HRS')
+    expect(hours.innerHTML).toContain('lucide-clock')
+    const note = screen.getByTestId('cluster-scale-note')
+    expect(note.compareDocumentPosition(hours) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  test('says RUN when nothing is in a warning or alarm zone', () => {
+  test('draws no status chip when nothing is in a warning or alarm zone', () => {
     renderCluster()
-    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 })
 
 /**
- * The chip says RUN only for an engine known to be turning with live data.
- * A stale or missing reading, a lost feed or a quiet engine must not read RUN
- * beside a STALE border.
+ * The chip says WARN or ALARM, and only for an engine known to be turning with
+ * live data. A healthy engine has no chip.
  */
 describe('the status chip', () => {
   const allStale = Object.fromEntries(Object.keys(values).map((p) => [p, 300]))
@@ -184,12 +187,12 @@ describe('the status chip', () => {
     expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
-  test('says RUN for a live, turning engine, whether or not the server has classified it', () => {
+  test('is not drawn for a healthy, turning engine, whether or not the server has classified it', () => {
     const { unmount } = renderCluster()
-    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
     unmount()
     renderCluster(full, values, { engines: { port: { state: 'running' } } })
-    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 })
 
@@ -351,14 +354,18 @@ describe('mirror', () => {
     expect(stbdLeft).toBeLessThan(400)
   })
 
-  test('hours and status tabs swap sides', () => {
-    const p = renderCluster(portFuel)
-    expect((screen.getByTestId('cluster-notch') as HTMLElement).style.right).toBe('52px')
-    expect((screen.getByTestId('cluster-chip-tab') as HTMLElement).style.left).toBe('52px')
-    p.unmount()
-    renderCluster(stbd)
-    expect((screen.getByTestId('cluster-notch') as HTMLElement).style.left).toBe('52px')
-    expect((screen.getByTestId('cluster-chip-tab') as HTMLElement).style.right).toBe('52px')
+  // The chip sits in the tile's title row, not on the card, so the card keeps
+  // no band at its top for it.
+  test('the status chip rides the title row on either side', () => {
+    const hot = { left: { ...arcs.left, zones: [{ from: 0, to: 95, state: 'normal' as const }, { from: 95, to: 120, state: 'alarm' as const }] } }
+    const hotValues = { ...values, 'propulsion.port.temperature': 380.15 }
+    for (const config of [portFuel, stbd]) {
+      const { container, unmount } = renderCluster({ ...config, arcs: hot }, hotValues)
+      const header = container.querySelector('[data-slot="card-header"]') as HTMLElement
+      expect(header).toContainElement(screen.getByTestId('cluster-chip'))
+      expect(container.querySelector('[data-cluster-canvas]')).not.toContainElement(screen.getByTestId('cluster-chip'))
+      unmount()
+    }
   })
 
   test('the fuel fan goes to the outer edge', () => {
@@ -590,7 +597,7 @@ describe('tile state (ADR 0081)', () => {
     }
     const { container } = renderCluster(zoned)
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
-    expect(screen.getByTestId('cluster-chip')).toHaveTextContent('RUN')
+    expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
   test('carries no state when nothing on the cluster has a band configured', () => {

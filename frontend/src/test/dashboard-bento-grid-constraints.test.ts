@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import {
+  CLUSTER_MIN_SCALE,
   CLUSTER_WIDGET_CONSTRAINTS,
   GRID_MARGIN,
   GRID_ROW_HEIGHT,
@@ -13,6 +14,7 @@ import {
   raiseGaugeHeight,
   gridPixelHeight,
 } from '@/components/dashboard-bento-grid'
+import { CLUSTER_H } from '@/lib/engine-cluster-layout'
 import { NARROW_STRIP_FOLD_PX } from '@/lib/displays'
 import { TILE_INSET_H, rowsForHeight } from '@/lib/grid-metrics'
 
@@ -33,11 +35,13 @@ describe('grid row maths', () => {
 
 describe('the engine cluster resize floor', () => {
   /**
-   * The card is drawn 800 x 592 and only grows past that, so 592 is the
-   * shortest the tile can be at scale 1: 32px of tile header and top padding,
-   * the canvas, 8px of bottom padding.
+   * The floor holds the card at CLUSTER_MIN_SCALE, what a five-column tile
+   * draws it at, chosen by the operator over the labels' full-size legibility. Holding
+   * it at full size left a half-width tile with a band of empty space above
+   * and below the card that could not be resized away. 32px of tile header and
+   * top padding, the canvas, 8px of bottom padding.
    */
-  const MEASURED_TILE_HEIGHT = 32 + 592 + 8
+  const MEASURED_TILE_HEIGHT = 32 + Math.ceil(CLUSTER_H * CLUSTER_MIN_SCALE) + 8
 
   test('holds the whole tile', () => {
     expect(gridPixelHeight(CLUSTER_WIDGET_CONSTRAINTS.minH))
@@ -51,8 +55,8 @@ describe('the engine cluster resize floor', () => {
 
   // The fuel fan is part of the 800-wide card, so a railed cluster needs no
   // wider column than a bare one.
-  test('asks for half the board across', () => {
-    expect(CLUSTER_WIDGET_CONSTRAINTS.minW).toBe(6)
+  test('asks for five columns across', () => {
+    expect(CLUSTER_WIDGET_CONSTRAINTS.minW).toBe(5)
   })
 })
 
@@ -178,6 +182,6 @@ describe('liftClusterBox', () => {
 describe('a new engine cluster tile', () => {
   test('is placed at the minimum size, so the card fits its tile', () => {
     expect(CLUSTER_DEFAULT_SIZE).toEqual({ w: CLUSTER_WIDGET_CONSTRAINTS.minW, h: CLUSTER_WIDGET_CONSTRAINTS.minH })
-    expect(gridPixelHeight(CLUSTER_DEFAULT_SIZE.h)).toBeGreaterThanOrEqual(32 + 592 + 8)
+    expect(gridPixelHeight(CLUSTER_DEFAULT_SIZE.h)).toBeGreaterThanOrEqual(32 + Math.ceil(CLUSTER_H * CLUSTER_MIN_SCALE) + 8)
   })
 })
