@@ -413,6 +413,85 @@ func (p *wasmPOIProvider) SearchPlaces(input placeSearchInput) (result placeSear
 	}, nil
 }
 
+// ── shoreline_near (ADR 0201, optional export) ────────────────────────────
+
+// wasmShorelineInput mirrors the guest's shoreline_near input contract.
+type wasmShorelineInput struct {
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	RadiusM int     `json:"radius_m"`
+}
+
+// wasmShorelineLine/wasmShorelineOutput mirror the guest's shoreline_near
+// output: {"lines": [{"id": "way/123", "kind": "coastline"|"reef", "name":
+// string, "closed": bool, "points": [[lat, lon], ...]}]}. A shoreline with
+// no lines is a legitimate answer (open sea); a malformed line is an error.
+type wasmShorelineLine struct {
+	ID     string       `json:"id"`
+	Kind   string       `json:"kind"`
+	Name   string       `json:"name"`
+	Closed bool         `json:"closed"`
+	Points [][2]float64 `json:"points"`
+}
+
+type wasmShorelineOutput struct {
+	Lines []wasmShorelineLine `json:"lines"`
+}
+
+func mapWasmShorelineOutput(pluginID string, out wasmShorelineOutput) ([]shorelineLine, error) {
+	lines := make([]shorelineLine, 0, len(out.Lines))
+	for _, l := range out.Lines {
+		if l.Kind != "coastline" && l.Kind != "reef" {
+			return nil, fmt.Errorf("plugin %q: shoreline_near returned line %q with unrecognised kind %q", pluginID, l.ID, l.Kind)
+		}
+		if len(l.Points) < 2 {
+			return nil, fmt.Errorf("plugin %q: shoreline_near returned line %q with %d points", pluginID, l.ID, len(l.Points))
+		}
+		pts := make([]shorelinePoint, len(l.Points))
+		for i, p := range l.Points {
+			if p[0] < -90 || p[0] > 90 || p[1] < -180 || p[1] > 180 {
+				return nil, fmt.Errorf("plugin %q: shoreline_near returned line %q with point %v out of range", pluginID, l.ID, p)
+			}
+			pts[i] = shorelinePoint{Lat: p[0], Lon: p[1]}
+		}
+		if l.Closed && pts[0] != pts[len(pts)-1] {
+			return nil, fmt.Errorf("plugin %q: shoreline_near returned line %q marked closed but its ends differ", pluginID, l.ID)
+		}
+		lines = append(lines, shorelineLine{ID: l.ID, Kind: l.Kind, Name: sanitizePlaceName(l.Name), Closed: l.Closed, Points: pts})
+	}
+	return lines, nil
+}
+
+// ShorelineNear calls the guest's shoreline_near export: raw coastline and
+// reef lines within radiusM of (lat, lon). Same config overlay and panic
+// recovery as PlaceNameAt. A plugin without the export gets a clear error,
+// never an empty shoreline (which would read as open sea).
+func (p *wasmPOIProvider) ShorelineNear(lat, lon float64, radiusM int) (lines []shorelineLine, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("plugin %q panicked in shoreline_near: %v", p.id, r)
+			lines = nil
+		}
+	}()
+
+	if !p.SupportsShoreline() {
+		return nil, fmt.Errorf("plugin %q has no shoreline_near export", p.id)
+	}
+	input, err := json.Marshal(wasmShorelineInput{Lat: lat, Lon: lon, RadiusM: radiusM})
+	if err != nil {
+		return nil, fmt.Errorf("plugin %q: failed to marshal shoreline_near input: %w", p.id, err)
+	}
+	out, err := p.call("shoreline_near", input)
+	if err != nil {
+		return nil, err
+	}
+	var parsed wasmShorelineOutput
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		return nil, fmt.Errorf("plugin %q: unparseable shoreline_near JSON: %w", p.id, err)
+	}
+	return mapWasmShorelineOutput(p.id, parsed)
+}
+
 // loadWasmPOIProviders scans dir once at startup for .wasm plugins, via the
 // shared loadWasmPluginsFromDir. Mirrors loadWasmWaveProviders - a file that
 // fails to load as a valid plugin is logged and skipped, discovery

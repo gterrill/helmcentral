@@ -42,6 +42,10 @@
 // injectable overpassQueryFunc; this file supplies doOverpassQuery, the one
 // place all three wasmexports below actually call the pdk HTTP client.
 //
+// A third optional export, shoreline_near, returns raw coastline and reef
+// lines around a position for Mate's anchorage_shelter tool - see
+// osm-overpass.go's "shoreline_near" section.
+//
 // This file (main.go) holds only the thin //go:wasmexport wrapper layer;
 // all the actual query-building/parsing logic lives in osm-overpass.go,
 // which has no dependency on "github.com/extism/go-pdk" specifically so it
@@ -243,6 +247,27 @@ func searchPlaces() int32 {
 	}
 
 	output, err := runSearchPlaces(doOverpassQuery, input)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	if err := pdk.OutputJSON(output); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
+}
+
+//go:wasmexport shoreline_near
+func shorelineNear() int32 {
+	var input shorelineNearInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	output, err := runShorelineNear(doOverpassQuery, input.Lat, input.Lon, input.RadiusM)
 	if err != nil {
 		pdk.SetError(err)
 		return -1

@@ -206,6 +206,21 @@ commonly name the same plugin but need not.
 | `place_name_at` | `{lat, lon, radius_m}` | The single best-named feature within `radius_m`, or the legitimate negative `{"name": ""}` |
 | `search_places` | `{query, lat, lon, max_results, broad}` | `{search: "exact"\|"regex"\|"none", radius_nm, centred_on, results, note}` - the plugin owns the search ladder, the host owns distance/bearing/dedupe/sort exactly as it does for `fetch_poi` |
 
+A third export, `shoreline_near`, is optional on its own (it does not need the
+pair above) and serves Mate's `anchorage_shelter` tool:
+
+| Export | Input | Returns |
+| --- | --- | --- |
+| `shoreline_near` | `{lat, lon, radius_m}` | `{lines: [{id, kind: "coastline"\|"reef", name, closed, points: [[lat, lon], ...]}]}` - raw OpenStreetMap geometry; the host casts every ray and computes every distance |
+
+Return the whole closed ring for a reef (the host tests whether the anchor is
+inside it), a coastline may be clipped to the radius, and keep the payload
+modest: the boat's link is slow and the call shares the 15 s budget. An
+upstream failure or Overpass `remark` runtime error must be a call error; an
+empty `lines` array means open sea. A plugin without the export makes the tool
+return an error naming it. See
+[ADR 0201](../adr/0201-anchorage-shelter-from-charted-shoreline.md).
+
 `place_name_at` is called on a widening ladder (400m, 1500m, 5000m,
 stopping at the first named answer) by the host, not the plugin - the
 plugin only ever answers one radius per call. `search_places`' `broad` flag

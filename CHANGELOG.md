@@ -20,6 +20,19 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   you zoom out; with no length recorded it is drawn at that size at every
   zoom, not to scale. With no hull type set, 3D off or the terrain unavailable, the
   plain dot stays.
+- **Mate can tell you which wind directions an anchorage is sheltered from.**
+  Ask about a bay or a position and Mate reads the charted coastline and reefs
+  around it, then reports the compass arcs it is sheltered, partly sheltered
+  and exposed from, with how far the nearest land or reef is in each direction.
+  When you are weighing anchorages against a forecast, it sets those arcs
+  against the forecast wind for the stay. Inside a reef it gives the reef's
+  width each way and says that reef shelter depends on the tide. It is an
+  estimate from the chart: it cannot see wind bending round a headland, gusts
+  down a valley or swell wrapping a point, and Mate says so. It needs the
+  updated OpenStreetMap place-names plugin that ships with this release; with an
+  older copy, Mate reports that coastline is unavailable instead of guessing.
+  The map server can be slow on a boat connection, and a timeout is reported
+  as a failure.
 - **The passage replay can show the land in 3D.** A 3D button beside the
   satellite button tilts the map and raises hills and headlands, with the sea
   kept flat so the chart and photographs lie level on the water. You can drag to

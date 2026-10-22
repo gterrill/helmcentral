@@ -395,6 +395,7 @@ type mateTool struct {
 // search_web stays last: it is the only conditional tool.
 var mateTools = []mateTool{
 	mateToolFindPlaces,
+	mateToolAnchorageShelter,
 	mateToolGetWindForecast,
 	mateToolGetTides,
 	mateToolEstimatePassage,

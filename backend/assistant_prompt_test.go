@@ -1216,3 +1216,17 @@ func TestBuildAssistantSystemPrompt_PassageWindowRule(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildAssistantSystemPrompt_AnchorageShelterRule(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"anchorage_shelter",
+		"sheltered arcs",
+		"forecast wind directions",
+		"estimate",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt misses %q", want)
+		}
+	}
+}

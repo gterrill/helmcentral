@@ -911,6 +911,14 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"forecast once per position with enough days for the whole plan; do not re-fetch the same position " +
 		"under a different name.\n\n" +
 
+		"When you choose or assess an anchorage against a forecast, call anchorage_shelter with the position " +
+		"find_places gave you, and compare its sheltered arcs with the forecast wind directions over the " +
+		"stay: a wind from inside a sheltered arc is a good night, one from an exposed arc is a lee shore. " +
+		"Tell the operator the shelter is an estimate from charted shoreline that cannot see wind bending " +
+		"round headlands, gusts down valleys or swell wrapping, and let your own knowledge of the place " +
+		"correct it where it differs. If the tool returns an error, say shelter could not be checked and why; " +
+		"do not substitute a guess without saying so.\n\n" +
+
 		"Shape an anchorage or passage answer as a pilotage briefing, not a forecast readout. For each anchorage: " +
 		"the wind directions it is sheltered from and which would make it a lee shore, reasoned from the " +
 		"coastline and the direction it faces, plus holding, depths, swinging room and hazards where you know " +

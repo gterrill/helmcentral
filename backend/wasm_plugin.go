@@ -118,6 +118,10 @@ type wasmPluginBase struct {
 	// optional way ttl_seconds()/description() are, against the same
 	// throwaway instance, and never causes plugin load to fail.
 	supportsPlaceNames bool
+	// supportsShoreline is true when a POI plugin exports shoreline_near
+	// (ADR 0201), the optional export behind Mate's anchorage_shelter tool.
+	// Detected like supportsPlaceNames and never a reason to fail loading.
+	supportsShoreline bool
 }
 
 func (b *wasmPluginBase) ID() string               { return b.id }
@@ -126,6 +130,7 @@ func (b *wasmPluginBase) Description() string      { return b.description }
 func (b *wasmPluginBase) TTLSeconds() int64        { return b.ttlSeconds }
 func (b *wasmPluginBase) Path() string             { return b.path }
 func (b *wasmPluginBase) SupportsPlaceNames() bool { return b.supportsPlaceNames }
+func (b *wasmPluginBase) SupportsShoreline() bool  { return b.supportsShoreline }
 
 func (b *wasmPluginBase) ttlDuration() time.Duration {
 	return time.Duration(b.ttlSeconds) * time.Second
@@ -684,6 +689,8 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 	// guessed at.
 	supportsPlaceNames := instance.FunctionExists("place_name_at") && instance.FunctionExists("search_places")
 
+	supportsShoreline := instance.FunctionExists("shoreline_near")
+
 	return &wasmPluginBase{
 		id:                 id,
 		name:               name,
@@ -693,6 +700,7 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 		compiled:           compiled,
 		configFieldKeys:    configFieldKeys,
 		supportsPlaceNames: supportsPlaceNames,
+		supportsShoreline:  supportsShoreline,
 	}, nil
 }
 

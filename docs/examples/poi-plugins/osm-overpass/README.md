@@ -147,6 +147,24 @@ match answers in about 1s even at the full 100nm rung 1 radius (Overpass
 uses its name index directly), and the rung 2 regex union answers in 2 to
 5s at 20nm (not indexable, a full scan of the box).
 
+## A third optional export: shoreline_near
+
+`shoreline_near` is independent of the pair above and serves Mate's
+`anchorage_shelter` tool
+([ADR 0201](../../../adr/0201-anchorage-shelter-from-charted-shoreline.md)).
+Input `{"lat": <number>, "lon": <number>, "radius_m": <integer>}`, output
+`{"lines": [{"id": "way/123", "kind": "coastline"|"reef", "name": <string>, "closed": <boolean>, "points": [[lat, lon], ...]}]}`:
+raw OpenStreetMap geometry, no distances (the host casts the rays).
+
+One Overpass request, with the global `[bbox:...]` setting as the spatial
+index. Coastline is output clipped to the box (`out geom(bbox)`, which returns
+`null` for nodes outside it) and reef ways and `natural=reef` relation outer
+members are output whole, so a reef ring stays closed for the host's
+containment test. The plugin then drops points closer than 15 m to the last
+one kept; a Stonehaven query is about 340 KB. A box that would cross the
+antimeridian or a pole, an Overpass `remark` runtime error, a rate limit, and a
+reef with a missing node are all errors. `lines: []` means open sea.
+
 ## Truncation is a heuristic, not an exact count
 
 Overpass's `out ... <cap>` statement silently drops anything past the cap -
@@ -198,7 +216,7 @@ enrichment" below),
     "label": "Overpass server",
     "type": "url",
     "placeholder": "https://overpass-api.de/api/interpreter",
-    "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it. Any mirror other than those two must also be added to this plugin's allowed hosts."
+    "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it; that mirror only answers networks it has approved, so it may refuse yours. Any mirror other than those two must also be added to this plugin's allowed hosts."
   },
   {
     "key": "detail_limit",
