@@ -36,6 +36,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate no longer moves the page when an answer finishes.** If you scrolled
+  to keep reading while an answer was still being written, the view jumped
+  away from where you were reading as soon as it finished, often back to an
+  earlier question. It now stays where you left it.
 - **The Battery & Power dawn figure no longer shows tonight's state of charge
   as tomorrow's when the bank's capacity is unknown.** Without a capacity
   there is no charge rate, and the tile treated that as a bank holding steady:

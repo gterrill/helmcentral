@@ -306,7 +306,9 @@ export function useMateSession(options: MateSessionOptions = {}) {
     /** The last answer delivered on this session's stream; the thread
      * scrolls to its start. */
     deliveredMessageId: chat.deliveredMessageId,
-  }), [chat.sending, chat.statusText, chat.draft, error, stopped, chat.deliveredMessageId])
+    /** Row key of the streamed draft; the delivered reply carries it too. */
+    draftKey: chat.draftKey,
+  }), [chat.sending, chat.statusText, chat.draft, error, stopped, chat.deliveredMessageId, chat.draftKey])
 
   return useMemo(() => ({
     conversations: conversations.conversations,
