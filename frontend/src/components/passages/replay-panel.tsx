@@ -9,6 +9,7 @@ import {
   formatLocalDateTime,
   locate,
   positionAt,
+  sailedAt,
   segmentBounds,
   timedSegments,
   type PassageDetail,
@@ -79,6 +80,24 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     replay.toggle()
   }
 
+  // Once the replay has moved off the start, each track is drawn up to the
+  // boat: earlier passages whole, later ones not at all. The passage the boat
+  // is on ends exactly where the marker stands.
+  const hereId = here?.entry.id
+  const boatLat = boat?.lat
+  const boatLon = boat?.lon
+  const sailedTo = useMemo(() => {
+    if (replay.clock <= 0) return null
+    const at = new Map<string, { at: number; end?: { lat: number; lon: number } }>()
+    for (const e of timeline.entries) {
+      const end = e.id === hereId && boatLat !== undefined && boatLon !== undefined ? { lat: boatLat, lon: boatLon } : undefined
+      at.set(e.id, { at: sailedAt(e, replay.clock), end })
+    }
+    return at
+  }, [timeline, replay.clock, hereId, boatLat, boatLon])
+
+  const mapPassages = useMemo(() => built.items.map((i) => ({ id: i.id, segments: i.line })), [built.items])
+
   const playedIds = useMemo(
     () => new Set(timeline.entries.filter((e) => e.offset <= replay.clock).map((e) => e.id)),
     [timeline, replay.clock],
@@ -101,8 +120,9 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         <PassageMap
           className="h-full"
           ref={mapHandle}
-          passages={built.items.map((i) => ({ id: i.id, segments: i.line }))}
+          passages={mapPassages}
           playedIds={playedIds}
+          sailedTo={sailedTo}
           boat={boat}
           isDarkTheme={isDarkTheme}
           overlay={

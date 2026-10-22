@@ -13,6 +13,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **The passage replay can show the land in 3D.** A 3D button beside the
+  satellite button tilts the map and raises hills and headlands, with the sea
+  kept flat so the chart and photographs lie level on the water. You can drag to
+  turn and tilt the map. It is on by default and remembers your choice
+  separately; switch it off for the flat map as before. If the elevation data
+  cannot be fetched the map says "Terrain unavailable" and stays flat. The
+  overview map stays flat.
+- **The replay draws the track as the boat sails it.** The line is solid up to
+  the boat and faint ahead of it, instead of lighting a whole passage at once.
+
 - **The passage map can show satellite photographs.** A satellite button in the
   top right corner switches the map between the chart and aerial photography,
   with the track edged in white and place names kept on top. It is on by

@@ -235,6 +235,62 @@ export function segmentsToGeoJSON(segments: TimedSegment[]): GeoJSON.Feature<Geo
   }
 }
 
+/** The part of the track sailed by `at` (Unix seconds), as a GeoJSON
+ * MultiLineString in [lon, lat] order. Each segment is cut at the cursor and
+ * ends on the position interpolated between the fixes either side of it, so
+ * the line meets the boat. Segments the cursor has not reached are left out,
+ * and a segment with fewer than two points drawn is not a line. When `end` is
+ * given (the boat marker's position) the last line drawn ends exactly on it, so
+ * the line and the marker cannot sit apart. */
+export function sailedToGeoJSON(
+  segments: TimedSegment[],
+  at: number,
+  end?: { lat: number; lon: number },
+): GeoJSON.Feature<GeoJSON.MultiLineString> {
+  const coordinates: [number, number][][] = []
+  for (const seg of segments) {
+    if (seg.length === 0 || at < seg[0].t) continue
+    const line: [number, number][] = []
+    for (let i = 0; i < seg.length; i++) {
+      const p = seg[i]
+      if (p.t <= at) {
+        line.push([p.lon, p.lat])
+        continue
+      }
+      const a = seg[i - 1]
+      if (a.t === at) break
+      const span = p.t - a.t
+      const f = span > 0 ? (at - a.t) / span : 1
+      line.push([a.lon + (p.lon - a.lon) * f, a.lat + (p.lat - a.lat) * f])
+      break
+    }
+    if (line.length >= 2) coordinates.push(line)
+  }
+  if (end && coordinates.length > 0) coordinates[coordinates.length - 1][coordinates[coordinates.length - 1].length - 1] = [end.lon, end.lat]
+  return { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates } }
+}
+
+export interface SailedCache {
+  /** The sailed GeoJSON for one passage, rebuilt only when its segments, the
+   * instant or the end point differ from the last call for that passage. */
+  get: (id: string, segments: TimedSegment[], at: number, end?: { lat: number; lon: number }) => GeoJSON.Feature<GeoJSON.MultiLineString>
+}
+
+/** Keeps each passage's sailed line between frames, so a replay frame only
+ * hands the map a new line for the passage the boat is actually on. */
+export function createSailedCache(): SailedCache {
+  const last = new Map<string, { segments: TimedSegment[]; at: number; lat?: number; lon?: number; geo: GeoJSON.Feature<GeoJSON.MultiLineString> }>()
+  return {
+    get(id, segments, at, end) {
+      const hit = last.get(id)
+      if (hit && hit.segments === segments && hit.at === at && hit.lat === end?.lat && hit.lon === end?.lon) return hit.geo
+      const geo = sailedToGeoJSON(segments, at, end)
+      last.set(id, { segments, at, lat: end?.lat, lon: end?.lon, geo })
+      return geo
+    },
+  }
+}
+
 /** [west, south, east, north] over every point, or null when there are none. */
 export function segmentBounds(segments: TimedSegment[]): [number, number, number, number] | null {
   let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity
@@ -308,13 +364,19 @@ export function buildTimeline(passages: { id: string; start: number; end: number
   return { entries, total: offset }
 }
 
+/** The real instant a passage stands at for a replay clock value: its start
+ * before the clock reaches it, its end once the clock is past. */
+export function sailedAt(entry: TimelineEntry, clock: number): number {
+  return Math.max(entry.start, Math.min(entry.end, entry.start + (clock - entry.offset)))
+}
+
 /** The passage the replay clock is in and the real instant it stands for. */
 export function locate(timeline: Timeline, clock: number): { entry: TimelineEntry; at: number } | null {
   if (timeline.entries.length === 0) return null
   const c = Math.max(0, Math.min(timeline.total, clock))
   for (let i = timeline.entries.length - 1; i >= 0; i--) {
     const e = timeline.entries[i]
-    if (c >= e.offset) return { entry: e, at: Math.min(e.end, e.start + (c - e.offset)) }
+    if (c >= e.offset) return { entry: e, at: sailedAt(e, c) }
   }
   return null
 }
