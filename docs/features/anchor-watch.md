@@ -32,6 +32,18 @@ drift live in the compact readout panel on the map itself instead. That is where
 you've swung and how much room is left before the alarm sounds, while the
 header above keeps its attention on the water.
 
+## The swing trail
+
+The yellow line on the anchor map is where the boat has been since the anchor
+went down, so a night's swing shows as a full pattern rather than a
+scribble under the boat arrow. A point is saved whenever the boat has moved
+a metre, or a minute has passed. The server keeps it, so closing the browser,
+reloading or restarting Helmcentral does not lose it. Moving the anchor
+position starts the trail again from that point, because the trail is
+measured against where the anchor is; changing only the radius keeps it.
+Raising the anchor ends it. The newest 10,000 points are kept and drawn,
+which covers days at anchor.
+
 ## AIS targets on the map
 
 Nearby AIS targets draw on the anchor-watch map as amber circles carrying the

@@ -132,40 +132,10 @@ var (
 	anchorWatchMu               sync.RWMutex
 	anchorWatchState            *anchorWatchData
 	lastAnchorWatchRadiusMeters = defaultAnchorWatchRadiusMeters
-
-	trailMu   sync.RWMutex
-	selfTrail *vesselTrail
 )
 
 func anchorWatchFilePath() string {
 	return cacheFilePath("ANCHOR_WATCH_FILE", "data/anchor_watch.json")
-}
-
-// recordSelfTrailPoint appends to post-anchor ring buffer only when active.
-func recordSelfTrailPoint(lat, lon float64) {
-	anchorWatchMu.RLock()
-	active := anchorWatchState != nil
-	anchorWatchMu.RUnlock()
-	if !active {
-		return
-	}
-
-	trailMu.Lock()
-	defer trailMu.Unlock()
-	if selfTrail != nil {
-		selfTrail.addPoint(lat, lon)
-	}
-}
-
-// getSelfTrailSince returns post-anchor ring-buffer points after the given timestamp.
-func getSelfTrailSince(since time.Time) []*trailPoint {
-	trailMu.RLock()
-	defer trailMu.RUnlock()
-
-	if selfTrail == nil {
-		return nil
-	}
-	return selfTrail.pointsSince(since)
 }
 
 // loadAnchorWatch restores the watch on startup. A missing file is the
@@ -424,6 +394,14 @@ func setAnchorWatch(c echo.Context) error {
 		PlanningTideHeightFt: planningTideHeightFt,
 	}
 
+	// A drop or reposition starts a fresh swing trail. It goes first, before
+	// the new watch is saved or published, so no reader sees the new anchor
+	// with the old trail; if it fails nothing else has changed.
+	if err := resetAnchorTrail(true); err != nil {
+		c.Logger().Errorf("anchor watch: %v", err)
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not start the swing trail; the anchor watch was not changed. Retry."})
+	}
+
 	if err := saveAnchorWatch(aw); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist"})
 	}
@@ -439,11 +417,6 @@ func setAnchorWatch(c echo.Context) error {
 	// check for first. Retract that warning now that a good file and a good
 	// in-memory state both exist.
 	clearAnchorWatchLoadFailure()
-
-	// Reset post-anchor ring buffer.
-	trailMu.Lock()
-	selfTrail = newVesselTrail()
-	trailMu.Unlock()
 
 	// Keep the local safety watch if the upstream publish fails, but do not
 	// report a successful drop/reposition. The operator can retry explicitly.
@@ -832,6 +805,18 @@ func patchAnchorWatch(c echo.Context) error {
 			updated.PlaceName = live.PlaceName
 		}
 	}
+	if positionChanged {
+		// Restart the swing trail, the same way a POST reposition does: the
+		// trail is the boat's movement relative to THIS anchor position, and
+		// stops meaning anything the instant the anchor moves. Under the
+		// lock and before the new state is published, so no reader sees the
+		// new anchor with the old trail.
+		if err := resetAnchorTrail(true); err != nil {
+			anchorWatchMu.Unlock()
+			c.Logger().Errorf("anchor watch: SignalK confirmed a position change to %v,%v but the swing trail could not be restarted: %v", updated.Lat, updated.Lon, err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK was updated with the new anchor position, but the swing trail could not be restarted and the local anchor watch was not saved. Retry Adjust."})
+		}
+	}
 	if err := saveAnchorWatch(updated); err != nil {
 		anchorWatchMu.Unlock()
 		if positionChanged {
@@ -855,13 +840,6 @@ func patchAnchorWatch(c echo.Context) error {
 	anchorWatchMu.Unlock()
 
 	if positionChanged {
-		// Reset the post-anchor ring buffer, the same way a POST reposition
-		// does: the trail is the boat's movement relative to THIS anchor
-		// position, and stops meaning anything the instant the anchor moves.
-		trailMu.Lock()
-		selfTrail = newVesselTrail()
-		trailMu.Unlock()
-
 		// PlaceName was either cleared above (an ordinary hand-placed move)
 		// or restored to a known value (Undo, via body.Restore) — only the
 		// first case has anything left to resolve. Starting a resolve over a
@@ -913,6 +891,10 @@ func deleteAnchorWatch(c echo.Context) error {
 	defer anchorLifecycleMu.Unlock()
 
 	if err := raiseAnchorWatch(); err != nil {
+		if anchorRaiseFailureStage(err) == anchorRaiseStageTrail {
+			c.Logger().Errorf("anchor raise: swing trail not cleared: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK anchor raised and the watch removed, but the swing trail could not be cleared. Retry Raise."})
+		}
 		if anchorRaiseFailureStage(err) == anchorRaiseStageRemoveFile {
 			c.Logger().Errorf("anchor raise: local watch removal failed: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK anchor raised, but local watch could not be removed. Retry Raise."})
@@ -922,25 +904,6 @@ func deleteAnchorWatch(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{"active": false})
-}
-
-// GET /api/anchor-watch/trails/self?since=<RFC3339-timestamp>
-// Returns post-anchor ring-buffer positions since the given timestamp.
-func getSelfTrailHandler(c echo.Context) error {
-	sinceStr := c.QueryParam("since")
-	var since time.Time
-	if sinceStr != "" {
-		var err error
-		since, err = time.Parse(time.RFC3339, sinceStr)
-		if err != nil {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid since timestamp"})
-		}
-	}
-
-	points := getSelfTrailSince(since)
-	return c.JSON(http.StatusOK, map[string]any{
-		"points": points,
-	})
 }
 
 // GET /api/anchor-watch/trails/ais/:id?since=<RFC3339-timestamp>

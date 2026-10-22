@@ -120,6 +120,7 @@ import { useOvernightProjection } from '@/hooks/use-overnight-projection'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
+import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
@@ -1156,6 +1157,10 @@ function AppShell() {
   )
   const trailsEnabled = activePageHasTrailConsumerWidget || activePanel === 'anchor-watch'
   const { getSelfTrail, getAisTrails } = useServerTrails(5000, trailsEnabled)
+  // The anchor swing trail has its own server-kept record (ADR 0199); only
+  // the anchor watch tile and drawer draw it.
+  const anchorTrailEnabled = effectiveWidgets.some((w) => w.id === 'anchor-watch') || activePanel === 'anchor-watch'
+  const { getAnchorTrail } = useAnchorTrail(5000, anchorTrailEnabled)
   // A reverse geocode of a slowly changing position, cached server-side per
   // ~550m grid cell — see PLACE_NAME_REFRESH_SECONDS (config/app-config.ts).
   const placeName = usePlaceName(latitude, longitude, PLACE_NAME_REFRESH_SECONDS)
@@ -1756,7 +1761,7 @@ function AppShell() {
             currentDriftImpactKts={currentDriftImpactKts}
             isImperial={isImperialDistance}
             vesselHeadingDeg={headingTrue}
-            vesselTrail={getSelfTrail}
+            vesselTrail={getAnchorTrail}
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
             aisCollisionAlarms={aisCollisionAlarms}
@@ -2428,7 +2433,7 @@ function AppShell() {
               anchorSetAt={anchorWatch.setAt}
               anchorStateKnown={anchorWatch.loaded}
               error={anchorWatch.error}
-              vesselTrail={getSelfTrail}
+              vesselTrail={getAnchorTrail}
               aisVessels={nearbyVessels}
               aisTrails={getAisTrails}
               aisCollisionAlarms={aisCollisionAlarms}

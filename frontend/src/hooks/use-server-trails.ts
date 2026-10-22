@@ -19,10 +19,10 @@ function toMs(timestamp: string): number {
   return new Date(timestamp).getTime()
 }
 
-function appendCapped(existing: TrailPoint[], incoming: TrailPoint[]): TrailPoint[] {
+export function appendCapped(existing: TrailPoint[], incoming: TrailPoint[], max = MAX_POINTS): TrailPoint[] {
   if (incoming.length === 0) return existing
   const merged = existing.concat(incoming)
-  return merged.length > MAX_POINTS ? merged.slice(merged.length - MAX_POINTS) : merged
+  return merged.length > max ? merged.slice(merged.length - max) : merged
 }
 
 export interface ServerTrailsResult {

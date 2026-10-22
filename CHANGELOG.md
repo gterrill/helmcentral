@@ -22,6 +22,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   fetched the picture is not saved, rather than saved with a patch missing.
   The blog embed is unchanged and always shows the chart. The overview map in
   the replay moves down a little to make room for the button.
+### Changed
+
+- **The anchor swing trail now shows everything since the anchor went down,
+  and survives a restart.** It used to hold only the last hour and a half or
+  so, which on a long night left a small scribble hidden under the boat
+  arrow, and it was lost whenever Helmcentral restarted. It is now kept
+  until the anchor is raised. A point is saved when the boat has moved a
+  metre or a minute has passed, and the newest 10,000 points are kept and
+  drawn. Moving the anchor position starts the trail again; changing only the
+  radius does not. If the trail cannot be restarted, dropping, moving or
+  raising the anchor now reports the failure instead of carrying on.
 
 ### Fixed
 
