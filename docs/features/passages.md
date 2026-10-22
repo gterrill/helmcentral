@@ -67,6 +67,21 @@ while the photographs show, so it stays clear against them. Place names stay
 on top. The photographs come from the boat's internet connection, so the map
 shows the chart alone when the boat is offline.
 
+The 3D button beside the satellite button tilts the map and raises the land:
+hills, headlands and mountains stand up from the chart, exaggerated half again
+so a coastline reads at a glance. It is on by default and remembers your choice
+on its own. With 3D on you can drag to turn the map and tilt it up to 70
+degrees; switch it off and the map goes back to the flat, north-up view. The sea
+stays flat, so the chart and the photographs lie level on the water. The
+elevation data comes over the boat's internet connection and is kept once
+fetched. If it cannot be fetched the map shows "Terrain unavailable" in the top
+left corner and carries on flat, level and north up, and tries the elevation
+data again every minute; the notice goes once it arrives.
+
+During a replay the track is drawn as the boat sails it: solid up to the boat,
+and a faint line for the water still ahead. Before Play, and when you view a
+passage without replaying, the whole track shows as before.
+
 The map opens with the whole track framed. Pressing **Play** from the start
 brings the map down from high above onto the track, then runs the replay with a
 boat marker. The slider scrubs to any point, and Play from the middle just

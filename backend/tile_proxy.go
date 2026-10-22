@@ -110,6 +110,10 @@ func mapRoutes(tileFetchClient *http.Client) []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/world-imagery/:z/:x/:y", tierRead, proxyWorldImageryTileHandler(globalTileCache, tileFetchClient)},
 
+		// Elevation tiles for the 3D passage replay: sea flattened to 0 m,
+		// an error rather than a stand-in when upstream is down.
+		{http.MethodGet, "/api/terrain/:z/:x/:y", tierRead, proxyTerrainTileHandler(globalTileCache, tileFetchClient)},
+
 		// Carto vector basemap proxy + offline cache (ADR 0067) - same
 		// tierRead as world-imagery above: read-only, no session write
 		// implied by fetching a map tile/style/font/sprite.

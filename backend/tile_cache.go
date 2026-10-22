@@ -62,10 +62,11 @@ type tileTransportError struct{ err error }
 func (e *tileTransportError) Error() string { return e.err.Error() }
 func (e *tileTransportError) Unwrap() error { return e.err }
 
-// tileCircuitBreaker is shared by both upstream tile fetchers (Esri World
-// Imagery and Carto vector basemap, via callThroughBreaker below): the
-// boat's uplink being down is one fact about the world, not a fact about
-// either provider individually, so one shared breaker discovers it once
+// tileCircuitBreaker is shared by every upstream tile fetcher (Esri World
+// Imagery, Carto vector basemap and AWS Terrarium terrain, via
+// callThroughBreaker below): the boat's
+// uplink being down is one fact about the world, not a fact about any one
+// provider, so one shared breaker discovers it once
 // instead of each provider spending its own tileCircuitBreakerThreshold
 // failures rediscovering the same outage.
 type tileCircuitBreaker struct {

@@ -1,7 +1,7 @@
 import { Satellite } from 'lucide-react'
 import { Layer, Source } from 'react-map-gl/maplibre'
 
-import { cn } from '@/lib/utils'
+import { MapToggleButton } from '@/components/map-toggle-button'
 import { worldImageryPaint, worldImagerySource } from '@/lib/world-imagery'
 
 export interface WorldImageryLayerProps {
@@ -30,20 +30,5 @@ export interface ImageryToggleButtonProps {
 
 /** The satellite button both maps carry: sky-blue when imagery is on. */
 export function ImageryToggleButton({ on, onToggle, className }: ImageryToggleButtonProps) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-label="Toggle satellite imagery"
-      aria-pressed={on}
-      className={cn(
-        'flex h-10 w-10 items-center justify-center rounded-lg text-white shadow-sm backdrop-blur-sm active:scale-95',
-        on ? 'bg-sky-600/90 hover:bg-sky-500/90' : 'bg-black/65 hover:bg-black/80',
-        className,
-      )}
-      style={{ transition: 'background-color 150ms ease-out' }}
-    >
-      <Satellite className="h-4 w-4" />
-    </button>
-  )
+  return <MapToggleButton icon={Satellite} label="Toggle satellite imagery" on={on} onToggle={onToggle} className={className} />
 }

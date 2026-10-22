@@ -1,0 +1,39 @@
+// Terrain for the 3D passage replay. The boat serves the elevation tiles with
+// the sea flattened to 0 m, so the chart and the imagery draped over the relief
+// stay level on the water instead of sagging into the bathymetry.
+
+export const TERRAIN_SOURCE_ID = 'terrain-dem'
+export const TERRAIN_TILES = '/api/terrain/{z}/{x}/{y}'
+export const TERRAIN_MAX_ZOOM = 15
+export const TERRAIN_EXAGGERATION = 1.5
+
+/** Camera pitch when 3D comes on, and the most the operator can tilt to. */
+export const REPLAY_3D_PITCH = 50
+export const REPLAY_3D_MAX_PITCH = 70
+
+export const TERRAIN_ATTRIBUTION = 'Terrain: Mapzen, NASADEM, SRTM, GEBCO and others (AWS Open Data)'
+
+/** The raster-dem source spec, shared by the relief and the hillshade layer. */
+export const terrainSource = {
+  type: 'raster-dem' as const,
+  tiles: [TERRAIN_TILES],
+  encoding: 'terrarium' as const,
+  tileSize: 256,
+  maxzoom: TERRAIN_MAX_ZOOM,
+  attribution: TERRAIN_ATTRIBUTION,
+}
+
+// MapLibre paints with literal colours. Neutral and faint, so the shading
+// reads on both the light and the dark basemap and over imagery.
+const HILLSHADE_SHADOW = '#1f2933'
+const HILLSHADE_HIGHLIGHT = '#ffffff'
+
+export const hillshadePaint = {
+  'hillshade-exaggeration': 0.35,
+  'hillshade-shadow-color': HILLSHADE_SHADOW,
+  'hillshade-highlight-color': HILLSHADE_HIGHLIGHT,
+  'hillshade-accent-color': HILLSHADE_SHADOW,
+}
+
+/** The terrain setting for the map, or undefined for a flat map. */
+export const terrainSetting = { source: TERRAIN_SOURCE_ID, exaggeration: TERRAIN_EXAGGERATION }

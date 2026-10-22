@@ -87,7 +87,8 @@ describe('PassageMap satellite imagery', () => {
   it('stacks overlay content under the toggle, in the same corner', () => {
     render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} overlay={<div data-testid="inset" />} />)
     const toggle = screen.getByRole('button', { name: 'Toggle satellite imagery' })
-    expect(toggle.parentElement).toBe(screen.getByTestId('inset').parentElement)
+    // The toggle sits in a row beside the 3D button; the row and the overlay share the corner.
+    expect(toggle.parentElement?.parentElement).toBe(screen.getByTestId('inset').parentElement)
   })
 
   it('remembers the choice under its own key, not the anchor map one', () => {
