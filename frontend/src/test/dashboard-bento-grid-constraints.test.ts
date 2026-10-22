@@ -175,13 +175,18 @@ describe('liftClusterBox', () => {
 })
 
 /**
- * A new cluster tile is placed at the card's own minimum. At the old 6 x 7 the
- * 592-tall card overflowed its tile and spilled its footer onto whatever sat
- * below, found placing one through the real UI.
+ * A new cluster tile must hold the card. At the old 6 x 7 the 592-tall card
+ * overflowed its tile and spilled its footer onto whatever sat below, found
+ * placing one through the real UI.
  */
 describe('a new engine cluster tile', () => {
-  test('is placed at the minimum size, so the card fits its tile', () => {
-    expect(CLUSTER_DEFAULT_SIZE).toEqual({ w: CLUSTER_WIDGET_CONSTRAINTS.minW, h: CLUSTER_WIDGET_CONSTRAINTS.minH })
-    expect(gridPixelHeight(CLUSTER_DEFAULT_SIZE.h)).toBeGreaterThanOrEqual(32 + Math.ceil(CLUSTER_H * CLUSTER_MIN_SCALE) + 8)
+  // The resize floor lets the operator take the card down to 0.6 scale, below
+  // the label legibility floor; a new tile does not start there. It is placed
+  // at half the board, tall enough for the card at full size.
+  test('is placed at half the board, tall enough for the card at full size', () => {
+    expect(CLUSTER_DEFAULT_SIZE.w).toBe(6)
+    expect(CLUSTER_DEFAULT_SIZE.h).toBe(rowsForHeight(32 + CLUSTER_H + 8))
+    expect(CLUSTER_DEFAULT_SIZE.w).toBeGreaterThanOrEqual(CLUSTER_WIDGET_CONSTRAINTS.minW)
+    expect(CLUSTER_DEFAULT_SIZE.h).toBeGreaterThanOrEqual(CLUSTER_WIDGET_CONSTRAINTS.minH)
   })
 })

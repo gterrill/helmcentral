@@ -91,8 +91,12 @@ const CLUSTER_WIDGET_CONSTRAINTS = {
   minH: rowsForHeight(TILE_CHROME_H + Math.ceil(CLUSTER_H * CLUSTER_MIN_SCALE)),
 }
 
-/** Where a new cluster tile is placed: the card's own minimum, so it fits. */
-export const CLUSTER_DEFAULT_SIZE = { w: CLUSTER_WIDGET_CONSTRAINTS.minW, h: CLUSTER_WIDGET_CONSTRAINTS.minH } as const
+/**
+ * Where a new cluster tile is placed: half the board, tall enough for the card
+ * at full size. The resize floor goes lower, but only by the operator's hand:
+ * a new tile does not start with its labels below the legibility floor.
+ */
+export const CLUSTER_DEFAULT_SIZE = { w: 6, h: rowsForHeight(TILE_CHROME_H + CLUSTER_H) } as const
 
 /**
  * A cluster saved before the v2 card is narrower than the card needs, and drawn
