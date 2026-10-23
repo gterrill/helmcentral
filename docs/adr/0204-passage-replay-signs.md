@@ -5,7 +5,7 @@
 Accepted (2026-10-23). Fourth of four steps toward a cinematic passage replay,
 after [ADR 0200](0200-passage-replay-in-3d.md) (3D),
 [ADR 0202](0202-passage-replay-boat-model.md) (the boat model) and
-[ADR 0203](0203-passage-replay-camera-shots.md) (camera shots).
+[ADR 0206](0206-passage-replay-camera-shots.md) (camera shots).
 
 ## Context
 

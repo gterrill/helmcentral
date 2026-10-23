@@ -1,4 +1,4 @@
-// Signs in the blog card (ADR 0206): pins, cards on a leader line and the photo
+// Signs in the blog card (ADR 0205): pins, cards on a leader line and the photo
 // dialog, built with DOM calls and textContent only. The rules for which cards
 // are up come from the app (lib/replay-signs.ts); this file only draws them.
 // Everything is scoped to one card: its elements live inside the card's root

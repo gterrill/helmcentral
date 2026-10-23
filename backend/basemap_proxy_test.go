@@ -127,7 +127,7 @@ func TestBasemapStyleHandler_RewritesURLsAndPreservesSourceAndLayerIDs(t *testin
 				t.Fatalf(`style lost the "protomaps" source id that map-place-labels.tsx pins; sources = %v`, sources)
 			}
 			tiles, _ := src["tiles"].([]any)
-			if len(tiles) != 1 || tiles[0] != "http://example.com/api/basemap/tiles/{z}/{x}/{y}" {
+			if len(tiles) != 1 || tiles[0] != "http://example.com/api/basemap/v2/tiles/{z}/{x}/{y}" {
 				t.Errorf("tiles = %v, want the single absolute same-origin template", src["tiles"])
 			}
 			if _, has := src["url"]; has {
@@ -141,10 +141,10 @@ func TestBasemapStyleHandler_RewritesURLsAndPreservesSourceAndLayerIDs(t *testin
 			if a, _ := src["attribution"].(string); !strings.Contains(a, "CARTO") {
 				t.Errorf("attribution must survive the rewrite, got %q", a)
 			}
-			if got := doc["glyphs"]; got != "http://example.com/api/basemap/fonts/{fontstack}/{range}.pbf" {
+			if got := doc["glyphs"]; got != "http://example.com/api/basemap/v2/fonts/{fontstack}/{range}.pbf" {
 				t.Errorf("glyphs = %v", got)
 			}
-			if got := doc["sprite"]; got != "http://example.com/api/basemap/sprite/"+theme {
+			if got := doc["sprite"]; got != "http://example.com/api/basemap/v2/sprite/"+theme {
 				t.Errorf("sprite = %v", got)
 			}
 			if strings.Contains(rec.Body.String(), "cartocdn.com/v/") {
@@ -193,14 +193,14 @@ func TestBasemapStyleHandler_CachesUpstreamStyleAndServesRepeatsOffline(t *testi
 		t.Errorf("cache hit still called upstream: %d before, %d after", before, got)
 	}
 	doc := decodeStyle(t, rec2.Body.Bytes())
-	if doc["sprite"] != "https://boat.example.net/api/basemap/sprite/positron" {
+	if doc["sprite"] != "https://boat.example.net/api/basemap/v2/sprite/positron" {
 		t.Errorf("sprite = %v, want the forwarded origin", doc["sprite"])
 	}
-	if doc["glyphs"] != "https://boat.example.net/api/basemap/fonts/{fontstack}/{range}.pbf" {
+	if doc["glyphs"] != "https://boat.example.net/api/basemap/v2/fonts/{fontstack}/{range}.pbf" {
 		t.Errorf("glyphs = %v, want the forwarded origin", doc["glyphs"])
 	}
 	tiles := doc["sources"].(map[string]any)["protomaps"].(map[string]any)["tiles"].([]any)
-	if tiles[0] != "https://boat.example.net/api/basemap/tiles/{z}/{x}/{y}" {
+	if tiles[0] != "https://boat.example.net/api/basemap/v2/tiles/{z}/{x}/{y}" {
 		t.Errorf("tiles = %v, want the forwarded origin", tiles)
 	}
 }
@@ -429,7 +429,7 @@ func TestBasemapFontsHandler_ReEncodesFontstackForUpstream(t *testing.T) {
 	}
 
 	c, rec := newBasemapTestContext(
-		"/api/basemap/fonts/x/0-255.pbf",
+		"/api/basemap/v2/fonts/x/0-255.pbf",
 		[]string{"fontstack", "range"},
 		[]string{stack, "0-255.pbf"},
 	)
@@ -460,7 +460,7 @@ func TestBasemapFontsHandler_ReEncodesFontstackForUpstream(t *testing.T) {
 
 	before := fetcher.callCount()
 	c2, rec2 := newBasemapTestContext(
-		"/api/basemap/fonts/x/0-255.pbf",
+		"/api/basemap/v2/fonts/x/0-255.pbf",
 		[]string{"fontstack", "range"},
 		[]string{stack, "0-255.pbf"},
 	)
@@ -495,7 +495,7 @@ func TestBasemapFontsHandler_RejectsRangeWithoutPbfSuffix(t *testing.T) {
 	fetcher := respondingFetcher("nothing", "application/x-protobuf", "x")
 
 	c, rec := newBasemapTestContext(
-		"/api/basemap/fonts/x/0-255",
+		"/api/basemap/v2/fonts/x/0-255",
 		[]string{"fontstack", "range"},
 		[]string{"Montserrat Medium", "0-255"},
 	)
@@ -524,7 +524,7 @@ func TestBasemapSpriteHandler_ServesAllowlistedNamesAndRejectsOthers(t *testing.
 			var urls []string
 			fetcher := upstreamURLRecorder("image/png", "sprite-bytes", &urls)
 
-			c, rec := newBasemapTestContext("/api/basemap/sprite/"+name, []string{"name"}, []string{name})
+			c, rec := newBasemapTestContext("/api/basemap/v2/sprite/"+name, []string{"name"}, []string{name})
 			if err := basemapSpriteHandler(cache, fetcher)(c); err != nil {
 				t.Fatalf("handler returned error: %v", err)
 			}
@@ -544,7 +544,7 @@ func TestBasemapSpriteHandler_ServesAllowlistedNamesAndRejectsOthers(t *testing.
 			cache := newTestTileCache(t)
 			fetcher := respondingFetcher("sprite", "image/png", "sprite-bytes")
 
-			c, rec := newBasemapTestContext("/api/basemap/sprite/x", []string{"name"}, []string{name})
+			c, rec := newBasemapTestContext("/api/basemap/v2/sprite/x", []string{"name"}, []string{name})
 			if err := basemapSpriteHandler(cache, fetcher)(c); err != nil {
 				t.Fatalf("handler returned error: %v", err)
 			}
@@ -563,7 +563,7 @@ func TestBasemapVectorTileHandler_ServesUpstreamBytesThenCacheHitWithoutFetching
 	seedCartoUpstream(t, cache)
 	fetcher := respondingFetcher("vectortiles/carto.streets", "application/x-protobuf", "mvt-bytes")
 
-	c, rec := newBasemapTestContext("/api/basemap/tiles/12/3742/2283",
+	c, rec := newBasemapTestContext("/api/basemap/v2/tiles/12/3742/2283",
 		[]string{"z", "x", "y"}, []string{"12", "3742", "2283"})
 	if err := basemapVectorTileHandler(cache, fetcher)(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -576,7 +576,7 @@ func TestBasemapVectorTileHandler_ServesUpstreamBytesThenCacheHitWithoutFetching
 	}
 
 	before := fetcher.callCount()
-	c2, rec2 := newBasemapTestContext("/api/basemap/tiles/12/3742/2283",
+	c2, rec2 := newBasemapTestContext("/api/basemap/v2/tiles/12/3742/2283",
 		[]string{"z", "x", "y"}, []string{"12", "3742", "2283"})
 	if err := basemapVectorTileHandler(cache, fetcher)(c2); err != nil {
 		t.Fatalf("handler returned error on repeat: %v", err)
@@ -596,7 +596,7 @@ func TestBasemapVectorTileHandler_UpstreamFailureWithEmptyCacheIs404(t *testing.
 	cache := newTestTileCache(t)
 	seedCartoUpstream(t, cache)
 
-	c, rec := newBasemapTestContext("/api/basemap/tiles/12/3742/2283",
+	c, rec := newBasemapTestContext("/api/basemap/v2/tiles/12/3742/2283",
 		[]string{"z", "x", "y"}, []string{"12", "3742", "2283"})
 	if err := basemapVectorTileHandler(cache, failingFetcher())(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -622,7 +622,7 @@ func TestBasemapVectorTileHandler_NeverServesAParentTilesBytesForAMissingChild(t
 		t.Fatalf("seeding parent tile: %v", err)
 	}
 
-	c, rec := newBasemapTestContext("/api/basemap/tiles/12/3742/2283",
+	c, rec := newBasemapTestContext("/api/basemap/v2/tiles/12/3742/2283",
 		[]string{"z", "x", "y"}, []string{"12", "3742", "2283"})
 	if err := basemapVectorTileHandler(cache, failingFetcher())(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -645,7 +645,7 @@ func TestBasemapVectorTileHandler_RejectsZoomPastCartoMaxZoom(t *testing.T) {
 	fetcher := respondingFetcher("vectortiles/carto.streets", "application/x-protobuf", "mvt-bytes")
 
 	z := cartoBasemapMaxZoom + 1
-	c, rec := newBasemapTestContext(fmt.Sprintf("/api/basemap/tiles/%d/7484/4566", z),
+	c, rec := newBasemapTestContext(fmt.Sprintf("/api/basemap/v2/tiles/%d/7484/4566", z),
 		[]string{"z", "x", "y"}, []string{fmt.Sprint(z), "7484", "4566"})
 	if err := basemapVectorTileHandler(cache, fetcher)(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -662,7 +662,7 @@ func TestBasemapVectorTileHandler_RejectsNonNumericCoords(t *testing.T) {
 	cache := newTestTileCache(t)
 	fetcher := respondingFetcher("vectortiles/carto.streets", "application/x-protobuf", "mvt-bytes")
 
-	c, rec := newBasemapTestContext("/api/basemap/tiles/a/b/c",
+	c, rec := newBasemapTestContext("/api/basemap/v2/tiles/a/b/c",
 		[]string{"z", "x", "y"}, []string{"a", "b", "c"})
 	if err := basemapVectorTileHandler(cache, fetcher)(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -681,7 +681,7 @@ func TestBasemapVectorTileHandler_RejectsNegativeCoords(t *testing.T) {
 	cache := newTestTileCache(t)
 	fetcher := respondingFetcher("vectortiles/carto.streets", "application/x-protobuf", "mvt-bytes")
 
-	c, rec := newBasemapTestContext("/api/basemap/tiles/0/-1/-1",
+	c, rec := newBasemapTestContext("/api/basemap/v2/tiles/0/-1/-1",
 		[]string{"z", "x", "y"}, []string{"0", "-1", "-1"})
 	if err := basemapVectorTileHandler(cache, fetcher)(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -701,7 +701,7 @@ func TestBasemapVectorTileHandler_RejectsCoordsOutOfRangeForZoom(t *testing.T) {
 	cache := newTestTileCache(t)
 	fetcher := respondingFetcher("vectortiles/carto.streets", "application/x-protobuf", "mvt-bytes")
 
-	c, rec := newBasemapTestContext("/api/basemap/tiles/2/4/0",
+	c, rec := newBasemapTestContext("/api/basemap/v2/tiles/2/4/0",
 		[]string{"z", "x", "y"}, []string{"2", "4", "0"})
 	if err := basemapVectorTileHandler(cache, fetcher)(c); err != nil {
 		t.Fatalf("handler returned error: %v", err)
@@ -771,6 +771,38 @@ func TestMapRoutes_NoTileJSONEndpoint(t *testing.T) {
 	for _, r := range mapRoutes(nil) {
 		if strings.Contains(r.Path, "tilejson") {
 			t.Errorf("route %s still registered", r.Path)
+		}
+	}
+}
+
+// The browser caches tiles, sprite and glyphs as immutable, so the old
+// unversioned paths must not exist: a v0.52.0 browser would otherwise keep
+// pairing its cached OpenMapTiles data with the Protomaps style.
+func TestBasemapRoutes_OnlyVersionedAssetPathsAreRegistered(t *testing.T) {
+	registered := map[string]apiRoute{}
+	for _, r := range mapRoutes(nil) {
+		registered[r.Path] = r
+	}
+	for _, want := range []string{
+		"/api/basemap/style/:name",
+		"/api/basemap/v2/tiles/:z/:x/:y",
+		"/api/basemap/v2/fonts/:fontstack/:range",
+		"/api/basemap/v2/sprite/:name",
+	} {
+		r, ok := registered[want]
+		if !ok {
+			t.Errorf("route %s not registered", want)
+		} else if r.Tier != tierRead {
+			t.Errorf("route %s tier = %v, want tierRead", want, r.Tier)
+		}
+	}
+	for _, old := range []string{
+		"/api/basemap/tiles/:z/:x/:y",
+		"/api/basemap/fonts/:fontstack/:range",
+		"/api/basemap/sprite/:name",
+	} {
+		if _, ok := registered[old]; ok {
+			t.Errorf("unversioned route %s must be removed", old)
 		}
 	}
 }

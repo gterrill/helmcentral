@@ -1,4 +1,4 @@
-# ADR 0203: Camera shots direct the passage replay
+# ADR 0206: Camera shots direct the passage replay
 
 ## Status
 

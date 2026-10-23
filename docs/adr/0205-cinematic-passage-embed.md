@@ -4,7 +4,7 @@
 
 Accepted (2026-10-23). Fifth step toward a cinematic passage replay, after
 [ADR 0200](0200-passage-replay-in-3d.md) (3D), [ADR 0202](0202-passage-replay-boat-model.md)
-(the boat model) and [ADR 0203](0203-passage-replay-camera-shots.md) (camera
+(the boat model) and [ADR 0206](0206-passage-replay-camera-shots.md) (camera
 shots). Amends [ADR 0174](0174-passage-export-is-a-self-contained-card.md) and
 [ADR 0199](0199-passage-map-satellite-imagery.md): the blog card is still always
 the chart, never satellite photographs, but it is no longer flat. Signs are the
@@ -115,7 +115,7 @@ snippet of text.
    `lib/terrain.ts`: the card has no theme of its own, so it is always the day
    variant. The map stays on the globe projection of ADR 0174, so the opening
    still comes down from the whole earth; MapLibre cannot draw fog on a globe, so
-   the horizon blend of ADR 0203 is weaker than in the app.
+   the horizon blend of ADR 0206 is weaker than in the app.
 
    A tile that cannot be fetched fails the source. The card shows "Terrain
    unavailable", takes the terrain, hillshade and sky off, puts the camera back

@@ -12,7 +12,7 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
-// Camera shots for the passage replay (ADR 0203). A shot belongs to a moment
+// Camera shots for the passage replay (ADR 0206). A shot belongs to a moment
 // of real time, not to a passage, so splitting, merging or trimming a passage
 // never moves or loses one.
 

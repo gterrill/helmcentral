@@ -329,9 +329,9 @@ func TestCompression_SkipperExcludesStreamingAndBinaryRoutes(t *testing.T) {
 		// is still caught separately, by path suffix, below.
 		{"/api/basemap/style/:name", false},
 		{"/api/basemap/tilejson", false},
-		{"/api/basemap/tiles/:z/:x/:y", false},
-		{"/api/basemap/fonts/:fontstack/:range", false},
-		{"/api/basemap/sprite/:name", false},
+		{"/api/basemap/v2/tiles/:z/:x/:y", false},
+		{"/api/basemap/v2/fonts/:fontstack/:range", false},
+		{"/api/basemap/v2/sprite/:name", false},
 		{"/api/weather-forecast", false},
 		{"/api/wave-forecast", false},
 		{"/api/vessel-state", false},
@@ -405,7 +405,7 @@ func TestCompression_DocumentContentRouteStaysUncompressed(t *testing.T) {
 }
 
 // TestCompression_SpritePNGStaysSkippedButSpriteJSONDoesNot is item 4's
-// sprite-specific case: one route pattern, "/api/basemap/sprite/:name",
+// sprite-specific case: one route pattern, "/api/basemap/v2/sprite/:name",
 // serves both sprite.png (an already-compressed image, still skipped) and
 // sprite.json (metadata text, now compressed like every other JSON/PBF
 // basemap route). The pattern itself is no longer on noCompressRoutePatterns
@@ -418,17 +418,17 @@ func TestCompression_SpritePNGStaysSkippedButSpriteJSONDoesNot(t *testing.T) {
 		reqPath string
 		want    bool
 	}{
-		{"/api/basemap/sprite/positron.png", true},
-		{"/api/basemap/sprite/positron@2x.png", true},
-		{"/api/basemap/sprite/dark-matter.png", true},
-		{"/api/basemap/sprite/positron.json", false},
-		{"/api/basemap/sprite/positron@2x.json", false},
+		{"/api/basemap/v2/sprite/positron.png", true},
+		{"/api/basemap/v2/sprite/positron@2x.png", true},
+		{"/api/basemap/v2/sprite/dark-matter.png", true},
+		{"/api/basemap/v2/sprite/positron.json", false},
+		{"/api/basemap/v2/sprite/positron@2x.json", false},
 	}
 	for _, tc := range cases {
 		req := httptest.NewRequest(http.MethodGet, tc.reqPath, nil)
 		rec := httptest.NewRecorder()
 		c := e.NewContext(req, rec)
-		c.SetPath("/api/basemap/sprite/:name")
+		c.SetPath("/api/basemap/v2/sprite/:name")
 		if got := compressionSkipper(c); got != tc.want {
 			t.Errorf("compressionSkipper(request path=%q) = %v, want %v", tc.reqPath, got, tc.want)
 		}
@@ -485,7 +485,7 @@ func TestCompression_BasemapStyleJSONIsGzippedToAGzipClientAndDecodesCorrectly(t
 	sources, _ := doc["sources"].(map[string]any)
 	src, _ := sources["protomaps"].(map[string]any)
 	tiles, _ := src["tiles"].([]any)
-	if len(tiles) != 1 || tiles[0] != "http://example.com/api/basemap/tiles/{z}/{x}/{y}" {
+	if len(tiles) != 1 || tiles[0] != "http://example.com/api/basemap/v2/tiles/{z}/{x}/{y}" {
 		t.Fatalf("rewritten tiles = %v - the gzip round trip lost the rewrite", src["tiles"])
 	}
 }
