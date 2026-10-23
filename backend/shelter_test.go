@@ -103,7 +103,7 @@ func TestEstimateShelter_StonehavenArcs(t *testing.T) {
 	}
 
 	// Sheltered 030..190 (noforeignland's crowd data says about 020..155; the
-	// estimate overshoots the south end - the known limitation in ADR 0201).
+	// estimate overshoots the south end - the known limitation in ADR 0203).
 	for d := 30; d <= 190; d += 10 {
 		if g := bearingRow(t, est, d).Grade; g != shelterSheltered {
 			t.Errorf("%03d: grade %q, want sheltered", d, g)

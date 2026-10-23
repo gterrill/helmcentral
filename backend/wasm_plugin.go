@@ -119,7 +119,7 @@ type wasmPluginBase struct {
 	// throwaway instance, and never causes plugin load to fail.
 	supportsPlaceNames bool
 	// supportsShoreline is true when a POI plugin exports both
-	// shoreline_square and shoreline_changes (ADR 0201), the optional
+	// shoreline_square and shoreline_changes (ADR 0203), the optional
 	// exports behind the offline coastline. Detected like supportsPlaceNames
 	// (both or neither) and never a reason to fail loading.
 	supportsShoreline bool

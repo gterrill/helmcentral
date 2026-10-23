@@ -236,7 +236,7 @@ func main() {
 	}
 	globalAlarmLogStore = als
 
-	// Offline coastline (ADR 0201): the coverage squares Mate's shelter
+	// Offline coastline (ADR 0203): the coverage squares Mate's shelter
 	// estimate reads, in the same file. The worker starts with the others
 	// below and does nothing while the switch is off.
 	coastStore, err := newCoastlineStore(helmcentralDBPath())

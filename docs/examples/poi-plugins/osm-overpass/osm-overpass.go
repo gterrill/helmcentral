@@ -1370,7 +1370,7 @@ func runSearchPlaces(post overpassQueryFunc, input searchPlacesInput) (searchPla
 // ── shoreline_square and shoreline_changes ─────────────────────────────
 //
 // Raw coastline and reef geometry for the host's offline coastline (ADR
-// 0201), fetched one coverage square at a time. ADR 0091's rule applies: this
+// 0203), fetched one coverage square at a time. ADR 0091's rule applies: this
 // returns lines, the host casts every ray and computes every distance.
 //
 // shoreline_square is one Overpass round trip for one box. The global

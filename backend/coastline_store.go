@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// ── offline coastline store (ADR 0201) ───────────────────────────────────
+// ── offline coastline store (ADR 0203) ───────────────────────────────────
 //
 // One row per coverage square in helmcentral.sqlite (ADR 0141). The geometry
 // is the square's shoreline lines as gzipped JSON in a single blob: a square

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// ── reading the offline coastline for a shelter estimate (ADR 0201) ───────
+// ── reading the offline coastline for a shelter estimate (ADR 0203) ───────
 //
 // anchorage_shelter reads only what is held on board. It never reaches for
 // Overpass: when the coastline it needs is not there, it says exactly why.

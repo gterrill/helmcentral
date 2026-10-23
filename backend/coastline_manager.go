@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// ── offline coastline manager (ADR 0201) ─────────────────────────────────
+// ── offline coastline manager (ADR 0203) ─────────────────────────────────
 //
 // One background worker keeps the coverage squares current. Each step does at
 // most one unit of work, in this order:

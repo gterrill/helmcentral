@@ -7,7 +7,7 @@ import (
 )
 
 // The offline coastline's own state: the squares in helmcentral.sqlite and
-// the worker that keeps them current (ADR 0201). Nil until main opens them.
+// the worker that keeps them current (ADR 0203). Nil until main opens them.
 var (
 	globalCoastlineStore   *coastlineStore
 	globalCoastlineManager *coastlineManager

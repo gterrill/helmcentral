@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-// ── coverage squares (ADR 0201) ───────────────────────────────────────────
+// ── coverage squares (ADR 0203) ───────────────────────────────────────────
 //
 // The offline coastline is held as fixed 1 degree by 1 degree squares on the
 // integer-degree grid. A square is named by its south-west corner, so -21,148

@@ -159,7 +159,7 @@ type settingsPayload struct {
 		PassageLimits passageLimits `json:"passage_limits"`
 	} `json:"assistant"`
 	// OfflineCoastline is the on-board shoreline Mate's shelter estimate and
-	// later features read (ADR 0201). Off by default: it downloads from the
+	// later features read (ADR 0203). Off by default: it downloads from the
 	// internet in the background.
 	OfflineCoastline struct {
 		Enabled bool `json:"enabled"`

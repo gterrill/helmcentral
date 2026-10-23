@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// ── anchorage shelter estimate (ADR 0201) ────────────────────────────────
+// ── anchorage shelter estimate (ADR 0203) ────────────────────────────────
 //
 // Shelter is estimated from charted shoreline alone: for every compass
 // bearing a ray is cast from the anchor over the OpenStreetMap coastline and

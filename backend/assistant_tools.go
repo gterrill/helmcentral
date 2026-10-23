@@ -82,7 +82,7 @@ type assistantToolDeps struct {
 	// every call so a Settings change takes effect on the very next lookup.
 	placeNames placeNameProviderResolver
 	// offlineCoastline is the on-board shoreline anchorage_shelter reads
-	// (ADR 0201). nil when the install has none; the tool then says so.
+	// (ADR 0203). nil when the install has none; the tool then says so.
 	offlineCoastline func() *offlineCoastlineReader
 	// influxRange is estimate_passage's only I/O dependency: any SignalK
 	// path's history over an explicit range, aggregated to fixed-size

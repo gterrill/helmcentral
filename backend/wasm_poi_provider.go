@@ -413,7 +413,7 @@ func (p *wasmPOIProvider) SearchPlaces(input placeSearchInput) (result placeSear
 	}, nil
 }
 
-// ── shoreline_square and shoreline_changes (ADR 0201, optional exports) ──
+// ── shoreline_square and shoreline_changes (ADR 0203, optional exports) ──
 
 // coastlineBackgroundCallBudget is the time a coastline call may take. It is
 // set per call, for work nobody is waiting on; Mate's interactive plugin
