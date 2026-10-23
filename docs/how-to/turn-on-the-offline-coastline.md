@@ -15,22 +15,34 @@ The status line under the switch tells you what is happening:
 - **Waiting for a position fix.** Helmcentral does not yet have a position it
   trusts, so it does not know which squares to fetch. It starts when one
   arrives.
-- **Downloading 7 of 25.** Seven of the 25 squares within 200 nm of the boat
-  are aboard. They arrive one at a time, nearest first. Leave it running; you
-  can use the rest of Helmcentral meanwhile.
+- **Downloading 7 of 49.** Seven of the 49 squares within 200 nm of the boat
+  (the count depends on where you are; 40 to 60 is usual) are aboard. They
+  arrive one at a time, nearest first, about 40 seconds each with a pause
+  between, so a full set takes 40 to 60 minutes on a good link. Leave it
+  running; you can use the rest of Helmcentral meanwhile.
+- **The map server is rate-limiting requests from this boat.** The public map
+  server refused the job as a whole. Helmcentral stops asking, says when it
+  will try again, and carries on by itself. Nothing is marked as failed.
 - **Coverage: 31 squares · oldest 3 Oct · 12 edits since.** Everything in range
   is aboard. The date is the oldest download; the last figure is how many
   coastline or reef edits have appeared on the public map since.
 
-The map under it shows the squares, shaded stronger the more recently each was
-downloaded, the 200 nm ring around the boat, and any failed square in red. A
-heavy outline marks a square with edits since.
+The map under it shows the squares aboard, shaded stronger the more recently
+each was downloaded, the 200 nm ring around the boat, and any square that failed
+to download in red. A square inside the ring that is not downloaded yet is drawn
+as an outline only. A heavy outline marks a square with edits since. Scroll the
+page as normal over the map; to zoom the map, hold Ctrl (or Command) while
+scrolling, or pinch with two fingers.
 
 ## If a square fails
 
-A failed square is listed under the map by its corner, with the reason the
-server gave. Helmcentral tries it again by itself, waiting longer each time, up
-to a few hours. A rate limit or a slow link clears on its own. A message that
+A square that did not download is listed under the map by its corner, with the
+reason the server gave. Helmcentral tries it again by itself, waiting longer
+each time, up to a few hours. A square you already hold whose weekly check for
+edits failed stays held and is listed separately; its coverage is kept. When the
+map server as a whole is rate-limiting or refusing the boat, the status line
+says so and when it will try again, instead of listing squares. A slow link
+clears on its own. A message that
 the plugin is not installed or is too old does not: update the OpenStreetMap
 place-names plugin as described in [Provider plugins](../reference/plugins.md).
 

@@ -204,6 +204,9 @@ export function useSettingsForm(): UseSettingsFormResult {
       // Saved roles (and a changed SignalK address) move the setup steps.
       void invalidateQueries(['/api/setup/status'])
       void invalidateQueries(['/api/vessel/discovery'])
+      // The Offline coastline switch is part of this save; its status line
+      // must not keep saying "Off" until the next poll.
+      void invalidateQueries(['/api/offline-coastline'])
       // Units and anchor geometry drive rendering across the dashboard, not
       // just this form, so push the authoritative response to those consumers
       // rather than making the operator reload.

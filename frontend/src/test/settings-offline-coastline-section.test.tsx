@@ -164,9 +164,24 @@ describe('OfflineCoastlineSection coverage', () => {
     renderSection({ offlineCoastlineEnabled: true })
     expect(screen.getByTestId('map-stub')).toHaveTextContent('2 squares')
     const failures = screen.getByTestId('offline-coastline-failures')
-    expect(failures).toHaveTextContent('1 square did not download or check')
+    expect(failures).toHaveTextContent('1 square did not download')
     expect(failures).toHaveTextContent('22°S 148°E')
     expect(failures).toHaveTextContent('overpass rate limited')
+  })
+
+  it('lists a failed weekly check apart from download failures, and the square stays held', () => {
+    hook.status = status({
+      held: 2, check_failed: 1, oldest_downloaded_at: NOON('2026-10-03'),
+      squares: [
+        heldSquares[0],
+        { ...heldSquares[1], check_error: 'timed out' },
+      ],
+    })
+    renderSection({ offlineCoastlineEnabled: true })
+    expect(screen.queryByText(/did not download/)).not.toBeInTheDocument()
+    const checks = screen.getByTestId('offline-coastline-check-failures')
+    expect(checks).toHaveTextContent('could not be checked for edits')
+    expect(checks).toHaveTextContent('timed out')
   })
 })
 

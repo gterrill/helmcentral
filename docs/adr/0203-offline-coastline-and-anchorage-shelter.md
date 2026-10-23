@@ -210,6 +210,16 @@ A failed square records its error and retries after 5 minutes, doubling to a
 cap of 6 hours. It stays on the page with its error. Nothing runs, and the
 plugin is never touched, while the switch is off.
 
+A failure of the whole map server (a 429 or rate-limit page, a 5xx, a refused
+connection, a timeout) is not the square's fault. It pauses the job instead:
+no square is tried until the longer of the server's Retry-After and the same
+5 minute doubling backoff has passed, the square is not marked failed (an
+operator-requested update stays queued), and the status says the server is
+refusing and when the worker will try again. The plugin carries Retry-After in
+its error text; the host reads the text because it is all that crosses the
+plugin boundary. Status is served from the position and switch the worker last
+read, refreshed on a settings save, not fetched per request.
+
 **Position.** The top-up pauses without a valid own-ship fix. Valid means no
 critical GNSS alert and not the `-1,-1` sentinel pair or null island, not just
 a coordinate in range (`hasUsableVesselPosition`, ADR 0178; the Gulf of

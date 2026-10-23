@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  coastlineCheckFailures,
   coastlineFailures,
   coastlineStatusLine,
   coverageRingGeoJSON,
@@ -90,24 +91,33 @@ describe('coastlineStatusLine', () => {
       .toBe('the osm-overpass plugin is too old for the offline coastline: install the updated plugin')
   })
 
+  it('says plainly that the map server is refusing and when it will try again', () => {
+    const line = coastlineStatusLine(status({
+      state: 'paused', pause_reason: 'The map server is rate-limiting requests from this boat', retry_at: '2026-10-23T09:05:00Z',
+    }))
+    expect(line).toMatch(/^The map server is rate-limiting requests from this boat\. Trying again about \d\d:\d\d$/)
+  })
+
   it('says when switched on but nothing is held yet', () => {
     expect(coastlineStatusLine(status({ state: 'idle', held: 0 }))).toBe('Coverage: none yet')
   })
 })
 
 describe('coastlineFailures', () => {
-  it('lists squares with an error, named by label', () => {
-    const s = status({
-      squares: [
-        { lat: -21, lon: 148, state: 'ready', in_range: true, edits_since: 0 },
-        { lat: -21, lon: 149, state: 'failed', in_range: true, edits_since: 0, error: 'overpass rate limited', next_attempt_at: NOON('2026-10-03') },
-        { lat: -22, lon: 148, state: 'ready', in_range: true, edits_since: 2, error: 'timed out' },
-      ],
-    })
-    expect(coastlineFailures(s).map((f) => [f.label, f.error])).toEqual([
-      ['21°S 149°E', 'overpass rate limited'],
-      ['22°S 148°E', 'timed out'],
-    ])
+  const s = status({
+    squares: [
+      { lat: -21, lon: 148, state: 'ready', in_range: true, edits_since: 0 },
+      { lat: -21, lon: 149, state: 'failed', in_range: true, edits_since: 0, error: 'runtime error', next_attempt_at: NOON('2026-10-03') },
+      { lat: -22, lon: 148, state: 'ready', in_range: true, edits_since: 2, check_error: 'timed out' },
+    ],
+  })
+
+  it('lists squares whose download failed, by label', () => {
+    expect(coastlineFailures(s).map((f) => [f.label, f.error])).toEqual([['21°S 149°E', 'runtime error']])
+  })
+
+  it('lists failed edit checks of held squares separately', () => {
+    expect(coastlineCheckFailures(s).map((f) => [f.label, f.error])).toEqual([['22°S 148°E', 'timed out']])
   })
 })
 
@@ -129,11 +139,11 @@ describe('coverage geometry', () => {
     expect(ready.geometry.coordinates[0]).toEqual([[148, -21], [149, -21], [149, -20], [148, -20], [148, -21]])
   })
 
-  it('treats a square that failed an update as failed on the map though it holds data', () => {
+  it('keeps a held square held on the map when only its weekly check failed', () => {
     const fc = coverageSquaresGeoJSON(status({
-      squares: [{ lat: -21, lon: 148, state: 'ready', in_range: true, edits_since: 0, downloaded_at: NOON('2026-10-03'), error: 'timed out' }],
+      squares: [{ lat: -21, lon: 148, state: 'ready', in_range: true, edits_since: 0, downloaded_at: NOON('2026-10-03'), check_error: 'timed out' }],
     }), new Date(NOON('2026-10-13')))
-    expect(fc.features[0].properties).toMatchObject({ state: 'ready', failed: true })
+    expect(fc.features[0].properties).toMatchObject({ state: 'ready', failed: false })
   })
 
   it('draws the coverage ring as a closed circle of the right size', () => {

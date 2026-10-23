@@ -49,26 +49,42 @@ export default function OfflineCoastlineMapImpl({ status }: OfflineCoastlineMapP
     [status.position, status.radius_nm],
   )
 
-  // Frame the squares (and the ring when there is a fix) once they are known.
-  const boundsKey = useMemo(() => {
-    const lats = status.squares.flatMap((q) => [q.lat, q.lat + 1])
-    const lons = status.squares.flatMap((q) => [q.lon, q.lon + 1])
+  // Frame what the operator cares about: the squares inside the ring and the
+  // ring itself. Squares held from earlier voyages can lie anywhere and would
+  // zoom the map out to a continent. With no fix there is no ring, so fall back
+  // to every square.
+  const bounds = useMemo(() => {
+    const inRange = status.squares.filter((q) => q.in_range)
+    const framed = ring ? inRange : status.squares
+    const lats = framed.flatMap((q) => [q.lat, q.lat + 1])
+    const lons = framed.flatMap((q) => [q.lon, q.lon + 1])
     if (ring) {
       for (const [lon, lat] of ring.geometry.coordinates[0]) {
         lats.push(lat)
         lons.push(lon)
       }
     }
-    if (lats.length === 0) return ''
-    return [Math.min(...lons), Math.min(...lats), Math.max(...lons), Math.max(...lats)].join(',')
+    if (lats.length === 0) return null
+    return [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]] as [[number, number], [number, number]]
   }, [status.squares, ring])
+
+  // The ring follows the boat and the status arrives every few seconds, so
+  // fitting on every update would snap the map back under the operator's hand.
+  // Fit when the set of squares first appears or changes, and never once the
+  // operator has panned or zoomed.
+  const squareSet = useMemo(
+    () => status.squares.filter((q) => q.in_range).map((q) => `${q.lat},${q.lon}`).sort().join('|') + (ring ? '+ring' : ''),
+    [status.squares, ring],
+  )
+  const operatorMovedRef = useRef(false)
+  const fittedSetRef = useRef<string | null>(null)
 
   const frame = useCallback(() => {
     const map = mapRef.current?.getMap?.()
-    if (!map || !boundsKey) return
-    const [w, s, e, n] = boundsKey.split(',').map(Number)
-    map.fitBounds([[w, s], [e, n]], { padding: FIT_PADDING, duration: 0, maxZoom: 9 })
-  }, [boundsKey])
+    if (!map || !bounds || operatorMovedRef.current || fittedSetRef.current === squareSet) return
+    fittedSetRef.current = squareSet
+    map.fitBounds(bounds, { padding: FIT_PADDING, duration: 0, maxZoom: 9 })
+  }, [bounds, squareSet])
 
   useEffect(() => {
     frame()
@@ -99,6 +115,13 @@ export default function OfflineCoastlineMapImpl({ status }: OfflineCoastlineMapP
       attributionControl={{ compact: true }}
       onIdle={collapseAttribution}
       onLoad={frame}
+      // Only a move the operator made carries the browser event; fitBounds
+      // does not.
+      onMoveStart={(e) => {
+        if (e.originalEvent) operatorMovedRef.current = true
+      }}
+      // The settings page scrolls, and a map under the wheel would swallow it.
+      cooperativeGestures
       dragRotate={false}
       touchPitch={false}
     >
@@ -119,12 +142,7 @@ export default function OfflineCoastlineMapImpl({ status }: OfflineCoastlineMapP
           filter={['get', 'failed']}
           paint={{ 'fill-color': destructive, 'fill-opacity': 0.4 }}
         />
-        <Layer
-          id="coverage-pending"
-          type="fill"
-          filter={['==', ['get', 'state'], 'pending']}
-          paint={{ 'fill-color': muted, 'fill-opacity': 0.12 }}
-        />
+        {/* Wanted but not held yet: outline only, so it never reads as coverage. */}
         {/* Squares with edits since are outlined heavier. */}
         <Layer
           id="coverage-outline"

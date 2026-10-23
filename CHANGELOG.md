@@ -35,7 +35,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   downloaded before. Mate's shelter answer reads it, so it works with no
   signal. It is off until you switch it on, because filling it uses the
   internet. A map shows what is held, how old each square is, and any square
-  that failed and why. Once a week Helmcentral checks whether the public map has
+  that failed and why. If the public map server rate-limits or refuses the
+  boat, the page says so and when it will try again, and nothing is marked as
+  failed. A full set (around 50 squares at 200 nm) takes 40 to 60 minutes on a
+  good link. Once a week Helmcentral checks whether the public map has
   changed inside each square; the page shows how many edits since, and an
   **Update** button downloads those squares again when you choose. **Clear
   coverage** deletes everything. Where the coastline is off, missing, or still

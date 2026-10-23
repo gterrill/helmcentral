@@ -7,7 +7,13 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Switch } from '@/components/ui/switch'
 import { useOfflineCoastline } from '@/hooks/use-offline-coastline'
-import { coastlineFailures, coastlineStatusLine, type OfflineCoastlineStatus } from '@/lib/offline-coastline'
+import {
+  clockTime,
+  coastlineCheckFailures,
+  coastlineFailures,
+  coastlineStatusLine,
+  type OfflineCoastlineStatus,
+} from '@/lib/offline-coastline'
 
 interface OfflineCoastlineSectionProps {
   draft: RegularSettingsDraft
@@ -20,28 +26,44 @@ function retryTime(iso: string | undefined): string | null {
   if (!iso) return null
   const t = new Date(iso)
   if (Number.isNaN(t.getTime()) || t.getTime() <= Date.now()) return null
-  return t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  return clockTime(iso)
 }
 
 function Failures({ status }: { status: OfflineCoastlineStatus }) {
   const failures = coastlineFailures(status)
-  if (failures.length === 0) return null
+  const checks = coastlineCheckFailures(status)
+  if (failures.length === 0 && checks.length === 0) return null
+  const list = (items: typeof failures) => (
+    <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+      {items.map((f) => {
+        const retry = retryTime(f.nextAttemptAt)
+        return (
+          <li key={f.label} className="min-w-0 break-words">
+            <span className="font-medium text-foreground">{f.label}</span>: {f.error}
+            {retry ? ` (trying again about ${retry})` : ''}
+          </li>
+        )
+      })}
+    </ul>
+  )
   return (
-    <div className="flex flex-col gap-1" data-testid="offline-coastline-failures">
-      <p className="text-xs font-medium text-destructive">
-        {plural(failures.length, 'square', 'squares')} did not download or check
-      </p>
-      <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
-        {failures.map((f) => {
-          const retry = retryTime(f.nextAttemptAt)
-          return (
-            <li key={f.label} className="min-w-0 break-words">
-              <span className="font-medium text-foreground">{f.label}</span>: {f.error}
-              {retry ? ` (trying again about ${retry})` : ''}
-            </li>
-          )
-        })}
-      </ul>
+    <div className="flex flex-col gap-3" data-testid="offline-coastline-failures">
+      {failures.length > 0 && (
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium text-destructive">
+            {plural(failures.length, 'square', 'squares')} did not download
+          </p>
+          {list(failures)}
+        </div>
+      )}
+      {checks.length > 0 && (
+        <div className="flex flex-col gap-1" data-testid="offline-coastline-check-failures">
+          <p className="text-xs font-medium">
+            {plural(checks.length, 'held square', 'held squares')} could not be checked for edits (the coverage is kept)
+          </p>
+          {list(checks)}
+        </div>
+      )}
     </div>
   )
 }
@@ -149,7 +171,7 @@ export function OfflineCoastlineSection({ draft, onChange }: OfflineCoastlineSec
       {status && (status.squares.length > 0 || (status.enabled && status.position)) && (
         <FormSection
           title="Coverage"
-          description="Each square is 1° of latitude by 1° of longitude, named by its south-west corner. Stronger shading means a more recent download. Red squares failed. A heavy outline means edits since the download. The dashed ring is 200 nm around the boat."
+          description="Each square is 1° of latitude by 1° of longitude, named by its south-west corner. Shaded squares are held, and stronger shading means a more recent download. Squares drawn as an outline only are within the ring but not downloaded yet. Red squares failed to download. A heavy outline means edits since the download. The dashed ring is 200 nm around the boat."
         >
           <div className="h-72 overflow-hidden rounded-md border border-border" data-testid="offline-coastline-map">
             <OfflineCoastlineMap status={status} />

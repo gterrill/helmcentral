@@ -13,14 +13,17 @@ export interface CoastlineSquare {
   downloaded_at?: string
   edits_since: number
   checked_at?: string
-  /** The last failed download or check; a ready square can carry one. */
+  /** Why a download of this square failed (state failed). */
   error?: string
+  /** Why the weekly edit check of a held square failed; the square is still held. */
+  check_error?: string
   next_attempt_at?: string
 }
 
 export type OfflineCoastlineState =
   | 'off'
   | 'error'
+  | 'paused'
   | 'waiting_for_fix'
   | 'updating'
   | 'downloading'
@@ -31,6 +34,10 @@ export interface OfflineCoastlineStatus {
   enabled: boolean
   state: OfflineCoastlineState
   error?: string
+  /** While paused: what the map server did, and when the worker tries again. */
+  pause_reason?: string
+  pause_detail?: string
+  retry_at?: string
   has_fix: boolean
   position?: { lat: number; lon: number }
   radius_nm: number
@@ -38,7 +45,10 @@ export interface OfflineCoastlineStatus {
   held: number
   wanted: number
   wanted_held: number
+  /** Wanted squares whose download failed and will be retried. */
   failed: number
+  /** Held squares whose weekly edit check failed. */
+  check_failed?: number
   edits_since: number
   squares_with_edits: number
   updating: number
@@ -61,6 +71,13 @@ function shortDate(iso: string, now: Date): string {
   return d.toLocaleDateString('en-GB', opts)
 }
 
+/** Local HH:MM, or null when the time is unreadable. */
+export function clockTime(iso: string): string | null {
+  const t = new Date(iso)
+  if (Number.isNaN(t.getTime())) return null
+  return t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+}
+
 function coverageText(s: OfflineCoastlineStatus, now: Date): string {
   if (s.held === 0) return 'Coverage: none yet'
   const parts = [`Coverage: ${plural(s.held, 'square', 'squares')}`]
@@ -76,6 +93,10 @@ export function coastlineStatusLine(s: OfflineCoastlineStatus, now: Date = new D
       return 'Off. Nothing is downloaded or checked.'
     case 'error':
       return s.error ?? 'Offline coastline cannot run.'
+    case 'paused': {
+      const at = s.retry_at ? clockTime(s.retry_at) : null
+      return `${s.pause_reason ?? 'The map server is refusing requests'}. ${at ? `Trying again about ${at}` : 'Trying again later'}`
+    }
     case 'waiting_for_fix':
       return s.held > 0
         ? `Waiting for a position fix · ${coverageText(s, now)}`
@@ -97,11 +118,18 @@ export interface CoastlineFailure {
   nextAttemptAt?: string
 }
 
-/** Squares whose last download or check failed, for the page to name. */
+/** Squares whose download failed, for the page to name. */
 export function coastlineFailures(s: OfflineCoastlineStatus): CoastlineFailure[] {
   return s.squares
-    .filter((q) => q.error)
+    .filter((q) => q.state === 'failed' && q.error)
     .map((q) => ({ label: squareLabel(q.lat, q.lon), error: q.error as string, nextAttemptAt: q.next_attempt_at }))
+}
+
+/** Held squares whose weekly edit check failed. They stay held. */
+export function coastlineCheckFailures(s: OfflineCoastlineStatus): CoastlineFailure[] {
+  return s.squares
+    .filter((q) => q.state === 'ready' && q.check_error)
+    .map((q) => ({ label: squareLabel(q.lat, q.lon), error: q.check_error as string, nextAttemptAt: q.next_attempt_at }))
 }
 
 const DAY_MS = 86_400_000
@@ -132,7 +160,7 @@ export function coverageSquaresGeoJSON(
       type: 'Feature',
       properties: {
         state: q.state,
-        failed: q.state === 'failed' || Boolean(q.error),
+        failed: q.state === 'failed',
         in_range: q.in_range,
         has_edits: q.edits_since > 0,
         age_days: q.downloaded_at ? Math.max(0, Math.round((now.getTime() - new Date(q.downloaded_at).getTime()) / DAY_MS)) : 0,
