@@ -209,10 +209,7 @@ func doOverpassQuery(query string) ([]overpassElement, error) {
 	contentType := headerCaseInsensitive(resp.Headers(), "Content-Type")
 
 	if resp.Status() != 200 {
-		if looksLikeOverpassRateLimit(contentType, body) {
-			return nil, fmt.Errorf("overpass rate limited (HTTP %d with a non-JSON body)", resp.Status())
-		}
-		return nil, fmt.Errorf("overpass returned status %d", resp.Status())
+		return nil, overpassStatusError(int(resp.Status()), headerCaseInsensitive(resp.Headers(), "Retry-After"), contentType, body, time.Now())
 	}
 
 	return parseOverpassBody(contentType, body)

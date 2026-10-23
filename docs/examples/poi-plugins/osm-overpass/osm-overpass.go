@@ -430,6 +430,25 @@ func parseOverpassBody(contentType string, body []byte) ([]overpassElement, erro
 	return parsed.Elements, nil
 }
 
+// overpassStatusError describes a non-200 Overpass answer. A Retry-After
+// header (seconds, or an HTTP date) is carried in the text as "retry after
+// Ns", because the host only receives the error text and needs the server's
+// own wait to pace its downloads.
+func overpassStatusError(status int, retryAfter, contentType string, body []byte, now time.Time) error {
+	suffix := ""
+	if ra := strings.TrimSpace(retryAfter); ra != "" {
+		if n, err := strconv.Atoi(ra); err == nil && n > 0 {
+			suffix = fmt.Sprintf(", retry after %ds", n)
+		} else if at, err := time.Parse(time.RFC1123, ra); err == nil && at.After(now) {
+			suffix = fmt.Sprintf(", retry after %ds", int(at.Sub(now).Seconds())+1)
+		}
+	}
+	if looksLikeOverpassRateLimit(contentType, body) {
+		return fmt.Errorf("overpass rate limited (HTTP %d with a non-JSON body%s)", status, suffix)
+	}
+	return fmt.Errorf("overpass returned status %d%s", status, suffix)
+}
+
 func headerCaseInsensitive(headers map[string]string, name string) string {
 	for k, v := range headers {
 		if strings.EqualFold(k, name) {

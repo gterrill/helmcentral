@@ -347,3 +347,18 @@ func TestRunShorelineSquare_ReefRelationOuterWaysThatDoNotJoinStayOpen(t *testin
 		t.Errorf("unjoined ways must stay open and separate: %+v", out.Lines)
 	}
 }
+
+func TestOverpassStatusError_CarriesRetryAfter(t *testing.T) {
+	now := time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC)
+	err := overpassStatusError(429, "30", "text/html", []byte("<html>"), now)
+	if want := "overpass rate limited (HTTP 429 with a non-JSON body, retry after 30s)"; err.Error() != want {
+		t.Errorf("got %q, want %q", err, want)
+	}
+	err = overpassStatusError(504, now.Add(90*time.Second).Format(time.RFC1123), "application/json", []byte("{}"), now)
+	if want := "overpass returned status 504, retry after 91s"; err.Error() != want {
+		t.Errorf("got %q, want %q", err, want)
+	}
+	if err := overpassStatusError(503, "", "application/json", []byte("{}"), now); err.Error() != "overpass returned status 503" {
+		t.Errorf("got %q", err)
+	}
+}
