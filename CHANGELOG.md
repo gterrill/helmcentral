@@ -87,6 +87,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **An upside-down wall display with room to spare starts at the top left.**
+  Below magnification 1, the pages sat in the bottom right corner with an
+  empty band along the top and left edges, and the bottom row could fall under
+  the screen's frame. The spare room now goes along the right and bottom
+  edges, as on an upright screen.
 - **Mate no longer moves the page when an answer finishes.** If you scrolled
   to keep reading while an answer was still being written, the view jumped
   away from where you were reading as soon as it finished, often back to an

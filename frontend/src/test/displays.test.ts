@@ -13,6 +13,7 @@ import {
   nextDisplayIndex,
   prevDisplayIndex,
   displayFit,
+  displayRotatedOffset,
   type Display,
   type DisplayEligiblePage,
 } from '@/lib/displays'
@@ -218,6 +219,43 @@ describe('prevDisplayIndex', () => {
 
   it('returns -1 for an empty feed', () => {
     expect(prevDisplayIndex([], 'a')).toBe(-1)
+  })
+})
+
+describe('displayRotatedOffset', () => {
+  const hd = { w: 1920, h: 1080 }
+
+  it('moves a shrunk inverted strip so its slack lands at the viewer\'s bottom right', () => {
+    // The flybridge: a 1920x360 strip in a reported 1920x1080 window, at 0.95.
+    expect(displayRotatedOffset(display({ scale: 0.95, rotate: 180 }), hd)).toEqual({ left: 96, top: 18 })
+  })
+
+  it('does not move an upright display', () => {
+    expect(displayRotatedOffset(display({ scale: 0.95, rotate: 0 }), hd)).toEqual({ left: 0, top: 0 })
+  })
+
+  it('does not move a large canvas shrunk to exactly fill the window', () => {
+    expect(displayRotatedOffset(display({ width: 3840, height: 2160, scale: 0.5, rotate: 180 }), hd))
+      .toEqual({ left: 0, top: 0 })
+  })
+
+  it('measures the slack against the window when the window is smaller than the canvas', () => {
+    // 1920 x 0.95 = 1824 in an 1824 window: nothing to spare.
+    expect(displayRotatedOffset(display({ scale: 0.95, rotate: 180 }), { w: 1824, h: 1080 }))
+      .toEqual({ left: 0, top: 18 })
+  })
+
+  it('never pushes an overflowing footprint further off screen', () => {
+    expect(displayRotatedOffset(display({ scale: 0.95, rotate: 180 }), { w: 1600, h: 300 }))
+      .toEqual({ left: 0, top: 0 })
+  })
+
+  it('does not move a magnified display', () => {
+    expect(displayRotatedOffset(display({ scale: 1.5, rotate: 180 }), hd)).toEqual({ left: 0, top: 0 })
+  })
+
+  it('does not move a full-window canvas', () => {
+    expect(displayRotatedOffset(display({ width: 0, height: 0, rotate: 180 }), hd)).toEqual({ left: 0, top: 0 })
   })
 })
 

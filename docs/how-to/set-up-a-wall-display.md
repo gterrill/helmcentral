@@ -72,7 +72,9 @@ configured, with its address, size and how many pages are on it. Choose
   screen you read close up, and 1.5 for a television across a cabin. It takes
   two decimals, so 0.79 is a fine value. You can change it after you have
   looked at it from where you will actually sit.
-- **Upside down**, for a panel mounted inverted.
+- **Upside down**, for a panel mounted inverted. When the pages take up
+  less than the whole screen, they still start at the top left as you look at
+  the panel, with the spare room along the right and bottom edges.
 - **OLED panel**, for an OLED television, so a board left up all season does
   not burn in.
 - **Keep awake**, to ask the screen not to sleep.

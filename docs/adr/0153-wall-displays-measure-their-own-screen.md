@@ -96,3 +96,15 @@ differently on the wall because of a measurement.
 - A browser that reports a different size from the panel it drives (the
   ODROID strip) is measured as the browser reports it, which is the number the
   canvas has to fit.
+- An upside-down display places its footprint using the measurement too
+  (amended 2026-10-23). The rotation is about the footprint's own centre with
+  the footprint pinned to the window's top left, which is the viewer's bottom
+  right. At magnification 0.95 the flybridge strip therefore drew its board in
+  the viewer's bottom right with a 96x18 px band along the top and left, and
+  its bottom row ran under the frame. The footprint now moves by the slack
+  between itself and the screen, taken as the smaller of canvas and window on
+  each axis: a strip smaller than its reported window is bounded by its
+  canvas, and a large canvas shrunk to fit is bounded by the window. Anchoring
+  to the window's bottom right was rejected: the ODROID reports 1080 px of
+  height and shows the top 360, so the board would land out of sight. A
+  footprint that already overflows is not moved.

@@ -4,7 +4,7 @@ import { usePixelShift } from '@/hooks/use-pixel-shift'
 import { useScreenWakeLock } from '@/hooks/use-screen-wake-lock'
 import { cn } from '@/lib/utils'
 import { useDisplayViewport } from '@/hooks/use-display-viewport'
-import { displayFit, displayScale, type Display } from '@/lib/displays'
+import { displayFit, displayRotatedOffset, displayScale, type Display } from '@/lib/displays'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
 
 interface DisplayShellProps {
@@ -174,9 +174,11 @@ export function DisplayShell({ display, alarms, children, overlay, preview = fal
     }
   }, [])
 
+  // Upside down, the slack goes to the viewer's bottom right (ADR 0153).
+  const offset = displayRotatedOffset(display, viewport)
   const outerStyle: CSSProperties = {
-    top: 0,
-    left: 0,
+    top: `${offset.top}px`,
+    left: `${offset.left}px`,
     transformOrigin: 'center center',
   }
   if (display.rotate === 180) {
