@@ -73,6 +73,28 @@ export function displayFit(d: Display, viewport: { w: number; h: number } | unde
   return { status: 'overflow', overW, overH, fitScale: fitScale >= DISPLAY_MIN_SCALE ? fitScale : null }
 }
 
+/**
+ * Where display-shell.tsx places the footprint of an upside-down display.
+ * The window's top left is the viewer's bottom right and the box rotates in
+ * place, so a footprint smaller than the screen would leave its slack at the
+ * viewer's top left. Moving it by the slack puts the board where an upright
+ * screen starts it, with the spare room along the viewer's right and bottom.
+ *
+ * The screen is the smaller of the canvas and the window on each axis: the
+ * flybridge strip is a 1920x360 canvas in a reported 1920x1080 window and
+ * shows only that strip, while a large canvas shrunk to fit is bounded by
+ * the window. A footprint at or past the screen's edge is not moved, so an
+ * overflowing board is never pushed further off.
+ */
+export function displayRotatedOffset(d: Display, viewport: { w: number; h: number }): { left: number; top: number } {
+  if (d.rotate !== 180 || (d.width === 0 && d.height === 0)) return { left: 0, top: 0 }
+  const scale = displayScale(d)
+  return {
+    left: Math.max(0, Math.min(d.width, viewport.w) - d.width * scale),
+    top: Math.max(0, Math.min(d.height, viewport.h) - d.height * scale),
+  }
+}
+
 /** display-shell.tsx's root padding (`p-1` = 4px) on every edge, in logical px. */
 export const DISPLAY_ROOT_PADDING_PX = 4
 

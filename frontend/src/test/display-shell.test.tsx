@@ -204,6 +204,48 @@ describe('DisplayShell', () => {
     expect(outer.style.transformOrigin).toBe('center center')
   })
 
+  // An upside-down screen's viewport origin is the viewer's bottom right. A
+  // shrunk canvas pinned there and rotated in place leaves its slack at the
+  // viewer's top left; it has to start at the viewer's top left instead,
+  // the same corner an upright screen uses.
+  test('rotated and shrunk, the footprint moves so the slack lands bottom right as the viewer sees it', () => {
+    setViewport(1920, 1080)
+    const { getByTestId } = render(
+      <DisplayShell display={display({ width: 1920, height: 360, scale: 0.95, rotate: 180 })} alarms={[]}>
+        <div>content</div>
+      </DisplayShell>,
+    )
+    for (const id of ['display-shell-outer', 'display-shell-overlay']) {
+      const box = getByTestId(id)
+      expect(box.style.left).toBe('96px')
+      expect(box.style.top).toBe('18px')
+    }
+  })
+
+  test('upright and shrunk, the footprint stays at the viewport top left', () => {
+    setViewport(1920, 1080)
+    const { getByTestId } = render(
+      <DisplayShell display={display({ width: 1920, height: 360, scale: 0.95, rotate: 0 })} alarms={[]}>
+        <div>content</div>
+      </DisplayShell>,
+    )
+    const outer = getByTestId('display-shell-outer')
+    expect(outer.style.left).toBe('0px')
+    expect(outer.style.top).toBe('0px')
+  })
+
+  test('rotated and magnified, the footprint stays at the viewport top left', () => {
+    setViewport(1920, 1080)
+    const { getByTestId } = render(
+      <DisplayShell display={display({ width: 1920, height: 360, scale: 1.5, rotate: 180 })} alarms={[]}>
+        <div>content</div>
+      </DisplayShell>,
+    )
+    const outer = getByTestId('display-shell-outer')
+    expect(outer.style.left).toBe('0px')
+    expect(outer.style.top).toBe('0px')
+  })
+
   test('applies no rotation transform when rotate is 0', () => {
     const { getByTestId } = render(
       <DisplayShell display={display({ rotate: 0 })} alarms={[]}>
