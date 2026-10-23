@@ -91,6 +91,10 @@ export type SettingsPayload = {
     web_search_model?: string
     passage_limits?: PassageLimitsPayload
   }
+  // The on-board coastline Mate's shelter estimate reads. Off by default.
+  offline_coastline?: {
+    enabled?: boolean
+  }
   // Which equipment item plays each single-choice part (house bank, port
   // alternator, ...). Saved with the rest of Settings. A payload that omits it
   // leaves the stored block alone on the server.
@@ -200,6 +204,9 @@ export function useSettingsForm(): UseSettingsFormResult {
       // Saved roles (and a changed SignalK address) move the setup steps.
       void invalidateQueries(['/api/setup/status'])
       void invalidateQueries(['/api/vessel/discovery'])
+      // The Offline coastline switch is part of this save; its status line
+      // must not keep saying "Off" until the next poll.
+      void invalidateQueries(['/api/offline-coastline'])
       // Units and anchor geometry drive rendering across the dashboard, not
       // just this form, so push the authoritative response to those consumers
       // rather than making the operator reload.

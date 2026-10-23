@@ -174,6 +174,8 @@ export interface RegularSettingsDraft {
   assistantWebSearch: boolean
   assistantWebSearchModel: string
   assistantPassageLimits: PassageLimitsDraft
+  // Off until the operator turns it on: it downloads in the background.
+  offlineCoastlineEnabled: boolean
   /**
    * null until the server's roles block has been read. It stays null if the
    * settings fetch fell back without one, and the patch then omits `roles`
@@ -228,6 +230,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantWebSearch: false,
   assistantWebSearchModel: defaultWebSearchModel,
   assistantPassageLimits: blankPassageLimits(),
+  offlineCoastlineEnabled: false,
   roles: null,
 }
 
@@ -327,6 +330,8 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
 
   draft.assistantPassageLimits = passageLimitsFromPayload(settings.assistant?.passage_limits)
 
+  if (typeof settings.offline_coastline?.enabled === 'boolean') draft.offlineCoastlineEnabled = settings.offline_coastline.enabled
+
   if (settings.roles) draft.roles = { ...emptyVesselRoles, ...settings.roles }
 
   return draft
@@ -388,6 +393,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantWebSearch !== b.assistantWebSearch) return false
   if (a.assistantWebSearchModel !== b.assistantWebSearchModel) return false
   if (!passageLimitsEqual(a.assistantPassageLimits, b.assistantPassageLimits)) return false
+  if (a.offlineCoastlineEnabled !== b.offlineCoastlineEnabled) return false
 
   if (!rolesEqual(a.roles, b.roles)) return false
 
@@ -471,6 +477,9 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       web_search: draft.assistantWebSearch,
       web_search_model: draft.assistantWebSearchModel.trim(),
       passage_limits: passageLimitsToPayload(draft.assistantPassageLimits),
+    },
+    offline_coastline: {
+      enabled: draft.offlineCoastlineEnabled,
     },
     // Omitted while the roles block was never read (see the draft field).
     ...(draft.roles === null ? {} : { roles: draft.roles }),

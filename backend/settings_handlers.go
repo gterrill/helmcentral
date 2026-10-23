@@ -158,6 +158,12 @@ type settingsPayload struct {
 		// until the operator enters it.
 		PassageLimits passageLimits `json:"passage_limits"`
 	} `json:"assistant"`
+	// OfflineCoastline is the on-board shoreline Mate's shelter estimate and
+	// later features read (ADR 0203). Off by default: it downloads from the
+	// internet in the background.
+	OfflineCoastline struct {
+		Enabled bool `json:"enabled"`
+	} `json:"offline_coastline"`
 	Auth struct {
 		Mode string `json:"mode"`
 	} `json:"auth"`
@@ -391,6 +397,9 @@ func updateSettingsHandler(c echo.Context) error {
 		}
 		settings["assistant"].(map[string]any)["passage_limits"] = block
 	}
+	settings["offline_coastline"] = map[string]any{
+		"enabled": normalized.OfflineCoastline.Enabled,
+	}
 	settings["units"] = normalized.Units
 
 	// roles is only touched when the request carries it (see the Roles
@@ -405,6 +414,11 @@ func updateSettingsHandler(c echo.Context) error {
 
 	if err := writeSettings(settingsPath, settings); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
+	}
+	if globalCoastlineManager != nil {
+		// The Offline coastline switch may have changed: the page refetches
+		// status right after this save and must see the new switch.
+		globalCoastlineManager.SettingsChanged()
 	}
 
 	// A house bank may have just been chosen or changed: move the alarm rules
@@ -740,6 +754,12 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		payload.Assistant.PassageLimits = limits
 	}
 
+	if coastMap, ok := settings["offline_coastline"].(map[string]any); ok {
+		if v, ok := coastMap["enabled"].(bool); ok {
+			payload.OfflineCoastline.Enabled = v
+		}
+	}
+
 	if authMap, ok := settings["auth"].(map[string]any); ok {
 		payload.Auth.Mode = strings.TrimSpace(coerceString(authMap["mode"]))
 	}
@@ -889,6 +909,8 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.WebSearch = req.Assistant.WebSearch
 	normalized.Assistant.WebSearchModel = strings.TrimSpace(req.Assistant.WebSearchModel)
 	normalized.Assistant.PassageLimits = req.Assistant.PassageLimits
+
+	normalized.OfflineCoastline.Enabled = req.OfflineCoastline.Enabled
 
 	normalized.Auth.Mode = strings.TrimSpace(req.Auth.Mode)
 	if normalized.Auth.Mode == "" {

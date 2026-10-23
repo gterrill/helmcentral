@@ -17,6 +17,14 @@ just a plugin dropped into the right folder and a restart.
 
 Pick the active provider for each category in Settings.
 
+The [Offline coastline](../features/offline-coastline.md) downloads through
+the `osm-overpass` place-names plugin, and needs a version of it that can
+supply coastline and report edits. If you replace that plugin file with an
+older one, Settings → Offline coastline says the plugin is too old and nothing
+downloads. Mate carries on with everything else, and answers shelter questions
+with an error naming what is missing. The map server it talks to is that
+plugin's own setting.
+
 Upper air is optional: leave that plugin out and the forecast page simply
 shows no 500mb section. Points of interest is optional the same way: with no
 `poi` plugin installed, Nearby reports an actionable error rather than any

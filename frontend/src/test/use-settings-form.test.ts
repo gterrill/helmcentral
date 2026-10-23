@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { deepMergeSettings, useSettingsForm } from '@/hooks/use-settings-form'
+import { useOfflineCoastline } from '@/hooks/use-offline-coastline'
 import { useTideSettings } from '@/hooks/use-tide-settings'
 import { stubApi, type StubRequest } from '@/test/helpers/stub-api'
 
@@ -22,6 +23,25 @@ describe('useSettingsForm', () => {
     await act(async () => { await form.result.current.save({ ui: { tide_provider: 'bom', tide_station_id: 'B' } }) })
     expect(tide.result.current.tideProvider).toBe('bom')
     expect(tide.result.current.tideStationId).toBe('B')
+  })
+
+  it('a save refetches the offline coastline status at once, not at the next poll', async () => {
+    let saved = false
+    stubApi({
+      'GET /api/settings': { offline_coastline: { enabled: false } },
+      'POST /api/settings': (req: StubRequest) => {
+        saved = true
+        return req.body
+      },
+      'GET /api/offline-coastline': () => ({ enabled: saved, state: saved ? 'idle' : 'off', squares: [] }),
+    })
+    const coast = renderHook(() => useOfflineCoastline())
+    const form = renderHook(() => useSettingsForm())
+    await waitFor(() => expect(coast.result.current.status?.state).toBe('off'))
+    await waitFor(() => expect(form.result.current.loading).toBe(false))
+
+    await act(async () => { await form.result.current.save({ offline_coastline: { enabled: true } }) })
+    await waitFor(() => expect(coast.result.current.status?.state).toBe('idle'), { timeout: 1500 })
   })
 
   it('fetches settings on mount and populates state', async () => {

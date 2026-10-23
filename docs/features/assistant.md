@@ -106,6 +106,29 @@ forecast wind during the run, it warns that the seas will be steeper and
 shorter and says when the fair-tide departure runs into that. A course
 square across the stream gains little from timing, and Mate says so.
 
+Mate can also tell you which wind directions an anchorage is sheltered from.
+Ask about a bay or a position and it reads the charted coastline and reefs
+around it and reports the compass arcs the spot is sheltered, partly
+sheltered and exposed from, such as "sheltered from NNE through S
+(030°–190°)", with a bearing-by-bearing table of how far the nearest land or
+reef is and what it is. When you are choosing between anchorages against a
+forecast it compares those arcs with the wind direction forecast for each
+night of the stay. If you are anchored inside a reef it gives the reef's width
+in each direction and tells you that reef shelter depends on the tide.
+
+Treat it as a first look, and Mate says so. It works from the shoreline as
+charted: it cannot see wind bending round a headland, gusts funnelling down a
+valley or swell wrapping round a point, so it can read an anchorage as better
+sheltered than it is on the side where swell curls in, and it is only as good
+as the chart.
+
+The shoreline is the [Offline coastline](offline-coastline.md), kept aboard,
+so the answer needs no signal. It is off until you turn it on in Settings →
+Offline coastline, and it covers the water within 200 nm of the boat plus
+anywhere you have downloaded before. Where it has not been downloaded, or is
+off, or a neighbouring square is missing, Mate tells you exactly which and
+does not guess the shelter.
+
 When InfluxDB is configured, it can also estimate how long a passage will
 take and how much fuel it will burn, from your own boat's logged speed over
 ground and fuel-rate history, not a manufacturer's polar or fuel curve.

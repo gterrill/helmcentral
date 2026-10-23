@@ -351,6 +351,18 @@ type overpassElement struct {
 	Lon    *float64          `json:"lon,omitempty"`
 	Center *overpassLatLon   `json:"center,omitempty"`
 	Tags   map[string]string `json:"tags"`
+	// Geometry and Members are only present in `out geom` responses
+	// (shoreline_square): a way's own points, and a relation's members with
+	// theirs.
+	Geometry []*overpassLatLon `json:"geometry,omitempty"`
+	Members  []overpassMember  `json:"members,omitempty"`
+}
+
+type overpassMember struct {
+	Type     string            `json:"type"`
+	Ref      int64             `json:"ref"`
+	Role     string            `json:"role"`
+	Geometry []*overpassLatLon `json:"geometry,omitempty"`
 }
 
 type overpassResponse struct {
@@ -416,6 +428,25 @@ func parseOverpassBody(contentType string, body []byte) ([]overpassElement, erro
 	}
 
 	return parsed.Elements, nil
+}
+
+// overpassStatusError describes a non-200 Overpass answer. A Retry-After
+// header (seconds, or an HTTP date) is carried in the text as "retry after
+// Ns", because the host only receives the error text and needs the server's
+// own wait to pace its downloads.
+func overpassStatusError(status int, retryAfter, contentType string, body []byte, now time.Time) error {
+	suffix := ""
+	if ra := strings.TrimSpace(retryAfter); ra != "" {
+		if n, err := strconv.Atoi(ra); err == nil && n > 0 {
+			suffix = fmt.Sprintf(", retry after %ds", n)
+		} else if at, err := time.Parse(time.RFC1123, ra); err == nil && at.After(now) {
+			suffix = fmt.Sprintf(", retry after %ds", int(at.Sub(now).Seconds())+1)
+		}
+	}
+	if looksLikeOverpassRateLimit(contentType, body) {
+		return fmt.Errorf("overpass rate limited (HTTP %d with a non-JSON body%s)", status, suffix)
+	}
+	return fmt.Errorf("overpass returned status %d%s", status, suffix)
 }
 
 func headerCaseInsensitive(headers map[string]string, name string) string {
@@ -1353,4 +1384,339 @@ func runSearchPlaces(post overpassQueryFunc, input searchPlacesInput) (searchPla
 		Results:   results,
 		Note:      note,
 	}, nil
+}
+
+// ── shoreline_square and shoreline_changes ─────────────────────────────
+//
+// Raw coastline and reef geometry for the host's offline coastline (ADR
+// 0203), fetched one coverage square at a time. ADR 0091's rule applies: this
+// returns lines, the host casts every ray and computes every distance.
+//
+// shoreline_square is one Overpass round trip for one box. The global
+// [bbox:...] is the spatial index (a tag-first scan of natural=coastline
+// times out on the mirrors). Coastline is output clipped to the box, so two
+// neighbouring squares never repeat it; reefs are output whole, so a ring
+// that crosses a square edge stays closed in both squares and the host
+// dedupes it by id. Because the boat link is slow, every line is thinned to
+// shorelineMinSpacingM between points before it leaves the plugin.
+//
+// shoreline_changes asks how many coastline and reef elements in the box were
+// edited after a date: the host's weekly check on a square it holds.
+
+const (
+	// shorelineTimeoutSeconds is Overpass's own budget for one square. The
+	// host gives a background call longer than this; the interactive 15 s
+	// plugin budget is not enough for a square of coastline.
+	shorelineTimeoutSeconds = 100
+
+	// shorelineChangesTimeoutSeconds is the budget for the count query.
+	shorelineChangesTimeoutSeconds = 60
+
+	// shorelineMinSpacingM drops points closer than this to the last point
+	// kept. Rays are miles long, so a metre of coastline detail is noise, but
+	// the anchor is often a few hundred metres from shore, so the spacing
+	// stays small. First and last points are always kept, so a ring stays a
+	// ring.
+	shorelineMinSpacingM = 15.0
+
+	// shorelineMaxSpanDeg bounds a requested box. The host asks for one degree
+	// squares; anything much bigger is a mistake that would time out slowly.
+	shorelineMaxSpanDeg = 2.0
+)
+
+type shorelineBoxInput struct {
+	South float64 `json:"south"`
+	West  float64 `json:"west"`
+	North float64 `json:"north"`
+	East  float64 `json:"east"`
+}
+
+type shorelineChangesInput struct {
+	South float64 `json:"south"`
+	West  float64 `json:"west"`
+	North float64 `json:"north"`
+	East  float64 `json:"east"`
+	Since string  `json:"since"` // RFC 3339
+}
+
+func (in shorelineChangesInput) box() shorelineBoxInput {
+	return shorelineBoxInput{South: in.South, West: in.West, North: in.North, East: in.East}
+}
+
+type shorelineLineOut struct {
+	ID     string       `json:"id"`
+	Kind   string       `json:"kind"`
+	Name   string       `json:"name"`
+	Closed bool         `json:"closed"`
+	Points [][2]float64 `json:"points"`
+}
+
+type shorelineSquareOutput struct {
+	Lines []shorelineLineOut `json:"lines"`
+}
+
+type shorelineChangesOutput struct {
+	Changed int `json:"changed"`
+}
+
+func (b shorelineBoxInput) validate() error {
+	if b.South < -90 || b.North > 90 || b.West < -180 || b.East > 180 {
+		return fmt.Errorf("shoreline: box %.4f,%.4f,%.4f,%.4f is outside the world (the antimeridian and the poles are not supported)", b.South, b.West, b.North, b.East)
+	}
+	if b.North <= b.South || b.East <= b.West {
+		return fmt.Errorf("shoreline: box %.4f,%.4f,%.4f,%.4f has no area", b.South, b.West, b.North, b.East)
+	}
+	if b.North-b.South > shorelineMaxSpanDeg || b.East-b.West > shorelineMaxSpanDeg {
+		return fmt.Errorf("shoreline: box %.4f,%.4f,%.4f,%.4f is larger than %.0f degrees", b.South, b.West, b.North, b.East, shorelineMaxSpanDeg)
+	}
+	return nil
+}
+
+func buildShorelineQuery(b shorelineBoxInput) (string, error) {
+	if err := b.validate(); err != nil {
+		return "", err
+	}
+	// Coastline is output clipped to the box (`out geom(bbox)`: nodes outside
+	// come back as null), which is most of the payload on a long coast. Reefs
+	// are output whole so a ring stays closed.
+	return fmt.Sprintf(`[out:json][timeout:%d][bbox:%.6f,%.6f,%.6f,%.6f];way["natural"="coastline"]->.c;(way["natural"="reef"];relation["natural"="reef"];)->.r;.c out geom(%.6f,%.6f,%.6f,%.6f);.r out geom;`,
+		shorelineTimeoutSeconds, b.South, b.West, b.North, b.East, b.South, b.West, b.North, b.East), nil
+}
+
+// buildShorelineChangesQuery counts coastline and reef elements edited after
+// since. `newer` matches an element whose own timestamp is later, so it sees
+// new and edited ways and relations; it cannot see a node moved inside an
+// unedited way, or an element deleted.
+func buildShorelineChangesQuery(b shorelineBoxInput, since time.Time) (string, error) {
+	if err := b.validate(); err != nil {
+		return "", err
+	}
+	if since.IsZero() {
+		return "", fmt.Errorf("shoreline_changes: since is required")
+	}
+	ts := since.UTC().Format(time.RFC3339)
+	return fmt.Sprintf(`[out:json][timeout:%d][bbox:%.6f,%.6f,%.6f,%.6f];(way["natural"="coastline"](newer:"%s");way["natural"="reef"](newer:"%s");relation["natural"="reef"](newer:"%s"););out count;`,
+		shorelineChangesTimeoutSeconds, b.South, b.West, b.North, b.East, ts, ts, ts), nil
+}
+
+func roundShorelineCoord(v float64) float64 { return math.Round(v*1e5) / 1e5 }
+
+// thinShoreline drops points within shorelineMinSpacingM of the last point
+// kept, always keeping the first and last.
+func thinShoreline(pts []overpassLatLon) [][2]float64 {
+	if len(pts) == 0 {
+		return nil
+	}
+	out := make([][2]float64, 0, len(pts))
+	last := pts[0]
+	out = append(out, [2]float64{roundShorelineCoord(last.Lat), roundShorelineCoord(last.Lon)})
+	for i := 1; i < len(pts)-1; i++ {
+		if haversineMeters(last.Lat, last.Lon, pts[i].Lat, pts[i].Lon) < shorelineMinSpacingM {
+			continue
+		}
+		last = pts[i]
+		out = append(out, [2]float64{roundShorelineCoord(last.Lat), roundShorelineCoord(last.Lon)})
+	}
+	if len(pts) > 1 {
+		end := pts[len(pts)-1]
+		out = append(out, [2]float64{roundShorelineCoord(end.Lat), roundShorelineCoord(end.Lon)})
+	}
+	return out
+}
+
+// shorelineRuns splits a geometry array at the nulls Overpass puts where a
+// node lies outside `out geom(bbox)`, then keeps from each piece the runs of
+// consecutive segments whose bounding box overlaps the search box. A segment
+// that crosses the box with both ends outside it is kept, so a long straight
+// coast is not lost.
+func shorelineRuns(geom []*overpassLatLon, south, west, north, east float64) [][]overpassLatLon {
+	var pieces [][]overpassLatLon
+	var piece []overpassLatLon
+	for _, p := range geom {
+		if p == nil {
+			if piece != nil {
+				pieces = append(pieces, piece)
+				piece = nil
+			}
+			continue
+		}
+		piece = append(piece, *p)
+	}
+	if piece != nil {
+		pieces = append(pieces, piece)
+	}
+
+	var runs [][]overpassLatLon
+	for _, pts := range pieces {
+		var cur []overpassLatLon
+		for i := 1; i < len(pts); i++ {
+			a, b := pts[i-1], pts[i]
+			overlaps := !(math.Max(a.Lat, b.Lat) < south || math.Min(a.Lat, b.Lat) > north ||
+				math.Max(a.Lon, b.Lon) < west || math.Min(a.Lon, b.Lon) > east)
+			if overlaps {
+				if cur == nil {
+					cur = []overpassLatLon{a}
+				}
+				cur = append(cur, b)
+				continue
+			}
+			if cur != nil {
+				runs = append(runs, cur)
+				cur = nil
+			}
+		}
+		if cur != nil {
+			runs = append(runs, cur)
+		}
+	}
+	return runs
+}
+
+// wholeGeometry returns geom as values, or an error if any node is null: a
+// reef ring with a missing node is not a ring, and guessing would hide it.
+func wholeGeometry(id string, geom []*overpassLatLon) ([]overpassLatLon, error) {
+	out := make([]overpassLatLon, len(geom))
+	for i, p := range geom {
+		if p == nil {
+			return nil, fmt.Errorf("shoreline_square: %s has a node with no position", id)
+		}
+		out[i] = *p
+	}
+	return out, nil
+}
+
+// assembleOuterRings joins the outer member ways of a multipolygon end to end
+// into rings. Ways meet where an end point has exactly the same coordinates
+// as another way's end (Overpass gives shared nodes identical positions), in
+// either direction. A chain that does not close is returned as it stands, open,
+// so the host never treats it as a ring.
+func assembleOuterRings(ways [][]overpassLatLon) [][]overpassLatLon {
+	used := make([]bool, len(ways))
+	var rings [][]overpassLatLon
+	for i := range ways {
+		if used[i] {
+			continue
+		}
+		used[i] = true
+		chain := append([]overpassLatLon(nil), ways[i]...)
+		for chain[0] != chain[len(chain)-1] {
+			joined := false
+			for j := range ways {
+				if used[j] {
+					continue
+				}
+				w := ways[j]
+				end := chain[len(chain)-1]
+				switch {
+				case w[0] == end:
+					chain = append(chain, w[1:]...)
+				case w[len(w)-1] == end:
+					for k := len(w) - 2; k >= 0; k-- {
+						chain = append(chain, w[k])
+					}
+				default:
+					continue
+				}
+				used[j] = true
+				joined = true
+				break
+			}
+			if !joined {
+				break
+			}
+		}
+		rings = append(rings, chain)
+	}
+	return rings
+}
+
+func runShorelineSquare(post overpassQueryFunc, box shorelineBoxInput) (shorelineSquareOutput, error) {
+	query, err := buildShorelineQuery(box)
+	if err != nil {
+		return shorelineSquareOutput{}, err
+	}
+	south, west, north, east := box.South, box.West, box.North, box.East
+
+	elements, err := post(query)
+	if err != nil {
+		return shorelineSquareOutput{}, fmt.Errorf("shoreline_square: %w", err)
+	}
+
+	lines := []shorelineLineOut{}
+	addReef := func(id, name string, raw []*overpassLatLon) error {
+		if len(raw) < 2 {
+			return nil
+		}
+		geom, err := wholeGeometry(id, raw)
+		if err != nil {
+			return err
+		}
+		closed := geom[0] == geom[len(geom)-1]
+		lines = append(lines, shorelineLineOut{ID: id, Kind: "reef", Name: name, Closed: closed, Points: thinShoreline(geom)})
+		return nil
+	}
+
+	for _, el := range elements {
+		kind := el.Tags["natural"]
+		name := strings.TrimSpace(el.Tags["name"])
+		switch {
+		case el.Type == "way" && kind == "coastline":
+			id := fmt.Sprintf("way/%d", el.ID)
+			for _, run := range shorelineRuns(el.Geometry, south, west, north, east) {
+				lines = append(lines, shorelineLineOut{
+					ID: id, Kind: "coastline", Name: name,
+					Closed: len(run) == len(el.Geometry) && run[0] == run[len(run)-1],
+					Points: thinShoreline(run),
+				})
+			}
+		case el.Type == "way" && kind == "reef":
+			if err := addReef(fmt.Sprintf("way/%d", el.ID), name, el.Geometry); err != nil {
+				return shorelineSquareOutput{}, err
+			}
+		case el.Type == "relation" && kind == "reef":
+			var ways [][]overpassLatLon
+			for i, m := range el.Members {
+				if m.Type != "way" || m.Role != "outer" || len(m.Geometry) < 2 {
+					continue
+				}
+				geom, err := wholeGeometry(fmt.Sprintf("relation/%d/%d", el.ID, i), m.Geometry)
+				if err != nil {
+					return shorelineSquareOutput{}, err
+				}
+				ways = append(ways, geom)
+			}
+			for i, ring := range assembleOuterRings(ways) {
+				lines = append(lines, shorelineLineOut{
+					ID: fmt.Sprintf("relation/%d/%d", el.ID, i), Kind: "reef", Name: name,
+					Closed: len(ring) > 2 && ring[0] == ring[len(ring)-1], Points: thinShoreline(ring),
+				})
+			}
+		}
+	}
+	return shorelineSquareOutput{Lines: lines}, nil
+}
+
+// runShorelineChanges returns how many coastline and reef elements in the box
+// changed after since. A response with no count element is an error, never
+// zero edits.
+func runShorelineChanges(post overpassQueryFunc, box shorelineBoxInput, since time.Time) (shorelineChangesOutput, error) {
+	query, err := buildShorelineChangesQuery(box, since)
+	if err != nil {
+		return shorelineChangesOutput{}, err
+	}
+	elements, err := post(query)
+	if err != nil {
+		return shorelineChangesOutput{}, fmt.Errorf("shoreline_changes: %w", err)
+	}
+	for _, el := range elements {
+		if el.Type != "count" {
+			continue
+		}
+		total, err := strconv.Atoi(el.Tags["total"])
+		if err != nil || total < 0 {
+			return shorelineChangesOutput{}, fmt.Errorf("shoreline_changes: unreadable count %q", el.Tags["total"])
+		}
+		return shorelineChangesOutput{Changed: total}, nil
+	}
+	return shorelineChangesOutput{}, fmt.Errorf("shoreline_changes: overpass returned no count")
 }

@@ -42,6 +42,11 @@
 // injectable overpassQueryFunc; this file supplies doOverpassQuery, the one
 // place all three wasmexports below actually call the pdk HTTP client.
 //
+// Two further optional exports, shoreline_square and shoreline_changes,
+// return the raw coastline and reef lines of one coverage square, and count
+// how many were edited since a date, for the host's offline coastline - see
+// osm-overpass.go's "shoreline_square" section.
+//
 // This file (main.go) holds only the thin //go:wasmexport wrapper layer;
 // all the actual query-building/parsing logic lives in osm-overpass.go,
 // which has no dependency on "github.com/extism/go-pdk" specifically so it
@@ -204,10 +209,7 @@ func doOverpassQuery(query string) ([]overpassElement, error) {
 	contentType := headerCaseInsensitive(resp.Headers(), "Content-Type")
 
 	if resp.Status() != 200 {
-		if looksLikeOverpassRateLimit(contentType, body) {
-			return nil, fmt.Errorf("overpass rate limited (HTTP %d with a non-JSON body)", resp.Status())
-		}
-		return nil, fmt.Errorf("overpass returned status %d", resp.Status())
+		return nil, overpassStatusError(int(resp.Status()), headerCaseInsensitive(resp.Headers(), "Retry-After"), contentType, body, time.Now())
 	}
 
 	return parseOverpassBody(contentType, body)
@@ -243,6 +245,53 @@ func searchPlaces() int32 {
 	}
 
 	output, err := runSearchPlaces(doOverpassQuery, input)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	if err := pdk.OutputJSON(output); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
+}
+
+//go:wasmexport shoreline_square
+func shorelineSquare() int32 {
+	var input shorelineBoxInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	output, err := runShorelineSquare(doOverpassQuery, input)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	if err := pdk.OutputJSON(output); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
+}
+
+//go:wasmexport shoreline_changes
+func shorelineChanges() int32 {
+	var input shorelineChangesInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	since, err := time.Parse(time.RFC3339, input.Since)
+	if err != nil {
+		pdk.SetError(fmt.Errorf("shoreline_changes: since %q is not an RFC 3339 time", input.Since))
+		return -1
+	}
+
+	output, err := runShorelineChanges(doOverpassQuery, input.box(), since)
 	if err != nil {
 		pdk.SetError(err)
 		return -1

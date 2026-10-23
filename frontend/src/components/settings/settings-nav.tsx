@@ -14,6 +14,7 @@ export type SettingsSectionId =
   | 'mayara'
   | 'alarms'
   | 'assistant'
+  | 'offline-coastline'
   | 'security'
   | 'logs'
   | 'import'
@@ -46,6 +47,7 @@ export const SETTINGS_SECTION_GROUPS: Array<SectionNavGroup<SettingsSectionId>> 
       { id: 'anchor-watch', label: 'Anchor Watch' },
       { id: 'alarms', label: 'Alarms' },
       { id: 'assistant', label: 'Mate' },
+      { id: 'offline-coastline', label: 'Offline coastline' },
     ],
   },
   {

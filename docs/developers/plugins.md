@@ -206,6 +206,28 @@ commonly name the same plugin but need not.
 | `place_name_at` | `{lat, lon, radius_m}` | The single best-named feature within `radius_m`, or the legitimate negative `{"name": ""}` |
 | `search_places` | `{query, lat, lon, max_results, broad}` | `{search: "exact"\|"regex"\|"none", radius_nm, centred_on, results, note}` - the plugin owns the search ladder, the host owns distance/bearing/dedupe/sort exactly as it does for `fetch_poi` |
 
+Two more exports, optional as a pair (a plugin needs both or neither, and
+neither depends on the place-name pair above), feed the offline coastline:
+
+| Export | Input | Returns |
+| --- | --- | --- |
+| `shoreline_square` | `{south, west, north, east}` in degrees (one coverage square, 1° by 1°) | `{lines: [{id, kind: "coastline"\|"reef", name, closed, points: [[lat, lon], ...]}]}` - raw OpenStreetMap geometry; the host casts every ray and computes every distance |
+| `shoreline_changes` | `{south, west, north, east, since}`, `since` an RFC 3339 time | `{changed: n}` - how many coastline and reef elements in the box were edited after `since` |
+
+Clip coastline to the box, so neighbouring squares do not repeat it, but return
+a reef whole: the host needs the closed ring to test whether an anchor is inside
+it, and removes duplicates by `id` where a reef straddles two squares. An empty
+`lines` array means open sea and is stored as a valid square. An upstream
+failure, a rate limit or an Overpass `remark` runtime error must be a call
+error, and a count query that returns no count must be an error rather than
+zero. Reject a box across the antimeridian or a pole.
+
+These calls run in the background, so the host gives them a 120 s budget of
+their own instead of the 15 s Mate gets; keep the upstream query inside it. A
+plugin without both exports makes the offline coastline report that the plugin
+needs updating. See
+[ADR 0203](../adr/0203-offline-coastline-and-anchorage-shelter.md).
+
 `place_name_at` is called on a widening ladder (400m, 1500m, 5000m,
 stopping at the first named answer) by the host, not the plugin - the
 plugin only ever answers one radius per call. `search_places`' `broad` flag

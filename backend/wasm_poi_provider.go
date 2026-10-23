@@ -413,6 +413,141 @@ func (p *wasmPOIProvider) SearchPlaces(input placeSearchInput) (result placeSear
 	}, nil
 }
 
+// ── shoreline_square and shoreline_changes (ADR 0203, optional exports) ──
+
+// coastlineBackgroundCallBudget is the time a coastline call may take. It is
+// set per call, for work nobody is waiting on; Mate's interactive plugin
+// budget (WASM_PLUGIN_TIMEOUT_MS, 15 s) is left alone. A square of coastline
+// took 30 to 50 s from Overpass on a good day.
+const coastlineBackgroundCallBudget = 120 * time.Second
+
+// wasmShorelineSquareInput mirrors the guest's shoreline_square input
+// contract: one box, in degrees.
+type wasmShorelineSquareInput struct {
+	South float64 `json:"south"`
+	West  float64 `json:"west"`
+	North float64 `json:"north"`
+	East  float64 `json:"east"`
+}
+
+// wasmShorelineChangesInput is the same box plus the time to count edits
+// after (RFC 3339), and wasmShorelineChangesOutput its answer.
+type wasmShorelineChangesInput struct {
+	South float64 `json:"south"`
+	West  float64 `json:"west"`
+	North float64 `json:"north"`
+	East  float64 `json:"east"`
+	Since string  `json:"since"`
+}
+
+type wasmShorelineChangesOutput struct {
+	Changed *int `json:"changed"`
+}
+
+// wasmShorelineLine/wasmShorelineOutput mirror the guest's shoreline_square
+// output: {"lines": [{"id": "way/123", "kind": "coastline"|"reef", "name":
+// string, "closed": bool, "points": [[lat, lon], ...]}]}. A square with no
+// lines is a legitimate answer (open sea); a malformed line is an error.
+type wasmShorelineLine struct {
+	ID     string       `json:"id"`
+	Kind   string       `json:"kind"`
+	Name   string       `json:"name"`
+	Closed bool         `json:"closed"`
+	Points [][2]float64 `json:"points"`
+}
+
+type wasmShorelineOutput struct {
+	Lines []wasmShorelineLine `json:"lines"`
+}
+
+func mapWasmShorelineOutput(pluginID string, out wasmShorelineOutput) ([]shorelineLine, error) {
+	lines := make([]shorelineLine, 0, len(out.Lines))
+	for _, l := range out.Lines {
+		if l.Kind != "coastline" && l.Kind != "reef" {
+			return nil, fmt.Errorf("plugin %q: shoreline_square returned line %q with unrecognised kind %q", pluginID, l.ID, l.Kind)
+		}
+		if len(l.Points) < 2 {
+			return nil, fmt.Errorf("plugin %q: shoreline_square returned line %q with %d points", pluginID, l.ID, len(l.Points))
+		}
+		pts := make([]shorelinePoint, len(l.Points))
+		for i, p := range l.Points {
+			if p[0] < -90 || p[0] > 90 || p[1] < -180 || p[1] > 180 {
+				return nil, fmt.Errorf("plugin %q: shoreline_square returned line %q with point %v out of range", pluginID, l.ID, p)
+			}
+			pts[i] = shorelinePoint{Lat: p[0], Lon: p[1]}
+		}
+		if l.Closed && pts[0] != pts[len(pts)-1] {
+			return nil, fmt.Errorf("plugin %q: shoreline_square returned line %q marked closed but its ends differ", pluginID, l.ID)
+		}
+		lines = append(lines, shorelineLine{ID: l.ID, Kind: l.Kind, Name: sanitizePlaceName(l.Name), Closed: l.Closed, Points: pts})
+	}
+	return lines, nil
+}
+
+// ShorelineSquare calls the guest's shoreline_square export: the raw
+// coastline and reef lines of one coverage square, with the background
+// call budget. Same config overlay and panic recovery as PlaceNameAt. A
+// plugin without the export gets a clear error, never an empty shoreline
+// (which would read as open sea).
+func (p *wasmPOIProvider) ShorelineSquare(sq coverageSquare) (lines []shorelineLine, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("plugin %q panicked in shoreline_square: %v", p.id, r)
+			lines = nil
+		}
+	}()
+
+	if !p.SupportsShoreline() {
+		return nil, fmt.Errorf("plugin %q has no shoreline_square export", p.id)
+	}
+	south, west, north, east := sq.Bounds()
+	input, err := json.Marshal(wasmShorelineSquareInput{South: south, West: west, North: north, East: east})
+	if err != nil {
+		return nil, fmt.Errorf("plugin %q: failed to marshal shoreline_square input: %w", p.id, err)
+	}
+	out, err := p.callWithin("shoreline_square", input, coastlineBackgroundCallBudget)
+	if err != nil {
+		return nil, err
+	}
+	var parsed wasmShorelineOutput
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		return nil, fmt.Errorf("plugin %q: unparseable shoreline_square JSON: %w", p.id, err)
+	}
+	return mapWasmShorelineOutput(p.id, parsed)
+}
+
+// ShorelineChanges calls the guest's shoreline_changes export: how many
+// coastline and reef elements in the square were edited after since.
+func (p *wasmPOIProvider) ShorelineChanges(sq coverageSquare, since time.Time) (changed int, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("plugin %q panicked in shoreline_changes: %v", p.id, r)
+			changed = 0
+		}
+	}()
+
+	if !p.SupportsShoreline() {
+		return 0, fmt.Errorf("plugin %q has no shoreline_changes export", p.id)
+	}
+	south, west, north, east := sq.Bounds()
+	input, err := json.Marshal(wasmShorelineChangesInput{South: south, West: west, North: north, East: east, Since: since.UTC().Format(time.RFC3339)})
+	if err != nil {
+		return 0, fmt.Errorf("plugin %q: failed to marshal shoreline_changes input: %w", p.id, err)
+	}
+	out, err := p.callWithin("shoreline_changes", input, coastlineBackgroundCallBudget)
+	if err != nil {
+		return 0, err
+	}
+	var parsed wasmShorelineChangesOutput
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		return 0, fmt.Errorf("plugin %q: unparseable shoreline_changes JSON: %w", p.id, err)
+	}
+	if parsed.Changed == nil || *parsed.Changed < 0 {
+		return 0, fmt.Errorf("plugin %q: shoreline_changes returned no usable count", p.id)
+	}
+	return *parsed.Changed, nil
+}
+
 // loadWasmPOIProviders scans dir once at startup for .wasm plugins, via the
 // shared loadWasmPluginsFromDir. Mirrors loadWasmWaveProviders - a file that
 // fails to load as a valid plugin is logged and skipped, discovery

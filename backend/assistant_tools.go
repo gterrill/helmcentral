@@ -81,6 +81,9 @@ type assistantToolDeps struct {
 	// placeNameProviderResolver shape place_name.go uses - read fresh on
 	// every call so a Settings change takes effect on the very next lookup.
 	placeNames placeNameProviderResolver
+	// offlineCoastline is the on-board shoreline anchorage_shelter reads
+	// (ADR 0203). nil when the install has none; the tool then says so.
+	offlineCoastline func() *offlineCoastlineReader
 	// influxRange is estimate_passage's only I/O dependency: any SignalK
 	// path's history over an explicit range, aggregated to fixed-size
 	// buckets. Production wires queryInfluxPathRange (influx.go); tests
@@ -290,6 +293,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		placeNames: func() (placeNameProvider, string, error) {
 			return resolvePlaceNameProvider(settingsPath)
 		},
+		offlineCoastline:  offlineCoastlineReaderFor(settingsPath),
 		influxRange:       queryInfluxPathRange,
 		fuelRateInstances: configuredEngineInstances(settingsPath),
 		engineSignature:   liveEngineSignature,
@@ -395,6 +399,7 @@ type mateTool struct {
 // search_web stays last: it is the only conditional tool.
 var mateTools = []mateTool{
 	mateToolFindPlaces,
+	mateToolAnchorageShelter,
 	mateToolGetWindForecast,
 	mateToolGetTides,
 	mateToolEstimatePassage,
