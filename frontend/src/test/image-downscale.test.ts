@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
+import { downscaleAll, downscaleImage, probeJpeg } from '@/lib/image-downscale'
 
 // Lets every currently-queued microtask (a resolved mock promise's `.then`
 // continuation, an async function resuming past its own `await`) run before
@@ -199,5 +199,50 @@ describe('downscaleAll', () => {
     const outcomes = await downscaleAll([new File(['x'], 'x.jpg')])
     expect(outcomes).toHaveLength(1)
     expect(outcomes[0].result.ok).toBe(true)
+  })
+})
+
+describe('downscaleImage for sign photos', () => {
+  beforeEach(() => { vi.restoreAllMocks() })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  // A JPEG header: SOI, an Exif APP1 holding the orientation, SOF.
+  const header = (w: number, h: number, orientation: number) => {
+    const tiff = [0x49, 0x49, 42, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, orientation, 0, 0, 0, 0, 0, 0, 0]
+    const exif = [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff]
+    return new Blob([Uint8Array.from([0xff, 0xd8, 0xff, 0xe1, 0, exif.length + 2, ...exif, 0xff, 0xc0, 0, 8, 8, h >> 8, h & 255, w >> 8, w & 255, 1])], { type: 'image/jpeg' })
+  }
+
+  it('reads a JPEG\'s size and turns it with its Exif orientation', async () => {
+    expect(await probeJpeg(header(4000, 3000, 1))).toEqual({ width: 4000, height: 3000 })
+    expect(await probeJpeg(header(4000, 3000, 6))).toEqual({ width: 3000, height: 4000 })
+    expect(await probeJpeg(new Blob(['not a jpeg']))).toBeNull()
+  })
+
+  it('decodes a big photo at the target size, with its orientation applied', async () => {
+    const create = vi.fn().mockResolvedValue({ width: 960, height: 1280, close: () => {} })
+    vi.stubGlobal('createImageBitmap', create)
+    stubCanvas({ fillRect: () => {}, fillStyle: '' }, new Blob(['jpeg'], { type: 'image/jpeg' }))
+    await downscaleImage(header(8000, 6000, 6), 960, { reduceDecode: true })
+    expect(create.mock.calls[0][1]).toMatchObject({ imageOrientation: 'from-image', resizeHeight: 960 })
+    expect(create.mock.calls[0][1]).not.toHaveProperty('resizeWidth')
+  })
+
+  it('does not ask for a smaller decode of a photo already near the target', async () => {
+    const create = vi.fn().mockResolvedValue({ width: 1000, height: 750, close: () => {} })
+    vi.stubGlobal('createImageBitmap', create)
+    stubCanvas({ fillRect: () => {} }, new Blob(['jpeg'], { type: 'image/jpeg' }))
+    await downscaleImage(header(1000, 750, 1), 960, { reduceDecode: true })
+    expect(create.mock.calls[0][1]).toEqual({ imageOrientation: 'from-image' })
+  })
+
+  it('paints white first and takes its own quality', async () => {
+    stubImageBitmap(800, 600)
+    const toBlob = vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation(function (this: HTMLCanvasElement, cb: BlobCallback) { cb(new Blob(['x'])) })
+    const fillRect = vi.fn()
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation((() => ({ drawImage: () => {}, fillRect, fillStyle: '' })) as never)
+    await downscaleImage(new Blob(['x']), 960, { quality: 0.82, opaque: true })
+    expect(fillRect).toHaveBeenCalledWith(0, 0, 800, 600)
+    expect(toBlob.mock.calls[0][2]).toBe(0.82)
   })
 })

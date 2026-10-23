@@ -11,6 +11,10 @@ vi.mock('@/lib/save-blob', () => ({ saveBlob: vi.fn() }))
 const shotsHook = vi.hoisted(() => ({ value: { shots: [] as unknown[], loading: false, error: null as string | null } }))
 vi.mock('@/hooks/use-camera-shots', () => ({ useCameraShots: () => shotsHook.value }))
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => ({ type: 'sail_mono', loaM: 12, beamM: 4 }) }))
+const signsHook = vi.hoisted(() => ({ value: { signs: [] as unknown[], loading: false, error: null as string | null } }))
+vi.mock('@/hooks/use-replay-signs', () => ({ useReplaySigns: () => signsHook.value }))
+const photos = vi.hoisted(() => ({ prepare: vi.fn<(signs: { id: string }[], o?: { onProgress?: (d: number, t: number) => void }) => Promise<Map<string, string>>>() }))
+vi.mock('@/lib/passage-export-photos', () => ({ prepareSignPhotos: photos.prepare }))
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), loading: vi.fn(), dismiss: vi.fn() }))
 vi.mock('sonner', () => ({ toast }))
 
@@ -41,7 +45,15 @@ function openMenu() {
 beforeEach(() => {
   vi.clearAllMocks(); saveImageryPreference(true); localStorage.clear()
   shotsHook.value = { shots: [], loading: false, error: null }
+  signsHook.value = { signs: [], loading: false, error: null }
+  photos.prepare.mockImplementation(async (signs) => new Map(signs.map((x) => [x.id, 'data:image/jpeg;base64,QUJD'])))
 })
+
+const T0S = Date.UTC(2026, 8, 14) / 1000
+const aSign = (id: string, at: number, over: Record<string, unknown> = {}) => ({
+  id, t_ms: (T0S + at) * 1000, title: `Sign ${id}`, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, ...over,
+})
+const SIGNS = [aSign('a', 100), aSign('b', 200, { title: 'Whale', photo_url: '/api/documents/b/content', document_id: 'b' }), aSign('far', 99999)]
 
 describe('PassageExportMenu', () => {
   it('opens the blog embed in a dialog, selected and ready to copy', async () => {
@@ -140,5 +152,170 @@ describe('PassageExportMenu, cinematic card', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
     expect(toast.error).toHaveBeenCalledWith('Could not read the camera shots', { description: 'HTTP 500' })
     expect(screen.queryByRole('textbox', { name: 'Blog embed' })).toBeNull()
+  })
+
+  describe('signs', () => {
+    beforeEach(() => { signsHook.value = { signs: SIGNS, loading: false, error: null } })
+    const embedText = async () => ((await screen.findByRole('textbox', { name: 'Blog embed' })) as HTMLTextAreaElement).value
+
+    it('offers Include signs, on, with the count for the exported range', async () => {
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      expect((await screen.findByRole('menuitemcheckbox', { name: 'Include signs' })).getAttribute('aria-checked')).toBe('true')
+      expect(screen.getByTestId('sign-summary').textContent).toContain('2 signs, 1 photo')
+    })
+
+    it('says so when the range has no signs', async () => {
+      signsHook.value = { signs: [], loading: false, error: null }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      await screen.findByRole('menuitemcheckbox', { name: 'Include signs' })
+      expect(screen.getByTestId('sign-summary').textContent).toContain('No signs in this range')
+    })
+
+    it('puts the signs and their photos in the blog embed', async () => {
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+      const text = await embedText()
+      expect(text).toContain('Whale')
+      expect(text).toContain('data:image/jpeg;base64,QUJD')
+      expect(text).not.toContain('far')
+      expect(toast.error).not.toHaveBeenCalled()
+    })
+
+    it('leaves them out when Include signs is off, and fetches no photo', async () => {
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Include signs' }))
+      photos.prepare.mockClear()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+      const text = await embedText()
+      expect(text).not.toContain('Whale')
+      expect(text).not.toContain('QUJD')
+      expect(photos.prepare).not.toHaveBeenCalled()
+    })
+
+    it('stops and names the sign when its photo cannot be prepared', async () => {
+      photos.prepare.mockRejectedValue(new Error('The photo for the sign "Whale" could not be read (HTTP 404)'))
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalled())
+      expect(toast.error.mock.calls[0][1]).toEqual({ description: expect.stringContaining('"Whale"') })
+      expect(screen.queryByRole('textbox', { name: 'Blog embed' })).toBeNull()
+    })
+
+    it('stops over 3 MB with the plain message and writes no file', async () => {
+      photos.prepare.mockImplementation(async (signs) => new Map(signs.map((x) => [x.id, `data:image/jpeg;base64,${'A'.repeat(3_500_000)}`])))
+      const { saveBlob } = await import('@/lib/save-blob')
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Download embed as HTML' }))
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalled())
+      const description = (toast.error.mock.calls[0][1] as { description: string }).description
+      expect(description).toMatch(/over the 3 MB limit/)
+      expect(description).toContain('"Whale"')
+      expect(description).toContain('Include signs')
+      expect(saveBlob).not.toHaveBeenCalled()
+      openMenu()
+      await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).toMatch(/over the 3 MB limit/))
+    })
+
+    it('stops when the signs could not be read, unless they are off', async () => {
+      signsHook.value = { signs: [], loading: false, error: 'HTTP 500' }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalled())
+      expect(toast.error.mock.calls[0][0]).toBe('Could not read the signs')
+    })
+
+    it('shows the card size once the photos are ready', async () => {
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).toMatch(/^Card \d+ (KB|MB)$|^Card \d+\.\d MB$/))
+    })
+
+    const photoSign = (id: string, at: number) => aSign(id, at, { title: `Photo ${id}`, photo_url: `/api/documents/${id}/content`, document_id: id })
+    const uriOf = (id: string) => `data:image/jpeg;base64,QUJD${id.toUpperCase()}`
+    const preparedFor = async (signs: { id: string }[]) => new Map(signs.map((x) => [x.id, uriOf(x.id)]))
+
+    it('waits for the run that matches the signs now, when the set changed mid-run', async () => {
+      let release: (m: Map<string, string>) => void = () => {}
+      photos.prepare.mockImplementationOnce(() => new Promise((resolve) => { release = resolve }))
+      photos.prepare.mockImplementation(preparedFor)
+      signsHook.value = { signs: [photoSign('b', 200)], loading: false, error: null }
+      const { rerender } = render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      await vi.waitFor(() => expect(photos.prepare).toHaveBeenCalledTimes(1))
+      signsHook.value = { signs: [photoSign('b', 200), photoSign('c', 300)], loading: false, error: null }
+      rerender(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      await vi.waitFor(() => expect(photos.prepare).toHaveBeenCalledTimes(2))
+      // The first run finishes late, with only the first set.
+      release(new Map([['b', uriOf('b')]]))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+      const text = await embedText()
+      expect(text).toContain(uriOf('b'))
+      expect(text).toContain(uriOf('c'))
+      expect(toast.error).not.toHaveBeenCalled()
+    })
+
+    it('does not prepare the photos again once they are ready', async () => {
+      photos.prepare.mockImplementation(preparedFor)
+      signsHook.value = { signs: [photoSign('b', 200)], loading: false, error: null }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).not.toContain('about'))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+      await embedText()
+      fireEvent.click(screen.getAllByRole('button', { name: 'Close' }).find((b) => b.textContent === 'Close') as HTMLElement)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Download embed as HTML' }))
+      await vi.waitFor(() => expect(toast.error).not.toHaveBeenCalled())
+      expect(photos.prepare).toHaveBeenCalledTimes(1)
+    })
+
+    it('warns before anything is prepared that the card will probably be too big', async () => {
+      photos.prepare.mockImplementation(() => new Promise(() => {}))
+      signsHook.value = { signs: Array.from({ length: 12 }, (_, i) => photoSign(`p${i}`, 100 + i)), loading: false, error: null }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).toMatch(/^Card about \d\.\d MB, over the 3 MB limit$/))
+    })
+
+    it('says "about" until every photo is ready, then the exact size', async () => {
+      let release: (m: Map<string, string>) => void = () => {}
+      photos.prepare.mockImplementation(() => new Promise((resolve) => { release = resolve }))
+      signsHook.value = { signs: [photoSign('b', 200)], loading: false, error: null }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).toMatch(/^Card about /))
+      release(new Map([['b', uriOf('b')]]))
+      await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).not.toContain('about'))
+    })
+
+    it('ignores signs that are still loading, or failed, when Include signs is off', async () => {
+      signsHook.value = { signs: [], loading: true, error: null }
+      const { rerender } = render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Include signs' }))
+      expect(screen.getByRole('menuitem', { name: 'Copy blog embed' }).hasAttribute('data-disabled')).toBe(false)
+      expect(screen.getByRole('menuitem', { name: 'Download embed as HTML' }).hasAttribute('data-disabled')).toBe(false)
+      expect(screen.getByTestId('card-size')).toBeTruthy()
+      signsHook.value = { signs: [], loading: false, error: 'HTTP 500' }
+      rerender(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      fireEvent.click(screen.getByRole('menuitem', { name: 'Copy blog embed' }))
+      await embedText()
+      expect(toast.error).not.toHaveBeenCalled()
+    })
+
+    it('holds Copy and Download while signs load, when they are included', async () => {
+      signsHook.value = { signs: [], loading: true, error: null }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      expect((await screen.findByRole('menuitem', { name: 'Copy blog embed' })).hasAttribute('data-disabled')).toBe(true)
+      expect(screen.queryByTestId('card-size')).toBeNull()
+    })
   })
 })
