@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { InsetMap, PassageMap, type PassageMapHandle } from '@/components/passages/passage-map'
+import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
+import { useBoatHull } from '@/hooks/use-boat-hull'
+import { nextHeading, type HeadingState } from '@/lib/boat-model'
 import { useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
   buildTimeline,
@@ -61,6 +64,13 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
 
   const here = locate(timeline, replay.clock)
   const boat = here ? positionAt(here.entry.segments, here.at) : null
+  const hull = useBoatHull()
+  // The bow follows the course sailed; worked out only when there is a model
+  // to point. A held heading carries on only while playback moves forward.
+  const [threeD] = use3dPreference()
+  const lastHeading = useRef<HeadingState | null>(null)
+  const heading = hull && threeD && here ? nextHeading(lastHeading.current, { id: here.entry.id, at: here.at }, here.entry.segments) : null
+  useEffect(() => { lastHeading.current = heading })
   useEffect(() => {
     if (cursorRef) cursorRef.current = here ? { id: here.entry.id, at: here.at } : null
   })
@@ -124,6 +134,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           playedIds={playedIds}
           sailedTo={sailedTo}
           boat={boat}
+          boatHeading={heading ? heading.heading : null}
+          hull={hull}
           isDarkTheme={isDarkTheme}
           overlay={
             insetOn && !flying ? (

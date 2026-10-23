@@ -13,6 +13,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **The replay shows your boat as a model.** With 3D on, the marker becomes a
+  sailing or power monohull or catamaran to match the hull type set under
+  Anchor Watch settings, sized from your vessel's length and beam and pointing
+  along the course she is sailing. It stays at least about 40 pixels long when
+  you zoom out; with no length recorded it is drawn at that size at every
+  zoom, not to scale. With no hull type set, 3D off or the terrain unavailable, the
+  plain dot stays.
 - **The passage replay can show the land in 3D.** A 3D button beside the
   satellite button tilts the map and raises hills and headlands, with the sea
   kept flat so the chart and photographs lie level on the water. You can drag to

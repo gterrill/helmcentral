@@ -10,6 +10,8 @@ import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-
 import { MapToggleButton } from '@/components/map-toggle-button'
 import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
+import type { BoatLayer } from '@/lib/boat-layer'
+import { boatMarkerKind, type BoatHull } from '@/lib/boat-model'
 import { OPENSEAMAP_TILES, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
@@ -61,6 +63,10 @@ export interface PassageMapProps {
   sailedTo?: ReadonlyMap<string, SailedTo> | null
   /** Where the boat marker stands, or null before there is anything to show. */
   boat: { lat: number; lon: number } | null
+  /** The bow's bearing in degrees, or null when the track has not said yet. */
+  boatHeading?: number | null
+  /** The hull to draw as a 3D model in place of the dot; null keeps the dot. */
+  hull?: BoatHull | null
   isDarkTheme: boolean
   className?: string
   /** Shown in the top right corner, stacked under the satellite button. */
@@ -81,7 +87,7 @@ function centreOf(bounds: [number, number, number, number]) {
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, isDarkTheme, className, overlay },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, isDarkTheme, className, overlay },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -103,6 +109,57 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   // so turning 3D off eases down instead of snapping.
   const [levelling, setLevelling] = useState(false)
   const tiltable = camera3d || levelling
+  // The boat model is a custom layer, loaded on demand: three.js is a
+  // separate chunk fetched only when 3D replay is on and a hull type is set.
+  const boatLayerRef = useRef<BoatLayer | null>(null)
+  const [layerReady, setLayerReady] = useState(false)
+  const [mapLoaded, setMapLoaded] = useState(false)
+  const wantModel = camera3d && hull !== null && mapLoaded
+  const hullType = hull?.type
+  const hullLoa = hull?.loaM ?? null
+  const hullBeam = hull?.beamM ?? null
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.()
+    if (!wantModel || !map || !hullType) return
+    let cancelled = false
+    let layer: BoatLayer | null = null
+    // Adds the layer if the map does not have it. A new map style (light to
+    // dark) drops custom layers, so this runs again on styledata. A failure
+    // goes in the console, the dot comes back, and no half-added layer stays.
+    const add = () => {
+      if (!layer || map.getLayer(layer.id)) return
+      try {
+        map.addLayer(layer)
+      } catch (err) {
+        console.error('Boat model could not be added to the map', err)
+        try { if (map.getLayer(layer.id)) map.removeLayer(layer.id) } catch { /* nothing more to undo */ }
+        setLayerReady(false)
+      }
+    }
+    void import('@/lib/boat-layer').then(({ createBoatLayer }) => {
+      if (cancelled) return
+      layer = createBoatLayer({ type: hullType, loaM: hullLoa, beamM: hullBeam })
+      boatLayerRef.current = layer
+      add()
+      map.on('styledata', add)
+      setLayerReady(!!map.getLayer(layer.id))
+    }).catch((err) => {
+      console.error('Boat model unavailable', err)
+    })
+    return () => {
+      cancelled = true
+      map.off('styledata', add)
+      if (layer && map.getLayer(layer.id)) map.removeLayer(layer.id)
+      boatLayerRef.current = null
+      setLayerReady(false)
+    }
+  }, [wantModel, hullType, hullLoa, hullBeam])
+  // The model follows the replay cursor straight into the layer, which asks the
+  // map for a frame itself; React does not draw it.
+  useEffect(() => {
+    if (layerReady) boatLayerRef.current?.setPose(boat ? { lat: boat.lat, lon: boat.lon, headingDeg: boatHeading } : null)
+  }, [layerReady, boat, boatHeading])
+  const marker = boatMarkerKind({ threeD, terrain, hull: hull ?? null, layerReady })
   const sailedCache = useMemo(() => createSailedCache(), [])
   const fullLines = useMemo(() => passages.map((p) => segmentsToGeoJSON(p.segments)), [passages])
 
@@ -147,6 +204,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
 
   const handleLoad = useCallback(() => {
     loadedRef.current = true
+    setMapLoaded(true)
     const map = mapRef.current?.getMap?.()
     // Fail fast: the place labels draw from the style's own vector source.
     if (map) warnIfBaseVectorSourceMissing(map)
@@ -312,7 +370,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
             </Fragment>
           )
         })}
-        {boat && (
+        {boat && marker === 'dot' && (
           <Marker longitude={boat.lon} latitude={boat.lat} anchor="center">
             <div
               data-testid="passage-boat-marker"
