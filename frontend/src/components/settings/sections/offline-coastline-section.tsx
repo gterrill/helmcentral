@@ -12,6 +12,7 @@ import {
   coastlineCheckFailures,
   coastlineFailures,
   coastlineStatusLine,
+  inlandSkippedLine,
   type OfflineCoastlineStatus,
 } from '@/lib/offline-coastline'
 
@@ -163,9 +164,9 @@ export function OfflineCoastlineSection({ draft, onChange }: OfflineCoastlineSec
           ) : status ? (
             <p className="text-sm font-medium">{coastlineStatusLine(status)}</p>
           ) : null}
-          {status && status.inland_skipped > 0 && (
+          {status && inlandSkippedLine(status) && (
             <p className="text-xs text-muted-foreground" data-testid="offline-coastline-inland">
-              {status.inland_skipped === 1 ? '1 square that is all land is skipped.' : `${status.inland_skipped} squares that are all land are skipped.`}
+              {inlandSkippedLine(status)}
             </p>
           )}
           {unsaved && <p className="text-xs text-muted-foreground">Save settings to apply the switch.</p>}

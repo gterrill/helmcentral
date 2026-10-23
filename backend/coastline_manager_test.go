@@ -914,3 +914,34 @@ func TestCoastlineManager_AnInlandSquareAlreadyHeldStaysHeld(t *testing.T) {
 		t.Errorf("held inland square must stay: %+v", rec)
 	}
 }
+
+func TestCoastlineManager_DropsFailedInlandRecordsButKeepsHeldOnes(t *testing.T) {
+	h := newCoastlineHarness(t)
+	failedInland := coverageSquare{Lat: -24, Lon: 133}
+	heldInland := coverageSquare{Lat: -24, Lon: 134}
+	if !squareInland(failedInland) || !squareInland(heldInland) {
+		t.Fatal("fixture squares must be inland")
+	}
+	_ = h.store.RecordFailure(failedInland, "runtime error", h.now, h.now.Add(time.Hour))
+	_ = h.store.SaveSquare(heldInland, nil, h.now.Add(-time.Hour))
+	h.m.step()
+	if _, ok, _ := h.store.Record(failedInland); ok {
+		t.Error("a failed inland square holds nothing and must be dropped")
+	}
+	if rec, ok, _ := h.store.Record(heldInland); !ok || rec.Status != coastlineStatusReady {
+		t.Errorf("held inland square must stay: %+v", rec)
+	}
+}
+
+func TestCoastlineManager_NoWeeklyCheckForInlandSquares(t *testing.T) {
+	h := newCoastlineHarness(t)
+	inland := coverageSquare{Lat: -24, Lon: 133}
+	_ = h.store.SaveSquare(inland, nil, h.now.Add(-30*24*time.Hour))
+	for h.m.step() {
+	}
+	for _, sq := range h.src.checks {
+		if squareInland(sq) {
+			t.Errorf("weekly check asked Overpass about inland square %v", sq)
+		}
+	}
+}

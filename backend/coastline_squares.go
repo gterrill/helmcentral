@@ -174,7 +174,7 @@ func squaresWithin(lat, lon, radiusNm float64) ([]coverageSquare, error) {
 // GSHHG; every error in it falls toward "not inland", which only costs a
 // download. ADR 0203.
 //
-//go:embed data/coastline_inland_squares.bin
+//go:embed coastline_data/coastline_inland_squares.bin
 var inlandMaskBytes []byte
 
 const inlandMaskSize = 360 * 180 / 8

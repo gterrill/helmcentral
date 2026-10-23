@@ -28,8 +28,8 @@ sail home again needs no downloads. Only **Clear coverage** removes them.
 20 nm of the sea, such as the middle of a continent, cannot matter to a
 shelter estimate, which looks no further than 15 nm from the water. Helmcentral
 does not download it, and the page says how many it left out. When in doubt it
-downloads: the Caspian Sea, the polar regions and small islands count as
-coastal. A square of that kind that you already hold stays. A shelter estimate
+downloads: the Caspian Sea and Antarctica count as coastal, and so does any
+island too small for the land data to show. A square of that kind that you already hold stays. A shelter estimate
 asked for a position in such a square answers that the spot is inland, with no
 anchorage shelter to estimate.
 

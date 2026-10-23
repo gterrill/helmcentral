@@ -110,6 +110,12 @@ describe('OfflineCoastlineSection status line', () => {
     expect(screen.getByTestId('offline-coastline-inland')).toHaveTextContent('12 squares that are all land are skipped.')
   })
 
+  it('says nothing about skipped squares while the switch is off', () => {
+    hook.status = status({ enabled: false, state: 'off', inland_skipped: 12 })
+    renderSection({ offlineCoastlineEnabled: false })
+    expect(screen.queryByTestId('offline-coastline-inland')).toBeNull()
+  })
+
   it('says nothing about skipped squares when there are none', () => {
     hook.status = status({ state: 'idle', held: 41, wanted: 41, wanted_held: 41, inland_skipped: 0 })
     renderSection({ offlineCoastlineEnabled: true })

@@ -38,7 +38,9 @@ The status line under the switch tells you what is happening:
 
 Under the status, a muted line says how many squares in range are all land
 and so are skipped, for example "12 squares that are all land are skipped."
-They are not counted in the totals above.
+They are not among the squares to download, so they do not count toward the
+"of 49" in the progress figure. An all-land square you already hold from
+earlier is still held and still counted under Coverage.
 
 The map under it shows the squares aboard, shaded stronger the more recently
 each was downloaded, the 200 nm ring around the boat, and any square that failed

@@ -1,4 +1,4 @@
-// Command inlandmask writes backend/data/coastline_inland_squares.bin, the
+// Command inlandmask writes backend/coastline_data/coastline_inland_squares.bin, the
 // bitmap the offline coastline uses to skip coverage squares that are all
 // land (ADR 0203, "Inland squares are skipped").
 //
@@ -6,7 +6,12 @@
 // GeoJSON. The file is not kept in the repository; take it from history:
 //
 //	git show b330ff78^:backend/data/gshhg_coastline_l.json > /tmp/gshhg.json
-//	cd backend && go run ./cmd/inlandmask /tmp/gshhg.json data/coastline_inland_squares.bin
+//	cd backend && go run ./cmd/inlandmask /tmp/gshhg.json coastline_data/coastline_inland_squares.bin
+//
+// Upstream, should the repository history be lost: NOAA GSHHG 2.3.7,
+// GSHHS_l_L1 (low resolution, level 1 land), converted to GeoJSON polygons
+// (https://www.ngdc.noaa.gov/mgg/shorelines/). Rebuild the JSON from that
+// shapefile as one Polygon feature per ring, [lon, lat] coordinates.
 //
 // Output: 360 x 180 bits, 8100 bytes. Bit (lat+90)*360 + (lon+180), least
 // significant bit first within a byte, is set when the 1 degree square whose
@@ -31,7 +36,8 @@ import (
 const (
 	inlandMarginNm = 20.0
 	densifyNm      = 1.0
-	edgeSamples    = 20 // matches squareDistanceNm in the backend
+	edgeSamples    = 20   // coarse scan per edge before refining
+	distTolNm      = 0.05 // slack added to the margin so rounding never favours inland
 	earthRadiusNm  = 3440.065
 )
 
@@ -53,26 +59,45 @@ func haversineNm(a, b pt) float64 {
 	return 2 * earthRadiusNm * math.Asin(math.Min(1, math.Sqrt(h)))
 }
 
-// distToSquareNm is the distance from p to the nearest point of the square,
-// 0 inside, sampling the perimeter like squareDistanceNm.
+// distToSquareNm is the great-circle distance from p to the nearest point of
+// the square, 0 inside. Each edge is scanned coarsely, then the best sample
+// is refined by ternary search, so the result is exact to well under 0.01 nm
+// and never overestimates by more than that. The caller adds distTolNm.
 func distToSquareNm(p pt, la, lo int) float64 {
 	s, w, n, e := float64(la), float64(lo), float64(la+1), float64(lo+1)
 	if p.lat >= s && p.lat <= n && p.lon >= w && p.lon <= e {
 		return 0
 	}
 	best := math.MaxFloat64
-	try := func(lat, lon float64) {
-		if d := haversineNm(p, pt{lat, lon}); d < best {
-			best = d
+	edge := func(at func(f float64) pt) {
+		d := func(f float64) float64 { return haversineNm(p, at(f)) }
+		bf, bd := 0.0, math.MaxFloat64
+		for i := 0; i <= edgeSamples; i++ {
+			f := float64(i) / edgeSamples
+			if v := d(f); v < bd {
+				bf, bd = f, v
+			}
+		}
+		lo, hi := math.Max(0, bf-1.0/edgeSamples), math.Min(1, bf+1.0/edgeSamples)
+		for k := 0; k < 40; k++ {
+			m1, m2 := lo+(hi-lo)/3, hi-(hi-lo)/3
+			if d(m1) < d(m2) {
+				hi = m2
+			} else {
+				lo = m1
+			}
+		}
+		if v := d((lo + hi) / 2); v < bd {
+			bd = v
+		}
+		if bd < best {
+			best = bd
 		}
 	}
-	for i := 0; i <= edgeSamples; i++ {
-		f := float64(i) / edgeSamples
-		try(s, w+f)
-		try(n, w+f)
-		try(s+f, w)
-		try(s+f, e)
-	}
+	edge(func(f float64) pt { return pt{s, w + f} })
+	edge(func(f float64) pt { return pt{n, w + f} })
+	edge(func(f float64) pt { return pt{s + f, w} })
+	edge(func(f float64) pt { return pt{s + f, e} })
 	return best
 }
 
@@ -190,7 +215,7 @@ func main() {
 				for bo := lonFrom; bo <= lonTo; bo++ {
 					w := ((bo+180)%360+360)%360 - 180
 					for _, p := range buckets[sqIndex(bl, w)] {
-						if distToSquareNm(p, la, lo) <= inlandMarginNm {
+						if distToSquareNm(p, la, lo) <= inlandMarginNm+distTolNm {
 							near = true
 							break search
 						}

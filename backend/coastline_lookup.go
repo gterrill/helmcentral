@@ -59,9 +59,6 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 	if err != nil {
 		return shorelineSet{}, err
 	}
-	if squareInland(own) {
-		return shorelineSet{}, fmt.Errorf("%.4f, %.4f is inland, well clear of the sea, so there is no anchorage shelter to estimate there", lat, lon)
-	}
 	recs, err := r.Store.Records()
 	if err != nil {
 		return shorelineSet{}, err
@@ -108,11 +105,17 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 		if rec, held := byKey[sq]; held && rec.Status == coastlineStatusReady {
 			continue
 		}
+		if squareInland(sq) {
+			// By definition no sea lies within 20 nm of it, so it holds no
+			// coastline and no ray from water reaches it. Only the position's
+			// own square being inland is worth saying.
+			if sq == own {
+				return shorelineSet{}, fmt.Errorf("%.4f, %.4f is inland, well clear of the sea, so there is no anchorage shelter to estimate there", lat, lon)
+			}
+			continue
+		}
 		if sq == own {
 			ownMissing = true
-		}
-		if squareInland(sq) {
-			return shorelineSet{}, fmt.Errorf("%.4f, %.4f is ashore: %s is inland, well clear of the sea, so there is no anchorage shelter to estimate there", lat, lon, sq.Label())
 		}
 		missing = append(missing, fmt.Sprintf("%s (%s)", sq.Label(), describe(sq)))
 	}
@@ -134,12 +137,19 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 		return shorelineSet{}, fmt.Errorf("shelter at %.4f, %.4f needs neighbouring Offline coastline squares that are not held: %s", lat, lon, strings.Join(missing, ", "))
 	}
 
-	lines, err := r.Store.Lines(needed)
+	// Inland squares that were never downloaded hold no coastline.
+	var used []coverageSquare
+	for _, sq := range needed {
+		if _, held := byKey[sq]; held || !squareInland(sq) {
+			used = append(used, sq)
+		}
+	}
+	lines, err := r.Store.Lines(used)
 	if err != nil {
 		return shorelineSet{}, err
 	}
 	oldest := time.Time{}
-	for _, sq := range needed {
+	for _, sq := range used {
 		if d := byKey[sq].DownloadedAt; oldest.IsZero() || d.Before(oldest) {
 			oldest = d
 		}

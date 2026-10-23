@@ -209,6 +209,15 @@ func (s *coastlineStore) RecordFailure(sq coverageSquare, message string, at, ne
 	})
 }
 
+// DeleteFailed removes a square's row only if it failed and holds no
+// geometry; a held square is never touched.
+func (s *coastlineStore) DeleteFailed(sq coverageSquare) error {
+	return s.RunTx("delete failed coastline square", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`DELETE FROM coastline_squares WHERE lat = ? AND lon = ? AND status = ?`, sq.Lat, sq.Lon, coastlineStatusFailed)
+		return err
+	})
+}
+
 // RecordEdits stores the result of a weekly check on a held square.
 func (s *coastlineStore) RecordEdits(sq coverageSquare, edits int, checkedAt time.Time) error {
 	return s.RunTx("record coastline edits", func(tx *sql.Tx) error {
