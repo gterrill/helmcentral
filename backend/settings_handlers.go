@@ -415,6 +415,11 @@ func updateSettingsHandler(c echo.Context) error {
 	if err := writeSettings(settingsPath, settings); err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save settings"})
 	}
+	if globalCoastlineManager != nil {
+		// The Offline coastline switch may have changed: the page refetches
+		// status right after this save and must see the new switch.
+		globalCoastlineManager.SettingsChanged()
+	}
 
 	// A house bank may have just been chosen or changed: move the alarm rules
 	// that follow it, then seed whichever anomaly-v1 sub-sets that unlocks. A

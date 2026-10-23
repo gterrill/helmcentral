@@ -238,20 +238,6 @@ func scanCoastlineRecord(row interface{ Scan(...any) error }) (coastlineSquareRe
 
 const coastlineRecordColumns = `lat, lon, status, downloaded_at, edits_since, checked_at, last_error, attempts, next_attempt_at`
 
-// Record returns one square's row, ok false when the store has none.
-func (s *coastlineStore) Record(sq coverageSquare) (coastlineSquareRecord, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	r, err := scanCoastlineRecord(s.db.QueryRow(`SELECT `+coastlineRecordColumns+` FROM coastline_squares WHERE lat = ? AND lon = ?`, sq.Lat, sq.Lon))
-	if err == sql.ErrNoRows {
-		return coastlineSquareRecord{}, false, nil
-	}
-	if err != nil {
-		return coastlineSquareRecord{}, false, fmt.Errorf("read coastline square: %w", err)
-	}
-	return r, true, nil
-}
-
 // Records returns every square the store has a row for, without geometry.
 func (s *coastlineStore) Records() ([]coastlineSquareRecord, error) {
 	s.mu.Lock()

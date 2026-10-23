@@ -192,10 +192,10 @@ func TestCoastlineManager_NoFixPausesTopUpButStatusSaysSo(t *testing.T) {
 func TestCoastlineManager_FailedSquareIsRecordedBackedOffAndRetried(t *testing.T) {
 	h := newCoastlineHarness(t)
 	wanted, _ := squaresWithin(h.lat, h.lon, coastlineCoverageRadiusNm)
-	h.src.fail[wanted[0]] = errors.New("overpass rate limited")
+	h.src.fail[wanted[0]] = errors.New("overpass query failed: runtime error: out of memory")
 	h.m.step()
 	rec, ok, _ := h.store.Record(wanted[0])
-	if !ok || rec.Status != coastlineStatusFailed || rec.LastError != "overpass rate limited" || rec.Attempts != 1 {
+	if !ok || rec.Status != coastlineStatusFailed || rec.LastError != "overpass query failed: runtime error: out of memory" || rec.Attempts != 1 {
 		t.Fatalf("failure not recorded: %+v", rec)
 	}
 	first := rec.NextAttemptAt.Sub(h.now)
@@ -223,7 +223,7 @@ func TestCoastlineManager_FailedSquareIsRecordedBackedOffAndRetried(t *testing.T
 			shown = &st.Squares[i]
 		}
 	}
-	if shown == nil || shown.State != "failed" || shown.Error != "overpass rate limited" {
+	if shown == nil || shown.State != "failed" || shown.Error != "overpass query failed: runtime error: out of memory" {
 		t.Errorf("the page must show the failed square and why: %+v", shown)
 	}
 
@@ -342,7 +342,7 @@ func TestCoastlineManager_WeeklyCheckFailureBacksOff(t *testing.T) {
 	sq := coverageSquare{-21, 148}
 	_ = h.store.SaveSquare(sq, nil, h.now)
 	h.now = h.now.Add(8 * 24 * time.Hour)
-	h.src.checkErr = fmt.Errorf("overpass rate limited")
+	h.src.checkErr = fmt.Errorf("overpass query failed: runtime error: out of memory")
 	h.fix = false
 	if !h.m.step() {
 		t.Fatal("check should have run")
@@ -565,5 +565,197 @@ func TestCoastlineManager_SwitchOffDiscardsDownloadInFlight(t *testing.T) {
 	recs, _ := h.store.Records()
 	if len(recs) != 0 {
 		t.Errorf("a download finishing after the switch went off must not be saved: %v", recs)
+	}
+}
+
+const rateLimitedErr = "overpass rate limited (HTTP 429 with a non-JSON body, retry after 120s)"
+
+func TestClassifyCoastlineError(t *testing.T) {
+	for _, msg := range []string{
+		"overpass rate limited",
+		"overpass rate limited (HTTP 429 with a non-JSON body)",
+		"overpass returned status 429",
+		"overpass returned status 503, retry after 20s",
+		"overpass returned status 504",
+		"Post \"https://x\": dial tcp 1.2.3.4:443: connect: connection refused",
+		"dial tcp: lookup overpass-api.de: no such host",
+		"read tcp: i/o timeout",
+		"the server is probably too busy",
+	} {
+		if classifyCoastlineError(errors.New(msg)) == nil {
+			t.Errorf("%q is the whole service refusing, not one square", msg)
+		}
+	}
+	for _, msg := range []string{
+		"overpass query failed: runtime error: out of memory",
+		"failed to parse overpass response: invalid character",
+		"shoreline_square: way/1 has a node with no position",
+		"overpass returned status 400",
+	} {
+		if classifyCoastlineError(errors.New(msg)) != nil {
+			t.Errorf("%q is about the square", msg)
+		}
+	}
+	if p := classifyCoastlineError(errors.New(rateLimitedErr)); p.RetryAfter != 120*time.Second {
+		t.Errorf("retry after %v", p.RetryAfter)
+	}
+}
+
+func TestCoastlineManager_RateLimitPausesTheWholeJobWithoutMarkingTheSquare(t *testing.T) {
+	h := newCoastlineHarness(t)
+	wanted, _ := squaresWithin(h.lat, h.lon, coastlineCoverageRadiusNm)
+	h.src.fail[wanted[0]] = errors.New(rateLimitedErr)
+	start := h.now
+
+	h.m.step()
+	if len(h.src.downloads) != 1 {
+		t.Fatalf("downloads %v", h.src.downloads)
+	}
+	if _, ok, _ := h.store.Record(wanted[0]); ok {
+		t.Error("a rate limit says nothing about the square; it must not be recorded as failed")
+	}
+
+	// Ten seconds later, the next square is NOT tried: the server just said no.
+	h.now = start.Add(coastlineDownloadPause)
+	if h.m.step() || len(h.src.downloads) != 1 {
+		t.Errorf("worker kept hitting a rate-limiting server: %v", h.src.downloads)
+	}
+	st, _ := h.m.Status()
+	if st.State != "paused" || !strings.Contains(st.PauseReason, "rate-limiting") || st.RetryAt == nil || !st.RetryAt.Equal(start.Add(coastlineRetryBase)) {
+		t.Errorf("the page must say the server is rate-limiting and when it will retry: %+v", st)
+	}
+	if st.Failed != 0 {
+		t.Errorf("no square failed: %d", st.Failed)
+	}
+
+	// After the wait the same square is tried again; a second refusal waits
+	// twice as long.
+	h.now = start.Add(coastlineRetryBase + time.Second)
+	h.m.step()
+	if len(h.src.downloads) != 2 || h.src.downloads[1] != wanted[0] {
+		t.Fatalf("after the pause: %v", h.src.downloads)
+	}
+	st, _ = h.m.Status()
+	if want := h.now.Add(2 * coastlineRetryBase); !st.RetryAt.Equal(want) {
+		t.Errorf("second pause until %v, want %v", st.RetryAt, want)
+	}
+
+	// Recovery clears the pause.
+	delete(h.src.fail, wanted[0])
+	h.now = st.RetryAt.Add(time.Second)
+	h.m.step()
+	st, _ = h.m.Status()
+	if st.State == "paused" || st.RetryAt != nil {
+		t.Errorf("still paused after success: %+v", st)
+	}
+}
+
+func TestCoastlineManager_RetryAfterLongerThanTheBackoffIsHonoured(t *testing.T) {
+	h := newCoastlineHarness(t)
+	wanted, _ := squaresWithin(h.lat, h.lon, coastlineCoverageRadiusNm)
+	h.src.fail[wanted[0]] = errors.New("overpass rate limited (HTTP 429 with a non-JSON body, retry after 1800s)")
+	h.m.step()
+	st, _ := h.m.Status()
+	if st.RetryAt == nil || !st.RetryAt.Equal(h.now.Add(30*time.Minute)) {
+		t.Errorf("retry at %v, want 30 minutes", st.RetryAt)
+	}
+}
+
+func TestCoastlineManager_RefusedUpdateStaysQueued(t *testing.T) {
+	h := newCoastlineHarness(t)
+	sq := coverageSquare{-21, 148}
+	_ = h.store.SaveSquare(sq, sampleCoastLines(), h.now)
+	_ = h.store.RecordEdits(sq, 5, h.now)
+	h.src.fail[sq] = errors.New("overpass returned status 503")
+	if _, err := h.m.Update(); err != nil {
+		t.Fatal(err)
+	}
+	h.m.step()
+	st, _ := h.m.Status()
+	if st.Updating != 1 || st.State != "paused" {
+		t.Errorf("the operator's update must wait out the pause: %+v", st)
+	}
+	delete(h.src.fail, sq)
+	h.now = h.now.Add(coastlineRetryBase + time.Second)
+	h.m.step()
+	rec, _, _ := h.store.Record(sq)
+	if rec.EditsSince != 0 {
+		t.Errorf("update not applied after the pause: %+v", rec)
+	}
+}
+
+func TestCoastlineManager_RefusedWeeklyCheckPausesInsteadOfRecordingFailure(t *testing.T) {
+	h := newCoastlineHarness(t)
+	sq := coverageSquare{-21, 148}
+	_ = h.store.SaveSquare(sq, nil, h.now)
+	h.now = h.now.Add(8 * 24 * time.Hour)
+	h.src.checkErr = errors.New("overpass rate limited")
+	h.fix = false
+	h.m.step()
+	rec, _, _ := h.store.Record(sq)
+	if rec.LastError != "" {
+		t.Errorf("a refused check is not the square's fault: %+v", rec)
+	}
+	st, _ := h.m.Status()
+	if st.State != "paused" {
+		t.Errorf("%+v", st)
+	}
+}
+
+func TestCoastlineManager_StatusServesCachedStateInsteadOfFetchingEveryPoll(t *testing.T) {
+	h := newCoastlineHarness(t)
+	var posCalls, enCalls int
+	cfg := h.m.cfg
+	pos, en := cfg.Position, cfg.Enabled
+	h.m.cfg.Position = func() (float64, float64, bool) { posCalls++; return pos() }
+	h.m.cfg.Enabled = func() (bool, error) { enCalls++; return en() }
+
+	h.m.step()
+	p0, e0 := posCalls, enCalls
+	for i := 0; i < 5; i++ {
+		st, err := h.m.Status()
+		if err != nil || !st.Enabled || !st.HasFix {
+			t.Fatalf("%+v %v", st, err)
+		}
+	}
+	if posCalls != p0 || enCalls != e0 {
+		t.Errorf("Status fetched position %d times and the setting %d times", posCalls-p0, enCalls-e0)
+	}
+
+	// A settings save shows at once.
+	h.setEnabled(false)
+	h.m.SettingsChanged()
+	if st, _ := h.m.Status(); st.Enabled || st.State != "off" {
+		t.Errorf("after the save: %+v", st)
+	}
+}
+
+func TestCoastlineManager_StatusCountsOnlyWantedFailuresAndKeepsFailedChecksHeld(t *testing.T) {
+	h := newCoastlineHarness(t)
+	wanted, _ := squaresWithin(h.lat, h.lon, coastlineCoverageRadiusNm)
+	// A wanted square whose download failed and will be retried.
+	_ = h.store.RecordFailure(wanted[0], "runtime error", h.now, h.now.Add(time.Hour))
+	// A failed square far outside the ring: never retried, not counted.
+	far := coverageSquare{40, 10}
+	_ = h.store.RecordFailure(far, "runtime error", h.now, h.now.Add(time.Hour))
+	// A held square whose weekly check failed.
+	held := wanted[1]
+	_ = h.store.SaveSquare(held, nil, h.now)
+	_ = h.store.RecordFailure(held, "check failed", h.now, h.now.Add(time.Hour))
+
+	h.m.refresh()
+	st, _ := h.m.Status()
+	if st.Failed != 1 {
+		t.Errorf("failed %d, want only the wanted square awaiting retry", st.Failed)
+	}
+	if st.CheckFailed != 1 {
+		t.Errorf("check_failed %d", st.CheckFailed)
+	}
+	for _, q := range st.Squares {
+		if q.Lat == held.Lat && q.Lon == held.Lon {
+			if q.State != "ready" || q.Error != "" || q.CheckError != "check failed" {
+				t.Errorf("held square with a failed check: %+v", q)
+			}
+		}
 	}
 }

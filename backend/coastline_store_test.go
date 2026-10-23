@@ -1,6 +1,8 @@
 package main
 
 import (
+	"database/sql"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -182,4 +184,19 @@ func TestCoastlineStore_RecordsAndClear(t *testing.T) {
 	if len(recs) != 0 {
 		t.Errorf("clear left %v", recs)
 	}
+}
+
+// Record returns one square's row, ok false when the store has none. Only
+// tests need a single-row read; production code reads Records.
+func (s *coastlineStore) Record(sq coverageSquare) (coastlineSquareRecord, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := scanCoastlineRecord(s.db.QueryRow(`SELECT `+coastlineRecordColumns+` FROM coastline_squares WHERE lat = ? AND lon = ?`, sq.Lat, sq.Lon))
+	if err == sql.ErrNoRows {
+		return coastlineSquareRecord{}, false, nil
+	}
+	if err != nil {
+		return coastlineSquareRecord{}, false, fmt.Errorf("read coastline square: %w", err)
+	}
+	return r, true, nil
 }
