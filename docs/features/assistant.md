@@ -120,10 +120,14 @@ Treat it as a first look, and Mate says so. It works from the shoreline as
 charted: it cannot see wind bending round a headland, gusts funnelling down a
 valley or swell wrapping round a point, so it can read an anchorage as better
 sheltered than it is on the side where swell curls in, and it is only as good
-as the chart. The coastline comes from the place-names source in Settings →
-Plugins and is fetched once per anchorage and kept for a week. If that source
-is an older copy that cannot supply coastline, or the map server does not
-answer in time, Mate says so rather than guessing.
+as the chart.
+
+The shoreline is the [Offline coastline](offline-coastline.md), kept aboard,
+so the answer needs no signal. It is off until you turn it on in Settings →
+Offline coastline, and it covers the water within 200 nm of the boat plus
+anywhere you have downloaded before. Where it has not been downloaded, or is
+off, or a neighbouring square is missing, Mate tells you exactly which and
+does not guess the shelter.
 
 When InfluxDB is configured, it can also estimate how long a passage will
 take and how much fuel it will burn, from your own boat's logged speed over

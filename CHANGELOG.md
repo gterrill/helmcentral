@@ -28,11 +28,21 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   against the forecast wind for the stay. Inside a reef it gives the reef's
   width each way and says that reef shelter depends on the tide. It is an
   estimate from the chart: it cannot see wind bending round a headland, gusts
-  down a valley or swell wrapping a point, and Mate says so. It needs the
-  updated OpenStreetMap place-names plugin that ships with this release; with an
-  older copy, Mate reports that coastline is unavailable instead of guessing.
-  The map server can be slow on a boat connection, and a timeout is reported
-  as a failure.
+  down a valley or swell wrapping a point, and Mate says so.
+- **An offline coastline, kept aboard.** A new **Offline coastline** section in
+  Settings downloads the coastline and reefs for every 1° square within 200 nm
+  of the boat, in the background and nearest first, and keeps squares you have
+  downloaded before. Mate's shelter answer reads it, so it works with no
+  signal. It is off until you switch it on, because filling it uses the
+  internet. A map shows what is held, how old each square is, and any square
+  that failed and why. Once a week Helmcentral checks whether the public map has
+  changed inside each square; the page shows how many edits since, and an
+  **Update** button downloads those squares again when you choose. **Clear
+  coverage** deletes everything. Where the coastline is off, missing, or still
+  downloading, Mate says exactly that instead of guessing. It needs the updated
+  OpenStreetMap place-names plugin that ships with this release; with an older
+  copy the page says the plugin is too old. Areas across the 180° meridian or
+  near a pole are not covered.
 - **The passage replay can show the land in 3D.** A 3D button beside the
   satellite button tilts the map and raises hills and headlands, with the sea
   kept flat so the chart and photographs lie level on the water. You can drag to

@@ -32,6 +32,9 @@ meets your needs.
 - [Mate](features/assistant.md), a chat assistant that answers
   passage-planning questions using the boat's own live data, from any page
   and by voice.
+- [Offline coastline](features/offline-coastline.md), the charted coastline and
+  reefs kept aboard for the water around the boat, which Mate uses to judge
+  anchorage shelter without internet.
 - [Documents](features/documents.md), a searchable library for manuals,
   receipts and logs, with OCR, summaries and tags once Mate reads a scan or
   a photo. Built and working; no Documents panel in the dashboard yet.
@@ -67,6 +70,8 @@ Steps for specific tasks.
   filing, ordering and illustrating the sections.
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
 - [Set passage limits](how-to/set-passage-limits.md)
+- [Turn on the offline coastline](how-to/turn-on-the-offline-coastline.md),
+  filling it, keeping it current and clearing it.
 - [Set up your vessel](how-to/set-up-your-vessel.md), picking the engines and
   house bank anomaly detection watches, and entering owner and insurance
   details.

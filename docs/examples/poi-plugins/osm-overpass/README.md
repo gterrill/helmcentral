@@ -147,23 +147,34 @@ match answers in about 1s even at the full 100nm rung 1 radius (Overpass
 uses its name index directly), and the rung 2 regex union answers in 2 to
 5s at 20nm (not indexable, a full scan of the box).
 
-## A third optional export: shoreline_near
+## Two more optional exports: shoreline_square and shoreline_changes
 
-`shoreline_near` is independent of the pair above and serves Mate's
-`anchorage_shelter` tool
-([ADR 0201](../../../adr/0201-anchorage-shelter-from-charted-shoreline.md)).
-Input `{"lat": <number>, "lon": <number>, "radius_m": <integer>}`, output
+These are independent of the pair above and feed the host's offline coastline
+([ADR 0203](../../../adr/0203-offline-coastline-and-anchorage-shelter.md)). A
+plugin has to export both for the host to use either.
+
+`shoreline_square`: input `{"south": <number>, "west": <number>, "north":
+<number>, "east": <number>}` (one 1° by 1° coverage square), output
 `{"lines": [{"id": "way/123", "kind": "coastline"|"reef", "name": <string>, "closed": <boolean>, "points": [[lat, lon], ...]}]}`:
 raw OpenStreetMap geometry, no distances (the host casts the rays).
 
 One Overpass request, with the global `[bbox:...]` setting as the spatial
 index. Coastline is output clipped to the box (`out geom(bbox)`, which returns
-`null` for nodes outside it) and reef ways and `natural=reef` relation outer
-members are output whole, so a reef ring stays closed for the host's
-containment test. The plugin then drops points closer than 15 m to the last
-one kept; a Stonehaven query is about 340 KB. A box that would cross the
-antimeridian or a pole, an Overpass `remark` runtime error, a rate limit, and a
-reef with a missing node are all errors. `lines: []` means open sea.
+`null` for nodes outside it), so two neighbouring squares never repeat it. Reef
+ways and `natural=reef` relation outer members are output whole, so a reef
+ring that crosses a square edge stays closed; the host removes the duplicate by
+`id`. The plugin then drops points closer than 15 m to the last one kept; a
+square in the Whitsundays is about 450 KB. The query asks Overpass for up to
+100 s, and the host gives the call 120 s. A box that crosses the antimeridian or
+a pole, or is larger than 2°, an Overpass `remark` runtime error, a rate limit,
+and a reef with a missing node are all errors. `lines: []` means open sea.
+
+`shoreline_changes`: input is the same box plus `"since"`, an RFC 3339 time;
+output `{"changed": <integer>}`. It counts coastline ways and reef ways and
+relations in the box whose own timestamp is newer than `since`
+(`(newer:"...")` with `out count;`). It does not see a deleted element or a
+node moved inside an unedited way. A response with no count is an error, never
+zero.
 
 ## Truncation is a heuristic, not an exact count
 
