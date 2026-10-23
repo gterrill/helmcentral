@@ -67,6 +67,11 @@ type assistantActiveAlarmsResult struct {
 	// times are UTC, so Mate does not present them as local.
 	TimezoneNote string           `json:"timezone_note,omitempty"`
 	Alarms       []assistantAlarm `json:"alarms"`
+	// IgnoredAlarms are the titles of the network alarms the operator has
+	// stopped showing. They are absent from alarms, from the alarm history and
+	// from every notification, which is why Mate was not told about them.
+	// Mate can read this list and has no tool to change it.
+	IgnoredAlarms []string `json:"ignored_alarms,omitempty"`
 }
 
 func assistantAlarmSensors(in []sensorHealthEntry) []assistantAlarmSensor {
@@ -85,7 +90,7 @@ func (d assistantToolDeps) executeGetActiveAlarms(ctx context.Context, _ json.Ra
 		return "", fmt.Errorf("get_active_alarms: the alarm list is not available")
 	}
 	alarms := d.activeAlarms()
-	result := assistantActiveAlarmsResult{Alarms: make([]assistantAlarm, 0, len(alarms))}
+	result := assistantActiveAlarmsResult{Alarms: make([]assistantAlarm, 0, len(alarms)), IgnoredAlarms: ignoredAlarmTitles()}
 
 	// The vessel's position is a SignalK round trip, needed only to turn
 	// timestamps into boat time. Without a timestamp to format, skip it.
@@ -276,7 +281,10 @@ var mateToolGetActiveAlarms = mateTool{
 			"says nothing about them. sensor_count, live_sensor_count and investigate_count give the full " +
 			"length of a list that was cut to fit. If truncated is true, alarms were left out: shown of count " +
 			"are listed. Call this FIRST for any question about an alarm, then investigate what it returns, " +
-			"never a path guessed from a device name. An empty list means nothing is alarming.",
+			"never a path guessed from a device name. An empty list means nothing is alarming. ignored_alarms lists " +
+			"the titles of network alarms the operator has chosen to stop showing; they are not in alarms or " +
+			"the alarm history, so if asked why you did not hear of one, say it is on that list. You cannot " +
+			"change the list; the operator restores a kind in Settings.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
 	execute: assistantToolDeps.executeGetActiveAlarms,

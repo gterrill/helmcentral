@@ -17,6 +17,8 @@ export interface SensorHealthEntry {
   label: string
   /** The whole line: label, reading and why it is wrong. */
   text: string
+  /** Only on the ignored-sensors list: when the operator ignored it (RFC 3339). */
+  ignored_at?: string
 }
 
 export interface ActiveAlarm {
@@ -115,6 +117,12 @@ export interface ActiveAlarm {
   silenced: boolean
   can_silence: boolean
   can_acknowledge: boolean
+  /**
+   * True on a network alarm the operator may stop showing. The server decides
+   * (safety alarms and emergencies are never ignorable); the card offers the
+   * action from this alone.
+   */
+  ignorable?: boolean
 }
 
 interface AlarmsPayload {

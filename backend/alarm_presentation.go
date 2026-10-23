@@ -32,6 +32,9 @@ var (
 // the path turned into words.
 var writtenTitles = map[string]string{
 	"navigation.anchor": "Anchor Alarm",
+	// The plotter's route alarms (alarm_presentation_navigation.go).
+	"perpendicularPassed":  "Waypoint Passed",
+	"arrivalCircleEntered": "Arriving at Waypoint",
 }
 
 // presentNotification turns a bus notification (path without the
@@ -69,6 +72,10 @@ func presentNotification(path, message string, radars []radarInfo) (title, body 
 			return "AIS Distress", sentence(message, path)
 		}
 		return "Distress Received", sentence(message, path)
+	}
+
+	if title, body, ok := presentNavigationNotification(path); ok {
+		return title, body
 	}
 
 	title, ok := writtenTitles[path]

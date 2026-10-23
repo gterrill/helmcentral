@@ -102,23 +102,12 @@ type alarmRulesFile struct {
 	// on the file being empty, because a set the operator deleted on purpose
 	// must never come back on the next restart.
 	SeededSets []string `json:"seeded_sets,omitempty"`
-
-	// IgnoredSensors is the anomaly-detection sensor-health checks' own
-	// exclusion list (anomaly_sensor_health.go's frozenVerdict/silentSources
-	// excluded parameters): a SignalK path (a dead exhaust sender excluded
-	// from the frozen check) or a $source id (a source excluded from the
-	// silent-source check), added from the alarm card's own "Ignore this
-	// sensor" action, on the boat -- not a settings list, and not shipped
-	// with any entry by any install (plan: "nothing Pikorua-specific in
-	// shipped config").
-	IgnoredSensors []string `json:"ignored_sensors,omitempty"`
 }
 
 var (
-	alarmRulesMu             sync.RWMutex
-	alarmRulesState          = map[string]*alarmRule{}
-	alarmRulesSeededSets     []string
-	alarmRulesIgnoredSensors []string
+	alarmRulesMu         sync.RWMutex
+	alarmRulesState      = map[string]*alarmRule{}
+	alarmRulesSeededSets []string
 )
 
 // Rules live in their own file rather than settings.yaml deliberately: POST
@@ -138,7 +127,6 @@ func loadAlarmRules() error {
 			alarmRulesMu.Lock()
 			alarmRulesState = map[string]*alarmRule{}
 			alarmRulesSeededSets = nil
-			alarmRulesIgnoredSensors = nil
 			alarmRulesMu.Unlock()
 			return nil
 		}
@@ -163,7 +151,6 @@ func loadAlarmRules() error {
 	alarmRulesMu.Lock()
 	alarmRulesState = next
 	alarmRulesSeededSets = file.SeededSets
-	alarmRulesIgnoredSensors = file.IgnoredSensors
 	alarmRulesMu.Unlock()
 	return nil
 }
@@ -175,7 +162,7 @@ func saveAlarmRulesLocked() error {
 	}
 	sortAlarmRules(list)
 	return writeJSONFileAtomic(alarmRulesFilePath(), alarmRulesFile{
-		Rules: list, SeededSets: alarmRulesSeededSets, IgnoredSensors: alarmRulesIgnoredSensors,
+		Rules: list, SeededSets: alarmRulesSeededSets,
 	})
 }
 

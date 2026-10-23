@@ -41,7 +41,9 @@ func TestPresentNotificationGuardZoneNamesTheRadarWhenTwoAreLive(t *testing.T) {
 
 func TestPresentNotificationGeneric(t *testing.T) {
 	cases := []struct{ path, message, title, body string }{
-		{"perpendicularPassed", "Perpendicular passed", "Perpendicular Passed", "Perpendicular passed."},
+		{"perpendicularPassed", "Perpendicular passed!", "Waypoint Passed", "The boat has passed the active waypoint."},
+		{"arrivalCircleEntered", "WP arrival circle entered!", "Arriving at Waypoint", "The boat is inside the active waypoint's arrival circle."},
+		{"navigation.arrivalCircleEntered", "", "Arriving at Waypoint", "The boat is inside the active waypoint's arrival circle."},
 		{"propulsion.starboard.overTemperature", "Engine too hot!", "Propulsion Starboard Over Temperature", "Engine too hot."},
 		{"navigation.depth", "Shallow?", "Navigation Depth", "Shallow."},
 		{"navigation.depth", "  Shallow!!  ", "Navigation Depth", "Shallow."},

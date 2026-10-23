@@ -326,3 +326,11 @@ export function formatAlarmTime(iso?: string): string | null {
 
   return isToday ? time : `${date.getDate()} ${MONTHS[date.getMonth()]} ${time}`
 }
+
+/** "12 Oct 2026" for the date an item went onto an ignore list; "" when unknown. */
+export function formatIgnoredOn(iso?: string): string {
+  if (!iso) return ''
+  const at = new Date(iso)
+  if (Number.isNaN(at.getTime())) return ''
+  return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}

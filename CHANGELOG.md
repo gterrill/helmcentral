@@ -11,7 +11,24 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Stop showing an alarm you can't act on.** Alarms raised by other devices on
+  the boat, such as the plotter's Waypoint Passed, now have a **Stop showing**
+  button on their card in the alarms drawer. Confirm it and that kind of alarm
+  leaves the board and the banner, and stops reaching your phone, other
+  notifications and Mate, whichever device raises it. Safety alarms (man
+  overboard, fire, flooding, anchor, collision, grounding, distress calls, radar
+  guard zones and anything marked as an emergency) never have the button. Find
+  what you stopped, with the date, under Settings → Alarms → Ignored alarms, and
+  choose **Restore** to see it again. Settings → Alarms → Ignored sensors now
+  shows its dates too, and your existing ignored sensors carry over on their own.
+
 ### Changed
+
+- **The plotter's route alarms read plainly.** "Perpendicular passed" is now
+  **Waypoint Passed** and "Arrival circle entered" is now **Arriving at
+  Waypoint**, each with one sentence saying what it means.
 
 - **Offline coastline no longer downloads squares that are all land.** Squares
   with no part of them within 20 nm of the sea, such as the interior of a

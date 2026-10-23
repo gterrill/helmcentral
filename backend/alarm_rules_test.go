@@ -17,12 +17,14 @@ func withTempAlarmRules(t *testing.T) string {
 
 	alarmRulesMu.Lock()
 	alarmRulesState = map[string]*alarmRule{}
-	// The seed markers and ignored-sensor list are part of the rules file's
-	// state, so a helper that stands up a fresh install has to clear them
-	// too - otherwise one test's seeding/ignoring suppresses another's.
+	// The seed markers are part of the rules file's state, so a helper that
+	// stands up a fresh install has to clear them too - otherwise one test's
+	// seeding suppresses another's.
 	alarmRulesSeededSets = nil
-	alarmRulesIgnoredSensors = nil
 	alarmRulesMu.Unlock()
+	// The ignore lists live in the database, not the rules file; a fresh
+	// install starts with both empty.
+	withTempIgnoreStore(t)
 
 	return path
 }

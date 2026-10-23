@@ -68,6 +68,8 @@ Steps for specific tasks.
   and what the builder's handbook already covers.
 - [Write the boat's manual](how-to/write-the-boats-manual.md), capturing,
   filing, ordering and illustrating the sections.
+- [Stop showing a network alarm](how-to/stop-showing-a-network-alarm.md), and
+  bringing it back.
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
 - [Set passage limits](how-to/set-passage-limits.md)
 - [Turn on the offline coastline](how-to/turn-on-the-offline-coastline.md),
