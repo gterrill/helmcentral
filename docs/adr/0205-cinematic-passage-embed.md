@@ -170,6 +170,81 @@ snippet of text.
    security policy needs to allow those hosts; the how-to lists the directives. The card still contains no
    address of the boat, and a test checks the full set of hosts in the snippet.
    The built player is about 27.8 KB (11.8 KB gzipped), up from 12.7 KB (4.1 KB).
+   With signs (item 8) it is 34.2 KB (14.2 KB gzipped).
+8. **Signs and their photos.** The card's data gets a `signs` list: time, title,
+   note, visibility and show time for each sign inside an exported passage, and
+   a photo as a data URI when the sign has one. The sign's id and its document
+   id never go out. The player runs the app's own `lib/replay-signs.ts` (always,
+   while passing, after passing, the 0.5 s lead-in, at most two cards, a
+   displaced card never returns) and only draws the result: `export-player/signs.ts`
+   builds pins, cards on a leader line and the photo dialog with DOM calls and
+   `textContent`, as map markers so they follow the projection through pitch and
+   terrain. A card's signs run on the replay's own clock with nights left out,
+   so a pause at anchor does not use up a passing sign's time. Pins show at
+   rest, before Play and when the replay ends; a tap on a pin opens its card.
+   A tap on a card photo opens it in a dialog inside the card only while the
+   replay is not running (paused, at rest or ended). The cards are light
+   surfaces, since the card has no dark theme and sits over chart, terrain and
+   sky. Everything is scoped to the card's id, so two cards on a page do not
+   share ids, dialogs or styles.
+
+   **Photos are prepared in the operator's browser at export time.** Each is
+   fetched from the app's document content URL and passed through the app's
+   shared downscaler (`lib/image-downscale.ts`, the one the equipment and bin
+   photos use, extended with a quality, an opaque background and a reduced-size
+   decode): orientation applied, decoded at about the target size where the
+   browser supports it so a 48 MP photo is never held whole, scaled so the longest
+   side is at most 960 px (never enlarged) and re-encoded as JPEG at quality 0.82.
+   The encoder's file is then rewritten by us, not trusted: only the JFIF header
+   (APP0), an ICC profile (APP2), the quantisation, frame, Huffman and restart
+   tables and the scan data are kept, and every other APPn segment (Exif and XMP
+   in APP1, IPTC in APP13, and the rest) and every comment is dropped, so a
+   browser whose encoder writes its own APP1 cannot carry a position out. The
+   result is walked again to check nothing else remains and that the picture data
+   was reached; a file cut short, or one that still has metadata, fails the
+   export and names the sign. A photo that cannot be fetched, decoded or
+   encoded also fails the export and names the sign; it is never sent as a note.
+   A sign whose photo document has been deleted has no photo link and goes out as
+   a note, as the app shows it. Only `data:image/jpeg;base64,` strings the export
+   wrote may be an image source: the export checks the prefix and the base64
+   alphabet, and the player checks again. If the data does not pass, the player
+   says "A sign photo in this card is damaged" in the card's own alert and still
+   shows the sign's title and note. The data is written with `safeJson`, which
+   escapes `<`, `>`, `&` and the two line separators, so a note or a data URI
+   cannot close the script element; tests use notes containing `</script>` and
+   `<!--`.
+
+   **The 3 MB rule.** The whole snippet (player, data and photos) must stay
+   under 3 MB. Over that, Copy and Download stop with a plain message that
+   names the largest photos and their sizes and says to turn off **Include
+   signs** or remove photos; nothing is dropped silently. The Export menu has an
+   **Include signs** switch (on), a count line such as "5 signs, 3 photos" for
+   the signs in the exported range, and the card's size: while photos are being
+   prepared it is marked "about" and counts every sign's title and note plus 300
+   KB for each photo not yet prepared, then exact after. 300 KB is the base64
+   size of a 960 px photo at the worst (noisy) end; thirteen real photos
+   measured a median of 67 KB, a 90th percentile of 187 KB and a maximum of 248
+   KB, so the guess leans high and warns early. If even the guess is over the
+   limit the menu says so before the operator commits. Photos are prepared when
+   the menu opens, as one run per set of photos (signs and their documents): if
+   the set changes while a run is going, a new run starts for the new set and
+   Copy waits for that one. Prepared photos are kept for the page's lifetime and
+   handed back as they are, so a second export neither fetches them again nor
+   rebuilds the card data. With Include signs off, sign loading or a sign
+   error neither hides the size nor holds Copy and Download. Still PNG exports
+   do not change.
+
+   **Cards stay inside the map.** The card's marker is a point; the card is
+   placed round it each frame (and when a paused map moves). Near the left or
+   right edge it slides sideways, its leader line staying under it; near the top
+   it goes below its point; the leader shortens where room is tight. Opening a
+   card from a pin moves focus to its Close button, which names the sign, and
+   closing it returns focus to the pin.
+
+   **The Play button while paused.** It shows the pause bars only while playing;
+   paused, idle or ended it shows the play triangle (the card is marked
+   `hcp-paused`). The bars-while-paused fault dates from the first generator
+   (ADR 0174), not from the shared-code player.
 
 ## Rejected
 
@@ -185,6 +260,19 @@ snippet of text.
   out, and a reader with no route to the boat would get no terrain.
 - **Bundling three.js into the card.** It would put 690 KB in every pasted card,
   including those with no hull type or with 3D off.
+- **Hosting sign photos elsewhere and linking them from the card.** Smaller
+  cards, but the card would point at the boat or at a third-party store, and
+  ADR 0174's rule is that a pasted card needs nothing from the operator after
+  export. A photo that disappears from its host would also leave a blog post
+  with a hole in it.
+- **A per-sign private flag.** Deferred. **Include signs** is all or nothing for
+  now, and the operator controls what goes out by which signs exist in the span
+  being exported. A flag can be added later without changing the card's format.
+- **Sending photos at their original size, or leaving the Exif and trusting the
+  blog.** Several MB per photo, and a photo's GPS position would reach every
+  reader. Re-encoding at 960 px keeps a photo to a few tens or hundreds of KB.
+- **Dropping photos silently to fit the limit.** A card that is missing what the
+  operator chose would be a different card with no word said.
 
 ## Consequences
 
@@ -198,4 +286,11 @@ snippet of text.
   second by checking the built text.
 - The card's data now carries a vessel's hull type and size. Nothing else about
   the boat goes out.
-- Signs, with their photos inlined, are the last step and are not in the card yet.
+- Cards with photos are larger than the rest, up to 3 MB, and a blog host that
+  limits the size of an HTML card may refuse the biggest. The limit is a
+  constant, and the message says how to get under it.
+- The card's data now carries sign titles and notes and downscaled photos
+  without location metadata. The signs' ids, the photos' documents and their
+  original files stay on the boat.
+- A blog that sets a content security policy needs `data:` in `img-src` for the
+  photos, which the how-to already lists for the map.

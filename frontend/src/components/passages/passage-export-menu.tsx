@@ -1,5 +1,5 @@
 import { Share2 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { PassageEmbedDialog } from '@/components/passages/passage-embed-dialog'
@@ -19,9 +19,11 @@ import {
 import type { DistanceUnits } from '@/config/app-config'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
+import { useReplaySigns } from '@/hooks/use-replay-signs'
 import {
   DEFAULT_PLAY_SECONDS,
   PLAY_LENGTHS,
+  estimateEmbed,
   exportFileName,
   exportablePassages,
   exportZone,
@@ -36,6 +38,8 @@ import { IMAGE_SIZES, type ImageKind } from '@/lib/passage-export-layout'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import type { CruiseStats, PassageDetail } from '@/lib/passages'
+import { prepareSignPhotos } from '@/lib/passage-export-photos'
+import { CARD_LIMIT_BYTES, fmtMB, signSummary, signsInRange } from '@/lib/passage-export-signs'
 import { saveBlob } from '@/lib/save-blob'
 
 export interface PassageExportMenuProps {
@@ -46,6 +50,8 @@ export interface PassageExportMenuProps {
   cruiseStats?: CruiseStats | null
   units: DistanceUnits
 }
+
+const NO_PHOTOS: ReadonlyMap<string, string> = new Map()
 
 function failed(action: string, err: unknown) {
   toast.error(`Could not ${action}`, { description: err instanceof Error ? err.message : String(err) })
@@ -73,36 +79,118 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   ), [exportable, hasTrack])
   const { shots, loading: shotsLoading, error: shotsError } = useCameraShots(span ? span.from : null, span ? span.to : null)
 
-  const exportInput = (): ExportInput => ({ kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, playSeconds, threeD, shots, hull })
+  // Signs belong to real time too. The ones inside an exported passage go in
+  // when Include signs is on, photos included.
+  const [includeSigns, setIncludeSigns] = useState(true)
+  const { signs: allSigns, loading: signsLoading, error: signsError } = useReplaySigns(span ? span.from : null, span ? span.to : null)
+  const signsInCard = useMemo(
+    () => signsInRange(allSigns, exportable.map((x) => ({ a: Date.parse(x.p.start) / 1000, b: Date.parse(x.p.end) / 1000 }))),
+    [allSigns, exportable],
+  )
+  const photoSigns = useMemo(() => signsInCard.filter((s) => s.photo_url), [signsInCard])
+  const [photos, setPhotos] = useState<ReadonlyMap<string, string>>(new Map())
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
+  const [photoError, setPhotoError] = useState<string | null>(null)
+  // The photo signs the card needs, by sign and document: a change in the set
+  // is a different job, and a run for an earlier set is not the answer to it.
+  const photoKey = useMemo(() => photoSigns.map((s) => `${s.id}:${s.document_id}`).sort().join('|'), [photoSigns])
+  const latestKey = useRef(photoKey)
+  latestKey.current = photoKey
+  const preparing = useRef<{ key: string; promise: Promise<ReadonlyMap<string, string>> } | null>(null)
+  const ready = photoSigns.every((s) => photos.has(s.id))
+
+  // Photos are fetched, shrunk and cleaned in this browser, one run per set of
+  // photos. Everything prepared already is handed back as it is.
+  const ensurePhotos = (): Promise<ReadonlyMap<string, string>> => {
+    if (!includeSigns || photoSigns.length === 0) return Promise.resolve(NO_PHOTOS)
+    if (ready) return Promise.resolve(photos)
+    const key = photoKey
+    if (preparing.current?.key === key) return preparing.current.promise
+    setPhotoError(null)
+    const current = () => latestKey.current === key
+    const promise = prepareSignPhotos(photoSigns, { onProgress: (done, total) => { if (current()) setProgress({ done, total }) } })
+      .then((prepared) => { if (current()) setPhotos(prepared); return prepared })
+      .catch((err: unknown) => { if (current()) setPhotoError(err instanceof Error ? err.message : String(err)); throw err })
+      .finally(() => { if (preparing.current?.key === key) { preparing.current = null; setProgress(null) } })
+    preparing.current = { key, promise }
+    return promise
+  }
+  const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    // Ready by the time the operator chooses, and the size shown is true.
+    if (menuOpen && includeSigns && photoSigns.length > 0 && !signsLoading) ensurePhotos().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuOpen, includeSigns, photoKey, signsLoading])
+
+  const exportInput = (prepared: ReadonlyMap<string, string> = photos): ExportInput => ({
+    kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, playSeconds, threeD, shots, hull,
+    ...(includeSigns ? { signs: signsInCard, photos: prepared } : {}),
+  })
+
+  // Signs only matter to the export, and to what the menu says about it, when
+  // they are included.
+  const signsWait = includeSigns && signsLoading
+  const signsFailed = includeSigns && signsError !== null
+
+  // The card's size: exact once every photo is prepared, a guess (kept on the
+  // high side) before that.
+  const size = useMemo(() => {
+    if (!hasTrack || shotsLoading || shotsError || signsWait || signsFailed) return null
+    try {
+      return estimateEmbed(exportInput())
+    } catch {
+      return null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasTrack, shotsLoading, shotsError, signsWait, signsFailed, signsInCard, photos, includeSigns, kind, title, passages, cruiseStats, units, inset, playSeconds, threeD, shots, hull])
   // The file name follows the same passages, order and zone as the card itself.
   const fileName = (input: ExportInput, ext: string) => {
     const data = prepareExport(input)
     return exportFileName(title, data.start, data.zone.o, ext)
   }
 
-  // An export without the shots the operator saved would be a different card
-  // with no word said, so a shot list that failed to load stops the export.
-  const shotsReady = () => {
+  // An export without the shots or signs the operator saved would be a
+  // different card with no word said, so a list that failed to load stops it.
+  const listsReady = () => {
     if (shotsError) {
       failed('read the camera shots', new Error(shotsError))
+      return false
+    }
+    if (signsFailed) {
+      failed('read the signs', new Error(signsError as string))
       return false
     }
     return true
   }
 
-  const showEmbed = () => {
-    if (!shotsReady()) return
+  // The export input with every photo prepared, or null after saying why not.
+  const readyInput = async (action: string): Promise<ExportInput | null> => {
+    if (!listsReady()) return null
+    const toastId = photoSigns.length > 0 && includeSigns && !ready ? toast.loading('Preparing sign photos') : null
     try {
-      setEmbed(generateEmbed(exportInput()))
+      return exportInput(await ensurePhotos())
+    } catch (err) {
+      failed(action, err)
+      return null
+    } finally {
+      if (toastId !== null) toast.dismiss(toastId)
+    }
+  }
+
+  const showEmbed = async () => {
+    const input = await readyInput('make the blog embed')
+    if (!input) return
+    try {
+      setEmbed(generateEmbed(input))
     } catch (err) {
       failed('make the blog embed', err)
     }
   }
 
-  const downloadPage = () => {
-    if (!shotsReady()) return
+  const downloadPage = async () => {
+    const input = await readyInput('download the embed')
+    if (!input) return
     try {
-      const input = exportInput()
       saveBlob(new Blob([generateStandalonePage(input)], { type: 'text/html' }), fileName(input, 'html'))
     } catch (err) {
       failed('download the embed', err)
@@ -131,7 +219,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
 
   return (
     <>
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger
         render={
           <Button type="button" variant="outline" disabled={!hasTrack} aria-label="Export">
@@ -162,9 +250,27 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
         >
           3D
         </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem
+          checked={includeSigns}
+          onCheckedChange={setIncludeSigns}
+        >
+          Include signs
+        </DropdownMenuCheckboxItem>
+        <div className="px-2 pb-1.5 text-xs text-muted-foreground" data-testid="sign-summary">
+          <p>{signsLoading ? 'Reading signs' : signsError ? 'Signs could not be read' : signSummary(signsInCard)}</p>
+          {includeSigns && progress && <p role="status">Preparing photos, {progress.done} of {progress.total}</p>}
+          {includeSigns && photoError && <p role="alert" className="text-destructive">{photoError}</p>}
+          {size && (
+            <p data-testid="card-size" className={size.bytes > CARD_LIMIT_BYTES ? 'font-medium text-destructive' : undefined}>
+              {size.bytes > CARD_LIMIT_BYTES
+                ? `Card ${size.exact ? '' : 'about '}${fmtMB(size.bytes)}, over the ${CARD_LIMIT_BYTES / (1024 * 1024)} MB limit`
+                : `Card ${size.exact ? '' : 'about '}${fmtMB(size.bytes)}`}
+            </p>
+          )}
+        </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={shotsLoading} onClick={showEmbed}>Copy blog embed</DropdownMenuItem>
-        <DropdownMenuItem disabled={shotsLoading} onClick={downloadPage}>Download embed as HTML</DropdownMenuItem>
+        <DropdownMenuItem disabled={shotsLoading || signsWait} onClick={() => void showEmbed()}>Copy blog embed</DropdownMenuItem>
+        <DropdownMenuItem disabled={shotsLoading || signsWait} onClick={() => void downloadPage()}>Download embed as HTML</DropdownMenuItem>
         <DropdownMenuItem disabled={busy} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
         <DropdownMenuItem disabled={busy} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
       </DropdownMenuContent>

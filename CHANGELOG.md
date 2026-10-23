@@ -13,6 +13,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Signs go into the blog card.** The Export menu has an **Include signs**
+  switch, ticked to start with, with a line such as "5 signs, 3 photos" for the
+  passages you are exporting and the size of the card. Readers see your signs
+  as markers on the track at rest and cards on a line from the track while the
+  replay plays, by the settings you gave them, and can open a photo large while
+  the replay is paused. Photos are shrunk to 960 pixels on the longest side and
+  saved again as new files, so the position and camera details inside the
+  original do not go on your blog. A card can be at most 3 MB: over that, Copy
+  and Download stop and name the largest photos, and you untick **Include
+  signs** or take photos off some signs. A photo that cannot be read stops the
+  export and names the sign. A card already on your blog does not change:
+  export again to pick this up.
 - **The blog map plays the 3D replay.** The blog embed and the downloaded page
   now show the land standing up, your boat as a model and the camera shots you
   set, with a **3D** switch in the Export menu that starts the way the passage

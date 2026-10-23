@@ -6,6 +6,7 @@
 import { trackIndex } from '@/lib/boat-model'
 import type { ExportData, ExportPassage, ExportShot } from '@/lib/passage-export'
 import { buildTimeline, type TimedSegment, type Timeline } from '@/lib/passages'
+import { resolveSigns, SIGN_SHOW_DEFAULT, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
 import { paceSpans, resolveShots, timelineAtWall, wallAtTimeline, type CameraShot, type PaceSpan, type ResolvedShot } from '@/lib/replay-clock'
 
 export interface Step {
@@ -35,6 +36,8 @@ export interface CardState {
   done: boolean
   /** Where the replay stands on the shots' timeline (passages end to end). */
   clock: number
+  /** Seconds of watching so far with nights left out: the clock the signs run on. */
+  run: number
 }
 
 export interface Plan {
@@ -44,6 +47,8 @@ export interface Plan {
   timeline: Timeline
   segments: TimedSegment[][]
   shots: ResolvedShot[]
+  /** The signs that fall on a passage, placed on its track. */
+  signs: ResolvedSign[]
   spans: PaceSpan[]
   stateAt: (wall: number) => CardState
   /** Seconds of watching from a timeline position to another, nights left out. */
@@ -66,6 +71,15 @@ function lastFix(segments: TimedSegment[]): [number, number] | null {
     if (seg.length > 0) return [seg[seg.length - 1].lon, seg[seg.length - 1].lat]
   }
   return null
+}
+
+/** The card's signs as the app's rules read them. A sign has no id in the
+ * card; its place in the list stands in, padded so the order is stable. */
+export function signsOf(data: ExportData): ReplaySign[] {
+  return data.signs.map((s, i) => ({
+    id: String(i).padStart(5, '0'), t_ms: s.t, title: s.ti, note: s.no, document_id: null, photo_url: s.ph ?? null,
+    visibility: s.v, show_s: Number.isFinite(s.s) ? s.s : SIGN_SHOW_DEFAULT,
+  }))
 }
 
 export function buildPlan(data: ExportData): Plan {
@@ -111,12 +125,15 @@ export function buildPlan(data: ExportData): Plan {
     const entry = timeline.entries[s.i]
     let t: number
     let clock: number
+    let run: number
     if (s.kind === 'night') {
       const f = s.dur > 0 ? Math.min(1, (c - s.at) / s.dur) : 1
       t = s.t0 + (s.t1 - s.t0) * f
       clock = entry.offset + (entry.end - entry.start)
+      run = wallAt(clock)
     } else {
-      clock = timelineAtWall(timeline.total, data.play, spans, s.w0 + (c - s.at))
+      run = s.w0 + (c - s.at)
+      clock = timelineAtWall(timeline.total, data.play, spans, run)
       t = Math.max(p.a, Math.min(p.b, entry.start + (clock - entry.offset)))
     }
     const pos = s.kind === 'night' ? lastFix(segments[s.i]) : (() => {
@@ -126,9 +143,9 @@ export function buildPlan(data: ExportData): Plan {
     return {
       pos, t, passage: p.n, index: s.i,
       night: s.kind === 'night' ? { n: s.night as number, place: s.place as string } : null,
-      done: c >= total, clock,
+      done: c >= total, clock, run,
     }
   }
 
-  return { steps, total, timeline, segments, shots, spans, stateAt, wallAt }
+  return { steps, total, timeline, segments, shots, signs: resolveSigns(signsOf(data), timeline), spans, stateAt, wallAt }
 }

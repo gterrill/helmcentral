@@ -35,7 +35,9 @@ import {
   type PassageDetail,
   type TimedSegment,
 } from '@/lib/passages'
+import { CARD_LIMIT_BYTES, ESTIMATED_PHOTO_BYTES, EXPORT_PHOTO_PREFIX, exportSigns, oversizeMessage, signsInRange, type ExportSign } from '@/lib/passage-export-signs'
 import type { CameraMode, CameraShot } from '@/lib/replay-clock'
+import type { ReplaySign } from '@/lib/replay-signs'
 
 // The blog export (ADR 0174): one passage, a cruise or a combined selection
 // turned into a single HTML snippet for a Ghost HTML card. The snippet carries
@@ -73,6 +75,12 @@ export interface ExportInput {
   shots?: readonly CameraShot[]
   /** The vessel's hull type and size, for the boat model. */
   hull?: BoatHull | null
+  /** The signs saved for the span of the passages; only those that fall inside
+   * an exported passage go out. Leave it out for a card with no signs. */
+  signs?: readonly ReplaySign[]
+  /** Each sign's prepared photo, a JPEG data URI, by sign id. A sign with a
+   * photo and no entry here stops the export. */
+  photos?: ReadonlyMap<string, string>
   /** An id for the card's elements. Random unless given. */
   cardId?: string
 }
@@ -136,6 +144,7 @@ export interface ExportData {
   /** The boat to draw as a model; null keeps the dot. Only with d3. */
   hull: ExportHull | null
   shots: ExportShot[]
+  signs: ExportSign[]
   bounds: [number, number, number, number]
   stats: { l: string; v: string }[]
   passages: ExportPassage[]
@@ -337,7 +346,7 @@ function sameKey(a: unknown[], b: unknown[]) {
  * is no track to show: an export of nothing is a fault, not an empty card.
  * Thinning is the slow part, so the last result is reused for the same input. */
 export function prepareExport(input: ExportInput): ExportData {
-  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.playSeconds, input.threeD ?? false, input.shots ?? null, input.hull ?? null]
+  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.playSeconds, input.threeD ?? false, input.shots ?? null, input.hull ?? null, input.signs ?? null, input.photos ?? null]
   if (lastPrepared && sameKey(lastPrepared.key, key)) return lastPrepared.data
   const data = buildExport(input)
   lastPrepared = { key, data }
@@ -394,6 +403,7 @@ function buildExport(input: ExportInput): ExportData {
     d3,
     hull: d3 && input.hull ? { type: input.hull.type, loa: input.hull.loaM, beam: input.hull.beamM } : null,
     shots: exportShots(input.shots ?? [], passages),
+    signs: exportSigns(input.signs ?? [], passages, input.photos),
     bounds: bounds.map((v) => round(v, 5)) as ExportData['bounds'],
     stats: statsStrip(input, totalNights),
     passages,
@@ -447,8 +457,34 @@ export function playerScript(id: string): string {
   return `(function () {\n${playerSource}\nHcPlayer.initCard(${JSON.stringify(id)}, window.maplibregl, document);\n})();`
 }
 
-/** The one self-contained HTML snippet for a Ghost HTML card. */
+/** The card's size in bytes as it would be written, with no limit applied.
+ * For showing the size before the operator commits to an export. */
+export function embedSize(input: ExportInput): number {
+  return new TextEncoder().encode(buildEmbed(input)).length
+}
+
+/** The card's size before every photo is prepared: the real size of those that
+ * are, a conservative figure for each that is not, and the titles and notes of
+ * every sign. `exact` is true only when nothing is guessed. */
+export function estimateEmbed(input: ExportInput): { bytes: number; exact: boolean } {
+  const ranges = exportablePassages(input.passages).map((x) => ({ a: Date.parse(x.p.start) / 1000, b: Date.parse(x.p.end) / 1000 }))
+  const waiting = signsInRange(input.signs ?? [], ranges).filter((s) => s.photo_url && !input.photos?.has(s.id))
+  const guess = `${EXPORT_PHOTO_PREFIX}${'A'.repeat(Math.max(0, ESTIMATED_PHOTO_BYTES - EXPORT_PHOTO_PREFIX.length))}`
+  const photos = new Map(input.photos ?? [])
+  for (const s of waiting) photos.set(s.id, guess)
+  return { bytes: embedSize({ ...input, photos }), exact: waiting.length === 0 }
+}
+
+/** The one self-contained HTML snippet for a Ghost HTML card. It throws when
+ * the card, photos included, is over CARD_LIMIT_BYTES. */
 export function generateEmbed(input: ExportInput): string {
+  const html = buildEmbed(input)
+  const bytes = new TextEncoder().encode(html).length
+  if (bytes > CARD_LIMIT_BYTES) throw new Error(oversizeMessage(bytes, prepareExport(input).signs))
+  return html
+}
+
+function buildEmbed(input: ExportInput): string {
   const data = prepareExport(input)
   const id = input.cardId ?? newCardId()
   if (!/^[A-Za-z][A-Za-z0-9_-]*$/.test(id)) throw new Error(`Invalid card id: ${id}`)

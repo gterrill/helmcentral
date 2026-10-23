@@ -28,11 +28,18 @@ to reach the boat afterwards.
    Ticked, readers see the hills and headlands standing up, with your boat
    drawn on the water as a model (see below). Unticked, the card is the flat
    map it always was.
-6. Choose **Copy blog embed**. The embed opens in a box, already selected.
+6. Tick or untick **Include signs**. It is ticked to start with. The line under
+   it counts the signs in the passages you are exporting, for example "5 signs,
+   3 photos", and under that the menu shows the size of the card. While the
+   photos are being prepared the size reads "about" and leans high, and a line
+   shows progress; it settles to the exact size once they are done. If even the
+   estimate is over 3 MB the menu says so before you choose. See [Film a passage replay](film-a-passage-replay.md)
+   for adding signs.
+7. Choose **Copy blog embed**. The embed opens in a box, already selected.
    Press **Copy**. If the box says to press ⌘C (Ctrl+C), the browser would not
    copy for Helmcentral, which can happen over a plain `http` address. The
    text is still selected, so press the keys yourself.
-7. In your Ghost post, add an **HTML** card and paste.
+8. In your Ghost post, add an **HTML** card and paste.
 
 To look at it before it goes into a post, choose **Download embed as HTML**
 and open the saved file in a browser.
@@ -42,6 +49,17 @@ is nothing to tick. See [Film a passage replay](film-a-passage-replay.md)
 for setting them. If Helmcentral cannot read your shots, **Copy blog embed** and
 **Download embed as HTML** tell you so and stop, rather than hand you a card
 without them. A passage with no shots plays as it always did.
+
+### If the card is too big
+
+A card can be at most 3 MB. Photos are what make it big: each is shrunk to 960
+pixels on its longest side before it goes in, and a handful fit easily. If the
+signs you are exporting carry more than that, **Copy blog embed** and **Download
+embed as HTML** stop and name the largest photos and their sizes. Untick
+**Include signs**, or take photos off some signs (pick the sign in the sign
+editor and remove its photo), and export again. If a photo cannot be read, the
+export stops and names the sign; Helmcentral does not leave the photo out and
+carry on.
 
 ## Save a picture
 
@@ -91,6 +109,19 @@ between framings instead of moving.
 If the hills cannot be fetched for a reader, a small "Terrain unavailable"
 notice shows and the map plays flat, with shots reduced to a zoom and a centre.
 
+Signs you added to the replay show for readers when **Include signs** was
+ticked. Before they press Play, and again when the replay ends, each sign is a
+small blue marker on the track, and tapping one opens its note. While the replay
+plays, signs come up as cards on a line from their point on the track, by their
+own setting: an *always* sign stays up, a *while passing* sign comes up just
+before the boat arrives and goes after its time, and an *after passing* sign
+stays up from then on. No more than two cards show at once. When the replay is
+paused, or before it starts or after it ends, tapping a card's photo opens it
+large, and Escape or **Close** puts it away. The cards are light and sit over the
+map in daylight or at night. If a reader's device asks for reduced motion, cards
+appear without fading in. A card near the edge of the map slides in or drops
+below its point so it is never cut off.
+
 Under the map, a row of figures shows distance, time underway, nights (for
 cruises and selections, counted as midnights since the first departure, as on the
 cruise page), fuel and the highest gust, in your Units setting. A
@@ -114,15 +145,23 @@ figure the boat did not record is left out rather than shown as `--`.
 - Your camera shots go out, and so do the hull type, length and beam when 3D is
   ticked and the vessel has a hull type. With 3D unticked the hull and its size
   stay on the boat.
-- Only the track, the shots, the hull details and the figures above go out.
-  Notes, edits and any other boat data stay on the boat.
+- With **Include signs** ticked, the title, note and time of each sign in the
+  exported passages go out, with its photo. The photos are shrunk to 960 pixels
+  on the longest side and saved again as new JPEG files, which removes the
+  location and camera details the original carries, so a photo's GPS position
+  does not go with it. The photos are written into the card itself and nothing
+  is fetched from the boat. A sign's setting for when it shows goes too; nothing
+  else about it does. Signs outside the passages you are exporting stay on the
+  boat. Untick **Include signs** and none go.
+- Only the track, the shots, the signs, the hull details and the figures above go
+  out. Passage notes, edits and any other boat data stay on the boat.
 
 ## If your blog sets a content security policy
 
 Most Ghost blogs set none and the card just works. If yours does (a security
 plugin, a CDN rule or a `Content-Security-Policy` header from your host), the
 card is blocked until the policy allows what it fetches. A blocked card shows a
-plain map, or the map without the land heights or the boat model, and the
+plain map, or the map without the land heights, the boat model or the sign photos, and the
 browser's console names the blocked address. Add these to the policy, keeping
 anything already there:
 

@@ -13,6 +13,7 @@ import { boatMarkerKind, nextHeading, type HeadingState } from '@/lib/boat-model
 import { fitZoomForPitch } from '@/lib/pitch-fit'
 import type { ExportData } from '@/lib/passage-export'
 import { createSailedCache } from '@/lib/passages'
+import { visibleSigns } from '@/lib/replay-signs'
 import { CameraDirector, CameraGate, outsideCentral, shotStartState, type Camera } from '@/lib/replay-camera'
 import {
   hillshadePaint,
@@ -26,6 +27,7 @@ import {
 } from '@/lib/terrain'
 
 import { buildPlan, type CardState } from './plan'
+import { createSignLayer, type SignLayer } from './signs'
 import { TERRAIN_PROTOCOL, TERRAIN_PROTOCOL_TILES, terrainLoader } from './terrain-protocol'
 import { loadThree } from './three-loader'
 
@@ -186,6 +188,29 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     }
   }
 
+  // ── signs ───────────────────────────────────────────────────────────────
+
+  // Pins at rest, before Play and when the replay ends; cards from the app's
+  // own visibility rules while it plays. A photo opens only when the replay
+  // is not running.
+  function showProblem(message: string) {
+    els.error.textContent = message
+    els.error.hidden = false
+  }
+  const signLayer: SignLayer | null = plan.signs.length > 0
+    ? createSignLayer({ doc, root, stage: part('stage'), map, lib, id, signs: plan.signs, still: reduced, onProblem: showProblem })
+    : null
+  signLayer?.update({ cards: [], pins: true, canOpenPhoto: true })
+  let lastRun = 0
+  function showSigns(cardsOn: boolean) {
+    if (!signLayer) return
+    signLayer.update({
+      cards: cardsOn ? visibleSigns(plan.signs, lastRun, plan.wallAt) : [],
+      pins: !cardsOn,
+      canOpenPhoto: !(cardsOn && !paused),
+    })
+  }
+
   // ── the boat ────────────────────────────────────────────────────────────
 
   const boatEl = doc.createElement('div')
@@ -306,6 +331,8 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     els.caption.textContent = s.night ? `Night ${s.night.n}${s.night.place ? ` · ${s.night.place}` : ''}` : ''
     const src = map.getSource(data.map.doneSource) as MapLibre.GeoJSONSource | undefined
     if (src) src.setData(geoFor(s))
+    lastRun = s.run
+    showSigns(true)
   }
 
   function makeInset() {
@@ -449,6 +476,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     paused = false
     dimTrack(false)
     setMode('done', 'Replay')
+    showSigns(false)
   }
 
   // Each press of Play starts a run with its own token. The fly-in's listener
@@ -505,6 +533,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     const done = map.getSource(data.map.doneSource) as MapLibre.GeoJSONSource
     done.setData({ type: 'FeatureCollection', features: [] })
     setMode('flying', 'Play')
+    showSigns(false)
     const overview = flat() ? null : overviewCamera()
     if (reduced) {
       if (overview) map.jumpTo(overview)
@@ -520,6 +549,8 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     if (playing) {
       paused = !paused
       els.label.textContent = paused ? 'Resume' : 'Pause'
+      root.classList.toggle('hcp-paused', paused)
+      showSigns(true)
       lastTick = performance.now()
       if (!paused) resume++
       return
