@@ -16,11 +16,13 @@ import { OPENSEAMAP_TILES, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
 import { fitZoomForPitch } from '@/lib/pitch-fit'
+import { outsideCentral, type Camera, type CameraResult } from '@/lib/replay-camera'
 import { createSailedCache, segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
 import {
   hillshadePaint,
   REPLAY_3D_MAX_PITCH,
   REPLAY_3D_PITCH,
+  skyFor,
   TERRAIN_SOURCE_ID,
   terrainSetting,
   terrainSource,
@@ -44,6 +46,22 @@ export interface PassageMapHandle {
   /** The opening move: jump high over the track and come down onto it.
    * Resolves when the camera has settled. */
   flyIn: () => Promise<void>
+  /** The camera as the operator has it, for a new camera shot. `pitch` is null
+   * while the map is flat, since a flat map has no pitch of its own to keep. */
+  getView: () => { zoom: number; pitch: number | null; bearing: number } | null
+}
+
+/** What the replay asks of the camera. The map places the camera when `clock`
+ * changes: not when a shot is edited, so editing never moves the view. */
+export interface CameraDriver {
+  clock: number
+  /** The camera for the clock, given the map's whole-track framing, or null
+   * when no shot applies. */
+  resolve: (env: { flat: boolean; overview: Camera; current: Camera }) => CameraResult | null
+  /** Reduced motion: cut to a framing at each shot start instead of moving. */
+  reduced: boolean
+  /** Bumped when the operator takes control back (Play, a scrub). */
+  resume: number
 }
 
 /** How far a passage has been sailed: the real instant, and the boat marker's
@@ -67,6 +85,10 @@ export interface PassageMapProps {
   boatHeading?: number | null
   /** The hull to draw as a 3D model in place of the dot; null keeps the dot. */
   hull?: BoatHull | null
+  /** Camera shots, when the replay has any. Null leaves the camera alone. */
+  cameraDriver?: CameraDriver | null
+  /** Told when the camera is flat (3D off, or the terrain failed) or tilting. */
+  onFlatChange?: (flat: boolean) => void
   isDarkTheme: boolean
   className?: string
   /** Shown in the top right corner, stacked under the satellite button. */
@@ -77,17 +99,41 @@ const INTRO_START_ZOOM = 1.5
 const INTRO_MS = 3200
 const FIT_PADDING = { top: 48, bottom: 80, left: 48, right: 48 }
 const LEVEL_MS = 600
+/** How far a pointer moves while down before it counts as a drag. */
+const DRAG_YIELD_PX = 4
 /** How long a failed terrain waits before the map tries it again. */
 export const TERRAIN_RETRY_MS = 60_000
 
+function readCamera(map: MapInstance): Camera {
+  const c = map.getCenter()
+  return { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() }
+}
+
+const sameCamera = (a: Camera, b: Camera) =>
+  Math.abs(a.center[0] - b.center[0]) < 1e-7 && Math.abs(a.center[1] - b.center[1]) < 1e-7
+  && Math.abs(a.zoom - b.zoom) < 1e-3 && Math.abs(a.pitch - b.pitch) < 0.01
+  && Math.abs((((a.bearing - b.bearing) % 360) + 540) % 360 - 180) < 0.01
+
 type TerrainState = 'ok' | 'failed' | 'retrying'
+
+type MapInstance = ReturnType<NonNullable<MapRef['getMap']>>
+
+/** MapLibre's own fit of the bounds as a flat camera: the centre as lon/lat and
+ * the zoom, or null when it cannot be worked out. */
+function flatFit(map: MapInstance, bounds: [number, number, number, number]): { centre: { lon: number; lat: number }; zoom: number } | null {
+  const fit = map.cameraForBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: FIT_PADDING, maxZoom: 14 })
+  if (!fit || !fit.center) return null
+  const fc = fit.center
+  const centre = Array.isArray(fc) ? { lon: fc[0], lat: fc[1] } : 'lng' in fc ? { lon: fc.lng, lat: fc.lat } : { lon: fc.lon, lat: fc.lat }
+  return { centre, zoom: fit.zoom ?? 0 }
+}
 
 function centreOf(bounds: [number, number, number, number]) {
   return { longitude: (bounds[0] + bounds[2]) / 2, latitude: (bounds[1] + bounds[3]) / 2 }
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, isDarkTheme, className, overlay },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, overlay },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -165,19 +211,15 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
 
   // Frames the whole track. Pitched, MapLibre's flat fit loses the near and far
   // ends, so the zoom is backed off until every corner is inside the padding.
-  const cameraFor = useCallback((map: ReturnType<NonNullable<MapRef['getMap']>>) => {
-    if (!bounds) return null
-    const box: [[number, number], [number, number]] = [[bounds[0], bounds[1]], [bounds[2], bounds[3]]]
-    if (pitch === 0) return null
-    const flat = map.cameraForBounds(box, { padding: FIT_PADDING, maxZoom: 14 })
-    if (!flat || !flat.center) return null
+  const cameraFor = useCallback((map: MapInstance) => {
+    if (!bounds || pitch === 0) return null
+    const flat = flatFit(map, bounds)
+    if (!flat) return null
     const c = map.getContainer()
-    const fc = flat.center
-    const centre = Array.isArray(fc) ? { lon: fc[0], lat: fc[1] } : 'lng' in fc ? { lon: fc.lng, lat: fc.lat } : { lon: fc.lon, lat: fc.lat }
     const zoom = fitZoomForPitch({
-      bounds, centre, zoom: flat.zoom ?? 0, pitch, width: c.clientWidth, height: c.clientHeight, padding: FIT_PADDING,
+      bounds, centre: flat.centre, zoom: flat.zoom, pitch, width: c.clientWidth, height: c.clientHeight, padding: FIT_PADDING,
     })
-    return { center: [centre.lon, centre.lat] as [number, number], zoom, pitch, bearing: 0 }
+    return { center: [flat.centre.lon, flat.centre.lat] as [number, number], zoom, pitch, bearing: 0 }
   }, [bounds, pitch])
 
   // On load, and whenever the passages change, the whole track is framed.
@@ -189,7 +231,30 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: FIT_PADDING, duration: 0, maxZoom: 14 })
   }, [bounds, cameraFor])
 
+  // The whole-track framing as a camera, flat or pitched. Remembered per
+  // track, pitch and size: working it out searches for a zoom.
+  const overviewCache = useRef<{ key: string; camera: Camera } | null>(null)
+  const overviewCamera = useCallback((map: MapInstance): Camera | null => {
+    if (!bounds) return null
+    const c = map.getContainer()
+    const key = `${boundsKey}|${pitch}|${c.clientWidth}x${c.clientHeight}`
+    if (overviewCache.current?.key === key) return overviewCache.current.camera
+    let camera: Camera | null = cameraFor(map)
+    if (!camera) {
+      const flat = flatFit(map, bounds)
+      if (!flat) return null
+      camera = { center: [flat.centre.lon, flat.centre.lat], zoom: flat.zoom, pitch: 0, bearing: 0 }
+    }
+    overviewCache.current = { key, camera }
+    return camera
+  }, [bounds, boundsKey, pitch, cameraFor])
+
   useImperativeHandle(ref, () => ({
+    getView: () => {
+      const map = mapRef.current?.getMap?.()
+      if (!map) return null
+      return { zoom: map.getZoom(), pitch: camera3d ? map.getPitch() : null, bearing: map.getBearing() }
+    },
     flyIn: () => new Promise<void>((resolve) => {
       const map = mapRef.current?.getMap?.()
       if (!map || !bounds) { resolve(); return }
@@ -200,7 +265,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
       if (cam) map.easeTo({ ...cam, duration: INTRO_MS })
       else map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: FIT_PADDING, duration: INTRO_MS, maxZoom: 14 })
     }),
-  }), [bounds, cameraFor])
+  }), [bounds, cameraFor, camera3d])
 
   const handleLoad = useCallback(() => {
     loadedRef.current = true
@@ -254,6 +319,100 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     const timer = setTimeout(() => setTerrain('retrying'), TERRAIN_RETRY_MS)
     return () => clearTimeout(timer)
   }, [terrain])
+
+  // Camera shots. The operator taking hold of the map takes the camera: the
+  // replay stops placing it until the next shot starts, or Play or a scrub
+  // hands control back. A tap does not count; a drag past a few pixels, a
+  // pinch, the wheel, or a movestart that came from a person (an originalEvent)
+  // does. The camera's own jumps carry no originalEvent.
+  const driverRef = useRef(cameraDriver)
+  const boatRef = useRef(boat)
+  const yieldedRef = useRef(false)
+  const lastShotKey = useRef<string | null>(null)
+  const lastResume = useRef(0)
+  useEffect(() => {
+    driverRef.current = cameraDriver
+    boatRef.current = boat
+  })
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.()
+    if (!mapLoaded || !map) return
+    const surface = map.getCanvasContainer()
+    const down = new globalThis.Map<number, { x: number; y: number }>()
+    const onDown = (e: PointerEvent) => {
+      down.set(e.pointerId ?? 0, { x: e.clientX, y: e.clientY })
+      if (down.size > 1) yieldedRef.current = true
+    }
+    const onMove = (e: PointerEvent) => {
+      const start = down.get(e.pointerId ?? 0)
+      if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > DRAG_YIELD_PX) yieldedRef.current = true
+    }
+    const onUp = (e: PointerEvent) => { down.delete(e.pointerId ?? 0) }
+    const onWheel = () => { yieldedRef.current = true }
+    const onMoveStart = (e: { originalEvent?: unknown }) => {
+      if (e.originalEvent) yieldedRef.current = true
+    }
+    surface.addEventListener('pointerdown', onDown)
+    surface.addEventListener('pointermove', onMove)
+    surface.addEventListener('pointerup', onUp)
+    surface.addEventListener('pointercancel', onUp)
+    surface.addEventListener('wheel', onWheel, { passive: true })
+    map.on('movestart', onMoveStart)
+    return () => {
+      surface.removeEventListener('pointerdown', onDown)
+      surface.removeEventListener('pointermove', onMove)
+      surface.removeEventListener('pointerup', onUp)
+      surface.removeEventListener('pointercancel', onUp)
+      surface.removeEventListener('wheel', onWheel)
+      map.off('movestart', onMoveStart)
+    }
+  }, [mapLoaded])
+  const driverClock = cameraDriver ? cameraDriver.clock : null
+  const driverResume = cameraDriver ? cameraDriver.resume : 0
+  useEffect(() => {
+    const driver = driverRef.current
+    const map = mapRef.current?.getMap?.()
+    if (!driver || !map || !loadedRef.current) return
+    const overview = overviewCamera(map)
+    if (!overview) return
+    const current = readCamera(map)
+    const result = driver.resolve({ flat: !camera3d, overview, current })
+    if (!result) return
+    const resumed = lastResume.current !== driver.resume
+    lastResume.current = driver.resume
+    const newShot = lastShotKey.current !== result.shotKey
+    lastShotKey.current = result.shotKey
+    if (resumed || newShot) yieldedRef.current = false
+    if (yieldedRef.current) return
+    if (driver.reduced && !(resumed || newShot)) {
+      // No continuous motion: cut again only when the boat nears the edge,
+      // and only in a mode that follows her.
+      if (result.mode !== 'follow' && result.mode !== 'orbit') return
+      const at = boatRef.current
+      if (!at) return
+      const c = map.getContainer()
+      if (!outsideCentral(map.project([at.lon, at.lat]), c.clientWidth, c.clientHeight)) return
+    }
+    // Never re-place a camera that is already there.
+    if (sameCamera(current, result.camera)) return
+    map.jumpTo(result.camera)
+  // Placed when the replay clock moves or control is handed back.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [driverClock, driverResume])
+
+  // The sky over the tilted map, only while the terrain is really up.
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.()
+    if (!mapLoaded || !map) return
+    // The typings leave undefined (no sky) out; the runtime clears the sky with it.
+    const apply = () => map.setSky((camera3d ? skyFor(isDarkTheme) : undefined) as never)
+    apply()
+    // A new map style (light to dark) drops the sky.
+    map.on('style.load', apply)
+    return () => { map.off('style.load', apply) }
+  }, [mapLoaded, camera3d, isDarkTheme])
+
+  useEffect(() => { onFlatChange?.(!camera3d) }, [camera3d, onFlatChange])
 
   useEffect(() => {
     if (loadedRef.current) frame()

@@ -180,6 +180,9 @@ func createPassageSchema(db *sql.DB) error {
 	if err := createAnchorTrailSchema(db); err != nil {
 		return err
 	}
+	if err := createCameraShotSchema(db); err != nil {
+		return err
+	}
 	if err := addTrackPointSourceColumn(db); err != nil {
 		return err
 	}
