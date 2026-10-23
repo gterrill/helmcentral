@@ -47,6 +47,7 @@ function status(overrides: Partial<OfflineCoastlineStatus> = {}): OfflineCoastli
     held: 0,
     wanted: 0,
     wanted_held: 0,
+    inland_skipped: 0,
     failed: 0,
     edits_since: 0,
     squares_with_edits: 0,
@@ -101,6 +102,24 @@ describe('OfflineCoastlineSection status line', () => {
     hook.status = status({ state: 'downloading', held: 7, wanted: 25, wanted_held: 7 })
     renderSection({ offlineCoastlineEnabled: true })
     expect(screen.getByTestId('offline-coastline-status')).toHaveTextContent('Downloading 7 of 25')
+  })
+
+  it('says how many all-land squares are skipped', () => {
+    hook.status = status({ state: 'idle', held: 41, wanted: 41, wanted_held: 41, inland_skipped: 12 })
+    renderSection({ offlineCoastlineEnabled: true })
+    expect(screen.getByTestId('offline-coastline-inland')).toHaveTextContent('12 squares that are all land are skipped.')
+  })
+
+  it('says nothing about skipped squares while the switch is off', () => {
+    hook.status = status({ enabled: false, state: 'off', inland_skipped: 12 })
+    renderSection({ offlineCoastlineEnabled: false })
+    expect(screen.queryByTestId('offline-coastline-inland')).toBeNull()
+  })
+
+  it('says nothing about skipped squares when there are none', () => {
+    hook.status = status({ state: 'idle', held: 41, wanted: 41, wanted_held: 41, inland_skipped: 0 })
+    renderSection({ offlineCoastlineEnabled: true })
+    expect(screen.queryByTestId('offline-coastline-inland')).toBeNull()
   })
 
   it('says it is waiting for a position fix', () => {

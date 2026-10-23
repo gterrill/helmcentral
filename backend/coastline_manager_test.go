@@ -100,7 +100,7 @@ func TestCoastlineManager_OffDoesNothing(t *testing.T) {
 
 func TestCoastlineManager_DownloadsNearestFirstAndOnlyMissing(t *testing.T) {
 	h := newCoastlineHarness(t)
-	wanted, err := squaresWithin(h.lat, h.lon, coastlineCoverageRadiusNm)
+	wanted, _, err := coverageWanted(h.lat, h.lon)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -873,5 +873,75 @@ func TestClassifyCoastlineErrorTurnedAwaySummaryPointsAtTheFix(t *testing.T) {
 	}
 	if p := classifyCoastlineError(errors.New("connection refused")); strings.Contains(p.Summary, "turned") {
 		t.Errorf("a network refusal keeps the network wording: %q", p.Summary)
+	}
+}
+
+func TestCoastlineManager_NeverDownloadsInlandSquaresAndCountsThem(t *testing.T) {
+	h := newCoastlineHarness(t)
+	wanted, skipped, err := coverageWanted(h.lat, h.lon)
+	if err != nil || skipped == 0 {
+		t.Fatalf("wanted %d skipped %d err %v: the harness position must reach inland squares", len(wanted), skipped, err)
+	}
+	for h.m.step() {
+	}
+	for _, sq := range h.src.downloads {
+		if squareInland(sq) {
+			t.Errorf("downloaded inland square %v", sq)
+		}
+	}
+	if len(h.src.downloads) != len(wanted) {
+		t.Errorf("downloaded %d squares, want %d", len(h.src.downloads), len(wanted))
+	}
+	st, _ := h.m.Status()
+	if st.Wanted != len(wanted) || st.WantedHeld != len(wanted) || st.InlandSkipped != skipped || st.State != "idle" {
+		t.Errorf("status wanted %d held %d skipped %d state %s", st.Wanted, st.WantedHeld, st.InlandSkipped, st.State)
+	}
+}
+
+func TestCoastlineManager_AnInlandSquareAlreadyHeldStaysHeld(t *testing.T) {
+	h := newCoastlineHarness(t)
+	inland := coverageSquare{Lat: -24, Lon: 133}
+	if err := h.store.SaveSquare(inland, nil, h.now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for h.m.step() {
+	}
+	st, _ := h.m.Status()
+	if st.Held == 0 {
+		t.Fatal("nothing held")
+	}
+	if rec, ok, _ := h.store.Record(inland); !ok || rec.Status != coastlineStatusReady {
+		t.Errorf("held inland square must stay: %+v", rec)
+	}
+}
+
+func TestCoastlineManager_DropsFailedInlandRecordsButKeepsHeldOnes(t *testing.T) {
+	h := newCoastlineHarness(t)
+	failedInland := coverageSquare{Lat: -24, Lon: 133}
+	heldInland := coverageSquare{Lat: -24, Lon: 134}
+	if !squareInland(failedInland) || !squareInland(heldInland) {
+		t.Fatal("fixture squares must be inland")
+	}
+	_ = h.store.RecordFailure(failedInland, "runtime error", h.now, h.now.Add(time.Hour))
+	_ = h.store.SaveSquare(heldInland, nil, h.now.Add(-time.Hour))
+	h.m.step()
+	if _, ok, _ := h.store.Record(failedInland); ok {
+		t.Error("a failed inland square holds nothing and must be dropped")
+	}
+	if rec, ok, _ := h.store.Record(heldInland); !ok || rec.Status != coastlineStatusReady {
+		t.Errorf("held inland square must stay: %+v", rec)
+	}
+}
+
+func TestCoastlineManager_NoWeeklyCheckForInlandSquares(t *testing.T) {
+	h := newCoastlineHarness(t)
+	inland := coverageSquare{Lat: -24, Lon: 133}
+	_ = h.store.SaveSquare(inland, nil, h.now.Add(-30*24*time.Hour))
+	for h.m.step() {
+	}
+	for _, sq := range h.src.checks {
+		if squareInland(sq) {
+			t.Errorf("weekly check asked Overpass about inland square %v", sq)
+		}
 	}
 }

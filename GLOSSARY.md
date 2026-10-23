@@ -20,6 +20,11 @@ One 1° latitude by 1° longitude square of coverage, the unit that is fetched,
 dated and updated on its own.
 _Avoid_: Cell, tile, chunk
 
+**Inland square**:
+A coverage square with no part of it within 20 nm of the sea. It is not
+downloaded, since no shelter estimate can reach it from the water.
+_Avoid_: Land square, dry square
+
 **Edits since**:
 The number of coastline or reef changes made to the public map inside
 coverage after it was downloaded; what decides whether an update is worth it.

@@ -36,6 +36,12 @@ The status line under the switch tells you what is happening:
   is aboard. The date is the oldest download; the last figure is how many
   coastline or reef edits have appeared on the public map since.
 
+Under the status, a muted line says how many squares in range are all land
+and so are skipped, for example "12 squares that are all land are skipped."
+They are not among the squares to download, so they do not count toward the
+"of 49" in the progress figure. An all-land square you already hold from
+earlier is still held and still counted under Coverage.
+
 The map under it shows the squares aboard, shaded stronger the more recently
 each was downloaded, the 200 nm ring around the boat, and any square that failed
 to download in red. A square inside the ring that is not downloaded yet is drawn

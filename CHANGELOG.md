@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **Offline coastline no longer downloads squares that are all land.** Squares
+  with no part of them within 20 nm of the sea, such as the interior of a
+  continent, are skipped, so the first fill finishes sooner and uses less of
+  your data. Settings → Offline coastline says how many were skipped. Squares
+  you already hold are kept. Asking Mate for the shelter at an inland position
+  now says the spot is inland.
+
 ### Fixed
 
 - **The "SignalK found" prompt no longer appears after an update restart, and

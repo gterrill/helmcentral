@@ -6,6 +6,7 @@ import {
   coastlineStatusLine,
   coverageRingGeoJSON,
   coverageSquaresGeoJSON,
+  inlandSkippedLine,
   squareLabel,
   type OfflineCoastlineStatus,
 } from '@/lib/offline-coastline'
@@ -21,6 +22,7 @@ function status(overrides: Partial<OfflineCoastlineStatus> = {}): OfflineCoastli
     held: 0,
     wanted: 0,
     wanted_held: 0,
+    inland_skipped: 0,
     failed: 0,
     edits_since: 0,
     squares_with_edits: 0,
@@ -155,5 +157,16 @@ describe('coverage geometry', () => {
     const maxLat = Math.max(...pts.map((p) => p[1]))
     expect(maxLat).toBeGreaterThan(-20.1 + 3.3)
     expect(maxLat).toBeLessThan(-20.1 + 3.4)
+  })
+})
+
+describe('inlandSkippedLine', () => {
+  it('words one and many', () => {
+    expect(inlandSkippedLine(status({ inland_skipped: 1 }))).toBe('1 square that is all land is skipped.')
+    expect(inlandSkippedLine(status({ inland_skipped: 12 }))).toBe('12 squares that are all land are skipped.')
+  })
+  it('is silent for none, or when the switch is off', () => {
+    expect(inlandSkippedLine(status({ inland_skipped: 0 }))).toBeNull()
+    expect(inlandSkippedLine(status({ state: 'off', inland_skipped: 12 }))).toBeNull()
   })
 })
