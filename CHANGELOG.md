@@ -13,6 +13,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **The blog map plays the 3D replay.** The blog embed and the downloaded page
+  now show the land standing up, your boat as a model and the camera shots you
+  set, with a **3D** switch in the Export menu that starts the way the passage
+  map's 3D button is set. Readers get the hills and the sky, the camera follows
+  or circles the boat and slows where you set a pace, and your chosen play
+  length stretches by those paces. A reader can take hold of the map and the
+  camera leaves it to them until the next shot. Without shots the card plays as
+  before. The reader's browser now also asks Amazon's public elevation data for
+  the land heights and, with a hull type set, a public software library for the
+  boat model; nothing goes through the boat. A card already on your blog does
+  not change: export again to pick this up.
 - **Pin notes and photos to the passage replay with signs.** A **Signs** button
   on the replay bar opens a sign editor. Add a sign at any point on the slider
   with a title and a short note, or add a photo and it is placed where it was

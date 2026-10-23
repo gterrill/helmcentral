@@ -1,0 +1,23 @@
+{
+ "t11-1861-1134.png": {
+  "width": 256,
+  "height": 256,
+  "rgbaSha256": "5927941cd1bd59e609d90ac1c2f8ffcb4b0f32fd4bb9f753d6f4219ce6cdd257",
+  "clampedSha256": "5927941cd1bd59e609d90ac1c2f8ffcb4b0f32fd4bb9f753d6f4219ce6cdd257",
+  "seaPixels": 0
+ },
+ "t5-29-17.png": {
+  "width": 256,
+  "height": 256,
+  "rgbaSha256": "598ee9064c4d091bdf41de97231788b7db8bcfe4d5ec03fe8026c414e29b4137",
+  "clampedSha256": "202342a08b6937b09a145536a8264b0594bc6de243610c0f5d47ad10f95e7780",
+  "seaPixels": 61504
+ },
+ "t8-232-141.png": {
+  "width": 256,
+  "height": 256,
+  "rgbaSha256": "d614cacd799be9471a71462c582c7391340f8a133d0cf6d96a354c8540915699",
+  "clampedSha256": "c511b6217d5bc0768c2fc3d9b6584f340b206718fb905d1f7b0322ba0cfe2967",
+  "seaPixels": 58354
+ }
+}

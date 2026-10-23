@@ -228,7 +228,8 @@ A passage, a cruise or a selection of passages can go on your blog as an
 animated map your readers replay, or out as a still picture for a post's
 header. The **Export** button on each page makes both. A still picture shows
 the satellite photographs when the map is showing them, with the credit added
-along the bottom; the blog map is always the chart. See
+along the bottom; the blog map is always the chart. The blog map plays the same
+3D land, boat model and camera shots as the replay on the boat. See
 [Share a passage on your blog](../how-to/share-a-passage-on-your-blog.md).
 
 ## Limits

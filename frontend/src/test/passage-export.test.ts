@@ -312,7 +312,7 @@ describe('generateEmbed', () => {
     expect(html).not.toMatch(/\/api\//)
     expect(html).not.toMatch(/localhost|127\.0\.0\.1|100\.\d+\.\d+\.\d+|192\.168\.|\.ts\.net|\.local\b|apiBaseUrl/)
     const hosts = new Set([...html.matchAll(/https?:\/\/([^/"'\s\\{]+)/g)].map((m) => m[1]))
-    expect([...hosts].sort()).toEqual(['basemaps.cartocdn.com', 'cdn.jsdelivr.net', 'tiles.openseamap.org'])
+    expect([...hosts].sort()).toEqual(['basemaps.cartocdn.com', 'cdn.jsdelivr.net', 's3.amazonaws.com', 'tiles.openseamap.org'])
   })
 
   it('cannot be broken out of by a malicious title', () => {

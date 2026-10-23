@@ -23,14 +23,25 @@ to reach the boat afterwards.
    adds a short pause on top.
 4. Tick or untick **Overview map in the corner**. It is the small map that
    shows where the coast and the track sit in the wider country.
-5. Choose **Copy blog embed**. The embed opens in a box, already selected.
+5. Tick or untick **3D**. It starts the way the 3D button on the passage map is
+   set, and it is the same setting, so changing it here changes the map too.
+   Ticked, readers see the hills and headlands standing up, with your boat
+   drawn on the water as a model (see below). Unticked, the card is the flat
+   map it always was.
+6. Choose **Copy blog embed**. The embed opens in a box, already selected.
    Press **Copy**. If the box says to press ⌘C (Ctrl+C), the browser would not
    copy for Helmcentral, which can happen over a plain `http` address. The
    text is still selected, so press the keys yourself.
-6. In your Ghost post, add an **HTML** card and paste.
+7. In your Ghost post, add an **HTML** card and paste.
 
 To look at it before it goes into a post, choose **Download embed as HTML**
 and open the saved file in a browser.
+
+Any camera shots you have set on the replay go into the card as they are; there
+is nothing to tick. See [Film a passage replay](film-a-passage-replay.md)
+for setting them. If Helmcentral cannot read your shots, **Copy blog embed** and
+**Download embed as HTML** tell you so and stop, rather than hand you a card
+without them. A passage with no shots plays as it always did.
 
 ## Save a picture
 
@@ -59,6 +70,27 @@ passage it is on. Each night at anchor shows as a pause captioned "Night 2 ·
 Scawfell Island", using the place the passage before it ended at. At the end
 the button changes to **Replay**.
 
+With **3D** ticked the land stands up, the sea stays flat, and the sky shows
+above the horizon. The glow on the track is replaced by a model of your boat,
+the hull type you set under Anchor Watch settings, sized from the vessel's
+length and beam and pointing the way she is going. With no length recorded the
+model is drawn at a fixed size on screen, not to scale. If the model cannot be
+fetched, the glowing dot stays.
+
+Camera shots you set on the replay play for readers too: the camera eases into
+each one, follows or circles the boat, and slows the replay where you set a
+pace. The play length you chose is stretched by those paces: a stretch at half
+pace takes twice as long to watch, so the card can run longer than the 30
+seconds you picked. Readers can take hold of the
+map with a mouse drag or a pinch, and the replay leaves the camera alone until
+the next shot begins; a tap does nothing. Readers cannot change 3D or add
+satellite photographs. The map's credit line shows as a small ⓘ in the corner,
+and opens when a reader taps it. If their device asks for reduced motion, the camera cuts
+between framings instead of moving.
+
+If the hills cannot be fetched for a reader, a small "Terrain unavailable"
+notice shows and the map plays flat, with shots reduced to a zoom and a centre.
+
 Under the map, a row of figures shows distance, time underway, nights (for
 cruises and selections, counted as midnights since the first departure, as on the
 cruise page), fuel and the highest gust, in your Units setting. A
@@ -70,12 +102,46 @@ figure the boat did not record is left out rather than shown as `--`.
   for the seamarks) and are fetched by the reader's own browser. Their credits
   show on the map. The map software is loaded from a public software library.
   The blog map never carries satellite photographs; only a saved picture does.
+- With **3D** ticked the reader's browser also fetches the land heights from
+  Amazon's public elevation data, and, if your vessel has a hull type, the
+  drawing library for the boat model from the same public software library
+  as the map software. Both come straight from those servers to the reader, and
+  neither goes through the boat.
 - The track and figures are written into the pasted card. Nothing in it points
   at the boat, so readers need no access to your network.
 - The track is thinned to at most about 1,500 points across all the passages,
   which is enough to follow the line and keeps the card light.
-- Only the track and the figures above go out. Notes, edits and any other
-  boat data stay on the boat.
+- Your camera shots go out, and so do the hull type, length and beam when 3D is
+  ticked and the vessel has a hull type. With 3D unticked the hull and its size
+  stay on the boat.
+- Only the track, the shots, the hull details and the figures above go out.
+  Notes, edits and any other boat data stay on the boat.
+
+## If your blog sets a content security policy
+
+Most Ghost blogs set none and the card just works. If yours does (a security
+plugin, a CDN rule or a `Content-Security-Policy` header from your host), the
+card is blocked until the policy allows what it fetches. A blocked card shows a
+plain map, or the map without the land heights or the boat model, and the
+browser's console names the blocked address. Add these to the policy, keeping
+anything already there:
+
+```
+script-src   'unsafe-inline' https://cdn.jsdelivr.net blob:
+style-src    'unsafe-inline' https://cdn.jsdelivr.net
+connect-src  https://cdn.jsdelivr.net https://s3.amazonaws.com https://basemaps.cartocdn.com https://tiles.basemaps.cartocdn.com https://tiles.openseamap.org
+img-src      data: blob: https://basemaps.cartocdn.com https://tiles.basemaps.cartocdn.com https://tiles.openseamap.org
+worker-src   blob:
+```
+
+What each is for: the card is pasted into the page, so it needs inline script and
+style; `cdn.jsdelivr.net` serves the map software and, for the boat model, one
+more file; `blob:` lets the map's background workers and the boat model run;
+`s3.amazonaws.com` serves the land heights; the Carto and OpenSeaMap hosts serve
+the chart and seamarks. Without `s3.amazonaws.com` in `connect-src` the card says
+"Terrain unavailable" and plays flat; without `cdn.jsdelivr.net` in `connect-src`
+or `blob:` in `script-src` the boat stays a glowing dot. The browser's console
+says which of these to check, once.
 
 ## After you change a passage
 

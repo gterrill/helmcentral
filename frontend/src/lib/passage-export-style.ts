@@ -20,6 +20,16 @@ export const MAPLIBRE_CSS_URL = `https://cdn.jsdelivr.net/npm/maplibre-gl@${MAPL
 export const MAPLIBRE_JS_SRI = 'sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp'
 export const MAPLIBRE_CSS_SRI = 'sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK'
 
+export const THREE_VERSION = '0.170.0'
+export const THREE_URL = `https://cdn.jsdelivr.net/npm/three@${THREE_VERSION}/build/three.module.min.js`
+// sha384 of three.module.min.js 0.170.0, the version the app pins. Obtained by
+// hashing node_modules/three/build/three.module.min.js and checked against the
+// bytes jsDelivr serves (curl the URL above and hash the response: they are
+// identical). A test recomputes it from node_modules so an upgrade cannot leave
+// it stale. The card fetches the file with this hash as its integrity value
+// and only then imports it.
+export const THREE_SRI = 'sha384-IDC7sAMAIMB/TZ6dgKKPPAKZ2bXXXP8+FBMBC8cU319eBhKITx+PaalhfDkDNH28'
+
 export const EXPORT_BASE_STYLE_URL = 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json'
 export const EXPORT_SEAMARK_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
 export const EXPORT_SEAMARK_ATTRIBUTION = '© OpenSeaMap contributors'

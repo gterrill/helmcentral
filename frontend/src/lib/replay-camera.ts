@@ -171,3 +171,53 @@ export function outsideCentral(p: { x: number; y: number }, width: number, heigh
   const my = (height * (1 - fraction)) / 2
   return p.x < mx || p.x > width - mx || p.y < my || p.y > height - my
 }
+
+export const sameCamera = (a: Camera, b: Camera) =>
+  Math.abs(a.center[0] - b.center[0]) < 1e-7 && Math.abs(a.center[1] - b.center[1]) < 1e-7
+  && Math.abs(a.zoom - b.zoom) < 1e-3 && Math.abs(a.pitch - b.pitch) < 0.01
+  && Math.abs((((a.bearing - b.bearing) % 360) + 540) % 360 - 180) < 0.01
+
+export interface PlaceInput {
+  result: CameraResult
+  /** Bumped when the operator hands control back (Play, a scrub). */
+  resume: number
+  reduced: boolean
+  /** The map's camera as it is this instant. */
+  current: Camera
+  /** Whether the boat has left the central part of the view. Asked only in
+   * reduced motion, in a mode that follows her. */
+  boatOutside: () => boolean
+}
+
+/** Whether the replay or the person holds the camera. The person takes it by
+ * dragging, wheeling or pinching (`yield`); a tap does not count. The replay
+ * has it back at the next shot, or when Play or a scrub hands control back.
+ * The same gate runs the app's map and the blog card's. */
+export class CameraGate {
+  private yielded = false
+  private shotKey: string | null = null
+  private resume = 0
+
+  /** A person has taken hold of the map. */
+  yield() {
+    this.yielded = true
+  }
+
+  /** The camera to place now, or null to leave the map where it is. */
+  place({ result, resume, reduced, current, boatOutside }: PlaceInput): Camera | null {
+    const resumed = this.resume !== resume
+    this.resume = resume
+    const newShot = this.shotKey !== result.shotKey
+    this.shotKey = result.shotKey
+    if (resumed || newShot) this.yielded = false
+    if (this.yielded) return null
+    if (reduced && !(resumed || newShot)) {
+      // No continuous motion: cut again only when the boat nears the edge,
+      // and only in a mode that follows her.
+      if (result.mode !== 'follow' && result.mode !== 'orbit') return null
+      if (!boatOutside()) return null
+    }
+    // Never re-place a camera that is already there.
+    return sameCamera(current, result.camera) ? null : result.camera
+  }
+}

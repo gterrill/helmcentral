@@ -8,6 +8,9 @@ import type { PassageDetail, PassageStats } from '@/lib/passages'
 const render_ = vi.hoisted(() => ({ renderPassageImage: vi.fn<(data: unknown, kind: unknown, satellite: boolean) => Promise<Blob>>(async () => new Blob(['x'], { type: 'image/png' })) }))
 vi.mock('@/lib/passage-export-image', () => render_)
 vi.mock('@/lib/save-blob', () => ({ saveBlob: vi.fn() }))
+const shotsHook = vi.hoisted(() => ({ value: { shots: [] as unknown[], loading: false, error: null as string | null } }))
+vi.mock('@/hooks/use-camera-shots', () => ({ useCameraShots: () => shotsHook.value }))
+vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => ({ type: 'sail_mono', loaM: 12, beamM: 4 }) }))
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), loading: vi.fn(), dismiss: vi.fn() }))
 vi.mock('sonner', () => ({ toast }))
 
@@ -35,7 +38,10 @@ function openMenu() {
   fireEvent.click(trigger)
 }
 
-beforeEach(() => { vi.clearAllMocks(); saveImageryPreference(true); localStorage.clear() })
+beforeEach(() => {
+  vi.clearAllMocks(); saveImageryPreference(true); localStorage.clear()
+  shotsHook.value = { shots: [], loading: false, error: null }
+})
 
 describe('PassageExportMenu', () => {
   it('opens the blog embed in a dialog, selected and ready to copy', async () => {
@@ -80,5 +86,59 @@ describe('PassageExportMenu', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Download image 2:1' }))
     await vi.waitFor(() => expect(render_.renderPassageImage).toHaveBeenCalledTimes(2))
     expect(render_.renderPassageImage.mock.calls[1][2]).toBe(false)
+  })
+})
+
+describe('PassageExportMenu, cinematic card', () => {
+  const embedText = async () => ((await screen.findByRole('textbox', { name: 'Blog embed' })) as HTMLTextAreaElement).value
+  const dataOf = (html: string) => JSON.parse(html.match(/<script type="application\/json"[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? '{}') as {
+    d3: boolean; hull: unknown; shots: unknown[]
+  }
+
+  it('offers a 3D switch that follows the passage map, on unless it was turned off there', async () => {
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    expect((await screen.findByRole('menuitemcheckbox', { name: '3D' })).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('starts with 3D off when the passage map has it off', async () => {
+    localStorage.setItem('passages.replay3d', '0')
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    expect((await screen.findByRole('menuitemcheckbox', { name: '3D' })).getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('puts the 3D choice, the hull and the saved shots into the embed', async () => {
+    const t0 = Date.UTC(2026, 8, 14) / 1000
+    shotsHook.value = {
+      shots: [{ id: 's', t_ms: (t0 + 100) * 1000, mode: 'orbit', zoom: 14, pitch: 55, bearing_offset_deg: 0, orbit_deg_per_s: 6, pace: 0.5 }],
+      loading: false, error: null,
+    }
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+    const data = dataOf(await embedText())
+    expect(data.d3).toBe(true)
+    expect(data.hull).toEqual({ type: 'sail_mono', loa: 12, beam: 4 })
+    expect(data.shots).toHaveLength(1)
+  })
+
+  it('leaves the model and the tilt out when 3D is switched off', async () => {
+    localStorage.setItem('passages.replay3d', '0')
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+    const data = dataOf(await embedText())
+    expect(data.d3).toBe(false)
+    expect(data.hull).toBeNull()
+  })
+
+  it('stops, saying why, when the camera shots could not be read', async () => {
+    shotsHook.value = { shots: [], loading: false, error: 'HTTP 500' }
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+    expect(toast.error).toHaveBeenCalledWith('Could not read the camera shots', { description: 'HTTP 500' })
+    expect(screen.queryByRole('textbox', { name: 'Blog embed' })).toBeNull()
   })
 })

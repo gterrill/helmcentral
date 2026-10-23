@@ -16,7 +16,7 @@ import { OPENSEAMAP_TILES, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
 import { fitZoomForPitch } from '@/lib/pitch-fit'
-import { outsideCentral, type Camera, type CameraResult } from '@/lib/replay-camera'
+import { CameraGate, outsideCentral, type Camera, type CameraResult } from '@/lib/replay-camera'
 import { createSailedCache, segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
 import {
   hillshadePaint,
@@ -111,11 +111,6 @@ function readCamera(map: MapInstance): Camera {
   return { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() }
 }
 
-const sameCamera = (a: Camera, b: Camera) =>
-  Math.abs(a.center[0] - b.center[0]) < 1e-7 && Math.abs(a.center[1] - b.center[1]) < 1e-7
-  && Math.abs(a.zoom - b.zoom) < 1e-3 && Math.abs(a.pitch - b.pitch) < 0.01
-  && Math.abs((((a.bearing - b.bearing) % 360) + 540) % 360 - 180) < 0.01
-
 type TerrainState = 'ok' | 'failed' | 'retrying'
 
 type MapInstance = ReturnType<NonNullable<MapRef['getMap']>>
@@ -184,9 +179,9 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
         setLayerReady(false)
       }
     }
-    void import('@/lib/boat-layer').then(({ createBoatLayer }) => {
+    void Promise.all([import('@/lib/boat-layer'), import('three')]).then(([{ createBoatLayer }, three]) => {
       if (cancelled) return
-      layer = createBoatLayer({ type: hullType, loaM: hullLoa, beamM: hullBeam })
+      layer = createBoatLayer({ type: hullType, loaM: hullLoa, beamM: hullBeam }, { three, MercatorCoordinate: maplibregl.MercatorCoordinate })
       boatLayerRef.current = layer
       add()
       map.on('styledata', add)
@@ -329,9 +324,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   // does. The camera's own jumps carry no originalEvent.
   const driverRef = useRef(cameraDriver)
   const boatRef = useRef(boat)
-  const yieldedRef = useRef(false)
-  const lastShotKey = useRef<string | null>(null)
-  const lastResume = useRef(0)
+  const gate = useRef(new CameraGate())
   useEffect(() => {
     driverRef.current = cameraDriver
     boatRef.current = boat
@@ -343,16 +336,16 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     const down = new globalThis.Map<number, { x: number; y: number }>()
     const onDown = (e: PointerEvent) => {
       down.set(e.pointerId ?? 0, { x: e.clientX, y: e.clientY })
-      if (down.size > 1) yieldedRef.current = true
+      if (down.size > 1) gate.current.yield()
     }
     const onMove = (e: PointerEvent) => {
       const start = down.get(e.pointerId ?? 0)
-      if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > DRAG_YIELD_PX) yieldedRef.current = true
+      if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > DRAG_YIELD_PX) gate.current.yield()
     }
     const onUp = (e: PointerEvent) => { down.delete(e.pointerId ?? 0) }
-    const onWheel = () => { yieldedRef.current = true }
+    const onWheel = () => { gate.current.yield() }
     const onMoveStart = (e: { originalEvent?: unknown }) => {
-      if (e.originalEvent) yieldedRef.current = true
+      if (e.originalEvent) gate.current.yield()
     }
     surface.addEventListener('pointerdown', onDown)
     surface.addEventListener('pointermove', onMove)
@@ -380,24 +373,19 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     const current = readCamera(map)
     const result = driver.resolve({ flat: !camera3d, overview, current })
     if (!result) return
-    const resumed = lastResume.current !== driver.resume
-    lastResume.current = driver.resume
-    const newShot = lastShotKey.current !== result.shotKey
-    lastShotKey.current = result.shotKey
-    if (resumed || newShot) yieldedRef.current = false
-    if (yieldedRef.current) return
-    if (driver.reduced && !(resumed || newShot)) {
-      // No continuous motion: cut again only when the boat nears the edge,
-      // and only in a mode that follows her.
-      if (result.mode !== 'follow' && result.mode !== 'orbit') return
-      const at = boatRef.current
-      if (!at) return
-      const c = map.getContainer()
-      if (!outsideCentral(map.project([at.lon, at.lat]), c.clientWidth, c.clientHeight)) return
-    }
-    // Never re-place a camera that is already there.
-    if (sameCamera(current, result.camera)) return
-    map.jumpTo(result.camera)
+    const place = gate.current.place({
+      result,
+      resume: driver.resume,
+      reduced: driver.reduced,
+      current,
+      boatOutside: () => {
+        const at = boatRef.current
+        if (!at) return false
+        const c = map.getContainer()
+        return outsideCentral(map.project([at.lon, at.lat]), c.clientWidth, c.clientHeight)
+      },
+    })
+    if (place) map.jumpTo(place)
   // Placed when the replay clock moves or control is handed back.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [driverClock, driverResume])
