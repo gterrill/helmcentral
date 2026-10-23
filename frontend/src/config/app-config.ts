@@ -181,10 +181,6 @@ export function normalizeUiConfig(settings: AppConfigSettings | null | undefined
 export function normalizeAnchorConfig(settings: AppConfigSettings | null | undefined): AnchorConfig {
   const anchor = settings?.anchor
 
-  const hullType = typeof anchor?.hull_type === 'string'
-    ? anchor.hull_type.trim().toLowerCase()
-    : ''
-
   const scopeMethod = typeof anchor?.scope_method === 'string'
     ? anchor.scope_method.trim().toLowerCase()
     : ''
@@ -193,9 +189,7 @@ export function normalizeAnchorConfig(settings: AppConfigSettings | null | undef
     bowRollerHeightM: positiveNumber(anchor?.bow_roller_height_m, fallbackAnchorConfig.bowRollerHeightM),
     chainSizeMm: positiveNumber(anchor?.chain_size_mm, fallbackAnchorConfig.chainSizeMm),
     chainOnboardM: positiveNumber(anchor?.chain_onboard_m, fallbackAnchorConfig.chainOnboardM),
-    hullType: (HULL_TYPES as string[]).includes(hullType)
-      ? (hullType as HullType)
-      : fallbackAnchorConfig.hullType,
+    hullType: parseHullType(anchor?.hull_type) ?? fallbackAnchorConfig.hullType,
     scopeMethod: (SCOPE_METHODS as string[]).includes(scopeMethod)
       ? (scopeMethod as ScopeMethod)
       : fallbackAnchorConfig.scopeMethod,
@@ -232,6 +226,19 @@ export function normalizeAssistantVoiceConfig(settings: AppConfigSettings | null
     readAloud: typeof assistant?.read_aloud === 'boolean' ? assistant.read_aloud : fallbackAssistantVoiceConfig.readAloud,
     wakeWord: typeof assistant?.wake_word === 'boolean' ? assistant.wake_word : fallbackAssistantVoiceConfig.wakeWord,
   }
+}
+
+/** A hull type from a settings value, or null when it is empty or unknown. */
+export function parseHullType(raw: unknown): HullType | null {
+  const hullType = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  return (HULL_TYPES as string[]).includes(hullType) ? (hullType as HullType) : null
+}
+
+/** The hull type the operator chose, or null when none is set. Unlike the
+ * anchor geometry this has no stand-in: the boat model is drawn only for a
+ * hull type that was actually given. */
+export function normalizeBoatHull(settings: AppConfigSettings | null | undefined): HullType | null {
+  return parseHullType(settings?.anchor?.hull_type)
 }
 
 // Read live by hooks/use-vessel-identity.ts (the "Vessel" header tile and the

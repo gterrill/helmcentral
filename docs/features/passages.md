@@ -78,6 +78,20 @@ fetched. If it cannot be fetched the map shows "Terrain unavailable" in the top
 left corner and carries on flat, level and north up, and tries the elevation
 data again every minute; the notice goes once it arrives.
 
+With 3D on, the boat marker becomes a model of your own hull: a sailing
+monohull, sailing catamaran, power monohull or power catamaran, set under
+**Settings → Anchor Watch → Hull type**. It is sized from the length overall and beam in
+your vessel details (or the Length Overall under Anchor Watch settings), and
+drawn true to size when you zoom in close. It is kept at least about 40 pixels
+long when you zoom out so you can still find it. With a length but no beam, the
+beam is estimated from a typical proportion for the hull type. With no length
+recorded the boat is drawn at that fixed 40 pixels at every zoom, and is not to
+scale. The bow points along
+the course the boat is sailing; when she is stopped it points the way she is
+about to go, or keeps its last heading if she goes nowhere more.
+It sits level on the water. Without a hull type set, or with 3D off or the
+terrain unavailable, the marker is the plain dot.
+
 During a replay the track is drawn as the boat sails it: solid up to the boat,
 and a faint line for the water still ahead. Before Play, and when you view a
 passage without replaying, the whole track shows as before.

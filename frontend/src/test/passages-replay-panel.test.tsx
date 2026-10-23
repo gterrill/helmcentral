@@ -7,6 +7,8 @@ import { REPLAY_SPEEDS } from '@/hooks/use-replay'
 import { ReplayPanel, type ReplayCursor } from '@/components/passages/replay-panel'
 import type { PassageDetail } from '@/lib/passages'
 
+vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => null }))
+
 const flyIn = vi.fn(() => Promise.resolve())
 let lastBoat: { lat: number; lon: number } | null = null
 vi.mock('@/components/passages/passage-map', () => ({

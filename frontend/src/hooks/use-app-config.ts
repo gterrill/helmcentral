@@ -8,12 +8,14 @@ import {
   fallbackUiConfig,
   normalizeAnchorConfig,
   normalizeAssistantVoiceConfig,
+  normalizeBoatHull,
   normalizeBoatModel,
   normalizeMayaraConfig,
   normalizeUiConfig,
   type AnchorConfig,
   type AppConfigSettings,
   type AssistantVoiceConfig,
+  type HullType,
   type MayaraConfig,
   type UiConfig,
 } from '@/config/app-config'
@@ -28,6 +30,8 @@ export type AppConfig = {
   /** Read live by hooks/use-vessel-identity.ts. Null until settings.boat.model
    * is known, or when it's unset/blank. */
   boatModel: string | null
+  /** The hull type set under Anchor Watch settings, or null when unset. */
+  boatHull: HullType | null
   /** False until the backend's settings have been applied (or have failed). */
   loaded: boolean
 }
@@ -38,6 +42,7 @@ const defaultAppConfig: AppConfig = {
   mayara: fallbackMayaraConfig,
   assistant: fallbackAssistantVoiceConfig,
   boatModel: null,
+  boatHull: null,
   loaded: false,
 }
 
@@ -61,6 +66,7 @@ function toAppConfig(settings: AppConfigSettings | null): AppConfig {
     mayara: normalizeMayaraConfig(settings),
     assistant: normalizeAssistantVoiceConfig(settings),
     boatModel: normalizeBoatModel(settings),
+    boatHull: normalizeBoatHull(settings),
     loaded: true,
   }
 }
