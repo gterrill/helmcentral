@@ -183,6 +183,9 @@ func createPassageSchema(db *sql.DB) error {
 	if err := createCameraShotSchema(db); err != nil {
 		return err
 	}
+	if err := createSignSchema(db); err != nil {
+		return err
+	}
 	if err := addTrackPointSourceColumn(db); err != nil {
 		return err
 	}

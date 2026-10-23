@@ -93,6 +93,8 @@ export interface PassageMapProps {
   className?: string
   /** Shown in the top right corner, stacked under the satellite button. */
   overlay?: ReactNode
+  /** Map markers drawn over the track: the replay's signs. */
+  markers?: ReactNode
 }
 
 const INTRO_START_ZOOM = 1.5
@@ -133,7 +135,7 @@ function centreOf(bounds: [number, number, number, number]) {
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, overlay },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, overlay, markers },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -537,6 +539,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
             />
           </Marker>
         )}
+        {markers}
       </Map>
       {threeD && terrain !== 'ok' && (
         <div

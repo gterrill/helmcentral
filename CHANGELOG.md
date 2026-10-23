@@ -13,6 +13,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Pin notes and photos to the passage replay with signs.** A **Signs** button
+  on the replay bar opens a sign editor. Add a sign at any point on the slider
+  with a title and a short note, or add a photo and it is placed where it was
+  taken, from the time stored in the picture (read in the boat's time zone if the
+  photo has none), and the editor shows the time used. A sign shows as a card
+  as the boat passes, always, or from then on, and only two show at once. Before
+  you press Play every sign is a small mark on the track, and tapping a card
+  while the replay is paused opens its photo. Photos you upload are kept in a
+  Documents folder called Passage photos. Signs survive splitting and merging
+  passages.
 - **Direct the passage replay with camera shots.** A **Camera** button on the
   replay bar opens a shot editor. Add a shot at any point on the slider, then
   choose Overview, Follow (chase the boat from astern, abeam or any angle) or

@@ -38,7 +38,7 @@ const passage: PassageDetail = {
   replay_times: [[start, start + 250, start + 750, start + 1000]],
 }
 
-beforeEach(() => { stubApi({ 'GET /api/passages/camera-shots': { shots: [] } }); localStorage.clear(); lastBoat = null; flyIn.mockClear() })
+beforeEach(() => { stubApi({ 'GET /api/passages/camera-shots': { shots: [] }, 'GET /api/passages/signs': { signs: [] } }); localStorage.clear(); lastBoat = null; flyIn.mockClear() })
 
 describe('ReplayPanel', () => {
   it('scrubbing moves the boat and the boat-local readout, and reports the cursor', () => {

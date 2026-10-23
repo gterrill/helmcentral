@@ -1,15 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { CameraEditor, type CameraShotChange } from '@/components/passages/camera-editor'
+import { SignPhotoDialog } from '@/components/passages/sign-card'
+import { SignEditor, type SignChange } from '@/components/passages/sign-editor'
+import { SignMarkers } from '@/components/passages/sign-markers'
+import type { DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
 import { InsetMap, PassageMap, type CameraDriver, type PassageMapHandle } from '@/components/passages/passage-map'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
+import { useReplaySigns } from '@/hooks/use-replay-signs'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
 import { nextHeading, type HeadingState } from '@/lib/boat-model'
 import { cameraShotsApi } from '@/lib/camera-shots-api'
+import { replaySignsApi } from '@/lib/replay-signs-api'
+import { resolveSigns, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX, visibleSigns } from '@/lib/replay-signs'
+import { placeByCapture } from '@/lib/sign-placement'
+import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-photo'
 import { CameraDirector, shotStartState } from '@/lib/replay-camera'
 import { paceSpans, resolveShots, wallAtTimeline, type CameraMode } from '@/lib/replay-clock'
 import { REPLAY_3D_PITCH } from '@/lib/terrain'
@@ -22,6 +31,7 @@ import {
   sailedAt,
   segmentBounds,
   timedSegments,
+  vesselZone,
   type PassageDetail,
   type TimedSegment,
 } from '@/lib/passages'
@@ -51,6 +61,17 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null)
   const [shotBusy, setShotBusy] = useState(false)
   const [shotError, setShotError] = useState<string | null>(null)
+  const [signsOpen, setSignsOpen] = useState(false)
+  const [selectedSignId, setSelectedSignId] = useState<string | null>(null)
+  // Writes run one at a time; busy is the number queued or running.
+  const [signWrites, setSignWrites] = useState(0)
+  const signQueue = useRef<Promise<void>>(Promise.resolve())
+  const signWritesPending = useRef(0)
+  const [signError, setSignError] = useState<string | null>(null)
+  const [signNotice, setSignNotice] = useState<string | null>(null)
+  // A pin the operator opened into its card, and the sign whose photo is open full size.
+  const [openPinId, setOpenPinId] = useState<string | null>(null)
+  const [photoSignId, setPhotoSignId] = useState<string | null>(null)
   // Bumped when the operator takes the camera back from a drag (Play, a scrub).
   const [resume, setResume] = useState(0)
   // The map says whether it is flat: 3D off, or the terrain failed.
@@ -101,6 +122,11 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const spans = useMemo(() => paceSpans(resolved), [resolved])
   const lengthS = replaySeconds(speed)
   const replay = useReplay(timeline.total, lengthS, spans)
+
+  // Signs, like shots, belong to real time: the ones inside the replayed
+  // passages are the ones placed; a trimmed-out sign is kept but not shown.
+  const { signs } = useReplaySigns(spanMs ? spanMs.from : null, spanMs ? spanMs.to : null)
+  const placedSigns = useMemo(() => resolveSigns(signs, timeline), [signs, timeline])
 
   const here = locate(timeline, replay.clock)
   const boat = here ? positionAt(here.entry.segments, here.at) : null
@@ -175,6 +201,115 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         },
       }
     : null
+
+  // Cards come and go on watched (wall-clock) time. Before the replay has
+  // moved off the start every sign is a pin, and the pins show while the sign
+  // editor is open.
+  const replaying = replay.clock > 0
+  const cards = useMemo(
+    () => (replaying ? visibleSigns(placedSigns, wallAt(replay.clock), wallAt) : []),
+    [replaying, placedSigns, wallAt, replay.clock],
+  )
+  const pins = !replaying || signsOpen ? placedSigns : []
+  const openId = pins.some((p) => p.sign.id === openPinId) ? openPinId : null
+  const photoSign = signs.find((s) => s.id === photoSignId) ?? null
+
+  const selectedSign = signs.find((s) => s.id === selectedSignId && placedSigns.some((r) => r.sign.id === s.id)) ?? null
+  const selectSign = (id: string | null) => {
+    if (id !== selectedSignId) setSignNotice(null)
+    setSelectedSignId(id)
+    setSignError(null)
+  }
+  // One write at a time, in the order the operator made them, so a slow upload
+  // and a title saved a moment later cannot cross. Each write reports its own
+  // failure; a later success does not wipe it. The old error is dropped only
+  // when a new action starts with nothing else in flight.
+  const runSignWrite = (write: () => Promise<void>) => {
+    if (signWritesPending.current === 0) setSignError(null)
+    signWritesPending.current += 1
+    setSignWrites((n) => n + 1)
+    signQueue.current = signQueue.current.then(async () => {
+      try {
+        await write()
+      } catch (err) {
+        setSignError(err instanceof Error ? err.message : String(err))
+      } finally {
+        signWritesPending.current -= 1
+        setSignWrites((n) => n - 1)
+      }
+    })
+    return signQueue.current
+  }
+  const seekToSign = (at: number) => {
+    const entry = timeline.entries.find((e) => at >= e.start && at <= e.end)
+    if (!entry) return
+    replay.setPlaying(false)
+    replay.setClock(entry.offset + (at - entry.start))
+    setResume((n) => n + 1)
+  }
+  const addSign = () => {
+    if (!here) return
+    setSignNotice(null)
+    void runSignWrite(async () => {
+      const created = await replaySignsApi.create({
+        t_ms: Math.round(here.at * 1000), title: 'New sign', note: '', document_id: null, visibility: 'passing', show_s: SIGN_SHOW_DEFAULT,
+      })
+      setSelectedSignId(created.id)
+    })
+  }
+  // A new sign for a photo: pinned where the photo was taken if that is inside
+  // the replay, otherwise at the cursor, and the editor says which.
+  const addPhotoSign = (name: string, getCapture: () => Promise<Awaited<ReturnType<typeof captureOfFile>>>, getDocumentId: () => Promise<string>) => {
+    if (!here) return
+    setSignNotice(null)
+    const cursorAt = here.at
+    void runSignWrite(async () => {
+      const placement = placeByCapture(await getCapture(), vesselZone(lon).offsetHours, timeline, cursorAt)
+      const documentId = await getDocumentId()
+      const created = await replaySignsApi.create({
+        t_ms: Math.round(placement.at * 1000), title: name, note: '', document_id: documentId, visibility: 'passing', show_s: SIGN_SHOW_DEFAULT,
+      })
+      setSelectedSignId(created.id)
+      setSignNotice(placement.message)
+      if (placement.placedByPhoto) seekToSign(placement.at)
+    })
+  }
+  const titleFor = (name: string) => name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ').trim().slice(0, SIGN_TITLE_MAX) || 'Photo'
+  const addPhoto = (file: File) => addPhotoSign(titleFor(file.name), () => captureOfFile(file), () => uploadSignPhoto(file))
+  const addFromLibrary = (doc: DocumentLinkPickerResult) =>
+    addPhotoSign(titleFor(doc.title || doc.filename), () => captureOfDocument(doc.document_id), () => Promise.resolve(doc.document_id))
+  const changeSign = (change: SignChange) => {
+    setSignNotice(null)
+    if (selectedSign) void runSignWrite(async () => { await replaySignsApi.patch(selectedSign.id, change) })
+  }
+  const replacePhoto = (file: File) => {
+    if (!selectedSign) return
+    setSignNotice(null)
+    void runSignWrite(async () => { await replaySignsApi.patch(selectedSign.id, { document_id: await uploadSignPhoto(file) }) })
+  }
+  const replaceFromLibrary = (doc: DocumentLinkPickerResult) => {
+    if (!selectedSign) return
+    setSignNotice(null)
+    void runSignWrite(async () => { await replaySignsApi.patch(selectedSign.id, { document_id: doc.document_id }) })
+  }
+  const removePhoto = () => {
+    setSignNotice(null)
+    if (selectedSign) void runSignWrite(async () => { await replaySignsApi.patch(selectedSign.id, { document_id: null }) })
+  }
+  const deleteSign = () => {
+    if (!selectedSign) return
+    setSignNotice(null)
+    void runSignWrite(async () => {
+      await replaySignsApi.remove(selectedSign.id)
+      setSelectedSignId(null)
+    })
+  }
+  const signTicks = placedSigns.map((r) => ({
+    id: r.sign.id,
+    fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
+    label: `Sign ${r.sign.title} at ${formatLocalDateTime(r.at, lon)}`,
+    selected: r.sign.id === selectedSign?.id,
+  }))
 
   const selectShot = (id: string | null) => {
     setSelectedShotId(id)
@@ -270,6 +405,18 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           hull={hull}
           cameraDriver={cameraDriver}
           onFlatChange={setMapFlat}
+          markers={
+            <SignMarkers
+              cards={cards}
+              pins={pins}
+              openId={openId}
+              canOpenPhoto={!replay.playing}
+              still={reducedMotion}
+              onOpenPhoto={(sign) => setPhotoSignId(sign.id)}
+              onPinClick={(id) => { setOpenPinId(id); if (signsOpen) selectSign(id) }}
+              onCloseOpen={() => setOpenPinId(null)}
+            />
+          }
           isDarkTheme={isDarkTheme}
           overlay={
             insetOn && !flying ? (
@@ -306,6 +453,34 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           selectShot(id)
           setCameraOpen(true)
         }}
+        signTicks={signTicks}
+        signsOpen={signsOpen}
+        onSignsToggle={() => setSignsOpen((o) => !o)}
+        onSignTickClick={(id) => {
+          const r = placedSigns.find((x) => x.sign.id === id)
+          if (!r) return
+          seekToSign(r.at)
+          selectSign(id)
+          setSignsOpen(true)
+        }}
+        signsEditor={
+          <SignEditor
+            sign={selectedSign}
+            signCount={placedSigns.length}
+            whenLabel={selectedSign ? formatLocalDateTime(selectedSign.t_ms / 1000, lon) : null}
+            busy={signWrites > 0}
+            error={signError}
+            notice={signNotice}
+            onAdd={addSign}
+            onAddPhoto={addPhoto}
+            onAddFromLibrary={addFromLibrary}
+            onChange={changeSign}
+            onReplacePhoto={replacePhoto}
+            onReplaceFromLibrary={replaceFromLibrary}
+            onRemovePhoto={removePhoto}
+            onDelete={deleteSign}
+          />
+        }
         editor={
           <CameraEditor
             shot={selectedShot}
@@ -320,6 +495,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           />
         }
       />
+      <SignPhotoDialog sign={photoSign} onClose={() => setPhotoSignId(null)} />
     </div>
   )
 }

@@ -143,6 +143,46 @@ for reduced motion, the camera cuts to each shot instead of moving, and cuts
 again if the boat nears the edge of the view. With no shots the replay frames
 the track as before. See [Film a passage replay](../how-to/film-a-passage-replay.md).
 
+### Signs
+
+A sign is a short note with an optional photo, pinned to a moment of the
+passage, for the whale off the bow or the anchorage with the good beach. It
+appears on the map as a card on a thin line from its place on the track, with
+the photo as a thumbnail beside the title and note. The **Signs** button on the
+replay bar opens the sign editor.
+
+Each sign chooses when it shows: **While passing** (the default) brings it up
+just before the boat reaches the spot and keeps it for a number of seconds you
+set, from 1 to 30; **After passing** shows it from the spot to the end;
+**Always** shows it for the whole replay. The seconds are seconds you watch, so
+a faster replay does not make a sign flash by. Only two cards show at once: when
+a third is due, the one that has been up longest steps aside. A sign set to
+**Always** does not step aside, so two of them leave no room for others.
+
+Before you press Play, each sign is a small mark on its place on the track, and
+a tap opens its card. While the replay is paused, a tap on a card opens its
+photo full size; Escape closes it. Signs show as diamonds on the slider, apart
+from the marks for camera shots, and picking one jumps to it and opens it for
+editing.
+
+A photo is either uploaded, into a Documents folder called **Passage photos**
+that is made the first time, or chosen from a photo already in Documents. When
+you make a sign from a photo it is placed at the moment the photo was taken, if
+that is inside the replay. The camera's clock is used as it is; if the photo
+doesn't say which time zone it was taken in, it is read in the boat's zone, the
+one shown beside the replay time, and the editor shows the time it used. If the
+photo has no time or was taken outside the replay, the sign goes where the
+slider is and the editor says so. The photo's own position is not used: the
+track is what the boat recorded. If you delete the photo in Documents, the sign
+keeps its title and note and shows no picture. If a photo is still there but
+cannot be loaded, the card says "Photo not available" instead of hiding it.
+
+Signs belong to the time of day, not to one passage record, so splitting or
+merging passages keeps them. If you trim a passage so a sign falls outside it,
+the sign is hidden and comes back if you undo the trim. Signs are only removed
+when you delete them. If your device asks for reduced motion, signs appear with
+no fade. See [Film a passage replay](../how-to/film-a-passage-replay.md).
+
 Under the map are the passage's figures:
 
 - distance and time underway
