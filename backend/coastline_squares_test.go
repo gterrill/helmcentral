@@ -136,3 +136,86 @@ func TestSquaresWithin_AntimeridianAndPolesAreErrors(t *testing.T) {
 		t.Errorf("far from it: %v", err)
 	}
 }
+
+func TestSquareInland_KnownSquares(t *testing.T) {
+	cases := []struct {
+		name   string
+		sq     coverageSquare
+		inland bool
+	}{
+		{"central Australia", coverageSquare{Lat: -24, Lon: 133}, true},
+		{"Alps", coverageSquare{Lat: 47, Lon: 10}, true},
+		{"Whitsundays, Hook Island", coverageSquare{Lat: -21, Lon: 148}, false},
+		{"Whitsundays, Hayman side", coverageSquare{Lat: -21, Lon: 149}, false},
+		{"mid Pacific", coverageSquare{Lat: 0, Lon: -140}, false},
+		{"Coral Sea", coverageSquare{Lat: -15, Lon: 155}, false},
+		{"Caspian Sea", coverageSquare{Lat: 42, Lon: 50}, false},
+		{"Solent", coverageSquare{Lat: 50, Lon: -2}, false},
+		{"Antarctica (not in the land data)", coverageSquare{Lat: -80, Lon: 0}, false},
+	}
+	for _, c := range cases {
+		if got := squareInland(c.sq); got != c.inland {
+			t.Errorf("%s %v: inland = %v, want %v", c.name, c.sq, got, c.inland)
+		}
+	}
+}
+
+func TestSquareInland_OutOfRangeIsNotInland(t *testing.T) {
+	if squareInland(coverageSquare{Lat: 95, Lon: 0}) || squareInland(coverageSquare{Lat: 0, Lon: 200}) {
+		t.Error("an invalid square must never be treated as inland")
+	}
+}
+
+func TestSquareInland_SeaIsNeverNearInlandSquares(t *testing.T) {
+	// Every shelter ray is at most 15 nm, so a square that touches the
+	// 20 nm band of any square at the Whitsundays must not be inland.
+	wanted, err := squaresWithin(-20.1, 148.9, 40)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sq := range wanted {
+		if squareInland(sq) {
+			t.Errorf("%v is within 40 nm of Hook Island yet inland", sq)
+		}
+	}
+}
+
+func TestCoverageWanted_DropsInlandSquaresAndCountsThem(t *testing.T) {
+	// Mackay hinterland: the 200 nm circle reaches square after square of
+	// the Queensland interior.
+	lat, lon := -20.1, 148.9
+	all, err := squaresWithin(lat, lon, coastlineCoverageRadiusNm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wanted, skipped, err := coverageWanted(lat, lon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped == 0 {
+		t.Fatal("the circle reaches the Queensland interior, some squares must be skipped")
+	}
+	if len(wanted)+skipped != len(all) {
+		t.Errorf("wanted %d + skipped %d != %d in range", len(wanted), skipped, len(all))
+	}
+	for _, sq := range wanted {
+		if squareInland(sq) {
+			t.Errorf("%v is inland but wanted", sq)
+		}
+	}
+	// Order is kept: still nearest first.
+	last := -1.0
+	for _, sq := range wanted {
+		d := squareDistanceNm(lat, lon, sq)
+		if d < last {
+			t.Fatalf("not nearest first at %v", sq)
+		}
+		last = d
+	}
+}
+
+func TestCoverageWanted_RefusesUnsupportedAreas(t *testing.T) {
+	if _, _, err := coverageWanted(-17, 179.6); !errors.Is(err, errCoastlineUnsupportedArea) {
+		t.Errorf("err = %v", err)
+	}
+}

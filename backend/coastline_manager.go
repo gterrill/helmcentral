@@ -306,7 +306,7 @@ func (m *coastlineManager) step() bool {
 	}
 
 	if snap.fix {
-		wanted, err := squaresWithin(snap.lat, snap.lon, coastlineCoverageRadiusNm)
+		wanted, _, err := coverageWanted(snap.lat, snap.lon)
 		if err != nil {
 			m.setError(err.Error())
 		} else {
@@ -546,6 +546,9 @@ type coastlineStatus struct {
 	Held        int                     `json:"held"`
 	Wanted      int                     `json:"wanted"`
 	WantedHeld  int                     `json:"wanted_held"`
+	// InlandSkipped counts squares in range that are all land and so are
+	// not downloaded.
+	InlandSkipped int `json:"inland_skipped"`
 	// Failed counts wanted squares whose download failed and will be retried.
 	Failed int `json:"failed"`
 	// CheckFailed counts held squares whose weekly edit check failed.
@@ -594,8 +597,9 @@ func (m *coastlineManager) Status() (coastlineStatus, error) {
 	var wanted []coverageSquare
 	if fix {
 		st.Position = &coastlinePosition{Lat: snap.lat, Lon: snap.lon}
-		wanted, err = squaresWithin(snap.lat, snap.lon, coastlineCoverageRadiusNm)
+		wanted, st.InlandSkipped, err = coverageWanted(snap.lat, snap.lon)
 		if err != nil {
+			st.InlandSkipped = 0
 			st.Error = err.Error()
 			wanted = nil
 		}

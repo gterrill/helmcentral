@@ -163,6 +163,11 @@ export function OfflineCoastlineSection({ draft, onChange }: OfflineCoastlineSec
           ) : status ? (
             <p className="text-sm font-medium">{coastlineStatusLine(status)}</p>
           ) : null}
+          {status && status.inland_skipped > 0 && (
+            <p className="text-xs text-muted-foreground" data-testid="offline-coastline-inland">
+              {status.inland_skipped === 1 ? '1 square that is all land is skipped.' : `${status.inland_skipped} squares that are all land are skipped.`}
+            </p>
+          )}
           {unsaved && <p className="text-xs text-muted-foreground">Save settings to apply the switch.</p>}
         </div>
         {actionError && <p className="text-sm text-destructive" role="alert">{actionError}</p>}

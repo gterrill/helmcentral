@@ -18,10 +18,20 @@ keeps the coastline and the reefs, taken from OpenStreetMap, and the date it
 was downloaded.
 
 **Coverage** is every square any part of which lies within 200 nautical miles
-of the boat, plus every square you have downloaded earlier. That is roughly
-40 to 60 squares, tens of megabytes to download. As the boat moves, only squares
+of the boat, plus every square you have downloaded earlier, less the squares
+that are all land (below). That is roughly 40 to 60 squares, tens of megabytes
+to download. As the boat moves, only squares
 newly within 200 nm are fetched. Squares behind you stay, so a cruise you
 sail home again needs no downloads. Only **Clear coverage** removes them.
+
+**Squares that are all land are skipped.** A square with no part of it within
+20 nm of the sea, such as the middle of a continent, cannot matter to a
+shelter estimate, which looks no further than 15 nm from the water. Helmcentral
+does not download it, and the page says how many it left out. When in doubt it
+downloads: the Caspian Sea, the polar regions and small islands count as
+coastal. A square of that kind that you already hold stays. A shelter estimate
+asked for a position in such a square answers that the spot is inland, with no
+anchorage shelter to estimate.
 
 Squares come down one at a time, nearest the boat first, with a pause between
 each. A square with no coastline in it, open sea, is still a square, and is
@@ -63,6 +73,8 @@ that includes the neighbouring squares, up to three more at a corner. If any
 is not yet held, Mate says which, and why. It answers in plain terms:
 
 - **Offline coastline is off.** Turn it on in Settings → Offline coastline.
+- **Inland.** The position is on land well clear of the sea, so there is
+  no anchorage shelter to estimate.
 - **Outside coverage.** The position is not in any square held, and not
   within 200 nm of the boat.
 - **Still downloading.** The square is in range and on its way.

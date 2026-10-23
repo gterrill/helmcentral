@@ -21,6 +21,7 @@ function status(overrides: Partial<OfflineCoastlineStatus> = {}): OfflineCoastli
     held: 0,
     wanted: 0,
     wanted_held: 0,
+    inland_skipped: 0,
     failed: 0,
     edits_since: 0,
     squares_with_edits: 0,

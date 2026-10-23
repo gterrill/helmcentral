@@ -45,6 +45,8 @@ export interface OfflineCoastlineStatus {
   held: number
   wanted: number
   wanted_held: number
+  /** Squares in range that are all land, so are not downloaded. */
+  inland_skipped: number
   /** Wanted squares whose download failed and will be retried. */
   failed: number
   /** Held squares whose weekly edit check failed. */

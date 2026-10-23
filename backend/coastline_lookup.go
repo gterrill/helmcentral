@@ -59,6 +59,9 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 	if err != nil {
 		return shorelineSet{}, err
 	}
+	if squareInland(own) {
+		return shorelineSet{}, fmt.Errorf("%.4f, %.4f is inland, well clear of the sea, so there is no anchorage shelter to estimate there", lat, lon)
+	}
 	recs, err := r.Store.Records()
 	if err != nil {
 		return shorelineSet{}, err
@@ -74,7 +77,7 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 	var boatErr error
 	if r.Boat != nil {
 		if bLat, bLon, ok := r.Boat(); ok {
-			wanted, werr := squaresWithin(bLat, bLon, coastlineCoverageRadiusNm)
+			wanted, _, werr := coverageWanted(bLat, bLon)
 			if werr != nil {
 				// Reported only if a square is actually missing: with
 				// everything held, coverage does not matter.
@@ -107,6 +110,9 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 		}
 		if sq == own {
 			ownMissing = true
+		}
+		if squareInland(sq) {
+			return shorelineSet{}, fmt.Errorf("%.4f, %.4f is ashore: %s is inland, well clear of the sea, so there is no anchorage shelter to estimate there", lat, lon, sq.Label())
 		}
 		missing = append(missing, fmt.Sprintf("%s (%s)", sq.Label(), describe(sq)))
 	}
