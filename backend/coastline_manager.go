@@ -92,6 +92,14 @@ type coastlineManagerConfig struct {
 type coastlineManager struct {
 	cfg coastlineManagerConfig
 
+	// gateMu orders every write to the store against Clear and Update, and
+	// guards gen. A plugin call can take minutes; whatever the operator did
+	// meanwhile (Clear, or the switch going off) must win, so a result is
+	// saved only if gen is unchanged and the switch is still on, checked and
+	// written under this lock.
+	gateMu sync.Mutex
+	gen    uint64
+
 	mu        sync.Mutex
 	queue     []coverageSquare // operator-requested updates, in order
 	lastError string           // a problem with the whole job, not one square
@@ -126,6 +134,30 @@ func (m *coastlineManager) nextQueued() (coverageSquare, bool) {
 	return sq, true
 }
 
+// commit runs save only if the work that produced it is still wanted: no
+// Clear has happened since gen was read, and Offline coastline is still on.
+// The check and the write share gateMu, so Clear cannot slip in between.
+func (m *coastlineManager) commit(gen uint64, what string, save func() error) {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	if gen != m.gen {
+		log.Printf("offline coastline: %s discarded: coverage was cleared while it ran", what)
+		return
+	}
+	enabled, err := m.cfg.Enabled()
+	if err != nil {
+		m.setError(fmt.Sprintf("could not read the offline coastline setting: %v", err))
+		return
+	}
+	if !enabled {
+		log.Printf("offline coastline: %s discarded: Offline coastline was switched off while it ran", what)
+		return
+	}
+	if err := save(); err != nil {
+		m.setError(err.Error())
+	}
+}
+
 // step does one unit of work and reports whether it called the plugin.
 func (m *coastlineManager) step() bool {
 	enabled, err := m.cfg.Enabled()
@@ -147,6 +179,10 @@ func (m *coastlineManager) step() bool {
 	}
 	m.setError("")
 
+	m.gateMu.Lock()
+	gen := m.gen
+	m.gateMu.Unlock()
+
 	now := m.cfg.Now()
 	recs, err := m.cfg.Store.Records()
 	if err != nil {
@@ -159,7 +195,7 @@ func (m *coastlineManager) step() bool {
 	}
 
 	if sq, ok := m.nextQueued(); ok {
-		m.download(src, sq, byKey[sq], now)
+		m.download(src, gen, sq, byKey[sq], now)
 		return true
 	}
 
@@ -176,7 +212,7 @@ func (m *coastlineManager) step() bool {
 				if held && now.Before(rec.NextAttemptAt) {
 					continue
 				}
-				m.download(src, sq, rec, now)
+				m.download(src, gen, sq, rec, now)
 				return true
 			}
 		}
@@ -190,38 +226,38 @@ func (m *coastlineManager) step() bool {
 	}
 	if len(due) > 0 {
 		sort.Slice(due, func(i, j int) bool { return due[i].CheckedAt.Before(due[j].CheckedAt) })
-		m.check(src, due[0], now)
+		m.check(src, gen, due[0], now)
 		return true
 	}
 	return false
 }
 
-func (m *coastlineManager) download(src coastlineSource, sq coverageSquare, prev coastlineSquareRecord, now time.Time) {
+func (m *coastlineManager) download(src coastlineSource, gen uint64, sq coverageSquare, prev coastlineSquareRecord, now time.Time) {
 	lines, err := src.ShorelineSquare(sq)
 	if err != nil {
 		log.Printf("offline coastline: download of %s failed: %v", sq.Label(), err)
-		if rerr := m.cfg.Store.RecordFailure(sq, err.Error(), now, now.Add(coastlineRetryDelay(prev.Attempts+1))); rerr != nil {
-			m.setError(rerr.Error())
-		}
+		m.commit(gen, "failure of "+sq.Label(), func() error {
+			return m.cfg.Store.RecordFailure(sq, err.Error(), now, now.Add(coastlineRetryDelay(prev.Attempts+1)))
+		})
 		return
 	}
-	if err := m.cfg.Store.SaveSquare(sq, lines, now); err != nil {
-		m.setError(err.Error())
-	}
+	m.commit(gen, "download of "+sq.Label(), func() error {
+		return m.cfg.Store.SaveSquare(sq, lines, now)
+	})
 }
 
-func (m *coastlineManager) check(src coastlineSource, rec coastlineSquareRecord, now time.Time) {
+func (m *coastlineManager) check(src coastlineSource, gen uint64, rec coastlineSquareRecord, now time.Time) {
 	edits, err := src.ShorelineChanges(rec.Square, rec.DownloadedAt)
 	if err != nil {
 		log.Printf("offline coastline: edit check of %s failed: %v", rec.Square.Label(), err)
-		if rerr := m.cfg.Store.RecordFailure(rec.Square, err.Error(), now, now.Add(coastlineRetryDelay(rec.Attempts+1))); rerr != nil {
-			m.setError(rerr.Error())
-		}
+		m.commit(gen, "failure of edit check of "+rec.Square.Label(), func() error {
+			return m.cfg.Store.RecordFailure(rec.Square, err.Error(), now, now.Add(coastlineRetryDelay(rec.Attempts+1)))
+		})
 		return
 	}
-	if err := m.cfg.Store.RecordEdits(rec.Square, edits, now); err != nil {
-		m.setError(err.Error())
-	}
+	m.commit(gen, "edit check of "+rec.Square.Label(), func() error {
+		return m.cfg.Store.RecordEdits(rec.Square, edits, now)
+	})
 }
 
 // Update queues a re-download of every held square with edits since, and
@@ -234,6 +270,9 @@ func (m *coastlineManager) Update() (int, error) {
 	if !enabled {
 		return 0, errors.New("Offline coastline is off: turn it on in Settings before updating")
 	}
+	// Held across the read and the queueing so a Clear cannot land between.
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
 	recs, err := m.cfg.Store.Records()
 	if err != nil {
 		return 0, err
@@ -262,6 +301,9 @@ func (m *coastlineManager) Update() (int, error) {
 
 // Clear deletes all coverage and forgets any queued update.
 func (m *coastlineManager) Clear() error {
+	m.gateMu.Lock()
+	defer m.gateMu.Unlock()
+	m.gen++ // any plugin call already in flight is now stale
 	m.mu.Lock()
 	m.queue = nil
 	m.mu.Unlock()

@@ -51,6 +51,13 @@ type coastlineHarness struct {
 	lat     float64
 	lon     float64
 	srcErr  error
+	enMu    sync.Mutex // guards enabled while a step runs in another goroutine
+}
+
+func (h *coastlineHarness) setEnabled(v bool) {
+	h.enMu.Lock()
+	h.enabled = v
+	h.enMu.Unlock()
 }
 
 func newCoastlineHarness(t *testing.T) *coastlineHarness {
@@ -63,7 +70,7 @@ func newCoastlineHarness(t *testing.T) *coastlineHarness {
 	}
 	h.m = newCoastlineManager(coastlineManagerConfig{
 		Store:    h.store,
-		Enabled:  func() (bool, error) { return h.enabled, nil },
+		Enabled:  func() (bool, error) { h.enMu.Lock(); defer h.enMu.Unlock(); return h.enabled, nil },
 		Position: func() (float64, float64, bool) { return h.lat, h.lon, h.fix },
 		Source: func() (coastlineSource, error) {
 			if h.srcErr != nil {
@@ -432,5 +439,131 @@ func TestSettingsPayloadRoundTripsOfflineCoastline(t *testing.T) {
 	}
 	if on, _ := offlineCoastlineEnabledFromSettingsFile(settingsPath)(); on {
 		t.Fatal("turning it off must stick")
+	}
+}
+
+// blockingCoastlineSource holds each plugin call until released, so a test
+// can act while the call is in flight.
+type blockingCoastlineSource struct {
+	*fakeCoastlineSource
+	started chan struct{}
+	release chan struct{}
+}
+
+func newBlockingSource(f *fakeCoastlineSource) *blockingCoastlineSource {
+	return &blockingCoastlineSource{fakeCoastlineSource: f, started: make(chan struct{}, 4), release: make(chan struct{})}
+}
+
+func (b *blockingCoastlineSource) ShorelineSquare(sq coverageSquare) ([]shorelineLine, error) {
+	b.started <- struct{}{}
+	<-b.release
+	return b.fakeCoastlineSource.ShorelineSquare(sq)
+}
+
+func (b *blockingCoastlineSource) ShorelineChanges(sq coverageSquare, since time.Time) (int, error) {
+	b.started <- struct{}{}
+	<-b.release
+	return b.fakeCoastlineSource.ShorelineChanges(sq, since)
+}
+
+// stepWhileBlocked runs one step against a blocked plugin call, runs during
+// while the call is in flight, then releases the call and waits for the step.
+func stepWhileBlocked(t *testing.T, h *coastlineHarness, during func()) {
+	t.Helper()
+	b := newBlockingSource(h.src)
+	h.m.cfg.Source = func() (coastlineSource, error) { return b, nil }
+	done := make(chan struct{})
+	go func() { h.m.step(); close(done) }()
+	select {
+	case <-b.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("plugin call never started")
+	}
+	during()
+	close(b.release)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("step did not finish")
+	}
+}
+
+func TestCoastlineManager_ClearDiscardsDownloadInFlight(t *testing.T) {
+	h := newCoastlineHarness(t)
+	stepWhileBlocked(t, h, func() {
+		if err := h.m.Clear(); err != nil {
+			t.Error(err)
+		}
+	})
+	recs, err := h.store.Records()
+	if err != nil || len(recs) != 0 {
+		t.Errorf("a download that began before Clear must not be saved: %v %v", recs, err)
+	}
+}
+
+func TestCoastlineManager_ClearDiscardsFailureInFlight(t *testing.T) {
+	h := newCoastlineHarness(t)
+	wanted, _ := squaresWithin(h.lat, h.lon, coastlineCoverageRadiusNm)
+	h.src.fail[wanted[0]] = errors.New("overpass down")
+	stepWhileBlocked(t, h, func() {
+		if err := h.m.Clear(); err != nil {
+			t.Error(err)
+		}
+	})
+	recs, _ := h.store.Records()
+	if len(recs) != 0 {
+		t.Errorf("a failure that began before Clear must not leave a row: %v", recs)
+	}
+}
+
+func TestCoastlineManager_ClearDiscardsEditCheckInFlight(t *testing.T) {
+	h := newCoastlineHarness(t)
+	h.fix = false
+	sq := coverageSquare{Lat: -21, Lon: 148}
+	if err := h.store.SaveSquare(sq, nil, h.now.Add(-30*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	h.src.edits[sq] = 3
+	stepWhileBlocked(t, h, func() {
+		if err := h.m.Clear(); err != nil {
+			t.Error(err)
+		}
+	})
+	recs, _ := h.store.Records()
+	if len(recs) != 0 {
+		t.Errorf("edit check racing Clear must not bring the square back: %v", recs)
+	}
+}
+
+func TestCoastlineManager_ClearDiscardsQueuedUpdateDownload(t *testing.T) {
+	h := newCoastlineHarness(t)
+	h.fix = false
+	sq := coverageSquare{Lat: -21, Lon: 148}
+	if err := h.store.SaveSquare(sq, nil, h.now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.store.RecordEdits(sq, 2, h.now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.m.Update(); err != nil {
+		t.Fatal(err)
+	}
+	stepWhileBlocked(t, h, func() {
+		if err := h.m.Clear(); err != nil {
+			t.Error(err)
+		}
+	})
+	recs, _ := h.store.Records()
+	if len(recs) != 0 {
+		t.Errorf("an update download racing Clear must be discarded: %v", recs)
+	}
+}
+
+func TestCoastlineManager_SwitchOffDiscardsDownloadInFlight(t *testing.T) {
+	h := newCoastlineHarness(t)
+	stepWhileBlocked(t, h, func() { h.setEnabled(false) })
+	recs, _ := h.store.Records()
+	if len(recs) != 0 {
+		t.Errorf("a download finishing after the switch went off must not be saved: %v", recs)
 	}
 }
