@@ -17,7 +17,7 @@ import (
 
 // Signs for the passage replay (ADR 0204). A sign is a short note, with an
 // optional photo, pinned to a real instant on the track. Like a camera shot
-// (ADR 0203) it belongs to a moment of time, not to a passage, so splitting,
+// (ADR 0206) it belongs to a moment of time, not to a passage, so splitting,
 // merging or trimming a passage never moves or loses one, and nothing here
 // deletes a sign except the operator.
 

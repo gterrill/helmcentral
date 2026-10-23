@@ -51,6 +51,13 @@ const basemapStyleCacheControl = "private, max-age=300"
 // from the OpenMapTiles-shaped v1 ones, so rows cached before the switch
 // must never be served for it; newTileCache deletes anything outside this
 // prefix.
+//
+// The same "v2" segment is in the public URLs of the tile, sprite and glyph
+// routes (tile_proxy.go), because those responses are served immutable and
+// browsers keep them for a year. BUMP THE VERSION SEGMENT, here and in the
+// routes and the style rewrite, whenever the tile schema or the sprite set
+// changes: an unchanged URL would keep serving the old data from the
+// browser's own cache with no request ever reaching this server.
 const basemapAssetPrefix = "/api/basemap/v2/"
 
 // cartoStyleUpstreamURLs is a closed allowlist from this proxy's own
@@ -534,9 +541,9 @@ func buildCartoStyle(rawUpstream []byte, styleName, origin string) ([]byte, erro
 
 	src := doc["sources"].(map[string]any)[up.sourceID].(map[string]any)
 	delete(src, "url")
-	src["tiles"] = []string{origin + "/api/basemap/tiles/{z}/{x}/{y}"}
-	doc["glyphs"] = origin + "/api/basemap/fonts/{fontstack}/{range}.pbf"
-	doc["sprite"] = origin + "/api/basemap/sprite/" + styleName
+	src["tiles"] = []string{origin + "/api/basemap/v2/tiles/{z}/{x}/{y}"}
+	doc["glyphs"] = origin + "/api/basemap/v2/fonts/{fontstack}/{range}.pbf"
+	doc["sprite"] = origin + "/api/basemap/v2/sprite/" + styleName
 
 	rewritten, err := json.Marshal(doc)
 	if err != nil {
@@ -614,7 +621,7 @@ func basemapStyleHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc
 	}
 }
 
-// basemapVectorTileHandler is the GET /api/basemap/tiles/:z/:x/:y handler
+// basemapVectorTileHandler is the GET /api/basemap/v2/tiles/:z/:x/:y handler
 // factory, backed by resolveCartoVectorTile (tile_cache.go) - deliberately
 // NOT resolveWorldImageryTile; see that function's doc comment for why
 // mixing them up would corrupt every vector tile it degrades.
@@ -667,10 +674,10 @@ func basemapVectorTileHandler(cache *tileCache, fetcher tileFetcher) echo.Handle
 	}
 }
 
-// basemapFontsHandler is the GET /api/basemap/fonts/:fontstack/:range
+// basemapFontsHandler is the GET /api/basemap/v2/fonts/:fontstack/:range
 // handler factory. MapLibre substitutes the style's "glyphs" template
 // itself, producing requests like
-// /api/basemap/fonts/Montserrat%20Medium%2COpen%20Sans%20Bold/0-255.pbf -
+// /api/basemap/v2/fonts/Montserrat%20Medium%2COpen%20Sans%20Bold/0-255.pbf -
 // :fontstack is a single URL-encoded path segment (commas and spaces come
 // through already percent-decoded by the time Echo hands it to c.Param,
 // same as any other path param), and :range arrives as "0-255.pbf" because
@@ -708,7 +715,7 @@ func basemapFontsHandler(cache *tileCache, fetcher tileFetcher) echo.HandlerFunc
 	}
 }
 
-// basemapSpriteHandler is the GET /api/basemap/sprite/:name handler
+// basemapSpriteHandler is the GET /api/basemap/v2/sprite/:name handler
 // factory. The style's sprite field is a base URL with no extension, so
 // MapLibre requests <base>.json, <base>.png and, on high-DPI screens,
 // <base>@2x.json and <base>@2x.png. :name carries that suffix (e.g.

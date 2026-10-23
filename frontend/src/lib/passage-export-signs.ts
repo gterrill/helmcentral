@@ -1,6 +1,6 @@
 import type { ReplaySign, SignVisibility } from '@/lib/replay-signs'
 
-// Signs in the blog card (ADR 0206). The card carries each sign's time, title,
+// Signs in the blog card (ADR 0205). The card carries each sign's time, title,
 // note and visibility, and a photo as a small JPEG data URI the export itself
 // made. The pure parts live here so the card's player can share them: nothing
 // in this file touches the network, the DOM or React.

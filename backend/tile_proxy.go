@@ -117,10 +117,13 @@ func mapRoutes(tileFetchClient *http.Client) []apiRoute {
 		// Carto vector basemap proxy + offline cache (ADR 0067) - same
 		// tierRead as world-imagery above: read-only, no session write
 		// implied by fetching a map tile/style/font/sprite.
+		// Tiles, glyphs and sprites are served immutable (a year), so their
+		// URLs carry the schema version (basemapAssetPrefix): bump it with
+		// the schema, never reuse a path for different data.
 		{http.MethodGet, "/api/basemap/style/:name", tierRead, basemapStyleHandler(globalTileCache, tileFetchClient)},
-		{http.MethodGet, "/api/basemap/tiles/:z/:x/:y", tierRead, basemapVectorTileHandler(globalTileCache, tileFetchClient)},
-		{http.MethodGet, "/api/basemap/fonts/:fontstack/:range", tierRead, basemapFontsHandler(globalTileCache, tileFetchClient)},
-		{http.MethodGet, "/api/basemap/sprite/:name", tierRead, basemapSpriteHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/v2/tiles/:z/:x/:y", tierRead, basemapVectorTileHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/v2/fonts/:fontstack/:range", tierRead, basemapFontsHandler(globalTileCache, tileFetchClient)},
+		{http.MethodGet, "/api/basemap/v2/sprite/:name", tierRead, basemapSpriteHandler(globalTileCache, tileFetchClient)},
 		{http.MethodDelete, "/api/world-imagery/cache", tierWrite, deleteWorldImageryCacheHandler(globalTileCache)},
 	}
 }

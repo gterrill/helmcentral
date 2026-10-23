@@ -45,7 +45,7 @@ or any install that cleared its map cache, got a blank chart.
    suffixes) and the zoom range stay closed sets as before; glyph font stacks
    and tile coordinates are escaped or integers, as before.
 3. **Serve a rewritten copy per request.** The style handler rewrites the
-   source to an inline `tiles: ["<origin>/api/basemap/tiles/{z}/{x}/{y}"]`
+   source to an inline `tiles: ["<origin>/api/basemap/v2/tiles/{z}/{x}/{y}"]`
    and the glyphs and sprite to same-origin paths, absolute under the origin
    the request arrived on (MapLibre needs absolute URLs; the boat is reached
    on several hostnames). The source id is left as `protomaps`.
@@ -58,6 +58,16 @@ or any install that cleared its map cache, got a blank chart.
    an upgraded boat refetches by itself and nothing serves OpenMapTiles-shaped
    bytes to the new style. The "clear map cache" action still clears both
    tables.
+7. **Version the public asset URLs too.** Tiles, sprite and glyphs are served
+   `public, max-age=31536000, immutable`, so a browser that showed the chart
+   before the switch would keep its cached OpenMapTiles tiles and old sprite
+   under the new style and draw a blank or partial chart with no error. They
+   are now served at `/api/basemap/v2/tiles/:z/:x/:y`,
+   `/api/basemap/v2/sprite/:name` and `/api/basemap/v2/fonts/:fontstack/:range`,
+   the rewritten style references only those, and the unversioned asset routes
+   are removed (404). The style URL stays unversioned: it is cached for five
+   minutes only, so browsers pick up the new style within that time and then
+   ask for paths they have never cached.
 6. **Labels follow the schema.** `map-place-labels.tsx` attaches to
    `protomaps` and reads: bays from `water` Points of kind `bay`; straits from
    `water` LineStrings of kind `strait` (a further layer, placed along the line);
@@ -100,6 +110,12 @@ or any install that cleared its map cache, got a blank chart.
   templates. Cached vector tiles are kept: the schema is the same v2 and they
   are the offline chart. The templates themselves are held in memory per
   theme, loaded from the cached style on first use.
+- The `v2` segment in the asset URLs must be bumped whenever the tile schema
+  or the sprite set changes, because browser caches treat those responses as
+  immutable and never ask the server again. The same segment is
+  `basemapAssetPrefix` on the server, so cache rows and public URLs move
+  together. Operators have nothing to do: the next style fetch (at most five
+  minutes after upgrade) points the browser at paths it has not cached.
 - A refetch that fails or is rejected by the allowlist is logged with the
   theme and reason, is not cached, and the request fails with an error that
   carries the reason (502). Unchanged templates mean the 404 was genuine and

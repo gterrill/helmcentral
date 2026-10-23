@@ -3,7 +3,7 @@ import { downscaleImage } from '@/lib/image-downscale'
 import { EXPORT_PHOTO_PREFIX, PHOTO_EDGE_PX, PHOTO_QUALITY, cleanJpeg } from '@/lib/passage-export-signs'
 import type { ReplaySign } from '@/lib/replay-signs'
 
-// Sign photos for the blog card (ADR 0206), prepared in the operator's own
+// Sign photos for the blog card (ADR 0205), prepared in the operator's own
 // browser: fetched from the document, shrunk to 960 px on the long side and
 // re-encoded as JPEG by the app's shared downscaler. The encoder's file is then
 // rewritten with only the plain header segments, so no Exif (and with it no GPS
