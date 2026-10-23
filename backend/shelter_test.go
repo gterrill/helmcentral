@@ -574,3 +574,23 @@ func TestCallWithin_BudgetIsPerCallAndLeavesTheSharedOneAlone(t *testing.T) {
 		t.Error("background coastline calls need more than Mate's interactive budget")
 	}
 }
+
+func TestEstimateShelter_InsideReefSummaryIgnoresBearingsBlockedByACay(t *testing.T) {
+	// A lagoon about 1 nm across with a cay close to the east of the anchor.
+	// Bearings that hit the cay are not reef width, so the summary must not
+	// report them as a 0.0 nm minimum.
+	const lat, lon = -20.0, 149.0
+	d := 0.0166 // about 1 nm of latitude
+	reef := []shorelinePoint{{lat - d, lon - d}, {lat - d, lon + d}, {lat + d, lon + d}, {lat + d, lon - d}, {lat - d, lon - d}}
+	cay := []shorelinePoint{{lat - 0.0005, lon + 0.002}, {lat + 0.0005, lon + 0.002}, {lat + 0.0005, lon + 0.003}, {lat - 0.0005, lon + 0.003}, {lat - 0.0005, lon + 0.002}}
+	est := estimateShelter(lat, lon, []shorelineLine{
+		{ID: "way/1", Kind: "reef", Name: "Lagoon", Closed: true, Points: reef},
+		{ID: "way/2", Kind: "coastline", Closed: true, Points: cay},
+	})
+	if !est.InsideReef {
+		t.Fatalf("anchor is inside the lagoon reef")
+	}
+	if strings.Contains(est.Summary, "0.0 nm") {
+		t.Errorf("summary reports a zero reef width: %q", est.Summary)
+	}
+}

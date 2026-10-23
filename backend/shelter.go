@@ -303,19 +303,29 @@ func shelterSummary(est shelterEstimate) string {
 		if est.ReefName != "" {
 			who = est.ReefName
 		}
-		lo, hi := est.Bearings[0], est.Bearings[0]
-		for _, b := range est.Bearings {
-			if b.ReefWidthNm < lo.ReefWidthNm {
+		// Only bearings whose edge is the host reef measure its width; a
+		// bearing blocked by a cay, the coast or another reef, or open, has
+		// no reef width and must not pull the minimum to zero.
+		var lo, hi *shelterBearing
+		for i := range est.Bearings {
+			b := &est.Bearings[i]
+			if b.ReefWidthNm <= 0 {
+				continue
+			}
+			if lo == nil || b.ReefWidthNm < lo.ReefWidthNm {
 				lo = b
 			}
-			if b.ReefWidthNm > hi.ReefWidthNm {
+			if hi == nil || b.ReefWidthNm > hi.ReefWidthNm {
 				hi = b
 			}
 		}
-		parts = append(parts, fmt.Sprintf("The anchor is inside %s. Reef width upwind runs from %.1f nm (wind from %s, %03d°) to %.1f nm (wind from %s, %03d°). "+
-			"Reef shelter depends on the tide: it breaks the sea best near low water and gives less as the reef covers",
-			who, lo.ReefWidthNm, degreesToDirection(float64(lo.BearingDeg)), lo.BearingDeg,
-			hi.ReefWidthNm, degreesToDirection(float64(hi.BearingDeg)), hi.BearingDeg))
+		text := fmt.Sprintf("The anchor is inside %s.", who)
+		if lo != nil {
+			text += fmt.Sprintf(" Reef width upwind runs from %.1f nm (wind from %s, %03d°) to %.1f nm (wind from %s, %03d°).",
+				lo.ReefWidthNm, degreesToDirection(float64(lo.BearingDeg)), lo.BearingDeg,
+				hi.ReefWidthNm, degreesToDirection(float64(hi.BearingDeg)), hi.BearingDeg)
+		}
+		parts = append(parts, text+" Reef shelter depends on the tide: it breaks the sea best near low water and gives less as the reef covers")
 	}
 	lead := map[string]string{
 		shelterSheltered: "Sheltered from",
