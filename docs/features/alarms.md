@@ -120,6 +120,35 @@ when the plotter stops sending route updates and drops these two alarms from
 the board on its own within a few minutes, rather than leaving them showing
 for as long as the boat keeps running.
 
+The plotter's two route alarms are worded for the watch: **Waypoint Passed**
+("The boat has passed the active waypoint.") and **Arriving at Waypoint** ("The
+boat is inside the active waypoint's arrival circle."). The plotter does not
+send the waypoint's name or a distance with them, so the card does not invent
+one.
+
+## Stopping an alarm you can't act on
+
+Some alarms raised by other devices are true for a whole leg and ask nothing of
+you, such as the plotter's Waypoint Passed. Choose **Stop showing** on the
+alarm's card and confirm, and that kind of alarm leaves the alarm board and the
+banner. It stops reaching your phone and the other notification transports, Mate
+no longer hears of it, and it stops being added to the alarm history. It applies
+to that alarm whichever device raises it, and it does not acknowledge anything
+on the instrument network, so the plotter keeps showing its own.
+
+Safety alarms never offer **Stop showing**: man overboard, fire, sinking,
+flooding, collision, grounding, listing, adrift, piracy and abandon ship,
+anchor alarms, collision warnings for AIS targets, received distress calls,
+radar guard zones, and anything the instrument network marks as an emergency.
+If an alarm you have stopped showing comes back as an emergency, it shows.
+
+To see what you have stopped showing, or to bring one back, open **Settings →
+Alarms** and look under **Ignored alarms**. Restored while the condition is
+still true, an alarm appears again as a fresh alarm and notifies you. Mate can
+tell you which alarms are on the list when you ask why you were not told about
+one, but it cannot add to it or take from it. The steps are in [Stop showing a
+network alarm](../how-to/stop-showing-a-network-alarm.md).
+
 An AIS distress alarm (a SART, man-overboard beacon or EPIRB heard over AIS) is
 titled "AIS Distress" and carries the position sentence the receiver gave, such
 as how far away it is and which way. The receiver raises it once and never

@@ -236,6 +236,14 @@ func main() {
 	}
 	globalAlarmLogStore = als
 
+	// The operator's two ignore lists (ignored sensors, ignored network
+	// alarms), in the same file.
+	ignores, err := newAlarmIgnoreStore(helmcentralDBPath())
+	if err != nil {
+		log.Fatalf("failed to open alarm ignore lists: %v", err)
+	}
+	globalIgnoreStore = ignores
+
 	// Offline coastline (ADR 0203): the coverage squares Mate's shelter
 	// estimate reads, in the same file. The worker starts with the others
 	// below and does nothing while the switch is off.
@@ -368,6 +376,11 @@ func main() {
 
 	if err := loadAlarmRules(); err != nil {
 		log.Fatalf("failed to load alarm rules: %v", err)
+	}
+	// Releases before this kept the ignored-sensor list in alarm-rules.json.
+	// Delete this call, and moveLegacyIgnoredSensors, in a later release.
+	if _, err := moveLegacyIgnoredSensors(globalIgnoreStore, alarmRulesFilePath(), time.Now().UTC()); err != nil {
+		log.Fatalf("failed to move the ignored-sensor list: %v", err)
 	}
 	// Offers the heavy-weather set once per installation, disabled, for the
 	// operator to enable and tune (ADR 0070). A failure here is not fatal: it

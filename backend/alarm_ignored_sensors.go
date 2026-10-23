@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -15,7 +16,7 @@ The sensor-health checks' own exclusion list (anomaly_sensor_health.go's
 frozenVerdict/silentSources), reached from the frozen/impossible/silent-
 source alarm card's own "Ignore this sensor" action -- not a settings list,
 per the plan: "The frozen/impossible alarm card gets an Ignore this sensor
-action, stored with the alarm rules in data/. Pikorua's dead exhaust senders
+action, kept in helmcentral.sqlite. Pikorua's dead exhaust senders
 are excluded that way, on the boat."
 
 An identifier is either a SignalK path (excludes it from the frozen check)
@@ -30,22 +31,19 @@ disambiguate.
 
 // ignoredSensorSet returns a copy of the currently ignored identifiers as a
 // set, the shape frozenVerdict/silentSources' own excluded parameter wants.
+// The list is held in memory, so the anomaly tick reads it cheaply.
 func ignoredSensorSet() map[string]bool {
-	alarmRulesMu.RLock()
-	defer alarmRulesMu.RUnlock()
-
-	out := make(map[string]bool, len(alarmRulesIgnoredSensors))
-	for _, s := range alarmRulesIgnoredSensors {
-		out[s] = true
-	}
-	return out
+	return globalIgnoreStore.set(ignoredSensorsList)
 }
 
-// listIgnoredSensors returns a copy of the raw list, for the API response.
+// listIgnoredSensors returns the raw identifiers, for the API response.
 func listIgnoredSensors() []string {
-	alarmRulesMu.RLock()
-	defer alarmRulesMu.RUnlock()
-	return append([]string(nil), alarmRulesIgnoredSensors...)
+	entries := globalIgnoreStore.entries(ignoredSensorsList)
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, e.Key)
+	}
+	return out
 }
 
 // ignoreSensor adds identifier to the ignore list and persists it.
@@ -56,44 +54,32 @@ func ignoreSensor(identifier string) error {
 	if identifier == "" {
 		return fmt.Errorf("identifier required")
 	}
-
-	alarmRulesMu.Lock()
-	defer alarmRulesMu.Unlock()
-
-	for _, s := range alarmRulesIgnoredSensors {
-		if s == identifier {
-			return nil
-		}
-	}
-	alarmRulesIgnoredSensors = append(alarmRulesIgnoredSensors, identifier)
-	return saveAlarmRulesLocked()
+	return globalIgnoreStore.add(ignoredSensorsList, identifier, time.Now().UTC())
 }
 
 // unignoreSensor removes identifier from the ignore list. Also idempotent:
 // removing an identifier that was never ignored is a no-op.
 func unignoreSensor(identifier string) error {
-	identifier = strings.TrimSpace(identifier)
-
-	alarmRulesMu.Lock()
-	defer alarmRulesMu.Unlock()
-
-	next := make([]string, 0, len(alarmRulesIgnoredSensors))
-	for _, s := range alarmRulesIgnoredSensors {
-		if s != identifier {
-			next = append(next, s)
-		}
-	}
-	alarmRulesIgnoredSensors = next
-	return saveAlarmRulesLocked()
+	return globalIgnoreStore.remove(ignoredSensorsList, strings.TrimSpace(identifier))
 }
 
 // ignoredSensorsResponse is the body of every ignored-sensors endpoint:
 // the raw identifiers (what DELETE takes) and, for each, the name the
 // operator knows it by -- the settings list shows names and never an id.
 func ignoredSensorsResponse() map[string]any {
-	identifiers := listIgnoredSensors()
+	entries := globalIgnoreStore.entries(ignoredSensorsList)
+	identifiers := make([]string, 0, len(entries))
+	ignoredAt := make(map[string]string, len(entries))
+	for _, e := range entries {
+		identifiers = append(identifiers, e.Key)
+		ignoredAt[e.Key] = e.IgnoredAt.Format(time.RFC3339)
+	}
 	namer := newSensorNamer(globalSignalKSnapshot, vesselViewForNaming(), globalSourceDevices.get())
-	return map[string]any{"identifiers": identifiers, "sensors": ignoredSensorEntries(namer, identifiers)}
+	sensors := ignoredSensorEntries(namer, identifiers)
+	for i := range sensors {
+		sensors[i].IgnoredAt = ignoredAt[sensors[i].Identifier]
+	}
+	return map[string]any{"identifiers": identifiers, "sensors": sensors}
 }
 
 // ignoredSensorEntries names each identifier, numbering identical names the

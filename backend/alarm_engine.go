@@ -93,6 +93,11 @@ type alarmStatus struct {
 	Value   float64    `json:"value"`
 	Message string     `json:"message"`
 
+	// Ignorable is set on a network alarm the operator may stop showing. It
+	// is false for safety alarms and for anything in the emergency state, so
+	// the alarm card offers the action from this alone.
+	Ignorable bool `json:"ignorable,omitempty"`
+
 	// Op, Threshold, Hysteresis and ClearValue exist so the frontend can render
 	// "clears above/below Y" without re-deriving the engine's own arithmetic.
 	// They describe a rule this engine holds, so they are set only for

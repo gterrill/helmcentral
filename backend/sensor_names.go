@@ -183,6 +183,9 @@ type sensorHealthEntry struct {
 	Quantity   string `json:"quantity,omitempty"`
 	Label      string `json:"label"`
 	Text       string `json:"text"`
+	// IgnoredAt is set only on the ignored-sensors list: when the operator
+	// ignored it, RFC 3339.
+	IgnoredAt string `json:"ignored_at,omitempty"`
 	// Partial is set on a grouped device entry when some of its sources still
 	// send. Not sent to clients; the alarm title reads it.
 	Partial bool `json:"-"`

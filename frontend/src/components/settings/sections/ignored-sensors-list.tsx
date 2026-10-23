@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { FormSection } from '@/components/patterns'
 import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
+import { formatIgnoredOn } from '@/lib/alarm-display'
 
 /**
  * Sees and un-ignores the sensor-health checks' own exclusion list
@@ -39,9 +40,14 @@ export function IgnoredSensorsList() {
         {!loading && !error && sensors.length === 0 && (
           <p className="text-sm text-muted-foreground">No sensors are currently ignored.</p>
         )}
-        {sensors.map(({ identifier, label }) => (
+        {sensors.map(({ identifier, label, ignored_at }) => (
           <div key={identifier} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-1.5">
-            <span className="min-w-0 truncate text-sm text-foreground">{label}</span>
+            <div className="min-w-0">
+              <p className="truncate text-sm text-foreground">{label}</p>
+              {formatIgnoredOn(ignored_at) && (
+                <p className="truncate text-xs text-muted-foreground">Ignored {formatIgnoredOn(ignored_at)}</p>
+              )}
+            </div>
             <Button
               type="button"
               size="sm"

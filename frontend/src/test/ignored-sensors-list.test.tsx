@@ -15,7 +15,7 @@ describe('IgnoredSensorsList', () => {
       identifiers: ['propulsion.port.exhaustTemperature', 'venus.battery.512'],
       sensors: [
         { identifier: 'propulsion.port.exhaustTemperature', name: 'Port engine', label: 'Port engine exhaust temperature', text: 'Port engine exhaust temperature' },
-        { identifier: 'venus.battery.512', name: 'House bank', label: 'House bank', text: 'House bank' },
+        { identifier: 'venus.battery.512', name: 'House bank', label: 'House bank', text: 'House bank', ignored_at: '2026-10-12T08:00:00Z' },
       ],
     }) })))
     render(<IgnoredSensorsList />)
@@ -24,6 +24,7 @@ describe('IgnoredSensorsList', () => {
     expect(screen.getByText('House bank')).toBeInTheDocument()
     expect(screen.queryByText('venus.battery.512')).toBeNull()
     expect(screen.getAllByRole('button', { name: 'Remove' })).toHaveLength(2)
+    expect(screen.getByText(/Ignored .*2026/)).toBeInTheDocument()
   })
 
   it('removing one calls DELETE and drops it from the list', async () => {

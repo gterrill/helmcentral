@@ -45,3 +45,26 @@ _Avoid_: Sector, protection range
 **Reef shelter**:
 Shelter that comes only from reef lying upwind, which changes with the tide
 and never counts as better than partial.
+
+## Alarms
+
+**Network alarm**:
+An alarm raised by another device on the boat's network, such as the chart
+plotter or a radar, rather than by Helmcentral's own alarm rules or watches.
+_Avoid_: Bus notification, SignalK alarm, external alarm
+
+**Alarm kind**:
+What a network alarm reports, independent of which device sent it or when,
+e.g. every Perpendicular Passed alarm is one kind.
+_Avoid_: Alarm type, alarm path
+
+**Ignored alarm**:
+An alarm kind the operator has told Helmcentral never to show, until they
+restore it; it never reaches the board, notifications, Mate or history.
+_Avoid_: Muted, silenced, suppressed, hidden alarm
+
+**Safety alarm**:
+An alarm that can never be ignored: a kind such as man overboard, fire,
+flooding, collision, distress or anchor dragging, or any alarm the sending
+device marks as an emergency.
+_Avoid_: Critical alarm, emergency alarm

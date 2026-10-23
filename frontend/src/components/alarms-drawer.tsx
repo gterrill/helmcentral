@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { StopShowingAlarm } from '@/components/stop-showing-alarm'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { alarmConditionSentence, formatAlarmReading, formatAlarmTime, ignorableSensors, isSensorHealthPath, sensorHealthLines } from '@/lib/alarm-display'
 import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
@@ -356,6 +357,9 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                           <Button size="sm" variant="outline" onClick={() => void acknowledge(alarm.rule_id)}>
                             Acknowledge
                           </Button>
+                        )}
+                        {alarm.ignorable && (
+                          <StopShowingAlarm kind={alarm.path.replace(/^notifications\./, '')} title={alarm.label} />
                         )}
                       </div>
                     </div>

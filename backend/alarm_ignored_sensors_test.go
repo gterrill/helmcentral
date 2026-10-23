@@ -10,7 +10,7 @@ import (
 )
 
 func TestIgnoreSensorAddsAndPersists(t *testing.T) {
-	path := withTempAlarmRules(t)
+	withTempAlarmRules(t)
 
 	if err := ignoreSensor("propulsion.port.exhaustTemperature"); err != nil {
 		t.Fatalf("ignoreSensor: %v", err)
@@ -21,16 +21,14 @@ func TestIgnoreSensorAddsAndPersists(t *testing.T) {
 		t.Fatalf("listIgnoredSensors: got %+v", got)
 	}
 
-	// Reload from disk to prove persistence, not just in-memory state.
-	alarmRulesMu.Lock()
-	alarmRulesIgnoredSensors = nil
-	alarmRulesMu.Unlock()
-	if err := loadAlarmRules(); err != nil {
-		t.Fatalf("reload: %v", err)
+	// Reopen the database to prove persistence, not just the in-memory copy.
+	reopened, err := newAlarmIgnoreStore(globalIgnoreStore.path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
 	}
-	_ = path
-	if got := listIgnoredSensors(); len(got) != 1 || got[0] != "propulsion.port.exhaustTemperature" {
-		t.Fatalf("after reload: got %+v", got)
+	defer reopened.Close()
+	if e := reopened.entries(ignoredSensorsList); len(e) != 1 || e[0].Key != "propulsion.port.exhaustTemperature" || e[0].IgnoredAt.IsZero() {
+		t.Fatalf("after reopen: got %+v", e)
 	}
 }
 
