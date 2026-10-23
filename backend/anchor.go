@@ -397,6 +397,8 @@ func setAnchorWatch(c echo.Context) error {
 	// A drop or reposition starts a fresh swing trail. It goes first, before
 	// the new watch is saved or published, so no reader sees the new anchor
 	// with the old trail; if it fails nothing else has changed.
+	endMove := beginAnchorMove()
+	defer endMove()
 	if err := resetAnchorTrail(true); err != nil {
 		c.Logger().Errorf("anchor watch: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not start the swing trail; the anchor watch was not changed. Retry."})
@@ -410,6 +412,7 @@ func setAnchorWatch(c echo.Context) error {
 	anchorWatchState = aw
 	lastAnchorWatchRadiusMeters = aw.RadiusMeters
 	anchorWatchMu.Unlock()
+	endMove()
 
 	// saveAnchorWatch above just overwrote anchor_watch.json atomically,
 	// whatever it held before — a bad file from a previous corrupt-state
@@ -784,6 +787,28 @@ func patchAnchorWatch(c echo.Context) error {
 		}
 	}
 
+	// Restart the swing trail, the same way a POST reposition does: the trail
+	// is the boat's movement relative to THIS anchor position, and stops
+	// meaning anything the instant the anchor moves. It is a database
+	// transaction, so it runs here with anchorWatchMu released (no I/O under
+	// that lock); anchorLifecycleMu still keeps every other lifecycle write
+	// out, and the move guard (beginAnchorMove) keeps trail readers and the
+	// tick recorder from seeing the half-moved state. If it fails, SignalK
+	// already holds the new position, so put the old one back and keep the
+	// local watch: the two must not disagree.
+	endMove := func() {}
+	if positionChanged {
+		endMove = beginAnchorMove()
+		defer endMove()
+		if err := resetAnchorTrail(true); err != nil {
+			c.Logger().Errorf("anchor watch: SignalK confirmed a position change to %v,%v but the swing trail could not be restarted: %v", updated.Lat, updated.Lon, err)
+			if restoreSignalKAnchorPosition(c, current) != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "The swing trail could not be restarted, and SignalK could not be put back on the old anchor position. SignalK and the local anchor watch now disagree; retry Adjust."})
+			}
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "The swing trail could not be restarted, so the anchor was not moved. Retry Adjust."})
+		}
+	}
+
 	anchorWatchMu.Lock()
 	if !positionChanged {
 		// The place-name resolver (place_name.go's resolveAndPinAnchorWatchPlaceName)
@@ -805,29 +830,20 @@ func patchAnchorWatch(c echo.Context) error {
 			updated.PlaceName = live.PlaceName
 		}
 	}
-	if positionChanged {
-		// Restart the swing trail, the same way a POST reposition does: the
-		// trail is the boat's movement relative to THIS anchor position, and
-		// stops meaning anything the instant the anchor moves. Under the
-		// lock and before the new state is published, so no reader sees the
-		// new anchor with the old trail.
-		if err := resetAnchorTrail(true); err != nil {
-			anchorWatchMu.Unlock()
-			c.Logger().Errorf("anchor watch: SignalK confirmed a position change to %v,%v but the swing trail could not be restarted: %v", updated.Lat, updated.Lon, err)
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK was updated with the new anchor position, but the swing trail could not be restarted and the local anchor watch was not saved. Retry Adjust."})
-		}
-	}
 	if err := saveAnchorWatch(updated); err != nil {
 		anchorWatchMu.Unlock()
 		if positionChanged {
 			// SignalK already has the new position at this point (the publish
-			// above succeeded) — the operator must be told the two now
-			// disagree, not given the same generic message a field-only PATCH
-			// failure gets. Fail-fast, no silent retry: the caller (the
-			// frontend's own commit hook) keeps Adjust open with its draft
-			// intact and the operator explicitly retries.
+			// above succeeded) and the trail has been restarted. Put SignalK
+			// back so it agrees with the watch that is still saved, and say
+			// plainly what was and was not undone. Fail-fast, no silent retry:
+			// the caller (the frontend's own commit hook) keeps Adjust open
+			// with its draft intact and the operator explicitly retries.
 			c.Logger().Errorf("anchor watch: SignalK confirmed a position change to %v,%v but the local save failed: %v", updated.Lat, updated.Lon, err)
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK was updated with the new anchor position, but the local anchor watch could not be saved. Retry Adjust."})
+			if restoreSignalKAnchorPosition(c, current) != nil {
+				return c.JSON(http.StatusInternalServerError, map[string]string{"error": "The local anchor watch could not be saved, the swing trail was restarted, and SignalK could not be put back on the old anchor position. SignalK and the local anchor watch now disagree; retry Adjust."})
+			}
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "The local anchor watch could not be saved, so the anchor was not moved and SignalK was put back. The swing trail was restarted. Retry Adjust."})
 		}
 		c.Logger().Errorf("anchor watch: local save failed: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to persist"})
@@ -838,6 +854,7 @@ func patchAnchorWatch(c echo.Context) error {
 		lastAnchorWatchRadiusMeters = updated.RadiusMeters
 	}
 	anchorWatchMu.Unlock()
+	endMove()
 
 	if positionChanged {
 		// PlaceName was either cleared above (an ordinary hand-placed move)
@@ -895,6 +912,10 @@ func deleteAnchorWatch(c echo.Context) error {
 			c.Logger().Errorf("anchor raise: swing trail not cleared: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK anchor raised and the watch removed, but the swing trail could not be cleared. Retry Raise."})
 		}
+		if anchorRaiseFailureStage(err) == anchorRaiseStagePlacemarks {
+			c.Logger().Errorf("anchor raise: placemarks not cleared: %v", err)
+			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK anchor raised and the watch removed, but the placemarks could not be cleared. Retry Raise."})
+		}
 		if anchorRaiseFailureStage(err) == anchorRaiseStageRemoveFile {
 			c.Logger().Errorf("anchor raise: local watch removal failed: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "SignalK anchor raised, but local watch could not be removed. Retry Raise."})
@@ -940,4 +961,28 @@ func anchorRoutes() []apiRoute {
 		{http.MethodPost, "/api/anchor-watch/placemarks", tierWrite, createPlacemarkHandler},
 		{http.MethodDelete, "/api/anchor-watch/placemarks/:id", tierWrite, deletePlacemarkHandler},
 	}
+}
+
+// anchorTrailMoveMu is held for writing while a drop or move restarts the
+// swing trail and swaps the watch, so the trail endpoint never serves the
+// new empty trail beside the old anchor. The tick recorder skips instead of
+// waiting (recordAnchorTrailPoint), so a fix taken against the old anchor
+// cannot land in the new trail. Lock order: this, then anchorWatchMu.
+var anchorTrailMoveMu sync.RWMutex
+
+// beginAnchorMove takes the move guard and returns an idempotent release.
+func beginAnchorMove() func() {
+	anchorTrailMoveMu.Lock()
+	var once sync.Once
+	return func() { once.Do(anchorTrailMoveMu.Unlock) }
+}
+
+// restoreSignalKAnchorPosition publishes the watch's old position back to
+// SignalK after a move failed locally, and logs when that fails too.
+func restoreSignalKAnchorPosition(c echo.Context, old *anchorWatchData) error {
+	err := publishSignalKAnchorPosition(old)
+	if err != nil {
+		c.Logger().Errorf("anchor watch: could not put SignalK back on %v,%v after a failed move: %v", old.Lat, old.Lon, err)
+	}
+	return err
 }

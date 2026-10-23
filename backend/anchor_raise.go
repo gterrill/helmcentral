@@ -14,6 +14,7 @@ const (
 	anchorRaiseStagePublish anchorRaiseStage = iota
 	anchorRaiseStageRemoveFile
 	anchorRaiseStageTrail
+	anchorRaiseStagePlacemarks
 )
 
 // anchorRaiseError wraps a raiseAnchorWatch failure with the stage it
@@ -73,14 +74,19 @@ func raiseAnchorWatch() error {
 	// path, since there is nothing to clear there.
 	clearAnchorWatchLoadFailure()
 
+	// Placemarks are bound to the anchoring session, so they end with it.
+	// This runs before the trail reset and whatever it returns: the watch is
+	// already gone, so nothing would retry the cleanup later.
+	pmErr := clearPlacemarks()
+
 	// The watch is already gone, so ticks have stopped adding to the trail;
 	// a failure here is reported, and Raise can be retried (it is idempotent).
 	if err := resetAnchorTrail(false); err != nil {
-		return &anchorRaiseError{Stage: anchorRaiseStageTrail, Err: err}
+		return &anchorRaiseError{Stage: anchorRaiseStageTrail, Err: errors.Join(err, pmErr)}
 	}
-
-	// Placemarks are bound to the anchoring session, so they end with it.
-	clearPlacemarks()
+	if pmErr != nil {
+		return &anchorRaiseError{Stage: anchorRaiseStagePlacemarks, Err: pmErr}
+	}
 
 	return nil
 }

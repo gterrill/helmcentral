@@ -20,9 +20,18 @@ The status line under the switch tells you what is happening:
   arrive one at a time, nearest first, about 40 seconds each with a pause
   between, so a full set takes 40 to 60 minutes on a good link. Leave it
   running; you can use the rest of Helmcentral meanwhile.
-- **The map server is rate-limiting requests from this boat.** The public map
-  server refused the job as a whole. Helmcentral stops asking, says when it
-  will try again, and carries on by itself. Nothing is marked as failed.
+- **The map server is rate-limiting requests from this boat** (or **is
+  refusing connections**). The public map server refused the job as a whole,
+  whether by rate limit, an outage, or turning this boat away. Helmcentral stops
+  asking, says when it will try again, and carries on by itself. Nothing is
+  marked as failed. If the server keeps refusing, the wait grows to hours and
+  the message stays; it does not work through the squares one by one.
+- **The map server turned the boat away. Choose another Overpass server in the
+  plugin settings.** The server answered that it will not serve this boat (for
+  example, "only available to white-listed usages"). Every square would get the
+  same answer, so Helmcentral stops and does not mark any square as failed. Pick
+  a different Overpass server in the OpenStreetMap plugin's settings; it tries
+  again by itself once the wait is over.
 - **Coverage: 31 squares · oldest 3 Oct · 12 edits since.** Everything in range
   is aboard. The date is the oldest download; the last figure is how many
   coastline or reef edits have appeared on the public map since.

@@ -77,6 +77,7 @@ type coastlineServiceProblem struct {
 var (
 	coastlineRetryAfterRe = regexp.MustCompile(`retry after (\d+)s`)
 	coastline5xxRe        = regexp.MustCompile(`status 5\d\d`)
+	coastlineRefusedRe    = regexp.MustCompile(`status (401|403|451)\b`)
 )
 
 // classifyCoastlineError returns the service problem behind err, or nil when
@@ -98,6 +99,12 @@ func classifyCoastlineError(err error) *coastlineServiceProblem {
 	switch {
 	case strings.Contains(low, "rate limited") || strings.Contains(low, "rate_limited") || strings.Contains(low, "status 429"):
 		p.Summary = "The map server is rate-limiting requests from this boat"
+	// 401, 403 and 451 are the server turning this boat away (for example
+	// "only available to white-listed usages"), not a fault of one square:
+	// every other square would get the same answer. The fix is a different
+	// server, not the network, so the summary says so.
+	case coastlineRefusedRe.MatchString(low):
+		p.Summary = "The map server turned the boat away. Choose another Overpass server in the plugin settings"
 	case strings.Contains(low, "connection refused") || strings.Contains(low, "connection reset") || strings.Contains(low, "no such host"):
 		p.Summary = "The map server is refusing connections"
 	case strings.Contains(low, "i/o timeout") || strings.Contains(low, "deadline exceeded") || strings.Contains(low, "timeout awaiting"):
@@ -294,9 +301,7 @@ func (m *coastlineManager) step() bool {
 	}
 
 	if sq, ok := m.nextQueued(); ok {
-		if m.download(src, gen, sq, byKey[sq], now) {
-			m.requeueFront(sq)
-		}
+		m.download(src, gen, sq, byKey[sq], now, &sq)
 		return true
 	}
 
@@ -313,7 +318,7 @@ func (m *coastlineManager) step() bool {
 				if held && now.Before(rec.NextAttemptAt) {
 					continue
 				}
-				m.download(src, gen, sq, rec, now)
+				m.download(src, gen, sq, rec, now, nil)
 				return true
 			}
 		}
@@ -334,16 +339,34 @@ func (m *coastlineManager) step() bool {
 }
 
 // serviceFailed pauses the whole job after the map server refused it, if the
-// work that hit the refusal is still wanted. The wait is the longer of the
+// work that hit the refusal is still wanted, and reports whether it was (the
+// generation it started under is still current). The wait is the longer of the
 // server's Retry-After and the usual backoff, which doubles while refusals
 // keep coming.
-func (m *coastlineManager) serviceFailed(gen uint64, what string, p *coastlineServiceProblem, now time.Time) {
+//
+// Like commit, it drops the refusal when Offline coastline has been switched
+// off since the work began (switching off does not bump the generation). A
+// non-nil requeue is put back at the front of the queue in the same critical
+// section.
+func (m *coastlineManager) serviceFailed(gen uint64, what string, p *coastlineServiceProblem, now time.Time, requeue *coverageSquare) bool {
 	m.gateMu.Lock()
 	defer m.gateMu.Unlock()
 	if gen != m.gen {
-		return
+		return false
+	}
+	enabled, err := m.cfg.Enabled()
+	if err != nil {
+		m.setError(fmt.Sprintf("could not read the offline coastline setting: %v", err))
+		return false
+	}
+	if !enabled {
+		log.Printf("offline coastline: %s refusal discarded: Offline coastline was switched off while it ran", what)
+		return false
 	}
 	m.mu.Lock()
+	if requeue != nil {
+		m.queue = append([]coverageSquare{*requeue}, m.queue...)
+	}
 	m.pauseFailures++
 	wait := coastlineRetryDelay(m.pauseFailures)
 	if p.RetryAfter > wait {
@@ -353,6 +376,7 @@ func (m *coastlineManager) serviceFailed(gen uint64, what string, p *coastlineSe
 	m.pausedUntil = now.Add(wait)
 	m.mu.Unlock()
 	log.Printf("offline coastline: %s: %s; pausing until %s (%s)", what, p.Summary, now.Add(wait).Format(time.RFC3339), p.Detail)
+	return true
 }
 
 func (m *coastlineManager) serviceWorked() {
@@ -361,32 +385,28 @@ func (m *coastlineManager) serviceWorked() {
 	m.mu.Unlock()
 }
 
-func (m *coastlineManager) requeueFront(sq coverageSquare) {
-	m.mu.Lock()
-	m.queue = append([]coverageSquare{sq}, m.queue...)
-	m.mu.Unlock()
-}
-
-// download fetches one square. It reports true when the map server refused
-// the whole job, so the caller can keep an operator-requested square queued.
-func (m *coastlineManager) download(src coastlineSource, gen uint64, sq coverageSquare, prev coastlineSquareRecord, now time.Time) bool {
+// download fetches one square. requeue is the operator-requested square to put
+// back at the front of the queue if the map server refuses the whole job; it
+// is nil for a square the top-up picked itself. The requeue happens inside
+// serviceFailed, under the same lock as the Clear/switch-off check, so a Clear
+// cannot land between the check and the requeue.
+func (m *coastlineManager) download(src coastlineSource, gen uint64, sq coverageSquare, prev coastlineSquareRecord, now time.Time, requeue *coverageSquare) {
 	lines, err := src.ShorelineSquare(sq)
 	if err != nil {
 		log.Printf("offline coastline: download of %s failed: %v", sq.Label(), err)
 		if p := classifyCoastlineError(err); p != nil {
-			m.serviceFailed(gen, "download of "+sq.Label(), p, now)
-			return true
+			m.serviceFailed(gen, "download of "+sq.Label(), p, now, requeue)
+			return
 		}
 		m.commit(gen, "failure of "+sq.Label(), func() error {
 			return m.cfg.Store.RecordFailure(sq, err.Error(), now, now.Add(coastlineRetryDelay(prev.Attempts+1)))
 		})
-		return false
+		return
 	}
 	m.serviceWorked()
 	m.commit(gen, "download of "+sq.Label(), func() error {
 		return m.cfg.Store.SaveSquare(sq, lines, now)
 	})
-	return false
 }
 
 func (m *coastlineManager) check(src coastlineSource, gen uint64, rec coastlineSquareRecord, now time.Time) {
@@ -394,7 +414,7 @@ func (m *coastlineManager) check(src coastlineSource, gen uint64, rec coastlineS
 	if err != nil {
 		log.Printf("offline coastline: edit check of %s failed: %v", rec.Square.Label(), err)
 		if p := classifyCoastlineError(err); p != nil {
-			m.serviceFailed(gen, "edit check of "+rec.Square.Label(), p, now)
+			m.serviceFailed(gen, "edit check of "+rec.Square.Label(), p, now, nil)
 			return
 		}
 		m.commit(gen, "failure of edit check of "+rec.Square.Label(), func() error {

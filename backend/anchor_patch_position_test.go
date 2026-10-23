@@ -260,13 +260,13 @@ func TestPatchAnchorWatch_PositionSaveFailureIsExplicitAndLoud(t *testing.T) {
 	}
 	msg, _ := resp["error"].(string)
 	if !strings.Contains(msg, "SignalK") || !strings.Contains(strings.ToLower(msg), "local") {
-		t.Fatalf("expected an explicit SignalK-updated-but-local-save-failed message, got %q", msg)
+		t.Fatalf("expected an explicit local-save-failed message that mentions SignalK, got %q", msg)
 	}
 
 	// Confirms the scenario the message describes actually happened: the
 	// PATCH really did publish the new position before the save failed.
-	if frames := stub.captured(); len(frames) != 2 { // the drop, then the PATCH's own publish
-		t.Fatalf("expected the PATCH to have published before the save failed, got %d frames", len(frames))
+	if frames := stub.captured(); len(frames) != 3 { // the drop, the PATCH's own publish, then the rollback
+		t.Fatalf("expected the PATCH to have published and then rolled back, got %d frames", len(frames))
 	}
 }
 
