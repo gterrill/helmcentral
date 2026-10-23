@@ -71,13 +71,18 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 	// The squares the boat is (or will be) downloading, to tell "still
 	// downloading" from "not covered".
 	var inCoverage map[coverageSquare]bool
+	var boatErr error
 	if r.Boat != nil {
 		if bLat, bLon, ok := r.Boat(); ok {
-			if wanted, werr := squaresWithin(bLat, bLon, coastlineCoverageRadiusNm); werr == nil {
-				inCoverage = make(map[coverageSquare]bool, len(wanted))
-				for _, sq := range wanted {
-					inCoverage[sq] = true
-				}
+			wanted, werr := squaresWithin(bLat, bLon, coastlineCoverageRadiusNm)
+			if werr != nil {
+				// Reported only if a square is actually missing: with
+				// everything held, coverage does not matter.
+				boatErr = fmt.Errorf("could not work out which squares the boat is downloading: %w", werr)
+			}
+			inCoverage = make(map[coverageSquare]bool, len(wanted))
+			for _, sq := range wanted {
+				inCoverage[sq] = true
 			}
 		}
 	}
@@ -106,6 +111,9 @@ func (r *offlineCoastlineReader) ShorelineAround(lat, lon float64) (shorelineSet
 		missing = append(missing, fmt.Sprintf("%s (%s)", sq.Label(), describe(sq)))
 	}
 	if len(missing) > 0 {
+		if boatErr != nil {
+			return shorelineSet{}, boatErr
+		}
 		if ownMissing {
 			switch describe(own) {
 			case "outside coverage":
