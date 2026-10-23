@@ -148,14 +148,19 @@ export interface UseSettingsFormResult {
   settings: SettingsPayload
   setSettings: React.Dispatch<React.SetStateAction<SettingsPayload>>
   loading: boolean
+  /** True once a settings read succeeded. False while loading, and if every read failed. */
+  loaded: boolean
   saving: boolean
   error: string | null
   save: (patch: DeepPartial<SettingsPayload>) => Promise<SettingsPayload>
 }
 
+const RETRY_DELAYS_MS = [5_000, 15_000, 60_000]
+
 export function useSettingsForm(): UseSettingsFormResult {
   const [settings, setSettings] = useState<SettingsPayload>({})
   const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -168,26 +173,52 @@ export function useSettingsForm(): UseSettingsFormResult {
     settingsRef.current = settings
   }, [settings])
 
+  const loadedRef = useRef(false)
+  const markLoaded = useCallback(() => {
+    loadedRef.current = true
+    setLoaded(true)
+  }, [])
+
   // The form edits a local draft seeded from the server, so this read stays
-  // out of the shared cache.
+  // out of the shared cache. A failed read is retried (5 s, 15 s, then every
+  // 60 s) until one succeeds or a save does, since reads fail while the
+  // backend restarts and `loaded` would otherwise stay false until a reload.
+  // The attempts run one after another from a single timer, so two reads are
+  // never in flight together, and only the first flips `loading`.
   useEffect(() => {
-    const fetchSettings = async () => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+
+    const fetchSettings = async (attempt: number) => {
+      // A save may have landed while this retry was waiting.
+      if (attempt > 0 && loadedRef.current) return
       try {
-        setSettings(await apiRequest<SettingsPayload>('/api/settings'))
+        const data = await apiRequest<SettingsPayload>('/api/settings')
+        if (cancelled) return
+        setSettings(data)
+        markLoaded()
       } catch {
         try {
           const data = await apiRequest<{ address?: string; port?: number }>('/api/settings/signalk')
+          if (cancelled) return
           setSettings((previous) => ({ ...previous, signalk: data }))
+          markLoaded()
         } catch {
-          // Keep defaults if settings endpoint is unavailable.
+          // Keep defaults if the settings endpoint is unavailable, and try again.
         }
       } finally {
-        setLoading(false)
+        if (!cancelled && attempt === 0) setLoading(false)
       }
+      if (cancelled || loadedRef.current) return
+      timer = setTimeout(() => void fetchSettings(attempt + 1), RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)])
     }
 
-    void fetchSettings()
-  }, [])
+    void fetchSettings(0)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [markLoaded])
 
   const save = useCallback(async (patch: DeepPartial<SettingsPayload>) => {
     setSaving(true)
@@ -198,6 +229,8 @@ export function useSettingsForm(): UseSettingsFormResult {
     try {
       const data = await apiRequest<SettingsPayload>('/api/settings', { method: 'POST', json: merged })
       setSettings(data)
+      // The response is the whole document, so a save counts as a load.
+      markLoaded()
       // The response is the whole document, the shape other readers of the
       // shared entry (the tide settings) take, so they follow the save.
       setQueryData(['/api/settings'], data)
@@ -219,7 +252,7 @@ export function useSettingsForm(): UseSettingsFormResult {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [markLoaded])
 
-  return { settings, setSettings, loading, saving, error, save }
+  return { settings, setSettings, loading, loaded, saving, error, save }
 }

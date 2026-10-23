@@ -44,6 +44,100 @@ describe('useSettingsForm', () => {
     await waitFor(() => expect(coast.result.current.status?.state).toBe('idle'), { timeout: 1500 })
   })
 
+  it('reports loaded only when a settings read succeeded', async () => {
+    stubApi({ 'GET /api/settings': { signalk: { address: '10.0.0.5', port: 3000 } } })
+    const ok = renderHook(() => useSettingsForm())
+    await waitFor(() => expect(ok.result.current.loading).toBe(false))
+    expect(ok.result.current.loaded).toBe(true)
+    ok.unmount()
+
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('backend restarting')))
+    const failed = renderHook(() => useSettingsForm())
+    await waitFor(() => expect(failed.result.current.loading).toBe(false))
+    expect(failed.result.current.loaded).toBe(false)
+  })
+
+  describe('when the first read fails', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    // Reads fail while the backend restarts. Without a retry, `loaded` would
+    // stay false until the page was reloaded.
+    function failingThenWorking(succeedFromAttempt: number) {
+      let attempts = 0
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (init?.method === 'POST') return { ok: true, json: async () => ({ signalk: { address: 'saved.local', port: 3000 } }) }
+        if (String(url).endsWith('/api/settings')) {
+          attempts += 1
+          if (attempts >= succeedFromAttempt) return { ok: true, json: async () => ({ signalk: { address: '10.0.0.5', port: 3000 } }) }
+        }
+        return { ok: false, json: async () => ({}) }
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      return { fetchMock, attempts: () => attempts }
+    }
+
+    it('retries after 5 s, then 15 s, then every 60 s, and stops once loaded', async () => {
+      vi.useFakeTimers()
+      const { attempts } = failingThenWorking(5)
+      const { result } = renderHook(() => useSettingsForm())
+      const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+
+      await advance(0)
+      expect(attempts()).toBe(1)
+      expect(result.current.loading).toBe(false)
+      expect(result.current.loaded).toBe(false)
+
+      await advance(4_999)
+      expect(attempts()).toBe(1)
+      await advance(1)
+      expect(attempts()).toBe(2)
+
+      await advance(14_999)
+      expect(attempts()).toBe(2)
+      await advance(1)
+      expect(attempts()).toBe(3)
+
+      await advance(59_999)
+      expect(attempts()).toBe(3)
+      await advance(1)
+      expect(attempts()).toBe(4)
+
+      await advance(60_000)
+      expect(attempts()).toBe(5)
+      expect(result.current.loaded).toBe(true)
+      expect(result.current.settings.signalk?.address).toBe('10.0.0.5')
+
+      await advance(300_000)
+      expect(attempts()).toBe(5)
+    })
+
+    it('stops retrying when unmounted', async () => {
+      vi.useFakeTimers()
+      const { attempts } = failingThenWorking(99)
+      const { unmount } = renderHook(() => useSettingsForm())
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      unmount()
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000) })
+      expect(attempts()).toBe(1)
+    })
+
+    it('counts a successful save as loaded and stops retrying', async () => {
+      vi.useFakeTimers()
+      const { attempts } = failingThenWorking(99)
+      const { result } = renderHook(() => useSettingsForm())
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(result.current.loaded).toBe(false)
+
+      await act(async () => { await result.current.save({ signalk: { address: 'saved.local' } }) })
+      expect(result.current.loaded).toBe(true)
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000) })
+      expect(attempts()).toBe(1)
+    })
+  })
+
   it('fetches settings on mount and populates state', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

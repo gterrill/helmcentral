@@ -57,6 +57,65 @@ type discoveredServer struct {
 	URL        string `json:"url"`
 	VesselName string `json:"vessel_name"`
 	Version    string `json:"version"`
+	// Configured is true when this is the server already saved in settings:
+	// the saved address (a hostname is resolved) and port match. The prompt
+	// never offers it back to the operator.
+	Configured bool `json:"configured"`
+}
+
+// configuredLookupTimeout bounds resolving the saved address, so a dead
+// resolver cannot hold the discovery answer.
+const configuredLookupTimeout = 2 * time.Second
+
+func lookupHostIPs(ctx context.Context, host string) ([]net.IP, error) {
+	addrs, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	ips := make([]net.IP, 0, len(addrs))
+	for _, a := range addrs {
+		ips = append(ips, a.IP)
+	}
+	return ips, nil
+}
+
+// markConfiguredServers sets Configured on each server whose address and port
+// are the saved ones. The sweep returns IPv4 literals only, so a saved
+// hostname (boat.local) is resolved first. A lookup that fails is logged and
+// marks nothing: the server is then offered like any other, and the operator
+// can decline.
+func markConfiguredServers(ctx context.Context, servers []discoveredServer, address string, port int, lookup func(context.Context, string) ([]net.IP, error)) {
+	address = strings.TrimSpace(address)
+	if address == "" || len(servers) == 0 {
+		return
+	}
+
+	var ips []net.IP
+	if literal := net.ParseIP(address); literal != nil {
+		ips = []net.IP{literal}
+	} else {
+		lookupCtx, cancel := context.WithTimeout(ctx, configuredLookupTimeout)
+		defer cancel()
+		resolved, err := lookup(lookupCtx, address)
+		if err != nil {
+			log.Printf("signalk discovery: cannot resolve saved address %q, so the saved server cannot be recognised: %v", address, err)
+			return
+		}
+		ips = resolved
+	}
+
+	for i := range servers {
+		if servers[i].Port != port {
+			continue
+		}
+		found := net.ParseIP(servers[i].Address)
+		for _, ip := range ips {
+			if found != nil && ip.Equal(found) {
+				servers[i].Configured = true
+				break
+			}
+		}
+	}
 }
 
 // resolveDiscoveryNetwork decides which /24 to sweep.
@@ -296,6 +355,7 @@ func discoverSignalKHandler(c echo.Context) error {
 	if servers == nil {
 		servers = []discoveredServer{}
 	}
+	markConfiguredServers(c.Request().Context(), servers, configuredAddress, configuredPort, lookupHostIPs)
 
 	return c.JSON(http.StatusOK, map[string]any{
 		"scanned_subnet": network.String(),

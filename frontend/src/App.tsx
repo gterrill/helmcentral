@@ -1025,7 +1025,7 @@ function AppShell() {
   // Only for deciding whether to offer SignalK discovery. Gated on `loading`
   // below so an unconfigured-looking empty address during the initial fetch
   // can't trigger the prompt spuriously.
-  const { settings: currentSettings, loading: currentSettingsLoading } = useSettingsForm()
+  const { settings: currentSettings } = useSettingsForm()
   // The AIS Target Prioritizer plugin's webapp lives on the SignalK server
   // itself, so the collision alarm card's tuning link is only as good as
   // the configured address (ADR 0090); null when unconfigured, which
@@ -3074,12 +3074,7 @@ function AppShell() {
         </div>
       </SidebarInset>
 
-      {!currentSettingsLoading && (
-        <SignalKDiscoveryPrompt
-          configuredAddress={currentSettings.signalk?.address ?? ''}
-          vesselStateSource={vesselStateSource}
-        />
-      )}
+      <SignalKDiscoveryPrompt vesselStateSource={vesselStateSource} />
 
 
       <NavigationGuardDialog />

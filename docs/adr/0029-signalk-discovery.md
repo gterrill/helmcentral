@@ -66,3 +66,13 @@ Tradeoffs:
    - **It searches the network of the address currently typed in the form**, sent as the discovery `hint`, rather than whatever is persisted. The saved address is frequently stale, loopback, or on a dead subnet — often exactly why the operator is on this screen. Ignoring what they just typed would search the wrong network and report a confusing failure. (This was found in end-to-end testing: with the E2E seed at `127.0.0.1`, the first implementation derived nothing usable and returned "127.0.0.1 is not a private address" despite a perfectly good LAN address sitting in the field.)
 
    Picking a result **fills the form and does not save** — the opposite of the prompt's behaviour, and correct in both places. This page is a draft-then-save form with its own Save Settings button (ADR 0028); the prompt is a standalone confirmation where accepting *is* the deliberate act.
+
+## Amendment: the prompt waits out a restart and never offers the saved server
+
+An update restart made `vessel-state` answer `signalk-unreachable` for a few seconds, and the prompt read that as a moved server, found the saved address and offered to store it. Rules 4 and 5 now carry these conditions:
+
+- The unreachable case searches only after the source has stayed `signalk-unreachable` for 30 seconds without any other reading in between, and only while the vessel-state stream is connected (the stream keeps its last reading when it drops, so a long restart would otherwise count). A drop resets the clock. Vessel state is pushed on change, not polled, so this is a timer. The unconfigured case still searches at once.
+- The saved server is never offered. A sweep returns IPv4 literals only, so the discovery endpoint resolves the saved address (2 s limit) and marks each result whose address and port match with `configured: true`; the prompt drops those, and also any plain address-and-port match. If nothing is left, no dialog opens and no dismissal is recorded.
+- The prompt reads address, port and loaded state from the settings instance it saves through, and does nothing until that has loaded. A failed settings read is retried (5 s, 15 s, then every 60 s) and never looks like an unconfigured boat.
+- A search that completes is done for that situation. One that fails is retried after 60 s while the situation persists.
+- Dismissals are keyed by `address:port`. An older address-only dismissal still counts for port 3000.

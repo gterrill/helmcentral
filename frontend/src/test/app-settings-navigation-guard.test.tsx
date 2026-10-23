@@ -8,6 +8,7 @@
  * reached and its dirty state driven directly from the test.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { settingsFormMock } from '@/test/helpers/settings-form-mock'
 import { render, screen, fireEvent, waitFor, act, within } from '@testing-library/react'
 import { App } from '../App'
 import { SECRET_KEYS, type SecretKey } from '@/hooks/use-secrets-status'
@@ -248,14 +249,7 @@ vi.mock('@/hooks/use-settings-form', async () => {
   const actual = await vi.importActual<typeof import('@/hooks/use-settings-form')>('@/hooks/use-settings-form')
   return {
     ...actual,
-    useSettingsForm: () => ({
-      settings: {},
-      setSettings: vi.fn(),
-      loading: false,
-      saving: false,
-      error: null,
-      save: saveMock,
-    }),
+    useSettingsForm: () => settingsFormMock(saveMock),
   }
 })
 

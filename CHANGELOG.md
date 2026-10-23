@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **The "SignalK found" prompt no longer appears after an update restart, and
+  never offers the server you already use.** It now waits until SignalK has
+  been unreachable for a full 30 seconds, with the live feed connected, before
+  searching, and leaves out the server you have saved, including when you
+  saved it by name such as `boat.local`. If a search fails it tries again a
+  minute later, and if the settings cannot be read during a restart it keeps
+  trying to read them rather than treating the boat as unconfigured.
+
 ## [0.53.0] - 2026-10-24
 
 ### Added
