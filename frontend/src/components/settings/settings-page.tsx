@@ -22,6 +22,7 @@ import { SecuritySection } from '@/components/settings/sections/security-section
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
 import { LogsSection } from '@/components/settings/sections/logs-section'
 import { MayaraSection } from '@/components/settings/sections/mayara-section'
+import { OfflineCoastlineSection } from '@/components/settings/sections/offline-coastline-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
 import { PluginsSection } from '@/components/settings/sections/plugins-section'
 import {
@@ -259,6 +260,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <AlarmsSection />
       case 'assistant':
         return <AssistantSection draft={draft} onChange={handleDraftChange} />
+      case 'offline-coastline':
+        return <OfflineCoastlineSection draft={draft} onChange={handleDraftChange} />
       case 'security':
         return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':

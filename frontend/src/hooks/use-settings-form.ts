@@ -91,6 +91,10 @@ export type SettingsPayload = {
     web_search_model?: string
     passage_limits?: PassageLimitsPayload
   }
+  // The on-board coastline Mate's shelter estimate reads. Off by default.
+  offline_coastline?: {
+    enabled?: boolean
+  }
   // Which equipment item plays each single-choice part (house bank, port
   // alternator, ...). Saved with the rest of Settings. A payload that omits it
   // leaves the stored block alone on the server.
