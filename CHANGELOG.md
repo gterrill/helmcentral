@@ -13,6 +13,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Direct the passage replay with camera shots.** A **Camera** button on the
+  replay bar opens a shot editor. Add a shot at any point on the slider, then
+  choose Overview, Follow (chase the boat from astern, abeam or any angle) or
+  Orbit (circle her), with its own zoom and pitch, and a pace of full, half or
+  quarter speed to slow a stretch down. Shots show as marks on the slider and
+  survive splitting and merging passages. With none, the replay frames the
+  track as before. There is also a 60 second replay length. If your device asks
+  for reduced motion, the camera cuts between framings instead of moving.
 - **The replay shows your boat as a model.** With 3D on, the marker becomes a
   sailing or power monohull or catamaran to match the hull type set under
   Anchor Watch settings, sized from your vessel's length and beam and pointing

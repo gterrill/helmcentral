@@ -100,10 +100,48 @@ The map opens with the whole track framed. Pressing **Play** from the start
 brings the map down from high above onto the track, then runs the replay with a
 boat marker. The slider scrubs to any point, and Play from the middle just
 carries on with no zoom. The readout shows the local date and time at that
-point. Slow, Normal and Fast set how long the whole replay takes: 30, 15 or 8
-seconds. **Overview map** puts a small map of the surrounding coast in the
+point. 60 s, Slow, Normal and Fast set how long the whole replay takes: 60,
+30, 15 or 8 seconds. **Overview map** puts a small map of the surrounding coast in the
 corner, with a box where the track is. It stays on or off the next time you
 open a passage.
+
+### Camera shots
+
+By default the camera frames the whole track. Camera shots let you direct it,
+for a replay you want to watch or film: open on the whole passage, chase the
+boat through a narrow pass, circle her at the anchorage, slow down for the part
+worth seeing. The **Camera** button on the replay bar opens the shot editor.
+
+A shot starts at a moment of the passage and lasts until the next shot. It has
+one of three modes:
+
+- **Overview** frames the whole track.
+- **Follow** keeps the boat in the middle and turns with her. The angle sets the
+  view: 0 is from astern, 90 is from abeam, negative angles look from the other
+  side.
+- **Orbit** circles the moving boat at a set number of degrees every second you
+  watch, either way round. A faster replay does not spin it faster.
+
+Follow and Orbit have their own zoom and pitch. Each shot also has a **Pace**:
+full, half or quarter speed. At half pace the passage runs half as fast for as
+long as the shot lasts, so the replay takes longer to watch. The slider stays
+in passage time.
+
+Shots show as marks on the slider; pick one to jump to it and edit it. The
+camera eases into each shot over about a second and a half. Scrubbing puts the
+camera straight into the shot you land in. If you drag, zoom or tilt the map
+yourself during playback (a simple tap does not count), the replay leaves the
+camera with you until the next shot starts, or you press Play again, and the
+next shot eases in from wherever you left the view. With 3D on, the tilted map
+has a sky that fades into the horizon.
+
+Shots belong to the time of day, not to one passage record, so splitting or
+merging passages keeps them. If you trim a passage so a shot falls outside it,
+the shot is hidden and comes back if you undo the trim. With 3D off or the
+terrain unavailable, shots only move and zoom the flat map. If your device asks
+for reduced motion, the camera cuts to each shot instead of moving, and cuts
+again if the boat nears the edge of the view. With no shots the replay frames
+the track as before. See [Film a passage replay](../how-to/film-a-passage-replay.md).
 
 Under the map are the passage's figures:
 

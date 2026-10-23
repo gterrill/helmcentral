@@ -30,6 +30,8 @@ vi.mock('react-map-gl/maplibre', async () => {
     fitBounds: vi.fn(),
     jumpTo: vi.fn(),
     once: vi.fn(),
+    setSky: vi.fn(),
+    getCanvasContainer: () => document.createElement('div'),
     on: mapOn,
     off: vi.fn(),
     cameraForBounds: () => ({ center: { lng: 148.05, lat: -20.05 }, zoom: 9 }),

@@ -37,3 +37,18 @@ export const hillshadePaint = {
 
 /** The terrain setting for the map, or undefined for a flat map. */
 export const terrainSetting = { source: TERRAIN_SOURCE_ID, exaggeration: TERRAIN_EXAGGERATION }
+
+// The sky over the tilted 3D map, so the area above the horizon fades from the
+// horizon colour into the sky instead of standing blank. Literal colours, as
+// for the hillshade: MapLibre paints with them directly.
+const sky = (skyColour: string, horizon: string) => ({
+  'sky-color': skyColour,
+  'horizon-color': horizon,
+  'fog-color': horizon,
+  'sky-horizon-blend': 0.6,
+  'horizon-fog-blend': 0.8,
+  'fog-ground-blend': 0.2,
+})
+export const SKY_DAY = sky('#8fb8d8', '#dfe9ef')
+export const SKY_NIGHT = sky('#0a1826', '#1a3045')
+export const skyFor = (dark: boolean) => (dark ? SKY_NIGHT : SKY_DAY)

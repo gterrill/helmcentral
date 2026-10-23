@@ -1,12 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
-import { InsetMap, PassageMap, type PassageMapHandle } from '@/components/passages/passage-map'
+import { CameraEditor, type CameraShotChange } from '@/components/passages/camera-editor'
+import { InsetMap, PassageMap, type CameraDriver, type PassageMapHandle } from '@/components/passages/passage-map'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { useBoatHull } from '@/hooks/use-boat-hull'
+import { useCameraShots } from '@/hooks/use-camera-shots'
+import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
 import { nextHeading, type HeadingState } from '@/lib/boat-model'
-import { useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
+import { cameraShotsApi } from '@/lib/camera-shots-api'
+import { CameraDirector, shotStartState } from '@/lib/replay-camera'
+import { paceSpans, resolveShots, wallAtTimeline, type CameraMode } from '@/lib/replay-clock'
+import { REPLAY_3D_PITCH } from '@/lib/terrain'
+import { replaySeconds, useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
   buildTimeline,
   formatLocalDateTime,
@@ -32,8 +39,24 @@ export interface ReplayPanelProps {
   cursorRef?: MutableRefObject<ReplayCursor | null>
 }
 
+const MODE_NAMES: Record<CameraMode, string> = { overview: 'Overview', follow: 'Follow', orbit: 'Orbit' }
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+const round = (v: number, digits: number) => Math.round(v * 10 ** digits) / 10 ** digits
+/** An angle brought into -180..180. */
+const signedDeg = (d: number) => ((((d % 360) + 540) % 360) - 180)
+
 export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelProps) {
   const [speed, setSpeed] = useState<ReplaySpeedId>('normal')
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [selectedShotId, setSelectedShotId] = useState<string | null>(null)
+  const [shotBusy, setShotBusy] = useState(false)
+  const [shotError, setShotError] = useState<string | null>(null)
+  // Bumped when the operator takes the camera back from a drag (Play, a scrub).
+  const [resume, setResume] = useState(0)
+  // The map says whether it is flat: 3D off, or the terrain failed.
+  const [mapFlat, setMapFlat] = useState(false)
+  const [director] = useState(() => new CameraDirector())
+  const reducedMotion = usePrefersReducedMotion()
   const [insetOn, setInsetOn] = useInsetPreference()
   const [flying, setFlying] = useState(false)
   const mapHandle = useRef<PassageMapHandle>(null)
@@ -60,7 +83,24 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const bounds = useMemo(() => segmentBounds(allSegments), [allSegments])
   // The server cuts nights by the zone of the first fix; read the clock the same way.
   const lon = passages[0]?.start_lon ?? (bounds ? (bounds[0] + bounds[2]) / 2 : 0)
-  const replay = useReplay(timeline.total, speed)
+
+  // Camera shots belong to real time, so the ones inside the replayed
+  // passages are the ones that play; a trimmed-out shot is simply not there.
+  const spanMs = useMemo(() => {
+    if (built.items.length === 0) return null
+    return {
+      from: Math.min(...built.items.map((i) => i.start)) * 1000,
+      to: Math.max(...built.items.map((i) => i.end)) * 1000,
+    }
+  }, [built.items])
+  const { shots } = useCameraShots(spanMs ? spanMs.from : null, spanMs ? spanMs.to : null)
+  const resolved = useMemo(
+    () => resolveShots(shots, timeline).filter((r) => timeline.entries.find((e) => e.id === r.entryId)?.segments.some((s) => s.length > 0)),
+    [shots, timeline],
+  )
+  const spans = useMemo(() => paceSpans(resolved), [resolved])
+  const lengthS = replaySeconds(speed)
+  const replay = useReplay(timeline.total, lengthS, spans)
 
   const here = locate(timeline, replay.clock)
   const boat = here ? positionAt(here.entry.segments, here.at) : null
@@ -69,7 +109,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // to point. A held heading carries on only while playback moves forward.
   const [threeD] = use3dPreference()
   const lastHeading = useRef<HeadingState | null>(null)
-  const heading = hull && threeD && here ? nextHeading(lastHeading.current, { id: here.entry.id, at: here.at }, here.entry.segments) : null
+  const heading = ((hull && threeD) || resolved.length > 0) && here ? nextHeading(lastHeading.current, { id: here.entry.id, at: here.at }, here.entry.segments) : null
   useEffect(() => { lastHeading.current = heading })
   useEffect(() => {
     if (cursorRef) cursorRef.current = here ? { id: here.entry.id, at: here.at } : null
@@ -79,6 +119,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // the zoom-in; resuming from a pause or a scrub just plays.
   const handlePlay = async () => {
     if (replay.playing) { replay.toggle(); return }
+    setResume((n) => n + 1)
     if (replay.clock <= 0 || replay.clock >= timeline.total) {
       setFlying(true)
       try {
@@ -105,6 +146,97 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     }
     return at
   }, [timeline, replay.clock, hereId, boatLat, boatLon])
+
+  // The camera: asked for by clock position; the map applies it per frame.
+  const wallAt = useCallback(
+    (clock: number) => wallAtTimeline(timeline.total, lengthS, spans, clock),
+    [timeline.total, lengthS, spans],
+  )
+  const cameraDriver: CameraDriver | null = resolved.length > 0 && !flying
+    ? {
+        clock: replay.clock,
+        reduced: reducedMotion,
+        resume,
+        resolve: ({ flat, overview, current }) => {
+          if (!boat) return null
+          return director.frame(
+            { overview, flat, shotStart: (rs) => shotStartState(timeline, rs), elapsedAt: (rs, clock) => wallAt(clock) - wallAt(rs.clock) },
+            {
+              resolved,
+              clock: replay.clock,
+              playing: replay.playing,
+              nowMs: performance.now(),
+              reduced: reducedMotion,
+              resume,
+              boat: { lat: boat.lat, lon: boat.lon, heading: heading ? heading.heading : null },
+              current,
+            },
+          )
+        },
+      }
+    : null
+
+  const selectShot = (id: string | null) => {
+    setSelectedShotId(id)
+    setShotError(null)
+  }
+  const selectedShot = shots.find((s) => s.id === selectedShotId && resolved.some((r) => r.shot.id === s.id)) ?? null
+  const runShotWrite = async (write: () => Promise<void>) => {
+    setShotBusy(true)
+    try {
+      await write()
+      setShotError(null)
+    } catch (err) {
+      setShotError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setShotBusy(false)
+    }
+  }
+  const addShot = () => {
+    if (!here) return
+    const view = mapHandle.current?.getView()
+    if (!view) { setShotError('The map is not ready'); return }
+    void runShotWrite(async () => {
+      const created = await cameraShotsApi.create({
+        t_ms: Math.round(here.at * 1000),
+        mode: 'follow',
+        zoom: round(clamp(view.zoom, 0, 22), 2),
+        pitch: round(clamp(view.pitch ?? REPLAY_3D_PITCH, 0, 70), 1),
+        bearing_offset_deg: 0,
+        orbit_deg_per_s: 0,
+        pace: 1,
+      })
+      selectShot(created.id)
+    })
+  }
+  const changeShot = (change: CameraShotChange) => {
+    if (selectedShot) void runShotWrite(async () => { await cameraShotsApi.patch(selectedShot.id, change) })
+  }
+  const deleteShot = () => {
+    if (!selectedShot) return
+    void runShotWrite(async () => {
+      await cameraShotsApi.remove(selectedShot.id)
+      selectShot(null)
+    })
+  }
+  const useCurrentView = () => {
+    const view = mapHandle.current?.getView()
+    const rs = resolved.find((r) => r.shot.id === selectedShot?.id)
+    if (!view || !rs || !selectedShot) { setShotError('The map is not ready'); return }
+    const change: CameraShotChange = { zoom: round(clamp(view.zoom, 0, 22), 2) }
+    if (view.pitch !== null) change.pitch = round(clamp(view.pitch, 0, 70), 1)
+    if (selectedShot.mode === 'follow' && view.pitch !== null) {
+      const bow = shotStartState(timeline, rs)?.heading ?? null
+      if (bow !== null) change.bearing_offset_deg = round(signedDeg(view.bearing - bow), 1)
+    }
+    void runShotWrite(async () => { await cameraShotsApi.patch(selectedShot.id, change) })
+  }
+  const shotTicks = resolved.map((r) => ({
+    id: r.shot.id,
+    fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
+    label: `Camera shot ${MODE_NAMES[r.shot.mode]} at ${formatLocalDateTime(r.at, lon)}`,
+    selected: r.shot.id === selectedShot?.id,
+  }))
 
   const mapPassages = useMemo(() => built.items.map((i) => ({ id: i.id, segments: i.line })), [built.items])
 
@@ -136,6 +268,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           boat={boat}
           boatHeading={heading ? heading.heading : null}
           hull={hull}
+          cameraDriver={cameraDriver}
+          onFlatChange={setMapFlat}
           isDarkTheme={isDarkTheme}
           overlay={
             insetOn && !flying ? (
@@ -157,9 +291,34 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         insetOn={insetOn}
         disabled={timeline.total <= 0 || flying}
         onToggle={() => void handlePlay()}
-        onScrub={(c) => { replay.setPlaying(false); replay.setClock(c) }}
+        onScrub={(c) => { replay.setPlaying(false); replay.setClock(c); setResume((n) => n + 1) }}
         onSpeed={setSpeed}
         onInsetChange={setInsetOn}
+        shotTicks={shotTicks}
+        cameraOpen={cameraOpen}
+        onCameraToggle={() => setCameraOpen((o) => !o)}
+        onTickClick={(id) => {
+          const rs = resolved.find((r) => r.shot.id === id)
+          if (!rs) return
+          replay.setPlaying(false)
+          replay.setClock(rs.clock)
+          setResume((n) => n + 1)
+          selectShot(id)
+          setCameraOpen(true)
+        }}
+        editor={
+          <CameraEditor
+            shot={selectedShot}
+            shotCount={resolved.length}
+            flat={mapFlat}
+            busy={shotBusy}
+            error={shotError}
+            onAdd={addShot}
+            onChange={changeShot}
+            onDelete={deleteShot}
+            onUseView={useCurrentView}
+          />
+        }
       />
     </div>
   )

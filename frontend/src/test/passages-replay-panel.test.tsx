@@ -6,6 +6,7 @@ import { REPLAY_SPEEDS } from '@/hooks/use-replay'
 
 import { ReplayPanel, type ReplayCursor } from '@/components/passages/replay-panel'
 import type { PassageDetail } from '@/lib/passages'
+import { stubApi } from './helpers/stub-api'
 
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => null }))
 
@@ -37,7 +38,7 @@ const passage: PassageDetail = {
   replay_times: [[start, start + 250, start + 750, start + 1000]],
 }
 
-beforeEach(() => { localStorage.clear(); lastBoat = null; flyIn.mockClear() })
+beforeEach(() => { stubApi({ 'GET /api/passages/camera-shots': { shots: [] } }); localStorage.clear(); lastBoat = null; flyIn.mockClear() })
 
 describe('ReplayPanel', () => {
   it('scrubbing moves the boat and the boat-local readout, and reports the cursor', () => {
@@ -73,8 +74,8 @@ describe('ReplayPanel', () => {
     expect(flyIn).not.toHaveBeenCalled()
   })
 
-  it('plays the whole track in 30, 15 or 8 seconds', () => {
-    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['Slow', 30], ['Normal', 15], ['Fast', 8]])
+  it('plays the whole track in 60, 30, 15 or 8 seconds', () => {
+    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['Slow', 30], ['Normal', 15], ['Fast', 8]])
   })
 
   it('says so when no track was kept rather than drawing nothing', () => {
