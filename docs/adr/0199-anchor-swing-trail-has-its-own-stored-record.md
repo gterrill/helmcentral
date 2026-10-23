@@ -41,11 +41,18 @@ is about six points an hour, far too few to draw a swing.
 3. A drop, a re-POST reposition and a PATCH that changes the position restart
    the trail (rows deleted, new start time). A PATCH that changes only the
    radius does not. Raise, by the operator or by the server-side auto-raise
-   (ADR 0099), both through `raiseAnchorWatch`, deletes the trail. The reset
-   comes before the new watch is saved and published, so no reader sees the new
-   anchor with the old trail, and a failed reset fails the drop, the move or the
+   (ADR 0099), both through `raiseAnchorWatch`, deletes the trail. A failed reset fails the drop, the move or the
    raise (500) rather than leaving the two disagreeing; the auto-raise logs it.
-   A move's reset runs after the SignalK publish and before the local save. `set_at` is
+   A move's reset runs after the SignalK publish and before the local save, outside
+   `anchorWatchMu` (it is a database transaction; `anchorLifecycleMu` still keeps
+   other lifecycle writes out). Trail readers wait
+   for the move (`anchorTrailMoveMu`) and the tick recorder skips while it runs,
+   so no reader sees the new empty trail beside the old anchor and no fix taken
+   against the old anchor lands in the new trail. If the reset, or the local
+   save after it, fails, Helmcentral publishes the old position back to
+   SignalK, keeps the local watch, and answers 500 (after a failed save it says
+   the trail was restarted); if that
+   rollback also fails the error says SignalK and the watch disagree. `set_at` is
    not usable as the restart marker: it is the anchoring session's identity and
    deliberately does not change on reposition (ADR 0064).
 4. `GET /api/anchor-watch/trails/self?since=` returns
@@ -71,7 +78,9 @@ is about six points an hour, far too few to draw a swing.
 - The map renders up to 10000 points as one GeoJSON line.
 - An unavailable store fails a drop, a move or a raise loudly, as the fallback
   policy requires. A raise whose trail clear fails has already removed the
-  watch; Raise is idempotent and can be retried.
+  watch, so it still clears the session's placemarks before reporting the
+  trail failure (the auto-raise watcher will not retry a nil watch); Raise is
+  idempotent and can be retried.
 - Two tick-rate recorders now exist (`selfTrack` for the Nearby trail, this
   table for anchoring). Moving the Nearby trail to a stored record is a
   separate decision.

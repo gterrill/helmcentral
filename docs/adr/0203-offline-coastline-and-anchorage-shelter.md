@@ -211,10 +211,22 @@ cap of 6 hours. It stays on the page with its error. Nothing runs, and the
 plugin is never touched, while the switch is off.
 
 A failure of the whole map server (a 429 or rate-limit page, a 5xx, a refused
-connection, a timeout) is not the square's fault. It pauses the job instead:
+connection, a timeout, or a 401, 403 or 451 turning the boat away) is not the
+square's fault. 403 is the one that matters: a server that answers "only
+available to white-listed usages" gives every square the same answer, so
+treating it as per-square would march through about 50 squares and mark them
+all failed. 401 (credentials needed) and 451 (blocked for legal reasons) are
+the same kind of refusal and take the same pause, but their status text
+differs: "The map server turned the boat away. Choose another Overpass server
+in the plugin settings", because the fix is a different server, not the
+network. 400 and other 4xx stay with
+the square. It pauses the job instead:
 no square is tried until the longer of the server's Retry-After and the same
 5 minute doubling backoff has passed, the square is not marked failed (an
-operator-requested update stays queued), and the status says the server is
+operator-requested update stays queued, unless a Clear or the switch going
+off happened while the download was in flight: then the square is dropped, not
+queued again; the check and the requeue happen under one lock, and the pause
+is also dropped once the switch is off), and the status says the server is
 refusing and when the worker will try again. The plugin carries Retry-After in
 its error text; the host reads the text because it is all that crosses the
 plugin boundary. Status is served from the position and switch the worker last
@@ -296,6 +308,6 @@ shelter could not be checked, and why.
 - Areas across the 180th meridian and near the poles are not supported, and
   say so.
 - The public Overpass servers are a moving target. `overpass.openstreetmap.fr`
-  refused a Mac with 403 "only available to white-listed usages"; the
-  worker's backoff and visible per-square errors are how an operator sees a
-  server that has turned them away.
+  refused a Mac with 403 "only available to white-listed usages"; the pause
+  and its visible reason are how an operator sees a server that has turned
+  them away.

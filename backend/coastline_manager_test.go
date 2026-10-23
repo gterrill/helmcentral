@@ -577,6 +577,9 @@ func TestClassifyCoastlineError(t *testing.T) {
 		"overpass returned status 429",
 		"overpass returned status 503, retry after 20s",
 		"overpass returned status 504",
+		"overpass returned status 403",
+		"overpass returned status 401",
+		"overpass returned status 451",
 		"Post \"https://x\": dial tcp 1.2.3.4:443: connect: connection refused",
 		"dial tcp: lookup overpass-api.de: no such host",
 		"read tcp: i/o timeout",
@@ -757,5 +760,118 @@ func TestCoastlineManager_StatusCountsOnlyWantedFailuresAndKeepsFailedChecksHeld
 				t.Errorf("held square with a failed check: %+v", q)
 			}
 		}
+	}
+}
+
+func TestCoastlineManager_ClearDuringARefusedUpdateDoesNotRequeueTheSquare(t *testing.T) {
+	for name, msg := range map[string]string{
+		"rate limit": rateLimitedErr,
+		"timeout":    "read tcp: i/o timeout",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newCoastlineHarness(t)
+			sq := coverageSquare{-21, 148}
+			_ = h.store.SaveSquare(sq, sampleCoastLines(), h.now)
+			_ = h.store.RecordEdits(sq, 5, h.now)
+			if _, err := h.m.Update(); err != nil {
+				t.Fatal(err)
+			}
+			h.src.fail[sq] = errors.New(msg)
+			stepWhileBlocked(t, h, func() {
+				if err := h.m.Clear(); err != nil {
+					t.Error(err)
+				}
+			})
+			if _, queued := h.m.nextQueued(); queued {
+				t.Error("a square the operator cleared was queued again after the refusal")
+			}
+			if recs, _ := h.store.Records(); len(recs) != 0 {
+				t.Errorf("a cleared square was saved: %v", recs)
+			}
+			if st, _ := h.m.Status(); st.State == "paused" {
+				t.Errorf("a refusal from before the Clear must not pause the new job: %+v", st)
+			}
+		})
+	}
+}
+
+func TestCoastlineManager_ServerRefusalPausesTheWholeJob(t *testing.T) {
+	for _, msg := range []string{
+		"overpass returned status 403",
+		"overpass returned status 403: only available to white-listed usages",
+		"overpass returned status 401",
+		"overpass returned status 451",
+	} {
+		t.Run(msg, func(t *testing.T) {
+			h := newCoastlineHarness(t)
+			wanted, _ := squaresWithin(h.lat, h.lon, coastlineCoverageRadiusNm)
+			h.src.fail[wanted[0]] = errors.New(msg)
+			start := h.now
+			h.m.step()
+			st, _ := h.m.Status()
+			if st.State != "paused" || st.Failed != 0 || st.RetryAt == nil {
+				t.Fatalf("a refused boat pauses the job and fails no square: %+v", st)
+			}
+			if recs, _ := h.store.Records(); len(recs) != 0 {
+				t.Errorf("no square may be recorded: %v", recs)
+			}
+			h.now = start.Add(coastlineDownloadPause)
+			h.m.step()
+			if len(h.src.downloads) != 1 {
+				t.Errorf("worker kept asking a server that refused the boat: %v", h.src.downloads)
+			}
+		})
+	}
+}
+
+func TestCoastlineManager_SwitchOffDuringARefusedUpdateDoesNotRequeueOrPause(t *testing.T) {
+	h := newCoastlineHarness(t)
+	sq := coverageSquare{-21, 148}
+	_ = h.store.SaveSquare(sq, sampleCoastLines(), h.now)
+	_ = h.store.RecordEdits(sq, 5, h.now)
+	if _, err := h.m.Update(); err != nil {
+		t.Fatal(err)
+	}
+	h.src.fail[sq] = errors.New(rateLimitedErr)
+	stepWhileBlocked(t, h, func() { h.setEnabled(false) })
+	h.m.mu.Lock()
+	queued, pausedUntil := len(h.m.queue), h.m.pausedUntil
+	h.m.mu.Unlock()
+	if queued != 0 || !pausedUntil.IsZero() {
+		t.Errorf("a refusal after the switch went off must neither requeue nor pause: queue %d, paused until %v", queued, pausedUntil)
+	}
+}
+
+func TestCoastlineManager_RequeueHappensInsideThePauseDecision(t *testing.T) {
+	h := newCoastlineHarness(t)
+	sq := coverageSquare{-21, 148}
+	p := classifyCoastlineError(errors.New(rateLimitedErr))
+	h.m.gateMu.Lock()
+	gen := h.m.gen
+	h.m.gateMu.Unlock()
+	if !h.m.serviceFailed(gen, "test", p, h.now, &sq) {
+		t.Fatal("a current refusal should be accepted")
+	}
+	if got, ok := h.m.nextQueued(); !ok || got != sq {
+		t.Fatalf("the square must be queued before serviceFailed returns, got %v %v", got, ok)
+	}
+	_ = h.m.Clear()
+	if h.m.serviceFailed(gen, "test", p, h.now, &sq) {
+		t.Fatal("a stale refusal must be dropped")
+	}
+	if _, ok := h.m.nextQueued(); ok {
+		t.Fatal("a stale refusal must not queue the square")
+	}
+}
+
+func TestClassifyCoastlineErrorTurnedAwaySummaryPointsAtTheFix(t *testing.T) {
+	for _, msg := range []string{"overpass returned status 403", "overpass returned status 401", "overpass returned status 451"} {
+		p := classifyCoastlineError(errors.New(msg))
+		if p == nil || !strings.Contains(p.Summary, "turned the boat away") || !strings.Contains(p.Summary, "another Overpass server") {
+			t.Errorf("%s: summary %+v", msg, p)
+		}
+	}
+	if p := classifyCoastlineError(errors.New("connection refused")); strings.Contains(p.Summary, "turned") {
+		t.Errorf("a network refusal keeps the network wording: %q", p.Summary)
 	}
 }

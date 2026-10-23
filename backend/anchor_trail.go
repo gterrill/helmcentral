@@ -195,6 +195,12 @@ func (s *passageStore) anchorTrailSince(since time.Time) ([]*trailPoint, time.Ti
 // recordAnchorTrailPoint is called on every poll tick; it stores the fix only
 // while an anchor watch is active and the position is a real fix.
 func recordAnchorTrailPoint(lat, lon float64, at time.Time) {
+	// A drop or move is restarting the trail: this fix belongs to the old
+	// anchor, so skip it rather than wait.
+	if !anchorTrailMoveMu.TryRLock() {
+		return
+	}
+	defer anchorTrailMoveMu.RUnlock()
 	anchorWatchMu.RLock()
 	active := anchorWatchState != nil
 	anchorWatchMu.RUnlock()
@@ -214,11 +220,22 @@ func recordAnchorTrailPoint(lat, lon float64, at time.Time) {
 // (raise). The caller fails the operation when it returns an error, so the
 // watch and its trail never disagree silently.
 func resetAnchorTrail(restart bool) error {
-	if globalPassageStore == nil {
-		return errAnchorTrailNoStore
-	}
-	return globalPassageStore.resetAnchorTrail(restart, time.Now().UTC().Truncate(time.Millisecond))
+	return (*anchorTrailResetter.Load())(restart)
 }
+
+// anchorTrailResetter is the real reset unless a test stands in a slow or
+// failing trail store; atomic so swapping it cannot race background work.
+var anchorTrailResetter = func() *atomic.Pointer[func(bool) error] {
+	p := new(atomic.Pointer[func(bool) error])
+	f := func(restart bool) error {
+		if globalPassageStore == nil {
+			return errAnchorTrailNoStore
+		}
+		return globalPassageStore.resetAnchorTrail(restart, time.Now().UTC().Truncate(time.Millisecond))
+	}
+	p.Store(&f)
+	return p
+}()
 
 // startRestoredAnchorTrail runs once at startup, after the watch is restored:
 // a watch that was already running when the trail table was introduced gets
@@ -250,6 +267,9 @@ func getSelfTrailHandler(c echo.Context) error {
 		}
 	}
 
+	// Wait out a move in progress so the trail and the anchor agree.
+	anchorTrailMoveMu.RLock()
+	defer anchorTrailMoveMu.RUnlock()
 	anchorWatchMu.RLock()
 	active := anchorWatchState != nil
 	anchorWatchMu.RUnlock()

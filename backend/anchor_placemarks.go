@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -93,11 +94,17 @@ func loadAnchorPlacemarks() {
 
 // clearPlacemarks drops every pin and its state file. Called when the anchor
 // session ends.
-func clearPlacemarks() {
+//
+// A missing file is fine. Any other failure to remove it is returned: the
+// pins would otherwise come back from disk at the next start.
+func clearPlacemarks() error {
 	placemarkMu.Lock()
 	placemarks = nil
 	placemarkMu.Unlock()
-	_ = os.Remove(anchorPlacemarksFilePath())
+	if err := os.Remove(anchorPlacemarksFilePath()); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove anchor placemarks file: %w", err)
+	}
+	return nil
 }
 
 // GET /api/anchor-watch/placemarks
