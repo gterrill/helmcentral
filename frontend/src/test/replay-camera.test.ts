@@ -3,13 +3,16 @@ import { describe, expect, it } from 'vitest'
 import {
   blendCameras,
   CameraDirector,
+  CameraGate,
   easeInOut,
   outsideCentral,
+  sameCamera,
   shotStartState,
   TRANSITION_S,
   type BoatState,
   type Camera,
   type CameraContext,
+  type CameraResult,
   type FrameInput,
 } from '@/lib/replay-camera'
 import { paceSpans, resolveShots, wallAtTimeline, type CameraShot } from '@/lib/replay-clock'
@@ -259,5 +262,52 @@ describe('outsideCentral', () => {
     expect(outsideCentral({ x: 190, y: 300 }, 1000, 600)).toBe(true)
     expect(outsideCentral({ x: 500, y: 100 }, 1000, 600)).toBe(true)
     expect(outsideCentral({ x: 900, y: 300 }, 1000, 600)).toBe(true)
+  })
+})
+
+describe('CameraGate', () => {
+  const camera = (zoom: number, bearing = 0): Camera => ({ center: [149, -22], zoom, pitch: 50, bearing })
+  const result = (shotKey: string, cam: Camera, mode: CameraResult['mode'] = 'follow'): CameraResult => ({ camera: cam, shotKey, mode })
+  const input = (r: CameraResult, over: Partial<Parameters<CameraGate['place']>[0]> = {}) => ({
+    result: r, resume: 0, reduced: false, current: camera(8), boatOutside: () => false, ...over,
+  })
+
+  it('places the shot\'s camera, and not one the map already has', () => {
+    const gate = new CameraGate()
+    expect(gate.place(input(result('a', camera(14))))).toEqual(camera(14))
+    expect(gate.place(input(result('a', camera(14)), { current: camera(14, 0.001) }))).toBeNull()
+  })
+
+  it('stays out of the way once a person has the map, until the next shot', () => {
+    const gate = new CameraGate()
+    gate.place(input(result('a', camera(14))))
+    gate.yield()
+    expect(gate.place(input(result('a', camera(15))))).toBeNull()
+    expect(gate.place(input(result('b', camera(12))))).toEqual(camera(12))
+  })
+
+  it('takes the camera back when Play or a scrub hands control back', () => {
+    const gate = new CameraGate()
+    gate.place(input(result('a', camera(14))))
+    gate.yield()
+    expect(gate.place(input(result('a', camera(15)), { resume: 1 }))).toEqual(camera(15))
+  })
+
+  it('in reduced motion cuts at a shot start, then only when the boat nears the edge', () => {
+    const gate = new CameraGate()
+    expect(gate.place(input(result('a', camera(14)), { reduced: true }))).toEqual(camera(14))
+    expect(gate.place(input(result('a', camera(15)), { reduced: true }))).toBeNull()
+    expect(gate.place(input(result('a', camera(15)), { reduced: true, boatOutside: () => true }))).toEqual(camera(15))
+    // An overview does not follow the boat, so there is nothing to re-cut.
+    expect(gate.place(input(result('a', camera(15)), { reduced: true, boatOutside: () => true }))).toEqual(camera(15))
+    expect(gate.place(input(result('a', camera(16), 'overview'), { reduced: true, boatOutside: () => true }))).toBeNull()
+  })
+})
+
+describe('sameCamera', () => {
+  it('treats bearings across north as the same turn', () => {
+    const a: Camera = { center: [1, 2], zoom: 3, pitch: 4, bearing: 359.999 }
+    expect(sameCamera(a, { ...a, bearing: 0 })).toBe(true)
+    expect(sameCamera(a, { ...a, bearing: 5 })).toBe(false)
   })
 })

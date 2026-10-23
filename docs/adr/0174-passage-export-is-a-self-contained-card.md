@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (2026-10-14).
+Accepted (2026-10-14). Amended by [ADR 0205](0205-cinematic-passage-embed.md): the
+player is now built from the app's own code and draws terrain, the boat model and
+camera shots.
 
 ## Context
 

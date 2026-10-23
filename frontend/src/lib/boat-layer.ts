@@ -1,13 +1,13 @@
 // The MapLibre custom layer that draws the boat, with three.js on the map's own
 // WebGL context. Loaded with import() only when the 3D replay needs it, so
-// three.js stays out of the main bundle.
+// three.js stays out of the main bundle. The three.js namespace is handed in:
+// the app imports it from its own chunk, the blog card from a pinned CDN copy.
 
-import type { CustomLayerInterface, Map as MapLibreMap } from 'maplibre-gl'
-import { MercatorCoordinate } from 'maplibre-gl'
-import { AmbientLight, Camera, DirectionalLight, Matrix4, Scene, Vector3, WebGLRenderer } from 'three'
+import type { CustomLayerInterface, MercatorCoordinate as MercatorCoordinateClass, Map as MapLibreMap } from 'maplibre-gl'
+import type { WebGLRenderer } from 'three'
 
 import { boatScaleFactor, resolveBoatDimensions, type BoatHull } from '@/lib/boat-model'
-import { buildBoat, disposeBoat, type BoatModel } from '@/lib/boat-geometry'
+import { buildBoat, disposeBoat, type BoatModel, type Three } from '@/lib/boat-geometry'
 import { TERRAIN_SOURCE_ID } from '@/lib/terrain'
 
 export const BOAT_LAYER_ID = 'passage-boat-model'
@@ -39,7 +39,15 @@ function logMissing(hull: BoatHull, missing: ('length' | 'beam')[]) {
   console.info(`Boat model (${hull.type}): ${what}. Enter it under vessel details.`)
 }
 
-export function createBoatLayer(hull: BoatHull): BoatLayer {
+/** What the layer draws with, handed in by the caller. MapLibre's own class is
+ * passed too, so the blog card, where MapLibre is a page global, needs no
+ * import of it. */
+export interface BoatLayerLibs {
+  three: Three
+  MercatorCoordinate: typeof MercatorCoordinateClass
+}
+
+export function createBoatLayer(hull: BoatHull, { three: T, MercatorCoordinate }: BoatLayerLibs): BoatLayer {
   const dims = resolveBoatDimensions(hull.type, hull.loaM, hull.beamM)
   logMissing(hull, dims.missing)
   let map: MapLibreMap | null = null
@@ -49,12 +57,12 @@ export function createBoatLayer(hull: BoatHull): BoatLayer {
   let heading = 0
   let elevation = 0
   let elevationStale = true
-  const camera = new Camera()
-  const scene = new Scene()
+  const camera = new T.Camera()
+  const scene = new T.Scene()
   // Scratch objects for the per-frame matrix, so a frame allocates nothing.
-  const placement = new Matrix4()
-  const mvp = new Matrix4()
-  const scale = new Vector3()
+  const placement = new T.Matrix4()
+  const mvp = new T.Matrix4()
+  const scale = new T.Vector3()
 
   const onSourceData = (e: { sourceId?: string }) => {
     if (e.sourceId === TERRAIN_SOURCE_ID) elevationStale = true
@@ -72,13 +80,13 @@ export function createBoatLayer(hull: BoatHull): BoatLayer {
       map = m
       map.on('sourcedata', onSourceData)
       if (renderer) return
-      model = buildBoat(hull.type, { loaM: dims.loaM ?? 1, beamM: dims.beamM })
+      model = buildBoat(hull.type, { loaM: dims.loaM ?? 1, beamM: dims.beamM }, T)
       scene.add(model.group)
-      scene.add(new AmbientLight(0xffffff, 1.6))
-      const sun = new DirectionalLight(0xffffff, 1.8)
+      scene.add(new T.AmbientLight(0xffffff, 1.6))
+      const sun = new T.DirectionalLight(0xffffff, 1.8)
       sun.position.set(-0.4, -0.6, 1).normalize()
       scene.add(sun)
-      renderer = new WebGLRenderer({ canvas: m.getCanvas(), context: gl, antialias: true })
+      renderer = new T.WebGLRenderer({ canvas: m.getCanvas(), context: gl, antialias: true })
       renderer.autoClear = false
       // Creating the renderer changed GL state outside MapLibre's pass: clear
       // three.js's view of it and tell MapLibre's state cache to re-apply its

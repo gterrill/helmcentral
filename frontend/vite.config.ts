@@ -4,6 +4,8 @@ import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
+import { passagePlayer } from './vite-plugin-passage-player.ts'
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8080'
 
@@ -19,7 +21,7 @@ export default defineConfig(({ mode }) => ({
   // and content scanning). It has to run before react() sees any CSS import
   // so index.css is compiled by Tailwind's Vite plugin rather than passed
   // through as plain CSS.
-  plugins: [tailwindcss(), react()],
+  plugins: [tailwindcss(), react(), passagePlayer(__dirname)],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

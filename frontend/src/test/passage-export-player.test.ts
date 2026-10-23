@@ -3,9 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { generateEmbed, PLAYER_SOURCE, type ExportInput } from '@/lib/passage-export'
 import type { PassageDetail, PassageStats } from '@/lib/passages'
 
-// jsdom has no WebGL, so MapLibre is replaced by a recorder. What is checked is
-// the player's own logic: the plan, the readout, the captions and the order of
-// camera moves.
+// happy-dom has no WebGL, so MapLibre is replaced by a recorder. What is checked
+// is the player's own logic: the plan, the readout, the captions and the order
+// of camera moves. The player under test is the built one, the text a blog
+// page receives.
 
 const STATS: PassageStats = {
   distance_nm: 10, underway_seconds: 3600, mean_sog_kts: 5, max_sog_kts: 6, fuel_burned_l: null,
@@ -33,7 +34,8 @@ class FakeMap {
   constructor(public options: Record<string, unknown>) { FakeMap.instances.push(this) }
   on(evt: string, fn: () => void) { (this.handlers[evt] ??= []).push(fn) }
   once(evt: string, fn: () => void) { this.on(evt, fn) }
-  fire(evt: string) { for (const fn of this.handlers[evt] ?? []) fn() }
+  off(evt: string, fn: () => void) { this.handlers[evt] = (this.handlers[evt] ?? []).filter((h) => h !== fn) }
+  fire(evt: string) { for (const fn of [...(this.handlers[evt] ?? [])]) fn() }
   addControl() {}
   setProjection(p: unknown) { this.calls.push(['setProjection', p]) }
   addSource(id: string) { this.sources.set(id, { setData: vi.fn() }); this.calls.push(['addSource', id]) }
@@ -42,6 +44,7 @@ class FakeMap {
   setPaintProperty(layer: string, prop: string, v: unknown) { this.calls.push(['paint', { layer, prop, v }]) }
   jumpTo(o: unknown) { this.calls.push(['jumpTo', o]) }
   fitBounds(b: unknown, o: unknown) { this.calls.push(['fitBounds', { b, o }]) }
+  getCanvasContainer() { return document.createElement('div') }
 }
 class FakeMarker {
   static last: FakeMarker | null = null
@@ -70,7 +73,7 @@ function stripScripts(html: string) {
 function mount(input: ExportInput, lib: unknown = fakeMaplibre) {
   document.body.innerHTML = stripScripts(generateEmbed(input))
   const id = input.cardId as string
-  const init = new Function(`${PLAYER_SOURCE}\nreturn hcPassageCardInit`)() as (id: string, lib: unknown, doc: Document) => Api
+  const init = new Function(`${PLAYER_SOURCE}\nreturn HcPlayer.initCard`)() as (id: string, lib: unknown, doc: Document) => Api
   return { api: init(id, lib, document), root: document.getElementById(id) as HTMLElement }
 }
 

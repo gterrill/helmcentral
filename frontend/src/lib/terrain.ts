@@ -52,3 +52,7 @@ const sky = (skyColour: string, horizon: string) => ({
 export const SKY_DAY = sky('#8fb8d8', '#dfe9ef')
 export const SKY_NIGHT = sky('#0a1826', '#1a3045')
 export const skyFor = (dark: boolean) => (dark ? SKY_NIGHT : SKY_DAY)
+
+/** Where the elevation tiles come from, upstream of the boat's proxy. The blog
+ * card asks for them directly; its reader's browser never needs the boat. */
+export const TERRARIUM_UPSTREAM_TILES = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'

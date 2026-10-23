@@ -14,13 +14,15 @@ vi.mock('three', async (importOriginal) => {
   }
   return { ...actual, WebGLRenderer: FakeRenderer }
 })
-vi.mock('maplibre-gl', () => ({
-  MercatorCoordinate: {
-    fromLngLat: (_l: unknown, z: number) => ({ x: 0.5, y: 0.5, z: z * 1e-7, meterInMercatorCoordinateUnits: () => 1e-7 }),
-  },
-}))
 
-import { BOAT_LAYER_ID, createBoatLayer } from '@/lib/boat-layer'
+import * as THREE from 'three'
+
+import { BOAT_LAYER_ID, createBoatLayer as makeBoatLayer } from '@/lib/boat-layer'
+
+const MercatorCoordinate = {
+  fromLngLat: (_l: unknown, z: number) => ({ x: 0.5, y: 0.5, z: z * 1e-7, meterInMercatorCoordinateUnits: () => 1e-7 }),
+} as unknown as Parameters<typeof makeBoatLayer>[1]['MercatorCoordinate']
+const createBoatLayer = (hull: Parameters<typeof makeBoatLayer>[0]) => makeBoatLayer(hull, { three: THREE, MercatorCoordinate })
 
 const setDirty = vi.fn()
 const queryTerrainElevation = vi.fn(() => 3)

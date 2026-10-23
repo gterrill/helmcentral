@@ -1,6 +1,8 @@
-import type { DistanceUnits } from '@/config/app-config'
+import playerSource from 'virtual:passage-player'
+
+import type { DistanceUnits, HullType } from '@/config/app-config'
+import type { BoatHull } from '@/lib/boat-model'
 import playerCss from '@/lib/passage-export-player.css.txt?raw'
-import playerSource from '@/lib/passage-export-player.js?raw'
 import {
   DONE_LAYERS,
   EXPORT_BASE_STYLE_URL,
@@ -12,6 +14,8 @@ import {
   MAPLIBRE_JS_URL,
   SEAMARK_LAYER_ID,
   SEAMARK_SOURCE_ID,
+  THREE_SRI,
+  THREE_URL,
   TRACK_LAYERS,
   exportColour,
   insetNeedsDot,
@@ -31,6 +35,7 @@ import {
   type PassageDetail,
   type TimedSegment,
 } from '@/lib/passages'
+import type { CameraMode, CameraShot } from '@/lib/replay-clock'
 
 // The blog export (ADR 0174): one passage, a cruise or a combined selection
 // turned into a single HTML snippet for a Ghost HTML card. The snippet carries
@@ -61,6 +66,13 @@ export interface ExportInput {
   /** Whether the overview map shows in the corner during the replay. */
   inset: boolean
   playSeconds: PlaySeconds
+  /** Draw the terrain in 3D, with the boat model when a hull type is set. */
+  threeD?: boolean
+  /** The camera shots saved for the span of the passages. Only those that fall
+   * inside an exported passage go out. */
+  shots?: readonly CameraShot[]
+  /** The vessel's hull type and size, for the boat model. */
+  hull?: BoatHull | null
   /** An id for the card's elements. Random unless given. */
   cardId?: string
 }
@@ -84,6 +96,26 @@ export interface ExportPassage {
   pl: string
 }
 
+/** One camera shot as the player reads it. Short keys keep the snippet small. */
+export interface ExportShot {
+  /** Real time, Unix milliseconds. */
+  t: number
+  m: CameraMode
+  /** Zoom, pitch, bearing offset, orbit degrees per second, pace. */
+  z: number
+  p: number
+  b: number
+  o: number
+  k: number
+}
+
+export interface ExportHull {
+  type: HullType
+  /** Length overall and beam in metres, or null when the vessel has none. */
+  loa: number | null
+  beam: number | null
+}
+
 export interface ExportData {
   title: string
   dates: string
@@ -99,6 +131,11 @@ export interface ExportData {
   play: number
   nightSeconds: number
   nightCap: number
+  /** Terrain in 3D and a tilted camera. Off draws the flat card. */
+  d3: boolean
+  /** The boat to draw as a model; null keeps the dot. Only with d3. */
+  hull: ExportHull | null
+  shots: ExportShot[]
   bounds: [number, number, number, number]
   stats: { l: string; v: string }[]
   passages: ExportPassage[]
@@ -108,6 +145,9 @@ export interface ExportData {
     layers: unknown[]
     trackSource: string
     doneSource: string
+    /** The pinned three.js build the card fetches for the boat model. Only
+     * with d3 and a hull. */
+    three: { url: string; sri: string } | null
   }
 }
 
@@ -297,7 +337,7 @@ function sameKey(a: unknown[], b: unknown[]) {
  * is no track to show: an export of nothing is a fault, not an empty card.
  * Thinning is the slow part, so the last result is reused for the same input. */
 export function prepareExport(input: ExportInput): ExportData {
-  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.playSeconds]
+  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.playSeconds, input.threeD ?? false, input.shots ?? null, input.hull ?? null]
   if (lastPrepared && sameKey(lastPrepared.key, key)) return lastPrepared.data
   const data = buildExport(input)
   lastPrepared = { key, data }
@@ -339,6 +379,7 @@ function buildExport(input: ExportInput): ExportData {
 
   const first = passages[0]
   const last = passages[passages.length - 1]
+  const d3 = input.threeD === true
   return {
     title: input.title,
     dates: dateRangeLabel(first.a, last.b, input.zone.offsetHours),
@@ -350,6 +391,9 @@ function buildExport(input: ExportInput): ExportData {
     play: input.playSeconds,
     nightSeconds: NIGHT_SECONDS,
     nightCap: NIGHT_CAP_SECONDS,
+    d3,
+    hull: d3 && input.hull ? { type: input.hull.type, loa: input.hull.loaM, beam: input.hull.beamM } : null,
+    shots: exportShots(input.shots ?? [], passages),
     bounds: bounds.map((v) => round(v, 5)) as ExportData['bounds'],
     stats: statsStrip(input, totalNights),
     passages,
@@ -359,8 +403,21 @@ function buildExport(input: ExportInput): ExportData {
       layers: [...TRACK_LAYERS, ...DONE_LAYERS],
       trackSource: TRACK_LAYERS[0].source,
       doneSource: DONE_LAYERS[0].source,
+      three: d3 && input.hull ? { url: THREE_URL, sri: THREE_SRI } : null,
     },
   }
+}
+
+/** The shots that fall inside an exported passage, oldest first. A shot in a
+ * gap between passages or outside the selection would never play. */
+function exportShots(shots: readonly CameraShot[], passages: ExportPassage[]): ExportShot[] {
+  return shots
+    .filter((s) => passages.some((p) => s.t_ms / 1000 >= p.a && s.t_ms / 1000 <= p.b))
+    .sort((a, b) => a.t_ms - b.t_ms)
+    .map((s) => ({
+      t: Math.round(s.t_ms), m: s.mode, z: round(s.zoom, 2), p: round(s.pitch, 1),
+      b: round(s.bearing_offset_deg, 1), o: round(s.orbit_deg_per_s, 1), k: s.pace,
+    }))
 }
 
 // ── the snippet ──────────────────────────────────────────────────────────
@@ -381,12 +438,13 @@ function newCardId(): string {
   return `hcp-${Array.from(bytes, (b) => b.toString(36).padStart(2, '0')).join('')}`
 }
 
-/** The player's source as written, for tests. */
+/** The player as built from the app's shared modules (ADR 0205): a script
+ * that defines `HcPlayer` and nothing else. For tests. */
 export const PLAYER_SOURCE: string = playerSource
 
 /** The player's source, ready to run for one card. */
 export function playerScript(id: string): string {
-  return `(function () {\n${playerSource}\nhcPassageCardInit(${JSON.stringify(id)}, window.maplibregl, document);\n})();`
+  return `(function () {\n${playerSource}\nHcPlayer.initCard(${JSON.stringify(id)}, window.maplibregl, document);\n})();`
 }
 
 /** The one self-contained HTML snippet for a Ghost HTML card. */
@@ -408,6 +466,7 @@ export function generateEmbed(input: ExportInput): string {
     `    <div class="hcp-readout" hidden><p class="hcp-caption" hidden></p><p class="hcp-passage"></p><p class="hcp-time"></p></div>`,
     `    <button type="button" class="hcp-btn"><span class="hcp-btn-icon" aria-hidden="true"></span><span class="hcp-btn-label">Play</span></button>`,
     `    <p class="hcp-error" role="alert" hidden></p>`,
+    `    <p class="hcp-notice" role="status" hidden></p>`,
     `  </div>`,
     `  <div class="hcp-stats"></div>`,
     `  <script type="application/json" id="${id}-data">${safeJson(data)}</script>`,

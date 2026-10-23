@@ -6,9 +6,13 @@
     "outDir": "./node_modules/.tmp/tsconfig.node",
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node/tsbuildinfo",
     "skipLibCheck": true,
+    "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
+    "emitDeclarationOnly": true,
+    "types": ["node"]
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "vite-plugin-passage-player.ts", "vite-plugin-passage-player.test.ts"]
 }
