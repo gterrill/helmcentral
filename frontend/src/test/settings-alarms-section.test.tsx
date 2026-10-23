@@ -21,16 +21,14 @@ import { AlarmsDrawer } from '@/components/alarms-drawer'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
 import type { AlarmTransportConfig } from '@/hooks/use-alarm-transports'
 import type { SecretKey } from '@/hooks/use-secrets-status'
+import { settingsFormMock } from '@/test/helpers/settings-form-mock'
 
 const saveSettingsMock = vi.fn().mockResolvedValue({})
 const saveTransportsMock = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/hooks/use-settings-form', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-settings-form')>()),
-  useSettingsForm: () => ({
-    settings: {}, setSettings: vi.fn(), loading: false, saving: false, error: null,
-    save: saveSettingsMock,
-  }),
+  useSettingsForm: () => settingsFormMock(saveSettingsMock),
 }))
 
 vi.mock('@/hooks/use-secrets-status', async (importOriginal) => {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   AlertDialog,
@@ -12,13 +12,29 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { useSettingsForm } from '@/hooks/use-settings-form'
+import { useTelemetryStatus } from '@/hooks/use-telemetry-stream'
 import { useSignalKDiscovery, type DiscoveredServer } from '@/hooks/use-signalk-discovery'
 
 const DISMISSED_KEY = 'helmcentral.signalk-discovery-dismissed-for'
+const UNCONFIGURED_KEY = '__unconfigured__'
+
+/**
+ * How long vessel state must stay `signalk-unreachable`, without a single
+ * other reading in between and while the vessel-state stream is connected,
+ * before the saved server counts as gone. An update restart answers
+ * "unreachable" for a few seconds while the new backend connects, and that must
+ * not look like a moved server. Vessel state is pushed on change, not polled,
+ * so this is a timer and not a count of polls.
+ */
+export const UNREACHABLE_GRACE_MS = 30_000
+
+/** How long to wait before searching again after a search failed outright. */
+export const SEARCH_RETRY_MS = 60_000
+
+/** The port the app uses when the saved settings carry none. */
+const DEFAULT_SIGNALK_PORT = 3000
 
 interface SignalKDiscoveryPromptProps {
-  /** Currently persisted SignalK address; empty or "localhost" means unconfigured. */
-  configuredAddress: string
   /** `source` from /api/vessel-state — "signalk-unreachable" means the saved server isn't answering. */
   vesselStateSource: string | null
 }
@@ -26,6 +42,14 @@ interface SignalKDiscoveryPromptProps {
 function isUnconfigured(address: string): boolean {
   const trimmed = address.trim()
   return trimmed === '' || trimmed === 'localhost'
+}
+
+/** The saved server, by the server's own verdict or, failing that, by plain address and port. */
+function isConfiguredServer(server: DiscoveredServer, address: string, port: number): boolean {
+  return (
+    server.configured === true ||
+    (server.address.trim().toLowerCase() === address.trim().toLowerCase() && server.port === port)
+  )
 }
 
 /**
@@ -38,50 +62,97 @@ function isUnconfigured(address: string): boolean {
  * the operator can accept. It does not put a modal over the dashboard to
  * announce that it is looking (a sweep takes seconds), nor to report that it
  * found nothing: neither is worth blocking the app for, and manual entry in
- * Settings → SignalK is always there. It searches once per mount, and
- * remembers a dismissal against the address it was dismissed for — so
- * declining doesn't gag it when a *different* server later fails, which would
- * be a different problem going unreported.
+ * Settings → SignalK is always there.
+ *
+ * Rules:
+ * - It reads the saved address and port from the same useSettingsForm
+ *   instance it saves through, and does nothing until that has loaded, so a
+ *   failed settings read can never look like an unconfigured boat.
+ * - Unconfigured (empty address or "localhost"): searches at once.
+ * - Unreachable: searches only after the source has stayed unreachable for
+ *   UNREACHABLE_GRACE_MS while the vessel-state stream is connected. Any other
+ *   reading, or a dropped stream, restarts the clock.
+ * - The server already saved is never offered, as marked by the backend (which
+ *   resolves a saved hostname) or matched by address and port. If nothing else
+ *   is found there is no dialog and no dismissal.
+ * - A search that completes counts as done for this situation, whatever it
+ *   found. One that fails is tried again after SEARCH_RETRY_MS, while the
+ *   situation persists.
+ * - A dismissal is remembered against address:port. An older address-only
+ *   dismissal still counts for port 3000.
  *
  * Accepting saves immediately via useSettingsForm().save(), the single write
  * path (ADR 0028). That is consistent with removing the old Connect button:
  * what was wrong there was saving as a side effect of a connectivity *check*,
  * not saving in response to a deliberate "yes, store this".
  */
-export function SignalKDiscoveryPrompt({ configuredAddress, vesselStateSource }: SignalKDiscoveryPromptProps) {
+export function SignalKDiscoveryPrompt({ vesselStateSource }: SignalKDiscoveryPromptProps) {
   const { servers, discover } = useSignalKDiscovery()
-  const { save } = useSettingsForm()
+  const { settings, loaded, save } = useSettingsForm()
+  const streamConnected = useTelemetryStatus() === 'connected'
 
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // One search per mount: the unreachable state persists across every poll, and
-  // re-sweeping the network on each one would be a scan storm.
+  // The situation (dismissal key) a search is running or has completed for.
   const searchedFor = useRef<string | null>(null)
+  // Set when a search failed outright; makes the next attempt wait SEARCH_RETRY_MS.
+  const failedFor = useRef<string | null>(null)
+  const [failures, setFailures] = useState(0)
+
+  const configuredAddress = settings.signalk?.address ?? ''
+  const configuredPort = settings.signalk?.port ?? DEFAULT_SIGNALK_PORT
 
   const unconfigured = isUnconfigured(configuredAddress)
   const unreachable = vesselStateSource === 'signalk-unreachable'
-  const shouldOffer = unconfigured || unreachable
+  // Without settings an empty address says nothing about the boat.
+  const shouldOffer = loaded && (unconfigured || unreachable)
 
-  // Keyed by address so a dismissal is scoped to the situation it was about.
-  const dismissalKey = unconfigured ? '__unconfigured__' : configuredAddress.trim()
+  // Scoped to the situation the dismissal was about.
+  const trimmedAddress = configuredAddress.trim()
+  const dismissalKey = unconfigured ? UNCONFIGURED_KEY : `${trimmedAddress}:${configuredPort}`
+  const legacyDismissalKey = !unconfigured && configuredPort === DEFAULT_SIGNALK_PORT ? trimmedAddress : null
+
+  const offered = useMemo(
+    () => (servers ?? []).filter((server) => !isConfiguredServer(server, configuredAddress, configuredPort)),
+    [servers, configuredAddress, configuredPort],
+  )
 
   useEffect(() => {
     if (!shouldOffer) return
+    // Only the unreachable case waits, and only while the stream is delivering.
+    if (!unconfigured && !streamConnected) return
     if (searchedFor.current === dismissalKey) return
-    if (globalThis.localStorage?.getItem(DISMISSED_KEY) === dismissalKey) return
+    const dismissed = globalThis.localStorage?.getItem(DISMISSED_KEY)
+    if (dismissed === dismissalKey || (legacyDismissalKey !== null && dismissed === legacyDismissalKey)) return
 
-    searchedFor.current = dismissalKey
-    void discover()
-      .then((found) => {
-        // Only interrupt if there is something to accept.
-        if (found.length > 0) setOpen(true)
-      })
-      .catch(() => {
-        // A background search the operator never asked for shouldn't raise a
-        // modal when it fails. Settings → SignalK remains the manual path.
-      })
-  }, [shouldOffer, dismissalKey, discover])
+    const search = () => {
+      searchedFor.current = dismissalKey
+      void discover()
+        .then((found) => {
+          failedFor.current = null
+          // Only interrupt if there is something to accept.
+          if (found.some((server) => !isConfiguredServer(server, configuredAddress, configuredPort))) setOpen(true)
+        })
+        .catch(() => {
+          // A background search the operator never asked for shouldn't raise a
+          // modal when it fails; Settings → SignalK remains the manual path.
+          // It may be a restart still in progress, so allow another go.
+          searchedFor.current = null
+          failedFor.current = dismissalKey
+          setFailures((count) => count + 1)
+        })
+    }
+
+    const delay = failedFor.current === dismissalKey ? SEARCH_RETRY_MS : unconfigured ? 0 : UNREACHABLE_GRACE_MS
+    if (delay === 0) {
+      search()
+      return
+    }
+    // Cleanup runs when the source, the stream or the settings change, which is what restarts the clock.
+    const timer = setTimeout(search, delay)
+    return () => clearTimeout(timer)
+  }, [shouldOffer, unconfigured, streamConnected, dismissalKey, legacyDismissalKey, discover, configuredAddress, configuredPort, failures])
 
   const dismiss = useCallback(() => {
     globalThis.localStorage?.setItem(DISMISSED_KEY, dismissalKey)
@@ -90,6 +161,8 @@ export function SignalKDiscoveryPrompt({ configuredAddress, vesselStateSource }:
 
   const accept = useCallback(
     async (server: DiscoveredServer) => {
+      // Never save over settings that have not been read.
+      if (!loaded) return
       setSaving(true)
       setSaveError(null)
       try {
@@ -101,12 +174,12 @@ export function SignalKDiscoveryPrompt({ configuredAddress, vesselStateSource }:
         setSaving(false)
       }
     },
-    [save],
+    [save, loaded],
   )
 
   if (!open) return null
 
-  const found = servers ?? []
+  const found = offered
   const single = found.length === 1 ? found[0] : null
 
   return (
@@ -133,7 +206,7 @@ export function SignalKDiscoveryPrompt({ configuredAddress, vesselStateSource }:
                 key={`${server.address}:${server.port}`}
                 variant="outline"
                 className="justify-between"
-                disabled={saving}
+                disabled={saving || !loaded}
                 onClick={() => void accept(server)}
               >
                 <span>{server.vessel_name || 'Unnamed vessel'}</span>
@@ -152,7 +225,7 @@ export function SignalKDiscoveryPrompt({ configuredAddress, vesselStateSource }:
         <AlertDialogFooter>
           <AlertDialogCancel onClick={dismiss}>Not now</AlertDialogCancel>
           {single && (
-            <AlertDialogAction disabled={saving} onClick={() => void accept(single)}>
+            <AlertDialogAction disabled={saving || !loaded} onClick={() => void accept(single)}>
               {saving ? 'Saving…' : 'Store these settings'}
             </AlertDialogAction>
           )}

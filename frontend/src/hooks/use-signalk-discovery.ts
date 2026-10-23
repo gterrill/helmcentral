@@ -7,6 +7,8 @@ export interface DiscoveredServer {
   url: string
   vessel_name: string
   version: string
+  /** The backend's verdict: this is the server already saved in settings (a saved hostname is resolved there). */
+  configured?: boolean
 }
 
 export interface UseSignalKDiscoveryResult {

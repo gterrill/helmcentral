@@ -8,6 +8,7 @@
 import { fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { settingsFormMock } from '@/test/helpers/settings-form-mock'
 
 import { emptyVesselRoles } from '@/lib/vessel-settings'
 import { SettingsPage } from '@/components/settings/settings-page'
@@ -27,10 +28,7 @@ const saveSettingsMock = vi.fn()
 
 vi.mock('@/hooks/use-settings-form', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-settings-form')>()),
-  useSettingsForm: () => ({
-    settings: settingsFixture, setSettings: vi.fn(), loading: false, saving: false, error: null,
-    save: saveSettingsMock,
-  }),
+  useSettingsForm: () => settingsFormMock(saveSettingsMock, settingsFixture),
 }))
 
 vi.mock('@/hooks/use-secrets-status', async (importOriginal) => {

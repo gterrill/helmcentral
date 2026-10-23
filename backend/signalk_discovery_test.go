@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -244,4 +245,77 @@ func TestDiscoverHandler_PersistsNothing(t *testing.T) {
 	if string(before) != string(after) {
 		t.Fatalf("discovery must not persist anything:\n--- before ---\n%s\n--- after ---\n%s", before, after)
 	}
+}
+
+// A saved hostname such as boat.local never equals the IPv4 literal a sweep
+// returns, so the server already in use has to be recognised by resolving the
+// saved address and comparing addresses and ports.
+func TestMarkConfiguredServers(t *testing.T) {
+	lookup := func(hosts map[string][]string) func(context.Context, string) ([]net.IP, error) {
+		return func(_ context.Context, host string) ([]net.IP, error) {
+			ips, ok := hosts[strings.ToLower(host)]
+			if !ok {
+				return nil, fmt.Errorf("no such host %s", host)
+			}
+			var out []net.IP
+			for _, s := range ips {
+				out = append(out, net.ParseIP(s))
+			}
+			return out, nil
+		}
+	}
+	servers := func() []discoveredServer {
+		return []discoveredServer{
+			{Address: "192.168.50.240", Port: 3000},
+			{Address: "192.168.50.77", Port: 3000},
+			{Address: "192.168.50.240", Port: 3001},
+		}
+	}
+	flags := func(s []discoveredServer) []bool {
+		out := make([]bool, len(s))
+		for i := range s {
+			out[i] = s[i].Configured
+		}
+		return out
+	}
+	same := func(a, b []bool) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+
+	t.Run("a hostname resolving to the discovered address is the configured server", func(t *testing.T) {
+		got := servers()
+		markConfiguredServers(context.Background(), got, "Boat.Local", 3000, lookup(map[string][]string{"boat.local": {"192.168.50.240"}}))
+		if want := []bool{true, false, false}; !same(flags(got), want) {
+			t.Fatalf("got %v, want %v", flags(got), want)
+		}
+	})
+	t.Run("an address literal matches without a lookup", func(t *testing.T) {
+		got := servers()
+		markConfiguredServers(context.Background(), got, " 192.168.50.77 ", 3000, lookup(nil))
+		if want := []bool{false, true, false}; !same(flags(got), want) {
+			t.Fatalf("got %v, want %v", flags(got), want)
+		}
+	})
+	t.Run("the port must match too", func(t *testing.T) {
+		got := servers()
+		markConfiguredServers(context.Background(), got, "192.168.50.240", 3001, lookup(nil))
+		if want := []bool{false, false, true}; !same(flags(got), want) {
+			t.Fatalf("got %v, want %v", flags(got), want)
+		}
+	})
+	t.Run("a hostname that does not resolve marks nothing", func(t *testing.T) {
+		got := servers()
+		markConfiguredServers(context.Background(), got, "gone.local", 3000, lookup(nil))
+		if want := []bool{false, false, false}; !same(flags(got), want) {
+			t.Fatalf("got %v, want %v", flags(got), want)
+		}
+	})
 }

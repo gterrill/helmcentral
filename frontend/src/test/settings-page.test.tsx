@@ -9,6 +9,7 @@
  */
 import { createRef } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { settingsFormMock } from '@/test/helpers/settings-form-mock'
 import { render as rtlRender, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
@@ -47,14 +48,7 @@ vi.mock('@/hooks/use-settings-form', async () => {
   const actual = await vi.importActual<typeof import('@/hooks/use-settings-form')>('@/hooks/use-settings-form')
   return {
     ...actual,
-    useSettingsForm: () => ({
-      settings: {},
-      setSettings: vi.fn(),
-      loading: false,
-      saving: false,
-      error: null,
-      save: saveMock,
-    }),
+    useSettingsForm: () => settingsFormMock(saveMock),
   }
 })
 
