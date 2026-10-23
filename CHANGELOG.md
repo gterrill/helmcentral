@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.53.0] - 2026-10-24
+
 ### Added
 
 - **Signs go into the blog card.** The Export menu has an **Include signs**
@@ -96,7 +98,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   overview map stays flat.
 - **The replay draws the track as the boat sails it.** The line is solid up to
   the boat and faint ahead of it, instead of lighting a whole passage at once.
-
 - **The passage map can show satellite photographs.** A satellite button in the
   top right corner switches the map between the chart and aerial photography,
   with the track edged in white and place names kept on top. It is on by
@@ -106,6 +107,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   fetched the picture is not saved, rather than saved with a patch missing.
   The blog embed is unchanged and always shows the chart. The overview map in
   the replay moves down a little to make room for the button.
+
 ### Changed
 
 - **The anchor swing trail now shows everything since the anchor went down,
@@ -129,14 +131,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   to keep reading while an answer was still being written, the view jumped
   away from where you were reading as soon as it finished, often back to an
   earlier question. It now stays where you left it.
-
 - **The chart works again on a new install or after clearing the map cache.**
   Carto changed the map style Helmcentral draws its chart from, and a boat with
   nothing stored yet got a blank chart. Helmcentral now reads the new style, and
   keeps place names for islands, bays, straits, marinas and peaks. Some water
   names in the Whitsundays (Cid Harbour, Nara Inlet, Hayman Channel) are not in
   Carto's new data and no longer appear.
-
 - **The Battery & Power dawn figure no longer shows tonight's state of charge
   as tomorrow's when the bank's capacity is unknown.** Without a capacity
   there is no charge rate, and the tile treated that as a bank holding steady:
@@ -1686,7 +1686,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.52.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.53.0...HEAD
+[0.53.0]: https://github.com/gterrill/helmcentral/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/gterrill/helmcentral/compare/v0.51.0...v0.52.0
 [0.51.0]: https://github.com/gterrill/helmcentral/compare/v0.50.0...v0.51.0
 [0.50.0]: https://github.com/gterrill/helmcentral/compare/v0.49.0...v0.50.0
