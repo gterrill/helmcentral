@@ -352,7 +352,7 @@ type overpassElement struct {
 	Center *overpassLatLon   `json:"center,omitempty"`
 	Tags   map[string]string `json:"tags"`
 	// Geometry and Members are only present in `out geom` responses
-	// (shoreline_near): a way's own points, and a relation's members with
+	// (shoreline_square): a way's own points, and a relation's members with
 	// theirs.
 	Geometry []*overpassLatLon `json:"geometry,omitempty"`
 	Members  []overpassMember  `json:"members,omitempty"`
@@ -1559,11 +1559,56 @@ func wholeGeometry(id string, geom []*overpassLatLon) ([]overpassLatLon, error) 
 	out := make([]overpassLatLon, len(geom))
 	for i, p := range geom {
 		if p == nil {
-			return nil, fmt.Errorf("shoreline_near: %s has a node with no position", id)
+			return nil, fmt.Errorf("shoreline_square: %s has a node with no position", id)
 		}
 		out[i] = *p
 	}
 	return out, nil
+}
+
+// assembleOuterRings joins the outer member ways of a multipolygon end to end
+// into rings. Ways meet where an end point has exactly the same coordinates
+// as another way's end (Overpass gives shared nodes identical positions), in
+// either direction. A chain that does not close is returned as it stands, open,
+// so the host never treats it as a ring.
+func assembleOuterRings(ways [][]overpassLatLon) [][]overpassLatLon {
+	used := make([]bool, len(ways))
+	var rings [][]overpassLatLon
+	for i := range ways {
+		if used[i] {
+			continue
+		}
+		used[i] = true
+		chain := append([]overpassLatLon(nil), ways[i]...)
+		for chain[0] != chain[len(chain)-1] {
+			joined := false
+			for j := range ways {
+				if used[j] {
+					continue
+				}
+				w := ways[j]
+				end := chain[len(chain)-1]
+				switch {
+				case w[0] == end:
+					chain = append(chain, w[1:]...)
+				case w[len(w)-1] == end:
+					for k := len(w) - 2; k >= 0; k-- {
+						chain = append(chain, w[k])
+					}
+				default:
+					continue
+				}
+				used[j] = true
+				joined = true
+				break
+			}
+			if !joined {
+				break
+			}
+		}
+		rings = append(rings, chain)
+	}
+	return rings
 }
 
 func runShorelineSquare(post overpassQueryFunc, box shorelineBoxInput) (shorelineSquareOutput, error) {
@@ -1610,12 +1655,22 @@ func runShorelineSquare(post overpassQueryFunc, box shorelineBoxInput) (shorelin
 				return shorelineSquareOutput{}, err
 			}
 		case el.Type == "relation" && kind == "reef":
+			var ways [][]overpassLatLon
 			for i, m := range el.Members {
-				if m.Type == "way" && m.Role == "outer" {
-					if err := addReef(fmt.Sprintf("relation/%d/%d", el.ID, i), name, m.Geometry); err != nil {
-						return shorelineSquareOutput{}, err
-					}
+				if m.Type != "way" || m.Role != "outer" || len(m.Geometry) < 2 {
+					continue
 				}
+				geom, err := wholeGeometry(fmt.Sprintf("relation/%d/%d", el.ID, i), m.Geometry)
+				if err != nil {
+					return shorelineSquareOutput{}, err
+				}
+				ways = append(ways, geom)
+			}
+			for i, ring := range assembleOuterRings(ways) {
+				lines = append(lines, shorelineLineOut{
+					ID: fmt.Sprintf("relation/%d/%d", el.ID, i), Kind: "reef", Name: name,
+					Closed: len(ring) > 2 && ring[0] == ring[len(ring)-1], Points: thinShoreline(ring),
+				})
 			}
 		}
 	}

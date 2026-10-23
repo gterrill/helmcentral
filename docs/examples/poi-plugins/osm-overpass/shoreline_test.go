@@ -302,3 +302,48 @@ func TestRunShorelineSquare_RealStonehavenCaptureStaysModest(t *testing.T) {
 		t.Errorf("payload %d bytes is not modest for a slow boat link", len(b))
 	}
 }
+
+func TestRunShorelineSquare_ReefRelationOuterRingOfSeveralWaysIsAssembled(t *testing.T) {
+	// A reef relation whose outer ring is two ways meeting end to end, the
+	// second written in the opposite direction. Emitted way by way neither is
+	// closed and an anchor inside the reef is missed.
+	a := []*overpassLatLon{{Lat: -20.50, Lon: 148.90}, {Lat: -20.50, Lon: 148.92}, {Lat: -20.52, Lon: 148.92}}
+	b := []*overpassLatLon{{Lat: -20.50, Lon: 148.90}, {Lat: -20.52, Lon: 148.90}, {Lat: -20.52, Lon: 148.92}}
+	post := func(string) ([]overpassElement, error) {
+		return []overpassElement{{Type: "relation", ID: 5, Tags: map[string]string{"natural": "reef", "name": "Split Reef"}, Members: []overpassMember{
+			{Type: "way", Role: "outer", Geometry: a},
+			{Type: "way", Role: "outer", Geometry: b},
+		}}}, nil
+	}
+	out, err := runShorelineSquare(post, testSquare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Lines) != 1 {
+		t.Fatalf("want one assembled ring, got %+v", out.Lines)
+	}
+	l := out.Lines[0]
+	if !l.Closed || l.Kind != "reef" || l.Name != "Split Reef" || l.Points[0] != l.Points[len(l.Points)-1] {
+		t.Errorf("ring not closed: %+v", l)
+	}
+	if len(l.Points) != 5 {
+		t.Errorf("want 5 points (4 corners + closing), got %d: %v", len(l.Points), l.Points)
+	}
+}
+
+func TestRunShorelineSquare_ReefRelationOuterWaysThatDoNotJoinStayOpen(t *testing.T) {
+	a := []*overpassLatLon{{Lat: -20.50, Lon: 148.90}, {Lat: -20.50, Lon: 148.92}}
+	b := []*overpassLatLon{{Lat: -20.60, Lon: 148.90}, {Lat: -20.60, Lon: 148.92}}
+	post := func(string) ([]overpassElement, error) {
+		return []overpassElement{{Type: "relation", ID: 6, Tags: map[string]string{"natural": "reef"}, Members: []overpassMember{
+			{Type: "way", Role: "outer", Geometry: a}, {Type: "way", Role: "outer", Geometry: b},
+		}}}, nil
+	}
+	out, err := runShorelineSquare(post, testSquare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Lines) != 2 || out.Lines[0].Closed || out.Lines[1].Closed {
+		t.Errorf("unjoined ways must stay open and separate: %+v", out.Lines)
+	}
+}
