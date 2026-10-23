@@ -236,6 +236,15 @@ func main() {
 	}
 	globalAlarmLogStore = als
 
+	// Offline coastline (ADR 0201): the coverage squares Mate's shelter
+	// estimate reads, in the same file. The worker starts with the others
+	// below and does nothing while the switch is off.
+	coastStore, err := newCoastlineStore(helmcentralDBPath())
+	if err != nil {
+		log.Fatalf("failed to open offline coastline store: %v", err)
+	}
+	initOfflineCoastline(coastStore, getEnv("SETTINGS_FILE", "../settings.yaml"))
+
 	// Onboard assistant conversation history (ADR 0093), another of the six
 	// stores sharing helmcentral.sqlite (ADR 0141). Fail fast on open
 	// error, same reasoning as the stores above.
@@ -531,6 +540,7 @@ func main() {
 	go startAnchorDragWatcher(streamCtx, anchorDragCheckInterval)
 	go startAnchorAutoRaiseWatcher(streamCtx, autoRaiseCheckInterval)
 	go startForecastWarningsFetcher(streamCtx, forecastWarningsFetchInterval)
+	go globalCoastlineManager.Run(streamCtx)
 	// Anomaly detection (sensor health, full-bank charging, engine
 	// differentials): a failed baseline load is logged and leaves twin
 	// residuals absent rather than reporting zero offsets (see
@@ -630,6 +640,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, vesselParticularsRoutes()...)
 	routes = append(routes, maintenanceRoutes()...)
 	routes = append(routes, importRoutes()...)
+	routes = append(routes, coastlineRoutes()...)
 	return routes
 }
 

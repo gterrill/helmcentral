@@ -11,10 +11,10 @@ import (
 //
 // Shelter is estimated from charted shoreline alone: for every compass
 // bearing a ray is cast from the anchor over the OpenStreetMap coastline and
-// reef lines the place-names plugin returned, and the distance to the first
+// reef lines held in the offline coastline (coastline_store.go), and the distance to the first
 // obstacle is the fetch - how far wind blowing from that bearing has run
 // over water before it reaches the boat. Everything here is pure geometry
-// over already-fetched lines (ADR 0091: the provider returns raw features,
+// over already-downloaded lines (ADR 0091: the provider returns raw features,
 // the host computes). Wind direction is always the direction the wind comes
 // FROM, so a ray cast towards 090 grades the east wind.
 

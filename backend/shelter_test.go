@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -91,11 +90,6 @@ func bearingRow(t *testing.T, est shelterEstimate, deg int) shelterBearing {
 	}
 	t.Fatalf("no row for %d", deg)
 	return shelterBearing{}
-}
-
-type shorelineInput struct {
-	lat, lon float64
-	radiusM  int
 }
 
 func TestEstimateShelter_StonehavenArcs(t *testing.T) {
@@ -232,50 +226,72 @@ func TestEstimateShelter_NoShorelineIsAllExposed(t *testing.T) {
 	}
 }
 
-// ── cache + tool ────────────────────────────────────────────────────────
+// ── tool over stored coverage squares ───────────────────────────────────
 
-type fakeShorelineProvider struct {
-	fakeSearchPlacesProvider
-	lines     []shorelineLine
-	shoreErr  error
-	shoreMu   sync.Mutex
-	shoreHits []shorelineInput
-	unsupp    bool
+type shelterWorld struct {
+	store   *coastlineStore
+	enabled bool
+	fix     bool
+	boatLat float64
+	boatLon float64
 }
 
-func (f *fakeShorelineProvider) SupportsShoreline() bool { return !f.unsupp }
+func newShelterWorld(t *testing.T) *shelterWorld {
+	t.Helper()
+	return &shelterWorld{store: newTestCoastlineStore(t), enabled: true, fix: true, boatLat: stonehavenLat, boatLon: stonehavenLon}
+}
 
-func (f *fakeShorelineProvider) ShorelineNear(lat, lon float64, radiusM int) ([]shorelineLine, error) {
-	f.shoreMu.Lock()
-	f.shoreHits = append(f.shoreHits, shorelineInput{lat, lon, radiusM})
-	f.shoreMu.Unlock()
-	if f.shoreErr != nil {
-		return nil, f.shoreErr
+// hold stores lines in home and empty (open sea) squares in others, the way
+// a fixture cropped around one anchorage lands in the squares around it.
+func (w *shelterWorld) hold(t *testing.T, lines []shorelineLine, home coverageSquare, others ...coverageSquare) {
+	t.Helper()
+	if err := w.store.SaveSquare(home, lines, coastlineTestAt); err != nil {
+		t.Fatal(err)
 	}
-	return f.lines, nil
+	for _, sq := range others {
+		if err := w.store.SaveSquare(sq, nil, coastlineTestAt.Add(24*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
-func shelterDeps(provider placeNameProvider) assistantToolDeps {
-	shorelineCache.reset()
+func (w *shelterWorld) deps() assistantToolDeps {
 	return assistantToolDeps{
-		placeNames: func() (placeNameProvider, string, error) { return provider, "fake", nil },
+		offlineCoastline: func() *offlineCoastlineReader {
+			return &offlineCoastlineReader{
+				Enabled: func() (bool, error) { return w.enabled, nil },
+				Store:   w.store,
+				Boat:    func() (float64, float64, bool) { return w.boatLat, w.boatLon, w.fix },
+			}
+		},
 	}
 }
 
-func TestAnchorageShelterTool_ReturnsArcsTableAndCaveat(t *testing.T) {
-	p := &fakeShorelineProvider{lines: loadShorelineFixture(t, "stonehaven")}
-	p.id = "fake"
-	deps := shelterDeps(p)
+func (w *shelterWorld) run(args string) (string, error) {
+	return w.deps().execute(context.Background(), "anchorage_shelter", json.RawMessage(args))
+}
 
-	raw, err := deps.execute(context.Background(), "anchorage_shelter", json.RawMessage(`{"lat":-20.097633,"lon":148.902533}`))
+var (
+	stonehavenSquares = []coverageSquare{{-21, 149}, {-20, 148}, {-20, 149}}
+	faireySquares     = []coverageSquare{{-20, 149}}
+)
+
+func TestAnchorageShelterTool_StonehavenFromStoredSquaresMatchesTheDirectEstimate(t *testing.T) {
+	lines := loadShorelineFixture(t, "stonehaven")
+	w := newShelterWorld(t)
+	w.hold(t, lines, coverageSquare{-21, 148}, stonehavenSquares...)
+
+	raw, err := w.run(`{"lat":-20.097633,"lon":148.902533}`)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
 	var out struct {
-		Summary  string           `json:"summary"`
-		Arcs     []shelterArc     `json:"arcs"`
-		Bearings []shelterBearing `json:"bearings"`
-		Caveat   string           `json:"caveat"`
+		Summary             string           `json:"summary"`
+		Source              string           `json:"source"`
+		CoastlineDownloaded string           `json:"coastline_downloaded"`
+		Arcs                []shelterArc     `json:"arcs"`
+		Bearings            []shelterBearing `json:"bearings"`
+		Caveat              string           `json:"caveat"`
 	}
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -291,85 +307,170 @@ func TestAnchorageShelterTool_ReturnsArcsTableAndCaveat(t *testing.T) {
 	if len(raw) > assistantMaxToolResultChars {
 		t.Errorf("result %d chars exceeds the tool cap", len(raw))
 	}
-	if len(p.shoreHits) != 1 {
-		t.Fatalf("shoreline fetches: %d", len(p.shoreHits))
+	if !strings.Contains(out.Source, "Offline coastline") || out.CoastlineDownloaded != "2026-10-03" {
+		t.Errorf("source %q downloaded %q: the oldest square's date is what Mate reports", out.Source, out.CoastlineDownloaded)
 	}
-	// The query must reach the full ray length from anywhere in its cache cell.
-	if min := int(shelterMaxFetchNm * metersPerNauticalMile); p.shoreHits[0].radiusM <= min {
-		t.Errorf("radius %d m does not cover the %d m rays plus the cache cell", p.shoreHits[0].radiusM, min)
+
+	direct := estimateShelter(stonehavenLat, stonehavenLon, lines)
+	if out.Summary != direct.Summary || len(out.Arcs) != len(direct.Arcs) {
+		t.Errorf("stored squares changed the answer:\n tool   %s\n direct %s", out.Summary, direct.Summary)
+	}
+	for i, b := range out.Bearings {
+		if b != direct.Bearings[i] {
+			t.Fatalf("bearing %d differs: %+v vs %+v", b.BearingDeg, b, direct.Bearings[i])
+		}
 	}
 }
 
-func TestAnchorageShelterTool_CachesByRoundedPosition(t *testing.T) {
-	p := &fakeShorelineProvider{lines: loadShorelineFixture(t, "stonehaven")}
-	deps := shelterDeps(p)
-	ctx := context.Background()
-	for _, args := range []string{
-		`{"lat":-20.097633,"lon":148.902533}`,
-		`{"lat":-20.0990,"lon":148.9040}`, // same 0.02 degree cell
-	} {
-		if _, err := deps.execute(ctx, "anchorage_shelter", json.RawMessage(args)); err != nil {
-			t.Fatal(err)
-		}
+func TestAnchorageShelterTool_FaireyReefFromStoredSquaresMatchesTheDirectEstimate(t *testing.T) {
+	lines := loadShorelineFixture(t, "fairey")
+	w := newShelterWorld(t)
+	w.boatLat, w.boatLon = faireyLat, faireyLon
+	w.hold(t, lines, coverageSquare{-20, 148}, faireySquares...)
+
+	raw, err := w.run(`{"lat":-19.5434,"lon":148.939367}`)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
 	}
-	if len(p.shoreHits) != 1 {
-		t.Errorf("want one provider call for two nearby anchors, got %d", len(p.shoreHits))
+	var out struct {
+		InsideReef bool             `json:"inside_reef"`
+		Summary    string           `json:"summary"`
+		Bearings   []shelterBearing `json:"bearings"`
 	}
-	if _, err := deps.execute(ctx, "anchorage_shelter", json.RawMessage(`{"lat":-20.3,"lon":148.9}`)); err != nil {
+	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		t.Fatal(err)
 	}
-	if len(p.shoreHits) != 2 {
-		t.Errorf("a different cell must fetch again, got %d", len(p.shoreHits))
+	direct := estimateShelter(faireyLat, faireyLon, lines)
+	if !out.InsideReef || out.Summary != direct.Summary {
+		t.Errorf("inside_reef %v, summary %q vs %q", out.InsideReef, out.Summary, direct.Summary)
 	}
-}
-
-func TestAnchorageShelterTool_FailsFast(t *testing.T) {
-	ctx := context.Background()
-
-	// Upstream error: surfaced, not cached, not masked.
-	p := &fakeShorelineProvider{shoreErr: fmt.Errorf("overpass query failed: runtime error: timed out")}
-	deps := shelterDeps(p)
-	_, err := deps.execute(ctx, "anchorage_shelter", json.RawMessage(`{"lat":-20.1,"lon":148.9}`))
-	if err == nil || !strings.Contains(err.Error(), "timed out") {
-		t.Fatalf("want the upstream error, got %v", err)
-	}
-	p.shoreErr = nil
-	p.lines = loadShorelineFixture(t, "stonehaven")
-	if _, err := deps.execute(ctx, "anchorage_shelter", json.RawMessage(`{"lat":-20.1,"lon":148.9}`)); err != nil {
-		t.Fatalf("a failure must not be cached: %v", err)
-	}
-
-	// Plugin without the export.
-	old := &fakeShorelineProvider{unsupp: true}
-	_, err = shelterDeps(old).execute(ctx, "anchorage_shelter", json.RawMessage(`{"lat":-20.1,"lon":148.9}`))
-	if err == nil || !strings.Contains(err.Error(), "shoreline_near") {
-		t.Errorf("want an error naming shoreline_near, got %v", err)
-	}
-
-	// A provider type that knows nothing of shorelines at all.
-	_, err = shelterDeps(&fakeSearchPlacesProvider{id: "plain"}).execute(ctx, "anchorage_shelter", json.RawMessage(`{"lat":-20.1,"lon":148.9}`))
-	if err == nil || !strings.Contains(err.Error(), "shoreline_near") {
-		t.Errorf("want an error naming shoreline_near, got %v", err)
-	}
-
-	// Bad arguments.
-	for _, args := range []string{`{}`, `{"lat":95,"lon":10}`, `{"lat":-20,"lon":200}`, `{"lat":0,"lon":0}`} {
-		if _, err := deps.execute(ctx, "anchorage_shelter", json.RawMessage(args)); err == nil {
-			t.Errorf("args %s should be refused", args)
+	for _, d := range []int{100, 120, 150, 180} {
+		got, want := bearingRow(t, shelterEstimate{Bearings: out.Bearings}, d), bearingRow(t, direct, d)
+		if got != want {
+			t.Errorf("%03d: %+v vs %+v", d, got, want)
 		}
 	}
 }
 
-func TestShorelineCache_ExpiresAfterTTL(t *testing.T) {
-	now := time.Unix(1_800_000_000, 0)
-	c := newShorelineCacheStore(func() time.Time { return now })
-	c.put("k", []shorelineLine{{ID: "way/1"}})
-	if _, ok := c.get("k"); !ok {
-		t.Fatal("fresh entry missing")
+func TestAnchorageShelterTool_ReefSpanningTwoSquaresIsOneRing(t *testing.T) {
+	// Fairey's reef ring split across two squares by the 149°E meridian, held
+	// whole in both as the plugin returns it: the answer must not change.
+	lines := loadShorelineFixture(t, "fairey")
+	w := newShelterWorld(t)
+	w.boatLat, w.boatLon = faireyLat, faireyLon
+	w.hold(t, lines, coverageSquare{-20, 148})
+	if err := w.store.SaveSquare(coverageSquare{-20, 149}, lines, coastlineTestAt); err != nil {
+		t.Fatal(err)
 	}
-	now = now.Add(shorelineCacheTTL + time.Second)
-	if _, ok := c.get("k"); ok {
-		t.Error("expired entry served")
+	raw, err := w.run(`{"lat":-19.5434,"lon":148.939367}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Summary string `json:"summary"`
+	}
+	_ = json.Unmarshal([]byte(raw), &out)
+	if direct := estimateShelter(faireyLat, faireyLon, lines); out.Summary != direct.Summary {
+		t.Errorf("duplicated reef changed the answer: %q vs %q", out.Summary, direct.Summary)
+	}
+}
+
+func TestAnchorageShelterTool_SaysExactlyWhyItCannotAnswer(t *testing.T) {
+	const args = `{"lat":-20.097633,"lon":148.902533}`
+	lines := loadShorelineFixture(t, "stonehaven")
+
+	// Off: tells the operator where the switch is, whatever is held.
+	w := newShelterWorld(t)
+	w.hold(t, lines, coverageSquare{-21, 148}, stonehavenSquares...)
+	w.enabled = false
+	_, err := w.run(args)
+	if err == nil || !strings.Contains(err.Error(), "Offline coastline is off") || !strings.Contains(err.Error(), "Settings → Offline coastline") {
+		t.Errorf("off: %v", err)
+	}
+
+	// Nothing held, boat nearby with a fix: still downloading.
+	w = newShelterWorld(t)
+	_, err = w.run(args)
+	if err == nil || !strings.Contains(err.Error(), "still downloading") || !strings.Contains(err.Error(), "21°S 148°E") {
+		t.Errorf("downloading: %v", err)
+	}
+
+	// The square failed: the reason is passed on.
+	_ = w.store.RecordFailure(coverageSquare{-21, 148}, "overpass rate limited", coastlineTestAt, coastlineTestAt)
+	_, err = w.run(args)
+	if err == nil || !strings.Contains(err.Error(), "download failed: overpass rate limited") {
+		t.Errorf("failed: %v", err)
+	}
+
+	// Boat nowhere near, nothing held: outside coverage.
+	w = newShelterWorld(t)
+	w.boatLat, w.boatLon = 51.5, -1.2
+	_, err = w.run(args)
+	if err == nil || !strings.Contains(err.Error(), "outside Offline coastline coverage") {
+		t.Errorf("outside: %v", err)
+	}
+
+	// No fix and nothing held: no way to download it either.
+	w = newShelterWorld(t)
+	w.fix = false
+	_, err = w.run(args)
+	if err == nil || !strings.Contains(err.Error(), "outside Offline coastline coverage") {
+		t.Errorf("no fix: %v", err)
+	}
+
+	// Own square held, neighbours missing: names them and why.
+	w = newShelterWorld(t)
+	w.hold(t, lines, coverageSquare{-21, 148}, coverageSquare{-20, 148})
+	_ = w.store.RecordFailure(coverageSquare{-21, 149}, "timed out", coastlineTestAt, coastlineTestAt)
+	_, err = w.run(args)
+	if err == nil {
+		t.Fatal("a missing neighbour must be an error: rays reach 15 nm")
+	}
+	for _, want := range []string{"neighbouring", "21°S 149°E (download failed: timed out)", "20°S 149°E (still downloading)"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("neighbours: %q misses %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), "20°S 148°E") {
+		t.Errorf("a square that is held must not be listed: %v", err)
+	}
+
+	// A neighbour that will never come (boat far off, not held).
+	w = newShelterWorld(t)
+	w.boatLat, w.boatLon = 51.5, -1.2
+	w.hold(t, lines, coverageSquare{-21, 148})
+	if _, err = w.run(args); err == nil || !strings.Contains(err.Error(), "outside coverage") {
+		t.Errorf("held own square, no neighbours, boat elsewhere: %v", err)
+	}
+
+	// Across the antimeridian.
+	w = newShelterWorld(t)
+	if _, err = w.run(`{"lat":-17,"lon":179.95}`); err == nil || !strings.Contains(err.Error(), "180") {
+		t.Errorf("antimeridian: %v", err)
+	}
+}
+
+func TestAnchorageShelterTool_NoLiveFallbackWithoutCoastline(t *testing.T) {
+	// A place-names plugin that could answer must never be consulted.
+	called := false
+	deps := assistantToolDeps{
+		placeNames: func() (placeNameProvider, string, error) { called = true; return nil, "", nil },
+	}
+	_, err := deps.execute(context.Background(), "anchorage_shelter", json.RawMessage(`{"lat":-20.1,"lon":148.9}`))
+	if err == nil || !strings.Contains(err.Error(), "Offline coastline") {
+		t.Errorf("want an Offline coastline error, got %v", err)
+	}
+	if called {
+		t.Error("anchorage_shelter must not reach for a live source")
+	}
+}
+
+func TestAnchorageShelterTool_RefusesBadArguments(t *testing.T) {
+	w := newShelterWorld(t)
+	for _, args := range []string{`{}`, `{"lat":95,"lon":10}`, `{"lat":-20,"lon":200}`, `{"lat":0,"lon":0}`, `{"lat":"x"}`} {
+		if _, err := w.run(args); err == nil {
+			t.Errorf("args %s should be refused", args)
+		}
 	}
 }
 
@@ -388,7 +489,7 @@ func TestDescribeAnchorageShelter(t *testing.T) {
 	}
 }
 
-// ── host side of shoreline_near ─────────────────────────────────────────
+// ── host side of shoreline_square and shoreline_changes ─────────────────
 
 func TestMapWasmShorelineOutput(t *testing.T) {
 	ring := [][2]float64{{-20, 149}, {-20, 149.1}, {-20.1, 149.1}, {-20, 149}}
@@ -427,10 +528,13 @@ func TestSupportsShoreline_FalseWithoutExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	if base.SupportsShoreline() {
-		t.Fatal("configecho exports no shoreline_near")
+		t.Fatal("configecho exports no shoreline_square")
 	}
 	p := newWasmPOIProviderFromBase(base)
-	if _, err := p.ShorelineNear(-20, 149, 1000); err == nil || !strings.Contains(err.Error(), "shoreline_near") {
+	if _, err := p.ShorelineSquare(coverageSquare{-21, 148}); err == nil || !strings.Contains(err.Error(), "shoreline_square") {
+		t.Errorf("want a clear error, got %v", err)
+	}
+	if _, err := p.ShorelineChanges(coverageSquare{-21, 148}, time.Now()); err == nil || !strings.Contains(err.Error(), "shoreline_changes") {
 		t.Errorf("want a clear error, got %v", err)
 	}
 }
@@ -445,6 +549,28 @@ func TestSupportsShoreline_TrueForBuiltOsmOverpass(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !base.SupportsShoreline() {
-		t.Fatal("rebuilt osm-overpass must export shoreline_near")
+		t.Fatal("rebuilt osm-overpass must export shoreline_square and shoreline_changes")
+	}
+}
+
+func TestCallWithin_BudgetIsPerCallAndLeavesTheSharedOneAlone(t *testing.T) {
+	manifest := extism.Manifest{Wasm: []extism.Wasm{extism.WasmFile{Path: configEchoFixtureWasm}}, Timeout: 15000}
+	base, err := newWasmPluginBase(manifest, "plugins/test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A generous per-call budget works, a one-nanosecond one fails that call
+	// only, and a plain call afterwards still uses the manifest's budget.
+	if _, err := base.callWithin("id", nil, time.Minute); err != nil {
+		t.Fatalf("a long budget: %v", err)
+	}
+	if _, err := base.callWithin("id", nil, time.Nanosecond); err == nil {
+		t.Error("a one nanosecond budget must expire")
+	}
+	if _, err := base.call("id", nil); err != nil {
+		t.Fatalf("the shared budget must be untouched: %v", err)
+	}
+	if coastlineBackgroundCallBudget <= time.Duration(defaultWasmPluginTimeoutMS)*time.Millisecond {
+		t.Error("background coastline calls need more than Mate's interactive budget")
 	}
 }

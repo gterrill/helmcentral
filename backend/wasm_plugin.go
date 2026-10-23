@@ -118,9 +118,10 @@ type wasmPluginBase struct {
 	// optional way ttl_seconds()/description() are, against the same
 	// throwaway instance, and never causes plugin load to fail.
 	supportsPlaceNames bool
-	// supportsShoreline is true when a POI plugin exports shoreline_near
-	// (ADR 0201), the optional export behind Mate's anchorage_shelter tool.
-	// Detected like supportsPlaceNames and never a reason to fail loading.
+	// supportsShoreline is true when a POI plugin exports both
+	// shoreline_square and shoreline_changes (ADR 0201), the optional
+	// exports behind the offline coastline. Detected like supportsPlaceNames
+	// (both or neither) and never a reason to fail loading.
 	supportsShoreline bool
 }
 
@@ -142,6 +143,15 @@ func (b *wasmPluginBase) ttlDuration() time.Duration {
 // concurrent-safe access, since a Plugin/Instance is not itself safe for
 // concurrent use. Shared by every plugin type's exported-function callers.
 func (b *wasmPluginBase) call(name string, input []byte) (out []byte, err error) {
+	return b.callWithin(name, input, 0)
+}
+
+// callWithin is call with an explicit time budget for this one call. A zero
+// budget keeps the manifest's WASM_PLUGIN_TIMEOUT_MS (15 s by default), which
+// is sized for Mate answering a question. Background work that has no one
+// waiting, such as downloading a square of coastline, passes its own longer
+// budget here rather than raising the shared one.
+func (b *wasmPluginBase) callWithin(name string, input []byte, budget time.Duration) (out []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("plugin %q panicked calling %s: %v", b.id, name, r)
@@ -161,6 +171,9 @@ func (b *wasmPluginBase) call(name string, input []byte) (out []byte, err error)
 		}
 	}
 
+	if budget > 0 {
+		instance.Timeout = budget
+	}
 	_, out, err = instance.Call(name, input)
 	if err != nil {
 		return nil, fmt.Errorf("plugin %q: %s call failed: %w", b.id, name, err)
@@ -689,7 +702,7 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 	// guessed at.
 	supportsPlaceNames := instance.FunctionExists("place_name_at") && instance.FunctionExists("search_places")
 
-	supportsShoreline := instance.FunctionExists("shoreline_near")
+	supportsShoreline := instance.FunctionExists("shoreline_square") && instance.FunctionExists("shoreline_changes")
 
 	return &wasmPluginBase{
 		id:                 id,
