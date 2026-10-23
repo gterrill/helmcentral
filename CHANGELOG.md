@@ -13,6 +13,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The plotter's route alarms read plainly.** "Perpendicular passed" is now
+  **Waypoint Passed** and "Arrival circle entered" is now **Arriving at
+  Waypoint**, each with one sentence saying what it means.
+
 - **Offline coastline no longer downloads squares that are all land.** Squares
   with no part of them within 20 nm of the sea, such as the interior of a
   continent, are skipped, so the first fill finishes sooner and uses less of
