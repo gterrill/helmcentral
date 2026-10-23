@@ -42,9 +42,10 @@
 // injectable overpassQueryFunc; this file supplies doOverpassQuery, the one
 // place all three wasmexports below actually call the pdk HTTP client.
 //
-// A third optional export, shoreline_near, returns raw coastline and reef
-// lines around a position for Mate's anchorage_shelter tool - see
-// osm-overpass.go's "shoreline_near" section.
+// Two further optional exports, shoreline_square and shoreline_changes,
+// return the raw coastline and reef lines of one coverage square, and count
+// how many were edited since a date, for the host's offline coastline - see
+// osm-overpass.go's "shoreline_square" section.
 //
 // This file (main.go) holds only the thin //go:wasmexport wrapper layer;
 // all the actual query-building/parsing logic lives in osm-overpass.go,
@@ -259,15 +260,41 @@ func searchPlaces() int32 {
 	return 0
 }
 
-//go:wasmexport shoreline_near
-func shorelineNear() int32 {
-	var input shorelineNearInput
+//go:wasmexport shoreline_square
+func shorelineSquare() int32 {
+	var input shorelineBoxInput
 	if err := pdk.InputJSON(&input); err != nil {
 		pdk.SetError(err)
 		return -1
 	}
 
-	output, err := runShorelineNear(doOverpassQuery, input.Lat, input.Lon, input.RadiusM)
+	output, err := runShorelineSquare(doOverpassQuery, input)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	if err := pdk.OutputJSON(output); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
+}
+
+//go:wasmexport shoreline_changes
+func shorelineChanges() int32 {
+	var input shorelineChangesInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	since, err := time.Parse(time.RFC3339, input.Since)
+	if err != nil {
+		pdk.SetError(fmt.Errorf("shoreline_changes: since %q is not an RFC 3339 time", input.Since))
+		return -1
+	}
+
+	output, err := runShorelineChanges(doOverpassQuery, input.box(), since)
 	if err != nil {
 		pdk.SetError(err)
 		return -1
