@@ -34,11 +34,18 @@ interface DocumentLinkPickerProps {
    * operator can't pick the same document twice from here (EquipmentEditor
    * itself also no-ops a duplicate add, this just keeps it from showing). */
   excludeIds?: string[]
+  /** Narrows what can be picked by the document's type; a pick that fails it
+   * is refused with `rejection` and the picker stays open. */
+  accept?: (mime: string) => boolean
+  rejection?: string
+  /** Wording for a pick that is not "a document". */
+  heading?: string
+  prompt?: string
 }
 
 const NO_RESULTS: DocumentSearchResult[] = []
 
-export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = [] }: DocumentLinkPickerProps) {
+export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = [], accept, rejection = 'That document is not a type that can be used here.', heading = 'Add a document', prompt = 'Search the document library and pick one to link.' }: DocumentLinkPickerProps) {
   const [query, setQuery] = useState('')
   // A failed pick (the record could not be read), shown beside a search error.
   const [pickError, setPickError] = useState<string | null>(null)
@@ -84,6 +91,10 @@ export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = []
         `/api/documents/${encodeURIComponent(result.document_id)}`,
       )
       if (seq !== pickSeq.current) return
+      if (accept && !accept(record.mime)) {
+        setPickError(rejection)
+        return
+      }
       onPick({
         document_id: result.document_id,
         title: result.title || result.filename,
@@ -107,8 +118,8 @@ export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = []
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add a document</DialogTitle>
-          <DialogDescription>Search the document library and pick one to link.</DialogDescription>
+          <DialogTitle>{heading}</DialogTitle>
+          <DialogDescription>{prompt}</DialogDescription>
         </DialogHeader>
 
         <Input

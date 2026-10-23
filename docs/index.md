@@ -97,7 +97,7 @@ Steps for specific tasks.
 - [Edit a passage](how-to/edit-passages.md), splitting, trimming, merging,
   hiding and filing passages in cruises.
 - [Film a passage replay](how-to/film-a-passage-replay.md), directing the
-  replay camera with shots.
+  replay camera with shots and pinning notes and photos with signs.
 - [Share a passage on your blog](how-to/share-a-passage-on-your-blog.md),
   copying an animated map into a Ghost post and saving still images.
 - [Import from YachtWave](how-to/import-from-yachtwave.md), page by page

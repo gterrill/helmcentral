@@ -168,4 +168,22 @@ describe('DocumentLinkPicker', () => {
     await waitFor(() => expect(onPick).toHaveBeenCalledTimes(1))
     expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ document_id: 'd1' }))
   })
+
+  it('refuses a pick that fails `accept` and stays open', async () => {
+    fetchMock.mockImplementation((url: string) => {
+      if (String(url).includes('/api/documents/d1')) {
+        return Promise.resolve({ ok: true, json: async () => ({ id: 'd1', kind: 'file', mime: 'application/pdf', created_at: '2026-01-12T09:30:00Z' }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ results: [{ document_id: 'd1', title: 'Manual', filename: 'manual.pdf', status: 'indexed', page: 1, snippet: '', folder_id: null }] }) })
+    })
+    const onPick = vi.fn()
+    const onOpenChange = vi.fn()
+    render(<DocumentLinkPicker open onOpenChange={onOpenChange} onPick={onPick} accept={(m) => m.startsWith('image/')} rejection="Pick a photo." heading="Choose a photo" />)
+    expect(screen.getByText('Choose a photo')).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Search documents'), { target: { value: 'man' } })
+    fireEvent.click(await screen.findByText('Manual'))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Pick a photo.')
+    expect(onPick).not.toHaveBeenCalled()
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
 })

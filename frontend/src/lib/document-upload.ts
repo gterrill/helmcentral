@@ -19,7 +19,8 @@ export interface UploadedDocument {
  * rejected upload (AGENTS.md fallback policy: no generic "upload failed"
  * swallowing a real reason). `tags` becomes the upload's comma-separated
  * `tags` field (documents_handlers.go's parseDocumentTagsField); omitted for
- * a caller that doesn't want one.
+ * a caller that doesn't want one. `folderId` files the upload in that folder
+ * instead of the library root.
  *
  * Uploads dedupe by sha256 server-side (documents_store.go/storeUploadedFile):
  * identical bytes already on file come back as the EXISTING document, `id`
@@ -27,10 +28,11 @@ export interface UploadedDocument {
  * doesn't need to branch on `duplicate` to decide whether inserting a
  * reference to `id` is safe.
  */
-export async function uploadDocument(file: Blob, filename: string, tags?: string[]): Promise<UploadedDocument> {
+export async function uploadDocument(file: Blob, filename: string, tags?: string[], folderId?: string): Promise<UploadedDocument> {
   const form = new FormData()
   form.append('file', file, filename)
   if (tags && tags.length > 0) form.append('tags', tags.join(','))
+  if (folderId) form.append('folder_id', folderId)
   const data = await apiRequest<{ document: { id: string }; duplicate: boolean }>('/api/documents', { method: 'POST', body: form })
   return { id: data.document.id, duplicate: data.duplicate === true }
 }

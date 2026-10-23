@@ -49,6 +49,7 @@ let writes: { method: string; url: string; body: unknown }[] = []
 
 function stub() {
   stubApi({
+    'GET /api/passages/signs': { signs: [] },
     'GET /api/passages/camera-shots': () => ({ shots }),
     'POST /api/passages/camera-shots': (req: StubRequest) => {
       writes.push({ method: 'POST', url: req.url, body: req.body })
