@@ -20,12 +20,26 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   way. A passage you have not set keeps today's look, top right at the automatic
   zoom.
 
+- **Settings → Offline coastline links to running your own Overpass server.**
+  The coastline squares come from the same map server as place names, and a
+  server aboard fills them far faster than a public one. The link opens the
+  how-to in the help.
+
 ### Changed
 
 - **Help pages read more plainly.** Every help page has had a wording pass,
   and the contents page now links the anchor watch, alarm threshold and alarm
   notification guides and the Tiles, Alarm rules and Mate lookups reference
   pages, which were missing from it.
+- **The Anchor Watch page is all map.** Depth, tide and the low-water clearance
+  warning now sit in the readout panel in the map's top-left corner, above
+  current, distance, bearing and radius, instead of in a card above the map.
+  Drop and Raise float over the bottom of the map rather than taking a row
+  under it. Adjust is the icon in the map's control stack. The chart now
+  centres the boat and anchor in the part of the screen the panel leaves clear.
+  On a phone the quiet low-water clearance line is left out; a shallow-water
+  warning always shows. With no GPS fix, or on a display that cannot
+  draw the map, the readings card and the Drop/Raise row stay as they were.
 - **The overview map on the replay now frames the coast the way the blog embed
   and images do.** It shows a little more of the surrounding coast than before
   at the automatic zoom.

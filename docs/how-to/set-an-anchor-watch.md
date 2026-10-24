@@ -7,7 +7,8 @@ steps for running it from the anchor watch map.
 ## Drop the watch
 
 1. Wait until the anchor is on the bottom and the boat is lying to it.
-2. Open the anchor watch page and choose **Drop**. The watch is set at the
+2. Open the anchor watch page and choose **Drop**, at the bottom of the map.
+   The watch is set at the
    boat's current GPS position, not wherever the map happens to be centred.
 3. Set the radius as below. There is no circle to adjust until the watch is
    dropped.
@@ -21,11 +22,13 @@ alarm radius or the anchor's saved position. To change either, open
 
 1. Tap the **Move** icon in the map's control stack (top right). On a
    display with no map (an older tablet, say), a text **Adjust** button
-   appears in the header instead. The icon stays lit while Adjust is open, and
-   tapping it again is the same as **Cancel**.
-2. The page stays as it was. The chart keeps its size, and the depth header,
-   the rode planner and the chart's own controls stay where they are.
-   **Cancel** and **Save** appear at the bottom of the chart.
+   appears in the readings card at the top of the page instead. The icon stays
+   lit while Adjust is open, and tapping it again is the same as **Cancel**.
+2. The page stays as it was. The chart keeps its size, and the depth and tide
+   readings, the rode planner and the chart's own controls stay where they
+   are. **Cancel** and **Save** appear at the bottom of the chart, with Raise
+   still at the bottom left (just above them on a narrow screen). Raising the
+   watch closes Adjust without saving.
 3. **To move the anchor:** pan the chart. The anchor sits fixed at the centre
    of the screen, marked with a crosshair, and dragging the chart underneath
    it moves the anchor to wherever the crosshair ends up. A faded copy of the
@@ -76,7 +79,7 @@ you're lying properly. That's usually simpler than adjusting a long way.
 
 ## Raise the watch
 
-Open the Anchor Watch page, choose **Raise** and confirm. This clears the
+Open the Anchor Watch page, choose **Raise** (bottom left of the map) and confirm. This clears the
 watch, the trail and any pins placed in the rode planner for this anchoring.
 The Anchor Watch tile on a dashboard page has no Raise, so a stray touch on
 the tile can't end the watch.

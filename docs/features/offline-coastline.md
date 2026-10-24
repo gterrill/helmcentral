@@ -32,7 +32,11 @@ asked for a position in an all-land square answers that the spot is inland,
 with no anchorage shelter to estimate.
 
 Squares come down one at a time, nearest the boat first, with a pause between
-each. A square with no coastline in it, open sea, is still a square, and is
+each. They come from the Overpass server set in **Settings → Plugins →
+OpenStreetMap (Overpass)**, the same one place names use. A public server can
+take the better part of a minute per square in busy hours. A server aboard
+answers in seconds. See
+[Run your own Overpass server](../how-to/run-your-own-overpass-server.md). A square with no coastline in it, open sea, is still a square, and is
 stored as one. If a square fails, Helmcentral keeps the reason, shows it on the
 page, and tries it again later, waiting longer after each failure.
 

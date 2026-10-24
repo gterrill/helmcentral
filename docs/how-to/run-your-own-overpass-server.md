@@ -1,7 +1,9 @@
 # Run your own Overpass server
 
-Place names, Nearby and Mate's place lookups all ask an Overpass server for
-OpenStreetMap data. The public ones are shared, and over a boat's link they're
+Place names, Nearby, Mate's place lookups and the
+[offline coastline](../features/offline-coastline.md) all ask an Overpass
+server for OpenStreetMap data. The public ones are shared, and over a boat's
+link they're
 slow when they answer at all. A server aboard answers in a fraction of a
 second, never turns Mate away, keeps working when the link is down, and keeps
 the boat's position off the internet.

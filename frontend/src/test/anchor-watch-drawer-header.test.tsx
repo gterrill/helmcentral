@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { render, screen, within, fireEvent, act } from '@testing-library/react'
 import { toast } from 'sonner'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
@@ -30,6 +30,7 @@ function actionOf(options: unknown): ToastActionOptions['action'] {
 // moved in here from below the map.
 const easeToMock = vi.fn()
 const jumpToMock = vi.fn()
+const setPaddingMock = vi.fn()
 // Captured so a test can fire a synthetic 'move' event directly — a genuine
 // pan/pinch gesture, distinguished from a programmatic easeTo/jumpTo frame
 // by carrying a real originalEvent (see anchor-watch-map.tsx's own
@@ -52,6 +53,7 @@ vi.mock('react-map-gl/maplibre', async () => {
           getZoom: () => 14,
           easeTo: easeToMock,
           jumpTo: jumpToMock,
+          setPadding: setPaddingMock,
           getMap: () => ({
             isStyleLoaded: () => true,
             getSource: () => ({}),
@@ -158,6 +160,13 @@ const baseProps = {
   onPlanningDepthChange: () => Promise.resolve(),
 }
 
+// With a map the header content lives inside the map's own top-left panel
+// (anchor-watch-metrics); without one (no WebGL2, no GPS fix) the standalone
+// card (anchor-watch-header) carries it instead. hud() is the with-map one.
+function hud() {
+  return screen.getByTestId('anchor-watch-metrics')
+}
+
 describe('AnchorWatchDrawer header — removed controls', () => {
   it('no longer renders the old Distance hero KPI', () => {
     render(<AnchorWatchDrawer {...baseProps} />)
@@ -176,7 +185,7 @@ describe('AnchorWatchDrawer header — depth hero', () => {
   it('shows the live depth as the hero readout, in metric', () => {
     render(<AnchorWatchDrawer {...baseProps} depthMeters={3.2} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     expect(within(header).getByText('Depth')).toBeInTheDocument()
     expect(header).toHaveTextContent('3.2')
     expect(header).toHaveTextContent('m')
@@ -185,7 +194,7 @@ describe('AnchorWatchDrawer header — depth hero', () => {
   it('converts to feet under imperial units', () => {
     render(<AnchorWatchDrawer {...baseProps} depthMeters={3} isImperial />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     // 3 m * 3.28084 = 9.84252 ft
     expect(header).toHaveTextContent('9.8')
     expect(header).toHaveTextContent('ft')
@@ -194,7 +203,7 @@ describe('AnchorWatchDrawer header — depth hero', () => {
   it('shows a dash rather than a stale figure with no live depth reading', () => {
     render(<AnchorWatchDrawer {...baseProps} depthMeters={null} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     expect(header).toHaveTextContent('—')
     expect(header).toHaveTextContent('unavailable')
   })
@@ -214,29 +223,23 @@ describe('AnchorWatchDrawer header — depth hero', () => {
 })
 
 describe('AnchorWatchDrawer header — tide context', () => {
-  it('labels the tide with the station name', () => {
+  it('names the tide station as visible text beside the Tide label', () => {
     render(<AnchorWatchDrawer {...baseProps} tide={makeTide({ station_name: 'Goold Island' })} />)
 
-    // The label reads "Tide" in the DOM and is capitalised visually by CSS
-    // (text-transform: uppercase, the same convention the rest of this
-    // header's own labels — "Depth" — and the map's metrics panel labels
-    // already use), so this asserts case-insensitively rather than
-    // requiring literal uppercase characters in the markup.
-    const header = screen.getByTestId('anchor-watch-header')
-    expect(header).toHaveTextContent(/tide/i)
-    expect(header).toHaveTextContent(/goold island/i)
+    const panel = hud()
+    expect(panel).toHaveTextContent(/tide\s*·\s*goold island/i)
   })
 
   it('shows Falling with the falling arrow', () => {
     render(<AnchorWatchDrawer {...baseProps} tide={makeTide({ tide_direction: 'Falling' })} />)
 
-    expect(screen.getByTestId('anchor-watch-header')).toHaveTextContent('Falling')
+    expect(hud()).toHaveTextContent('Falling')
   })
 
   it('shows Rising with the rising arrow', () => {
     render(<AnchorWatchDrawer {...baseProps} tide={makeTide({ tide_direction: 'Rising' })} />)
 
-    expect(screen.getByTestId('anchor-watch-header')).toHaveTextContent('Rising')
+    expect(hud()).toHaveTextContent('Rising')
   })
 
   it('names the next turn (whichever of high/low comes first) with its height and time', () => {
@@ -244,7 +247,7 @@ describe('AnchorWatchDrawer header — tide context', () => {
     const tide = makeTide()
     render(<AnchorWatchDrawer {...baseProps} tide={tide} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     expect(header).toHaveTextContent('Low')
     expect(header).not.toHaveTextContent(/\bHigh\b(?!er)/)
     // low_tide_height_ft 1 ft -> 0.3 m
@@ -256,25 +259,23 @@ describe('AnchorWatchDrawer header — tide context', () => {
   it('shows the estimated depth at the next low when falling', () => {
     render(<AnchorWatchDrawer {...baseProps} depthMeters={4} tide={makeTide({ tide_direction: 'Falling' })} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     // drop from current (3 ft) to low (1 ft) = 2 ft = 0.6096 m; 4 - 0.6096 = 3.3904 m
-    expect(header).toHaveTextContent('Est. low')
-    expect(header).toHaveTextContent('3.4')
+    expect(header).toHaveTextContent(/est\. 3\.4 m/)
   })
 
   it('shows the estimated depth at the next high when rising', () => {
     render(<AnchorWatchDrawer {...baseProps} depthMeters={4} tide={makeTide({ tide_direction: 'Rising' })} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     // rise from current (3 ft) to high (5 ft) = 2 ft = 0.6096 m; 4 + 0.6096 = 4.6096 m
-    expect(header).toHaveTextContent('Est. high')
-    expect(header).toHaveTextContent('4.6')
+    expect(header).toHaveTextContent(/est\. 4\.6 m/)
   })
 
   it('says No tide station with no tide station configured', () => {
     render(<AnchorWatchDrawer {...baseProps} tide={null} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     expect(header).toHaveTextContent('No tide station')
   })
 
@@ -288,7 +289,7 @@ describe('AnchorWatchDrawer header — tide context', () => {
     const tide = makeTide({ high_tide_time: '', high_tide_height_ft: -1, low_tide_time: '', low_tide_height_ft: -1 })
     render(<AnchorWatchDrawer {...baseProps} tide={tide} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     expect(header).toHaveTextContent('No tide station')
   })
 
@@ -296,7 +297,7 @@ describe('AnchorWatchDrawer header — tide context', () => {
     const tide = makeTide({ low_tide_time: '', low_tide_height_ft: -1 })
     render(<AnchorWatchDrawer {...baseProps} tide={tide} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     expect(header).toHaveTextContent('High')
     expect(header).not.toHaveTextContent('Low')
   })
@@ -308,18 +309,137 @@ describe('AnchorWatchDrawer header — tide context', () => {
     const tide = makeTide({ low_tide_height_ft: -0.4 })
     render(<AnchorWatchDrawer {...baseProps} tide={tide} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
+    const header = hud()
     // -0.4 ft -> -0.12 m (metric, isImperial false in baseProps)
     expect(header).toHaveTextContent('-0.1')
   })
 })
 
 describe('AnchorWatchDrawer header — low-water clearance moved in', () => {
-  it('still renders the low-water clearance line, now inside the header', () => {
+  it('renders the low-water clearance line inside the map panel', () => {
     render(<AnchorWatchDrawer {...baseProps} depthMeters={2} vesselDraftM={1.2} tide={makeTide()} />)
 
-    const header = screen.getByTestId('anchor-watch-header')
-    expect(within(header).getByTestId('low-water-clearance')).toBeInTheDocument()
+    expect(within(hud()).getByTestId('low-water-clearance')).toBeInTheDocument()
+    expect(screen.queryByTestId('anchor-watch-header')).not.toBeInTheDocument()
+  })
+
+  it('hides the quiet ok/unknown clearance lines below sm but never the too-shallow alert', () => {
+    const { rerender } = render(<AnchorWatchDrawer {...baseProps} depthMeters={4} vesselDraftM={1.2} tide={makeTide()} />)
+    expect(within(hud()).getByTestId('low-water-clearance').className).toMatch(/\bhidden\b.*\bsm:block\b/)
+
+    rerender(<AnchorWatchDrawer {...baseProps} depthMeters={4} vesselDraftM={null} tide={makeTide()} />)
+    expect(within(hud()).getByTestId('low-water-clearance').className).toMatch(/\bhidden\b.*\bsm:block\b/)
+
+    rerender(<AnchorWatchDrawer {...baseProps} depthMeters={2} vesselDraftM={1.2} tide={makeTide()} />)
+    expect(within(hud()).getByTestId('low-water-clearance').className).not.toMatch(/\bhidden\b/)
+  })
+})
+
+class FakeResizeObserver {
+  private cb: () => void
+  constructor(cb: () => void) { this.cb = cb }
+  observe() { queueMicrotask(() => this.cb()) }
+  unobserve() {}
+  disconnect() {}
+}
+
+describe('AnchorWatchDrawer header — map keeps clear of the panel', () => {
+  beforeEach(() => { vi.stubGlobal('ResizeObserver', FakeResizeObserver) })
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); setPaddingMock.mockClear() })
+
+  it('pads the map top by the panel footprint, and drops the padding during Adjust', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({
+      width: 400, height: 300, top: 0, left: 0, right: 400, bottom: 120, x: 0, y: 0, toJSON: () => {},
+    }))
+    render(<AnchorWatchDrawer {...baseProps} tide={makeTide()} />)
+    await act(async () => { await Promise.resolve() })
+
+    expect(setPaddingMock).toHaveBeenLastCalledWith(expect.objectContaining({ top: 128 }))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust anchor' }))
+    await act(async () => { await Promise.resolve() })
+    expect(setPaddingMock).toHaveBeenLastCalledWith(expect.objectContaining({ top: 0 }))
+  })
+})
+
+describe('AnchorWatchDrawer header — folded into the map panel', () => {
+  it('puts depth above the existing Current/Distance rows in one panel', () => {
+    render(<AnchorWatchDrawer {...baseProps} depthMeters={3.2} tide={makeTide()} />)
+
+    const panel = hud()
+    expect(panel).toHaveTextContent('Depth')
+    expect(panel).toHaveTextContent('Distance')
+    expect(panel.textContent!.indexOf('Depth')).toBeLessThan(panel.textContent!.indexOf('Distance'))
+    expect(screen.queryByTestId('anchor-watch-header')).not.toBeInTheDocument()
+  })
+})
+
+describe('AnchorWatchDrawer header — fallback card when there is no map', () => {
+  afterEach(() => { mockHasWebGL2 = true })
+
+  it('keeps the card, with depth, tide and clearance, when the browser has no WebGL2', () => {
+    mockHasWebGL2 = false
+    render(<AnchorWatchDrawer {...baseProps} depthMeters={2} vesselDraftM={1.2} tide={makeTide()} />)
+
+    const card = screen.getByTestId('anchor-watch-header')
+    expect(card).toHaveTextContent('Depth')
+    expect(card).toHaveTextContent(/goold island/i)
+    expect(within(card).getByTestId('low-water-clearance')).toBeInTheDocument()
+  })
+
+  it('keeps the card when there is no GPS fix', () => {
+    render(<AnchorWatchDrawer {...baseProps} vesselLat={null} vesselLon={null} depthMeters={3.2} />)
+
+    expect(screen.getByTestId('anchor-watch-header')).toHaveTextContent('3.2')
+    expect(screen.queryByTestId('anchor-watch-metrics')).not.toBeInTheDocument()
+    expect(screen.getByText('No GPS fix')).toBeInTheDocument()
+  })
+})
+
+describe('AnchorWatchDrawer Drop/Raise placement', () => {
+  afterEach(() => { mockHasWebGL2 = true })
+
+  it('floats Raise inside the map container, and leaves no row below it', () => {
+    render(<AnchorWatchDrawer {...baseProps} />)
+
+    const container = screen.getByTestId('anchor-watch-map-container')
+    expect(within(container).getByRole('button', { name: 'Raise' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Raise' })).toHaveLength(1)
+  })
+
+  it('floats Drop inside the map container when no anchor is set', () => {
+    render(<AnchorWatchDrawer {...baseProps} anchorState="none" anchorLat={null} anchorLon={null} />)
+
+    const container = screen.getByTestId('anchor-watch-map-container')
+    expect(within(container).getByRole('button', { name: /drop/i })).toBeInTheDocument()
+  })
+
+  it('keeps Raise reachable while Adjust is open, and raising closes Adjust', () => {
+    const { rerender } = render(<AnchorWatchDrawer {...baseProps} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust anchor' }))
+
+    expect(screen.getByRole('button', { name: 'Raise' })).toBeInTheDocument()
+    expect(screen.getByTestId('anchor-adjust-actions')).toBeInTheDocument()
+
+    rerender(<AnchorWatchDrawer {...baseProps} anchorState="none" anchorLat={null} anchorLon={null} />)
+    expect(screen.queryByTestId('anchor-adjust-actions')).not.toBeInTheDocument()
+  })
+
+  it('keeps Drop clear of the bottom-right attribution control', () => {
+    render(<AnchorWatchDrawer {...baseProps} anchorState="none" anchorLat={null} anchorLon={null} />)
+
+    const drop = screen.getByRole('button', { name: /drop/i })
+    // The floating wrapper leaves a right-hand gutter wider than the left.
+    expect(drop.parentElement!.className).toMatch(/\bpr-1[0-9]\b|\bpr-\d{2}\b/)
+  })
+
+  it('keeps the row below the page when there is no map', () => {
+    mockHasWebGL2 = false
+    render(<AnchorWatchDrawer {...baseProps} />)
+
+    const container = screen.getByTestId('anchor-watch-map-container')
+    expect(within(container).queryByRole('button', { name: 'Raise' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Raise' })).toBeInTheDocument()
   })
 })
 

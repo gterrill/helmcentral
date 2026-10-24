@@ -2350,7 +2350,7 @@ function AppShell() {
       case 'inventory':
         return <InventoryRoutePanel canWrite={canWrite} />
       case 'settings':
-        return <SettingsRoutePanel onAskMate={openMate} />
+        return <SettingsRoutePanel onAskMate={openMate} onOpenHelp={openHelp} />
       case 'anchor-watch':
         return (
           <>

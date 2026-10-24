@@ -15,20 +15,32 @@ during an outage rather than wandering, and the watchdog for a lost instrument
 connection reports the outage separately, as its own alarm. A drag alert and a
 lost GPS fix require different responses.
 
-## The header: depth and tide
+## The map panel: depth, tide and swing
 
-The full-page anchor watch view opens with live depth under the keel as its
-headline reading. That is what matters while sitting on the hook, more than
-how far off the anchor you've swung. Beside it, tide context shows which way
-the tide is moving, the next high or low with its height and time, and the
-depth you should expect once it turns. The low-water clearance warning sits
-there too, so everything about the water you're anchored in reads from one
-place. If depth hasn't updated recently, the reading is marked stale rather
-than left looking current.
+The full-page anchor watch view is the map, with nothing stacked above or
+below it. The panel in the map's top-left corner carries the readings, headed
+by live depth under the keel. That matters more on the hook than how far off
+the anchor you've swung. Under the depth, the tide shows which way it is
+moving, then one line with the next high or low, its height and time, and the
+depth to expect once it turns. The tide station it comes from is named beside
+the **Tide** label. The low-water clearance warning sits in the same panel, so
+everything about the water you're anchored in reads from one place. If depth
+hasn't updated recently, the reading is marked stale rather than left looking
+current.
 
-Distance from the anchor, bearing to it, the alarm radius, and current set and
-drift live in the compact readout panel on the map itself. That is where you
-check how far you've swung and how much room is left before the alarm sounds.
+Below those, the panel shows current set and drift, and with an anchor down,
+the distance from the anchor, the bearing to it and the alarm radius. That is
+where you check how far you've swung and how much room is left before the
+alarm sounds.
+
+On a phone the panel is kept short. The quiet low-water clearance line (the
+one that says you have room) is left out, but a shallow-water warning always
+shows. The chart is centred in the part of the screen the panel leaves clear,
+so the boat and anchor aren't hidden under it.
+
+With no GPS fix, or on a display that can't draw the map (an older tablet,
+say), there is no panel. The page shows the same figures in a card above the
+empty map area instead.
 
 ## The swing trail
 
@@ -74,6 +86,12 @@ window follows every save, in case you change your mind again straight away.
 See [Set an anchor watch](../how-to/set-an-anchor-watch.md) for the steps.
 
 ## Drop, Raise, and the instrument network
+
+**Drop** and **Raise** float over the bottom of the map: Drop in the centre
+when no watch is set, a compact Raise at the bottom left while one is. During
+Adjust, Raise stays available. On a narrow screen it sits just above Cancel and
+Save. Raising closes Adjust. Without a map they sit in a row below the page's
+map area.
 
 **Drop** saves the watch and publishes its anchor coordinates onto the boat's
 instrument network. These are the stored coordinates, including the bow
@@ -146,7 +164,7 @@ forward to the next low tide, and compares what is left under the keel
 against your vessel's draft and the margin you set in Settings → Anchor
 Watch (**Clearance at Low Water**, 0.5 m by default). When the water left at
 that point would be less than your margin, the full-page Anchor Watch view
-shows a shallow-water warning naming the shortfall and the time of
+shows a shallow-water warning in the map panel naming the shortfall and the time of
 the next low. When there is enough water, the same line quietly shows the
 clearance you can expect instead.
 

@@ -112,7 +112,7 @@ function render(ui: ReactElement) {
 
 function renderSettings(props: Partial<{ onDirtyChange: (d: boolean) => void }> = {}) {
   return render(
-    <SettingsPage {...props} />,
+    <SettingsPage onOpenHelp={vi.fn()} {...props} />,
   )
 }
 
@@ -212,7 +212,7 @@ describe('Settings Alarms section saving', () => {
 
   it('persists transports through the imperative handle App.tsx uses for "Save and Continue"', async () => {
     const ref = createRef<SettingsPageHandle>()
-    render(<SettingsPage ref={ref} />)
+    render(<SettingsPage onOpenHelp={vi.fn()} ref={ref} />)
 
     openAlarms()
     fireEvent.click(screen.getByLabelText(/webhook/i))

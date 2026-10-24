@@ -107,7 +107,7 @@ beforeEach(() => {
 })
 
 async function openVessel(onDirtyChange?: (dirty: boolean) => void) {
-  render(<SettingsPage onDirtyChange={onDirtyChange} />)
+  render(<SettingsPage onOpenHelp={vi.fn()} onDirtyChange={onDirtyChange} />)
   fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
   await screen.findByLabelText('Builder')
 }
@@ -218,7 +218,7 @@ describe('Settings -> Vessel and the Save bar', () => {
 describe('roles the server could not read', () => {
   it('shows the server message, and a save from another field leaves roles out', async () => {
     settingsFixture = { roles_error: 'roles settings: parsing roles block: bad' }
-    render(<SettingsPage />)
+    render(<SettingsPage onOpenHelp={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'SignalK' }))
 
     expect(await screen.findByText(/Roles could not be read/)).toBeInTheDocument()
