@@ -173,6 +173,8 @@ func filepathBase(name string) string {
 func passageRoutes() []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/passages", tierRead, listPassagesHandler},
+		{http.MethodGet, "/api/passages/inset-view", tierRead, getInsetViewHandler},
+		{http.MethodPut, "/api/passages/inset-view", tierWrite, putInsetViewHandler},
 		{http.MethodGet, "/api/passages/camera-shots", tierRead, listCameraShotsHandler},
 		{http.MethodPost, "/api/passages/camera-shots", tierWrite, createCameraShotHandler},
 		{http.MethodPatch, "/api/passages/camera-shots/:id", tierWrite, patchCameraShotHandler},

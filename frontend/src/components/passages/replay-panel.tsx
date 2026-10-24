@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { CameraEditor, type CameraShotChange } from '@/components/passages/camera-editor'
@@ -11,6 +12,9 @@ import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
+import { useInsetView } from '@/hooks/use-inset-view'
+import { insetViewApi } from '@/lib/inset-view-api'
+import { type InsetView } from '@/lib/passage-inset-view'
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
 import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
@@ -115,6 +119,30 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     }
   }, [built.items])
   const { shots } = useCameraShots(spanMs ? spanMs.from : null, spanMs ? spanMs.to : null)
+
+  // The overview map's corner and zoom step are saved per passage, keyed by
+  // the first departure. A change shows at once and holds until the server
+  // has answered the last write; a refused write puts the saved view back.
+  const { view: savedInset, error: insetError } = useInsetView(spanMs ? spanMs.from : null)
+  const [pendingInset, setPendingInset] = useState<InsetView | null>(null)
+  const insetWrites = useRef(0)
+  const insetView = pendingInset ?? savedInset
+  useEffect(() => {
+    if (insetError) toast.error('Could not read where the overview map goes', { description: insetError })
+  }, [insetError])
+  const changeInsetView = (next: InsetView) => {
+    if (!spanMs) return
+    setPendingInset(next)
+    insetWrites.current += 1
+    void insetViewApi.save(spanMs.from, next)
+      .catch((err: unknown) => {
+        toast.error('Could not save the overview map', { description: err instanceof Error ? err.message : String(err) })
+      })
+      .finally(() => {
+        insetWrites.current -= 1
+        if (insetWrites.current === 0) setPendingInset(null)
+      })
+  }
   const resolved = useMemo(
     () => resolveShots(shots, timeline).filter((r) => timeline.entries.find((e) => e.id === r.entryId)?.segments.some((s) => s.length > 0)),
     [shots, timeline],
@@ -495,12 +523,14 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
             />
           }
           isDarkTheme={isDarkTheme}
-          overlay={
-            insetOn && !flying ? (
+          insetCorner={insetView?.corner}
+          inset={
+            insetOn && !flying && insetView ? (
               <InsetMap
                 className="h-32 w-44 overflow-hidden rounded-md border border-border shadow-sm"
                 bounds={bounds}
                 isDarkTheme={isDarkTheme}
+                zoomOffset={insetView.zoomOffset}
               />
             ) : null
           }
@@ -518,6 +548,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         onScrub={(c) => { replay.setPlaying(false); replay.setClock(c); setResume((n) => n + 1) }}
         onSpeed={setSpeed}
         onInsetChange={setInsetOn}
+        insetView={insetView ?? undefined}
+        onInsetViewChange={changeInsetView}
         shotTicks={shotTicks}
         cameraOpen={cameraOpen}
         onCameraToggle={() => setCameraOpen((o) => !o)}

@@ -3,6 +3,7 @@ import playerSource from 'virtual:passage-player'
 import type { DistanceUnits, HullType } from '@/config/app-config'
 import type { BoatHull } from '@/lib/boat-model'
 import playerCss from '@/lib/passage-export-player.css.txt?raw'
+import { DEFAULT_INSET_VIEW, offsetInsetZoom, type InsetCorner, type InsetView } from '@/lib/passage-inset-view'
 import {
   DONE_LAYERS,
   EXPORT_BASE_STYLE_URL,
@@ -67,6 +68,8 @@ export interface ExportInput {
   zone: { offsetHours: number; label: string }
   /** Whether the overview map shows in the corner during the replay. */
   inset: boolean
+  /** Corner and zoom step of the overview map; top right, automatic zoom when absent. */
+  insetView?: InsetView
   playSeconds: PlaySeconds
   /** Draw the terrain in 3D, with the boat model when a hull type is set. */
   threeD?: boolean
@@ -133,6 +136,8 @@ export interface ExportData {
   /** Show the overview map during the replay. */
   inset: boolean
   insetZoom: number
+  /** The corner of the map the overview sits in. */
+  insetCorner: InsetCorner
   /** The track is too small to see on the overview: draw a dot. */
   insetDot: boolean
   /** Underway play length, seconds. */
@@ -336,6 +341,9 @@ export function exportZone(passages: PassageDetail[]): { offsetHours: number; la
   return vesselZone(lon)
 }
 
+/** The class suffix the player's stylesheet places each corner by. */
+const CORNER_CLASS: Record<InsetCorner, string> = { 'top-left': 'tl', 'top-right': 'tr', 'bottom-left': 'bl', 'bottom-right': 'br' }
+
 let lastPrepared: { key: unknown[]; data: ExportData } | null = null
 
 function sameKey(a: unknown[], b: unknown[]) {
@@ -346,7 +354,7 @@ function sameKey(a: unknown[], b: unknown[]) {
  * is no track to show: an export of nothing is a fault, not an empty card.
  * Thinning is the slow part, so the last result is reused for the same input. */
 export function prepareExport(input: ExportInput): ExportData {
-  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.playSeconds, input.threeD ?? false, input.shots ?? null, input.hull ?? null, input.signs ?? null, input.photos ?? null]
+  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.insetView?.corner ?? DEFAULT_INSET_VIEW.corner, input.insetView?.zoomOffset ?? DEFAULT_INSET_VIEW.zoomOffset, input.playSeconds, input.threeD ?? false, input.shots ?? null, input.hull ?? null, input.signs ?? null, input.photos ?? null]
   if (lastPrepared && sameKey(lastPrepared.key, key)) return lastPrepared.data
   const data = buildExport(input)
   lastPrepared = { key, data }
@@ -389,14 +397,17 @@ function buildExport(input: ExportInput): ExportData {
   const first = passages[0]
   const last = passages[passages.length - 1]
   const d3 = input.threeD === true
+  const inset = input.insetView ?? DEFAULT_INSET_VIEW
+  const insetFinalZoom = offsetInsetZoom(insetZoom(bounds), inset.zoomOffset)
   return {
     title: input.title,
     dates: dateRangeLabel(first.a, last.b, input.zone.offsetHours),
     start: first.a,
     zone: { o: input.zone.offsetHours, l: input.zone.label },
     inset: input.inset,
-    insetZoom: round(insetZoom(bounds), 2),
-    insetDot: insetNeedsDot(bounds, insetZoom(bounds)),
+    insetZoom: round(insetFinalZoom, 2),
+    insetCorner: inset.corner,
+    insetDot: insetNeedsDot(bounds, insetFinalZoom),
     play: input.playSeconds,
     nightSeconds: NIGHT_SECONDS,
     nightCap: NIGHT_CAP_SECONDS,
@@ -498,7 +509,7 @@ function buildEmbed(input: ExportInput): string {
     `  <div class="hcp-head"><h3 class="hcp-title"></h3><p class="hcp-dates"></p></div>`,
     `  <div class="hcp-stage">`,
     `    <div class="hcp-map" role="region" aria-label="Passage map"></div>`,
-    `    <div class="hcp-inset" hidden></div>`,
+    `    <div class="hcp-inset hcp-inset-${CORNER_CLASS[data.insetCorner]}" hidden></div>`,
     `    <div class="hcp-readout" hidden><p class="hcp-caption" hidden></p><p class="hcp-passage"></p><p class="hcp-time"></p></div>`,
     `    <button type="button" class="hcp-btn"><span class="hcp-btn-icon" aria-hidden="true"></span><span class="hcp-btn-label">Play</span></button>`,
     `    <p class="hcp-error" role="alert" hidden></p>`,

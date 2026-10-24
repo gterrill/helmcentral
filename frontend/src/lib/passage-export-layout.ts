@@ -1,4 +1,5 @@
 import { exportImageAttribution } from '@/lib/passage-export-style'
+import type { InsetCorner } from '@/lib/passage-inset-view'
 
 // Layout of the static passage images (ADR 0174): where the title, dates,
 // figures and overview go, worked out as plain numbers and strings so it can be
@@ -72,6 +73,8 @@ export interface LayoutSpec {
   dates: string
   stats: { l: string; v: string }[]
   inset: boolean
+  /** Which corner of the map the overview sits in; top right when absent. */
+  insetCorner?: InsetCorner
   /** The map is drawn over satellite imagery, which needs its credit. */
   satellite?: boolean
 }
@@ -118,7 +121,17 @@ export function composeImageLayout(spec: LayoutSpec, measure: Measure): ImageLay
 
   const insetW = Math.round(width * 0.22)
   const insetH = Math.round(insetW * 0.68)
-  const inset: Rect | null = spec.inset ? { x: width - 24 - insetW, y: 24, w: insetW, h: insetH } : null
+  // Always inside the map area, 24 px from its edges: a bottom corner sits
+  // above the band, so the title, the figures and the credit are never covered.
+  const corner = spec.insetCorner ?? 'top-right'
+  const inset: Rect | null = spec.inset
+    ? {
+      x: corner.endsWith('left') ? 24 : width - 24 - insetW,
+      y: corner.startsWith('top') ? 24 : band.y - 24 - insetH,
+      w: insetW,
+      h: insetH,
+    }
+    : null
   return {
     width, height, band, title, dates, stats, attribution, inset,
     padding: { top: 48, right: 64, bottom: bandH + 48, left: 64 },

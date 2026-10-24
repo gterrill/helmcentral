@@ -50,6 +50,7 @@ let writes: { method: string; url: string; body: unknown }[] = []
 function stub() {
   stubApi({
     'GET /api/passages/signs': { signs: [] },
+    'GET /api/passages/inset-view': { inset_view: { at_ms: 0, corner: 'top-right', zoom_offset: 0 } },
     'GET /api/passages/camera-shots': () => ({ shots }),
     'POST /api/passages/camera-shots': (req: StubRequest) => {
       writes.push({ method: 'POST', url: req.url, body: req.body })
@@ -156,6 +157,7 @@ describe('ReplayPanel camera shots', () => {
 
   it('shows the server\'s reason when a shot is refused', async () => {
     stubApi({
+      'GET /api/passages/inset-view': { inset_view: { at_ms: 0, corner: 'top-right', zoom_offset: 0 } },
       'GET /api/passages/camera-shots': () => ({ shots }),
       'POST /api/passages/camera-shots': () => new Response(JSON.stringify({ error: 'zoom must be between 0 and 22' }), { status: 400, headers: { 'Content-Type': 'application/json' } }),
     })
@@ -231,6 +233,7 @@ describe('ReplayPanel camera robustness', () => {
     shots = [shot('s1', 250), shot('s2', 600)]
     let release: () => void = () => {}
     stubApi({
+      'GET /api/passages/inset-view': { inset_view: { at_ms: 0, corner: 'top-right', zoom_offset: 0 } },
       'GET /api/passages/camera-shots': () => ({ shots }),
       'PATCH /api/passages/camera-shots/s1': () => new Promise((resolve) => { release = () => resolve({ shot: shots[0] }) }),
       'PATCH /api/passages/camera-shots/s2': () => new Response(JSON.stringify({ error: 'zoom must be between 0 and 22' }), { status: 400, headers: { 'Content-Type': 'application/json' } }),

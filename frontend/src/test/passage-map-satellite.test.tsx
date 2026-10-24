@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { saveImageryPreference } from '@/lib/passage-imagery-preference'
-import { PassageMap } from '@/components/passages/passage-map'
+import { InsetMap, PassageMap } from '@/components/passages/passage-map'
 
 vi.mock('maplibre-gl', () => ({ default: {} }))
 vi.mock('@/lib/webgl', () => ({ hasWebGL2: () => true }))
@@ -14,9 +14,9 @@ let layers: LayerProps[] = []
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
   return {
-    Map: React.forwardRef(({ children }: { children?: React.ReactNode }, ref: React.Ref<unknown>) => {
+    Map: React.forwardRef(({ children, initialViewState }: { children?: React.ReactNode; initialViewState?: { zoom?: number } }, ref: React.Ref<unknown>) => {
       React.useImperativeHandle(ref, () => ({ getMap: () => ({ getSource: () => ({}) }), getCanvas: () => ({}) }))
-      return <div data-testid="map-root">{children}</div>
+      return <div data-testid="map-root" data-zoom={initialViewState?.zoom}>{children}</div>
     }),
     Marker: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
     Source: ({ id, children }: { id: string; children?: React.ReactNode }) => <div data-testid={`source-${id}`}>{children}</div>,
@@ -84,11 +84,25 @@ describe('PassageMap satellite imagery', () => {
     }
   })
 
-  it('stacks overlay content under the toggle, in the same corner', () => {
-    render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} overlay={<div data-testid="inset" />} />)
+  it('stacks the overview under the toggle in the top right corner by default', () => {
+    render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} inset={<div data-testid="inset" />} />)
     const toggle = screen.getByRole('button', { name: 'Toggle satellite imagery' })
-    // The toggle sits in a row beside the 3D button; the row and the overlay share the corner.
+    // The toggle sits in a row beside the 3D button; the row and the overview share the corner.
     expect(toggle.parentElement?.parentElement).toBe(screen.getByTestId('inset').parentElement)
+  })
+
+  it.each([
+    ['top-left', ['left-2', 'top-2']],
+    ['top-right', ['right-2', 'top-2']],
+    ['bottom-left', ['left-2', 'bottom-8']],
+    ['bottom-right', ['right-2', 'bottom-8']],
+  ] as const)('puts the overview in the %s corner, away from the toggles', (corner, classes) => {
+    render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} inset={<div data-testid="inset" />} insetCorner={corner} />)
+    expect(screen.getAllByTestId('inset')).toHaveLength(1)
+    const holder = screen.getByTestId('inset').parentElement as HTMLElement
+    for (const c of classes) expect(holder.className).toContain(c)
+    const toggle = screen.getByRole('button', { name: 'Toggle satellite imagery' })
+    if (corner !== 'top-right') expect(toggle.parentElement?.parentElement).not.toBe(holder)
   })
 
   it('remembers the choice under its own key, not the anchor map one', () => {
@@ -105,5 +119,36 @@ describe('PassageMap satellite imagery', () => {
     renderMap()
     expect(screen.queryByTestId('layer-world-imagery-layer')).toBeNull()
     expect(screen.getByRole('button', { name: 'Toggle satellite imagery' }).getAttribute('aria-pressed')).toBe('false')
+  })
+})
+
+describe('InsetMap zoom', () => {
+  const bounds: [number, number, number, number] = [148, -20.4, 149, -19.9]
+  const zoomOf = (offset?: number) => {
+    const { unmount } = render(<InsetMap bounds={bounds} isDarkTheme={false} zoomOffset={offset} />)
+    const z = Number(screen.getByTestId('map-root').dataset.zoom)
+    unmount()
+    return z
+  }
+
+  it('adds the steps to the automatic zoom', () => {
+    const auto = zoomOf()
+    expect(auto).toBeCloseTo(Math.log2(360 / 8), 5)
+    expect(zoomOf(0)).toBe(auto)
+    expect(zoomOf(2)).toBeCloseTo(auto + 2, 5)
+    expect(zoomOf(-3)).toBeCloseTo(auto - 3, 5)
+  })
+
+  it('stays inside zoom 0 to 12', () => {
+    expect(zoomOf(30)).toBe(12)
+    expect(zoomOf(-30)).toBe(0)
+  })
+
+  it('draws a fresh map when the step changes, since the first view is only applied on mount', () => {
+    const { rerender } = render(<InsetMap bounds={bounds} isDarkTheme={false} zoomOffset={0} />)
+    const first = screen.getByTestId('map-root')
+    rerender(<InsetMap bounds={bounds} isDarkTheme={false} zoomOffset={1} />)
+    expect(screen.getByTestId('map-root')).not.toBe(first)
+    expect(Number(screen.getByTestId('map-root').dataset.zoom)).toBeCloseTo(Math.log2(360 / 8) + 1, 5)
   })
 })

@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Choose the corner and zoom of the overview map.** On the passage replay,
+  with Overview map on, the slider icon beside it puts the small map in any
+  corner and makes it wider or closer by up to three steps. The choice is saved
+  with the passage, and the blog embed and the still images draw it the same
+  way. A passage you have not set keeps today's look, top right at the automatic
+  zoom.
+
 ### Fixed
 
 - **Passage replay no longer wobbles.** The camera and the boat turn smoothly

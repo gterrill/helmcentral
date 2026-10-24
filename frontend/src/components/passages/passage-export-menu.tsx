@@ -19,6 +19,7 @@ import {
 import type { DistanceUnits } from '@/config/app-config'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
+import { useInsetView } from '@/hooks/use-inset-view'
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import {
   DEFAULT_PLAY_SECONDS,
@@ -78,6 +79,9 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
       : null
   ), [exportable, hasTrack])
   const { shots, loading: shotsLoading, error: shotsError } = useCameraShots(span ? span.from : null, span ? span.to : null)
+  // The overview map's corner and zoom step are saved per passage, keyed by the
+  // first departure; the card and the images draw it the way the replay does.
+  const { view: insetView, loading: insetViewLoading, error: insetViewError } = useInsetView(span ? span.from : null)
 
   // Signs belong to real time too. The ones inside an exported passage go in
   // when Include signs is on, photos included.
@@ -123,7 +127,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   }, [menuOpen, includeSigns, photoKey, signsLoading])
 
   const exportInput = (prepared: ReadonlyMap<string, string> = photos): ExportInput => ({
-    kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, playSeconds, threeD, shots, hull,
+    kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, ...(insetView ? { insetView } : {}), playSeconds, threeD, shots, hull,
     ...(includeSigns ? { signs: signsInCard, photos: prepared } : {}),
   })
 
@@ -135,14 +139,14 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   // The card's size: exact once every photo is prepared, a guess (kept on the
   // high side) before that.
   const size = useMemo(() => {
-    if (!hasTrack || shotsLoading || shotsError || signsWait || signsFailed) return null
+    if (!hasTrack || shotsLoading || shotsError || insetViewLoading || insetViewError || signsWait || signsFailed) return null
     try {
       return estimateEmbed(exportInput())
     } catch {
       return null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasTrack, shotsLoading, shotsError, signsWait, signsFailed, signsInCard, photos, includeSigns, kind, title, passages, cruiseStats, units, inset, playSeconds, threeD, shots, hull])
+  }, [hasTrack, shotsLoading, shotsError, insetViewLoading, insetViewError, signsWait, signsFailed, signsInCard, photos, includeSigns, kind, title, passages, cruiseStats, units, inset, insetView, playSeconds, threeD, shots, hull])
   // The file name follows the same passages, order and zone as the card itself.
   const fileName = (input: ExportInput, ext: string) => {
     const data = prepareExport(input)
@@ -154,6 +158,10 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   const listsReady = () => {
     if (shotsError) {
       failed('read the camera shots', new Error(shotsError))
+      return false
+    }
+    if (insetViewError) {
+      failed('read where the overview map goes', new Error(insetViewError))
       return false
     }
     if (signsFailed) {
@@ -269,10 +277,10 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
           )}
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={shotsLoading || signsWait} onClick={() => void showEmbed()}>Copy blog embed</DropdownMenuItem>
-        <DropdownMenuItem disabled={shotsLoading || signsWait} onClick={() => void downloadPage()}>Download embed as HTML</DropdownMenuItem>
-        <DropdownMenuItem disabled={busy} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
-        <DropdownMenuItem disabled={busy} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
+        <DropdownMenuItem disabled={shotsLoading || insetViewLoading || signsWait} onClick={() => void showEmbed()}>Copy blog embed</DropdownMenuItem>
+        <DropdownMenuItem disabled={shotsLoading || insetViewLoading || signsWait} onClick={() => void downloadPage()}>Download embed as HTML</DropdownMenuItem>
+        <DropdownMenuItem disabled={busy || insetViewLoading} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
+        <DropdownMenuItem disabled={busy || insetViewLoading} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
     <PassageEmbedDialog embed={embed} onClose={() => setEmbed(null)} />

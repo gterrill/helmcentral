@@ -1,8 +1,12 @@
-import { Map as MapIcon, Pause, Play, Signpost, Video } from 'lucide-react'
+import { Map as MapIcon, Minus, Pause, Play, Plus, Signpost, SlidersHorizontal, Video } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { REPLAY_SPEEDS, type ReplaySpeedId } from '@/hooks/use-replay'
+import {
+  INSET_CORNERS, INSET_ZOOM_STEP_MAX, INSET_ZOOM_STEP_MIN, clampInsetStep, insetStepLabel, type InsetView,
+} from '@/lib/passage-inset-view'
 import { cn } from '@/lib/utils'
 
 /** A camera shot drawn as a mark on the scrubber. */
@@ -37,6 +41,10 @@ export interface PassageReplayBarProps {
   onScrub: (clock: number) => void
   onSpeed: (speed: ReplaySpeedId) => void
   onInsetChange: (on: boolean) => void
+  /** Where the overview map sits and how close it looks. */
+  insetView?: InsetView
+  /** Saves a new corner or zoom step. Without it the placement controls stay out of the bar. */
+  onInsetViewChange?: (view: InsetView) => void
   shotTicks?: ShotTick[]
   cameraOpen?: boolean
   onCameraToggle?: () => void
@@ -53,6 +61,7 @@ export interface PassageReplayBarProps {
 
 export function PassageReplayBar({
   clock, total, playing, readout, speed, insetOn, disabled, onToggle, onScrub, onSpeed, onInsetChange,
+  insetView, onInsetViewChange,
   shotTicks = [], cameraOpen = false, onCameraToggle, onTickClick, editor,
   signTicks = [], signsOpen = false, onSignsToggle, onSignTickClick, signsEditor,
 }: PassageReplayBarProps) {
@@ -159,20 +168,86 @@ export function PassageReplayBar({
           Signs
         </Button>
       )}
-      <Button
-        type="button"
-        size="sm"
-        variant={insetOn ? 'default' : 'outline'}
-        aria-pressed={insetOn}
-        className={cn(!onCameraToggle && !onSignsToggle && 'ml-auto')}
-        onClick={() => onInsetChange(!insetOn)}
-      >
-        <MapIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-        Overview map
-      </Button>
+      <span className={cn('flex items-center gap-1', !onCameraToggle && !onSignsToggle && 'ml-auto')}>
+        <Button
+          type="button"
+          size="sm"
+          variant={insetOn ? 'default' : 'outline'}
+          aria-pressed={insetOn}
+          onClick={() => onInsetChange(!insetOn)}
+        >
+          <MapIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+          Overview map
+        </Button>
+        {insetOn && insetView && onInsetViewChange && (
+          <InsetPlacement view={insetView} onChange={onInsetViewChange} />
+        )}
+      </span>
     </div>
     {cameraOpen && editor}
     {signsOpen && signsEditor}
     </div>
+  )
+}
+
+/** Corner and zoom step of the overview map, in a small popover beside its button. */
+function InsetPlacement({ view, onChange }: { view: InsetView; onChange: (view: InsetView) => void }) {
+  return (
+    <Popover>
+      <PopoverTrigger
+        render={<Button type="button" size="icon-sm" variant="outline" aria-label="Place overview map" />}
+      >
+        <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+      </PopoverTrigger>
+      <PopoverContent align="end" side="top" className="flex w-56 flex-col gap-3 p-3">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Corner</span>
+          <div role="group" aria-label="Overview map corner" className="grid grid-cols-2 gap-1">
+            {INSET_CORNERS.map((c) => (
+              <Button
+                key={c.id}
+                type="button"
+                size="sm"
+                variant={view.corner === c.id ? 'default' : 'outline'}
+                aria-pressed={view.corner === c.id}
+                onClick={() => onChange({ ...view, corner: c.id })}
+              >
+                {c.label}
+              </Button>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Zoom</span>
+          <div role="group" aria-label="Overview map zoom" className="flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label="Zoom out"
+              disabled={view.zoomOffset <= INSET_ZOOM_STEP_MIN}
+              onClick={() => onChange({ ...view, zoomOffset: clampInsetStep(view.zoomOffset - 1) })}
+            >
+              <Minus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+              Wider
+            </Button>
+            <span data-testid="inset-zoom-step" className="min-w-6 text-center text-xs tabular-nums text-foreground">
+              {insetStepLabel(view.zoomOffset)}
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-label="Zoom in"
+              disabled={view.zoomOffset >= INSET_ZOOM_STEP_MAX}
+              onClick={() => onChange({ ...view, zoomOffset: clampInsetStep(view.zoomOffset + 1) })}
+            >
+              <Plus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+              Closer
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
