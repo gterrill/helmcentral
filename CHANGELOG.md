@@ -65,6 +65,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A web page tile that runs a few pixels past a wall display's edge no
+  longer goes blank.** It is now trimmed to the screen instead. On a wall
+  mounted upside down, a live camera picture still needs the camera page's own
+  wall mode (HelmCam's kiosk view) to show.
 - **A sign you opened on the chart no longer stays up through the replay.**
   Pressing Play now closes it, so each sign shows only for the time it is set
   to.
