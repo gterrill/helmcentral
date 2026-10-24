@@ -224,11 +224,10 @@ function InsetPlacement({ view, onChange }: { view: InsetView; onChange: (view: 
               type="button"
               size="sm"
               variant="outline"
-              aria-label="Zoom out"
               disabled={view.zoomOffset <= INSET_ZOOM_STEP_MIN}
               onClick={() => onChange({ ...view, zoomOffset: clampInsetStep(view.zoomOffset - 1) })}
             >
-              <Minus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+              <Minus className="h-4 w-4 shrink-0" data-icon="inline-start" aria-hidden="true" />
               Wider
             </Button>
             <span data-testid="inset-zoom-step" className="min-w-6 text-center text-xs tabular-nums text-foreground">
@@ -238,11 +237,10 @@ function InsetPlacement({ view, onChange }: { view: InsetView; onChange: (view: 
               type="button"
               size="sm"
               variant="outline"
-              aria-label="Zoom in"
               disabled={view.zoomOffset >= INSET_ZOOM_STEP_MAX}
               onClick={() => onChange({ ...view, zoomOffset: clampInsetStep(view.zoomOffset + 1) })}
             >
-              <Plus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+              <Plus className="h-4 w-4 shrink-0" data-icon="inline-start" aria-hidden="true" />
               Closer
             </Button>
           </div>

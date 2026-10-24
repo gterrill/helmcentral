@@ -130,8 +130,8 @@ describe('ReplayPanel', () => {
       render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
       turnOn()
       fireEvent.click(await screen.findByRole('button', { name: 'Place overview map' }))
-      fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
-      fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Closer' }))
+      fireEvent.click(screen.getByRole('button', { name: 'Closer' }))
       expect(screen.getByTestId('inset')).toHaveAttribute('data-zoom-offset', '2')
       await waitFor(() => expect(puts).toHaveLength(2))
       expect(puts).toEqual([

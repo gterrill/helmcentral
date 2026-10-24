@@ -47,23 +47,23 @@ describe('the overview map placement controls', () => {
     const { onInsetViewChange } = bar({ insetView: { corner: 'top-left', zoomOffset: 1 } })
     open()
     expect(screen.getByTestId('inset-zoom-step')).toHaveTextContent('+1')
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Wider' }))
     expect(onInsetViewChange).toHaveBeenLastCalledWith({ corner: 'top-left', zoomOffset: 0 })
-    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Closer' }))
     expect(onInsetViewChange).toHaveBeenLastCalledWith({ corner: 'top-left', zoomOffset: 2 })
   })
 
   it('stop at three steps either way', () => {
     bar({ insetView: { corner: 'top-left', zoomOffset: 3 } })
     open()
-    expect(screen.getByRole('button', { name: 'Zoom in' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Closer' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Wider' })).toBeEnabled()
   })
 
   it('stop at the wide end too', () => {
     bar({ insetView: { corner: 'top-left', zoomOffset: -3 } })
     open()
     expect(screen.getByTestId('inset-zoom-step')).toHaveTextContent('-3')
-    expect(screen.getByRole('button', { name: 'Zoom out' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Wider' })).toBeDisabled()
   })
 })
