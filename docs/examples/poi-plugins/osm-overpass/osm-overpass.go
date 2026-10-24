@@ -1029,7 +1029,7 @@ func runPlaceNameAt(post overpassQueryFunc, lat, lon float64, radiusM int) (plac
 // ── search_places ──────────────────────────────────────────────────────
 //
 // Ports backend/assistant_tools.go's find_places two-rung ladder (ADR 0093):
-// rung 1 is always an exact nwr["name"="<variant>"] match over a 100nm box
+// rung 1 is always an exact nwr["name"="<variant>"] match over a 200nm box
 // (findPlacesExactNameVariants); rung 2 - a case-insensitive partial-name
 // regex over a tighter 20nm box - only runs when rung 1 found nothing AND
 // the host says to broaden the search (runSearchPlaces' broad parameter).
@@ -1048,7 +1048,7 @@ func runPlaceNameAt(post overpassQueryFunc, lat, lon float64, radiusM int) (plac
 // searchPlacesResultCap) and leaves ranking/trimming to the host.
 
 const (
-	searchPlacesExactRadiusNm = 100.0
+	searchPlacesExactRadiusNm = 200.0
 	searchPlacesRegexRadiusNm = 20.0
 )
 
@@ -1069,8 +1069,9 @@ const searchPlacesResultCap = 50
 // three separate HTTP connections and JSON parsing on top of whatever
 // Overpass itself takes. Measured live against overpass.openstreetmap.fr on
 // 2026-09-11 (backend/assistant_tools.go, ADR 0093 section 8): an
-// exact-name match answers in about 1s even at the full 100nm rung 1 radius
-// (Overpass uses its name index directly), and the rung 2 regex union
+// exact-name match answers in about 1s even at the full rung 1 radius (1.2s
+// at 200nm, measured 2026-10-24; Overpass uses its name index directly),
+// and the rung 2 regex union
 // answers in 2 to 5s at 20nm (not indexable, a full scan of the box).
 const (
 	searchPlacesExactTimeoutSeconds     = 4

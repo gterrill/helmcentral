@@ -44,6 +44,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Place lookups reach twice as far.** Searching for a place by its full
+  name, from the Forecast page or by asking Mate, now looks up to 200 nautical
+  miles from the boat instead of 100. A partial name still searches the
+  nearest 20. Update the OpenStreetMap place-names plugin to get it.
 - **The plotter's route alarms read plainly.** "Perpendicular passed" is now
   **Waypoint Passed** and "Arrival circle entered" is now **Arriving at
   Waypoint**, each with one sentence saying what it means.
