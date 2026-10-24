@@ -4,7 +4,7 @@
     "label": "Overpass server",
     "type": "url",
     "placeholder": "https://overpass-api.de/api/interpreter",
-    "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it; that mirror only answers networks it has approved, so it may refuse yours. Any mirror other than those two must also be added to this plugin's allowed hosts."
+    "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it; that mirror only answers networks it has approved, so it may refuse yours. A server on your own network can use plain http, for example http://192.168.1.20:12345/api/interpreter; any other address must be https. Any server other than the public two must also be added to this plugin's allowed hosts."
   },
   {
     "key": "detail_limit",

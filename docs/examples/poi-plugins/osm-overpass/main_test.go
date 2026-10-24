@@ -584,7 +584,7 @@ func TestResolveOverpassURL_RejectsMalformedValueRatherThanFallingBack(t *testin
 	cases := []string{
 		"not a url",
 		"overpass.kumi.systems/api/interpreter",        // no scheme
-		"http://overpass.kumi.systems/api/interpreter", // not https
+		"http://overpass.kumi.systems/api/interpreter", // http to a public host
 		"https://", // no host
 		"ftp://overpass.kumi.systems/api/interpreter", // wrong scheme
 	}
@@ -598,6 +598,67 @@ func TestResolveOverpassURL_RejectsMalformedValueRatherThanFallingBack(t *testin
 		}
 		if got != "" {
 			t.Fatalf("expected no fallback to the default on a malformed value, got %q", got)
+		}
+	}
+}
+
+func TestResolveOverpassURL_AcceptsPlainHTTPOnLocalNetwork(t *testing.T) {
+	cases := []string{
+		"http://192.168.1.20:12345/api/interpreter",
+		"http://100.64.0.1:12345/api/interpreter",
+		"http://100.127.255.254/api/interpreter",
+		"http://helmbox.tail1234.ts.net:12345/api/interpreter",
+		"http://10.0.0.5/api/interpreter",
+		"http://172.16.3.4:8080/api/interpreter",
+		"http://127.0.0.1:12345/api/interpreter",
+		"http://169.254.1.2/api/interpreter",
+		"http://[fd00::1]:12345/api/interpreter",
+		"http://[::1]:12345/api/interpreter",
+		"http://overpass/api/interpreter",
+		"http://overpass:12345/api/interpreter",
+		"http://overpass.local/api/interpreter",
+		"http://overpass.lan:12345/api/interpreter",
+		"http://overpass.internal/api/interpreter",
+		"http://overpass.home.arpa/api/interpreter",
+		"http://localhost:12345/api/interpreter",
+		"http://LOCALHOST:12345/api/interpreter",
+	}
+	for _, raw := range cases {
+		got, err := resolveOverpassURL(raw, true)
+		if err != nil {
+			t.Fatalf("expected %q to be accepted, got %v", raw, err)
+		}
+		if got != raw {
+			t.Fatalf("expected %q, got %q", raw, got)
+		}
+	}
+}
+
+func TestResolveOverpassURL_RejectsPlainHTTPOffTheLocalNetwork(t *testing.T) {
+	cases := []string{
+		"http://overpass-api.de/api/interpreter",
+		"http://8.8.8.8/api/interpreter",
+		"http://100.128.0.1/api/interpreter", // just above 100.64/10
+		"http://100.63.255.255/api/interpreter",
+		"http://134744072/api/interpreter", // libc reads this as 8.8.8.8
+		"http://0x08080808/api/interpreter",
+		"http://0x7f000001/api/interpreter",
+		"https://:443/api/interpreter",
+		"http://172.32.0.1/api/interpreter", // just outside 172.16/12
+		"http://[2001:db8::1]/api/interpreter",
+		"http://notlocal.example.com/api/interpreter",
+		"http://evil.local.example.com/api/interpreter",
+		"ftp://192.168.1.2/x",
+		"https://",
+		"http://",
+	}
+	for _, raw := range cases {
+		got, err := resolveOverpassURL(raw, true)
+		if err == nil {
+			t.Fatalf("expected %q to be rejected, got %q", raw, got)
+		}
+		if !strings.Contains(err.Error(), "overpass_url") || got != "" {
+			t.Fatalf("bad rejection for %q: url %q err %v", raw, got, err)
 		}
 	}
 }

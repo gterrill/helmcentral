@@ -74,6 +74,8 @@ Steps for specific tasks.
 - [Set passage limits](how-to/set-passage-limits.md)
 - [Turn on the offline coastline](how-to/turn-on-the-offline-coastline.md),
   filling it, keeping it current and clearing it.
+- [Run your own Overpass server](how-to/run-your-own-overpass-server.md), a
+  place-names server aboard that answers fast and works offline.
 - [Set up your vessel](how-to/set-up-your-vessel.md), picking the engines and
   house bank anomaly detection watches, and entering owner and insurance
   details.

@@ -227,7 +227,7 @@ enrichment" below),
     "label": "Overpass server",
     "type": "url",
     "placeholder": "https://overpass-api.de/api/interpreter",
-    "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it; that mirror only answers networks it has approved, so it may refuse yours. Any mirror other than those two must also be added to this plugin's allowed hosts."
+    "help": "Blank uses the public overpass-api.de. Use a mirror such as https://overpass.openstreetmap.fr/api/interpreter if your network refuses it; that mirror only answers networks it has approved, so it may refuse yours. A server on your own network can use plain http, for example http://192.168.1.20:12345/api/interpreter; any other address must be https. Any server other than the public two must also be added to this plugin's allowed hosts."
   },
   {
     "key": "detail_limit",
@@ -250,7 +250,11 @@ very next call with no plugin reload or Helmcentral restart. Leaving
 `overpass-api.de` default.
 
 `resolveOverpassURL` (`osm-overpass.go`) requires the stored value to parse
-as an absolute `https://` URL. A present-but-malformed value fails the
+as an absolute `https://` URL, or as an `http://` URL whose host is on the
+local network: a private, loopback or link-local IP address, `localhost`, a
+name ending `.local`, `.lan`, `.internal`, `.home.arpa` or `.ts.net`, a Tailscale
+(100.64.0.0/10) address, or a single-word name such as a Docker service name. A port is allowed. Plain http to any
+public address is rejected. A present-but-malformed value fails the
 `fetch_poi` call outright, naming the `overpass_url` key in the error - it
 never falls back to the default silently, since a broken setting almost
 certainly wasn't meant to keep querying overpass-api.de. The Settings API
