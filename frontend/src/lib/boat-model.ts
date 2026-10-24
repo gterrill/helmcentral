@@ -171,6 +171,49 @@ export function nextHeading(last: HeadingState | null, cursor: { id: string; at:
   return { id: cursor.id, at: cursor.at, heading: trackHeading(segments, cursor.at, continuing ? last.heading : null) }
 }
 
+/** The track heading is a chord over a span behind the boat, so as the replay
+ * runs it twitches each time that span crosses a fix. Smoothing it in watched
+ * seconds (not track time) keeps the settle rate the same at every speed. */
+export const HEADING_SMOOTH_S = 0.6
+
+/** The longest span of watched time one step eases across. A stalled frame or
+ * a background tab must not turn into one big lurch. */
+const HEADING_MAX_DT_S = 0.5
+
+/** Holds a heading and eases it toward each new target, by the shortest arc.
+ * Time is measured here, from the timestamps the caller passes in. */
+export class HeadingSmoother {
+  private held: number | null = null
+  private lastMs: number | null = null
+
+  /** Say that time passed without easing across it (a pause, a stalled frame):
+   * the next step measures from `nowMs`. */
+  hold(nowMs: number): void {
+    this.lastMs = nowMs
+  }
+
+  /** `snap` takes the target exactly; a null target with snap clears the
+   * held value. Otherwise a null target keeps what is held. */
+  step(target: number | null, nowMs: number, opts: { snap?: boolean } = {}): number | null {
+    const dtS = this.lastMs === null ? 0 : Math.min(HEADING_MAX_DT_S, Math.max(0, (nowMs - this.lastMs) / 1000))
+    this.lastMs = nowMs
+    if (opts.snap) {
+      this.held = target
+      return this.held
+    }
+    if (target === null) return this.held
+    if (this.held === null) {
+      this.held = target
+      return this.held
+    }
+    if (dtS <= 0) return this.held
+    const alpha = 1 - Math.exp(-dtS / HEADING_SMOOTH_S)
+    const diff = ((((target - this.held) % 360) + 540) % 360) - 180
+    this.held = (((this.held + diff * alpha) % 360) + 360) % 360
+    return this.held
+  }
+}
+
 export interface BoatMarkerInput {
   threeD: boolean
   terrain: 'ok' | 'failed' | 'retrying'

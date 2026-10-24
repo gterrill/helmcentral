@@ -9,7 +9,7 @@
 import type * as MapLibre from 'maplibre-gl'
 
 import { createBoatLayer, type BoatLayer } from '@/lib/boat-layer'
-import { boatMarkerKind, nextHeading, type HeadingState } from '@/lib/boat-model'
+import { boatMarkerKind, HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
 import { fitZoomForPitch } from '@/lib/pitch-fit'
 import type { ExportData } from '@/lib/passage-export'
 import { createSailedCache } from '@/lib/passages'
@@ -313,6 +313,10 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
 
   const wantHeading = () => (data.d3 && hull !== null) || plan.shots.length > 0
   let lastHeading: HeadingState | null = null
+  // The raw track heading twitches as its chord crosses fixes; the model and
+  // the camera both take this eased one, stepped in watched seconds.
+  const smoother = new HeadingSmoother()
+  let smoothedHeading: number | null = null
 
   function showState(s: CardState) {
     if (s.pos) {
@@ -321,8 +325,10 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     }
     if (wantHeading() && s.pos) {
       const at = s.night ? data.passages[s.index].b : s.t
+      const sameLeg = lastHeading !== null && lastHeading.id === String(s.index)
       lastHeading = nextHeading(lastHeading, { id: String(s.index), at }, plan.segments[s.index])
-      lastPose = { lat: s.pos[1], lon: s.pos[0], headingDeg: lastHeading.heading }
+      smoothedHeading = smoother.step(lastHeading.heading, performance.now(), { snap: reduced || !sameLeg })
+      lastPose = { lat: s.pos[1], lon: s.pos[0], headingDeg: smoothedHeading }
       if (modelReady && modelLayer) modelLayer.setPose(lastPose)
     }
     els.passage.textContent = s.passage
@@ -427,7 +433,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     const overview = overviewCamera()
     if (!overview) return
     const current = readCamera()
-    const heading = wantHeading() && lastHeading ? lastHeading.heading : null
+    const heading = wantHeading() && lastHeading ? smoothedHeading : null
     const result = director.frame(
       {
         overview,
@@ -460,6 +466,8 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
 
   function frame(now: number) {
     if (!playing) return
+    // A stalled frame (a background tab) is not eased across.
+    if (now - lastTick > 250) smoother.hold(performance.now())
     if (!paused) {
       clock = Math.min(plan.total, clock + (now - lastTick) / 1000)
       const s = plan.stateAt(clock)
@@ -492,6 +500,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     started = true
     clock = 0
     lastHeading = null
+    smoother.hold(performance.now())
     playing = true
     paused = false
     setMode('playing', 'Pause')
@@ -552,6 +561,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
       root.classList.toggle('hcp-paused', paused)
       showSigns(true)
       lastTick = performance.now()
+      smoother.hold(lastTick)
       if (!paused) resume++
       return
     }
