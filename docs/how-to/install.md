@@ -1,31 +1,31 @@
 # Installing Helmcentral
 
-The one-line installer covers most cases:
+The one-line installer covers most boats:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/gterrill/helmcentral/main/install.sh | sh
 ```
 
 Then open `http://<this-machine>:8080/`. On first run Helmcentral searches the
-network for a SignalK server and offers what it finds, without requiring manual
-configuration.
+network for a SignalK server and offers what it finds, so there is nothing
+to configure by hand.
 
 The other installation options are described below.
 
 > [!WARNING]
-> **Authentication is off by default** (`auth.mode: none`). A fresh install's
-> API can control connected equipment, including generator start/stop and CZone
+> **Authentication is off by default** (`auth.mode: none`). A fresh install can
+> control connected equipment, including generator start/stop and CZone
 > switching, with no login. Run it on a trusted boat LAN and do not port-forward
-> it to the internet. For remote access, put it behind a VPN or an
-> authenticating reverse proxy either way. See
+> it to the internet. For remote access, use a VPN or an authenticating reverse
+> proxy. See
 > [Configuration](../reference/configuration.md) for turning login on.
 
 ## Install script
 
-The script detects the platform, verifies the download against the
-published checksums, installs to `/usr/local/bin`, creates `/var/lib/helmcentral`
-for state, installs the reference plugin bundle, and enables a systemd service
-on Linux.
+The script detects the platform and checks the download against the
+published checksums. It installs to `/usr/local/bin`, creates `/var/lib/helmcentral`
+for state, installs the reference plugin bundle, and on Linux enables a systemd
+service.
 
 **Re-run it any time to upgrade.** Settings and data are left alone.
 
@@ -84,7 +84,7 @@ docker compose pull
 docker compose up -d --force-recreate
 ```
 
-The dashboard and API are served at <http://localhost:9091>. Change the left-hand side of
+The dashboard is served at <http://localhost:9091>. Change the left-hand side of
 the port mapping to serve it elsewhere. State goes to `./backend-data`, created
 on first run, so nothing needs to exist beforehand.
 

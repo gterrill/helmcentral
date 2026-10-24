@@ -8,7 +8,7 @@ to reach the boat afterwards.
 ## Before you start
 
 - The blog needs to be a Ghost site where you can add an HTML card to a post.
-- Only finished passages can be exported; a leg still underway is not stored
+- Only finished passages can be exported. A leg still underway is not stored
   until it ends.
 - Set the passage titles, cruise names and place names the way you want your
   readers to see them first. See [Edit a passage](edit-passages.md).
@@ -35,9 +35,9 @@ to reach the boat afterwards.
    it counts the signs in the passages you are exporting, for example "5 signs,
    3 photos", and under that the menu shows the size of the card. While the
    photos are being prepared the size reads "about" and leans high, and a line
-   shows progress; it settles to the exact size once they are done. If even the
-   estimate is over 3 MB the menu says so before you choose. See [Film a passage replay](film-a-passage-replay.md)
-   for adding signs.
+   shows progress. It settles to the exact size once they are done. If even the
+   estimate is over 3 MB the menu says so before you choose. See
+   [Film a passage replay](film-a-passage-replay.md) for adding signs.
 7. Choose **Copy blog embed**. The embed opens in a box, already selected.
    Press **Copy**. If the box says to press ⌘C (Ctrl+C), the browser would not
    copy for Helmcentral, which can happen over a plain `http` address. The
@@ -47,7 +47,7 @@ to reach the boat afterwards.
 To look at it before it goes into a post, choose **Download embed as HTML**
 and open the saved file in a browser.
 
-Any camera shots you have set on the replay go into the card as they are; there
+Any camera shots you have set on the replay go into the card as they are. There
 is nothing to tick. See [Film a passage replay](film-a-passage-replay.md)
 for setting them. If Helmcentral cannot read your shots, **Copy blog embed** and
 **Download embed as HTML** tell you so and stop, rather than hand you a card
@@ -61,7 +61,7 @@ signs you are exporting carry more than that, **Copy blog embed** and **Download
 embed as HTML** stop and name the largest photos and their sizes. Untick
 **Include signs**, or take photos off some signs (pick the sign in the sign
 editor and remove its photo), and export again. If a photo cannot be read, the
-export stops and names the sign; Helmcentral does not leave the photo out and
+export stops and names the sign. Helmcentral does not leave the photo out and
 carry on.
 
 ## Save a picture
@@ -71,11 +71,11 @@ social card, or **Download image 2:1** for a wide picture at twice the size
 (2400 × 1200). Each shows the whole track with its title, dates and figures,
 and the overview map if it is ticked. If the satellite button on the
 passage map is on, the picture is drawn over the aerial photographs and carries
-their credit; switch it off first for the plain chart. The file is named from the title and the
-first date, for example `hamilton-island-to-mackay-2026-09-14.png`. Drawing
+their credit. Switch it off first for the plain chart. The file is named from
+the title and the first date, for example `hamilton-island-to-mackay-2026-09-14.png`. Drawing
 takes a few seconds, because the map tiles are fetched first, and it needs the
 boat's screen to be online. If the photographs cannot be fetched, even for one
-patch of the map, no picture is saved and you are told so; try again when the
+patch of the map, no picture is saved and you are told so. Try again when the
 boat is online, or switch the satellite button off to get the chart. The Esri
 credit is added only when the picture is zoomed in far enough to show photographs.
 
@@ -100,14 +100,14 @@ fetched, the glowing dot stays.
 
 Camera shots you set on the replay play for readers too: the camera eases into
 each one, follows or circles the boat, and slows the replay where you set a
-pace. The play length you chose is stretched by those paces: a stretch at half
+pace. The play length you chose is stretched by those paces. A stretch at half
 pace takes twice as long to watch, so the card can run longer than the 30
-seconds you picked. Readers can take hold of the
-map with a mouse drag or a pinch, and the replay leaves the camera alone until
-the next shot begins; a tap does nothing. Readers cannot change 3D or add
+seconds you picked. Readers can take hold of the map with a mouse drag or a
+pinch, and the replay leaves the camera alone until the next shot begins. A
+tap does nothing. Readers cannot change 3D or add
 satellite photographs. The map's credit line shows as a small ⓘ in the corner,
-and opens when a reader taps it. If their device asks for reduced motion, the camera cuts
-between framings instead of moving.
+and opens when a reader taps it. If their device asks for reduced motion, the
+camera cuts between framings instead of moving.
 
 If the hills cannot be fetched for a reader, a small "Terrain unavailable"
 notice shows and the map plays flat, with shots reduced to a zoom and a centre.
@@ -135,7 +135,7 @@ figure the boat did not record is left out rather than shown as `--`.
 - The map tiles come from public map servers (Carto for the chart, OpenSeaMap
   for the seamarks) and are fetched by the reader's own browser. Their credits
   show on the map. The map software is loaded from a public software library.
-  The blog map never carries satellite photographs; only a saved picture does.
+  The blog map never carries satellite photographs. Only a saved picture does.
 - With **3D** ticked the reader's browser also fetches the land heights from
   Amazon's public elevation data, and, if your vessel has a hull type, the
   drawing library for the boat model from the same public software library
@@ -153,7 +153,7 @@ figure the boat did not record is left out rather than shown as `--`.
   on the longest side and saved again as new JPEG files, which removes the
   location and camera details the original carries, so a photo's GPS position
   does not go with it. The photos are written into the card itself and nothing
-  is fetched from the boat. A sign's setting for when it shows goes too; nothing
+  is fetched from the boat. A sign's setting for when it shows goes too, and nothing
   else about it does. Signs outside the passages you are exporting stay on the
   boat. Untick **Include signs** and none go.
 - Only the track, the shots, the signs, the hull details and the figures above go
@@ -176,13 +176,13 @@ img-src      data: blob: https://basemaps.cartocdn.com https://tiles.basemaps.ca
 worker-src   blob:
 ```
 
-What each is for: the card is pasted into the page, so it needs inline script and
-style; `cdn.jsdelivr.net` serves the map software and, for the boat model, one
-more file; `blob:` lets the map's background workers and the boat model run;
-`s3.amazonaws.com` serves the land heights; the Carto and OpenSeaMap hosts serve
-the chart and seamarks. Without `s3.amazonaws.com` in `connect-src` the card says
-"Terrain unavailable" and plays flat; without `cdn.jsdelivr.net` in `connect-src`
-or `blob:` in `script-src` the boat stays a glowing dot. The browser's console
+What each is for. The card is pasted into the page, so it needs inline script and
+style. `cdn.jsdelivr.net` serves the map software and, for the boat model, one
+more file. `blob:` lets the map's background workers and the boat model run.
+`s3.amazonaws.com` serves the land heights, and the Carto and OpenSeaMap hosts
+serve the chart and seamarks. Without `s3.amazonaws.com` in `connect-src` the
+card says "Terrain unavailable" and plays flat. Without `cdn.jsdelivr.net` in
+`connect-src` or `blob:` in `script-src` the boat stays a glowing dot. The browser's console
 says which of these to check, once.
 
 ## After you change a passage

@@ -15,7 +15,7 @@ of instrument tiles reading live off the boat's own instrument network.
 Lose the link between this screen and Helmcentral and a **Server connection
 unavailable** banner takes the top of the page, on a phone as well as at the
 helm. You cannot dismiss it. Everything below it is the last thing that
-arrived: telemetry, anchor-watch state and alarm status alike. Read them as
+arrived: telemetry, anchor-watch state and alarm status alike. Read it as
 history, not as the state of the boat right now.
 
 The dashboard reconnects on its own. It raises the warning immediately when
@@ -28,7 +28,7 @@ clears the warning.
 That banner tracks one thing: this screen's link to Helmcentral. A source
 dropping off the boat's own network is a different problem, covered under
 [When a source goes quiet](#when-a-source-goes-quiet). Alarms carry on
-running on the Helmcentral box while a phone cannot reach it; the phone
+running on the Helmcentral box while a phone cannot reach it. The phone
 simply cannot tell you what they are doing.
 
 ## Instrument tiles
@@ -46,8 +46,8 @@ for the full catalog and every tile's fields.
 
 One strip of labelled status cells and a CHK cell, pinned above the grid on every
 dashboard page, inside whatever skin that page uses. The strip belongs to the
-vessel, not to the page: same lamps, same order, wherever you look, so a
-glance always means the same thing. It stays off the Forecast, Radar,
+vessel, not to the page. It has the same lamps in the same order wherever you
+look, so a glance always means the same thing. It stays off the Forecast, Radar,
 Anchor Watch and Settings panels, which rely on the alarm banner instead, and
 off wall displays, where it would spend a third of a 360px-tall strip on the
 least page-specific information on screen.
@@ -60,14 +60,14 @@ quiet never keeps showing its last "on". While an active alarm is on a cell's
 signal it turns amber or red to match the alarm, whether the system is running
 or not, so the ribbon never disagrees with the alarm card. Tapping a cell
 with an alarm opens the alarms panel. Cells can be given a group such as
-Propulsion or Power; neighbouring cells in the same group share one heading.
+Propulsion or Power, and neighbouring cells in the same group share one heading.
 The row wraps onto more lines on a narrow screen instead of scrolling.
 
 The CHK cell sits first. Quiet, it reads CHK. With alarms active it widens,
 takes the colour of the worst one and reads the number active and that
 alarm's title.
 
-Its order never changes on its own: a lamp that trips does not jump to the
+Its order never changes on its own. A lamp that trips does not jump to the
 front, and a lamp that clears does not vanish, because a ribbon earns its
 place only if you can memorize it. Triage belongs to the alarm banner
 instead, which counts each severity currently active, worst first.
@@ -100,7 +100,7 @@ anchorage page. Everything else keeps the position you gave it.
 
 The Wind and Engine Cluster tiles are drawn at a fixed proportion and fill
 whatever size you give them, centred in the tile, up to twice their usual
-size. Drag one larger and the dial and its readings grow with it; make it
+size. Drag one larger and the dial and its readings grow with it. Make it
 smaller and they shrink. On a phone or a narrow window they fit the width of
 the screen as before.
 
@@ -132,9 +132,8 @@ Tap the full screen button (four outward corners) in the header and the
 sidebar, header and browser bars all go, leaving the tiles on the whole
 screen. A tablet mounted at the helm or a screen at the nav station then reads
 like a dedicated instrument. A live alarm still shows over
-the grid; full screen never quiets one. Press Esc, or tap the small exit
-button that appears in the corner for a screen with no keyboard, to bring the
-sidebar and header back. Following an alarm banner into the alarms list also
+the grid, because full screen never quiets one. To bring the sidebar and header back, press Esc, or on a screen with no
+keyboard tap the small exit button that appears in the corner. Following an alarm banner into the alarms list also
 brings them back, since you need the sidebar to get anywhere else from there.
 On a touchscreen, swipe left or right anywhere on the grid to move to the
 next or previous page, the same order they're listed in normally. A page
@@ -167,7 +166,7 @@ not a board you want filling a television, so a page you like moves to
 another screen as a duplicate you then rearrange for its new shape, and it
 loses its hero tile once it is on a display, since the hero's extra row
 spends the vertical room the wall is measuring. Deleting a display never
-deletes its pages; they return to the ordinary page list.
+deletes its pages. They return to the ordinary page list.
 
 The pinned indicator ribbon never draws on a wall display, whatever page is
 showing. If a page needs status lamps there, it carries its own indicator
@@ -184,7 +183,7 @@ The address bar follows the panel you are on, so you can link straight to it.
 
 | URL | Opens |
 | --- | --- |
-| `/` | The dashboard; on first load, this browser's remembered page if it still exists, otherwise the first page. |
+| `/` | The dashboard. On first load, this browser's remembered page if it still exists, otherwise the first page. |
 | `/dashboard/<page id>` | The dashboard, that page. |
 | `/forecast` | The forecast drawer. |
 | `/radar` | Radar targets. |
@@ -194,7 +193,7 @@ The address bar follows the panel you are on, so you can link straight to it.
 | `/settings/<section id>` | Settings, that section. |
 | `/display/<address>` | That wall display: fullscreen, no sidebar, cycling the pages assigned to it. |
 
-The first page answers to `/` as its canonical address; reorder the pages so
+The first page answers to `/` as its canonical address. Reorder the pages so
 a different one comes first and the address follows, without switching the
 page you are looking at.
 
@@ -226,8 +225,8 @@ A tile's edge takes the colour of the worst alert level any of its readings
 currently sits in: sky for alert, amber for warn, red for alarm, a deeper red
 wash for emergency. A dot beside the title carries the same colour, since a
 border alone is easy to miss along the edge of a screen. A tile with every
-reading in its normal band draws no attention at all, on the same principle
-as the rest of the board: colour is spent only where something needs it. A
+reading in its normal band draws no attention at all. Colour is spent only
+where something needs it. A
 reading with no warn or alarm threshold set for it stays quiet too, until you
 set one in Settings. See [Tile state colours](../reference/tiles.md#tile-state-colours)
 for the full rule, including how a stale tile overrides its band colour.
@@ -236,11 +235,11 @@ for the full rule, including how a stale tile overrides its band colour.
 
 Four cards, State, Net, Solar and Loads, plus a Shore line once the shore
 charger has something to report. State is the big number, state of charge,
-with a bar underneath; neither turns amber or red until you set a matching
-alarm rule, see [Set the battery state-of-charge
-bands](../how-to/set-battery-state-of-charge-bands.md). The footer projects
-the same state of charge at sunrise, the **Dawn figure**, so you can tell at
-a glance whether the bank holds until morning. See [Battery & Power
+with a bar underneath. Neither turns amber or red until you set a matching
+alarm rule (see [Set the battery state-of-charge
+bands](../how-to/set-battery-state-of-charge-bands.md)). The footer projects
+the same state of charge at sunrise, the **Dawn figure**, so you can tell
+whether the bank holds until morning. See [Battery & Power
 fields](../reference/tiles.md#battery--power-fields) for what each card
 shows and how the Dawn figure is worked out.
 
@@ -264,8 +263,8 @@ The map keeps the vessel at the centre with the five nearest matches in view,
 but never zooms in tighter than the range. In the map-and-list layout one row
 at a time is highlighted, moving to the next match every few seconds and back
 to the first once it reaches the end, and that match's marker gets a ring. Its
-description shows too when it has one - many points of interest, especially
-from OpenStreetMap, don't. The map dives in to the first match and tilts, holds
+description shows too when it has one, though many points of interest,
+especially from OpenStreetMap, don't have any. The map dives in to the first match and tilts, holds
 there, then flies straight on to each next one in a high arc that rises far
 enough to show the boat and the whole area on the way. After the last match it
 pulls back out to the view centred on the boat and rests on it before starting
@@ -295,8 +294,8 @@ waypoint you are heading for, the tile shows that waypoint instead. See
 ### Autopilot
 
 Engage and disengage, mode, heading nudges, tack and gybe either way, and
-dodge. Helmcentral drives pilots through the modern autopilot interface only;
-a pilot offering nothing but the older legacy steering controls will not
+dodge. Helmcentral drives pilots through the modern autopilot interface only.
+A pilot offering nothing but the older legacy steering controls will not
 respond, and Helmcentral will not quietly fall back to them.
 
 The tile reports what the pilot last said about itself, never what your last
@@ -316,7 +315,7 @@ map centred on the vessel.
 Radar is optional and stays off unless the pieces are there: mayara-server
 running against the physical radar, and its plugin installed on the boat's
 instrument server. Helmcentral needs no configuration of its own beyond
-that and finds the radar on the feed; without both pieces the tile reads
+that and finds the radar on the feed. Without both pieces the tile reads
 `—`.
 
 ### Max wind gust

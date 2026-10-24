@@ -10,7 +10,7 @@ screen or the fourth.
 
 ## 1. Check the device first
 
-Before configuring anything, load `/display-probe.html` on the actual browser
+Before you configure anything, load `/display-probe.html` on the actual browser
 and device that will drive the screen, not on a desktop. Results go to the
 backend log, since the narrowest screen here is 360px tall and cannot show a
 long report:
@@ -36,21 +36,21 @@ the ones you are really there for:
   1280x720 against a 4K panel.
 - **keys** is a live readout, on screen rather than in the log, of the last
   four keys pressed. Point the remote at the screen and press the direction
-  keys, OK, and back; each press shows its name and code. The same lines go
-  to the log so you can read them off later. This is how you confirm the
-  remote drives the rotation before relying on it.
+  keys, OK, and back. Each press shows its name and code, and the same lines go
+  to the log so you can read them off later. Use it to confirm the remote
+  drives the rotation before you rely on it.
 
-The rest are capability checks: a hardware graphics context (a software
-renderer such as SwiftShader or llvmpipe counts as a failure, because the
-chart and radar tiles need real hardware), modern CSS support, magnification
-without a layout shift, and whether the screen can be asked to stay awake.
+The rest check that the browser is new enough and has real graphics hardware,
+which the chart and radar tiles need. A software renderer counts as a
+failure. Other checks cover magnification without the layout jumping and
+whether the screen can be told to stay awake.
 
-If everything passes, go on. If only the informational `100svh` check fails,
-go on anyway; nothing uses that. If the graphics context, `:has()`,
-`structuredClone` or the CSS checks fail, the browser is too old for this
-dashboard. On a television that usually means driving it from a small HDMI
-box running a current Chromium instead of using the set's built-in browser,
-which is also the fix on an ARM board that ships an older browser by default.
+If everything passes, go on. One check is marked informational, and if that is
+the only failure you can go on anyway. If any other check fails, the browser
+is too old for this dashboard. On a television that usually means driving it
+from a small HDMI box running a current Chromium instead of using the set's
+built-in browser. The same fix applies to an ARM board that ships an older
+browser by default.
 
 Add `?rotate=180` to the probe URL to check a physically inverted screen. If
 the browser reports a screen taller than the panel, add `&height=<px>` too,
@@ -95,7 +95,7 @@ Trust the probe's number, not the box.
 That is also why a smaller canvas with more magnification works well on a
 television. 1280x720 at 1.5 comes to 1920x1080 on the screen, which fits a
 browser reporting 1920x1080, and the tiles are big enough to read across the
-cabin. It only works if the browser really reports 1920x1080 or more; on the
+cabin. It only works if the browser really reports 1920x1080 or more. On the
 1536x856 set above, 1280x720 at 1.5 would be too big, and 1280x720 at 1.1
 (1408x792) would fit.
 
@@ -116,7 +116,7 @@ shows a warning that says how many pixels run past the right edge and the
 bottom. Click **Fit to screen** and the magnification is set to the largest
 value that fits, keeping your width and height. For 1920x1080 on a 1536x856
 screen that is 0.79. If the canvas is so large that it would need less than
-0.5 magnification, there is no button; use a smaller canvas instead.
+0.5 magnification, there is no button. Use a smaller canvas instead.
 
 The **Wall displays** list marks the same problem next to the canvas, so you
 can spot it without opening each screen. The wall itself also says so: while
@@ -126,14 +126,14 @@ larger than the screen", with the display's name to open.
 ## 3. Put pages on it
 
 The display's own page is the easiest way. **Add page** lists every dashboard
-page not already on a screen; pick one and it joins the rotation. The table
+page not already on a screen. Pick one and it joins the rotation. The table
 below it holds the pages already there, where you set each one's dwell (5 to
 3600 seconds) and its condition: **Always**, or a vessel state such as
 **While anchored** to show it only then.
 
 The arrows in the **Order** column set the sequence the screen cycles
 through. Moving a page here only moves it relative to the other pages on
-that screen; the rest of your dashboard keeps its own order.
+that screen. The rest of your dashboard keeps its own order.
 
 **Duplicate** copies a page onto another screen, which is how you start a
 television version of a strip page. **Remove from this display** takes a page
@@ -146,7 +146,7 @@ quicker when you are already looking at the page you want to move.
 To arrange the tiles themselves, click the page's name in that table. That
 opens it in layout mode, where an amber dashed line marks where this
 particular screen cuts the page off. Everything above the line is what the
-screen shows; anything below it is real and invisible there.
+screen shows. Anything below it is real but invisible there.
 
 Putting a page on a wall display clears its hero tile, because the hero's
 extra row spends the vertical room the screen is measuring.
@@ -207,13 +207,12 @@ from the same tiles, then spread them out.
 
 ## 7. Television settings that matter
 
-Three things on a television set will undo the work above, and none of them
-can be overridden from the dashboard:
+Three settings on a television will undo the work above, and the dashboard can't override any of them:
 
 - **Energy saving**, which dims a mostly dark picture until it is unreadable.
   Turn it off, or the wall will look broken at night.
 - **Auto power off** after a few hours with no input. On LG sets this is four
-  hours by default. Keep awake cannot defeat it; turn it off in the set's own
+  hours by default. Keep awake cannot defeat it, so turn it off in the set's own
   menu.
 - **Screen shift and pixel refresh**, the set's own burn-in protection. Leave
   these on. They work alongside the OLED panel option, which moves the
@@ -221,8 +220,6 @@ can be overridden from the dashboard:
 
 ## 8. Leave it running
 
-The dashboard is served so that a reload, after a restart, a power cut, or
-just because the browser felt like it, always picks up the current build.
-There is nothing else to maintain. Adding or removing a page, changing a
+A reload always picks up the current build, whether it follows a restart, a power cut or the browser simply deciding to. There is nothing else to maintain. Adding or removing a page, changing a
 duration or a condition, or editing the screen's size or magnification all
 apply at the wall's next lap without touching the device.

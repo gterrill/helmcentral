@@ -1,65 +1,69 @@
 # Helmcentral documentation
 
-These pages ship inside Helmcentral itself, so they're on the boat whether
-or not the boat has a connection. The `?` button in the app's header opens
-the page for whatever screen you're looking at; the sidebar's **Help**
-item opens this contents page instead. Links within these help pages stay
-in the app; a link to something outside it, an ADR, an example plugin's
-source, the release workflow, opens on GitHub, which does need a
-connection.
-
-Documentation here is split by what you are trying to do, following the
-[Diátaxis](https://diataxis.fr/) distinction between task instructions and
-reference material.
+Press the `?` button in the header to open help for the screen you're on. The
+**Help** item in the sidebar brings you back to this contents page. Help works
+without an internet connection. A few links lead to engineering notes or
+source code on GitHub, and those do need one.
 
 ## Features
 
-What each feature does and its limits. Start here to see whether Helmcentral
-meets your needs.
+What each feature does and where it stops. Start here to decide whether
+Helmcentral suits your boat.
 
-- [The dashboard](features/dashboard.md), instrument tiles, gauges, embeds and pages.
-- [Forecast](features/forecast.md), weather, wind, wave and tide, and the
+- [The dashboard](features/dashboard.md): the pages of instrument tiles, gauges
+  and embeds you set up at the helm.
+- [Forecast](features/forecast.md): weather, wind, waves and tide, plus the
   heavy-weather warning signs the wave graph watches for.
-- [Engine Cluster](features/engine-cluster.md), one engine's dial, readouts, fuel and electrical footer.
-- [Anchor watch](features/anchor-watch.md), including the rode planner.
-- [Alarms](features/alarms.md), rules, transports and the decisions behind them.
-- [Passages](features/passages.md), the logbook: every leg the boat has run,
-  replayed on the chart, with cruise totals for nights, fuel, wind, generator,
-  battery and water.
-- [Anomaly detection](features/anomaly-detection.md), frozen and impossible
-  sensor readings, charging into a full house bank, and engines pulling
-  apart from each other.
-- [Mate](features/assistant.md), a chat assistant that answers
-  passage-planning questions using the boat's own live data, from any page
-  and by voice.
-- [Place names and nearby places](features/place-names.md), naming the bay,
-  marina or island the boat is at, the Nearby map, and Mate's place lookups,
-  and why running your own Overpass server aboard makes them fast and keeps
-  them working offline.
-- [Offline coastline](features/offline-coastline.md), the charted coastline and
-  reefs kept aboard for the water around the boat, which Mate uses to judge
-  anchorage shelter without internet.
-- [Documents](features/documents.md), a searchable library for manuals,
-  receipts and logs, with OCR, summaries and tags once Mate reads a scan or
-  a photo. Built and working; no Documents panel in the dashboard yet.
-- [Notes and the manual](features/notes-and-the-manual.md), somewhere to write
-  down what you know about the boat in one action, and assemble it into an
-  operations manual the crew and the next owner can follow.
-- [Inventory](features/inventory-tracking.md), the equipment registry: one record
-  per system aboard, its documents, where it lives, and the profile it follows.
-- [Maintenance](features/maintenance.md), what's due on running hours, on the
-  calendar, or both, and the service log it's completed into.
-- [Import](features/import.md), bringing equipment, spares, the service log,
-  notes and documents across from YachtWave.
+- [Engine Cluster](features/engine-cluster.md): one engine's dial and readouts,
+  with fuel and electrical figures along the bottom.
+- [Anchor watch](features/anchor-watch.md): watching the anchor, and the rode
+  planner for working out how much to let out.
+- [Alarms](features/alarms.md): alarm rules, how alerts reach you, and why they
+  behave the way they do.
+- [Passages](features/passages.md): the logbook of every leg the boat has run.
+  Replay any of them on the chart and see cruise totals for nights, fuel, wind,
+  generator, battery and water.
+- [Anomaly detection](features/anomaly-detection.md): catches frozen or
+  impossible sensor readings, charging into a full house bank, and engines
+  drifting apart from each other.
+- [Mate](features/assistant.md): a chat assistant that answers passage-planning
+  questions from the boat's own live data. Ask it from any page, by typing or
+  by voice.
+- [Place names and nearby places](features/place-names.md): naming the bay,
+  marina or island you're in, the Nearby map, and Mate's place lookups. It also
+  explains why an Overpass server aboard makes them faster and keeps them
+  working offline.
+- [Offline coastline](features/offline-coastline.md): charted coastline and
+  reefs for the waters around the boat, stored aboard. Mate uses it to judge
+  anchorage shelter without an internet connection.
+- [Documents](features/documents.md): a searchable library for manuals,
+  receipts and logs. Once Mate reads a scan or a photo, it adds the text, a
+  summary and tags. There's no Documents tile for the dashboard yet.
+- [Notes and the manual](features/notes-and-the-manual.md): write down what you
+  know about the boat in one step, then gather it into an operations manual the
+  crew and the next owner can follow.
+- [Inventory](features/inventory-tracking.md): the equipment register, with one
+  record per system aboard, its documents, where it's stowed, and the profile
+  it follows.
+- [Maintenance](features/maintenance.md): jobs that fall due on running hours,
+  on the calendar, or both, and the service log you sign them off in.
+- [Import](features/import.md): bring equipment, spares, the service log, notes
+  and documents across from YachtWave.
 
 ## How-to guides
 
-Steps for specific tasks.
+Step-by-step instructions for specific jobs.
 
-- [Installing Helmcentral](how-to/install.md), including Docker and manual binaries.
+- [Installing Helmcentral](how-to/install.md): with Docker or by hand.
 - [Upgrading across a breaking release](how-to/upgrading.md)
-- [Plan a stay](how-to/plan-a-stay.md), seeing the forecast for a marina you
-  are booked into.
+- [Plan a stay](how-to/plan-a-stay.md): see the forecast for a marina you've
+  booked.
+- [Set an anchor watch](how-to/set-an-anchor-watch.md): drop the watch, move
+  the anchor or radius, and raise it.
+- [Set an alarm threshold](how-to/set-an-alarm-threshold.md): create an alarm
+  rule directly or from a gauge.
+- [Set up alarm notifications](how-to/set-up-alarm-notifications.md): turn on
+  a way for alarms to reach you, and check it works.
 - [Create a dashboard page](how-to/create-a-dashboard-page.md)
 - [Reorder dashboard pages](how-to/reorder-dashboard-pages.md)
 - [Pin an indicator ribbon](how-to/pin-an-indicator-ribbon.md)
@@ -68,85 +72,74 @@ Steps for specific tasks.
 - [Set up Mate](how-to/set-up-the-assistant.md)
 - [Talk to Mate](how-to/talk-to-mate.md)
 - [Keep what a Mate conversation worked out](how-to/keep-what-a-mate-conversation-worked-out.md)
-- [Fill in a form with Mate](how-to/fill-in-a-form-with-mate.md), insurer and
-  marina paperwork from the details the boat already holds.
-- [Start a ship's manual](how-to/start-a-ships-manual.md), what belongs in one
+- [Fill in a form with Mate](how-to/fill-in-a-form-with-mate.md): insurer and
+  marina paperwork, filled in from details the boat already holds.
+- [Start a ship's manual](how-to/start-a-ships-manual.md): what belongs in one,
   and what the builder's handbook already covers.
-- [Write the boat's manual](how-to/write-the-boats-manual.md), capturing,
-  filing, ordering and illustrating the sections.
-- [Stop showing a network alarm](how-to/stop-showing-a-network-alarm.md), and
-  bringing it back.
+- [Write the boat's manual](how-to/write-the-boats-manual.md): capturing,
+  filing, ordering and illustrating each section.
+- [Stop showing a network alarm](how-to/stop-showing-a-network-alarm.md): hiding
+  one you don't need, and bringing it back.
 - [Set battery state-of-charge bands](how-to/set-battery-state-of-charge-bands.md)
 - [Set passage limits](how-to/set-passage-limits.md)
-- [Turn on the offline coastline](how-to/turn-on-the-offline-coastline.md),
+- [Turn on the offline coastline](how-to/turn-on-the-offline-coastline.md):
   filling it, keeping it current and clearing it.
-- [Run your own Overpass server](how-to/run-your-own-overpass-server.md), a
-  place-names server aboard that answers fast and works offline.
-- [Set up your vessel](how-to/set-up-your-vessel.md), picking the engines and
-  house bank anomaly detection watches, and entering owner and insurance
-  details.
+- [Run your own Overpass server](how-to/run-your-own-overpass-server.md): a
+  place-names server aboard that answers quickly and works offline.
+- [Set up your vessel](how-to/set-up-your-vessel.md): choose which engines and
+  house bank anomaly detection watches, and enter owner and insurance details.
 - [Show equipment on a tile](how-to/show-equipment-on-a-tile.md)
 - [Duplicate a gauge group onto another instance](how-to/duplicate-a-gauge-group.md)
-- [Tag bins and equipment](how-to/tag-bins-and-equipment.md), writing and
-  using an NFC tag, and the iPhone Copy route.
-- [Photograph your gear](how-to/photograph-your-gear.md), from an item's
-  editor or on the spot while adding it from a bin.
-- [Draw your deck plans](how-to/draw-deck-plans.md), adding a deck picture,
-  outlining locations on it and pinning bins.
-- [Run a stocktake](how-to/run-a-stocktake.md), scanning a bin and its
-  contents to confirm what's aboard.
-- [Set up a maintenance schedule](how-to/set-up-a-maintenance-schedule.md),
-  following a profile's service intervals, changing them for one item, or
-  adding rules by hand.
-- [Set up a maintenance schedule with Mate](how-to/set-up-a-maintenance-schedule-with-mate.md),
-  asking Mate for a schedule and applying what it proposes.
-- [Log a service](how-to/log-a-service.md), completing a scheduled job or
-  recording a repair or improvement.
-- [Import GPX tracks](how-to/import-gpx-tracks.md), adding trips Helmcentral did
-  not record itself.
-- [Edit a passage](how-to/edit-passages.md), splitting, trimming, merging,
-  hiding and filing passages in cruises.
-- [Film a passage replay](how-to/film-a-passage-replay.md), directing the
-  replay camera with shots and pinning notes and photos with signs.
-- [Share a passage on your blog](how-to/share-a-passage-on-your-blog.md),
-  copying an animated map into a Ghost post and saving still images.
-- [Import from YachtWave](how-to/import-from-yachtwave.md), page by page
-  through the import wizard.
-- [Development](how-to/development.md), running the stack, tests and release builds.
+- [Tag bins and equipment](how-to/tag-bins-and-equipment.md): writing an NFC
+  tag, using it, and the iPhone Copy route.
+- [Photograph your gear](how-to/photograph-your-gear.md): from an item's
+  editor, or on the spot while adding it from a bin.
+- [Draw your deck plans](how-to/draw-deck-plans.md): add a picture of each
+  deck, outline locations on it and pin bins.
+- [Run a stocktake](how-to/run-a-stocktake.md): scan a bin and its contents to
+  confirm what's aboard.
+- [Set up a maintenance schedule](how-to/set-up-a-maintenance-schedule.md):
+  follow a profile's service intervals, change them for one item, or add rules
+  by hand.
+- [Set up a maintenance schedule with Mate](how-to/set-up-a-maintenance-schedule-with-mate.md):
+  ask Mate for a schedule and apply what it suggests.
+- [Log a service](how-to/log-a-service.md): complete a scheduled job, or record
+  a repair or improvement.
+- [Import GPX tracks](how-to/import-gpx-tracks.md): add trips Helmcentral
+  didn't record.
+- [Edit a passage](how-to/edit-passages.md): split, trim, merge and hide
+  passages, and file them into cruises.
+- [Film a passage replay](how-to/film-a-passage-replay.md): direct the replay
+  camera with shots, and pin notes and photos along the way with signs.
+- [Share a passage on your blog](how-to/share-a-passage-on-your-blog.md): copy
+  an animated map into a Ghost post and save still images.
+- [Import from YachtWave](how-to/import-from-yachtwave.md): each page of the
+  import wizard in turn.
+- [Development](developers/development.md): for working on Helmcentral itself,
+  running it locally, testing and building releases.
 
 ## Reference
 
-Lookup material: fields, formats, environment variables and file paths.
+Details to look up: settings, file formats and where things are stored.
 
-- [Configuration](reference/configuration.md), covering every environment
-  variable, state path and startup behaviour.
-- [Equipment profiles](reference/equipment-profiles.md), the profile JSON
+- [Configuration](reference/configuration.md): every environment variable,
+  where data is kept, and what happens at startup.
+- [Tiles](reference/tiles.md): the built-in tiles, their fields, and how every
+  tile shows stale data and alert colours.
+- [Alarm rules](reference/alarm-rules.md): the built-in alarm rules and the
+  extra values a rule or gauge can watch.
+- [What Mate can look up](reference/mate-tools.md): each lookup Mate can make
+  and the provider it draws on.
+- [Equipment profiles](reference/equipment-profiles.md): the profile file
   format for engines, alternators and generators.
-- [Provider plugins](reference/plugins.md), the WASM sandbox and the per-category
-  contracts.
-- [YachtWave import fields](reference/yachtwave-import.md), where each part
-  of a YachtWave export ends up.
-- [POI categories](reference/poi-categories.md), the eleven points-of-interest
-  categories and each provider's coverage.
+- [Provider plugins](reference/plugins.md): how plugins are kept apart from
+  the rest of Helmcentral, and what each kind has to provide.
+- [YachtWave import fields](reference/yachtwave-import.md): where each part of
+  a YachtWave export ends up.
+- [POI categories](reference/poi-categories.md): the eleven points-of-interest
+  categories and what each provider covers.
 
-## Architecture decision records
+## Engineering notes
 
-[docs/adr/](adr/) is separate from the user-facing documentation. It records
-engineering decisions, rejected alternatives and later reversals for code
-maintainers.
-
-Pages in `features/`, `how-to/` and `reference/` should be understandable
-without consulting a decision record.
-
-## What goes where
-
-| You are writing | It goes in |
-| --- | --- |
-| What a feature does and its limits | `features/` |
-| Steps to accomplish a task | `how-to/` |
-| Fields, formats, variables, paths | `reference/` |
-| Why a design choice was made, and which alternatives were rejected | `adr/` |
-
-Tutorials, in the Diátaxis sense of a guided first run, do not exist yet. The
-README's install section covers that ground for now, and a `tutorials/`
-directory will be added when a longer guided introduction is needed.
+The [design decisions](adr/) behind Helmcentral are kept separately for anyone
+working on the code. You won't need them to use the app.

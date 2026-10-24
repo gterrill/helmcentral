@@ -1,12 +1,12 @@
 # Run your own Overpass server
 
 Place names, Nearby and Mate's place lookups all ask an Overpass server for
-OpenStreetMap data. The public ones are shared, and over a boat's link they are
+OpenStreetMap data. The public ones are shared, and over a boat's link they're
 slow when they answer at all. A server aboard answers in a fraction of a
 second, never turns Mate away, keeps working when the link is down, and keeps
 the boat's position off the internet.
 [Place names and nearby places](../features/place-names.md#running-your-own-server)
-weighs what it gets you against what it costs.
+weighs the benefit against the cost.
 
 You need a home server that runs Docker apps (these steps use ZimaOS), a few
 gigabytes of free disk (about 4 GB for the Queensland coast), and an internet
@@ -18,11 +18,10 @@ connection for the first import.
    [docker-compose.yml](https://github.com/gterrill/helmcentral/blob/main/packaging/overpass/docker-compose.yml)
    (or the
    [raw file](https://raw.githubusercontent.com/gterrill/helmcentral/main/packaging/overpass/docker-compose.yml)
-   to save). It is not part of the release download. Its header comment repeats
+   to save). It isn't part of the release download. Its header comment repeats
    these steps.
 2. Choose your region and your cruising ground, and edit the two placeholders
-   in the file. They are left blank on purpose, so an unedited file will not
-   start.
+   in the file. They're blank on purpose, so an unedited file won't start.
    - `OVERPASS_PLANET_URL`: the download for the area that holds your cruising
      ground. Browse [download.geofabrik.de](https://download.geofabrik.de/),
      pick your country or state, and copy the link ending `-latest.osm.pbf`.
@@ -37,9 +36,9 @@ connection for the first import.
    and builds the database. Expect one to several hours. The server does not
    answer until that finishes.
 
-The server does not update itself. To refresh it, or to change the box, delete
-the app's `db` folder (`/DATA/AppData/overpass/db` on ZimaOS) and start it
-again; it imports afresh. Place names change slowly, so every few months is
+The server doesn't update itself. To refresh it, or to change the box, delete
+the app's `db` folder (`/DATA/AppData/overpass/db` on ZimaOS) and start the app
+again. It imports afresh. Place names change slowly, so every few months is
 plenty.
 
 ## Point Helmcentral at it
@@ -54,7 +53,7 @@ plenty.
    short descriptions), and keep the public servers too if you want them as a
    fallback you can switch back to.
 4. Save, then restart Helmcentral. Changes to allowed hosts only take effect
-   after a restart; the Overpass server field itself applies at once.
+   after a restart. The Overpass server field itself applies at once.
 
 Plain http is accepted here because the server is on your own network. Any
 address outside it has to be https.
@@ -62,7 +61,7 @@ address outside it has to be https.
 ## Check it
 
 Open a Nearby map or ask Mate where the nearest anchorage is. If a lookup
-fails, check three things: the import may still be running, you may not have
+fails, check three things. The import may still be running, you may not have
 restarted Helmcentral since adding the address to Allowed Hosts, or the address
-and port in **Overpass server** may not match the app. Once all three are right,
-answers come back at once.
+and port in **Overpass server** may not match the app. Once all three are
+right, answers come back at once.

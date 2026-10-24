@@ -50,7 +50,7 @@ send it.
   boxes to tick. Tick them yourself on the downloaded copy if it cannot.
 - **A value will not fit.** Mate names the blank. Shorten the value, or write it
   in by hand.
-- **A character it cannot write.** Replace it with a plain letter, such as a
-  without an accent, and ask again.
+- **A character it cannot write.** Swap it for a plain letter, such as e for é,
+  and ask again.
 - **The form is a scan.** Mate cannot read it. Ask the sender for the original
   PDF, or fill it in by hand.

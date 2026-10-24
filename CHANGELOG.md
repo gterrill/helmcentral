@@ -22,6 +22,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Help pages read more plainly.** Every help page has had a wording pass,
+  and the contents page now links the anchor watch, alarm threshold and alarm
+  notification guides and the Tiles, Alarm rules and Mate lookups reference
+  pages, which were missing from it.
 - **The overview map on the replay now frames the coast the way the blog embed
   and images do.** It shows a little more of the surrounding coast than before
   at the automatic zoom.

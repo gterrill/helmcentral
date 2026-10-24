@@ -27,10 +27,10 @@ rather than zero when there is not enough history to answer:
 | `helmcentral.fuel.rangeAtCurrentBurn` | m | Fuel aboard times the boat's current distance per unit fuel. Empty under the same conditions as fuel economy or fuel volume, whichever is absent. |
 | `helmcentral.environment.forecastWindWarningLevel` | none | The official wind warning in force for the vessel's zone, ranked: 0 none, 1 strong wind or small craft, 2 gale, 3 storm. Absent until the first fetch lands, and again after thirty minutes without one. |
 | `helmcentral.environment.forecastSurfWarning` | none | 1 when a hazardous surf warning is in force for the zone, 0 otherwise. Absent under the same conditions as the wind level. |
-| `helmcentral.anomaly.sensor.frozenCount` | none | How many engine-correlated readings are stuck while the engine is clearly working. 0 means the check ran and found nothing; needs at least one engine item assigned to a propulsion source in Settings → SignalK. |
+| `helmcentral.anomaly.sensor.frozenCount` | none | How many engine-correlated readings are stuck while the engine is clearly working. 0 means the check ran and found nothing. Needs at least one engine item assigned to a propulsion source in Settings → SignalK. |
 | `helmcentral.anomaly.sensor.outOfRangeCount` | none | How many engine or battery readings are outside anything physically possible. Battery numbers reported only by chargers are not counted. Needs no setup. |
 | `helmcentral.anomaly.sensor.silentSourceCount` | none | How many previously steady sources on the instrument network have gone quiet. Leaves out engine computers, equipment that switches off with the engines, and SignalK plugin outputs, so turning the engines off does not raise it. A network gateway going quiet is still raised. Needs no setup. |
-| `helmcentral.anomaly.propulsion.<name>.stumbleCount` | none | How many times that engine's rpm dipped and recovered at a steady throttle in the last ten minutes, leaving out dips that hit both engines of a twin together. 0 means the engine is being watched and has not stumbled. Needs no setup; there is one per engine that reports rpm. |
+| `helmcentral.anomaly.propulsion.<name>.stumbleCount` | none | How many times that engine's rpm dipped and recovered at a steady throttle in the last ten minutes, leaving out dips that hit both engines of a twin together. 0 means the engine is being watched and has not stumbled. Needs no setup. There is one per engine that reports rpm. |
 | `helmcentral.anomaly.battery.fullBankCharging` | none | 0, 1 or 2: whether the house bank is being charged past where it needs to be, and how far. Needs a house bank chosen under Settings → SignalK → Roles. |
 | `helmcentral.anomaly.engines.<name>.<reading>Residual` | °C, kPa or none | One engine's gap from its peers for one reading (coolant temperature, oil pressure, boost pressure, engine load, or the transmission's own oil pressure/temperature), less the gap that engine normally runs. Absent until several weeks of history have taught Helmcentral what normal is for your boat. Needs at least two engines set up. |
 
@@ -52,8 +52,8 @@ reading they are built from (a fuel tank's level or capacity, an engine's fuel
 rate, or speed over ground) has stopped updating for more than two minutes,
 the derived path reports nothing rather than a number computed from a source
 that is no longer telling the truth. A rule bound to one of these paths never
-fires on stale arithmetic; it simply sees no value, the same as if the path
-had never been published at all.
+fires on stale arithmetic. It sees no value, the same as if the path had
+never been published at all.
 
 The exception is an engine that has been shut down. Engines stop sending
 anything when they are turned off, so an engine that has gone completely quiet
@@ -61,12 +61,10 @@ for more than two minutes counts as off and is left out of the total burn,
 provided other devices on the same connection are still live. With every
 engine off there is no burn, and the figures have no value and no age, so a
 stale-data rule does not fire for them. That needs another device on the
-engines' connection still reporting; if the engines are on a connection of
+engines' connection still reporting. If the engines are on a connection of
 their own, they read as stale instead, because a failed connection looks the
-same. If only its fuel rate has stopped, or
-if its whole connection has gone quiet, the figures go absent as above. An engine on a connection of its own cannot be
-told apart this way: if that connection fails while the engine runs, it counts
-as off and range and time to empty read high.
+same. If only its fuel rate has stopped, or if its whole connection has gone
+quiet, the figures go absent as above.
 
 A rule bound to one of a switched-off engine's own readings (revolutions, oil
 pressure and so on) is treated the same way: it sees no value, and a stale-data
@@ -75,7 +73,7 @@ instead, the rule sees the readings go stale as usual.
 
 ## Heavy-weather rule set
 
-From *Surviving the Storm*. Both arrive switched off; see
+From *Surviving the Storm*. Both arrive switched off. See
 [Alarms](../features/alarms.md#the-heavy-weather-rule-set) for why.
 
 | Rule | Fires when | Severity |
@@ -86,7 +84,7 @@ From *Surviving the Storm*. Both arrive switched off; see
 ## The Law of Storms rule set
 
 From R. J. Ellis, "Secret Law of Storms", worldstormcentral.co (Rules for
-storms and gales page). Six of the seven arrive switched on; see
+storms and gales page). Six of the seven arrive switched on. See
 [Alarms](../features/alarms.md#the-law-of-storms-barometer-rules) for which
 one doesn't and why.
 
@@ -104,10 +102,10 @@ one doesn't and why.
 
 See [Anomaly detection](../features/anomaly-detection.md) for what each of
 these watches for and what setting it up needs. Impossible-reading,
-gone-quiet and engine-stumble arrive switched on with no setup at all; the rest arrive as each
-one's own setup is completed, and the engine differential pairs arrive
-switched off until a steady run has taught Helmcentral your boat's own
-normal gap.
+gone-quiet and engine-stumble arrive switched on with no setup at all. The
+rest arrive as each one's own setup is completed. The engine differential
+pairs arrive switched off until a steady run has taught Helmcentral your
+boat's own normal gap.
 
 | Rule | Fires when | Severity |
 | --- | --- | --- |
@@ -116,17 +114,18 @@ normal gap.
 | Instrument Silent (titled with the device's name when only one is quiet, for example "Vesper Cortex Silent") | Any silent-source count above 0 | warn |
 | Charging into a full house bank | Full-bank charging level 1 or higher | warn |
 | House bank overcharge risk | Full-bank charging level 2 (switched off until tuned) | alarm |
-| Engine RPM dips (one per engine, titled with its name, for example "Port Engine RPM Dips") | Stumble count of 3 or more; clears when it falls back to 0 | warn |
+| Engine RPM dips (one per engine, titled with its name, for example "Port Engine RPM Dips") | Stumble count of 3 or more, clearing when it falls back to 0 | warn |
 | Engine running hotter/cooler, oil/boost pressure high/low, load high/low | That reading's residual past its learned band (switched off until a baseline is learned) | alert |
 
 The three sensor rules do not show their count. Their cards, banner and
 notifications name each failing sensor and say what is wrong with it, one line
-each, using the names of the equipment items they are assigned to. The title is the rule's own.
+each, using the names of the equipment items they are assigned to. The title is
+the rule's own.
 
 ## Forecast warning rule set
 
-Reads the ranked forecast-warning values above. All four arrive switched on;
-see [Alarms](../features/alarms.md#the-forecast-warning-rules).
+Reads the ranked forecast-warning values above. All four arrive switched on.
+See [Alarms](../features/alarms.md#the-forecast-warning-rules).
 
 | Rule | Fires when | Severity |
 | --- | --- | --- |

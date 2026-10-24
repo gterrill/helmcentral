@@ -6,7 +6,7 @@ create a rule, the tile's state-of-charge number stays plain amber at any
 level, and the line beside it only ever reads "To full" or "To empty".
 
 The bands follow the house bank you chose in **Settings → SignalK → Roles**.
-Choose the bank there first: with no house bank chosen, the tile has no bands
+Choose the bank there first. With no house bank chosen, the tile has no bands
 and no dawn figure, and a rule is not matched to anything.
 
 This sets up a warn band at 20% and an alarm band at 10% on the house bank.
@@ -26,12 +26,12 @@ Adjust the numbers to suit your own bank.
 8. Repeat for a second rule on the same path: **Condition** `below`,
    **Threshold** `0.1`, **Severity** `alarm`.
 
-State of charge is published on the bus as a ratio, not a percentage, so
-`0.2` is 20%. If you type `20` instead, that works too: anything you enter
-over 1 is read as already being a percentage. When the server publishes a
-unit for the path, the drawer shows the converted value under the threshold
-field as you type, so you can check it reads 20% before saving; if no unit
-is published, the field shows only what you typed.
+SignalK publishes state of charge as a ratio, not a percentage, so `0.2` is
+20%. Typing `20` works too, because anything you enter over 1 is read as a
+percentage. When the server publishes a unit for the path, the drawer shows
+the converted value under the threshold field as you type, so you can check
+it reads 20% before saving. If no unit is published, the field shows only
+what you typed.
 
 Once both rules are saved, the Battery & Power tile updates immediately,
 without a reload:
@@ -52,5 +52,5 @@ disappear until you edit it or add a new one. With no house bank chosen, a rule
 that follows it watches nothing.
 
 To change a threshold later, edit either rule from the Alarms drawer's rules
-list. To go back to the plain, uncoloured behaviour, delete both rules; the
-tile does not need them to keep working, it just stops colouring the number.
+list. To go back to the plain, uncoloured behaviour, delete both rules. The
+tile keeps working, it just stops colouring the number.

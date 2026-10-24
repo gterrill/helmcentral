@@ -1,8 +1,8 @@
 # Edit a passage
 
-The passage finder gets most legs right, but not all. This corrects the ones it
-did not: a stop it split in two, a passage that ran on after you had tied up,
-or one you would rather not keep. See [Passages](../features/passages.md) for
+The passage finder gets most legs right, but not all. These steps correct the
+ones it missed: a stop it split in two, a passage that ran on after you tied
+up, or one you'd rather not keep. See [Passages](../features/passages.md) for
 how a passage is found.
 
 Open **Passages** and then the passage. Split and trim act on the point the
@@ -27,7 +27,7 @@ The passage becomes two. Each keeps its own figures.
 1. Scrub the replay to the new start, or the new end.
 2. Press **Trim start to here** or **Trim end to here**.
 
-Positions outside the new span stay in the log. They simply stop being part of
+Positions outside the new span stay in the log. They just stop being part of
 this passage.
 
 ## Merge two passages
@@ -41,8 +41,8 @@ start and the later end.
 1. Press **Hide passage**.
 2. Confirm.
 
-The passage leaves the list and does not come back by itself, even when
-Helmcentral finds the same stretch again. The recorded positions stay in the
+The passage leaves the list and stays gone, even when Helmcentral finds the
+same stretch again. The recorded positions stay in the
 log.
 
 ## Group passages into a cruise

@@ -8,8 +8,14 @@ early, delay a passage or pick a different anchorage.
 Position comes from the boat's own GPS feed, so the forecast follows you
 without manual position updates.
 
+The page has three panels of equal weight. Today covers the next 24 hours,
+the 10-day forecast gives the surface picture day by day, and upper air shows
+the 16-day pattern. Each panel header shows its span and a small meter for how
+far ahead it reaches, so today's conditions don't get mixed up with the
+longer pattern you plan from.
+
 The forecast page can also show the weather at a marina or anchorage you have
-booked for later; see [Looking ahead to a planned stay](#looking-ahead-to-a-planned-stay).
+booked for later. See [Looking ahead to a planned stay](#looking-ahead-to-a-planned-stay).
 
 Weather, waves and tides each come from their own provider plugin. If one is
 down you get an explicit failure for that section rather than a stale
@@ -30,7 +36,7 @@ companion *Mariner's Weather Handbook*:
 
 Page 231 of *Surviving the Storm* explains the 1:10 threshold used to colour the
 wave graph. *Mariner's Weather Handbook* covers the 500mb material behind the
-squash-zone alarm rule; the first book covers it only briefly.
+squash-zone alarm rule. The first book covers it only briefly.
 
 These are one crew's thresholds, published in 1999. They have not been
 calibrated against your boat or your coast.
@@ -53,18 +59,18 @@ line once seas get steep:
 | 1:10 or steeper | breaking, line turns red |
 
 The 1:10 figure comes from observations at sea. Tank tests put wave instability
-nearer 1:7; this page uses the lower threshold reported by sailors.
+nearer 1:7. This page uses the lower threshold reported by sailors.
 
 On a day that stays in the rolling band the line keeps its ordinary colour and
-the summary says nothing about steepness, reserving alerts for steeper seas.
+the summary says nothing about steepness. Alerts are kept for steeper seas.
 
 ## The largest wave you will actually meet
 
 Under the summary the page gives a second figure, roughly 1.87 times the
 significant height. Significant wave height is the average of the highest third
-of the waves, not the maximum; about one wave in seven reaches that height.
+of the waves, not the maximum, and about one wave in seven reaches that height.
 
-Use the larger number for planning: a 3m forecast gives an estimate near 5.6m
+Use the larger number for planning. A 3m forecast gives an estimate near 5.6m
 for the largest wave over the day.
 
 ## Warning signs
@@ -109,7 +115,7 @@ atmosphere favour a low developing. Select that day and the panel below says
 why.
 
 The Dashews place particular importance on upper-air forecasting. A surface low
-needs an upper trough above it to vent into and deepen; without one, it may
+needs an upper trough above it to vent into and deepen. Without one, it may
 remain weak or fail to form. The upper pattern can indicate days ahead whether
 surface systems have support to develop, before the barometer changes.
 
@@ -131,12 +137,6 @@ it has fallen 40 m over two days and whether it has reached a minimum or is
 still falling. The forecast page ends with a panel tracing the whole window
 at six-hourly resolution, approximately the interval of the book's synoptic
 charts.
-
-The page has three panels with equal prominence. Today is
-the next 24 hours, the 10-day forecast is the surface picture day by day, and
-upper air is the 16-day pattern. Each panel header carries its span and a small
-meter showing how far ahead it reaches. This helps distinguish today's
-conditions from the longer-term pattern used for planning.
 
 The trace has three elements.
 
@@ -160,7 +160,7 @@ pattern because they are beyond the surface forecast's range.
 
 The first two days of the window cannot be marked because there is not enough
 preceding history to establish the trend. Forecast skill at 500mb also varies
-across sixteen days; treat the far end as a possible scenario. The book advises
+across sixteen days, so treat the far end as a possible scenario. The book advises
 watching the pattern over ten days to two weeks rather than relying on a single
 chart. The same caution applies here.
 
@@ -168,7 +168,7 @@ chart. The same caution applies here.
 
 It does not predict a storm. The book's precursor for a bomb is two
 upper troughs converging until they overlap, which it judges by eye across
-successive charts; Helmcentral does not assess that. It indicates days when
+successive charts, and Helmcentral does not assess that. It indicates days when
 conditions aloft support development, as a risk modifier for your planning.
 
 If you want to go further, the reasoning lives in *Mariner's Weather Handbook*,
@@ -197,7 +197,7 @@ There is one stay at a time, kept on the boat's server, so every phone, tablet
 and wall display sees the same one. It disappears the day after you leave.
 
 The page always opens on the boat. Beside the heading sits a button with the
-place and the dates, such as "Coral Coast Marina · 27-31 Oct"; choose it to
+place and the dates, such as "Coral Coast Marina · 27-31 Oct". Choose it to
 switch to the stay, and choose **Boat** to come back. The heading says which you
 are looking at, and while it is the stay it adds that this is not the boat's
 position. Nothing on the dashboard changes: the tiles, the clock's sunrise and
@@ -230,11 +230,11 @@ What the stay view shows:
   does not borrow the open water's sea state.
 
 Mate can read the stay when you talk about "the marina", and can propose one for
-you from a place name and dates. A proposal is a card; nothing is set until you
+you from a place name and dates. A proposal is a card, and nothing is set until you
 apply it. See [Plan a stay](../how-to/plan-a-stay.md) for the steps.
 
 Helmcentral does not notify you when the stay comes inside the forecast. Look at
-the placeholder cards: they say when each day arrives.
+the placeholder cards, which say when each day arrives.
 
 ## Alarm rules that use this
 
@@ -252,24 +252,23 @@ tendency table, mostly enabled. See [Alarms](alarms.md).
 
 ## On the dashboard and the wall display
 
-The forecast panel is the full picture; the dashboard carries condensed
+The forecast panel is the full picture. The dashboard carries condensed
 versions of the same data as ordinary tiles. **Current Conditions** shows
 true wind speed, with an arrow for its direction, and outside temperature
 against today's forecast range, plus whether rain is likely in the next
-hour, when it starts and how heavy - minute by minute with Apple
-WeatherKit, in coarser fifteen-minute steps with
-Open-Meteo over North America and central Europe. Elsewhere, Open-Meteo's
-near-term strip is built from the hourly outlook rather than a true
-short-range reading, and is labelled "hourly forecast" so it reads as what
-it is rather than a promise of minute-by-minute accuracy it can't back up.
-Dropped in favour of the plain hourly outlook wherever neither provider has
-any near-term coverage at all. **Forecast Conditions** lists the next
+hour, when it starts and how heavy. Apple WeatherKit gives it minute by minute, and Open-Meteo in
+coarser fifteen-minute steps over North America and central Europe.
+Elsewhere, Open-Meteo's near-term strip is built from the hourly outlook
+rather than a true short-range reading, and is labelled "hourly forecast" so
+it doesn't promise accuracy it can't back up. Where neither provider has any
+near-term coverage at all, the strip is dropped in favour of the plain hourly
+outlook. **Forecast Conditions** lists the next
 five days with condition, high and low, and under them draws the same wind,
 gust and wave-height series this page does, steepness-coloured the same way,
 each day lined up under its own card. **Clock** shows sunrise, sunset and
-moon phase alongside the time. None of the three replace this page: none show the warning signs, the largest-wave figure or
-the upper-air outlook. They exist for a glance that doesn't want the
-detail, particularly on a [wall
+moon phase alongside the time. None of the three replaces this page. None shows the warning signs, the
+largest-wave figure or the upper-air outlook. They are for a glance that
+doesn't want the detail, particularly on a [wall
 display](../how-to/set-up-a-wall-display.md), which has no room for this
 whole page at once. See [The dashboard](dashboard.md#instrument-tiles).
 

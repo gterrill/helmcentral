@@ -69,14 +69,14 @@ shows the chart alone when the boat is offline.
 
 The 3D button beside the satellite button tilts the map and raises the land:
 hills, headlands and mountains stand up from the chart, exaggerated half again
-so a coastline reads at a glance. It is on by default and remembers your choice
+so a coastline is easy to read. It is on by default and remembers your choice
 on its own. With 3D on you can drag to turn the map and tilt it up to 70
-degrees; switch it off and the map goes back to the flat, north-up view. The sea
+degrees. Switch it off and the map goes back to the flat, north-up view. The sea
 stays flat, so the chart and the photographs lie level on the water. The
 elevation data comes over the boat's internet connection and is kept once
 fetched. If it cannot be fetched the map shows "Terrain unavailable" in the top
-left corner and carries on flat, level and north up, and tries the elevation
-data again every minute; the notice goes once it arrives.
+left corner and carries on flat, level and north up. It tries the elevation
+data again every minute, and the notice goes once it arrives.
 
 With 3D on, the boat marker becomes a model of your own hull: a sailing
 monohull, sailing catamaran, power monohull or power catamaran, set under
@@ -87,7 +87,7 @@ long when you zoom out so you can still find it. With a length but no beam, the
 beam is estimated from a typical proportion for the hull type. With no length
 recorded the boat is drawn at that fixed 40 pixels at every zoom, and is not to
 scale. The bow points along
-the course the boat is sailing; when she is stopped it points the way she is
+the course the boat is sailing. When she is stopped it points the way she is
 about to go, or keeps its last heading if she goes nowhere more.
 It sits level on the water. Without a hull type set, or with 3D off or the
 terrain unavailable, the marker is the plain dot.
@@ -138,10 +138,10 @@ full, half or quarter speed. At half pace the passage runs half as fast for as
 long as the shot lasts, so the replay takes longer to watch. The slider stays
 in passage time.
 
-Shots show as marks on the slider; pick one to jump to it and edit it. The
+Shots show as marks on the slider. Pick one to jump to it and edit it. The
 picked mark is larger and ringed, and a line above its settings names it, for
 example "Shot 2 of 3 · from 09:41 to 10:20". Hover a mark to see its number
-and time; on a replay that spans more than one day the date is shown too. The
+and time, and on a replay that spans more than one day the date too. The
 camera eases into each shot over about a second and a half. Scrubbing puts the
 camera straight into the shot you land in. If you drag, zoom or tilt the map
 yourself during playback (a simple tap does not count), the replay leaves the
@@ -169,7 +169,7 @@ the replay bar opens the sign editor.
 
 Each sign chooses when it shows: **While passing** (the default) brings it up
 just before the boat reaches the spot and keeps it for a number of seconds you
-set, from 1 to 30; **After passing** shows it from the spot to the end;
+set, from 1 to 30. **After passing** shows it from the spot to the end.
 **Always** shows it for the whole replay. The seconds are seconds you watch, so
 a faster replay does not make a sign flash by. Only two cards show at once: when
 a third is due, the one that has been up longest steps aside. A sign set to
@@ -177,18 +177,18 @@ a third is due, the one that has been up longest steps aside. A sign set to
 
 Before you press Play, each sign is a small mark on its place on the track, and
 a tap opens its card. While the replay is paused, a tap on a card opens its
-photo full size; Escape closes it. Signs show as diamonds on the slider, apart
+photo full size, and Escape closes it. Signs show as diamonds on the slider, apart
 from the marks for camera shots, and picking one jumps to it and opens it for
 editing.
 
 A photo is either uploaded, into a Documents folder called **Passage photos**
 that is made the first time, or chosen from a photo already in Documents. When
 you make a sign from a photo it is placed at the moment the photo was taken, if
-that is inside the replay. The camera's clock is used as it is; if the photo
+that is inside the replay. The camera's clock is used as it is. If the photo
 doesn't say which time zone it was taken in, it is read in the boat's zone, the
 one shown beside the replay time, and the editor shows the time it used. If the
 photo has no time or was taken outside the replay, the sign goes where the
-slider is and the editor says so. The photo's own position is not used: the
+slider is and the editor says so. The photo's own position is not used, because the
 track is what the boat recorded. If you delete the photo in Documents, the sign
 keeps its title and note and shows no picture. If a photo is still there but
 cannot be loaded, the card says "Photo not available" instead of hiding it.
@@ -244,7 +244,7 @@ A passage, a cruise or a selection of passages can go on your blog as an
 animated map your readers replay, or out as a still picture for a post's
 header. The **Export** button on each page makes both. A still picture shows
 the satellite photographs when the map is showing them, with the credit added
-along the bottom; the blog map is always the chart. The blog map plays the same
+along the bottom. The blog map is always the chart. The blog map plays the same
 3D land, boat model and camera shots as the replay on the boat, and your signs
 too, if **Include signs** is ticked: the notes and the photos, shrunk and with
 their location details removed, written into the card. A card can be at most

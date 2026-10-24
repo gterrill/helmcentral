@@ -26,7 +26,7 @@ Nothing stops placing them on an ordinary page too.
   sends only the waypoint you are heading for, the tile shows that waypoint, or
   "Next waypoint" until the place has a name. It reads `--` when nothing is set
   and `--` with "Route unavailable" when the route can't be read. Tapping it does
-  nothing; start and stop routes on your plotter.
+  nothing. Start and stop routes on your plotter.
 - **Clock**: the time, date, sunrise, sunset, moon phase, where the boat is
   and when it gets where it's going.
 - **Current Conditions**: depth, true wind speed with a small arrow for its
@@ -43,7 +43,7 @@ day. A small chance with no rain actually forecast reads as a chance, not as
 rain on the way. How fine that timing gets depends on your weather provider.
 Apple WeatherKit tracks rain minute by minute where it has coverage.
 Open-Meteo, the free default, only has true fifteen-minute rain over North
-America and Central Europe; everywhere else the strip is drawn from its
+America and Central Europe. Everywhere else the strip is drawn from its
 hourly forecast and is labelled "hourly forecast" so you know. If your
 provider has nothing to say about the next hour at your position, the tile
 drops the strip and falls back to the hourly and daily outlook rather than
@@ -67,40 +67,41 @@ once, unlike the built-ins above:
 | --- | --- |
 | Gauge | Any single value the boat's instrument network publishes, as a number, radial dial, bar, lamp or trend. Coloured bands double as alarm rules. |
 | Gauge group | Several gauges clustered under one title: the readings of one piece of equipment, or any paths you pick. A group for equipment follows the item you choose and takes its bands from the item's profile. See [Duplicate a gauge group](../how-to/duplicate-a-gauge-group.md). |
-| Engine cluster | One engine's tachometer, readout cards, fuel arcs and electrical footer, mirrored for starboard (see [Engine Cluster](../features/engine-cluster.md)). You choose the engine from your equipment, and the footer's battery, alternator and exhaust the same way. It reads the engine's source and the bands on the engine's profile live. If the engine is not chosen, not mapped to a source or not reporting, the tile says `Pick equipment`, `Not mapped` or `Not reporting` and links to the item. Fills the tile you give it, up to twice its usual size, and needs at least five of the board's twelve columns. When the engine is switched off the tile reads `OFF` instead of going stale; see [Staleness](#staleness). |
+| Engine cluster | One engine's tachometer, readout cards, fuel arcs and electrical footer, mirrored for starboard (see [Engine Cluster](../features/engine-cluster.md)). You choose the engine from your equipment, and the footer's battery, alternator and exhaust the same way. It reads the engine's source and the bands on the engine's profile live. If the engine is not chosen, not mapped to a source or not reporting, the tile says `Pick equipment`, `Not mapped` or `Not reporting` and links to the item. Fills the tile you give it, up to twice its usual size, and needs at least five of the board's twelve columns. When the engine is switched off the tile reads `OFF` instead of going stale. See [Staleness](#staleness). |
 | Indicators | A row of status lamps, either pinned as the vessel-wide ribbon or placed on one page. A lamp reads a path, or a reading of an engine, generator, charger, inverter or alternator you choose. See [Pin an indicator ribbon](../how-to/pin-an-indicator-ribbon.md). |
-| Embed | Any URL in the grid: a Grafana panel, a camera feed, a windrose. **Frameless** drops the title bar and padding so the embedded page fills the tile; layout mode still draws the frame so an embed is never impossible to reconfigure. |
+| Embed | Any URL in the grid: a Grafana panel, a camera feed, a windrose. **Frameless** drops the title bar and padding so the embedded page fills the tile. Layout mode still draws the frame, so you can always reconfigure an embed. |
 | Nearby map | Points of interest around the vessel. See [Add a Nearby map](../how-to/add-a-nearby-map.md) and [POI categories](poi-categories.md). |
 
 ## Wind fields
 
 Two toggles sit in the Wind tile's header, each remembered on this device:
 
-- **Apparent / True**: apparent wind is what you feel at the helm - the
+- **Apparent / True**: apparent wind is what you feel at the helm, the
   true wind combined with the boat's own motion through it. True wind is
   what's actually blowing over the water, independent of your speed and
-  heading, which is the number that matters for planning a passage or
-  checking the instruments against a forecast. Switching also swaps the
-  MAX GUST cards to that reading's own gust history, not a converted copy
-  of the other one.
+  heading. That is the number for planning a passage or checking the
+  instruments against a forecast. Switching also swaps the MAX GUST cards
+  to that reading's own gust history, not a converted copy of the other
+  one.
 - **Course Up / North Up**: Course Up keeps the bow at the top of the
-  compass ring and turns the ring as you turn - the everyday view for
+  compass ring and turns the ring as you turn. It's the everyday view for
   steering by. North Up holds true north at the top instead and swings a
-  small bow marker around the ring to show your heading, which is useful
-  for relating the wind to a chart or a compass bearing. North Up's bow
+  small bow marker around the ring to show your heading, which helps when
+  relating the wind to a chart or a compass bearing. North Up's bow
   marker, and the wind arrow in Apparent mode, both need a heading to
-  place; without one they drop from the ring rather than guess, though
+  place. Without one they drop from the ring rather than guess, though
   the centre speed and angle keep reading.
 
-A true-wind source is not fitted on every boat - it needs boat speed and
+Not every boat has a true-wind source. It needs boat speed and
 heading feeding the wind instrument, not just wind alone. Where it is
 missing or has gone quiet, True mode reads `—` rather than falling back to
 the apparent figures.
 
-The two MAX GUST cards each show the strongest gust over a window - 10M,
-30M, 1HR or 24HR - named in the small boxed tag beside the label. Tap
-anywhere on the card to step to the next window. Each card keeps its own window, remembered on
-this device, so you can watch the last ten minutes against the whole day.
+The two MAX GUST cards each show the strongest gust over a window (10M,
+30M, 1HR or 24HR), named in the small boxed tag beside the label. Tap
+anywhere on the card to step to the next window. Each card keeps its own
+window, remembered on this device, so you can watch the last ten minutes
+against the whole day.
 
 ## Battery & Power fields
 
@@ -119,14 +120,15 @@ anything:
   while nothing is plugged in. A charger error always shows, in red, even
   before anything else about the charger has reported. It reads the shore
   charger you picked under Settings, SignalK, Roles. If the boat has no shore
-  charger, answer **This boat has none** there; the line stays absent either way.
+  charger, answer **This boat has none** there. The line stays absent either way.
 
 The footer's left side shows the voltage of the **Voltage readout battery** you
 picked under Settings, SignalK, Roles, with the name you gave that battery,
 followed by the charge rate. Each Roles list offers your items first, then a
 **From the boat** group of batteries the boat reports that no item owns, with a
-live reading; choosing one makes the item and picks it. With no readout battery picked, or one that is not reporting, the
-voltage is left out rather than replaced by another battery's.
+live reading, and choosing one makes the item and picks it. With no readout
+battery picked, or one that is not reporting, the voltage is left out rather
+than replaced by another battery's.
 
 With no house bank chosen, the State card is replaced by a message, "No house
 bank chosen. Choose one under Settings, SignalK, Roles", with the last part a
@@ -134,7 +136,7 @@ link to the house bank list there. The house bank, unlike the other roles, has
 no **This boat has none** answer. The Net card goes and Solar takes the whole row. Solar, Loads
 and the Shore line read as usual, and the footer still shows the voltage of the
 Voltage readout battery, but not the charge rate. A bank that is chosen but not
-reporting keeps the full layout and shows a dash (—) for its figures.
+reporting keeps the full layout and shows a dash for its figures.
 
 If the item chosen as the house bank has lost its SignalK source, or has been
 deleted, the same card says "The house bank's item has no SignalK source.
@@ -142,7 +144,7 @@ Choose it again under Settings, SignalK, Roles", and the House bank setup step
 says the same. Roles shows the choice as "Item no longer assigned".
 
 The state-of-charge number and bar only turn amber or red once you have set
-a matching alarm rule; see [Set battery state-of-charge
+a matching alarm rule. See [Set battery state-of-charge
 bands](../how-to/set-battery-state-of-charge-bands.md).
 
 ### The Dawn figure
@@ -153,19 +155,20 @@ charge then, and `4 nights` means enough history exists to base the figure
 on the boat's own recent overnight draw rather than tonight's rate alone.
 
 Helmcentral takes the median discharge rate from the most recent *clean*
-nights it can find, up to seven, searching back as far as thirty, and
-applies it to tonight after first running the current rate forward to
-sunset. A clean night runs sunset to sunrise with no shore power and no
-generator run (checked against the shore charger and generator you picked
-under Settings, SignalK, Roles; a night is not screened for one you left as Not
-set), has enough samples to trust the slope, and did not somehow see the bank
-rise; a night that fails any of those is skipped rather than
-averaged in. Hovering the figure shows how many nights were skipped and why.
+nights it can find, up to seven, searching back as far as thirty. It applies
+that rate to tonight, after first running the current rate forward to sunset.
+A clean night runs sunset to sunrise with no shore power and no generator
+run, has enough samples to trust the slope, and did not somehow see the bank
+rise. Shore power and generator runs are checked against the shore charger
+and generator you picked under Settings, SignalK, Roles. A night is not
+screened for one you left as Not set. A night that fails any test is skipped
+rather than averaged in. Hovering the figure shows how many nights were
+skipped and why.
 
 Short of two clean nights, the same spot reads `Dawn 6:08 · 61% · at current
 rate` instead, holding whatever rate the bank is charging or discharging
 right now all the way to sunrise. Read literally, this can project as high
-as 100% in the early afternoon while the panels are charging; once the sun
+as 100% in the early afternoon while the panels are charging. Once the sun
 sets, the current rate *is* the night's rate and the figure is accurate. The
 switch from "at current rate" to a night count happens on its own once two
 clean nights exist.
@@ -173,9 +176,9 @@ clean nights exist.
 While on shore power tonight, the line reads `Dawn 6:08 · on shore power`
 instead of a percentage, since the bank is being held rather than run down.
 Without a position there is no sunrise to project and the segment drops
-out; with a stale feed, or the live-rate fallback switched off and too
+out. With a stale feed, or the live-rate fallback switched off and too
 little history, it reads a dash. It also reads a dash with no charge rate,
-which needs the bank current and the house bank's capacity in amp-hours; if
+which needs the bank current and the house bank's capacity in amp-hours. If
 your battery monitor doesn't report a capacity, enter it on the house bank's
 equipment record. The projected percentage takes the alarm
 band colours the same as the live figure does.
@@ -185,7 +188,7 @@ band colours the same as the live figure does.
 The Generator tile reads the generator you picked under Settings, SignalK,
 Roles: its state, runtime, and the power on the generator AC input, with Start
 and Stop buttons. The Roles list offers your generator items, then a **From the
-boat** group of generators the boat reports that no item owns; choosing one makes
+boat** group of generators the boat reports that no item owns. Choosing one makes
 the item and picks it.
 
 With no generator chosen, the tile says "The generator is not set up" and links
@@ -223,10 +226,10 @@ sending. Past two minutes of silence, a tile dims, its header gains a
 `STALE` marker with the age, and its readings go to `—`. Blanking the
 number is deliberate: a stale reading shown as current is worse than none.
 
-- Solar tracks this per controller as well as for the array as a whole; one
+- Solar tracks this per controller as well as for the array as a whole. One
   MPPT dropping off marks only that row.
 - A gauge group or engine cluster badges the one reading that stopped and
-  keeps reporting the rest; the tile as a whole only goes stale once every
+  keeps reporting the rest. The tile as a whole only goes stale once every
   reading on it has.
 - An indicator cell drops to the dashed no-data look rather than staying lit
   on an old value.

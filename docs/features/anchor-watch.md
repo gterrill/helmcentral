@@ -15,22 +15,20 @@ during an outage rather than wandering, and the watchdog for a lost instrument
 connection reports the outage separately, as its own alarm. A drag alert and a
 lost GPS fix require different responses.
 
-## The header: depth and tide at a glance
+## The header: depth and tide
 
 The full-page anchor watch view opens with live depth under the keel as its
-headline reading, because that is what you actually care about while
-sitting on the hook, not how far off the anchor you've swung. Beside it,
-tide context keeps you from being surprised by the water changing under
-you: which way the tide is moving, the next high or low with its height and
-time, and the depth you should expect once it turns. The low-water
-clearance warning sits right there too, so everything about the water
-you're anchored in reads from one place. If depth hasn't updated recently,
-the reading is marked stale rather than left looking current.
+headline reading. That is what matters while sitting on the hook, more than
+how far off the anchor you've swung. Beside it, tide context shows which way
+the tide is moving, the next high or low with its height and time, and the
+depth you should expect once it turns. The low-water clearance warning sits
+there too, so everything about the water you're anchored in reads from one
+place. If depth hasn't updated recently, the reading is marked stale rather
+than left looking current.
 
 Distance from the anchor, bearing to it, the alarm radius, and current set and
-drift live in the compact readout panel on the map itself instead. That is where you check how far
-you've swung and how much room is left before the alarm sounds, while the
-header above keeps its attention on the water.
+drift live in the compact readout panel on the map itself. That is where you
+check how far you've swung and how much room is left before the alarm sounds.
 
 ## The swing trail
 
@@ -40,7 +38,7 @@ scribble under the boat arrow. A point is saved whenever the boat has moved
 a metre, or a minute has passed. The server keeps it, so closing the browser,
 reloading or restarting Helmcentral does not lose it. Moving the anchor
 position starts the trail again from that point, because the trail is
-measured against where the anchor is; changing only the radius keeps it.
+measured against where the anchor is. Changing only the radius keeps it.
 Raising the anchor ends it. The newest 10,000 points are kept and drawn,
 which covers days at anchor.
 
@@ -80,7 +78,7 @@ See [Set an anchor watch](../how-to/set-an-anchor-watch.md) for the steps.
 **Drop** saves the watch and publishes its anchor coordinates onto the boat's
 instrument network. These are the stored coordinates, including the bow
 offset when applied. Moving the anchor's saved position in Adjust
-republishes the corrected coordinates; changing the alarm radius or rode
+republishes the corrected coordinates. Changing the alarm radius or rode
 settings does not. See [Set an anchor watch](../how-to/set-an-anchor-watch.md)
 for how to open Adjust and move the anchor or change the radius.
 
@@ -91,15 +89,15 @@ anchor sees the vessel as under way again. Both operations confirm the change
 before reporting success and use the saved instrument-network credentials,
 independently of alarm transport settings.
 
-If synchronization fails, an error is shown. A failed Drop/reposition leaves
-the saved local watch active for safety; repeat Drop/reposition to synchronize.
-A failed Raise publication retains the local watch; retry Raise. If the
-instrument network accepted Raise but removing the local watch failed, the
-error says so and Raise can be retried. Restarting Helmcentral does not
+If synchronization fails, an error is shown. A failed Drop or reposition
+leaves the saved watch active for safety, so repeat it to synchronize. A
+failed Raise keeps the saved watch, so retry Raise. If the instrument network
+accepted Raise but removing the saved watch failed, the error says so and
+you can retry Raise. Restarting Helmcentral does not
 republish or clear anchor state.
 
-If the saved watch itself can't be read back after a restart or an update —
-the file behind it is damaged — the tile and this page say so plainly rather
+If the saved watch can't be read back after a restart or an update (its
+stored record is damaged), the tile and this page say so plainly rather
 than guessing at a position or showing a watch that isn't really there. Every
 other alarm on the boat keeps running. Drop the anchor again to start a fresh
 watch in its place.
@@ -175,15 +173,15 @@ low tide, not a lower one that might follow later in the day.
 
 ## The rode planner
 
-A sidebar on the anchor watch page for pay-out and swing-radius planning,
-against tide-corrected depth and gust-seeded wind. It can be used before
+A sidebar on the anchor watch page for planning pay-out and swing radius,
+against tide-corrected depth and gust-seeded wind. You can use it before
 lowering the anchor.
 
 Its Depth field shows the figure the plan is computed against: depth at this
 spot at the next high tide, plus your bow roller height above the water.
 That is the depth the chain has to reach on a rising tide, not just the
 depth under the keel right now. Type over it to plan against a different
-figure; the field will not accept a number that leaves no water at all once
+figure. The field won't accept a number that leaves no water at all once
 the tide and bow height are backed out, and says so rather than saving it.
 
 Its map takes pins: click open water to mark a bombie, a mooring block or the

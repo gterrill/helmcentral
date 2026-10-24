@@ -10,7 +10,7 @@ Mate is bring-your-own-key: Helmcentral doesn't supply a model or pay for
 your questions.
 
 1. Create an account at <https://openrouter.ai>.
-2. Add credit to it. OpenRouter is pay-as-you-go; a few dollars covers a
+2. Add credit to it. OpenRouter is pay-as-you-go. A few dollars covers a
    long time of passage-planning questions.
 3. Create an API key under your account settings and copy it. You won't be
    able to see it again after this step.

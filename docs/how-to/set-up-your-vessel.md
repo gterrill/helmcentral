@@ -1,7 +1,7 @@
 # Set up your vessel
 
 Helmcentral needs to know which engines, battery bank, generator, charger and
-inverter are yours before it can show or watch them. The Alternators tile, the
+inverter are yours before it can show or watch them. The Alternator tile, the
 Battery & Power tile (including its dawn projection and state-of-charge bands),
 the Generator, Solar and Tanks tiles, anchor auto-raise, Mate's passage
 estimates and anomaly detection (frozen and impossible sensor readings,
@@ -28,7 +28,7 @@ in order:
 1. **Connect to SignalK.** Enter the address and port, choose **Test
    Connection**, then **Save**.
 2. **Engines.** In **Discovery**, create an item for each engine the boat reports.
-   An engine item counts only if its source has reported RPM; one set to a source
+   An engine item counts only if its source has reported RPM. One set to a source
    that never has stays open, and the step names it.
 3. **House bank.** Under **Roles**, choose the house bank.
 4. **Charging and power sources.** Under **Roles**, answer the port and
@@ -40,9 +40,10 @@ in order:
 
 A step counts when it is saved. Until SignalK is connected on a new install, the
 other steps wait for it. Once you have set things up, a dropped connection does
-not reopen the list; the tiles' stale indicators say so instead. The list and the dashboard line work out where you are every time you
-look, so if an instrument is renumbered, an item is deleted or a role is
-cleared, the step comes back by itself. Both go away when the last step is done.
+not reopen the list. The tiles' stale indicators say so instead. The list and
+the dashboard line work out where you are every time you look, so if an
+instrument is renumbered, an item is deleted or a role is cleared, the step
+comes back by itself. Both go away when the last step is done.
 
 ## Assign each source to an item
 
@@ -54,7 +55,7 @@ cleared, the step comes back by itself. Both go away when the last step is done.
 2. On a row with no item yet, choose **Assign to item** and pick one of your
    existing items that does not own a source yet, or choose **Create item**,
    type a name such as "Port engine" and choose **Create**. A new item starts
-   with just that name and the right system; fill in the rest on its own page.
+   with just that name and the right system. Fill in the rest on its own page.
 3. A row that names an item is done. Choose **Open** to go to the item.
 
 You do not have to visit Discovery first for the Roles. Each dropdown under
@@ -108,9 +109,11 @@ reported its own, Helmcentral says so in red on that source (in Discovery,
 under the role, and on the item's page), and the Setup step stays open with the
 item's name and the source. Open the item and choose the source that does report
 it. Helmcentral makes this call only after it has watched the boat for a week
-(time the connection to SignalK was down does not count). A history log counts for the days it covers, together with the time watched; before that, or for a source it has never seen at
-all (an engine laid up since before it started watching), it does not guess: the
-step stays done and notes that it could not check yet.
+(time the connection to SignalK was down does not count). A history log counts
+for the days it covers, together with the time watched. Before that, or for a
+source it has never seen at all (an engine laid up since before it started
+watching), it doesn't guess. The step stays done and notes that it could not
+check yet.
 
 Names come only from items. There are no separate battery names, solar names,
 engine names or tank labels any more. A tank shows on the Tanks tile once an
@@ -126,9 +129,9 @@ each engine the boat has.
 
 - Give the item an engine profile and the engine's tiles take that profile's
   ranges and alarm limits. Add an Engine Cluster tile and choose the engine
-  from the list; see [Show equipment on a tile](show-equipment-on-a-tile.md).
+  from the list. See [Show equipment on a tile](show-equipment-on-a-tile.md).
   There is nothing to copy across, and no per-tile limits to keep in step.
-- The Alternators tile appears when a mapped engine is turning, and anchor
+- The Alternator tile appears when a mapped engine is turning, and anchor
   auto-raise only acts while one is. With no engine mapped, or none reporting,
   the tile stays hidden and auto-raise does nothing.
 - Mate's passage estimates use these engines for fuel history, and say engines
@@ -149,13 +152,13 @@ each engine the boat has.
    item. Choose **Save** in the bar across the top of the screen.
 
 This is the bank the Battery & Power tile reads for state of charge, voltage,
-current and power. If the bank reports its own nominal capacity, that figure is
-used; otherwise the capacity on the item is. The overnight dawn projection and
+current and power. If the bank reports its own nominal capacity, Helmcentral
+uses that. Otherwise it uses the capacity on the item. The overnight dawn projection and
 the state-of-charge bands follow the same bank. With no house bank chosen, the
 tile says "No house bank chosen" and links to **Settings, SignalK, Roles**, and
 the bands and dawn figure are absent. Solar, Loads, Shore and the voltage of the
-readout battery still show. A bank that is chosen but not reporting shows a dash
-(—). See [Set battery state-of-charge
+readout battery still show. A bank that is chosen but not reporting shows a dash.
+See [Set battery state-of-charge
 bands](set-battery-state-of-charge-bands.md).
 
 If you later move the house bank, either by choosing another item or by giving
@@ -163,7 +166,7 @@ the item another source, the state-of-charge bands move with it.
 
 ## Alternators
 
-The Alternators tile shows what each engine's alternator is putting out. The
+The Alternator tile shows what each engine's alternator is putting out. The
 boat's instruments number the alternators in their own order, and that order can
 change when equipment is reinstalled, so Helmcentral does not assume which
 number is port and which is starboard.
@@ -177,7 +180,7 @@ number is port and which is starboard.
    only one side set, the tile shows a single alternator.
 4. Choose **Save** in the bar across the top of the screen.
 
-A side that is not set shows no reading on the Alternators tile. Until you set
+A side that is not set shows no reading on the Alternator tile. Until you set
 at least one side, the tile is empty.
 
 ## Electrical
@@ -195,7 +198,7 @@ reinstalled, so Helmcentral does not assume which number is which.
    the boat reports with its live power. Start the generator and pick the one
    that reads load.
 4. Choose **This boat has none** for any the boat lacks. That is an answer, and
-   it finishes the setup step; **Not set** means you have not answered yet. Both
+   it finishes the setup step. **Not set** means you have not answered yet. Both
    show no figures. Choose **Save** in the bar across the top of the screen.
 
 What each one does:
@@ -240,7 +243,7 @@ Under **Roles**, each check shows whether it is ready, or what is still
 missing, so you always know what saving will turn on.
 
 If an item loses its source while a role still points at it, the role's figure
-shows no data and the log says why; the role list shows **Item no longer
+shows no data and the log says why. The role list shows **Item no longer
 assigned** until you choose again. If the item is deleted, the role is cleared
 and shows **Not set**. Other settings still save.
 
@@ -291,7 +294,8 @@ they are worth entering once. None of them is needed for anomaly detection.
    when you are away, with how to reach them.
 3. Under **Particulars**, enter the length overall and beam in metres. The
    boat's live instruments supply a length too when they publish one, shown
-   at the top of the section; this figure is the one kept for forms.
+   at the top of the section, but the figure you enter here is the one kept for
+   forms.
 4. Choose **Save** in the bar across the top of the screen.
 
 Leave a field blank if you do not want Mate to use it. It asks instead. See

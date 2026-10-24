@@ -19,7 +19,7 @@ empty.
 | Hailing port | Hailing port |
 | Hull type | Hull type |
 | Hull material | Hull material |
-| Displacement | Displacement, in kilograms. Tonnes are converted; any other unit stops the import |
+| Displacement | Displacement, in kilograms. Tonnes are converted, and any other unit stops the import |
 | Shore power | Shore power |
 | System voltage | System voltage |
 | Registration | Registration |
@@ -56,7 +56,7 @@ line becomes a bin coded with the locker's name, holding one item per line.
 | Work done (title and text) | Description, title first |
 | Engine / equipment | The equipment the entry is on. Chosen by you when two items share the name |
 | Hours | Hours |
-| Type | Not kept; every entry is recorded as maintenance |
+| Type | Not kept. Every entry is recorded as maintenance |
 
 ## Notes and tasks
 
@@ -69,7 +69,7 @@ text is not kept.
 ## Documents and photos
 
 Each keeps its YachtWave label as its title. You supply the file. Photos must
-be JPEG or PNG; YachtWave's `.jpe` photos are JPEG. A document or photo whose
+be JPEG or PNG. YachtWave's `.jpe` photos are JPEG. A document or photo whose
 YachtWave record names one piece of equipment is linked to it.
 
 ## Not imported
