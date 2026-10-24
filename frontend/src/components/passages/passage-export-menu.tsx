@@ -19,6 +19,7 @@ import {
 import type { DistanceUnits } from '@/config/app-config'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
+import { useInsetView } from '@/hooks/use-inset-view'
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import {
   DEFAULT_PLAY_SECONDS,
@@ -36,6 +37,7 @@ import {
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { IMAGE_SIZES, type ImageKind } from '@/lib/passage-export-layout'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
+import { insetViewRange } from '@/lib/passage-inset-view'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import type { CruiseStats, PassageDetail } from '@/lib/passages'
 import { prepareSignPhotos } from '@/lib/passage-export-photos'
@@ -78,6 +80,11 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
       : null
   ), [exportable, hasTrack])
   const { shots, loading: shotsLoading, error: shotsError } = useCameraShots(span ? span.from : null, span ? span.to : null)
+  // The overview map's corner and zoom step are saved with the replay, keyed by
+  // its range over every passage shown (the key the replay saves under); the
+  // card and the images draw it the way the replay does.
+  const insetRange = useMemo(() => insetViewRange(passages), [passages])
+  const { view: insetView, loading: insetViewLoading, error: insetViewError } = useInsetView(hasTrack ? insetRange : null)
 
   // Signs belong to real time too. The ones inside an exported passage go in
   // when Include signs is on, photos included.
@@ -123,7 +130,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   }, [menuOpen, includeSigns, photoKey, signsLoading])
 
   const exportInput = (prepared: ReadonlyMap<string, string> = photos): ExportInput => ({
-    kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, playSeconds, threeD, shots, hull,
+    kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, ...(insetView ? { insetView } : {}), playSeconds, threeD, shots, hull,
     ...(includeSigns ? { signs: signsInCard, photos: prepared } : {}),
   })
 
@@ -135,18 +142,28 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   // The card's size: exact once every photo is prepared, a guess (kept on the
   // high side) before that.
   const size = useMemo(() => {
-    if (!hasTrack || shotsLoading || shotsError || signsWait || signsFailed) return null
+    if (!hasTrack || shotsLoading || shotsError || insetViewLoading || insetViewError || signsWait || signsFailed) return null
     try {
       return estimateEmbed(exportInput())
     } catch {
       return null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasTrack, shotsLoading, shotsError, signsWait, signsFailed, signsInCard, photos, includeSigns, kind, title, passages, cruiseStats, units, inset, playSeconds, threeD, shots, hull])
+  }, [hasTrack, shotsLoading, shotsError, insetViewLoading, insetViewError, signsWait, signsFailed, signsInCard, photos, includeSigns, kind, title, passages, cruiseStats, units, inset, insetView, playSeconds, threeD, shots, hull])
   // The file name follows the same passages, order and zone as the card itself.
   const fileName = (input: ExportInput, ext: string) => {
     const data = prepareExport(input)
     return exportFileName(title, data.start, data.zone.o, ext)
+  }
+
+  // An export drawn without the overview placement the operator saved would be
+  // a different picture with no word said, so images stop for it too.
+  const insetReady = () => {
+    if (insetViewError) {
+      failed('read where the overview map goes', new Error(insetViewError))
+      return false
+    }
+    return true
   }
 
   // An export without the shots or signs the operator saved would be a
@@ -156,6 +173,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
       failed('read the camera shots', new Error(shotsError))
       return false
     }
+    if (!insetReady()) return false
     if (signsFailed) {
       failed('read the signs', new Error(signsError as string))
       return false
@@ -198,7 +216,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   }
 
   const downloadImage = async (imageKind: ImageKind) => {
-    if (busy) return
+    if (busy || !insetReady()) return
     setBusy(true)
     const label = IMAGE_SIZES[imageKind].label
     const toastId = toast.loading(`Drawing the ${label} image`)
@@ -269,10 +287,10 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
           )}
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={shotsLoading || signsWait} onClick={() => void showEmbed()}>Copy blog embed</DropdownMenuItem>
-        <DropdownMenuItem disabled={shotsLoading || signsWait} onClick={() => void downloadPage()}>Download embed as HTML</DropdownMenuItem>
-        <DropdownMenuItem disabled={busy} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
-        <DropdownMenuItem disabled={busy} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
+        <DropdownMenuItem disabled={shotsLoading || insetViewLoading || signsWait} onClick={() => void showEmbed()}>Copy blog embed</DropdownMenuItem>
+        <DropdownMenuItem disabled={shotsLoading || insetViewLoading || signsWait} onClick={() => void downloadPage()}>Download embed as HTML</DropdownMenuItem>
+        <DropdownMenuItem disabled={busy || insetViewLoading} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
+        <DropdownMenuItem disabled={busy || insetViewLoading} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
     <PassageEmbedDialog embed={embed} onClose={() => setEmbed(null)} />

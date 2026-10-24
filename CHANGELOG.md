@@ -11,8 +11,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Choose the corner and zoom of the overview map.** On the passage replay,
+  with Overview map on, the slider icon beside it puts the small map in any
+  corner and makes it wider or closer by up to three steps. The choice is saved
+  with the passage, and the blog embed and the still images draw it the same
+  way. A passage you have not set keeps today's look, top right at the automatic
+  zoom.
+
 ### Changed
 
+- **The overview map on the replay now frames the coast the way the blog embed
+  and images do.** It shows a little more of the surrounding coast than before
+  at the automatic zoom.
 - **The power catamaran on the passage replay looks like a power catamaran.**
   Boats set to the power catamaran hull type are now drawn as two slender hulls
   with fine bows, open stern steps down to swim platforms, a salon with a
@@ -23,23 +35,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   blog card, a sign now shows its photo across the top of the card, with the
   title and note underneath, instead of a small thumbnail beside them.
   A sign with no photo stays a compact text card.
+- **The camera shot you are editing is named.** On the passage replay, with
+  Camera on, a line above the shot's settings reads "Shot 2 of 3 · from 09:41
+  to 10:20" (with dates on a multi-day replay). The picked mark on the scrubber is larger and ringed so it is not
+  mistaken for the playhead, and hovering any mark shows its number and time.
 
 ### Fixed
 
 - **Sign cards near the edge of the map are no longer cut off.** A card now
   slides sideways to stay inside the map, or drops below its point when there
   is no room above it, and keeps doing so as the camera moves during replay.
-### Fixed
-
 - **Passage replay no longer wobbles.** The camera and the boat turn smoothly
   with the course instead of twitching at every fix.
-
-### Changed
-
-- **The camera shot you are editing is named.** On the passage replay, with
-  Camera on, a line above the shot's settings reads "Shot 2 of 3 · from 09:41
-  to 10:20" (with dates on a multi-day replay). The picked mark on the scrubber is larger and ringed so it is not
-  mistaken for the playhead, and hovering any mark shows its number and time.
 
 ## [0.54.0] - 2026-10-24
 

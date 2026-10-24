@@ -250,6 +250,32 @@ describe('overview inset framing', () => {
   })
 })
 
+describe('overview corner and zoom in the export', () => {
+  it('adds the zoom steps to the automatic zoom, keeps the corner, and decides the dot on the final zoom', () => {
+    const auto = prepareExport(input())
+    expect(auto.insetCorner).toBe('top-right')
+    const closer = prepareExport(input({ insetView: { corner: 'bottom-left', zoomOffset: 2 } }))
+    expect(closer.insetCorner).toBe('bottom-left')
+    expect(closer.insetZoom).toBeCloseTo(Math.min(12, auto.insetZoom + 2), 2)
+    const wider = prepareExport(input({ insetView: { corner: 'top-left', zoomOffset: -3 } }))
+    expect(wider.insetZoom).toBeCloseTo(Math.max(0, auto.insetZoom - 3), 2)
+    // The fixture track is tiny: a dot at zoom 5, and still a dot three steps wider (about 2 NM across the box at zoom 2).
+    expect(auto.insetDot).toBe(true)
+    expect(wider.insetDot).toBe(insetNeedsDot(auto.bounds, wider.insetZoom))
+  })
+
+  it('treats a new corner or step as a new export, not the cached one', () => {
+    const first = input()
+    const a = prepareExport(first)
+    expect(prepareExport({ ...first })).toBe(a)
+    const b = prepareExport({ ...first, insetView: { corner: 'bottom-right', zoomOffset: 0 } })
+    expect(b).not.toBe(a)
+    const c = prepareExport({ ...first, insetView: { corner: 'bottom-right', zoomOffset: 1 } })
+    expect(c).not.toBe(b)
+    expect(c.insetZoom).not.toBe(b.insetZoom)
+  })
+})
+
 describe('nights agree with the cruise page', () => {
   // Server rule: boat-local midnights from the first departure to the last arrival.
   it('counts a night at sea, numbers the anchor nights after it, and matches the cruise figure', () => {

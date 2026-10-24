@@ -22,7 +22,10 @@ to reach the boat afterwards.
    boat takes to cover the time actually spent underway. Each night at anchor
    adds a short pause on top.
 4. Tick or untick **Overview map in the corner**. It is the small map that
-   shows where the coast and the track sit in the wider country.
+   shows where the coast and the track sit in the wider country. Its corner
+   and zoom are the ones saved for the passage (see
+   [Film a passage replay](film-a-passage-replay.md)), and the card and both
+   images follow them.
 5. Tick or untick **3D**. It starts the way the 3D button on the passage map is
    set, and it is the same setting, so changing it here changes the map too.
    Ticked, readers see the hills and headlands standing up, with your boat

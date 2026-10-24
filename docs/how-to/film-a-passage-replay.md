@@ -47,6 +47,21 @@ Drag, zoom, pinch or tilt the map while the replay plays and it leaves the camer
 with you; a simple tap does not. It takes over again when the next shot starts, or when you press Play or
 move the slider.
 
+## Place the overview map
+
+1. Press **Overview map** on the replay bar to turn it on.
+2. Press the slider icon beside it, **Place overview map**.
+3. Under **Corner**, choose **Top left**, **Top right**, **Bottom left** or
+   **Bottom right**.
+4. Under **Zoom**, press **Wider** to show more of the coast or **Closer** to
+   show less. The number between them is how many steps you are from the
+   automatic zoom, from -3 to +3, and 0 is the automatic zoom.
+
+The choice is saved with the passage. A blog embed or image made from the
+passage afterwards uses the same corner and zoom. A cruise or a selection of
+passages remembers its own choice, separate from its first passage's. Trimming
+a passage, or replaying a different set, starts again from the defaults.
+
 ## Remove a shot
 
 Pick its mark and press **Delete shot**.

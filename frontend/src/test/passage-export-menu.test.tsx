@@ -10,6 +10,9 @@ vi.mock('@/lib/passage-export-image', () => render_)
 vi.mock('@/lib/save-blob', () => ({ saveBlob: vi.fn() }))
 const shotsHook = vi.hoisted(() => ({ value: { shots: [] as unknown[], loading: false, error: null as string | null } }))
 vi.mock('@/hooks/use-camera-shots', () => ({ useCameraShots: () => shotsHook.value }))
+const insetArgs = vi.hoisted(() => ({ calls: [] as unknown[] }))
+const insetHook = vi.hoisted(() => ({ value: { view: { corner: 'top-right', zoomOffset: 0 } as { corner: string; zoomOffset: number } | null, loading: false, error: null as string | null } }))
+vi.mock('@/hooks/use-inset-view', () => ({ useInsetView: (range: unknown) => { insetArgs.calls.push(range); return insetHook.value } }))
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => ({ type: 'sail_mono', loaM: 12, beamM: 4 }) }))
 const signsHook = vi.hoisted(() => ({ value: { signs: [] as unknown[], loading: false, error: null as string | null } }))
 vi.mock('@/hooks/use-replay-signs', () => ({ useReplaySigns: () => signsHook.value }))
@@ -45,6 +48,7 @@ function openMenu() {
 beforeEach(() => {
   vi.clearAllMocks(); saveImageryPreference(true); localStorage.clear()
   shotsHook.value = { shots: [], loading: false, error: null }
+  insetHook.value = { view: { corner: 'top-right', zoomOffset: 0 }, loading: false, error: null }
   signsHook.value = { signs: [], loading: false, error: null }
   photos.prepare.mockImplementation(async (signs) => new Map(signs.map((x) => [x.id, 'data:image/jpeg;base64,QUJD'])))
 })
@@ -133,6 +137,58 @@ describe('PassageExportMenu, cinematic card', () => {
     expect(data.d3).toBe(true)
     expect(data.hull).toEqual({ type: 'sail_mono', loa: 12, beam: 4 })
     expect(data.shots).toHaveLength(1)
+  })
+
+  it('puts the saved overview corner and zoom step into the embed', async () => {
+    const embedFor = async (view: { corner: string; zoomOffset: number }) => {
+      insetHook.value = { view, loading: false, error: null }
+      const { unmount } = render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+      const data = JSON.parse((await embedText()).match(/<script type="application\/json"[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? '{}') as { insetCorner: string; insetZoom: number }
+      unmount()
+      return data
+    }
+    const auto = await embedFor({ corner: 'top-right', zoomOffset: 0 })
+    const moved = await embedFor({ corner: 'bottom-left', zoomOffset: -2 })
+    expect(auto.insetCorner).toBe('top-right')
+    expect(moved.insetCorner).toBe('bottom-left')
+    expect(moved.insetZoom).toBeCloseTo(auto.insetZoom - 2, 2)
+  })
+
+  it('reads the placement for the range of every passage shown, track or not', async () => {
+    const t0 = Date.UTC(2026, 8, 14)
+    const noTrack = { ...passage([]), id: 'q', start: new Date(t0 - 3600_000).toISOString(), end: new Date(t0 - 1800_000).toISOString() }
+    const last = { ...passage(TRACK), id: 'r', start: new Date(t0 + 86400_000).toISOString(), end: new Date(t0 + 86400_000 + 600_000).toISOString() }
+    insetArgs.calls = []
+    render(<PassageExportMenu kind="combined" title="Both" passages={[passage(TRACK), noTrack, last]} units="metric" />)
+    expect(insetArgs.calls.at(-1)).toEqual({ from: t0 - 3600_000, to: t0 + 86400_000 + 600_000 })
+  })
+
+  it('stops an image, saying why, when the overview placement could not be read', async () => {
+    insetHook.value = { view: null, loading: false, error: 'HTTP 500' }
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Download image 1200 × 630' }))
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith('Could not read where the overview map goes', { description: 'HTTP 500' }))
+    expect(render_.renderPassageImage).not.toHaveBeenCalled()
+  })
+
+  it('waits for the saved overview placement before it exports', async () => {
+    insetHook.value = { view: null, loading: true, error: null }
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    expect(await screen.findByRole('menuitem', { name: 'Copy blog embed' })).toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('menuitem', { name: 'Download image 1200 × 630' })).toHaveAttribute('aria-disabled', 'true')
+  })
+
+  it('stops, saying why, when the overview placement could not be read', async () => {
+    insetHook.value = { view: null, loading: false, error: 'HTTP 500' }
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+    expect(toast.error).toHaveBeenCalledWith('Could not read where the overview map goes', { description: 'HTTP 500' })
+    expect(screen.queryByRole('textbox', { name: 'Blog embed' })).toBeNull()
   })
 
   it('leaves the model and the tilt out when 3D is switched off', async () => {

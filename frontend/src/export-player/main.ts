@@ -333,8 +333,10 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     }
     els.passage.textContent = s.passage
     els.time.textContent = fmtLocal(s.t)
+    const wasNight = !els.caption.hidden
     els.caption.hidden = !s.night
     els.caption.textContent = s.night ? `Night ${s.night.n}${s.night.place ? ` · ${s.night.place}` : ''}` : ''
+    if (wasNight !== !!s.night) liftInset()
     const src = map.getSource(data.map.doneSource) as MapLibre.GeoJSONSource | undefined
     if (src) src.setData(geoFor(s))
     lastRun = s.run
@@ -364,6 +366,17 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
       }
     })
   }
+  // A bottom-corner overview sits just above the readout, whatever height the
+  // readout has (a night caption makes it taller). The gap is the distance
+  // from the stage's bottom edge to the readout's top, plus a margin; unset
+  // while the readout is hidden, so the stylesheet's own offset applies.
+  function liftInset() {
+    if (els.readout.hidden) { root.style.removeProperty('--hcp-ro-gap'); return }
+    root.style.setProperty('--hcp-ro-gap', `${part('stage').clientHeight - els.readout.offsetTop + 8}px`)
+  }
+  doc.defaultView?.addEventListener('resize', liftInset)
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(liftInset).observe(els.readout)
+
   let insetMap: MapLibre.Map | null = null
 
   // ── the camera ──────────────────────────────────────────────────────────
@@ -505,6 +518,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     paused = false
     setMode('playing', 'Pause')
     els.readout.hidden = false
+    liftInset()
     makeInset()
     showState(plan.stateAt(0))
     lastTick = performance.now()
