@@ -1,0 +1,10 @@
+extends: existence
+message: "'%s' is how the code works. Describe what the operator sees instead."
+level: error
+tokens:
+  - WebAssembly
+  - WASM
+  - Web Components?
+  - WebSockets?
+  - React (?:apps?|components?|hooks?)
+  - Go (?:code|backend|binary|server)

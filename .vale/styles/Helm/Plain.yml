@@ -1,0 +1,16 @@
+extends: substitution
+message: "Prefer '%s' over '%s'."
+level: suggestion
+ignorecase: true
+swap:
+  utilis(?:e|ing)|utiliz(?:e|ing): use
+  in order to: to
+  prior to: before
+  subsequent(?:ly)?: later
+  commence: start
+  facilitate: help
+  approximately: about
+  a number of: some
+  in the event that: if
+  is able to: can
+  at this point in time: now

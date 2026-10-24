@@ -1,0 +1,8 @@
+extends: existence
+message: "'%s' is usually implementation detail. Keep it only when the operator types or sees it."
+level: warning
+tokens:
+  - SQLite
+  - JSON schema
+  - API endpoints?
+  - data pipelines?

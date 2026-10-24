@@ -1,0 +1,6 @@
+extends: occurrence
+message: "This sentence runs past 30 words. Split it so it reads aloud in one breath."
+level: warning
+scope: sentence
+max: 30
+token: '\b(\w+)\b'

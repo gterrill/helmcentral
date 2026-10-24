@@ -19,8 +19,8 @@
 - Before tagging, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a
   fresh empty `## [Unreleased]` above it, and update the compare links at the
   foot of the file. Check it with `sh packaging/release-notes.sh vX.Y.Z`.
-- Entries are written for the operator, under the user-facing writing rules in
-  the Documentation Location Policy: no ADR numbers, no implementation detail.
+- Entries are written for the operator with the `help-pages` skill: no ADR
+  numbers, no implementation detail.
 
 ## Checks Before Commit And Release
 
@@ -105,22 +105,14 @@ A feature normally gets one `features/` page as its entry point, and grows
 `how-to/` and `reference/` pages as it needs them. Do not create empty
 directories or placeholder pages in advance.
 
-#### Target Audience & Persona
+#### Writing help pages
 
-- **Audience:** Vessel skippers, navigators, and boat owners monitoring live vessel systems at the helm or remotely over tailscale.
-- **Voice:** Pragmatic, professional marine systems guide. Focus on operational utility, situational awareness, and helm workflows.
-- **Perspective:** Focus on *what the system does for the boat and operator*, never on *how the code or build system was implemented*.
-
-#### User Facing Writing Rules
-
-1. **No Implementation Details in User Docs:** Never mention Go, WebAssembly (WASM), Web Components, WebSocket lifecycles, JSON schemas, or internal data pipelines in user/operator documentation.
-2. **Marine Terminology First:**
-   - Use "vessel telemetry," "live instrument data," or "NMEA network feeds" instead of "Signal K paths / tree."
-   - Use "tile" for a component placed on a dashboard page. One word, every time. Never "widget," and never a synonym picked per sentence: this bullet used to offer four alternatives and no default, which is how the help pages ended up carrying both "Widgets" and "Tile state" as peer headings for the same object. "Gauge," "dial" and "lamp" remain correct for the specific kinds of tile that are those things.
-   - Use "operating modes" or "helm profiles" (e.g., Underway, At Anchor, Coastal, Refueling) instead of "UI pages / dashboard grids."
-   - Use "alarm thresholds" or "system warnings" instead of "boolean state triggers."
-3. **Operational Context First:** Start every feature doc with 1–2 sentences explaining the physical onboard benefit (e.g., preventing engine overheat, monitoring battery health at anchor, passage navigation).
-4. **Actionable Steps:** Focus how-to instructions strictly on what the user clicks, selects, or toggles on the display.
+Before writing or editing these pages or a `CHANGELOG.md` entry, read
+`.claude/skills/help-pages/SKILL.md` (Claude loads it as the `help-pages`
+skill). It holds the reader, the voice, worked examples and the shape of each
+kind of page. Run `make docs-lint` before
+committing a help page. Errors fail CI, and the warnings mark sentences to
+split.
 
 ### The engineering tree
 

@@ -1,0 +1,17 @@
+extends: existence
+message: "Cut '%s'. It reads as filler."
+level: error
+ignorecase: true
+tokens:
+  - "it'?s (?:important|worth) (?:to note|noting)"
+  - seamless(?:ly)?
+  - delve
+  - testament
+  - game ?changer
+  - load ?bearing
+  - leverag(?:e|es|ed|ing)
+  - empower(?:s|ed|ing)?
+  - ever-evolving
+  - robust
+  - cutting-edge
+  - unlock(?:s|ed)? the

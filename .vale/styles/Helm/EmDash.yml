@@ -1,0 +1,8 @@
+extends: existence
+message: "Use a full stop, comma, colon or brackets instead of a dash, and 'to' for a range."
+level: error
+nonword: true
+tokens:
+  - '—'
+  - '\s–\s'
+  - '\s-\s'

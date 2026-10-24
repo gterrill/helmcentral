@@ -1,0 +1,6 @@
+extends: existence
+message: "Say 'tile', not '%s'. Operators never see the word widget."
+level: error
+ignorecase: true
+tokens:
+  - widgets?
