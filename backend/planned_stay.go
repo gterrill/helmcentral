@@ -78,6 +78,21 @@ func parseStayDate(field, v string) (time.Time, *plannedStayError) {
 	return d, nil
 }
 
+// normalisePlannedStay is the one rule both writers share, the Forecast page's
+// PUT and Mate's changeset: the name is trimmed, then every field is checked,
+// and a stay whose departure has already passed at the place is refused (it
+// would be saved and then read back as no stay at all).
+func normalisePlannedStay(s plannedStay, now time.Time) (plannedStay, *plannedStayError) {
+	s.Name = strings.TrimSpace(s.Name)
+	if verr := validatePlannedStay(s); verr != nil {
+		return plannedStay{}, verr
+	}
+	if !plannedStayActive(s, now) {
+		return plannedStay{}, &plannedStayError{Field: "depart", Message: "depart has already passed at the place"}
+	}
+	return s, nil
+}
+
 func validatePlannedStay(s plannedStay) *plannedStayError {
 	if s.Name == "" {
 		return &plannedStayError{Field: "name", Message: "name the place"}
@@ -158,8 +173,8 @@ func (s *documentStore) SetPlannedStay(in plannedStay) (plannedStay, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	in.Name = strings.TrimSpace(in.Name)
-	if verr := validatePlannedStay(in); verr != nil {
+	in, verr := normalisePlannedStay(in, plannedStayNow())
+	if verr != nil {
 		return plannedStay{}, verr
 	}
 	var saved plannedStay
@@ -357,7 +372,8 @@ func updatePlannedStayRecord(env changeEnv, before recordSnapshot, given fieldSe
 	if val, has := given["depart"]; has {
 		cur.Depart = stringOf(val)
 	}
-	if verr := validatePlannedStay(cur); verr != nil {
+	cur, verr := normalisePlannedStay(cur, plannedStayNow())
+	if verr != nil {
 		return fieldErr(verr.Field, "%s", verr.Message)
 	}
 	return upsertPlannedStayTx(env.tx, cur, env.now)

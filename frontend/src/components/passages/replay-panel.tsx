@@ -439,7 +439,11 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
               canOpenPhoto={!replay.playing}
               still={reducedMotion}
               onOpenPhoto={(sign) => setPhotoSignId(sign.id)}
-              onPinClick={(id) => { setOpenPinId(id); if (signsOpen) selectSign(id) }}
+              onPinClick={(id) => {
+                // A press during playback or the fly-in opens nothing, now or when it pauses.
+                if (!replay.playing && !flying) setOpenPinId(id)
+                if (signsOpen) selectSign(id)
+              }}
               onCloseOpen={() => setOpenPinId(null)}
             />
           }

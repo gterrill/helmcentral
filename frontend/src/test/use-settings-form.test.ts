@@ -156,13 +156,10 @@ describe('useSettingsForm', () => {
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/settings'), expect.anything())
   })
 
-  it('falls back to GET /api/settings/signalk when GET /api/settings fails', async () => {
+  it('does not treat a signalk-only read as loaded, so nothing can be saved over unread settings', async () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes('/api/settings/signalk')) {
         return { ok: true, json: async () => ({ address: 'boat.local', port: 3001 }) }
-      }
-      if (url.includes('/api/settings')) {
-        return { ok: false, json: async () => ({}) }
       }
       return { ok: false, json: async () => ({}) }
     })
@@ -171,8 +168,27 @@ describe('useSettingsForm', () => {
     const { result } = renderHook(() => useSettingsForm())
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.settings.signalk).toEqual({ address: 'boat.local', port: 3001 })
-    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/api/settings/signalk'), expect.anything())
+    expect(result.current.loaded).toBe(false)
+    expect(result.current.settings.signalk).toBeUndefined()
+    expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining('/api/settings/signalk'), expect.anything())
+  })
+
+  it('stops retrying when the session is not allowed to read settings', async () => {
+    vi.useFakeTimers()
+    try {
+      let attempts = 0
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        attempts += 1
+        return { ok: false, status: 403, json: async () => ({ error: 'forbidden' }) }
+      }))
+      const { result } = renderHook(() => useSettingsForm())
+      await act(async () => { await vi.advanceTimersByTimeAsync(300_000) })
+      expect(attempts).toBe(1)
+      expect(result.current.loaded).toBe(false)
+      expect(result.current.loading).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('save(patch) deep-merges into current state and POSTs the FULL merged object', async () => {

@@ -88,7 +88,6 @@ function coverageText(s: OfflineCoastlineStatus, now: Date): string {
   return parts.join(' · ')
 }
 
-/** The one line under the switch. */
 /** The muted note about all-land squares left out, or null when there is nothing to say (none skipped, or the switch is off). */
 export function inlandSkippedLine(s: OfflineCoastlineStatus): string | null {
   const n = s.inland_skipped ?? 0
@@ -96,6 +95,7 @@ export function inlandSkippedLine(s: OfflineCoastlineStatus): string | null {
   return `${plural(n, 'square', 'squares')} that ${n === 1 ? 'is' : 'are'} all land ${n === 1 ? 'is' : 'are'} skipped.`
 }
 
+/** The one line under the switch. */
 export function coastlineStatusLine(s: OfflineCoastlineStatus, now: Date = new Date()): string {
   switch (s.state) {
     case 'off':

@@ -88,11 +88,10 @@ func signalKNotifications(snapshot *signalKSnapshot, owned func(path string) boo
 		// A kind the operator stopped showing (alarm_ignored_alarms.go) never
 		// leaves here: the board, banner, Mate, push and the alarm history all
 		// read this list. Safety kinds and emergencies are never hidden.
-		ignorable := alarmKindIgnorable(status.Label, status.State)
-		if ignorable && globalIgnoreStore.has(ignoredAlarmsList, status.Label) {
+		if alarmKindHidden(status.Label, status.State) {
 			continue
 		}
-		status.Ignorable = ignorable
+		status.Ignorable = alarmKindIgnorable(status.Label, status.State)
 		// ADR 0144: a leaf whose own "sentence" field says it came from a
 		// repeating NMEA 0183 message (signalk-server's parser re-asserts
 		// arrivalCircleEntered/perpendicularPassed on every APB sentence and

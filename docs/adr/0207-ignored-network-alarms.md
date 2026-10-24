@@ -30,7 +30,10 @@ kept in `alarm-rules.json`, the rule file, with no date.
 1. **Ignore is per alarm kind, whichever device raises it.** The kind is the
    notification path relative to the boat (`perpendicularPassed`,
    `navigation.arrivalCircleEntered`). Ignoring "Waypoint Passed" ignores it
-   from the plotter and from anything else that raises the same path.
+   from the plotter and from anything else that raises the same path. The
+   plotter's two route alarms (`perpendicularPassed`, `arrivalCircleEntered`)
+   are one kind whether raised with or without the `navigation.` prefix, and
+   are stored as the bare name.
 2. **It is hidden everywhere Helmcentral shows alarms.** The filter sits in
    `signalKNotifications`, beside the owned-path, stale-sentence and departed-
    beacon drops. Both consumers go through it: `activeAlarms()` (the board, the

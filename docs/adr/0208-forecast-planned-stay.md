@@ -39,7 +39,9 @@ them at a marina would put another place's sunset on the boat's clock.
    after departure, judged by the date at the place (its longitude's time zone,
    worked out on the server), not the browser's or the server's. The row is not swept: it is replaced or cleared by
    the operator and ignored once it has ended. `PUT` checks the dates and
-   `depart >= arrive`; `GET`, `PUT` and `DELETE` are on `/api/planned-stay`.
+   `depart >= arrive`, and refuses a departure already past at the place
+   (otherwise it would be saved and read back as no stay). Mate's changeset
+   takes the same trim and checks as `PUT`; `GET`, `PUT` and `DELETE` are on `/api/planned-stay`.
 3. **The forecast page opens on the boat.** A chip, "Coral Coast Marina ·
    27-31 Oct", switches to the stay and a Boat button returns, one tap each way.
    The header always names which place is on screen: "Forecast for Coral Coast
