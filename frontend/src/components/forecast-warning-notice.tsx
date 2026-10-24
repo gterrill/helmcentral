@@ -11,7 +11,11 @@ import { findActiveSurfBulletin, findActiveWindBulletin, type ForecastWarnings }
 // wrapper rather than the inline fragment this used to return: this is the
 // highest-stakes text on the forecast page, and set inline it had no more
 // weight than the sentence it was appended to.
-export function ForecastWarningNotice({ warnings }: { warnings: ForecastWarnings | null }) {
+//
+// `place` is set in the stay view, where the bulletins are those for the named
+// place rather than for the boat, and each line says so.
+export function ForecastWarningNotice({ warnings, place }: { warnings: ForecastWarnings | null; place?: string }) {
+  const where = place ? ` for ${place}${warnings?.region ? ` (${warnings.region})` : ''}` : ''
   const windBulletin = findActiveWindBulletin(warnings)
   const surfBulletin = findActiveSurfBulletin(warnings)
   if (!windBulletin && !surfBulletin) return null
@@ -20,7 +24,7 @@ export function ForecastWarningNotice({ warnings }: { warnings: ForecastWarnings
     <>
       {windBulletin ? (
         <p data-testid="forecast-wind-warning" className="mt-1.5">
-          <span className="font-semibold text-destructive">Wind warning in effect.</span>
+          <span className="font-semibold text-destructive">Wind warning in effect{where}.</span>
           {windBulletin.detailsUrl ? (
             <>
               {' '}
@@ -38,7 +42,7 @@ export function ForecastWarningNotice({ warnings }: { warnings: ForecastWarnings
       ) : null}
       {surfBulletin ? (
         <p data-testid="forecast-surf-warning" className="mt-1.5">
-          <span className="font-semibold text-destructive">Hazardous surf warning in effect.</span>
+          <span className="font-semibold text-destructive">Hazardous surf warning in effect{where}.</span>
           {surfBulletin.detailsUrl ? (
             <>
               {' '}

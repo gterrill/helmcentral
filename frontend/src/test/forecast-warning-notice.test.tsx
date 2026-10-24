@@ -149,4 +149,39 @@ describe('ForecastWarningNotice', () => {
     expect(notice).toHaveTextContent('Wind warning in effect.')
     expect(notice.textContent?.startsWith(' ')).toBe(false)
   })
+
+  // The stay view shows the place's bulletins, not the boat's. A warning for
+  // somewhere else read as the boat's would send a skipper to the wrong
+  // decision, so the line names whose it is.
+  describe('for a named place', () => {
+    const windWarning: ForecastWarnings = {
+      provider: 'bom',
+      region: 'QLD Gold Coast',
+      bulletins: [
+        {
+          id: 'IDQ20085',
+          title: 'Strong Wind Warning',
+          issuedAt: null,
+          detailsUrl: '',
+          category: 'wind',
+          sections: [{ day: 'Tuesday', warningType: 'Strong Wind Warning' }],
+        },
+      ],
+    }
+
+    it('labels a wind warning as the place\'s', () => {
+      render(<ForecastWarningNotice warnings={windWarning} place="Coral Coast Marina" />)
+      expect(screen.getByTestId('forecast-wind-warning')).toHaveTextContent('Wind warning in effect for Coral Coast Marina (QLD Gold Coast).')
+    })
+
+    it('leaves the boat\'s own wording alone when no place is given', () => {
+      render(<ForecastWarningNotice warnings={windWarning} />)
+      expect(screen.getByTestId('forecast-wind-warning')).toHaveTextContent(/^Wind warning in effect\.$/)
+    })
+
+    it('says nothing is in effect only by showing nothing', () => {
+      const { container } = render(<ForecastWarningNotice warnings={{ ...windWarning, bulletins: [] }} place="Coral Coast Marina" />)
+      expect(container).toBeEmptyDOMElement()
+    })
+  })
 })

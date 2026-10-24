@@ -426,6 +426,7 @@ var mateTools = []mateTool{
 	mateToolProposeChanges,
 	mateToolStartWatch,
 	mateToolGetVesselParticulars,
+	mateToolGetPlannedStay,
 	mateToolInspectForm,
 	mateToolFillForm,
 	mateToolSearchWeb,

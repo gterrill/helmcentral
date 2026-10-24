@@ -8,6 +8,9 @@ early, delay a passage or pick a different anchorage.
 Position comes from the boat's own GPS feed, so the forecast follows you
 without manual position updates.
 
+The forecast page can also show the weather at a marina or anchorage you have
+booked for later; see [Looking ahead to a planned stay](#looking-ahead-to-a-planned-stay).
+
 Weather, waves and tides each come from their own provider plugin. If one is
 down you get an explicit failure for that section rather than a stale
 number, and the card says which provider answered, whether the data was cached
@@ -183,6 +186,56 @@ Open-Meteo for upper air is a supported pairing rather than a contradiction.
 With no upper-air provider selected, the forecast page simply has no
 upper-air section. Nothing else changes.
 
+## Looking ahead to a planned stay
+
+The week before you move to another marina, you want the weather there for the
+days you will be there, not the weather where you are tied up now. Plan the stay
+once, with the place and your arrival and departure dates, and the forecast page
+can show that place alongside the boat's.
+
+There is one stay at a time, kept on the boat's server, so every phone, tablet
+and wall display sees the same one. It disappears the day after you leave.
+
+The page always opens on the boat. Beside the heading sits a button with the
+place and the dates, such as "Coral Coast Marina · 27-31 Oct"; choose it to
+switch to the stay, and choose **Boat** to come back. The heading says which you
+are looking at, and while it is the stay it adds that this is not the boat's
+position. Nothing on the dashboard changes: the tiles, the clock's sunrise and
+sunset, the day and night theme, the anchor rode planner and the alarms all keep
+reading from the boat's own position.
+
+What the stay view shows:
+
+- **The ten days, with your days marked.** Days you will be at the place carry a
+  STAY tag. The forecast reaches about ten days ahead, so a stay further out
+  gets a placeholder card for each day it does not reach, reading "No forecast
+  yet · from 3 Nov". That date is when the forecast first covers the day.
+  Nothing is guessed to fill the gap and the last day is never stretched.
+- **Times at the place.** Sunrise, sunset, the hours on every chart and the tide
+  times are the place's local time. When its clock differs from the boat's, a
+  note beside the buttons says so.
+- **Upper air.** The tinted band on the sixteen-day trace marks your stay. Read
+  it as the trend in the upper air over those days, whether heights are falling
+  or recovering, and not as a forecast for each day. A stay further out than the
+  trace says so.
+- **Tide from the nearest station.** The tide chart uses the station closest to
+  the place, names it, and says how far it is from the place. A station more
+  than 20 nautical miles away is flagged, since a tide there can differ from the
+  tide at the berth. Your saved tide station and automatic station setting are
+  left as they are, and only this view uses the nearer one.
+- **Warnings for that place.** A wind or surf warning is worded as the place's
+  and names its zone, so you do not read a warning for somewhere else as your own.
+- **Waves.** Where the wave model has no values at the spot, such as a berth up
+  a river or beside a lake, the card says "No wave forecast for this spot". It
+  does not borrow the open water's sea state.
+
+Mate can read the stay when you talk about "the marina", and can propose one for
+you from a place name and dates. A proposal is a card; nothing is set until you
+apply it. See [Plan a stay](../how-to/plan-a-stay.md) for the steps.
+
+Helmcentral does not notify you when the stay comes inside the forecast. Look at
+the placeholder cards: they say when each day arrives.
+
 ## Alarm rules that use this
 
 The forecast page shows what is coming. For what is happening now, Helmcentral
@@ -224,7 +277,8 @@ whole page at once. See [The dashboard](dashboard.md#instrument-tiles).
 
 The forecast is only as good as the models behind it, and the wave model in
 particular has poor coverage close inshore. Query it from a berth and you may
-get zeros, because the grid cell is land.
+get zeros, because the grid cell is land. For a planned stay the page says
+there is no wave forecast for that spot.
 
 None of the indicators here are predictions of severe weather. They are the
 warning signs a seamanship text says to watch for, evaluated automatically so

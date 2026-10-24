@@ -10,6 +10,9 @@ import { apiRequest } from '@/lib/api-query'
 import { useTideChart } from '@/hooks/use-tide-chart'
 import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useTideSettings } from '@/hooks/use-tide-settings'
+import { usePlaceTideStation } from '@/hooks/use-place-tide-station'
+import { placeDayStart, placeTimeZoneName } from '@/lib/place-time'
+import { isFarFromPlace, TIDE_STATION_FAR_NM } from '@/lib/stay'
 import { classifyTidePhase } from '@/lib/tide-phase'
 
 interface ForecastTideSectionProps {
@@ -160,6 +163,108 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
           its legend); every other branch above has no legend row to share,
           so it surfaces here instead of disappearing. */}
       {!chart && tideRefreshMeta && <div className="mt-1 flex justify-end">{tideRefreshMeta}</div>}
+    </div>
+  )
+})
+
+interface ForecastPlaceTideSectionProps {
+  isImperial: boolean
+  place: { name: string; lat: number; lon: number }
+  /** The place's calendar day being read, YYYY-MM-DD. */
+  dayKey: string
+}
+
+/**
+ * The tide for the stay view: the station nearest the place, for this view
+ * only. It reads the boat's tide provider but never writes a station, so the
+ * saved station and the auto-station setting stay what the operator chose for
+ * the boat. The station is named with how far it is from the place, and the
+ * distance is flagged when a tide there could differ from the tide at the
+ * place.
+ */
+export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({ isImperial, place, dayKey }: ForecastPlaceTideSectionProps) {
+  const { tideProvider, loading: settingsLoading } = useTideSettings()
+  const { providers: tideProviders } = useTideProviders()
+  const provider = settingsLoading ? '' : tideProvider
+  const { nearest, loading: nearestLoading, error: nearestError } = usePlaceTideStation(provider, { lat: place.lat, lon: place.lon })
+  const { chart, loading, error, isCached, updatedAt, ttlSeconds, refetch } = useTideChart(provider, nearest?.station.stationId ?? '')
+
+  const { windowStart, windowEnd } = useMemo(() => {
+    const start = placeDayStart(dayKey, place.lon)
+    return { windowStart: start, windowEnd: new Date(start.getTime() + 24 * 3_600_000) }
+  }, [dayKey, place.lon])
+  const timeZone = placeTimeZoneName(place.lon)
+
+  const refreshMeta = (isCached || updatedAt) ? (
+    <p data-testid="forecast-tide-refresh-meta" className="text-sm text-muted-foreground">
+      Data: {tideProviders.find((p) => p.id === tideProvider)?.name || tideProvider}
+      {' · '}
+      {isCached ? 'cached' : 'live'} · updated {formatRefreshAge(updatedAt, Date.now())}
+      {ttlSeconds ? ` · refreshes every ${Math.round(ttlSeconds / 3600)}h` : ''}
+    </p>
+  ) : null
+
+  let body
+  if (settingsLoading) {
+    body = <p className="py-6 text-center text-xs text-muted-foreground">Loading tide settings...</p>
+  } else if (!tideProvider) {
+    body = <p className="py-6 text-center text-xs text-muted-foreground">Tide provider is not set up. Choose one in Settings to see tides at {place.name}.</p>
+  } else if (nearestLoading) {
+    body = <p className="py-6 text-center text-xs text-muted-foreground">Finding the nearest tide station to {place.name}…</p>
+  } else if (!nearest) {
+    body = (
+      <p className="py-6 text-center text-xs text-muted-foreground">
+        No tide station found near {place.name}{nearestError ? ` (${nearestError})` : ''}.
+      </p>
+    )
+  } else {
+    const far = nearest.distanceNm !== null && isFarFromPlace(nearest.distanceNm)
+    const miles = nearest.distanceNm !== null ? nearest.distanceNm.toFixed(1) : null
+    const stationName = chart?.station.name || nearest.station.name
+    const stationState = chart?.station.state ?? nearest.station.state
+    body = (
+      <>
+        <div className="mb-2">
+          <p className="text-lg font-semibold text-foreground">
+            {stationName}
+            {stationState && <span className="ml-1 text-sm text-muted-foreground">({stationState})</span>}
+          </p>
+          {miles !== null && (
+            <p data-testid="forecast-place-tide-distance" className="text-xs text-muted-foreground">
+              {miles} NM from {place.name}
+            </p>
+          )}
+          {far && (
+            <p data-testid="forecast-place-tide-far" className="mt-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+              Nearest station is {miles} NM away, more than {TIDE_STATION_FAR_NM} NM. Tide times and heights at {place.name} may differ.
+            </p>
+          )}
+        </div>
+        {loading && !chart ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">Loading tide data...</p>
+        ) : error && !chart ? (
+          <div className="py-6 text-center">
+            <p className="text-xs text-destructive">{error}</p>
+            <Button type="button" size="sm" variant="outline" className="mt-3 h-8" onClick={() => void refetch()}>
+              Retry
+            </Button>
+          </div>
+        ) : chart ? (
+          <TideChart chart={chart} isImperial={isImperial} windowStart={windowStart} windowEnd={windowEnd} footerMeta={refreshMeta} timeZone={timeZone} />
+        ) : (
+          <p className="py-6 text-center text-xs text-muted-foreground">No tide data available</p>
+        )}
+      </>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-md border bg-card/70 p-2">
+      <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+        <Waves size={13} className="text-gauge-secondary" /> Tide ({isImperial ? 'ft' : 'm'})
+      </h4>
+      {body}
+      {!chart && refreshMeta && <div className="mt-1 flex justify-end">{refreshMeta}</div>}
     </div>
   )
 })

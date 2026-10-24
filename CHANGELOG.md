@@ -13,6 +13,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **See the forecast for a marina you're booked into.** On the Forecast page,
+  choose **Plan a stay**, find the place by name and give your arrival and
+  departure dates. A button beside the heading then switches the page to that
+  place and back to the boat. The ten days show which are yours; days past the
+  forecast say "No forecast yet" and when they will arrive. Times, tide station,
+  warnings and the upper-air trend are the place's, and the heading always says
+  it is not the boat's position. The dashboard, the clock and the alarms keep
+  using the boat's own position. The stay disappears the day after you leave.
+  Mate can read it and can propose one for you to apply.
 - **Use an Overpass server on your own network.** Place names, Nearby and
   Mate's place lookups can now use an Overpass server aboard over plain http,
   for example `http://192.168.1.20:12345/api/interpreter`. Plain http is

@@ -51,7 +51,7 @@ const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then(
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
 const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-route-panel').then((mod) => ({ default: mod.PassagesRoutePanel })))
 const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
-const ForecastDrawer = lazy(() => import('@/components/forecast-drawer').then((mod) => ({ default: mod.ForecastDrawer })))
+const ForecastPage = lazy(() => import('@/components/forecast-page').then((mod) => ({ default: mod.ForecastPage })))
 const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
 const SettingsRoutePanel = lazy(() => import('@/components/settings/settings-route-panel').then((mod) => ({ default: mod.SettingsRoutePanel })))
 // MateSheet and HelpSheet (unlike the panels above) fetch nothing and run
@@ -123,6 +123,7 @@ import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
+import { buildForecastDrawerProps } from '@/lib/forecast-drawer-props'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
 import { useUpperAir } from '@/hooks/use-upper-air'
 import { useWeatherToday } from '@/hooks/use-weather-today'
@@ -491,19 +492,8 @@ function AppShell() {
   useScreenWakeLock((fullscreen.isFullscreen || homeScreenDashboard) && !isDisplay && servedOverHttps())
   // The forecast hook is called here, ahead of the theme, because Auto mode
   // reads the same sunrise and sunset the Clock tile shows.
-  const {
-    forecast,
-    hourlyToday: forecastHourlyToday,
-    nextHour: forecastNextHour,
-    summary: forecastSummary,
-    loading: forecastLoading,
-    error: forecastError,
-    provider: forecastProvider,
-    isCached: forecastIsCached,
-    updatedAt: forecastUpdatedAt,
-    ttlSeconds: forecastTtlSeconds,
-    refetch: refetchForecast,
-  } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  const weatherFeed = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  const { forecast, nextHour: forecastNextHour } = weatherFeed
   const vesselTimeZone = useVesselTimeZone()
   const [storedIsDarkTheme, toggleDarkMode, themeState] = useDarkMode({
     sunriseTime: forecast[0]?.sunriseTime ?? null,
@@ -1083,28 +1073,19 @@ function AppShell() {
   // already well inside both — see config/app-config.ts.
   const { weather } = useWeatherToday(FORECAST_REFRESH_SECONDS)
   const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
-  const { activeWarning: activeForecastWarning } = useForecastWarnings(FORECAST_REFRESH_SECONDS)
+  const warningsFeed = useForecastWarnings(FORECAST_REFRESH_SECONDS)
+  const { activeWarning: activeForecastWarning } = warningsFeed
+  const wavesFeed = useWaveForecast(FORECAST_REFRESH_SECONDS)
   const {
     days: waveForecastDays,
     seaTemperatureF: waveSeaTemperatureF,
-    provider: waveForecastProvider,
-    isCached: waveForecastIsCached,
-    updatedAt: waveForecastUpdatedAt,
-    ttlSeconds: waveForecastTtlSeconds,
     loading: waveForecastLoading,
     error: waveForecastError,
-    refetch: refetchWaveForecast,
-  } = useWaveForecast(FORECAST_REFRESH_SECONDS)
+  } = wavesFeed
   // Upper air keeps its own refresh cadence: the global models behind it run
   // four times a day, so polling it on the surface-forecast interval would
   // re-fetch the same numbers.
-  const {
-    days: upperAirDays,
-    series: upperAirSeries,
-    windowBand: upperAirWindow,
-    updatedAt: upperAirUpdatedAt,
-    ttlSeconds: upperAirTtlSeconds,
-  } = useUpperAir()
+  const upperAirFeed = useUpperAir()
   // The anchor-watch record's own poll cadence is chosen inside the hook
   // itself (config/app-config.ts's ANCHOR_WATCH_ACTIVE/IDLE_REFRESH_SECONDS),
   // since it depends on whether a watch is currently active — not on this
@@ -2221,33 +2202,16 @@ function AppShell() {
     switch (activePanel) {
       case 'forecast':
         return (
-          <ForecastDrawer
-            forecast={forecast}
-            hourlyToday={forecastHourlyToday}
-            summary={forecastSummary}
-            loading={forecastLoading}
-            error={forecastError}
-            provider={forecastProvider}
-            isCached={forecastIsCached}
-            updatedAt={forecastUpdatedAt}
-            ttlSeconds={forecastTtlSeconds}
-            onRetry={refetchForecast}
-            unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
-            activeForecastWarning={activeForecastWarning}
-            waveDays={waveForecastDays}
-            upperAirDays={upperAirDays}
-            upperAirSeries={upperAirSeries}
-            upperAirWindow={upperAirWindow}
-            upperAirUpdatedAt={upperAirUpdatedAt}
-            upperAirTtlSeconds={upperAirTtlSeconds}
-            waveSeaTemperatureF={waveSeaTemperatureF}
-            waveLoading={waveForecastLoading}
-            waveError={waveForecastError}
-            waveProvider={waveForecastProvider}
-            waveIsCached={waveForecastIsCached}
-            waveUpdatedAt={waveForecastUpdatedAt}
-            waveTtlSeconds={waveForecastTtlSeconds}
-            onWaveRetry={refetchWaveForecast}
+          <ForecastPage
+            boatLongitude={longitude}
+            canWrite={canWrite}
+            boat={buildForecastDrawerProps({
+              weather: weatherFeed,
+              waves: wavesFeed,
+              upperAir: upperAirFeed,
+              warnings: warningsFeed,
+              unit: uiConfig.distanceUnits as 'imperial' | 'metric',
+            })}
           />
         )
       case 'alarms':

@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useApiQuery } from '@/lib/api-query';
+import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 export type WaveSteepnessBand = 'rolling' | 'building' | 'steep' | 'breaking';
 
@@ -160,11 +161,11 @@ const EMPTY_WAVES: MappedWaveForecast = {
   ttlSeconds: null,
 };
 
-export function useWaveForecast(refreshIntervalSeconds = 3600) {
+export function useWaveForecast(refreshIntervalSeconds = 3600, options: ForecastQueryOptions = {}) {
   const { data, error, isLoading, refetch } = useApiQuery<MappedWaveForecast>({
-    queryKey: ['/api/wave-forecast'],
-    path: '/api/wave-forecast',
+    ...forecastQuery('/api/wave-forecast', options.place),
     refetchInterval: refreshIntervalSeconds * 1000,
+    enabled: options.enabled,
     select: mapWavePayload,
   });
 
