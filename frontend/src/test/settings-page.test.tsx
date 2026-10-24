@@ -109,7 +109,7 @@ describe('SettingsPage dirty tracking', () => {
   it('reports dirty=false initially, true after a draft field changes, and false again after a successful save', async () => {
     const onDirtyChange = vi.fn()
     render(
-      <SettingsPage
+      <SettingsPage onOpenHelp={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -136,7 +136,7 @@ describe('SettingsPage dirty tracking', () => {
     mockTouched = { ...emptyTouched(), WEATHERKIT_KEY_ID: true }
     const onDirtyChange = vi.fn()
     render(
-      <SettingsPage
+      <SettingsPage onOpenHelp={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -151,7 +151,7 @@ describe('SettingsPage dirty tracking', () => {
   it('reports dirty=false when a field is changed back to its original saved value (regression: was stuck true)', async () => {
     const onDirtyChange = vi.fn()
     render(
-      <SettingsPage
+      <SettingsPage onOpenHelp={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -186,7 +186,7 @@ describe('SettingsPage Anchor scope method', () => {
   it('renders the Scope Method select, marks the form dirty on change, and saves the chosen value', async () => {
     const onDirtyChange = vi.fn()
     render(
-      <SettingsPage
+      <SettingsPage onOpenHelp={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -222,7 +222,7 @@ describe('SettingsPage Anchor auto-raise setting', () => {
   it('defaults the switch on, and saving after turning it off patches auto_raise_on_motoring:false', async () => {
     const onDirtyChange = vi.fn()
     render(
-      <SettingsPage
+      <SettingsPage onOpenHelp={vi.fn()}
         onDirtyChange={onDirtyChange}
       />,
     )
@@ -251,7 +251,7 @@ describe('SettingsPage imperative save handle', () => {
   it('saves the settings patch and ALL touched secrets (the full SECRET_KEYS set, not just the inline-section subset)', async () => {
     const ref = createRef<SettingsPageHandle>()
     render(
-      <SettingsPage ref={ref} />,
+      <SettingsPage onOpenHelp={vi.fn()} ref={ref} />,
     )
 
     await ref.current!.save()
@@ -265,7 +265,7 @@ describe('SettingsPage imperative save handle', () => {
     saveMock.mockRejectedValueOnce(new Error('boom'))
     const ref = createRef<SettingsPageHandle>()
     render(
-      <SettingsPage ref={ref} />,
+      <SettingsPage onOpenHelp={vi.fn()} ref={ref} />,
     )
 
     await expect(ref.current!.save()).rejects.toThrow('boom')
@@ -274,13 +274,13 @@ describe('SettingsPage imperative save handle', () => {
 
 describe('SettingsPage Save bar', () => {
   it('shows no Save bar while clean, and no Save Settings button anywhere', () => {
-    render(<SettingsPage />)
+    render(<SettingsPage onOpenHelp={vi.fn()} />)
     expect(saveBar().queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /save settings/i })).not.toBeInTheDocument()
   })
 
   it('shows the bar in the header slot once a field is edited, and Save runs the save path', async () => {
-    render(<SettingsPage />)
+    render(<SettingsPage onOpenHelp={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
     fireEvent.change(screen.getByLabelText('Vessel prefix'), { target: { value: 'S/V Test' } })
 
@@ -292,7 +292,7 @@ describe('SettingsPage Save bar', () => {
   })
 
   it('Discard restores the original value, clears touched secrets and hides the bar', async () => {
-    render(<SettingsPage />)
+    render(<SettingsPage onOpenHelp={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
     const input = screen.getByLabelText('Vessel prefix') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'S/V Test' } })
@@ -307,7 +307,7 @@ describe('SettingsPage Save bar', () => {
 
   it('shows a settings save error in the bar and keeps it open', async () => {
     saveMock.mockRejectedValueOnce(new Error('boom'))
-    render(<SettingsPage />)
+    render(<SettingsPage onOpenHelp={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
     fireEvent.change(screen.getByLabelText('Vessel prefix'), { target: { value: 'S/V Test' } })
 
@@ -319,7 +319,7 @@ describe('SettingsPage Save bar', () => {
 
   it('Discard clears a failed save, so the next edit opens a bar with no stale error', async () => {
     saveMock.mockRejectedValueOnce(new Error('boom'))
-    render(<SettingsPage />)
+    render(<SettingsPage onOpenHelp={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
     const input = screen.getByLabelText('Vessel prefix')
     fireEvent.change(input, { target: { value: 'S/V Test' } })
@@ -336,7 +336,7 @@ describe('SettingsPage Save bar', () => {
   it('Discard after a partial save keeps what the settings request already saved', async () => {
     saveTouchedKeysMock.mockRejectedValueOnce(new Error('secrets down'))
     mockTouched = { ...emptyTouched(), SIGNALK_PASSWORD: true }
-    render(<SettingsPage />)
+    render(<SettingsPage onOpenHelp={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: 'Vessel' }))
     const input = screen.getByLabelText('Vessel prefix') as HTMLInputElement
     fireEvent.change(input, { target: { value: 'S/V Test' } })
@@ -354,7 +354,7 @@ describe('SettingsPage Save bar', () => {
   it('combines secrets save failures into the bar', async () => {
     saveTouchedKeysMock.mockRejectedValueOnce(new Error('secrets down'))
     mockTouched = { ...emptyTouched(), SIGNALK_PASSWORD: true }
-    render(<SettingsPage />)
+    render(<SettingsPage onOpenHelp={vi.fn()} />)
     fireEvent.click(await saveBar().findByRole('button', { name: 'Save' }))
     expect(await saveBar().findByRole('alert')).toHaveTextContent('secrets down')
   })

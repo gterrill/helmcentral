@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Switch } from '@/components/ui/switch'
 import { useOfflineCoastline } from '@/hooks/use-offline-coastline'
+import type { HelpTarget } from '@/lib/help-links'
 import {
   clockTime,
   coastlineCheckFailures,
@@ -19,7 +20,11 @@ import {
 interface OfflineCoastlineSectionProps {
   draft: RegularSettingsDraft
   onChange: (patch: Partial<RegularSettingsDraft>) => void
+  /** Opens the in-app help, for the link to the Overpass how-to. */
+  onOpenHelp: (target: HelpTarget) => void
 }
+
+const OVERPASS_HELP_TARGET: HelpTarget = { page: 'how-to/run-your-own-overpass-server' }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
@@ -69,7 +74,7 @@ function Failures({ status }: { status: OfflineCoastlineStatus }) {
   )
 }
 
-export function OfflineCoastlineSection({ draft, onChange }: OfflineCoastlineSectionProps) {
+export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: OfflineCoastlineSectionProps) {
   const { status, loading, error, update, clearCoverage } = useOfflineCoastline()
   const [actionError, setActionError] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
@@ -151,6 +156,17 @@ export function OfflineCoastlineSection({ draft, onChange }: OfflineCoastlineSec
                 Downloads OpenStreetMap coastline and reefs for every 1° square within 200 nm of the boat, one square at a
                 time in the background, and checks each week whether the public map has changed. It uses the internet while
                 it fills. Off, nothing is downloaded or checked.
+              </FieldDescription>
+              <FieldDescription>
+                The squares come from the Overpass server set in Settings → Plugins → OpenStreetMap (Overpass). A server
+                aboard fills them much faster than a public one.{' '}
+                <button
+                  type="button"
+                  onClick={() => onOpenHelp(OVERPASS_HELP_TARGET)}
+                  className="rounded-sm font-medium text-primary hover:underline focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                >
+                  Run your own Overpass server
+                </button>
               </FieldDescription>
             </FieldContent>
           </Field>
