@@ -15,6 +15,8 @@ import { boatMarkerKind, type BoatHull } from '@/lib/boat-model'
 import { OPENSEAMAP_TILES, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
+import { insetZoom } from '@/lib/passage-export-style'
+import { offsetInsetZoom, type InsetCorner } from '@/lib/passage-inset-view'
 import { fitZoomForPitch } from '@/lib/pitch-fit'
 import { CameraGate, outsideCentral, type Camera, type CameraResult } from '@/lib/replay-camera'
 import { createSailedCache, segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
@@ -91,8 +93,11 @@ export interface PassageMapProps {
   onFlatChange?: (flat: boolean) => void
   isDarkTheme: boolean
   className?: string
-  /** Shown in the top right corner, stacked under the satellite button. */
-  overlay?: ReactNode
+  /** The overview map, drawn in `insetCorner` clear of the map's own buttons,
+   * notices and credit. */
+  inset?: ReactNode
+  /** Where `inset` sits; top right when absent. */
+  insetCorner?: InsetCorner
   /** Map markers drawn over the track: the replay's signs. */
   markers?: ReactNode
 }
@@ -130,7 +135,7 @@ function centreOf(bounds: [number, number, number, number]) {
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, overlay, markers },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -529,21 +534,29 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
         )}
         {markers}
       </Map>
-      {threeD && terrain !== 'ok' && (
-        <div
-          role="status"
-          className="absolute left-2 top-2 rounded-md bg-black/70 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm"
-        >
-          Terrain unavailable
-        </div>
-      )}
+      {/* Each corner keeps what lives there and puts the overview beside it:
+          the terrain notice and the toggle buttons stack with it at the top,
+          and the bottom corners sit above the map credit. */}
+      <div className="absolute left-2 top-2 flex flex-col items-start gap-2">
+        {threeD && terrain !== 'ok' && (
+          <div
+            role="status"
+            className="rounded-md bg-black/70 px-2 py-1 text-xs font-medium text-white backdrop-blur-sm"
+          >
+            Terrain unavailable
+          </div>
+        )}
+        {insetCorner === 'top-left' && inset}
+      </div>
       <div className="absolute right-2 top-2 flex flex-col items-end gap-2">
         <div className="flex gap-2">
           <MapToggleButton icon={Mountain} label="Toggle 3D" on={threeD} onToggle={() => setThreeD(!threeD)} />
           <ImageryToggleButton on={satellite} onToggle={() => setSatellite(!satellite)} />
         </div>
-        {overlay}
+        {insetCorner === 'top-right' && inset}
       </div>
+      {insetCorner === 'bottom-left' && <div className="absolute bottom-8 left-2">{inset}</div>}
+      {insetCorner === 'bottom-right' && <div className="absolute bottom-8 right-2">{inset}</div>}
     </div>
   )
 })
@@ -552,14 +565,28 @@ export interface InsetMapProps {
   bounds: [number, number, number, number] | null
   isDarkTheme: boolean
   className?: string
+  /** Zoom steps from the automatic fit: negative is wider, positive closer. */
+  zoomOffset?: number
 }
 
 // A small overview in the corner: the region around the track, with a box
 // where the track is. Not interactive; the main map is the one to move.
-export function InsetMap({ bounds, isDarkTheme, className }: InsetMapProps) {
+export function InsetMap({ bounds, isDarkTheme, className, zoomOffset = 0 }: InsetMapProps) {
   const canRender = hasWebGL2()
-  if (!canRender || !bounds) return null
-  const centre = centreOf(bounds)
+  const mapRef = useRef<MapRef>(null)
+  const centre = bounds ? centreOf(bounds) : null
+  // The same automatic zoom the blog embed and the still images use, so a step
+  // means the same framing in all three.
+  const zoom = bounds ? offsetInsetZoom(insetZoom(bounds), zoomOffset) : 0
+  const lon = centre?.longitude
+  const lat = centre?.latitude
+  // A map takes its first view only when it is made, so a new step moves the
+  // map that is there instead of drawing another.
+  useEffect(() => {
+    if (lon === undefined || lat === undefined) return
+    mapRef.current?.jumpTo({ center: [lon, lat], zoom })
+  }, [lon, lat, zoom])
+  if (!canRender || !bounds || !centre) return null
   const box: GeoJSON.Feature<GeoJSON.Polygon> = {
     type: 'Feature',
     properties: {},
@@ -568,14 +595,11 @@ export function InsetMap({ bounds, isDarkTheme, className }: InsetMapProps) {
       coordinates: [[[bounds[0], bounds[1]], [bounds[2], bounds[1]], [bounds[2], bounds[3]], [bounds[0], bounds[3]], [bounds[0], bounds[1]]]],
     },
   }
-  // Wide enough to show the surrounding coast: about eight times the track's
-  // longest side, never closer than zoom 3 or further out than zoom 1.
-  const span = Math.max(bounds[2] - bounds[0], (bounds[3] - bounds[1]) * 1.6, 0.05)
-  const zoom = Math.max(1, Math.min(8, Math.log2(360 / (span * 8))))
   return (
     <div className={className} data-testid="passage-inset-map">
       <Map
         mapLib={maplibregl}
+        ref={mapRef}
         initialViewState={{ ...centre, zoom }}
         style={{ width: '100%', height: '100%' }}
         mapStyle={isDarkTheme ? STYLE_DARK : STYLE_LIGHT}

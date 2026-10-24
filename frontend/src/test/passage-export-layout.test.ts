@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import { INSET_CORNERS } from '@/lib/passage-inset-view'
+
 import { IMAGE_SIZES, composeImageLayout, fitText, mapCropRect, paintOverlay, type LayoutSpec, type Measure } from '@/lib/passage-export-layout'
 
 // Every glyph is half its font size wide, so widths are exact and the same on
@@ -97,6 +99,31 @@ describe('composeImageLayout', () => {
     expect(r.y).toBeGreaterThan(0)
     expect(r.y + r.h).toBeLessThan(on.band.y)
     expect(composeImageLayout(spec({ inset: false }), measure).inset).toBeNull()
+  })
+
+  const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+
+  it.each(INSET_CORNERS.map((c) => [c.id]))('puts the overview in the %s corner clear of the band, its text and the credit', (corner) => {
+    for (const size of [IMAGE_SIZES.og, IMAGE_SIZES.wide]) {
+      const l = composeImageLayout(spec({ ...size, inset: true, insetCorner: corner }), measure)
+      const r = l.inset as NonNullable<typeof l.inset>
+      expect(r.x).toBeGreaterThan(0)
+      expect(r.x + r.w).toBeLessThan(size.width)
+      expect(r.y).toBeGreaterThan(0)
+      expect(r.y + r.h).toBeLessThan(l.band.y)
+      expect(overlaps(r, l.band)).toBe(false)
+      const left = corner.endsWith('left')
+      expect(left ? r.x : size.width - (r.x + r.w)).toBe(24)
+      const top = corner.startsWith('top')
+      expect(top ? r.y : l.band.y - (r.y + r.h)).toBe(24)
+    }
+  })
+
+  it('keeps the top right corner when no corner is given', () => {
+    const l = composeImageLayout(spec(), measure)
+    const t = composeImageLayout(spec({ insetCorner: 'top-right' }), measure)
+    expect(l.inset).toEqual(t.inset)
   })
 
   it('credits the map sources on the image', () => {

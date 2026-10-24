@@ -124,7 +124,7 @@ function copyCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
 /** The finished PNG for one image size. */
 export async function renderPassageImage(data: ExportData, kind: ImageKind, satellite = false): Promise<Blob> {
   const size = IMAGE_SIZES[kind]
-  const layoutSpec = { width: size.width, height: size.height, title: data.title, dates: data.dates, stats: data.stats, inset: data.inset }
+  const layoutSpec = { width: size.width, height: size.height, title: data.title, dates: data.dates, stats: data.stats, inset: data.inset, insetCorner: data.insetCorner }
   const measure = measureWithCanvas()
   const padding = composeImageLayout(layoutSpec, measure)
   const mapPromise = renderMap(data, {

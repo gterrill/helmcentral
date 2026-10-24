@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { CameraEditor, type CameraShotChange } from '@/components/passages/camera-editor'
@@ -11,6 +12,9 @@ import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
+import { useInsetView } from '@/hooks/use-inset-view'
+import { insetViewApi } from '@/lib/inset-view-api'
+import { insetViewRange, type InsetView } from '@/lib/passage-inset-view'
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
 import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
@@ -115,6 +119,36 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     }
   }, [built.items])
   const { shots } = useCameraShots(spanMs ? spanMs.from : null, spanMs ? spanMs.to : null)
+
+  // The overview map's corner and zoom step are saved with the replay, keyed by
+  // its range (first departure to last arrival). A change shows at once and
+  // holds until the server has answered the last write; a refused write puts the
+  // saved view back. Writes go one at a time, so the last click is what the
+  // server keeps and what the cache ends up showing.
+  const insetRange = useMemo(() => insetViewRange(passages), [passages])
+  const { view: savedInset, error: insetError, refetch: retryInset } = useInsetView(insetRange)
+  const [pendingInset, setPendingInset] = useState<InsetView | null>(null)
+  const insetWrites = useRef(0)
+  const insetQueue = useRef<Promise<void>>(Promise.resolve())
+  const insetView = pendingInset ?? savedInset
+  useEffect(() => {
+    if (insetError) toast.error('Could not read where the overview map goes', { description: insetError })
+  }, [insetError])
+  const changeInsetView = (next: InsetView) => {
+    if (!insetRange) return
+    setPendingInset(next)
+    insetWrites.current += 1
+    insetQueue.current = insetQueue.current
+      .then(() => insetViewApi.save(insetRange.from, insetRange.to, next))
+      .then(() => undefined)
+      .catch((err: unknown) => {
+        toast.error('Could not save the overview map', { description: err instanceof Error ? err.message : String(err) })
+      })
+      .finally(() => {
+        insetWrites.current -= 1
+        if (insetWrites.current === 0) setPendingInset(null)
+      })
+  }
   const resolved = useMemo(
     () => resolveShots(shots, timeline).filter((r) => timeline.entries.find((e) => e.id === r.entryId)?.segments.some((s) => s.length > 0)),
     [shots, timeline],
@@ -495,12 +529,14 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
             />
           }
           isDarkTheme={isDarkTheme}
-          overlay={
-            insetOn && !flying ? (
+          insetCorner={insetView?.corner}
+          inset={
+            insetOn && !flying && insetView ? (
               <InsetMap
                 className="h-32 w-44 overflow-hidden rounded-md border border-border shadow-sm"
                 bounds={bounds}
                 isDarkTheme={isDarkTheme}
+                zoomOffset={insetView.zoomOffset}
               />
             ) : null
           }
@@ -518,6 +554,10 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         onScrub={(c) => { replay.setPlaying(false); replay.setClock(c); setResume((n) => n + 1) }}
         onSpeed={setSpeed}
         onInsetChange={setInsetOn}
+        insetView={insetView ?? undefined}
+        insetViewError={insetError}
+        onInsetViewRetry={() => void retryInset()}
+        onInsetViewChange={changeInsetView}
         shotTicks={shotTicks}
         cameraOpen={cameraOpen}
         onCameraToggle={() => setCameraOpen((o) => !o)}

@@ -105,6 +105,17 @@ point. 60 s, Slow, Normal and Fast set how long the whole replay takes: 60,
 corner, with a box where the track is. It stays on or off the next time you
 open a passage.
 
+With the overview map on, the slider icon beside its button lets you put it in
+any corner of the map (top left, top right, bottom left or bottom right) and
+make it wider or closer than the automatic fit, up to three steps either way.
+The corner and the step are saved with the passage, so it looks the same the next
+time you open it and in everything you share from it. The blog embed and the
+two still images draw the overview in the same corner at the same zoom, and in
+every corner it keeps clear of the map buttons, the readout and the map credit.
+A passage you have not set shows the overview top right at the automatic zoom.
+If the saved choice cannot be read, the overview stays off and a Retry button
+appears beside it rather than showing a guess.
+
 ### Camera shots
 
 By default the camera frames the whole track. Camera shots let you direct it,

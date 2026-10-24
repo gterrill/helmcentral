@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { generateEmbed, PLAYER_SOURCE, type ExportInput } from '@/lib/passage-export'
+import { generateEmbed, PLAYER_SOURCE, prepareExport, type ExportInput } from '@/lib/passage-export'
 import type { PassageDetail, PassageStats } from '@/lib/passages'
 
 // happy-dom has no WebGL, so MapLibre is replaced by a recorder. What is checked
@@ -193,6 +193,44 @@ describe('tapping play', () => {
     expect(root.className).toContain('hcp-playing')
     expect((root.querySelector('.hcp-time') as HTMLElement).textContent).toBe('14 Sep 10:00 UTC+10')
     expect((root.querySelector('.hcp-passage') as HTMLElement).textContent).toBe('Leg 1')
+    raf.mockRestore()
+  })
+
+  it.each([
+    ['top-left', 'hcp-inset-tl'], ['top-right', 'hcp-inset-tr'], ['bottom-left', 'hcp-inset-bl'], ['bottom-right', 'hcp-inset-br'],
+  ] as const)('places the overview in the %s corner and draws it at the exported zoom', (corner, cls) => {
+    const raf = vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1)
+    const { root } = mount(base({ insetView: { corner, zoomOffset: 2 } }))
+    const inset = root.querySelector('.hcp-inset') as HTMLElement
+    expect(inset.classList.contains(cls)).toBe(true)
+    expect([...inset.classList].filter((c) => c.startsWith('hcp-inset-'))).toEqual([cls])
+    const map = FakeMap.instances[0]
+    map.fire('style.load')
+    ;(root.querySelector('.hcp-btn') as HTMLElement).click()
+    map.fire('moveend')
+    const zoomed = prepareExport(base({ insetView: { corner, zoomOffset: 2 } })).insetZoom
+    expect(FakeMap.instances[1].options.zoom).toBe(zoomed)
+    raf.mockRestore()
+  })
+
+  it('lifts a bottom corner overview to just above the readout, wherever its top is', () => {
+    const raf = vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1)
+    const { root } = mount(base({ insetView: { corner: 'bottom-left', zoomOffset: 0 } }))
+    const stage = root.querySelector('.hcp-stage') as HTMLElement
+    const readout = root.querySelector('.hcp-readout') as HTMLElement
+    Object.defineProperty(stage, 'clientHeight', { configurable: true, value: 400 })
+    // A readout with a night caption is taller, so its top is higher.
+    let top = 330
+    Object.defineProperty(readout, 'offsetTop', { configurable: true, get: () => top })
+    expect(root.style.getPropertyValue('--hcp-ro-gap')).toBe('')
+    const map = FakeMap.instances[0]
+    map.fire('style.load')
+    ;(root.querySelector('.hcp-btn') as HTMLElement).click()
+    map.fire('moveend')
+    expect(root.style.getPropertyValue('--hcp-ro-gap')).toBe('78px')
+    top = 290
+    window.dispatchEvent(new Event('resize'))
+    expect(root.style.getPropertyValue('--hcp-ro-gap')).toBe('118px')
     raf.mockRestore()
   })
 
