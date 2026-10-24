@@ -4,6 +4,8 @@ import {
   boatMarkerKind,
   boatScaleFactor,
   circularMeanDeg,
+  HEADING_SMOOTH_S,
+  HeadingSmoother,
   nextHeading,
   MIN_BOAT_PX,
   resolveBoatDimensions,
@@ -192,5 +194,87 @@ describe('normalizeBoatHull', () => {
     expect(normalizeBoatHull({ anchor: { hull_type: '' } })).toBeNull()
     expect(normalizeBoatHull({ anchor: { hull_type: 'trawler' } })).toBeNull()
     expect(normalizeBoatHull(null)).toBeNull()
+  })
+})
+
+describe('HeadingSmoother', () => {
+  const T = 500
+  it('holds nothing until a heading arrives, and returns the first one exactly', () => {
+    const s = new HeadingSmoother()
+    expect(s.step(null, 0)).toBeNull()
+    expect(s.step(123, 100)).toBe(123)
+  })
+  it('keeps the held value when the target is null', () => {
+    const s = new HeadingSmoother()
+    s.step(90, 0)
+    expect(s.step(null, 500)).toBe(90)
+  })
+  it('snaps to the target when asked', () => {
+    const s = new HeadingSmoother()
+    s.step(90, 0)
+    expect(s.step(200, 16, { snap: true })).toBe(200)
+  })
+  it('a snap with a null target clears the held value', () => {
+    const s = new HeadingSmoother()
+    s.step(90, 0)
+    expect(s.step(null, 16, { snap: true })).toBeNull()
+    expect(s.step(null, 32)).toBeNull()
+    expect(s.step(40, 48)).toBe(40)
+  })
+  it('holds the value when no time has passed', () => {
+    const s = new HeadingSmoother()
+    s.step(90, 1000)
+    expect(s.step(200, 1000)).toBe(90)
+    expect(s.step(200, 900)).toBe(90)
+  })
+  it('turns the short way round north, both directions', () => {
+    const k = 1 - Math.exp(-0.5 / HEADING_SMOOTH_S)
+    const a = new HeadingSmoother()
+    a.step(350, 0)
+    // 350 -> 10 is +20 through north: half a second closes that fraction of it
+    expect(a.step(10, T)).toBeCloseTo((350 + 20 * k) % 360, 5)
+    const b = new HeadingSmoother()
+    b.step(10, 0)
+    expect(b.step(350, T)).toBeCloseTo(360 + 10 - 20 * k, 5)
+  })
+  it('normalises output into [0, 360)', () => {
+    const s = new HeadingSmoother()
+    s.step(355, 0)
+    for (let i = 1; i <= 100; i++) {
+      const v = s.step(5, i * 50) as number
+      expect(v).toBeGreaterThanOrEqual(0)
+      expect(v).toBeLessThan(360)
+    }
+  })
+  it('converges on a sustained step within 3 s of 60 fps frames', () => {
+    const s = new HeadingSmoother()
+    s.step(80, 0)
+    let v = 80
+    for (let i = 1; i <= 180; i++) v = s.step(170, (i * 1000) / 60) as number
+    expect(Math.abs(v - 170)).toBeLessThan(1)
+  })
+  it('does not wobble on an alternating jittery target', () => {
+    const s = new HeadingSmoother()
+    let prev = s.step(90, 0) as number
+    let worst = 0
+    for (let i = 1; i <= 240; i++) {
+      const v = s.step(i % 2 === 0 ? 80 : 100, (i * 1000) / 60) as number
+      worst = Math.max(worst, Math.abs(v - prev))
+      prev = v
+    }
+    expect(worst).toBeLessThan(0.5)
+  })
+  it('caps one step at half a second of watched time', () => {
+    const s = new HeadingSmoother()
+    s.step(0, 0)
+    const v = s.step(90, 60_000) as number
+    expect(v).toBeCloseTo(90 * (1 - Math.exp(-0.5 / HEADING_SMOOTH_S)), 5)
+  })
+  it('hold() means the first step after a gap eases by a normal frame, not the cap', () => {
+    const s = new HeadingSmoother()
+    s.step(0, 0)
+    s.hold(10_000)
+    const v = s.step(90, 10_016) as number
+    expect(v).toBeCloseTo(90 * (1 - Math.exp(-0.016 / HEADING_SMOOTH_S)), 5)
   })
 })
