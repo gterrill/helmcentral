@@ -1,6 +1,6 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
 import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Move, Plus, Radar, Ship, X } from 'lucide-react'
@@ -383,6 +383,10 @@ export interface AnchorWatchMapProps {
   // opt out: neither host passes it, so neither ever shows the icon,
   // regardless of `interactive`.
   onAdjust?: () => void
+  // Content the host wants at the top of the metrics panel (the drawer puts
+  // depth, tide and low-water clearance there), so the map carries one panel
+  // rather than a card above it plus a panel on it. The tile omits it.
+  hudHeader?: ReactNode
   // Whether Adjust mode (ADR 0136, radius decoupled from zoom by ADR 0143)
   // is open. Owned by the host (anchor-watch-drawer.tsx), not this
   // component: the drawer decides entry/exit (the Move icon, Cancel, Save, a
@@ -470,6 +474,7 @@ export function AnchorWatchMap({
   interactive = true,
   viewKey = '',
   onAdjust,
+  hudHeader,
   adjustActive = false,
   adjustRadiusM,
   adjustRadiusAtMin = false,
@@ -491,6 +496,25 @@ export function AnchorWatchMap({
   const mapWrapperRef = useRef<HTMLDivElement | null>(null)
   const metricsPanelRef = useRef<HTMLDivElement | null>(null)
   const mapControlsRef = useRef<HTMLDivElement | null>(null)
+  // A host that puts content in the metrics panel (hudHeader) makes it tall
+  // enough to cover real chart. The map reserves the panel's footprint at the
+  // top (MapLibre padding), so the anchor, boat and swing circle are centred
+  // and fitted in the part left clear. Zero for the tile, which passes no
+  // hudHeader, and during Adjust, whose crosshair is the true screen centre.
+  const hasHudHeader = hudHeader !== undefined && hudHeader !== null && hudHeader !== false
+  const topInsetRef = useRef(0)
+  const applyTopInset = useCallback(() => {
+    const wrapper = mapWrapperRef.current
+    const panel = metricsPanelRef.current
+    let inset = 0
+    if (hasHudHeader && !adjustActive && wrapper && panel) {
+      inset = Math.ceil(panel.getBoundingClientRect().bottom - wrapper.getBoundingClientRect().top + 8)
+      if (!(inset > 0)) inset = 0
+    }
+    if (inset === topInsetRef.current) return
+    topInsetRef.current = inset
+    mapRef.current?.setPadding?.({ top: inset, bottom: 0, left: 0, right: 0 })
+  }, [hasHudHeader, adjustActive])
   const mapRef = useRef<MapRef | null>(null)
 
   // Resolved once, at mount. A stored centre is the operator's pan, but only
@@ -645,7 +669,8 @@ export function AnchorWatchMap({
   const measureShortSidePx = useCallback(() => {
     const container = mapRef.current?.getMap?.()?.getContainer?.() ?? mapWrapperRef.current
     const rect = container?.getBoundingClientRect()
-    return rect ? Math.min(rect.width, rect.height) : 0
+    // The swing circle is fitted into what the panel leaves clear.
+    return rect ? Math.min(rect.width, rect.height - topInsetRef.current) : 0
   }, [])
 
   // Applies as much of `pending` as the map/container currently allow, and
@@ -810,12 +835,13 @@ export function AnchorWatchMap({
 
   const handleMapLoad = useCallback(() => {
     handleRadarEchoMapLoad()
+    applyTopInset()
     // The map instance is guaranteed to exist by the time 'load' fires —
     // this is the fallback path for fitToAnchor above, for the common case
     // where it ran before react-map-gl had finished constructing the
     // underlying map (or session change followed by a not-yet-ready map).
     retryPendingFit()
-  }, [handleRadarEchoMapLoad, retryPendingFit])
+  }, [handleRadarEchoMapLoad, applyTopInset, retryPendingFit])
 
   const handleMapStyleData = useCallback(() => {
     handleStyleData()
@@ -1313,8 +1339,8 @@ export function AnchorWatchMap({
   // wrapper-relative coordinates. Cached here rather than re-measured by
   // the recompute below: getBoundingClientRect forces a synchronous layout,
   // and these panels only actually move when the wrapper itself resizes or
-  // the metrics panel's own row count changes (hasAnchor) — not on every
-  // AIS poll or pan/zoom.
+  // the panel/stack's own size changes (observed below) — not on every AIS
+  // poll or pan/zoom.
   const avoidZonesRef = useRef<ScreenRect[]>([])
   const recomputeAvoidZones = useCallback(() => {
     const wrapper = mapWrapperRef.current
@@ -1362,14 +1388,31 @@ export function AnchorWatchMap({
     recomputeAisLabelSuppressionRef.current = recomputeAisLabelSuppression
   }, [recomputeAisLabelSuppression])
 
-  // Mount + whenever the metrics panel's own row count changes (hasAnchor)
-  // + whenever aisVessels changes (a new/departed contact, or ranks
-  // reshuffling): both the avoid zones and the suppression result need a
-  // fresh look. Neither of these fires per GPS tick.
+  // Whenever aisVessels changes (a new/departed contact, or ranks
+  // reshuffling) the suppression result needs a fresh look against the
+  // cached avoid zones. Doesn't fire per GPS tick, and doesn't re-measure:
+  // the observers below own that.
   useEffect(() => {
-    recomputeAvoidZones()
     recomputeAisLabelSuppression()
-  }, [hasAnchor, recomputeAvoidZones, recomputeAisLabelSuppression])
+  }, [recomputeAisLabelSuppression])
+
+  // The panel grows and shrinks on its own (a host's hudHeader changing, a
+  // row appearing with hasAnchor) and so does the control stack (the Move
+  // icon, the Adjust toolbar), without the wrapper moving, so the wrapper's
+  // observer below never sees it. Watch both directly; an observer also
+  // fires once on observe, which covers the mount measurement. The panel's
+  // footprint also sets the map's top padding.
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      applyTopInset()
+      recomputeAvoidZones()
+      recomputeAisLabelSuppressionRef.current()
+    })
+    if (metricsPanelRef.current) observer.observe(metricsPanelRef.current)
+    if (mapControlsRef.current) observer.observe(mapControlsRef.current)
+    return () => observer.disconnect()
+  }, [applyTopInset, recomputeAvoidZones])
 
   // Container resize (a tile being resized, the browser window changing, a
   // hidden page becoming visible, kiosk rotation, the drawer opening): the
@@ -1924,11 +1967,10 @@ export function AnchorWatchMap({
       </Map>
       )}
 
-      {/* Metric overlay — top of map. Depth is gone from here entirely (ADR
-          0133's amendment): it's the Anchor Watch page's own hero KPI now,
-          in the header above the map (anchor-watch-drawer.tsx), so this
-          panel doesn't repeat it at a second visual weight. Distance is
-          this panel's own top row instead — the boat's live distance from
+      {/* Metric overlay — top of map. A host can put its own header at the
+          top through the hudHeader slot (the Anchor Watch page puts depth,
+          tide and low-water clearance there, ADR 0209); the tile passes none.
+          Under any header, Distance is the first row — the boat's live distance from
           the anchor, same figure and formatting the old promoted Distance
           KPI showed. Distance, Bearing and Radius are dropped from the row
           list outright with no anchor set (none of the three mean anything
@@ -1949,6 +1991,7 @@ export function AnchorWatchMap({
         style={{ zIndex: 2000 }}
         data-testid="anchor-watch-metrics"
       >
+        {hudHeader}
         {[
           ...(hasAnchor
             ? [
@@ -1986,7 +2029,7 @@ export function AnchorWatchMap({
             key={label}
             className={cn(
               'flex items-center justify-between gap-4 px-3 py-1.5',
-              index > 0 && 'border-t border-white/10',
+              (index > 0 || hudHeader) && 'border-t border-white/10',
             )}
           >
             <p className="text-[9px] uppercase tracking-[0.16em] text-white/80">

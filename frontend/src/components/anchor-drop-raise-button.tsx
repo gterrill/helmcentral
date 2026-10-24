@@ -29,7 +29,7 @@ interface AnchorDropRaiseButtonProps {
 
 /**
  * Drop/Raise control shared by the anchor-watch tile and the fullscreen
- * drawer, mounted below their respective maps. Keeping this in one place
+ * drawer, mounted with their respective maps (below the tile map, floating over the drawer map). Keeping this in one place
  * also fixes a gap the two callers used to have independently: the drawer's
  * drop path never primed the audio context, so a drag alarm set from the
  * drawer could fail to sound until some other gesture unlocked audio first.

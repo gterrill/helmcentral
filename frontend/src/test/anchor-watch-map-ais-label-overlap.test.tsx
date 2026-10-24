@@ -1,5 +1,5 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   AnchorWatchMap,
   LABEL_COLLISION_RADIUS_PX,
@@ -195,7 +195,22 @@ describe('AnchorWatchMap AIS label suppression wiring', () => {
 // the avoid-zone rects are cached and only re-measured on an actual trigger
 // (a container resize, or the metrics panel gaining/losing rows), not on
 // every GPS fix.
+// Captures every observer so a test can play the browser telling it a
+// watched element changed size (happy-dom never does by itself).
+const resizeCallbacks = new Set<() => void>()
+class FakeResizeObserver {
+  private cb: () => void
+  constructor(cb: () => void) { this.cb = cb }
+  observe() { resizeCallbacks.add(this.cb); queueMicrotask(() => this.cb()) }
+  unobserve() { resizeCallbacks.delete(this.cb) }
+  disconnect() { resizeCallbacks.delete(this.cb) }
+}
+function fireResize() { for (const cb of [...resizeCallbacks]) cb() }
+
 describe('AnchorWatchMap AIS label suppression per-tick cost', () => {
+  beforeEach(() => { vi.stubGlobal('ResizeObserver', FakeResizeObserver) })
+  afterEach(() => { vi.unstubAllGlobals(); resizeCallbacks.clear() })
+
   it('does not re-measure the overlay panels when only the vessel position ticks, with the same AIS vessels', async () => {
     lastProject = ([lon]) => ({ x: (lon - 152.9103) * 1_000_000, y: 100 })
     const vessels: NearbyVessel[] = [
@@ -235,9 +250,11 @@ describe('AnchorWatchMap AIS label suppression per-tick cost', () => {
     }
     expect(rectSpy).not.toHaveBeenCalled()
 
-    // A real trigger — the anchor clearing, which changes the metrics
-    // panel's own row count — still re-measures.
+    // A real trigger — the anchor clearing changes the metrics panel's own
+    // row count, which the browser reports to the panel's observer — still
+    // re-measures.
     rerender(element(-25.2939, null))
+    fireResize()
     expect(rectSpy).toHaveBeenCalled()
 
     rectSpy.mockRestore()

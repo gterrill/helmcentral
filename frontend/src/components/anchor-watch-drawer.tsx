@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ArrowUp } from 'lucide-react'
 import { toast } from 'sonner'
 import type { AnchorConfig } from '@/config/app-config'
 import { DRAG_BUFFER_METERS, type AnchorWatchState } from '@/hooks/use-anchor-watch'
@@ -14,40 +13,24 @@ import type { SeabedType, SeaState } from '@/lib/catenary'
 import { AnchorAdjustActions } from '@/components/anchor-adjust-actions'
 import { AnchorAdjustRadiusToolbar } from '@/components/anchor-adjust-radius-toolbar'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
+import { AnchorWatchReadings } from '@/components/anchor-watch-readings'
 import { AnchorRodePlanner } from '@/components/anchor-rode-planner'
 import { AnchorWatchMap, type AnchorAdjustPosition } from '@/components/anchor-watch-map'
 import { Button } from '@/components/ui/button'
 import { useAnchorAdjustCommit, type AnchorAdjustTarget } from '@/hooks/use-anchor-adjust-commit'
 import { alarmRadiusBounds, adjustWarningActive, buildAdjustCommitTargets, clampRadiusM, radiusStepM, snapRadiusM, type AnchorAdjustRestore } from '@/lib/anchor-adjust'
-import { computeLowWaterClearance, lowWaterClearanceReasonLabel, underKeelPhrase } from '@/lib/low-water-clearance'
+import { computeLowWaterClearance } from '@/lib/low-water-clearance'
 import { haversineMeters } from '@/lib/geo'
 import { resolveLoaM } from '@/lib/rode-plan'
-import { estimateDepthAtNextTurn, nextTideExtreme } from '@/lib/tide-estimate'
 import { isRetryableAnchorError } from '@/lib/anchor-request'
-import { formatDataAge, isStale } from '@/lib/staleness'
 import { hasWebGL2 } from '@/lib/webgl'
 import { cn } from '@/lib/utils'
-import { feetToMeters, metersToFeet } from '@/lib/units'
 
 /** Adjust mode's live draft (ADR 0136, ADR 0143) — the drawer's own plain state: position comes from the map's pan, radius is stepped directly by the corner toolbar/keyboard, no longer derived from zoom. */
 interface AnchorAdjustDraft {
   lat: number
   lon: number
   radiusM: number
-}
-
-/** A tide height in feet, converted to the host's chosen unit — matches depth-tide-tile.tsx's own conversion. */
-function tideValueDisplay(heightFt: number, isImperial: boolean): string {
-  return isImperial ? heightFt.toFixed(1) : feetToMeters(heightFt).toFixed(2)
-}
-
-/**
- * A depth-shaped figure (the hero reading, or the Est. high/low projection)
- * in the host's chosen unit — matches depth-tide-tile.tsx's own conversion,
- * one decimal place either way.
- */
-function depthValueDisplay(meters: number, isImperial: boolean): string {
-  return (isImperial ? metersToFeet(meters) : meters).toFixed(1)
 }
 
 interface AnchorWatchDrawerProps {
@@ -71,7 +54,7 @@ interface AnchorWatchDrawerProps {
   radiusMeters: number
   depthMeters: number | null
   // Seconds since the depth feed last reported, or null if unknown — feeds
-  // the header's own hero-depth staleness badge, the same isStale/
+  // the hero-depth staleness badge (readings presenter), the same isStale/
   // formatDataAge contract depth-tide-tile.tsx's own Depth reading uses.
   depthLastUpdateAgeS: number | null
   currentDriftKts: number | null
@@ -262,13 +245,6 @@ export function AnchorWatchDrawer({
     [depthMeters, tide, vesselDraftM, anchorConfig.minClearanceAtLowM],
   )
 
-  const depthStale = isStale(depthLastUpdateAgeS)
-  const depthStaleLabel = formatDataAge(depthLastUpdateAgeS)
-  const tideDirection = tide?.tide_direction ?? null
-  const tideIsRising = tideDirection === 'Rising'
-  const nextTurn = tide !== null ? nextTideExtreme(tide) : null
-  const estimatedDepthAtNextTurn = tide !== null ? estimateDepthAtNextTurn(depthMeters, tide) : null
-
   // ── Adjust mode (ADR 0136) ────────────────────────────────────────────────
   // Only the Anchor Watch page (this drawer) ever gets Adjust — the
   // dashboard tile and the wall kiosk don't render this component at all, so
@@ -280,7 +256,7 @@ export function AnchorWatchDrawer({
   const [adjustActive, setAdjustActive] = useState(false)
   const [adjustDraft, setAdjustDraft] = useState<AnchorAdjustDraft | null>(null)
   const [confirmingSet, setConfirmingSet] = useState(false)
-  const headerAdjustButtonRef = useRef<HTMLButtonElement>(null)
+  const fallbackAdjustButtonRef = useRef<HTMLButtonElement>(null)
   // The watch's own values the instant Adjust opened: what Set's "previous"
   // (and so Undo) restores. A ref, not state — it must never itself trigger
   // a re-render, and it is set once on entry and read once on Set, nothing
@@ -312,11 +288,19 @@ export function AnchorWatchDrawer({
     : 'Chain onboard, without boat length'
   const adjustStepM = radiusStepM(isImperial)
 
+  // Whether the map is on screen: a live position to centre on and a browser
+  // that can draw it. When it is, the header content (depth, tide, low-water
+  // clearance) rides in the map's own top-left panel and Drop/Raise float
+  // over the map. When it isn't there is no panel to carry them, so the
+  // standalone card and the row below keep doing the job.
+  const hasMap = vesselLat !== null && vesselLon !== null && canUseMapForAdjust
+
   const { committing: adjustCommitting, commit: commitAdjust } = useAnchorAdjustCommit({ adjustAnchor, isImperial })
 
   // No WebGL2: there is no map, so no map-corner Move icon (AnchorWatchMap's
-  // own canRenderMap gating) — this text button is that state's entry point
-  // instead. Anchor-gated: there is nothing to adjust with no anchor set.
+  // own canRenderMap gating) — the fallback card's text button is that
+  // state's entry point instead. With a map, the Move icon in the map's
+  // control stack is the one Adjust entry; the drawer passes onAdjust to it. Anchor-gated: there is nothing to adjust with no anchor set.
   const showAdjustTextButton = isAnchored && !canUseMapForAdjust
 
   // Set when the committed radius, at the moment Adjust opened, was above
@@ -357,8 +341,8 @@ export function AnchorWatchDrawer({
     adjustOpenedFromRef.current = null
     // AnchorWatchMap's own entry/exit effect returns focus to the Move icon
     // in the with-map path; this is the same courtesy for the no-map path,
-    // whose entry point is this header's own text button instead.
-    if (!canUseMapForAdjust) headerAdjustButtonRef.current?.focus()
+    // whose entry point is the fallback card's own text button instead.
+    if (!canUseMapForAdjust) fallbackAdjustButtonRef.current?.focus()
   }, [canUseMapForAdjust])
 
   // Exit paths beyond Cancel/Save: raising the anchor, or the watch
@@ -467,6 +451,38 @@ export function AnchorWatchDrawer({
   const adjustRadiusAtMin = adjustDisplayRadiusM <= adjustBounds.minM
   const adjustRadiusAtMax = adjustDisplayRadiusM >= adjustBounds.maxM
 
+  // The depth/tide/clearance readings as one presenter (ADR 0209): compact
+  // inside the map's own panel when there is a map, a standalone card when
+  // there isn't. Only the layout differs.
+  const mapHudHeader = hasMap ? (
+    <AnchorWatchReadings
+      variant="hud"
+      depthMeters={depthMeters}
+      depthLastUpdateAgeS={depthLastUpdateAgeS}
+      tide={tide}
+      lowWaterClearance={lowWaterClearance}
+      isImperial={isImperial}
+    />
+  ) : null
+
+  // Drop/Raise float over the map (ADR 0209). Raise stays reachable during
+  // Adjust, and raising mid-Adjust closes Adjust (the isAnchored effect
+  // above).
+  const floatDropRaise = hasMap
+  const dropRaiseButton = (floating: boolean) => (
+    <AnchorDropRaiseButton
+      className={cn(
+        anchorState === 'none' ? 'w-full max-w-xs' : undefined,
+        floating && 'pointer-events-auto shadow-lg',
+        floating && anchorState !== 'none' && 'bg-background',
+      )}
+      anchorActive={anchorState !== 'none'}
+      canDrop={canDrop}
+      onDrop={onDropAnchor}
+      onRaise={onClearAnchor}
+    />
+  )
+
   return (
     <div className="flex h-full flex-col gap-3">
       {/* The backend puts a damaged anchor_watch.json into an explicit error
@@ -496,117 +512,33 @@ export function AnchorWatchDrawer({
             'flex min-w-0 flex-1 flex-col gap-3',
           )}
         >
-          {/* Header (ADR 0133's amendment): live depth as the hero KPI — what
-              you care about at the helm is the water under you, not how far
-              off the hook you are (Distance moved into the map's own
-              metrics panel instead) — with tide context beside it, and the
-              low-water clearance warning (ADR 0135, PR #39) folded in below
-              rather than living as its own strip above this one. Kept
-              compact on purpose: the map is the focus.
+          {/* Fallback header card (ADR 0133's amendment, ADR 0209): live depth
+              as the hero KPI, tide context beside it, and the low-water
+              clearance warning (ADR 0135) below. Only rendered when there is
+              no map to carry these (no GPS fix, or no WebGL2): with a map
+              they ride in its top-left panel instead (mapHudHeader below),
+              so the map keeps the whole column.
 
-              Not gated on isAnchored, matching the low-water clearance
-              line's own prior behaviour (and anchor-watch-tile.tsx's
-              equivalent): depth and the water under the keel matter while
-              deciding where to drop, not only once the hook is down. Only
-              the Adjust text button below is anchor-gated — there is
-              nothing to adjust with no anchor set. Stays up during Adjust:
-              entering Adjust must not resize the map. */}
-          <div
-            data-testid="anchor-watch-header"
-            className="rounded-md border bg-background/60 px-3 py-3"
-          >
-            <div className="flex flex-wrap items-start gap-4">
-                <div className={cn('min-w-0', depthStale && 'grayscale')}>
-                  <p className="flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                    Depth
-                    {depthStale && (
-                      <span
-                        data-testid="anchor-watch-depth-stale-badge"
-                        title={depthStaleLabel ? `No update for ${depthStaleLabel}` : 'Source has stopped updating'}
-                        className="shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs leading-none text-amber-600 dark:text-amber-400"
-                      >
-                        Stale{depthStaleLabel ? ` ${depthStaleLabel}` : ''}
-                      </span>
-                    )}
-                  </p>
-                  <p className="font-display text-4xl leading-none tabular-nums text-gauge-primary">
-                    {depthMeters !== null ? depthValueDisplay(depthMeters, isImperial) : '—'}
-                    <span className="ml-2 align-baseline text-lg text-muted-foreground">
-                      {depthMeters !== null ? (isImperial ? 'ft' : 'm') : 'unavailable'}
-                    </span>
-                  </p>
-                </div>
-
-                <div className="min-w-0 flex-1">
-                  {tide !== null && nextTurn !== null ? (
-                    <>
-                      <p className="truncate text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-                        Tide{tide.station_name ? ` · ${tide.station_name.toUpperCase()}` : ''}
-                      </p>
-                      <p className="mt-1 inline-flex items-center gap-1 text-sm font-semibold text-gauge-secondary">
-                        {tideIsRising ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
-                        {tide.tide_direction}
-                      </p>
-                      <p className="mt-1 truncate text-xs text-foreground">
-                        {nextTurn.isHigh ? 'High' : 'Low'}
-                        {/* nextTurn only ever holds an extreme tideExtremesByTime
-                            already found usable (lib/tide-estimate.ts drops the
-                            -1-sentinel/no-time case before this reads it), so its
-                            height is always real here - including a genuine
-                            negative low, which must still show its figure rather
-                            than being read as "no data" the way the -1 sentinel
-                            once was. */}
-                        <span className="text-muted-foreground"> {tideValueDisplay(nextTurn.heightFt, isImperial)} {isImperial ? 'ft' : 'm'}</span>
-                        {' · '}
-                        {new Date(nextTurn.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                      </p>
-                      {estimatedDepthAtNextTurn !== null && (
-                        <p className="truncate text-xs text-foreground">
-                          <span className="text-muted-foreground">{tideIsRising ? 'Est. high' : 'Est. low'}</span>{' '}
-                          <span className="font-semibold text-gauge-secondary">
-                            {depthValueDisplay(estimatedDepthAtNextTurn, isImperial)} {isImperial ? 'ft' : 'm'}
-                          </span>
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">No tide station</p>
-                  )}
-                </div>
-
-                {showAdjustTextButton && (
-                  <Button ref={headerAdjustButtonRef} type="button" variant="outline" onClick={openAdjust} className="shrink-0">
-                    Adjust
-                  </Button>
-                )}
-            </div>
-
-            {/* Anchor Watch's low-water clearance warning (ADR 0135): the
-                depth at the boat's current position, projected to the next
-                low tide, against the operator's configured margin. A
-                display warning, not an alarm rule — moved in from its own
-                strip above the map (PR #39). */}
-            {lowWaterClearance.status === 'too_shallow' && (
-              <div
-                data-testid="low-water-clearance"
-                className="mt-2 truncate rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-xs text-red-600 dark:text-red-400"
-              >
-                Too shallow at low water · {underKeelPhrase(lowWaterClearance.clearanceM)} at{' '}
-                {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-              </div>
-            )}
-            {lowWaterClearance.status === 'ok' && (
-              <p data-testid="low-water-clearance" className="mt-2 truncate text-xs text-muted-foreground">
-                {underKeelPhrase(lowWaterClearance.clearanceM)} at low water ·{' '}
-                {new Date(lowWaterClearance.lowTideTime).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-              </p>
-            )}
-            {lowWaterClearance.status === 'unknown' && (
-              <p data-testid="low-water-clearance" className="mt-2 truncate text-xs text-muted-foreground">
-                {lowWaterClearanceReasonLabel(lowWaterClearance.reason)}
-              </p>
-            )}
-          </div>
+              Not gated on isAnchored: depth and the water under the keel
+              matter while deciding where to drop, not only once the hook is
+              down. Only the Adjust text button is anchor-gated, and only
+              ever shown without WebGL2 — nothing to adjust with no anchor
+              set. */}
+          {!hasMap && (
+            <AnchorWatchReadings
+              variant="card"
+              depthMeters={depthMeters}
+              depthLastUpdateAgeS={depthLastUpdateAgeS}
+              tide={tide}
+              lowWaterClearance={lowWaterClearance}
+              isImperial={isImperial}
+              adjustAction={showAdjustTextButton ? (
+                <Button ref={fallbackAdjustButtonRef} type="button" variant="outline" onClick={openAdjust} className="shrink-0">
+                  Adjust
+                </Button>
+              ) : undefined}
+            />
+          )}
           {/* ADR 0143: Adjust's radius controls and Cancel/Save no longer
               dock in a bottom bar that eats the map — the corner toolbar
               lives inside AnchorWatchMap's own control stack, and
@@ -645,7 +577,7 @@ export function AnchorWatchDrawer({
               />
             </div>
           ) : (
-          <div className="relative min-h-0 flex-1 rounded-xl border bg-background/70">
+          <div data-testid="anchor-watch-map-container" className="relative min-h-0 flex-1 rounded-xl border bg-background/70">
             {vesselLat !== null && vesselLon !== null ? (
               <AnchorWatchMap
                 vesselLat={vesselLat}
@@ -690,6 +622,7 @@ export function AnchorWatchDrawer({
                 onPlacemarkRemove={onPlacemarkRemove}
                 className="h-full w-full"
                 onAdjust={openAdjust}
+                hudHeader={mapHudHeader}
                 adjustActive={adjustActive}
                 adjustRadiusM={adjustDisplayRadiusM}
                 adjustRadiusAtMin={adjustRadiusAtMin}
@@ -703,6 +636,23 @@ export function AnchorWatchDrawer({
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
                 No GPS fix
+              </div>
+            )}
+            {/* Drop (idle) floats bottom-centre; Raise sits compact at
+                bottom-left, since bottom-right holds MapLibre's attribution. */}
+            {floatDropRaise && (
+              <div
+                className={cn(
+                  'pointer-events-none absolute z-20',
+                  // pr-14 keeps Drop clear of MapLibre's attribution "i"
+                  // at bottom-right. During Adjust, Raise sits above the
+                  // centred Cancel/Save row on narrow widths so the two
+                  // never overlap.
+                  anchorState === 'none' ? 'inset-x-0 bottom-4 flex justify-center pl-3 pr-14' : 'left-3',
+                  anchorState !== 'none' && (adjustActive ? 'bottom-20 sm:bottom-4' : 'bottom-4'),
+                )}
+              >
+                {dropRaiseButton(true)}
               </div>
             )}
             {/* Cancel/Save float over the map's bottom-centre (clear of
@@ -732,22 +682,16 @@ export function AnchorWatchDrawer({
           </div>
           )}
 
-          {/* Stays up during Adjust so the map keeps its size. Raising
-              mid-Adjust closes Adjust (see the isAnchored effect above).
-              Prominence otherwise follows state (see anchor-watch-tile.tsx):
-              Drop is the idle state's one action and gets a generous
-              centered target; Raise is a confirmed departure chore and sits
-              compact at the trailing edge rather than spanning the whole map
-              column. */}
+          {/* No map to float over (no GPS fix, or no WebGL2): Drop/Raise keep
+              their row below. Prominence follows state (see
+              anchor-watch-tile.tsx): Drop is the idle state's one action and
+              gets a generous centered target; Raise is a confirmed departure
+              chore and sits compact at the trailing edge. */}
+          {!hasMap && (
             <div className={anchorState === 'none' ? 'flex justify-center' : 'flex justify-end'}>
-              <AnchorDropRaiseButton
-                className={anchorState === 'none' ? 'w-full max-w-xs' : undefined}
-                anchorActive={anchorState !== 'none'}
-                canDrop={canDrop}
-                onDrop={onDropAnchor}
-                onRaise={onClearAnchor}
-              />
+              {dropRaiseButton(false)}
             </div>
+          )}
         </div>
 
         <AnchorRodePlanner
