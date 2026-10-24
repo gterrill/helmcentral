@@ -392,12 +392,31 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     }
     void runShotWrite(async () => { await cameraShotsApi.patch(selectedShot.id, change) })
   }
-  const shotTicks = resolved.map((r) => ({
-    id: r.shot.id,
-    fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
-    label: `Camera shot ${MODE_NAMES[r.shot.mode]} at ${formatLocalDateTime(r.at, lon)}`,
-    selected: r.shot.id === selectedShot?.id,
-  }))
+  // Times alone on a one-day replay; the date too once the shots span days.
+  const selectedShotId2 = selectedShot?.id
+  const { shotTicks, shotHeading } = useMemo(() => {
+    const parts = resolved.map((r) => localDateTimeParts(r.at, lon))
+    const oneDay = new Set(parts.map((p) => p.date)).size <= 1
+    const short = (p: { date: string; time: string }) => (oneDay ? p.time : `${p.date} ${p.time}`)
+    const ticks = resolved.map((r, i) => ({
+      id: r.shot.id,
+      fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
+      label: `Camera shot ${i + 1}, ${MODE_NAMES[r.shot.mode]}, at ${formatLocalDateTime(r.at, lon)}`,
+      title: `Shot ${i + 1} · ${short(parts[i])}`,
+      selected: r.shot.id === selectedShotId2,
+    }))
+    const idx = resolved.findIndex((r) => r.shot.id === selectedShotId2)
+    if (idx < 0) return { shotTicks: ticks, shotHeading: null }
+    // The shot ends at the next shot or where its own passage ends, whichever
+    // is first; "end" is only for the last shot of the last passage.
+    const entry = timeline.entries.find((e) => e.id === resolved[idx].entryId)
+    const nextAt = idx + 1 < resolved.length ? resolved[idx + 1].at : null
+    const lastPassage = entry !== undefined && entry === timeline.entries[timeline.entries.length - 1]
+    let to: string | null = null
+    if (nextAt !== null && (!entry || nextAt <= entry.end)) to = short(parts[idx + 1])
+    else if (entry && !(nextAt === null && lastPassage)) to = short(localDateTimeParts(entry.end, lon))
+    return { shotTicks: ticks, shotHeading: { number: idx + 1, total: resolved.length, from: short(parts[idx]), to } }
+  }, [resolved, lon, timeline, selectedShotId2])
 
   const mapPassages = useMemo(() => built.items.map((i) => ({ id: i.id, segments: i.line })), [built.items])
 
@@ -511,6 +530,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           <CameraEditor
             shot={selectedShot}
             shotCount={resolved.length}
+            heading={shotHeading}
             flat={mapFlat}
             busy={shotBusy}
             error={shotError}
