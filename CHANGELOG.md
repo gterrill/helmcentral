@@ -48,6 +48,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A web page tile that runs a few pixels past a wall display's edge no
+  longer goes blank.** It is now trimmed to the screen instead. On a wall
+  mounted upside down, a live camera picture still needs the camera page's own
+  wall mode (HelmCam's kiosk view) to show.
 - **The "SignalK found" prompt no longer appears after an update restart, and
   never offers the server you already use.** It now waits until SignalK has
   been unreachable for a full 30 seconds, with the live feed connected, before

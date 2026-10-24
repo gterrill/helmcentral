@@ -466,7 +466,8 @@ describe('EmbedTile inside a DisplayShell (WPE compositing workaround)', () => {
     const portalFrame = screen.getByTestId('embed-frame-portal')
 
     expect(outer).not.toContainElement(portalFrame)
-    expect(portalFrame.parentElement).toBe(document.body)
+    expect(portalFrame.parentElement).toBe(screen.getByTestId('embed-frame-clip'))
+    expect(screen.getByTestId('embed-frame-clip').parentElement).toBe(document.body)
     expect(portalFrame.style.transform).toContain('rotate(180deg)')
     expect(portalFrame.style.transform).toContain('scale(')
   })
@@ -480,7 +481,7 @@ describe('EmbedTile inside a DisplayShell (WPE compositing workaround)', () => {
     revealAndMount()
 
     const portalFrame = screen.getByTestId('embed-frame-portal')
-    expect(portalFrame.parentElement).toBe(document.body)
+    expect(screen.getByTestId('embed-frame-clip').parentElement).toBe(document.body)
     expect(portalFrame.style.transform).not.toContain('rotate(')
     expect(portalFrame.style.transform).toContain('scale(')
   })
@@ -611,9 +612,9 @@ describe('EmbedTile portal follows a tile that moves without resizing', () => {
       mutationObserver.trigger()
     })
 
-    const portalFrame = screen.getByTestId('embed-frame-portal')
-    expect(portalFrame.style.left).toBe('60px')
-    expect(portalFrame.style.top).toBe('40px')
+    const wrapper = screen.getByTestId('embed-frame-clip')
+    expect(wrapper.style.left).toBe('60px')
+    expect(wrapper.style.top).toBe('40px')
   })
 
   // The guard that skips a redundant setState when reposition recomputes
@@ -643,6 +644,7 @@ describe('EmbedTile portal follows a tile that moves without resizing', () => {
     const mutations: MutationRecord[] = []
     const styleWatcher = new MutationObserver((records) => mutations.push(...records))
     styleWatcher.observe(portalFrame, { attributes: true, attributeFilter: ['style'] })
+    styleWatcher.observe(screen.getByTestId('embed-frame-clip'), { attributes: true, attributeFilter: ['style'] })
 
     // Same geometry again - nothing has actually moved.
     act(() => {
@@ -713,9 +715,9 @@ describe('EmbedTile portal follows a tile that moves without resizing', () => {
       container.parentElement!.dispatchEvent(new Event('transitionend', { bubbles: true }))
     })
 
-    const portalFrame = screen.getByTestId('embed-frame-portal')
-    expect(portalFrame.style.left).toBe('90px')
-    expect(portalFrame.style.top).toBe('70px')
+    const wrapper = screen.getByTestId('embed-frame-clip')
+    expect(wrapper.style.left).toBe('90px')
+    expect(wrapper.style.top).toBe('70px')
   })
 })
 
@@ -748,6 +750,30 @@ describe('EmbedTile portal matches any extra ancestor scale', () => {
   })
 })
 
+describe('EmbedTile portal centres the iframe when layout size differs from on-screen size', () => {
+  test.each([0, 180] as const)('rotate %i: left/top are (rect - layout) / 2', (rotate) => {
+    render(
+      <DisplayShell display={display({ rotate, scale: 0.95 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(container, { top: 0, left: 0, right: 950, bottom: 190 })
+    Object.defineProperty(container, 'offsetWidth', { configurable: true, value: 1000 })
+    Object.defineProperty(container, 'offsetHeight', { configurable: true, value: 200 })
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    const frame = screen.getByTestId('embed-frame-portal')
+    expect(frame.style.left).toBe('-25px')
+    expect(frame.style.top).toBe('-5px')
+  })
+})
+
 // The shell's outer box clips its own content with overflow-hidden, but a
 // portalled iframe lives at document.body and escapes that clip entirely.
 // EmbedFrame re-derives the same crop by hand from the outer box's and the
@@ -770,10 +796,10 @@ describe('EmbedTile portal is cropped to the display outer box', () => {
       window.dispatchEvent(new Event('resize'))
     })
 
-    expect(screen.getByTestId('embed-frame-portal').style.clipPath).toBe('inset(8px 20px 12px 5px)')
+    expect(screen.getByTestId('embed-frame-clip').style.clipPath).toBe('inset(8px 20px 12px 5px)')
   })
 
-  test('swaps top/bottom and left/right for a rotated display, since local top paints at screen bottom', () => {
+  test('keeps the inset in screen px on a rotated display, and puts no transform on the wrapper', () => {
     render(
       <DisplayShell display={display({ rotate: 180, scale: 1 })} alarms={[]}>
         <EmbedTile config={config} editing={false} />
@@ -790,7 +816,45 @@ describe('EmbedTile portal is cropped to the display outer box', () => {
       window.dispatchEvent(new Event('resize'))
     })
 
-    expect(screen.getByTestId('embed-frame-portal').style.clipPath).toBe('inset(12px 5px 8px 20px)')
+    // Overrun at screen bottom (12px) is the bottom inset: the wrapper is
+    // untransformed, so no swap.
+    const wrapper = screen.getByTestId('embed-frame-clip')
+    expect(wrapper.style.clipPath).toBe('inset(8px 20px 12px 5px)')
+    expect(wrapper.style.transform).toBe('')
+    // WPE blanks an iframe that carries clip-path, so it must never have one.
+    expect(screen.getByTestId('embed-frame-portal').style.clipPath).toBe('')
+    expect(screen.getByTestId('embed-frame-portal').style.transform).toContain('rotate(180deg)')
+  })
+
+  test('never puts clip-path on the iframe, and centres it in an untransformed wrapper at the container rect', () => {
+    render(
+      <DisplayShell display={display({ rotate: 0, scale: 1 })} alarms={[]}>
+        <EmbedTile config={config} editing={false} />
+      </DisplayShell>,
+    )
+    revealAndMount()
+
+    const outer = screen.getByTestId('display-shell-outer')
+    const container = screen.getByTestId('embed-frame-container')
+    mockBox(outer, { top: 0, left: 0, right: 400, bottom: 300 })
+    mockBox(container, { top: -8, left: -5, right: 420, bottom: 312 })
+
+    act(() => {
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    const wrapper = screen.getByTestId('embed-frame-clip')
+    const frame = screen.getByTestId('embed-frame-portal')
+    expect(frame.style.clipPath).toBe('')
+    expect(frame.parentElement).toBe(wrapper)
+    expect(wrapper.parentElement).toBe(document.body)
+    expect(wrapper.style.transform).toBe('')
+    expect(wrapper.style.position).toBe('fixed')
+    expect(wrapper.style.left).toBe('-5px')
+    expect(wrapper.style.width).toBe('425px')
+    expect(frame.style.position).toBe('absolute')
+    expect(frame.style.left).toBe('0px')
+    expect(frame.style.top).toBe('0px')
   })
 
   test('omits clipPath entirely when the tile sits fully inside the display', () => {
@@ -810,7 +874,7 @@ describe('EmbedTile portal is cropped to the display outer box', () => {
       window.dispatchEvent(new Event('resize'))
     })
 
-    expect(screen.getByTestId('embed-frame-portal').style.clipPath).toBe('')
+    expect(screen.getByTestId('embed-frame-clip').style.clipPath).toBe('')
   })
 
   test('hides the frame entirely once the tile has scrolled fully outside the display', () => {
@@ -830,6 +894,6 @@ describe('EmbedTile portal is cropped to the display outer box', () => {
       window.dispatchEvent(new Event('resize'))
     })
 
-    expect(screen.getByTestId('embed-frame-portal').style.visibility).toBe('hidden')
+    expect(screen.getByTestId('embed-frame-clip').style.visibility).toBe('hidden')
   })
 })

@@ -60,21 +60,21 @@ interface EmbedFrameProps {
   className: string
 }
 
-/** Field-by-field, not a deep-equal library: `portalStyle` only ever has
- * these seven fields (see `reposition` below), and this is what lets a
- * no-op reposition bail out of setState entirely rather than committing a
- * new-but-identical style object on every ResizeObserver/MutationObserver
- * firing on an otherwise-static tile. */
+interface PortalStyle {
+  /** The untransformed, fixed-position wrapper that carries the crop. */
+  wrapper: CSSProperties
+  /** The iframe inside it: sized, centred, rotated and scaled. */
+  frame: CSSProperties
+}
+
+/** Shallow equality over both objects' own keys, not a deep-equal library:
+ * each half of `portalStyle` is a flat object of strings and numbers, and this
+ * is what lets a no-op reposition bail out of setState entirely rather than
+ * committing a new-but-identical style object on every
+ * ResizeObserver/MutationObserver firing on an otherwise-static tile. */
 function portalStylesEqual(a: CSSProperties, b: CSSProperties): boolean {
-  return (
-    a.left === b.left &&
-    a.top === b.top &&
-    a.width === b.width &&
-    a.height === b.height &&
-    a.transform === b.transform &&
-    a.clipPath === b.clipPath &&
-    a.visibility === b.visibility
-  )
+  const keys = Object.keys(a) as (keyof CSSProperties)[]
+  return keys.length === Object.keys(b).length && keys.every((k) => a[k] === b[k])
 }
 
 /**
@@ -87,7 +87,10 @@ function portalStylesEqual(a: CSSProperties, b: CSSProperties): boolean {
  * wall display is exactly that: display-shell.tsx rotates its outer box and
  * scales/pixel-shifts its inner box, and every tile paints inside both. The
  * same iframe, transformed directly with no transformed ancestor between it
- * and the viewport, renders fine on-device. So inside a DisplayShell
+ * and the viewport, paints static and canvas content on-device, and a
+ * scale alone leaves an MJPEG `<img>` painting too. A rotation on the
+ * iframe itself still blanks MJPEG, so a camera page shown on a 180° wall
+ * has to draw its stream into a `<canvas>`. So inside a DisplayShell
  * (DisplayTransformContext non-null) this portals the iframe onto
  * `document.body` — outside the transformed chain entirely — and applies
  * the shell's own rotation/scale to the iframe itself instead of inheriting
@@ -98,12 +101,16 @@ function portalStylesEqual(a: CSSProperties, b: CSSProperties): boolean {
  * Outside a DisplayShell, DisplayTransformContext is null and this renders
  * the iframe inline exactly as before — no portal, no behaviour change.
  *
- * Once portalled, the iframe is repositioned to track the container's own
- * rect (see `reposition` inside the layout effect below): centred over it,
- * rotated/scaled to match, cropped to the display's outer box (which the
- * portal otherwise escapes, since `overflow-hidden` only clips the outer
- * box's actual DOM descendants), and re-run on every resize/mutation of the
- * container or any ancestor up to the shell's own inner box.
+ * Once portalled, the iframe sits inside a wrapper `<div>` that tracks the
+ * container's own rect (see `reposition` inside the layout effect below).
+ * The iframe is centred in the wrapper and rotated/scaled to match; the
+ * wrapper has no transform and carries the crop to the display's outer box
+ * (which the portal otherwise escapes, since `overflow-hidden` only clips the
+ * outer box's actual DOM descendants). The crop is never put on the iframe:
+ * WPE WebKit 2.44.1 paints nothing for an iframe with `clip-path`, while the
+ * same iframe inside a clipped wrapper paints. Everything is re-run on every
+ * resize/mutation of the container or any ancestor up to the shell's own
+ * inner box.
  *
  * `container` arrives as plain state, not a ref object, on purpose: when
  * the container div and this component mount together in the same commit
@@ -120,7 +127,7 @@ function portalStylesEqual(a: CSSProperties, b: CSSProperties): boolean {
  */
 function EmbedFrame({ container, src, title, className }: EmbedFrameProps) {
   const displayTransform = useContext(DisplayTransformContext)
-  const [portalStyle, setPortalStyle] = useState<CSSProperties | null>(null)
+  const [portalStyle, setPortalStyle] = useState<PortalStyle | null>(null)
 
   // Recomputed on the container's own size and every ancestor's up to the
   // shell's inner box (ResizeObserver + MutationObserver, both below), on
@@ -150,20 +157,34 @@ function EmbedFrame({ container, src, title, className }: EmbedFrameProps) {
       const s = w > 0 ? r.width / w : shellTransform.scale
       const rotated = shellTransform.rotate === 180
 
-      const style: CSSProperties = {
-        position: 'fixed',
-        left: r.left + r.width / 2 - w / 2,
-        top: r.top + r.height / 2 - h / 2,
+      // The iframe sits centred in a wrapper that is laid over the container's
+      // on-screen rect and carries no transform of its own; the rotation and
+      // scale live on the iframe, the crop on the wrapper.
+      const frame: CSSProperties = {
+        position: 'absolute',
+        left: (r.width - w) / 2,
+        top: (r.height - h) / 2,
         width: w,
         height: h,
         transformOrigin: 'center center',
         transform: `${rotated ? 'rotate(180deg) ' : ''}scale(${s})`,
       }
+      const wrapper: CSSProperties = {
+        position: 'fixed',
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        height: r.height,
+      }
 
       // The outer box clips everything painted inside it with
-      // overflow-hidden, but this iframe lives at document.body and
-      // escapes that clip entirely - re-derive the same crop by hand from
-      // how far the container's own rect extends past the outer box's.
+      // overflow-hidden, but this frame lives at document.body and escapes
+      // that clip entirely - re-derive the same crop by hand from how far
+      // the container's own rect extends past the outer box's. The crop goes
+      // on the untransformed wrapper, never on the iframe: WPE WebKit 2.44.1
+      // paints nothing for an iframe that carries clip-path. The wrapper has
+      // no transform, so screen top/right/bottom/left map straight onto the
+      // inset, rotated display or not.
       const outer = shellTransform.clipElement
       if (outer) {
         const o = outer.getBoundingClientRect()
@@ -173,25 +194,19 @@ function EmbedFrame({ container, src, title, className }: EmbedFrameProps) {
         const oRight = Math.max(0, r.right - o.right)
 
         if (oTop > 0 || oBottom > 0 || oLeft > 0 || oRight > 0) {
-          // clip-path insets the element's own (local, pre-transform) box.
-          // Unrotated, local top/right/bottom/left line up with screen
-          // top/right/bottom/left one-to-one. Rotated 180, the iframe's own
-          // `transform` above turns its local top into screen bottom (and
-          // local left into screen right), so the inset that belongs on
-          // local top is the overflow measured at screen bottom, and so on
-          // round the box.
-          const [top, right, bottom, left] = rotated
-            ? [oBottom, oLeft, oTop, oRight]
-            : [oTop, oRight, oBottom, oLeft]
-          style.clipPath = `inset(${top / s}px ${right / s}px ${bottom / s}px ${left / s}px)`
+          wrapper.clipPath = `inset(${oTop}px ${oRight}px ${oBottom}px ${oLeft}px)`
         }
 
         const outsideEntirely =
           r.right <= o.left || r.left >= o.right || r.bottom <= o.top || r.top >= o.bottom
-        if (outsideEntirely) style.visibility = 'hidden'
+        if (outsideEntirely) wrapper.visibility = 'hidden'
       }
 
-      setPortalStyle((prev) => (prev && portalStylesEqual(prev, style) ? prev : style))
+      setPortalStyle((prev) =>
+        prev && portalStylesEqual(prev.frame, frame) && portalStylesEqual(prev.wrapper, wrapper)
+          ? prev
+          : { frame, wrapper },
+      )
     }
 
     reposition()
@@ -267,12 +282,14 @@ function EmbedFrame({ container, src, title, className }: EmbedFrameProps) {
   if (!portalStyle) return null
 
   return createPortal(
-    <iframe
-      {...frameProps}
-      data-testid="embed-frame-portal"
-      data-rotate={displayTransform.rotate}
-      style={portalStyle}
-    />,
+    <div data-testid="embed-frame-clip" style={portalStyle.wrapper}>
+      <iframe
+        {...frameProps}
+        data-testid="embed-frame-portal"
+        data-rotate={displayTransform.rotate}
+        style={portalStyle.frame}
+      />
+    </div>,
     document.body,
   )
 }

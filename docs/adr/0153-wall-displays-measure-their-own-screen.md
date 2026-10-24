@@ -108,3 +108,22 @@ differently on the wall because of a measurement.
   to the window's bottom right was rejected: the ODROID reports 1080 px of
   height and shows the top 360, so the board would land out of sight. A
   footprint that already overflows is not moved.
+
+## Amendment 2026-10-24: web page tiles are cropped by a wrapper
+
+A web page tile (embed) on a wall display is drawn outside the transformed
+board, directly on the page body, and rotated and scaled itself, because the
+wall browser (WPE WebKit 2.44.1) could not composite a stream under a
+transformed ancestor. Measured on the flybridge wall: an iframe that carries
+`clip-path` paints nothing at all, rotated or not, while the same iframe inside
+a clipped wrapper paints. A tile that overran the display by a few pixels
+(the camera at magnification 0.95, 8 px) therefore went blank. The crop now
+sits on an untransformed wrapper laid over the tile's on-screen rectangle, in
+plain screen pixels, and the iframe inside it carries only the rotation and
+scale; it never carries `clip-path`.
+
+An earlier statement that rotating the iframe itself makes a motion-JPEG image
+paint is wrong: measured 2026-10-24, only static and canvas content paints
+under a rotated iframe. The camera page handles that on its own side by
+drawing the stream into a canvas, so the wall does not change its rotation
+handling.

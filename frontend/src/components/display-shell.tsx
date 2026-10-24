@@ -55,10 +55,13 @@ export interface DisplayTransform {
  * own document — verified on-device, and display-shell.tsx's outer
  * (rotation) and inner (scale + pixel shift) boxes are exactly such an
  * ancestor chain. The same iframe, transformed directly with no transformed
- * ancestor between it and the viewport, renders fine, so EmbedTile portals
+ * ancestor between it and the viewport, paints static and canvas content
+ * (MJPEG survives a scale there but not a rotation), so EmbedTile portals
  * its iframe onto `document.body` and applies this context's rotate/scale
  * to the iframe itself instead of inheriting it here - `clipElement` is
- * what lets it also reproduce the crop that portal otherwise escapes.
+ * what lets it also reproduce the crop that portal otherwise escapes, on an
+ * untransformed wrapper around the iframe (WPE paints nothing for an iframe
+ * that carries clip-path itself).
  */
 export const DisplayTransformContext = createContext<DisplayTransform | null>(null)
 
