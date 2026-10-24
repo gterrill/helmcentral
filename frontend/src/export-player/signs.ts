@@ -7,17 +7,12 @@
 import type * as MapLibre from 'maplibre-gl'
 
 import { isExportPhoto } from '@/lib/passage-export-signs'
-import type { ResolvedSign } from '@/lib/replay-signs'
+import { SIGN_LIFT_PX, placeSignCard, type ResolvedSign } from '@/lib/replay-signs'
 
-/** How far above its point a card floats, by the place it holds, so two cards
- * for nearby points do not sit on top of each other. */
-const LIFT_PX = [20, 104] as const
-/** What a card measures before the browser can say, and the shortest leader. */
-const CARD_W = 220
-const CARD_H = 72
-const MIN_LEADER = 8
-/** Room kept clear at the top for the Play, Pause and zoom controls. */
-const TOP_MARGIN = 48
+/** What a card measures before the browser can say. */
+const CARD_W = 256
+const CARD_H_PHOTO = 250
+const CARD_H_TEXT = 72
 
 export interface SignView {
   /** The cards on screen now, in order; they win over a pin. */
@@ -62,7 +57,6 @@ interface Item {
 
 export function createSignLayer(o: SignLayerOptions): SignLayer {
   const { doc, root, stage, map, lib, id, still } = o
-  const MARGIN = 6
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string) => {
     const e = doc.createElement(tag)
     e.className = cls
@@ -240,28 +234,20 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     const H = c.clientHeight
     for (const [i, slot] of up) {
       const it = items[i]
-      const lift: number = LIFT_PX[Math.min(slot, LIFT_PX.length - 1)]
-      let dx = 0
-      let below = false
-      let leader = lift
+      const lift: number = SIGN_LIFT_PX[Math.min(slot, SIGN_LIFT_PX.length - 1)]
+      let r = { dx: 0, below: false, leader: lift }
       if (W > 0 && H > 0) {
         const p = map.project([it.r.lon, it.r.lat])
-        const w = it.surface.offsetWidth || CARD_W
-        const h = it.surface.offsetHeight || CARD_H
-        const slide = w / 2 - 6
-        const left = p.x - w / 2
-        if (left < MARGIN) dx = Math.min(slide, MARGIN - left)
-        else if (left + w > W - MARGIN) dx = -Math.min(slide, left + w - (W - MARGIN))
-        const room = p.y - h - TOP_MARGIN
-        if (room >= MIN_LEADER) leader = Math.min(lift, room)
-        else {
-          const under = H - MARGIN - p.y - h
-          if (under > room) { below = true; leader = Math.max(MIN_LEADER, Math.min(lift, under)) } else leader = MIN_LEADER
-        }
+        r = placeSignCard({
+          point: { x: p.x, y: p.y },
+          container: { w: W, h: H },
+          card: { w: it.surface.offsetWidth || CARD_W, h: it.surface.offsetHeight || (it.photo ? CARD_H_PHOTO : CARD_H_TEXT) },
+          lift,
+        })
       }
-      it.surface.style.transform = dx === 0 ? '' : `translateX(${Math.round(dx)}px)`
-      it.box.classList.toggle('hcp-below', below)
-      it.line.style.height = `${Math.round(leader)}px`
+      it.surface.style.transform = r.dx === 0 ? '' : `translateX(${Math.round(r.dx)}px)`
+      it.box.classList.toggle('hcp-below', r.below)
+      it.line.style.height = `${Math.round(r.leader)}px`
     }
   }
   // A map that moves under a paused card moves its anchor, so it is placed again.

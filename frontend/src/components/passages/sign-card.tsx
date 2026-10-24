@@ -27,11 +27,13 @@ export interface SignCardProps {
   onOpenPhoto: (sign: ReplaySign) => void
   /** Present on a card opened from a pin: closes it again. */
   onClose?: () => void
+  /** The most the card may be wide, in pixels: the map's width less its margins. */
+  maxWidthPx?: number
   className?: string
 }
 
-/** A sign on the chart: photo thumbnail beside the title and note. */
-export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, className }: SignCardProps) {
+/** A sign on the chart: the photo above the title and note. */
+export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, maxWidthPx, className }: SignCardProps) {
   const src = signPhotoSrc(sign)
   // The photo is there on the server but would not load: say so, do not hide it.
   const [failed, setFailed] = useState(false)
@@ -46,23 +48,25 @@ export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, clas
   const body = (
     <>
       {src && !failed && (
-        <img src={src} alt="" loading="lazy" className="h-14 w-14 shrink-0 rounded-sm object-cover" onError={() => { logPhotoFailure(sign); setFailed(true) }} />
+        <img src={src} alt="" loading="lazy" className="aspect-[4/3] w-full shrink-0 rounded-sm bg-muted object-cover" onError={() => { logPhotoFailure(sign); setFailed(true) }} />
       )}
       {src && failed && (
-        <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground" data-testid="sign-photo-missing">
-          <ImageOff className="h-5 w-5" aria-hidden="true" />
+        <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground" data-testid="sign-photo-missing">
+          <ImageOff className="h-6 w-6" aria-hidden="true" />
         </span>
       )}
-      <span className="flex min-w-0 flex-1 flex-col text-left">
+      <span className="flex min-w-0 flex-col text-left">
         <span className="truncate text-sm font-semibold text-foreground">{sign.title}</span>
         {sign.note && <span className="line-clamp-2 whitespace-pre-line text-xs text-muted-foreground">{sign.note}</span>}
         {src && failed && <span className="text-xs text-muted-foreground">Photo not available</span>}
       </span>
     </>
   )
-  const surface = 'flex w-56 items-start gap-2 rounded-md border border-border bg-card p-2 text-card-foreground shadow-md'
+  // The photo leads, full width; a note-only sign stays a compact text card.
+  const surface = cn(src ? 'w-64' : 'w-56', 'flex max-w-full flex-col items-stretch gap-2 rounded-md border border-border bg-card p-2 text-card-foreground shadow-md')
   return (
     <div
+      style={maxWidthPx === undefined ? undefined : { maxWidth: maxWidthPx }}
       className={cn('relative', !still && 'transition-opacity duration-300', visible ? 'opacity-100' : 'opacity-0', className)}
       data-testid="sign-card"
       data-sign-id={sign.id}

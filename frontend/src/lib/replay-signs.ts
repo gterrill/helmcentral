@@ -109,3 +109,57 @@ export function visibleSigns(resolved: readonly ResolvedSign[], wall: number, wa
   const always = live.filter((u) => u.r.sign.visibility === 'always')
   return [...always, ...live.filter((u) => u.r.sign.visibility !== 'always')].map((u) => u.r)
 }
+
+/** How far above its point a card floats, by the place it holds, so two cards
+ * for nearby points do not sit on top of each other. */
+export const SIGN_LIFT_PX = [20, 104] as const
+/** The gap kept between a card and the edge of the map. */
+export const SIGN_EDGE_MARGIN_PX = 6
+/** The shortest leader line a card is squeezed down to. */
+export const SIGN_MIN_LEADER_PX = 8
+/** Room kept clear at the top for the Play, Pause and zoom controls. */
+export const SIGN_TOP_MARGIN_PX = 48
+/** The leader must still meet the card, so a card slides no further than this
+ * short of its edge from centred over its point. */
+const LEADER_INSET_PX = 6
+
+export interface SignPlacementInput {
+  /** The sign's point in the map container, in pixels. */
+  point: { x: number; y: number }
+  container: { w: number; h: number }
+  /** The card's own size. */
+  card: { w: number; h: number }
+  /** The leader line length the card would like. */
+  lift: number
+}
+
+export interface SignPlacement {
+  /** Sideways shift of the card; the leader and dot stay on the point. */
+  dx: number
+  /** The card sits under its point, the leader going up to it. */
+  below: boolean
+  /** The leader line's length. */
+  leader: number
+}
+
+/** Where a card sits so it stays whole inside the map. It slides sideways near
+ * an edge, drops below its point when there is more room there, and shortens
+ * its leader (down to a minimum) when it is tight. With an unknown map or card
+ * size it is left as it prefers. Shared by the app and the exported player. */
+export function placeSignCard({ point, container, card, lift }: SignPlacementInput): SignPlacement {
+  if (container.w <= 0 || container.h <= 0 || card.w <= 0 || card.h <= 0) return { dx: 0, below: false, leader: lift }
+  const m = SIGN_EDGE_MARGIN_PX
+  let dx = 0
+  if (card.w + 2 * m <= container.w) {
+    const left = point.x - card.w / 2
+    if (left < m) dx = m - left
+    else if (left + card.w > container.w - m) dx = container.w - m - (left + card.w)
+    const reach = Math.max(0, card.w / 2 - LEADER_INSET_PX)
+    dx = Math.max(-reach, Math.min(reach, dx))
+  }
+  const room = point.y - card.h - SIGN_TOP_MARGIN_PX
+  if (room >= SIGN_MIN_LEADER_PX) return { dx, below: false, leader: Math.min(lift, room) }
+  const under = container.h - m - point.y - card.h
+  if (under > room) return { dx, below: true, leader: Math.max(SIGN_MIN_LEADER_PX, Math.min(lift, under)) }
+  return { dx, below: false, leader: SIGN_MIN_LEADER_PX }
+}
