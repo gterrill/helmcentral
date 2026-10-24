@@ -48,7 +48,7 @@ let writes: { method: string; url: string; body: unknown }[] = []
 
 function stub(extra: Record<string, unknown> = {}) {
   stubApi({
-    'GET /api/passages/inset-view': { inset_view: { at_ms: 0, corner: 'top-right', zoom_offset: 0 } },
+    'GET /api/passages/inset-view': { inset_view: { from_ms: 0, to_ms: 0, corner: 'top-right', zoom_offset: 0 } },
     'GET /api/passages/camera-shots': { shots: [] },
     'GET /api/passages/signs': () => ({ signs }),
     'POST /api/passages/signs': (req: StubRequest) => {

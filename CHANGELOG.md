@@ -27,6 +27,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The overview map on the replay now frames the coast the way the blog embed
+  and images do.** It shows a little more of the surrounding coast than before
+  at the automatic zoom.
 - **The camera shot you are editing is named.** On the passage replay, with
   Camera on, a line above the shot's settings reads "Shot 2 of 3 · from 09:41
   to 10:20" (with dates on a multi-day replay). The picked mark on the scrubber is larger and ringed so it is not

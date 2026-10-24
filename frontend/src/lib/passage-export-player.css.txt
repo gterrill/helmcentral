@@ -30,9 +30,8 @@
 }
 #HCP_ID .hcp-inset-tr { top: 10px; right: 10px; }
 #HCP_ID .hcp-inset-tl { top: 52px; left: 48px; }
-#HCP_ID .hcp-inset-bl { bottom: 28px; left: 10px; }
-#HCP_ID .hcp-inset-br { bottom: 36px; right: 10px; }
-#HCP_ID:has(.hcp-readout:not([hidden])) .hcp-inset-bl, #HCP_ID:has(.hcp-readout:not([hidden])) .hcp-inset-br { bottom: 112px; }
+#HCP_ID .hcp-inset-bl { bottom: var(--hcp-ro-gap, 28px); left: 10px; }
+#HCP_ID .hcp-inset-br { bottom: var(--hcp-ro-gap, 36px); right: 10px; }
 #HCP_ID:has(.hcp-inset-tl:not([hidden])) .hcp-notice { top: 152px; }
 #HCP_ID .hcp-inset[hidden], #HCP_ID .hcp-readout[hidden], #HCP_ID .hcp-caption[hidden], #HCP_ID .hcp-error[hidden], #HCP_ID .hcp-notice[hidden], #HCP_ID .hcp-stats[hidden], #HCP_ID .hcp-btn[hidden] { display: none; }
 #HCP_ID .hcp-readout {
@@ -119,7 +118,6 @@
   #HCP_ID .hcp-readout { bottom: 58px; }
   #HCP_ID .hcp-title { font-size: 18px; }
   #HCP_ID .hcp-inset { width: 104px; height: 74px; }
-  #HCP_ID:has(.hcp-readout:not([hidden])) .hcp-inset-bl, #HCP_ID:has(.hcp-readout:not([hidden])) .hcp-inset-br { bottom: 142px; }
   #HCP_ID:has(.hcp-inset-tl:not([hidden])) .hcp-notice { top: 134px; }
   #HCP_ID .hcp-stats { gap: 8px 16px; }
 }

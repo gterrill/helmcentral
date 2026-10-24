@@ -14,7 +14,7 @@ import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
 import { useInsetView } from '@/hooks/use-inset-view'
 import { insetViewApi } from '@/lib/inset-view-api'
-import { type InsetView } from '@/lib/passage-inset-view'
+import { insetViewRange, type InsetView } from '@/lib/passage-inset-view'
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
 import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
@@ -120,21 +120,27 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   }, [built.items])
   const { shots } = useCameraShots(spanMs ? spanMs.from : null, spanMs ? spanMs.to : null)
 
-  // The overview map's corner and zoom step are saved per passage, keyed by
-  // the first departure. A change shows at once and holds until the server
-  // has answered the last write; a refused write puts the saved view back.
-  const { view: savedInset, error: insetError } = useInsetView(spanMs ? spanMs.from : null)
+  // The overview map's corner and zoom step are saved with the replay, keyed by
+  // its range (first departure to last arrival). A change shows at once and
+  // holds until the server has answered the last write; a refused write puts the
+  // saved view back. Writes go one at a time, so the last click is what the
+  // server keeps and what the cache ends up showing.
+  const insetRange = useMemo(() => insetViewRange(passages), [passages])
+  const { view: savedInset, error: insetError, refetch: retryInset } = useInsetView(insetRange)
   const [pendingInset, setPendingInset] = useState<InsetView | null>(null)
   const insetWrites = useRef(0)
+  const insetQueue = useRef<Promise<void>>(Promise.resolve())
   const insetView = pendingInset ?? savedInset
   useEffect(() => {
     if (insetError) toast.error('Could not read where the overview map goes', { description: insetError })
   }, [insetError])
   const changeInsetView = (next: InsetView) => {
-    if (!spanMs) return
+    if (!insetRange) return
     setPendingInset(next)
     insetWrites.current += 1
-    void insetViewApi.save(spanMs.from, next)
+    insetQueue.current = insetQueue.current
+      .then(() => insetViewApi.save(insetRange.from, insetRange.to, next))
+      .then(() => undefined)
       .catch((err: unknown) => {
         toast.error('Could not save the overview map', { description: err instanceof Error ? err.message : String(err) })
       })
@@ -549,6 +555,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         onSpeed={setSpeed}
         onInsetChange={setInsetOn}
         insetView={insetView ?? undefined}
+        insetViewError={insetError}
+        onInsetViewRetry={() => void retryInset()}
         onInsetViewChange={changeInsetView}
         shotTicks={shotTicks}
         cameraOpen={cameraOpen}

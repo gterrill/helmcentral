@@ -15,6 +15,7 @@ import { boatMarkerKind, type BoatHull } from '@/lib/boat-model'
 import { OPENSEAMAP_TILES, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
+import { insetZoom } from '@/lib/passage-export-style'
 import { offsetInsetZoom, type InsetCorner } from '@/lib/passage-inset-view'
 import { fitZoomForPitch } from '@/lib/pitch-fit'
 import { CameraGate, outsideCentral, type Camera, type CameraResult } from '@/lib/replay-camera'
@@ -572,8 +573,20 @@ export interface InsetMapProps {
 // where the track is. Not interactive; the main map is the one to move.
 export function InsetMap({ bounds, isDarkTheme, className, zoomOffset = 0 }: InsetMapProps) {
   const canRender = hasWebGL2()
-  if (!canRender || !bounds) return null
-  const centre = centreOf(bounds)
+  const mapRef = useRef<MapRef>(null)
+  const centre = bounds ? centreOf(bounds) : null
+  // The same automatic zoom the blog embed and the still images use, so a step
+  // means the same framing in all three.
+  const zoom = bounds ? offsetInsetZoom(insetZoom(bounds), zoomOffset) : 0
+  const lon = centre?.longitude
+  const lat = centre?.latitude
+  // A map takes its first view only when it is made, so a new step moves the
+  // map that is there instead of drawing another.
+  useEffect(() => {
+    if (lon === undefined || lat === undefined) return
+    mapRef.current?.jumpTo({ center: [lon, lat], zoom })
+  }, [lon, lat, zoom])
+  if (!canRender || !bounds || !centre) return null
   const box: GeoJSON.Feature<GeoJSON.Polygon> = {
     type: 'Feature',
     properties: {},
@@ -582,15 +595,11 @@ export function InsetMap({ bounds, isDarkTheme, className, zoomOffset = 0 }: Ins
       coordinates: [[[bounds[0], bounds[1]], [bounds[2], bounds[1]], [bounds[2], bounds[3]], [bounds[0], bounds[3]], [bounds[0], bounds[1]]]],
     },
   }
-  // Wide enough to show the surrounding coast: about eight times the track's
-  // longest side, never closer than zoom 3 or further out than zoom 1.
-  const span = Math.max(bounds[2] - bounds[0], (bounds[3] - bounds[1]) * 1.6, 0.05)
-  const zoom = offsetInsetZoom(Math.max(1, Math.min(8, Math.log2(360 / (span * 8)))), zoomOffset)
   return (
     <div className={className} data-testid="passage-inset-map">
       <Map
         mapLib={maplibregl}
-        key={zoom}
+        ref={mapRef}
         initialViewState={{ ...centre, zoom }}
         style={{ width: '100%', height: '100%' }}
         mapStyle={isDarkTheme ? STYLE_DARK : STYLE_LIGHT}

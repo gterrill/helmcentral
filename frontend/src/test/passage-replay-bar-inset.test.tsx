@@ -67,3 +67,18 @@ describe('the overview map placement controls', () => {
     expect(screen.getByRole('button', { name: 'Wider' })).toBeDisabled()
   })
 })
+
+describe('the placement controls before and without the saved view', () => {
+  it('wait, disabled, while the saved placement is still being read', () => {
+    bar({ insetView: undefined })
+    expect(screen.getByRole('button', { name: 'Place overview map' })).toBeDisabled()
+  })
+
+  it('offer a retry, not a quiet default, when the saved placement could not be read', () => {
+    const onRetry = vi.fn()
+    bar({ insetView: undefined, insetViewError: 'HTTP 500', onInsetViewRetry: onRetry })
+    expect(screen.queryByRole('button', { name: 'Place overview map' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry reading the overview map placement' }))
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+})

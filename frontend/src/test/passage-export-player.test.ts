@@ -213,6 +213,27 @@ describe('tapping play', () => {
     raf.mockRestore()
   })
 
+  it('lifts a bottom corner overview to just above the readout, wherever its top is', () => {
+    const raf = vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1)
+    const { root } = mount(base({ insetView: { corner: 'bottom-left', zoomOffset: 0 } }))
+    const stage = root.querySelector('.hcp-stage') as HTMLElement
+    const readout = root.querySelector('.hcp-readout') as HTMLElement
+    Object.defineProperty(stage, 'clientHeight', { configurable: true, value: 400 })
+    // A readout with a night caption is taller, so its top is higher.
+    let top = 330
+    Object.defineProperty(readout, 'offsetTop', { configurable: true, get: () => top })
+    expect(root.style.getPropertyValue('--hcp-ro-gap')).toBe('')
+    const map = FakeMap.instances[0]
+    map.fire('style.load')
+    ;(root.querySelector('.hcp-btn') as HTMLElement).click()
+    map.fire('moveend')
+    expect(root.style.getPropertyValue('--hcp-ro-gap')).toBe('78px')
+    top = 290
+    window.dispatchEvent(new Event('resize'))
+    expect(root.style.getPropertyValue('--hcp-ro-gap')).toBe('118px')
+    raf.mockRestore()
+  })
+
   it('leaves the overview out when it was off at export', () => {
     const raf = vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1)
     const { root } = mount(base({ inset: false }))

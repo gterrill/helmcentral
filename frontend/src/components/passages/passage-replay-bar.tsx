@@ -1,4 +1,4 @@
-import { Map as MapIcon, Minus, Pause, Play, Plus, Signpost, SlidersHorizontal, Video } from 'lucide-react'
+import { Map as MapIcon, Minus, Pause, Play, Plus, RefreshCw, Signpost, SlidersHorizontal, Video } from 'lucide-react'
 import type { ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -45,6 +45,9 @@ export interface PassageReplayBarProps {
   insetView?: InsetView
   /** Saves a new corner or zoom step. Without it the placement controls stay out of the bar. */
   onInsetViewChange?: (view: InsetView) => void
+  /** Why the saved placement could not be read; the bar then offers a retry. */
+  insetViewError?: string | null
+  onInsetViewRetry?: () => void
   shotTicks?: ShotTick[]
   cameraOpen?: boolean
   onCameraToggle?: () => void
@@ -61,7 +64,7 @@ export interface PassageReplayBarProps {
 
 export function PassageReplayBar({
   clock, total, playing, readout, speed, insetOn, disabled, onToggle, onScrub, onSpeed, onInsetChange,
-  insetView, onInsetViewChange,
+  insetView, onInsetViewChange, insetViewError = null, onInsetViewRetry,
   shotTicks = [], cameraOpen = false, onCameraToggle, onTickClick, editor,
   signTicks = [], signsOpen = false, onSignsToggle, onSignTickClick, signsEditor,
 }: PassageReplayBarProps) {
@@ -179,8 +182,19 @@ export function PassageReplayBar({
           <MapIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
           Overview map
         </Button>
-        {insetOn && insetView && onInsetViewChange && (
-          <InsetPlacement view={insetView} onChange={onInsetViewChange} />
+        {insetOn && onInsetViewChange && (
+          insetView ? (
+            <InsetPlacement view={insetView} onChange={onInsetViewChange} />
+          ) : insetViewError ? (
+            <Button type="button" size="sm" variant="outline" aria-label="Retry reading the overview map placement" onClick={onInsetViewRetry}>
+              <RefreshCw className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+              Retry
+            </Button>
+          ) : (
+            <Button type="button" size="icon-sm" variant="outline" disabled aria-label="Place overview map">
+              <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+            </Button>
+          )
         )}
       </span>
     </div>

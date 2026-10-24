@@ -37,6 +37,7 @@ import {
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { IMAGE_SIZES, type ImageKind } from '@/lib/passage-export-layout'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
+import { insetViewRange } from '@/lib/passage-inset-view'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import type { CruiseStats, PassageDetail } from '@/lib/passages'
 import { prepareSignPhotos } from '@/lib/passage-export-photos'
@@ -79,9 +80,11 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
       : null
   ), [exportable, hasTrack])
   const { shots, loading: shotsLoading, error: shotsError } = useCameraShots(span ? span.from : null, span ? span.to : null)
-  // The overview map's corner and zoom step are saved per passage, keyed by the
-  // first departure; the card and the images draw it the way the replay does.
-  const { view: insetView, loading: insetViewLoading, error: insetViewError } = useInsetView(span ? span.from : null)
+  // The overview map's corner and zoom step are saved with the replay, keyed by
+  // its range over every passage shown (the key the replay saves under); the
+  // card and the images draw it the way the replay does.
+  const insetRange = useMemo(() => insetViewRange(passages), [passages])
+  const { view: insetView, loading: insetViewLoading, error: insetViewError } = useInsetView(hasTrack ? insetRange : null)
 
   // Signs belong to real time too. The ones inside an exported passage go in
   // when Include signs is on, photos included.
@@ -153,6 +156,16 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
     return exportFileName(title, data.start, data.zone.o, ext)
   }
 
+  // An export drawn without the overview placement the operator saved would be
+  // a different picture with no word said, so images stop for it too.
+  const insetReady = () => {
+    if (insetViewError) {
+      failed('read where the overview map goes', new Error(insetViewError))
+      return false
+    }
+    return true
+  }
+
   // An export without the shots or signs the operator saved would be a
   // different card with no word said, so a list that failed to load stops it.
   const listsReady = () => {
@@ -160,10 +173,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
       failed('read the camera shots', new Error(shotsError))
       return false
     }
-    if (insetViewError) {
-      failed('read where the overview map goes', new Error(insetViewError))
-      return false
-    }
+    if (!insetReady()) return false
     if (signsFailed) {
       failed('read the signs', new Error(signsError as string))
       return false
@@ -206,7 +216,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   }
 
   const downloadImage = async (imageKind: ImageKind) => {
-    if (busy) return
+    if (busy || !insetReady()) return
     setBusy(true)
     const label = IMAGE_SIZES[imageKind].label
     const toastId = toast.loading(`Drawing the ${label} image`)

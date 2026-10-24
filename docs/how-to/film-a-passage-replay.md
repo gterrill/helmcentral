@@ -59,7 +59,8 @@ move the slider.
 
 The choice is saved with the passage. A blog embed or image made from the
 passage afterwards uses the same corner and zoom. A cruise or a selection of
-passages remembers its own choice, kept against its first departure.
+passages remembers its own choice, separate from its first passage's. Trimming
+a passage, or replaying a different set, starts again from the defaults.
 
 ## Remove a shot
 

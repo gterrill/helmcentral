@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  DEFAULT_INSET_VIEW, INSET_CORNERS, INSET_ZOOM_CEILING, INSET_ZOOM_FLOOR, clampInsetStep, insetStepLabel, offsetInsetZoom,
+  DEFAULT_INSET_VIEW, insetViewRange, INSET_CORNERS, INSET_ZOOM_CEILING, INSET_ZOOM_FLOOR, clampInsetStep, insetStepLabel, offsetInsetZoom,
 } from '@/lib/passage-inset-view'
 
 describe('the overview view', () => {
@@ -22,5 +22,19 @@ describe('the overview view', () => {
     expect(clampInsetStep(5)).toBe(3)
     expect(clampInsetStep(-5)).toBe(-3)
     expect([insetStepLabel(2), insetStepLabel(0), insetStepLabel(-1)]).toEqual(['+2', '0', '-1'])
+  })
+})
+
+describe('the range a saved view belongs to', () => {
+  const p = (start: string, end: string) => ({ start, end })
+
+  it('runs from the earliest start to the latest end, whatever the order', () => {
+    const range = insetViewRange([p('2026-10-02T00:00:00.000Z', '2026-10-02T05:00:00.000Z'), p('2026-10-01T00:00:00.000Z', '2026-10-01T03:00:00.000Z')])
+    expect(range).toEqual({ from: Date.UTC(2026, 9, 1), to: Date.UTC(2026, 9, 2, 5) })
+  })
+
+  it('is the passage itself for one passage, and nothing for none', () => {
+    expect(insetViewRange([p('2026-10-01T00:00:00.000Z', '2026-10-01T03:00:00.000Z')])).toEqual({ from: Date.UTC(2026, 9, 1), to: Date.UTC(2026, 9, 1, 3) })
+    expect(insetViewRange([])).toBeNull()
   })
 })

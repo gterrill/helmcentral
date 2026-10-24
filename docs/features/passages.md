@@ -113,6 +113,8 @@ time you open it and in everything you share from it. The blog embed and the
 two still images draw the overview in the same corner at the same zoom, and in
 every corner it keeps clear of the map buttons, the readout and the map credit.
 A passage you have not set shows the overview top right at the automatic zoom.
+If the saved choice cannot be read, the overview stays off and a Retry button
+appears beside it rather than showing a guess.
 
 ### Camera shots
 

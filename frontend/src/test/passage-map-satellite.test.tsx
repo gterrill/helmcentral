@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { saveImageryPreference } from '@/lib/passage-imagery-preference'
+import { insetZoom } from '@/lib/passage-export-style'
 import { InsetMap, PassageMap } from '@/components/passages/passage-map'
 
 vi.mock('maplibre-gl', () => ({ default: {} }))
@@ -10,12 +11,13 @@ vi.mock('@/lib/webgl', () => ({ hasWebGL2: () => true }))
 interface LayerProps { id: string; beforeId?: string; minzoom?: number; paint?: Record<string, unknown> }
 let order: string[] = []
 let layers: LayerProps[] = []
+const jumpTo = vi.hoisted(() => vi.fn())
 
 vi.mock('react-map-gl/maplibre', async () => {
   const React = await import('react')
   return {
     Map: React.forwardRef(({ children, initialViewState }: { children?: React.ReactNode; initialViewState?: { zoom?: number } }, ref: React.Ref<unknown>) => {
-      React.useImperativeHandle(ref, () => ({ getMap: () => ({ getSource: () => ({}) }), getCanvas: () => ({}) }))
+      React.useImperativeHandle(ref, () => ({ getMap: () => ({ getSource: () => ({}) }), getCanvas: () => ({}), jumpTo }))
       return <div data-testid="map-root" data-zoom={initialViewState?.zoom}>{children}</div>
     }),
     Marker: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
@@ -131,10 +133,10 @@ describe('InsetMap zoom', () => {
     return z
   }
 
-  it('adds the steps to the automatic zoom', () => {
-    const auto = zoomOf()
-    expect(auto).toBeCloseTo(Math.log2(360 / 8), 5)
-    expect(zoomOf(0)).toBe(auto)
+  it('starts from the same automatic zoom the export uses, then adds the steps', () => {
+    const auto = insetZoom(bounds)
+    expect(zoomOf()).toBeCloseTo(auto, 5)
+    expect(zoomOf(0)).toBeCloseTo(auto, 5)
     expect(zoomOf(2)).toBeCloseTo(auto + 2, 5)
     expect(zoomOf(-3)).toBeCloseTo(auto - 3, 5)
   })
@@ -144,11 +146,16 @@ describe('InsetMap zoom', () => {
     expect(zoomOf(-30)).toBe(0)
   })
 
-  it('draws a fresh map when the step changes, since the first view is only applied on mount', () => {
+  it('moves the map it already has when the step changes, rather than drawing a new one', () => {
+    jumpTo.mockClear()
     const { rerender } = render(<InsetMap bounds={bounds} isDarkTheme={false} zoomOffset={0} />)
     const first = screen.getByTestId('map-root')
+    jumpTo.mockClear()
     rerender(<InsetMap bounds={bounds} isDarkTheme={false} zoomOffset={1} />)
-    expect(screen.getByTestId('map-root')).not.toBe(first)
-    expect(Number(screen.getByTestId('map-root').dataset.zoom)).toBeCloseTo(Math.log2(360 / 8) + 1, 5)
+    expect(screen.getByTestId('map-root')).toBe(first)
+    expect(jumpTo).toHaveBeenCalledTimes(1)
+    const arg = jumpTo.mock.calls[0][0] as { zoom: number; center: [number, number] }
+    expect(arg.zoom).toBeCloseTo(insetZoom(bounds) + 1, 5)
+    expect(arg.center[0]).toBeCloseTo(148.5, 5)
   })
 })

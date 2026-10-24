@@ -10,8 +10,9 @@ vi.mock('@/lib/passage-export-image', () => render_)
 vi.mock('@/lib/save-blob', () => ({ saveBlob: vi.fn() }))
 const shotsHook = vi.hoisted(() => ({ value: { shots: [] as unknown[], loading: false, error: null as string | null } }))
 vi.mock('@/hooks/use-camera-shots', () => ({ useCameraShots: () => shotsHook.value }))
+const insetArgs = vi.hoisted(() => ({ calls: [] as unknown[] }))
 const insetHook = vi.hoisted(() => ({ value: { view: { corner: 'top-right', zoomOffset: 0 } as { corner: string; zoomOffset: number } | null, loading: false, error: null as string | null } }))
-vi.mock('@/hooks/use-inset-view', () => ({ useInsetView: () => insetHook.value }))
+vi.mock('@/hooks/use-inset-view', () => ({ useInsetView: (range: unknown) => { insetArgs.calls.push(range); return insetHook.value } }))
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => ({ type: 'sail_mono', loaM: 12, beamM: 4 }) }))
 const signsHook = vi.hoisted(() => ({ value: { signs: [] as unknown[], loading: false, error: null as string | null } }))
 vi.mock('@/hooks/use-replay-signs', () => ({ useReplaySigns: () => signsHook.value }))
@@ -153,6 +154,24 @@ describe('PassageExportMenu, cinematic card', () => {
     expect(auto.insetCorner).toBe('top-right')
     expect(moved.insetCorner).toBe('bottom-left')
     expect(moved.insetZoom).toBeCloseTo(auto.insetZoom - 2, 2)
+  })
+
+  it('reads the placement for the range of every passage shown, track or not', async () => {
+    const t0 = Date.UTC(2026, 8, 14)
+    const noTrack = { ...passage([]), id: 'q', start: new Date(t0 - 3600_000).toISOString(), end: new Date(t0 - 1800_000).toISOString() }
+    const last = { ...passage(TRACK), id: 'r', start: new Date(t0 + 86400_000).toISOString(), end: new Date(t0 + 86400_000 + 600_000).toISOString() }
+    insetArgs.calls = []
+    render(<PassageExportMenu kind="combined" title="Both" passages={[passage(TRACK), noTrack, last]} units="metric" />)
+    expect(insetArgs.calls.at(-1)).toEqual({ from: t0 - 3600_000, to: t0 + 86400_000 + 600_000 })
+  })
+
+  it('stops an image, saying why, when the overview placement could not be read', async () => {
+    insetHook.value = { view: null, loading: false, error: 'HTTP 500' }
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Download image 1200 × 630' }))
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith('Could not read where the overview map goes', { description: 'HTTP 500' }))
+    expect(render_.renderPassageImage).not.toHaveBeenCalled()
   })
 
   it('waits for the saved overview placement before it exports', async () => {
