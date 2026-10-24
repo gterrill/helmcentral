@@ -11,6 +11,8 @@ export interface ShotTick {
   /** 0..1 along the scrubber. */
   fraction: number
   label: string
+  /** Hover text: the shot's number and time. */
+  title?: string
   selected: boolean
 }
 
@@ -67,7 +69,7 @@ export function PassageReplayBar({
       >
         {playing ? <Pause className="h-4 w-4" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
       </Button>
-      <div className={cn('relative flex min-w-24 flex-1 items-center', onSignsToggle && 'pb-5')}>
+      <div className={cn('relative flex min-w-24 flex-1 items-center', onSignsToggle && 'pb-5', shotTicks.length > 0 && 'pt-3')}>
         <input
           type="range"
           aria-label="Replay position"
@@ -84,11 +86,12 @@ export function PassageReplayBar({
             key={t.id}
             type="button"
             aria-label={t.label}
+            title={t.title}
             aria-pressed={t.selected}
             disabled={disabled}
             className={cn(
-              'absolute top-0 h-2.5 w-2 -translate-x-1/2 rounded-b-sm border border-background',
-              t.selected ? 'bg-foreground' : 'bg-primary',
+              'absolute -translate-x-1/2 rounded-b-sm border border-background',
+              t.selected ? 'top-1 z-10 h-3 w-3 bg-foreground ring-2 ring-ring ring-offset-1 ring-offset-background' : 'top-2 h-2.5 w-2 bg-primary',
             )}
             style={{ left: `${Math.max(0, Math.min(1, t.fraction)) * 100}%` }}
             onClick={() => onTickClick?.(t.id)}
