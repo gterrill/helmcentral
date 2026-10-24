@@ -1,10 +1,11 @@
 # The dashboard
 
-The dashboard is the screen you watch while the boat is working. It holds the
-readings that matter for whatever you are doing right now: depth and wind
-while you are conning, battery state and solar yield overnight at anchor,
-engine temperature and fuel burn on passage. You lay each screen out
-yourself, so the numbers in front of you are the ones you actually need.
+The dashboard is the screen you look at whilst the boat is in operation. It's
+the screen that contains the readings that are relevant to what you're doing
+at that particular moment: depth and wind when you're conning, battery state
+and solar yield over the course of an overnight anchor, engine temperature and
+fuel burn on passage. You set up the screens yourself so that the readings you
+have in front of you are the ones that actually matter.
 
 Each layout is a **page**, and pages are how you switch jobs. Most boats end
 up with a handful: Anchored, Underway, an engine watch. Every page is a grid
