@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **The power catamaran on the passage replay looks like a power catamaran.**
+  Boats set to the power catamaran hull type are now drawn as two slender hulls
+  with fine bows, open stern steps down to swim platforms, a salon with a
+  near-vertical windscreen, and a flybridge with an enclosed helm under a
+  hardtop. The boat is drawn to the length overall and beam in your vessel
+  details.
+
 ## [0.54.0] - 2026-10-24
 
 ### Added
