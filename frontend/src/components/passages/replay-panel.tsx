@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { CameraEditor, type CameraShotChange } from '@/components/passages/camera-editor'
-import { SignPhotoDialog } from '@/components/passages/sign-card'
+import { SignPhotoDialog, signPhotoSrc } from '@/components/passages/sign-card'
 import { SignEditor, type SignChange } from '@/components/passages/sign-editor'
 import { SignMarkers } from '@/components/passages/sign-markers'
 import type { DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
@@ -25,7 +25,7 @@ import { REPLAY_3D_PITCH } from '@/lib/terrain'
 import { replaySeconds, useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
   buildTimeline,
-  formatLocalDateTime,
+  formatLocalDateTime, localDateTimeParts,
   locate,
   positionAt,
   sailedAt,
@@ -145,6 +145,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // the zoom-in; resuming from a pause or a scrub just plays.
   const handlePlay = async () => {
     if (replay.playing) { replay.toggle(); return }
+    // An opened pin is a paused preview; playing hands the cards back to each sign's own window.
+    setOpenPinId(null)
     setResume((n) => n + 1)
     if (replay.clock <= 0 || replay.clock >= timeline.total) {
       setFlying(true)
@@ -211,7 +213,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     [replaying, placedSigns, wallAt, replay.clock],
   )
   const pins = !replaying || signsOpen ? placedSigns : []
-  const openId = pins.some((p) => p.sign.id === openPinId) ? openPinId : null
+  // A pin pressed mid-play or mid-fly-in must not open a card that outlasts its window.
+  const openId = !replay.playing && !flying && pins.some((p) => p.sign.id === openPinId) ? openPinId : null
   const photoSign = signs.find((s) => s.id === photoSignId) ?? null
 
   const selectedSign = signs.find((s) => s.id === selectedSignId && placedSigns.some((r) => r.sign.id === s.id)) ?? null
@@ -304,12 +307,35 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       setSelectedSignId(null)
     })
   }
+  const pickSign = (id: string) => {
+    const r = placedSigns.find((x) => x.sign.id === id)
+    if (!r) return
+    seekToSign(r.at)
+    selectSign(id)
+    setSignsOpen(true)
+  }
   const signTicks = placedSigns.map((r) => ({
     id: r.sign.id,
     fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
     label: `Sign ${r.sign.title} at ${formatLocalDateTime(r.at, lon)}`,
     selected: r.sign.id === selectedSign?.id,
   }))
+
+  // The chips show the time alone, with the date only when the signs span days;
+  // the full date, time and zone stay in each chip's label.
+  const selectedSignId2 = selectedSign?.id
+  const signChips = useMemo(() => {
+    const when = placedSigns.map((r) => ({ r, parts: localDateTimeParts(r.at, lon) }))
+    const oneDay = new Set(when.map(({ parts }) => parts.date)).size <= 1
+    return when.map(({ r, parts }) => ({
+      id: r.sign.id,
+      title: r.sign.title,
+      timeLabel: `${parts.date} ${parts.time} ${parts.zone}`,
+      shortTime: oneDay ? parts.time : `${parts.date} ${parts.time}`,
+      photoSrc: signPhotoSrc(r.sign),
+      selected: r.sign.id === selectedSignId2,
+    }))
+  }, [placedSigns, lon, selectedSignId2])
 
   const selectShot = (id: string | null) => {
     setSelectedShotId(id)
@@ -456,17 +482,13 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         signTicks={signTicks}
         signsOpen={signsOpen}
         onSignsToggle={() => setSignsOpen((o) => !o)}
-        onSignTickClick={(id) => {
-          const r = placedSigns.find((x) => x.sign.id === id)
-          if (!r) return
-          seekToSign(r.at)
-          selectSign(id)
-          setSignsOpen(true)
-        }}
+        onSignTickClick={pickSign}
         signsEditor={
           <SignEditor
             sign={selectedSign}
-            signCount={placedSigns.length}
+            signs={signChips}
+            onPick={pickSign}
+            disabled={timeline.total <= 0 || flying}
             whenLabel={selectedSign ? formatLocalDateTime(selectedSign.t_ms / 1000, lon) : null}
             busy={signWrites > 0}
             error={signError}

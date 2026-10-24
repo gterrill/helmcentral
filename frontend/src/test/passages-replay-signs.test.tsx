@@ -97,6 +97,29 @@ describe('ReplayPanel signs: on the chart', () => {
     expect(screen.getAllByTestId('sign-pin')).toHaveLength(2)
   })
 
+  it('an opened pin is a paused preview: pressing play closes it and only visible cards remain', async () => {
+    signs = [sign('s1', 250), sign('s2', 600, { visibility: 'after' })]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    const pins = await screen.findAllByTestId('sign-pin')
+    fireEvent.click(pins[0])
+    expect(screen.getByRole('button', { name: 'Close sign: Sign s1' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause replay' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /^Close sign:/ })).toBeNull()
+    expect(screen.queryAllByTestId('sign-card')).toHaveLength(0)
+  })
+
+  it('a pin pressed while playing leaves no card up', async () => {
+    signs = [sign('s1', 250)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    await screen.findByTestId('sign-pin')
+    fireEvent.click(screen.getByRole('button', { name: 'Signs' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Pause replay' })).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('sign-pin'))
+    expect(screen.queryByRole('button', { name: /^Close sign:/ })).toBeNull()
+  })
+
   it('puts a sign on the track where the boat is at its time', async () => {
     signs = [sign('s1', 500)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
@@ -224,6 +247,25 @@ describe('ReplayPanel signs: the editor', () => {
     expect(within(editor).getByLabelText('Seconds shown')).toHaveValue(4)
     // Pins show in the editor even though the replay has moved.
     expect(screen.queryAllByTestId('sign-pin').length + screen.queryAllByTestId('sign-card').length).toBeGreaterThan(0)
+  })
+
+  it('lists the signs as chips and a chip seeks to its sign and selects it', async () => {
+    signs = [sign('s2', 600), sign('s1', 250)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    const tick = await screen.findByRole('button', { name: /^Sign Sign s1 at/ })
+    expect(tick).toBeInTheDocument()
+    fireEvent.click(await screen.findByRole('button', { name: /^Signs$/ }))
+    const list = await screen.findByRole('group', { name: 'Signs on this replay' })
+    const chips = within(list).getAllByRole('button')
+    expect(chips.map((c) => c.getAttribute('aria-label'))).toEqual([
+      expect.stringMatching(/^Edit sign Sign s1 at/),
+      expect.stringMatching(/^Edit sign Sign s2 at/),
+    ])
+    expect(chips[0]).toHaveAttribute('aria-pressed', 'false')
+    fireEvent.click(chips[1])
+    expect((screen.getByLabelText('Replay position') as HTMLInputElement).value).toBe('600')
+    expect(screen.getByLabelText('Sign title')).toHaveValue('Sign s2')
+    expect(within(screen.getByRole('group', { name: 'Signs on this replay' })).getAllByRole('button')[1]).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('adds a note-only sign at the cursor', async () => {

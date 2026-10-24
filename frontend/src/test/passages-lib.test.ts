@@ -12,6 +12,7 @@ import {
   fmtPct,
   formatLocalDate,
   formatLocalDateTime,
+  localDateTimeParts,
   locate,
   passageHeading,
   passageRoute,
@@ -81,6 +82,7 @@ describe('boat-local time', () => {
 
   it('labels the zone on the time and rolls the date', () => {
     const t = Date.UTC(2026, 2, 13, 23, 30) / 1000
+    expect(localDateTimeParts(t, 149)).toEqual({ date: '14 Mar', time: '09:30', zone: 'UTC+10' })
     expect(formatLocalDateTime(t, 149)).toBe('14 Mar 09:30 UTC+10')
     expect(formatLocalDate(new Date(t * 1000).toISOString(), 149)).toBe('14 Mar')
     expect(formatLocalDate('garbage', 149)).toBe('--')

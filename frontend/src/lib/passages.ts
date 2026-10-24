@@ -184,11 +184,17 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 /** `14 Mar 09:32 UTC+10` for a Unix-seconds instant at a longitude. */
 export function formatLocalDateTime(unixSeconds: number, lon: number): string {
+  const { date, time, zone } = localDateTimeParts(unixSeconds, lon)
+  return `${date} ${time} ${zone}`
+}
+
+/** The pieces of formatLocalDateTime: `14 Mar`, `09:32` and `UTC+10`. */
+export function localDateTimeParts(unixSeconds: number, lon: number): { date: string; time: string; zone: string } {
   const zone = vesselZone(lon)
   const d = new Date((unixSeconds + zone.offsetHours * 3600) * 1000)
   const hh = String(d.getUTCHours()).padStart(2, '0')
   const mm = String(d.getUTCMinutes()).padStart(2, '0')
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${hh}:${mm} ${zone.label}`
+  return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`, time: `${hh}:${mm}`, zone: zone.label }
 }
 
 /** `14 Mar` for an ISO instant at a longitude. */
