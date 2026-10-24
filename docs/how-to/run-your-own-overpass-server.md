@@ -2,10 +2,15 @@
 
 Place names, Nearby and Mate's place lookups all ask an Overpass server for
 OpenStreetMap data. The public ones are shared, and over a boat's link they are
-slow when they answer at all. A server aboard answers in a fraction of a second
-and keeps working when the link is down. You need a home server that runs
-Docker apps (these steps use ZimaOS), a few gigabytes of free disk (about 4 GB
-for the Queensland coast), and an internet connection for the first import.
+slow when they answer at all. A server aboard answers in a fraction of a
+second, never turns Mate away, keeps working when the link is down, and keeps
+the boat's position off the internet.
+[Place names and nearby places](../features/place-names.md#running-your-own-server)
+weighs what it gets you against what it costs.
+
+You need a home server that runs Docker apps (these steps use ZimaOS), a few
+gigabytes of free disk (about 4 GB for the Queensland coast), and an internet
+connection for the first import.
 
 ## Install the server
 
