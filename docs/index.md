@@ -32,6 +32,10 @@ meets your needs.
 - [Mate](features/assistant.md), a chat assistant that answers
   passage-planning questions using the boat's own live data, from any page
   and by voice.
+- [Place names and nearby places](features/place-names.md), naming the bay,
+  marina or island the boat is at, the Nearby map, and Mate's place lookups,
+  and why running your own Overpass server aboard makes them fast and keeps
+  them working offline.
 - [Offline coastline](features/offline-coastline.md), the charted coastline and
   reefs kept aboard for the water around the boat, which Mate uses to judge
   anchorage shelter without internet.
