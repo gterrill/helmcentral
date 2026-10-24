@@ -11,6 +11,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **Passage replay no longer wobbles.** The camera and the boat turn smoothly
+  with the course instead of twitching at every fix.
+
 ### Changed
 
 - **The camera shot you are editing is named.** On the passage replay, with
