@@ -544,7 +544,9 @@ func placeSearchHandler(c echo.Context) error {
 	if err != nil || !hasUsableVesselPosition(state.Latitude, state.Longitude) {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": placeSearchNoPositionMessage})
 	}
-	args, err := json.Marshal(assistantFindPlacesArgs{Query: c.QueryParam("q"), MaxResults: placeSearchMaxResults})
+	// Search around the reading just checked, so the position is read once.
+	lat, lon := state.Latitude, state.Longitude
+	args, err := json.Marshal(assistantFindPlacesArgs{Query: c.QueryParam("q"), MaxResults: placeSearchMaxResults, NearLat: &lat, NearLon: &lon})
 	if err != nil {
 		return err
 	}

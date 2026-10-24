@@ -63,16 +63,28 @@ func alarmKindIgnorable(kind, state string) bool {
 	return true
 }
 
+// canonicalAlarmKind folds the plotter's route alarms, which a device may raise
+// as either "perpendicularPassed" or "navigation.perpendicularPassed" and which
+// are worded as one alarm, to the bare spelling. Every other kind, the
+// navigation safety kinds among them, is left as it is.
+func canonicalAlarmKind(kind string) string {
+	bare := strings.TrimPrefix(kind, "navigation.")
+	if _, ok := navigationNotificationBodies[bare]; ok {
+		return bare
+	}
+	return kind
+}
+
 // alarmKindOf is the kind of a bus alarm, from its path ("notifications.x").
 func alarmKindOf(path string) string {
-	return strings.TrimPrefix(path, notificationsRoot+".")
+	return canonicalAlarmKind(strings.TrimPrefix(path, notificationsRoot+"."))
 }
 
 // alarmKindHidden reports whether an alarm of this kind and state is hidden by
 // the operator's list. A safety kind is never hidden, even if it somehow got
 // onto the list, and an ignored kind in the emergency state shows.
 func alarmKindHidden(kind, state string) bool {
-	return alarmKindIgnorable(kind, state) && globalIgnoreStore.has(ignoredAlarmsList, kind)
+	return alarmKindIgnorable(kind, state) && globalIgnoreStore.has(ignoredAlarmsList, canonicalAlarmKind(kind))
 }
 
 // ignoredAlarmEntry is one row of the Settings list.

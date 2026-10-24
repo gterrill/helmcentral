@@ -37,7 +37,8 @@ to make changes sees the buttons to plan, change or clear it.
 2. To move it, search for the new place or edit the dates, then choose
    **Save stay**. To remove it, choose **Clear stay**.
 
-A stay ends on its own the day after your departure date.
+A stay ends on its own the day after your departure date. A departure date
+that has already passed at the place is not accepted.
 
 ## Ask Mate
 

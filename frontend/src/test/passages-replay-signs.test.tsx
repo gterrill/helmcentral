@@ -118,6 +118,10 @@ describe('ReplayPanel signs: on the chart', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Pause replay' })).toBeInTheDocument())
     fireEvent.click(screen.getByTestId('sign-pin'))
     expect(screen.queryByRole('button', { name: /^Close sign:/ })).toBeNull()
+    // The press must not wait to pop open when playback pauses.
+    fireEvent.click(screen.getByRole('button', { name: 'Pause replay' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Play replay' })).toBeInTheDocument())
+    expect(screen.queryByRole('button', { name: /^Close sign:/ })).toBeNull()
   })
 
   it('puts a sign on the track where the boat is at its time', async () => {

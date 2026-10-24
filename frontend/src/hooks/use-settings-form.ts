@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { apiRequest, invalidateQueries, setQueryData } from '@/lib/api-query'
+import { ApiError, apiRequest, invalidateQueries, setQueryData } from '@/lib/api-query'
 import { publishAppConfigSettings } from '@/hooks/use-app-config'
 import type { VesselRoles } from '@/lib/vessel-settings'
 
@@ -188,6 +188,7 @@ export function useSettingsForm(): UseSettingsFormResult {
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let denied = false
 
     const fetchSettings = async (attempt: number) => {
       // A save may have landed while this retry was waiting.
@@ -197,19 +198,15 @@ export function useSettingsForm(): UseSettingsFormResult {
         if (cancelled) return
         setSettings(data)
         markLoaded()
-      } catch {
-        try {
-          const data = await apiRequest<{ address?: string; port?: number }>('/api/settings/signalk')
-          if (cancelled) return
-          setSettings((previous) => ({ ...previous, signalk: data }))
-          markLoaded()
-        } catch {
-          // Keep defaults if the settings endpoint is unavailable, and try again.
-        }
+      } catch (err) {
+        // A session that may not read settings will not be allowed on a retry
+        // either, and a signalk-only read would not be the whole document, so
+        // `loaded` stays false and nothing can be saved over unread settings.
+        if (err instanceof ApiError && (err.status === 401 || err.status === 403)) denied = true
       } finally {
         if (!cancelled && attempt === 0) setLoading(false)
       }
-      if (cancelled || loadedRef.current) return
+      if (cancelled || denied || loadedRef.current) return
       timer = setTimeout(() => void fetchSettings(attempt + 1), RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)])
     }
 

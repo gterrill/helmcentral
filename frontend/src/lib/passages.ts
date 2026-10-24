@@ -176,7 +176,10 @@ export function passageHeading(p: Pick<PassageRecord, 'title' | 'from_name' | 't
  * uses for its nights, so a night on the page is a night in the figures. */
 export function vesselZone(lon: number): { offsetHours: number; label: string } {
   if (!Number.isFinite(lon) || lon < -180 || lon > 180) return { offsetHours: 0, label: 'UTC' }
-  const offsetHours = Math.max(-12, Math.min(14, Math.round(lon / 15)))
+  // Half-way rounds away from zero like the server's math.Round; JS
+  // Math.round would send -7.5 to -7. The `+ 0` turns a -0 into 0.
+  const rounded = Math.sign(lon) * Math.round(Math.abs(lon) / 15) + 0
+  const offsetHours = Math.max(-12, Math.min(14, rounded))
   return { offsetHours, label: offsetHours === 0 ? 'UTC' : `UTC${offsetHours > 0 ? '+' : ''}${offsetHours}` }
 }
 
