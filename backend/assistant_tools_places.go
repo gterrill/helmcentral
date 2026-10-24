@@ -130,6 +130,13 @@ func dedupeAssistantPlaceCandidates(candidates []assistantPlaceCandidate) []assi
 	return out
 }
 
+// findPlacesQueryError is a query the search refuses to send: empty, too long
+// or with characters a place name never has. The planned-stay search answers
+// it as a 400; Mate sees the same text as any other tool error.
+type findPlacesQueryError struct{ msg string }
+
+func (e *findPlacesQueryError) Error() string { return e.msg }
+
 // executeFindPlaces hands the query to the configured place-names provider's
 // search_places (ADR 0101) - the provider owns the actual search ladder (an
 // exact-name rung, and a broader rung it runs when told to); this host
@@ -146,7 +153,7 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 
 	query := strings.TrimSpace(args.Query)
 	if query == "" {
-		return "", fmt.Errorf("find_places: query is required")
+		return "", &findPlacesQueryError{msg: "find_places: query is required"}
 	}
 	// M-4 finding: query is the only text that reaches a third-party host
 	// (the configured place-names provider) verbatim, so it is bounded and
@@ -155,10 +162,10 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 	// trusting the prompt alone to keep the model from passing through
 	// whatever a document told it to encode here.
 	if n := utf8.RuneCountInString(query); n > assistantFindPlacesMaxQueryRunes {
-		return "", fmt.Errorf("find_places: query is %d characters, longer than the %d-character limit for a place name search", n, assistantFindPlacesMaxQueryRunes)
+		return "", &findPlacesQueryError{msg: fmt.Sprintf("find_places: query is %d characters, longer than the %d-character limit for a place name search", n, assistantFindPlacesMaxQueryRunes)}
 	}
 	if !assistantFindPlacesQueryPattern.MatchString(query) {
-		return "", fmt.Errorf("find_places: query %q contains characters not valid in a place name search", query)
+		return "", &findPlacesQueryError{msg: fmt.Sprintf("find_places: query %q contains characters not valid in a place name search", query)}
 	}
 
 	maxResults := args.MaxResults

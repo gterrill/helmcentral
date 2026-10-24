@@ -386,12 +386,21 @@ func tideNearestHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "unknown tide provider"})
 	}
 
-	vesselState, err := fetchSignalKVesselState()
-	if err != nil || !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
-		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "vessel position unavailable"})
+	// A named place (a planned stay) is measured from itself; otherwise from
+	// the boat.
+	lat, lon, explicit, pointErr := explicitForecastPoint(c)
+	if pointErr != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": pointErr.Error()})
+	}
+	if !explicit {
+		vesselState, err := fetchSignalKVesselState()
+		if err != nil || !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "vessel position unavailable"})
+		}
+		lat, lon = vesselState.Latitude, vesselState.Longitude
 	}
 
-	station, ok := nearestStation(provider, vesselState.Latitude, vesselState.Longitude)
+	station, ok := nearestStation(provider, lat, lon)
 	if !ok {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "no stations available"})
 	}

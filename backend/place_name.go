@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -504,5 +507,55 @@ func placeNameRoutes() []apiRoute {
 	return []apiRoute{
 		{http.MethodGet, "/api/place-name", tierRead, placeName},
 		{http.MethodGet, "/api/place-name-providers", tierRead, placeNameProvidersHandler},
+		{http.MethodGet, "/api/place-search", tierRead, placeSearchHandler},
 	}
+}
+
+// placeSearchDeps supplies the dependencies the forward place search runs
+// with; tests replace it.
+var placeSearchDeps = func() assistantToolDeps {
+	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	return assistantToolDeps{
+		vesselState: fetchSignalKVesselState,
+		placeNames: func() (placeNameProvider, string, error) {
+			return resolvePlaceNameProvider(settingsPath)
+		},
+	}
+}
+
+// placeSearchNoPositionMessage is what the operator is told when the boat's
+// position is unknown: the place-names plugin searches around a centre and
+// cannot search without one.
+const placeSearchNoPositionMessage = "Boat position unknown - place search needs it"
+
+// placeSearchMaxResults is how many candidates the stay sheet is offered.
+const placeSearchMaxResults = 8
+
+// placeSearchHandler serves GET /api/place-search?q=: a name resolved to
+// candidate positions by the configured place-names plugin, centred on the
+// boat, nearest first, each with its distance and bearing. It is Mate's
+// find_places on the same path, so the operator and Mate find the same
+// places. A query the search refuses is a 400; a provider that is missing or
+// fails is a 502 naming why, never an empty list. With no boat position
+// the plugin cannot search at all, so that is a 503 in the operator's words.
+func placeSearchHandler(c echo.Context) error {
+	deps := placeSearchDeps()
+	state, err := deps.vesselState()
+	if err != nil || !hasUsableVesselPosition(state.Latitude, state.Longitude) {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": placeSearchNoPositionMessage})
+	}
+	args, err := json.Marshal(assistantFindPlacesArgs{Query: c.QueryParam("q"), MaxResults: placeSearchMaxResults})
+	if err != nil {
+		return err
+	}
+	body, err := deps.executeFindPlaces(c.Request().Context(), args)
+	if err != nil {
+		var qerr *findPlacesQueryError
+		if errors.As(err, &qerr) {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": strings.TrimPrefix(qerr.Error(), "find_places: ")})
+		}
+		log.Printf("place search: %v", err)
+		return c.JSON(http.StatusBadGateway, map[string]string{"error": strings.TrimPrefix(err.Error(), "find_places: ")})
+	}
+	return c.Blob(http.StatusOK, echo.MIMEApplicationJSON, []byte(body))
 }

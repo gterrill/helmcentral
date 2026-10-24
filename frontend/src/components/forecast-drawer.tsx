@@ -7,7 +7,7 @@ import { Cloud, Moon, Sunrise, Sunset, Wind, Waves } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { ChartTooltipBubble, ChartTooltipMarker, ChartUnavailableMessage } from '@/components/chart-tooltip'
-import { ForecastTideSection } from '@/components/forecast-tide-section'
+import { ForecastPlaceTideSection, ForecastTideSection } from '@/components/forecast-tide-section'
 import { ForecastWarningNotice } from '@/components/forecast-warning-notice'
 import { WeatherConditionIcon } from '@/components/forecast/weather-condition-icon'
 import { WindBarb, WaveDirectionArrow } from '@/components/forecast/direction-glyphs'
@@ -23,6 +23,7 @@ import { compassPointFor } from '@/lib/format'
 import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
 import { fahrenheitToCelsius } from '@/lib/units'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { formatDayMonth, formatStayRange, formatWeekday, isStayDay, pendingStayDays } from '@/lib/stay'
 
 interface ForecastDay {
   dayKey: string
@@ -50,8 +51,25 @@ interface ForecastDay {
   hourlyCloud: WeatherHourlyCloudPoint[]
 }
 
-interface ForecastDrawerProps {
+/**
+ * The planned stay the forecast is being read for. Present only in the stay
+ * view, where every feed handed to the drawer is about this place and not the
+ * boat; the drawer then marks the stay days, lists the ones the forecast does
+ * not reach yet, and words its own-ship copy for the place.
+ */
+export interface ForecastDrawerStay {
+  placeName: string
+  lat: number
+  lon: number
+  /** First and last day of the stay, YYYY-MM-DD at the place. */
+  arrive: string
+  depart: string
+}
+
+export interface ForecastDrawerProps {
   forecast: ForecastDay[]
+  /** Set in the stay view. Absent means the forecast is for the boat. */
+  stay?: ForecastDrawerStay
   hourlyToday?: WeatherHourlyEntry[]
   summary?: string | null
   loading?: boolean
@@ -574,6 +592,7 @@ export function ForecastDrawer({
   waveUpdatedAt = null,
   waveTtlSeconds = null,
   onWaveRetry,
+  stay,
 }: ForecastDrawerProps) {
   const hasForecast = Boolean(forecast && forecast.length > 0)
   const [selectedDayIndex, setSelectedDayIndex] = useState(0)
@@ -591,6 +610,12 @@ export function ForecastDrawer({
   const windUnit = 'kts'
   const displayTemp = (tempF: number) => (unit === 'metric' ? fahrenheitToCelsius(tempF) : tempF)
   const days = forecast.slice(0, 10)
+  // Stay days the forecast does not reach yet. Listed, never estimated.
+  const stayPendingDays = useMemo(
+    () => (stay ? pendingStayDays(days.map((d) => d.dayKey), stay) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stay, forecast],
+  )
   // Matches spanLabel="Next 24 hours" below - the strip used to cap at 12,
   // which read as a full day's plan while actually stopping around 9PM for
   // anyone reading it at midday: daylight hours only, no overnight, on the
@@ -922,6 +947,20 @@ export function ForecastDrawer({
         .filter((span) => upperAirFlaggedDayKeys.has(span.dayKey)),
     [upperAirDayStarts, upperAirFlaggedDayKeys, upperAirChartData.length],
   )
+
+  // The stay's extent on the trace, drawn as a band so the reader can see how
+  // the upper air is trending over the days they will be there. It runs to
+  // where the day after departure begins, like a trough span does.
+  const upperAirStaySpan = useMemo(() => {
+    if (!stay) return null
+    const inStay = upperAirDayStarts.flatMap((start, i) => (isStayDay(start.dayKey, stay) ? [{ start, i }] : []))
+    if (inStay.length === 0) return null
+    const last = inStay[inStay.length - 1]
+    return {
+      from: inStay[0].start.idx,
+      to: upperAirDayStarts[last.i + 1]?.idx ?? upperAirChartData.length - 1,
+    }
+  }, [stay, upperAirDayStarts, upperAirChartData.length])
 
   /*
    * Paired hard-edged gradient stops across the plot, the same shape as
@@ -1266,7 +1305,7 @@ export function ForecastDrawer({
       <div className="rounded-lg border bg-background/60 px-4 py-8 text-center">
         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Forecast</p>
         <p className="mt-2 font-medium text-foreground">Loading latest marine forecast...</p>
-        <p className="mt-1 text-xs text-muted-foreground">Pulling weather and wind guidance for your position</p>
+        <p className="mt-1 text-xs text-muted-foreground">Pulling weather and wind guidance for {stay ? stay.placeName : 'your position'}</p>
       </div>
     )
   }
@@ -1322,7 +1361,7 @@ export function ForecastDrawer({
           intro={
             <div className="pr-2 text-base font-medium leading-relaxed text-foreground/90">
               <p>{summary ?? "Today's hourly forecast"}</p>
-              <ForecastWarningNotice warnings={activeForecastWarning} />
+              <ForecastWarningNotice warnings={activeForecastWarning} place={stay?.placeName} />
             </div>
           }
         >
@@ -1428,7 +1467,8 @@ export function ForecastDrawer({
               // carries the same decision-relevant content: wind (the
               // display slot's own reasoning applies here too), condition,
               // high/low, precipitation chance, and the trough flag.
-              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}`
+              const isStaySelected = stay ? isStayDay(day.dayKey, stay) : false
+              const dayAriaLabel = `Select forecast day ${day.dayName} ${day.date}${isStaySelected ? ', planned stay' : ''}, wind ${Math.round(day.windSpeed)} ${windUnit} ${day.windDirection}, ${day.condition}, high ${Math.round(displayTemp(day.high))}${tempUnit} low ${Math.round(displayTemp(day.low))}${tempUnit}, ${precipLabel}${hasTrough ? ', upper air trough' : ''}`
 
               return (
                 <button
@@ -1437,8 +1477,11 @@ export function ForecastDrawer({
                   className={`min-w-[150px] shrink-0 rounded-lg border px-2.5 py-2 text-left transition-colors ${
                     isSelected
                       ? 'border-primary/40 bg-card'
-                      : 'border-border/60 bg-background/40 hover:bg-muted/30'
+                      : isStaySelected
+                        ? 'border-primary/30 bg-primary/5 hover:bg-primary/10'
+                        : 'border-border/60 bg-background/40 hover:bg-muted/30'
                   }`}
+                  data-stay={isStaySelected ? 'true' : undefined}
                   aria-label={dayAriaLabel}
                   aria-pressed={isSelected}
                   onClick={() => selectDay(idx)}
@@ -1457,6 +1500,14 @@ export function ForecastDrawer({
                       <p className="text-2xs text-muted-foreground">{day.date}</p>
                     </div>
                     <div className="flex items-center gap-1">
+                      {isStaySelected && (
+                        <span
+                          data-testid="forecast-stay-day-marker"
+                          className="rounded-sm bg-primary/15 px-1 py-0.5 text-2xs font-semibold uppercase tracking-wide text-primary"
+                        >
+                          STAY
+                        </span>
+                      )}
                       {hasTrough && (
                         <span
                           data-testid="forecast-upper-air-marker"
@@ -1501,6 +1552,22 @@ export function ForecastDrawer({
                 </button>
               )
             })}
+            {stayPendingDays.map((pending) => (
+              <div
+                key={pending.dayKey}
+                data-testid="forecast-stay-pending-day"
+                className="min-w-[150px] shrink-0 rounded-lg border border-dashed border-primary/30 bg-primary/5 px-2.5 py-2 text-left"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">{formatWeekday(pending.dayKey)}</p>
+                    <p className="text-2xs text-muted-foreground">{formatDayMonth(pending.dayKey)}</p>
+                  </div>
+                  <span className="rounded-sm bg-primary/15 px-1 py-0.5 text-2xs font-semibold uppercase tracking-wide text-primary">STAY</span>
+                </div>
+                <p className="mt-2 text-2xs font-medium text-muted-foreground">No forecast yet · from {formatDayMonth(pending.availableFrom)}</p>
+              </div>
+            ))}
           </div>
 
           <div ref={detailsCardRef} className="rounded-lg border bg-background/60 p-3">
@@ -2142,6 +2209,10 @@ export function ForecastDrawer({
                       {waveRefreshMeta}
                     </div>
                   </>
+                ) : stay && waveDays.length === 0 ? (
+                  // The model has no values at this point (a berth up a river,
+                  // a lake). Said plainly; never filled from the nearest sea.
+                  <ChartUnavailableMessage testId="forecast-wave-none" message="No wave forecast for this spot" tone="quiet" />
                 ) : (
                   <>
                     <ChartUnavailableMessage testId="forecast-wave-unavailable" message="Wave forecast unavailable for this day" />
@@ -2152,7 +2223,15 @@ export function ForecastDrawer({
             </div>
 
 
-            <ForecastTideSection isImperial={unit === 'imperial'} dayOffset={selectedDayIndex} />
+            {stay ? (
+              <ForecastPlaceTideSection
+                isImperial={unit === 'imperial'}
+                place={{ name: stay.placeName, lat: stay.lat, lon: stay.lon }}
+                dayKey={selectedDay.dayKey}
+              />
+            ) : (
+              <ForecastTideSection isImperial={unit === 'imperial'} dayOffset={selectedDayIndex} />
+            )}
 
           </div>
         </div>
@@ -2185,6 +2264,13 @@ export function ForecastDrawer({
             {upperAirTroughSpans.length > 0 && 'Red marks days with upper support for a surface low. '}
             Trace smoothed over 18 hours.
           </p>
+          {stay && (
+            <p data-testid="forecast-upper-air-stay-key" className="mb-2 text-sm text-muted-foreground">
+              {upperAirStaySpan
+                ? `The tinted band is your stay at ${stay.placeName}, ${formatStayRange(stay.arrive, stay.depart)}. It shows the upper-air trend over those days, not a forecast for each day.`
+                : `Your stay at ${stay.placeName}, ${formatStayRange(stay.arrive, stay.depart)}, is beyond this upper-air trace.`}
+            </p>
+          )}
           <div ref={upperAirCardRef} className="relative">
             {upperAirTooltipEntry && (
               <ChartTooltipBubble
@@ -2214,6 +2300,16 @@ export function ForecastDrawer({
                 style={{ zIndex: 0 }}
                 aria-hidden
               >
+                {upperAirStaySpan && (
+                  <rect
+                    data-testid="forecast-upper-air-stay-band"
+                    x={upperAirXFor(upperAirStaySpan.from)}
+                    y={upperAirChartTop}
+                    width={Math.max(0, upperAirXFor(upperAirStaySpan.to) - upperAirXFor(upperAirStaySpan.from))}
+                    height={upperAirChartBottom - upperAirChartTop}
+                    fill="hsl(var(--primary) / 0.10)"
+                  />
+                )}
                 {upperAirWindow?.present && (
                   <rect
                     data-testid="forecast-upper-air-quintile-band"

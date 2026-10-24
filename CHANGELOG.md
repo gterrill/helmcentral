@@ -13,6 +13,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **See the forecast for a marina you're booked into.** On the Forecast page,
+  choose **Plan a stay**, find the place by name and give your arrival and
+  departure dates. A button beside the heading then switches the page to that
+  place and back to the boat. The ten days show which are yours; days past the
+  forecast say "No forecast yet" and when they will arrive. Times, tide station,
+  warnings and the upper-air trend are the place's, and the heading always says
+  it is not the boat's position. The dashboard, the clock and the alarms keep
+  using the boat's own position. The stay disappears the day after you leave.
+  Mate can read it and can propose one for you to apply.
 - **Use an Overpass server on your own network.** Place names, Nearby and
   Mate's place lookups can now use an Overpass server aboard over plain http,
   for example `http://192.168.1.20:12345/api/interpreter`. Plain http is
@@ -35,6 +44,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Place lookups reach twice as far.** Searching for a place by its full
+  name, from the Forecast page or by asking Mate, now looks up to 200 nautical
+  miles from the boat instead of 100. A partial name still searches the
+  nearest 20. Update the OpenStreetMap place-names plugin to get it.
+- **Pick a sign to edit from a list.** The Signs panel in the passage replay
+  now shows every sign as a button in time order, with its photo, title and
+  time. Press one to jump to it and edit it. The marks on the scrubber and the
+  pins on the chart are also bigger and easier to hit.
 - **The plotter's route alarms read plainly.** "Perpendicular passed" is now
   **Waypoint Passed** and "Arrival circle entered" is now **Arriving at
   Waypoint**, each with one sentence saying what it means.
@@ -52,6 +69,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   longer goes blank.** It is now trimmed to the screen instead. On a wall
   mounted upside down, a live camera picture still needs the camera page's own
   wall mode (HelmCam's kiosk view) to show.
+- **A sign you opened on the chart no longer stays up through the replay.**
+  Pressing Play now closes it, so each sign shows only for the time it is set
+  to.
 - **The "SignalK found" prompt no longer appears after an update restart, and
   never offers the server you already use.** It now waits until SignalK has
   been unreachable for a full 30 seconds, with the live feed connected, before

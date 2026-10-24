@@ -304,7 +304,7 @@ func createDocumentsSchema(db *sql.DB) error {
 		return err
 	}
 
-	return nil
+	return createPlannedStaySchema(db)
 }
 
 // newDocumentStore opens (creating if necessary) the SQLite database at

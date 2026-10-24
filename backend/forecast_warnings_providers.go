@@ -230,25 +230,12 @@ func forecastWarningsHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-	signalkURL := buildSignalKURL(address, port)
-	if signalkURL == "" {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "SignalK URL is not configured"})
+	point, status, message := resolveForecastPoint(c, settingsPath, true)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": message})
 	}
 
-	vesselState, vesselErr := fetchSignalKVesselState()
-	if vesselErr != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
-	}
-	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
-	}
-
-	bundle, fetchErr := provider.FetchWarnings(vesselState.Latitude, vesselState.Longitude)
+	bundle, fetchErr := provider.FetchWarnings(point.Lat, point.Lon)
 	if fetchErr != nil {
 		log.Printf("forecast warnings provider %q error: %v", configuredProvider, fetchErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("forecast warnings provider %q unavailable: %s", configuredProvider, firstErrorLine(fetchErr))})

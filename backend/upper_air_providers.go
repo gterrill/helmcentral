@@ -170,25 +170,19 @@ func upperAirForecast(c echo.Context) error {
 		})
 	}
 
-	vesselState, vesselErr := fetchSignalKVesselState()
-	if vesselErr != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
-	}
-	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
+	point, status, message := resolveForecastPoint(c, settingsPath, false)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": message})
 	}
 
-	bundle, fetchErr := provider.FetchUpperAir(vesselState.Latitude, vesselState.Longitude, upperAirForecastDays)
+	bundle, fetchErr := provider.FetchUpperAir(point.Lat, point.Lon, upperAirForecastDays)
 	if fetchErr != nil {
 		log.Printf("upper-air provider %q error: %v", configured, fetchErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("upper-air provider %q unavailable: %s", configured, firstErrorLine(fetchErr))})
 	}
 
-	localLocation := vesselLocalLocation(vesselState.Longitude)
-	referenceDatetime := vesselState.Datetime
-	if referenceDatetime.IsZero() {
-		referenceDatetime = time.Now().UTC()
-	}
+	localLocation := vesselLocalLocation(point.Lon)
+	referenceDatetime := point.Reference
 	localTodayKey := referenceDatetime.In(localLocation).Format("2006-01-02")
 
 	byDay := buildUpperAirInputs(bundle.Hourly, localLocation)

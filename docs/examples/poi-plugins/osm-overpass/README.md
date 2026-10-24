@@ -108,7 +108,7 @@ distance/bearing" rule) - trimming here, before the host's own distance
 sort, could silently drop the actual nearest match.
 
 Rung 1 always runs: an untagged, exact `nwr["name"="<variant>"]` match over
-a 100nm box, tried against the query as typed, Title Case, first-letter-only
+a 200nm box, tried against the query as typed, Title Case, first-letter-only
 capitalised, and - for a query carrying a comma-qualifier ("Bona Bay,
 Gloucester Island") - the same three variants of just the head before the
 comma too, since OSM's own name tag almost never carries the qualifier
@@ -143,9 +143,10 @@ comfortably under the host's 15s WASM plugin call budget
 three separate HTTP connections and JSON parsing on top of whatever
 Overpass itself takes. Measured live against `overpass.openstreetmap.fr` on
 2026-09-11 (`backend/assistant_tools.go`, ADR 0093 section 8): an exact-name
-match answers in about 1s even at the full 100nm rung 1 radius (Overpass
-uses its name index directly), and the rung 2 regex union answers in 2 to
-5s at 20nm (not indexable, a full scan of the box).
+match answers in about 1s even at the full rung 1 radius (1.2s at 200nm,
+measured 2026-10-24; Overpass uses its name index directly), and the rung 2
+regex union answers in 2 to 5s at 20nm (not indexable, a full scan of the
+box).
 
 ## Two more optional exports: shoreline_square and shoreline_changes
 

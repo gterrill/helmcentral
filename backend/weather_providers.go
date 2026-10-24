@@ -1036,21 +1036,18 @@ func weatherToday(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 
-	vesselState, vesselErr := fetchSignalKVesselState()
-	if vesselErr != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
-	}
-	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
+	point, status, message := resolveForecastPoint(c, settingsPath, false)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": message})
 	}
 
-	bundle, fetchErr := provider.FetchForecast(vesselState.Latitude, vesselState.Longitude, 1, vesselLocalTimezoneName(vesselState.Longitude))
+	bundle, fetchErr := provider.FetchForecast(point.Lat, point.Lon, 1, vesselLocalTimezoneName(point.Lon))
 	if fetchErr != nil {
 		log.Printf("weather provider %q error: %v", configuredProvider, fetchErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("weather provider %q unavailable: %v", configuredProvider, fetchErr)})
 	}
 
-	localLocation := vesselLocalLocation(vesselState.Longitude)
+	localLocation := vesselLocalLocation(point.Lon)
 
 	condition := "Unknown"
 	if strings.TrimSpace(bundle.Current.Condition) != "" {
@@ -1110,25 +1107,12 @@ func weatherForecast(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-	signalkURL := buildSignalKURL(address, port)
-	if signalkURL == "" {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "SignalK URL is not configured"})
+	point, status, message := resolveForecastPoint(c, settingsPath, true)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": message})
 	}
 
-	vesselState, vesselErr := fetchSignalKVesselState()
-	if vesselErr != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
-	}
-	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
-	}
-
-	bundle, forecastErr := provider.FetchForecast(vesselState.Latitude, vesselState.Longitude, 10, vesselLocalTimezoneName(vesselState.Longitude))
+	bundle, forecastErr := provider.FetchForecast(point.Lat, point.Lon, 10, vesselLocalTimezoneName(point.Lon))
 	if forecastErr != nil {
 		log.Printf("weather provider %q forecast error: %v", configuredProvider, forecastErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("weather provider %q unavailable: %v", configuredProvider, forecastErr)})
@@ -1137,11 +1121,8 @@ func weatherForecast(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "weather forecast response was empty"})
 	}
 
-	localLocation := vesselLocalLocation(vesselState.Longitude)
-	referenceDatetime := vesselState.Datetime
-	if referenceDatetime.IsZero() {
-		referenceDatetime = time.Now().UTC()
-	}
+	localLocation := vesselLocalLocation(point.Lon)
+	referenceDatetime := point.Reference
 	localTodayKey := referenceDatetime.In(localLocation).Format("2006-01-02")
 
 	windByDay, precipByDay, uvByDay, cloudByDay := buildHourlySeriesByDay(bundle.Hourly, localLocation)
