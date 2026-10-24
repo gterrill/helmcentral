@@ -19,6 +19,27 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   near-vertical windscreen, and a flybridge with an enclosed helm under a
   hardtop. The boat is drawn to the length overall and beam in your vessel
   details.
+- **Bigger photos on passage signs.** In the passage replay and in an exported
+  blog card, a sign now shows its photo across the top of the card, with the
+  title and note underneath, instead of a small thumbnail beside them.
+  A sign with no photo stays a compact text card.
+
+### Fixed
+
+- **Sign cards near the edge of the map are no longer cut off.** A card now
+  slides sideways to stay inside the map, or drops below its point when there
+  is no room above it, and keeps doing so as the camera moves during replay.
+### Fixed
+
+- **Passage replay no longer wobbles.** The camera and the boat turn smoothly
+  with the course instead of twitching at every fix.
+
+### Changed
+
+- **The camera shot you are editing is named.** On the passage replay, with
+  Camera on, a line above the shot's settings reads "Shot 2 of 3 · from 09:41
+  to 10:20" (with dates on a multi-day replay). The picked mark on the scrubber is larger and ringed so it is not
+  mistaken for the playhead, and hovering any mark shows its number and time.
 
 ## [0.54.0] - 2026-10-24
 

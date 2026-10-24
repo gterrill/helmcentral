@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildTimeline, type TimedSegment } from '@/lib/passages'
-import { MAX_SIGN_CARDS, SIGN_LEAD_S, resolveSigns, visibleSigns, type ReplaySign } from '@/lib/replay-signs'
+import { MAX_SIGN_CARDS, SIGN_LEAD_S, placeSignCard, resolveSigns, visibleSigns, type ReplaySign } from '@/lib/replay-signs'
 
 const sign = (id: string, t: number, extra: Partial<ReplaySign> = {}): ReplaySign => ({
   id, t_ms: t * 1000, title: id, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, ...extra,
@@ -126,5 +126,60 @@ describe('visibleSigns', () => {
     // Each frame depends only on its own time, never on the one before.
     for (const w of [10, 49.5, 53, 54.5, 70]) expect(visibleSigns(r, w, wallAtClock).map((x) => x.sign.id)).toEqual(frames[Math.round(w / 0.25)])
     for (const f of frames) expect(f.length).toBeLessThanOrEqual(2)
+  })
+})
+
+describe('placeSignCard', () => {
+  const container = { w: 800, h: 600 }
+  const card = { w: 256, h: 220 }
+  const base = { container, card, lift: 20 }
+
+  it('leaves a card alone when it fits above its point', () => {
+    expect(placeSignCard({ ...base, point: { x: 400, y: 400 } })).toEqual({ dx: 0, below: false, leader: 20 })
+  })
+
+  it('shifts a card left past the right edge and right past the left edge', () => {
+    // card centred on 780 ends at 908; it must end at 794
+    expect(placeSignCard({ ...base, point: { x: 780, y: 400 } }).dx).toBe(-114)
+    expect(placeSignCard({ ...base, point: { x: 20, y: 400 } }).dx).toBe(114)
+  })
+
+  it('never shifts so far that the leader leaves the card', () => {
+    expect(placeSignCard({ ...base, point: { x: -500, y: 400 } }).dx).toBe(122)
+    expect(placeSignCard({ ...base, point: { x: 1500, y: 400 } }).dx).toBe(-122)
+  })
+
+  it('centres a card wider than the map, and copes with a tiny one', () => {
+    expect(placeSignCard({ ...base, container: { w: 200, h: 600 }, point: { x: 50, y: 400 } }).dx).toBe(0)
+    expect(placeSignCard({ ...base, card: { w: 4, h: 220 }, point: { x: 790, y: 400 } }).dx).toBe(0)
+  })
+
+  it('leaves the card as preferred while its size or the map size is unknown', () => {
+    expect(placeSignCard({ ...base, card: { w: 0, h: 0 }, point: { x: 790, y: 10 } })).toEqual({ dx: 0, below: false, leader: 20 })
+    expect(placeSignCard({ ...base, container: { w: 0, h: 0 }, point: { x: 790, y: 10 } })).toEqual({ dx: 0, below: false, leader: 20 })
+  })
+
+  it('puts the card below its point when there is no room above', () => {
+    const r = placeSignCard({ ...base, point: { x: 400, y: 120 } })
+    expect(r.below).toBe(true)
+    expect(r.leader).toBe(20)
+  })
+
+  it('stays above, leader squeezed to the minimum, when neither side has room', () => {
+    expect(placeSignCard({ ...base, container: { w: 800, h: 300 }, point: { x: 400, y: 200 } })).toMatchObject({ below: false, leader: 8 })
+  })
+
+  it('keeps the top margin clear: a card does not run under the map controls', () => {
+    // room above = 260 - 220 - 48 = -8: not enough, so it goes below
+    expect(placeSignCard({ ...base, point: { x: 400, y: 260 } }).below).toBe(true)
+    // 48 + 220 + 8 above the point is just enough, with the leader shortened to 8
+    expect(placeSignCard({ ...base, point: { x: 400, y: 276 } })).toMatchObject({ below: false, leader: 8 })
+  })
+
+  it('shortens the second card leader so it fits a 416px map', () => {
+    const r = placeSignCard({ container: { w: 800, h: 416 }, card, lift: 104, point: { x: 400, y: 300 } })
+    expect(r.below).toBe(false)
+    expect(r.leader).toBe(32)
+    expect(300 - r.leader - 220).toBeGreaterThanOrEqual(48)
   })
 })

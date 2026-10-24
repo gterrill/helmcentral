@@ -13,7 +13,7 @@ import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
-import { nextHeading, type HeadingState } from '@/lib/boat-model'
+import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
 import { cameraShotsApi } from '@/lib/camera-shots-api'
 import { replaySignsApi } from '@/lib/replay-signs-api'
 import { resolveSigns, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX, visibleSigns } from '@/lib/replay-signs'
@@ -137,6 +137,34 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const lastHeading = useRef<HeadingState | null>(null)
   const heading = ((hull && threeD) || resolved.length > 0) && here ? nextHeading(lastHeading.current, { id: here.entry.id, at: here.at }, here.entry.segments) : null
   useEffect(() => { lastHeading.current = heading })
+  // One smoothed heading serves the boat and the camera, so the model does not
+  // swing against the screen. It is stepped in render because both need it in
+  // the same render; the step is keyed on (clock, playing, passage, raw
+  // heading), so a repeat render with the same key (StrictMode) returns the
+  // cached value and cannot advance it twice. Pausing keeps the value as it
+  // stands. A scrub or seek while paused, a new passage and reduced motion
+  // show the exact heading. Resuming eases from the held value, timed from
+  // the resume.
+  const smoother = useRef<HeadingSmoother | null>(null)
+  if (smoother.current === null) smoother.current = new HeadingSmoother()
+  const smoothed = useRef<{ clock: number; playing: boolean; id: string | null; raw: number | null; out: number | null } | null>(null)
+  const rawHeading = heading ? heading.heading : null
+  const hereKey = here ? here.entry.id : null
+  const sm = smoothed.current
+  if (!sm || sm.clock !== replay.clock || sm.playing !== replay.playing || sm.id !== hereKey || sm.raw !== rawHeading) {
+    const now = performance.now()
+    const idChanged = !!sm && sm.id !== hereKey
+    const moved = !sm || sm.clock !== replay.clock || sm.raw !== rawHeading
+    if (!replay.playing || (sm && !sm.playing)) smoother.current.hold(now)
+    // Only a move made while already paused is a scrub; the last tick of a
+    // replay moves the clock and stops in the same render, and keeps its ease.
+    const snap = reducedMotion || idChanged || (!replay.playing && moved && (!sm || !sm.playing))
+    smoothed.current = {
+      clock: replay.clock, playing: replay.playing, id: hereKey, raw: rawHeading,
+      out: smoother.current.step(rawHeading, now, { snap }),
+    }
+  }
+  const shownHeading = smoothed.current ? smoothed.current.out : null
   useEffect(() => {
     if (cursorRef) cursorRef.current = here ? { id: here.entry.id, at: here.at } : null
   })
@@ -196,7 +224,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
               nowMs: performance.now(),
               reduced: reducedMotion,
               resume,
-              boat: { lat: boat.lat, lon: boat.lon, heading: heading ? heading.heading : null },
+              boat: { lat: boat.lat, lon: boat.lon, heading: shownHeading },
               current,
             },
           )
@@ -392,12 +420,31 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     }
     void runShotWrite(async () => { await cameraShotsApi.patch(selectedShot.id, change) })
   }
-  const shotTicks = resolved.map((r) => ({
-    id: r.shot.id,
-    fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
-    label: `Camera shot ${MODE_NAMES[r.shot.mode]} at ${formatLocalDateTime(r.at, lon)}`,
-    selected: r.shot.id === selectedShot?.id,
-  }))
+  // Times alone on a one-day replay; the date too once the shots span days.
+  const selectedShotId2 = selectedShot?.id
+  const { shotTicks, shotHeading } = useMemo(() => {
+    const parts = resolved.map((r) => localDateTimeParts(r.at, lon))
+    const oneDay = new Set(parts.map((p) => p.date)).size <= 1
+    const short = (p: { date: string; time: string }) => (oneDay ? p.time : `${p.date} ${p.time}`)
+    const ticks = resolved.map((r, i) => ({
+      id: r.shot.id,
+      fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
+      label: `Camera shot ${i + 1}, ${MODE_NAMES[r.shot.mode]}, at ${formatLocalDateTime(r.at, lon)}`,
+      title: `Shot ${i + 1} · ${short(parts[i])}`,
+      selected: r.shot.id === selectedShotId2,
+    }))
+    const idx = resolved.findIndex((r) => r.shot.id === selectedShotId2)
+    if (idx < 0) return { shotTicks: ticks, shotHeading: null }
+    // The shot ends at the next shot or where its own passage ends, whichever
+    // is first; "end" is only for the last shot of the last passage.
+    const entry = timeline.entries.find((e) => e.id === resolved[idx].entryId)
+    const nextAt = idx + 1 < resolved.length ? resolved[idx + 1].at : null
+    const lastPassage = entry !== undefined && entry === timeline.entries[timeline.entries.length - 1]
+    let to: string | null = null
+    if (nextAt !== null && (!entry || nextAt <= entry.end)) to = short(parts[idx + 1])
+    else if (entry && !(nextAt === null && lastPassage)) to = short(localDateTimeParts(entry.end, lon))
+    return { shotTicks: ticks, shotHeading: { number: idx + 1, total: resolved.length, from: short(parts[idx]), to } }
+  }, [resolved, lon, timeline, selectedShotId2])
 
   const mapPassages = useMemo(() => built.items.map((i) => ({ id: i.id, segments: i.line })), [built.items])
 
@@ -427,7 +474,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           playedIds={playedIds}
           sailedTo={sailedTo}
           boat={boat}
-          boatHeading={heading ? heading.heading : null}
+          boatHeading={shownHeading}
           hull={hull}
           cameraDriver={cameraDriver}
           onFlatChange={setMapFlat}
@@ -511,6 +558,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           <CameraEditor
             shot={selectedShot}
             shotCount={resolved.length}
+            heading={shotHeading}
             flat={mapFlat}
             busy={shotBusy}
             error={shotError}

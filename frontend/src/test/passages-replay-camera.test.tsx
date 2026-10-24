@@ -91,7 +91,7 @@ describe('ReplayPanel camera shots', () => {
   it('draws a mark on the scrubber for each shot inside the replay and none for one outside', async () => {
     shots = [shot('s1', 250), shot('out', -86_400)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    const mark = await screen.findByRole('button', { name: /Camera shot Follow at/ })
+    const mark = await screen.findByRole('button', { name: /Camera shot 1, Follow, at/ })
     expect(mark).toHaveStyle({ left: '25%' })
     expect(screen.getAllByRole('button', { name: /^Camera shot/ })).toHaveLength(1)
     expect(driver).not.toBeNull()
@@ -100,7 +100,7 @@ describe('ReplayPanel camera shots', () => {
   it('a mark seeks to its shot and opens the editor on it', async () => {
     shots = [shot('s1', 250, { mode: 'orbit', orbit_deg_per_s: 6 })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /Camera shot Orbit at/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Camera shot 1, Orbit, at/ }))
     expect((screen.getByLabelText('Replay position') as HTMLInputElement).value).toBe('250')
     const editor = screen.getByTestId('camera-editor')
     expect(within(editor).getByRole('button', { name: 'Orbit' })).toHaveAttribute('aria-pressed', 'true')
@@ -125,7 +125,7 @@ describe('ReplayPanel camera shots', () => {
   it('edits mode, pace, numbers and deletes, each sent to the server', async () => {
     shots = [shot('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /Camera shot Follow at/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Camera shot 1, Follow, at/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Pace half' }))
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0].body).toEqual({ pace: 0.5 })
@@ -147,7 +147,7 @@ describe('ReplayPanel camera shots', () => {
   it('Use current view copies zoom, pitch and the angle off the bow', async () => {
     shots = [shot('s1', 250)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(await screen.findByRole('button', { name: /Camera shot Follow at/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Camera shot 1, Follow, at/ }))
     fireEvent.click(screen.getByRole('button', { name: 'Use current view' }))
     await waitFor(() => expect(writes).toHaveLength(1))
     // The boat heads east (090); the view is turned to 135: 45 degrees off the stern.
@@ -168,14 +168,14 @@ describe('ReplayPanel camera shots', () => {
   it('a slowed shot stretches the replay and keeps the scrubber in timeline units', async () => {
     shots = [shot('s1', 0, { pace: 0.5 })]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    await screen.findByRole('button', { name: /Camera shot Follow at/ })
+    await screen.findByRole('button', { name: /Camera shot 1, Follow, at/ })
     expect(screen.getByLabelText('Replay position')).toHaveAttribute('max', '1000')
   })
 
   it('asks for a camera that follows the boat', async () => {
     shots = [shot('s1', 0)]
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    await screen.findByRole('button', { name: /Camera shot Follow at/ })
+    await screen.findByRole('button', { name: /Camera shot 1, Follow, at/ })
     fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: '500' } })
     const overview = { center: [149.5, 0] as [number, number], zoom: 8, pitch: 50, bearing: 0 }
     const result = driver!.resolve({ flat: false, overview, current: overview })!
@@ -196,7 +196,7 @@ describe('ReplayPanel camera under reduced motion', () => {
     try {
       shots = [shot('s1', 0)]
       render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-      await screen.findByRole('button', { name: /Camera shot Follow at/ })
+      await screen.findByRole('button', { name: /Camera shot 1, Follow, at/ })
       expect(driver!.reduced).toBe(true)
     } finally {
       vi.unstubAllGlobals()
@@ -210,7 +210,7 @@ describe('ReplayPanel camera robustness', () => {
   it('a shot at the end of one passage does not break when the next has no track', async () => {
     shots = [shot('s1', 1000)]
     render(<ReplayPanel passages={[passage, second]} isDarkTheme={false} />)
-    await screen.findByRole('button', { name: /Camera shot Follow at/ })
+    await screen.findByRole('button', { name: /Camera shot 1, Follow, at/ })
     fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: '1000' } })
     const overview = { center: [149.5, 0] as [number, number], zoom: 8, pitch: 50, bearing: 0 }
     expect(() => driver!.resolve({ flat: false, overview, current: overview })).not.toThrow()
@@ -247,5 +247,45 @@ describe('ReplayPanel camera robustness', () => {
     expect(await screen.findByRole('alert')).toBeInTheDocument()
     fireEvent.click(screen.getAllByRole('button', { name: /^Camera shot/ })[0])
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('names the shot being edited, with its number, start and end', async () => {
+    shots = [shot('s1', 250), shot('s2', 600)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    const marks = await screen.findAllByRole('button', { name: /^Camera shot/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Camera' }))
+    const editor = screen.getByTestId('camera-editor')
+    expect(within(editor).queryByTestId('camera-shot-heading')).toBeNull()
+    expect(within(editor).getByText(/Pick a mark on the scrubber/)).toBeInTheDocument()
+    fireEvent.click(marks[0])
+    expect(within(editor).getByTestId('camera-shot-heading')).toHaveTextContent('Shot 1 of 2 · from 09:04 to 09:10')
+    fireEvent.click(screen.getAllByRole('button', { name: /^Camera shot/ })[1])
+    expect(within(editor).getByTestId('camera-shot-heading')).toHaveTextContent('Shot 2 of 2 · from 09:10 to end')
+  })
+
+  it('puts dates on the titles and heading once the shots span days', async () => {
+    shots = [shot('s1', 250), shot('s2', 600, { t_ms: (start + 86_400) * 1000 })]
+    const day2 = { ...passage, id: 'p2', start: new Date((start + 86_000) * 1000).toISOString(), end: new Date((start + 87_000) * 1000).toISOString(), track_times: [[start + 86_000, start + 87_000]], replay_times: [[start + 86_000, start + 86_500, start + 87_000]] }
+    render(<ReplayPanel passages={[passage, day2]} isDarkTheme={false} />)
+    const marks = await screen.findAllByRole('button', { name: /^Camera shot/ })
+    expect(marks[0].getAttribute('title')).toMatch(/^Shot 1 · \d+ \w{3} 09:04$/)
+    fireEvent.click(screen.getByRole('button', { name: 'Camera' }))
+    fireEvent.click(marks[0])
+    // The first shot ends with its own passage, not at the next day's shot.
+    expect(screen.getByTestId('camera-shot-heading').textContent).toMatch(/^Shot 1 of 2 · from \d+ \w{3} 09:04 to \d+ \w{3} 09:16$/)
+  })
+
+  it('titles each mark with its number and time and rings the selected one', async () => {
+    shots = [shot('s1', 250), shot('s2', 600)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    const marks = await screen.findAllByRole('button', { name: /^Camera shot/ })
+    expect(marks[0]).toHaveAttribute('title', 'Shot 1 · 09:04')
+    expect(marks[1]).toHaveAttribute('title', 'Shot 2 · 09:10')
+    expect(marks[1].className).not.toContain('ring-2')
+    fireEvent.click(marks[1])
+    const picked = screen.getAllByRole('button', { name: /^Camera shot/ })
+    expect(picked[1]).toHaveAttribute('aria-pressed', 'true')
+    expect(picked[1].className).toContain('ring-2')
+    expect(picked[0].className).not.toContain('ring-2')
   })
 })

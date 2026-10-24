@@ -69,6 +69,8 @@ export interface CameraEditorProps {
   /** The shot being edited, or null when none is picked. */
   shot: CameraShot | null
   shotCount: number
+  /** Names the picked shot: its place in time order and when it starts and ends (null end: the end of the replay). Null when none is picked. */
+  heading: { number: number; total: number; from: string; to: string | null } | null
   /** The map is flat: shots play as zoom and centre only. */
   flat: boolean
   busy: boolean
@@ -79,7 +81,7 @@ export interface CameraEditorProps {
   onUseView: () => void
 }
 
-export function CameraEditor({ shot, shotCount, flat, busy, error, onAdd, onChange, onDelete, onUseView }: CameraEditorProps) {
+export function CameraEditor({ shot, shotCount, heading, flat, busy, error, onAdd, onChange, onDelete, onUseView }: CameraEditorProps) {
   return (
     <div className="flex flex-col gap-2 border-t border-border p-2" data-testid="camera-editor" role="group" aria-label="Camera shots">
       <div className="flex flex-wrap items-center gap-2">
@@ -92,6 +94,11 @@ export function CameraEditor({ shot, shotCount, flat, busy, error, onAdd, onChan
         </span>
         {flat && shotCount > 0 && <span className="text-xs text-muted-foreground">Flat map: shots move and zoom only</span>}
       </div>
+      {shot && heading && (
+        <p className="text-xs font-medium text-foreground tabular-nums" data-testid="camera-shot-heading">
+          {`Shot ${heading.number} of ${heading.total} · from ${heading.from} to ${heading.to ?? 'end'}`}
+        </p>
+      )}
       {shot && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="camera-shot-fields">
           <span className="flex gap-1" role="group" aria-label="Shot mode">
