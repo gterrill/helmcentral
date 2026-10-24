@@ -13,6 +13,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The Anchor Watch page is all map.** Depth, tide and the low-water clearance
+  warning now sit in the readout panel in the map's top-left corner, above
+  current, distance, bearing and radius, instead of in a card above the map.
+  Drop and Raise float over the bottom of the map rather than taking a row
+  under it. Adjust is the icon in the map's control stack. The chart now
+  centres the boat and anchor in the part of the screen the panel leaves clear.
+  On a phone the quiet low-water clearance line is left out; a shallow-water
+  warning always shows. With no GPS fix, or on a display that cannot
+  draw the map, the readings card and the Drop/Raise row stay as they were.
 - **The power catamaran on the passage replay looks like a power catamaran.**
   Boats set to the power catamaran hull type are now drawn as two slender hulls
   with fine bows, open stern steps down to swim platforms, a salon with a
