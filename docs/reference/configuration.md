@@ -114,8 +114,10 @@ opens the same **Overpass server** field. There is no environment-variable
 override and no `settings.yaml` entry. Saving it takes effect on the
 plugin's next call with no restart needed. Blank (the default) uses the
 public `https://overpass-api.de/api/interpreter`. The save rejects anything
-that is not an absolute URL, and the plugin itself refuses anything but
-`https://` on every call.
+that is not an absolute URL, and the plugin itself refuses plain `http://`
+on every call unless the address is on your own network (a private or
+loopback address, `localhost`, a name ending `.local`, `.lan`, `.internal`,
+`.home.arpa` or `.ts.net`, a Tailscale address, or a single-word name). Everything else must be `https://`.
 
 This one setting feeds every use this plugin is put to: Nearby, place-name
 resolution (the position tile, the anchor pin), and Mate's place-name
@@ -127,7 +129,8 @@ refuses `overpass-api.de`. See
 for what this plugin covers. A mirror other than those two also needs adding
 to the plugin's own allowlist file; see
 [Provider plugins](plugins.md#plugin-declared-settings) and the developer
-documentation for how.
+documentation for how. To run a server of your own aboard, see
+[Run your own Overpass server](../how-to/run-your-own-overpass-server.md).
 
 ### Anchor Watch
 

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"sort"
@@ -610,7 +611,9 @@ func resolveDetailLimit(raw string, present bool) int {
 // fall back to the default - a config.json edit that failed to produce a
 // usable URL almost certainly did not mean "use overpass-api.de", so this
 // returns an error naming the "overpass_url" key rather than masking the
-// mistake. The value must parse as an absolute https URL.
+// mistake. The value must parse as an absolute https URL, or as an http URL
+// whose host is on the local network (see isLocalNetworkHost), so a server
+// run aboard the boat needs no certificate.
 //
 // Pointing this at a mirror (e.g. https://overpass.openstreetmap.fr/api/interpreter)
 // does not by itself grant network access to it: the mirror's host still has
@@ -627,10 +630,44 @@ func resolveOverpassURL(raw string, present bool) (string, error) {
 		return defaultOverpassAPIURL, nil
 	}
 	parsed, err := url.Parse(trimmed)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-		return "", fmt.Errorf("overpass_url: must be an absolute https URL, got %q", raw)
+	if err != nil || parsed.Hostname() == "" ||
+		(parsed.Scheme != "https" && !(parsed.Scheme == "http" && isLocalNetworkHost(parsed.Hostname()))) {
+		return "", fmt.Errorf("overpass_url: must be an https URL, or http to a local network address, got %q", raw)
 	}
 	return trimmed, nil
+}
+
+var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
+
+// isLocalNetworkHost reports whether host (no port) is an address plain http
+// may safely reach: a private, loopback or link-local IP literal, "localhost",
+// a name under .local, .lan, .internal, .home.arpa or .ts.net (Tailscale
+// MagicDNS), or a single-label name with no dot such as a Docker service name.
+// Tailscale's 100.64.0.0/10 addresses count: that traffic is encrypted.
+// A dotless name could in principle be expanded by a resolver search domain to
+// a public host; accepted, because the plugin's allowed-hosts list still has to
+// name it. All-digit and 0x-prefixed single labels are refused: libc reads
+// "134744072" as 8.8.8.8.
+func isLocalNetworkHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(host, "."))
+	if host == "" {
+		return false
+	}
+	if addr, err := netip.ParseAddr(host); err == nil {
+		return addr.IsPrivate() || addr.IsLoopback() || addr.IsLinkLocalUnicast() || cgnatPrefix.Contains(addr)
+	}
+	if host == "localhost" {
+		return true
+	}
+	if !strings.Contains(host, ".") {
+		return !strings.HasPrefix(host, "0x") && strings.Trim(host, "0123456789") != ""
+	}
+	for _, suffix := range []string{".local", ".lan", ".internal", ".home.arpa", ".ts.net"} {
+		if strings.HasSuffix(host, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // nearestWikipediaFeatures returns the indexes of features carrying a

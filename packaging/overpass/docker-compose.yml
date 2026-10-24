@@ -1,0 +1,72 @@
+# Local Overpass server for Helmcentral's place names, Nearby and Mate's
+# find_places. Import on ZimaOS as a custom app (App Store > Custom Install >
+# Import), then point the osm-overpass plugin at
+# http://<box-ip>:12345/api/interpreter and add <box-ip> to its allowed hosts.
+#
+# BEFORE INSTALLING, set two values below. Both are placeholders on purpose, so
+# an unedited file fails to start instead of importing the wrong coast:
+#   OVERPASS_PLANET_URL  the Geofabrik extract that contains your cruising
+#                        ground (https://download.geofabrik.de/)
+#   --bbox               west,south,east,north in degrees, in
+#                        OVERPASS_PLANET_PREPROCESS. Written inline, not as a
+#                        variable: ZimaOS's compose import expands variable
+#                        references itself and leaves an empty string.
+# Worked example, the Queensland coast from the Gold Coast to Torres Strait:
+#   OVERPASS_PLANET_URL: https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf
+#   --bbox 142.0,-29.2,154.0,-9.0
+#
+# First start downloads the extract, crops it to the box and builds the
+# database: expect one to several hours. The container serves queries once the
+# import finishes. It does not apply daily updates, which would keep adding
+# objects from outside the box. To refresh, or to change the box, delete
+# /DATA/AppData/overpass/db and restart: it imports afresh.
+name: overpass
+services:
+  overpass:
+    image: wiktorn/overpass-api:v0.7.62.11
+    container_name: overpass
+    restart: unless-stopped
+    ports:
+      - "12345:80"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      OVERPASS_MODE: init
+      OVERPASS_META: "no"
+      OVERPASS_COMPRESSION: gz
+      OVERPASS_PLANET_URL: https://download.geofabrik.de/REGION-latest.osm.pbf
+      # Geofabrik ships PBF; Overpass init wants osm.bz2. Crop while converting.
+      OVERPASS_PLANET_PREPROCESS: >-
+        mv /db/planet.osm.bz2 /db/extract.osm.pbf &&
+        osmium extract --bbox WEST,SOUTH,EAST,NORTH --strategy complete_ways
+        --overwrite -o /db/planet.osm.bz2 /db/extract.osm.pbf &&
+        rm /db/extract.osm.pbf
+      # Helmcentral queries around/bbox, never area(); skip area generation.
+      OVERPASS_USE_AREAS: "false"
+      # Every request arrives from the one Helmcentral container, and Mate
+      # sends several find_places calls at once.
+      OVERPASS_RATE_LIMIT: "16"
+      OVERPASS_ALLOW_DUPLICATE_QUERIES: "yes"
+      OVERPASS_FASTCGI_PROCESSES: "8"
+      # Keep serving after the import instead of exiting.
+      OVERPASS_STOP_AFTER_INIT: "false"
+    volumes:
+      - /DATA/AppData/overpass/db:/db
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+
+x-casaos:
+  architectures:
+    - amd64
+  main: overpass
+  author: self
+  category: self
+  title:
+    en_us: Overpass
+  tagline:
+    en_us: Local OpenStreetMap query server for Helmcentral
+  port_map: "12345"
+  index: /api/status

@@ -13,6 +13,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Use an Overpass server on your own network.** Place names, Nearby and
+  Mate's place lookups can now use an Overpass server aboard over plain http,
+  for example `http://192.168.1.20:12345/api/interpreter`. Plain http is
+  accepted only for addresses on the boat's own network: private and Tailscale
+  addresses, `localhost`, a single word such as a Docker service name, and
+  names ending `.local`, `.lan`, `.internal`, `.home.arpa` or `.ts.net`. Every
+  other server still has to be https. Add the server's address to the plugin's
+  allowed hosts and restart Helmcentral, as for any other server. Steps are in
+  [Run your own Overpass server](https://github.com/gterrill/helmcentral/blob/main/docs/how-to/run-your-own-overpass-server.md).
 - **Stop showing an alarm you can't act on.** Alarms raised by other devices on
   the boat, such as the plotter's Waypoint Passed, now have a **Stop showing**
   button on their card in the alarms drawer. Confirm it and that kind of alarm

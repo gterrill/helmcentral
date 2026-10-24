@@ -379,7 +379,8 @@ type pluginConfigRequest struct {
 // isAbsoluteHTTPURL reports whether raw parses as an absolute http or https
 // URL with a host. Used to validate a "url"-typed config field generically,
 // at the host level - a plugin's own domain-specific constraints (e.g. the
-// osm-overpass plugin's https-only Overpass mirror requirement) are enforced
+// osm-overpass plugin's rule that an Overpass server is https, or http to a
+// local-network address) are enforced
 // by the plugin itself when the value is actually used, not duplicated here.
 func isAbsoluteHTTPURL(raw string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(raw))

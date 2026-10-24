@@ -70,7 +70,9 @@ instance is unreachable from your network, point it at a mirror such as
 `overpass.openstreetmap.fr` instead. This applies on the next Nearby lookup
 with no restart. See
 [configuration.md](../reference/configuration.md#overpass) for the allowlist
-a mirror other than that one also needs.
+a mirror other than that one also needs. A server on the boat's own network
+works too: see
+[Run your own Overpass server](run-your-own-overpass-server.md).
 
 ## Place names is a separate picker
 
