@@ -13,11 +13,11 @@ checking it works.
      addresses, and a **Username** and **Password** if the server requires
      authentication.
    - **Webhook**: set the **URL** to post to.
-   - **Publish to SignalK**: no fields; it uses the instrument-network
-     connection already configured for the boat.
-   - **Web push (browser & phone)**: see [Web push over
-     Tailscale](../reference/configuration.md#web-push-over-tailscale) first;
-     it needs Helmcentral served over https before the toggle does anything.
+   - **Publish to SignalK**: no fields. It uses the instrument-network
+     connection already set up for the boat.
+   - **Web push (browser & phone)**: read [Web push over
+     Tailscale](../reference/configuration.md#web-push-over-tailscale) first.
+     Helmcentral has to be served over https before the toggle does anything.
 3. Choose **Save** in the bar that appears across the top once you have changed
    something. **Discard** puts everything back as it was.
 4. Choose **Send Test** at the top of the Notifications panel. It sends a
@@ -25,7 +25,6 @@ checking it works.
    delivery before relying on it at sea.
 
 If you change an ntfy server or SMTP host afterwards, re-enter that
-transport's token or password: changing the destination clears the
-credential that was bound to it, and the transport stays quiet until you
-paste it back in. Changing an SMTP username clears its password for the same
-reason.
+transport's token or password. Changing the destination clears the credential
+that belonged to it, and the transport stays quiet until you paste it back in.
+Changing an SMTP username clears its password for the same reason.

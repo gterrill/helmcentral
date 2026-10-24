@@ -27,15 +27,15 @@ instead, but not place names.
 The public servers are run by volunteers and shared by everyone who uses them.
 That works ashore. From a boat it often doesn't:
 
-- **Slow.** Over a marina wifi or a satellite link a single lookup often
+- They are slow. Over marina wifi or a satellite link a single lookup often
   takes 5 to 15 seconds. Mate asks several at once when it compares
   anchorages, and those wait in line behind each other.
-- **Refused.** Each server gives one address only a couple of lookups at a
-  time and turns the rest away when it is busy. Some servers now answer only
-  networks they have approved, and the main one has refused some boat networks
-  outright.
-- **Gone when the link is.** Out of mobile range, or with the satellite link
-  down, there are no names at all.
+- They refuse requests. Each server gives one address only a couple of lookups
+  at a time and turns the rest away when it is busy. Some servers now answer
+  only networks they have approved, and the main one has refused some boat
+  networks outright.
+- They need a link. Out of mobile range, or with the satellite link down,
+  there are no names at all.
 
 When a lookup fails, the position tile goes without a name, the Nearby map
 keeps the last places it found and shows how old they are along with the
@@ -52,20 +52,19 @@ steps are in
 
 What it gets you:
 
-- **Answers at once.** Lookups take a fraction of a second instead of several
-  seconds. Mate can check five anchorages by name in the time one used to take,
-  and the Nearby map fills as soon as you open it.
-- **Works with no signal.** At anchor out of range, or on passage with the
+- Lookups take a fraction of a second instead of several seconds. Mate can
+  check five anchorages by name in the time one used to take, and the Nearby
+  map fills as soon as you open it.
+- It works with no signal. At anchor out of range, or on passage with the
   link down, the position tile still names the bay and Mate can still find
   places by name. With the [offline coastline](offline-coastline.md) turned on
   as well, Mate can name an anchorage and judge its shelter with no internet at
   all.
-- **No queue, no refusals.** The server is yours alone, so Mate's lookups
-  never wait behind other users' and are never turned away.
-- **Not at the mercy of someone else's policy.** If a public server changes
-  its rules, goes down or blocks your network, nothing changes aboard.
-- **The boat's position stays aboard.** Each lookup carries the boat's
-  position. A server on your own network keeps that off the internet.
+- The server is yours alone, so Mate's lookups never wait behind other users'
+  and are never turned away. If a public server changes its rules, goes down or
+  blocks your network, nothing changes aboard.
+- Each lookup carries the boat's position. A server on your own network keeps
+  that off the internet.
 
 What it costs:
 
@@ -76,7 +75,7 @@ What it costs:
   there until you load a bigger area. Load the area for the season's cruising,
   with room to spare.
 - It doesn't update itself. Re-import every few months to pick up new names
-  and changes; place names change slowly.
+  and changes. Place names change slowly.
 - The short descriptions on Nearby places still come from Wikipedia, so they
   need the internet. Without it, places show their names without the
   description.

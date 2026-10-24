@@ -3,8 +3,8 @@
 A copy of the charted coastline and reefs, kept aboard for the water around
 the boat, so questions about land and shelter get an answer at anchor with no
 signal. Today Mate uses it to say which wind directions an anchorage is
-protected from. It is built to serve other things later, such as a land layer
-for the chart and distance-to-land checks.
+protected from. A land layer for the chart and distance-to-land checks could
+use it later.
 
 It is **off until you turn it on**, because filling it uses the internet. The
 steps are in [Turn on the offline coastline](../how-to/turn-on-the-offline-coastline.md).
@@ -20,9 +20,7 @@ was downloaded.
 **Coverage** is every square any part of which lies within 200 nautical miles
 of the boat, plus every square you have downloaded earlier, less the squares
 that are all land (below). That is roughly 40 to 60 squares, tens of megabytes
-to download. As the boat moves, only squares
-newly within 200 nm are fetched. Squares behind you stay, so a cruise you
-sail home again needs no downloads. Only **Clear coverage** removes them.
+to download. As the boat moves, only squares newly within 200 nm are fetched. Squares behind you stay, so sailing a cruise home again needs no downloads. Only **Clear coverage** removes them.
 
 **Squares that are all land are skipped.** A square with no part of it within
 20 nm of the sea, such as the middle of a continent, cannot matter to a
@@ -30,13 +28,13 @@ shelter estimate, which looks no further than 15 nm from the water. Helmcentral
 does not download it, and the page says how many it left out. When in doubt it
 downloads: the Caspian Sea and Antarctica count as coastal, and so does any
 island too small for the land data to show. A square of that kind that you already hold stays. A shelter estimate
-asked for a position in such a square answers that the spot is inland, with no
-anchorage shelter to estimate.
+asked for a position in an all-land square answers that the spot is inland,
+with no anchorage shelter to estimate.
 
 Squares come down one at a time, nearest the boat first, with a pause between
 each. They come from the Overpass server set in **Settings → Plugins →
 OpenStreetMap (Overpass)**, the same one place names use. A public server can
-take the better part of a minute per square in busy hours; a server aboard
+take the better part of a minute per square in busy hours. A server aboard
 answers in seconds. See
 [Run your own Overpass server](../how-to/run-your-own-overpass-server.md). A square with no coastline in it, open sea, is still a square, and is
 stored as one. If a square fails, Helmcentral keeps the reason, shows it on the
@@ -44,20 +42,19 @@ page, and tries it again later, waiting longer after each failure.
 
 With no position fix Helmcentral cannot tell which squares are near, so it
 waits and the page says **Waiting for a position fix**. A fix means a position
-the GPS has validated; a boat that has only an old or suspect position is not
-treated as having one. Mate keeps answering from the squares already held.
+the GPS has validated. An old or suspect position doesn't count. Mate keeps answering from the squares already held.
 
 ## Keeping it current
 
 Once a week Helmcentral asks whether the public map has changed inside each
 square since you downloaded it, and keeps the count as that square's **edits
 since**. It never replaces a square on its own. When some squares have edits
-since, the page shows an **Update** button; tapping it downloads those squares
+since, the page shows an **Update** button, and tapping it downloads those squares
 again. New coverage, by contrast, downloads by itself, since it only adds
 shoreline where there was none.
 
 The count is a hint, not a diff. It sees coastline and reef outlines that
-were edited or added; it does not see a deleted outline, or a point nudged
+were edited or added. It does not see a deleted outline, or a point nudged
 within one that was not otherwise touched. A square with a handful of edits
 from years of mapping is usually not worth the bandwidth. One with many, or
 one you are about to rely on, is.
@@ -74,7 +71,7 @@ instead, which depends on the tide and is never better than partial. See
 
 A shelter estimate needs every square its 15 nm reaches. Near a square's edge
 that includes the neighbouring squares, up to three more at a corner. If any
-is not yet held, Mate says which, and why. It answers in plain terms:
+is not yet held, Mate says which, and why:
 
 - **Offline coastline is off.** Turn it on in Settings → Offline coastline.
 - **Inland.** The position is on land well clear of the sea, so there is

@@ -13,9 +13,9 @@ your course:
 
 | Sector | True wind angle off the bow |
 | --- | --- |
-| Ahead | 0–60° |
-| Abeam | 60–120° |
-| Astern | 120–180° |
+| Ahead | 0 to 60° |
+| Abeam | 60 to 120° |
+| Astern | 120 to 180° |
 
 You enter only the **No-go** levels: the wind speed and, if you want it
 checked, the wave height at which you would wait. Mate works out the rest.
@@ -33,13 +33,12 @@ checked, the wave height at which you would wait. Mate works out the rest.
    left blank is shown as not checked for waves, never as passed.
 4. Under **Wind against tide**, enter how many knots to **Reduce wind limits
    by** while a stream runs against the wind, through the strongest part of
-   the flood or ebb. It lowers the no-go wind only; marginal follows at 70% of
+   the flood or ebb. It lowers the no-go wind only. Marginal follows at 70% of
    the lowered figure, and gust limits are not changed. With a no-go wind of
    20 knots and a reduction of 5, wind against the stream is no-go from 15
    knots and marginal from 10.5. It must be more than 0 and less than every
-   no-go wind. Leave it blank to skip the
-   check. It is applied only for legs where Mate knows which way the flood
-   runs.
+   no-go wind. Leave it blank to skip the check. It is applied only for legs
+   where Mate knows which way the flood runs.
 5. Turn on **Daylight arrival** if a leg that would arrive in the dark, before
    sunrise or after sunset, should count as no-go.
 6. Choose **Save** in the bar at the bottom of the page.

@@ -23,7 +23,7 @@ Press **Cancel** to leave without saving anything.
 
 Keep talking in the same conversation, then press **Update note** where
 **Summarise to note** was. The review window shows a fresh summary of the whole
-conversation. Equipment already linked is ticked; unticking it removes the
+conversation. Equipment already linked is ticked, and unticking it removes the
 link. Press **Update note** to replace the note's title and text. No second note
 is made.
 

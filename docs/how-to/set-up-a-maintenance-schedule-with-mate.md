@@ -1,11 +1,11 @@
 # Set up a maintenance schedule with Mate
 
 Have Mate work out a schedule for an item and put it on a card you can check
-before anything changes. Useful when the manual has a page of intervals you
-don't want to type in one at a time.
+before anything changes. It saves typing when the manual has a page of
+intervals.
 
 Mate never changes the schedule itself. It writes a proposal, and the change
-is made only when you tap **Apply**. You need write access to apply one; a
+is made only when you tap **Apply**. You need write access to apply one. A
 read-only session sees the card but has no buttons.
 
 ## Ask for a schedule
@@ -57,8 +57,8 @@ If the schedule no longer matches the card, Apply refuses. That happens when
 a rule was edited after Mate wrote the card, by you in Maintenance or from
 another device, or when you added the same entries by hand in the meantime.
 Nothing is made. The card is marked **Out of date**, names the rule that
-changed, and stays that way when you reload the page. Ask Mate to redo it, and it reads the schedule
-again and writes a fresh card.
+changed, and stays that way when you reload the page. Ask Mate to redo it and
+it reads the schedule again and writes a fresh card.
 
 ## What Mate can't do here
 

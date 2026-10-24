@@ -43,9 +43,7 @@ The slider still counts in passage time. The **60 s**, **Slow**, **Normal** and
 
 ## Take the camera yourself
 
-Drag, zoom, pinch or tilt the map while the replay plays and it leaves the camera
-with you; a simple tap does not. It takes over again when the next shot starts, or when you press Play or
-move the slider.
+Drag, zoom, pinch or tilt the map while the replay plays and the replay leaves the camera with you. A simple tap doesn't count. The replay takes the camera back when the next shot starts, or when you press Play or move the slider.
 
 ## Place the overview map
 

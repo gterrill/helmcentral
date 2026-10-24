@@ -13,8 +13,8 @@ You need YachtWave's Vessel Export for the boat, saved as an HTML file.
 2. Select **Import from YachtWave**.
 3. Drop the export file on the page, or pick it.
 
-If the file isn't a YachtWave Vessel Export, the page says so and nothing is
-kept.
+If the file isn't a YachtWave Vessel Export, the page says so and keeps
+nothing.
 
 ## Work through the pages
 
@@ -40,8 +40,8 @@ the top take you to earlier pages without losing anything.
    comes in as a bin with one item per line.
 5. **Maintenance log.** Untick entries you don't want. Where both engines have
    the same name, **Choose the equipment** for each entry the export leaves
-   open, or pick **No equipment**. You can't go on until each ticked entry
-   has one.
+   open, or pick **No equipment**. You can't go on until each ticked entry has
+   one.
 6. **Notes.** Notes and YachtWave tasks, which come in as notes. Untick any
    you don't want. Notes marked **Not imported** hold a password or wifi
    key and stay behind.

@@ -1,10 +1,9 @@
 # Import
 
 If the boat's records already live in another boat management app, you can
-bring them across instead of retyping them. You don't have to re-enter years
-of service history, the spares list, or the notes you wrote down the first
-time the watermaker played up, and they end up next to the live instrument
-data that shows when each was last needed.
+bring them across instead of retyping them. Years of service history, the
+spares list and the notes from the first time the watermaker played up all
+end up next to the live instrument data that shows when each was last needed.
 
 YachtWave is the first app Helmcentral imports from. The import is in
 **Settings → Import**.
@@ -39,9 +38,9 @@ YachtWave is the first app Helmcentral imports from. The import is in
 
 ## How it works
 
-The import doesn't change anything until the last page. You go through it one
-page per topic: what was found, the vessel, locations, equipment and spares,
-the service log, notes, then each document and photo in turn, and finally a
+The import doesn't change anything until the last page. It takes one page per
+topic: what was found, the vessel, locations, equipment and spares, the
+service log, notes, then each document and photo in turn, and finally a
 summary to confirm. Your choices are saved as you go, so you can stop halfway
 and pick it up again from the same device.
 
