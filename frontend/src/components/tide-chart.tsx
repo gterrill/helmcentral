@@ -108,9 +108,13 @@ interface TideChartProps {
    * legend. ForecastTideSection owns the data-fetch state this describes and
    * passes it down, since the legend it rides beside lives here. */
   footerMeta?: ReactNode
+  /** IANA zone the times are read in. Absent means this device's own, as the
+   * boat's chart has always read. The stay view passes the place's zone so a
+   * tide at 2PM there is labelled 2PM, not the hour it is here. */
+  timeZone?: string
 }
 
-export function TideChart({ chart, isImperial, windowStart, windowEnd, footerMeta }: TideChartProps) {
+export function TideChart({ chart, isImperial, windowStart, windowEnd, footerMeta, timeZone }: TideChartProps) {
   const [containerRef, measuredWidth] = useMeasuredWidth()
   const viewportWidth = measuredWidth > 0 ? measuredWidth : DEFAULT_VIEWPORT_WIDTH
   const CHART_RIGHT = viewportWidth - CHART_RIGHT_MARGIN
@@ -256,10 +260,10 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
         const x = CHART_LEFT + ((t - chartStartMs) / (chartEndMs - chartStartMs)) * (CHART_RIGHT - CHART_LEFT)
         return {
           x,
-          label: new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true }).replace(' ', ''),
+          label: new Date(t).toLocaleTimeString('en-US', { hour: 'numeric', hour12: true, timeZone }).replace(' ', ''),
         }
       }),
-    [chartStartMs, chartEndMs, CHART_RIGHT],
+    [chartStartMs, chartEndMs, CHART_RIGHT, timeZone],
   )
 
   if (!hasExtremesInWindow) {
@@ -286,11 +290,13 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           time={tideTooltipTime.toLocaleDateString('en-US', {
             month: 'short',
             day: 'numeric',
+            timeZone,
           })}
           primary={`${tideTooltipHeight.toFixed(1)} ${unit}`}
           secondary={tideTooltipTime.toLocaleTimeString('en-US', {
             hour: 'numeric',
             minute: '2-digit',
+            timeZone,
           })}
         />
       )}
@@ -384,7 +390,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
           // a gesture that starts on this surface alone rather than reading
           // it as a page turn.
           data-no-swipe
-          aria-label={`Tide height at ${chart.station.name} for ${windowStart.toLocaleDateString('en-US', { weekday: 'long' })}, in ${unit}. Use arrow keys to read values.`}
+          aria-label={`Tide height at ${chart.station.name} for ${windowStart.toLocaleDateString('en-US', { weekday: 'long', timeZone })}, in ${unit}. Use arrow keys to read values.`}
           onPointerDown={tideTooltip.onPointerDown}
           onPointerMove={tideTooltip.onPointerMove}
           onPointerLeave={tideTooltip.onPointerLeave}
@@ -411,7 +417,7 @@ const displayHeights = sortedExtremes.map((extreme) => toDisplay(extreme.heightM
             const t = new Date(extreme.time).getTime()
             const x = xFor(t)
             const y = yFor(toDisplay(extreme.heightM))
-            const label = new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+            const label = new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone })
             const aboveLine = y > CHART_TOP + 16
             return (
               <g key={extreme.time}>

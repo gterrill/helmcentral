@@ -185,6 +185,22 @@ type waveDayHourlyData struct {
 	SwellWavePeriodS      float64
 }
 
+// waveSeriesHasNoValues reports a series in which every wave figure of every
+// hour is zero. The marine plugin writes a null upstream value as 0, and a
+// real sea always carries a period, so a whole series of zeros is the model
+// having no data for the point rather than a flat calm.
+func waveSeriesHasNoValues(hourly []waveHourPoint) bool {
+	for _, h := range hourly {
+		if h.WaveHeightM != 0 || h.WavePeriodS != 0 || h.WaveDirectionDeg != 0 ||
+			h.WindWaveHeightM != 0 || h.SwellWaveHeightM != 0 ||
+			h.WindWaveDirectionDeg != 0 || h.WindWavePeriodS != 0 ||
+			h.SwellWaveDirectionDeg != 0 || h.SwellWavePeriodS != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 // buildWaveHourlySeriesByDay buckets a provider's flat hourly points into
 // per-day (local date) wave series, keyed by "2006-01-02" in localLocation -
 // mirrors buildHourlySeriesByDay in weather_providers.go, but simpler since
@@ -645,25 +661,12 @@ func waveForecast(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": err.Error()})
 	}
 
-	address, port, err := loadSignalKSettings(settingsPath)
-	if err != nil {
-		address = defaultSignalKAddress
-		port = defaultSignalKPort
-	}
-	signalkURL := buildSignalKURL(address, port)
-	if signalkURL == "" {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "SignalK URL is not configured"})
+	point, status, message := resolveForecastPoint(c, settingsPath, true)
+	if status != 0 {
+		return c.JSON(status, map[string]string{"error": message})
 	}
 
-	vesselState, vesselErr := fetchSignalKVesselState()
-	if vesselErr != nil {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("failed to fetch vessel state: %v", vesselErr)})
-	}
-	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "invalid vessel coordinates from SignalK"})
-	}
-
-	bundle, fetchErr := provider.FetchWaves(vesselState.Latitude, vesselState.Longitude, 10)
+	bundle, fetchErr := provider.FetchWaves(point.Lat, point.Lon, 10)
 	if fetchErr != nil {
 		log.Printf("wave provider %q error: %v", configuredProvider, fetchErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("wave provider %q unavailable: %s", configuredProvider, firstErrorLine(fetchErr))})
@@ -671,12 +674,24 @@ func waveForecast(c echo.Context) error {
 	if len(bundle.Hourly) == 0 {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "wave forecast response was empty"})
 	}
-
-	localLocation := vesselLocalLocation(vesselState.Longitude)
-	referenceDatetime := vesselState.Datetime
-	if referenceDatetime.IsZero() {
-		referenceDatetime = time.Now().UTC()
+	// A named place the model has no values for (a marina up a river, a lake)
+	// is an answer, not a fault: the wave plugin returns the hourly series for
+	// the point with every wave value null, which reaches the host as zeros.
+	// Only that case, for an explicit place, is a 200 with no days; an empty
+	// response or one with no days on or after today stays a 502 as for the
+	// boat's own position.
+	if point.Explicit && waveSeriesHasNoValues(bundle.Hourly) {
+		return c.JSON(http.StatusOK, waveForecastResponse{
+			Provider:   configuredProvider,
+			Days:       []waveDayResponse{},
+			Cached:     bundle.Cached,
+			UpdatedAt:  bundle.CachedAt.UTC().Format(time.RFC3339),
+			TTLSeconds: provider.TTLSeconds(),
+		})
 	}
+
+	localLocation := vesselLocalLocation(point.Lon)
+	referenceDatetime := point.Reference
 	localTodayKey := referenceDatetime.In(localLocation).Format("2006-01-02")
 
 	byDay := buildWaveHourlySeriesByDay(bundle.Hourly, localLocation)

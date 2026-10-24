@@ -58,6 +58,8 @@ Steps for specific tasks.
 
 - [Installing Helmcentral](how-to/install.md), including Docker and manual binaries.
 - [Upgrading across a breaking release](how-to/upgrading.md)
+- [Plan a stay](how-to/plan-a-stay.md), seeing the forecast for a marina you
+  are booked into.
 - [Create a dashboard page](how-to/create-a-dashboard-page.md)
 - [Reorder dashboard pages](how-to/reorder-dashboard-pages.md)
 - [Pin an indicator ribbon](how-to/pin-an-indicator-ribbon.md)

@@ -651,6 +651,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, inventoryRoutes()...)
 	routes = append(routes, deckRoutes()...)
 	routes = append(routes, vesselParticularsRoutes()...)
+	routes = append(routes, plannedStayRoutes()...)
 	routes = append(routes, maintenanceRoutes()...)
 	routes = append(routes, importRoutes()...)
 	routes = append(routes, coastlineRoutes()...)

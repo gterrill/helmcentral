@@ -810,6 +810,15 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"the filled-in form and that the card under your reply lets them open it, download it or save it to Documents; it is " +
 		"not saved until they do, and you never say it is. If fill_form fails, say which entry it named and correct it.\n\n")
 
+	// 2a-vi. The planned stay (ADR 0208) - fixed wording, identical for every turn.
+	b.WriteString("The operator can plan one stay on the Forecast page: a place and the dates they arrive and depart, such as a marina berth " +
+		"for a week. Read it with get_planned_stay when they mention the marina, the stay or being there, and use its lat and lon for " +
+		"get_wind_forecast and get_tides; its dates are local to that place, and the forecast reaches only about ten days ahead, so say " +
+		"when part of the stay is beyond it. When they ask you to plan or change a stay, resolve the place with find_places, tell them " +
+		"which candidate you chose, then offer it with propose_changes on the planned_stay record (id stay): the first time it gives name, " +
+		"lat, lon, arrive and depart, and to clear it you propose a delete. It is a card they apply on the Forecast page's behalf; never " +
+		"say the stay is set until they do.\n\n")
+
 	// 2b. Product vocabulary - fixed wording, identical for every turn. Mate's
 	// training prior is heavily weighted toward the word this product used to
 	// use for a dashboard component, so left unpinned it keeps using that

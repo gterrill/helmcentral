@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useApiQuery } from '@/lib/api-query';
+import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 import type { NowcastPoint } from '@/lib/nowcast';
 
@@ -391,11 +392,11 @@ const EMPTY_FORECAST: MappedForecast = {
   ttlSeconds: null,
 };
 
-export function useWeatherForecast(refreshIntervalSeconds = 3600) {
+export function useWeatherForecast(refreshIntervalSeconds = 3600, options: ForecastQueryOptions = {}) {
   const query = useApiQuery<WeatherForecastDayApi[] | WeatherForecastEnvelopeApi>({
-    queryKey: ['/api/weather-forecast'],
-    path: '/api/weather-forecast',
+    ...forecastQuery('/api/weather-forecast', options.place),
     refetchInterval: refreshIntervalSeconds * 1000,
+    enabled: options.enabled,
   });
 
   // A payload of the wrong shape is reported like a failed request, so the

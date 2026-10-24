@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useApiQuery } from '@/lib/api-query';
+import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 /**
  * The 500mb outlook for one forecast day.
@@ -223,11 +224,11 @@ const EMPTY_UPPER_AIR: MappedUpperAir = {
  * configuration rather than a fault. Only a configured-but-broken provider
  * sets `error`.
  */
-export function useUpperAir(refreshIntervalSeconds = 21600) {
+export function useUpperAir(refreshIntervalSeconds = 21600, options: ForecastQueryOptions = {}) {
   const { data, error, isLoading, refetch } = useApiQuery<MappedUpperAir>({
-    queryKey: ['/api/upper-air'],
-    path: '/api/upper-air',
+    ...forecastQuery('/api/upper-air', options.place),
     refetchInterval: refreshIntervalSeconds * 1000,
+    enabled: options.enabled,
     select: mapUpperAir,
   });
 

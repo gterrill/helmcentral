@@ -13,6 +13,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **See the forecast for a marina you're booked into.** On the Forecast page,
+  choose **Plan a stay**, find the place by name and give your arrival and
+  departure dates. A button beside the heading then switches the page to that
+  place and back to the boat. The ten days show which are yours; days past the
+  forecast say "No forecast yet" and when they will arrive. Times, tide station,
+  warnings and the upper-air trend are the place's, and the heading always says
+  it is not the boat's position. The dashboard, the clock and the alarms keep
+  using the boat's own position. The stay disappears the day after you leave.
+  Mate can read it and can propose one for you to apply.
 - **Use an Overpass server on your own network.** Place names, Nearby and
   Mate's place lookups can now use an Overpass server aboard over plain http,
   for example `http://192.168.1.20:12345/api/interpreter`. Plain http is
@@ -35,6 +44,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Place lookups reach twice as far.** Searching for a place by its full
+  name, from the Forecast page or by asking Mate, now looks up to 200 nautical
+  miles from the boat instead of 100. A partial name still searches the
+  nearest 20. Update the OpenStreetMap place-names plugin to get it.
 - **The plotter's route alarms read plainly.** "Perpendicular passed" is now
   **Waypoint Passed** and "Arrival circle entered" is now **Arriving at
   Waypoint**, each with one sentence saying what it means.
