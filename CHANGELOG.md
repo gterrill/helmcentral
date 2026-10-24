@@ -11,6 +11,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **Bigger photos on passage signs.** In the passage replay and in an exported
+  blog card, a sign now shows its photo across the top of the card, with the
+  title and note underneath, instead of a small thumbnail beside them.
+  A sign with no photo stays a compact text card.
+
+### Fixed
+
+- **Sign cards near the edge of the map are no longer cut off.** A card now
+  slides sideways to stay inside the map, or drops below its point when there
+  is no room above it, and keeps doing so as the camera moves during replay.
 ### Fixed
 
 - **Passage replay no longer wobbles.** The camera and the boat turn smoothly

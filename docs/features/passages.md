@@ -151,8 +151,10 @@ the track as before. See [Film a passage replay](../how-to/film-a-passage-replay
 A sign is a short note with an optional photo, pinned to a moment of the
 passage, for the whale off the bow or the anchorage with the good beach. It
 appears on the map as a card on a thin line from its place on the track, with
-the photo as a thumbnail beside the title and note. The **Signs** button on the
-replay bar opens the sign editor.
+the photo across the top and the title and note beneath it. A card near the
+edge of the map moves over to stay in view, or sits below its place when there
+is no room above, and follows the camera as it moves. The **Signs** button on
+the replay bar opens the sign editor.
 
 Each sign chooses when it shows: **While passing** (the default) brings it up
 just before the boat reaches the spot and keeps it for a number of seconds you
