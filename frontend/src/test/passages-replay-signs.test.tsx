@@ -14,6 +14,7 @@ vi.mock('react-map-gl/maplibre', () => ({
   Marker: ({ children, longitude, latitude }: { children: ReactNode; longitude: number; latitude: number }) => (
     <div data-testid="marker" data-lon={longitude} data-lat={latitude}>{children}</div>
   ),
+  useMap: () => ({ current: undefined }),
 }))
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
