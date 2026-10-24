@@ -4,16 +4,18 @@ import { SettingsPage, type SettingsPageHandle } from '@/components/settings/set
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import { useSettingsRoute } from '@/hooks/use-settings-route'
 import { settingsSectionOf } from '@/lib/app-location'
+import type { HelpTarget } from '@/lib/help-links'
 
 interface SettingsRoutePanelProps {
   onAskMate: (question: string, options?: { newConversation?: boolean }) => void
+  onOpenHelp: (target: HelpTarget) => void
 }
 
 // ADR 0171: Settings wired to the app location. It owns the page's navigation
 // guard: leaving the Settings panel while the form holds unsaved edits asks
 // first, with the page's own save behind Save and Continue. Moving between
 // sections is not leaving, and is never held.
-export function SettingsRoutePanel({ onAskMate }: SettingsRoutePanelProps) {
+export function SettingsRoutePanel({ onAskMate, onOpenHelp }: SettingsRoutePanelProps) {
   const { route, go } = useSettingsRoute()
   const pageRef = useRef<SettingsPageHandle>(null)
   const [dirty, setDirty] = useState(false)
@@ -42,6 +44,7 @@ export function SettingsRoutePanel({ onAskMate }: SettingsRoutePanelProps) {
         go(runId ? { view: 'import-run', runId } : { view: 'section', section: 'import' })
       }}
       onAskMate={onAskMate}
+      onOpenHelp={onOpenHelp}
     />
   )
 }

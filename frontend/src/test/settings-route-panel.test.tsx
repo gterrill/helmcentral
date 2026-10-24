@@ -40,7 +40,7 @@ vi.mock('@/components/settings/settings-page', () => ({
 
 function mount(path = '/settings') {
   const harness = testRouter(path)
-  render(<SettingsRoutePanel onAskMate={vi.fn()} />, { wrapper: harness.wrapper as never })
+  render(<SettingsRoutePanel onAskMate={vi.fn()} onOpenHelp={vi.fn()} />, { wrapper: harness.wrapper as never })
   return harness
 }
 
@@ -118,7 +118,7 @@ describe('SettingsRoutePanel', () => {
 
   it('stops guarding when the panel goes away', () => {
     const harness = testRouter('/settings')
-    const { unmount } = render(<SettingsRoutePanel onAskMate={vi.fn()} />, { wrapper: harness.wrapper as never })
+    const { unmount } = render(<SettingsRoutePanel onAskMate={vi.fn()} onOpenHelp={vi.fn()} />, { wrapper: harness.wrapper as never })
     fireEvent.click(screen.getByText('make-dirty'))
     expect(harness.router.hasGuards()).toBe(true)
     unmount()

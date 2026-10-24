@@ -20,6 +20,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   way. A passage you have not set keeps today's look, top right at the automatic
   zoom.
 
+- **Settings → Offline coastline links to running your own Overpass server.**
+  The coastline squares come from the same map server as place names, and a
+  server aboard fills them far faster than a public one. The link opens the
+  how-to in the help.
+
 ### Changed
 
 - **The overview map on the replay now frames the coast the way the blog embed

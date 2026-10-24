@@ -25,6 +25,7 @@ import { MayaraSection } from '@/components/settings/sections/mayara-section'
 import { OfflineCoastlineSection } from '@/components/settings/sections/offline-coastline-section'
 import { SignalKConnectionSection } from '@/components/settings/sections/signalk-connection-section'
 import { PluginsSection } from '@/components/settings/sections/plugins-section'
+import type { HelpTarget } from '@/lib/help-links'
 import {
   buildRegularSettingsPatch,
   draftsEqual,
@@ -48,6 +49,7 @@ interface SettingsPageProps {
   importRunId?: string | null
   onImportRunChange?: (runId: string | null) => void
   onAskMate?: (question: string, options?: { newConversation?: boolean }) => void
+  onOpenHelp: (target: HelpTarget) => void
 }
 
 export interface SettingsPageHandle {
@@ -76,6 +78,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     importRunId: controlledImportRunId,
     onImportRunChange,
     onAskMate,
+    onOpenHelp,
   },
   ref,
 ) {
@@ -261,7 +264,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
       case 'assistant':
         return <AssistantSection draft={draft} onChange={handleDraftChange} />
       case 'offline-coastline':
-        return <OfflineCoastlineSection draft={draft} onChange={handleDraftChange} />
+        return <OfflineCoastlineSection draft={draft} onChange={handleDraftChange} onOpenHelp={onOpenHelp} />
       case 'security':
         return <SecuritySection draft={draft} onChange={handleDraftChange} />
       case 'influxdb':

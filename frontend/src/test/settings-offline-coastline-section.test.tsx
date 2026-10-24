@@ -56,12 +56,18 @@ function status(overrides: Partial<OfflineCoastlineStatus> = {}): OfflineCoastli
   }
 }
 
-function renderSection(overrides: Partial<RegularSettingsDraft> = {}) {
+function renderSection(overrides: Partial<RegularSettingsDraft> = {}, onOpenHelp = vi.fn()) {
   const drafts: RegularSettingsDraft[] = []
   function Harness() {
     const [draft, setDraft] = useState<RegularSettingsDraft>({ ...initialRegularSettingsDraft, ...overrides })
     drafts.push(draft)
-    return <OfflineCoastlineSection draft={draft} onChange={(patch) => setDraft((p) => ({ ...p, ...patch }))} />
+    return (
+      <OfflineCoastlineSection
+        draft={draft}
+        onChange={(patch) => setDraft((p) => ({ ...p, ...patch }))}
+        onOpenHelp={onOpenHelp}
+      />
+    )
   }
   render(<Harness />)
   return { latestDraft: () => drafts[drafts.length - 1] }
@@ -78,6 +84,16 @@ beforeEach(() => {
   hook.error = null
   hook.update = vi.fn().mockResolvedValue(undefined)
   hook.clearCoverage = vi.fn().mockResolvedValue(undefined)
+})
+
+describe('OfflineCoastlineSection Overpass link', () => {
+  it('opens the how-to for running an Overpass server aboard', () => {
+    hook.status = status({ enabled: false, state: 'off' })
+    const onOpenHelp = vi.fn()
+    renderSection({}, onOpenHelp)
+    fireEvent.click(screen.getByRole('button', { name: 'Run your own Overpass server' }))
+    expect(onOpenHelp).toHaveBeenCalledWith({ page: 'how-to/run-your-own-overpass-server' })
+  })
 })
 
 describe('OfflineCoastlineSection status line', () => {
