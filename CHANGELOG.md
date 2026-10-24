@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.54.0] - 2026-10-24
+
 ### Added
 
 - **See the forecast for a marina you're booked into.** On the Forecast page,
@@ -47,7 +49,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Place lookups reach twice as far.** Searching for a place by its full
   name, from the Forecast page or by asking Mate, now looks up to 200 nautical
   miles from the boat instead of 100. A partial name still searches the
-  nearest 20. Update the OpenStreetMap place-names plugin to get it.
+  nearest 20.
 - **Pick a sign to edit from a list.** The Signs panel in the passage replay
   now shows every sign as a button in time order, with its photo, title and
   time. Press one to jump to it and edit it. The marks on the scrubber and the
@@ -55,7 +57,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **The plotter's route alarms read plainly.** "Perpendicular passed" is now
   **Waypoint Passed** and "Arrival circle entered" is now **Arriving at
   Waypoint**, each with one sentence saying what it means.
-
 - **Offline coastline no longer downloads squares that are all land.** Squares
   with no part of them within 20 nm of the sea, such as the interior of a
   continent, are skipped, so the first fill finishes sooner and uses less of
@@ -1755,7 +1756,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.53.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.54.0...HEAD
+[0.54.0]: https://github.com/gterrill/helmcentral/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/gterrill/helmcentral/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/gterrill/helmcentral/compare/v0.51.0...v0.52.0
 [0.51.0]: https://github.com/gterrill/helmcentral/compare/v0.50.0...v0.51.0
