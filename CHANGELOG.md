@@ -48,6 +48,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   name, from the Forecast page or by asking Mate, now looks up to 200 nautical
   miles from the boat instead of 100. A partial name still searches the
   nearest 20. Update the OpenStreetMap place-names plugin to get it.
+- **Pick a sign to edit from a list.** The Signs panel in the passage replay
+  now shows every sign as a button in time order, with its photo, title and
+  time. Press one to jump to it and edit it. The marks on the scrubber and the
+  pins on the chart are also bigger and easier to hit.
 - **The plotter's route alarms read plainly.** "Perpendicular passed" is now
   **Waypoint Passed** and "Arrival circle entered" is now **Arriving at
   Waypoint**, each with one sentence saying what it means.
@@ -61,6 +65,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A sign you opened on the chart no longer stays up through the replay.**
+  Pressing Play now closes it, so each sign shows only for the time it is set
+  to.
 - **The "SignalK found" prompt no longer appears after an update restart, and
   never offers the server you already use.** It now waits until SignalK has
   been unreachable for a full 30 seconds, with the live feed connected, before

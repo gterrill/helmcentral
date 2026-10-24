@@ -67,7 +67,7 @@ export function PassageReplayBar({
       >
         {playing ? <Pause className="h-4 w-4" aria-hidden="true" /> : <Play className="h-4 w-4" aria-hidden="true" />}
       </Button>
-      <div className="relative flex min-w-24 flex-1 items-center">
+      <div className={cn('relative flex min-w-24 flex-1 items-center', onSignsToggle && 'pb-5')}>
         <input
           type="range"
           aria-label="Replay position"
@@ -101,13 +101,18 @@ export function PassageReplayBar({
             aria-label={t.label}
             aria-pressed={t.selected}
             disabled={disabled}
-            className={cn(
-              'absolute bottom-0 h-2.5 w-2.5 -translate-x-1/2 rotate-45 rounded-xs border',
-              t.selected ? 'border-foreground bg-foreground' : 'border-primary bg-card',
-            )}
+            className="group absolute bottom-0 flex h-5 w-5 -translate-x-1/2 items-center justify-center bg-transparent focus-visible:outline-hidden"
             style={{ left: `${Math.max(0, Math.min(1, t.fraction)) * 100}%` }}
             onClick={() => onSignTickClick?.(t.id)}
-          />
+          >
+            <span
+              aria-hidden="true"
+              className={cn(
+                'h-3 w-3 rotate-45 rounded-xs border group-focus-visible:ring-2 group-focus-visible:ring-ring',
+                t.selected ? 'border-foreground bg-foreground' : 'border-primary bg-card',
+              )}
+            />
+          </button>
         ))}
       </div>
       <span className="min-w-36 truncate text-xs tabular-nums text-foreground" data-testid="replay-readout">{readout}</span>

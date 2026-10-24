@@ -97,9 +97,11 @@ export function SignPin({ sign, onClick }: { sign: ReplaySign; onClick: () => vo
       title={sign.title}
       data-testid="sign-pin"
       data-sign-id={sign.id}
-      className="h-4 w-4 rotate-45 rounded-xs border-2 border-background bg-primary shadow-sm ring-1 ring-primary/50 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+      className="group flex h-7 w-7 items-center justify-center rounded-full focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onClick}
-    />
+    >
+      <span aria-hidden="true" className="h-4 w-4 rotate-45 rounded-xs border-2 border-background bg-primary shadow-sm ring-1 ring-primary/50" />
+    </button>
   )
 }
 

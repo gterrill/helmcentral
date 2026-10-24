@@ -1,4 +1,4 @@
-import { ChevronDown, Library, Plus, Trash2, Upload, X } from 'lucide-react'
+import { ChevronDown, Library, Plus, Signpost, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
@@ -6,6 +6,7 @@ import { signPhotoSrc } from '@/components/passages/sign-card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
 import { isSignPhotoType, SIGN_PHOTO_TYPES } from '@/lib/sign-photo'
 import {
@@ -108,10 +109,57 @@ function SecondsField({ value, onCommit }: { value: number; onCommit: (value: nu
   )
 }
 
+/** One placed sign in the picker row. */
+export interface SignChip {
+  id: string
+  title: string
+  /** Boat-local date, time and zone of the sign, for its label. */
+  timeLabel: string
+  /** What the chip shows: the time, with the date when the signs span days. */
+  shortTime: string
+  photoSrc: string | null
+  selected: boolean
+}
+
+// Keyed by the photo source by its caller, so a new photo gets a fresh try.
+function ChipThumb({ src }: { src: string }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) return <Signpost className="h-4 w-4 shrink-0" aria-hidden="true" />
+  return <img src={src} alt="" className="h-6 w-6 rounded-sm object-cover" onError={() => setFailed(true)} />
+}
+
+function SignChipButton({ chip, disabled, onPick }: { chip: SignChip; disabled: boolean; onPick: (id: string) => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={chip.selected}
+      aria-label={`Edit sign ${chip.title} at ${chip.timeLabel}`}
+      disabled={disabled}
+      className={cn(
+        'flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-1.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
+        chip.selected ? 'border-primary bg-primary text-primary-foreground' : 'border-border bg-card text-foreground',
+      )}
+      onClick={() => onPick(chip.id)}
+    >
+      {chip.photoSrc ? (
+        <ChipThumb key={chip.photoSrc} src={chip.photoSrc} />
+      ) : (
+        <Signpost className="h-4 w-4 shrink-0" aria-hidden="true" />
+      )}
+      <span className="max-w-40 truncate text-xs font-medium">{chip.title}</span>
+      <span className={cn('text-xs tabular-nums', chip.selected ? 'text-primary-foreground' : 'text-muted-foreground')}>{chip.shortTime}</span>
+    </button>
+  )
+}
+
 export interface SignEditorProps {
   /** The sign being edited, or null when none is picked. */
   sign: ReplaySign | null
-  signCount: number
+  /** The placed signs in time order, for the picker row. */
+  signs: SignChip[]
+  onPick: (id: string) => void
+  /** The scrubber is not usable (nothing to replay, or the fly-in is running). */
+  disabled?: boolean
   /** Boat-local time of the sign being edited. */
   whenLabel: string | null
   /** A write is queued or running. Marks the editor busy; nothing is disabled. */
@@ -132,7 +180,7 @@ export interface SignEditorProps {
 const ACCEPT = SIGN_PHOTO_TYPES.join(',')
 
 export function SignEditor({
-  sign, signCount, whenLabel, busy, error, notice, onAdd, onAddPhoto, onAddFromLibrary, onChange, onReplacePhoto, onReplaceFromLibrary, onRemovePhoto, onDelete,
+  sign, signs, onPick, disabled = false, whenLabel, busy, error, notice, onAdd, onAddPhoto, onAddFromLibrary, onChange, onReplacePhoto, onReplaceFromLibrary, onRemovePhoto, onDelete,
 }: SignEditorProps) {
   const addInput = useRef<HTMLInputElement>(null)
   const replaceInput = useRef<HTMLInputElement>(null)
@@ -175,10 +223,13 @@ export function SignEditor({
           </DropdownMenuContent>
         </DropdownMenu>
         <input ref={addInput} type="file" accept={ACCEPT} aria-label="Photo file for a new sign" className="sr-only" tabIndex={-1} onChange={(e) => take(e, onAddPhoto)} />
-        <span className="text-xs text-muted-foreground">
-          {signCount === 0 ? 'No signs yet' : `${signCount} ${signCount === 1 ? 'sign' : 'signs'}. Pick a mark on the scrubber to edit it`}
-        </span>
+        {signs.length === 0 && <span className="text-xs text-muted-foreground">No signs yet</span>}
       </div>
+      {signs.length > 0 && (
+        <div className="flex min-w-0 gap-1 overflow-x-auto pb-1" role="group" aria-label="Signs on this replay">
+          {signs.map((c) => <SignChipButton key={c.id} chip={c} disabled={disabled} onPick={onPick} />)}
+        </div>
+      )}
       {sign && (
         <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" data-testid="sign-fields" key={sign.id}>
           <TextField label="Sign title" value={sign.title} max={SIGN_TITLE_MAX} required onCommit={(title) => onChange({ title })} />
