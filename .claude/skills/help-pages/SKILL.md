@@ -38,6 +38,11 @@ never say it that way out loud, rewrite it.
   between ideas with "so that", "because", "when", "if".
 - **Say who does what.** "You tap **Save**", "Helmcentral raises an alarm",
   "Mate asks you". The reader or the boat is the subject.
+- **A list for several cases.** When a paragraph walks through several
+  conditions, cases or outcomes, open with one sentence saying what follows,
+  then give each case its own bullet. Start each bullet with a short label
+  and a colon ("Instant warnings:", "Clearing alerts:"), then say what happens
+  in a full sentence.
 - **Contractions.** "It's", "you're", "doesn't".
 - **British/NZ spelling.** Colour, behaviour, metres, centre. "Whilst" is fine.
 - **The operator's words.** "Tile" for anything placed on a dashboard page,
@@ -52,10 +57,13 @@ never say it that way out loud, rewrite it.
 - **Limits stated flatly.** "Mate can't read a scanned form." Admitted limits
   build trust.
 
-## Example
+## Examples
 
-The operator ran the dashboard page's opening through a humaniser and
-preferred the result. Learn the direction from it: longer, plainer, fully said.
+The operator ran these passages through a humaniser and preferred the
+results. Learn the direction from them: longer, plainer, fully said, and
+broken into a list when there are several cases.
+
+### A paragraph said in full
 
 Before:
 
@@ -77,6 +85,40 @@ After:
 What changed: "watch" became "look at", "holds" became "contains", "lay out"
 became "set up", "so" became "so that", and contractions came in. No fact
 changed.
+
+### Several cases become a list
+
+Before:
+
+> The dashboard reconnects on its own. It raises the warning immediately when
+> the link fails outright or the device reports itself offline. A link that
+> goes quiet without failing takes 45 seconds to catch, and coming back to the
+> screen checks the clock again, so a phone that slept through an outage does
+> not wake showing a stale screen as though it were live. Only a fresh reading
+> clears the warning.
+
+After:
+
+> The Helmcentral dashboard automatically handles reconnections in the
+> background. Here is how connection warnings and status checks work:
+>
+> - Instant warnings: If the connection drops completely or your device
+>   reports itself offline, an alert appears immediately.
+> - Silent drops (45-second check): If the connection stalls without an
+>   explicit error, the system will detect the issue and flag it within 45
+>   seconds.
+> - Waking up your device: Whenever you unlock your phone or switch back to
+>   the screen, the dashboard verifies the internal clock right away. This
+>   prevents your phone from displaying outdated data as if it were still
+>   live.
+> - Clearing alerts: The warning will remain visible until the dashboard
+>   successfully receives an active, up-to-date reading.
+
+What changed: four cases packed into one paragraph became a lead-in and four
+labelled bullets, one case each. "Catch" became "detect the issue and flag
+it", "a phone that slept through an outage" became "whenever you unlock your
+phone", and the reader is addressed as "you" and "your device". The 45
+seconds and every condition carried over.
 
 ## Page shapes
 
