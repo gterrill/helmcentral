@@ -75,7 +75,7 @@ describe('ReplayPanel', () => {
 
   it('zooms in when Play is pressed at the start, then plays and shows the overview map', async () => {
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    fireEvent.click(screen.getByRole('button', { name: /Overview map/ }))
+    fireEvent.click(screen.getByRole('switch', { name: 'Overview map' }))
     expect(localStorage.getItem('passages.insetMap')).toBe('1')
     fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
     expect(flyIn).toHaveBeenCalledTimes(1)
@@ -92,7 +92,7 @@ describe('ReplayPanel', () => {
   })
 
   it('plays the whole track in 60, 30, 15 or 8 seconds', () => {
-    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['Slow', 30], ['Normal', 15], ['Fast', 8]])
+    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['30 s', 30], ['15 s', 15], ['8 s', 8]])
   })
 
   it('says so when no track was kept rather than drawing nothing', () => {
@@ -106,7 +106,7 @@ describe('ReplayPanel', () => {
       await waitFor(() => expect(screen.getByRole('button', { name: 'Place overview map' })).toBeEnabled())
       fireEvent.click(screen.getByRole('button', { name: 'Place overview map' }))
     }
-    const turnOn = () => fireEvent.click(screen.getByRole('button', { name: /Overview map/ }))
+    const turnOn = () => fireEvent.click(screen.getByRole('switch', { name: 'Overview map' }))
 
     it('draws the overview in the corner saved for the passage, at its zoom step', async () => {
       saved = { corner: 'bottom-left', zoom_offset: -2 }

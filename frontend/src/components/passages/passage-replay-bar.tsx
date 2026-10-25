@@ -2,7 +2,10 @@ import { Map as MapIcon, Minus, Pause, Play, Plus, RefreshCw, Signpost, SlidersH
 import type { ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
+import { InputGroup, InputGroupButton } from '@/components/ui/input-group'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import { REPLAY_SPEEDS, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
   INSET_CORNERS, INSET_ZOOM_STEP_MAX, INSET_ZOOM_STEP_MIN, clampInsetStep, insetStepLabel, type InsetView,
@@ -131,20 +134,20 @@ export function PassageReplayBar({
         ))}
       </div>
       <span className="min-w-36 truncate text-xs tabular-nums text-foreground" data-testid="replay-readout">{readout}</span>
-      <span className="flex gap-1" role="group" aria-label="Replay speed">
-        {REPLAY_SPEEDS.map((s) => (
-          <Button
-            key={s.id}
-            type="button"
-            size="sm"
-            variant={speed === s.id ? 'default' : 'outline'}
-            aria-pressed={speed === s.id}
-            onClick={() => onSpeed(s.id)}
-          >
-            {s.label}
-          </Button>
-        ))}
-      </span>
+      <Select
+        items={SPEED_ITEMS}
+        value={speed}
+        onValueChange={(value) => value && onSpeed(value as ReplaySpeedId)}
+      >
+        <SelectTrigger aria-label="Replay length" className="w-24">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectPopup>
+          {REPLAY_SPEEDS.map((s) => (
+            <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
+          ))}
+        </SelectPopup>
+      </Select>
       {onCameraToggle && (
         <Button
           type="button"
@@ -171,32 +174,31 @@ export function PassageReplayBar({
           Signs
         </Button>
       )}
-      <span className={cn('flex items-center gap-1', !onCameraToggle && !onSignsToggle && 'ml-auto')}>
-        <Button
-          type="button"
-          size="sm"
-          variant={insetOn ? 'default' : 'outline'}
-          aria-pressed={insetOn}
-          onClick={() => onInsetChange(!insetOn)}
-        >
-          <MapIcon className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-          Overview map
-        </Button>
-        {insetOn && onInsetViewChange && (
-          insetView ? (
-            <InsetPlacement view={insetView} onChange={onInsetViewChange} />
-          ) : insetViewError ? (
-            <Button type="button" size="sm" variant="outline" aria-label="Retry reading the overview map placement" onClick={onInsetViewRetry}>
-              <RefreshCw className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
-              Retry
-            </Button>
-          ) : (
-            <Button type="button" size="icon-sm" variant="outline" disabled aria-label="Place overview map">
-              <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
-            </Button>
-          )
+      <InputGroup aria-label="Overview map" className={cn('w-auto', !onCameraToggle && !onSignsToggle && 'ml-auto')}>
+        <span className="flex items-center gap-2 px-3">
+          <label htmlFor="replay-overview-map" className="flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground">
+            <MapIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            Overview map
+          </label>
+          <Switch id="replay-overview-map" checked={insetOn} onCheckedChange={(on) => onInsetChange(on)} />
+        </span>
+        {onInsetViewChange && (
+          <span className="flex self-stretch items-center border-l border-input">
+            {insetView ? (
+              <InsetPlacement view={insetView} disabled={!insetOn} onChange={onInsetViewChange} />
+            ) : insetViewError ? (
+              <InputGroupButton size="sm" disabled={!insetOn} aria-label="Retry reading the overview map placement" onClick={onInsetViewRetry}>
+                <RefreshCw className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                Retry
+              </InputGroupButton>
+            ) : (
+              <InputGroupButton size="icon-sm" disabled aria-label="Place overview map">
+                <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
+              </InputGroupButton>
+            )}
+          </span>
         )}
-      </span>
+      </InputGroup>
     </div>
     {cameraOpen && editor}
     {signsOpen && signsEditor}
@@ -204,12 +206,15 @@ export function PassageReplayBar({
   )
 }
 
-/** Corner and zoom step of the overview map, in a small popover beside its button. */
-function InsetPlacement({ view, onChange }: { view: InsetView; onChange: (view: InsetView) => void }) {
+const SPEED_ITEMS = REPLAY_SPEEDS.map((s) => ({ value: s.id, label: s.label }))
+
+/** Corner and zoom step of the overview map, in a small popover beside its switch. */
+function InsetPlacement({ view, disabled, onChange }: { view: InsetView; disabled: boolean; onChange: (view: InsetView) => void }) {
   return (
     <Popover>
       <PopoverTrigger
-        render={<Button type="button" size="icon-sm" variant="outline" aria-label="Place overview map" />}
+        disabled={disabled}
+        render={<InputGroupButton size="icon-sm" aria-label="Place overview map" />}
       >
         <SlidersHorizontal className="h-4 w-4" aria-hidden="true" />
       </PopoverTrigger>

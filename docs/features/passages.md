@@ -109,12 +109,12 @@ The map opens with the whole track framed. Pressing **Play** from the start
 brings the map down from high above onto the track, then runs the replay with a
 boat marker. The slider scrubs to any point, and Play from the middle just
 carries on with no zoom. The readout shows the local date and time at that
-point. 60 s, Slow, Normal and Fast set how long the whole replay takes: 60,
-30, 15 or 8 seconds. **Overview map** puts a small map of the surrounding coast
-in the corner, with a box where the track is. It stays on or off the next time
-you open a passage.
+point. The length list sets how long the whole replay takes, 60, 30, 15 or 8
+seconds, however long the passage was. The **Overview map** switch puts a small
+map of the surrounding coast in the corner, with a box where the track is. It
+stays on or off the next time you open a passage.
 
-With the overview map on, the slider icon beside its button lets you put it in
+With the overview map on, the slider icon beside its switch lets you put it in
 any corner of the map (top left, top right, bottom left or bottom right). You
 can also make it wider or closer than the automatic fit, up to three steps
 either way.
