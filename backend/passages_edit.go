@@ -237,6 +237,7 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 		if title == "" {
 			title = b.FromName
 		}
+		title = joinTitle(title)
 		// A split at a join leaves its sign behind; a second merge reuses it.
 		var have int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM replay_signs WHERE starts_leg = 1 AND t_ms = ?`, a.End.UnixMilli()).Scan(&have); err != nil {

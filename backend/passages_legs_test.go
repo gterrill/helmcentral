@@ -4,8 +4,10 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // seedLeg stores a passage with the given names, hours after the epoch.
@@ -281,6 +283,37 @@ func TestNamingFillsUntitledJoinSignsFromTheTrack(t *testing.T) {
 	}
 	if ids, _ = s.SignsNeedingNames(now.Add(48*time.Hour), 24*time.Hour); len(ids) != 0 {
 		t.Errorf("named sign queued: %v", ids)
+	}
+}
+
+func TestJoinTitlesFitTheSignTitleLimit(t *testing.T) {
+	long := strings.Repeat("é", signTitleMax+20)
+	s := newTestPassageStore(t)
+	a := seedLeg(t, s, 0, 1, "Cairns", long)
+	b := seedLeg(t, s, 2, 3, "Mossman", "Cooktown")
+	if _, err := s.MergePassages(a.ID, b.ID); err != nil {
+		t.Fatal(err)
+	}
+	signs, _ := s.ListSigns(0, 0)
+	if len(signs) != 1 || utf8.RuneCountInString(signs[0].Title) != signTitleMax {
+		t.Fatalf("merge title not clipped: %+v", signs)
+	}
+
+	s = newTestPassageStore(t)
+	appendAll(t, s, simpleTrip(2*time.Hour).pts)
+	if _, err := s.InsertPassage(passageRecord{Start: passageEpoch.Add(20 * time.Minute), End: passageEpoch.Add(2 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	sg, err := s.CreateSign(replaySign{TMs: passageEpoch.Add(time.Hour).UnixMilli(), StartsLeg: true, Visibility: signAfter, ShowS: signShowDef})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.FillSignName(sg.ID, func(float64, float64) string { return long }); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.ListSigns(0, 0)
+	if len(got) != 1 || utf8.RuneCountInString(got[0].Title) != signTitleMax {
+		t.Errorf("looked-up title not clipped: %+v", got)
 	}
 }
 

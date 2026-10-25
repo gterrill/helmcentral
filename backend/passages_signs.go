@@ -92,6 +92,15 @@ func createSignSchema(db *sql.DB) error {
 	return ensureColumn(db, "replay_signs", "name_attempted_ms", "INTEGER")
 }
 
+// joinTitle cuts a place name written into a join sign to the title limit, so
+// a long looked-up or passage name never leaves a sign that fails validation.
+func joinTitle(name string) string {
+	if r := []rune(name); len(r) > signTitleMax {
+		return strings.TrimSpace(string(r[:signTitleMax]))
+	}
+	return name
+}
+
 func validateSign(s replaySign) error {
 	// Only a join may be untitled: it waits for the naming lookup.
 	if n := utf8.RuneCountInString(s.Title); (n == 0 && !s.StartsLeg) || n > signTitleMax {

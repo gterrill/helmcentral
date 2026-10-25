@@ -162,7 +162,7 @@ func (s *passageStore) FillSignName(id string, lookup func(lat, lon float64) str
 	if err != nil {
 		return err
 	}
-	if name := lookup(p.Lat, p.Lon); name != "" {
+	if name := joinTitle(lookup(p.Lat, p.Lon)); name != "" {
 		if _, err := s.db.Exec(`UPDATE replay_signs SET title = ? WHERE id = ? AND title = '' AND starts_leg = 1 AND t_ms = ?`, name, id, tMs); err != nil {
 			return err
 		}
