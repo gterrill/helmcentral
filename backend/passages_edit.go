@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -108,6 +109,9 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 	return rec, tx.Commit()
 }
 
+// splitSnap is how far from a titled join a split still lands on the join.
+const splitSnap = 60 * time.Second
+
 // SplitPassage cuts a passage in two at a moment strictly inside it. The first
 // half keeps the id, the origin and the title; the second keeps the
 // destination. Names the cut cannot know are left empty.
@@ -129,19 +133,40 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 		err = invalidf("split time must be inside the passage")
 		return
 	}
+	// A titled join within a minute of the cut is where the operator meant to
+	// cut: take the nearest one's exact time and name.
+	var join string
+	{
+		lo, hi := at.Add(-splitSnap).UnixMilli(), at.Add(splitSnap).UnixMilli()
+		var jt int64
+		jerr := tx.QueryRow(`SELECT t_ms, title FROM replay_signs WHERE starts_leg = 1 AND title != '' AND t_ms >= ? AND t_ms <= ? AND t_ms > ? AND t_ms < ?
+			ORDER BY ABS(t_ms - ?), id LIMIT 1`, lo, hi, rec.Start.UnixMilli(), rec.End.UnixMilli(), at.UnixMilli()).Scan(&jt, &join)
+		if jerr != nil && !errors.Is(jerr, sql.ErrNoRows) {
+			err = jerr
+			return
+		}
+		if jerr == nil {
+			at = time.UnixMilli(jt).UTC()
+		}
+	}
 	first, second = rec, rec
 	first.End, first.ToName, first.ToNameEdited, first.Edited = at, "", false, true
 	second.ID, second.Start, second.FromName, second.FromNameEdited, second.Title, second.Edited = uuid.NewString(), at, "", false, "", true
 	second.CreatedAt = time.Now().UTC()
+	// A titled join at the cut is the place both halves meet: they take its
+	// name and need no lookup.
+	if join != "" {
+		first.ToName, second.FromName = join, join
+	}
 	// The first half's destination is now the cut, which the old name did not
 	// describe: clear it and queue the half for naming again, as a trim does.
 	// The second half is new, so it is queued already; the wake after commit
 	// gets both named promptly.
-	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name='', to_name_edited=0, edited=1, stats_json=NULL, name_attempted_ms=NULL WHERE id=?`, at.UnixMilli(), id); err != nil {
+	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=0, edited=1, stats_json=NULL, name_attempted_ms=NULL WHERE id=?`, at.UnixMilli(), first.ToName, id); err != nil {
 		return
 	}
 	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		second.ID, second.Start.UnixMilli(), second.End.UnixMilli(), "", second.ToName, "", "",
+		second.ID, second.Start.UnixMilli(), second.End.UnixMilli(), second.FromName, second.ToName, "", "",
 		boolInt(second.Hidden), 1, second.CruiseID, second.CreatedAt.UnixMilli(), 0, boolInt(second.ToNameEdited)); err != nil {
 		return
 	}
@@ -149,78 +174,110 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	if err = tx.Commit(); err != nil {
 		return
 	}
-	if passageNamesWake != nil {
+	if join == "" && passageNamesWake != nil {
 		passageNamesWake()
 	}
 	return
 }
 
-// MergePassages joins two neighbouring passages into one. They must be
-// adjacent (no other passage, hidden or not, between them), visible, and in the
-// same cruise or in none.
-func (s *passageStore) MergePassages(idA, idB string) (passageRecord, error) {
-	if idA == idB {
-		return passageRecord{}, invalidf("merge needs two different passages")
+// MergePassages joins two or more neighbouring passages into the earliest one
+// and writes a join sign at each boundary, so the legs stay visible. They must
+// be adjacent (no other passage, hidden or not, between them), visible, and in
+// the same cruise or in none. The join sits at the earlier leg's end, named
+// for the place that leg arrived at, else the later leg's origin, else left
+// untitled for the naming lookup.
+func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
+	if len(ids) < 2 {
+		return passageRecord{}, invalidf("merge needs at least two passages")
+	}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			return passageRecord{}, invalidf("merge needs different passages")
+		}
+		seen[id] = true
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return passageRecord{}, err
 	}
 	defer tx.Rollback()
-	get := func(id string) (passageRecord, error) {
+	legs := make([]passageRecord, len(ids))
+	for i, id := range ids {
 		r, err := scanPassage(tx.QueryRow(`SELECT `+passageColumns+` FROM passages WHERE id = ?`, id))
 		if errors.Is(err, sql.ErrNoRows) {
 			return r, errPassageNotFound
 		}
-		return r, err
+		if err != nil {
+			return r, err
+		}
+		if r.Hidden {
+			return r, invalidf("a hidden passage cannot be merged")
+		}
+		legs[i] = r
 	}
-	a, err := get(idA)
-	if err != nil {
-		return a, err
-	}
-	b, err := get(idB)
-	if err != nil {
-		return b, err
-	}
-	if b.Start.Before(a.Start) {
-		a, b = b, a
-	}
-	if a.Hidden || b.Hidden {
-		return a, invalidf("a hidden passage cannot be merged")
-	}
-	if a.CruiseID != nil && b.CruiseID != nil && *a.CruiseID != *b.CruiseID {
-		return a, invalidf("the passages are in different cruises")
-	}
-	var between int
-	if err := tx.QueryRow(`SELECT COUNT(*) FROM passages WHERE id NOT IN (?, ?) AND start_ms < ? AND end_ms > ?`,
-		a.ID, b.ID, b.Start.UnixMilli(), a.End.UnixMilli()).Scan(&between); err != nil {
-		return a, err
-	}
-	if between > 0 {
-		return a, invalidf("the passages are not next to each other")
-	}
-	m := a
-	m.End, m.ToName, m.ToNameEdited, m.Edited = b.End, b.ToName, b.ToNameEdited, true
-	if m.Title == "" {
-		m.Title = b.Title
-	}
-	switch {
-	case a.Notes == "":
-		m.Notes = b.Notes
-	case b.Notes != "":
-		m.Notes = a.Notes + "\n\n" + b.Notes
-	}
-	if m.CruiseID == nil {
-		m.CruiseID = b.CruiseID
-	}
-	if _, err := tx.Exec(`DELETE FROM passages WHERE id = ?`, b.ID); err != nil {
-		return m, err
+	sort.Slice(legs, func(i, j int) bool { return legs[i].Start.Before(legs[j].Start) })
+	m := legs[0]
+	untitled := false
+	now := time.Now().UTC().UnixMilli()
+	for i := 1; i < len(legs); i++ {
+		a, b := legs[i-1], legs[i]
+		if m.CruiseID != nil && b.CruiseID != nil && *m.CruiseID != *b.CruiseID {
+			return m, invalidf("the passages are in different cruises")
+		}
+		var between int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM passages WHERE id NOT IN (?, ?) AND start_ms < ? AND end_ms > ?`,
+			a.ID, b.ID, b.Start.UnixMilli(), a.End.UnixMilli()).Scan(&between); err != nil {
+			return m, err
+		}
+		if between > 0 {
+			return m, invalidf("the passages are not next to each other")
+		}
+		title := a.ToName
+		if title == "" {
+			title = b.FromName
+		}
+		title = joinTitle(title)
+		// A split at a join leaves its sign behind; a second merge reuses it.
+		var have int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM replay_signs WHERE starts_leg = 1 AND t_ms = ?`, a.End.UnixMilli()).Scan(&have); err != nil {
+			return m, err
+		}
+		if have == 0 {
+			untitled = untitled || title == ""
+			if _, err := tx.Exec(`INSERT INTO replay_signs (`+signColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+				uuid.NewString(), a.End.UnixMilli(), title, "", nil, signAfter, signShowDef, 1, now, now); err != nil {
+				return m, fmt.Errorf("insert join sign: %w", err)
+			}
+		}
+		m.End, m.ToName, m.ToNameEdited, m.Edited = b.End, b.ToName, b.ToNameEdited, true
+		if m.Title == "" {
+			m.Title = b.Title
+		}
+		switch {
+		case m.Notes == "":
+			m.Notes = b.Notes
+		case b.Notes != "":
+			m.Notes = m.Notes + "\n\n" + b.Notes
+		}
+		if m.CruiseID == nil {
+			m.CruiseID = b.CruiseID
+		}
+		if _, err := tx.Exec(`DELETE FROM passages WHERE id = ?`, b.ID); err != nil {
+			return m, err
+		}
 	}
 	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, edited=1, stats_json=NULL WHERE id=?`,
 		m.End.UnixMilli(), m.ToName, boolInt(m.ToNameEdited), m.Title, m.Notes, m.CruiseID, m.ID); err != nil {
 		return m, err
 	}
-	return m, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return m, err
+	}
+	if untitled && passageNamesWake != nil {
+		passageNamesWake()
+	}
+	return m, nil
 }
 
 // TrimPassage moves a passage's ends inward. The track points are untouched.

@@ -179,7 +179,7 @@ export function PassageEditPanel({
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" disabled={editDisabled || !olderNeighbour} onClick={() =>
             olderNeighbour && void run('merge passages', async () => {
-              const merged = await passagesApi.merge(olderNeighbour.id, passage.id)
+              const merged = await passagesApi.merge([olderNeighbour.id, passage.id])
               onMerged(merged.id)
             })}>
             <GitMerge className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
@@ -187,7 +187,7 @@ export function PassageEditPanel({
           </Button>
           <Button type="button" variant="outline" size="sm" disabled={editDisabled || !newerNeighbour} onClick={() =>
             newerNeighbour && void run('merge passages', async () => {
-              const merged = await passagesApi.merge(passage.id, newerNeighbour.id)
+              const merged = await passagesApi.merge([passage.id, newerNeighbour.id])
               onMerged(merged.id)
             })}>
             <GitMerge className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />

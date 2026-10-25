@@ -131,13 +131,14 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
 
   const exportInput = (prepared: ReadonlyMap<string, string> = photos): ExportInput => ({
     kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, ...(insetView ? { insetView } : {}), playSeconds, threeD, shots, hull,
+    joins: allSigns,
     ...(includeSigns ? { signs: signsInCard, photos: prepared } : {}),
   })
 
-  // Signs only matter to the export, and to what the menu says about it, when
-  // they are included.
-  const signsWait = includeSigns && signsLoading
-  const signsFailed = includeSigns && signsError !== null
+  // Join signs split the track into legs, so every export needs the signs,
+  // whether or not Include signs draws them.
+  const signsWait = signsLoading
+  const signsFailed = signsError !== null
 
   // The card's size: exact once every photo is prepared, a guess (kept on the
   // high side) before that.
@@ -217,6 +218,10 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
 
   const downloadImage = async (imageKind: ImageKind) => {
     if (busy || !insetReady()) return
+    if (signsFailed) {
+      failed('read the signs', new Error(signsError as string))
+      return
+    }
     setBusy(true)
     const label = IMAGE_SIZES[imageKind].label
     const toastId = toast.loading(`Drawing the ${label} image`)
@@ -289,8 +294,8 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
         <DropdownMenuSeparator />
         <DropdownMenuItem disabled={shotsLoading || insetViewLoading || signsWait} onClick={() => void showEmbed()}>Copy blog embed</DropdownMenuItem>
         <DropdownMenuItem disabled={shotsLoading || insetViewLoading || signsWait} onClick={() => void downloadPage()}>Download embed as HTML</DropdownMenuItem>
-        <DropdownMenuItem disabled={busy || insetViewLoading} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
-        <DropdownMenuItem disabled={busy || insetViewLoading} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
+        <DropdownMenuItem disabled={busy || insetViewLoading || signsWait} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
+        <DropdownMenuItem disabled={busy || insetViewLoading || signsWait} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
     <PassageEmbedDialog embed={embed} onClose={() => setEmbed(null)} />

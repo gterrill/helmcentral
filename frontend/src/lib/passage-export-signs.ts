@@ -38,7 +38,7 @@ export function isExportPhoto(value: unknown): value is string {
  * between passages or outside the selection would never be shown. */
 export function signsInRange(signs: readonly ReplaySign[], passages: readonly { a: number; b: number }[]): ReplaySign[] {
   return signs
-    .filter((s) => passages.some((p) => s.t_ms / 1000 >= p.a && s.t_ms / 1000 <= p.b))
+    .filter((s) => s.title !== '' && passages.some((p) => s.t_ms / 1000 >= p.a && s.t_ms / 1000 <= p.b))
     .sort((a, b) => a.t_ms - b.t_ms || a.id.localeCompare(b.id))
 }
 

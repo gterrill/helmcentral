@@ -11,7 +11,7 @@ const SIGNS_PATH = '/api/passages/signs'
 export const replaySignsPath = (fromMs: number, toMs: number) => `${SIGNS_PATH}?from=${Math.round(fromMs)}&to=${Math.round(toMs)}`
 
 /** What a new sign is made from; the server fills the id and the photo link. */
-export type NewReplaySign = Pick<ReplaySign, 't_ms' | 'title' | 'note' | 'document_id' | 'visibility' | 'show_s'>
+export type NewReplaySign = Pick<ReplaySign, 't_ms' | 'title' | 'note' | 'document_id' | 'visibility' | 'show_s'> & { starts_leg?: boolean }
 export type ReplaySignPatch = Partial<NewReplaySign>
 
 export const replaySignsApi = {

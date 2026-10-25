@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 
 import type { DistanceUnits } from '@/config/app-config'
 import { CruiseEditPanel } from '@/components/passages/cruise-edit-panel'
+import { MergePassagesButton } from '@/components/passages/merge-passages-button'
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
 import { passageColour } from '@/components/passages/passage-map'
 import { PassageExportMenu } from '@/components/passages/passage-export-menu'
@@ -11,8 +12,10 @@ import { CruiseStatsPanel, PassageStatsStrip } from '@/components/passages/passa
 import { ReplayPanel, type ReplayCursor } from '@/components/passages/replay-panel'
 import { DetailsLayout, FormSection, Page } from '@/components/patterns'
 import { Skeleton } from '@/components/ui/skeleton'
+import { usePassageLegs } from '@/hooks/use-passage-legs'
 import { useCruiseDetails, usePassageDetail, usePassageDetails } from '@/hooks/use-passages'
 import { combinedTitle } from '@/lib/passage-export'
+import { legsOf, type PassageLeg } from '@/lib/passage-legs'
 import { passagesApi } from '@/lib/passages-api'
 import {
   fmtDuration,
@@ -67,18 +70,24 @@ function firstLon(passages: PassageDetail[]): number {
 }
 
 function PassageList({
-  passages, onOpen, colours = false,
-}: { passages: (Parameters<typeof passageHeading>[0] & { id: string })[]; onOpen: (id: string) => void; colours?: boolean }) {
+  passages, onOpen, legs,
+}: { passages: (Parameters<typeof passageHeading>[0] & { id: string })[]; onOpen: (id: string) => void; legs?: readonly PassageLeg[] }) {
   return (
     <ul className="flex flex-col gap-1">
-      {passages.map((p, i) => (
+      {passages.map((p) => (
         <li key={p.id}>
           <button
             type="button"
             className="flex w-full min-w-0 items-center gap-2 rounded-sm px-1 py-1.5 text-left text-sm hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             onClick={() => onOpen(p.id)}
           >
-            {colours && <span aria-hidden="true" className="h-2 w-4 shrink-0 rounded-sm" style={{ backgroundColor: passageColour(i) }} />}
+            {legs && (
+              <span aria-hidden="true" className="flex shrink-0 gap-0.5" data-testid="passage-legend">
+                {legsOf(legs, p.id).map((l) => (
+                  <span key={l.colourIndex} className="h-2 w-4 rounded-sm" style={{ backgroundColor: passageColour(l.colourIndex) }} />
+                ))}
+              </span>
+            )}
             <span className="min-w-0 flex-1 truncate">{passageHeading(p)}</span>
           </button>
         </li>
@@ -141,6 +150,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
   const visible = (data?.passages ?? []).filter((p) => !p.hidden)
   const { passages, error: tracksError } = usePassageDetails(visible.map((p) => p.id))
   const lon = firstLon(passages)
+  const { legs } = usePassageLegs(visible)
 
   const labelRise = async (rise: WaterRise, label: WaterRiseLabel | '') => {
     try {
@@ -165,7 +175,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
               <FormSection title="Passages">
                 {visible.length === 0
                   ? <p className="text-sm text-muted-foreground">No passages in this cruise yet.</p>
-                  : <PassageList passages={visible} onOpen={onOpenPassage} colours />}
+                  : <PassageList passages={visible} onOpen={onOpenPassage} legs={legs} />}
               </FormSection>
             </>
           }
@@ -187,11 +197,12 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
 
 // ── an ad-hoc selection ───────────────────────────────────────────────────
 
-function CombinedPassages({ ids, units, canWrite, isDarkTheme, onBack, onOpenPassage, onOpenCruise }: PassageDetailsPageProps & { ids: string[] }) {
+function CombinedPassages({ ids, units, canWrite, isDarkTheme, list, onBack, onOpenPassage, onOpenCruise }: PassageDetailsPageProps & { ids: string[] }) {
   const { passages, loading, error } = usePassageDetails(ids)
   const [saveOpen, setSaveOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const ordered = [...passages].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
+  const { legs } = usePassageLegs(ordered)
   const distance = ordered.reduce((n, p) => n + p.stats.distance_nm, 0)
   const underway = ordered.reduce((n, p) => n + p.stats.underway_seconds, 0)
 
@@ -220,11 +231,12 @@ function CombinedPassages({ ids, units, canWrite, isDarkTheme, onBack, onOpenPas
         <DetailsLayout
           aside={
             <FormSection title="Passages" description={`${fmtNM(distance)} in ${fmtDuration(underway)} underway`}>
-              <PassageList passages={ordered} onOpen={onOpenPassage} colours />
+              <PassageList passages={ordered} onOpen={onOpenPassage} legs={legs} />
             </FormSection>
           }
         >
-          <div className="flex justify-end">
+          <div className="flex flex-wrap justify-end gap-2">
+            {canWrite && <MergePassagesButton selected={ordered} all={list} onMerged={onOpenPassage} />}
             <PassageExportMenu kind="combined" title={combinedTitle(ordered)} passages={ordered} units={units} />
           </div>
           <ReplayPanel passages={ordered} isDarkTheme={isDarkTheme} />

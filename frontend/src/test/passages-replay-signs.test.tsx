@@ -541,3 +541,42 @@ describe('ReplayPanel signs: photos', () => {
     expect(writes[0]).toMatchObject({ method: 'PATCH', body: { document_id: 'doc1' } })
   })
 })
+
+describe('ReplayPanel signs: legs', () => {
+  it('"Starts a new leg" switch sends starts_leg', async () => {
+    signs = [sign('s1', 250, { starts_leg: false })]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    const sw = screen.getByRole('switch', { name: 'Starts a new leg' })
+    expect(sw).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(sw)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].body).toEqual({ starts_leg: true })
+  })
+
+  it('an untitled join is listed as awaiting a name and draws no pin or card', async () => {
+    signs = [sign('s1', 250, { title: '', starts_leg: true })]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Awaiting a name at/ }))
+    expect(screen.getByRole('button', { name: /^Edit sign Awaiting a name at/ })).toBeInTheDocument()
+    expect(screen.queryAllByTestId('sign-pin')).toHaveLength(0)
+    scrub(300)
+    expect(screen.queryAllByTestId('sign-card')).toHaveLength(0)
+  })
+
+  it('turning the switch off on an untitled join asks for a title first', async () => {
+    signs = [sign('s1', 250, { title: '', starts_leg: true })]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Awaiting a name at/ }))
+    const sw = screen.getByRole('switch', { name: 'Starts a new leg' })
+    fireEvent.click(sw)
+    expect(writes).toHaveLength(0)
+    expect(sw).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByRole('status')).toHaveTextContent(/name/i)
+    const title = screen.getByLabelText('Sign title')
+    fireEvent.change(title, { target: { value: 'Percy Island' } })
+    fireEvent.blur(title)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].body).toEqual({ title: 'Percy Island', starts_leg: false })
+  })
+})

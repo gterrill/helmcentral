@@ -49,8 +49,8 @@ its cruise. Dates and times on this page are the boat's own local time, taken
 from where the passage began. A time that appears with a zone label such as
 UTC+10 is in that zone.
 
-Tick several passages to **View together** on one map, to **Save as cruise**,
-or to **Move to cruise**.
+Tick several passages to **View together** on one map, to **Merge** them, to
+**Save as cruise**, or to **Move to cruise**.
 
 ## One passage
 
@@ -226,6 +226,29 @@ the sign is hidden and comes back if you undo the trim. Signs are only removed
 when you delete them. If your device asks for reduced motion, signs appear with
 no fade. See [Film a passage replay](../how-to/film-a-passage-replay.md).
 
+### Legs
+
+A passage can hold more than one leg. A leg is a stretch of the track drawn in
+its own colour. A day with a stop in the middle then reads as two runs on the
+map, even though it's one passage.
+
+- **How legs appear:** Merging passages makes one leg from each, and puts a
+  sign at the place where they met, named for that stop. You can also turn on
+  **Starts a new leg** for any sign in the sign editor. That starts a new
+  colour at that spot, for the moment you stopped to fish or to wait out a
+  squall.
+- **Colours:** Every leg gets its own colour on the passage map, the cruise
+  map, the replay, the legend, the exported still and the blog map. The colours
+  run on from one leg to the next across everything on the map, and they begin
+  again after six.
+- **No legs:** A passage with no such signs is one leg, one colour, as it
+  always was.
+- **Names:** A sign that starts a leg can wait for a name. It reads "Awaiting
+  a name" and shows no label until Helmcentral has looked the place up from the
+  track, or you've typed one.
+- **Where it stops:** The figures under the map cover the whole passage. They
+  aren't split by leg.
+
 Under the map are the passage's figures:
 
 - distance and time underway
@@ -243,7 +266,8 @@ Splitting, trimming, merging, hiding and moving are in
 ## Cruises
 
 A cruise is a named group of passages, such as "Whitsundays with Steve and
-Kim". A passage is in at most one cruise, and cruises don't nest. A cruise's
+Kim". A passage is in at most one cruise, and cruises don't nest. Legs are how you show stretches inside one passage, as
+described above. A cruise's
 page replays all its passages one after another, leaving out the days between
 them, and adds the figures that only make sense across a whole trip:
 
@@ -269,7 +293,8 @@ unfiled.
 
 A passage, a cruise or a selection of passages can go on your blog as an
 animated map your readers replay, or out as a still picture for a post's
-header. The **Export** button on each page makes both. A still picture shows
+header. The **Export** button on each page makes both. Each leg is drawn in its
+own colour in both. A still picture shows
 the satellite photographs when the map is showing them, with the credit added
 along the bottom. The blog map is always the chart.
 

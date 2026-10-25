@@ -57,7 +57,7 @@ class FakeMarker {
 const fakeMaplibre = { Map: FakeMap, Marker: FakeMarker, NavigationControl: class {} }
 
 const sign = (id: string, atS: number, over: Partial<ReplaySign> = {}): ReplaySign => ({
-  id, t_ms: atS * 1000, title: `Sign ${id}`, note: `Note ${id}`, document_id: null, photo_url: null, visibility: 'passing', show_s: 4, ...over,
+  id, t_ms: atS * 1000, title: `Sign ${id}`, note: `Note ${id}`, document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, ...over,
 })
 const URI = `${EXPORT_PHOTO_PREFIX}QUJD`
 const photoSign = (id: string, atS: number, over: Partial<ReplaySign> = {}) => sign(id, atS, { photo_url: `/api/documents/${id}/content`, ...over })

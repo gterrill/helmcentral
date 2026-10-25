@@ -43,8 +43,10 @@ type replaySign struct {
 	DocumentID *string
 	Visibility string
 	ShowS      int
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// StartsLeg marks a join: the track from here on is drawn as a new leg.
+	StartsLeg bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // signJSON is a sign as the client sees it. The photo fields are filled only
@@ -58,6 +60,7 @@ type signJSON struct {
 	PhotoURL   *string   `json:"photo_url"`
 	Visibility string    `json:"visibility"`
 	ShowS      int       `json:"show_s"`
+	StartsLeg  bool      `json:"starts_leg"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -81,11 +84,26 @@ func createSignSchema(db *sql.DB) error {
 			return fmt.Errorf("create replay signs schema: %w", err)
 		}
 	}
-	return nil
+	// A join is a sign that starts a new leg. name_attempted_ms stamps the
+	// last try at naming an untitled join from the track, as on passages.
+	if err := ensureColumn(db, "replay_signs", "starts_leg", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	return ensureColumn(db, "replay_signs", "name_attempted_ms", "INTEGER")
+}
+
+// joinTitle cuts a place name written into a join sign to the title limit, so
+// a long looked-up or passage name never leaves a sign that fails validation.
+func joinTitle(name string) string {
+	if r := []rune(name); len(r) > signTitleMax {
+		return strings.TrimSpace(string(r[:signTitleMax]))
+	}
+	return name
 }
 
 func validateSign(s replaySign) error {
-	if n := utf8.RuneCountInString(s.Title); n == 0 || n > signTitleMax {
+	// Only a join may be untitled: it waits for the naming lookup.
+	if n := utf8.RuneCountInString(s.Title); (n == 0 && !s.StartsLeg) || n > signTitleMax {
 		return invalidf("title is required and at most %d characters", signTitleMax)
 	}
 	if utf8.RuneCountInString(s.Note) > signNoteMax {
@@ -123,13 +141,15 @@ func checkSignPhoto(id string) error {
 	return nil
 }
 
-const signColumns = `id, t_ms, title, note, document_id, visibility, show_s, created_ms, updated_ms`
+const signColumns = `id, t_ms, title, note, document_id, visibility, show_s, starts_leg, created_ms, updated_ms`
 
 func scanSign(row interface{ Scan(...any) error }) (replaySign, error) {
 	var s replaySign
 	var doc sql.NullString
 	var created, updated int64
-	err := row.Scan(&s.ID, &s.TMs, &s.Title, &s.Note, &doc, &s.Visibility, &s.ShowS, &created, &updated)
+	var startsLeg int
+	err := row.Scan(&s.ID, &s.TMs, &s.Title, &s.Note, &doc, &s.Visibility, &s.ShowS, &startsLeg, &created, &updated)
+	s.StartsLeg = startsLeg != 0
 	if doc.Valid {
 		s.DocumentID = &doc.String
 	}
@@ -181,11 +201,18 @@ func (s *passageStore) CreateSign(in replaySign) (replaySign, error) {
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	in.ID, in.CreatedAt, in.UpdatedAt = uuid.NewString(), now, now
-	if _, err := tx.Exec(`INSERT INTO replay_signs (`+signColumns+`) VALUES (?,?,?,?,?,?,?,?,?)`,
-		in.ID, in.TMs, in.Title, in.Note, in.DocumentID, in.Visibility, in.ShowS, now.UnixMilli(), now.UnixMilli()); err != nil {
+	if _, err := tx.Exec(`INSERT INTO replay_signs (`+signColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+		in.ID, in.TMs, in.Title, in.Note, in.DocumentID, in.Visibility, in.ShowS, boolInt(in.StartsLeg), now.UnixMilli(), now.UnixMilli()); err != nil {
 		return replaySign{}, fmt.Errorf("insert sign: %w", err)
 	}
-	return in, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return in, err
+	}
+	// An untitled join is waiting for a name; get it named promptly.
+	if in.StartsLeg && in.Title == "" && passageNamesWake != nil {
+		passageNamesWake()
+	}
+	return in, nil
 }
 
 // signPatch carries the fields a PATCH may change; nil means untouched.
@@ -199,6 +226,7 @@ type signPatch struct {
 	DocumentIDSet bool
 	Visibility    *string
 	ShowS         *int
+	StartsLeg     *bool
 }
 
 func (s *passageStore) PatchSign(id string, p signPatch) (replaySign, error) {
@@ -232,6 +260,9 @@ func (s *passageStore) PatchSign(id string, p signPatch) (replaySign, error) {
 	if p.ShowS != nil {
 		sg.ShowS = *p.ShowS
 	}
+	if p.StartsLeg != nil {
+		sg.StartsLeg = *p.StartsLeg
+	}
 	if err := validateSign(sg); err != nil {
 		return sg, err
 	}
@@ -241,11 +272,19 @@ func (s *passageStore) PatchSign(id string, p signPatch) (replaySign, error) {
 		}
 	}
 	sg.UpdatedAt = time.Now().UTC().Truncate(time.Millisecond)
-	if _, err := tx.Exec(`UPDATE replay_signs SET t_ms=?, title=?, note=?, document_id=?, visibility=?, show_s=?, updated_ms=? WHERE id=?`,
-		sg.TMs, sg.Title, sg.Note, sg.DocumentID, sg.Visibility, sg.ShowS, sg.UpdatedAt.UnixMilli(), id); err != nil {
+	untitledJoin := sg.StartsLeg && sg.Title == ""
+	if _, err := tx.Exec(`UPDATE replay_signs SET t_ms=?, title=?, note=?, document_id=?, visibility=?, show_s=?, starts_leg=?, updated_ms=?,
+		name_attempted_ms = CASE WHEN ? THEN NULL ELSE name_attempted_ms END WHERE id=?`,
+		sg.TMs, sg.Title, sg.Note, sg.DocumentID, sg.Visibility, sg.ShowS, boolInt(sg.StartsLeg), sg.UpdatedAt.UnixMilli(), untitledJoin, id); err != nil {
 		return sg, fmt.Errorf("update sign: %w", err)
 	}
-	return sg, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return sg, err
+	}
+	if untitledJoin && passageNamesWake != nil {
+		passageNamesWake()
+	}
+	return sg, nil
 }
 
 func (s *passageStore) DeleteSign(id string) error {
@@ -278,7 +317,7 @@ func signErrorResponse(c echo.Context, err error) error {
 func toSignJSON(sg replaySign, exists func(id string) (bool, error)) (signJSON, error) {
 	out := signJSON{
 		ID: sg.ID, TMs: sg.TMs, Title: sg.Title, Note: sg.Note, Visibility: sg.Visibility,
-		ShowS: sg.ShowS, CreatedAt: sg.CreatedAt, UpdatedAt: sg.UpdatedAt,
+		ShowS: sg.ShowS, StartsLeg: sg.StartsLeg, CreatedAt: sg.CreatedAt, UpdatedAt: sg.UpdatedAt,
 	}
 	if sg.DocumentID == nil {
 		return out, nil
@@ -364,14 +403,19 @@ func createSignHandler(c echo.Context) error {
 		DocumentID *string `json:"document_id"`
 		Visibility *string `json:"visibility"`
 		ShowS      *int    `json:"show_s"`
+		StartsLeg  bool    `json:"starts_leg"`
 	}
 	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
 		return err
 	}
-	if body.TMs == nil || body.Title == nil {
+	// A join may leave the title out; the naming lookup fills it.
+	if body.TMs == nil || (body.Title == nil && !body.StartsLeg) {
 		return passageErrorResponse(c, invalidf("t_ms and title are required"))
 	}
-	in := replaySign{TMs: *body.TMs, Title: *body.Title, Note: body.Note, DocumentID: body.DocumentID, Visibility: signPassing, ShowS: signShowDef}
+	in := replaySign{TMs: *body.TMs, Note: body.Note, DocumentID: body.DocumentID, Visibility: signPassing, ShowS: signShowDef, StartsLeg: body.StartsLeg}
+	if body.Title != nil {
+		in.Title = *body.Title
+	}
 	if body.Visibility != nil {
 		in.Visibility = *body.Visibility
 	}
@@ -404,11 +448,12 @@ func patchSignHandler(c echo.Context) error {
 		DocumentID json.RawMessage `json:"document_id"`
 		Visibility *string         `json:"visibility"`
 		ShowS      *int            `json:"show_s"`
+		StartsLeg  *bool           `json:"starts_leg"`
 	}
 	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
 		return err
 	}
-	patch := signPatch{TMs: body.TMs, Title: body.Title, Note: body.Note, Visibility: body.Visibility, ShowS: body.ShowS}
+	patch := signPatch{TMs: body.TMs, Title: body.Title, Note: body.Note, Visibility: body.Visibility, ShowS: body.ShowS, StartsLeg: body.StartsLeg}
 	if body.DocumentID != nil {
 		patch.DocumentIDSet = true
 		if !bytes.Equal(bytes.TrimSpace(body.DocumentID), []byte("null")) {

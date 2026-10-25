@@ -115,6 +115,61 @@ func (s *passageStore) FillPassageNames(id string, lookup func(lat, lon float64)
 	return nil
 }
 
+// SignsNeedingNames lists untitled joins (signs that start a leg) not tried in
+// the last retryAfter. Merge makes one without a title when neither leg has a
+// name for the place.
+func (s *passageStore) SignsNeedingNames(now time.Time, retryAfter time.Duration) ([]string, error) {
+	rows, err := s.db.Query(`SELECT id FROM replay_signs
+		WHERE starts_leg = 1 AND title = ''
+		AND (name_attempted_ms IS NULL OR name_attempted_ms < ?)
+		ORDER BY t_ms, id`, now.Add(-retryAfter).UnixMilli())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// FillSignName names an untitled join from the last track point at or before
+// its time. A title the operator typed during the lookup, or a join moved
+// meanwhile, is left alone.
+func (s *passageStore) FillSignName(id string, lookup func(lat, lon float64) string) error {
+	var tMs int64
+	var title string
+	var startsLeg int
+	if err := s.db.QueryRow(`SELECT t_ms, title, starts_leg FROM replay_signs WHERE id = ?`, id).Scan(&tMs, &title, &startsLeg); err != nil {
+		return err
+	}
+	if title != "" || startsLeg == 0 {
+		return nil
+	}
+	stamp := time.Now().UnixMilli()
+	if _, err := s.db.Exec(`UPDATE replay_signs SET name_attempted_ms = ? WHERE id = ?`, stamp, id); err != nil {
+		return err
+	}
+	p, err := scanTrackPoint(s.db.QueryRow(`SELECT `+trackPointColumns+` FROM track_points WHERE t_ms <= ? ORDER BY t_ms DESC, id DESC LIMIT 1`, tMs))
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if name := joinTitle(lookup(p.Lat, p.Lon)); name != "" {
+		if _, err := s.db.Exec(`UPDATE replay_signs SET title = ? WHERE id = ? AND title = '' AND starts_leg = 1 AND t_ms = ?`, name, id, tMs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 type namingWorker struct {
 	store  *passageStore
 	lookup func(lat, lon float64) string
@@ -154,11 +209,20 @@ func (w *namingWorker) scan() {
 	ids, err := w.store.PassagesNeedingNames(time.Now(), passageNamingRetryAfter)
 	if err != nil {
 		log.Printf("passages: naming scan: %v", err)
-		return
 	}
 	for _, id := range ids {
 		if err := w.store.FillPassageNames(id, w.lookup); err != nil {
 			log.Printf("passages: naming %s: %v", id, err)
+		}
+	}
+	signs, err := w.store.SignsNeedingNames(time.Now(), passageNamingRetryAfter)
+	if err != nil {
+		log.Printf("passages: sign naming scan: %v", err)
+		return
+	}
+	for _, id := range signs {
+		if err := w.store.FillSignName(id, w.lookup); err != nil {
+			log.Printf("passages: naming sign %s: %v", id, err)
 		}
 	}
 }

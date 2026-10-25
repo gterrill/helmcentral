@@ -12,6 +12,9 @@ export const SIGN_VISIBILITIES: readonly { id: SignVisibility; label: string }[]
   { id: 'after', label: 'After passing' },
 ]
 
+/** What a join with no title yet is called in lists. */
+export const AWAITING_NAME = 'Awaiting a name'
+
 export const SIGN_TITLE_MAX = 80
 export const SIGN_NOTE_MAX = 280
 export const SIGN_SHOW_MIN = 1
@@ -29,6 +32,9 @@ export interface ReplaySign {
   photo_url: string | null
   visibility: SignVisibility
   show_s: number
+  /** A join: the track from here on is drawn as a new leg. Only a join may
+   * have no title; it waits for a name from the track. */
+  starts_leg: boolean
 }
 
 /** A sign placed on the replay. */

@@ -351,19 +351,26 @@ describe('PassageExportMenu, cinematic card', () => {
       await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).not.toContain('about'))
     })
 
-    it('ignores signs that are still loading, or failed, when Include signs is off', async () => {
+    it('holds every export while signs load, even with Include signs off', async () => {
       signsHook.value = { signs: [], loading: true, error: null }
-      const { rerender } = render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
       openMenu()
       fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Include signs' }))
-      expect(screen.getByRole('menuitem', { name: 'Copy blog embed' }).hasAttribute('data-disabled')).toBe(false)
-      expect(screen.getByRole('menuitem', { name: 'Download embed as HTML' }).hasAttribute('data-disabled')).toBe(false)
-      expect(screen.getByTestId('card-size')).toBeTruthy()
+      for (const name of ['Copy blog embed', 'Download embed as HTML']) {
+        expect(screen.getByRole('menuitem', { name }).hasAttribute('data-disabled')).toBe(true)
+      }
+      for (const item of screen.getAllByRole('menuitem').filter((i) => /^Download image/.test(i.textContent ?? ''))) {
+        expect(item.hasAttribute('data-disabled')).toBe(true)
+      }
+    })
+
+    it('refuses an export when signs failed to load, even with Include signs off', async () => {
       signsHook.value = { signs: [], loading: false, error: 'HTTP 500' }
-      rerender(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitemcheckbox', { name: 'Include signs' }))
       fireEvent.click(screen.getByRole('menuitem', { name: 'Copy blog embed' }))
-      await embedText()
-      expect(toast.error).not.toHaveBeenCalled()
+      await vi.waitFor(() => expect(toast.error).toHaveBeenCalledWith('Could not read the signs', expect.anything()))
     })
 
     it('holds Copy and Download while signs load, when they are included', async () => {

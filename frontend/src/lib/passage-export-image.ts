@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl'
 import { worldImageryVisibleAtZoom } from '@/lib/world-imagery'
 import { addExportImagery } from '@/lib/passage-export-style'
 import type { ExportData } from '@/lib/passage-export'
+import { exportLegSegments } from '@/lib/passage-legs'
 import { IMAGE_SIZES, composeImageLayout, mapCropRect, paintOverlay, roundRectPath, type ImageKind, type ImageLayout, type Measure } from '@/lib/passage-export-layout'
 
 // Static images of a passage for the blog's feature image or a social card
@@ -38,10 +39,13 @@ function bboxPolygon(b: ExportData['bounds']): GeoJSON.Feature<GeoJSON.Polygon> 
 function trackCollection(data: ExportData): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = []
   for (const p of data.passages) {
-    for (const seg of p.s) {
-      if (seg.length < 2) continue
-      features.push({ type: 'Feature', properties: { c: p.c }, geometry: { type: 'LineString', coordinates: seg.map((pt) => [pt[1], pt[2]]) } })
-    }
+    const timed = p.s.map((seg) => seg.map(([t, lon, lat]) => ({ t, lon, lat })))
+    p.l.forEach((leg, k) => {
+      for (const seg of exportLegSegments(timed, p.l, k)) {
+        if (seg.length < 2) continue
+        features.push({ type: 'Feature', properties: { c: leg.c }, geometry: { type: 'LineString', coordinates: seg.map((pt) => [pt.lon, pt.lat]) } })
+      }
+    })
   }
   return { type: 'FeatureCollection', features }
 }

@@ -6,6 +6,7 @@ import { signPhotoSrc } from '@/components/passages/sign-card'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
 import { isSignPhotoType, SIGN_PHOTO_TYPES } from '@/lib/sign-photo'
@@ -19,7 +20,7 @@ import {
 } from '@/lib/replay-signs'
 
 /** The editable fields of a sign. */
-export type SignChange = Partial<Pick<ReplaySign, 'title' | 'note' | 'visibility' | 'show_s'>>
+export type SignChange = Partial<Pick<ReplaySign, 'title' | 'note' | 'visibility' | 'show_s' | 'starts_leg'>>
 
 // Nothing in here is disabled while a write is under way. A field saves when
 // it is left, and the click that left it must still land on the button the
@@ -195,6 +196,20 @@ export function SignEditor({
     if (file) then(file)
   }
   const hasPhoto = sign?.document_id != null
+  const fields = useRef<HTMLDivElement>(null)
+  // A join with no name cannot stop being a join until it has one: the switch
+  // stays on and the title is asked for.
+  const [needsTitle, setNeedsTitle] = useState(false)
+  useEffect(() => { setNeedsTitle(false) }, [sign?.id, sign?.starts_leg])
+  const toggleLeg = (on: boolean) => {
+    if (!sign) return
+    if (!on && sign.title === '') {
+      setNeedsTitle(true)
+      fields.current?.querySelector<HTMLInputElement>('input[aria-label="Sign title"]')?.focus()
+      return
+    }
+    onChange({ starts_leg: on })
+  }
   return (
     <div className="flex flex-col gap-2 border-t border-border p-2" data-testid="sign-editor" role="group" aria-label="Signs" aria-busy={busy}>
       <div className="flex flex-wrap items-center gap-2">
@@ -231,8 +246,14 @@ export function SignEditor({
         </div>
       )}
       {sign && (
-        <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" data-testid="sign-fields" key={sign.id}>
-          <TextField label="Sign title" value={sign.title} max={SIGN_TITLE_MAX} required onCommit={(title) => onChange({ title })} />
+        <div className="grid grid-cols-1 gap-x-3 gap-y-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" data-testid="sign-fields" key={sign.id} ref={fields}>
+          <TextField
+            label="Sign title"
+            value={sign.title}
+            max={SIGN_TITLE_MAX}
+            required={!sign.starts_leg}
+            onCommit={(title) => onChange(needsTitle && title !== '' ? { title, starts_leg: false } : { title })}
+          />
           <TextField label="Sign note" value={sign.note} max={SIGN_NOTE_MAX} multiline onCommit={(note) => onChange({ note })} />
           <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
             <span className="flex flex-wrap gap-1" role="group" aria-label="When the sign shows">
@@ -251,6 +272,16 @@ export function SignEditor({
             </span>
             {sign.visibility === 'passing' && <SecondsField value={sign.show_s} onCommit={(show_s) => onChange({ show_s })} />}
             {whenLabel && <span className="text-xs tabular-nums text-muted-foreground">At {whenLabel}</span>}
+          </div>
+          <div className="flex min-w-0 flex-col gap-1 sm:col-span-2">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Switch id="sign-starts-leg" checked={sign.starts_leg} onCheckedChange={toggleLeg} />
+              <label htmlFor="sign-starts-leg">Starts a new leg</label>
+            </div>
+            {sign.starts_leg && sign.title === '' && !needsTitle && (
+              <p className="text-xs text-muted-foreground">Awaiting a name from the track. Type one to set it now.</p>
+            )}
+            {needsTitle && <p role="status" className="text-xs text-muted-foreground">Give this sign a name before it stops starting a leg.</p>}
           </div>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="flex items-center gap-2" role="group" aria-label="Sign photo">

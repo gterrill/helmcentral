@@ -170,7 +170,8 @@ func TestSignsSurviveSplitMergeAndTrim(t *testing.T) {
 	if _, err := store.TrimPassage(first.ID, passageEpoch, passageEpoch.Add(2*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := store.ListSigns(0, 0); len(got) != 1 || got[0].TMs != at {
+	// The merge adds a join sign at the cut; the trim deletes neither.
+	if got, _ := store.ListSigns(0, 0); len(got) != 2 || !got[0].StartsLeg || got[1].TMs != at {
 		t.Fatalf("after trim: %+v", got)
 	}
 }

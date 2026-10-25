@@ -96,6 +96,48 @@ describe('PassagesPanel', () => {
     expect(baseProps.onCombine).toHaveBeenCalledWith(expect.arrayContaining(['p1', 'p2']))
   })
 
+  it('merges a selection of neighbours and opens the result', async () => {
+    api.merge.mockResolvedValue({ id: 'p1' })
+    const passages = [passage('p2', { start: '2026-03-14T04:00:00Z', end: '2026-03-14T06:00:00Z' }), passage('p1')]
+    render(<PassagesPanel {...baseProps} passages={passages} />)
+    for (const box of screen.getAllByRole('checkbox', { name: /Select Airlie/ })) fireEvent.click(box)
+    const merge = screen.getByRole('button', { name: 'Merge' })
+    expect(merge).toBeEnabled()
+    fireEvent.click(merge)
+    await waitFor(() => expect(api.merge).toHaveBeenCalledWith(['p1', 'p2']))
+    await waitFor(() => expect(baseProps.onOpenPassage).toHaveBeenCalledWith('p1'))
+  })
+
+  it('holds Save as cruise and Move to cruise off while a merge is in flight', async () => {
+    let finish: (v: { id: string }) => void = () => {}
+    api.merge.mockReturnValue(new Promise((r) => { finish = r }))
+    const passages = [passage('p2', { start: '2026-03-14T04:00:00Z', end: '2026-03-14T06:00:00Z' }), passage('p1')]
+    render(<PassagesPanel {...baseProps} passages={passages} />)
+    for (const box of screen.getAllByRole('checkbox', { name: /Select Airlie/ })) fireEvent.click(box)
+    expect(screen.getByRole('button', { name: /Save as cruise/ })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Merge' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Save as cruise/ })).toBeDisabled())
+    expect(screen.getByRole('button', { name: /Move to cruise/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /New cruise/ })).toBeDisabled()
+    finish({ id: 'p1' })
+    await waitFor(() => expect(baseProps.onOpenPassage).toHaveBeenCalledWith('p1'))
+  })
+
+  it('turns Merge off, with the reason, when something sits between the passages', () => {
+    const passages = [
+      passage('p3', { start: '2026-03-14T08:00:00Z', end: '2026-03-14T09:00:00Z' }),
+      passage('p2', { start: '2026-03-14T04:00:00Z', end: '2026-03-14T06:00:00Z' }),
+      passage('p1'),
+    ]
+    render(<PassagesPanel {...baseProps} passages={passages} />)
+    const boxes = screen.getAllByRole('checkbox', { name: /Select Airlie/ })
+    fireEvent.click(boxes[0])
+    fireEvent.click(boxes[2])
+    const merge = screen.getByRole('button', { name: 'Merge' })
+    expect(merge).toBeDisabled()
+    expect(merge).toHaveAttribute('aria-description', expect.stringMatching(/not next to each other/))
+  })
+
   it('shows the import summary after an upload', async () => {
     api.importGPX.mockResolvedValue({
       files: [{ name: 'a.gpx', points: 10 }], points_read: 10, points_added: 10, points_rejected: 0,
