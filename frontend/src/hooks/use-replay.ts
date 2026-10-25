@@ -4,10 +4,10 @@ import { timelineAtWall, wallAtTimeline, type PaceSpan } from '@/lib/replay-cloc
 
 /** Replay lengths: how long the whole timeline takes to watch at full pace, in seconds. */
 export const REPLAY_SPEEDS = [
-  { id: 'long', label: '60 s', seconds: 60 },
-  { id: 'slow', label: 'Slow', seconds: 30 },
-  { id: 'normal', label: 'Normal', seconds: 15 },
-  { id: 'fast', label: 'Fast', seconds: 8 },
+  { id: '60s', label: '60 s', seconds: 60 },
+  { id: '30s', label: '30 s', seconds: 30 },
+  { id: '15s', label: '15 s', seconds: 15 },
+  { id: '8s', label: '8 s', seconds: 8 },
 ] as const
 export type ReplaySpeedId = (typeof REPLAY_SPEEDS)[number]['id']
 

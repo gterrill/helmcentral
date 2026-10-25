@@ -27,6 +27,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Tidier replay bar.** The replay length is now one list instead of four
+  buttons, and every choice is named by how long the replay runs: 60 s, 30 s,
+  15 s or 8 s. Slow, Normal and Fast are now 30 s, 15 s and 8 s. Overview map
+  is a switch, with its placement button beside it in the same box. The
+  placement button stays there, greyed out, while the overview map is off.
+
 - **Help pages rewritten to read the way you'd say them.** Every help page now
   uses shorter sentences and everyday words. Paragraphs that walked through
   several cases are now lists, one case per point, so it's quicker to find the

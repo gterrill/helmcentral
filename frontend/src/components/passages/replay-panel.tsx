@@ -60,7 +60,7 @@ const round = (v: number, digits: number) => Math.round(v * 10 ** digits) / 10 *
 const signedDeg = (d: number) => ((((d % 360) + 540) % 360) - 180)
 
 export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelProps) {
-  const [speed, setSpeed] = useState<ReplaySpeedId>('normal')
+  const [speed, setSpeed] = useState<ReplaySpeedId>('15s')
   const [cameraOpen, setCameraOpen] = useState(false)
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null)
   const [shotBusy, setShotBusy] = useState(false)

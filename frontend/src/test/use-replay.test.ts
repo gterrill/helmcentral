@@ -8,7 +8,7 @@ afterEach(() => { vi.useRealTimers() })
 
 describe('useReplay', () => {
   it('offers a 60 second length beside the existing ones', () => {
-    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['Slow', 30], ['Normal', 15], ['Fast', 8]])
+    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['30 s', 30], ['15 s', 15], ['8 s', 8]])
   })
 
   it('plays the timeline in the chosen length', () => {

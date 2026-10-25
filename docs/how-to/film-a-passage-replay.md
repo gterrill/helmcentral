@@ -38,8 +38,8 @@ also copies the angle you're looking from.
 
 Under **Pace** choose **1×**, **½×** or **¼×**. At ½× the passage runs at half
 speed for as long as that shot lasts, so the whole replay takes longer to watch.
-The slider still counts in passage time. The **60 s**, **Slow**, **Normal** and
-**Fast** buttons still set the length of the replay at full pace.
+The slider still counts in passage time. The length list (**60 s**, **30 s**,
+**15 s** or **8 s**) still sets the length of the replay at full pace.
 
 ## Take the camera yourself
 
@@ -50,7 +50,7 @@ slider.
 
 ## Place the overview map
 
-1. Press **Overview map** on the replay bar to turn it on.
+1. Turn on the **Overview map** switch on the replay bar.
 2. Press the slider icon beside it, **Place overview map**.
 3. Under **Corner**, choose **Top left**, **Top right**, **Bottom left** or
    **Bottom right**.
