@@ -39,10 +39,17 @@ never say it that way out loud, rewrite it.
 - **Say who does what.** "You tap **Save**", "Helmcentral raises an alarm",
   "Mate asks you". The reader or the boat is the subject.
 - **A list for several cases.** When a paragraph walks through several
-  conditions, cases or outcomes, open with one sentence saying what follows,
-  then give each case its own bullet. Start each bullet with a short label
+  conditions, cases or outcomes, or a page opens with several separate points
+  about how a feature behaves, open with one sentence saying what follows,
+  then give each case or point its own bullet. Start each bullet with a short label
   and a colon ("Instant warnings:", "Clearing alerts:"), then say what happens
   in a full sentence.
+- **The reason up front.** When a behaviour exists for a reason, give the
+  reason first: "Because a dragging anchor and a failed GPS antenna need
+  different responses, a lost connection raises its own alert."
+- **Name the familiar thing.** "A lost satellite fix", "a tablet mounted in
+  the saloon", "every screen on board switched off". Explain a technical term
+  the first time with the everyday thing it means.
 - **Contractions.** "It's", "you're", "doesn't".
 - **British/NZ spelling.** Colour, behaviour, metres, centre. "Whilst" is fine.
 - **The operator's words.** "Tile" for anything placed on a dashboard page,
@@ -120,11 +127,60 @@ it", "a phone that slept through an outage" became "whenever you unlock your
 phone", and the reader is addressed as "you" and "your device". The 45
 seconds and every condition carried over.
 
+### A feature's opening becomes a benefit and labelled points
+
+Before:
+
+> Anchor watch catches a dragging anchor before it grounds the boat or fouls a
+> neighbour, including at 0300 with nobody on deck: trail sampling and drag
+> detection both run on the server, for your own vessel and for nearby AIS
+> targets, and keep running with every browser on the boat closed.
+>
+> A drag is an ordinary alarm: it is logged, can be acknowledged, and uses the
+> transports you have configured. Acknowledgement happens on the server, so
+> silencing an alarm on your phone also silences it in a browser left open in
+> the saloon.
+>
+> A lost GNSS fix never raises a drag. Position freezes at its last trusted
+> value during an outage rather than wandering, and the watchdog for a lost
+> instrument connection reports the outage separately, as its own alarm. A
+> drag alert and a lost GPS fix require different responses.
+
+After:
+
+> The Anchor Watch monitors your position continuously to alert you the moment
+> your boat, or a nearby vessel, starts dragging, even when everyone is asleep
+> and every screen on board is switched off.
+>
+> - Always-on server monitoring: Trail tracking and drag detection run
+>   directly on the server, not in your browser. It monitors your own boat
+>   alongside nearby AIS targets around the clock, so you don't need to keep a
+>   device awake or a browser tab open.
+> - Unified alarms and silencing: A drag event triggers like any standard
+>   system alarm: it logs the event and alerts you across all your configured
+>   channels. Silencing the alert on your phone immediately syncs back to the
+>   server, quieting open screens anywhere else on the boat (like a tablet
+>   mounted in the saloon).
+> - Failsafe GPS handling: A lost satellite fix will never trigger a false
+>   drag alarm. If your GNSS signal drops, your position simply freezes at its
+>   last known safe location rather than drifting across the screen.
+> - Dedicated instrument watchdog: Because a drifting anchor and a failed GPS
+>   antenna require completely different responses, a lost instrument
+>   connection triggers its own distinct alert instead of a drag warning.
+
+What changed: three dense paragraphs became one benefit sentence and four
+labelled points. "0300 with nobody on deck" became "even when everyone is
+asleep", "transports" became "configured channels", "a lost GNSS fix" became
+"a lost satellite fix", and the reason for the separate watchdog moved to the
+front of its sentence. The humaniser's version had an em dash after "system
+alarm". It is a colon here, because the lint fails on dashes.
+
 ## Page shapes
 
-- **features/**: open with one or two sentences on what the feature does for
-  the boat or crew (catching a dragging anchor, keeping the house bank
-  healthy). Then what it shows, how it behaves, and where it stops.
+- **features/**: open with one sentence on what the feature does for the
+  boat or crew (catching a dragging anchor, keeping the house bank healthy).
+  Follow it with labelled points for the key behaviours, as in the anchor
+  watch example. Then what it shows, how it behaves, and where it stops.
 - **how-to/**: numbered steps, each naming the exact control to click, tap,
   select or type, in the order the reader meets them. Background goes in a
   sentence before the steps, with a link to the feature page.
