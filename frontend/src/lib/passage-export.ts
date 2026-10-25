@@ -3,6 +3,7 @@ import playerSource from 'virtual:passage-player'
 import type { DistanceUnits, HullType } from '@/config/app-config'
 import type { BoatHull } from '@/lib/boat-model'
 import playerCss from '@/lib/passage-export-player.css.txt?raw'
+import { passageLegs, type LegSign } from '@/lib/passage-legs'
 import { DEFAULT_INSET_VIEW, offsetInsetZoom, type InsetCorner, type InsetView } from '@/lib/passage-inset-view'
 import {
   DONE_LAYERS,
@@ -81,6 +82,9 @@ export interface ExportInput {
   /** The signs saved for the span of the passages; only those that fall inside
    * an exported passage go out. Leave it out for a card with no signs. */
   signs?: readonly ReplaySign[]
+  /** The signs saved for the span, whether or not they go in the card: the ones
+   * that start a new leg decide the line colours. */
+  joins?: readonly LegSign[]
   /** Each sign's prepared photo, a JPEG data URI, by sign id. A sign with a
    * photo and no entry here stops the export. */
   photos?: ReadonlyMap<string, string>
@@ -88,12 +92,22 @@ export interface ExportInput {
   cardId?: string
 }
 
+/** One leg of an exported passage. */
+export interface ExportLeg {
+  /** Start and end, Unix seconds. */
+  a: number
+  b: number
+  /** Line colour. */
+  c: string
+}
+
 /** One passage as the player reads it. Short keys keep the snippet small. */
 export interface ExportPassage {
   /** Heading shown in the readout. */
   n: string
-  /** Line colour. */
-  c: string
+  /** The legs, in order: start and end in Unix seconds, and the line colour. One
+   * leg unless a join sign falls inside the passage. */
+  l: ExportLeg[]
   /** Start and end, Unix seconds. */
   a: number
   b: number
@@ -354,7 +368,7 @@ function sameKey(a: unknown[], b: unknown[]) {
  * is no track to show: an export of nothing is a fault, not an empty card.
  * Thinning is the slow part, so the last result is reused for the same input. */
 export function prepareExport(input: ExportInput): ExportData {
-  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.insetView?.corner ?? DEFAULT_INSET_VIEW.corner, input.insetView?.zoomOffset ?? DEFAULT_INSET_VIEW.zoomOffset, input.playSeconds, input.threeD ?? false, input.shots ?? null, input.hull ?? null, input.signs ?? null, input.photos ?? null]
+  const key = [input.kind, input.title, ...input.passages, input.passages.length, input.cruiseStats, input.units, input.zone.offsetHours, input.zone.label, input.inset, input.insetView?.corner ?? DEFAULT_INSET_VIEW.corner, input.insetView?.zoomOffset ?? DEFAULT_INSET_VIEW.zoomOffset, input.playSeconds, input.threeD ?? false, input.shots ?? null, input.hull ?? null, input.signs ?? null, input.joins ?? null, input.photos ?? null]
   if (lastPrepared && sameKey(lastPrepared.key, key)) return lastPrepared.data
   const data = buildExport(input)
   lastPrepared = { key, data }
@@ -372,6 +386,7 @@ function buildExport(input: ExportInput): ExportData {
   const firstStart = Date.parse(withTracks[0].p.start) / 1000
   const lastEnd = Date.parse(withTracks[withTracks.length - 1].p.end) / 1000
   const totalNights = midnightsSince(firstStart, lastEnd, input.zone.offsetHours)
+  const legs = passageLegs(withTracks.map(({ p }) => ({ id: p.id, startMs: Date.parse(p.start), endMs: Date.parse(p.end) })), input.joins ?? [])
   const passages: ExportPassage[] = withTracks.map(({ p }, i) => {
     const a = Date.parse(p.start) / 1000
     const b = Date.parse(p.end) / 1000
@@ -381,9 +396,10 @@ function buildExport(input: ExportInput): ExportData {
     // Numbered from the first departure, so a night spent at sea on an
     // overnight passage counts and the next night at anchor follows it.
     const n0 = prev ? midnightsSince(firstStart, prevEnd, input.zone.offsetHours) + 1 : 1
+    const mine = legs.filter((l) => l.passageId === p.id).map((l) => ({ a: l.fromMs / 1000, b: l.toMs / 1000, c: exportColour(l.colourIndex) }))
     const entry: ExportPassage = {
       n: passageHeading(p),
-      c: exportColour(i),
+      l: mine,
       a,
       b,
       s: thinned[i].map((seg) => seg.map((pt) => [Math.round(pt.t), round(pt.lon, 5), round(pt.lat, 5)] as [number, number, number])),

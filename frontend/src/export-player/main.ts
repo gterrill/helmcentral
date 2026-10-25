@@ -12,7 +12,8 @@ import { createBoatLayer, type BoatLayer } from '@/lib/boat-layer'
 import { boatMarkerKind, HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
 import { fitZoomForPitch } from '@/lib/pitch-fit'
 import type { ExportData } from '@/lib/passage-export'
-import { createSailedCache } from '@/lib/passages'
+import { exportLegSegments } from '@/lib/passage-legs'
+import { createSailedCache, type TimedSegment } from '@/lib/passages'
 import { visibleSigns } from '@/lib/replay-signs'
 import { CameraDirector, CameraGate, outsideCentral, shotStartState, type Camera } from '@/lib/replay-camera'
 import {
@@ -279,12 +280,23 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
   function fullGeo(): GeoJSON.FeatureCollection {
     const features: GeoJSON.Feature[] = []
     data.passages.forEach((p, i) => {
-      for (const seg of plan.segments[i]) {
-        if (seg.length < 2) continue
-        features.push({ type: 'Feature', properties: { c: p.c }, geometry: { type: 'LineString', coordinates: seg.map((pt) => [pt.lon, pt.lat]) } })
-      }
+      p.l.forEach((leg, k) => {
+        for (const seg of exportLegSegments(plan.segments[i], p.l, k)) {
+          if (seg.length < 2) continue
+          features.push({ type: 'Feature', properties: { c: leg.c }, geometry: { type: 'LineString', coordinates: seg.map((pt) => [pt.lon, pt.lat]) } })
+        }
+      })
     })
     return { type: 'FeatureCollection', features }
+  }
+
+  // A leg's track is cut once and kept, so the sailed cache can tell it is unchanged.
+  const legCache = new Map<string, TimedSegment[]>()
+  function legSegs(i: number, k: number): TimedSegment[] {
+    const key = `${i}-${k}`
+    let hit = legCache.get(key)
+    if (!hit) { hit = exportLegSegments(plan.segments[i], data.passages[i].l, k); legCache.set(key, hit) }
+    return hit
   }
 
   // The part of every passage the boat has covered, one MultiLineString each.
@@ -294,8 +306,13 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     for (let i = 0; i <= s.index; i++) {
       const p = data.passages[i]
       const through = i < s.index || s.night || s.done ? p.b : s.t
-      const part = sailed.get(String(i), plan.segments[i], through)
-      if (part.geometry.coordinates.length > 0) features.push({ type: 'Feature', properties: { c: p.c }, geometry: part.geometry })
+      // Leg by leg, so each part is drawn in its own colour; the legs not yet
+      // reached add nothing.
+      p.l.forEach((leg, k) => {
+        if (p.l.length > 1 && through <= leg.a) return
+        const part = sailed.get(`${i}-${k}`, legSegs(i, k), through)
+        if (part.geometry.coordinates.length > 0) features.push({ type: 'Feature', properties: { c: leg.c }, geometry: part.geometry })
+      })
     }
     return { type: 'FeatureCollection', features }
   }

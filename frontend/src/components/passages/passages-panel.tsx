@@ -4,6 +4,7 @@ import { useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { toast } from 'sonner'
 
 import { ImportSummaryCard } from '@/components/passages/import-summary'
+import { MergePassagesButton } from '@/components/passages/merge-passages-button'
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
 import {
   EmptyState,
@@ -71,6 +72,8 @@ export function PassagesPanel({
   const [summary, setSummary] = useState<ImportSummary | null>(null)
   const [cruiseDialog, setCruiseDialog] = useState<'new' | 'save' | null>(null)
   const [busy, setBusy] = useState(false)
+  // A merge in flight holds the rest of the bulk bar still.
+  const [merging, setMerging] = useState(false)
 
   const cruiseName = useMemo(() => new Map(cruises.map((c) => [c.id, c.name])), [cruises])
   const rows = passagesInFilter(passages, filter)
@@ -200,14 +203,21 @@ export function PassagesPanel({
       </Button>
       {canWrite && (
         <>
-          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setCruiseDialog('save')}>
+          <Button type="button" size="sm" variant="outline" disabled={busy || merging} onClick={() => setCruiseDialog('save')}>
             <FolderPlus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             Save as cruise
           </Button>
+          <MergePassagesButton
+            selected={passages.filter((p) => selected.has(p.id))}
+            all={passages}
+            disabled={busy}
+            onMerged={(id) => { afterBulk(); onOpenPassage(id) }}
+            onBusyChange={setMerging}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button type="button" size="sm" variant="outline" disabled={busy}>
+                <Button type="button" size="sm" variant="outline" disabled={busy || merging}>
                   Move to cruise
                   <ChevronDown className="h-4 w-4" data-icon="inline-end" aria-hidden="true" />
                 </Button>
@@ -261,7 +271,7 @@ export function PassagesPanel({
               onDismiss={dismiss}
             />
             {canWrite && (
-              <Button type="button" variant="ghost" size="sm" className="justify-start" onClick={() => setCruiseDialog('new')}>
+              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={merging} onClick={() => setCruiseDialog('new')}>
                 <FolderPlus className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
                 New cruise
               </Button>

@@ -22,6 +22,11 @@ With no title, the list shows the two ends.
 
 The passage becomes two. Each keeps its own figures.
 
+If a named sign that starts a new leg is within a minute of the cut, the cut
+moves onto that sign. Both halves take its name: the first ends there and the
+second starts there. Helmcentral doesn't look the place up again. A cut further
+away stays where you made it.
+
 ## Trim a passage
 
 1. Scrub the replay to the new start, or the new end.
@@ -30,11 +35,34 @@ The passage becomes two. Each keeps its own figures.
 Positions outside the new span stay in the log. They just stop being part of
 this passage.
 
-## Merge two passages
+## Merge passages
 
-Press **Merge with previous** or **Merge with next**. The two must be
-neighbours in the list, and the result becomes one passage with the earlier
-start and the later end.
+Merging keeps each passage as its own leg, in its own colour, and writes a sign
+where each pair met. The sign is named for the place the earlier leg arrived at,
+or else the place the later leg left from. If neither leg has a name, the sign
+waits for Helmcentral to look the place up from the track.
+
+1. To merge one passage with its neighbour, open it and press **Merge with
+   previous** or **Merge with next**.
+2. To merge several at once, tick them in the list, or in the combined view
+   from **View together**, and press **Merge**.
+
+The passages must be neighbours with nothing in between, none of them hidden,
+and all in the same cruise or in none. If they aren't, **Merge** is greyed out
+and says why. The result is one passage with the earliest start and the latest
+end, and a join at every place they met.
+
+## Start a new leg anywhere
+
+You can split the colours of a passage without merging anything.
+
+1. Open the passage and press **Signs** on the replay bar.
+2. Add a sign where the new leg starts, or pick one you already have.
+3. Turn on **Starts a new leg**.
+
+The track is drawn in a new colour from that moment on. Turn the switch off, or
+delete the sign, to make it one colour again. If the sign has no name yet, it
+shows "Awaiting a name" and turning the switch off asks you to type one first.
 
 ## Hide a passage
 
@@ -68,5 +96,5 @@ again clears it. A suggested Dock fill is only a suggestion until you press it.
 ## View passages together
 
 Select two or more passages in the list and press **View together**. They
-replay one after another on a single map, each in its own colour. Nothing is
+replay one after another on a single map, each in its own colour, one for every leg. Nothing is
 saved unless you press **Save as cruise**.

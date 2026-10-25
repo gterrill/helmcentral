@@ -91,7 +91,7 @@ func splitPassageHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"passages": []passageRecord{a, b}})
 }
 
-// mergePassagesHandler is POST /api/passages/merge {ids:[a,b]}.
+// mergePassagesHandler is POST /api/passages/merge {ids:[a,b,...]} with two or more ids.
 func mergePassagesHandler(c echo.Context) error {
 	store, ok := passageStoreOrError(c)
 	if !ok {
@@ -103,10 +103,7 @@ func mergePassagesHandler(c echo.Context) error {
 	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
 		return err
 	}
-	if len(body.IDs) != 2 {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": "ids must name exactly two passages"})
-	}
-	rec, err := store.MergePassages(body.IDs[0], body.IDs[1])
+	rec, err := store.MergePassages(body.IDs...)
 	if err != nil {
 		return passageErrorResponse(c, err)
 	}

@@ -181,8 +181,20 @@ describe('prepareExport', () => {
     const a = passage({ id: 'a', t0: T0, title: 'Leg one' })
     const b = passage({ id: 'b', t0: T0 + 86400 })
     const data = prepareExport(input({ kind: 'combined', passages: [a, b] }))
-    expect(data.passages[0].c).not.toBe(data.passages[1].c)
+    expect(data.passages[0].l[0].c).not.toBe(data.passages[1].l[0].c)
     expect(data.passages.map((p) => p.n)).toEqual(['Leg one', 'Hamilton Island → Airlie Beach'])
+  })
+
+  it('colours leg by leg when a join sign falls inside a passage', () => {
+    const a = passage({ id: 'a', t0: T0 })
+    const b = passage({ id: 'b', t0: T0 + 86400 })
+    const mid = (T0 + 1500) * 1000
+    const data = prepareExport(input({ kind: 'combined', passages: [a, b], joins: [{ t_ms: mid, starts_leg: true }, { t_ms: Date.parse(b.start), starts_leg: true }] }))
+    expect(data.passages[0].l).toHaveLength(2)
+    expect(data.passages[0].l[0].b).toBe(data.passages[0].l[1].a)
+    expect(data.passages[1].l).toHaveLength(1)
+    const colours = data.passages.flatMap((p) => p.l.map((l) => l.c))
+    expect(new Set(colours).size).toBe(3)
   })
 
   it('stays under the point budget for a long track', () => {

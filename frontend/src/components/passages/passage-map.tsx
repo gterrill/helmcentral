@@ -19,6 +19,7 @@ import { insetZoom } from '@/lib/passage-export-style'
 import { offsetInsetZoom, type InsetCorner } from '@/lib/passage-inset-view'
 import { fitZoomForPitch } from '@/lib/pitch-fit'
 import { CameraGate, outsideCentral, type Camera, type CameraResult } from '@/lib/replay-camera'
+import { legsOf, legSegments, type PassageLeg } from '@/lib/passage-legs'
 import { createSailedCache, segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
 import {
   hillshadePaint,
@@ -100,6 +101,9 @@ export interface PassageMapProps {
   insetCorner?: InsetCorner
   /** Map markers drawn over the track: the replay's signs. */
   markers?: ReactNode
+  /** The legs each passage is drawn in, one colour per leg. Without it every
+   * passage is one leg, coloured by its place in the list. */
+  legs?: readonly PassageLeg[]
 }
 
 const INTRO_START_ZOOM = 1.5
@@ -135,7 +139,7 @@ function centreOf(bounds: [number, number, number, number]) {
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -209,7 +213,28 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   }, [layerReady, boat, boatHeading])
   const marker = boatMarkerKind({ threeD, terrain, hull: hull ?? null, layerReady })
   const sailedCache = useMemo(() => createSailedCache(), [])
-  const fullLines = useMemo(() => passages.map((p) => segmentsToGeoJSON(p.segments)), [passages])
+  // What is drawn: a piece of track per leg. The first piece of a passage is
+  // open at its start and the last at its end, as the sailed line reads it.
+  const pieces = useMemo(() => {
+    const out: { key: string; passageId: string; segments: TimedSegment[]; colourIndex: number; from: number; to: number }[] = []
+    passages.forEach((p, i) => {
+      const mine = legs ? legsOf(legs, p.id) : []
+      if (mine.length === 0) {
+        out.push({ key: p.id, passageId: p.id, segments: p.segments, colourIndex: i, from: -Infinity, to: Infinity })
+        return
+      }
+      mine.forEach((leg, k) => out.push({
+        key: mine.length === 1 ? p.id : `${p.id}-${k}`,
+        passageId: p.id,
+        segments: legSegments(p.segments, mine, k),
+        colourIndex: leg.colourIndex,
+        from: k === 0 ? -Infinity : leg.fromMs / 1000,
+        to: k === mine.length - 1 ? Infinity : leg.toMs / 1000,
+      }))
+    })
+    return out
+  }, [passages, legs])
+  const fullLines = useMemo(() => pieces.map((p) => segmentsToGeoJSON(p.segments)), [pieces])
 
   // Frames the whole track. Pitched, MapLibre's flat fit loses the near and far
   // ends, so the zoom is backed off until every corner is inside the padding.
@@ -466,27 +491,27 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
           />
         )}
         <MapPlaceLabels isDarkTheme={isDarkTheme} overImagery={satellite} />
-        {passages.map((p, i) => {
-          const sailed = sailedTo ? sailedTo.get(p.id) : undefined
+        {pieces.map((p, i) => {
+          const sailed = sailedTo ? sailedTo.get(p.passageId) : undefined
           const progressive = sailed !== undefined
           // While replaying, the whole line is the dim road ahead and the
           // sailed part is drawn over it; otherwise one line, as before.
-          const lineOpacity = progressive ? 0.4 : playedIds.has(p.id) ? 0.95 : 0.45
-          const casingOpacity = progressive ? 0.35 : playedIds.has(p.id) ? 0.95 : 0.5
+          const lineOpacity = progressive ? 0.4 : playedIds.has(p.passageId) ? 0.95 : 0.45
+          const casingOpacity = progressive ? 0.35 : playedIds.has(p.passageId) ? 0.95 : 0.5
           return (
-            <Fragment key={p.id}>
-              <Source id={`passage-${p.id}`} type="geojson" data={fullLines[i]}>
+            <Fragment key={p.key}>
+              <Source id={`passage-${p.key}`} type="geojson" data={fullLines[i]}>
                 <Layer
-                  id={`passage-line-${p.id}`}
+                  id={`passage-line-${p.key}`}
                   type="line"
                   layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-                  paint={{ 'line-color': passageColour(i), 'line-width': 3.5, 'line-opacity': lineOpacity }}
+                  paint={{ 'line-color': passageColour(p.colourIndex), 'line-width': 3.5, 'line-opacity': lineOpacity }}
                 />
                 {satellite && (
                   <Layer
-                    id={`passage-casing-${p.id}`}
+                    id={`passage-casing-${p.key}`}
                     type="line"
-                    beforeId={`passage-line-${p.id}`}
+                    beforeId={`passage-line-${p.key}`}
                     layout={{ 'line-cap': 'round', 'line-join': 'round' }}
                     minzoom={SAT_HANDOFF_START_ZOOM}
                     paint={{
@@ -498,18 +523,18 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
                 )}
               </Source>
               {progressive && (
-                <Source id={`passage-sailed-${p.id}`} type="geojson" data={sailedCache.get(p.id, p.segments, sailed.at, sailed.end)}>
+                <Source id={`passage-sailed-${p.key}`} type="geojson" data={sailedCache.get(p.key, p.segments, sailed.at, sailed.end && sailed.at >= p.from && sailed.at <= p.to ? sailed.end : undefined)}>
                   <Layer
-                    id={`passage-sailed-line-${p.id}`}
+                    id={`passage-sailed-line-${p.key}`}
                     type="line"
                     layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-                    paint={{ 'line-color': passageColour(i), 'line-width': 3.5, 'line-opacity': 0.95 }}
+                    paint={{ 'line-color': passageColour(p.colourIndex), 'line-width': 3.5, 'line-opacity': 0.95 }}
                   />
                   {satellite && (
                     <Layer
-                      id={`passage-sailed-casing-${p.id}`}
+                      id={`passage-sailed-casing-${p.key}`}
                       type="line"
-                      beforeId={`passage-sailed-line-${p.id}`}
+                      beforeId={`passage-sailed-line-${p.key}`}
                       layout={{ 'line-cap': 'round', 'line-join': 'round' }}
                       minzoom={SAT_HANDOFF_START_ZOOM}
                       paint={{

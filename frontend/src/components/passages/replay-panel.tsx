@@ -15,12 +15,12 @@ import { useCameraShots } from '@/hooks/use-camera-shots'
 import { useInsetView } from '@/hooks/use-inset-view'
 import { insetViewApi } from '@/lib/inset-view-api'
 import { insetViewRange, type InsetView } from '@/lib/passage-inset-view'
-import { useReplaySigns } from '@/hooks/use-replay-signs'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
 import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
 import { cameraShotsApi } from '@/lib/camera-shots-api'
 import { replaySignsApi } from '@/lib/replay-signs-api'
-import { resolveSigns, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX, visibleSigns } from '@/lib/replay-signs'
+import { usePassageLegs } from '@/hooks/use-passage-legs'
+import { AWAITING_NAME, resolveSigns, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX, visibleSigns } from '@/lib/replay-signs'
 import { placeByCapture } from '@/lib/sign-placement'
 import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-photo'
 import { CameraDirector, shotStartState } from '@/lib/replay-camera'
@@ -159,8 +159,11 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
 
   // Signs, like shots, belong to real time: the ones inside the replayed
   // passages are the ones placed; a trimmed-out sign is kept but not shown.
-  const { signs } = useReplaySigns(spanMs ? spanMs.from : null, spanMs ? spanMs.to : null)
+  const legRanges = built.items.map((i) => ({ id: i.id, start: new Date(i.start * 1000).toISOString(), end: new Date(i.end * 1000).toISOString() }))
+  const { legs, signs } = usePassageLegs(legRanges)
   const placedSigns = useMemo(() => resolveSigns(signs, timeline), [signs, timeline])
+  // A join still waiting for its name is listed but draws nothing on the map.
+  const labelledSigns = useMemo(() => placedSigns.filter((r) => r.sign.title !== ''), [placedSigns])
 
   const here = locate(timeline, replay.clock)
   const boat = here ? positionAt(here.entry.segments, here.at) : null
@@ -271,10 +274,10 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // editor is open.
   const replaying = replay.clock > 0
   const cards = useMemo(
-    () => (replaying ? visibleSigns(placedSigns, wallAt(replay.clock), wallAt) : []),
-    [replaying, placedSigns, wallAt, replay.clock],
+    () => (replaying ? visibleSigns(labelledSigns, wallAt(replay.clock), wallAt) : []),
+    [replaying, labelledSigns, wallAt, replay.clock],
   )
-  const pins = !replaying || signsOpen ? placedSigns : []
+  const pins = !replaying || signsOpen ? labelledSigns : []
   // A pin pressed mid-play or mid-fly-in must not open a card that outlasts its window.
   const openId = !replay.playing && !flying && pins.some((p) => p.sign.id === openPinId) ? openPinId : null
   const photoSign = signs.find((s) => s.id === photoSignId) ?? null
@@ -379,7 +382,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const signTicks = placedSigns.map((r) => ({
     id: r.sign.id,
     fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
-    label: `Sign ${r.sign.title} at ${formatLocalDateTime(r.at, lon)}`,
+    label: `Sign ${r.sign.title || AWAITING_NAME} at ${formatLocalDateTime(r.at, lon)}`,
     selected: r.sign.id === selectedSign?.id,
   }))
 
@@ -391,7 +394,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     const oneDay = new Set(when.map(({ parts }) => parts.date)).size <= 1
     return when.map(({ r, parts }) => ({
       id: r.sign.id,
-      title: r.sign.title,
+      title: r.sign.title || AWAITING_NAME,
       timeLabel: `${parts.date} ${parts.time} ${parts.zone}`,
       shortTime: oneDay ? parts.time : `${parts.date} ${parts.time}`,
       photoSrc: signPhotoSrc(r.sign),
@@ -505,6 +508,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           className="h-full"
           ref={mapHandle}
           passages={mapPassages}
+          legs={legs}
           playedIds={playedIds}
           sailedTo={sailedTo}
           boat={boat}

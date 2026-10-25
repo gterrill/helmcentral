@@ -1,4 +1,5 @@
 import { apiRequest, invalidateQueries } from '@/lib/api-query'
+import { REPLAY_SIGNS_KEY } from '@/lib/replay-signs-api'
 import type {
   CruiseRecord,
   CruiseStats,
@@ -55,9 +56,11 @@ export const passagesApi = {
     await passagesChanged()
     return passage
   },
-  merge: async (a: string, b: string) => {
-    const { passage } = await apiRequest<{ passage: PassageRecord }>('/api/passages/merge', { method: 'POST', json: { ids: [a, b] } })
-    await passagesChanged()
+  /** Folds two or more neighbouring passages into one, keeping a join sign at
+   * each boundary, so the signs are read again too. */
+  merge: async (ids: readonly string[]) => {
+    const { passage } = await apiRequest<{ passage: PassageRecord }>('/api/passages/merge', { method: 'POST', json: { ids } })
+    await Promise.all([passagesChanged(), invalidateQueries(REPLAY_SIGNS_KEY)])
     return passage
   },
   importGPX: async (files: File[]) => {

@@ -78,7 +78,7 @@ function lastFix(segments: TimedSegment[]): [number, number] | null {
 export function signsOf(data: ExportData): ReplaySign[] {
   return data.signs.map((s, i) => ({
     id: String(i).padStart(5, '0'), t_ms: s.t, title: s.ti, note: s.no, document_id: null, photo_url: s.ph ?? null,
-    visibility: s.v, show_s: Number.isFinite(s.s) ? s.s : SIGN_SHOW_DEFAULT,
+    visibility: s.v, show_s: Number.isFinite(s.s) ? s.s : SIGN_SHOW_DEFAULT, starts_leg: false,
   }))
 }
 

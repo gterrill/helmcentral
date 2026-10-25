@@ -13,6 +13,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Merged passages keep their legs.** Merging passages now leaves each one
+  drawn in its own colour, with a sign named for the place where they met, and
+  you can merge several at once from the passages list or from View together.
+  A new **Starts a new leg** switch in the sign editor starts a fresh colour
+  anywhere on a passage. The colours show on the map, the replay, the exported
+  stills and the blog map, and splitting within a minute of that sign cuts at it and gives both halves the name
+  back.
+
 - **Choose the corner and zoom of the overview map.** On the passage replay,
   with Overview map on, the slider icon beside it puts the small map in any
   corner and makes it wider or closer by up to three steps. The choice is saved

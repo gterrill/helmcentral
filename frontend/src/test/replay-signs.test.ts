@@ -4,7 +4,7 @@ import { buildTimeline, type TimedSegment } from '@/lib/passages'
 import { MAX_SIGN_CARDS, SIGN_LEAD_S, placeSignCard, resolveSigns, visibleSigns, type ReplaySign } from '@/lib/replay-signs'
 
 const sign = (id: string, t: number, extra: Partial<ReplaySign> = {}): ReplaySign => ({
-  id, t_ms: t * 1000, title: id, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, ...extra,
+  id, t_ms: t * 1000, title: id, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, ...extra,
 })
 
 // One passage, 1000 s long starting at t=10000, moving east a little each 100 s.
