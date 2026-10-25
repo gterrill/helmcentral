@@ -12,9 +12,9 @@ straight onto metal reads poorly or not at all.
 
 ## Write a tag from an Android phone
 
-1. Open the bin's page (open its location in Locations and tap the bin's code,
-   or add the bin there first if it doesn't exist yet) or the item's own
-   editor.
+1. Open the bin's page or the item's own editor. To reach the bin's page, open
+   its location in Locations and tap the bin's code. Add the bin there first if
+   it doesn't exist yet.
 2. Find the tag address, on the bin's page or in the item's Location section,
    and press **Write tag**.
 3. When prompted, hold the tag against the back of the phone and keep it still

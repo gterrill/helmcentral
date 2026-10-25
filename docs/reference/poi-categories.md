@@ -1,10 +1,10 @@
 # POI categories
 
-The Nearby tile groups points of interest into eleven fixed categories.
-Every points-of-interest provider is expected to understand all eleven,
-though not every one can supply data for each. A category a provider has no
-source for is reported as unsupported for that provider rather than just
-coming back empty.
+The Nearby tile groups points of interest into eleven fixed categories. Every
+points-of-interest provider is expected to understand all eleven, though not
+every one can supply data for each. If a provider has no source for a category,
+it's reported as unsupported for that provider, rather than just coming back
+empty.
 
 | Category | What it covers |
 | --- | --- |
@@ -22,10 +22,10 @@ coming back empty.
 
 ## The default provider: OpenStreetMap via Overpass
 
-`osm-overpass` is the bundled, keyless default. It maps every category
-above onto an OpenStreetMap tag combination and fetches all of them in a
-single request, summarised below for judging whether it will find anything
-useful on your cruising ground:
+`osm-overpass` is the bundled, keyless default. It maps every category above
+onto an OpenStreetMap tag combination and fetches all of them in a single
+request. The table below sums that up, so you can judge whether it will find
+anything useful on your cruising ground:
 
 | Category | Tags | Cap | Named only |
 | --- | --- | --- | --- |
@@ -43,9 +43,9 @@ useful on your cruising ground:
 
 "Named only" means an unnamed feature never appears for that category. An
 unnamed reef or an unnamed stretch of coastal path is noise, not a point of
-interest you would navigate to. The cap is the most this plugin returns for
-that category from any one fetch. Hitting it is reported as truncated for
-that category, rather than silently cutting the list short.
+interest you would navigate to. The cap is the most this plugin returns for that
+category from any one fetch. If a category hits its cap, it's reported as
+truncated for that category, rather than the list being silently cut short.
 
 ### Coverage caveats
 
@@ -53,52 +53,50 @@ OpenStreetMap's coverage of these categories is real but uneven, because it
 reflects what volunteer mappers have actually surveyed and tagged:
 
 - **Anchorages, marinas and moorings** are generally well covered in popular
-  cruising areas (the Whitsundays, the US East Coast, the Mediterranean) and
-  thin or absent in less-visited waters.
+  cruising areas (the Whitsundays, the US East Coast, the Mediterranean). They
+  are thin or absent in less-visited waters.
 - **Snorkelling and dive sites** are sparsely tagged worldwide. `sport=
   scuba_diving`/`snorkelling` nodes are rare outside a handful of well-known
-  dive destinations, so this category often returns little even in good
-  diving water. A named `natural=reef` catches some of the gap.
-- **Walking trails** are noisy in the other direction: `highway=path` and
+  dive destinations, so this category often returns little even in good diving
+  water. A named `natural=reef` catches some of the gap.
+- **Walking trails** are noisy in the other direction. `highway=path` and
   `highway=footway` are used for everything from a maintained national-park
-  track to a short unmarked footpad between two streets. The named-only
-  filter removes the worst of it, but an urban area can still surface trail
-  results you wouldn't consider a bushwalk.
-- **Historic sites** skew toward what's locally notable enough for someone
-  to have mapped and named it. A lighthouse is reliably present (it's a
-  navigation aid, useful to chart in its own right), but a historic wreck
-  site or midden is hit-or-miss.
+  track to a short unmarked footpad between two streets. The named-only filter
+  removes the worst of it, but in an urban area you can still get trail results
+  you wouldn't consider a bushwalk.
+- **Historic sites** skew toward what's locally notable enough for someone to
+  have mapped and named it. A lighthouse is reliably present (it's a navigation
+  aid, useful to chart in its own right), but a historic wreck site or midden is
+  hit-or-miss.
 
-This plugin can't fix any of it. It reports what the underlying map data
-contains. Wikipedia enrichment (the
-first sentence of the linked article, for features that carry an OSM
-`wikipedia` tag) adds useful context to the subset of features that have it,
-but does not fill in a category with no OSM tagging in a given area at all.
+This plugin can't fix any of that. It reports what the underlying map data
+contains. Wikipedia enrichment adds the first sentence of the linked article, for
+features that carry an OSM `wikipedia` tag. That adds useful context to the
+features that have it. It doesn't fill in a category that has no OSM tagging at
+all in a given area.
 
-This plugin queries the public `overpass-api.de` by default. If your
-network refuses it, open its settings (**Settings → Plugins → Nearby →
-osm-overpass's gear icon**) and point **Overpass server** at a mirror
-instead. See [Configuration → Overpass](configuration.md#overpass).
+This plugin queries the public `overpass-api.de` by default. If your network
+refuses it, open its settings (**Settings → Plugins → Nearby → osm-overpass's
+gear icon**) and point **Overpass server** at a mirror instead. See
+[Configuration → Overpass](configuration.md#overpass).
 
 ## Google Places
 
 `google-places` trades free and keyless for Google's business and place
-database, at the cost of narrower category coverage. Only `marina`,
-`historic`, `viewpoint` and `trail` map onto a real Google Places type. See
-the [developer documentation](../developers/plugins.md) for the exact type
-mapping and the cost/billing implications of switching to it.
+database, at the cost of narrower category coverage. Only `marina`, `historic`,
+`viewpoint` and `trail` map onto a real Google Places type. See the [developer
+documentation](../developers/plugins.md) for the exact type mapping and the
+cost and billing implications of switching to it.
 
-The description shown when you highlight a place is Google's own write-up
-where it has one. Many places have none, so Google's AI-written overview or
-summary of its reviews is used instead, and is marked as summarized by
-Google.
+The description shown when you highlight a place is Google's own write-up, where
+it has one. Many places have none. For those, Google's AI-written overview or
+summary of its reviews is used instead, and it's marked as summarised by Google.
 
 ## Why a fixed category list
 
-Every provider answers the same eleven categories, translated into whatever
-vocabulary its own upstream data source uses, rather than each provider
-exposing its own native category list. That lets you switch providers in
-Settings without the Nearby tile's category filter changing meaning, and it
-is why a provider with no equivalent for a
-category reports it as unsupported instead of inventing a mapping that
-doesn't really fit.
+Every provider answers the same eleven categories. Each one translates them into
+whatever vocabulary its own upstream data source uses, rather than exposing its
+own native category list. That lets you switch providers in Settings without the
+Nearby tile's category filter changing meaning. It's also why a provider with no
+equivalent for a category reports it as unsupported, instead of inventing a
+mapping that doesn't really fit.

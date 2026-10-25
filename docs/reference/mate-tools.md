@@ -3,15 +3,16 @@
 [Mate](../features/assistant.md) answers most questions from the boat's own
 live instrument data. For anything else it uses the lookups below, each tied
 to a provider you configure elsewhere in Helmcentral. This page is the detail
-behind the summary on Mate's own page: what each lookup draws on, what has to
-be configured for it to work, and what Mate says when it can't be done.
+behind the summary on Mate's own page. For each lookup it says what it draws
+on, what has to be configured for it to work, and what Mate says when it can't
+be done.
 
 | Lookup | What it reads | Comes from | Needs configured | If it can't run |
 | --- | --- | --- | --- | --- |
 | Live vessel context | Position, heading, speed, apparent wind, current place name, marine warning in force | The dashboard's own live feed, exactly as shown right now | Nothing extra, always included | A missing reading reads as "unknown", never a guessed number |
 | Place lookup | Resolves a named place to a position | The configured place-names plugin, searched by exact name within about 200 nautical miles of the boat | A place-names plugin (**Settings → Plugins → Place names**, OpenStreetMap by default) | Says the name didn't resolve |
 | Forecast for a place | Wind and wave forecast for a named place, not just where you are now | The same providers the Forecast panel uses | A forecast provider configured | Names the provider that failed |
-| Tide for a place | Tide predictions for a named place | The same tide provider and station catalog the dashboard uses | A tide provider and station | Says no tide provider is configured |
+| Tide for a place | Tide predictions for a named place | The same tide provider and station catalogue the dashboard uses | A tide provider and station | Says no tide provider is configured |
 | Passage wind and sea angle | True wind and sea angle against a planned course | Worked out from the forecast lookup above, not estimated by a language model | A course to compare against | - |
 | Fair-tide departure | The best three departure times, and the one to avoid, for a passage, with the share of the run that has the stream with you and the flood and ebb spells it crosses | The tide times of the nearest tide station, the passage course and hours, and the direction the flood stream sets, which Mate takes from your standing notes first and otherwise from its own general knowledge and says which | A tide provider and station. Putting the local flood direction, and how long the stream turns after high and low water if you know it, in your standing notes makes Mate use those | Says what is missing: no tide provider or station, tide times that do not reach the passage, or a flood direction it does not know. It reports stream phase only, not stream rate, and says the direction is to be checked against the tidal stream atlas and cruising guide |
 | Weather window | Go, marginal, no-go or no data for each leg of a trip on each candidate departure day, with the times and the figure that decided each, shown as a card under the answer | The forecast providers above, sampled along each leg for the hours it would be under way, sunset times for the leg's end, and, for legs with a known flood direction, the tide station's high and low water | Your [passage limits](../how-to/set-passage-limits.md), with a no-go wind limit for every sector a leg passes through (marginal is 70% of no-go, and gusts are judged against the no-go wind plus 10 kn), and a forecast provider. A wave provider and a no-go wave height add the wave check, and a tide provider and a wind-against-tide reduction add that one | Takes passage hours or a speed for each leg (the hours win if both are given, and Mate is told the speed was ignored). Says the limits are not set, or names the sector without one. A leg past the forecast is no data. A check it could not make (no gust forecast, no wave forecast, no tide station, no flood direction, sunset unknown) is listed as not checked, never passed |
@@ -33,13 +34,13 @@ be configured for it to work, and what Mate says when it can't be done.
 | Earlier conversations | Past conversations that mention a piece of equipment or a topic, with the matching lines and the date, or a whole earlier conversation read through | Your saved Mate conversations, the same ones the conversation list shows. The conversation you are in is left out | Nothing extra | Says nothing matches. A deleted conversation cannot be found |
 | The document library | Manuals, receipts, notes, photos already in the library | An attached file, or a search across the whole library | See [Documents](../features/documents.md) | - |
 
-Place search uses the same plugin as the place name on the position tile, and
-the same Overpass server setting when that plugin is OpenStreetMap. It is a
-separate choice from the plugin the Nearby tile uses, even though both default
+Place search uses the same plugin as the place name on the position tile. When
+that plugin is OpenStreetMap, it uses the same Overpass server setting too. It's
+a separate choice from the plugin the Nearby tile uses, even though both default
 to the same one. If your boat's connection can't reach the default Overpass
-server, see [Configuration → Overpass](configuration.md#overpass) for pointing
-it at a mirror.
+server, see [Configuration → Overpass](configuration.md#overpass) for how to
+point it at a mirror.
 
-A lookup that fails three times while Mate is answering a single question is
-not tried again for the rest of that answer. Mate says the lookup was
+If a lookup fails three times while Mate is answering a single question, Mate
+doesn't try it again for the rest of that answer. It says the lookup was
 unavailable and answers with what it has.

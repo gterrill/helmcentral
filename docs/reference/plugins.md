@@ -1,10 +1,10 @@
 # Provider plugins
 
 Tides, weather, waves, points of interest (Nearby), forecast warnings and the
-upper-air outlook each come from a small provider plugin rather than being
-built into Helmcentral itself. Adding a provider for another region's
-government data source, or swapping one out, needs no Helmcentral upgrade.
-Drop the plugin into the right folder and restart.
+upper-air outlook each come from a small provider plugin. They aren't built
+into Helmcentral itself. So you can add a provider for another region's
+government data source, or swap one out, without a Helmcentral upgrade. Drop
+the plugin into the right folder and restart.
 
 | Category | Directory | Override | Bundled plugins |
 | --- | --- | --- | --- |
@@ -18,17 +18,17 @@ Drop the plugin into the right folder and restart.
 Pick the active provider for each category in Settings.
 
 The [Offline coastline](../features/offline-coastline.md) downloads through
-the `osm-overpass` place-names plugin, and needs a version of it that can
-supply coastline and report edits. If you replace that plugin file with an
-older one, Settings → Offline coastline says the plugin is too old and nothing
-downloads. Mate carries on with everything else, and answers shelter questions
-with an error naming what is missing. The map server it talks to is that
-plugin's own setting.
+the `osm-overpass` place-names plugin, and it needs a version of that plugin
+that can supply coastline and report edits. If you replace the plugin file
+with an older one, Settings → Offline coastline says the plugin is too old and
+nothing downloads. Mate carries on with everything else, and answers shelter
+questions with an error naming what's missing. The map server it talks to is
+that plugin's own setting.
 
 Upper air is optional: leave that plugin out and the forecast page shows no
 500mb section. Points of interest is optional the same way. With no `poi`
 plugin installed, Nearby reports an error saying what to install, and nothing
-else on the dashboard fails to load. The rest have a tile that goes empty
+else on the dashboard fails to load. The rest each have a tile that goes empty
 without a provider.
 
 ## Installing a plugin
@@ -52,21 +52,22 @@ its category.
 A plugin can only reach the internet hosts named in its own allowlist file.
 One with no such file gets no network access at all. Review a third-party
 plugin's allowlist before installing it, because a plugin approved for both a
-secret and an external host can send that secret to that host. If a plugin needs
-your own credentials, such as WeatherKit's signing key, open that provider's
-settings from its card in Settings and enter them there, rather than editing
-a file by hand. The same dialog shows the plugin's allowed hosts and allowed
-secrets. Changes to those take effect after a restart.
+secret and an external host can send that secret to that host.
+
+If a plugin needs your own credentials, such as WeatherKit's signing key, open
+that provider's settings from its card in Settings. Enter them there rather
+than editing a file by hand. The same dialog shows the plugin's allowed
+hosts and allowed secrets. Changes to those take effect after a restart.
 
 ## Plugin-declared settings
 
 Some plugins expose one or two of their own settings for you to edit from
-Settings, without an environment variable, a file to edit, or a restart. The
+Settings. You don't need an environment variable, a file to edit, or a restart. The
 `osm-overpass` points-of-interest plugin's Overpass server address is the
 first example. See [Configuration → Overpass](configuration.md#overpass).
 Open the gear icon on a provider's card in Settings to reach settings like
-this. Leaving one blank reverts to the plugin's own default, and a change
-takes effect on the plugin's very next call.
+this. Leaving one blank reverts to the plugin's own default. A change takes
+effect on the plugin's very next call.
 
 ## Why tides have no default
 
@@ -77,10 +78,11 @@ dashboard without any configuration.
 Tides have no equivalent global service. Tide predictions depend on physical
 water-level stations rather than a global weather model, so there is no free
 API with worldwide coverage to default to. `bom` covers Australia and `noaa`
-covers the United States, with nothing beyond those. Helmcentral ships no
-coordinate-based fallback. A global model standing in for real station
-observations would show tide times that look authoritative but are wrong for
-local waters, which is worse than an honest gap.
+covers the United States, with nothing beyond those.
+
+Helmcentral ships no coordinate-based fallback. A global model standing in for
+real station observations would show tide times that look authoritative but
+are wrong for local waters, which is worse than an honest gap.
 
 Pick `ui.tide_provider` in Settings for your region. Until you do, the
 forecast page's tide section shows an explicit error naming what's missing

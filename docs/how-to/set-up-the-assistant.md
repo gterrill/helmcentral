@@ -17,8 +17,9 @@ your questions.
 
 ## 2. Configure it in Helmcentral
 
-With write access, open **Settings → Mate**. While viewing the Mate page
-itself, the gear icon in the header (tablet or larger) opens the same section directly:
+With write access, open **Settings → Mate**. While you're viewing the Mate page
+itself, the gear icon in the header (tablet or larger) opens the same section
+directly:
 
 1. Paste the key into the **OpenRouter API key** field.
 2. Choose your routing mode:
@@ -53,10 +54,10 @@ tides for both, then a short answer with a comparison table.
 
 ## If it says "No endpoints found that support tool use"
 
-The selected model path cannot execute tool calls. If you are on a fixed
-model, choose a different model from the dropdown. If you are on OpenRouter
-Auto, relax `allowed models`/`excluded models`/`cost tier` so Auto still has
-at least one tool-capable model available.
+The selected model path can't run tool calls. If you're on a fixed model,
+choose a different model from the dropdown. If you're on OpenRouter Auto,
+relax `allowed models`/`excluded models`/`cost tier` so that Auto still has at
+least one tool-capable model available.
 
 ## Write access and cost
 
@@ -66,6 +67,6 @@ switched on, a read-only account can open the panel and read past
 conversations but can't send a new message, since sending one spends your
 OpenRouter key.
 
-Every reply's footer shows what it cost, so keep an eye on it the same way
-you'd watch any other pay-as-you-go service, especially if login is off and
+Every reply's footer shows what it cost. Keep an eye on it the same way you'd
+watch any other pay-as-you-go service. That matters most if login is off and
 more than one person on the boat has access to the dashboard.

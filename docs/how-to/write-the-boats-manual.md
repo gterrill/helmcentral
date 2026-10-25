@@ -41,14 +41,14 @@ different documents with different readers.
 
 ## 3. File notes into it
 
-Every note's row carries a **File…** button, whether it's in **Unfiled notes**
-(the filter in the folder pane for notes still waiting to be dealt with) or
-filed somewhere already. It opens the same Move dialog you would
-use to move any document: choose the manual, or a folder inside it, creating
-one on the spot if it does not exist yet.
+Every note's row carries a **File…** button. It's there whether the note is in
+**Unfiled notes** or filed somewhere already. **Unfiled notes** is the filter
+in the folder pane for notes still waiting to be dealt with. The button opens
+the same Move dialog you'd use to move any document. Choose the manual, or a
+folder inside it, creating one on the spot if it doesn't exist yet.
 
 Filing removes the note from the unfiled count. The pile drains as the
-manual fills, so what is left in it is always what you have not dealt with
+manual fills, so what's left in it is always what you haven't dealt with
 yet.
 
 A note filed into a manual lands at the end of its order. If it belongs
@@ -65,7 +65,7 @@ Open the manual (a folder like any other, marked with a book icon) and press
 get the order right, then press **Done**.
 
 Order matters more than it looks. A manual is read front to back by someone
-who does not know the boat, so the sequence should follow how the boat is
+who doesn't know the boat. So the sequence should follow how the boat is
 actually operated: getting under way before anchoring, anchoring before
 leaving her for a month.
 
@@ -118,9 +118,9 @@ See [the fuel valve layout](hc-note:PASTE-THE-ID-HERE)
 ```
 
 Use it where a procedure genuinely depends on another one, such as a start-up
-checklist pointing at the fuel valve layout, rather than as a substitute for
+checklist pointing at the fuel valve layout. Don't use it as a substitute for
 saying the thing in place. A reader following a chain of links at 0300 is a
-reader who has not been told what to do.
+reader who hasn't been told what to do.
 
 ## 7. Run a checklist
 
@@ -140,19 +140,22 @@ for a full-width tick-off list sized for a thumb, not a cursor. Tap a step
 to tick it, in any order. **Complete checklist** closes the run out when
 you are done, and **Abandon checklist** stops it early without finishing.
 
-Get interrupted partway through and the note holds your place. Tap **Start
-checklist** again and it picks up exactly where you left off: how many
-steps are done, and the first one still unticked, without making you scan
-the list to find it.
+If you get interrupted partway through, the note holds your place. Tap **Start
+checklist** again and it picks up exactly where you left off. It shows how many
+steps are done and the first one still unticked, so you don't have to scan the
+list to find it.
 
-Editing the note while a run is under way does not disturb it, as long as
+Editing the note while a run is under way doesn't disturb it, as long as
 the step's own wording is unchanged. Reordering steps, fixing a typo
-elsewhere or adding a new step above does not move or clear a tick.
-Reword a ticked step itself and that one tick moves into a **Re-check**
-group, showing the old wording next to the new step, so nothing gets
+elsewhere or adding a new step above doesn't move or clear a tick.
+
+If you reword a ticked step itself, that one tick moves into a **Re-check**
+group, showing the old wording next to the new step. That way nothing gets
 silently counted as done when it was written differently to what actually
-got checked off. Completing or abandoning a run does not touch the note
-either. The next **Start checklist** begins a fresh, unticked run.
+got checked off.
+
+Completing or abandoning a run doesn't touch the note either. The next **Start
+checklist** begins a fresh, unticked run.
 
 ## Keeping it useful
 
@@ -160,6 +163,6 @@ Notes stay searchable wherever they are filed, so a manual section and the
 manufacturer's PDF it came from turn up in the same search.
 
 The sections worth writing first are the ones that are true of your hull and
-no other. Anything that is true of every boat of the model is already in the
-builder's handbook, and anything true of every engine of the type is already
+no other. Anything that's true of every boat of the model is already in the
+builder's handbook. Anything that's true of every engine of the type is already
 in the engine manual. Your manual's value is the rest.

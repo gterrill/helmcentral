@@ -1,10 +1,10 @@
 # Equipment profiles
 
-An equipment profile describes one piece of machinery: the gauges it needs,
-their display scales, its normal operating ranges and its service intervals.
-An equipment item follows a profile, and every tile that shows the item reads
-the profile's gauges and bands live. You set a limit once and the tile and its
-alarm both follow it.
+An equipment profile describes one piece of machinery. It lists the gauges the
+machine needs, their display scales, its normal operating ranges and its
+service intervals. An equipment item follows a profile, and every tile that
+shows the item reads the profile's gauges and bands live. You set a limit once,
+and the tile and its alarm both follow it.
 
 Three kinds of equipment are covered, set by the profile's `kind` field:
 
@@ -14,12 +14,12 @@ Three kinds of equipment are covered, set by the profile's `kind` field:
 | `alternator` | Engine-driven alternators | Anything except `phase.` or `total.` |
 | `generator` | AC gensets | Must start with `phase.` or `total.` |
 
-Your profiles are stored with the rest of your boat's records and are managed
-from **Inventory → Profiles**, which can add, edit, download and delete them.
-**Add from catalogue** there copies one of the profiles that ship with
-Helmcentral into your own list, where you can edit it freely. A profile already
-in your list is greyed out in the catalogue. Your profiles appear under **Add
-Tile → From equipment profile…**.
+Your profiles are stored with the rest of your boat's records. You manage them
+from **Inventory → Profiles**, where you can add, edit, download and delete
+them. **Add from catalogue** there copies one of the profiles that ship with
+Helmcentral into your own list, where you can edit it freely. A profile that's
+already in your list is greyed out in the catalogue. Your profiles appear under
+**Add Tile → From equipment profile…**.
 
 A profile can carry alarm thresholds, so you can open it and read the exact
 value at which an alarm will fire.
@@ -28,7 +28,7 @@ If you ran an earlier version that kept profiles as files in a folder, run
 `helmcentral convert-profile-rules` once to bring them across. It shows what it
 would import and changes nothing until you add `--apply`. Helmcentral won't
 start while profile files are waiting in the old folder and your profile list is
-empty, and its message names this command.
+empty. Its message names this command.
 
 ## What ships, and what does not
 
@@ -46,10 +46,10 @@ The three catalogue profiles land on both sides of that line:
 
 The two Cummins engines ship nothing because Cummins doesn't publish QSB 6.7
 setpoints. They're in the operator's manual and in QuickServe. Public material
-gives only general operating guidance. A low oil pressure alarm set at 25 psi
-because a forum says cruise pressure runs 40 to 80 would raise alarms your ECU
-doesn't, and that teaches you to ignore the alarm list. A number nobody can
-source is worse than no number.
+gives only general operating guidance. Say a forum claims cruise pressure runs
+40 to 80, and you set a low oil pressure alarm at 25 psi because of it. That
+would raise alarms your ECU doesn't, and it teaches you to ignore the alarm
+list. A number nobody can source is worse than no number.
 
 Where a figure is published, withholding it helps nobody, so the alternator
 ships its charging window, its sustained output limit and its thermal limit.
@@ -68,17 +68,17 @@ profile's gauges to show, and how.
 
 ## Filling in your thresholds
 
-There are two ways, with the same result. Edit the profile in **Inventory →
-Profiles**, or edit the zones on a gauge in the settings of a tile that shows
-the equipment. The tile's form is easier to check against the gauge layout as
-you go. Either way the zones are saved to the profile, and the form says which
-equipment and tiles the change applies to, for example "Applies to every tile
-and alarm using Yanmar 4JH (Port engine, Starboard engine)". No zone belongs to
-a tile alone.
+There are two ways, and they give the same result. You can edit the profile in
+**Inventory → Profiles**, or you can edit the zones on a gauge in the settings
+of a tile that shows the equipment. The tile's form is easier to check against
+the gauge layout as you go. Either way the zones are saved to the profile. The
+form says which equipment and tiles the change applies to, for example "Applies
+to every tile and alarm using Yanmar 4JH (Port engine, Starboard engine)". No
+zone belongs to a tile alone.
 
-A zone at any severity other than **Healthy** raises an alarm at its threshold
-the same way as any other alarm: the banner, the CHK lamp, acknowledgement and
-every configured notification transport. **Healthy** bands colour the gauge and
+A zone at any severity other than **Healthy** raises an alarm at its threshold.
+It works the same way as any other alarm, with the banner, the CHK lamp,
+acknowledgement and every configured notification transport. **Healthy** bands colour the gauge and
 raise nothing, which is how advisory ranges work.
 
 From an engine manual you usually want the low oil pressure warning and alarm,
@@ -148,7 +148,7 @@ the same size.
 "below"` with `"threshold": 15` covers everything below 15. A band has to
 anchor to one end of the gauge scale, because that's the only shape that maps
 to a single alarm threshold. A band floating in the middle of the range has no
-equivalent and is rejected.
+equivalent, so it's rejected.
 
 Thresholds are in the gauge's **display unit**, psi or °C, not SignalK's SI
 unit. The conversion happens before the alarm engine sees the value, which is
@@ -167,8 +167,8 @@ up. It draws no band and raises no alarm, and it isn't filled with a default
 nobody chose.
 
 **A threshold that is set must cite its `source`.** A test enforces this for
-the catalogue profiles, not for your own. Follow it in yours anyway. In a year
-you'll want to know whether 100 came from the specification or from an
+the catalogue profiles, not for your own. Follow it in yours anyway, because in a
+year you'll want to know whether 100 came from the specification or from an
 afternoon's guess.
 
 **Service items with no interval are slots too.** They name a job the machine
@@ -177,7 +177,7 @@ needs without inventing an interval for it.
 ## When a profile does not load
 
 A bad profile is skipped, logged and reported. The others still load, and
-Inventory names the profile that failed and why. Common causes:
+Inventory names the profile that failed and why. These are the common causes:
 
 - an unknown `unit`, `quantity` or `display`
 - a zone whose `direction` is neither `below` nor `above`
@@ -215,19 +215,19 @@ hyphens, starting with a letter or number.
 ## Service intervals
 
 The `service` block is the maintenance schedule of every equipment record
-that uses the profile. **Inventory → Maintenance** reads it live: change an
-interval here and every item using the profile follows at once. An entry with
-no interval shows as a job whose interval isn't set yet. It isn't skipped. An
-item can change a job's description or intervals, or mark it not applicable,
-for itself only. Those changes are marked on the item and can be reset to the
-profile's values.
+that uses the profile. **Inventory → Maintenance** reads it live, so if you
+change an interval here, every item using the profile follows at once. An entry
+with no interval shows as a job whose interval isn't set yet. It isn't skipped.
+An item can change a job's description or intervals, or mark it not applicable,
+for itself only. Those changes are marked on the item, and you can reset them
+to the profile's values.
 
 Each service `id` is how an item keeps its history for that job, so keep it
 stable. Renaming an id reads as removing one job and adding another. Saving a
 profile that removes a job some item has history for asks you to confirm and
-names the items, and the old job's history stays on those items under **No
-longer in the profile**. `first_at_hours` and `supersedes` are shown as written
-but don't yet change when a job falls due. See
+names the items. The old job's history stays on those items under **No longer
+in the profile**. `first_at_hours` and `supersedes` are shown as written, but
+they don't yet change when a job falls due. See
 [Maintenance](../features/maintenance.md) and
 [Set up a maintenance schedule](../how-to/set-up-a-maintenance-schedule.md).
 

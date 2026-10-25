@@ -1,11 +1,11 @@
 # Documents
 
 The document library keeps the files that matter to the boat where you can find
-them from the boat, not from an inbox ashore: manuals, receipts, invoices,
-service logs, passage notes, a photo of a part number or a data plate. Upload
-one and Helmcentral reads whatever text it can find and indexes it for search.
-With Mate switched on, a scan or photo is also OCR'd properly, and the document
-gets a short summary and a few suggested tags.
+them from the boat, not from an inbox ashore. That means manuals, receipts,
+invoices, service logs, passage notes, and a photo of a part number or a data
+plate. Upload one and Helmcentral reads whatever text it can find and indexes
+it for search. With Mate switched on, a scan or photo is also OCR'd properly,
+and the document gets a short summary and a few suggested tags.
 
 The sidebar's **Documents** panel is where this happens day to day. You browse
 folders, upload by button or drag-and-drop, search, and open, download, rename,
@@ -15,7 +15,7 @@ titled with the folder you are in. **Upload** is the button at the top right.
 actions**). The list holds documents only, and each row has its own menu.
 Folders live in the pane on the left, described below. You can also attach a
 file straight from Mate's composer (see [Documents](assistant.md#documents) on
-the Mate page), and a chip on a past message opens the same viewer this panel
+the Mate page). A chip on a past message opens the same viewer this panel
 uses.
 
 Notes you capture yourself, and folders marked as a manual for reading front to
@@ -39,15 +39,17 @@ This runs as soon as the document is uploaded. There's no button to press and
 no per-document prompt. It costs real money, though the amounts are small. A
 one-page scanned invoice cost $0.0023, the same document split across two pages
 cost $0.0046, and a photographed receipt cost $0.0012, all measured against a
-live OpenRouter account. Each document tracks what has been spent reading it,
-added up across every reindex, not just the last pass. That figure is on the
-document's Details page, under Indexing.
+live OpenRouter account.
+
+Each document tracks what has been spent reading it, added up across every
+reindex, not just the last pass. That figure is on the document's Details page,
+under Indexing.
 
 **What leaves the boat:** with Mate off, nothing does. With Mate on, an
 uploaded document's content goes to a separate reading model set up for the
 document library. For a scan that content is the scan itself, and for a
-text-layer PDF it's up to 24,000 characters of its text. This model is apart
-from the one that answers your questions and defaults to a fast, inexpensive
+text-layer PDF it's up to 24,000 characters of its text. This model is separate
+from the one that answers your questions, and it defaults to a fast, inexpensive
 one. See [Configuration](../reference/configuration.md) for where it's set.
 
 A document uploaded while Mate was off keeps whatever was read on the boat at
@@ -57,14 +59,18 @@ automatically once Mate is ready (see Searching, below).
 
 ## The folder pane
 
-The pane on the left shows every folder in the library as a tree, so you can
-see where things are filed and jump to any of them without stepping through the
-levels. **Documents** is at the top and shows the documents filed at the root
-of the library. The folders sit below it, each with a count on the right of the
-documents filed directly in it. A chevron opens or closes a folder that has
-subfolders, and Helmcentral remembers which ones you left open on that device.
-Open a document's folder from a link and its parents open themselves, with the
-folder highlighted.
+The pane on the left shows every folder in the library as a tree. You can see
+where things are filed and jump to any of them without stepping through the
+levels.
+
+- **Documents:** It's at the top and shows the documents filed at the root of
+  the library.
+- **Folders:** They sit below it, each with a count on the right of the
+  documents filed directly in it.
+- **Chevrons:** A chevron opens or closes a folder that has subfolders, and
+  Helmcentral remembers which ones you left open on that device.
+- **Links:** If you open a document's folder from a link, its parents open
+  themselves and the folder is highlighted.
 
 A folder marked as a manual shows a book icon. Its sections are read inside
 the manual, so they are not listed as folders in the pane, and its count is
@@ -73,12 +79,12 @@ every document anywhere inside it.
 Below a divider, **Unfiled notes** shows how many captured notes are not
 filed anywhere yet, and switches the list to just those.
 
-Every folder has a menu (the three dots at the right of its line, always
-showing on a touch screen and appearing on hover or focus elsewhere) with
-**Rename**, **Move…**, **Treat as a manual** or **Stop treating as manual**
-(top-level folders only) and **Delete**. A folder has to be empty before you
-can delete it. **New folder** in the page menu creates the folder inside the
-one you are viewing.
+Every folder has a menu. It's the three dots at the right of its line, always
+showing on a touch screen and appearing on hover or focus elsewhere. The menu
+has **Rename**, **Move…**, **Treat as a manual** or **Stop treating as
+manual** (top-level folders only) and **Delete**. A folder has to be empty
+before you can delete it. **New folder** in the page menu creates the folder
+inside the one you're viewing.
 
 To file documents quickly, drag a row from the list onto a folder in the pane.
 The folder lights up as you pass over it. If several rows are ticked, dragging
@@ -100,8 +106,8 @@ at the root). Moving a document only changes where it's filed. The file itself
 is untouched, so refiling never means re-uploading.
 
 **Move…** opens a folder picker you can browse one level at a time. The
-destination doesn't have to exist yet. Type a name and click **Create folder**,
-and the picker makes it inside the folder it's showing and drops straight into
+destination doesn't have to exist yet. Type a name and click **Create folder**.
+The picker makes the folder inside the one it's showing and drops straight into
 it, so **Move here** means the folder you just made. Filing the first receipt
 of a new year is one trip, not three.
 
@@ -132,7 +138,7 @@ Mate**, each with a **Keep** that adopts it as yours. **Rename** on the row
 menu is still there for when the title is all you want to change.
 
 Nothing is written until you press **Save**. As soon as you change anything, a
-save bar appears at the top of the screen with **Save** and **Discard**, and
+save bar appears at the top of the screen with **Save** and **Discard**.
 **Discard** puts the page back the way you found it. If you have unsaved edits,
 the page asks before it lets you leave.
 
@@ -195,7 +201,7 @@ With Mate on, search also works by meaning. Ask "how often should I service the
 engine's cooling system impeller" and the manual page that says "raw water
 pump: inspect the rubber vanes... replace every 500 hours" comes back, even
 though the two share no useful word. Both searches run and the results are
-merged, so a document both agree on ranks above one that only one side found.
+merged. So a document both agree on ranks above one that only one side found.
 
 For this, each document's text first has to be turned into vectors. Turning
 Mate on with an embedding model chosen sweeps the whole library in the
@@ -211,11 +217,13 @@ hundredths of a cent, and less if you've searched the same thing recently,
 since queries are cached.
 
 If the meaning half of a search can't run (no connection, OpenRouter down), the
-search still answers with its word results and says **Showing keyword results
-only** above them, with the reason. If no embedding model is configured at all,
-semantic search is simply off and the panel says nothing about it. If the
-background sweep hits a snag, the toolbar names it and links to Settings →
-Assistant so you can fix it there.
+search still answers with its word results. It says **Showing keyword results
+only** above them, with the reason.
+
+- **No embedding model:** If none is configured at all, semantic search is
+  simply off and the panel says nothing about it.
+- **A snag in the background sweep:** The toolbar names it and links to
+  Settings → Assistant so you can fix it there.
 
 The embedding model is set alongside the document-reading model above. Leave it
 blank and semantic search is off, with word search as the only way to find
@@ -233,7 +241,7 @@ first three tags with a "+2" style count for the rest. Hover to see them all.
 ## Status and Reindex
 
 In the listing, the document's icon carries its state. The normal grey icon
-means indexed, amber means still being read (hover for "Reading…"), and red
+means indexed. Amber means it's still being read (hover for "Reading…"). Red
 means it failed (hover for "Failed"), with the reason on a line under its name.
 
 A document is one of three things:
@@ -246,20 +254,21 @@ A document is one of three things:
 - **Failed**: something went wrong, with the reason shown alongside.
 
 **Reindex** re-reads a document from the beginning. Reading on the boat runs
-again, and if Mate is on right now, OCR and enrichment run again too, whether
-or not they ran, or succeeded, the first time. Reindex is also how a scan
-longer than 200 pages gets past the automatic cost cap. A document that size is
-turned away the first time, with its page count and an estimated cost, and only
-goes ahead once you ask for it through Reindex.
+again. If Mate is on right now, OCR and enrichment run again too, whether or
+not they ran, or succeeded, the first time.
 
-Select more than one document (the checkbox on each row, or **Select all** in
-the header for everything listed) and a bar appears above the list showing how
-many are selected, with **Move to…**, **Reindex…**, **Delete** and **Clear
+Reindex is also how a scan longer than 200 pages gets past the automatic cost
+cap. A document that size is turned away the first time, with its page count
+and an estimated cost. It only goes ahead once you ask for it through Reindex.
+
+Select more than one document, using the checkbox on each row or **Select all**
+in the header for everything listed. A bar then appears above the list showing
+how many are selected, with **Move to…**, **Reindex…**, **Delete** and **Clear
 selection**. Reindex covers everything you picked in one confirmation. That's
 useful after re-scanning a folder of receipts, or once Mate is switched on for
 a batch uploaded while it was off. The confirmation shows the combined page
-count and, if any of it is a scan or a photo, the estimated OCR cost for just
-those.
+count. If any of it is a scan or a photo, it also shows the estimated OCR cost
+for just those.
 
 ## Attaching a document to Mate, and Mate searching on its own
 
@@ -267,23 +276,27 @@ When you ask Mate a question with a document attached, Mate gets a short
 preamble ahead of your question: the filename, the kind of file, the page
 count, whether indexing has finished, and up to around 4,000 characters of
 what's in it. If the answer needs more, Mate reads further into the same
-document itself. The attachment stays on the message as a small chip that
-reopens this panel's viewer for that file.
+document itself. The attachment stays on the message as a small chip, and the
+chip reopens this panel's viewer for that file.
 
 Mate can also search the whole library on its own, the same way it looks up a
 forecast or a tide station. Ask "what's the part number for the raw water pump
-impeller", and if a receipt or a manual in the library mentions it, Mate finds
-and reads it without being handed the file.
+impeller". If a receipt or a manual in the library mentions it, Mate finds and
+reads it without being handed the file.
 
 ## Backups
 
-The library is two things, and you need both: the `data/documents/` folder
-(every file's bytes, in one flat folder, named by content) and
-`data/helmcentral.sqlite` (everything that describes them: titles, folders,
-tags and the search index, alongside the rest of your boat's records such as
-inventory, equipment, maintenance, Mate's conversations and the nearby-vessel
-history). The database alone describes files it can no longer produce. The
-folder alone is just anonymous names. Back both up as one unit.
+The library is two things, and you need both:
+
+- **`data/documents/`:** Every file's bytes, in one flat folder, named by
+  content.
+- **`data/helmcentral.sqlite`:** Everything that describes them: titles,
+  folders, tags and the search index. It sits alongside the rest of your boat's
+  records, such as inventory, equipment, maintenance, Mate's conversations and
+  the nearby-vessel history.
+
+The database alone describes files it can no longer produce. The folder alone
+is just anonymous names. Back both up as one unit.
 
 Copying `helmcentral.sqlite` while Helmcentral is running can miss changes
 still waiting to be written. Stop Helmcentral first, or use the `sqlite3`

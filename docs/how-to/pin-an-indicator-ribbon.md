@@ -5,25 +5,25 @@ You need write access, and you do this in layout mode.
 1. Toggle layout mode in the header (desktop widths only).
 2. Choose **Ribbon** next to the page's hero and skin controls. The first time,
    with nothing pinned yet, the dialog opens with a lamp already added for each
-   piece of mapped equipment that has a running signal: each engine's
+   piece of mapped equipment that has a running signal. That means each engine's
    revolutions, the generator's state, the charger's shore current, the
    inverter's AC input and each alternator's charging mode. Each lamp is
    labelled with the equipment's own name. Nothing is pinned until you choose
    Save, so you can still change or clear any of this.
 3. Add a lamp by hand. Under **Reads**, choose **Equipment** to pick a mapped
-   engine, generator, charger, inverter or alternator and the reading to watch,
-   or **A path** for a single signal such as a bilge float. Give it a short
-   label, 12 characters or fewer. The whole label is always shown. Use "Lit
-   when off" for a signal whose healthy state is off, such as a bilge float or
-   a fault line. For a CZone bilge circuit, the path is
+   engine, generator, charger, inverter or alternator and the reading to watch.
+   Or choose **A path** for a single signal such as a bilge float. Give it a
+   short label, 12 characters or fewer. The whole label is always shown. Use
+   "Lit when off" for a signal whose healthy state is off, such as a bilge float
+   or a fault line. For a CZone bilge circuit, the path is
    `electrical.switches.bank.<n>.<m>.state`, using the bank and circuit numbers
    CZone assigned it. Check "Lit when off" if the circuit reads off while the
    bilge is dry.
 4. Choose **Suggest lamps** to add any mapped equipment that isn't already in
    the list, such as a second generator you've mapped since you last edited the
    ribbon. Equipment that isn't mapped to a source gets no lamp. Suggest only
-   adds what's missing. A lamp already in the list, whether you added it by
-   hand or it came from an earlier suggestion, is left alone.
+   adds what's missing. A lamp already in the list is left alone, whether you
+   added it by hand or it came from an earlier suggestion.
 5. Optionally give a lamp a **Group**, such as Propulsion or Power (16
    characters or fewer). Neighbouring lamps with the same group share one
    heading. Choose an **Icon** for the lamp, or leave **Automatic** and one is

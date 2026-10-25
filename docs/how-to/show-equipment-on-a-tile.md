@@ -1,9 +1,9 @@
 # Show equipment on a tile
 
 An engine cluster, and a gauge group set to show equipment, follow a piece of
-equipment you have set up rather than a list of paths. Choose another engine
-and the readings, scales and alarm limits all come with it. That keeps a port
-tile and a starboard tile honest when you adjust a limit.
+equipment you have set up rather than a list of paths. If you choose another
+engine, the readings, scales and alarm limits all come with it. That keeps a
+port tile and a starboard tile honest when you adjust a limit.
 
 Before you start, the engine needs to be an equipment item mapped to what the
 boat reports. See [Set up your vessel](set-up-your-vessel.md).
@@ -11,12 +11,12 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
 ## Add an engine cluster
 
 1. Turn on **Layout** mode and choose **Add tile → Engine Cluster…**.
-2. Under **Engine**, choose the engine. The list shows your mapped engines. An
-   item that isn't mapped to anything yet is listed under **Not mapped yet** only
-   if it could be an engine (it's in the Propulsion system, or follows an engine
-   profile). A spare, a tool or a consumable never appears there. See below for
-   mapping. Two items with the same name are told apart by where they are and
-   their serial number.
+2. Under **Engine**, choose the engine. The list shows your mapped engines.
+   An item that isn't mapped to anything yet is listed under **Not mapped yet**
+   only if it could be an engine. That means it's in the Propulsion system, or
+   it follows an engine profile. A spare, a tool or a consumable never appears
+   there. See below for mapping. Two items with the same name are told apart by
+   where they are and their serial number.
 3. Choose **Fill slots from profile**, or pick each slot's **Reading** from the
    list of the profile's readings and the ones the boat reports for that
    engine. The ring, the hours, the four readout cards, the coolant arc and the
@@ -32,8 +32,9 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
 6. Leave **Title** blank to show the engine's name, or type your own.
 7. To add a fuel rail, choose **Add fuel rail**, then choose a tank for each bar
    (forward and aft). The arcs sit on the outer edge for the engine's side.
-   A bar can carry a **low fuel alarm**: the level it falls below, and how severe.
-   Unlike engine limits, it belongs to the bar, because a tank has no profile.
+   A bar can carry a **low fuel alarm**, which is the level it falls below and
+   how severe the alarm is. Unlike engine limits, it belongs to the bar,
+   because a tank has no profile.
 8. Choose **Save**.
 
 For the second engine, duplicate the tile, choose the other engine and press
@@ -51,13 +52,13 @@ For the second engine, duplicate the tile, choose the other engine and press
 
 ## Change a limit from a tile
 
-Each gauge with a scale lists its zones. Edit one and the form shows which
-equipment and tiles the change applies to, for example "Applies to every tile
+Each gauge with a scale lists its zones. When you edit one, the form shows
+which equipment and tiles the change applies to, for example "Applies to every tile
 and alarm using Yanmar 4JH (Port engine, Starboard engine)". Saving the tile
 saves the limit to the profile. No limit belongs to a single tile.
 
-The reading's quantity and unit come from the profile, so limits are always in
-the profile's unit and you can't change them on the tile.
+The reading's quantity and unit come from the profile. That means limits are
+always in the profile's unit, and you can't change them on the tile.
 
 If the profile has no gauge for a reading, the form says so and shows no zones.
 Add the reading to the profile under **Inventory → Profiles** to give it some.
@@ -66,7 +67,7 @@ Add the reading to the profile under **Inventory → Profiles** to give it some.
 
 A tile that was set up before you chose equipment keeps its own limits, and
 they keep raising their alarms, until the equipment has a profile to hold them.
-When you choose the equipment and save the tile:
+Here's what happens when you choose the equipment and save the tile:
 
 - If the profile has no limit for a reading, the tile's limit moves to the
   profile and leaves the tile.
@@ -77,9 +78,10 @@ When you choose the equipment and save the tile:
 
 ## When the tile does not show readings
 
-A tile that cannot read its equipment says why, in the tile:
+A tile that can't read its equipment says why, in the tile:
 
-- **Pick equipment.** No item is chosen. Open the tile's settings and choose one.
+- **Pick equipment.** No item is chosen. Open the tile's settings and choose
+  one.
 - **Not mapped.** The item exists but isn't mapped to anything the boat
   reports. The tile links to the item.
 - **Not reporting.** The item is mapped, but the boat isn't reporting that
@@ -91,8 +93,8 @@ A tile that cannot read its equipment says why, in the tile:
 
 ## Map an item without leaving the tile
 
-Choosing an item that isn't mapped opens a list of what the boat reports of
-that kind that no item owns. Choose one and then **Map**. This changes the item
-itself, for every tile and feature that uses it. Its alarms, maintenance hours
-and Mate all read the same source. It's the same setting as **Source** on the
-item's page.
+When you choose an item that isn't mapped, a list opens of what the boat
+reports of that kind that no item owns. Choose one and then **Map**. This
+changes the item itself, for every tile and feature that uses it. Its alarms,
+maintenance hours and Mate all read the same source. It's the same setting as
+**Source** on the item's page.

@@ -1,62 +1,68 @@
 # Tiles
 
-Field-level detail for what lands on a dashboard page: the built-in catalog,
-the exact fields on the tiles dense enough to need them, and the rules
-every tile follows for staleness and alert colour. See [The
-dashboard](../features/dashboard.md) for what each of these is for and how
-you put one on a page.
+This page gives the field-level detail for what lands on a dashboard page. It
+covers the built-in catalogue, the exact fields on the tiles that are dense
+enough to need them, and the rules every tile follows for staleness and alert
+colour. See [The dashboard](../features/dashboard.md) for what each of these is
+for and how you put one on a page.
 
 ## Built-in tiles
 
-Twenty: Vessel, Wind, Depth & Tide, Position, Today & Now,
+There are twenty: Vessel, Wind, Depth & Tide, Position, Today & Now,
 Anchor Watch, Tanks, Route, Nearby Vessels, Radar Targets, Battery & Power,
 Solar, Alternator, Generator, Switches, Hot Water, Autopilot, Clock, Current
-Conditions and Forecast Conditions. Each is one per page.
+Conditions and Forecast Conditions. Each one can appear once per page.
 
 **Add Tile** groups all of these, plus the configurable types below, by what
 they are for: Navigation, Weather, Situational, Power, Engine, Systems, At a
 glance, and Custom.
 
 Clock, Current Conditions and Forecast Conditions were sized for a wall
-display's fold first, the narrowest being a flybridge instrument strip.
-Nothing stops placing them on an ordinary page too.
+display's fold first, and the narrowest of those is a flybridge instrument
+strip. Nothing stops you placing them on an ordinary page too.
 
 - **Route**: the route SignalK is navigating, with the distance left to its end
   and the time to get there at your speed over the ground. When the plotter
-  sends only the waypoint you are heading for, the tile shows that waypoint, or
-  "Next waypoint" until the place has a name. It reads `--` when nothing is set
-  and `--` with "Route unavailable" when the route can't be read. Tapping it does
-  nothing. Start and stop routes on your plotter.
+  sends only the waypoint you're heading for, the tile shows that waypoint, or
+  "Next waypoint" until the place has a name. It reads `--` when nothing is set.
+  It reads `--` with "Route unavailable" when the route can't be read. Tapping
+  it does nothing, so you start and stop routes on your plotter.
 - **Clock**: the time, date, sunrise, sunset, moon phase, where the boat is
   and when it gets where it's going.
 - **Current Conditions**: depth, true wind speed with a small arrow for its
-  direction, and outside temperature, each read against today's forecast
-  range, with a look at rain in the next hour underneath.
+  direction, and outside temperature. Each is read against today's forecast
+  range, and there's a look at rain in the next hour underneath.
 - **Forecast Conditions**: the next five days' condition, high and low, above
   a wind-and-wave chart for the same five days, each day lined up under its
   own card.
 
 Current Conditions' rain strip shows the next sixty minutes as a row of
-bars, tallest where the rain is heaviest, with a line saying how heavy the
-rain will be and whether it starts now, in so many minutes, or later in the
-day. A small chance with no rain actually forecast reads as a chance, not as
-rain on the way. How fine that timing gets depends on your weather provider.
-Apple WeatherKit tracks rain minute by minute where it has coverage.
-Open-Meteo, the free default, only has true fifteen-minute rain over North
-America and Central Europe. Everywhere else the strip is drawn from its
-hourly forecast and is labelled "hourly forecast" so you know. If your
-provider has nothing to say about the next hour at your position, the tile
-drops the strip and falls back to the hourly and daily outlook rather than
-guessing.
+bars, tallest where the rain is heaviest. A line says how heavy the rain will
+be and whether it starts now, in so many minutes, or later in the day. A small
+chance with no rain actually forecast reads as a chance, not as rain on the
+way.
 
-The clock's arrival time follows whatever you are steering to. With a route
-active in SignalK it is the arrival at the route's last waypoint, at your
-speed over the ground, and blank while you are stopped. With only a
-destination set on the chartplotter it is the arrival at that point, named
-after the nearest place once one is found. With a TimeZero route, the boat's
-instruments only pass on the waypoint you are heading for, so the time shown
-is the arrival at that waypoint, not the end of the passage. An arrival that
-falls on another day carries the day, as in "Thu 09:40 AM".
+How fine that timing gets depends on your weather provider:
+
+- **Apple WeatherKit:** It tracks rain minute by minute where it has coverage.
+- **Open-Meteo:** The free default only has true fifteen-minute rain over
+  North America and Central Europe. Everywhere else the strip is drawn from
+  its hourly forecast, and it's labelled "hourly forecast" so you know.
+- **No data for the next hour:** If your provider has nothing to say about the
+  next hour at your position, the tile drops the strip. It falls back to the
+  hourly and daily outlook rather than guessing.
+
+The clock's arrival time follows whatever you're steering to:
+
+- **A route active in SignalK:** It's the arrival at the route's last
+  waypoint, at your speed over the ground, and it's blank while you're stopped.
+- **Only a destination on the chartplotter:** It's the arrival at that point,
+  named after the nearest place once one is found.
+- **A TimeZero route:** The boat's instruments only pass on the waypoint
+  you're heading for. So the time shown is the arrival at that waypoint, not
+  the end of the passage.
+
+An arrival that falls on another day carries the day, as in "Thu 09:40 AM".
 
 ## Tiles you configure yourself
 
@@ -85,12 +91,12 @@ Two toggles sit in the Wind tile's header, each remembered on this device:
   one.
 - **Course Up / North Up**: Course Up keeps the bow at the top of the
   compass ring and turns the ring as you turn. It's the everyday view for
-  steering by. North Up holds true north at the top instead and swings a
+  steering by. North Up holds true north at the top instead. It swings a
   small bow marker around the ring to show your heading, which helps when
-  relating the wind to a chart or a compass bearing. North Up's bow
+  you're relating the wind to a chart or a compass bearing. North Up's bow
   marker, and the wind arrow in Apparent mode, both need a heading to
-  place. Without one they drop from the ring rather than guess, though
-  the centre speed and angle keep reading.
+  place. Without one they drop from the ring rather than guess. The centre
+  speed and angle keep reading.
 
 Not every boat has a true-wind source. It needs boat speed and
 heading feeding the wind instrument, not just wind alone. Where it is
@@ -105,13 +111,13 @@ against the whole day.
 
 ## Battery & Power fields
 
-Four cards, plus a Shore line that appears once the shore charger reports
-anything:
+There are four cards, plus a Shore line that appears once the shore charger
+reports anything:
 
 - **State**: the big number, state of charge, with a bar underneath and a
-  line reading "To full", "To 20%" or "To empty" depending on whether the
-  bank is charging, discharging above a threshold, or discharging with none
-  set.
+  line reading "To full", "To 20%" or "To empty". Which one you see depends on
+  whether the bank is charging, discharging above a threshold, or discharging
+  with none set.
 - **Net**, **Solar**, and the rate shown beside State: energy moving into or
   out of the bank.
 - **Loads**: what the bank is feeding, shown as plain text since it is not a
@@ -120,50 +126,58 @@ anything:
   while nothing is plugged in. A charger error always shows, in red, even
   before anything else about the charger has reported. It reads the shore
   charger you picked under Settings, SignalK, Roles. If the boat has no shore
-  charger, answer **This boat has none** there. The line stays absent either way.
+  charger, answer **This boat has none** there. The line stays absent either
+  way.
 
 The footer's left side shows the voltage of the **Voltage readout battery** you
 picked under Settings, SignalK, Roles, with the name you gave that battery,
-followed by the charge rate. Each Roles list offers your items first, then a
-**From the boat** group of batteries the boat reports that no item owns, with a
-live reading, and choosing one makes the item and picks it. With no readout
-battery picked, or one that is not reporting, the voltage is left out rather
-than replaced by another battery's.
+followed by the charge rate. Each Roles list offers your items first. After
+those comes a **From the boat** group of batteries the boat reports that no
+item owns, with a live reading. Choosing one makes the item and picks it.
+With no readout battery picked, or one that isn't reporting, the voltage is
+left out rather than replaced by another battery's.
 
 With no house bank chosen, the State card is replaced by a message, "No house
 bank chosen. Choose one under Settings, SignalK, Roles", with the last part a
 link to the house bank list there. The house bank, unlike the other roles, has
-no **This boat has none** answer. The Net card goes and Solar takes the whole row. Solar, Loads
-and the Shore line read as usual, and the footer still shows the voltage of the
-Voltage readout battery, but not the charge rate. A bank that is chosen but not
-reporting keeps the full layout and shows a dash for its figures.
+no **This boat has none** answer. The Net card goes and Solar takes the whole
+row. Solar, Loads and the Shore line read as usual. The footer still shows the
+voltage of the Voltage readout battery, but not the charge rate. A bank that is
+chosen but not reporting keeps the full layout and shows a dash for its
+figures.
 
 If the item chosen as the house bank has lost its SignalK source, or has been
 deleted, the same card says "The house bank's item has no SignalK source.
 Choose it again under Settings, SignalK, Roles", and the House bank setup step
 says the same. Roles shows the choice as "Item no longer assigned".
 
-The state-of-charge number and bar only turn amber or red once you have set
-a matching alarm rule. See [Set battery state-of-charge
+The state-of-charge number and bar only turn amber or red once you've set a
+matching alarm rule. See [Set battery state-of-charge
 bands](../how-to/set-battery-state-of-charge-bands.md).
 
 ### The Dawn figure
 
 The footer's right side projects state of charge at sunrise: `Dawn 6:08 ·
-51% · 4 nights`. `6:08` is tomorrow's sunrise, `51%` the projected state of
-charge then, and `4 nights` means enough history exists to base the figure
-on the boat's own recent overnight draw rather than tonight's rate alone.
+51% · 4 nights`. Here `6:08` is tomorrow's sunrise and `51%` is the projected
+state of charge then. `4 nights` means enough history exists to base the
+figure on the boat's own recent overnight draw, rather than tonight's rate
+alone.
 
 Helmcentral takes the median discharge rate from the most recent *clean*
 nights it can find, up to seven, searching back as far as thirty. It applies
 that rate to tonight, after first running the current rate forward to sunset.
-A clean night runs sunset to sunrise with no shore power and no generator
-run, has enough samples to trust the slope, and did not somehow see the bank
-rise. Shore power and generator runs are checked against the shore charger
-and generator you picked under Settings, SignalK, Roles. A night is not
-screened for one you left as Not set. A night that fails any test is skipped
-rather than averaged in. Hovering the figure shows how many nights were
-skipped and why.
+
+A clean night meets all of these:
+
+- **Sunset to sunrise:** It runs the whole way from sunset to sunrise.
+- **No shore power and no generator run:** These are checked against the shore
+  charger and generator you picked under Settings, SignalK, Roles. A night
+  isn't screened for one you left as Not set.
+- **Enough samples:** There are enough samples to trust the slope.
+- **No rise:** The bank didn't somehow rise.
+
+A night that fails any test is skipped rather than averaged in. Hovering the
+figure shows how many nights were skipped and why.
 
 Short of two clean nights, the same spot reads `Dawn 6:08 · 61% · at current
 rate` instead, holding whatever rate the bank is charging or discharging
@@ -175,13 +189,13 @@ clean nights exist.
 
 While on shore power tonight, the line reads `Dawn 6:08 · on shore power`
 instead of a percentage, since the bank is being held rather than run down.
-Without a position there is no sunrise to project and the segment drops
-out. With a stale feed, or the live-rate fallback switched off and too
-little history, it reads a dash. It also reads a dash with no charge rate,
-which needs the bank current and the house bank's capacity in amp-hours. If
-your battery monitor doesn't report a capacity, enter it on the house bank's
-equipment record. The projected percentage takes the alarm
-band colours the same as the live figure does.
+Without a position there is no sunrise to project, so the segment drops out.
+With a stale feed, or the live-rate fallback switched off and too little
+history, it reads a dash. It also reads a dash with no charge rate, which needs
+the bank current and the house bank's capacity in amp-hours. If your battery
+monitor doesn't report a capacity, enter it on the house bank's equipment
+record. The projected percentage takes the alarm band colours the same as the
+live figure does.
 
 ## Generator fields
 
@@ -192,9 +206,10 @@ boat** group of generators the boat reports that no item owns. Choosing one make
 the item and picks it.
 
 With no generator chosen, the tile says "The generator is not set up" and links
-to the Roles list, and offers no Start or Stop. If the boat has no generator,
-choose **This boat has none** there: the tile then reads "This boat has no
-generator." with no link, and the Setup list counts the question as answered.
+to the Roles list, and it offers no Start or Stop. If the boat has no
+generator, choose **This boat has none** there. The tile then reads "This boat
+has no generator." with no link, and the Setup list counts the question as
+answered.
 
 ## Wall display fields
 
@@ -211,10 +226,10 @@ generator." with no link, and the Setup list counts the question as answered.
 
 Each page assigned to a display carries its own dwell, 5 to 3600 seconds,
 and a condition: **Always**, or a vessel state such as **While anchored**. A
-page whose condition stops being true finishes the slot it is already
-showing before dropping out, rather than cutting off mid-dwell. A rotation
-with nothing currently eligible checks again every 15 seconds rather than
-sitting blank.
+page whose condition stops being true finishes the slot it's already showing
+before dropping out, rather than cutting off mid-dwell. A rotation with
+nothing currently eligible checks again every 15 seconds rather than sitting
+blank.
 
 See [Set up a wall display](../how-to/set-up-a-wall-display.md) for the
 device check and setup steps.
@@ -241,11 +256,12 @@ number is deliberate: a stale reading shown as current is worse than none.
   two minutes while the rest of its network is still reporting. Any gauge,
   gauge group or lamp bound to that engine's readings shows `--` with no
   `STALE` marker too, so the tiles on a page agree. If the whole network
-  feeding the engine goes quiet, the tile stays amber `STALE`, because that is
-  a failed link rather than an engine switched off. Two cases it cannot tell
-  apart from a switch-off: an engine's electronics dropping out while the
-  engine runs, on a network that is otherwise healthy, and an engine wired to
-  a network of its own that fails while the engine runs. Both read `OFF`.
+  feeding the engine goes quiet, the tile stays amber `STALE`, because that's
+  a failed link rather than an engine switched off. There are two cases it
+  can't tell apart from a switch-off, and both read `OFF`. One is an engine's
+  electronics dropping out while the engine runs, on a network that's
+  otherwise healthy. The other is an engine wired to a network of its own that
+  fails while the engine runs.
 - A lamp goes dark with the same age marker rather than staying lit on an
   old value.
 - A number worked out from more than one reading, fuel economy for example,
@@ -262,7 +278,7 @@ checking on the source before assuming a dead link.
 A tile's edge, and a dot beside its title, take the colour of the worst
 alert level any of its readings currently sits in: sky for alert, amber for
 warn, red for alarm, a deeper red wash for emergency. A tile with every
-reading in its normal band, or a reading with no warn or alarm threshold set
-for it, draws no attention at all. A stale tile shows its amber staleness
-treatment instead, whatever band its last reading was in, since a value the
-tile can no longer vouch for should not also claim a state.
+reading in its normal band draws no attention at all. Neither does a reading
+with no warn or alarm threshold set for it. A stale tile shows its amber
+staleness treatment instead, whatever band its last reading was in. That's
+because a value the tile can no longer vouch for shouldn't also claim a state.

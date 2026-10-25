@@ -7,7 +7,7 @@ curl -fsSL https://raw.githubusercontent.com/gterrill/helmcentral/main/install.s
 ```
 
 Then open `http://<this-machine>:8080/`. On first run Helmcentral searches the
-network for a SignalK server and offers what it finds, so there is nothing
+network for a SignalK server and offers what it finds, so there's nothing
 to configure by hand.
 
 The other installation options are described below.
@@ -23,24 +23,27 @@ The other installation options are described below.
 ## Install script
 
 The script detects the platform and checks the download against the
-published checksums. It installs to `/usr/local/bin`, creates `/var/lib/helmcentral`
-for state, installs the reference plugin bundle, and on Linux enables a systemd
-service.
+published checksums. Then it does four things:
+
+- **Binary:** It installs to `/usr/local/bin`.
+- **State:** It creates `/var/lib/helmcentral` for state.
+- **Plugins:** It installs the reference plugin bundle.
+- **Service:** On Linux, it enables a systemd service.
 
 **Re-run it any time to upgrade.** Settings and data are left alone.
 
 Pin a version or change locations with `HELMCENTRAL_VERSION`,
 `HELMCENTRAL_PREFIX` and `HELMCENTRAL_STATE_DIR`.
 
-Useful afterwards:
+These two commands are useful afterwards:
 
 ```sh
 systemctl status helmcentral
 journalctl -u helmcentral -f
 ```
 
-On macOS the script installs the binary and prints how to run it, with no
-launchd service. On Windows, download the `.zip` from the
+On macOS the script installs the binary and prints how to run it, but it
+doesn't set up a launchd service. On Windows, download the `.zip` from the
 [releases page](https://github.com/gterrill/helmcentral/releases).
 
 ## Manual binary download
@@ -65,8 +68,8 @@ systemd unit, and `settings.example.yaml` as a starting config.
 ## Docker
 
 The image is multi-arch (amd64, arm64, armv7), so it runs on a Raspberry Pi.
-Take `docker-compose.yml` from the repository, then from the directory
-containing it:
+Take `docker-compose.yml` from the repository, then run these from the
+directory containing it:
 
 ```sh
 # 1. Add the reference plugins first. Compose bind-mounts ./plugins, and without
@@ -84,9 +87,9 @@ docker compose pull
 docker compose up -d --force-recreate
 ```
 
-The dashboard is served at <http://localhost:9091>. Change the left-hand side of
-the port mapping to serve it elsewhere. State goes to `./backend-data`, created
-on first run, so nothing needs to exist beforehand.
+The dashboard is served at <http://localhost:9091>. To serve it elsewhere,
+change the left-hand side of the port mapping. State goes to `./backend-data`,
+which is created on first run, so nothing needs to exist beforehand.
 
 Stop with `docker compose down`.
 

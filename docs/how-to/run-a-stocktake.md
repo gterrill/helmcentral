@@ -26,13 +26,13 @@ for actually running one.
 4. When you're done with the bin, scan the next one's tag to switch to it.
 
 Anything left under **Not seen this pass** when you move on was simply not
-scanned this time. Nothing changes for those items on its own. Go back for
-them, or accept that they weren't where you expected and follow up by hand
-later.
+scanned this time. Nothing changes for those items on its own. You can go
+back for them, or accept that they weren't where you expected and follow up
+by hand later.
 
 ## Add something you find along the way
 
 If you scan something Helmcentral doesn't recognise, it says so. It never
-drops the scan or guesses. Use **Add to this bin** on the current
-bin's page to record it properly with a name and a photo, the same as any
-other new item, then carry on scanning.
+drops the scan or guesses. Use **Add to this bin** on the current bin's page
+to record it properly. Give it a name and a photo, the same as any other new
+item, then carry on scanning.

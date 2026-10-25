@@ -1,10 +1,10 @@
 # Place names and nearby places
 
-Helmcentral puts names to the water around the boat: the bay you are anchored
-in, the marina you are lying in, the islands and reefs a passage ran between.
-It also answers "what's near here" and "where is that", so you can find the
-nearest boat ramp or fuel dock, or ask Mate about an anchorage by name, without
-leaving the helm.
+Helmcentral puts names to the water around the boat: the bay you're anchored in,
+the marina you're lying in, the islands and reefs a passage ran between. It also
+answers "what's near here" and "where is that". You can find the nearest boat
+ramp or fuel dock, or ask Mate about an anchorage by name, without leaving the
+helm.
 
 ## Where the names show up
 
@@ -19,28 +19,31 @@ leaving the helm.
 
 ## Where the names come from
 
-All of this comes from OpenStreetMap, the open map that sailors and others
-keep up to date. By default Helmcentral asks a public **Overpass server** for
-it each time it needs a name. A Google Places plugin can serve the Nearby map
-instead, but not place names.
+All of this comes from OpenStreetMap, the open map that sailors and others keep
+up to date. By default Helmcentral asks a public **Overpass server** for it each
+time it needs a name. A Google Places plugin can serve the Nearby map instead,
+but not place names.
 
 The public servers are run by volunteers and shared by everyone who uses them.
-That works ashore. From a boat it often doesn't:
+That works ashore, but from a boat it often doesn't:
 
-- They are slow. Over marina wifi or a satellite link a single lookup often
-  takes 5 to 15 seconds. Mate asks several at once when it compares
-  anchorages, and those wait in line behind each other.
-- They refuse requests. Each server gives one address only a couple of lookups
-  at a time and turns the rest away when it is busy. Some servers now answer
-  only networks they have approved, and the main one has refused some boat
-  networks outright.
-- They need a link. Out of mobile range, or with the satellite link down,
+- **They're slow:** Over marina wifi or a satellite link a single lookup often
+  takes 5 to 15 seconds. Mate asks several at once when it compares anchorages,
+  and those wait in line behind each other.
+- **They refuse requests:** Each server gives one address only a couple of
+  lookups at a time and turns the rest away when it's busy. Some servers now
+  answer only networks they have approved, and the main one has refused some
+  boat networks outright.
+- **They need a link:** Out of mobile range, or with the satellite link down,
   there are no names at all.
 
-When a lookup fails, the position tile goes without a name, the Nearby map
-keeps the last places it found and shows how old they are along with the
-error, and Mate carries on without names. After a few failures in one answer
-Mate stops looking places up and says so.
+When a lookup fails, here is what you see:
+
+- **Position tile:** It goes without a name.
+- **Nearby map:** It keeps the last places it found and shows how old they are,
+  along with the error.
+- **Mate:** It carries on without names. After a few failures in one answer,
+  Mate stops looking places up and says so.
 
 ## Running your own server
 

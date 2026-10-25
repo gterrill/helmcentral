@@ -27,6 +27,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Help pages rewritten to read the way you'd say them.** Every help page now
+  uses shorter sentences and everyday words. Paragraphs that walked through
+  several cases are now lists, one case per point, so it's quicker to find the
+  one that applies to you.
 - **Help pages read more plainly.** Every help page has had a wording pass,
   and the contents page now links the anchor watch, alarm threshold and alarm
   notification guides and the Tiles, Alarm rules and Mate lookups reference

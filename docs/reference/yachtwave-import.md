@@ -1,8 +1,8 @@
 # YachtWave import fields
 
-Where each part of a YachtWave Vessel Export ends up in Helmcentral. The
-import reads the HTML file YachtWave saves as its Vessel Export. Any other
-file is rejected.
+This page shows where each part of a YachtWave Vessel Export ends up in
+Helmcentral. The import reads the HTML file YachtWave saves as its Vessel
+Export. Any other file is rejected.
 
 Placeholders in the export (`--`, `—`, `Not set`, `Unknown`) are read as
 empty.
@@ -64,13 +64,13 @@ A note keeps its title, date and text. A task becomes a note titled
 `Task: <name>`, listing priority, assigned to, due, status and completed date.
 
 A note is left behind if it looks like it holds a password or wifi key. Its
-text is not kept.
+text isn't kept.
 
 ## Documents and photos
 
-Each keeps its YachtWave label as its title. You supply the file. Photos must
-be JPEG or PNG. YachtWave's `.jpe` photos are JPEG. A document or photo whose
-YachtWave record names one piece of equipment is linked to it.
+Each keeps its YachtWave label as its title, and you supply the file. Photos
+must be JPEG or PNG. YachtWave's `.jpe` photos are JPEG. A document or photo
+whose YachtWave record names one piece of equipment is linked to it.
 
 ## Not imported
 

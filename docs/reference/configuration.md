@@ -1,9 +1,9 @@
 # Configuration reference
 
-Helmcentral doesn't need a configuration file to start. A missing
-`settings.yaml` is tolerated, and on first run the dashboard searches your
-network for a SignalK server and offers what it finds. This page is for tuning
-an existing installation.
+Helmcentral doesn't need a configuration file to start. It copes with a missing
+`settings.yaml`, and on first run the dashboard searches your network for a
+SignalK server and offers what it finds. This page is for tuning an existing
+installation.
 
 ## Where things live
 
@@ -13,7 +13,7 @@ A native install (via `install.sh`) uses:
 | --- | --- |
 | `/usr/local/bin/helmcentral` | The binary. Self-contained: the web UI is embedded in it. |
 | `/var/lib/helmcentral/settings.yaml` | Operator settings, rewritten by the Settings UI on save. |
-| `/var/lib/helmcentral/data/` | SQLite stores, dashboard pages, uploaded charts, the anchor watch and its placemarks. |
+| `/var/lib/helmcentral/data/` | Databases, dashboard pages, uploaded charts, the anchor watch and its placemarks. |
 | `/var/lib/helmcentral/cache/` | Plugin forecast caches. |
 | `/var/lib/helmcentral/plugins/` | Provider plugins, by category (`tides/`, `weather/`, `waves/`, `forecast-warnings/`). |
 | `/etc/systemd/system/helmcentral.service` | The service unit. |
@@ -23,43 +23,44 @@ plugins mounted separately at `/app/plugins`.
 
 ### Back this up
 
-`data/secrets.key` decrypts the secrets store. **Lose it and every stored
-credential is unrecoverable.** The SignalK login, InfluxDB token and WeatherKit
-keys must all be re-entered. Back up the whole state directory, or at minimum
-that file. There is no key recovery.
+`data/secrets.key` decrypts the secrets store. **If you lose it, every stored
+credential is unrecoverable.** You'd have to re-enter the SignalK login, the
+InfluxDB token and the WeatherKit keys. Back up the whole state directory, or at
+minimum that file. There is no key recovery.
 
 `data/documents/` (every uploaded file's bytes) and `data/helmcentral.sqlite`
 are one backup unit. The database holds documents, notes, the equipment
 registry, inventory, maintenance, Mate's conversation history, the AIS sighting
-log, alarm history, registered phone alert devices and plugin settings:
-everything Helmcentral knows about your boat and this installation. On its own
-it describes files it can no longer produce, and the folder on its own is just
-anonymous content hashes. Once a few manuals and a season's worth of receipts
-and photos have gone through it, expect `data/documents/` to be the largest
-single thing in the state directory.
+log, alarm history, registered phone alert devices and plugin settings. That's
+everything Helmcentral knows about your boat and this installation.
 
-Alarm history trims itself, so it never needs clearing out by hand. Deleting
-`data/helmcentral.sqlite` to tidy up old alarms would take your documents,
-inventory and maintenance records with it, so don't.
+On its own the database describes files it can no longer produce, and the
+folder on its own is just anonymous content hashes. Once a few manuals and a
+season's worth of receipts and photos have gone through it, expect
+`data/documents/` to be the largest single thing in the state directory.
 
-`data/helmcentral.sqlite` runs in WAL mode, so a plain file copy taken while
-Helmcentral is running can miss data still sitting in its `-wal` sidecar. Back
-it up with the service stopped, or take a live backup with SQLite's own tools
-instead of copying the file directly:
+Alarm history trims itself, so you never need to clear it out by hand. Don't
+delete `data/helmcentral.sqlite` to tidy up old alarms, because that would take
+your documents, inventory and maintenance records with it.
+
+`data/helmcentral.sqlite` runs in WAL mode. A plain file copy taken while
+Helmcentral is running can therefore miss data still sitting in its `-wal`
+sidecar. Back it up with the service stopped, or take a live backup with the
+`sqlite3` tool instead of copying the file directly:
 
 ```sh
 sqlite3 data/helmcentral.sqlite ".backup /path/to/backup/helmcentral.sqlite"
 ```
 
-Never copy `-wal` or `-shm` separately from the main file while Helmcentral
-is running.
+Never copy `-wal` or `-shm` separately from the main file while Helmcentral is
+running.
 
 ## Environment variables
 
-Non-secret settings use standard environment variables. There is no `.env`
-file and nothing loads one. The backend reads these from the process
-environment only. Set them in the systemd unit's `Environment=` lines, the compose `environment:`
-block, or your shell.
+Non-secret settings use standard environment variables. There is no `.env` file
+and nothing loads one. The backend reads these from the process environment
+only. Set them in the systemd unit's `Environment=` lines, the compose
+`environment:` block, or your shell.
 
 ### Common
 
@@ -73,7 +74,7 @@ block, or your shell.
 | `CORS_ALLOWED_ORIGINS` | *(unset)* | Comma-separated extra origins allowed to call the API with credentials, on top of the server's own origin (always allowed). Only needed for a frontend hosted somewhere other than this binary. |
 | `DAWN_LINEAR_FALLBACK` | `true` | When overnight state-of-charge history is unavailable (InfluxDB not configured, unreachable, or too few usable nights), extrapolate the live rate to sunrise and label the result as such. Set `false` to show a dash with the reason instead. |
 
-A profiling switch for diagnosing a running instance's performance exists too.
+There's also a profiling switch for diagnosing a running instance's performance.
 See [Configuration internals](../developers/configuration.md) if you've been
 asked to use it.
 
@@ -83,13 +84,15 @@ asked to use it.
 | --- | --- | --- |
 | `SESSIONS_DB_PATH` | `data/sessions.sqlite` | Session store (see State paths below). |
 
-`auth.mode` is set in `settings.yaml` (or from Settings → Security in the
-running application) and has no environment-variable override. `settings.yaml`
-is its only source. Changes take effect on the next request, without a restart.
+You set `auth.mode` in `settings.yaml` (or from Settings → Security in the
+running application). It has no environment-variable override, so
+`settings.yaml` is its only source. Changes take effect on the next request,
+without a restart.
 
 Helmcentral keeps no user database. It forwards credentials to your SignalK
-server and maps the `readonly`, `readwrite` and `admin` levels it answers with
-onto matching Helmcentral permissions. An unrecognised role gets no access.
+server. The server answers with a `readonly`, `readwrite` or `admin` level, and
+Helmcentral maps that onto matching Helmcentral permissions. An unrecognised
+role gets no access.
 
 ### SignalK
 
@@ -107,44 +110,48 @@ section, set from the Settings UI.
 ### Overpass
 
 The Overpass server is the `osm-overpass` points-of-interest plugin's own
-setting, not an app-level one. The gear icon on osm-overpass's card, under
-either **Settings → Plugins → Nearby** or **Settings → Plugins → Place names**,
-opens the same **Overpass server** field. There is no environment-variable
-override and no `settings.yaml` entry. Saving takes effect on the plugin's next
-call, with no restart. Blank (the default) uses the public
-`https://overpass-api.de/api/interpreter`. The save rejects anything that
-isn't an absolute URL. The plugin itself refuses plain `http://` on every call
-unless the address is on your own network (a private or loopback address,
-`localhost`, a name ending `.local`, `.lan`, `.internal`, `.home.arpa` or
-`.ts.net`, a Tailscale address, or a single-word name). Everything else must
-be `https://`.
+setting, not an app-level one. The gear icon on osm-overpass's card opens the
+same **Overpass server** field, under either **Settings → Plugins → Nearby** or
+**Settings → Plugins → Place names**. There is no environment-variable override
+and no `settings.yaml` entry. Saving takes effect on the plugin's next call,
+with no restart.
+
+- **Blank:** The default. It uses the public
+  `https://overpass-api.de/api/interpreter`.
+- **What the save accepts:** It rejects anything that isn't an absolute URL.
+- **Plain `http://`:** The plugin itself refuses it on every call unless the
+  address is on your own network. That means a private or loopback address,
+  `localhost`, a name ending `.local`, `.lan`, `.internal`, `.home.arpa` or
+  `.ts.net`, a Tailscale address, or a single-word name. Everything else must be
+  `https://`.
 
 This one setting serves everything the plugin does. Nearby, place-name
 resolution (the position tile, the anchor pin) and Mate's place-name questions
 all use it, so there's one Overpass address to keep. Point it at a mirror such
-as `https://overpass.openstreetmap.fr/api/interpreter` when your network
-refuses `overpass-api.de`. See
+as `https://overpass.openstreetmap.fr/api/interpreter` when your network refuses
+`overpass-api.de`. See
 [poi-categories.md](poi-categories.md#the-default-provider-openstreetmap-via-overpass)
-for what this plugin covers. A mirror other than those two also needs adding
-to the plugin's own allowlist file. See
-[Provider plugins](plugins.md#plugin-declared-settings) and the developer
-documentation for how. To run a server of your own aboard, see
-[Run your own Overpass server](../how-to/run-your-own-overpass-server.md).
+for what this plugin covers.
+
+A mirror other than those two also needs adding to the plugin's own allowlist
+file. See [Provider plugins](plugins.md#plugin-declared-settings) and the
+developer documentation for how. To run a server of your own aboard, see [Run
+your own Overpass server](../how-to/run-your-own-overpass-server.md).
 
 ### Anchor Watch
 
 `anchor.min_clearance_at_low_m` in `settings.yaml` (or **Clearance at Low
-Water** under Settings → Anchor Watch) is the water, in metres, that Anchor
-Watch's low-water clearance warning wants left under the keel at the next low
-tide before it warns. There is no environment-variable override. It defaults to
-`0.5`. Zero is accepted (a deliberate "warn only once the keel would touch"),
-but a negative value is not.
+Water** under Settings → Anchor Watch) is the water, in metres, that you want
+left under the keel at the next low tide. Anchor Watch's low-water clearance
+warning appears when it would be less. There is no environment-variable override. It
+defaults to `0.5`. Zero is accepted (a deliberate "warn only once the keel would
+touch"), but a negative value isn't.
 
 ### State paths
 
 Each of these overrides one file or directory and takes precedence over
-`HELMCENTRAL_STATE_DIR`. Defaults are relative, resolved against the state
-dir when one is set.
+`HELMCENTRAL_STATE_DIR`. Defaults are relative, and when a state dir is set
+they're resolved against it.
 
 | Variable | Default |
 | --- | --- |
@@ -167,19 +174,23 @@ dir when one is set.
 
 SignalK credentials, `INFLUXDB_TOKEN`, the `WEATHERKIT_*` keys,
 `OPENROUTER_API_KEY` and the `VAPID_*` web push keys are **not** environment
-variables in normal use. They live in an AES-256-GCM encrypted SQLite store,
-and each is entered in the Settings section it belongs to (SignalK, InfluxDB,
-Mate, Alarms) or in a weather provider's settings. Keeping them out of the
-process environment is deliberate. Every plugin's own `${VAR}` configuration
-expansion reads from the environment, so a value placed there is visible to any
-plugin.
+variables in normal use. They live in an AES-256-GCM encrypted store. You enter
+each one in the Settings section it belongs to (SignalK, InfluxDB, Mate,
+Alarms) or in a weather provider's settings.
 
-Changing the SignalK address (or port) clears the stored SignalK username and
-password, and changing the InfluxDB URL clears `INFLUXDB_TOKEN`. Each
-credential belongs to the destination it was entered for, so a save that
-repoints the destination drops it. Re-enter it in the same section. Editing
-anything else on the Settings page, including the rest of the InfluxDB block
-(org, bucket), never touches either credential.
+Keeping them out of the process environment is deliberate. Every plugin's own
+`${VAR}` configuration expansion reads from the environment, so a value placed
+there is visible to any plugin.
+
+Each credential belongs to the destination it was entered for, so a save that
+repoints the destination drops it:
+
+- **SignalK:** Changing the SignalK address (or port) clears the stored SignalK
+  username and password.
+- **InfluxDB:** Changing the InfluxDB URL clears `INFLUXDB_TOKEN`.
+- **Re-entering:** Enter the credential again in the same section.
+- **Other edits:** Editing anything else on the Settings page, including the
+  rest of the InfluxDB block (org, bucket), never touches either credential.
 
 The `assistant:` block in `settings.yaml` holds Mate's non-secret
 configuration:
@@ -213,12 +224,12 @@ reads when a question is about Helmcentral itself is separate. It ships built
 into every official release and doesn't depend on your conversation history or
 this database.
 
-`VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception: they aren't
-managed from the UI. Helmcentral generates the keypair itself on first start
+`VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` are the exception, because you don't
+manage them from the UI. Helmcentral generates the keypair itself on first start
 and never rotates it. **Losing it is unrecoverable.** Every registered web push
-device stores the public key it subscribed with, so a new pair means every
-phone has to re-subscribe. Helmcentral discards orphaned registrations at boot
-and logs the count, so pushes don't fail silently. Back up
+device stores the public key it subscribed with, so a new pair means every phone
+has to re-subscribe. Helmcentral discards orphaned registrations at boot and
+logs the count, so pushes don't fail silently. Back up
 `backend/data/secrets.sqlite` and `backend/data/secrets.key` together.
 
 ## Roles
@@ -247,8 +258,8 @@ an item blanks the roles that named it and leaves `none` answers alone.
 ## Plugins
 
 Tide, weather, wave, points-of-interest, forecast-warning and upper-air data
-all come from provider plugins rather than being built into Helmcentral
-itself, so a provider can be added or swapped without an upgrade. See
+all come from provider plugins. They aren't built into Helmcentral itself, so a
+provider can be added or swapped without an upgrade. See
 [Provider plugins](plugins.md) for what ships, how to install one, and the
 settings a plugin can expose.
 
@@ -269,7 +280,7 @@ run. The **Breaking** entry for the release you're upgrading to in
 `CHANGELOG.md` has that command too.
 
 `auth.mode: signalk` adds one more fail-fast check. Helmcentral probes the
-SignalK server's security status once at startup and refuses to boot if
+SignalK server's security status once at startup. It refuses to boot if
 SignalK's own security is disabled, because delegated login needs
 authentication on the upstream server. Enable security on the SignalK server
 first, or set `auth.mode: none` in `settings.yaml` to boot without it.

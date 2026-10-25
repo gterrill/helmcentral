@@ -1,6 +1,7 @@
 # Plan a stay
 
-Use this when you have a berth or an anchorage booked for later and want to see the weather there for the days you'll be there. See [Looking ahead to a
+Use this when you have a berth or an anchorage booked for later and want to see
+the weather there for the days you'll be there. See [Looking ahead to a
 planned stay](../features/forecast.md#looking-ahead-to-a-planned-stay) for what
 the page shows and where it stops.
 
@@ -17,13 +18,14 @@ the page shows and where it stops.
    own, as written on your booking.
 6. Choose **Save stay**.
 
-Anyone using Helmcentral on the boat sees the stay. Only someone allowed to make changes sees the buttons to plan, change or clear it.
+Anyone using Helmcentral on the boat sees the stay. Only someone who's allowed
+to make changes sees the buttons to plan, change or clear it.
 
 ## Look at the forecast there
 
 1. On the Forecast page, choose the button with the place and dates, for example
    **Coral Coast Marina · 27-31 Oct**.
-2. Check the heading. It names the place and says it is not the boat's position.
+2. Check the heading. It names the place and says it isn't the boat's position.
 3. Days marked STAY are yours. A card reading "No forecast yet · from 3 Nov" is a
    day the forecast doesn't reach yet, and the date is when it will.
 4. Choose **Boat** to go back to the boat's own forecast. The page also opens on
@@ -36,7 +38,7 @@ Anyone using Helmcentral on the boat sees the stay. Only someone allowed to make
    **Save stay**. To remove it, choose **Clear stay**.
 
 A stay ends on its own the day after your departure date. A departure date
-that has already passed at the place is not accepted.
+that has already passed at the place isn't accepted.
 
 ## Ask Mate
 
@@ -44,4 +46,4 @@ Tell Mate where and when ("book me into Coral Coast Marina from the 27th to the
 31st"). Mate finds the place, says which one it chose and offers the stay as a
 card. Check the place and the dates, then choose **Apply**. Nothing is set
 until you do. You can also ask Mate about the weather or the tides "at the
-marina" and it will use the stay you have saved.
+marina", and it will use the stay you've saved.
