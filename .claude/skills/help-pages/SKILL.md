@@ -153,7 +153,7 @@ After:
 > and every screen on board is switched off.
 >
 > - Always-on server monitoring: Trail tracking and drag detection run
->   directly on the server, not in your browser. It monitors your own boat
+>   directly on the server, not in your browser. They watch your own boat
 >   alongside nearby AIS targets around the clock, so you don't need to keep a
 >   device awake or a browser tab open.
 > - Unified alarms and silencing: A drag event triggers like any standard
@@ -162,8 +162,9 @@ After:
 >   server, quieting open screens anywhere else on the boat (like a tablet
 >   mounted in the saloon).
 > - Failsafe GPS handling: A lost satellite fix will never trigger a false
->   drag alarm. If your GNSS signal drops, your position simply freezes at its
->   last known safe location rather than drifting across the screen.
+>   drag alarm. If your GNSS signal drops, your position simply freezes at the
+>   last one the GPS reported reliably, rather than drifting across the
+>   screen.
 > - Dedicated instrument watchdog: Because a drifting anchor and a failed GPS
 >   antenna require completely different responses, a lost instrument
 >   connection triggers its own distinct alert instead of a drag warning.
@@ -173,7 +174,10 @@ labelled points. "0300 with nobody on deck" became "even when everyone is
 asleep", "transports" became "configured channels", "a lost GNSS fix" became
 "a lost satellite fix", and the reason for the separate watchdog moved to the
 front of its sentence. The humaniser's version had an em dash after "system
-alarm". It is a colon here, because the lint fails on dashes.
+alarm". It is a colon here, because the lint fails on dashes. Two slips were
+also corrected: "It monitors" became "They watch", since the subject is
+plural, and "last known safe location" became "the last one the GPS reported
+reliably", since the position is trusted, not known to be safe.
 
 ## Page shapes
 
