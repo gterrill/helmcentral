@@ -160,3 +160,18 @@ component is absent", so pass the provider's zeros through unchanged rather
 than substituting anything. A plugin whose model does not carry these fields
 at all should omit them; they arrive as zeros and the host reads that as no
 per-component data rather than as waves out of the north.
+
+## Missing combined figures are left out
+
+`wave_height_m`, `wave_period_s` and `wave_direction_deg` are optional in the
+plugin contract. When Open-Meteo returns null for one of them (the model has no
+coverage for that hour or point), or something that is not a number, the plugin
+**omits that key** from the hour. The host reads a missing key as "no value",
+so an hour with no height is not checked as a flat calm, and an hour with no
+direction is not read as a sea from due north.
+
+A real zero is kept. Open-Meteo reports a flat sea as height 0, and that is a
+figure. Only null and non-numeric entries are dropped.
+
+The per-component fields above keep their zero encoding, because that is how
+Open-Meteo itself marks an absent component.

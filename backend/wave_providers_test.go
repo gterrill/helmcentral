@@ -208,9 +208,9 @@ func TestWaveForecast_ReturnsOKWithDayBucketingAndSeaTempNull(t *testing.T) {
 
 	bundle := waveForecastBundle{
 		Hourly: []waveHourPoint{
-			{Time: todayLocalMidnight.Add(time.Hour), WaveHeightM: 1.1, WavePeriodS: 8.0, WaveDirectionDeg: 90, WindWaveHeightM: 0.3, SwellWaveHeightM: 0.9},
-			{Time: todayLocalMidnight.Add(2 * time.Hour), WaveHeightM: 1.3, WavePeriodS: 8.5, WaveDirectionDeg: 100, WindWaveHeightM: 0.4, SwellWaveHeightM: 1.0},
-			{Time: day2Start.Add(time.Hour), WaveHeightM: 1.5, WavePeriodS: 9.0, WaveDirectionDeg: 110, WindWaveHeightM: 0.5, SwellWaveHeightM: 1.1},
+			{Time: todayLocalMidnight.Add(time.Hour), WaveHeightM: pwF(1.1), WavePeriodS: pwF(8.0), WaveDirectionDeg: pwF(90), WindWaveHeightM: 0.3, SwellWaveHeightM: 0.9},
+			{Time: todayLocalMidnight.Add(2 * time.Hour), WaveHeightM: pwF(1.3), WavePeriodS: pwF(8.5), WaveDirectionDeg: pwF(100), WindWaveHeightM: 0.4, SwellWaveHeightM: 1.0},
+			{Time: day2Start.Add(time.Hour), WaveHeightM: pwF(1.5), WavePeriodS: pwF(9.0), WaveDirectionDeg: pwF(110), WindWaveHeightM: 0.5, SwellWaveHeightM: 1.1},
 		},
 		SeaTempC: nil,
 		Cached:   false,
@@ -275,7 +275,7 @@ func TestWaveForecast_ReturnsRealSeaTemperatureFWhenPresent(t *testing.T) {
 	seaTempC := 21.0
 	bundle := waveForecastBundle{
 		Hourly: []waveHourPoint{
-			{Time: todayLocalMidnight.Add(time.Hour), WaveHeightM: 1.1, WavePeriodS: 8.0, WaveDirectionDeg: 90},
+			{Time: todayLocalMidnight.Add(time.Hour), WaveHeightM: pwF(1.1), WavePeriodS: pwF(8.0), WaveDirectionDeg: pwF(90)},
 		},
 		SeaTempC: &seaTempC,
 		Cached:   false,
@@ -319,8 +319,8 @@ func TestWaveForecast_ReturnsRealSeaTemperatureFWhenPresent(t *testing.T) {
 func TestBuildWaveHourlySeriesByDay_BucketsHoursByLocalDate(t *testing.T) {
 	loc := time.FixedZone("AEST", 10*60*60)
 	hourly := []waveHourPoint{
-		{Time: time.Date(2026, 6, 14, 13, 0, 0, 0, time.UTC), WaveHeightM: 1.2, WavePeriodS: 8.5, WaveDirectionDeg: 90, WindWaveHeightM: 0.4, SwellWaveHeightM: 0.9},  // 23:00 AEST Jun 14
-		{Time: time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC), WaveHeightM: 1.4, WavePeriodS: 8.9, WaveDirectionDeg: 100, WindWaveHeightM: 0.5, SwellWaveHeightM: 1.0}, // 00:00 AEST Jun 15
+		{Time: time.Date(2026, 6, 14, 13, 0, 0, 0, time.UTC), WaveHeightM: pwF(1.2), WavePeriodS: pwF(8.5), WaveDirectionDeg: pwF(90), WindWaveHeightM: 0.4, SwellWaveHeightM: 0.9},  // 23:00 AEST Jun 14
+		{Time: time.Date(2026, 6, 14, 14, 0, 0, 0, time.UTC), WaveHeightM: pwF(1.4), WavePeriodS: pwF(8.9), WaveDirectionDeg: pwF(100), WindWaveHeightM: 0.5, SwellWaveHeightM: 1.0}, // 00:00 AEST Jun 15
 	}
 
 	byDay := buildWaveHourlySeriesByDay(hourly, loc)
@@ -647,10 +647,10 @@ func TestWaveForecast_CarriesDayIndicators(t *testing.T) {
 	// criterion, with the period stepping 8s to 11s on the way.
 	bundle := waveForecastBundle{
 		Hourly: []waveHourPoint{
-			{Time: midnight.Add(time.Hour), WaveHeightM: 1.0, WavePeriodS: 8, WaveDirectionDeg: 90},
-			{Time: midnight.Add(2 * time.Hour), WaveHeightM: 1.6, WavePeriodS: 8, WaveDirectionDeg: 90},
-			{Time: midnight.Add(3 * time.Hour), WaveHeightM: 2.6, WavePeriodS: 9, WaveDirectionDeg: 90},
-			{Time: midnight.Add(4 * time.Hour), WaveHeightM: 4.2, WavePeriodS: 12, WaveDirectionDeg: 90},
+			{Time: midnight.Add(time.Hour), WaveHeightM: pwF(1.0), WavePeriodS: pwF(8), WaveDirectionDeg: pwF(90)},
+			{Time: midnight.Add(2 * time.Hour), WaveHeightM: pwF(1.6), WavePeriodS: pwF(8), WaveDirectionDeg: pwF(90)},
+			{Time: midnight.Add(3 * time.Hour), WaveHeightM: pwF(2.6), WavePeriodS: pwF(9), WaveDirectionDeg: pwF(90)},
+			{Time: midnight.Add(4 * time.Hour), WaveHeightM: pwF(4.2), WavePeriodS: pwF(12), WaveDirectionDeg: pwF(90)},
 		},
 		CachedAt: time.Now().UTC(),
 	}
@@ -783,5 +783,75 @@ func TestCrossSea_IgnoresANegligibleSecondarySystem(t *testing.T) {
 	real.SwellWaveHeightM = 0.6
 	if !waveDayIndicators([]waveDayHourlyData{real}).CrossSea {
 		t.Fatalf("0.6m against 1.44m, 75 degrees apart, is a crossing sea")
+	}
+}
+
+// Absent combined figures reach the day series as the file's missing-data
+// marker (negative), never as 0, and the forecast response leaves the key out.
+func TestWaveSeries_AbsentFiguresAreMarkedNotZero(t *testing.T) {
+	loc := time.UTC
+	tm := time.Date(2026, 6, 14, 3, 0, 0, 0, time.UTC)
+	h := 0.6
+	hourly := []waveHourPoint{{Time: tm}, {Time: tm.Add(time.Hour), WaveHeightM: &h}}
+	byDay := buildWaveHourlySeriesByDay(hourly, loc)["2026-06-14"]
+	if byDay[0].WaveHeightM >= 0 || byDay[0].WavePeriodS >= 0 || byDay[0].WaveDirectionDeg >= 0 {
+		t.Fatalf("absent hour must carry the missing marker: %+v", byDay[0])
+	}
+	if byDay[1].WaveHeightM != 0.6 || byDay[1].WavePeriodS >= 0 || byDay[1].WaveDirectionDeg >= 0 {
+		t.Fatalf("height only: %+v", byDay[1])
+	}
+
+	resp := mapWaveHourlyResponse(byDay)
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"wave_height_m", "wave_period_s", "wave_direction_deg"} {
+		if _, ok := rows[0][key]; ok {
+			t.Errorf("absent hour must omit %s, got %v", key, rows[0][key])
+		}
+	}
+	if rows[1]["wave_height_m"] != 0.6 {
+		t.Errorf("height lost: %v", rows[1])
+	}
+	if _, ok := rows[1]["wave_period_s"]; ok {
+		t.Errorf("period must be omitted when absent: %v", rows[1])
+	}
+	if rows[0]["steepness_ratio"] != nil || rows[1]["steepness_ratio"] != nil {
+		t.Errorf("no steepness without a period: %v", rows)
+	}
+}
+
+func TestWaveSeriesHasNoValues_AbsentFiguresCountAsNoValues(t *testing.T) {
+	tm := time.Date(2026, 6, 14, 3, 0, 0, 0, time.UTC)
+	if !waveSeriesHasNoValues([]waveHourPoint{{Time: tm}, {Time: tm.Add(time.Hour)}}) {
+		t.Fatal("a series with every figure absent has no values")
+	}
+	h := 0.5
+	if waveSeriesHasNoValues([]waveHourPoint{{Time: tm}, {Time: tm.Add(time.Hour), WaveHeightM: &h}}) {
+		t.Fatal("a series with a height has values")
+	}
+}
+
+// A series of real 0 m heights is a flat calm the model forecast, not a model
+// with no data.
+func TestWaveSeriesHasNoValues_PresentZeroHeightsAreValues(t *testing.T) {
+	tm := time.Date(2026, 6, 14, 3, 0, 0, 0, time.UTC)
+	z := 0.0
+	if waveSeriesHasNoValues([]waveHourPoint{{Time: tm, WaveHeightM: &z}, {Time: tm.Add(time.Hour), WaveHeightM: &z}}) {
+		t.Fatal("present zero heights are values")
+	}
+	if waveSeriesHasNoValues([]waveHourPoint{{Time: tm, WaveDirectionDeg: &z}}) {
+		t.Fatal("a present direction is a value")
+	}
+	if !waveSeriesHasNoValues([]waveHourPoint{{Time: tm, WindWaveHeightM: 0}}) {
+		t.Fatal("combined figures absent and components zero is no values")
+	}
+	if waveSeriesHasNoValues([]waveHourPoint{{Time: tm, SwellWavePeriodS: 7}}) {
+		t.Fatal("a component figure is a value")
 	}
 }

@@ -26,10 +26,11 @@ const MEASURE_WORDS: Record<PassageMeasure, string> = {
   wind_marginal: 'marginal wind limit',
   gust: 'gusts',
   wave: 'wave height',
+  wave_direction: 'wave direction',
   wind_against_tide: 'wind against tide',
   daylight: 'daylight arrival',
 }
-const MEASURE_ORDER: PassageMeasure[] = ['wind_marginal', 'gust', 'wave', 'wind_against_tide', 'daylight']
+const MEASURE_ORDER: PassageMeasure[] = ['wind_marginal', 'gust', 'wave', 'wave_direction', 'wind_against_tide', 'daylight']
 
 function StateChip({ state }: { state: PassageState }) {
   return (

@@ -25,6 +25,11 @@
 //	  "sea_surface_temperature_c": float64 (optional)
 //	}
 //
+// wave_height_m, wave_period_s and wave_direction_deg are OPTIONAL. A plugin
+// omits the key for an hour in which its model has no value, and the host
+// reads the missing key as absent (a nil *float64), never as 0 m, 0 s or a
+// sea from due north. A reported 0 is a real figure and is kept.
+//
 // The per-component direction and period fields are OPTIONAL in the sense
 // that a model without them may omit them; they then read as 0, and a
 // component with a zero period is treated as absent rather than as a wave
@@ -63,11 +68,15 @@ import (
 
 // waveHourPoint is a single hour's wave forecast, SI units, as returned by
 // one entry of a plugin's fetch_waves "hourly" field.
+//
+// The combined height, period and direction are pointers: nil is a figure the
+// provider did not give for this hour, which is not 0 m, 0 s or due north. A
+// reader must treat nil as unknown.
 type waveHourPoint struct {
 	Time             time.Time
-	WaveHeightM      float64
-	WavePeriodS      float64
-	WaveDirectionDeg float64
+	WaveHeightM      *float64
+	WavePeriodS      *float64
+	WaveDirectionDeg *float64
 	WindWaveHeightM  float64
 	SwellWaveHeightM float64
 
@@ -170,6 +179,9 @@ func resolveWaveProvider(settingsPath string) (waveProvider, string, error) {
 // calendar day - the wave-only analogue of weatherHourlyWindData etc.
 // Label/HourOfDay preserve the same meaning used throughout the weather
 // system (local "3PM"-style hour string / local hour 0-23).
+//
+// A combined height, period or direction the provider did not give is
+// waveFigureAbsent (negative), the marker the readers below already skip.
 type waveDayHourlyData struct {
 	Label            string
 	HourOfDay        int
@@ -185,13 +197,35 @@ type waveDayHourlyData struct {
 	SwellWavePeriodS      float64
 }
 
-// waveSeriesHasNoValues reports a series in which every wave figure of every
-// hour is zero. The marine plugin writes a null upstream value as 0, and a
-// real sea always carries a period, so a whole series of zeros is the model
-// having no data for the point rather than a flat calm.
+// waveFigureAbsent marks a combined wave figure the provider did not give for
+// an hour. Real heights, periods and directions are never negative.
+const waveFigureAbsent = -1.0
+
+// waveFigureOrAbsent turns an optional figure into the day series' value.
+func waveFigureOrAbsent(v *float64) float64 {
+	if v == nil {
+		return waveFigureAbsent
+	}
+	return *v
+}
+
+// waveFigureForResponse is the reverse: nil, so the JSON key is left out, for
+// a figure marked absent.
+func waveFigureForResponse(v float64) *float64 {
+	if v < 0 {
+		return nil
+	}
+	return &v
+}
+
+// waveSeriesHasNoValues reports a series in which no hour carries a value: the
+// combined height, period and direction are absent throughout, and every
+// per-component figure is zero. A plugin omits the combined figures when the
+// model has none and the components arrive as zeros, so that is the model
+// having no data for the point. A present figure, even a real 0 m, is data.
 func waveSeriesHasNoValues(hourly []waveHourPoint) bool {
 	for _, h := range hourly {
-		if h.WaveHeightM != 0 || h.WavePeriodS != 0 || h.WaveDirectionDeg != 0 ||
+		if h.WaveHeightM != nil || h.WavePeriodS != nil || h.WaveDirectionDeg != nil ||
 			h.WindWaveHeightM != 0 || h.SwellWaveHeightM != 0 ||
 			h.WindWaveDirectionDeg != 0 || h.WindWavePeriodS != 0 ||
 			h.SwellWaveDirectionDeg != 0 || h.SwellWavePeriodS != 0 {
@@ -218,9 +252,9 @@ func buildWaveHourlySeriesByDay(hourly []waveHourPoint, localLocation *time.Loca
 		series[dayKey] = append(series[dayKey], waveDayHourlyData{
 			Label:            localTime.Format("3PM"),
 			HourOfDay:        localTime.Hour(),
-			WaveHeightM:      hp.WaveHeightM,
-			WavePeriodS:      hp.WavePeriodS,
-			WaveDirectionDeg: hp.WaveDirectionDeg,
+			WaveHeightM:      waveFigureOrAbsent(hp.WaveHeightM),
+			WavePeriodS:      waveFigureOrAbsent(hp.WavePeriodS),
+			WaveDirectionDeg: waveFigureOrAbsent(hp.WaveDirectionDeg),
 			WindWaveHeightM:  hp.WindWaveHeightM,
 			SwellWaveHeightM: hp.SwellWaveHeightM,
 
@@ -578,13 +612,15 @@ func waveDirectionRange(hourly []waveDayHourlyData) string {
 // --- HTTP response shapes ---
 
 type waveHourlyResponse struct {
-	Label            string  `json:"label"`
-	HourOfDay        int     `json:"hour_of_day"`
-	WaveHeightM      float64 `json:"wave_height_m"`
-	WavePeriodS      float64 `json:"wave_period_s"`
-	WaveDirectionDeg float64 `json:"wave_direction_deg"`
-	WindWaveHeightM  float64 `json:"wind_wave_height_m"`
-	SwellWaveHeightM float64 `json:"swell_wave_height_m"`
+	Label     string `json:"label"`
+	HourOfDay int    `json:"hour_of_day"`
+	// The combined figures are left out of the JSON when the provider gave
+	// none for the hour; the client reads a missing key as unknown.
+	WaveHeightM      *float64 `json:"wave_height_m,omitempty"`
+	WavePeriodS      *float64 `json:"wave_period_s,omitempty"`
+	WaveDirectionDeg *float64 `json:"wave_direction_deg,omitempty"`
+	WindWaveHeightM  float64  `json:"wind_wave_height_m"`
+	SwellWaveHeightM float64  `json:"swell_wave_height_m"`
 
 	WindWaveDirectionDeg  float64 `json:"wind_wave_direction_deg"`
 	WindWavePeriodS       float64 `json:"wind_wave_period_s"`
@@ -626,9 +662,9 @@ func mapWaveHourlyResponse(entries []waveDayHourlyData) []waveHourlyResponse {
 		mapped := waveHourlyResponse{
 			Label:            entry.Label,
 			HourOfDay:        entry.HourOfDay,
-			WaveHeightM:      entry.WaveHeightM,
-			WavePeriodS:      entry.WavePeriodS,
-			WaveDirectionDeg: entry.WaveDirectionDeg,
+			WaveHeightM:      waveFigureForResponse(entry.WaveHeightM),
+			WavePeriodS:      waveFigureForResponse(entry.WavePeriodS),
+			WaveDirectionDeg: waveFigureForResponse(entry.WaveDirectionDeg),
 			WindWaveHeightM:  entry.WindWaveHeightM,
 			SwellWaveHeightM: entry.SwellWaveHeightM,
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -38,14 +39,14 @@ func TestParseOpenMeteoWaveResponse_FlatChronologicalHourly(t *testing.T) {
 	if first.Time != "2026-06-14T13:00:00Z" {
 		t.Errorf("expected first time 2026-06-14T13:00:00Z, got %s", first.Time)
 	}
-	if first.WaveHeightM != 1.2 {
-		t.Errorf("expected wave height 1.2, got %f", first.WaveHeightM)
+	if first.WaveHeightM == nil || *first.WaveHeightM != 1.2 {
+		t.Errorf("expected wave height 1.2, got %v", first.WaveHeightM)
 	}
-	if first.WavePeriodS != 6.5 {
-		t.Errorf("expected wave period 6.5, got %f", first.WavePeriodS)
+	if first.WavePeriodS == nil || *first.WavePeriodS != 6.5 {
+		t.Errorf("expected wave period 6.5, got %v", first.WavePeriodS)
 	}
-	if first.WaveDirectionDeg != 135.0 {
-		t.Errorf("expected wave direction 135, got %f", first.WaveDirectionDeg)
+	if first.WaveDirectionDeg == nil || *first.WaveDirectionDeg != 135.0 {
+		t.Errorf("expected wave direction 135, got %v", first.WaveDirectionDeg)
 	}
 	if first.WindWaveHeightM != 0.4 {
 		t.Errorf("expected wind wave height 0.4, got %f", first.WindWaveHeightM)
@@ -59,8 +60,8 @@ func TestParseOpenMeteoWaveResponse_FlatChronologicalHourly(t *testing.T) {
 	if second.Time != "2026-06-14T14:00:00Z" {
 		t.Errorf("expected second time 2026-06-14T14:00:00Z, got %s", second.Time)
 	}
-	if second.WaveHeightM != 1.5 {
-		t.Errorf("expected wave height 1.5, got %f", second.WaveHeightM)
+	if second.WaveHeightM == nil || *second.WaveHeightM != 1.5 {
+		t.Errorf("expected wave height 1.5, got %v", second.WaveHeightM)
 	}
 
 	// Verify times are in chronological order (they should be)
@@ -255,5 +256,52 @@ func TestParseOpenMeteoWaveResponse_CarriesPerComponentDirectionAndPeriod(t *tes
 	if points[1].SwellWaveDirectionDeg != 65 || points[1].SwellWavePeriodS != 7.7 {
 		t.Fatalf("swell = %v deg at %vs, want 65 at 7.7",
 			points[1].SwellWaveDirectionDeg, points[1].SwellWavePeriodS)
+	}
+}
+
+// A null or missing upstream value is a gap in the model, not a calm sea or a
+// wave from due north. The combined figures are left out of the hour, and the
+// JSON the host reads carries no key for them.
+func TestParseOpenMeteoWaveResponse_NullCombinedFiguresAreOmitted(t *testing.T) {
+	raw := []byte(`{"hourly":{
+		"time":["2026-09-03T00:00","2026-09-03T01:00","2026-09-03T02:00"],
+		"wave_height":[null,0.0,1.4],
+		"wave_period":[null,0.0,"n/a"],
+		"wave_direction":[null,0,null]
+	}}`)
+	points, err := parseOpenMeteoWaveResponse(raw, 0)
+	if err != nil {
+		t.Fatalf("parse failed: %v", err)
+	}
+	if len(points) != 3 {
+		t.Fatalf("expected 3 points, got %d", len(points))
+	}
+	if points[0].WaveHeightM != nil || points[0].WavePeriodS != nil || points[0].WaveDirectionDeg != nil {
+		t.Errorf("null entries must be absent: %+v", points[0])
+	}
+	if points[1].WaveHeightM == nil || points[1].WavePeriodS == nil || points[1].WaveDirectionDeg == nil {
+		t.Errorf("a reported zero is a figure and must be kept: %+v", points[1])
+	}
+	if points[2].WaveHeightM == nil || *points[2].WaveHeightM != 1.4 || points[2].WavePeriodS != nil || points[2].WaveDirectionDeg != nil {
+		t.Errorf("height only: %+v", points[2])
+	}
+
+	out, err := json.Marshal(fetchWavesOutput{Hourly: points})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back struct {
+		Hourly []map[string]any `json:"hourly"`
+	}
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"wave_height_m", "wave_period_s", "wave_direction_deg"} {
+		if _, ok := back.Hourly[0][key]; ok {
+			t.Errorf("hour 0 must not carry %s", key)
+		}
+		if _, ok := back.Hourly[1][key]; !ok {
+			t.Errorf("hour 1 must carry %s", key)
+		}
 	}
 }

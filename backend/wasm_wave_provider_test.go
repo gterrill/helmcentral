@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -43,10 +44,10 @@ func TestWasmWaveProvider_FetchWaves_MapsFixtureFieldsCorrectly(t *testing.T) {
 	if bundle.Hourly[0].Time.IsZero() {
 		t.Errorf("expected hourly[0].time to be parsed, got zero time")
 	}
-	if bundle.Hourly[0].WaveHeightM != 1.2 {
+	if bundle.Hourly[0].WaveHeightM == nil || *bundle.Hourly[0].WaveHeightM != 1.2 {
 		t.Errorf("expected wave_height_m 1.2, got %v", bundle.Hourly[0].WaveHeightM)
 	}
-	if bundle.Hourly[0].WavePeriodS != 8.5 {
+	if bundle.Hourly[0].WavePeriodS == nil || *bundle.Hourly[0].WavePeriodS != 8.5 {
 		t.Errorf("expected wave_period_s 8.5, got %v", bundle.Hourly[0].WavePeriodS)
 	}
 
@@ -216,5 +217,91 @@ func TestMapWasmFetchWavesOutput_SeaTempPresentMapsToPointer(t *testing.T) {
 	}
 	if bundle.SeaTempC == nil || *bundle.SeaTempC != 22.1 {
 		t.Fatalf("expected mapped bundle.SeaTempC to be 22.1, got %v", bundle.SeaTempC)
+	}
+}
+
+// A plugin omits wave_height_m, wave_period_s or wave_direction_deg when its
+// model has no value. The host reads the missing key as absent, which is not
+// the same as 0 m, 0 s or due north.
+func TestMapWasmFetchWavesOutput_OmittedCombinedFiguresMapToAbsent(t *testing.T) {
+	raw := `{"hourly":[
+		{"time":"2026-07-19T05:00:00Z","wave_height_m":1.2},
+		{"time":"2026-07-19T06:00:00Z","wave_height_m":0,"wave_period_s":0,"wave_direction_deg":0},
+		{"time":"2026-07-19T07:00:00Z"}]}`
+	var parsed wasmFetchWavesOutput
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := mapWasmFetchWavesOutput(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b, c := bundle.Hourly[0], bundle.Hourly[1], bundle.Hourly[2]
+	if a.WaveHeightM == nil || *a.WaveHeightM != 1.2 || a.WavePeriodS != nil || a.WaveDirectionDeg != nil {
+		t.Errorf("height only: %+v", a)
+	}
+	if b.WaveHeightM == nil || b.WavePeriodS == nil || b.WaveDirectionDeg == nil {
+		t.Errorf("explicit zeros are figures, not absence: %+v", b)
+	}
+	if c.WaveHeightM != nil || c.WavePeriodS != nil || c.WaveDirectionDeg != nil {
+		t.Errorf("no keys must be absent: %+v", c)
+	}
+}
+
+// A plugin that reports an impossible figure is broken, and the host says so
+// rather than reading the figure as absent.
+func TestMapWasmFetchWavesOutput_ImpossibleFiguresAreErrors(t *testing.T) {
+	cases := map[string]string{
+		"negative height":     `{"time":"2026-07-19T05:00:00Z","wave_height_m":1},{"time":"2026-07-19T06:00:00Z","wave_height_m":-0.5}`,
+		"negative period":     `{"time":"2026-07-19T05:00:00Z","wave_height_m":1},{"time":"2026-07-19T06:00:00Z","wave_period_s":-3}`,
+		"direction below 0":   `{"time":"2026-07-19T05:00:00Z","wave_height_m":1},{"time":"2026-07-19T06:00:00Z","wave_direction_deg":-10}`,
+		"direction above 360": `{"time":"2026-07-19T05:00:00Z","wave_height_m":1},{"time":"2026-07-19T06:00:00Z","wave_direction_deg":361}`,
+	}
+	for name, hours := range cases {
+		t.Run(name, func(t *testing.T) {
+			var parsed wasmFetchWavesOutput
+			if err := json.Unmarshal([]byte(`{"hourly":[`+hours+`]}`), &parsed); err != nil {
+				t.Fatal(err)
+			}
+			_, err := mapWasmFetchWavesOutput(parsed)
+			if err == nil || !strings.Contains(err.Error(), "hourly[1]") {
+				t.Fatalf("want an error naming hourly[1], got %v", err)
+			}
+		})
+	}
+	var ok wasmFetchWavesOutput
+	if err := json.Unmarshal([]byte(`{"hourly":[{"time":"2026-07-19T05:00:00Z","wave_height_m":0,"wave_period_s":0,"wave_direction_deg":360}]}`), &ok); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mapWasmFetchWavesOutput(ok); err != nil {
+		t.Fatalf("0 m, 0 s and 360 degrees are in range: %v", err)
+	}
+}
+
+// A cache file written before absent figures existed holds 0 for a null, and
+// would read as a real 0 m sea, including through the stale fallback. It is
+// not served.
+func TestWasmWaveProvider_OldFormatCacheFileIsNotServed(t *testing.T) {
+	stateDir := t.TempDir()
+	t.Setenv("HELMCENTRAL_STATE_DIR", stateDir)
+	t.Setenv("WAVE_WASM_CACHE_FILE_WAVE_VALID_FIXTURE", "")
+
+	oldPath := filepath.Join(stateDir, "cache", "wave_wasm_wave-valid-fixture_cache.json")
+	zero := 0.0
+	old := newWasmPluginCache[waveForecastBundle](oldPath)
+	old.set("30.0,40.0,2,", waveForecastBundle{
+		Hourly:   []waveHourPoint{{Time: time.Date(2026, 6, 14, 0, 0, 0, 0, time.UTC), WaveHeightM: &zero, WavePeriodS: &zero, WaveDirectionDeg: &zero}},
+		CachedAt: time.Now().UTC(),
+	})
+	if _, err := os.Stat(oldPath); err != nil {
+		t.Fatalf("test setup: old cache file not written: %v", err)
+	}
+
+	p, err := newWasmWaveProvider(waveValidFixtureWasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.cache.getStale("30.0,40.0,2,"); ok {
+		t.Fatal("an old-format wave cache entry must not be served, not even as stale")
 	}
 }

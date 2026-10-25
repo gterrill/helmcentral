@@ -199,7 +199,7 @@ func TestWaveForecast_ExplicitPointEmptyResponseIsAFault(t *testing.T) {
 func TestWaveForecast_ExplicitPointWithOnlyPastDaysIsAFault(t *testing.T) {
 	withCleanWaveProviderRegistry(t)
 	old := time.Now().UTC().AddDate(0, 0, -5)
-	hourly := []waveHourPoint{{Time: old, WaveHeightM: 1.2, WavePeriodS: 8}}
+	hourly := []waveHourPoint{{Time: old, WaveHeightM: pwF(1.2), WavePeriodS: pwF(8)}}
 	registerWaveProvider(&pointWave{stubWaveProvider: stubWaveProvider{id: "w", name: "W", ttl: 60, bundle: waveForecastBundle{Hourly: hourly, CachedAt: time.Now().UTC()}}})
 	t.Setenv("SETTINGS_FILE", writeWaveSettings(t, "w", "http://127.0.0.1:1"))
 	rec := serveForecastPoint(t, waveForecast, "?lat=-27.4&lon=153")

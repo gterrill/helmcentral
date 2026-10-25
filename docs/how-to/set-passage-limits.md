@@ -31,6 +31,14 @@ it checked, the wave height at which you would wait. Mate works out the rest.
    grade a leg that falls in a sector without one.
 3. Enter a **No-go wave height** in metres where it matters to you. A sector
    left blank is shown as not checked for waves, never as passed.
+   Sometimes the wave forecast gives a height for an hour but not the
+   direction the sea is coming from. Mate then compares the height with the
+   limit for every sector. If all three sectors have a limit and they give the
+   same answer, Mate uses it, because the direction can't change the result.
+   If they give different answers, or a sector has no limit, Mate can't tell
+   which limit applies. The card then says "Not checked: wave direction"
+   instead of picking one for you. If no sector has a wave limit, the card says "Not
+   checked: wave height".
 4. Under **Wind against tide**, enter how many knots to **Reduce wind limits
    by** while a stream runs against the wind, through the strongest part of
    the flood or ebb. It lowers the no-go wind only. Marginal follows at 70% of
@@ -44,7 +52,10 @@ it checked, the wave height at which you would wait. Mate works out the rest.
 6. Choose **Save** in the bar at the bottom of the page.
 
 On the weather window card, a marginal cell says which figure made it so, for
-example "Wind SE 12 kn ahead (marginal from 10.5)".
+example "Wind SE 12 kn ahead (marginal from 10.5)". A wave line shows the
+period beside the height when the forecast has one, for example "Waves 1.8 m ·
+6 s abeam". There's no period limit. It's there so that you can tell a short,
+steep sea from a long swell of the same height.
 
 You can type decimals with a point or a comma. A value Helmcentral can't read
 is marked on the field, and Save stays unavailable until you correct it.

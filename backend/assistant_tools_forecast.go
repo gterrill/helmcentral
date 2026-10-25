@@ -492,16 +492,24 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 			row.RelWindDeg, row.RelWind = &relDeg, &relLabel
 		}
 
-		if whp, ok := waveByUnix[hp.Time.Unix()]; ok && whp.WavePeriodS != 0 {
-			hm := roundTo1(whp.WaveHeightM)
-			ps := roundTo1(whp.WavePeriodS)
-			wd := degreesToDirection(whp.WaveDirectionDeg)
-			row.WaveM, row.WaveS, row.WaveDir = &hm, &ps, &wd
-
-			if args.CourseDeg != nil {
-				relDeg := relativeAngleDeg(*args.CourseDeg, whp.WaveDirectionDeg)
-				relLabel := relativeAngleLabel(relDeg)
-				row.RelWaveDeg, row.RelWave = &relDeg, &relLabel
+		// A wave row needs a height. The period and direction are added only
+		// when the provider gave them: an absent direction is not north, and
+		// a zero period is not a period.
+		if whp, ok := waveByUnix[hp.Time.Unix()]; ok && whp.WaveHeightM != nil {
+			hm := roundTo1(*whp.WaveHeightM)
+			row.WaveM = &hm
+			if whp.WavePeriodS != nil && *whp.WavePeriodS > 0 {
+				ps := roundTo1(*whp.WavePeriodS)
+				row.WaveS = &ps
+			}
+			if whp.WaveDirectionDeg != nil {
+				wd := degreesToDirection(*whp.WaveDirectionDeg)
+				row.WaveDir = &wd
+				if args.CourseDeg != nil {
+					relDeg := relativeAngleDeg(*args.CourseDeg, *whp.WaveDirectionDeg)
+					relLabel := relativeAngleLabel(relDeg)
+					row.RelWaveDeg, row.RelWave = &relDeg, &relLabel
+				}
 			}
 		}
 
