@@ -399,7 +399,7 @@ func TestExecuteGetWindForecast_RoundsFiltersNullsAndJoinsWaves(t *testing.T) {
 		id: "open-meteo-marine",
 		bundle: waveForecastBundle{
 			Hourly: []waveHourPoint{
-				{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WaveHeightM: 0.8, WavePeriodS: 6, WaveDirectionDeg: 90},
+				{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WaveHeightM: pwF(0.8), WavePeriodS: pwF(6), WaveDirectionDeg: pwF(90)},
 			},
 		},
 	}
@@ -566,7 +566,7 @@ func TestExecuteGetWindForecast_CourseDegAddsRelativeAngles(t *testing.T) {
 			Hourly: []waveHourPoint{
 				// 45 degrees (NE): forward of a 303 degree course's
 				// quarter, not "on or abaft the beam".
-				{Time: now, WaveHeightM: 1.0, WavePeriodS: 6, WaveDirectionDeg: 45},
+				{Time: now, WaveHeightM: pwF(1.0), WavePeriodS: pwF(6), WaveDirectionDeg: pwF(45)},
 			},
 		},
 	}
@@ -3031,5 +3031,53 @@ func TestExecuteReadHelp_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "help") {
 		t.Fatalf("expected a plain \"help\" error, got %v", err)
+	}
+}
+
+// get_wind_forecast leaves a wave figure out when the provider has none for
+// the hour: a height is given alone when there is no period, and no direction means no
+// direction or relative angle, never "N" or a bearing off due north.
+func TestGetWindForecast_AbsentWaveFiguresAreOmitted(t *testing.T) {
+	now := time.Date(2026, 9, 12, 2, 0, 0, 0, time.UTC) // local 12:00 at lon 149.1
+	lat, lon := -20.1, 149.1
+	weatherStub := &capturingWeatherProvider{
+		bundle: weatherForecastBundle{
+			Hourly: []weatherHourPoint{
+				{Time: now, WindSpeedMS: 5.0, WindGustMS: 6.0, WindDirectionDeg: 135},
+				{Time: now.Add(3 * time.Hour), WindSpeedMS: 5.0, WindGustMS: 6.0, WindDirectionDeg: 135},
+			},
+			CachedAt: now,
+		},
+	}
+	h, per := 1.0, 6.0
+	waveStub := &stubWaveProvider{id: "open-meteo-marine", bundle: waveForecastBundle{Hourly: []waveHourPoint{
+		{Time: now, WaveHeightM: &h, WavePeriodS: &per},
+		{Time: now.Add(3 * time.Hour), WaveHeightM: &h},
+	}}}
+	deps := assistantToolDeps{
+		now:     func() time.Time { return now },
+		weather: func() (weatherProvider, string, error) { return weatherStub, "capturing-weather", nil },
+		waves:   func() (waveProvider, string, error) { return waveStub, "open-meteo-marine", nil },
+	}
+	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(fmt.Sprintf(`{"lat":%f,"lon":%f,"days":1,"course_deg":0}`, lat, lon)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result assistantWindForecastResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Hourly) != 2 {
+		t.Fatalf("rows: %+v", result.Hourly)
+	}
+	first, second := result.Hourly[0], result.Hourly[1]
+	if first.WaveM == nil || first.WaveS == nil {
+		t.Errorf("height and period present: %+v", first)
+	}
+	if first.WaveDir != nil || first.RelWave != nil || first.RelWaveDeg != nil {
+		t.Errorf("no direction figure must not be invented: %+v", first)
+	}
+	if second.WaveM == nil || *second.WaveM != 1.0 || second.WaveS != nil || second.WaveDir != nil {
+		t.Errorf("a height with no period or direction gives the height alone: %+v", second)
 	}
 }

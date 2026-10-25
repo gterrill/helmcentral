@@ -101,6 +101,16 @@ describe('decodeMateCards: passage_window', () => {
     expect(reasonOf(mutate((p) => { p.legs[0].stay_nights_after = '2' }))).toMatch(/stay_nights_after/)
   })
 
+  it('accepts wave_direction as a not-checked measure and still reads cards saved without it', () => {
+    const withDirection = decodeMateCards(mutate((p) => { p.rows[0].cells[0].not_checked = ['wave', 'wave_direction'] }))
+    const card = withDirection[0]
+    expect(card.kind).toBe('passage_window')
+    if (card.kind !== 'passage_window') return
+    expect(card.rows[0].cells[0].notChecked).toEqual(['wave', 'wave_direction'])
+    // A card stored before the measure existed has only the old values.
+    expect(decodeMateCards(wrap(passageWindowPayload()))[0]).toMatchObject({ kind: 'passage_window' })
+  })
+
   it('rejects a missing payload and keeps the other cards', () => {
     const cards = decodeMateCards([{ kind: 'passage_window' }, ...wrap(passageWindowPayload())])
     expect(cards[0].kind).toBe('error')

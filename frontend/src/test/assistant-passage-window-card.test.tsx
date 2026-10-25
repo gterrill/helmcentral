@@ -95,6 +95,13 @@ describe('AssistantPassageWindowCard', () => {
     expect(screen.getByText('Not checked: wave height, wind against tide')).toBeInTheDocument()
   })
 
+  it('words a not-checked wave direction', () => {
+    const card: PassageWindowCard = passageWindowCard()
+    for (const r of card.rows) for (const c of r.cells) c.notChecked = ['wave_direction', 'gust']
+    render(<AssistantPassageWindowCard card={card} />)
+    expect(screen.getByText('Not checked: gusts, wave direction')).toBeInTheDocument()
+  })
+
   it('omits the not-checked line when everything was checked', () => {
     const card: PassageWindowCard = passageWindowCard()
     for (const r of card.rows) for (const c of r.cells) c.notChecked = []

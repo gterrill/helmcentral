@@ -85,6 +85,8 @@ type passageHour struct {
 	HasWave                    bool
 	WaveM, WaveDirDeg          float64
 	HasWaveDir                 bool
+	HasWavePeriod              bool
+	WavePeriodS                float64
 }
 
 // passageForecast is one point's hourly forecast keyed by the unix time of the
@@ -502,7 +504,47 @@ func (as *passageAssessor) tideExtremes(ctx context.Context, pt passageRoutePoin
 	return ext, err
 }
 
-var passageNotCheckedOrder = []string{"gust", "wave", "wind_against_tide", "daylight"}
+var passageNotCheckedOrder = []string{"gust", "wave", "wave_direction", "wind_against_tide", "daylight"}
+
+// wavesWithoutDirection judges a wave height against each sector's no-go and
+// returns how many sectors have a limit. The candidate is non-nil only when all
+// three are set and agree on severity; it is the one with the worst ratio, with
+// no sector in its text.
+func (as *passageAssessor) wavesWithoutDirection(waveM float64, h passageHour, label string) (*passageCandidate, int) {
+	set := 0
+	var worst *passageCandidate
+	sev := -1
+	agree := true
+	for _, lim := range []*float64{as.limits.Ahead.WaveMNoGo, as.limits.Abeam.WaveMNoGo, as.limits.Astern.WaveMNoGo} {
+		if lim == nil {
+			continue
+		}
+		set++
+		s, ratio := judge(waveM, h.WaveM, *lim)
+		if sev >= 0 && s != sev {
+			agree = false
+		}
+		sev = s
+		c := passageCandidate{s, ratio, "wave", "",
+			fmt.Sprintf("Waves %s%s · %s", waveFigures(waveM, h), marginalNote(s, *lim), label)}
+		if worst == nil || c.beats(*worst) {
+			worst = &c
+		}
+	}
+	if set < 3 || !agree {
+		return nil, set
+	}
+	return worst, set
+}
+
+// waveFigures is the wave part of a limiting line: the height, and the period
+// beside it when the provider gave one.
+func waveFigures(heightM float64, h passageHour) string {
+	if h.HasWavePeriod && h.WavePeriodS > 0 {
+		return fmt.Sprintf("%.1f m · %d s", heightM, int(math.Round(h.WavePeriodS)))
+	}
+	return fmt.Sprintf("%.1f m", heightM)
+}
 
 func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPlan, depart time.Time) (passageWindowCell, error) {
 	arrive := depart.Add(time.Duration(plan.hours * float64(time.Hour)))
@@ -591,19 +633,31 @@ func (as *passageAssessor) cell(ctx context.Context, idx int, plan passageLegPla
 				fmt.Sprintf("Gusts %d kn %s%s · %s", int(gustKn), sector, marginalNote(sev, gustNoGo), seg.label)})
 		}
 
-		if !h.HasWave {
+		switch {
+		case !h.HasWave:
 			notChecked["wave"] = true
-		} else {
-			waveSector := sector
-			if h.HasWaveDir {
-				waveSector = passageSector(angleBetween(h.WaveDirDeg, seg.bearing))
-			}
+		case h.HasWaveDir:
+			waveSector := passageSector(angleBetween(h.WaveDirDeg, seg.bearing))
 			if waveNoGo := as.limits.sector(waveSector).WaveMNoGo; waveNoGo != nil {
 				sev, ratio := judge(waveM, h.WaveM, *waveNoGo)
 				consider(passageCandidate{sev, ratio, "wave", waveSector,
-					fmt.Sprintf("Waves %.1f m %s%s · %s", waveM, waveSector, marginalNote(sev, *waveNoGo), seg.label)})
+					fmt.Sprintf("Waves %s %s%s · %s", waveFigures(waveM, h), waveSector, marginalNote(sev, *waveNoGo), seg.label)})
 			} else {
 				notChecked["wave"] = true
+			}
+		default:
+			// Height without a direction. The sector is unknown, so judge the
+			// height against every sector's limit. If all three give the same
+			// severity, direction cannot change the answer and the worst of
+			// them stands. Anything else would be a guess at the direction.
+			cand, set := as.wavesWithoutDirection(waveM, h, seg.label)
+			switch {
+			case set == 0:
+				notChecked["wave"] = true
+			case set == 3 && cand != nil:
+				consider(*cand)
+			default:
+				notChecked["wave_direction"] = true
 			}
 		}
 
@@ -797,7 +851,15 @@ func passageHoursFromBundles(wb weatherForecastBundle, vb *waveForecastBundle) m
 		for _, wp := range vb.Hourly {
 			k := wp.Time.Truncate(time.Hour).Unix()
 			if h, ok := out[k]; ok {
-				h.HasWave, h.WaveM, h.WaveDirDeg, h.HasWaveDir = true, wp.WaveHeightM, wp.WaveDirectionDeg, true
+				if wp.WaveHeightM != nil {
+					h.HasWave, h.WaveM = true, *wp.WaveHeightM
+				}
+				if wp.WaveDirectionDeg != nil {
+					h.HasWaveDir, h.WaveDirDeg = true, *wp.WaveDirectionDeg
+				}
+				if wp.WavePeriodS != nil && *wp.WavePeriodS > 0 {
+					h.HasWavePeriod, h.WavePeriodS = true, *wp.WavePeriodS
+				}
 				out[k] = h
 			}
 		}

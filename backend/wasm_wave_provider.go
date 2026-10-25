@@ -64,9 +64,12 @@ func newWasmWaveProviderWithManifest(manifest extism.Manifest) (*wasmWaveProvide
 // wave-specific disk-backed cache (loaded from disk immediately), mirroring
 // newWasmWeatherProviderFromBase.
 func newWasmWaveProviderFromBase(base *wasmPluginBase) *wasmWaveProvider {
+	// v2: the first cache files stored 0 for a figure the plugin had left
+	// out. A bundle read back from one would show a real 0 m and 0 degrees, so
+	// the file name changed and the old files are never read.
 	cacheFile := cacheFilePath(
 		"WAVE_WASM_CACHE_FILE_"+strings.ToUpper(strings.ReplaceAll(base.ID(), "-", "_")),
-		fmt.Sprintf("cache/wave_wasm_%s_cache.json", base.ID()),
+		fmt.Sprintf("cache/wave_wasm_v2_%s_cache.json", base.ID()),
 	)
 	cache := newWasmPluginCache[waveForecastBundle](cacheFile)
 	cache.loadFromDisk()
@@ -89,12 +92,16 @@ type wasmFetchWavesInput struct {
 // entirely (the contract's "genuinely no data here" case) naturally
 // unmarshals to nil - no special detection needed.
 type wasmWaveHourOutput struct {
-	Time             string  `json:"time"`
-	WaveHeightM      float64 `json:"wave_height_m"`
-	WavePeriodS      float64 `json:"wave_period_s"`
-	WaveDirectionDeg float64 `json:"wave_direction_deg"`
-	WindWaveHeightM  float64 `json:"wind_wave_height_m"`
-	SwellWaveHeightM float64 `json:"swell_wave_height_m"`
+	Time string `json:"time"`
+
+	// The combined height, period and direction are optional. A plugin omits
+	// the key when it has no value for the hour, and it arrives as nil: absent,
+	// which is not 0 m, 0 s or a sea from due north.
+	WaveHeightM      *float64 `json:"wave_height_m"`
+	WavePeriodS      *float64 `json:"wave_period_s"`
+	WaveDirectionDeg *float64 `json:"wave_direction_deg"`
+	WindWaveHeightM  float64  `json:"wind_wave_height_m"`
+	SwellWaveHeightM float64  `json:"swell_wave_height_m"`
 
 	// Per-component direction and period. A plugin whose upstream model does
 	// not carry them omits them, and they arrive as 0 - which the host reads
@@ -111,6 +118,21 @@ type wasmFetchWavesOutput struct {
 	SeaSurfaceTemperatureC *float64             `json:"sea_surface_temperature_c"`
 }
 
+// validateWaveFigures rejects a combined figure no sea can have. A plugin that
+// reports one is broken, and saying so beats reading it as absent.
+func validateWaveFigures(i int, h wasmWaveHourOutput) error {
+	if h.WaveHeightM != nil && *h.WaveHeightM < 0 {
+		return fmt.Errorf("hourly[%d].wave_height_m is %g, a height cannot be negative", i, *h.WaveHeightM)
+	}
+	if h.WavePeriodS != nil && *h.WavePeriodS < 0 {
+		return fmt.Errorf("hourly[%d].wave_period_s is %g, a period cannot be negative", i, *h.WavePeriodS)
+	}
+	if h.WaveDirectionDeg != nil && (*h.WaveDirectionDeg < 0 || *h.WaveDirectionDeg > 360) {
+		return fmt.Errorf("hourly[%d].wave_direction_deg is %g, a direction must be 0 to 360", i, *h.WaveDirectionDeg)
+	}
+	return nil
+}
+
 func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, error) {
 	var bundle waveForecastBundle
 
@@ -118,6 +140,9 @@ func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, erro
 	for i, h := range out.Hourly {
 		hourTime, err := parseRequiredTime(fmt.Sprintf("hourly[%d].time", i), h.Time)
 		if err != nil {
+			return waveForecastBundle{}, err
+		}
+		if err := validateWaveFigures(i, h); err != nil {
 			return waveForecastBundle{}, err
 		}
 		bundle.Hourly = append(bundle.Hourly, waveHourPoint{

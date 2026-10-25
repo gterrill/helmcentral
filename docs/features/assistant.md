@@ -320,7 +320,15 @@ briefing and shows the card without repeating the grid as a table.
 The card doesn't fill gaps. A leg past the end of the forecast is **NO DATA**,
 not go. Anything it couldn't check is listed under the grid ("Not checked: wave
 height, wind against tide"). That happens, for example, when no wave forecast is
-available or Mate doesn't know which way the flood runs on that leg. Wind
+available or Mate doesn't know which way the flood runs on that leg. An hour
+with no wave height in the forecast is never treated as a flat calm.
+
+"Not checked: wave direction" means the forecast had a wave height but not the
+direction it was coming from, and your wave limits don't all agree about it. Mate
+compares the height with the limit for each sector. If all three sectors have a
+limit and give the same answer, it uses that answer. Otherwise it can't tell which
+limit applies, so it leaves the check out rather than guess. When the forecast has a wave period, the card shows it beside the
+height, for example "Waves 1.8 m · 6 s abeam". Wind
 against tide is judged on the direction and timing of the stream from the tide
 station's high and low water, not on its speed.
 

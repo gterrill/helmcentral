@@ -58,10 +58,12 @@ const (
 //
 // If the hourly object is missing from the response, this is a hard error
 // (wave data is required). If hourly.time is missing or the arrays are
-// misaligned, it's also a hard error. Null entries in numeric arrays (which
-// Open-Meteo returns when queried over land with no wave model coverage)
-// silently become 0 on JSON unmarshaling of a bare float64 field - this is
-// acceptable since it's a model-coverage gap, not a malformed response.
+// misaligned, it's also a hard error. Null (or non-numeric) entries in the
+// combined height, period and direction arrays, which Open-Meteo returns when
+// queried over land with no wave model coverage, leave that figure out of the
+// hour so the host reads it as absent. A reported 0 is a real figure and is
+// kept. The per-component fields keep their zero encoding, which the host
+// reads as "no such wave train".
 func parseOpenMeteoWaveResponse(raw []byte, utcOffsetSeconds int) ([]waveHourOutput, error) {
 	var result map[string]any
 	if err := json.Unmarshal(raw, &result); err != nil {
@@ -108,17 +110,17 @@ func parseOpenMeteoWaveResponse(raw []byte, utcOffsetSeconds int) ([]waveHourOut
 		point := waveHourOutput{Time: rfc3339Time.UTC().Format(time.RFC3339)}
 		if i < len(heights) {
 			if h, ok := heights[i].(float64); ok {
-				point.WaveHeightM = h
+				point.WaveHeightM = &h
 			}
 		}
 		if i < len(periods) {
 			if p, ok := periods[i].(float64); ok {
-				point.WavePeriodS = p
+				point.WavePeriodS = &p
 			}
 		}
 		if i < len(directions) {
 			if d, ok := directions[i].(float64); ok {
-				point.WaveDirectionDeg = d
+				point.WaveDirectionDeg = &d
 			}
 		}
 		if i < len(windWaveHeights) {
@@ -219,12 +221,16 @@ func parseOpenMeteoLocalTime(localStr string, utcOffsetSeconds int) (time.Time, 
 // waveHourOutput mirrors the host's wasmWaveHourOutput contract exactly
 // (backend/wasm_wave_provider.go).
 type waveHourOutput struct {
-	Time             string  `json:"time"`
-	WaveHeightM      float64 `json:"wave_height_m"`
-	WavePeriodS      float64 `json:"wave_period_s"`
-	WaveDirectionDeg float64 `json:"wave_direction_deg"`
-	WindWaveHeightM  float64 `json:"wind_wave_height_m"`
-	SwellWaveHeightM float64 `json:"swell_wave_height_m"`
+	Time string `json:"time"`
+
+	// The combined figures are left out when the model has no value for the
+	// hour. The host reads a missing key as absent, which is not 0 m, 0 s or a
+	// sea from due north.
+	WaveHeightM      *float64 `json:"wave_height_m,omitempty"`
+	WavePeriodS      *float64 `json:"wave_period_s,omitempty"`
+	WaveDirectionDeg *float64 `json:"wave_direction_deg,omitempty"`
+	WindWaveHeightM  float64  `json:"wind_wave_height_m"`
+	SwellWaveHeightM float64  `json:"swell_wave_height_m"`
 
 	WindWaveDirectionDeg  float64 `json:"wind_wave_direction_deg"`
 	WindWavePeriodS       float64 `json:"wind_wave_period_s"`

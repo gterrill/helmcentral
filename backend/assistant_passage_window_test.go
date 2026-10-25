@@ -46,6 +46,20 @@ func pwUniform(windKn, fromDeg, gustKn float64, waveM *float64, waveFrom float64
 	}}
 }
 
+// pwWaves is the same weather at every hour with a wave figure set the caller
+// shapes: height, period and direction each present or absent.
+func pwWaves(windKn, fromDeg float64, mutate func(h *passageHour)) forecastSource {
+	hours := map[int64]passageHour{}
+	for t := pwDay(19, 0); !t.After(pwDay(25, 23)); t = t.Add(time.Hour) {
+		h := passageHour{WindMS: kn(windKn), GustMS: kn(windKn), WindDirDeg: fromDeg}
+		mutate(&h)
+		hours[t.Unix()] = h
+	}
+	return forecastSource{Provider: "test-wx", WaveProvider: "test-waves", Fetch: func(_ context.Context, lat, lon float64) (passageForecast, error) {
+		return passageForecast{Hours: hours}, nil
+	}}
+}
+
 func pwWeek(windKn, fromDeg float64) forecastSource {
 	return pwUniform(windKn, fromDeg, windKn, nil, 0, pwDay(19, 0), pwDay(25, 23))
 }
@@ -449,6 +463,182 @@ func TestAssessItinerary_MissingWaveDataIsNotCalm(t *testing.T) {
 	}
 }
 
+// A wave hour with a height and no direction cannot be placed in a sector. When
+// the sector limits differ, the answer depends on the direction, so the cell
+// says the direction was not checked rather than guessing one.
+func TestAssessItinerary_WaveHeightWithoutDirectionIsNotCheckedWhenLimitsDiffer(t *testing.T) {
+	l := pwLimitsAll()
+	l.Ahead.WaveMNoGo = pwF(2)
+	l.Abeam.WaveMNoGo = pwF(2.5)
+	l.Astern.WaveMNoGo = pwF(3)
+	fc := pwWaves(5, 180, func(h *passageHour) {
+		h.HasWave, h.WaveM = true, 2.8
+	})
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, fc))
+	if !pwHas(c.NotChecked, "wave_direction") {
+		t.Fatalf("want wave_direction not checked, got %v", c.NotChecked)
+	}
+	if pwHas(c.NotChecked, "wave") {
+		t.Fatalf("height is known, wave itself must not be listed: %v", c.NotChecked)
+	}
+	if c.State != "go" {
+		t.Fatalf("a wave check that could not run must not set a verdict, got %s / %+v", c.State, c.Limiting)
+	}
+}
+
+// With the same wave limit in all three sectors, direction cannot change the
+// answer, so the check runs and nothing is reported as skipped.
+func TestAssessItinerary_WaveHeightWithoutDirectionRunsWhenLimitsAreEqual(t *testing.T) {
+	l := pwLimitsAll()
+	l.Ahead.WaveMNoGo = pwF(2)
+	l.Abeam.WaveMNoGo = pwF(2)
+	l.Astern.WaveMNoGo = pwF(2)
+	fc := pwWaves(5, 180, func(h *passageHour) {
+		h.HasWave, h.WaveM = true, 2.4
+		h.HasWavePeriod, h.WavePeriodS = true, 7
+	})
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, fc))
+	if pwHas(c.NotChecked, "wave_direction") || pwHas(c.NotChecked, "wave") {
+		t.Fatalf("equal limits must run the check, got not checked %v", c.NotChecked)
+	}
+	if c.State != "no_go" || c.Limiting == nil || c.Limiting.Factor != "wave" || c.Limiting.Text != "Waves 2.4 m · 7 s · Alpha → Bravo" {
+		t.Fatalf("got %s / %+v", c.State, c.Limiting)
+	}
+}
+
+// Equal limits on only two of the three sectors is not "the same everywhere":
+// the third sector has no limit, so direction still decides whether one applies.
+func TestAssessItinerary_WaveHeightWithoutDirectionNeedsAllThreeSectorsSet(t *testing.T) {
+	l := pwLimitsAll()
+	l.Ahead.WaveMNoGo = pwF(2)
+	l.Abeam.WaveMNoGo = pwF(2)
+	fc := pwWaves(5, 180, func(h *passageHour) { h.HasWave, h.WaveM = true, 2.4 })
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, fc))
+	if !pwHas(c.NotChecked, "wave_direction") {
+		t.Fatalf("want wave_direction not checked, got %v", c.NotChecked)
+	}
+}
+
+// With differing limits, direction can still fail to change the answer: when
+// every sector gives the same severity the check runs, with no sector named.
+func TestAssessItinerary_NoDirectionRunsWhenEverySectorAgrees(t *testing.T) {
+	l := pwLimitsAll()
+	l.Ahead.WaveMNoGo = pwF(2)
+	l.Abeam.WaveMNoGo = pwF(2.5)
+	l.Astern.WaveMNoGo = pwF(3)
+	cases := []struct {
+		name  string
+		waveM float64
+		state string
+		text  string
+	}{
+		{"no-go in all three", 3.2, "no_go", "Waves 3.2 m · Alpha → Bravo"},
+		{"go in all three", 0.5, "go", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := pwWaves(5, 180, func(h *passageHour) { h.HasWave, h.WaveM = true, tc.waveM })
+			c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, fc))
+			if pwHas(c.NotChecked, "wave_direction") || pwHas(c.NotChecked, "wave") {
+				t.Fatalf("direction cannot change the answer, got not checked %v", c.NotChecked)
+			}
+			if c.State != tc.state {
+				t.Fatalf("state = %s, want %s", c.State, tc.state)
+			}
+			if tc.text != "" && (c.Limiting == nil || c.Limiting.Text != tc.text || c.Limiting.Sector != nil) {
+				t.Fatalf("limiting = %+v, want %q with no sector", c.Limiting, tc.text)
+			}
+		})
+	}
+}
+
+// With no wave limit in any sector the missing thing is the operator's limit,
+// not the forecast's direction.
+func TestAssessItinerary_NoDirectionAndNoWaveLimitIsWaveNotChecked(t *testing.T) {
+	fc := pwWaves(5, 180, func(h *passageHour) { h.HasWave, h.WaveM = true, 2.4 })
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), pwLimitsAll(), fc))
+	if !pwHas(c.NotChecked, "wave") || pwHas(c.NotChecked, "wave_direction") {
+		t.Fatalf("want wave only, got %v", c.NotChecked)
+	}
+}
+
+// A zero period is not a period: no "· 0 s".
+func TestAssessItinerary_ZeroPeriodIsNotShown(t *testing.T) {
+	l := pwLimitsAll()
+	l.Abeam.WaveMNoGo = pwF(2)
+	fc := pwWaves(5, 180, func(h *passageHour) {
+		h.HasWave, h.WaveM = true, 2.4
+		h.HasWavePeriod, h.WavePeriodS = true, 0
+		h.HasWaveDir, h.WaveDirDeg = true, 90
+	})
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, fc))
+	if c.Limiting == nil || c.Limiting.Text != "Waves 2.4 m abeam · Alpha → Bravo" {
+		t.Fatalf("got %+v", c.Limiting)
+	}
+}
+
+// No height means no wave data, whatever else the hour carries: the cell lists
+// wave as not checked and does not read it as a calm sea.
+func TestAssessItinerary_NoWaveHeightIsNotCheckedNotCalm(t *testing.T) {
+	l := pwLimitsAll()
+	l.Ahead.WaveMNoGo = pwF(2)
+	l.Abeam.WaveMNoGo = pwF(2)
+	l.Astern.WaveMNoGo = pwF(2)
+	fc := pwWaves(5, 180, func(h *passageHour) {
+		h.HasWaveDir, h.WaveDirDeg = true, 0
+		h.HasWavePeriod, h.WavePeriodS = true, 6
+	})
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, fc))
+	if !pwHas(c.NotChecked, "wave") {
+		t.Fatalf("want wave not checked, got %v", c.NotChecked)
+	}
+}
+
+// The period is printed next to the height, and only when the provider has one.
+func TestAssessItinerary_WaveLimitingTextCarriesThePeriod(t *testing.T) {
+	l := pwLimitsAll()
+	l.Abeam.WaveMNoGo = pwF(2)
+	withPeriod := pwWaves(5, 180, func(h *passageHour) {
+		h.HasWave, h.WaveM = true, 2.4
+		h.HasWavePeriod, h.WavePeriodS = true, 6
+		h.HasWaveDir, h.WaveDirDeg = true, 90
+	})
+	c := pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, withPeriod))
+	if c.Limiting == nil || c.Limiting.Text != "Waves 2.4 m · 6 s abeam · Alpha → Bravo" {
+		t.Fatalf("got %+v", c.Limiting)
+	}
+	noPeriod := pwWaves(5, 180, func(h *passageHour) {
+		h.HasWave, h.WaveM = true, 2.4
+		h.HasWaveDir, h.WaveDirDeg = true, 90
+	})
+	c = pwCell0(t, pwAssess(t, pwArgs([]string{"2026-10-20"}, "06:00", pwNorthLeg()), l, noPeriod))
+	if c.Limiting == nil || c.Limiting.Text != "Waves 2.4 m abeam · Alpha → Bravo" {
+		t.Fatalf("got %+v", c.Limiting)
+	}
+}
+
+// passageHoursFromBundles keeps absent wave figures absent.
+func TestPassageHoursFromBundles_AbsentWaveFiguresStayAbsent(t *testing.T) {
+	tm := pwDay(20, 6).UTC()
+	wb := weatherForecastBundle{Hourly: []weatherHourPoint{{Time: tm}}}
+	h2 := 0.0
+	per, dir := 7.0, 0.0
+	vb := &waveForecastBundle{Hourly: []waveHourPoint{
+		{Time: tm},
+		{Time: tm.Add(time.Hour), WaveHeightM: &h2, WavePeriodS: &per, WaveDirectionDeg: &dir},
+	}}
+	wb.Hourly = append(wb.Hourly, weatherHourPoint{Time: tm.Add(time.Hour)})
+	out := passageHoursFromBundles(wb, vb)
+	a := out[tm.Unix()]
+	if a.HasWave || a.HasWaveDir || a.HasWavePeriod {
+		t.Fatalf("hour with no wave figures must have none: %+v", a)
+	}
+	b := out[tm.Add(time.Hour).Unix()]
+	if !b.HasWave || b.WaveM != 0 || !b.HasWaveDir || b.WaveDirDeg != 0 || !b.HasWavePeriod || b.WavePeriodS != 7 {
+		t.Fatalf("present zeros are real figures: %+v", b)
+	}
+}
+
 // ── limits are required ─────────────────────────────────────────────────
 
 func TestAssessItinerary_NoLimitsIsAnError(t *testing.T) {
@@ -801,7 +991,7 @@ func pwCaptured(t *testing.T) forecastSource {
 		var vb waveForecastBundle
 		for i, tm := range ts {
 			wb.Hourly = append(wb.Hourly, weatherHourPoint{Time: tm, WindSpeedMS: wind["wind_speed_10m"][i], WindGustMS: wind["wind_gusts_10m"][i], WindDirectionDeg: wind["wind_direction_10m"][i]})
-			vb.Hourly = append(vb.Hourly, waveHourPoint{Time: tm, WaveHeightM: wave["wave_height"][i], WaveDirectionDeg: wave["wave_direction"][i], WavePeriodS: wave["wave_period"][i]})
+			vb.Hourly = append(vb.Hourly, waveHourPoint{Time: tm, WaveHeightM: pwF(wave["wave_height"][i]), WaveDirectionDeg: pwF(wave["wave_direction"][i]), WavePeriodS: pwF(wave["wave_period"][i])})
 		}
 		p.hours = passageHoursFromBundles(wb, &vb)
 		pts = append(pts, p)

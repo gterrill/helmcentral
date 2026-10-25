@@ -27,6 +27,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The weather window card shows the wave period.** A wave line now reads
+  "Waves 1.8 m · 6 s abeam" when the forecast has a period, so you can tell a
+  short, steep sea from a long swell of the same height. There's no new limit.
+
 - **Tidier replay bar.** The replay length is now one list instead of four
   buttons, and every choice is named by how long the replay runs: 60 s, 30 s,
   15 s or 8 s. Slow, Normal and Fast are now 30 s, 15 s and 8 s. Overview map
@@ -69,6 +73,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   mistaken for the playhead, and hovering any mark shows its number and time.
 
 ### Fixed
+
+- **Hours with no wave forecast no longer pass as calm.** Where the wave
+  forecast has no height for an hour, the weather window card now lists wave
+  height under "Not checked". And where it has a height but no direction, the
+  card no longer reads the sea as coming from the north. It compares the
+  height with your wave limit for each sector and uses the answer if all three
+  agree, because then the direction can't matter. Otherwise it lists
+  "Not checked: wave direction". The Open-Meteo Marine plugin is rebuilt with
+  the change, so there's nothing to do on upgrade.
 
 - **Sign cards near the edge of the map are no longer cut off.** A card now
   slides sideways to stay inside the map, or drops below its point when there
