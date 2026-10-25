@@ -9,7 +9,7 @@ for what it does and which alarms can never be stopped.
 
 1. Open the alarms drawer.
 2. On the alarm's card, choose **Stop showing**. A card with no such button is a
-   safety alarm and cannot be stopped.
+   safety alarm and can't be stopped.
 3. Read the confirmation, then choose **Stop showing** again.
 
 The alarm leaves the board and the banner straight away, and stops arriving in

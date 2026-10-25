@@ -3,7 +3,7 @@
 Re-running `install.sh` upgrades in place and preserves your settings and data.
 The notes below cover the releases that required manual steps.
 
-If you are installing fresh, none of this applies.
+If you're installing fresh, none of this applies.
 
 ## Checking what you are running
 
@@ -29,26 +29,33 @@ screen, and again when you return to it. When it finds one, a phone, tablet or
 laptop tells you and leaves the page alone. An "Update available" message with
 a **Reload** button appears, and the version line at the foot of the menu
 changes to "Update available · Reload". Nothing reloads until you press one of
-them. If you have something unsaved (a Settings change, a note you're
-writing, a service log entry, an inventory edit or a Mate message you haven't
-sent), you are asked "You have unsaved changes. Reload anyway?" first.
+them.
 
-A screen nobody is operating picks up the new version by itself. That means
-the wall display and the dashboard of a Home Screen app on a phone or tablet.
-They reload as soon as they see the update. A Home Screen app showing
-Documents, Settings or any page other than a dashboard counts as in use and
-asks like a browser tab does. So does a Home Screen dashboard with a sheet or
-dialog open over it, such as Mate, Help or a tile's settings. A dashboard in
-the browser's full screen mode also asks, because a reload would drop it out
-of full screen. If a Home Screen dashboard has unsaved work open, it waits and
-reloads as soon as you save or close it.
+If you have something unsaved, you're asked "You have unsaved changes. Reload
+anyway?" first. Unsaved work includes a Settings change, a note you're writing,
+a service log entry, an inventory edit or a Mate message you haven't sent.
+
+A screen nobody is operating picks up the new version by itself. That means the
+wall display and the dashboard of a Home Screen app on a phone or tablet. They
+reload as soon as they see the update. Some screens ask first, like a browser
+tab does:
+
+- **Other Home Screen pages:** A Home Screen app showing Documents, Settings or
+  any page other than a dashboard counts as in use.
+- **A dashboard with a sheet open:** A Home Screen dashboard counts as in use
+  when a sheet or dialog is open over it, such as Mate, Help or a tile's
+  settings.
+- **Full screen in a browser:** A dashboard in the browser's full screen mode
+  also asks, because a reload would drop it out of full screen.
+- **Unsaved work:** If a Home Screen dashboard has unsaved work open, it waits
+  and reloads as soon as you save or close it.
 
 After the new version loads, a short "Helmcentral updated to" message names it,
 with a **Release notes** button. Each browser remembers the last version it
-showed, so the message appears however the page came back: Reload, a manual
+showed. So the message appears however the page came back: Reload, a manual
 refresh, a new tab or reopening the Home Screen app. A browser seeing
-Helmcentral for the first time stays quiet. The wall display shows the same message for a
-few seconds across the bottom of the screen.
+Helmcentral for the first time stays quiet. The wall display shows the same
+message for a few seconds across the bottom of the screen.
 
 If a screen won't open after an upgrade because it has changed since the page
 loaded, you see "This screen needs the update. Reload to open it." If the
@@ -59,7 +66,7 @@ page by hand always works.
 
 ## SignalK delegated authentication (opt-in)
 
-This is not a breaking change, and no action is required. `auth.mode` defaults
+This isn't a breaking change, and no action is required. `auth.mode` defaults
 to `none` (no authentication, as in every earlier release), so an upgrade
 doesn't introduce a login requirement.
 
@@ -115,7 +122,7 @@ shows an error naming what is missing.
 
 Storm Glass was a worldwide, position-based provider. A global model standing
 in for a missing local station network gives tide times that look authoritative
-but are wrong for local waters, so it was removed instead of left as a
+but are wrong for local waters. So it was removed instead of left as a
 fallback. See [docs/reference/plugins.md](../reference/plugins.md).
 
 ## Anchor watch state moved to data/

@@ -33,9 +33,9 @@ Two more switches live in the same section, both off by default:
 
 The first time you tap the microphone, the browser asks for permission. Allow
 it. If you tapped Deny by mistake, or your browser denies by default, the fix
-is in the browser's own site settings (the padlock or site-info icon next to
-the address bar), not in Helmcentral. Find Helmcentral's entry there, change
-the microphone permission to Allow, then reload the page.
+is in the browser's own site settings, not in Helmcentral. Those are behind the
+padlock or site-info icon next to the address bar. Find Helmcentral's entry
+there, change the microphone permission to Allow, then reload the page.
 
 ## 4. Ask
 
@@ -50,11 +50,15 @@ one breath, or say "Hey Mate" alone and follow up within about eight seconds.
 
 The composer's own microphone, inside the text box beside Send, is a different
 button with a different job. It adds what you say to what you've already typed
-and never sends by itself. Tap it (it's labelled **Dictate**) to start. It
-fills in solid while it's listening, and the words it hears show right there in
-the box so you can check them before you send. Tap it again (now **Stop
-dictation**) when you're done, or press Escape to cancel without closing
-whatever you were doing. Either way, nothing sends until you press Send.
+and never sends by itself.
+
+1. Tap it (it's labelled **Dictate**) to start. It fills in solid while it's
+   listening, and the words it hears show right there in the box so you can
+   check them before you send.
+2. Tap it again (now **Stop dictation**) when you're done, or press Escape to
+   cancel without closing whatever you were doing.
+
+Either way, nothing sends until you press Send.
 
 The note capture sheet's microphone (**Documents → New → Note**) follows the
 same rule, but types wherever the cursor is in the note rather than only at the

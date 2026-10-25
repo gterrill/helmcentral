@@ -1,20 +1,27 @@
 # Set up your vessel
 
 Helmcentral needs to know which engines, battery bank, generator, charger and
-inverter are yours before it can show or watch them. The Alternator tile, the
-Battery & Power tile (including its dawn projection and state-of-charge bands),
-the Generator, Solar and Tanks tiles, anchor auto-raise, Mate's passage
-estimates and anomaly detection (frozen and impossible sensor readings,
-charging into a full house bank, twin engines pulling apart) all read what you
-set up here. Nothing is pre-filled for your boat: until you set it up, those
-features show no data or stay off, rather than guessing from whatever the boat
-reports.
+inverter are yours before it can show or watch them. These features all read
+what you set up here:
+
+- **Tiles:** The Alternator tile, the Battery & Power tile (including its dawn
+  projection and state-of-charge bands), and the Generator, Solar and Tanks
+  tiles.
+- **Anchor auto-raise:** It needs to know when an engine is running before it
+  lifts the anchor watch for you.
+- **Mate's passage estimates:** Mate works out a passage's time and fuel from
+  the speed and fuel rate your engines have logged.
+- **Anomaly detection:** It catches frozen and impossible sensor readings,
+  charging into a full house bank, and twin engines pulling apart.
+
+Nothing is pre-filled for your boat. Until you set it up, those features show
+no data or stay off, rather than guessing from whatever the boat reports.
 
 The idea is simple. Each engine, battery, alternator, solar controller, tank,
-generator, charger and inverter is an item in your equipment registry, and each
-such item owns the one thing the boat reports for it, called its SignalK source
-(for example `propulsion.port` or `electrical.batteries.1`). The item's name is
-the name you see on tiles and alarms. A few single-choice parts, such as which
+generator, charger and inverter is an item in your equipment registry. Each
+item owns the one thing the boat reports for it, called its SignalK source (for
+example `propulsion.port` or `electrical.batteries.1`). The item's name is the
+name you see on tiles and alarms. A few single-choice parts, such as which
 battery is the house bank, are then picked from those items under **Roles**.
 
 ## Follow the Setup list
@@ -39,11 +46,12 @@ in order:
    input, which the generator no longer needs.
 
 A step counts when it is saved. Until SignalK is connected on a new install, the
-other steps wait for it. Once you have set things up, a dropped connection does
-not reopen the list. The tiles' stale indicators say so instead. The list and
-the dashboard line work out where you are every time you look, so if an
-instrument is renumbered, an item is deleted or a role is cleared, the step
-comes back by itself. Both go away when the last step is done.
+other steps wait for it. Once you've set things up, a dropped connection doesn't
+reopen the list. The tiles' stale indicators say so instead.
+
+The list and the dashboard line work out where you are every time you look.
+So if an instrument is renumbered, an item is deleted or a role is cleared, the
+step comes back by itself. Both go away when the last step is done.
 
 ## Assign each source to an item
 
@@ -53,19 +61,20 @@ comes back by itself. Both go away when the last step is done.
    Each row shows its live readings so you can tell one from another, for
    example "RPM 1800 rpm · Coolant 77 °C" for an engine.
 2. On a row with no item yet, choose **Assign to item** and pick one of your
-   existing items that does not own a source yet, or choose **Create item**,
+   existing items that doesn't own a source yet. Or choose **Create item**,
    type a name such as "Port engine" and choose **Create**. A new item starts
    with just that name and the right system. Fill in the rest on its own page.
 3. A row that names an item is done. Choose **Open** to go to the item.
 
-You do not have to visit Discovery first for the Roles. Each dropdown under
-**Roles** lists your items for that kind, then a **From the boat** group of
-sources the boat reports that no item owns, with a live reading, for example
-"electrical.batteries.512 · 13.24 V · 87%". Choosing one creates an item named
-after the role, such as "House bank", and picks it. If the item cannot be made,
-you are told why and the role stays as it was. When the boat reports nothing of
-that kind, the dropdown says so ("The boat isn't reporting any batteries.") or
-says SignalK isn't connected.
+You don't have to visit Discovery first for the Roles. Each dropdown under
+**Roles** lists your items for that kind. After them comes a **From the boat**
+group. It lists sources the boat reports that no item owns, each with a live
+reading, for example "electrical.batteries.512 · 13.24 V · 87%". Choosing one creates an
+item named after the role, such as "House bank", and picks it. If the item can't
+be made, you're told why and the role stays as it was.
+
+When the boat reports nothing of that kind, the dropdown says so ("The boat isn't reporting any
+batteries.") or says SignalK isn't connected.
 
 A source belongs to one item. If another item already has it, Helmcentral says
 which one, and you free it there first. A source an item still owns that the
@@ -95,32 +104,36 @@ equipment needs:
 | Charger | output current |
 | Inverter | AC output power |
 
-Reporting now is not required. Helmcentral keeps its own record of what the
-boat has reported, so an engine that is switched off is still offered once
+Reporting now isn't required. Helmcentral keeps its own record of what the
+boat has reported. So an engine that is switched off is still offered once
 Helmcentral has seen it report, shown as **Not reporting now · last seen 16
-Oct**. A new install starts watching when it first connects, so until an engine
-has run, Discovery and the item's page say "Helmcentral has been watching the
-boat since 18 Oct" and list only what has reported since then. If you keep a
-history log in InfluxDB, Helmcentral reads it once, the first time it sees your
-boat, and can list switched-off engines straight away. A log is not required.
+Oct**.
 
-If an item is already set to a source that reports other readings but has never
-reported its own, Helmcentral says so in red on that source (in Discovery,
-under the role, and on the item's page), and the Setup step stays open with the
-item's name and the source. Open the item and choose the source that does report
-it. Helmcentral makes this call only after it has watched the boat for a week
-(time the connection to SignalK was down does not count). A history log counts
-for the days it covers, together with the time watched. Before that, or for a
-source it has never seen at all (an engine laid up since before it started
-watching), it doesn't guess. The step stays done and notes that it could not
-check yet.
+A new install starts watching when it first connects. So until an engine has
+run, Discovery and the item's page say "Helmcentral has been watching the boat
+since 18 Oct" and list only what has reported since then. If you keep a history
+log in InfluxDB, Helmcentral reads it once, the first time it sees your boat,
+and can list switched-off engines straight away. A log isn't required.
+
+Sometimes an item is set to a source that reports other readings but has never
+reported its own. When that happens, Helmcentral says so in red on that source
+(in Discovery, under the role, and on the item's page). The Setup step stays
+open with the item's name and the source. Open the item and choose the source
+that does report it.
+
+Helmcentral makes this call only after it has watched the boat for a week. Time
+the connection to SignalK was down doesn't count. A history log counts for the
+days it covers, together with the time watched. Before that, it doesn't guess.
+It doesn't guess either for a source it has never seen at all, such as an engine
+laid up since before it started watching. The step stays done and notes that it
+couldn't check yet.
 
 Names come only from items. There are no separate battery names, solar names,
 engine names or tank labels any more. A tank shows on the Tanks tile once an
 item owns it. A battery or solar controller no item owns shows under its
 number. If you upgraded from the old Vessel settings, an item was made for each
-battery, solar controller, tank and engine you had named, so you can delete the
-ones you do not want.
+battery, solar controller, tank and engine you had named. You can delete the
+ones you don't want.
 
 ## Engines
 
@@ -135,7 +148,7 @@ each engine the boat has.
   auto-raise only acts while one is. With no engine mapped, or none reporting,
   the tile stays hidden and auto-raise does nothing.
 - Mate's passage estimates use these engines for fuel history, and say engines
-  are not set up if you have mapped none.
+  aren't set up if you have mapped none.
 - The frozen-sensor check is ready once one engine is mapped. The
   engine-differential check (comparing engines against each other) needs two.
 
@@ -167,45 +180,45 @@ the item another source, the state-of-charge bands move with it.
 ## Alternators
 
 The Alternator tile shows what each engine's alternator is putting out. The
-boat's instruments number the alternators in their own order, and that order can
-change when equipment is reinstalled, so Helmcentral does not assume which
-number is port and which is starboard.
+boat's instruments number the alternators in their own order. That order can
+change when equipment is reinstalled, so Helmcentral doesn't assume which number
+is port and which is starboard.
 
 1. Map each alternator to an item ("Port alternator", "Starboard alternator").
    With the engines running, the one that is charging shows a current in
    Discovery.
 2. Under **Roles**, set **Port alternator** and **Starboard alternator**. An
-   item chosen for one side cannot be chosen for the other.
+   item chosen for one side can't be chosen for the other.
 3. Choose **This boat has none** if the boat has no alternator on that side. With
    only one side set, the tile shows a single alternator.
 4. Choose **Save** in the bar across the top of the screen.
 
-A side that is not set shows no reading on the Alternator tile. Until you set
+A side that isn't set shows no reading on the Alternator tile. Until you set
 at least one side, the tile is empty.
 
 ## Electrical
 
 The boat's instruments number the generator, the AC meters, the chargers and
-the inverters in their own order, and that order can change when equipment is
-reinstalled, so Helmcentral does not assume which number is which.
+the inverters in their own order. That order can change when equipment is
+reinstalled, so Helmcentral doesn't assume which number is which.
 
 1. Map the generator, the shore charger and the inverter to items, and any
    battery you want as the voltage readout.
 2. Under **Roles**, set **Generator**, **Shore charger**, **Inverter** and
    **Voltage readout battery** to those items.
 3. Set **Generator AC input** to the AC circuit the generator feeds. This one
-   is not an item: AC meters are not equipment, so the list shows each circuit
+   isn't an item: AC meters aren't equipment, so the list shows each circuit
    the boat reports with its live power. Start the generator and pick the one
    that reads load.
 4. Choose **This boat has none** for any the boat lacks. That is an answer, and
-   it finishes the setup step. **Not set** means you have not answered yet. Both
+   it finishes the setup step. **Not set** means you haven't answered yet. Both
    show no figures. Choose **Save** in the bar across the top of the screen.
 
 What each one does:
 
 - **Generator.** The Generator tile reads its state and runtime from it, and its
   Start and Stop buttons control it. With none chosen the tile says the generator
-  is not set up, links to **Settings, SignalK, Roles**, and offers no Start or
+  isn't set up, links to **Settings, SignalK, Roles**, and offers no Start or
   Stop.
 - **Generator AC input** is the Generator tile's Power card. Not set shows `--`.
 - **Shore charger** is the Shore line on the Battery & Power tile.
@@ -213,21 +226,21 @@ What each one does:
   leaves it blank, and Loads reads `--` because the total would otherwise leave
   out the AC draw.
 - **Voltage readout battery** is the voltage in the tile's footer, labelled with
-  the item's name. Not set, or a battery that is not reporting, leaves the
+  the item's name. Not set, or a battery that isn't reporting, leaves the
   voltage out.
 
 The shore charger and the generator also decide which nights the dawn projection
-trusts: a night when shore power was connected or the generator ran is skipped
-because the bank did not discharge naturally. A night is only screened for the
+trusts. A night when shore power was connected or the generator ran is skipped,
+because the bank didn't discharge naturally. A night is only screened for the
 ones you chose.
 
 ## Hour meters
 
 An engine or a generator has an hour meter, read from the source you mapped it
-to. You do not enter a path. Open the item and **Maintenance** shows the hour
-meter, read only. If it says **Not reporting**, the item has no engine or
-generator source mapped, or the source does not publish a runtime counter, and
-service rules counted in hours cannot count hours for it.
+to. You don't enter a path. Open the item and **Maintenance** shows the hour
+meter, read only. If it says **Not reporting**, either the item has no engine or
+generator source mapped, or the source doesn't publish a runtime counter. In
+that case, service rules counted in hours can't count hours for it.
 
 ## Saving, and what each check needs
 
@@ -236,7 +249,7 @@ an item's own page. The roles save together with the rest of Settings. The bar
 appears as soon as you change one, **Discard** puts it back, and if you try to
 leave Settings with changes unsaved you are asked first.
 
-The house bank and the voltage readout battery do not offer **This boat has
+The house bank and the voltage readout battery don't offer **This boat has
 none**: the bank is needed for most of the electrical tiles.
 
 Under **Roles**, each check shows whether it is ready, or what is still
@@ -256,9 +269,12 @@ asks you to confirm, for example:
 > Used by 2 tiles (Underway: Port, Wall: Engines: Port), anchor auto-raise, the
 > engine checks, the House bank role, 3 state-of-charge alarm rules.
 
-Tiles are named by their page and title. The list also covers the features that
-read an engine, battery or tank, the roles the item plays, and the alarm rules
-that watch its readings, including limits set on a gauge.
+Tiles are named by their page and title. The list also covers these:
+
+- **Features:** The ones that read an engine, battery or tank.
+- **Roles:** The roles the item plays.
+- **Alarm rules:** The rules that watch its readings, including limits set on a
+  gauge.
 
 Nothing is removed behind your back:
 
@@ -266,22 +282,23 @@ Nothing is removed behind your back:
   with a link to the item. The roles stay on the item, and the figures and alarm
   rules that depend on its source show no data until you map it again.
 - **Moving the source** takes everything that uses the item to the new source.
-- **Deleting the item** leaves its tiles showing **Equipment removed**, clears
-  the roles it played, and leaves the state-of-charge rules in place watching
+- **Deleting the item** leaves its tiles showing **Equipment removed** and
+  clears the roles it played. The state-of-charge rules stay in place, watching
   nothing until you choose a new house bank.
 
 If nothing uses the item, you are asked nothing more than before. If Helmcentral
-cannot work out what uses it, the confirmation stays switched off and says why.
+can't work out what uses it, the confirmation stays switched off and says why.
 
 ## Excluding a sensor you know is dead
 
 A sender that has failed outright (a stuck or open-circuit reading) can
-trip the frozen or impossible-reading check forever. Rather than a
-settings list, this is handled from the alarm itself: open the alarm card
-for that check and choose **Ignore** followed by the sensor's name (for example
-**Ignore Port engine exhaust temperature**) for the reading you want
-excluded. To see everything currently ignored, or to bring one back,
-open **Settings → Alarms** and look under **Ignored sensors**.
+trip the frozen or impossible-reading check forever. There's no settings list
+for this. You handle it from the alarm itself. Open the alarm card for that
+check and choose **Ignore** followed by the sensor's name (for example
+**Ignore Port engine exhaust temperature**) for the reading you want excluded.
+
+To see everything currently ignored, or to bring one back, open **Settings →
+Alarms** and look under **Ignored sensors**.
 
 ## Owner and insurance
 
@@ -290,13 +307,13 @@ they are worth entering once. None of them is needed for anomaly detection.
 
 1. Open **Settings → Vessel** and find **Owner & insurance**.
 2. Enter the owner's name, phone and email, the insurer and policy number, the
-   home marina and berth, and the storm delegate: whoever prepares the boat
-   when you are away, with how to reach them.
+   home marina and berth, and the storm delegate. The storm delegate is whoever
+   prepares the boat when you're away, along with how to reach them.
 3. Under **Particulars**, enter the length overall and beam in metres. The
-   boat's live instruments supply a length too when they publish one, shown
-   at the top of the section, but the figure you enter here is the one kept for
+   boat's live instruments supply a length too when they publish one, shown at
+   the top of the section. The figure you enter here is the one kept for
    forms.
 4. Choose **Save** in the bar across the top of the screen.
 
-Leave a field blank if you do not want Mate to use it. It asks instead. See
+Leave a field blank if you don't want Mate to use it. It asks instead. See
 [Fill in a form with Mate](fill-in-a-form-with-mate.md).

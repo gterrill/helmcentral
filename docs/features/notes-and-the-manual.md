@@ -1,19 +1,21 @@
 # Notes and the manual
 
-Boat knowledge arrives at the worst possible moment to write it down: wet, in
-a locker, with a torch in one hand, or on a dock halfway through a phone
-call. Capture puts it somewhere in one action, so the thing you worked out
-about the shower drain pump is still there in two years when it matters, and
-readable by whoever is aboard when you are not.
+Boat knowledge arrives at the worst possible moment to write it down. You're
+wet, or in a locker with a torch in one hand, or on a dock halfway through a
+phone call. Capture puts it somewhere in one action. So the thing you worked out
+about the shower drain pump is still there in two years when it matters. It's
+readable by whoever is aboard when you aren't.
 
 A note opens straight into the same editor used for headings, lists, tables
-and links elsewhere in Helmcentral, not a plain box you tidy up later. There
-is no title to fill in, no folder to choose and nothing to get right before
-you can save. Type a plain sentence and it captures as is, or reach for the
-toolbar when something needs real structure: a numbered start-up sequence, a
-table of settings, a link to another note. Type it or dictate it, and it is
-captured and searchable immediately, filed alongside everything else in
-**Documents**.
+and links elsewhere in Helmcentral, not a plain box you tidy up later.
+
+- **Nothing to fill in first:** There is no title to fill in, no folder to
+  choose and nothing to get right before you can save.
+- **Plain or structured:** Type a plain sentence and it captures as is. Or
+  reach for the toolbar when something needs real structure, such as a numbered
+  start-up sequence, a table of settings or a link to another note.
+- **Typed or dictated:** Either way, the note is captured and searchable
+  immediately, filed alongside everything else in **Documents**.
 
 ## Capturing a note
 
@@ -27,11 +29,13 @@ no title and no folder.
 
 The microphone button dictates instead of typing, which is easier with wet
 hands or while the boat is moving. It types wherever the cursor is, not just
-at the end, so you can dictate a line, tap back into the middle to fix a
-word, and carry on from there. Speech recognition is the browser's own, so it
-needs no OpenRouter account. Most browsers send the audio to a speech service,
-though, so it needs an internet connection. If the connection is down the
-button says so. On a browser with no speech support the button is absent.
+at the end. So you can dictate a line, tap back into the middle to fix a word,
+and carry on from there.
+
+Speech recognition is the browser's own, so it needs no OpenRouter account. Most
+browsers send the audio to a speech service, though, so it needs an internet
+connection. If the connection is down the button says so. On a browser with no
+speech support the button is absent.
 
 ## Adding a photograph
 
@@ -44,8 +48,8 @@ picked them.
 
 ## What kind of note it is
 
-Every note has a type, shown as an icon and a colour at the start of its row
-in Documents, so you can pick one out of a long list without reading it:
+Every note has a type. It shows as an icon and a colour at the start of its
+row in Documents, so you can pick one out of a long list without reading it:
 
 | Type | What it is |
 | --- | --- |
@@ -135,10 +139,10 @@ nothing for either, so they stay plain collections.
 ### Building a manual out of notes
 
 A manual has no capture of its own. Every section started as an ordinary
-captured note, filed into the manual the way any note is filed: **File…** on
-its row (in the Unfiled notes view, or anywhere else it appears), choosing the
-manual as the destination. The note leaves the unfiled pile and becomes a
-section.
+captured note. You file it into the manual the way you'd file any note. Choose
+**File…** on its row, in the Unfiled notes view or anywhere else it appears,
+and pick the manual as the destination. The note leaves the unfiled pile and
+becomes a section.
 
 ### Arranging sections
 
@@ -162,7 +166,7 @@ started and how many are done, and lands you on the first thing still
 unticked. Opening or closing the note doesn't start a run. Only tapping
 **Start checklist** does.
 
-A run is not a copy of the checklist. It is the current note plus which lines
+A run isn't a copy of the checklist. It is the current note plus which lines
 you've ticked, so editing an unrelated step (fixing a typo, reordering the
 list) never disturbs a tick already made. Only a step whose own wording
 changes loses its tick. When that happens it is never silently dropped or
@@ -186,19 +190,19 @@ and no Mate, so there is never a backlog of untyped notes waiting on you.
 Summarising a note and making it searchable by meaning is Mate's job, and it
 happens on its own once Mate is switched on. Capture a note while Mate is
 ready and it is queued at once. A note captured before you configured Mate
-isn't left behind. When Mate becomes ready, at startup or the next time you
-save a settings change that leaves it working, it sweeps the whole library for
-anything still waiting. The same pass catches up the document library's
-search-by-meaning index. There is nothing to click and no backlog count to
-watch. Turning Mate on is the only consent it needs.
+isn't left behind. When Mate becomes ready, it sweeps the whole library for
+anything still waiting. That happens at startup, or the next time you save a
+settings change that leaves Mate working. The same pass catches up the document
+library's search-by-meaning index. There is nothing to click and no backlog
+count to watch. Turning Mate on is the only consent it needs.
 
-## What this is not
+## What this isn't
 
-Notes and manuals are not the **Help** in the sidebar, which is Helmcentral's
+Notes and manuals aren't the **Help** in the sidebar, which is Helmcentral's
 own documentation and ships with the software.
 
 They are also not the manuals already in your document library. The Cummins
 manual describes every QSB 6.7 ever built. A note, and the manual you assemble
-out of notes, describes this hull: which of the two fuel valves is the return,
-what the previous owner did to the windlass wiring, and what to check first
-when the genset won't start.
+out of notes, describes this hull. It tells you which of the two fuel valves is
+the return and what the previous owner did to the windlass wiring. It also
+tells you what to check first when the genset won't start.

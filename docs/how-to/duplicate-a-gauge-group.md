@@ -1,10 +1,10 @@
 # Duplicate a gauge group onto another instance
 
 Most machinery on a boat comes in pairs. Once you have a tile reading the port
-engine, the starboard one wants the same gauges with the same scales and the
-same bands, pointed at the other machine.
+engine, you'll want the same gauges on the starboard one. They need the same
+scales and the same bands, pointed at the other machine.
 
-Duplicate works like Save As. Open the tile you already have, change what
+Duplicate works like Save As. You open the tile you already have, change what
 differs, and press **Duplicate** instead of **Save**. Your edits go to the new
 tile, and the one you opened is left as it was.
 
@@ -23,28 +23,28 @@ tile.
    page. The Port tile keeps the equipment it had when you opened it.
 
 Nothing else needs changing. Labels, scales and decimals come across, and the
-bands come from the equipment's profile. A warning at 100 °C on the port
-alternator is the same warning on the starboard one when both follow the same
-profile.
+bands come from the equipment's profile. When both alternators follow the same
+profile, a warning at 100 °C on the port alternator is the same warning on the
+starboard one.
 
-If the new tile says `Not mapped` or `Not reporting`, the item you chose has no
-source or the boat isn't reporting it. See
+If the new tile says `Not mapped` or `Not reporting`, either the item you chose
+has no source or the boat isn't reporting it. See
 [Show equipment on a tile](show-equipment-on-a-tile.md).
 
 ## A group of paths you pick
 
 A group set to **Paths I pick** keeps its own paths and bands. To point a copy at
 another instance, change each gauge's **SignalK path** (usually one word or
-one digit), then choose **Duplicate**. Before you leave Layout mode, check the
-new tile reads live values. A gauge showing dashes means its path isn't being
+one digit), then choose **Duplicate**. Before you leave Layout mode, check that
+the new tile reads live values. A gauge showing dashes means its path isn't being
 published.
 
 ## If you only want a second copy, unchanged
 
 Skip the dialog. In Layout mode, every tile that can exist more than once per
-page has a copy button on its corner: gauges, gauge groups, engine clusters,
-embeds, Nearby maps and lamp strips. It duplicates immediately, which suits a
-second tile that belongs on another page rather than on another engine.
+page has a copy button on its corner. That covers gauges, gauge groups, engine
+clusters, embeds, Nearby maps and lamp strips. It duplicates immediately. That suits a
+second tile that belongs on another page, rather than on another engine.
 
 Built-in tiles are one per page and have no copy button.
 
@@ -52,12 +52,13 @@ Built-in tiles are one per page and have no copy button.
 
 This matters for a group of paths. A gauge's **Quantity** and **Unit** decide
 how its bands are converted before alarms see them. A band of 100 means 100 °C
-on a gauge declared as a temperature in Celsius, and the bare number 100 on a
-gauge declared as **Raw**. Temperature arrives on the NMEA network in Kelvin,
-so a raw gauge compares 100 against a reading of 329 and raises a warning at
-56 °C that can never clear.
+on a gauge declared as a temperature in Celsius, and it means the bare number
+100 on a gauge declared as **Raw**. Temperature arrives on the NMEA network in
+Kelvin, so a raw gauge compares 100 against a reading of 329. It then raises a
+warning at 56 °C that can never clear.
 
 Changing a path only changes the quantity when the new path publishes units of
-its own, which few paths on this boat do. Open one gauge on the new tile and
-confirm **Quantity** and **Unit** read what you expect, not **Raw**. A group
-for equipment takes its units from the profile, so this doesn't affect it.
+its own, and few paths on this boat do. Open one gauge on the new tile and
+confirm that **Quantity** and **Unit** read what you expect, not **Raw**. A
+group for equipment takes its units from the profile, so this doesn't affect
+it.

@@ -3,16 +3,17 @@
 Place names, Nearby, Mate's place lookups and the
 [offline coastline](../features/offline-coastline.md) all ask an Overpass
 server for OpenStreetMap data. The public ones are shared, and over a boat's
-link they're
-slow when they answer at all. A server aboard answers in a fraction of a
-second, never turns Mate away, keeps working when the link is down, and keeps
-the boat's position off the internet.
+link they're slow when they answer at all. A server aboard answers in a
+fraction of a second. It never turns Mate away, it keeps working when the link
+is down, and it keeps the boat's position off the internet.
 [Place names and nearby places](../features/place-names.md#running-your-own-server)
 weighs the benefit against the cost.
 
-You need a home server that runs Docker apps (these steps use ZimaOS), a few
-gigabytes of free disk (about 4 GB for the Queensland coast), and an internet
-connection for the first import.
+You need three things:
+
+- **A home server:** One that runs Docker apps (these steps use ZimaOS).
+- **Disk space:** A few gigabytes free (about 4 GB for the Queensland coast).
+- **Internet:** A connection for the first import.
 
 ## Install the server
 
@@ -35,12 +36,12 @@ connection for the first import.
 3. On the home server, add the file as a custom app. On ZimaOS that is **App
    Store → Custom Install → Import**.
 4. Start the app. The first start downloads the extract, crops it to your box
-   and builds the database. Expect one to several hours. The server does not
+   and builds the database. Expect one to several hours. The server doesn't
    answer until that finishes.
 
 The server doesn't update itself. To refresh it, or to change the box, delete
 the app's `db` folder (`/DATA/AppData/overpass/db` on ZimaOS) and start the app
-again. It imports afresh. Place names change slowly, so every few months is
+again, and it imports afresh. Place names change slowly, so every few months is
 plenty.
 
 ## Point Helmcentral at it
@@ -52,7 +53,7 @@ plenty.
 3. Add the server address to **Allowed Hosts** (comma-separated), for example
    `192.168.1.20`. Saving that field replaces the whole list, so keep the
    entries already there, `en.wikipedia.org` in particular (it supplies the
-   short descriptions), and keep the public servers too if you want them as a
+   short descriptions). Keep the public servers too if you want them as a
    fallback you can switch back to.
 4. Save, then restart Helmcentral. Changes to allowed hosts only take effect
    after a restart. The Overpass server field itself applies at once.
@@ -63,7 +64,12 @@ address outside it has to be https.
 ## Check it
 
 Open a Nearby map or ask Mate where the nearest anchorage is. If a lookup
-fails, check three things. The import may still be running, you may not have
-restarted Helmcentral since adding the address to Allowed Hosts, or the address
-and port in **Overpass server** may not match the app. Once all three are
-right, answers come back at once.
+fails, check three things:
+
+- **The import:** It may still be running.
+- **The restart:** You may not have restarted Helmcentral since you added the
+  address to Allowed Hosts.
+- **The address:** The address and port in **Overpass server** may not match
+  the app.
+
+Once all three are right, answers come back at once.

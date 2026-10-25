@@ -1,15 +1,17 @@
 # Engine Cluster
 
-One engine on one tile, readable from the helm: revs, oil, boost, load, fuel
-burn, coolant, fuel in the tanks, and the electrical and drivetrain figures
-that tell you the engine is charging and cooling properly. Place one tile per
-engine.
+One engine on one tile, readable from the helm. It shows revs, oil, boost,
+load, fuel burn, coolant and fuel in the tanks. It also shows the electrical
+and drivetrain figures that tell you the engine is charging and cooling
+properly. You place one tile per engine.
 
 ## What the tile shows
 
-- **Tachometer.** Revs in the middle of a ticked dial, with the engine hours
-  underneath them. A coloured mark on the scale appears only for a band you
-  have set.
+Here's what each part of the tile tells you:
+
+- **Tachometer.** Revs sit in the middle of a ticked dial, with the engine
+  hours underneath them. A coloured mark on the scale appears only for a band
+  you have set.
 - **Warning or alarm.** While a running engine has a reading in an amber or red
   band, `WARN` or `ALARM` shows in the tile's title. A healthy engine shows
   nothing there.
@@ -18,21 +20,23 @@ engine.
   normal range. The bar stays neutral while the reading is in range. It turns
   amber or red only while the reading is in an amber or red band, and the bands
   behind it brighten for the one the reading is in.
-- **Two arcs at the foot of the dial.** Coolant temperature on the left, gearbox
-  oil temperature on the right. An arc you have not connected is not drawn.
+- **Two arcs at the foot of the dial.** Coolant temperature is on the left and
+  gearbox oil temperature is on the right. If you haven't connected an arc, the
+  tile doesn't draw it.
 - **Fuel arcs** on the outer edge: forward and aft tank, with litres in the
   tanks against capacity.
-- **Footer.** Starter battery voltage, the gearbox oil pressure and the
-  exhaust temperature, plus the alternator with its current, output power,
-  temperature, charge stage and a one-hour trace of current. A dashed line on
-  the trace marks the battery management system's charge limit, if you have
-  connected it.
+- **Footer.** It shows the starter battery voltage, the gearbox oil pressure
+  and the exhaust temperature. It also shows the alternator with its current,
+  output power, temperature, charge stage and a one-hour trace of current. If
+  you have connected the battery management system, a dashed line on the trace
+  marks its charge limit.
 
 ## Port and starboard
 
 Choose **Port** or **Starboard** for each tile. A starboard tile is a mirror
-image: the fuel arcs sit on the outer edge and the readout cards on the side
-facing the other engine, so a pair placed side by side reads symmetrically.
+image. The fuel arcs sit on the outer edge and the readout cards sit on the
+side facing the other engine. That way a pair placed side by side reads
+symmetrically.
 
 ## Colours and alarms
 
@@ -43,8 +47,8 @@ can't disagree.
 
 The supplied engine profile gives only the green normal range. It doesn't
 guess your warning and alarm limits. A reading outside the normal range with no
-limit set shows amber, never red, because Helmcentral can't know it has crossed
-a limit, only that it has left the usual range. Set your own limits from your
+limit set shows amber, never red. Helmcentral can't know the reading has
+crossed a limit, only that it has left the usual range. Set your own limits from your
 engine manual. They belong to the equipment's profile, so the tile and the
 alarms always agree.
 
@@ -54,30 +58,30 @@ temperature that means the raw water has stopped.
 
 ## When the engine is off
 
-A switched-off engine shows `--` in its readings and says `OFF` once, in a grey
+A switched-off engine shows `--` in its readings. It says `OFF` once, in a grey
 marker in the tile's title, where a running engine's `WARN` or `ALARM` would
 be. The border goes plain unless a reading from other equipment, such as the
-starter battery, is in a warning or alarm band. That still shows. See
-Staleness in [Tiles](../reference/tiles.md).
+starter battery, is in a warning or alarm band, and that reading still shows.
+See Staleness in [Tiles](../reference/tiles.md).
 
 ## Which equipment each part reads
 
 The engine's own readings (revs, oil, boost, load, fuel flow, coolant, gearbox)
 come from the engine you pick. The starter battery, the alternator and the
-exhaust are separate equipment, so you choose each in the tile's settings. The
-alternator follows the side: **Fill slots from profile** picks the port or
-starboard alternator you named under Roles in **Settings → SignalK**. If no
-alternator is named there, the alternator parts stay empty until you choose
-one.
+exhaust are separate equipment, so you choose each one in the tile's settings.
+The alternator follows the side: **Fill slots from profile** picks the port or
+starboard alternator you named under Roles in **Settings → SignalK**. If you
+haven't named an alternator there, the alternator parts stay empty until you
+choose one.
 
 ## What it does not do
 
-- It shows no engine oil temperature, because these engines have no sensor for
-  it. The right-hand arc is the gearbox oil temperature, which is a different
-  reading.
-- Charge stage shows the regulator's reported state. A state Helmcentral
-  doesn't recognise is shown as its number.
-- The alternator trace needs history recording switched on. Without it the
-  tile says so instead of drawing a flat line.
+- **Engine oil temperature:** The tile shows none, because these engines have
+  no sensor for it. The right-hand arc is the gearbox oil temperature, which is
+  a different reading.
+- **Charge stage:** It shows the state the regulator reports. If Helmcentral
+  doesn't recognise a state, the tile shows it as its number.
+- **Alternator trace:** It needs history recording switched on. Without that,
+  the tile says so instead of drawing a flat line.
 
 To set a tile up, see [Show equipment on a tile](../how-to/show-equipment-on-a-tile.md).

@@ -1,16 +1,16 @@
 # Alarm rules reference
 
-The built-in alarm rules Helmcentral ships, and the extra values it computes
-for a rule or a gauge to bind to. See [Alarms](../features/alarms.md) for
-what a rule is, how severities work, and how transports and dwell/deadband
-behave.
+This page lists the built-in alarm rules Helmcentral ships, and the extra
+values it computes for a rule or a gauge to bind to. See
+[Alarms](../features/alarms.md) for what a rule is, how severities work, and
+how transports and dwell/deadband behave.
 
 ## Derived values
 
-A rule can be built on any of these the same way as on a direct instrument
+You can build a rule on any of these the same way as on a direct instrument
 reading. They appear alongside everything else when you're choosing what a
-rule or a gauge should watch, under their own path, and report nothing
-rather than zero when there is not enough history to answer:
+rule or a gauge should watch, each under its own path. When there isn't enough
+history to answer, they report nothing rather than zero:
 
 | Path | Units | What it is |
 | --- | --- | --- |
@@ -36,39 +36,44 @@ rather than zero when there is not enough history to answer:
 
 These need the boat to be publishing an outside barometer reading and, for
 the squash-zone index, true wind speed and direction. If these inputs are
-missing, the value stays absent and does not satisfy a rule.
+missing, the value stays absent and doesn't satisfy a rule.
 
-The three-hour barometer paths, the rate, the three-hour tendency and the
-storm signature, need thirty minutes of history before they report anything.
-The twelve-hour tendency needs eleven and a half hours, and the
-twenty-four-hour tendency and the weather bomb rule need twenty-three and a
-half hours. The severe-thunderstorm signature needs whatever the twelve-hour
-tendency needs, since it reads both windows at once. All of them clear when
-Helmcentral restarts, since the history they are built from is kept in
-memory rather than on disk.
+Each of these needs some history before it reports anything:
 
-The fuel-economy and fuel paths go absent for a second reason as well: if any
-reading they are built from (a fuel tank's level or capacity, an engine's fuel
-rate, or speed over ground) has stopped updating for more than two minutes,
-the derived path reports nothing rather than a number computed from a source
-that is no longer telling the truth. A rule bound to one of these paths never
-fires on stale arithmetic. It sees no value, the same as if the path had
-never been published at all.
+- **Three-hour barometer paths:** The rate, the three-hour tendency and the
+  storm signature need thirty minutes of history.
+- **Twelve-hour tendency:** It needs eleven and a half hours.
+- **Twenty-four-hour tendency:** It, and the weather bomb rule, need
+  twenty-three and a half hours.
+- **Severe-thunderstorm signature:** It needs whatever the twelve-hour
+  tendency needs, because it reads both windows at once.
+
+All of them clear when Helmcentral restarts, because the history they're built
+from is kept in memory rather than on disk.
+
+The fuel-economy and fuel paths go absent for a second reason as well. If any
+reading they're built from has stopped updating for more than two minutes, the
+derived path reports nothing. Those readings are a fuel tank's level or
+capacity, an engine's fuel rate, and speed over ground. Helmcentral won't
+report a number computed from a source that's no longer telling the truth. A
+rule bound to one of these paths never fires on stale arithmetic. It sees no
+value, the same as if the path had never been published at all.
 
 The exception is an engine that has been shut down. Engines stop sending
-anything when they are turned off, so an engine that has gone completely quiet
-for more than two minutes counts as off and is left out of the total burn,
+anything when they're turned off. So an engine that has gone completely quiet
+for more than two minutes counts as off, and it's left out of the total burn,
 provided other devices on the same connection are still live. With every
 engine off there is no burn, and the figures have no value and no age, so a
-stale-data rule does not fire for them. That needs another device on the
-engines' connection still reporting. If the engines are on a connection of
-their own, they read as stale instead, because a failed connection looks the
-same. If only its fuel rate has stopped, or if its whole connection has gone
-quiet, the figures go absent as above.
+stale-data rule doesn't fire for them.
+
+That needs another device on the engines' connection still reporting. If the
+engines are on a connection of their own, they read as stale instead, because
+a failed connection looks the same. If only its fuel rate has stopped, or if
+its whole connection has gone quiet, the figures go absent as above.
 
 A rule bound to one of a switched-off engine's own readings (revolutions, oil
 pressure and so on) is treated the same way: it sees no value, and a stale-data
-rule does not fire for it. If the engine's whole connection has gone quiet
+rule doesn't fire for it. If the engine's whole connection has gone quiet
 instead, the rule sees the readings go stale as usual.
 
 ## Heavy-weather rule set
@@ -117,9 +122,9 @@ boat's own normal gap.
 | Engine RPM dips (one per engine, titled with its name, for example "Port Engine RPM Dips") | Stumble count of 3 or more, clearing when it falls back to 0 | warn |
 | Engine running hotter/cooler, oil/boost pressure high/low, load high/low | That reading's residual past its learned band (switched off until a baseline is learned) | alert |
 
-The three sensor rules do not show their count. Their cards, banner and
-notifications name each failing sensor and say what is wrong with it, one line
-each, using the names of the equipment items they are assigned to. The title is
+The three sensor rules don't show their count. Their cards, banner and
+notifications name each failing sensor and say what's wrong with it, one line
+each, using the names of the equipment items they're assigned to. The title is
 the rule's own.
 
 ## Forecast warning rule set

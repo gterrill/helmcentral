@@ -1,8 +1,8 @@
 # Set up a maintenance schedule
 
-Get an item's service jobs into Helmcentral so the Maintenance list can
-tell you what's due, whether the boat has years of history behind it or the
-item was fitted yesterday.
+Follow these steps to get an item's service jobs into Helmcentral, so that the
+Maintenance list can tell you what's due. It works whether the boat has years
+of history behind it or the item was fitted yesterday.
 
 If you'd rather describe the jobs and check a card, Mate can propose the rules.
 See [Set up a maintenance schedule with Mate](set-up-a-maintenance-schedule-with-mate.md).
@@ -15,9 +15,9 @@ Equipment** and its **Maintenance** block lists them under **From profile**.
 Fix an interval on the profile and every item using it follows.
 
 A job the profile names but gives no interval for shows **Interval not
-set**. Fill it in on the profile (from **Inventory → Profiles**) when every
-unit of that model is serviced the same way, or on the item when it applies to
-this one unit only.
+set**. If every unit of that model is serviced the same way, fill it in on the
+profile (from **Inventory → Profiles**). If it applies to this one unit only,
+fill it in on the item.
 
 ## Change a profile job for this item only
 

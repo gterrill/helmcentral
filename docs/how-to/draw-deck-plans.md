@@ -7,7 +7,8 @@ plan shows and where it appears. These are the steps for making one.
 
 A picture of the deck as a JPEG or PNG. The builder's general arrangement
 drawing is ideal. If you have it as a PDF, export the page to an image first.
-A clear photo of a printed drawing also works if it is taken square on.
+A clear photo of a printed drawing also works, as long as you take it square
+on.
 
 ## Add a deck and its picture
 
@@ -24,28 +25,28 @@ you to check them.
 
 ## Ask Mate to start a deck
 
-If the drawing is already in your documents as a JPEG or PNG, you can ask
-Mate to set the deck up: "Make a Main deck and use the general arrangement
-drawing in my documents as its plan." Mate answers with a card. Check the
-picture on the card is the right drawing, then tap **Apply**. Mate can't see
-the picture, so that check is yours.
+Suppose the drawing is already in your documents as a JPEG or PNG. You can ask
+Mate to set the deck up, for example: "Make a Main deck and use the general
+arrangement drawing in my documents as its plan." Mate answers with a card.
+Check that the picture on the card is the right drawing, then tap **Apply**.
+Mate can't see the picture, so that check is yours.
 
-If the drawing is a PDF, Mate will say a page of a PDF can't be a plan yet and
-ask you to upload a picture of that page. Export the page to an image, upload
-it as above, and Mate can use that. Outlining locations and pinning bins is
-still done on the deck's page, as below.
+If the drawing is a PDF, Mate will tell you a page of a PDF can't be a plan yet.
+It will ask you to upload a picture of that page. Export the page to an image and
+upload it as above. Then Mate can use it. Outlining locations and pinning
+bins is still done on the deck's page, as below.
 
 ## Outline a location
 
-1. On the deck's page, pick a location from the list beside the plan. A
-   location that is already on another deck says which one. Outlining it here
-   moves it to this deck.
-2. Tap the plan at each corner of the location, going around it. Tap the first
-   point again, or press **Finish outline**, to close the shape. You need at
+1. On the deck's page, pick a location from the list beside the plan. If a
+   location is already on another deck, the list says which one, and outlining
+   it here moves it to this deck.
+2. Tap the plan at each corner of the location, going around it. To close the
+   shape, tap the first point again or press **Finish outline**. You need at
    least three points.
 3. Press **Save** in the bar at the top.
 
-While you are drawing, **Backspace** takes back the last point, **Start over**
+While you're drawing, **Backspace** takes back the last point, **Start over**
 clears the shape, and **Escape** throws it away. Nothing reaches the boat's
 records until you press **Save**.
 
@@ -71,7 +72,7 @@ records until you press **Save**.
 
 ## Rename or delete a deck
 
-Rename a deck by editing its name on the deck's page and pressing **Save**. To
+To rename a deck, edit its name on the deck's page and press **Save**. To
 delete it, use the menu at the top right of the deck's page and confirm. The
 confirmation says how many locations lose their outline. The locations and bins
 stay, and the picture stays in Documents.
@@ -79,9 +80,9 @@ stay, and the picture stays in Documents.
 ## Look at the plan
 
 Open **Locations** and press **Plan** at the top. Pick a deck tab, then tap a
-location's outline to open it or a pin to open that bin. A location's page and
+location's outline to open it, or a pin to open that bin. A location's page and
 a bin's page show the same plan with their place marked.
 
-To change the deck you are looking at, press **Edit deck** beside the deck tabs.
+To change the deck you're looking at, press **Edit deck** beside the deck tabs.
 It opens that deck's page. The deck's page has a trail across the top
 (**Locations / Decks / the deck's name**) for getting back.

@@ -1,9 +1,9 @@
 # Set up a wall display
 
-This puts dashboard pages on a screen somewhere on the boat that cycles on
-its own, with no interaction. See [The dashboard: wall
-displays](../features/dashboard.md#wall-displays) for what a display is and
-what the rotation does and does not do.
+This puts dashboard pages on a screen somewhere on the boat that cycles on its
+own, with no interaction. See [The dashboard: wall
+displays](../features/dashboard.md#wall-displays) for what a display is and what
+the rotation does and doesn't do.
 
 You can have several. The steps below are the same whether this is the first
 screen or the fourth.
@@ -11,88 +11,87 @@ screen or the fourth.
 ## 1. Check the device first
 
 Before you configure anything, load `/display-probe.html` on the actual browser
-and device that will drive the screen, not on a desktop. Results go to the
-backend log, since the narrowest screen here is 360px tall and cannot show a
+and device that will drive the screen, not on a desktop. The results go to the
+backend log, because the narrowest screen here is 360px tall and can't show a
 long report:
 
 ```
 docker compose logs helmcentral | grep 'display probe'
 ```
 
-A white screen on the wall also lands in that log: the app posts its first
+A white screen on the wall also lands in that log. The app posts its first
 startup error as a `display probe: [FAIL] boot error` line naming the message
-and the script position, so a browser that cannot parse the app explains
+and the script position. A browser that can't parse the app therefore explains
 itself without a keyboard.
 
-The log prints a header line (browser, reported screen size, orientation),
-one line per check, and a footer with the pass count. Two of the checks are
-the ones you are really there for:
+The log prints a header line (browser, reported screen size, orientation), one
+line per check, and a footer with the pass count. Two of the checks are the ones
+you're really there for:
 
-- **viewport** reports the screen size the browser thinks it has, next to
-  what the panel actually is. These are the numbers to enter as the
-  display's screen size in step 2. They are often not the panel's
-  advertised resolution: the flybridge strip's browser reports 1920x1080
-  against a panel that is physically 1920x360, and a television may report
-  1280x720 against a 4K panel.
-- **keys** is a live readout, on screen rather than in the log, of the last
-  four keys pressed. Point the remote at the screen and press the direction
-  keys, OK, and back. Each press shows its name and code, and the same lines go
-  to the log so you can read them off later. Use it to confirm the remote
-  drives the rotation before you rely on it.
+- **viewport** reports the screen size the browser thinks it has, next to what
+  the panel actually is. These are the numbers to enter as the display's screen
+  size in step 2. They're often not the panel's advertised resolution. The
+  flybridge strip's browser reports 1920x1080 against a panel that is
+  physically 1920x360, and a television may report 1280x720 against a 4K panel.
+- **keys** is a live readout, on screen rather than in the log, of the last four
+  keys pressed. Point the remote at the screen and press the direction keys, OK,
+  and back. Each press shows its name and code, and the same lines go to the log
+  so you can read them off later. Use it to confirm the remote drives the
+  rotation before you rely on it.
 
 The rest check that the browser is new enough and has real graphics hardware,
-which the chart and radar tiles need. A software renderer counts as a
-failure. Other checks cover magnification without the layout jumping and
-whether the screen can be told to stay awake.
+which the chart and radar tiles need. A software renderer counts as a failure.
+Other checks cover magnification without the layout jumping, and whether the
+screen can be told to stay awake.
 
-If everything passes, go on. One check is marked informational, and if that is
-the only failure you can go on anyway. If any other check fails, the browser
-is too old for this dashboard. On a television that usually means driving it
-from a small HDMI box running a current Chromium instead of using the set's
-built-in browser. The same fix applies to an ARM board that ships an older
-browser by default.
+If everything passes, go on. One check is marked informational, and if that's
+the only failure you can go on anyway. If any other check fails, the browser is
+too old for this dashboard. On a television that usually means driving it from a
+small HDMI box running a current Chromium, instead of using the set's built-in
+browser. The same fix applies to an ARM board that ships an older browser by
+default.
 
-Add `?rotate=180` to the probe URL to check a physically inverted screen. If
-the browser reports a screen taller than the panel, add `&height=<px>` too,
-for example `/display-probe.html?rotate=180&height=360`, so you are checking
+Add `?rotate=180` to the probe URL to check a physically inverted screen. If the
+browser reports a screen taller than the panel, add `&height=<px>` too, for
+example `/display-probe.html?rotate=180&height=360`. That way you're checking
 the band the panel will actually show.
 
 ## 2. Add the display
 
 Open **Wall displays** in the sidebar. That lists every screen you have
-configured, with its address, size and how many pages are on it. Choose
-**New display** and it opens the new screen's own page. Fill in:
+configured, with its address, size and how many pages are on it. Choose **New
+display** and it opens the new screen's own page. Fill in:
 
 - **Name**, what you call the screen: "Flybridge", "Saloon TV".
 - **Address**, the last part of its web address. `flybridge` gives
   `/display/flybridge`.
-- **Canvas**, the width and height you lay the pages out against, taken from
-  the probe's viewport line in step 1.
-- **Magnification**, how much larger to draw everything. Start at 1 for a
-  screen you read close up, and 1.5 for a television across a cabin. It takes
-  two decimals, so 0.79 is a fine value. You can change it after you have
-  looked at it from where you will actually sit.
-- **Upside down**, for a panel mounted inverted. When the pages take up
-  less than the whole screen, they still start at the top left as you look at
-  the panel, with the spare room along the right and bottom edges.
-- **OLED panel**, for an OLED television, so a board left up all season does
-  not burn in.
+- **Canvas**, the width and height you lay the pages out against, taken from the
+  probe's viewport line in step 1.
+- **Magnification**, how much larger to draw everything. Start at 1 for a screen
+  you read close up, and 1.5 for a television across a cabin. It takes two
+  decimals, so 0.79 is a fine value. You can change it after you've looked at it
+  from where you'll actually sit.
+- **Upside down**, for a panel mounted inverted. The pages may take up less
+  than the whole screen. They still start at the top left as you look at the
+  panel, with the spare room along the right and bottom edges.
+- **OLED panel**, for an OLED television, so a board left up all season doesn't
+  burn in.
 - **Keep awake**, to ask the screen not to sleep.
 
 ### The rule: canvas times magnification has to fit the screen
 
 The canvas, multiplied by the magnification, has to fit inside the size the
-screen's browser reports. If it is bigger, the right and bottom edges are cut
-off and nothing on the screen tells you. A canvas smaller than the screen is
-fine: the flybridge strip is 1920x360 inside a browser that reports 1920x1080,
-and it is meant to be.
+screen's browser reports. If it's bigger, the right and bottom edges are cut off
+and nothing on the screen tells you. A canvas smaller than the screen is fine.
+The flybridge strip is 1920x360 inside a browser that reports 1920x1080, and
+it's meant to be.
 
-A television often reports less than its advertised resolution. A 1080p set
-with its picture scaling turned up can report 1536x856, and a canvas of
-1920x1080 at magnification 1 then loses the right column and the bottom row.
-Trust the probe's number, not the box.
+A television often reports less than its advertised resolution. A 1080p set with
+its picture scaling turned up can report 1536x856, and a canvas of 1920x1080 at
+magnification 1 then loses the right column and the bottom row. Trust the
+probe's number, not the box.
 
-That is also why a smaller canvas with more magnification works well on a
+That's also why a smaller canvas with more magnification works well on a
 television. 1280x720 at 1.5 comes to 1920x1080 on the screen, which fits a
 browser reporting 1920x1080, and the tiles are big enough to read across the
 cabin. It only works if the browser really reports 1920x1080 or more. On the
@@ -102,81 +101,82 @@ cabin. It only works if the browser really reports 1920x1080 or more. On the
 ### Let the screen tell you
 
 Open the display's address (step 4) once on the screen itself. The wall page
-then tells Helmcentral what size the browser really reports, and the display's
-page under **Wall displays** shows it under the canvas: **Measured on this
-screen: 1536 × 856**, with when it was last seen. If you change the TV's
-picture scaling later, open the address again and the number follows. The line
-also names the browser that reported it, so if it shows your laptop instead of
-the TV, you know the number is not the screen's. The **Preview** links in the
-app do not report, so looking at a display from your own browser never
+then tells Helmcentral what size the browser really reports. The display's page
+under **Wall displays** shows it under the canvas: **Measured on this screen:
+1536 × 856**, with when it was last seen. If you change the TV's picture scaling
+later, open the address again and the number follows.
+
+The line also names the browser that reported it, so if it shows your laptop
+instead of the TV, you know the number isn't the screen's. The **Preview** links
+in the app don't report, so looking at a display from your own browser never
 overwrites what the wall measured.
 
-If the canvas times the magnification is bigger than that, the same place
-shows a warning that says how many pixels run past the right edge and the
-bottom. Click **Fit to screen** and the magnification is set to the largest
-value that fits, keeping your width and height. For 1920x1080 on a 1536x856
-screen that is 0.79. If the canvas is so large that it would need less than
-0.5 magnification, there is no button. Use a smaller canvas instead.
+If the canvas times the magnification is bigger than that, the same place shows
+a warning that says how many pixels run past the right edge and the bottom.
+Click **Fit to screen** and the magnification is set to the largest value that
+fits, keeping your width and height. For 1920x1080 on a 1536x856 screen, that's
+0.79. If the canvas is so large that it would need less than 0.5 magnification,
+there's no button. Use a smaller canvas instead.
 
-The **Wall displays** list marks the same problem next to the canvas, so you
-can spot it without opening each screen. The wall itself also says so: while
-the canvas is too big, a small amber note at its top left reads "This page is
-larger than the screen", with the display's name to open.
+The **Wall displays** list marks the same problem next to the canvas, so you can
+spot it without opening each screen. The wall itself also says so. While the
+canvas is too big, a small amber note at its top left reads "This page is larger
+than the screen", with the display's name to open.
 
 ## 3. Put pages on it
 
 The display's own page is the easiest way. **Add page** lists every dashboard
 page not already on a screen. Pick one and it joins the rotation. The table
-below it holds the pages already there, where you set each one's dwell (5 to
-3600 seconds) and its condition: **Always**, or a vessel state such as
+below it holds the pages already there. That's where you set each one's dwell (5
+to 3600 seconds) and its condition: **Always**, or a vessel state such as
 **While anchored** to show it only then.
 
-The arrows in the **Order** column set the sequence the screen cycles
-through. Moving a page here only moves it relative to the other pages on
-that screen. The rest of your dashboard keeps its own order.
+The arrows in the **Order** column set the sequence the screen cycles through.
+Moving a page here only moves it relative to the other pages on that screen. The
+rest of your dashboard keeps its own order.
 
 **Duplicate** copies a page onto another screen, which is how you start a
 television version of a strip page. **Remove from this display** takes a page
-off the rotation without deleting it: it returns to the ordinary page list.
+off the rotation without deleting it, and it returns to the ordinary page list.
 
-You can also do the assignment from the other end. In layout mode on any
-page, the toolbar's display select puts that page on a screen, which is
-quicker when you are already looking at the page you want to move.
+You can also do the assignment from the other end. In layout mode on any page,
+the toolbar's display select puts that page on a screen. That's quicker when
+you're already looking at the page you want to move.
 
-To arrange the tiles themselves, click the page's name in that table. That
-opens it in layout mode, where an amber dashed line marks where this
-particular screen cuts the page off. Everything above the line is what the
-screen shows. Anything below it is real but invisible there.
+To arrange the tiles themselves, click the page's name in that table. That opens
+it in layout mode, where an amber dashed line marks where this particular screen
+cuts the page off. Everything above the line is what the screen shows. Anything
+below it is real but invisible there.
 
-Putting a page on a wall display clears its hero tile, because the hero's
-extra row spends the vertical room the screen is measuring.
+Putting a page on a wall display clears its hero tile, because the hero's extra
+row spends the vertical room the screen is measuring.
 
-The wall never shows the pinned indicator ribbon. If a page needs status
-lamps there, put a lamp strip tile on that page's own layout, in the space
-the dashed line marks as visible.
+The wall never shows the pinned indicator ribbon. If a page needs status lamps
+there, put a lamp strip tile on that page's own layout, in the space the dashed
+line marks as visible.
 
-A page on a screen keeps its place in that screen's rotation whatever you do
-to the rest of the dashboard: reordering your ordinary pages (see [Reorder
-dashboard pages](reorder-dashboard-pages.md)) never disturbs a rotation it
-had nothing to do with.
+A page on a screen keeps its place in that screen's rotation whatever you do to
+the rest of the dashboard. Reordering your ordinary pages (see [Reorder
+dashboard pages](reorder-dashboard-pages.md)) never disturbs a rotation it had
+nothing to do with.
 
 ## 4. Point the screen's browser at it
 
 Open `http://<your-helmcentral-host>:<port>/display/<address>` in the browser
-that will run unattended, for example `/display/flybridge`. There is nothing
-to click: no sidebar, no header, and no response to Back or Forward. Size and
-orientation come from the display's own record, so there is nothing to add to
-the address.
+that will run unattended, for example `/display/flybridge`. There's nothing to
+click: no sidebar, no header, and no response to Back or Forward. Size and
+orientation come from the display's own record, so there's nothing to add to the
+address.
 
-To hold one page while you decide whether it fits, add `?page=<page id>`
-(find the id in the address bar after selecting that page normally, at
-`/dashboard/<page id>`). A held page never advances, which also makes this
-the way to take a screenshot.
+To hold one page while you decide whether it fits, add `?page=<page id>`. You
+find the id in the address bar after selecting that page normally, at
+`/dashboard/<page id>`. A held page never advances, which also makes this the
+way to take a screenshot.
 
 ### If you are running the wpe-webkit kiosk snap
 
-For a small ARM board running Ubuntu Core's `wpe-webkit-mir-kiosk` snap, what
-the flybridge strip uses, point it at the display and restart it:
+For a small ARM board running Ubuntu Core's `wpe-webkit-mir-kiosk` snap, which is
+what the flybridge strip uses, point it at the display and restart it:
 
 ```
 sudo snap set wpe-webkit-mir-kiosk url="http://<helmcentral-host>:<port>/display/flybridge"
@@ -199,20 +199,21 @@ remote.
 
 ## 6. Add a second screen
 
-Repeat steps 1, 2 and 4 for the new screen, then use **Duplicate to** in the
+Repeat steps 1, 2 and 4 for the new screen. Then use **Duplicate to** in the
 layout toolbar to copy a page you already like onto it. You get a copy, not a
-shared page, so rearranging it for the new shape leaves the original alone.
-This is the intended way to build a television version of a strip page: start
-from the same tiles, then spread them out.
+shared page, so rearranging it for the new shape leaves the original alone. This
+is the intended way to build a television version of a strip page: start from
+the same tiles, then spread them out.
 
 ## 7. Television settings that matter
 
-Three settings on a television will undo the work above, and the dashboard can't override any of them:
+Three settings on a television will undo the work above, and the dashboard can't
+override any of them:
 
-- **Energy saving**, which dims a mostly dark picture until it is unreadable.
-  Turn it off, or the wall will look broken at night.
+- **Energy saving**, which dims a mostly dark picture until it's unreadable. Turn
+  it off, or the wall will look broken at night.
 - **Auto power off** after a few hours with no input. On LG sets this is four
-  hours by default. Keep awake cannot defeat it, so turn it off in the set's own
+  hours by default. Keep awake can't defeat it, so turn it off in the set's own
   menu.
 - **Screen shift and pixel refresh**, the set's own burn-in protection. Leave
   these on. They work alongside the OLED panel option, which moves the
@@ -220,6 +221,11 @@ Three settings on a television will undo the work above, and the dashboard can't
 
 ## 8. Leave it running
 
-A reload always picks up the current build, whether it follows a restart, a power cut or the browser simply deciding to. There is nothing else to maintain. Adding or removing a page, changing a
-duration or a condition, or editing the screen's size or magnification all
-apply at the wall's next lap without touching the device.
+A reload always picks up the current build, whether it follows a restart, a power
+cut or the browser simply deciding to. There's nothing else to maintain.
+
+These changes all apply at the wall's next lap, without touching the device:
+
+- Adding or removing a page.
+- Changing a duration or a condition.
+- Editing the screen's size or magnification.
