@@ -81,6 +81,24 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  docs:
+    name: Help pages prose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to the version `brew install vale` gave on 2026-10-25, and
+      # checked against the release's published sha256 before it runs.
+      - name: Install Vale
+        run: |
+          curl -fsSLo vale.tar.gz https://github.com/errata-ai/vale/releases/download/v3.25.1/vale_3.25.1_Linux_64-bit.tar.gz
+          echo "4bf5c5176b682b1da0830f471584d3494f1c2e27ee3029e1ad6f6661d4962182  vale.tar.gz" | sha256sum -c -
+          sudo tar -xzf vale.tar.gz -C /usr/local/bin vale
+
+      # Same command as `make docs-lint`. Only errors fail the job.
+      - name: Lint
+        run: vale --no-global docs
+
   release-build:
     name: Release build (dry run)
     runs-on: ubuntu-latest

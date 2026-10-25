@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage worktree prune-merged check-vite-config
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint worktree prune-merged check-vite-config
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -15,6 +15,15 @@ help-stage:
 	cp -R docs/features docs/how-to docs/reference backend/help/
 	cp docs/index.md backend/help/index.md
 	touch backend/help/.gitkeep
+
+# Prose lint for the operator help pages, with the rules in .vale/styles/Helm.
+# Errors (dashes, semicolons, "widget", ADR citations, filler, named code
+# technology) fail. Long sentences and other implementation words warn, and
+# reading grade and plainer-word swaps are suggestions. CI runs the same
+# command. Install with `brew install vale`.
+docs-lint:
+	@command -v vale >/dev/null || { echo "docs-lint: vale not installed (brew install vale)"; exit 1; }
+	vale --no-global docs
 
 # A second checkout for a second concurrent session, so two sessions editing
 # at once cannot race in one working tree. `make worktree NAME=ux-tweaks`

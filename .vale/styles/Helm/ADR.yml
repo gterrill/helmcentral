@@ -1,0 +1,5 @@
+extends: existence
+message: "Help pages don't cite ADRs. State the behaviour and the reason in plain words."
+level: error
+tokens:
+  - 'ADRs?\s?\d+'

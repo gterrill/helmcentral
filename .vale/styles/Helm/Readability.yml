@@ -1,0 +1,7 @@
+extends: metric
+message: "Reading grade is %s. Aim for 8 or below: shorter sentences and everyday words."
+link: https://en.wikipedia.org/wiki/Flesch%E2%80%93Kincaid_readability_tests
+level: suggestion
+formula: |
+  (0.39 * (words / sentences)) + (11.8 * (syllables / words)) - 15.59
+condition: "> 8"

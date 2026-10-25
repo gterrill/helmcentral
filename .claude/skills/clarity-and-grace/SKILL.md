@@ -1,11 +1,11 @@
 ---
 name: clarity-and-grace
-description: Edits and drafts documentation and technical prose combining Joseph Williams's "Style: Lessons in Clarity and Grace" and Virginia Tufte's "Artful Sentences: Syntax as Style", balancing conversational clarity and concrete operational depth with tight editorial structure.
+description: Edits and drafts architecture decision records in docs/adr, combining Joseph Williams's "Style: Lessons in Clarity and Grace" and Virginia Tufte's "Artful Sentences: Syntax as Style", balancing conversational clarity and concrete operational depth with tight editorial structure. Use for ADRs only. Operator help pages and CHANGELOG entries use the help-pages skill.
 ---
 
 # Style: Clarity, Grace, and Artful Architecture
 
-Apply this framework to technical guides, feature documentation, and narrative prose. Deliver concrete, conversational explanations anchored by strict editorial discipline: tight prose, prominent structural scaffolding, explicit failure modes, and deliberate sentence architecture.
+Apply this framework to architecture decision records in `docs/adr`. Help pages and CHANGELOG entries are written for the operator with the `help-pages` skill instead. Deliver concrete, conversational explanations anchored by strict editorial discipline: tight prose, prominent structural scaffolding, explicit failure modes, and deliberate sentence architecture.
 
 ## 1. Editorial Scaffolding & Structural Discipline
 - **Prominent Canonical Headings:** Use direct, authoritative headings (e.g., `## What it knows`, `## What leaves the boat`, `## What it is not`, `## When it can't run`). Avoid vague meta-labels.

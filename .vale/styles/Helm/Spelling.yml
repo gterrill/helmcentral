@@ -1,0 +1,16 @@
+extends: substitution
+message: "Use NZ spelling: '%s', not '%s'."
+level: warning
+ignorecase: true
+swap:
+  (synchron|recogn|organ|priorit|custom|minim|maxim|optim|normal|initial|author|summar|categor|memor|real|emphas|apolog|standard|visual|util|final|special|serial|digit|local|sanit)iz(e|es|ed|ing|ation|ations): $1is$2
+  color(s|ed|ing)?: colour$1
+  behavior(s|al)?: behaviour$1
+  favorite(s)?: favourite$1
+  center(s|ed|ing)?: centre$1
+  gray: grey
+  analyz(e|es|ed|ing): analys$1
+  catalog(s)?: catalogue$1
+exceptions:
+  - Prediction Center
+  - Hurricane Center
