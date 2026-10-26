@@ -261,6 +261,9 @@ func main() {
 		log.Fatalf("failed to open assistant store: %v", err)
 	}
 	globalAssistantStore = as
+	// Passage decisions (ADR 0211) read both the passage log and the
+	// assistant store, so the worker starts once both are open.
+	startPassageDecisions(globalPassageStore)
 
 	// Document store (ADR 0106): metadata, virtual folders, tags, chunks and
 	// FTS5 search behind a flat, hash-named folder of file bytes - another

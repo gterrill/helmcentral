@@ -121,3 +121,57 @@ func TestCruiseHandlers(t *testing.T) {
 		t.Errorf("gone %d", code)
 	}
 }
+
+func TestEditHandlersWakeDecisionsWithTheAffectedSpan(t *testing.T) {
+	var spans [][2]time.Time
+	prev := passageDecisionsWake
+	passageDecisionsWake = func(from, to time.Time) { spans = append(spans, [2]time.Time{from, to}) }
+	defer func() { passageDecisionsWake = prev }()
+	store := withPassageStore(t)
+	p := seedPassage(t, store, passageEpoch, passageEpoch.Add(4*time.Hour))
+	take := func() [][2]time.Time { s := spans; spans = nil; return s }
+
+	// A title-only patch changes nothing a decision reads.
+	send(t, patchPassageHandler, http.MethodPatch, `{"title":"x"}`, "id", p.ID)
+	if got := take(); len(got) != 0 {
+		t.Fatalf("title patch woke %v", got)
+	}
+	send(t, patchPassageHandler, http.MethodPatch, `{"hidden":true}`, "id", p.ID)
+	if got := take(); len(got) != 1 || !got[0][0].Equal(p.Start) || !got[0][1].Equal(p.End) {
+		t.Fatalf("hide woke %v", got)
+	}
+	send(t, patchPassageHandler, http.MethodPatch, `{"hidden":false}`, "id", p.ID)
+	take()
+
+	at := passageEpoch.Add(time.Hour).Format(time.RFC3339)
+	_, body := send(t, splitPassageHandler, http.MethodPost, `{"at":"`+at+`"}`, "id", p.ID)
+	if got := take(); len(got) != 1 || !got[0][0].Equal(p.Start) || !got[0][1].Equal(p.End) {
+		t.Fatalf("split woke %v", got)
+	}
+	second := body["passages"].([]any)[1].(map[string]any)["id"].(string)
+	send(t, mergePassagesHandler, http.MethodPost, `{"ids":["`+p.ID+`","`+second+`"]}`)
+	if got := take(); len(got) != 1 || !got[0][0].Equal(p.Start) || !got[0][1].Equal(p.End) {
+		t.Fatalf("merge woke %v", got)
+	}
+	send(t, trimPassageHandler, http.MethodPost, `{"start":"`+passageEpoch.Add(time.Minute).Format(time.RFC3339)+`","end":"`+passageEpoch.Add(time.Hour).Format(time.RFC3339)+`"}`, "id", p.ID)
+	if got := take(); len(got) != 1 || !got[0][0].Before(passageEpoch.Add(time.Hour+time.Second)) {
+		t.Fatalf("trim woke %v", got)
+	}
+	// A refused edit wakes nothing.
+	send(t, splitPassageHandler, http.MethodPost, `{"at":"2020-01-01T00:00:00Z"}`, "id", p.ID)
+	if got := take(); len(got) != 0 {
+		t.Fatalf("refused split woke %v", got)
+	}
+}
+
+func TestTrimOfAnUnknownPassageIsRefusedAndWakesNothing(t *testing.T) {
+	woke := 0
+	prev := passageDecisionsWake
+	passageDecisionsWake = func(from, to time.Time) { woke++ }
+	defer func() { passageDecisionsWake = prev }()
+	withPassageStore(t)
+	code, _ := send(t, trimPassageHandler, http.MethodPost, `{"start":"2026-10-14T00:01:00Z","end":"2026-10-14T01:00:00Z"}`, "id", "nope")
+	if code != http.StatusNotFound || woke != 0 {
+		t.Fatalf("code %d woke %d", code, woke)
+	}
+}

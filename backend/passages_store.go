@@ -71,6 +71,11 @@ type passageRecord struct {
 	ToNameEdited   bool      `json:"to_name_edited"`
 	CruiseID       *string   `json:"cruise_id"`
 	CreatedAt      time.Time `json:"created_at"`
+	// Source is the track source the passage was detected from
+	// (trackSourceRecorded or trackSourceImported), or empty when it is not
+	// known. It is internal: decision matching reads only the passage's own
+	// source (ADR 0211).
+	Source string `json:"-"`
 }
 
 type cruiseRecord struct {
@@ -147,7 +152,8 @@ func createPassageSchema(db *sql.DB) error {
 			name_attempted_ms INTEGER,
 			from_name_edited INTEGER NOT NULL DEFAULT 0,
 			to_name_edited INTEGER NOT NULL DEFAULT 0,
-			stats_json TEXT
+			stats_json TEXT,
+			source TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_passages_start ON passages(start_ms)`,
 		`CREATE TABLE IF NOT EXISTS water_rise_labels (
@@ -395,11 +401,11 @@ func (s *passageStore) InsertPassageIfNoOverlap(r passageRecord) (rec passageRec
 		r.CreatedAt = time.Now().UTC()
 	}
 	res, err := s.db.Exec(`INSERT INTO passages
-		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited)
-		SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?
+		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source)
+		SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?
 		WHERE NOT EXISTS (SELECT 1 FROM passages WHERE start_ms < ? AND end_ms > ?)`,
 		r.ID, r.Start.UnixMilli(), r.End.UnixMilli(), r.FromName, r.ToName, r.Title, r.Notes,
-		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited),
+		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited), r.Source,
 		r.End.UnixMilli(), r.Start.UnixMilli())
 	if err != nil {
 		return r, false, fmt.Errorf("insert passage unless it overlaps a stored one: %w", err)
@@ -420,10 +426,10 @@ func (s *passageStore) InsertPassage(r passageRecord) (passageRecord, error) {
 		r.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.Exec(`INSERT INTO passages
-		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Start.UnixMilli(), r.End.UnixMilli(), r.FromName, r.ToName, r.Title, r.Notes,
-		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited))
+		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited), r.Source)
 	if err != nil {
 		return r, fmt.Errorf("insert passage: %w", err)
 	}
@@ -437,14 +443,14 @@ func boolInt(b bool) int {
 	return 0
 }
 
-const passageColumns = `id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited`
+const passageColumns = `id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source`
 
 func scanPassage(r rowScanner) (passageRecord, error) {
 	var p passageRecord
 	var startMs, endMs, createdMs int64
 	var hidden, edited, fromEd, toEd int
 	var cruise sql.NullString
-	if err := r.Scan(&p.ID, &startMs, &endMs, &p.FromName, &p.ToName, &p.Title, &p.Notes, &hidden, &edited, &cruise, &createdMs, &fromEd, &toEd); err != nil {
+	if err := r.Scan(&p.ID, &startMs, &endMs, &p.FromName, &p.ToName, &p.Title, &p.Notes, &hidden, &edited, &cruise, &createdMs, &fromEd, &toEd, &p.Source); err != nil {
 		return p, err
 	}
 	p.Start, p.End = time.UnixMilli(startMs).UTC(), time.UnixMilli(endMs).UTC()
@@ -545,12 +551,38 @@ func addPassageNameAttemptColumn(db *sql.DB) error {
 	}
 	for _, c := range [][2]string{
 		{"name_attempted_ms", "INTEGER"},
+		{"source", "TEXT NOT NULL DEFAULT ''"},
 		{"from_name_edited", "INTEGER NOT NULL DEFAULT 0"},
 		{"to_name_edited", "INTEGER NOT NULL DEFAULT 0"},
 		{"stats_json", "TEXT"},
 	} {
 		if err := ensureColumn(db, "passages", c[0], c[1]); err != nil {
 			return err
+		}
+	}
+	// Rows with no source are filled on every start, and only where their
+	// track says exactly where they came from.
+	return backfillPassageSources(db)
+}
+
+func (s *passageStore) backfillPassageSources() error { return backfillPassageSources(s.db) }
+
+// backfillPassageSources sets the source of passages that have none. A passage
+// is detected from one source's points and contains them, so a span holding
+// points of exactly one source names it. A span with both, or with none, is
+// left empty: nothing says which it came from, and matching treats an empty
+// source as unknown rather than guessing.
+func backfillPassageSources(db *sql.DB) error {
+	for _, src := range []string{trackSourceRecorded, trackSourceImported} {
+		other := trackSourceImported
+		if src == trackSourceImported {
+			other = trackSourceRecorded
+		}
+		if _, err := db.Exec(`UPDATE passages SET source = ? WHERE source = ''
+			AND EXISTS (SELECT 1 FROM track_points t WHERE t.t_ms >= passages.start_ms AND t.t_ms <= passages.end_ms AND t.source = ?)
+			AND NOT EXISTS (SELECT 1 FROM track_points t WHERE t.t_ms >= passages.start_ms AND t.t_ms <= passages.end_ms AND t.source = ?)`,
+			src, src, other); err != nil {
+			return fmt.Errorf("backfill passage sources: %w", err)
 		}
 	}
 	return nil

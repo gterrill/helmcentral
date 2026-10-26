@@ -110,7 +110,7 @@ func cardsForMessages(q sqlQueryer, messageIDs []string) (map[string][]mateCard,
 			return nil, fmt.Errorf("scan message card: %w", err)
 		}
 		if dID.Valid {
-			c.Decision = newPassageDecisionView(dID.Int64, dState.String, dRow, dSource.String, dPassage)
+			c.Decision = newPassageDecisionView(dID.Int64, dState.String, nullStringPtr(dRow), dSource.String, nullStringPtr(dPassage))
 		}
 		c.Payload = json.RawMessage(payload)
 		out[messageID] = append(out[messageID], c)

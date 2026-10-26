@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +192,113 @@ func TestEditedPassageIsNotRecreatedByDetectorAfterTrim(t *testing.T) {
 	runPassageDetection(s)
 	if list, _ := s.ListPassages(); len(list) != 1 {
 		t.Errorf("detector re-created a trimmed passage: %d", len(list))
+	}
+}
+
+func TestSplitHalvesInheritTheSourceAndASameSourceMergeKeepsIt(t *testing.T) {
+	s := newTestPassageStore(t)
+	a, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(4 * time.Hour), Source: trackSourceImported})
+	first, second, err := s.SplitPassage(a.ID, passageEpoch.Add(time.Hour))
+	if err != nil || first.Source != trackSourceImported || second.Source != trackSourceImported {
+		t.Fatalf("%+v %+v %v", first, second, err)
+	}
+	if got, _ := s.GetPassage(second.ID); got.Source != trackSourceImported {
+		t.Fatalf("stored second half: %+v", got)
+	}
+	m, err := s.MergePassages(first.ID, second.ID)
+	if err != nil || m.Source != trackSourceImported {
+		t.Fatalf("merge of one source: %+v %v", m, err)
+	}
+
+}
+
+func TestMergeKeepsASharedSourceAndForgetsADisagreement(t *testing.T) {
+	s := newTestPassageStore(t)
+	h := func(n int) time.Time { return passageEpoch.Add(time.Duration(n) * time.Hour) }
+	add := func(from int, src string) passageRecord {
+		r, err := s.InsertPassage(passageRecord{Start: h(from), End: h(from + 1), Source: src})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	// All recorded: kept. All unknown: stays unknown.
+	a, b := add(0, trackSourceRecorded), add(2, trackSourceRecorded)
+	if m, err := s.MergePassages(a.ID, b.ID); err != nil || m.Source != trackSourceRecorded {
+		t.Fatalf("shared source: %+v %v", m, err)
+	}
+	c, d := add(4, ""), add(6, "")
+	if m, err := s.MergePassages(c.ID, d.ID); err != nil || m.Source != "" {
+		t.Fatalf("both unknown: %+v %v", m, err)
+	}
+	// Different sources, or one unknown: the merge goes ahead and the result is unknown.
+	e, f, g := add(8, trackSourceRecorded), add(10, trackSourceImported), add(12, trackSourceRecorded)
+	m, err := s.MergePassages(e.ID, f.ID, g.ID)
+	if err != nil || m.Source != "" {
+		t.Fatalf("mixed: %+v %v", m, err)
+	}
+	if got, _ := s.GetPassage(m.ID); got.Source != "" || got.End != h(13).UTC() {
+		t.Fatalf("stored: %+v", got)
+	}
+	x, y := add(14, ""), add(16, trackSourceRecorded)
+	if m, err := s.MergePassages(x.ID, y.ID); err != nil || m.Source != "" {
+		t.Fatalf("old with new: %+v %v", m, err)
+	}
+}
+
+func TestBackfillPassageSourcesOnlyWhereTheTrackSaysExactly(t *testing.T) {
+	s := newTestPassageStore(t)
+	mk := func(h int, src string) passageRecord {
+		r, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(time.Duration(h) * time.Hour), End: passageEpoch.Add(time.Duration(h)*time.Hour + 30*time.Minute)})
+		if src != "" {
+			s.AppendTrackPoint(recordedTrackPoint{At: r.Start.Add(time.Minute), Lat: -20, Lon: 149, Source: src})
+		}
+		return r
+	}
+	onlyRec, onlyImp, none := mk(0, trackSourceRecorded), mk(2, trackSourceImported), mk(4, "")
+	both := mk(6, trackSourceRecorded)
+	s.AppendTrackPoint(recordedTrackPoint{At: both.Start.Add(2 * time.Minute), Lat: -20, Lon: 149, Source: trackSourceImported})
+	if err := s.backfillPassageSources(); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{onlyRec.ID: trackSourceRecorded, onlyImp.ID: trackSourceImported, none.ID: "", both.ID: ""} {
+		if got, _ := s.GetPassage(id); got.Source != want {
+			t.Errorf("%s: source %q, want %q", id, got.Source, want)
+		}
+	}
+}
+
+func TestBackfillRunsOnEveryOpenAndLeavesMixedSpansUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.sqlite")
+	s, err := newPassageStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(time.Hour)})
+	mixed, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(3 * time.Hour), End: passageEpoch.Add(4 * time.Hour)})
+	s.AppendTrackPoint(recordedTrackPoint{At: mixed.Start.Add(time.Minute), Lat: -20, Lon: 149, Source: trackSourceRecorded})
+	s.AppendTrackPoint(recordedTrackPoint{At: mixed.Start.Add(2 * time.Minute), Lat: -20, Lon: 149, Source: trackSourceImported})
+	s.close()
+
+	s, err = newPassageStore(path) // first open: nothing to name later yet, mixed stays mixed
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetPassage(later.ID); got.Source != "" {
+		t.Fatalf("no points yet: %q", got.Source)
+	}
+	s.AppendTrackPoint(recordedTrackPoint{At: later.Start.Add(time.Minute), Lat: -20, Lon: 149, Source: trackSourceImported})
+	s.close()
+
+	s, err = newPassageStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	if got, _ := s.GetPassage(later.ID); got.Source != trackSourceImported {
+		t.Fatalf("a later open fills what the first could not: %q", got.Source)
+	}
+	if got, _ := s.GetPassage(mixed.ID); got.Source != "" {
+		t.Fatalf("a genuinely mixed span stays unknown: %q", got.Source)
 	}
 }

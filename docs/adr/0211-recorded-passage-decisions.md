@@ -59,35 +59,79 @@ Three facts in the code shape the design:
    that is not a row of the card's own snapshot, and 404 for an unknown id. A
    successful call sets the source to operator, and returns the decision as
    `{id, state, row_date, inferred, passage_id}`.
-6. **Inference fills the rest, and never freezes.** A later change (not this
-   one) matches a card to a passage and writes `source 'inferred'`. The rules
-   are fixed here so the table is shaped for them:
-   - A passage matches a row when it is not hidden, starts on the row's date in
-     the card's own timezone (a zone that fails to load skips the decision,
-     never falling back to UTC), starts within 4 hours of the leg 0 departure,
-     begins within 2 NM of the first route point, comes within 2 NM of the
-     leg 0 end point along its track (never across a segment break), and
-     starts after the card was made.
+6. **Inference fills the rest, and never freezes.** A worker matches cards to
+   passages and writes `source 'inferred'`. It reconciles on a passage being
+   stored (detection or GPX import), on a split, merge, trim or hide, once an
+   hour, and on every operator PUT. Wakes carry a span and coalesce, but every
+   pass works on the whole set, so winners, blocks and supersession are decided
+   over every card that can compete. The set is each decision with a row date in
+   the last 60 days, plus any decision linked to a passage in the woken span
+   (hidden ones too) or to a passage that no longer exists, so an edit to an
+   older passage still reaches its card. The operator's PUT saves the choice,
+   then asks the worker for an immediate reconcile, which always includes that
+   decision whatever the age of its card, and waits for it for at most 5
+   seconds, so the answer already shows who holds the passage. If it fails or
+   times out, that is logged, the saved choice is returned, and the worker or
+   the next tick catches up.
+   - A passage matches a row when it is not hidden, starts within 4 hours of
+     the row's planned first-leg departure, begins within 2 NM of the first route
+     point, comes within 2 NM of the first leg's end point along its track (never
+     across a segment break), and starts after the card was made. The 4 hours
+     are elapsed time, so a daylight-saving change counts as the hours it
+     really was. No calendar date is compared: a boat that planned 23:00 and
+     left at 00:30 left on that row. The card's `timezone` is used only to say
+     which dates a card offers, and a zone that fails to load skips the
+     decision rather than falling back to UTC.
    - When one card matches two passages, the start closest to the planned
      departure wins, the earlier on a tie. When one passage matches several
      cards, the latest card made before the passage starts wins, the higher id
-     on a tie, and the others reset to blank. An operator `went` already linked
-     to a passage blocks an inferred `went` on other cards.
+     on a tie, and the others reset to blank. A card that loses, or that
+     matches a passage an operator `went` already holds, stays blank rather
+     than becoming `stayed`, because the boat did sail.
    - An inferred `stayed` needs the date to be past, the detector to have
      processed past local midnight at the end of that date, and the card not to
-     be superseded by a later card with the same row date and leg 1 ends within
-     2 NM. A superseded card stays blank.
+     be superseded by a later card with the same row date and first-leg ends within
+     2 NM. A superseded card stays blank. So does a card for which a passage
+     left on the plan (the 4 hour window and the 2 NM start radius for some
+     row) but none reached the first leg's end, whether the boat turned back or the
+     passage was split: the operator did go out, and "stayed" would be wrong.
+     The same holds when a visible passage of unknown source started within the
+     4 hours of any row after the card was made: its track cannot be read, so
+     nothing can say the boat stayed. Hidden passages are ignored, as the
+     operator asked.
+   - Each card claims its best arrived passage, latest card first. A card whose
+     best passage is blocked by an operator went, or already claimed by a later
+     card, tries its other arrived passages in the same order (closest start,
+     then earlier) before it is left blank.
    - Inferred values are rewritten on every reconcile, so a late passage turns
      an inferred `stayed` into `went`. Writes are guarded with
      `source <> 'operator'`, so an operator PUT always wins a race. The link
      `passage_id` is always derived: hiding a passage drops its inferred `went`
-     and unhiding restores it, and split, merge and trim recompute it.
-7. **A passage carries a rating.** `passages.rating` holds blank,
-   `comfortable`, `lively` or `shouldnt_have_gone`, checked in Go and set
-   through `PATCH /api/passages/:id`. A rating-only patch does not wake the
-   reconcile. A split gives the second half no rating, and a merge keeps the
+     and unhiding restores it, a merge keeps the link on the earliest passage
+     if it still matches, and split and trim recompute it. An operator `went`
+     links to the best passage matching the row the operator chose, or to none.
+7. **A passage carries a rating.** This lands in the next commit of the same
+   branch and is not in the code this record first shipped with. `passages.rating`
+   holds blank, `comfortable`, `lively` or `shouldnt_have_gone`, checked in Go
+   and set through `PATCH /api/passages/:id`. A rating-only patch does not wake
+   the reconcile. A split gives the second half no rating, and a merge keeps the
    earliest passage's rating, or the next one that has any.
-8. **Mate is unchanged here.** `list_passages` reads InfluxDB and has no
+8. **Each passage records its track source.** `passages.source` holds
+   `recorded` or `imported`, the same values as `track_points.source`.
+   Detection writes `recorded`, GPX import writes `imported`, a split gives
+   both halves the source, and a merge keeps the source when every merged
+   passage has the same one. When they differ, or one is unknown, the merge
+   still goes ahead and the result has no source, because points of two
+   sources cannot be read as one track. Such a passage is left out of matching. Matching reads only the
+   passage's own source, so an overlapping import's points never become a
+   recorded passage's first point or break its segments. Passages with
+   no source are looked at on every start and filled only where the span holds
+   points of exactly one source, so a row that could not be named at one start
+   is named at a later one; a span with points of both, or of none, keeps an
+   empty source. Matching leaves such a passage out and logs it once,
+   instead of guessing, and it blocks an inferred stayed as above. The passage page and the stats still read the mixed
+   track.
+9. **Mate is unchanged here.** `list_passages` reads InfluxDB and has no
    passage ids. Letting Mate read decisions and ratings waits for the work that
    proposes limits from them.
 
@@ -114,7 +158,8 @@ Three facts in the code shape the design:
   The table grows by one small row per window card.
 - Inferred values can change after the operator first sees them. The help page
   says so, and an operator choice is the way to stop it.
-- This commit stores and edits decisions only. `passage_id` stays blank until
-  inference lands, so nothing yet links a decision to a passage.
+- The branch lands in steps: storage and the PUT, then inference and the
+  derived passage link (both in), then the rating and the passage page's
+  `planned_with_mate` list, then the frontend.
 - Merge in ADR 0210 folds any number of passages into the earliest, so the
   rating and link rules above read "earliest" where an earlier draft said "a".

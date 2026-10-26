@@ -165,9 +165,9 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=0, edited=1, stats_json=NULL, name_attempted_ms=NULL WHERE id=?`, at.UnixMilli(), first.ToName, id); err != nil {
 		return
 	}
-	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		second.ID, second.Start.UnixMilli(), second.End.UnixMilli(), second.FromName, second.ToName, "", "",
-		boolInt(second.Hidden), 1, second.CruiseID, second.CreatedAt.UnixMilli(), 0, boolInt(second.ToNameEdited)); err != nil {
+		boolInt(second.Hidden), 1, second.CruiseID, second.CreatedAt.UnixMilli(), 0, boolInt(second.ToNameEdited), second.Source); err != nil {
 		return
 	}
 	second.Notes = ""
@@ -222,6 +222,11 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 	now := time.Now().UTC().UnixMilli()
 	for i := 1; i < len(legs); i++ {
 		a, b := legs[i-1], legs[i]
+		// Points of two sources cannot be read as one track, so a mixed merge
+		// has no known source and is left out of decision matching.
+		if m.Source != b.Source {
+			m.Source = ""
+		}
 		if m.CruiseID != nil && b.CruiseID != nil && *m.CruiseID != *b.CruiseID {
 			return m, invalidf("the passages are in different cruises")
 		}
@@ -267,8 +272,8 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 			return m, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, edited=1, stats_json=NULL WHERE id=?`,
-		m.End.UnixMilli(), m.ToName, boolInt(m.ToNameEdited), m.Title, m.Notes, m.CruiseID, m.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, source=?, edited=1, stats_json=NULL WHERE id=?`,
+		m.End.UnixMilli(), m.ToName, boolInt(m.ToNameEdited), m.Title, m.Notes, m.CruiseID, m.Source, m.ID); err != nil {
 		return m, err
 	}
 	if err := tx.Commit(); err != nil {

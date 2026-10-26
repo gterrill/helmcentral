@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -32,15 +33,27 @@ type passageDecisionView struct {
 	PassageID *string `json:"passage_id"`
 }
 
-func newPassageDecisionView(id int64, state string, rowDate sql.NullString, source string, passageID sql.NullString) *passageDecisionView {
-	v := &passageDecisionView{ID: id, State: state, Inferred: source == "inferred"}
-	if rowDate.Valid {
-		v.RowDate = &rowDate.String
+func newPassageDecisionView(id int64, state string, rowDate *string, source string, passageID *string) *passageDecisionView {
+	return &passageDecisionView{ID: id, State: state, RowDate: rowDate, Inferred: source == "inferred", PassageID: passageID}
+}
+
+func nullStringPtr(n sql.NullString) *string {
+	if !n.Valid {
+		return nil
 	}
-	if passageID.Valid {
-		v.PassageID = &passageID.String
+	return &n.String
+}
+
+// view is the row as the client sees it; empty strings are NULLs.
+func (r passageDecisionRow) view() *passageDecisionView {
+	var rowDate, passageID *string
+	if r.RowDate != "" {
+		rowDate = &r.RowDate
 	}
-	return v
+	if r.PassageID != "" {
+		passageID = &r.PassageID
+	}
+	return newPassageDecisionView(r.ID, r.State, rowDate, r.Source, passageID)
 }
 
 func createPassageDecisionsSchema(db *sql.DB) error {
@@ -182,4 +195,124 @@ func (s *assistantStore) SetOperatorPassageDecision(id int64, state string, rowD
 		return passageDecisionView{}, fmt.Errorf("commit passage decision update: %w", err)
 	}
 	return passageDecisionView{ID: id, State: state, RowDate: rowDate}, nil
+}
+
+// passageDecisionRow is a stored decision as the reconcile reads it. RowDate
+// and PassageID are empty for NULL.
+type passageDecisionRow struct {
+	ID            int64
+	CardCreatedMs int64
+	PayloadJSON   string
+	RoutesJSON    string
+	State         string
+	RowDate       string
+	Source        string
+	PassageID     string
+}
+
+const passageDecisionRowColumns = `id, card_created_ms, payload_json, routes_json, state, COALESCE(row_date, ''), source, COALESCE(passage_id, '')`
+
+func scanPassageDecisionRow(sc interface{ Scan(...any) error }) (passageDecisionRow, error) {
+	var r passageDecisionRow
+	err := sc.Scan(&r.ID, &r.CardCreatedMs, &r.PayloadJSON, &r.RoutesJSON, &r.State, &r.RowDate, &r.Source, &r.PassageID)
+	return r, err
+}
+
+// PassageDecisionRow returns one decision, or errPassageDecisionNotFound.
+func (s *assistantStore) PassageDecisionRow(id int64) (passageDecisionRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, err := scanPassageDecisionRow(s.db.QueryRow(`SELECT `+passageDecisionRowColumns+` FROM passage_decisions WHERE id = ?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return r, errPassageDecisionNotFound
+	}
+	if err != nil {
+		return r, fmt.Errorf("read passage decision: %w", err)
+	}
+	return r, nil
+}
+
+// PassageDecisionsForInference returns the decisions a reconcile may look at:
+// every one whose card was made at or after since, plus any older one that
+// holds a passage link. The caller narrows these by row date.
+func (s *assistantStore) PassageDecisionsForInference(since time.Time, include []int64) ([]passageDecisionRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	where, args := `card_created_ms >= ? OR passage_id IS NOT NULL`, []any{since.UnixMilli()}
+	if len(include) > 0 {
+		marks := strings.TrimSuffix(strings.Repeat("?,", len(include)), ",")
+		where += ` OR id IN (` + marks + `)`
+		for _, id := range include {
+			args = append(args, id)
+		}
+	}
+	rows, err := s.db.Query(`SELECT `+passageDecisionRowColumns+` FROM passage_decisions WHERE `+where+` ORDER BY card_created_ms, id`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list passage decisions: %w", err)
+	}
+	defer rows.Close()
+	var out []passageDecisionRow
+	for rows.Next() {
+		r, err := scanPassageDecisionRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan passage decision: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ApplyPassageDecisionUpdates writes a reconcile's answer and reports how many
+// rows changed. An inferred write is guarded by source <> 'operator', so an
+// operator answer that landed after the read always stands. A link write
+// touches only an operator went that still has the state and date it was
+// computed for.
+func (s *assistantStore) ApplyPassageDecisionUpdates(ups []decisionUpdate) (int, error) {
+	if len(ups) == 0 {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, fmt.Errorf("begin passage decision updates: %w", err)
+	}
+	defer tx.Rollback()
+	now := s.now().UnixMilli()
+	changed := 0
+	for _, u := range ups {
+		var res sql.Result
+		var pid, rd any
+		if u.PassageID != "" {
+			pid = u.PassageID
+		}
+		if u.RowDate != "" {
+			rd = u.RowDate
+		}
+		if u.Link {
+			res, err = tx.Exec(`UPDATE passage_decisions SET passage_id = ?, updated_ms = ?
+				WHERE id = ? AND source = 'operator' AND state = ? AND COALESCE(row_date, '') = ?`,
+				pid, now, u.ID, u.State, u.RowDate)
+		} else {
+			source := ""
+			if u.State != "" {
+				source = "inferred"
+			}
+			res, err = tx.Exec(`UPDATE passage_decisions SET state = ?, row_date = ?, source = ?, passage_id = ?, updated_ms = ?
+				WHERE id = ? AND source <> 'operator'`,
+				u.State, rd, source, pid, now, u.ID)
+		}
+		if err != nil {
+			return 0, fmt.Errorf("update passage decision %d: %w", u.ID, err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("update passage decision %d: %w", u.ID, err)
+		}
+		changed += int(n)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit passage decision updates: %w", err)
+	}
+	return changed, nil
 }

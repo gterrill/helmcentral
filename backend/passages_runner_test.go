@@ -90,3 +90,54 @@ func TestRunnerEmptyLogIsNotAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDetectionWakesDecisionsWithThePassagesSpan(t *testing.T) {
+	var spans [][2]time.Time
+	prev := passageDecisionsWake
+	passageDecisionsWake = func(from, to time.Time) { spans = append(spans, [2]time.Time{from, to}) }
+	defer func() { passageDecisionsWake = prev }()
+	store := newTestPassageStore(t)
+	appendAll(t, store, simpleTrip(2*time.Hour).pts)
+	for i := 0; i < 2; i++ {
+		if err := runPassageDetection(store); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := store.ListPassages()
+	if len(got) != 1 || len(spans) != 1 || !spans[0][0].Equal(got[0].Start) || !spans[0][1].Equal(got[0].End) {
+		t.Fatalf("one wake with the stored span, got %v for %+v", spans, got)
+	}
+}
+
+func TestGPXImportWakesDecisionsWithThePassagesSpan(t *testing.T) {
+	var spans [][2]time.Time
+	prev := passageDecisionsWake
+	passageDecisionsWake = func(from, to time.Time) { spans = append(spans, [2]time.Time{from, to}) }
+	defer func() { passageDecisionsWake = prev }()
+	store := newTestPassageStore(t)
+	if _, err := store.ImportGPX(importTrip(simpleTrip(2 * time.Hour).pts)); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.ListPassages()
+	if len(got) != 1 || len(spans) != 1 || !spans[0][0].Equal(got[0].Start) {
+		t.Fatalf("spans %v for %+v", spans, got)
+	}
+}
+
+func TestDetectionAndImportRecordWhereAPassageCameFrom(t *testing.T) {
+	rec := newTestPassageStore(t)
+	appendAll(t, rec, simpleTrip(2*time.Hour).pts)
+	if err := runPassageDetection(rec); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := rec.ListPassages(); len(got) != 1 || got[0].Source != trackSourceRecorded {
+		t.Fatalf("detected: %+v", got)
+	}
+	imp := newTestPassageStore(t)
+	if _, err := imp.ImportGPX(importTrip(simpleTrip(2 * time.Hour).pts)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := imp.ListPassages(); len(got) != 1 || got[0].Source != trackSourceImported {
+		t.Fatalf("imported: %+v", got)
+	}
+}
