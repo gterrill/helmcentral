@@ -18,6 +18,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import type { PassagesFilter } from '@/lib/app-location'
+import { passagesInFilter } from '@/lib/passage-neighbours'
 import { passagesApi } from '@/lib/passages-api'
 import {
   fmtDuration,
@@ -43,11 +44,6 @@ export function filterNodeId(filter: PassagesFilter): string {
   return filter.kind === 'unfiled' ? UNFILED_NODE : ALL_NODE
 }
 
-export function passagesInFilter(passages: PassageSummary[], filter: PassagesFilter): PassageSummary[] {
-  if (filter.kind === 'all') return passages
-  if (filter.kind === 'unfiled') return passages.filter((p) => p.cruise_id === null)
-  return passages.filter((p) => p.cruise_id === filter.id)
-}
 
 export interface PassagesPanelProps {
   filter: PassagesFilter

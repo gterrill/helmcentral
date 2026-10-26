@@ -8,6 +8,10 @@ how a passage is found.
 Open **Passages** and then the passage. Split and trim act on the point the
 replay is showing, so drag the slider to the moment you mean first.
 
+To look at the passage before or after this one, use the arrows beside the
+title, or press **[** and **]**. Unsaved edits are held until you choose to
+**Save and Continue** or **Discard** them.
+
 ## Rename, change the ends, add notes
 
 1. Change **Title**, **From**, **To** or **Notes**.

@@ -453,3 +453,12 @@ their own endpoints and are not part of the page draft.
 
 Amended by ADR 0151: the particulars, engines and house bank now save through
 this bar as well.
+
+Amended: `Page` takes an optional `pager` for details pages that sit in a
+sequence of records. `Page` owns the two arrow buttons at the right of the
+title, the `[` and `]` keys (ignored in fields and with a modifier held) and
+the disabled ends, which never wrap. Each page supplies its own previous and
+next targets and defines its own order, so the slot carries no opinion about
+sorting. Passages is the first user, ordered by start time within the filter it
+was opened from. The other CRUD details pages can adopt it later by passing
+neighbours.

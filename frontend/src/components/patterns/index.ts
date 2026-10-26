@@ -25,7 +25,7 @@ export { IndexFilters, type IndexFilter, type IndexFilterOption, type IndexFilte
 export { LoadError, RefreshFailedNote, type LoadErrorProps, type RefreshFailedNoteProps } from './refresh-failed-note'
 export { ResourceItem, type ResourceItemProps } from './resource-item'
 export { ResourceList, type ResourceListProps } from './resource-list'
-export { Page, type PageAction, type PageProps } from './page'
+export { Page, type PageAction, type PagerProps, type PagerTarget, type PageProps } from './page'
 export { SettingsLayout, type SettingsLayoutProps } from './settings-layout'
 export { SaveBar, type SaveBarProps } from './save-bar'
 export { TreeLayout, type TreeLayoutProps } from './tree-layout'

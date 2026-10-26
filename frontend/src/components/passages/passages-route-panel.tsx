@@ -47,6 +47,7 @@ export function PassagesRoutePanel({ units, canWrite, isDarkTheme }: PassagesRou
       canWrite={canWrite}
       isDarkTheme={isDarkTheme}
       list={list.passages}
+      filter={route.view === 'cruise' ? { kind: 'cruise', id: route.id } : route.filter}
       cruises={list.cruises}
       onBack={() => { close() }}
       onOpenPassage={(id) => { openPassage(id) }}

@@ -1,12 +1,13 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
-import { Mountain } from 'lucide-react'
+import { Maximize, Minus, Mountain, Plus } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { forwardRef, Fragment, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Layer, Map, Marker, Source } from 'react-map-gl/maplibre'
 
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
+import { MapIconButton } from '@/components/map-icon-button'
 import { MapToggleButton } from '@/components/map-toggle-button'
 import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -104,12 +105,15 @@ export interface PassageMapProps {
   /** The legs each passage is drawn in, one colour per leg. Without it every
    * passage is one leg, coloured by its place in the list. */
   legs?: readonly PassageLeg[]
+  /** Greys the zoom and fit buttons: the replay owns the camera while it plays. */
+  controlsDisabled?: boolean
 }
 
 const INTRO_START_ZOOM = 1.5
 const INTRO_MS = 3200
 const FIT_PADDING = { top: 48, bottom: 80, left: 48, right: 48 }
 const LEVEL_MS = 600
+const ZOOM_STEP_MS = 250
 /** How far a pointer moves while down before it counts as a drag. */
 const DRAG_YIELD_PX = 4
 /** How long a failed terrain waits before the map tries it again. */
@@ -139,7 +143,7 @@ function centreOf(bounds: [number, number, number, number]) {
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs, controlsDisabled = false },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -256,6 +260,20 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     const cam = cameraFor(map)
     if (cam) { map.jumpTo(cam); return }
     map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: FIT_PADDING, duration: 0, maxZoom: 14 })
+  }, [bounds, cameraFor])
+
+  const zoomBy = useCallback((step: number) => {
+    const map = mapRef.current?.getMap?.()
+    if (map) map.easeTo({ zoom: map.getZoom() + step, duration: ZOOM_STEP_MS })
+  }, [])
+
+  // The same framing as `frame`, eased there for a button press.
+  const fitTrack = useCallback(() => {
+    const map = mapRef.current?.getMap?.()
+    if (!map || !bounds) return
+    const cam = cameraFor(map)
+    if (cam) map.easeTo({ ...cam, duration: ZOOM_STEP_MS })
+    else map.fitBounds([[bounds[0], bounds[1]], [bounds[2], bounds[3]]], { padding: FIT_PADDING, duration: ZOOM_STEP_MS, maxZoom: 14 })
   }, [bounds, cameraFor])
 
   // The whole-track framing as a camera, flat or pitched. Remembered per
@@ -577,6 +595,11 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
         <div className="flex gap-2">
           <MapToggleButton icon={Mountain} label="Toggle 3D" on={threeD} onToggle={() => setThreeD(!threeD)} />
           <ImageryToggleButton on={satellite} onToggle={() => setSatellite(!satellite)} />
+        </div>
+        <div className="flex flex-col gap-2">
+          <MapIconButton icon={Plus} label="Zoom in" onClick={() => zoomBy(1)} disabled={controlsDisabled} />
+          <MapIconButton icon={Minus} label="Zoom out" onClick={() => zoomBy(-1)} disabled={controlsDisabled} />
+          <MapIconButton icon={Maximize} label="Fit track" onClick={fitTrack} disabled={controlsDisabled || !bounds} />
         </div>
         {insetCorner === 'top-right' && inset}
       </div>

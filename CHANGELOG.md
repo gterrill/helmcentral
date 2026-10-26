@@ -23,6 +23,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Previous and next on a passage.** Two arrows at the right of the passage's
+  title step to the passage that started later or earlier, within the list you
+  opened it from, and the **[** and **]** keys do the same. The ends grey out
+  instead of wrapping. Unsaved edits are held, as they are with the back arrow.
+- **Zoom and fit buttons on the passage map.** **Zoom in**, **Zoom out** and
+  **Fit track** sit under the 3D and satellite buttons. They grey out whilst a
+  replay is playing.
 - **Tank alarms.** Helmcentral now raises its own alarm when a tank gets low, or
   when a waste tank gets full, for any tank that has an equipment item. Fuel and
   fresh water warn at 20 percent and alarm at 10. Waste warns at 80 and alarms

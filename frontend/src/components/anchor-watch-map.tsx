@@ -13,6 +13,7 @@ import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targ
 import type { TrailPoint } from '@/hooks/use-server-trails'
 import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-imagery'
 import { computeWorldImageryOpacity } from '@/lib/world-imagery'
+import { MapIconButton } from '@/components/map-icon-button'
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
 import { AnchorAdjustRadiusToolbar } from '@/components/anchor-adjust-radius-toolbar'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -2081,39 +2082,11 @@ export function AnchorWatchMap({
       >
         <>
             {onFullscreen && (
-              <button
-                onClick={onFullscreen}
-                aria-label="Full screen"
-                className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-                style={{ transition: 'background-color 150ms ease-out' }}
-              >
-                <Expand className="h-4 w-4" />
-              </button>
+              <MapIconButton icon={Expand} label="Full screen" onClick={onFullscreen} />
             )}
-            <button
-              onClick={handleZoomIn}
-              aria-label="Zoom in"
-              className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-              style={{ transition: 'background-color 150ms ease-out' }}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-            <button
-              onClick={handleZoomOut}
-              aria-label="Zoom out"
-              className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-              style={{ transition: 'background-color 150ms ease-out' }}
-            >
-              <Minus className="h-4 w-4" />
-            </button>
-            <button
-              onClick={handleRecenter}
-              aria-label="Re-centre on anchor"
-              className="flex h-10 w-10 items-center justify-center rounded-lg bg-black/65 text-white shadow-sm backdrop-blur-sm hover:bg-black/80 active:scale-95"
-              style={{ transition: 'background-color 150ms ease-out' }}
-            >
-              <Crosshair className="h-4 w-4" />
-            </button>
+            <MapIconButton icon={Plus} label="Zoom in" onClick={handleZoomIn} />
+            <MapIconButton icon={Minus} label="Zoom out" onClick={handleZoomOut} />
+            <MapIconButton icon={Crosshair} label="Re-centre on anchor" onClick={handleRecenter} />
             {expandedControls && (
               <>
                 <ImageryToggleButton on={showImageryLayer} onToggle={handleImageryToggle} />

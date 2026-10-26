@@ -29,6 +29,7 @@ vi.mock('react-map-gl/maplibre', async () => {
         getMap: () => ({
           getSource: () => ({}),
           easeTo,
+          getZoom: () => 10,
           fitBounds,
           jumpTo,
           once: (_: string, cb: () => void) => { onceHandlers.push(cb) },
@@ -275,5 +276,27 @@ describe('PassageMap progressive track', () => {
     )
     const geo = lastData['passage-sailed-p1'] as GeoJSON.Feature<GeoJSON.MultiLineString>
     expect(geo.geometry.coordinates[0].at(-1)).toEqual([148.04, -20.05])
+  })
+})
+
+describe('PassageMap zoom and fit buttons', () => {
+  it('zooms a step over 250 ms and fits the track', () => {
+    render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} />)
+    act(() => { (mapProps.onLoad as () => void)() })
+    easeTo.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+    expect(easeTo).toHaveBeenLastCalledWith({ zoom: 11, duration: 250 })
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }))
+    expect(easeTo).toHaveBeenLastCalledWith({ zoom: 9, duration: 250 })
+    easeTo.mockClear()
+    fireEvent.click(screen.getByRole('button', { name: 'Fit track' }))
+    expect(easeTo.mock.calls.length + fitBounds.mock.calls.length).toBeGreaterThan(0)
+  })
+
+  it('greys all three while the replay plays', () => {
+    render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} controlsDisabled />)
+    for (const name of ['Zoom in', 'Zoom out', 'Fit track']) {
+      expect(screen.getByRole('button', { name })).toBeDisabled()
+    }
   })
 })
