@@ -7,6 +7,7 @@ import { MergePassagesButton } from '@/components/passages/merge-passages-button
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
 import { passageColour } from '@/components/passages/passage-map'
 import { PassageExportMenu } from '@/components/passages/passage-export-menu'
+import { PassagePlans } from '@/components/passages/passage-plans'
 import { PassageEditPanel } from '@/components/passages/passage-edit-panel'
 import { CruiseStatsPanel, PassageStatsStrip } from '@/components/passages/passage-stats'
 import { ReplayPanel, type ReplayCursor } from '@/components/passages/replay-panel'
@@ -132,6 +133,7 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack
           }
         >
           <p className="text-sm text-muted-foreground">{passage.from_name || passage.to_name ? `${passageRoute(passage)} · ` : ''}{formatLocalDate(passage.start, firstLon([passage]))}</p>
+          <PassagePlans passageId={passage.id} plans={passage.plannedWithMate} error={passage.plannedWithMateError} canWrite={canWrite} />
           <div className="flex justify-end">
             <PassageExportMenu kind="passage" title={passageHeading(passage)} passages={[passage]} units={units} />
           </div>

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PassageEditPanel } from '@/components/passages/passage-edit-panel'
 import { CruiseStatsPanel, WaterRiseRow } from '@/components/passages/passage-stats'
 import { PassagesPanel } from '@/components/passages/passages-panel'
-import type { CruiseStats, PassageDetail, PassageSummary } from '@/lib/passages'
+import type { CruiseStats, PassageSummary, PassageView } from '@/lib/passages'
 
 const api = vi.hoisted(() => ({
   split: vi.fn(),
@@ -191,7 +191,7 @@ describe('CruiseStatsPanel', () => {
 })
 
 describe('PassageEditPanel', () => {
-  const detail: PassageDetail = { ...passage('p1'), track: [], track_times: [], replay_track: [], replay_times: [] }
+  const detail: PassageView = { ...passage('p1'), track: [], track_times: [], replay_track: [], replay_times: [], rating: '', ratingError: null, plannedWithMate: [], plannedWithMateError: null }
   const make = (cursor: { id: string; at: number } | null) => {
     const props = {
       passage: detail, cruises: [], olderNeighbour: null, newerNeighbour: null,
@@ -237,7 +237,7 @@ describe('PassageEditPanel', () => {
 })
 
 describe('PassageEditPanel with unsaved edits', () => {
-  const detail: PassageDetail = { ...passage('p1'), track: [], track_times: [], replay_track: [], replay_times: [] }
+  const detail: PassageView = { ...passage('p1'), track: [], track_times: [], replay_track: [], replay_times: [], rating: '', ratingError: null, plannedWithMate: [], plannedWithMateError: null }
   const props = {
     passage: detail, cruises: [], olderNeighbour: passage('p0'), newerNeighbour: passage('p2'),
     cursorRef: { current: { id: 'p1', at: 1000 } }, canWrite: true,

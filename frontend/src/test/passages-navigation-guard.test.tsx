@@ -4,14 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { CruiseEditPanel } from '@/components/passages/cruise-edit-panel'
 import { PassageEditPanel } from '@/components/passages/passage-edit-panel'
-import type { PassageDetail } from '@/lib/passages'
+import type { PassageView } from '@/lib/passages'
 import { testRouter } from './helpers/router'
 
 const api = vi.hoisted(() => ({ patch: vi.fn(), patchCruise: vi.fn() }))
 vi.mock('@/lib/passages-api', () => ({ passagesApi: api }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
-const passage: PassageDetail = {
+const passage: PassageView = {
   id: 'p1', start: '2026-03-13T23:30:00Z', end: '2026-03-14T02:00:00Z', from_name: 'Airlie', to_name: 'Hamilton',
   title: '', notes: '', hidden: false, edited: false, cruise_id: null, created_at: '', start_lon: 149,
   stats: {
@@ -19,6 +19,7 @@ const passage: PassageDetail = {
     max_gust_kts: null, soc_start_pct: null, soc_end_pct: null, soc_min_pct: null,
   },
   track: [], track_times: [], replay_track: [], replay_times: [],
+  rating: '', ratingError: null, plannedWithMate: [], plannedWithMateError: null,
 }
 
 const passagePanel = (

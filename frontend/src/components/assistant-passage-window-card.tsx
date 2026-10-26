@@ -34,7 +34,7 @@ const MEASURE_WORDS: Record<PassageMeasure, string> = {
 }
 const MEASURE_ORDER: PassageMeasure[] = ['wind_marginal', 'gust', 'wave', 'wave_direction', 'wind_against_tide', 'daylight']
 
-function StateChip({ state }: { state: PassageState }) {
+export function StateChip({ state }: { state: PassageState }) {
   return (
     <span
       className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-xs font-semibold leading-none ${STATE_CHIP[state]}`}

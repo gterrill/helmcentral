@@ -321,12 +321,15 @@ func (s *assistantStore) ApplyPassageDecisionUpdates(ups []decisionUpdate) (int,
 // reads it: the decision, the legs and row the operator chose, and whether the
 // chat that made the card still exists.
 type passagePlan struct {
-	Decision       *passageDecisionView `json:"decision"`
-	Legs           []passageWindowLeg   `json:"legs"`
-	RowVerdict     *string              `json:"row_verdict"`
-	Timezone       string               `json:"timezone"`
-	ConversationID string               `json:"conversation_id"`
-	ChatExists     bool                 `json:"chat_exists"`
+	Decision   *passageDecisionView `json:"decision"`
+	Legs       []passageWindowLeg   `json:"legs"`
+	RowVerdict *string              `json:"row_verdict"`
+	// RowDates is every departure day on the card, in order, so the page can
+	// offer "Went" on any of them.
+	RowDates       []string `json:"row_dates"`
+	Timezone       string   `json:"timezone"`
+	ConversationID string   `json:"conversation_id"`
+	ChatExists     bool     `json:"chat_exists"`
 }
 
 // PassagePlans returns the decisions linked to a passage, oldest card first.
@@ -356,6 +359,10 @@ func (s *assistantStore) PassagePlans(passageID string) ([]passagePlan, error) {
 		plan.Legs, plan.Timezone = p.Legs, p.Timezone
 		if plan.Legs == nil {
 			plan.Legs = []passageWindowLeg{}
+		}
+		plan.RowDates = make([]string, 0, len(p.Rows))
+		for _, row := range p.Rows {
+			plan.RowDates = append(plan.RowDates, row.DepartDate)
 		}
 		if r.RowDate != "" {
 			found := false

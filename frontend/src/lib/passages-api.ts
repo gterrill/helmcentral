@@ -1,4 +1,5 @@
 import { apiRequest, invalidateQueries } from '@/lib/api-query'
+import type { PassageRating } from '@/lib/passage-plans'
 import { REPLAY_SIGNS_KEY } from '@/lib/replay-signs-api'
 import type {
   CruiseRecord,
@@ -37,6 +38,8 @@ export interface PassagePatch {
   to_name?: string
   hidden?: boolean
   cruise_id?: string | null
+  /** '' clears the rating. */
+  rating?: PassageRating
 }
 
 export const passagesApi = {

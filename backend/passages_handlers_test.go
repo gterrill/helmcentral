@@ -169,6 +169,9 @@ func TestGetPassagePlannedWithMateListsLinkedDecisions(t *testing.T) {
 	if e["row_verdict"] != "go" || e["timezone"] != "Australia/Brisbane" || e["conversation_id"] != conv.ID || e["chat_exists"] != true {
 		t.Errorf("entry %v", e)
 	}
+	if dates, _ := e["row_dates"].([]any); len(dates) != 2 || dates[0] != "2026-10-23" || dates[1] != "2026-10-24" {
+		t.Errorf("row_dates %v", e["row_dates"])
+	}
 	if legs := e["legs"].([]any); len(legs) != 2 || legs[0].(map[string]any)["name"] != "Leg" {
 		t.Errorf("legs %v", e["legs"])
 	}

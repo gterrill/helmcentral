@@ -54,6 +54,20 @@ Tick several passages to **View together** on one map, to **Merge** them, to
 
 ## One passage
 
+Under the route and date, a passage you sailed from a Mate weather window shows
+a **Planned with Mate** line, such as "Planned with Mate · Fri 23 Oct · GO". It
+tells you which departure day you went on and what the forecast said for that
+day. Next to it is what Helmcentral recorded about the plan, and it says
+"(inferred)" when Helmcentral worked that out itself. If the chat that made the
+plan still exists, an **Open chat** link takes you back to it. A passage that
+was never planned with Mate shows no line, and if the plans can't be read, the
+page says so instead of leaving the line out.
+
+In the edit panel, **How it went** lets you rate the passage as **Comfortable**,
+**Lively** or **Shouldn't have gone**. The rating is yours alone. Helmcentral
+never fills it in, and Mate doesn't read it yet. When you merge passages, the
+rating that stays is the more cautious one.
+
 Opening a passage shows its track on the chart, with the same basemap and
 OpenSeaMap marks as Anchor Watch. A gap in the log is never bridged with a
 line: if the log has a hole, the track stops and starts again after it.

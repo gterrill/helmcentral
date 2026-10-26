@@ -82,7 +82,7 @@ export interface TelemetryChartCard {
   compare: (TelemetryChartRange & { label: string })[]
 }
 
-const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
+export const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
 const FACTORS: readonly string[] = ['wind', 'gust', 'wave', 'wind_against_tide', 'daylight']
 const SECTORS: readonly string[] = ['ahead', 'abeam', 'astern']
 // wind_marginal is only on cards saved by v0.49.0 chats; marginal is worked out now.
@@ -105,7 +105,7 @@ function str(v: unknown, path: string): string {
   if (typeof v !== 'string') bad(path, 'expected a string')
   return v as string
 }
-function oneOf<T extends string>(v: unknown, allowed: readonly string[], path: string): T {
+export function oneOf<T extends string>(v: unknown, allowed: readonly string[], path: string): T {
   if (typeof v !== 'string' || !allowed.includes(v)) bad(path, `expected one of ${allowed.join(', ')}`)
   return v as T
 }

@@ -10,16 +10,24 @@ import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { Textarea } from '@/components/ui/textarea'
+import type { PassageRating } from '@/lib/passage-plans'
 import { passagesApi } from '@/lib/passages-api'
-import { passageHeading, type CruiseRecord, type PassageDetail, type PassageRecord } from '@/lib/passages'
+import { passageHeading, type CruiseRecord, type PassageRecord, type PassageView } from '@/lib/passages'
+
+const RATINGS: { value: Exclude<PassageRating, ''>; label: string }[] = [
+  { value: 'comfortable', label: 'Comfortable' },
+  { value: 'lively', label: 'Lively' },
+  { value: 'shouldnt_have_gone', label: "Shouldn't have gone" },
+]
 
 function failure(action: string, err: unknown) {
   toast.error(`Could not ${action}`, { description: err instanceof Error ? err.message : String(err) })
 }
 
 export interface PassageEditPanelProps {
-  passage: PassageDetail
+  passage: PassageView
   cruises: CruiseRecord[]
   /** The next older and next newer visible passages, for Merge. */
   olderNeighbour: PassageRecord | null
@@ -103,6 +111,13 @@ export function PassageEditPanel({
     }
   }
 
+  // A rating saves on its own, whatever else is unsaved: it is not part of
+  // `dirty`, and the chip shown is what the server holds, never a guess. It
+  // goes through the same one-at-a-time gate as the other edits.
+  const rate = (next: PassageRating) => run('save rating', async () => {
+    await passagesApi.patch(passage.id, { rating: next })
+  })
+
   const cursorTime = (): string | null => {
     const c = cursorRef.current
     if (!c || c.id !== passage.id) return null
@@ -153,6 +168,23 @@ export function PassageEditPanel({
           <Label htmlFor="passage-notes">Notes</Label>
           <Textarea id="passage-notes" rows={5} value={notes} disabled={!canWrite} onChange={(e) => setNotes(e.target.value)} />
         </div>
+      </FormSection>
+
+      <FormSection title="How it went">
+        <ToggleGroup
+          variant="outline"
+          size="sm"
+          aria-label="How it went"
+          value={passage.rating ? [passage.rating] : []}
+          disabled={disabled}
+          onValueChange={(v) => { void rate((v[0] as PassageRating | undefined) ?? '') }}
+          className="flex-wrap"
+        >
+          {RATINGS.map((r) => (
+            <ToggleGroupItem key={r.value} value={r.value} className="text-xs">{r.label}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+        {passage.ratingError && <p role="alert" className="text-sm text-destructive">{passage.ratingError}</p>}
       </FormSection>
 
       <FormSection
