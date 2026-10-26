@@ -13,6 +13,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **What you did with a passage plan is kept.** On a Mate weather window card
+  you can mark **Went** (for a day on the card), **Stayed** or **Just looking**,
+  and change it whenever you like. Helmcentral fills it in for you, marked
+  "(inferred)", when the boat leaves on a planned day, within 4 hours of the
+  plan and within 2 NM at each end of the first leg. It marks the card Stayed
+  once the days have passed. Cards from before this update have no line.
+
 - **Merged passages keep their legs.** Merging passages now leaves each one
   drawn in its own colour, with a sign named for the place where they met, and
   you can merge several at once from the passages list or from View together.

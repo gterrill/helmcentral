@@ -591,7 +591,11 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                             ))}
                             {/* ADR 0191: cards built from tool results. */}
                             {message.cards?.map((card, i) => (
-                              <AssistantCard key={i} card={card} />
+                              <AssistantCard key={i} card={card} canWrite={canWrite} onDecisionChange={session.updatePassageDecision}
+                                onDecisionUnreadable={() => {
+                                  if (session.activeId !== null) void session.reloadMessages(session.activeId)
+                                }}
+                              />
                             ))}
                             <div className="flex items-center gap-2">
                               <MessageFooter

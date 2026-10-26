@@ -32,6 +32,8 @@ export function fakeMateSession(overrides: FakeMateSessionOverrides = {}): MateS
     rejoin: vi.fn().mockResolvedValue(undefined),
     isAnswering: vi.fn().mockReturnValue(false),
     updateProposal: vi.fn(),
+    updatePassageDecision: vi.fn(),
+    reloadMessages: vi.fn(),
     updateFormDraft: vi.fn(),
     liveAnswerIds: new Set<string>(),
     ratings: {},

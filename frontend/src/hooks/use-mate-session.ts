@@ -70,6 +70,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     remove,
     reload,
     updateProposal,
+    updatePassageDecision,
     updateFormDraft,
     updateFeedback,
     holdFeedback,
@@ -332,7 +333,9 @@ export function useMateSession(options: MateSessionOptions = {}) {
     reload,
     rejoin,
     isAnswering,
+    reloadMessages,
     updateProposal,
+    updatePassageDecision,
     updateFormDraft,
     /** Answers delivered live in the open conversation: the only ones the
      * operator can rate. */
@@ -342,6 +345,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     rateAnswer,
   }), [
     conversations.conversations,
+    reloadMessages,
     activeId,
     conversations.messages,
     conversations.summaryNoteId,
@@ -359,6 +363,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     rejoin,
     isAnswering,
     updateProposal,
+    updatePassageDecision,
     updateFormDraft,
     liveAnswerIds,
     ratings,

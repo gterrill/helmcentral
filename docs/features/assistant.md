@@ -335,6 +335,38 @@ station's high and low water, not on its speed.
 The card shows how old the forecast was when Mate checked it, and says so once
 that's more than six hours. For a fresh answer, ask again.
 
+### What you did with the plan
+
+Helmcentral keeps a note of what you did with each weather window card, so you
+can see later whether you sailed the plan or only asked out of curiosity. The
+card has a **What you did** line above "Not checked", with a menu you can change
+at any time:
+
+- **Went:** There's one "Went" choice for each departure day on the card, for
+  example "Went · Thu 23 Oct". The row you chose is marked **WENT**.
+- **Stayed:** You had the forecast and stayed where you were.
+- **Just looking:** You asked, and never meant to go. Only you can set this one.
+- **Not set:** Clears your choice and leaves it blank.
+
+You don't have to fill it in. Helmcentral fills it in for you, and adds
+"(inferred)" so you can tell it did:
+
+- **Went:** If the boat leaves within 4 hours of a day on the card, starting
+  within 2 NM of the plan's first start point and reaching within 2 NM of the
+  end of the first leg, that day is marked as the one you went.
+- **Stayed:** Once every day on the card has passed and the boat hasn't left on
+  the plan, the card shows Stayed. Helmcentral waits until it has finished
+  reading the track for the last day, and a track imported later can still turn
+  Stayed into Went.
+- **Left blank:** It doesn't guess when it can't tell. If the boat set out on
+  the plan but turned back, or the track can't be read, the card stays blank,
+  because "Stayed" would be wrong. A newer card for the same day and the same
+  first leg also takes over from an older one.
+
+Your own choice always wins, and Helmcentral never changes it. Cards saved
+before this was added have no line. A read-only screen shows the same words
+without the menu.
+
 ## Charting what the boat logged
 
 Mate can draw a chart of any reading your boat logs, so you can see a change

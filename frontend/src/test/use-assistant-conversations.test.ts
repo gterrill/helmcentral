@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { passageWindowPayload } from './helpers/passage-window-fixture'
 import { describeLoadError, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 
 // ADR 0093: conversation list + thread state for the assistant panel. The
@@ -644,5 +645,63 @@ describe('describeLoadError', () => {
       result.current.updateFormDraft({ ...result.current.messages[0].formDrafts![0], status: 'dismissed' })
     })
     expect(result.current.messages[0].formDrafts![0].status).toBe('dismissed')
+  })
+
+  describe('updatePassageDecision', () => {
+    const cardWire = (id: number, decisionId: number, state = '') => ({
+      id,
+      kind: 'passage_window',
+      payload: passageWindowPayload(),
+      decision: { id: decisionId, state, row_date: null, inferred: false, passage_id: null },
+    })
+    const savedView = { id: 5, state: 'stayed' as const, rowDate: null, inferred: false, passageId: null }
+    const decisions = (result: { current: ReturnType<typeof useAssistantConversations> }) =>
+      result.current.messages.map((m) => m.cards?.map((c) => (c.kind === 'passage_window' ? c.decision?.state : 'x')))
+
+    async function open(thread: () => unknown) {
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+        if (url === '/api/assistant/conversations') return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+        return { ok: true, json: async () => thread() }
+      }))
+      const hook = renderHook(() => useAssistantConversations())
+      await waitFor(() => expect(hook.result.current.loading).toBe(false))
+      await act(async () => { await hook.result.current.select('c1') })
+      return hook
+    }
+    const twoCards = () => ({
+      conversation: conversationApi(),
+      messages: [
+        messageApi({ id: 'a1', seq: 1, role: 'assistant', cards: [cardWire(12, 5)] }),
+        messageApi({ id: 'a2', seq: 2, role: 'assistant', cards: [cardWire(5, 9)] }),
+      ],
+    })
+
+    it('updates the card with that card id, and leaves a card whose id equals the decision id alone', async () => {
+      const { result } = await open(twoCards)
+      act(() => result.current.updatePassageDecision(12, savedView))
+      expect(decisions(result)).toEqual([['stayed'], ['']])
+    })
+
+    it('keeps a just-saved decision when a reload that began earlier answers with the old copy', async () => {
+      let answer!: () => void
+      let slow = false
+      vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+        if (url === '/api/assistant/conversations') return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+        if (!slow) return { ok: true, json: async () => twoCards() }
+        return { ok: true, json: () => new Promise((resolve) => { answer = () => resolve(twoCards()) }) }
+      }))
+      const { result } = renderHook(() => useAssistantConversations())
+      await waitFor(() => expect(result.current.loading).toBe(false))
+      await act(async () => { await result.current.select('c1') })
+
+      slow = true
+      let reloading!: Promise<void>
+      act(() => { reloading = result.current.reloadMessages('c1') })
+      await waitFor(() => expect(answer).toBeTypeOf('function'))
+      act(() => result.current.updatePassageDecision(12, savedView))
+      await act(async () => { answer(); await reloading })
+
+      expect(decisions(result)).toEqual([['stayed'], ['']])
+    })
   })
 })

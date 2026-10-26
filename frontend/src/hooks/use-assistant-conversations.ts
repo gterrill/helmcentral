@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 import type { MessageApi } from '@/lib/mate-api'
-import { decodeMateCards, type MateCard } from '@/lib/mate-cards'
+import { decodeMateCards, type MateCard, type PassageDecision } from '@/lib/mate-cards'
 
 // ADR 0093: the wire shape (Conversation/Message) is snake_case, persisted
 // as-is by the assistant's SQLite store. Mapped to camelCase here the same
@@ -516,6 +516,10 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   const localAppendsRef = useRef(0)
   const feedbackVersionRef = useRef(0)
   const reloadsInFlightRef = useRef(0)
+  // Passage decisions saved while a reload may be in flight, by card id, so an
+  // older server copy cannot replace them. Cleared once no reload is running.
+  const decisionVersionRef = useRef(0)
+  const pendingDecisionsRef = useRef(new Map<number, { decision: PassageDecision; version: number }>())
   const pendingFeedbackRef = useRef(new Map<string, { feedback: AssistantMessage['feedback']; version: number; settled: boolean }>())
 
   // Appends a message already known to the caller - the optimistic user
@@ -536,6 +540,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     const seq = selectionSeqRef.current
     const appends = localAppendsRef.current
     const feedbackVersion = feedbackVersionRef.current
+    const decisionVersion = decisionVersionRef.current
     reloadsInFlightRef.current += 1
     try {
       const data = await apiRequest<{ conversation?: ConversationApi; messages?: MessageApi[] }>(
@@ -549,7 +554,18 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
         const pending = pendingFeedbackRef.current.get(message.id)
         return pending && (!pending.settled || pending.version > feedbackVersion) ? { ...message, feedback: pending.feedback } : message
       })
-      setMessages((previous) => mergeReloaded(previous, newer))
+      const withDecisions = newer.map((message) =>
+        message.cards?.some((c) => c.kind === 'passage_window' && c.cardId !== undefined && (pendingDecisionsRef.current.get(c.cardId)?.version ?? 0) > decisionVersion)
+          ? {
+              ...message,
+              cards: message.cards.map((c) => {
+                const held = c.kind === 'passage_window' && c.cardId !== undefined ? pendingDecisionsRef.current.get(c.cardId) : undefined
+                return held && held.version > decisionVersion ? { ...c, decision: held.decision } : c
+              }),
+            }
+          : message,
+      )
+      setMessages((previous) => mergeReloaded(previous, withDecisions))
       setSummaryNoteId(data.conversation?.summary_note_id ?? null)
     } catch (err) {
       if (selectionSeqRef.current !== seq) return
@@ -557,6 +573,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     } finally {
       reloadsInFlightRef.current -= 1
       if (reloadsInFlightRef.current === 0) {
+        pendingDecisionsRef.current.clear()
         for (const [messageId, pending] of pendingFeedbackRef.current) {
           if (pending.settled) pendingFeedbackRef.current.delete(messageId)
         }
@@ -571,6 +588,25 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
       previous.map((message) =>
         message.proposals?.some((p) => p.id === proposal.id)
           ? { ...message, proposals: message.proposals.map((p) => (p.id === proposal.id ? proposal : p)) }
+          : message,
+      ),
+    )
+  }, [])
+
+  // The same for a passage plan's decision: the card with this id takes the
+  // view the server just answered, so a reload agrees.
+  const updatePassageDecision = useCallback((cardId: number, decision: PassageDecision) => {
+    if (reloadsInFlightRef.current > 0) {
+      decisionVersionRef.current += 1
+      pendingDecisionsRef.current.set(cardId, { decision, version: decisionVersionRef.current })
+    }
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.cards?.some((c) => c.kind === 'passage_window' && c.cardId === cardId)
+          ? {
+              ...message,
+              cards: message.cards.map((c) => (c.kind === 'passage_window' && c.cardId === cardId ? { ...c, decision } : c)),
+            }
           : message,
       ),
     )
@@ -635,6 +671,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     appendLocal,
     reloadMessages,
     updateProposal,
+    updatePassageDecision,
     updateFormDraft,
     updateFeedback,
     holdFeedback,

@@ -125,4 +125,51 @@ describe('decodeMateCards against the backend golden fixture', () => {
     const cards = decodeMateCards(JSON.parse(data).message.cards)
     expect(cards.map((c) => c.kind)).toEqual(['passage_window', 'telemetry_chart'])
   })
+
+  describe('passage decision', () => {
+    const wire = { id: 5, state: 'went', row_date: '2026-10-24', inferred: true, passage_id: 'p9' }
+    const entry = (extra: Record<string, unknown>) => [{ kind: 'passage_window', payload: passageWindowPayload(), ...extra }]
+
+    it('reads the card id and the decision beside the payload', () => {
+      const [card] = decodeMateCards(entry({ id: 12, decision: wire }))
+      expect(card).toMatchObject({
+        kind: 'passage_window',
+        cardId: 12,
+        decision: { id: 5, state: 'went', rowDate: '2026-10-24', inferred: true, passageId: 'p9' },
+      })
+    })
+
+    it('reads a blank decision with null date and passage', () => {
+      const [card] = decodeMateCards(entry({ id: 12, decision: { id: 5, state: '', row_date: null, inferred: false, passage_id: null } }))
+      expect(card).toMatchObject({ decision: { state: '', rowDate: null, passageId: null } })
+    })
+
+    it('accepts an old card with neither id nor decision', () => {
+      const [card] = decodeMateCards(entry({}))
+      expect(card.kind).toBe('passage_window')
+      expect(card.kind === 'passage_window' && card.decision).toBeUndefined()
+      expect(card.kind === 'passage_window' && card.cardId).toBeUndefined()
+    })
+
+    it('turns a decision on a card with no id into the card error entry', () => {
+      const [card] = decodeMateCards(entry({ decision: wire }))
+      expect(card).toMatchObject({ kind: 'error', rawKind: 'passage_window' })
+    })
+
+    it('turns a malformed decision into the card error entry', () => {
+      for (const decision of [
+        'went',
+        { ...wire, state: 'sailed' },
+        { ...wire, row_date: 'Thursday' },
+        { ...wire, inferred: 'yes' },
+        { ...wire, id: 'x' },
+        { ...wire, state: 'went', row_date: null },
+        { ...wire, state: 'went', row_date: '2026-11-01' },
+      ]) {
+        const [card] = decodeMateCards(entry({ id: 12, decision }))
+        expect(card).toMatchObject({ kind: 'error', rawKind: 'passage_window' })
+        expect(card.kind === 'error' && card.reason).toMatch(/decision/)
+      }
+    })
+  })
 })
