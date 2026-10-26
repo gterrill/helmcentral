@@ -110,12 +110,20 @@ Three facts in the code shape the design:
      and unhiding restores it, a merge keeps the link on the earliest passage
      if it still matches, and split and trim recompute it. An operator `went`
      links to the best passage matching the row the operator chose, or to none.
-7. **A passage carries a rating.** This lands in the next commit of the same
-   branch and is not in the code this record first shipped with. `passages.rating`
+7. **A passage carries a rating.** `passages.rating`
    holds blank, `comfortable`, `lively` or `shouldnt_have_gone`, checked in Go
    and set through `PATCH /api/passages/:id`. A rating-only patch does not wake
-   the reconcile. A split gives the second half no rating, and a merge keeps the
-   earliest passage's rating, or the next one that has any.
+   the reconcile, and it does not mark the passage edited, because a rating
+   annotates the passage and changes nothing the detector or the naming
+   lookup reads. Any other patch, including an empty one, is an edit as
+   before. `GET /api/passages/:id` lists the Mate plans the passage was sailed from
+   as `planned_with_mate`, read from the assistant store by `passage_id`. If
+   the plans cannot be read, the passage still comes back, with
+   `planned_with_mate` null and `planned_with_mate_error` set, so the page can
+   say so instead of showing an empty list. A plan whose row date is not on
+   its card is treated as unreadable. A split leaves both halves with the
+   rating, and a merge keeps the most cautious one among the merged passages
+   (`shouldnt_have_gone`, then `lively`, then `comfortable`).
 8. **Each passage records its track source.** `passages.source` holds
    `recorded` or `imported`, the same values as `track_points.source`.
    Detection writes `recorded`, GPX import writes `imported`, a split gives

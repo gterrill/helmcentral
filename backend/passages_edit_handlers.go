@@ -49,12 +49,13 @@ func patchPassageHandler(c echo.Context) error {
 		FromName *string         `json:"from_name"`
 		ToName   *string         `json:"to_name"`
 		Hidden   *bool           `json:"hidden"`
+		Rating   *string         `json:"rating"`
 		CruiseID json.RawMessage `json:"cruise_id"`
 	}
 	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
 		return err
 	}
-	patch := passagePatch{Title: body.Title, Notes: body.Notes, FromName: body.FromName, ToName: body.ToName, Hidden: body.Hidden}
+	patch := passagePatch{Title: body.Title, Notes: body.Notes, FromName: body.FromName, ToName: body.ToName, Hidden: body.Hidden, Rating: body.Rating}
 	if body.CruiseID != nil {
 		patch.CruiseIDSet = true
 		if !bytes.Equal(bytes.TrimSpace(body.CruiseID), []byte("null")) {

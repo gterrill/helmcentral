@@ -316,3 +316,61 @@ func (s *assistantStore) ApplyPassageDecisionUpdates(ups []decisionUpdate) (int,
 	}
 	return changed, nil
 }
+
+// passagePlan is one Mate plan a passage was sailed from, as the passage page
+// reads it: the decision, the legs and row the operator chose, and whether the
+// chat that made the card still exists.
+type passagePlan struct {
+	Decision       *passageDecisionView `json:"decision"`
+	Legs           []passageWindowLeg   `json:"legs"`
+	RowVerdict     *string              `json:"row_verdict"`
+	Timezone       string               `json:"timezone"`
+	ConversationID string               `json:"conversation_id"`
+	ChatExists     bool                 `json:"chat_exists"`
+}
+
+// PassagePlans returns the decisions linked to a passage, oldest card first.
+// A stored payload that cannot be read is an error, never a skipped entry.
+func (s *assistantStore) PassagePlans(passageID string) ([]passagePlan, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT d.id, d.card_created_ms, d.payload_json, d.state, COALESCE(d.row_date, ''), d.source, COALESCE(d.passage_id, ''), d.conversation_id, c.id IS NOT NULL
+		FROM passage_decisions d LEFT JOIN conversations c ON c.id = d.conversation_id
+		WHERE d.passage_id = ? ORDER BY d.card_created_ms, d.id`, passageID)
+	if err != nil {
+		return nil, fmt.Errorf("list plans for passage: %w", err)
+	}
+	defer rows.Close()
+	out := []passagePlan{}
+	for rows.Next() {
+		var r passageDecisionRow
+		var plan passagePlan
+		if err := rows.Scan(&r.ID, &r.CardCreatedMs, &r.PayloadJSON, &r.State, &r.RowDate, &r.Source, &r.PassageID, &plan.ConversationID, &plan.ChatExists); err != nil {
+			return nil, fmt.Errorf("scan plan for passage: %w", err)
+		}
+		var p passageWindowPayload
+		if err := json.Unmarshal([]byte(r.PayloadJSON), &p); err != nil {
+			return nil, fmt.Errorf("plan %d payload: %w", r.ID, err)
+		}
+		plan.Decision = r.view()
+		plan.Legs, plan.Timezone = p.Legs, p.Timezone
+		if plan.Legs == nil {
+			plan.Legs = []passageWindowLeg{}
+		}
+		if r.RowDate != "" {
+			found := false
+			for _, row := range p.Rows {
+				if row.DepartDate == r.RowDate {
+					v := row.Verdict
+					plan.RowVerdict, found = &v, true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("plan %d: row date %s is not on its card", r.ID, r.RowDate)
+			}
+		}
+		out = append(out, plan)
+	}
+	return out, rows.Err()
+}

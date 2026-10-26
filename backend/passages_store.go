@@ -76,6 +76,9 @@ type passageRecord struct {
 	// known. It is internal: decision matching reads only the passage's own
 	// source (ADR 0211).
 	Source string `json:"-"`
+	// Rating is how the operator found the passage: blank, or one of
+	// passageRatings (ADR 0211).
+	Rating string `json:"rating"`
 }
 
 type cruiseRecord struct {
@@ -153,7 +156,8 @@ func createPassageSchema(db *sql.DB) error {
 			from_name_edited INTEGER NOT NULL DEFAULT 0,
 			to_name_edited INTEGER NOT NULL DEFAULT 0,
 			stats_json TEXT,
-			source TEXT NOT NULL DEFAULT ''
+			source TEXT NOT NULL DEFAULT '',
+			rating TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_passages_start ON passages(start_ms)`,
 		`CREATE TABLE IF NOT EXISTS water_rise_labels (
@@ -401,11 +405,11 @@ func (s *passageStore) InsertPassageIfNoOverlap(r passageRecord) (rec passageRec
 		r.CreatedAt = time.Now().UTC()
 	}
 	res, err := s.db.Exec(`INSERT INTO passages
-		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source)
-		SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?
+		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source, rating)
+		SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 		WHERE NOT EXISTS (SELECT 1 FROM passages WHERE start_ms < ? AND end_ms > ?)`,
 		r.ID, r.Start.UnixMilli(), r.End.UnixMilli(), r.FromName, r.ToName, r.Title, r.Notes,
-		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited), r.Source,
+		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited), r.Source, r.Rating,
 		r.End.UnixMilli(), r.Start.UnixMilli())
 	if err != nil {
 		return r, false, fmt.Errorf("insert passage unless it overlaps a stored one: %w", err)
@@ -426,10 +430,10 @@ func (s *passageStore) InsertPassage(r passageRecord) (passageRecord, error) {
 		r.CreatedAt = time.Now().UTC()
 	}
 	_, err := s.db.Exec(`INSERT INTO passages
-		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		(id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source, rating)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		r.ID, r.Start.UnixMilli(), r.End.UnixMilli(), r.FromName, r.ToName, r.Title, r.Notes,
-		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited), r.Source)
+		boolInt(r.Hidden), boolInt(r.Edited), r.CruiseID, r.CreatedAt.UnixMilli(), boolInt(r.FromNameEdited), boolInt(r.ToNameEdited), r.Source, r.Rating)
 	if err != nil {
 		return r, fmt.Errorf("insert passage: %w", err)
 	}
@@ -443,14 +447,14 @@ func boolInt(b bool) int {
 	return 0
 }
 
-const passageColumns = `id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source`
+const passageColumns = `id, start_ms, end_ms, from_name, to_name, title, notes, hidden, edited, cruise_id, created_ms, from_name_edited, to_name_edited, source, rating`
 
 func scanPassage(r rowScanner) (passageRecord, error) {
 	var p passageRecord
 	var startMs, endMs, createdMs int64
 	var hidden, edited, fromEd, toEd int
 	var cruise sql.NullString
-	if err := r.Scan(&p.ID, &startMs, &endMs, &p.FromName, &p.ToName, &p.Title, &p.Notes, &hidden, &edited, &cruise, &createdMs, &fromEd, &toEd, &p.Source); err != nil {
+	if err := r.Scan(&p.ID, &startMs, &endMs, &p.FromName, &p.ToName, &p.Title, &p.Notes, &hidden, &edited, &cruise, &createdMs, &fromEd, &toEd, &p.Source, &p.Rating); err != nil {
 		return p, err
 	}
 	p.Start, p.End = time.UnixMilli(startMs).UTC(), time.UnixMilli(endMs).UTC()
@@ -555,6 +559,7 @@ func addPassageNameAttemptColumn(db *sql.DB) error {
 		{"from_name_edited", "INTEGER NOT NULL DEFAULT 0"},
 		{"to_name_edited", "INTEGER NOT NULL DEFAULT 0"},
 		{"stats_json", "TEXT"},
+		{"rating", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := ensureColumn(db, "passages", c[0], c[1]); err != nil {
 			return err

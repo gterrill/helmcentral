@@ -47,6 +47,11 @@ type passageDetail struct {
 	// speed line kept so stops show. The display line above stays distance-simplified.
 	ReplayTrack [][][2]float64 `json:"replay_track"`
 	ReplayTimes [][]int64      `json:"replay_times"`
+	// PlannedWithMate lists the Mate plans this passage was sailed from.
+	// A nil list with PlannedWithMateError set means the plans could not be
+	// read; the page shows that rather than "never planned".
+	PlannedWithMate      []passagePlan `json:"planned_with_mate"`
+	PlannedWithMateError string        `json:"planned_with_mate_error,omitempty"`
 }
 
 func passageStoreOrError(c echo.Context) (*passageStore, bool) {
@@ -95,6 +100,19 @@ func getPassageHandler(c echo.Context) error {
 		log.Printf("passages: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not read passage"})
 	}
+	// Plans that cannot be read must not hide the passage, and must not look
+	// like "never planned": the error travels with the passage.
+	var plans []passagePlan
+	plansErr := ""
+	if globalAssistantStore == nil {
+		plansErr = "the assistant store is not running"
+	} else if plans, err = globalAssistantStore.PassagePlans(rec.ID); err != nil {
+		plansErr = "could not read the Mate plans: " + err.Error()
+		plans = nil
+	}
+	if plansErr != "" {
+		log.Printf("passages: planned_with_mate for %s: %s", rec.ID, plansErr)
+	}
 	track, times := simplifyTrackTimed(pts, passageDisplayToleranceMeters)
 	if track == nil {
 		track = [][][2]float64{}
@@ -105,7 +123,7 @@ func getPassageHandler(c echo.Context) error {
 		replay = [][][2]float64{}
 		replayTimes = [][]int64{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats, StartLon: figures.StartLon, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes}})
+	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats, StartLon: figures.StartLon, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

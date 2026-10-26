@@ -40,6 +40,22 @@ type passagePatch struct {
 	Hidden      *bool
 	CruiseID    *string
 	CruiseIDSet bool
+	// Rating is blank or one of passageRatings. A patch that carries only a
+	// rating is an annotation, not an edit of the passage.
+	Rating *string
+}
+
+// passageRatings are the values a passage's rating may take besides blank.
+var passageRatings = map[string]bool{"comfortable": true, "lively": true, "shouldnt_have_gone": true}
+
+// moreCautiousRating returns the rating a merge keeps: shouldnt_have_gone over
+// lively over comfortable over blank.
+func moreCautiousRating(a, b string) string {
+	rank := map[string]int{"": 0, "comfortable": 1, "lively": 2, "shouldnt_have_gone": 3}
+	if rank[b] > rank[a] {
+		return b
+	}
+	return a
 }
 
 func checkLen(field string, v *string, max int) error {
@@ -59,6 +75,9 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 			return passageRecord{}, err
 		}
 	}
+	if p.Rating != nil && *p.Rating != "" && !passageRatings[*p.Rating] {
+		return passageRecord{}, invalidf("rating must be blank, comfortable, lively or shouldnt_have_gone")
+	}
 	tx, err := s.db.Begin()
 	if err != nil {
 		return passageRecord{}, err
@@ -70,6 +89,9 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 	}
 	if err != nil {
 		return rec, err
+	}
+	if p.Rating != nil {
+		rec.Rating = *p.Rating
 	}
 	if p.Title != nil {
 		rec.Title = *p.Title
@@ -98,12 +120,17 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 		}
 		rec.CruiseID = p.CruiseID
 	}
-	rec.Edited = true
+	// A patch whose only field is a rating annotates the passage and leaves it
+	// as the detector made it. Every other patch, including an empty one, is an
+	// edit, so a field added to passagePatch later marks edited by default.
+	if !(p.Rating != nil && p == passagePatch{Rating: p.Rating}) {
+		rec.Edited = true
+	}
 	if p.CruiseIDSet && marinaLookupWake != nil {
 		defer marinaLookupWake()
 	}
-	if _, err := tx.Exec(`UPDATE passages SET title=?, notes=?, from_name=?, to_name=?, hidden=?, cruise_id=?, edited=1, from_name_edited=?, to_name_edited=? WHERE id=?`,
-		rec.Title, rec.Notes, rec.FromName, rec.ToName, boolInt(rec.Hidden), rec.CruiseID, boolInt(rec.FromNameEdited), boolInt(rec.ToNameEdited), id); err != nil {
+	if _, err := tx.Exec(`UPDATE passages SET title=?, notes=?, from_name=?, to_name=?, hidden=?, cruise_id=?, edited=?, from_name_edited=?, to_name_edited=?, rating=? WHERE id=?`,
+		rec.Title, rec.Notes, rec.FromName, rec.ToName, boolInt(rec.Hidden), rec.CruiseID, boolInt(rec.Edited), boolInt(rec.FromNameEdited), boolInt(rec.ToNameEdited), rec.Rating, id); err != nil {
 		return rec, fmt.Errorf("update passage: %w", err)
 	}
 	return rec, tx.Commit()
@@ -165,9 +192,9 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 	if _, err = tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=0, edited=1, stats_json=NULL, name_attempted_ms=NULL WHERE id=?`, at.UnixMilli(), first.ToName, id); err != nil {
 		return
 	}
-	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	if _, err = tx.Exec(`INSERT INTO passages (`+passageColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		second.ID, second.Start.UnixMilli(), second.End.UnixMilli(), second.FromName, second.ToName, "", "",
-		boolInt(second.Hidden), 1, second.CruiseID, second.CreatedAt.UnixMilli(), 0, boolInt(second.ToNameEdited), second.Source); err != nil {
+		boolInt(second.Hidden), 1, second.CruiseID, second.CreatedAt.UnixMilli(), 0, boolInt(second.ToNameEdited), second.Source, second.Rating); err != nil {
 		return
 	}
 	second.Notes = ""
@@ -268,12 +295,13 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 		if m.CruiseID == nil {
 			m.CruiseID = b.CruiseID
 		}
+		m.Rating = moreCautiousRating(m.Rating, b.Rating)
 		if _, err := tx.Exec(`DELETE FROM passages WHERE id = ?`, b.ID); err != nil {
 			return m, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, source=?, edited=1, stats_json=NULL WHERE id=?`,
-		m.End.UnixMilli(), m.ToName, boolInt(m.ToNameEdited), m.Title, m.Notes, m.CruiseID, m.Source, m.ID); err != nil {
+	if _, err := tx.Exec(`UPDATE passages SET end_ms=?, to_name=?, to_name_edited=?, title=?, notes=?, cruise_id=?, source=?, rating=?, edited=1, stats_json=NULL WHERE id=?`,
+		m.End.UnixMilli(), m.ToName, boolInt(m.ToNameEdited), m.Title, m.Notes, m.CruiseID, m.Source, m.Rating, m.ID); err != nil {
 		return m, err
 	}
 	if err := tx.Commit(); err != nil {

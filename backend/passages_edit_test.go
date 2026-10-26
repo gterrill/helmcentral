@@ -302,3 +302,130 @@ func TestBackfillRunsOnEveryOpenAndLeavesMixedSpansUnknown(t *testing.T) {
 		t.Fatalf("a genuinely mixed span stays unknown: %q", got.Source)
 	}
 }
+
+func TestPatchPassageRatingValuesAreCheckedInGo(t *testing.T) {
+	s := newTestPassageStore(t)
+	p := seedPassage(t, s, passageEpoch, passageEpoch.Add(time.Hour))
+	for _, ok := range []string{"comfortable", "lively", "shouldnt_have_gone", ""} {
+		got, err := s.PatchPassage(p.ID, passagePatch{Rating: ptr(ok)})
+		if err != nil || got.Rating != ok {
+			t.Errorf("rating %q: %+v %v", ok, got, err)
+		}
+		stored, _ := s.GetPassage(p.ID)
+		if stored.Rating != ok {
+			t.Errorf("stored rating %q, want %q", stored.Rating, ok)
+		}
+	}
+	for _, bad := range []string{"Lively", "great", " lively"} {
+		if _, err := s.PatchPassage(p.ID, passagePatch{Rating: ptr(bad)}); !errors.Is(err, errPassageInvalid) {
+			t.Errorf("rating %q: %v", bad, err)
+		}
+	}
+}
+
+func TestPatchPassageRatingAloneIsNotAnEdit(t *testing.T) {
+	s := newTestPassageStore(t)
+	p := seedPassage(t, s, passageEpoch, passageEpoch.Add(time.Hour))
+	got, err := s.PatchPassage(p.ID, passagePatch{Rating: ptr("lively")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Edited || got.Title != "T" || got.FromNameEdited {
+		t.Errorf("a rating alone must leave the passage as it was: %+v", got)
+	}
+	got, _ = s.PatchPassage(p.ID, passagePatch{Rating: ptr("lively"), Title: ptr("X")})
+	if !got.Edited {
+		t.Error("a rating sent with another field is still an edit")
+	}
+	q := seedPassage(t, s, passageEpoch.Add(3*time.Hour), passageEpoch.Add(4*time.Hour))
+	if got, _ := s.PatchPassage(q.ID, passagePatch{}); !got.Edited {
+		t.Error("an empty patch keeps marking the passage edited")
+	}
+}
+
+func TestSplitPassageBothHalvesKeepTheRating(t *testing.T) {
+	s := newTestPassageStore(t)
+	p := seedPassage(t, s, passageEpoch, passageEpoch.Add(4*time.Hour))
+	s.PatchPassage(p.ID, passagePatch{Rating: ptr("lively")})
+	a, b, err := s.SplitPassage(p.ID, passageEpoch.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Rating != "lively" || b.Rating != "lively" {
+		t.Errorf("returned halves: %q %q", a.Rating, b.Rating)
+	}
+	sa, _ := s.GetPassage(a.ID)
+	sb, _ := s.GetPassage(b.ID)
+	if sa.Rating != "lively" || sb.Rating != "lively" {
+		t.Errorf("stored halves: %q %q", sa.Rating, sb.Rating)
+	}
+}
+
+func TestMergePassagesKeepsTheMostCautiousRating(t *testing.T) {
+	rate := func(s *passageStore, id, r string) {
+		if r != "" {
+			if _, err := s.PatchPassage(id, passagePatch{Rating: ptr(r)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, c := range []struct {
+		name       string
+		a, b, c    string
+		want       string
+		shuffleIDs bool
+	}{
+		{"most cautious wins", "comfortable", "lively", "shouldnt_have_gone", "shouldnt_have_gone", false},
+		{"lively beats comfortable", "comfortable", "lively", "", "lively", false},
+		{"blank earliest does not hide a later one", "", "comfortable", "lively", "lively", false},
+		{"only the last", "", "", "shouldnt_have_gone", "shouldnt_have_gone", true},
+		{"none", "", "", "", "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newTestPassageStore(t)
+			a := seedPassage(t, s, passageEpoch, passageEpoch.Add(time.Hour))
+			b := seedPassage(t, s, passageEpoch.Add(time.Hour), passageEpoch.Add(2*time.Hour))
+			d := seedPassage(t, s, passageEpoch.Add(2*time.Hour), passageEpoch.Add(3*time.Hour))
+			rate(s, a.ID, c.a)
+			rate(s, b.ID, c.b)
+			rate(s, d.ID, c.c)
+			ids := []string{a.ID, b.ID, d.ID}
+			if c.shuffleIDs {
+				ids = []string{d.ID, a.ID, b.ID}
+			}
+			m, err := s.MergePassages(ids...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, _ := s.GetPassage(m.ID)
+			if m.Rating != c.want || stored.Rating != c.want {
+				t.Errorf("returned %q stored %q, want %q", m.Rating, stored.Rating, c.want)
+			}
+		})
+	}
+}
+
+func TestOpeningAnOldPassagesTableAddsTheRatingColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.sqlite")
+	s, err := newPassageStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := seedPassage(t, s, passageEpoch, passageEpoch.Add(time.Hour))
+	if _, err := s.db.Exec(`ALTER TABLE passages DROP COLUMN rating`); err != nil {
+		t.Fatalf("make the old table: %v", err)
+	}
+	s.close()
+	s, err = newPassageStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s.close()
+	got, err := s.GetPassage(p.ID)
+	if err != nil || got.Rating != "" {
+		t.Fatalf("old row after upgrade: %+v %v", got, err)
+	}
+	if _, err := s.PatchPassage(p.ID, passagePatch{Rating: ptr("lively")}); err != nil {
+		t.Fatal(err)
+	}
+}

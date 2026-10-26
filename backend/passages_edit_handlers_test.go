@@ -175,3 +175,43 @@ func TestTrimOfAnUnknownPassageIsRefusedAndWakesNothing(t *testing.T) {
 		t.Fatalf("code %d woke %d", code, woke)
 	}
 }
+
+func TestPatchHandlerRating(t *testing.T) {
+	store := withPassageStore(t)
+	p := seedPassage(t, store, passageEpoch, passageEpoch.Add(time.Hour))
+	code, body := send(t, patchPassageHandler, http.MethodPatch, `{"rating":"lively"}`, "id", p.ID)
+	if code != 200 || body["passage"].(map[string]any)["rating"] != "lively" {
+		t.Fatal(code, body)
+	}
+	if code, _ := send(t, patchPassageHandler, http.MethodPatch, `{"rating":"awful"}`, "id", p.ID); code != 400 {
+		t.Errorf("unknown rating: %d", code)
+	}
+	if got, _ := store.GetPassage(p.ID); got.Rating != "lively" {
+		t.Errorf("a refused rating changed the stored one: %q", got.Rating)
+	}
+	code, body = send(t, patchPassageHandler, http.MethodPatch, `{"rating":""}`, "id", p.ID)
+	if code != 200 || body["passage"].(map[string]any)["rating"] != "" {
+		t.Errorf("clearing: %d %v", code, body)
+	}
+}
+
+func TestRatingOnlyPatchWakesNothing(t *testing.T) {
+	var woke int
+	prev := passageDecisionsWake
+	passageDecisionsWake = func(from, to time.Time) { woke++ }
+	defer func() { passageDecisionsWake = prev }()
+	var named int
+	prevNames := passageNamesWake
+	passageNamesWake = func() { named++ }
+	defer func() { passageNamesWake = prevNames }()
+	store := withPassageStore(t)
+	p := seedPassage(t, store, passageEpoch, passageEpoch.Add(time.Hour))
+	send(t, patchPassageHandler, http.MethodPatch, `{"rating":"comfortable"}`, "id", p.ID)
+	if woke != 0 || named != 0 {
+		t.Fatalf("a rating woke decisions %d times and naming %d times", woke, named)
+	}
+	send(t, patchPassageHandler, http.MethodPatch, `{"rating":"comfortable","hidden":true}`, "id", p.ID)
+	if woke != 1 {
+		t.Errorf("a rating sent with a hide still wakes the decisions: %d", woke)
+	}
+}
