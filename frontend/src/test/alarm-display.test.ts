@@ -489,17 +489,13 @@ describe('tank level alarms', () => {
       value: 0.19,
       unit: 'ratio',
       clear_value: 0.25,
-      capacity: 1.2,
       message: '19% · 228 L',
       ...overrides,
     })
 
-  it('reads level and volume in the body, without a clearing claim', () => {
+  it("reads the server's body, which is the same text the notifications carry", () => {
     expect(alarmConditionSentence(tankAlarm())).toBe('19% · 228 L')
-  })
-
-  it('reads just the percentage when the tank publishes no capacity', () => {
-    expect(alarmConditionSentence(tankAlarm({ capacity: undefined }))).toBe('19%')
+    expect(alarmConditionSentence(tankAlarm({ message: '19%' }))).toBe('19%')
   })
 
   it('puts the clear point in the footer, above for a low tank and below for waste', () => {

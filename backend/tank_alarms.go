@@ -88,6 +88,16 @@ func validateTankLevels(kind string, t tankLevelThresholds) error {
 			return fmt.Errorf("tank levels are percentages between 0 and 100")
 		}
 	}
+	// Both levels clear 5 points back on the good side, so the clear point has
+	// to stay inside the scale.
+	for _, v := range []float64{t.Warn, t.Alarm} {
+		if tankLowIsBad(kind) && v > 100-tankAlarmClearPoints {
+			return fmt.Errorf("levels for a low-bad tank can be at most %g percent, so the alarm can clear %g points above them", 100-tankAlarmClearPoints, tankAlarmClearPoints)
+		}
+		if !tankLowIsBad(kind) && v < tankAlarmClearPoints {
+			return fmt.Errorf("levels for a waste tank must be at least %g percent, so the alarm can clear %g points below them", tankAlarmClearPoints, tankAlarmClearPoints)
+		}
+	}
 	if tankLowIsBad(kind) && t.Alarm >= t.Warn {
 		return fmt.Errorf("the alarm level must be lower than the warn level, because a low tank is the bad one")
 	}
@@ -199,9 +209,38 @@ func loadTankAlarmDefaults() error {
 	return nil
 }
 
+// tanksLeftBackwards names the tanks whose resolved pair would be out of range
+// or the wrong way round under defaults. A default is only saved if this is
+// empty, so no tank silently loses its alarms and colours to a pair nobody chose.
+func tanksLeftBackwards(defaults tankAlarmDefaults) ([]string, error) {
+	items, err := listSourceItems()
+	if err != nil {
+		return nil, fmt.Errorf("cannot check the tanks against these levels, the equipment items are unreadable: %w", err)
+	}
+	var names []string
+	for _, item := range items {
+		if item.Group != sourceTank {
+			continue
+		}
+		kind := tankKindOfInstance(item.Instance)
+		levels, _ := resolveTankLevels(kind, defaults, item)
+		if validateTankLevels(kind, levels) != nil {
+			names = append(names, item.Name)
+		}
+	}
+	return names, nil
+}
+
 func saveTankAlarmDefaults(next tankAlarmDefaults) error {
 	if err := next.validate(); err != nil {
 		return err
+	}
+	names, err := tanksLeftBackwards(next)
+	if err != nil {
+		return err
+	}
+	if len(names) > 0 {
+		return fmt.Errorf("these levels would leave %s with an alarm level on the wrong side of its warn level, or out of range. Change that tank's own levels first", strings.Join(names, ", "))
 	}
 	tankAlarmDefaultsMu.Lock()
 	defer tankAlarmDefaultsMu.Unlock()
@@ -218,14 +257,26 @@ func isTankDerivedAlarmRuleID(id string) bool {
 	return strings.HasPrefix(id, tankAlarmRuleIDPrefix)
 }
 
-// tankDerivedAlarmRules is one warn rule and one alarm rule per tank that has
-// an equipment item and has not had its alarms switched off. A tank whose
-// resolved pair is backwards (a default changed under an override) raises
-// nothing and says so in the log.
+// tankDerivedAlarmRules is one rule per tank that has an equipment item and
+// has not had its alarms switched off. The rule is a single alarm with two
+// levels (Value is the warn level, AlarmLevelValue the alarm level), so a tank
+// escalates and de-escalates as one alarm: it has one card, one log entry and
+// one notification path, and acknowledging it acknowledges the tank. A tank
+// whose resolved pair is backwards (a hand-edited defaults file) raises nothing
+// and says so in the log.
+//
+// The result is reused while the items and defaults it was built from are the
+// same, since every card refresh and every ownership check asks for it.
 func tankDerivedAlarmRules() []alarmRule {
 	items, err := listSourceItems()
 	noteVesselRead("tank alarms", err, "tank alarms: could not read the equipment items, none are raised: %v")
 	defaults := currentTankAlarmDefaults()
+
+	tankRuleMemo.mu.Lock()
+	defer tankRuleMemo.mu.Unlock()
+	if err == nil && tankRuleMemo.valid && sameSourceItems(tankRuleMemo.items, items) && tankRuleMemo.defaults == defaults {
+		return tankRuleMemo.rules
+	}
 
 	var rules []alarmRule
 	for _, item := range items {
@@ -246,34 +297,56 @@ func tankDerivedAlarmRules() []alarmRule {
 		if !tankLowIsBad(kind) {
 			op, word = alarmOpAbove, "High"
 		}
-		for _, level := range []struct {
-			name    string
-			percent float64
-			state   string
-		}{{"warn", levels.Warn, alarmStateWarn}, {"alarm", levels.Alarm, alarmStateAlarm}} {
-			rules = append(rules, alarmRule{
-				ID:                tankAlarmRuleIDPrefix + item.ID + ":" + level.name,
-				Enabled:           true,
-				Path:              item.Source + ".currentLevel",
-				CapacityPath:      item.Source + ".capacity",
-				Label:             item.Name + " " + word,
-				Op:                op,
-				Value:             level.percent / 100,
-				Hysteresis:        tankAlarmClearPoints / 100,
-				DwellSeconds:      tankAlarmDwellSeconds,
-				StaleAfterSeconds: tankAlarmStaleAfterSeconds,
-				State:             level.state,
-				Methods:           []string{"visual", "sound"},
-			})
-		}
+		alarmLevel := levels.Alarm / 100
+		rules = append(rules, alarmRule{
+			ID:                tankAlarmRuleIDPrefix + item.ID,
+			Enabled:           true,
+			Path:              item.Source + ".currentLevel",
+			CapacityPath:      item.Source + ".capacity",
+			Label:             item.Name + " " + word,
+			Op:                op,
+			Value:             levels.Warn / 100,
+			AlarmLevelValue:   &alarmLevel,
+			Hysteresis:        tankAlarmClearPoints / 100,
+			DwellSeconds:      tankAlarmDwellSeconds,
+			StaleAfterSeconds: tankAlarmStaleAfterSeconds,
+			State:             alarmStateWarn,
+			Methods:           []string{"visual", "sound"},
+		})
+	}
+	if err == nil {
+		tankRuleMemo.valid, tankRuleMemo.items, tankRuleMemo.defaults, tankRuleMemo.rules = true, items, defaults, rules
 	}
 	return rules
+}
+
+var tankRuleMemo struct {
+	mu       sync.Mutex
+	valid    bool
+	items    []sourceItem
+	defaults tankAlarmDefaults
+	rules    []alarmRule
+}
+
+// sameSourceItems compares by value, so a cache refresh that reads the same
+// rows does not rebuild the rules and an edit that changes one does.
+func sameSourceItems(a, b []sourceItem) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // derivedAlarmRules is every rule Helmcentral derives rather than stores: gauge
 // zones (ADR 0050) and tank levels (ADR 0214).
 func derivedAlarmRules() []alarmRule {
-	return append(zoneDerivedAlarmRules(), tankDerivedAlarmRules()...)
+	zones := zoneDerivedAlarmRules()
+	return append(zones[:len(zones):len(zones)], tankDerivedAlarmRules()...)
 }
 
 // tankAlarmBody is the card body and the notification text: the level, then
@@ -287,28 +360,48 @@ func tankAlarmBody(level float64, capacity *float64) string {
 	return body
 }
 
-// collapseTankAlarms leaves one card per tank. A tank holds a warn rule and an
-// alarm rule on one path, both live below the alarm level; the card is the
-// worse of the two, and an acknowledged warn gives way to the alarm the moment
-// it raises, whatever the operator did to the warn.
-func collapseTankAlarms(statuses []alarmStatus) []alarmStatus {
-	best := map[string]int{}
-	for i, s := range statuses {
-		if !isTankDerivedAlarmRuleID(s.RuleID) {
-			continue
-		}
-		if j, seen := best[s.Path]; !seen || alarmStateRank[s.State] > alarmStateRank[statuses[j].State] {
-			best[s.Path] = i
+// withTankAlarmBodies sets every tank card's body from the live level, on the
+// server, so the card, the notification text and Mate read the same words
+// (ADR 0157). The volume is in litres, the one volume unit the app uses
+// (operatorUnit in alarm_units.go).
+func withTankAlarmBodies(statuses []alarmStatus) []alarmStatus {
+	for i := range statuses {
+		if isTankDerivedAlarmRuleID(statuses[i].RuleID) {
+			statuses[i].Message = tankAlarmBody(statuses[i].Value, statuses[i].Capacity)
 		}
 	}
-	out := make([]alarmStatus, 0, len(statuses))
-	for i, s := range statuses {
-		if isTankDerivedAlarmRuleID(s.RuleID) && best[s.Path] != i {
-			continue
-		}
-		out = append(out, s)
+	return statuses
+}
+
+// tankLevelPercent is the percentage a reading of currentLevel means. SignalK
+// publishes a ratio, but some senders publish 0-100, so a value over 1 is
+// already a percentage. The Tanks tile and the alarms both read it through
+// here, so they cannot disagree. A negative reading is not a level.
+func tankLevelPercent(raw float64) (percent float64, ok bool) {
+	if raw < 0 || math.IsNaN(raw) {
+		return 0, false
 	}
-	return out
+	if raw <= 1 {
+		raw *= 100
+	}
+	return math.Max(0, math.Min(100, roundTo1(raw))), true
+}
+
+// tankLevelAlarmReader makes the alarm engine read a tank's currentLevel as the
+// tile does: a ratio of full, whichever scale the sender used.
+func tankLevelAlarmReader(base alarmReader) alarmReader {
+	return func(path string) alarmSample {
+		sample := base(path)
+		if !sample.Present || !strings.HasPrefix(path, "tanks.") || !strings.HasSuffix(path, ".currentLevel") {
+			return sample
+		}
+		percent, ok := tankLevelPercent(sample.Value)
+		if !ok {
+			return alarmSample{}
+		}
+		sample.Value = percent / 100
+		return sample
+	}
 }
 
 // ── tank levels on the Tanks payload ─────────────────────────────────────────
@@ -317,10 +410,13 @@ func collapseTankAlarms(statuses []alarmStatus) []alarmStatus {
 // reading, so the Tanks tile and the fuel bars colour from the same numbers the
 // alarms use. A listed tank always has an item (the tile lists no other), so a
 // tank that has none here lost it between the two reads and gets the kind's
-// defaults.
-func annotateTankLevels(tanks []tankLevelData) {
+// defaults. Unreadable items are an error: without them the alarms are not
+// running either, so the tile must not colour by defaults as if they were.
+func annotateTankLevels(tanks []tankLevelData) error {
 	items, err := listSourceItems()
-	noteVesselRead("tank levels", err, "tanks: could not read the equipment items, tank levels use the defaults: %v")
+	if err != nil {
+		return fmt.Errorf("tank levels unavailable, the equipment items could not be read: %w", err)
+	}
 	bySource := make(map[string]sourceItem, len(items))
 	for _, item := range items {
 		bySource[item.Source] = item
@@ -330,6 +426,7 @@ func annotateTankLevels(tanks []tankLevelData) {
 		levels, off := resolveTankLevels(tanks[i].Kind, defaults, bySource["tanks."+tanks[i].ID])
 		tanks[i].WarnPercent, tanks[i].AlarmPercent, tanks[i].AlarmsOff = levels.Warn, levels.Alarm, off
 	}
+	return nil
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────────────────

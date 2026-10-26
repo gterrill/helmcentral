@@ -22,7 +22,6 @@ const tankAlarm: ActiveAlarm = {
   hysteresis: 0.05,
   clear_value: 0.25,
   unit: 'ratio',
-  capacity: 1.2,
   raised_at: '2026-10-27T02:14:00Z',
   silenced: false,
   can_silence: false,

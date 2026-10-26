@@ -85,6 +85,12 @@ func TestValidateTankLevels(t *testing.T) {
 		{"waste", tankLevelThresholds{80, 101}, false},
 		{"fuel", tankLevelThresholds{101, 10}, false},
 		{"fuel", tankLevelThresholds{20, -1}, false},
+		// The clear point sits 5 points back, so it has to stay inside 0-100.
+		{"fuel", tankLevelThresholds{96, 10}, false},
+		{"fuel", tankLevelThresholds{95, 10}, true},
+		{"waste", tankLevelThresholds{4, 90}, false},
+		{"waste", tankLevelThresholds{5, 90}, true},
+		{"waste", tankLevelThresholds{80, 100}, true},
 	}
 	for _, c := range cases {
 		err := validateTankLevels(c.kind, c.t)
@@ -127,33 +133,28 @@ func TestTankAlarmDefaultsCorruptFileFailsLoud(t *testing.T) {
 	}
 }
 
-func TestTankDerivedAlarmRulesForAFuelTank(t *testing.T) {
+func TestTankDerivedAlarmRuleForAFuelTankIsOneRuleWithTwoLevels(t *testing.T) {
 	tankTest(t)
 	id := newTankItem(t, "Fuel Port Fwd", "tanks.fuel.0", 0, 0, false)
 	rules := tankDerivedAlarmRules()
-	if len(rules) != 2 {
-		t.Fatalf("a warn and an alarm rule, got %+v", rules)
+	if len(rules) != 1 {
+		t.Fatalf("one rule per tank, got %+v", rules)
 	}
-	warn, alarm := rules[0], rules[1]
-	if warn.ID != "tank:"+id+":warn" || alarm.ID != "tank:"+id+":alarm" {
-		t.Fatalf("ids: %q %q", warn.ID, alarm.ID)
+	r := rules[0]
+	if r.ID != "tank:"+id {
+		t.Fatalf("id: %q", r.ID)
 	}
-	for _, r := range rules {
-		if r.Path != "tanks.fuel.0.currentLevel" || r.CapacityPath != "tanks.fuel.0.capacity" {
-			t.Errorf("paths: %+v", r)
-		}
-		if r.Op != alarmOpBelow || r.Label != "Fuel Port Fwd Low" || !r.Enabled {
-			t.Errorf("shape: %+v", r)
-		}
-		if r.DwellSeconds != 60 || math.Abs(r.Hysteresis-0.05) > 1e-9 || r.StaleAfterSeconds <= 0 {
-			t.Errorf("dwell/hysteresis/stale: %+v", r)
-		}
+	if r.Path != "tanks.fuel.0.currentLevel" || r.CapacityPath != "tanks.fuel.0.capacity" {
+		t.Errorf("paths: %+v", r)
 	}
-	if warn.State != alarmStateWarn || math.Abs(warn.Value-0.20) > 1e-9 {
-		t.Errorf("warn: %+v", warn)
+	if r.Op != alarmOpBelow || r.Label != "Fuel Port Fwd Low" || !r.Enabled || r.State != alarmStateWarn {
+		t.Errorf("shape: %+v", r)
 	}
-	if alarm.State != alarmStateAlarm || math.Abs(alarm.Value-0.10) > 1e-9 {
-		t.Errorf("alarm: %+v", alarm)
+	if r.DwellSeconds != 60 || math.Abs(r.Hysteresis-0.05) > 1e-9 || r.StaleAfterSeconds <= 0 {
+		t.Errorf("dwell/hysteresis/stale: %+v", r)
+	}
+	if math.Abs(r.Value-0.20) > 1e-9 || r.AlarmLevelValue == nil || math.Abs(*r.AlarmLevelValue-0.10) > 1e-9 {
+		t.Errorf("levels: %+v", r)
 	}
 }
 
@@ -161,16 +162,15 @@ func TestTankDerivedAlarmRulesForWasteRaiseOnHigh(t *testing.T) {
 	tankTest(t)
 	newTankItem(t, "Black Water Stbd", "tanks.blackWater.1", 0, 0, false)
 	rules := tankDerivedAlarmRules()
-	if len(rules) != 2 {
+	if len(rules) != 1 {
 		t.Fatalf("got %+v", rules)
 	}
-	for _, r := range rules {
-		if r.Op != alarmOpAbove || r.Label != "Black Water Stbd High" {
-			t.Errorf("waste is bad when high: %+v", r)
-		}
+	r := rules[0]
+	if r.Op != alarmOpAbove || r.Label != "Black Water Stbd High" {
+		t.Errorf("waste is bad when high: %+v", r)
 	}
-	if math.Abs(rules[0].Value-0.80) > 1e-9 || math.Abs(rules[1].Value-0.90) > 1e-9 {
-		t.Errorf("values: %v %v", rules[0].Value, rules[1].Value)
+	if math.Abs(r.Value-0.80) > 1e-9 || r.AlarmLevelValue == nil || math.Abs(*r.AlarmLevelValue-0.90) > 1e-9 {
+		t.Errorf("values: %+v", r)
 	}
 }
 
@@ -183,24 +183,48 @@ func TestTankDerivedAlarmRulesHonourOverridesAndKindDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	rules := tankDerivedAlarmRules()
-	if len(rules) != 2 || math.Abs(rules[0].Value-0.30) > 1e-9 || math.Abs(rules[1].Value-0.15) > 1e-9 {
+	if len(rules) != 1 || math.Abs(rules[0].Value-0.30) > 1e-9 || math.Abs(*rules[0].AlarmLevelValue-0.15) > 1e-9 {
 		t.Fatalf("item warn 30 over kind alarm 15, got %+v", rules)
 	}
 }
 
-func TestTankDerivedAlarmRulesSkipAlarmsOffAndInvalidPairs(t *testing.T) {
+func TestTankDerivedAlarmRulesSkipAlarmsOff(t *testing.T) {
 	tankTest(t)
 	newTankItem(t, "Off", "tanks.fuel.1", 0, 0, true)
+	if rules := tankDerivedAlarmRules(); len(rules) != 0 {
+		t.Fatalf("alarms off raises nothing, got %+v", rules)
+	}
+}
+
+// A kind default can no longer be saved so that a tank ends up backwards, so a
+// backwards pair reaching the rules (a hand-edited file) raises nothing and is
+// logged.
+func TestTankDerivedAlarmRulesSkipABackwardsPair(t *testing.T) {
+	tankTest(t)
 	newTankItem(t, "Backwards", "tanks.fuel.2", 15, 0, false)
-	// The kind default moves up under the item's own warn level: warn 15 over
-	// an alarm of 16 is backwards, so that tank raises nothing.
+	tankAlarmDefaultsMu.Lock()
+	tankAlarmDefaultsState.Fuel = tankLevelThresholds{Warn: 25, Alarm: 16}
+	tankAlarmDefaultsMu.Unlock()
+	if rules := tankDerivedAlarmRules(); len(rules) != 0 {
+		t.Fatalf("a backwards pair raises nothing, got %+v", rules)
+	}
+}
+
+func TestSavingDefaultsIsRefusedWhenItWouldInvertATanksPair(t *testing.T) {
+	tankTest(t)
+	newTankItem(t, "Fuel Port Fwd", "tanks.fuel.0", 15, 0, false) // warn 15 over default alarm 10
+	newTankItem(t, "Fuel Stbd Fwd", "tanks.fuel.1", 0, 0, false)
 	d := builtinTankAlarmDefaults()
 	d.Fuel = tankLevelThresholds{Warn: 25, Alarm: 16}
-	if err := saveTankAlarmDefaults(d); err != nil {
-		t.Fatal(err)
+	err := saveTankAlarmDefaults(d)
+	if err == nil {
+		t.Fatal("expected the save to be refused")
 	}
-	if rules := tankDerivedAlarmRules(); len(rules) != 0 {
-		t.Fatalf("alarms off and a backwards pair raise nothing, got %+v", rules)
+	if !strings.Contains(err.Error(), "Fuel Port Fwd") || strings.Contains(err.Error(), "Fuel Stbd Fwd") {
+		t.Errorf("name only the affected tank: %v", err)
+	}
+	if got := currentTankAlarmDefaults().Fuel; got != builtinTankAlarmDefaults().Fuel {
+		t.Errorf("a refused save changed state: %+v", got)
 	}
 }
 
@@ -224,22 +248,24 @@ func levelReader(level float64, capacity float64, seen time.Time) alarmReader {
 	}
 }
 
+// step runs the engine to `at` with the given level and returns the events.
+func step(engine *alarmEngine, rules []alarmRule, level, capacity float64, at time.Time) []alarmEvent {
+	return engine.evaluate(rules, levelReader(level, capacity, at), at)
+}
+
 func TestTankAlarmDwellThenRaiseWithCardWording(t *testing.T) {
 	tankTest(t)
 	newTankItem(t, "Fuel Port Fwd", "tanks.fuel.0", 0, 0, false)
 	rules := tankDerivedAlarmRules()
 	engine := newAlarmEngine()
-	read := levelReader(0.19, 1.2, alarmNow)
 
-	if events := engine.evaluate(rules, read, alarmNow); len(events) != 0 {
+	if events := step(engine, rules, 0.19, 1.2, alarmNow); len(events) != 0 {
 		t.Fatalf("no alarm before the dwell: %+v", events)
 	}
-	later := alarmNow.Add(59 * time.Second)
-	if events := engine.evaluate(rules, levelReader(0.19, 1.2, later), later); len(events) != 0 {
+	if events := step(engine, rules, 0.19, 1.2, alarmNow.Add(59*time.Second)); len(events) != 0 {
 		t.Fatalf("59 s is not 60: %+v", events)
 	}
-	at := alarmNow.Add(60 * time.Second)
-	events := engine.evaluate(rules, levelReader(0.19, 1.2, at), at)
+	events := step(engine, rules, 0.19, 1.2, alarmNow.Add(60*time.Second))
 	if len(events) != 1 || events[0].Kind != alarmEventRaised {
 		t.Fatalf("expected one raise at 60 s, got %+v", events)
 	}
@@ -253,9 +279,6 @@ func TestTankAlarmDwellThenRaiseWithCardWording(t *testing.T) {
 	if st.ClearValue == nil || math.Abs(*st.ClearValue-0.25) > 1e-9 {
 		t.Errorf("clears above 25%%, got %v", st.ClearValue)
 	}
-	if st.Capacity == nil || *st.Capacity != 1.2 {
-		t.Errorf("capacity is carried for the card: %v", st.Capacity)
-	}
 }
 
 func TestTankAlarmBodyWithoutCapacityIsJustThePercentage(t *testing.T) {
@@ -263,29 +286,124 @@ func TestTankAlarmBodyWithoutCapacityIsJustThePercentage(t *testing.T) {
 	newTankItem(t, "Fuel Port Fwd", "tanks.fuel.0", 0, 0, false)
 	rules := tankDerivedAlarmRules()
 	engine := newAlarmEngine()
-	engine.evaluate(rules, levelReader(0.19, 0, alarmNow), alarmNow)
-	at := alarmNow.Add(60 * time.Second)
-	events := engine.evaluate(rules, levelReader(0.19, 0, at), at)
+	step(engine, rules, 0.19, 0, alarmNow)
+	events := step(engine, rules, 0.19, 0, alarmNow.Add(60*time.Second))
 	if len(events) != 1 || events[0].Status.Message != "19%" {
 		t.Fatalf("got %+v", events)
+	}
+}
+
+func TestTankAlarmRaisesStraightAtAlarmWhenBothLevelsHoldForTheDwell(t *testing.T) {
+	tankTest(t)
+	newTankItem(t, "Fuel", "tanks.fuel.0", 0, 0, false)
+	rules := tankDerivedAlarmRules()
+	engine := newAlarmEngine()
+	step(engine, rules, 0.05, 0, alarmNow)
+	events := step(engine, rules, 0.05, 0, alarmNow.Add(60*time.Second))
+	if len(events) != 1 || events[0].Kind != alarmEventRaised || events[0].Status.State != alarmStateAlarm {
+		t.Fatalf("one raise at alarm, got %+v", events)
+	}
+}
+
+// One tank is one alarm: it escalates warn to alarm and back, and only clears
+// when it is clear of the warn level too.
+func TestTankAlarmEscalatesAndDeEscalatesAsOneAlarm(t *testing.T) {
+	tankTest(t)
+	id := newTankItem(t, "Fuel", "tanks.fuel.0", 0, 0, false)
+	rules := tankDerivedAlarmRules()
+	engine := newAlarmEngine()
+	at := alarmNow
+	step(engine, rules, 0.18, 0, at)
+	at = at.Add(60 * time.Second)
+	if ev := step(engine, rules, 0.18, 0, at); len(ev) != 1 || ev[0].Status.State != alarmStateWarn {
+		t.Fatalf("raise at warn: %+v", ev)
+	}
+
+	// Down through the alarm level: it must hold 60 s there too.
+	at = at.Add(time.Second)
+	if ev := step(engine, rules, 0.09, 0, at); len(ev) != 0 {
+		t.Fatalf("alarm level not yet held: %+v", ev)
+	}
+	at = at.Add(60 * time.Second)
+	ev := step(engine, rules, 0.09, 0, at)
+	if len(ev) != 1 || ev[0].Kind != alarmEventChanged || ev[0].Status.State != alarmStateAlarm || ev[0].Status.Message != "9%" {
+		t.Fatalf("escalation is one changed event to alarm: %+v", ev)
+	}
+	if got := len(engine.active()); got != 1 {
+		t.Fatalf("still one alarm, got %d", got)
+	}
+
+	// Back above 10 but short of the 5 point band: still alarm.
+	at = at.Add(time.Second)
+	if ev := step(engine, rules, 0.14, 0, at); len(ev) != 0 {
+		t.Fatalf("held at 14%%: %+v", ev)
+	}
+	// Past 15: de-escalates to warn, never a clear.
+	at = at.Add(time.Second)
+	ev = step(engine, rules, 0.16, 0, at)
+	if len(ev) != 1 || ev[0].Kind != alarmEventChanged || ev[0].Status.State != alarmStateWarn {
+		t.Fatalf("de-escalation is a changed event to warn: %+v", ev)
+	}
+	// Past 25: the only clear.
+	at = at.Add(time.Second)
+	ev = step(engine, rules, 0.26, 0, at)
+	if len(ev) != 1 || ev[0].Kind != alarmEventCleared {
+		t.Fatalf("one clear: %+v", ev)
+	}
+	if len(engine.active()) != 0 {
+		t.Fatal("nothing active after the clear")
+	}
+	_ = id
+}
+
+func TestAckAppliesToTheTankAlarmAndDeEscalationKeepsIt(t *testing.T) {
+	tankTest(t)
+	id := newTankItem(t, "Fuel", "tanks.fuel.0", 0, 0, false)
+	rules := tankDerivedAlarmRules()
+	engine := newAlarmEngine()
+	at := alarmNow
+	step(engine, rules, 0.05, 0, at)
+	at = at.Add(60 * time.Second)
+	step(engine, rules, 0.05, 0, at) // raised at alarm
+	if !engine.acknowledge("tank:"+id, at) {
+		t.Fatal("the tank alarm should acknowledge")
+	}
+	// Level recovers to between 15 and 20: de-escalates, stays acknowledged.
+	at = at.Add(time.Second)
+	ev := step(engine, rules, 0.17, 0, at)
+	if len(ev) != 1 || ev[0].Kind != alarmEventChanged {
+		t.Fatalf("de-escalation: %+v", ev)
+	}
+	if st := engine.statusFor("tank:" + id); st.Phase != alarmPhaseAcknowledged || st.State != alarmStateWarn {
+		t.Fatalf("acked warn expected, got %+v", st)
+	}
+	// Re-escalation re-raises unacknowledged.
+	at = at.Add(time.Second)
+	step(engine, rules, 0.05, 0, at)
+	at = at.Add(60 * time.Second)
+	ev = step(engine, rules, 0.05, 0, at)
+	if len(ev) != 1 || ev[0].Kind != alarmEventChanged || ev[0].Status.State != alarmStateAlarm {
+		t.Fatalf("re-escalation: %+v", ev)
+	}
+	if st := engine.statusFor("tank:" + id); st.Phase != alarmPhaseActive {
+		t.Fatalf("re-escalation is unacknowledged, got %+v", st)
 	}
 }
 
 func TestTankAlarmClearsFivePointsBackOnTheGoodSide(t *testing.T) {
 	tankTest(t)
 	newTankItem(t, "Fuel", "tanks.fuel.0", 0, 0, false)
-	rules := tankDerivedAlarmRules()[:1] // warn only
+	rules := tankDerivedAlarmRules()
 	engine := newAlarmEngine()
-	engine.evaluate(rules, levelReader(0.19, 0, alarmNow), alarmNow)
+	step(engine, rules, 0.19, 0, alarmNow)
 	at := alarmNow.Add(60 * time.Second)
-	engine.evaluate(rules, levelReader(0.19, 0, at), at)
-	// 24% is back over the warn point but inside the 5 point band.
+	step(engine, rules, 0.19, 0, at)
 	at = at.Add(time.Second)
-	if events := engine.evaluate(rules, levelReader(0.24, 0, at), at); len(events) != 0 {
+	if events := step(engine, rules, 0.24, 0, at); len(events) != 0 {
 		t.Fatalf("still held at 24%%: %+v", events)
 	}
 	at = at.Add(time.Second)
-	events := engine.evaluate(rules, levelReader(0.26, 0, at), at)
+	events := step(engine, rules, 0.26, 0, at)
 	if len(events) != 1 || events[0].Kind != alarmEventCleared {
 		t.Fatalf("clears above 25%%: %+v", events)
 	}
@@ -294,19 +412,19 @@ func TestTankAlarmClearsFivePointsBackOnTheGoodSide(t *testing.T) {
 func TestWasteTankClearsFivePointsBelowItsWarnPoint(t *testing.T) {
 	tankTest(t)
 	newTankItem(t, "Black", "tanks.blackWater.0", 0, 0, false)
-	rules := tankDerivedAlarmRules()[:1]
+	rules := tankDerivedAlarmRules()
 	engine := newAlarmEngine()
-	engine.evaluate(rules, levelReader(0.82, 0, alarmNow), alarmNow)
+	step(engine, rules, 0.82, 0, alarmNow)
 	at := alarmNow.Add(60 * time.Second)
-	if events := engine.evaluate(rules, levelReader(0.82, 0, at), at); len(events) != 1 {
+	if events := step(engine, rules, 0.82, 0, at); len(events) != 1 {
 		t.Fatalf("raise: %+v", events)
 	}
 	at = at.Add(time.Second)
-	if events := engine.evaluate(rules, levelReader(0.76, 0, at), at); len(events) != 0 {
+	if events := step(engine, rules, 0.76, 0, at); len(events) != 0 {
 		t.Fatalf("76%% is not below 75%%: %+v", events)
 	}
 	at = at.Add(time.Second)
-	if events := engine.evaluate(rules, levelReader(0.74, 0, at), at); len(events) != 1 || events[0].Kind != alarmEventCleared {
+	if events := step(engine, rules, 0.74, 0, at); len(events) != 1 || events[0].Kind != alarmEventCleared {
 		t.Fatalf("clear below 75%%: %+v", events)
 	}
 }
@@ -328,45 +446,70 @@ func TestStaleTankReadingRaisesNothing(t *testing.T) {
 	}
 }
 
-func TestCollapseTankAlarmsKeepsTheWorstPerTank(t *testing.T) {
-	statuses := []alarmStatus{
-		{RuleID: "tank:a:warn", Path: "tanks.fuel.0.currentLevel", State: alarmStateWarn, Phase: alarmPhaseAcknowledged},
-		{RuleID: "tank:a:alarm", Path: "tanks.fuel.0.currentLevel", State: alarmStateAlarm, Phase: alarmPhaseActive},
-		{RuleID: "tank:b:warn", Path: "tanks.fuel.1.currentLevel", State: alarmStateWarn, Phase: alarmPhaseActive},
-		{RuleID: "other", Path: "environment.depth", State: alarmStateWarn, Phase: alarmPhaseActive},
+// The tile shows senders that publish 0-100 as well as 0-1; the alarm reads the
+// same percentage.
+func TestTankAlarmReaderNormalisesBothScales(t *testing.T) {
+	read := tankLevelAlarmReader(func(path string) alarmSample {
+		switch path {
+		case "tanks.fuel.0.currentLevel":
+			return alarmSample{Value: 0.19, Present: true}
+		case "tanks.fuel.1.currentLevel":
+			return alarmSample{Value: 45, Present: true}
+		case "tanks.fuel.2.currentLevel":
+			return alarmSample{Value: -1, Present: true}
+		case "tanks.fuel.0.capacity":
+			return alarmSample{Value: 1.2, Present: true}
+		}
+		return alarmSample{}
+	})
+	if v := read("tanks.fuel.0.currentLevel").Value; math.Abs(v-0.19) > 1e-9 {
+		t.Errorf("ratio sender: %v", v)
 	}
-	got := collapseTankAlarms(statuses)
-	if len(got) != 3 {
-		t.Fatalf("one card per tank: %+v", got)
+	if v := read("tanks.fuel.1.currentLevel").Value; math.Abs(v-0.45) > 1e-9 {
+		t.Errorf("percent sender must read 0.45, got %v", v)
 	}
-	ids := map[string]bool{}
-	for _, s := range got {
-		ids[s.RuleID] = true
+	if read("tanks.fuel.2.currentLevel").Present {
+		t.Error("a negative level is absent, as on the tile")
 	}
-	if !ids["tank:a:alarm"] || ids["tank:a:warn"] || !ids["tank:b:warn"] || !ids["other"] {
-		t.Errorf("wrong cards kept: %v", ids)
+	if v := read("tanks.fuel.0.capacity").Value; v != 1.2 {
+		t.Errorf("capacity is left alone: %v", v)
+	}
+	if body := tankAlarmBody(0.45, nil); body != "45%" {
+		t.Errorf("never 4500%%: %q", body)
 	}
 }
 
-func TestAcknowledgedWarnReRaisesAsAnAlarmAtTheAlarmLevel(t *testing.T) {
-	tankTest(t)
-	id := newTankItem(t, "Fuel", "tanks.fuel.0", 0, 0, false)
-	rules := tankDerivedAlarmRules()
-	engine := newAlarmEngine()
-	at := alarmNow
-	engine.evaluate(rules, levelReader(0.18, 0, at), at)
-	at = at.Add(60 * time.Second)
-	engine.evaluate(rules, levelReader(0.18, 0, at), at)
-	if !engine.acknowledge("tank:"+id+":warn", at) {
-		t.Fatal("warn should acknowledge")
+func TestTankAlarmBodiesAreSetOnTheServerLive(t *testing.T) {
+	capacity := 1.2
+	in := []alarmStatus{
+		{RuleID: "tank:a", Value: 0.19, Capacity: &capacity, Message: "stale text"},
+		{RuleID: "other", Value: 3, Message: "keep"},
 	}
-	at = at.Add(time.Second)
-	engine.evaluate(rules, levelReader(0.09, 0, at), at)
-	at = at.Add(60 * time.Second)
-	engine.evaluate(rules, levelReader(0.09, 0, at), at)
-	cards := collapseTankAlarms(engine.active())
-	if len(cards) != 1 || cards[0].State != alarmStateAlarm || cards[0].Phase != alarmPhaseActive {
-		t.Fatalf("an unacknowledged alarm card replaces the acknowledged warn: %+v", cards)
+	out := withTankAlarmBodies(in)
+	if out[0].Message != "19% · 228 L" || out[1].Message != "keep" {
+		t.Errorf("got %+v", out)
+	}
+}
+
+func TestAlarmLogFollowsAnEscalationInOneRow(t *testing.T) {
+	store, err := newAlarmLogStore(filepath.Join(t.TempDir(), "log.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if _, err := store.RecordRaised(alarmLogEntry{RuleID: "tank:a", Label: "Fuel Low", Path: "p", State: alarmStateWarn, Message: "19%", RaisedAt: alarmNow}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkAcknowledged("tank:a", alarmNow.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	// De-escalation keeps the acknowledgement; escalation drops it.
+	if err := store.RecordStateChange("tank:a", alarmStateAlarm, "9%", true); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := store.Recent(10)
+	if len(entries) != 1 || entries[0].State != alarmStateAlarm || entries[0].Message != "9%" || entries[0].AckedAt != nil {
+		t.Fatalf("escalated row: %+v", entries)
 	}
 }
 
@@ -426,12 +569,26 @@ func TestTanksStatePayloadCarriesResolvedThresholds(t *testing.T) {
 		{ID: "fuel.0", Kind: "fuel", Category: "fuel"},
 		{ID: "freshWater.0", Kind: "water", Category: "freshWater"},
 	}
-	annotateTankLevels(tanks)
+	if err := annotateTankLevels(tanks); err != nil {
+		t.Fatal(err)
+	}
 	if tanks[0].WarnPercent != 30 || tanks[0].AlarmPercent != 10 || tanks[0].AlarmsOff {
 		t.Errorf("fuel: %+v", tanks[0])
 	}
 	if tanks[1].WarnPercent != 20 || tanks[1].AlarmPercent != 10 || !tanks[1].AlarmsOff {
 		t.Errorf("water: %+v", tanks[1])
+	}
+}
+
+// Equipment that cannot be read means alarms are dead; the tile must say so
+// rather than colour by defaults.
+func TestAnnotateTankLevelsFailsWhenTheItemsCannotBeRead(t *testing.T) {
+	tankTest(t)
+	store := vesselFixtureStore(t)
+	_ = store.db.Close()
+	invalidateSourceItems()
+	if err := annotateTankLevels([]tankLevelData{{ID: "fuel.0", Kind: "fuel"}}); err == nil {
+		t.Fatal("expected an error, not default levels")
 	}
 }
 

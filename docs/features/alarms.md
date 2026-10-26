@@ -279,9 +279,11 @@ the colour you see and the alarm you get always agree.
   minutes, Helmcentral doesn't raise a level alarm from the old reading. The
   Tanks tile goes stale instead, and the instrument health alarm covers the
   sender.
-- **One card per tank:** A tank below both levels shows one card, the worse one.
-  If you acknowledged the warn, a new card appears when the tank reaches the
-  alarm level.
+- **One alarm per tank:** A tank is a single alarm that moves from warn to alarm
+  as the level falls, and back to warn as it recovers. It only clears once the
+  tank is clear of the warn level. Acknowledging it acknowledges the tank. If
+  it recovers from alarm to warn it stays acknowledged, and if it falls back to
+  the alarm level it is raised again, unacknowledged.
 - **Alarms off:** A tank can have its alarms switched off. The Tanks tile still
   shows its level and colours.
 

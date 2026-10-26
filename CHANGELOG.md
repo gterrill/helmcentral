@@ -17,7 +17,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   A fuel bar now takes its colours from the tank's alarm levels, and the tank
   raises the alarm. Fuel bar zones you set before are ignored. Open the tank's
   equipment item and check **Tank levels**, or change the defaults for every
-  fuel tank under **Settings → Alarms → Tank levels**.
+  fuel tank under **Settings → Alarms → Tank levels**. A fuel bar that was
+  bound only to a SignalK source, with no tank equipment item behind it, no
+  longer raises a low fuel alarm. Add the tank as equipment to get one.
 
 ### Added
 

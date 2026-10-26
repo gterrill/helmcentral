@@ -73,7 +73,7 @@ func evaluateAlarmsOnce(now time.Time) {
 	// derivedAwareAlarmReader rather than snapshotAlarmReader, so a rule can
 	// name a helmcentral.* path. Reading through the snapshot alone made those
 	// rules permanently absent, and so permanently silent (ADR 0070).
-	events := globalAlarmEngine.evaluate(rules, derivedAwareAlarmReader(globalSignalKSnapshot), now)
+	events := globalAlarmEngine.evaluate(rules, tankLevelAlarmReader(derivedAwareAlarmReader(globalSignalKSnapshot)), now)
 	for _, event := range events {
 		recordAlarmEvent(event, now)
 	}
@@ -108,7 +108,7 @@ func evaluateAlarmsOnce(now time.Time) {
 	for _, status := range globalAlarmEngine.active() {
 		liveEnginePaths[status.Path] = true
 	}
-	globalBusEchoReconciler.check(now, helmcentralOwnershipPredicate(), liveEnginePaths)
+	globalBusEchoReconciler.check(now, helmcentralOwnershipPredicateFor(rules), liveEnginePaths)
 }
 
 func recordAlarmEvent(event alarmEvent, now time.Time) {
@@ -134,6 +134,11 @@ func recordAlarmEvent(event alarmEvent, now time.Time) {
 			RaisedAt:     now,
 		})
 		if err != nil {
+			log.Printf("alarm log: %v", err)
+		}
+	case alarmEventChanged:
+		escalated := alarmStateRank[event.Status.State] > alarmStateRank[event.Rule.State]
+		if err := globalAlarmLogStore.RecordStateChange(event.Rule.ID, event.Status.State, event.Status.Message, escalated); err != nil {
 			log.Printf("alarm log: %v", err)
 		}
 	case alarmEventCleared:
@@ -166,7 +171,7 @@ func vesselNameForNotifications() string {
 func activeAlarms() []alarmStatus {
 	// Always a list, never null: the UI iterates this without a nil guard.
 	combined := make([]alarmStatus, 0)
-	combined = append(combined, collapseTankAlarms(globalAlarmEngine.active())...)
+	combined = append(combined, withTankAlarmBodies(globalAlarmEngine.active())...)
 	combined = append(combined, attachLoggedOccurrenceTimes(signalKNotifications(globalSignalKSnapshot, helmcentralOwnershipPredicate(), time.Now().UTC()))...)
 
 	// The clock is read here rather than threaded through as a parameter

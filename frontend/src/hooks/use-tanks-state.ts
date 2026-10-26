@@ -19,11 +19,14 @@ export type TankLevel = {
 
 type TanksStateResponse = {
   tanks?: TankLevel[]
+  /** Set when the server could not give the tanks their levels (ADR 0214). */
+  error?: string
 }
 
 export function useTanksState() {
   const [tanks, setTanks] = useState<TankLevel[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   // Freshest of the per-tank ages (ADR 0068); null when no tank
   // publishes a timestamp.
   const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
@@ -48,6 +51,7 @@ export function useTanksState() {
         )
 
         setTanks(valid)
+        setError(typeof data.error === 'string' && data.error !== '' ? data.error : null)
         setLastUpdateAgeS(ageFromPayload((data as { last_update_age_s?: unknown }).last_update_age_s))
       } catch (err) {
         console.error('Failed to fetch tanks state:', err)
@@ -64,6 +68,7 @@ export function useTanksState() {
   return {
     tanks,
     loading,
+    error,
     lastUpdateAgeS,
   }
 }

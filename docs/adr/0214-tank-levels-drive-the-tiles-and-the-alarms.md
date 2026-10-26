@@ -46,9 +46,12 @@ alarms.
   and `tank_alarms_off`. Only an item whose source is a tank may carry them. The
   resolved pair must run the right way round (alarm below warn for a low-bad
   kind, above for waste), checked on save with blanks filled from the current
-  defaults. A default changed later can leave an override backwards. That tank
-  then raises nothing and the log says so once, rather than alarming on a pair
-  nobody chose.
+  defaults. Both levels also have to leave room for the 5 point clear: at most
+  95 for fuel and water, at least 5 for waste. Saving the kind defaults is
+  refused, naming the tanks, if it would leave any tank's pair backwards or out
+  of range, so no tank loses its alarm or its colour to a pair nobody chose. A
+  hand-edited defaults file that gets there anyway makes that tank raise nothing
+  and the log says so once.
 - **Alarms off** silences the alarm only. The tile still shows the level and
   its colours, because the colours are the levels.
 
@@ -56,10 +59,10 @@ alarms.
 
 - Only a tank with an equipment item. A tank nobody has mapped (the unmapped
   `fuel.0` and `fuel.1`) is not listed on the tile and never alarms.
-- Two derived rules per tank, `tank:<item id>:warn` and `tank:<item id>:alarm`,
-  built each tick from the items and the defaults in `tank_alarms.go`. They are
-  not seeded into `alarm-rules.json`, so editing a level changes the alarm and
-  the tile together and there is nothing to migrate.
+- One derived rule per tank, `tank:<item id>`, built from the items and the
+  defaults in `tank_alarms.go` and reused until either changes. It is not
+  seeded into `alarm-rules.json`, so editing a level changes the alarm and the
+  tile together and there is nothing to migrate.
 - The level must stay past the threshold for 60 seconds to raise. It clears
   when it is 5 percentage points back on the good side: a warn at 20 clears
   above 25, a waste warn at 80 clears below 75. Both are constants. A tank
@@ -67,11 +70,19 @@ alarms.
 - A reading older than 120 seconds, the age the Tanks tile calls stale, raises
   nothing, and a live alarm is held rather than cleared by it. The silent
   sender is the Instruments Silent alarm's business, not a level alarm's.
-- Severities are SignalK's: crossing the warn level is `warn`, crossing the
-  alarm level is `alarm`. Both rules can be live at once, so the alarm list
-  collapses them to one card per tank, the worse one. An operator who
-  acknowledged the warn sees a fresh unacknowledged card when the level crosses
-  the alarm level. Notifications go through the transports like any rule alarm.
+- The alarm reads the level as the tile does. Some senders publish 0-100
+  instead of SignalK's 0-1, so `tankLevelPercent` is the one place that decides
+  which a number is, and both the tile and an alarm-engine reader wrapper use it.
+- **A tank is one alarm.** The rule carries two thresholds (`Value` for warn,
+  `AlarmLevelValue` for alarm), and the engine moves the one alarm's severity
+  between them, each level with its own 60 second dwell and 5 point deadband.
+  Crossing into alarm sends a `changed` event, and so does falling back to
+  warn. Transports publish the new state and never a clear until the tank is
+  clear of the warn level. The alarm log keeps one row that follows the
+  severity. Acknowledging acknowledges the tank. Falling from alarm to warn
+  leaves it acknowledged, and rising to alarm again re-raises it
+  unacknowledged. The footer's clear point is the warn level's, because that is
+  where the alarm goes away.
 - A tank with Helmcentral alarms owns its `tanks.<kind>.<n>.currentLevel` path
   in `helmcentralOwnsPath`, the same as an enabled rule would, so a foreign
   notification on that path is superseded.
@@ -81,9 +92,10 @@ alarms.
 - **Title:** the tank's name and "Low" or "High": "Fuel Port Fwd Low", "Black
   Water Stbd High".
 - **Body:** the level, then the volume when SignalK publishes a capacity:
-  `19% · 228 L`. Without a capacity it is `19%`. The server builds the same
-  text for the notification transports. The volume is in litres, the unit the
-  Engine Cluster shows.
+  `19% · 228 L`. Without a capacity it is `19%`. The server writes this text
+  from the live level, and the card, the notifications and Mate all carry it;
+  the page does no formatting of its own. The app has one volume unit, litres
+  (`operatorUnit` in `alarm_units.go`), so there is no preference to follow.
 - **Footer:** "Clears above 25%" (or "below" for waste), taken from the rule's
   clear value. It sits beside the raised time, never in the body.
 
@@ -100,6 +112,12 @@ one operator and no installed base, so there is no migration.
 
 ## Rejected
 
+- **Two independent rules per tank, collapsed to one card.** That was the first
+  version. The engine, the transports and the log still saw two alarms, so a
+  tank falling back from alarm to warn sent "cleared" on the bus and "[CLEARED]"
+  to the phone while it was still in warn, logged twice, and left a hidden
+  unacknowledged warn behind an acknowledged card. The severity belongs inside
+  the one alarm.
 - **Seeded, editable alarm rules.** Seeding two rules per tank into
   `alarm-rules.json` would let them drift from the tile's colours and leave
   rules behind when a tank item is deleted or remapped. Derived rules follow the
@@ -120,5 +138,8 @@ one operator and no installed base, so there is no migration.
   alarming. The operator sets levels on the tank's equipment page instead.
 - A tank whose sender goes quiet shows stale on the tile and stays out of the
   level alarms.
-- The Alarms rules list shows each tank's warn and alarm rules, read-only,
-  marked as coming from the tank levels.
+- If the equipment items cannot be read, the Tanks feed carries an `error`
+  instead of tanks and the tile shows it. The alarms are not running either, so
+  the tile does not colour by defaults.
+- The Alarms rules list shows each tank's rule, read-only, marked as coming
+  from the tank levels.

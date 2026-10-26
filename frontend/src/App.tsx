@@ -1029,6 +1029,7 @@ function AppShell() {
   const {
     tanks,
     loading: tanksLoading,
+    error: tanksError,
     lastUpdateAgeS: tanksAgeS,
   } = useTanksState()
   const {
@@ -1768,6 +1769,7 @@ function AppShell() {
           <TanksTile
             tanks={tanks}
             loading={tanksLoading}
+            error={tanksError}
             lastUpdateAgeS={tanksAgeS}
           />
         )

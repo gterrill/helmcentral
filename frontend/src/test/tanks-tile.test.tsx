@@ -115,6 +115,12 @@ describe('TanksTile', () => {
     expect(screen.getByText('CRIT')).toBeInTheDocument()
   })
 
+  it('says why there are no levels instead of colouring by numbers the alarms do not use', () => {
+    render(<TanksTile tanks={[]} loading={false} error="tank levels unavailable, the equipment items could not be read" lastUpdateAgeS={null} />)
+    expect(screen.getByRole('alert')).toHaveTextContent(/equipment items could not be read/)
+    expect(screen.queryByText('No tank data available')).not.toBeInTheDocument()
+  })
+
   it('greys the tile and blanks readings once the feed is stale', () => {
     render(<TanksTile tanks={[tank({ level_percent: 5 })]} loading={false} lastUpdateAgeS={999} />)
 

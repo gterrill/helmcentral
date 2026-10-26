@@ -69,6 +69,11 @@ export function tankLevelsError(
   }
   const effectiveWarn = warn ?? defaults.warn
   const effectiveAlarm = alarm ?? defaults.alarm
+  // Both levels clear 5 points back on the good side, so that point must exist.
+  for (const v of [effectiveWarn, effectiveAlarm]) {
+    if (isLowBadKind(kind) && v > 95) return 'Levels for this kind of tank can be at most 95 percent, so the alarm can clear 5 points above them.'
+    if (!isLowBadKind(kind) && v < 5) return 'Levels for this kind of tank must be at least 5 percent, so the alarm can clear 5 points below them.'
+  }
   if (isLowBadKind(kind) && effectiveAlarm >= effectiveWarn) {
     return 'The alarm level must be lower than the warn level, because a low tank is the bad one.'
   }

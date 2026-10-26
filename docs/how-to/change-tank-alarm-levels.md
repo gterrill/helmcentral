@@ -13,11 +13,14 @@ Do this when every tank of a kind should use the same levels.
 2. Find **Tank levels**. Fuel, Fresh water and Waste each have a row.
 3. Set **Warn at** and **Alarm at** for the kind. For fuel and fresh water the
    alarm level must be lower than the warn level, because a low tank is the bad
-   one. For waste it must be higher, because a full tank is the bad one.
+   one, and neither can be above 95. For waste it must be higher, because a full
+   tank is the bad one, and neither can be below 5.
 4. Choose **Save** in the bar at the top.
 
 Helmcentral tells you which kind is wrong and doesn't save until the pair runs
-the right way round.
+the right way round. It also refuses a change that would leave one of your tanks
+with levels the wrong way round, and names that tank so you can fix its own
+levels first.
 
 ## Give one tank its own levels
 
@@ -46,6 +49,3 @@ silenced. Turn **Alarms off** back off to get the alarm again.
   alarms. Give it an item first.
 - The fuel bars on an Engine Cluster have no levels of their own. They follow
   the tank they show.
-- A tank's own level can end up on the wrong side of a default you change later.
-  If that happens, the tank raises no alarm until you fix it, and the log says
-  why.

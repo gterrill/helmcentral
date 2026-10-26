@@ -43,8 +43,6 @@ export interface ActiveAlarm {
   threshold?: number
   hysteresis?: number
   clear_value?: number
-  /** A tank alarm's tank capacity in cubic metres, when the tank publishes one (ADR 0214). */
-  capacity?: number
   /** SI unit string from SignalK meta or the derived-path table; absent when unknown. */
   unit?: string
 

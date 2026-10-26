@@ -12,6 +12,8 @@ import { cn } from '@/lib/utils'
 type TanksTileProps = {
   tanks: TankLevel[]
   loading: boolean
+  /** Why the tanks have no levels (ADR 0214), shown instead of the list. */
+  error?: string | null
   /**
    * Seconds since the tanks feed last reported, or null if the upstream
    * source carries no age at all. `useTanksState`'s payload does not
@@ -88,6 +90,7 @@ function tankKindIcon(kind: TankLevel['kind']) {
 export const TanksTile = memo(function TanksTile({
   tanks,
   loading,
+  error = null,
   lastUpdateAgeS,
 }: TanksTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
@@ -136,7 +139,11 @@ export const TanksTile = memo(function TanksTile({
           )
         })}
 
-        {!loading && visibleTanks.length === 0 ? (
+        {error ? (
+          <div role="alert" className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-destructive">{error}</div>
+        ) : null}
+
+        {!loading && !error && visibleTanks.length === 0 ? (
           <div className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-muted-foreground">No tank data available</div>
         ) : null}
 

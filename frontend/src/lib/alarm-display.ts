@@ -242,9 +242,10 @@ function withRadarFigures(sentence: string, target: ActiveAlarm['radar_target'])
 export function alarmConditionSentence(alarm: ActiveAlarm, options?: { forecastDetailsLinked?: boolean }): string {
   const { op, unit, value, clear_value: clearValue, message } = alarm
 
-  // A tank level alarm (ADR 0214) reads what the tank holds, "19% · 228 L";
+  // A tank level alarm (ADR 0214) reads what the tank holds, "19% · 228 L", in
+  // the words the server sets for every transport (one presenter, ADR 0157);
   // how it clears is the footer's (alarmFooterText).
-  if (isTankAlarm(alarm)) return tankAlarmBody(alarm)
+  if (isTankAlarm(alarm)) return message
 
   if (op === undefined) {
     // An alarm with no rule behind it: a bus notification (the backend has
@@ -317,13 +318,6 @@ export const TANK_ALARM_RULE_PREFIX = 'tank:'
 
 export function isTankAlarm(alarm: ActiveAlarm): boolean {
   return alarm.rule_id.startsWith(TANK_ALARM_RULE_PREFIX)
-}
-
-/** Level, then the volume when the tank publishes a capacity: "19% · 228 L", or "19%". */
-function tankAlarmBody(alarm: ActiveAlarm): string {
-  const level = `${Math.round(alarm.value * 100)}%`
-  if (alarm.capacity === undefined || alarm.capacity <= 0) return level
-  return `${level} · ${formatAlarmReading(alarm.value * alarm.capacity, 'm3')}`
 }
 
 /**

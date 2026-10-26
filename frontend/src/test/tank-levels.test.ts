@@ -47,6 +47,12 @@ describe('tankLevelsError', () => {
     expect(tankLevelsError('fuel', 8, null, { warn: 20, alarm: 10 })).toMatch(/lower than the warn/)
     expect(tankLevelsError('fuel', null, 25, { warn: 20, alarm: 10 })).toMatch(/lower than the warn/)
   })
+  it('keeps the clear point inside 0-100', () => {
+    expect(tankLevelsError('fuel', 96, null, { warn: 20, alarm: 10 })).toMatch(/at most 95/)
+    expect(tankLevelsError('fuel', 95, null, { warn: 20, alarm: 10 })).toBeNull()
+    expect(tankLevelsError('waste', null, 100, { warn: 80, alarm: 90 })).toBeNull()
+    expect(tankLevelsError('waste', 4, 95, { warn: 80, alarm: 90 })).toMatch(/at least 5/)
+  })
   it('refuses a waste tank whose alarm is not above its warn', () => {
     expect(tankLevelsError('waste', 95, null, { warn: 80, alarm: 90 })).toMatch(/higher than the warn/)
   })

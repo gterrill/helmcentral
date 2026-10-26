@@ -30,7 +30,12 @@ func helmcentralOwnsPath(path string, rules []alarmRule) bool {
 // derived from gauge zones (ADR 0050) and tank levels (ADR 0214) -- so "owned" never drifts from what
 // this engine is actually watching.
 func helmcentralOwnershipPredicate() func(path string) bool {
-	rules := append(listAlarmRules(), derivedAlarmRules()...)
+	return helmcentralOwnershipPredicateFor(append(listAlarmRules(), derivedAlarmRules()...))
+}
+
+// helmcentralOwnershipPredicateFor is the same check over a rule set the caller
+// already built, so a tick builds its rules once.
+func helmcentralOwnershipPredicateFor(rules []alarmRule) func(path string) bool {
 	return func(path string) bool {
 		return helmcentralOwnsPath(path, rules)
 	}
