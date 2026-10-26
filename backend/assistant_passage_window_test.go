@@ -1377,3 +1377,24 @@ func TestAssessPassageWindowDescription_SaysOnlyNoGoLimitsAreSet(t *testing.T) {
 		}
 	}
 }
+
+// The route points exist only in the tool's arguments (ADR 0211), so the card
+// that leaves the tool carries them, one list per leg, and not on the wire.
+func TestAssessPassageWindowTool_CardCarriesTheLegRoutesToTheSink(t *testing.T) {
+	d := pwToolDeps(pwLimitsAll())
+	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cards := d.takeCards(result)
+	if len(cards) != 1 {
+		t.Fatalf("cards = %+v", cards)
+	}
+	r := cards[0].routes
+	if len(r) != 1 || len(r[0]) != 2 || r[0][0].Name != "Alpha" || r[0][1].Lat != -18 {
+		t.Fatalf("routes = %+v", r)
+	}
+	if strings.Contains(string(cards[0].Payload), `"lat"`) {
+		t.Fatalf("route points are not part of the card payload: %s", cards[0].Payload)
+	}
+}

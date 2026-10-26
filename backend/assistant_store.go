@@ -259,6 +259,9 @@ func createAssistantSchema(db *sql.DB) error {
 	if err := createAssistantCardsSchema(db); err != nil {
 		return err
 	}
+	if err := createPassageDecisionsSchema(db); err != nil {
+		return err
+	}
 	return createAssistantFeedbackSchema(db)
 }
 
@@ -540,7 +543,7 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 		if m.Role != "assistant" {
 			return assistantMessage{}, fmt.Errorf("insert message cards: only an assistant message can carry them, got role %q", m.Role)
 		}
-		if err := insertAssistantCardsTx(tx, m.ID, m.Cards, now); err != nil {
+		if err := insertAssistantCardsTx(tx, m.ConversationID, m.ID, m.Cards, now); err != nil {
 			return assistantMessage{}, err
 		}
 	}

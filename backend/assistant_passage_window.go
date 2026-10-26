@@ -140,6 +140,16 @@ func parsePassageWindowArgs(raw json.RawMessage) (passageWindowArgs, error) {
 	return a, nil
 }
 
+// legRoutes is each leg's route points as given, kept with the card so a later
+// match can find the boat on the planned track (ADR 0211).
+func legRoutes(a passageWindowArgs) [][]passageRoutePoint {
+	out := make([][]passageRoutePoint, len(a.Legs))
+	for i, l := range a.Legs {
+		out[i] = l.Route
+	}
+	return out
+}
+
 func (a passageWindowArgs) validate() error {
 	fail := func(format string, v ...any) error {
 		return fmt.Errorf("assess_passage_window: "+format, v...)
@@ -1083,7 +1093,7 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 	if err != nil {
 		return "", err
 	}
-	d.cards.put(text, mateCard{Kind: "passage_window", Payload: card})
+	d.cards.put(text, mateCard{Kind: passageWindowCardKind, Payload: card, routes: legRoutes(args), created: now})
 	return text, nil
 }
 
