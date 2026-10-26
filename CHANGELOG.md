@@ -11,7 +11,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Engine Cluster fuel bars no longer raise alarms or set their own colours.**
+  A fuel bar now takes its colours from the tank's alarm levels, and the tank
+  raises the alarm. Fuel bar zones you set before are ignored. Open the tank's
+  equipment item and check **Tank levels**, or change the defaults for every
+  fuel tank under **Settings → Alarms → Tank levels**.
+
 ### Added
+
+- **Tank alarms.** Helmcentral now raises its own alarm when a tank gets low, or
+  when a waste tank gets full, for any tank that has an equipment item. Fuel and
+  fresh water warn at 20 percent and alarm at 10. Waste warns at 80 and alarms
+  at 90. The level has to hold for a minute before the alarm is raised, and it
+  clears once the tank is 5 percentage points back. The card is named for the
+  tank, such as "Fuel Port Fwd Low", and shows the level and the litres left,
+  with where it clears underneath. You can change the defaults under **Settings
+  → Alarms → Tank levels**, give one tank its own levels, or switch a tank's
+  alarms off on its equipment page.
 
 - **Move a sign in time.** With a sign picked in the replay's sign editor,
   **Move sign here** puts it at the moment the slider is on, and **−1 min**,
@@ -19,6 +37,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   replay jumps to the new moment. For a sign with a photo, **Photo**, then
   **Back to photo time** puts it back where the photo was taken. You no longer
   have to delete a sign and add it again to change when it appears.
+
+### Changed
+
+- **The Tanks tile warns fuel at 20 percent.** It used to warn at 30. The tile
+  and the fuel bars now use the same levels as the tank alarms, so the colour
+  you see is the alarm you get.
 
 ## [0.55.0] - 2026-10-26
 

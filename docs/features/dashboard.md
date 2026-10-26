@@ -279,8 +279,14 @@ and how the Dawn figure is worked out.
 ## Tanks
 
 Each tank gets a bar showing its level in percent, plus a state word that stays
-readable in glare. Fuel and water warn as they run low, and waste warns as it
-fills.
+readable in glare. Fuel and water turn amber and then red as they run low, and
+waste turns amber and then red as it fills. A tank turns amber below its warn
+level and red below its alarm level, or above them for waste. They're the same
+levels the tank alarms use, so the colour on the tile and the alarm always
+agree. See [Tank level alarms](alarms.md#tank-level-alarms) for the defaults and
+how to change them.
+
+The tile lists only the tanks you've given an equipment item.
 
 ## Nearby map
 

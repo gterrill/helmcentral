@@ -32,9 +32,9 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
 6. Leave **Title** blank to show the engine's name, or type your own.
 7. To add a fuel rail, choose **Add fuel rail**, then choose a tank for each bar
    (forward and aft). The arcs sit on the outer edge for the engine's side.
-   A bar can carry a **low fuel alarm**, which is the level it falls below and
-   how severe the alarm is. Unlike engine limits, it belongs to the bar,
-   because a tank has no profile.
+   A bar takes its colours from the tank's own alarm levels, so there's
+   nothing to set on the bar. See [Change a tank's alarm
+   levels](change-tank-alarm-levels.md).
 8. Choose **Save**.
 
 For the second engine, duplicate the tile, choose the other engine and press
