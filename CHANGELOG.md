@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-10-26
+
 ### Added
 
 - **Rate a passage.** A passage's edit panel has a **How it went** section with
@@ -1855,7 +1857,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.55.0...HEAD
+[0.55.0]: https://github.com/gterrill/helmcentral/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/gterrill/helmcentral/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/gterrill/helmcentral/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/gterrill/helmcentral/compare/v0.51.0...v0.52.0
