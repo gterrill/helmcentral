@@ -1029,6 +1029,7 @@ function AppShell() {
   const {
     tanks,
     loading: tanksLoading,
+    error: tanksError,
     lastUpdateAgeS: tanksAgeS,
   } = useTanksState()
   const {
@@ -1548,6 +1549,7 @@ function AppShell() {
           values={gaugeValues}
           ages={gaugeAges}
           engines={engineStates}
+          tanks={tanks}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setClusterDraft)}
         />
@@ -1767,6 +1769,7 @@ function AppShell() {
           <TanksTile
             tanks={tanks}
             loading={tanksLoading}
+            error={tanksError}
             lastUpdateAgeS={tanksAgeS}
           />
         )

@@ -298,24 +298,6 @@ func (ix equipmentIndex) resolveTank(tankID string) (level, capacity string, ok 
 	return item.Source + ".currentLevel", item.Source + ".capacity", true
 }
 
-// tankLevelReading is the gauge a low-fuel alarm is raised from: the tank's
-// level as a percentage of full, with the zones the fuel bar carries. The tank
-// is the item picked for the bar, or, while none is, the source the bar read.
-func (ix equipmentIndex) tankLevelReading(bar dashboardClusterFuelBar) (key string, gauge dashboardGaugeConfig, ok bool) {
-	min, max := 0.0, 100.0
-	gauge = dashboardGaugeConfig{Display: "bar", Quantity: "ratio", Unit: "percent", Min: &min, Max: &max, Zones: bar.Zones}
-	if level, _, resolved := ix.resolveTank(bar.TankID); resolved {
-		gauge.Path, gauge.Label = level, ix.items[bar.TankID].Name+" level"
-		return "tank:" + bar.TankID, gauge, true
-	}
-	if bar.Source != "" {
-		gauge.Path = bar.Source + ".currentLevel"
-		gauge.Label = firstNonEmpty(bar.Label, bar.Source) + " level"
-		return "tank:" + bar.Source, gauge, true
-	}
-	return "", dashboardGaugeConfig{}, false
-}
-
 // resolveLamp gives the path a lamp reads: its own, or its item's source plus
 // the suffix.
 func (ix equipmentIndex) resolveLamp(l dashboardLamp) (string, bool) {

@@ -161,6 +161,10 @@ type sourceItem struct {
 	Cells       int
 	WarnVoltage float64
 	HighVoltage float64
+	// A tank's own alarm levels (ADR 0214); zero is blank.
+	TankWarnPercent  float64
+	TankAlarmPercent float64
+	TankAlarmsOff    bool
 }
 
 func newSourceItem(it equipmentItem) (sourceItem, bool) {
@@ -173,6 +177,7 @@ func newSourceItem(it equipmentItem) (sourceItem, bool) {
 		Group: group, Instance: instance, ProfileID: it.ProfileID,
 		CapacityAh: it.CapacityAh, Cells: it.Cells,
 		WarnVoltage: it.WarnVoltage, HighVoltage: it.HighVoltage,
+		TankWarnPercent: it.TankWarnPercent, TankAlarmPercent: it.TankAlarmPercent, TankAlarmsOff: it.TankAlarmsOff,
 	}, true
 }
 

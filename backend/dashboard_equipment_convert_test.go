@@ -257,9 +257,9 @@ const unitsAndFuelFixture = `{"pages":[{"id":"p1","name":"Engines","position":0,
  ],"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}]}`
 
 // A tile whose unit differs from the profile's moves its zones in the
-// profile's unit, and a fuel bar keeps its zones, which raise the low-fuel
-// alarm, because a tank has no profile to hold them.
-func TestConvertDashboardTilesConvertsUnitsAndKeepsFuelBarZones(t *testing.T) {
+// profile's unit, and a fuel bar drops its zones: the tank's own levels colour
+// it and raise its alarm (ADR 0214).
+func TestConvertDashboardTilesConvertsUnitsAndDropsFuelBarZones(t *testing.T) {
 	setupDashboardPagesTest(t)
 	path := filepath.Join(t.TempDir(), "dashboard-pages.json")
 	t.Setenv("DASHBOARD_PAGES_FILE", path)
@@ -296,19 +296,15 @@ func TestConvertDashboardTilesConvertsUnitsAndKeepsFuelBarZones(t *testing.T) {
 	dashboardPagesMu.RLock()
 	bar := dashboardPagesState["p1"].Widgets[0].Cluster.Fuel.Bars[0]
 	dashboardPagesMu.RUnlock()
-	if bar.TankID != tank || len(bar.Zones) != 1 || bar.Zones[0].To != 15 || bar.Zones[0].State != alarmStateWarn {
-		t.Errorf("the fuel bar keeps its low-fuel zone: %+v", bar)
+	if bar.TankID != tank {
+		t.Errorf("the fuel bar names its tank: %+v", bar)
 	}
-	rules := zoneDerivedAlarmRules()
-	var low bool
-	for _, r := range rules {
-		if r.ID == "zone:tank:"+tank+":0" {
-			low = true
+	for _, r := range zoneDerivedAlarmRules() {
+		if strings.HasPrefix(r.ID, "zone:tank:") {
+			t.Errorf("a fuel bar raises no zone alarm: %+v", r)
 		}
 	}
-	if !low {
-		t.Errorf("the low-fuel alarm must survive the conversion, got %+v (engine %s)", rules, port)
-	}
+	_ = port
 }
 
 func barProfileWithoutZones() engineProfile {

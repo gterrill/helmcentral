@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 	"time"
 
@@ -18,6 +19,12 @@ type tankLevelData struct {
 	// dead sender does not condemn every tank on the boat. -1 when the
 	// tank's currentLevel carries no timestamp.
 	LastUpdateAge float64 `json:"last_update_age_s"`
+	// WarnPercent and AlarmPercent are the tank's resolved levels (ADR 0214),
+	// the same numbers its alarms use. AlarmsOff only silences the alarms;
+	// the tile still colours by the levels.
+	WarnPercent  float64 `json:"warn_percent"`
+	AlarmPercent float64 `json:"alarm_percent"`
+	AlarmsOff    bool    `json:"alarms_off"`
 }
 
 // buildTanksStatePayload produces the /api response body. Split from the handler so
@@ -26,6 +33,7 @@ func buildTanksStatePayload() map[string]any {
 	now := time.Now().UTC()
 	tanks := []tankLevelData{}
 	source := "backend-fallback"
+	tanksError := ""
 
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	address, port, err := loadSignalKSettings(settingsPath)
@@ -45,6 +53,11 @@ func buildTanksStatePayload() map[string]any {
 		stateTanks, datetime, fetchErr := fetchSignalKTanksState(labelOverrides)
 		if fetchErr == nil {
 			tanks = stateTanks
+			if err := annotateTankLevels(tanks); err != nil {
+				log.Printf("tanks: %v", err)
+				tanks = []tankLevelData{}
+				tanksError = err.Error()
+			}
 			now = datetime
 			source = "signalk"
 		}
@@ -63,6 +76,9 @@ func buildTanksStatePayload() map[string]any {
 		"datetime": now.Format(time.RFC3339),
 		"source":   source,
 		"tanks":    tanks,
+		// Set when the tanks could not be given their levels (ADR 0214); the
+		// tile says so instead of colouring by numbers the alarms don't use.
+		"error": tanksError,
 		// The freshest of the per-tank ages above: what the Tanks tile
 		// itself goes stale on (ADR 0068).
 		"last_update_age_s":    tanksFeedAge(tanks),

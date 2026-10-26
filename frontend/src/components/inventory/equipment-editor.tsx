@@ -59,6 +59,7 @@ import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { fetchNote, saveNote } from '@/lib/note-api'
 import { hourMeterSourceFor } from '@/lib/vessel-settings'
 import { EquipmentSourceSection } from '@/components/inventory/equipment-source-section'
+import { EquipmentTankLevelsSection } from '@/components/inventory/equipment-tank-levels-section'
 import {
   CHANGE_SOURCE_CONSEQUENCE,
   CLEAR_SOURCE_CONSEQUENCE,
@@ -119,6 +120,9 @@ function draftFromItem(item: EquipmentItem): EquipmentInput {
     cells: item.cells,
     warn_voltage: item.warn_voltage,
     high_voltage: item.high_voltage,
+    tank_warn_percent: item.tank_warn_percent,
+    tank_alarm_percent: item.tank_alarm_percent,
+    tank_alarms_off: item.tank_alarms_off,
     profile_id: item.profile_id,
     aliases: item.aliases,
     verified_aboard: item.verified_aboard,
@@ -154,6 +158,9 @@ function sameDraft(a: EquipmentInput, b: EquipmentInput): boolean {
     && a.cells === b.cells
     && a.warn_voltage === b.warn_voltage
     && a.high_voltage === b.high_voltage
+    && a.tank_warn_percent === b.tank_warn_percent
+    && a.tank_alarm_percent === b.tank_alarm_percent
+    && a.tank_alarms_off === b.tank_alarms_off
     && a.profile_id === b.profile_id
     && a.verified_aboard === b.verified_aboard
     && a.notes === b.notes
@@ -1279,6 +1286,8 @@ export function EquipmentEditor(
           discovery={discovery}
           canWrite={canWrite}
         />
+
+        <EquipmentTankLevelsSection draft={draft} setDraft={setDraft} canWrite={canWrite} />
 
         {/* An item has an hour meter when its SignalK source carries one: an
             engine's or a generator's runtime counter. The stored `category`

@@ -44,6 +44,9 @@ func validateEquipmentSource(q sqlQueryer, selfID string, item *equipmentItem) e
 	if group != sourceBattery && (item.CapacityAh != 0 || item.Cells != 0 || item.WarnVoltage != 0 || item.HighVoltage != 0) {
 		return fmt.Errorf("%w: capacity, cell count and voltages belong to a battery item, and this one is not mapped to a battery", errEquipmentSourceInvalid)
 	}
+	if err := validateTankOverrides(item, group); err != nil {
+		return fmt.Errorf("%w: %s", errEquipmentSourceInvalid, err.Error())
+	}
 	if item.SignalKSource == "" {
 		return nil
 	}

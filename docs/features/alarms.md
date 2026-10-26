@@ -254,6 +254,46 @@ show it, and changing the profile's limit changes the alarm. The alarm is named
 for the equipment, such as "Port engine Oil Press". See [Set an alarm
 threshold](../how-to/set-an-alarm-threshold.md) for the steps either way.
 
+## Tank level alarms
+
+Helmcentral watches every tank you've given an equipment item, so a fuel tank
+running low never depends on a chartplotter noticing first. The tank alarms
+share their levels with the Tanks tile and the Engine Cluster's fuel bars, so
+the colour you see and the alarm you get always agree.
+
+- **Two levels per tank:** A warn level raises a warn alarm and an alarm level
+  raises an alarm. Fuel and fresh water use 20 and 10 percent, because a low
+  tank is the bad one. Waste tanks use 80 and 90, because a full tank is the
+  bad one.
+- **Your own levels:** Change the defaults for each kind of tank under
+  **Settings → Alarms → Tank levels**, or give one tank its own levels on its
+  equipment page. See [Change a tank's alarm
+  levels](../how-to/change-tank-alarm-levels.md).
+- **Only tanks you've named:** A tank with no equipment item isn't listed on
+  the Tanks tile and doesn't alarm.
+- **No flapping:** The level has to stay past a level for 60 seconds before the
+  alarm is raised. It clears once the level is 5 percentage points back, so a
+  warn at 20 percent clears above 25, and a waste warn at 80 clears below 75.
+  Those two figures are fixed.
+- **A silent sender raises nothing:** If a tank's sender stops reporting for two
+  minutes, Helmcentral doesn't raise a level alarm from the old reading. The
+  Tanks tile goes stale instead, and the instrument health alarm covers the
+  sender.
+- **One alarm per tank:** A tank is a single alarm that moves from warn to alarm
+  as the level falls, and back to warn as it recovers. It only clears once the
+  tank is clear of the warn level. Acknowledging it acknowledges the tank. If
+  it recovers from alarm to warn it stays acknowledged, and if it falls back to
+  the alarm level it is raised again, unacknowledged.
+- **Alarms off:** A tank can have its alarms switched off. The Tanks tile still
+  shows its level and colours.
+
+The card is named for the tank, for example "Fuel Port Fwd Low" or "Black Water
+Stbd High". It shows the level and, when the tank reports its capacity, what
+that is in litres: "19% · 228 L". The line underneath says where the level has
+to get back to, such as "Clears above 25%". The alarms appear in the rules list
+marked as coming from the tank levels, and you change them on the tank rather
+than there.
+
 ## Values Helmcentral works out for itself
 
 A rule isn't limited to a single instrument reading. Some useful numbers don't

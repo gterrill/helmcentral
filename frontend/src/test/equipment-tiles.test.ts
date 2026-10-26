@@ -221,13 +221,25 @@ describe('the scale and unit of an equipment slot', () => {
 
 describe('fuel bar zones', () => {
   const tank = item({ id: 'tank-5', name: 'Port forward fuel', signalk_source: 'tanks.fuel.5', source_kind: 'tank', profile_id: '' })
-  it('go onto the level slot, because a tank has no profile to hold them', () => {
-    const r = resolveCluster(
-      { ...cluster, fuel: { side: 'left', bars: [{ tankId: 'tank-5', label: 'Fwd', zones: [{ from: 0, to: 15, state: 'warn' }] }] } },
-      ctx([item(), tank]),
-    )
+  const config = { ...cluster, fuel: { side: 'left' as const, bars: [{ tankId: 'tank-5', label: 'Fwd' }] } }
+  const levels = [{
+    id: 'fuel.5', label: 'Port forward fuel', category: 'fuel', kind: 'fuel' as const, level_percent: 50,
+    warn_percent: 25, alarm_percent: 12, alarms_off: false,
+  }]
+
+  it("come from the tank's resolved levels, one set for the colours and the alarms", () => {
+    const r = resolveCluster(config, ctx([item(), tank]), levels)
     if (!r.ok || !r.config.fuel) throw new Error('expected a rail')
-    expect(r.config.fuel.bars[0].level.zones).toEqual([{ from: 0, to: 15, state: 'warn' }])
+    expect(r.config.fuel.bars[0].level.zones).toEqual([
+      { from: 0, to: 12, state: 'alarm' },
+      { from: 12, to: 25, state: 'warn' },
+    ])
+  })
+
+  it('are absent until the tank has reported its levels', () => {
+    const r = resolveCluster(config, ctx([item(), tank]), [])
+    if (!r.ok || !r.config.fuel) throw new Error('expected a rail')
+    expect(r.config.fuel.bars[0].level.zones).toBeUndefined()
   })
 })
 
