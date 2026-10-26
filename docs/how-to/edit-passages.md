@@ -64,6 +64,31 @@ The track is drawn in a new colour from that moment on. Turn the switch off, or
 delete the sign, to make it one colour again. If the sign has no name yet, it
 shows "Awaiting a name" and turning the switch off asks you to type one first.
 
+## Rate a passage
+
+Rate a passage to keep a note of how it felt. See
+[Passages](../features/passages.md) for where the rating shows up.
+
+1. Open the passage and find **How it went** in the edit panel.
+2. Press **Comfortable**, **Lively** or **Shouldn't have gone**.
+
+It saves straight away, so you don't press **Save**. To clear it, press the
+chosen one again. If the save fails, a message gives the reason and the rating
+stays as it was.
+
+## Correct what Mate recorded
+
+When you sailed a passage from a Mate weather window, Helmcentral may have
+guessed what you did with the plan. It shows "(inferred)" beside the guess.
+
+1. Open the passage and find the **Planned with Mate** line under the route.
+2. Press the choice next to it, which reads something like "Went · Fri 23 Oct
+   (inferred)".
+3. Pick **Went**, **Stayed**, **Just looking** or **Not set**.
+
+Your choice replaces the guess and the "(inferred)" goes away. The same choice
+is on the weather window card in the chat. You need write access to change it.
+
 ## Hide a passage
 
 1. Press **Hide passage**.

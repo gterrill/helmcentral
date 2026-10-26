@@ -1,4 +1,5 @@
 import type { DistanceUnits } from '@/config/app-config'
+import type { PassageDetailExtras } from '@/lib/passage-plans'
 import { formatQuantity, unitOption } from '@/lib/quantities'
 
 // Passages page: the record shapes the backend returns and the pure helpers
@@ -48,6 +49,9 @@ export interface PassageDetail extends PassageSummary {
   replay_track: [number, number][][]
   replay_times: number[][]
 }
+
+/** One passage as its own page reads it: the tracks plus the rating and the Mate plans. */
+export type PassageView = PassageDetail & PassageDetailExtras
 
 export interface CruiseRecord {
   id: string

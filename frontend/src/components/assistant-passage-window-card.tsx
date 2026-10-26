@@ -1,7 +1,9 @@
 import { CalendarClock } from 'lucide-react'
 import { useState } from 'react'
 
-import type { PassageMeasure, PassageState, PassageWindowCard, PassageWindowCell } from '@/lib/mate-cards'
+import { PassageDecisionControl } from '@/components/passage-decision-control'
+import { formatRowDate } from '@/lib/passage-dates'
+import type { PassageDecision, PassageMeasure, PassageState, PassageWindowCard, PassageWindowCell } from '@/lib/mate-cards'
 
 const STALE_AFTER_MS = 6 * 60 * 60 * 1000
 
@@ -32,7 +34,7 @@ const MEASURE_WORDS: Record<PassageMeasure, string> = {
 }
 const MEASURE_ORDER: PassageMeasure[] = ['wind_marginal', 'gust', 'wave', 'wave_direction', 'wind_against_tide', 'daylight']
 
-function StateChip({ state }: { state: PassageState }) {
+export function StateChip({ state }: { state: PassageState }) {
   return (
     <span
       className={`inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-xs font-semibold leading-none ${STATE_CHIP[state]}`}
@@ -50,15 +52,6 @@ function formatStamp(iso: string, timeZone: string): string {
   const d = new Date(iso)
   const day = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short' }).format(d)
   return `${day} ${formatTime(iso, timeZone)}`
-}
-
-/** "Thu 23 Oct" from a local YYYY-MM-DD; read as UTC so no zone shifts the day. */
-function formatDate(ymd: string): string {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).formatToParts(
-    new Date(`${ymd}T00:00:00Z`),
-  )
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? ''
-  return `${get('weekday')} ${get('day')} ${get('month')}`
 }
 
 function stayLabel(n: number | null): string | null {
@@ -93,7 +86,19 @@ function cellTitle(cell: PassageWindowCell, rowDate: string, timeZone: string): 
  * legs across, one word per cell. From sm up it is a real grid; on a phone each
  * departure date is a block with its legs listed under it.
  */
-export function AssistantPassageWindowCard({ card }: { card: PassageWindowCard }) {
+export function AssistantPassageWindowCard({
+  card,
+  canWrite = false,
+  onDecisionChange,
+  onDecisionUnreadable,
+}: {
+  card: PassageWindowCard
+  canWrite?: boolean
+  /** Called with the server's answer after the operator changes the decision. */
+  onDecisionChange?: (cardId: number, decision: PassageDecision) => void
+  /** The choice was saved but the answer could not be read: re-read the thread. */
+  onDecisionUnreadable?: () => void
+}) {
   const [now] = useState(() => Date.now())
   const stale = now - Date.parse(card.forecastFetchedAt) > STALE_AFTER_MS
   const n = card.legs.length
@@ -146,8 +151,15 @@ export function AssistantPassageWindowCard({ card }: { card: PassageWindowCard }
             className={`grid min-w-0 grid-cols-1 gap-2 border-t border-border pt-2 ${gridCols}`}
           >
             <div role="rowheader" className="flex min-w-0 items-center justify-between gap-2 sm:flex-col sm:items-start sm:justify-start">
-              <span className="min-w-0 truncate text-sm font-medium text-foreground">{formatDate(row.departDate)}</span>
-              <StateChip state={row.verdict} />
+              <span className="min-w-0 truncate text-sm font-medium text-foreground">{formatRowDate(row.departDate)}</span>
+              <span className="flex shrink-0 items-center gap-1">
+                {card.decision?.state === 'went' && card.decision.rowDate === row.departDate && (
+                  <span className="inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-xs font-semibold leading-none text-muted-foreground">
+                    WENT
+                  </span>
+                )}
+                <StateChip state={row.verdict} />
+              </span>
             </div>
             {row.cells.map((cell) => {
               const detail = cell.limiting?.text ?? cell.note
@@ -173,6 +185,19 @@ export function AssistantPassageWindowCard({ card }: { card: PassageWindowCard }
           </div>
         ))}
       </div>
+
+      {card.decision && card.cardId !== undefined && (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">What you did</span>
+          <PassageDecisionControl
+            decision={card.decision}
+            rowDates={card.rows.map((r) => r.departDate)}
+            canWrite={canWrite}
+            onChange={(d) => onDecisionChange?.(card.cardId as number, d)}
+            onUnreadable={onDecisionUnreadable}
+          />
+        </div>
+      )}
 
       {notCheckedWords.length > 0 && (
         <p className="min-w-0 text-xs text-muted-foreground">Not checked: {notCheckedWords.join(', ')}</p>

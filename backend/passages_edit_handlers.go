@@ -49,12 +49,13 @@ func patchPassageHandler(c echo.Context) error {
 		FromName *string         `json:"from_name"`
 		ToName   *string         `json:"to_name"`
 		Hidden   *bool           `json:"hidden"`
+		Rating   *string         `json:"rating"`
 		CruiseID json.RawMessage `json:"cruise_id"`
 	}
 	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
 		return err
 	}
-	patch := passagePatch{Title: body.Title, Notes: body.Notes, FromName: body.FromName, ToName: body.ToName, Hidden: body.Hidden}
+	patch := passagePatch{Title: body.Title, Notes: body.Notes, FromName: body.FromName, ToName: body.ToName, Hidden: body.Hidden, Rating: body.Rating}
 	if body.CruiseID != nil {
 		patch.CruiseIDSet = true
 		if !bytes.Equal(bytes.TrimSpace(body.CruiseID), []byte("null")) {
@@ -68,6 +69,9 @@ func patchPassageHandler(c echo.Context) error {
 	rec, err := store.PatchPassage(c.Param("id"), patch)
 	if err != nil {
 		return passageErrorResponse(c, err)
+	}
+	if body.Hidden != nil {
+		wakePassageDecisions(rec.Start, rec.End)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"passage": rec})
 }
@@ -88,6 +92,7 @@ func splitPassageHandler(c echo.Context) error {
 	if err != nil {
 		return passageErrorResponse(c, err)
 	}
+	wakePassageDecisions(a.Start, b.End)
 	return c.JSON(http.StatusOK, map[string]any{"passages": []passageRecord{a, b}})
 }
 
@@ -107,6 +112,7 @@ func mergePassagesHandler(c echo.Context) error {
 	if err != nil {
 		return passageErrorResponse(c, err)
 	}
+	wakePassageDecisions(rec.Start, rec.End)
 	return c.JSON(http.StatusOK, map[string]any{"passage": rec})
 }
 
@@ -123,10 +129,24 @@ func trimPassageHandler(c echo.Context) error {
 	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
 		return err
 	}
+	// The span before the trim is read too: a decision linked to the part
+	// that was cut off must be looked at again.
+	before, err := store.GetPassage(c.Param("id"))
+	if err != nil {
+		return passageErrorResponse(c, err)
+	}
 	rec, err := store.TrimPassage(c.Param("id"), body.Start.UTC(), body.End.UTC())
 	if err != nil {
 		return passageErrorResponse(c, err)
 	}
+	from, to := rec.Start, rec.End
+	if before.Start.Before(from) {
+		from = before.Start
+	}
+	if before.End.After(to) {
+		to = before.End
+	}
+	wakePassageDecisions(from, to)
 	return c.JSON(http.StatusOK, map[string]any{"passage": rec})
 }
 

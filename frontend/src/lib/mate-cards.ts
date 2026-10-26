@@ -25,9 +25,25 @@ export interface PassageWindowCell {
   notChecked: PassageMeasure[]
 }
 
+export type PassageDecisionState = '' | 'went' | 'stayed' | 'just_looking'
+
+/** What was done with a passage plan. `rowDate` is set only for `went`. */
+export interface PassageDecision {
+  id: number
+  state: PassageDecisionState
+  rowDate: string | null
+  /** True while Helmcentral filled it in; an operator choice makes it false. */
+  inferred: boolean
+  passageId: string | null
+}
+
 /** The passage-window grid (ADR 0191): departure dates down, legs across. */
 export interface PassageWindowCard {
   kind: 'passage_window'
+  /** The stored card's id; absent on a card saved before decisions were kept. */
+  cardId?: number
+  /** What the operator did with the plan; absent on a card saved before decisions were kept. */
+  decision?: PassageDecision
   timezone: string
   forecastFetchedAt: string
   provider: string
@@ -66,7 +82,7 @@ export interface TelemetryChartCard {
   compare: (TelemetryChartRange & { label: string })[]
 }
 
-const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
+export const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
 const FACTORS: readonly string[] = ['wind', 'gust', 'wave', 'wind_against_tide', 'daylight']
 const SECTORS: readonly string[] = ['ahead', 'abeam', 'astern']
 // wind_marginal is only on cards saved by v0.49.0 chats; marginal is worked out now.
@@ -89,7 +105,7 @@ function str(v: unknown, path: string): string {
   if (typeof v !== 'string') bad(path, 'expected a string')
   return v as string
 }
-function oneOf<T extends string>(v: unknown, allowed: readonly string[], path: string): T {
+export function oneOf<T extends string>(v: unknown, allowed: readonly string[], path: string): T {
   if (typeof v !== 'string' || !allowed.includes(v)) bad(path, `expected one of ${allowed.join(', ')}`)
   return v as T
 }
@@ -112,6 +128,18 @@ function zone(v: unknown, path: string): string {
     bad(path, 'expected a time zone name')
   }
   return s
+}
+
+/** Reads the server's decision view; throws a field error naming `path`. */
+export function decodePassageDecision(raw: unknown, path = 'decision'): PassageDecision {
+  const o = obj(raw, path)
+  const id = o.id
+  if (typeof id !== 'number' || !Number.isInteger(id) || id < 1) bad(`${path}.id`, 'expected a positive integer')
+  const state = oneOf<PassageDecisionState>(o.state, ['', 'went', 'stayed', 'just_looking'], `${path}.state`)
+  const rowDate = o.row_date === null ? null : ymd(o.row_date, `${path}.row_date`)
+  if (typeof o.inferred !== 'boolean') bad(`${path}.inferred`, 'expected true or false')
+  if (o.passage_id !== null && typeof o.passage_id !== 'string') bad(`${path}.passage_id`, 'expected a string or null')
+  return { id: id as number, state, rowDate, inferred: o.inferred as boolean, passageId: o.passage_id as string | null }
 }
 
 function decodePassageWindow(raw: unknown): PassageWindowCard {
@@ -221,9 +249,26 @@ function decodeTelemetryChart(raw: unknown): TelemetryChartCard {
   }
 }
 
-const DECODERS: Record<string, (payload: unknown) => MateCard> = {
-  passage_window: decodePassageWindow,
-  telemetry_chart: decodeTelemetryChart,
+// `entry` is the whole stored card: a passage window also reads the `id` and
+// `decision` that sit beside its payload (ADR 0211). Both are optional.
+const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>) => MateCard> = {
+  passage_window: (payload, entry) => {
+    const card = decodePassageWindow(payload)
+    if (entry.id !== undefined) {
+      if (typeof entry.id !== 'number' || !Number.isInteger(entry.id) || entry.id < 1) bad('id', 'expected a positive integer')
+      card.cardId = entry.id as number
+    }
+    if (entry.decision !== undefined && entry.decision !== null) {
+      if (card.cardId === undefined) bad('id', 'expected the card id beside its decision')
+      const decision = decodePassageDecision(entry.decision)
+      if (decision.state === 'went' && (decision.rowDate === null || !card.rows.some((r) => r.departDate === decision.rowDate))) {
+        bad('decision.row_date', 'expected one of the card\'s departure dates for a went decision')
+      }
+      card.decision = decision
+    }
+    return card
+  },
+  telemetry_chart: (payload) => decodeTelemetryChart(payload),
 }
 
 /**
@@ -241,7 +286,7 @@ export function decodeMateCards(raw: unknown): MateCard[] {
     const decode = Object.prototype.hasOwnProperty.call(DECODERS, kind) ? DECODERS[kind] : undefined
     if (decode) {
       try {
-        return decode((entry as { payload?: unknown }).payload)
+        return decode((entry as { payload?: unknown }).payload, entry as Record<string, unknown>)
       } catch (err) {
         if (!(err instanceof CardFieldError)) throw err
         return { kind: 'error', reason: `message card ${i}: ${err.message}`, rawKind: kind }

@@ -38,7 +38,7 @@ describe('passages queries', () => {
     const mock = stubApi({
       'GET /api/passages': { passages: [record('p1')] },
       'GET /api/cruises': { cruises: [] },
-      'GET /api/passages/p1': { passage: { ...record('p1'), track: [], track_times: [], replay_track: [], replay_times: [] } },
+      'GET /api/passages/p1': { passage: { ...record('p1'), track: [], track_times: [], replay_track: [], replay_times: [], rating: '', planned_with_mate: [] } },
       'GET /api/cruises/c1': { cruise: { id: 'c1', name: 'T', notes: '', created_at: '' }, passages: [], stats: {} },
       'PATCH /api/passages/p1': { passage: record('p1') },
     })

@@ -253,7 +253,7 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 		found = append(found, *det.Open)
 	}
 	for _, lp := range found {
-		rec, inserted, err := s.InsertPassageIfNoOverlap(passageRecord{Start: lp.Start, End: lp.End})
+		rec, inserted, err := s.InsertPassageIfNoOverlap(passageRecord{Start: lp.Start, End: lp.End, Source: trackSourceImported})
 		if err != nil {
 			return sum, err
 		}
@@ -262,7 +262,7 @@ func (s *passageStore) ImportGPX(files []gpxFile) (gpxImportSummary, error) {
 			continue
 		}
 		s.PassageStatsFor(rec) // warm the stored figures
-		announcePassage(rec.ID)
+		announcePassageSpan(rec)
 		sum.PassagesCreated++
 	}
 	return sum, nil

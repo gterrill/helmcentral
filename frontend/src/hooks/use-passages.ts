@@ -9,7 +9,8 @@ import {
   passagesPath,
   type CruiseDetailResponse,
 } from '@/lib/passages-api'
-import type { CruiseRecord, PassageDetail, PassageSummary } from '@/lib/passages'
+import { decodePassageDetailExtras } from '@/lib/passage-plans'
+import type { CruiseRecord, PassageDetail, PassageSummary, PassageView } from '@/lib/passages'
 
 const NO_PASSAGES: PassageSummary[] = []
 const NO_CRUISES: CruiseRecord[] = []
@@ -37,12 +38,16 @@ export function usePassageList() {
   }
 }
 
+function selectPassageView(raw: { passage: PassageDetail }): PassageView {
+  return { ...raw.passage, ...decodePassageDetailExtras(raw.passage) }
+}
+
 /** One passage with its tracks. */
 export function usePassageDetail(id: string) {
   const query = useApiQuery({
     queryKey: [...PASSAGES_KEY, id],
     path: passagesPath(id),
-    select: (raw: { passage: PassageDetail }) => raw.passage,
+    select: selectPassageView,
   })
   return { passage: query.data, loading: query.isLoading, error: query.error?.message ?? null }
 }

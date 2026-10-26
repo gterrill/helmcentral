@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react'
 
-import type { MateCard } from '@/lib/mate-cards'
+import type { MateCard, PassageDecision } from '@/lib/mate-cards'
 
 // Lazy for the same reason as AssistantMarkdown: the kiosk entry chunk should
 // not carry card code for a thread it never mounts.
@@ -14,14 +14,24 @@ const AssistantTelemetryChartCard = lazy(() =>
 
 /** One card under a Mate reply (ADR 0191), chosen by `kind`. An `error` entry
  * is shown, not hidden: the operator should know a card was meant to be here. */
-export function AssistantCard({ card }: { card: MateCard }) {
+export function AssistantCard({
+  card,
+  canWrite = false,
+  onDecisionChange,
+  onDecisionUnreadable,
+}: {
+  card: MateCard
+  canWrite?: boolean
+  onDecisionChange?: (cardId: number, decision: PassageDecision) => void
+  onDecisionUnreadable?: () => void
+}) {
   switch (card.kind) {
     case 'passage_window':
       return (
         <Suspense
           fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
         >
-          <AssistantPassageWindowCard card={card} />
+          <AssistantPassageWindowCard card={card} canWrite={canWrite} onDecisionChange={onDecisionChange} onDecisionUnreadable={onDecisionUnreadable} />
         </Suspense>
       )
     case 'telemetry_chart':

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -191,5 +192,240 @@ func TestEditedPassageIsNotRecreatedByDetectorAfterTrim(t *testing.T) {
 	runPassageDetection(s)
 	if list, _ := s.ListPassages(); len(list) != 1 {
 		t.Errorf("detector re-created a trimmed passage: %d", len(list))
+	}
+}
+
+func TestSplitHalvesInheritTheSourceAndASameSourceMergeKeepsIt(t *testing.T) {
+	s := newTestPassageStore(t)
+	a, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(4 * time.Hour), Source: trackSourceImported})
+	first, second, err := s.SplitPassage(a.ID, passageEpoch.Add(time.Hour))
+	if err != nil || first.Source != trackSourceImported || second.Source != trackSourceImported {
+		t.Fatalf("%+v %+v %v", first, second, err)
+	}
+	if got, _ := s.GetPassage(second.ID); got.Source != trackSourceImported {
+		t.Fatalf("stored second half: %+v", got)
+	}
+	m, err := s.MergePassages(first.ID, second.ID)
+	if err != nil || m.Source != trackSourceImported {
+		t.Fatalf("merge of one source: %+v %v", m, err)
+	}
+
+}
+
+func TestMergeKeepsASharedSourceAndForgetsADisagreement(t *testing.T) {
+	s := newTestPassageStore(t)
+	h := func(n int) time.Time { return passageEpoch.Add(time.Duration(n) * time.Hour) }
+	add := func(from int, src string) passageRecord {
+		r, err := s.InsertPassage(passageRecord{Start: h(from), End: h(from + 1), Source: src})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	// All recorded: kept. All unknown: stays unknown.
+	a, b := add(0, trackSourceRecorded), add(2, trackSourceRecorded)
+	if m, err := s.MergePassages(a.ID, b.ID); err != nil || m.Source != trackSourceRecorded {
+		t.Fatalf("shared source: %+v %v", m, err)
+	}
+	c, d := add(4, ""), add(6, "")
+	if m, err := s.MergePassages(c.ID, d.ID); err != nil || m.Source != "" {
+		t.Fatalf("both unknown: %+v %v", m, err)
+	}
+	// Different sources, or one unknown: the merge goes ahead and the result is unknown.
+	e, f, g := add(8, trackSourceRecorded), add(10, trackSourceImported), add(12, trackSourceRecorded)
+	m, err := s.MergePassages(e.ID, f.ID, g.ID)
+	if err != nil || m.Source != "" {
+		t.Fatalf("mixed: %+v %v", m, err)
+	}
+	if got, _ := s.GetPassage(m.ID); got.Source != "" || got.End != h(13).UTC() {
+		t.Fatalf("stored: %+v", got)
+	}
+	x, y := add(14, ""), add(16, trackSourceRecorded)
+	if m, err := s.MergePassages(x.ID, y.ID); err != nil || m.Source != "" {
+		t.Fatalf("old with new: %+v %v", m, err)
+	}
+}
+
+func TestBackfillPassageSourcesOnlyWhereTheTrackSaysExactly(t *testing.T) {
+	s := newTestPassageStore(t)
+	mk := func(h int, src string) passageRecord {
+		r, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(time.Duration(h) * time.Hour), End: passageEpoch.Add(time.Duration(h)*time.Hour + 30*time.Minute)})
+		if src != "" {
+			s.AppendTrackPoint(recordedTrackPoint{At: r.Start.Add(time.Minute), Lat: -20, Lon: 149, Source: src})
+		}
+		return r
+	}
+	onlyRec, onlyImp, none := mk(0, trackSourceRecorded), mk(2, trackSourceImported), mk(4, "")
+	both := mk(6, trackSourceRecorded)
+	s.AppendTrackPoint(recordedTrackPoint{At: both.Start.Add(2 * time.Minute), Lat: -20, Lon: 149, Source: trackSourceImported})
+	if err := s.backfillPassageSources(); err != nil {
+		t.Fatal(err)
+	}
+	for id, want := range map[string]string{onlyRec.ID: trackSourceRecorded, onlyImp.ID: trackSourceImported, none.ID: "", both.ID: ""} {
+		if got, _ := s.GetPassage(id); got.Source != want {
+			t.Errorf("%s: source %q, want %q", id, got.Source, want)
+		}
+	}
+}
+
+func TestBackfillRunsOnEveryOpenAndLeavesMixedSpansUnknown(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.sqlite")
+	s, err := newPassageStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(time.Hour)})
+	mixed, _ := s.InsertPassage(passageRecord{Start: passageEpoch.Add(3 * time.Hour), End: passageEpoch.Add(4 * time.Hour)})
+	s.AppendTrackPoint(recordedTrackPoint{At: mixed.Start.Add(time.Minute), Lat: -20, Lon: 149, Source: trackSourceRecorded})
+	s.AppendTrackPoint(recordedTrackPoint{At: mixed.Start.Add(2 * time.Minute), Lat: -20, Lon: 149, Source: trackSourceImported})
+	s.close()
+
+	s, err = newPassageStore(path) // first open: nothing to name later yet, mixed stays mixed
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetPassage(later.ID); got.Source != "" {
+		t.Fatalf("no points yet: %q", got.Source)
+	}
+	s.AppendTrackPoint(recordedTrackPoint{At: later.Start.Add(time.Minute), Lat: -20, Lon: 149, Source: trackSourceImported})
+	s.close()
+
+	s, err = newPassageStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.close()
+	if got, _ := s.GetPassage(later.ID); got.Source != trackSourceImported {
+		t.Fatalf("a later open fills what the first could not: %q", got.Source)
+	}
+	if got, _ := s.GetPassage(mixed.ID); got.Source != "" {
+		t.Fatalf("a genuinely mixed span stays unknown: %q", got.Source)
+	}
+}
+
+func TestPatchPassageRatingValuesAreCheckedInGo(t *testing.T) {
+	s := newTestPassageStore(t)
+	p := seedPassage(t, s, passageEpoch, passageEpoch.Add(time.Hour))
+	for _, ok := range []string{"comfortable", "lively", "shouldnt_have_gone", ""} {
+		got, err := s.PatchPassage(p.ID, passagePatch{Rating: ptr(ok)})
+		if err != nil || got.Rating != ok {
+			t.Errorf("rating %q: %+v %v", ok, got, err)
+		}
+		stored, _ := s.GetPassage(p.ID)
+		if stored.Rating != ok {
+			t.Errorf("stored rating %q, want %q", stored.Rating, ok)
+		}
+	}
+	for _, bad := range []string{"Lively", "great", " lively"} {
+		if _, err := s.PatchPassage(p.ID, passagePatch{Rating: ptr(bad)}); !errors.Is(err, errPassageInvalid) {
+			t.Errorf("rating %q: %v", bad, err)
+		}
+	}
+}
+
+func TestPatchPassageRatingAloneIsNotAnEdit(t *testing.T) {
+	s := newTestPassageStore(t)
+	p := seedPassage(t, s, passageEpoch, passageEpoch.Add(time.Hour))
+	got, err := s.PatchPassage(p.ID, passagePatch{Rating: ptr("lively")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Edited || got.Title != "T" || got.FromNameEdited {
+		t.Errorf("a rating alone must leave the passage as it was: %+v", got)
+	}
+	got, _ = s.PatchPassage(p.ID, passagePatch{Rating: ptr("lively"), Title: ptr("X")})
+	if !got.Edited {
+		t.Error("a rating sent with another field is still an edit")
+	}
+	q := seedPassage(t, s, passageEpoch.Add(3*time.Hour), passageEpoch.Add(4*time.Hour))
+	if got, _ := s.PatchPassage(q.ID, passagePatch{}); !got.Edited {
+		t.Error("an empty patch keeps marking the passage edited")
+	}
+}
+
+func TestSplitPassageBothHalvesKeepTheRating(t *testing.T) {
+	s := newTestPassageStore(t)
+	p := seedPassage(t, s, passageEpoch, passageEpoch.Add(4*time.Hour))
+	s.PatchPassage(p.ID, passagePatch{Rating: ptr("lively")})
+	a, b, err := s.SplitPassage(p.ID, passageEpoch.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Rating != "lively" || b.Rating != "lively" {
+		t.Errorf("returned halves: %q %q", a.Rating, b.Rating)
+	}
+	sa, _ := s.GetPassage(a.ID)
+	sb, _ := s.GetPassage(b.ID)
+	if sa.Rating != "lively" || sb.Rating != "lively" {
+		t.Errorf("stored halves: %q %q", sa.Rating, sb.Rating)
+	}
+}
+
+func TestMergePassagesKeepsTheMostCautiousRating(t *testing.T) {
+	rate := func(s *passageStore, id, r string) {
+		if r != "" {
+			if _, err := s.PatchPassage(id, passagePatch{Rating: ptr(r)}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, c := range []struct {
+		name       string
+		a, b, c    string
+		want       string
+		shuffleIDs bool
+	}{
+		{"most cautious wins", "comfortable", "lively", "shouldnt_have_gone", "shouldnt_have_gone", false},
+		{"lively beats comfortable", "comfortable", "lively", "", "lively", false},
+		{"blank earliest does not hide a later one", "", "comfortable", "lively", "lively", false},
+		{"only the last", "", "", "shouldnt_have_gone", "shouldnt_have_gone", true},
+		{"none", "", "", "", "", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			s := newTestPassageStore(t)
+			a := seedPassage(t, s, passageEpoch, passageEpoch.Add(time.Hour))
+			b := seedPassage(t, s, passageEpoch.Add(time.Hour), passageEpoch.Add(2*time.Hour))
+			d := seedPassage(t, s, passageEpoch.Add(2*time.Hour), passageEpoch.Add(3*time.Hour))
+			rate(s, a.ID, c.a)
+			rate(s, b.ID, c.b)
+			rate(s, d.ID, c.c)
+			ids := []string{a.ID, b.ID, d.ID}
+			if c.shuffleIDs {
+				ids = []string{d.ID, a.ID, b.ID}
+			}
+			m, err := s.MergePassages(ids...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, _ := s.GetPassage(m.ID)
+			if m.Rating != c.want || stored.Rating != c.want {
+				t.Errorf("returned %q stored %q, want %q", m.Rating, stored.Rating, c.want)
+			}
+		})
+	}
+}
+
+func TestOpeningAnOldPassagesTableAddsTheRatingColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "p.sqlite")
+	s, err := newPassageStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := seedPassage(t, s, passageEpoch, passageEpoch.Add(time.Hour))
+	if _, err := s.db.Exec(`ALTER TABLE passages DROP COLUMN rating`); err != nil {
+		t.Fatalf("make the old table: %v", err)
+	}
+	s.close()
+	s, err = newPassageStore(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s.close()
+	got, err := s.GetPassage(p.ID)
+	if err != nil || got.Rating != "" {
+		t.Fatalf("old row after upgrade: %+v %v", got, err)
+	}
+	if _, err := s.PatchPassage(p.ID, passagePatch{Rating: ptr("lively")}); err != nil {
+		t.Fatal(err)
 	}
 }
