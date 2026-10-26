@@ -81,8 +81,14 @@ type alarmRule struct {
 	Hysteresis   float64 `json:"hysteresis"`
 	DwellSeconds int     `json:"dwell_seconds"`
 
-	// StaleAfterSeconds applies to alarmOpStale only.
+	// StaleAfterSeconds makes an alarmOpStale rule fire on silence. On a
+	// threshold rule it is the age past which the reading is not trusted: no
+	// raise from it, and a live alarm is held rather than cleared by it.
 	StaleAfterSeconds int `json:"stale_after_seconds"`
+
+	// CapacityPath, on a tank level rule (ADR 0214), is the tank's capacity
+	// path. The engine reads it so the card can give a volume beside the level.
+	CapacityPath string `json:"capacity_path,omitempty"`
 
 	State   string   `json:"state"`
 	Methods []string `json:"methods"`

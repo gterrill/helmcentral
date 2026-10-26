@@ -343,9 +343,6 @@ func (c *tileConverter) convertCluster(page, id string, cl *dashboardClusterConf
 				}
 				c.logOnce("%s: no equipment item owns the tank %q, so its fuel bar asks for one", where, bar.Level.Path)
 			}
-			if len(bar.Level.Zones) > 0 {
-				bar.Zones = c.fuelZonesInPercent(where, bar.Level)
-			}
 			bar.Level, bar.Capacity = nil, nil
 		}
 	}
@@ -398,24 +395,4 @@ func (c *tileConverter) convertLamps(where string, lamps []dashboardLamp) {
 		}
 		l.EquipmentID, l.Suffix, l.Path = item.ID, suffix, ""
 	}
-}
-
-// fuelZonesInPercent carries a fuel bar's zones onto the bar. A tank has no
-// profile, so the bar keeps them (as bands of the level in percent), and the
-// low-fuel alarm they raise is kept. A unit other than percent is converted.
-func (c *tileConverter) fuelZonesInPercent(where string, level *dashboardGaugeConfig) []gaugeZone {
-	if level.Quantity == "ratio" && level.Unit == "percent" {
-		return level.Zones
-	}
-	var out []gaugeZone
-	for _, z := range level.Zones {
-		from, err1 := convertBetweenUnits(z.From, level.Quantity, level.Unit, "ratio", "percent")
-		to, err2 := convertBetweenUnits(z.To, level.Quantity, level.Unit, "ratio", "percent")
-		if err1 != nil || err2 != nil {
-			c.logOnce("%s: dropped a zone on the fuel bar %q; its unit %s %s does not convert to percent", where, level.Label, level.Quantity, level.Unit)
-			continue
-		}
-		out = append(out, gaugeZone{From: from, To: to, State: z.State})
-	}
-	return out
 }

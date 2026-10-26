@@ -1548,6 +1548,7 @@ function AppShell() {
           values={gaugeValues}
           ages={gaugeAges}
           engines={engineStates}
+          tanks={tanks}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setClusterDraft)}
         />

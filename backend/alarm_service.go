@@ -57,9 +57,10 @@ func evaluateAlarmsOnce(now time.Time) {
 	// Deliberately no early return on an empty rule set: evaluate is also what
 	// drops statuses for rules that have been deleted or disabled, so skipping
 	// it would leave the last deleted rule's alarm stuck active forever.
-	// Stored rules plus the ones derived from gauge zones (ADR 0050), so a red
-	// band on a gauge is the alarm rather than merely looking like one.
-	rules := append(listAlarmRules(), zoneDerivedAlarmRules()...)
+	// Stored rules plus the ones derived from gauge zones (ADR 0050) and tank
+	// levels (ADR 0214), so a red band on a gauge is the alarm rather than
+	// merely looking like one.
+	rules := append(listAlarmRules(), derivedAlarmRules()...)
 
 	// Re-wired each tick for the same reason globalBusNotificationWatcher's
 	// snapshot is re-read below: production never reassigns
@@ -165,7 +166,7 @@ func vesselNameForNotifications() string {
 func activeAlarms() []alarmStatus {
 	// Always a list, never null: the UI iterates this without a nil guard.
 	combined := make([]alarmStatus, 0)
-	combined = append(combined, globalAlarmEngine.active()...)
+	combined = append(combined, collapseTankAlarms(globalAlarmEngine.active())...)
 	combined = append(combined, attachLoggedOccurrenceTimes(signalKNotifications(globalSignalKSnapshot, helmcentralOwnershipPredicate(), time.Now().UTC()))...)
 
 	// The clock is read here rather than threaded through as a parameter
@@ -256,7 +257,7 @@ func listAlarmRulesHandler(c echo.Context) error {
 	for _, rule := range rules {
 		out = append(out, alarmRulePayload(rule, false))
 	}
-	for _, rule := range zoneDerivedAlarmRules() {
+	for _, rule := range derivedAlarmRules() {
 		out = append(out, alarmRulePayload(rule, true))
 	}
 	return c.JSON(http.StatusOK, map[string]any{"rules": out})
@@ -281,6 +282,11 @@ func alarmRulePayload(rule alarmRule, derived bool) map[string]any {
 // 404 or create a shadow rule that the derivation immediately duplicates. The
 // threshold lives on the gauge; that is where it is changed.
 func rejectDerivedAlarmRuleID(c echo.Context) error {
+	if isTankDerivedAlarmRuleID(c.Param("id")) {
+		return c.JSON(http.StatusBadRequest, map[string]string{
+			"error": "this alarm comes from a tank's levels; change them on the tank's equipment page, or in Settings under Alarms",
+		})
+	}
 	if isZoneDerivedAlarmRuleID(c.Param("id")) {
 		return c.JSON(http.StatusBadRequest, map[string]string{
 			"error": "this alarm comes from a gauge zone; edit the zone on the gauge instead",
@@ -506,6 +512,10 @@ func alarmRoutes() []apiRoute {
 		{http.MethodGet, "/api/alarms", tierRead, alarmsHandler},
 		{http.MethodGet, "/api/alarms/log", tierRead, alarmLogHandler},
 		{http.MethodGet, "/api/alarm-rules", tierRead, listAlarmRulesHandler},
+
+		// The per-kind tank levels in Settings (tank_alarms.go).
+		{http.MethodGet, "/api/alarms/tank-levels", tierRead, getTankAlarmDefaultsHandler},
+		{http.MethodPut, "/api/alarms/tank-levels", tierWrite, setTankAlarmDefaultsHandler},
 
 		// The frozen/impossible/silent-source alarm card's own "Ignore this
 		// sensor" action (alarm_ignored_sensors.go) -- not a settings list.

@@ -7,7 +7,7 @@ import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { StopShowingAlarm } from '@/components/stop-showing-alarm'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
-import { alarmConditionSentence, formatAlarmReading, formatAlarmTime, ignorableSensors, isSensorHealthPath, sensorHealthLines } from '@/lib/alarm-display'
+import { alarmConditionSentence, alarmFooterText, formatAlarmReading, TANK_ALARM_RULE_PREFIX, formatAlarmTime, ignorableSensors, isSensorHealthPath, sensorHealthLines } from '@/lib/alarm-display'
 import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
 import { groupRulesByDomain } from '@/lib/alarm-rules-view'
 import { severityClass } from '@/lib/severity'
@@ -198,7 +198,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
               // returns null for that).
               const raised = formatAlarmTime(alarm.raised_at)
               const acked = formatAlarmTime(alarm.acked_at)
-              const timeParts = [raised && `Raised ${raised}`, acked && `acknowledged ${acked}`].filter(Boolean)
+              const timeParts = [raised && `Raised ${raised}`, acked && `acknowledged ${acked}`, alarmFooterText(alarm)].filter(Boolean)
               const hasMeta = timeParts.length > 0
               // The URL lives on the forecast-warnings payload, not on the
               // alarm (ADR 0114); null for every non-forecast alarm and for
@@ -533,7 +533,7 @@ function RuleRow({ rule, unit, firing, onEdit, onDelete }: RuleRowProps) {
           )}
           {rule.derived && (
             <span className="ml-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-              From a gauge zone
+              {rule.id.startsWith(TANK_ALARM_RULE_PREFIX) ? 'From the tank levels' : 'From a gauge zone'}
             </span>
           )}
           {firing && (
@@ -550,7 +550,7 @@ function RuleRow({ rule, unit, firing, onEdit, onDelete }: RuleRowProps) {
           offering controls that would only 400 is worse than offering none. */}
       {rule.derived ? (
         <span className="shrink-0 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
-          Edit on the gauge
+          {rule.id.startsWith(TANK_ALARM_RULE_PREFIX) ? 'Edit on the tank' : 'Edit on the gauge'}
         </span>
       ) : (
         <div className="flex shrink-0 gap-1">

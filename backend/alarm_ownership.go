@@ -27,10 +27,10 @@ func helmcentralOwnsPath(path string, rules []alarmRule) bool {
 
 // helmcentralOwnershipPredicate builds the ownership check from the same rule
 // set evaluateAlarmsOnce evaluates every tick -- stored rules plus the ones
-// derived from gauge zones (ADR 0050) -- so "owned" never drifts from what
+// derived from gauge zones (ADR 0050) and tank levels (ADR 0214) -- so "owned" never drifts from what
 // this engine is actually watching.
 func helmcentralOwnershipPredicate() func(path string) bool {
-	rules := append(listAlarmRules(), zoneDerivedAlarmRules()...)
+	rules := append(listAlarmRules(), derivedAlarmRules()...)
 	return func(path string) bool {
 		return helmcentralOwnsPath(path, rules)
 	}

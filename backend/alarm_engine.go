@@ -115,6 +115,10 @@ type alarmStatus struct {
 	// clears at a single number the way above/below do.
 	ClearValue *float64 `json:"clear_value,omitempty"`
 
+	// Capacity is a tank alarm's tank capacity in cubic metres, when the tank
+	// publishes one. The card gives the volume left from it (ADR 0214).
+	Capacity *float64 `json:"capacity,omitempty"`
+
 	// Unit is the SI unit for the alarm's path, when known -- set for rule
 	// alarms and for bus notifications alike, since an operator reading
 	// "-0.03" needs to know it is pascals per second whichever raised it.
@@ -308,6 +312,13 @@ func (e *alarmEngine) evaluate(rules []alarmRule, read alarmReader, now time.Tim
 
 		sample := read(rule.Path)
 		status.Value = sample.Value
+		status.Capacity = nil
+		if rule.CapacityPath != "" {
+			if capacity := read(rule.CapacityPath); capacity.Present {
+				value := capacity.Value
+				status.Capacity = &value
+			}
+		}
 
 		if event, emitted := advanceAlarmRule(rule, status, sample, now); emitted {
 			events = append(events, event)
@@ -386,6 +397,11 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 	status.escalated = false
 	status.Evidence = evidenceFor(rule.Path, now)
 	status.Message = alarmMessageFor(rule, sample, status.Unit, status.Evidence)
+	if isTankDerivedAlarmRuleID(rule.ID) {
+		// The card says what the tank holds, in the boat's frame (ADR 0157);
+		// how it clears is the card footer's, never the body.
+		status.Message = tankAlarmBody(sample.Value, status.Capacity)
+	}
 	if sensorHealthCountPaths[rule.Path] {
 		status.Sensors = sensorEntriesFor(rule.Path, now)
 		if len(status.Sensors) > 0 {

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
 import {
   alarmConditionSentence,
+  alarmFooterText,
   alarmDisplayUnitId,
   formatAlarmReading,
   formatAlarmTime,
@@ -473,5 +474,40 @@ describe('sensor-health alarms (impossible, frozen, silent source)', () => {
   it('offers one ignore action per live sensor, labelled by name and quantity', () => {
     expect(ignorableSensors(alarm)).toEqual([{ identifier: 'electrical.batteries.3.voltage', label: 'Port Engine Starter Battery voltage' }])
     expect(ignorableSensors(makeAlarm())).toEqual([])
+  })
+})
+
+// Tank level alarms (ADR 0214): the body is the situation in the boat's frame,
+// and how the alarm clears belongs to the footer, never the body.
+describe('tank level alarms', () => {
+  const tankAlarm = (overrides: Partial<ActiveAlarm> = {}) =>
+    makeAlarm({
+      rule_id: 'tank:abc:warn',
+      label: 'Fuel Port Fwd Low',
+      path: 'tanks.fuel.0.currentLevel',
+      op: 'below',
+      value: 0.19,
+      unit: 'ratio',
+      clear_value: 0.25,
+      capacity: 1.2,
+      message: '19% · 228 L',
+      ...overrides,
+    })
+
+  it('reads level and volume in the body, without a clearing claim', () => {
+    expect(alarmConditionSentence(tankAlarm())).toBe('19% · 228 L')
+  })
+
+  it('reads just the percentage when the tank publishes no capacity', () => {
+    expect(alarmConditionSentence(tankAlarm({ capacity: undefined }))).toBe('19%')
+  })
+
+  it('puts the clear point in the footer, above for a low tank and below for waste', () => {
+    expect(alarmFooterText(tankAlarm())).toBe('Clears above 25%')
+    expect(alarmFooterText(tankAlarm({ rule_id: 'tank:w:warn', op: 'above', value: 0.82, clear_value: 0.75 }))).toBe('Clears below 75%')
+  })
+
+  it('has no footer text for any other alarm', () => {
+    expect(alarmFooterText(makeAlarm())).toBeNull()
   })
 })

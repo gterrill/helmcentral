@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
@@ -438,37 +439,20 @@ func TestZoneDerivedAlarmRulesDoNotDependOnWhichTileIsMetFirst(t *testing.T) {
 	}
 }
 
-// A fuel bar's zones stay on the tile record, because a tank has no profile,
-// and raise a low-fuel alarm keyed by the tank item.
-func TestZoneDerivedAlarmRulesRaiseLowFuelFromABarsOwnZones(t *testing.T) {
+// A fuel bar raises nothing here: its colours and its alarms are the tank's own
+// levels (ADR 0214), so a bar no longer carries zones and an old stored one is
+// dropped on decode.
+func TestZoneDerivedAlarmRulesIgnoreAStoredFuelBarZone(t *testing.T) {
 	tank := newTileItem(t, "Port forward fuel", "tanks.fuel.5", "")
-	withPages(t, dashboardLayoutItem{
-		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10,
-		Cluster: &dashboardClusterConfig{
-			Ring:   dashboardGaugeConfig{Display: "radial", Quantity: "raw", Unit: "raw"},
-			Centre: dashboardGaugeConfig{Display: "numeric", Quantity: "raw", Unit: "raw"},
-			Fuel: &dashboardClusterFuelRail{Side: "left", Bars: []dashboardClusterFuelBar{{
-				TankID: tank, Label: "Fwd", Zones: []gaugeZone{{From: 0, To: 15, State: alarmStateWarn}},
-			}}},
-		},
-	})
-	rules := zoneDerivedAlarmRules()
-	if len(rules) != 1 {
-		t.Fatalf("expected the low fuel alarm, got %+v", rules)
+	var cluster dashboardClusterConfig
+	stored := `{"ring":{"display":"radial","quantity":"raw","unit":"raw"},"centre":{"display":"numeric","quantity":"raw","unit":"raw"},` +
+		`"fuel":{"side":"left","bars":[{"tankId":"` + tank + `","label":"Fwd","zones":[{"from":0,"to":15,"state":"warn"}]}]}}`
+	if err := json.Unmarshal([]byte(stored), &cluster); err != nil {
+		t.Fatal(err)
 	}
-	r := rules[0]
-	if r.Path != "tanks.fuel.5.currentLevel" || r.Op != alarmOpBelow || math.Abs(r.Value-0.15) > 1e-9 {
-		t.Fatalf("below 15 percent on the tank's level, got %+v", r)
-	}
-	if r.ID != "zone:tank:"+tank+":0" || r.Label != "Port forward fuel level" {
-		t.Fatalf("keyed by the tank item and named for it, got %q %q", r.ID, r.Label)
-	}
-	if msg := validateDashboardWidgets([]dashboardLayoutItem{{ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10, Cluster: &dashboardClusterConfig{
-		Ring:   dashboardGaugeConfig{Display: "radial", Quantity: "raw", Unit: "raw"},
-		Centre: dashboardGaugeConfig{Display: "numeric", Quantity: "raw", Unit: "raw"},
-		Fuel:   &dashboardClusterFuelRail{Side: "left", Bars: []dashboardClusterFuelBar{{TankID: tank, Zones: []gaugeZone{{From: 40, To: 60, State: alarmStateWarn}}}}},
-	}}}, ""); msg == "" {
-		t.Fatal("a mid-scale fuel zone cannot raise an alarm and must be refused")
+	withPages(t, dashboardLayoutItem{ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 10, Cluster: &cluster})
+	if rules := zoneDerivedAlarmRules(); len(rules) != 0 {
+		t.Fatalf("a fuel bar's old zone must not raise an alarm, got %+v", rules)
 	}
 }
 

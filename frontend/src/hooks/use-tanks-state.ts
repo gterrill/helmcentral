@@ -10,6 +10,11 @@ export type TankLevel = {
   category: string
   kind: 'water' | 'fuel' | 'waste'
   level_percent: number
+  /** The tank's resolved levels (ADR 0214): what its colours and its alarms both use. */
+  warn_percent: number
+  alarm_percent: number
+  /** Silences the alarms only; the tile still colours by the levels. */
+  alarms_off: boolean
 }
 
 type TanksStateResponse = {
@@ -36,7 +41,10 @@ export function useTanksState() {
             typeof tank.category === 'string' &&
             (tank.kind === 'water' || tank.kind === 'fuel' || tank.kind === 'waste') &&
             typeof tank.level_percent === 'number' &&
-            Number.isFinite(tank.level_percent),
+            Number.isFinite(tank.level_percent) &&
+            Number.isFinite(tank.warn_percent) &&
+            Number.isFinite(tank.alarm_percent) &&
+            typeof tank.alarms_off === 'boolean',
         )
 
         setTanks(valid)

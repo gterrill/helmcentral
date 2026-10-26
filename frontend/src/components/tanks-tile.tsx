@@ -4,6 +4,7 @@ import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import type { TankLevel } from '@/hooks/use-tanks-state'
+import { isLowBadKind, tankTone, type TankTone } from '@/lib/tank-levels'
 import { worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
@@ -28,48 +29,8 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, value))
 }
 
-type TankTone = 'critical' | 'warn' | 'normal'
-
-// Waste inverts the rest of the fleet: a FULL waste tank is the bad state,
-// not an empty one, so its "getting worse" direction is HIGH rather than LOW.
-function isLowBadKind(kind: TankLevel['kind']) {
-  return kind !== 'waste'
-}
-
-function isWarn(kind: TankLevel['kind'], percent: number) {
-  if (kind === 'water') {
-    return percent > 10 && percent <= 20
-  }
-
-  if (kind === 'waste') {
-    return percent > 80 && percent <= 90
-  }
-
-  return percent >= 10 && percent < 30
-}
-
-function isCritical(kind: TankLevel['kind'], percent: number) {
-  if (kind === 'water') {
-    return percent <= 10
-  }
-
-  if (kind === 'waste') {
-    return percent > 90
-  }
-
-  return percent < 10
-}
-
-function tankTone(kind: TankLevel['kind'], percent: number): TankTone {
-  if (isCritical(kind, percent)) {
-    return 'critical'
-  }
-
-  if (isWarn(kind, percent)) {
-    return 'warn'
-  }
-
-  return 'normal'
+function tankToneFor(tank: TankLevel, percent: number): TankTone {
+  return tankTone(tank.kind, percent, tank)
 }
 
 /** TankTone in the tile-edge vocabulary (ADR 0081). */
@@ -137,7 +98,7 @@ export const TanksTile = memo(function TanksTile({
   const state = worstZoneState(
     visibleTanks.map((tank) => {
       if (feedStale) return null
-      return TONE_STATE[tankTone(tank.kind, clampPercent(tank.level_percent))]
+      return TONE_STATE[tankToneFor(tank, clampPercent(tank.level_percent))]
     }),
   )
 
@@ -154,7 +115,7 @@ export const TanksTile = memo(function TanksTile({
           // A stale feed is showing a historical artefact, not a live level —
           // blanked rather than tinted by a tone it can no longer vouch for.
           const percent = feedStale ? null : clampPercent(tank.level_percent)
-          const tone: TankTone = percent === null ? 'normal' : tankTone(tank.kind, percent)
+          const tone: TankTone = percent === null ? 'normal' : tankToneFor(tank, percent)
           const percentLabel = percent === null ? NO_VALUE : `${Math.round(percent)}%`
           const toneWord = percent === null ? NO_VALUE : tankToneWord(tank.kind, tone)
 

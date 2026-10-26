@@ -243,17 +243,6 @@ func zoneDerivedAlarmRules() []alarmRule {
 		held.Label = strings.TrimSpace(owner + " " + firstNonEmpty(slot.Label, suffix))
 		add(fmt.Sprintf("%s:%d", widgetID, index), held)
 	}
-	collectTank := func(bar dashboardClusterFuelBar) {
-		if len(bar.Zones) == 0 {
-			return
-		}
-		key, reading, ok := ix.tankLevelReading(bar)
-		if !ok || seenReading[key] {
-			return
-		}
-		seenReading[key] = true
-		add(key, reading)
-	}
 
 	for _, page := range dashboardPagesState {
 		for _, widget := range page.Widgets {
@@ -270,10 +259,9 @@ func zoneDerivedAlarmRules() []alarmRule {
 					}
 				}
 			}
-			// A cluster slot's zones alarm like any other gauge's. A fuel bar has
-			// no profile to hold zones, so it keeps its own and they alarm on the
-			// tank's level; a capacity is a constant an alarm would never clear.
-			// The index space is flat and stable, so ids survive a restart: ring,
+			// A cluster slot's zones alarm like any other gauge's. A fuel bar
+			// raises nothing here: its colours and its alarms are the tank's own
+			// levels (tank_alarms.go, ADR 0214). The index space is flat and stable, so ids survive a restart: ring,
 			// centre, then corner rows, with the telltales at a fixed base past
 			// every corner row a cluster can hold.
 			if widget.Cluster != nil {
@@ -317,11 +305,6 @@ func zoneDerivedAlarmRules() []alarmRule {
 				for i, slot := range c.Footer.slots() {
 					if slot != nil {
 						collectSlot(widget.ID, clusterFooterZoneIndexBase+i, slotItem(c.EquipmentID, *slot), c.Source, c.Title, *slot)
-					}
-				}
-				if c.Fuel != nil {
-					for _, bar := range c.Fuel.Bars {
-						collectTank(bar)
 					}
 				}
 			}

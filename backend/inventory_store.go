@@ -232,6 +232,14 @@ type equipmentItem struct {
 	WarnVoltage   float64 `json:"warn_voltage"`
 	HighVoltage   float64 `json:"high_voltage"`
 
+	// TankWarnPercent and TankAlarmPercent are a tank's own alarm levels as a
+	// percentage of full, and TankAlarmsOff silences its alarms while the Tanks
+	// tile keeps its colours (ADR 0214). They are meaningful only on an item
+	// whose source is a tank. Zero is blank: the kind's default applies.
+	TankWarnPercent  float64 `json:"tank_warn_percent"`
+	TankAlarmPercent float64 `json:"tank_alarm_percent"`
+	TankAlarmsOff    bool    `json:"tank_alarms_off"`
+
 	// SourceKind and HourMeterSource are derived from SignalKSource on every
 	// read and ignored on a write: the kind is the source's group (engine,
 	// battery, ...), and the hour meter is the source's own runtime counter.
@@ -802,6 +810,7 @@ const equipmentColumns = `e.id, e.name, e.category, e.system, e.manufacturer, e.
 	e.zone_id, e.bin_id, e.location_detail, e.install_date, e.profile_id, e.aliases_json,
 	e.verified_aboard, e.notes, e.created_at, e.updated_at,
 	e.signalk_source, e.capacity_ah, e.cells, e.warn_voltage, e.high_voltage,
+	e.tank_warn_percent, e.tank_alarm_percent, e.tank_alarms_off,
 	z.name, b.code,
 	(SELECT COUNT(*) FROM equipment_documents ed WHERE ed.equipment_id = e.id)`
 
@@ -818,7 +827,7 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 	var zoneID, binID, zoneName, binCode sql.NullString
 	var required sql.NullInt64
 	var aliasesJSON string
-	var verified int
+	var verified, tankAlarmsOff int
 	var createdAt, updatedAt int64
 
 	if err := row.Scan(
@@ -826,6 +835,7 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 		&zoneID, &binID, &it.LocationDetail, &it.InstallDate, &it.ProfileID, &aliasesJSON,
 		&verified, &it.Notes, &createdAt, &updatedAt,
 		&it.SignalKSource, &it.CapacityAh, &it.Cells, &it.WarnVoltage, &it.HighVoltage,
+		&it.TankWarnPercent, &it.TankAlarmPercent, &tankAlarmsOff,
 		&zoneName, &binCode, &it.LinkCount,
 	); err != nil {
 		return equipmentItem{}, err
@@ -846,6 +856,7 @@ func scanEquipmentRow(row rowScanner) (equipmentItem, error) {
 	it.ZoneName = zoneName.String
 	it.BinCode = binCode.String
 	it.VerifiedAboard = verified != 0
+	it.TankAlarmsOff = tankAlarmsOff != 0
 	it.CreatedAt = time.Unix(createdAt, 0).UTC()
 	it.UpdatedAt = time.Unix(updatedAt, 0).UTC()
 
@@ -1122,12 +1133,14 @@ func createEquipmentTx(tx *sql.Tx, now time.Time, item equipmentItem) (equipment
 			id, name, category, system, manufacturer, model, serial, part_number, quantity, required_quantity, status,
 			zone_id, bin_id, location_detail, install_date, profile_id,
 			aliases_json, verified_aboard, notes, created_at, updated_at,
-			signalk_source, capacity_ah, cells, warn_voltage, high_voltage
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			signalk_source, capacity_ah, cells, warn_voltage, high_voltage,
+			tank_warn_percent, tank_alarm_percent, tank_alarms_off
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, name, item.Category, system, strings.TrimSpace(item.Manufacturer), strings.TrimSpace(item.Model), strings.TrimSpace(item.Serial), strings.TrimSpace(item.PartNumber), quantity, required, status,
 		nullableString(resolvedZoneID), nullableString(item.BinID), item.LocationDetail, item.InstallDate, item.ProfileID,
 		string(aliasesJSON), boolToInt(item.VerifiedAboard), item.Notes, now.Unix(), now.Unix(),
 		item.SignalKSource, item.CapacityAh, item.Cells, item.WarnVoltage, item.HighVoltage,
+		item.TankWarnPercent, item.TankAlarmPercent, boolToInt(item.TankAlarmsOff),
 	); err != nil {
 		return equipmentItem{}, fmt.Errorf("create equipment: %w", err)
 	}
@@ -1203,12 +1216,14 @@ func updateEquipmentTx(tx *sql.Tx, now time.Time, id string, item equipmentItem)
 			name = ?, category = ?, system = ?, manufacturer = ?, model = ?, serial = ?, part_number = ?, quantity = ?, required_quantity = ?, status = ?,
 			zone_id = ?, bin_id = ?, location_detail = ?, install_date = ?, profile_id = ?,
 			aliases_json = ?, verified_aboard = ?, notes = ?, updated_at = ?,
-			signalk_source = ?, capacity_ah = ?, cells = ?, warn_voltage = ?, high_voltage = ?
+			signalk_source = ?, capacity_ah = ?, cells = ?, warn_voltage = ?, high_voltage = ?,
+			tank_warn_percent = ?, tank_alarm_percent = ?, tank_alarms_off = ?
 		WHERE id = ?`,
 		name, item.Category, system, strings.TrimSpace(item.Manufacturer), strings.TrimSpace(item.Model), strings.TrimSpace(item.Serial), strings.TrimSpace(item.PartNumber), quantity, required, status,
 		nullableString(resolvedZoneID), nullableString(item.BinID), item.LocationDetail, item.InstallDate, item.ProfileID,
 		string(aliasesJSON), boolToInt(item.VerifiedAboard), item.Notes, now.Unix(),
 		item.SignalKSource, item.CapacityAh, item.Cells, item.WarnVoltage, item.HighVoltage,
+		item.TankWarnPercent, item.TankAlarmPercent, boolToInt(item.TankAlarmsOff),
 		id,
 	); err != nil {
 		return equipmentItem{}, fmt.Errorf("update equipment: %w", err)

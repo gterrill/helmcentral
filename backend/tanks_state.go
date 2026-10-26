@@ -18,6 +18,12 @@ type tankLevelData struct {
 	// dead sender does not condemn every tank on the boat. -1 when the
 	// tank's currentLevel carries no timestamp.
 	LastUpdateAge float64 `json:"last_update_age_s"`
+	// WarnPercent and AlarmPercent are the tank's resolved levels (ADR 0214),
+	// the same numbers its alarms use. AlarmsOff only silences the alarms;
+	// the tile still colours by the levels.
+	WarnPercent  float64 `json:"warn_percent"`
+	AlarmPercent float64 `json:"alarm_percent"`
+	AlarmsOff    bool    `json:"alarms_off"`
 }
 
 // buildTanksStatePayload produces the /api response body. Split from the handler so
@@ -45,6 +51,7 @@ func buildTanksStatePayload() map[string]any {
 		stateTanks, datetime, fetchErr := fetchSignalKTanksState(labelOverrides)
 		if fetchErr == nil {
 			tanks = stateTanks
+			annotateTankLevels(tanks)
 			now = datetime
 			source = "signalk"
 		}

@@ -377,6 +377,9 @@ func main() {
 		log.Printf("web push: discarded %d subscription(s) registered against a previous VAPID key; those devices must re-subscribe", discarded)
 	}
 
+	if err := loadTankAlarmDefaults(); err != nil {
+		log.Fatalf("tank alarm defaults: %v", err)
+	}
 	if err := loadAlarmRules(); err != nil {
 		log.Fatalf("failed to load alarm rules: %v", err)
 	}

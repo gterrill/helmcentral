@@ -198,7 +198,8 @@ func listSourceItems() ([]sourceItem, error) {
 func (s *documentStore) SourceItems() ([]sourceItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT id, name, signalk_source, profile_id, capacity_ah, cells, warn_voltage, high_voltage
+	rows, err := s.db.Query(`SELECT id, name, signalk_source, profile_id, capacity_ah, cells, warn_voltage, high_voltage,
+			tank_warn_percent, tank_alarm_percent, tank_alarms_off
 		FROM equipment WHERE signalk_source <> ''`)
 	if err != nil {
 		return nil, fmt.Errorf("list source items: %w", err)
@@ -207,9 +208,12 @@ func (s *documentStore) SourceItems() ([]sourceItem, error) {
 	var items []sourceItem
 	for rows.Next() {
 		var it equipmentItem
-		if err := rows.Scan(&it.ID, &it.Name, &it.SignalKSource, &it.ProfileID, &it.CapacityAh, &it.Cells, &it.WarnVoltage, &it.HighVoltage); err != nil {
+		var alarmsOff int
+		if err := rows.Scan(&it.ID, &it.Name, &it.SignalKSource, &it.ProfileID, &it.CapacityAh, &it.Cells, &it.WarnVoltage, &it.HighVoltage,
+			&it.TankWarnPercent, &it.TankAlarmPercent, &alarmsOff); err != nil {
 			return nil, fmt.Errorf("list source items: %w", err)
 		}
+		it.TankAlarmsOff = alarmsOff != 0
 		if si, ok := newSourceItem(it); ok {
 			items = append(items, si)
 		}

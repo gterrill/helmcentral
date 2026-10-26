@@ -1,6 +1,8 @@
 import type { EquipmentItem } from '@/hooks/use-inventory'
+import type { TankLevel } from '@/hooks/use-tanks-state'
 import type { EngineProfile, EngineProfileGauge, EngineProfileZone } from '@/lib/engine-profiles'
 import { convertBetweenUnits } from '@/lib/quantities'
+import { fuelBarZones } from '@/lib/tank-levels'
 import {
   CLUSTER_FOOTER_SLOTS,
   type EngineClusterConfig,
@@ -140,7 +142,11 @@ export function resolveSlot(item: TileItem, profile: EngineProfile | undefined, 
   }
 }
 
-export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileContext): Resolved<ResolvedClusterConfig> {
+/**
+ * `tanks` are the Tanks feed's readings, which carry each tank's resolved
+ * levels; the fuel bars colour from them.
+ */
+export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileContext, tanks: TankLevel[] = []): Resolved<ResolvedClusterConfig> {
   if (!config.equipmentId) return { ok: false, problem: EMPTY_PROBLEM }
   const item = findItem(ctx, config.equipmentId)
   if (!item) return { ok: false, problem: { kind: 'missing' } }
@@ -173,10 +179,13 @@ export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileCo
       const tank = findItem(ctx, bar.tankId)
       const source = tank && tank.source_kind === 'tank' ? tank.signalk_source : ''
       const label = bar.label ?? ''
+      // The bar's colours are the tank's own levels (ADR 0214), the numbers its
+      // alarms use. Until the tank has reported them the bar has no bands.
+      const levels = source ? tanks.find((t) => `tanks.${t.id}` === source) : undefined
       return {
         level: {
           path: source ? `${source}.currentLevel` : '', label, display: 'bar' as const, quantity: 'ratio', unit: 'percent', decimals: 0, min: 0, max: 100,
-          ...(bar.zones && bar.zones.length > 0 ? { zones: bar.zones } : {}),
+          ...(levels ? { zones: fuelBarZones(levels.kind, levels) } : {}),
         },
         capacity: { path: source ? `${source}.capacity` : '', label: '', display: 'numeric' as const, quantity: 'volume', unit: 'L', decimals: 0 },
       }
