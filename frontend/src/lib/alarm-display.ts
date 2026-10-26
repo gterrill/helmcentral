@@ -9,6 +9,7 @@
  */
 import type { ActiveAlarm, SensorHealthEntry } from '@/hooks/use-alarms'
 import { formatQuantity, quantityForSIUnit, unitOption } from '@/lib/quantities'
+import { tankClearText } from '@/lib/tank-levels'
 
 // SI unit -> the unit id an alarm reading is shown in. Not every quantity's
 // own first unit is what an alarm should show (pressure's first unit is
@@ -241,6 +242,11 @@ function withRadarFigures(sentence: string, target: ActiveAlarm['radar_target'])
 export function alarmConditionSentence(alarm: ActiveAlarm, options?: { forecastDetailsLinked?: boolean }): string {
   const { op, unit, value, clear_value: clearValue, message } = alarm
 
+  // A tank level alarm (ADR 0214) reads what the tank holds, "19% · 228 L", in
+  // the words the server sets for every transport (one presenter, ADR 0157);
+  // how it clears is the footer's (alarmFooterText).
+  if (isTankAlarm(alarm)) return message
+
   if (op === undefined) {
     // An alarm with no rule behind it: a bus notification (the backend has
     // already stripped internal ids) or a source like the stream watchdog,
@@ -305,6 +311,24 @@ export function alarmConditionSentence(alarm: ActiveAlarm, options?: { forecastD
   const direction = op === 'below' ? 'above' : 'below'
   const clears = formatAlarmReading(clearValue, unit)
   return `Now ${now}. Clears ${direction} ${clears}.`
+}
+
+/** Tank level alarms are derived on the server from each tank's levels (ADR 0214). */
+export const TANK_ALARM_RULE_PREFIX = 'tank:'
+
+export function isTankAlarm(alarm: ActiveAlarm): boolean {
+  return alarm.rule_id.startsWith(TANK_ALARM_RULE_PREFIX)
+}
+
+/**
+ * The footer line of a card that says how it clears, for the alarms where
+ * Helmcentral knows (a tank's level). Null elsewhere: a bus notification clears
+ * however its producer clears it, and nothing here claims to know.
+ */
+export function alarmFooterText(alarm: ActiveAlarm): string | null {
+  if (!isTankAlarm(alarm)) return null
+  if ((alarm.op !== 'above' && alarm.op !== 'below') || alarm.clear_value === undefined) return null
+  return tankClearText(alarm.op, alarm.clear_value)
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

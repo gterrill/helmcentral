@@ -61,6 +61,12 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
         next.warn_voltage = 0
         next.high_voltage = 0
       }
+      // Tank levels belong to a tank, and the server refuses them anywhere else.
+      if (sourceKindOf(source) !== 'tank') {
+        next.tank_warn_percent = 0
+        next.tank_alarm_percent = 0
+        next.tank_alarms_off = false
+      }
       return next
     })
   }

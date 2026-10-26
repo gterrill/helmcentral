@@ -89,6 +89,9 @@ func equipmentRecordType() *recordType {
 			{Name: "cells", Kind: kindInteger, Description: "a battery item's cell count"},
 			{Name: "warn_voltage", Kind: kindNumber, Description: "a battery item's warn voltage override"},
 			{Name: "high_voltage", Kind: kindNumber, Description: "a battery item's high voltage override"},
+			{Name: "tank_warn_percent", Kind: kindNumber, Description: "a tank item's own warn level in percent of full; 0 means the kind's default"},
+			{Name: "tank_alarm_percent", Kind: kindNumber, Description: "a tank item's own alarm level in percent of full; 0 means the kind's default"},
+			{Name: "tank_alarms_off", Kind: kindBoolean, Description: "whether a tank item's level alarms are switched off"},
 			{Name: "hour_meter_source", Kind: kindString, Description: "the live hour meter derived from the SignalK source"},
 			{Name: "zone_name", Kind: kindString, Description: "the name of its location"},
 			{Name: "bin_code", Kind: kindString, Description: "the code of its bin"},
@@ -127,7 +130,8 @@ func equipmentSnapshot(it equipmentItem) recordSnapshot {
 			"profile_id": it.ProfileID, "aliases": aliases, "verified_aboard": it.VerifiedAboard, "notes": it.Notes,
 			"category": it.Category, "zone_name": it.ZoneName, "bin_code": it.BinCode,
 			"signalk_source": it.SignalKSource, "capacity_ah": it.CapacityAh, "cells": it.Cells,
-			"warn_voltage": it.WarnVoltage, "high_voltage": it.HighVoltage, "hour_meter_source": it.HourMeterSource,
+			"warn_voltage": it.WarnVoltage, "high_voltage": it.HighVoltage, "tank_warn_percent": it.TankWarnPercent, "tank_alarm_percent": it.TankAlarmPercent, "tank_alarms_off": it.TankAlarmsOff,
+			"hour_meter_source": it.HourMeterSource,
 		},
 	}
 }

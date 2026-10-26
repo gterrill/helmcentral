@@ -11,6 +11,9 @@ function tank(overrides: Partial<TankLevel>): TankLevel {
     category: 'fuel',
     kind: 'fuel',
     level_percent: 60,
+    warn_percent: 20,
+    alarm_percent: 10,
+    alarms_off: false,
     ...overrides,
   }
 }
@@ -38,9 +41,9 @@ describe('TanksTile', () => {
   })
 
   it('warns a low fuel tank in amber with a LOW word, not the resting-normal colour', () => {
-    render(<TanksTile tanks={[tank({ kind: 'fuel', level_percent: 20 })]} loading={false} lastUpdateAgeS={null} />)
+    render(<TanksTile tanks={[tank({ kind: 'fuel', level_percent: 15 })]} loading={false} lastUpdateAgeS={null} />)
 
-    expect(screen.getByText('20%')).toHaveClass('text-amber-600')
+    expect(screen.getByText('15%')).toHaveClass('text-amber-600')
     expect(screen.getByText('LOW')).toBeInTheDocument()
   })
 
@@ -75,8 +78,8 @@ describe('TanksTile', () => {
     render(
       <TanksTile
         tanks={[
-          tank({ id: 'ws1', label: 'Waste', kind: 'waste', level_percent: 85 }),
-          tank({ id: 'ws2', label: 'Waste 2', kind: 'waste', level_percent: 95 }),
+          tank({ id: 'ws1', label: 'Waste', kind: 'waste', level_percent: 85, warn_percent: 80, alarm_percent: 90 }),
+          tank({ id: 'ws2', label: 'Waste 2', kind: 'waste', level_percent: 95, warn_percent: 80, alarm_percent: 90 }),
         ]}
         loading={false}
         lastUpdateAgeS={null}
@@ -87,6 +90,35 @@ describe('TanksTile', () => {
     expect(screen.getByText('HIGH')).toBeInTheDocument()
     expect(screen.getByText('95%')).toHaveClass('text-red-600')
     expect(screen.getByText('CRIT')).toBeInTheDocument()
+  })
+
+  // One set of levels drives the tile and the alarms (ADR 0214): the tile
+  // colours by the levels the server resolved for this tank, not by numbers of
+  // its own.
+  it('colours a tank by its own resolved levels', () => {
+    render(
+      <TanksTile
+        tanks={[tank({ kind: 'fuel', level_percent: 28, warn_percent: 30, alarm_percent: 25 })]}
+        loading={false}
+        lastUpdateAgeS={null}
+      />,
+    )
+    expect(screen.getByText('28%')).toHaveClass('text-amber-600')
+    expect(screen.getByText('LOW')).toBeInTheDocument()
+  })
+
+  it('keeps colouring a tank whose alarms are off', () => {
+    render(
+      <TanksTile tanks={[tank({ kind: 'fuel', level_percent: 5, alarms_off: true })]} loading={false} lastUpdateAgeS={null} />,
+    )
+    expect(screen.getByText('5%')).toHaveClass('text-red-600')
+    expect(screen.getByText('CRIT')).toBeInTheDocument()
+  })
+
+  it('says why there are no levels instead of colouring by numbers the alarms do not use', () => {
+    render(<TanksTile tanks={[]} loading={false} error="tank levels unavailable, the equipment items could not be read" lastUpdateAgeS={null} />)
+    expect(screen.getByRole('alert')).toHaveTextContent(/equipment items could not be read/)
+    expect(screen.queryByText('No tank data available')).not.toBeInTheDocument()
   })
 
   it('greys the tile and blanks readings once the feed is stale', () => {
@@ -119,7 +151,7 @@ describe('TanksTile', () => {
 
     it('carries a warn tank as the warn state when nothing is worse', () => {
       const { container } = render(
-        <TanksTile tanks={[tank({ kind: 'fuel', level_percent: 20 })]} loading={false} lastUpdateAgeS={null} />,
+        <TanksTile tanks={[tank({ kind: 'fuel', level_percent: 15 })]} loading={false} lastUpdateAgeS={null} />,
       )
       expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'warn')
     })

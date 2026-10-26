@@ -6,6 +6,7 @@ import { GaugeGroupTile } from '@/components/gauge-group-tile'
 import { LampStripTile } from '@/components/lamp-strip-tile'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import type { EngineStates } from '@/hooks/use-gauge-values'
+import type { TankLevel } from '@/hooks/use-tanks-state'
 import { formatAppLocation } from '@/lib/app-location'
 import type { EngineClusterConfig, GaugeGroupWidgetConfig, LampStripWidgetConfig } from '@/lib/dashboard-widgets'
 import {
@@ -71,9 +72,9 @@ interface HostProps<C> {
 }
 
 export const EngineClusterHost = memo(function EngineClusterHost({
-  config, ctx, values, ages, engines, editing, onConfigure,
-}: HostProps<EngineClusterConfig> & { engines?: EngineStates }) {
-  const resolved = useMemo(() => resolveCluster(config, ctx), [config, ctx])
+  config, ctx, values, ages, engines, tanks, editing, onConfigure,
+}: HostProps<EngineClusterConfig> & { engines?: EngineStates; tanks?: TankLevel[] }) {
+  const resolved = useMemo(() => resolveCluster(config, ctx, tanks), [config, ctx, tanks])
   if (!resolved.ok) {
     return <EquipmentTileNotice title={config.title.trim() || 'Engine'} problem={resolved.problem} editing={editing} onConfigure={onConfigure} />
   }

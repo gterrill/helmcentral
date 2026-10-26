@@ -24,7 +24,8 @@ Here's what each part of the tile tells you:
   gearbox oil temperature is on the right. If you haven't connected an arc, the
   tile doesn't draw it.
 - **Fuel arcs** on the outer edge: forward and aft tank, with litres in the
-  tanks against capacity.
+  tanks against capacity. An arc turns amber and then red at the same levels the
+  tank's alarms use, which you set on the tank's equipment page.
 - **Footer.** It shows the starter battery voltage, the gearbox oil pressure
   and the exhaust temperature. It also shows the alternator with its current,
   output power, temperature, charge stage and a one-hour trace of current. If

@@ -154,6 +154,11 @@ export interface EquipmentItem {
   cells: number
   warn_voltage: number
   high_voltage: number
+  /** A tank item's own alarm levels in percent of full; 0 means blank, the kind's default applies (ADR 0214). */
+  tank_warn_percent: number
+  tank_alarm_percent: number
+  /** Silences this tank's alarms; the tile still colours by its levels. */
+  tank_alarms_off: boolean
   /** Derived from signalk_source on every read: 'engine', 'battery', ... or ''. */
   source_kind: SourceKind | ''
   /** The live hour meter derived from the source, such as 'propulsion.port.runTime'; '' when it has none. */
@@ -205,6 +210,9 @@ export interface EquipmentInput {
   cells: number
   warn_voltage: number
   high_voltage: number
+  tank_warn_percent: number
+  tank_alarm_percent: number
+  tank_alarms_off: boolean
   profile_id: string
   aliases: string[]
   verified_aboard: boolean
@@ -237,6 +245,9 @@ export const BLANK_DRAFT: EquipmentInput = {
   cells: 0,
   warn_voltage: 0,
   high_voltage: 0,
+  tank_warn_percent: 0,
+  tank_alarm_percent: 0,
+  tank_alarms_off: false,
   profile_id: '',
   aliases: [],
   verified_aboard: false,
@@ -502,6 +513,9 @@ export function toEquipmentInput(item: EquipmentItem): EquipmentInput {
     cells: item.cells,
     warn_voltage: item.warn_voltage,
     high_voltage: item.high_voltage,
+    tank_warn_percent: item.tank_warn_percent,
+    tank_alarm_percent: item.tank_alarm_percent,
+    tank_alarms_off: item.tank_alarms_off,
     profile_id: item.profile_id,
     aliases: item.aliases,
     verified_aboard: item.verified_aboard,

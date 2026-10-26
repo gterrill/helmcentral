@@ -6,6 +6,10 @@ Accepted
 Extends ADR 0054 (engine cluster tile) with a sixth kind of slot, and inherits
 ADR 0050's rule that a zone is the alarm.
 
+Amended by [ADR 0214](0214-tank-levels-drive-the-tiles-and-the-alarms.md): a fuel
+bar no longer carries zones or raises an alarm. Its colours and the low fuel
+alarm come from the tank's own levels.
+
 ## Context
 
 The vessel carries four fuel tanks, two a side. Until now the dashboard showed

@@ -25,6 +25,10 @@ const (
 	alarmEventRaised    = "raised"
 	alarmEventCleared   = "cleared"
 	alarmEventEscalated = "escalated"
+	// alarmEventChanged is a live alarm moving between severities without
+	// clearing: a tank going from warn to alarm, or back (ADR 0214). Transports
+	// publish the new state; nothing is cleared until the alarm itself is.
+	alarmEventChanged = "changed"
 )
 
 // alarmSample is one reading of a path. Present distinguishes "no such path" —
@@ -115,6 +119,10 @@ type alarmStatus struct {
 	// clears at a single number the way above/below do.
 	ClearValue *float64 `json:"clear_value,omitempty"`
 
+	// Capacity is a tank alarm's tank capacity in cubic metres, when the tank
+	// publishes one. The card gives the volume left from it (ADR 0214).
+	Capacity *float64 `json:"-"`
+
 	// Unit is the SI unit for the alarm's path, when known -- set for rule
 	// alarms and for bus notifications alike, since an operator reading
 	// "-0.03" needs to know it is pascals per second whichever raised it.
@@ -189,6 +197,9 @@ type alarmStatus struct {
 	AckedAt   time.Time `json:"-"`
 
 	escalated bool
+	// levelSince is when the second level of a two-level rule (AlarmLevelValue)
+	// started to hold, for its own dwell.
+	levelSince time.Time
 	// title is the card title fixed at raise (alarmTitleFor), kept for the
 	// alarm's life so the escalation and cleared messages say what the raise did.
 	title string
@@ -308,6 +319,13 @@ func (e *alarmEngine) evaluate(rules []alarmRule, read alarmReader, now time.Tim
 
 		sample := read(rule.Path)
 		status.Value = sample.Value
+		status.Capacity = nil
+		if rule.CapacityPath != "" {
+			if capacity := read(rule.CapacityPath); capacity.Present {
+				value := capacity.Value
+				status.Capacity = &value
+			}
+		}
 
 		if event, emitted := advanceAlarmRule(rule, status, sample, now); emitted {
 			events = append(events, event)
@@ -333,6 +351,25 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 	stale := alarmSampleStale(rule, sample, now)
 	live := status.Phase == alarmPhaseActive || status.Phase == alarmPhaseAcknowledged
 
+	// A two-level rule (a tank, ADR 0214) is one alarm whose severity moves.
+	// The second level has its own dwell and its own deadband, and is judged by
+	// the same functions as the first, against its own threshold.
+	var upper alarmRule
+	hasUpper := rule.AlarmLevelValue != nil
+	upperMet := false
+	if hasUpper {
+		upper = rule
+		upper.Value = *rule.AlarmLevelValue
+		upperMet = alarmConditionMet(upper, sample, stale)
+		switch {
+		case !upperMet:
+			status.levelSince = time.Time{}
+		case status.levelSince.IsZero():
+			status.levelSince = now
+		}
+	}
+	upperHeld := upperMet && now.Sub(status.levelSince) >= time.Duration(rule.DwellSeconds)*time.Second
+
 	if live {
 		// Clearing uses the deadband, not the raise threshold, so a value
 		// hovering at the boundary cannot flap the alarm.
@@ -350,7 +387,27 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 			status.title = ""
 			status.Evidence = ""
 			status.Sensors = nil
+			status.levelSince = time.Time{}
 			return alarmEvent{Kind: alarmEventCleared, Rule: rule, Status: *status}, true
+		}
+
+		if hasUpper {
+			switch {
+			case status.State != alarmStateAlarm && upperHeld:
+				// Worse: a new problem, so it is unacknowledged again.
+				status.State = alarmStateAlarm
+				status.Phase = alarmPhaseActive
+				status.AckedAt = time.Time{}
+				status.escalated = false
+				status.Message = tankAlarmBody(sample.Value, status.Capacity)
+				return alarmEvent{Kind: alarmEventChanged, Rule: rule, Status: *status}, true
+			case status.State == alarmStateAlarm && alarmConditionCleared(upper, sample, stale):
+				// Better, but still past the first level: what the operator
+				// acknowledged stays acknowledged.
+				status.State = rule.State
+				status.Message = tankAlarmBody(sample.Value, status.Capacity)
+				return alarmEvent{Kind: alarmEventChanged, Rule: rule, Status: *status}, true
+			}
 		}
 
 		if shouldEscalateAlarm(rule, status, now) {
@@ -381,11 +438,19 @@ func advanceAlarmRule(rule alarmRule, status *alarmStatus, sample alarmSample, n
 
 	status.Phase = alarmPhaseActive
 	status.State = rule.State
+	if hasUpper && upperHeld {
+		status.State = alarmStateAlarm
+	}
 	status.RaisedAt = now
 	status.AckedAt = time.Time{}
 	status.escalated = false
 	status.Evidence = evidenceFor(rule.Path, now)
 	status.Message = alarmMessageFor(rule, sample, status.Unit, status.Evidence)
+	if isTankDerivedAlarmRuleID(rule.ID) {
+		// The card says what the tank holds, in the boat's frame (ADR 0157);
+		// how it clears is the card footer's, never the body.
+		status.Message = tankAlarmBody(sample.Value, status.Capacity)
+	}
 	if sensorHealthCountPaths[rule.Path] {
 		status.Sensors = sensorEntriesFor(rule.Path, now)
 		if len(status.Sensors) > 0 {

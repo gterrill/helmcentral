@@ -223,8 +223,8 @@ export function gapArcNames(): GapArcName[] {
 /**
  * The fuel fan on the outer edge: up to two tanks as concentric arcs, a scale
  * along the foot of them and the litres total underneath. Fill colour follows
- * each tank's own zones, so a low-fuel band is the amber, not a number baked in
- * here.
+ * the tank's own levels (ADR 0214), the same ones its alarms use, so the amber is
+ * not a number baked in here.
  */
 export function FuelFan({ config, title, side, values, ages }: {
   config: ClusterFuelRail

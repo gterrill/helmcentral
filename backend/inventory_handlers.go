@@ -66,15 +66,19 @@ type equipmentRequest struct {
 	InstallDate      string  `json:"install_date"`
 	// SignalKSource is the one SignalK node the item owns; the bank figures
 	// apply to a battery item. validateEquipmentSource (the store) checks them.
-	SignalKSource  string   `json:"signalk_source"`
-	CapacityAh     float64  `json:"capacity_ah"`
-	Cells          int      `json:"cells"`
-	WarnVoltage    float64  `json:"warn_voltage"`
-	HighVoltage    float64  `json:"high_voltage"`
-	ProfileID      string   `json:"profile_id"`
-	Aliases        []string `json:"aliases"`
-	VerifiedAboard bool     `json:"verified_aboard"`
-	Notes          string   `json:"notes"`
+	SignalKSource string  `json:"signalk_source"`
+	CapacityAh    float64 `json:"capacity_ah"`
+	Cells         int     `json:"cells"`
+	WarnVoltage   float64 `json:"warn_voltage"`
+	HighVoltage   float64 `json:"high_voltage"`
+	// The tank figures apply to a tank item (ADR 0214); zero is blank.
+	TankWarnPercent  float64  `json:"tank_warn_percent"`
+	TankAlarmPercent float64  `json:"tank_alarm_percent"`
+	TankAlarmsOff    bool     `json:"tank_alarms_off"`
+	ProfileID        string   `json:"profile_id"`
+	Aliases          []string `json:"aliases"`
+	VerifiedAboard   bool     `json:"verified_aboard"`
+	Notes            string   `json:"notes"`
 }
 
 // trimStringPtr trims *p and collapses it to nil when the result is blank -
@@ -199,6 +203,9 @@ func validateEquipmentInput(req equipmentRequest, existingProfileID string) (equ
 		Cells:            req.Cells,
 		WarnVoltage:      req.WarnVoltage,
 		HighVoltage:      req.HighVoltage,
+		TankWarnPercent:  req.TankWarnPercent,
+		TankAlarmPercent: req.TankAlarmPercent,
+		TankAlarmsOff:    req.TankAlarmsOff,
 		ProfileID:        profileID,
 		Aliases:          normalizeAliases(req.Aliases),
 		VerifiedAboard:   req.VerifiedAboard,

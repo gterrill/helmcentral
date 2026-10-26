@@ -62,6 +62,9 @@ Step-by-step instructions for specific jobs.
   the anchor or radius, and raise it.
 - [Set an alarm threshold](how-to/set-an-alarm-threshold.md): create an alarm
   rule directly or from a gauge.
+- [Change a tank's alarm levels](how-to/change-tank-alarm-levels.md): when a
+  tank turns amber or red and raises an alarm, for a kind of tank or for one
+  tank.
 - [Set up alarm notifications](how-to/set-up-alarm-notifications.md): turn on
   a way for alarms to reach you, and check it works.
 - [Create a dashboard page](how-to/create-a-dashboard-page.md)

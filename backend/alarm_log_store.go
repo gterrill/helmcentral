@@ -145,6 +145,34 @@ func (s *alarmLogStore) RecordRaised(entry alarmLogEntry) (string, error) {
 	return entry.ID, nil
 }
 
+// RecordStateChange moves the open occurrence for a rule to a new severity, as
+// a tank does going from warn to alarm and back (ADR 0214). One occurrence, so
+// the log reads as one alarm that changed. An escalation drops the
+// acknowledgement, because it is unacknowledged again; a de-escalation keeps it.
+func (s *alarmLogStore) RecordStateChange(ruleID, state, message string, escalated bool) error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	ackedSQL := "acked_at"
+	if escalated {
+		ackedSQL = "NULL"
+	}
+	query := fmt.Sprintf(`
+		UPDATE alarm_log SET state = ?, message = ?, acked_at = %s
+		WHERE id = (
+			SELECT id FROM alarm_log
+			WHERE rule_id = ? AND cleared_at IS NULL
+			ORDER BY raised_at DESC LIMIT 1
+		)`, ackedSQL)
+	if _, err := s.db.Exec(query, state, message, ruleID); err != nil {
+		return fmt.Errorf("record state change: %w", err)
+	}
+	return nil
+}
+
 // MarkAcknowledged stamps the still-open occurrence for a rule.
 func (s *alarmLogStore) MarkAcknowledged(ruleID string, at time.Time) error {
 	return s.stampOpen(ruleID, "acked_at", at)
