@@ -13,6 +13,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Previous and next on a passage.** Two arrows at the right of the passage's
+  title step to the passage that started later or earlier, within the list you
+  opened it from, and the **[** and **]** keys do the same. The ends grey out
+  instead of wrapping. Unsaved edits are held, as they are with the back arrow.
+- **Zoom and fit buttons on the passage map.** **Zoom in**, **Zoom out** and
+  **Fit track** sit under the 3D and satellite buttons. They grey out whilst a
+  replay is playing.
 - **Move a sign in time.** With a sign picked in the replay's sign editor,
   **Move sign here** puts it at the moment the slider is on, and **−1 min**,
   **−10 s**, **+10 s** and **+1 min** shift it a little at a time while the

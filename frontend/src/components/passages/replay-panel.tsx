@@ -582,6 +582,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           hull={hull}
           cameraDriver={cameraDriver}
           onFlatChange={setMapFlat}
+          controlsDisabled={replay.playing || flying}
           markers={
             <SignMarkers
               cards={cards}

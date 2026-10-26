@@ -104,7 +104,10 @@ const TREE_FIXTURE: TreeNode[] = [
   { id: 'unfiled', label: 'Unfiled notes', count: 3, separatorBefore: true },
 ]
 
+const PAGER_FIXTURE = ['Main generator', 'Watermaker', 'Windlass', 'Autopilot']
+
 export function PatternsGallery() {
+  const [pagerIndex, setPagerIndex] = useState(1)
   const [treeSelected, setTreeSelected] = useState('all')
   const [settingsDraft, setSettingsDraft] = useState(SETTINGS_FIXTURE)
   const [settingsSaved, setSettingsSaved] = useState(SETTINGS_FIXTURE)
@@ -165,6 +168,10 @@ export function PatternsGallery() {
     <Page
       title="Pattern gallery"
       primaryAction={{ label: 'New item', icon: <Plus className="h-4 w-4" aria-hidden="true" />, onClick: () => window.alert('New item') }}
+      pager={{
+        previous: pagerIndex > 0 ? { label: PAGER_FIXTURE[pagerIndex - 1], onSelect: () => setPagerIndex(pagerIndex - 1) } : null,
+        next: pagerIndex < PAGER_FIXTURE.length - 1 ? { label: PAGER_FIXTURE[pagerIndex + 1], onSelect: () => setPagerIndex(pagerIndex + 1) } : null,
+      }}
       secondaryActions={[{ label: 'Something destructive', destructive: true, onClick: () => setConfirmOpen(true) }]}
     >
       <p className="max-w-2xl text-sm text-muted-foreground">
@@ -399,6 +406,12 @@ export function PatternsGallery() {
       <GallerySection title="ConfirmDelete" description="An alert-dialog wrapper that leaves closing to the caller.">
         <Button type="button" variant="outline" onClick={() => setConfirmOpen(true)}>Delete something…</Button>
       </GallerySection>
+
+      <GallerySection title="Page pager" description="The arrows at the right of the title above, and the [ and ] keys, step through a list of records. Each end disables rather than wraps; the page supplies its own neighbours and decides their order. Keys typed in a field are ignored.">
+        <p className="text-sm text-foreground">Showing record: {PAGER_FIXTURE[pagerIndex]}</p>
+      </GallerySection>
+
+      <Separator />
 
       <ConfirmDelete
         open={confirmOpen}

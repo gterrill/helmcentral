@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import type { DistanceUnits } from '@/config/app-config'
+import type { PassagesFilter } from '@/lib/app-location'
 import { CruiseEditPanel } from '@/components/passages/cruise-edit-panel'
 import { MergePassagesButton } from '@/components/passages/merge-passages-button'
 import { NameCruiseDialog } from '@/components/passages/name-cruise-dialog'
@@ -17,6 +18,7 @@ import { usePassageLegs } from '@/hooks/use-passage-legs'
 import { useCruiseDetails, usePassageDetail, usePassageDetails } from '@/hooks/use-passages'
 import { combinedTitle } from '@/lib/passage-export'
 import { legsOf, type PassageLeg } from '@/lib/passage-legs'
+import { passageNeighbours } from '@/lib/passage-neighbours'
 import { passagesApi } from '@/lib/passages-api'
 import {
   fmtDuration,
@@ -44,6 +46,8 @@ export interface PassageDetailsPageProps {
   isDarkTheme: boolean
   /** The visible passages, newest first, for neighbours and names. */
   list: PassageSummary[]
+  /** The listing the page was opened from; the previous and next arrows stay inside it. */
+  filter: PassagesFilter
   cruises: CruiseRecord[]
   onBack: () => void
   onOpenPassage: (id: string) => void
@@ -106,13 +110,25 @@ export function PassageDetailsPage(props: PassageDetailsPageProps) {
 
 // ── one passage ───────────────────────────────────────────────────────────
 
-function SinglePassage({ id, units, canWrite, isDarkTheme, list, cruises, onBack, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
+function pagerTarget(p: PassageSummary | null, open: (id: string) => void) {
+  if (!p) return null
+  const named = p.title.trim() || p.from_name || p.to_name
+  const label = named ? `${passageHeading(p)} · ${formatLocalDate(p.start, p.start_lon ?? 0)}` : passageHeading(p)
+  return { label, onSelect: () => open(p.id) }
+}
+
+function SinglePassage({ id, units, canWrite, isDarkTheme, list, filter, cruises, onBack, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
   const { passage, loading, error } = usePassageDetail(id)
   const cursorRef = useRef<ReplayCursor | null>(null)
   const index = list.findIndex((p) => p.id === id)
+  const neighbours = passageNeighbours(list, id, filter)
   return (
     <Page
       title={passage ? passageHeading(passage) : 'Passage'}
+      pager={{
+        previous: pagerTarget(neighbours.previous, onOpenPassage),
+        next: pagerTarget(neighbours.next, onOpenPassage),
+      }}
       onBack={onBack}
       backLabel="Back to passages"
     >
