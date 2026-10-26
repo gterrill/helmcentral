@@ -11,6 +11,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **The passage map no longer keeps redrawing while the replay is paused.** With
+  3D on, the map redrew many times a second even when nothing was playing, and
+  Chrome flagged the Passages tab as slowing the browser. It now draws only
+  when the boat moves.
+
 ## [0.55.0] - 2026-10-26
 
 ### Added

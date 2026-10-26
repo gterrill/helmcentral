@@ -139,6 +139,8 @@ export function createBoatLayer(hull: BoatHull, { three: T, MercatorCoordinate }
     },
 
     setPose(next) {
+      // React hands over a fresh object on every render; only a moved boat needs a frame.
+      if (next === pose || (next && pose && next.lat === pose.lat && next.lon === pose.lon && next.headingDeg === pose.headingDeg)) return
       pose = next
       elevationStale = true
       map?.triggerRepaint()
