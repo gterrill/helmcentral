@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Move a sign in time.** With a sign picked in the replay's sign editor,
+  **Move sign here** puts it at the moment the slider is on, and **−1 min**,
+  **−10 s**, **+10 s** and **+1 min** shift it a little at a time while the
+  replay jumps to the new moment. For a sign with a photo, **Photo**, then
+  **Back to photo time** puts it back where the photo was taken. You no longer
+  have to delete a sign and add it again to change when it appears.
+
 ## [0.55.0] - 2026-10-26
 
 ### Added

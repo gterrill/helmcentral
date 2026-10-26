@@ -1,4 +1,4 @@
-import { ChevronDown, Library, Plus, Signpost, Trash2, Upload, X } from 'lucide-react'
+import { ChevronDown, Clock, Library, MapPin, Plus, Signpost, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
@@ -176,12 +176,28 @@ export interface SignEditorProps {
   onReplaceFromLibrary: (doc: DocumentLinkPickerResult) => void
   onRemovePhoto: () => void
   onDelete: () => void
+  /** Moves the sign to the replay cursor. */
+  onMoveHere: () => void
+  /** The cursor is already on the sign, or there is no cursor. */
+  moveHereDisabled: boolean
+  /** Moves the sign by this many seconds and seeks there. */
+  onNudge: (seconds: number) => void
+  /** Moves the sign to the time its photo was taken. */
+  onBackToPhotoTime: () => void
 }
+
+/** The nudge steps, earliest first. */
+const NUDGES: readonly { seconds: number; short: string; words: string }[] = [
+  { seconds: -60, short: '\u22121 min', words: '1 minute earlier' },
+  { seconds: -10, short: '\u221210 s', words: '10 seconds earlier' },
+  { seconds: 10, short: '+10 s', words: '10 seconds later' },
+  { seconds: 60, short: '+1 min', words: '1 minute later' },
+]
 
 const ACCEPT = SIGN_PHOTO_TYPES.join(',')
 
 export function SignEditor({
-  sign, signs, onPick, disabled = false, whenLabel, busy, error, notice, onAdd, onAddPhoto, onAddFromLibrary, onChange, onReplacePhoto, onReplaceFromLibrary, onRemovePhoto, onDelete,
+  sign, signs, onPick, disabled = false, whenLabel, busy, error, notice, onAdd, onAddPhoto, onAddFromLibrary, onChange, onReplacePhoto, onReplaceFromLibrary, onRemovePhoto, onDelete, onMoveHere, moveHereDisabled, onNudge, onBackToPhotoTime,
 }: SignEditorProps) {
   const addInput = useRef<HTMLInputElement>(null)
   const replaceInput = useRef<HTMLInputElement>(null)
@@ -273,6 +289,19 @@ export function SignEditor({
             {sign.visibility === 'passing' && <SecondsField value={sign.show_s} onCommit={(show_s) => onChange({ show_s })} />}
             {whenLabel && <span className="text-xs tabular-nums text-muted-foreground">At {whenLabel}</span>}
           </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2 sm:col-span-2" role="group" aria-label="Move sign in time">
+            <Button type="button" size="sm" variant="outline" disabled={moveHereDisabled || disabled} onClick={onMoveHere}>
+              <MapPin className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+              Move sign here
+            </Button>
+            <span className="flex flex-wrap gap-1">
+              {NUDGES.map((n) => (
+                <Button key={n.seconds} type="button" size="sm" variant="outline" title={`Move sign ${n.words}`} disabled={disabled} onClick={() => onNudge(n.seconds)}>
+                  {n.short}
+                </Button>
+              ))}
+            </span>
+          </div>
           <div className="flex min-w-0 flex-col gap-1 sm:col-span-2">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Switch id="sign-starts-leg" checked={sign.starts_leg} onCheckedChange={toggleLeg} />
@@ -306,6 +335,12 @@ export function SignEditor({
                     <Library className="h-4 w-4" aria-hidden="true" />
                     From Documents
                   </DropdownMenuItem>
+                  {hasPhoto && (
+                    <DropdownMenuItem disabled={disabled} onClick={onBackToPhotoTime}>
+                      <Clock className="h-4 w-4" aria-hidden="true" />
+                      Back to photo time
+                    </DropdownMenuItem>
+                  )}
                   {hasPhoto && (
                     <DropdownMenuItem onClick={onRemovePhoto}>
                       <X className="h-4 w-4" aria-hidden="true" />

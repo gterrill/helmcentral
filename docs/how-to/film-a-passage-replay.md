@@ -106,8 +106,20 @@ that moment is inside the replay, and the replay jumps there. The editor tells
 you the time it used. If the photo has no time zone, the time is read in the
 boat's time zone, which is the one shown beside the replay time. If the photo
 has no time, or it was taken outside the replay, the sign goes where the slider
-is and the editor says so. To move it, delete it and add it again where you
-want it.
+is and the editor says so.
+
+## Move a sign to another moment
+
+1. Open the sign editor with **Signs** and pick the sign.
+2. To put it where the slider is, drag the slider there and press **Move sign
+   here**.
+3. To shift it a little, press **−1 min**, **−10 s**, **+10 s** or **+1 min**.
+   The replay jumps to the new moment each time, and quick presses add up.
+4. For a sign with a photo, press **Photo**, then **Back to photo time** to put
+   it where the photo was taken.
+
+A sign can only be moved to a moment the replay includes. If you try anywhere else,
+the editor says so and the sign stays where it was.
 
 Uploaded photos are kept in a Documents folder called **Passage photos**. If you
 delete a photo there, the sign keeps its title and note and shows no picture.
