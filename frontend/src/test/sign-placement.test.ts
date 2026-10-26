@@ -5,7 +5,10 @@ import { placeByCapture } from '@/lib/sign-placement'
 
 // 22 Oct 2026, 09:00-15:00 UTC+10 is 23:00 (21st) to 05:00 UTC.
 const start = Date.UTC(2026, 9, 21, 23, 0) / 1000
-const timeline = buildTimeline([{ id: 'p', start, end: start + 6 * 3600, segments: [] }])
+// A track covering the whole span, since a sign is placed only where the
+// replay has a position.
+const track = [{ t: start, lat: -20, lon: 148 }, { t: start + 6 * 3600, lat: -20.5, lon: 148.5 }]
+const timeline = buildTimeline([{ id: 'p', start, end: start + 6 * 3600, segments: [track] }])
 const cursor = start + 3600
 const base = { year: 2026, month: 10, day: 22, hour: 11, minute: 30, second: 0 }
 

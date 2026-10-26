@@ -234,6 +234,15 @@ that is made the first time, or chosen from a photo already in Documents.
   but can't be loaded, the card says "Photo not available" instead of hiding
   it.
 
+You can change when a sign appears without deleting it. With the sign picked,
+**Move sign here** puts it at the moment the slider is on. The four buttons
+beside it, **−1 min**, **−10 s**, **+10 s** and **+1 min**, shift it a little
+at a time, and the replay jumps to the new moment so you can see where it
+lands. For a sign with a photo, **Back to photo time** in the **Photo** menu
+puts it back at the moment the photo was taken, by the same rules as when you
+made it. If the photo gives no usable time, the sign stays and the editor says
+why. A sign can only move to a moment the replay includes.
+
 Signs belong to the time of day, not to one passage record, so splitting or
 merging passages keeps them. If you trim a passage so a sign falls outside it,
 the sign is hidden and comes back if you undo the trim. Signs are only removed

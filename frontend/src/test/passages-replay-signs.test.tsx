@@ -9,6 +9,7 @@ import { resetQueryStore } from '@/lib/api-query'
 import { exifJpeg } from './helpers/exif-jpeg'
 import { jsonResponse, stubApi, type StubRequest } from './helpers/stub-api'
 
+let flyGate: Promise<void> | null = null
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => null }))
 vi.mock('react-map-gl/maplibre', () => ({
   Marker: ({ children, longitude, latitude }: { children: ReactNode; longitude: number; latitude: number }) => (
@@ -19,7 +20,7 @@ vi.mock('react-map-gl/maplibre', () => ({
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
   PassageMap: forwardRef(function PassageMapMock(p: { markers?: ReactNode }, ref) {
-    useImperativeHandle(ref, () => ({ flyIn: () => Promise.resolve(), getView: () => ({ zoom: 13, pitch: 40, bearing: 0 }) }))
+    useImperativeHandle(ref, () => ({ flyIn: () => flyGate ?? Promise.resolve(), getView: () => ({ zoom: 13, pitch: 40, bearing: 0 }) }))
     return <div data-testid="map">{p.markers}</div>
   }),
   InsetMap: () => <div />,
@@ -539,6 +540,283 @@ describe('ReplayPanel signs: photos', () => {
     fireEvent.change(screen.getByLabelText('Photo file for this sign'), { target: { files: [photo('2026:10:22 09:10:00')] } })
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0]).toMatchObject({ method: 'PATCH', body: { document_id: 'doc1' } })
+  })
+})
+
+describe('ReplayPanel signs: moving a sign', () => {
+  const t = (offset: number) => (start + offset) * 1000
+  const atTime = () => (screen.getByLabelText('Replay position') as HTMLInputElement).value
+
+  it('offers no move controls until a sign is selected', async () => {
+    signs = [sign('s1', 250)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Signs' }))
+    expect(screen.queryByRole('button', { name: 'Move sign here' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '−10 s' })).toBeNull()
+  })
+
+  it('Move sign here sends the cursor time, keeps the sign selected, and is off while the cursor is on the sign', async () => {
+    signs = [sign('s1', 250)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    expect(screen.getByRole('button', { name: 'Move sign here' })).toBeDisabled()
+    scrub(400)
+    fireEvent.click(screen.getByRole('button', { name: 'Move sign here' }))
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0]).toMatchObject({ method: 'PATCH', body: { t_ms: t(400) } })
+    expect(screen.getByLabelText('Sign title')).toHaveValue('Sign s1')
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Move sign here' })).toBeDisabled())
+    expect(screen.getByText(/^At 22 Oct 09:06/)).toBeInTheDocument()
+  })
+
+  it('shows the server\'s reason when the move is refused', async () => {
+    signs = [sign('s1', 250)]
+    stub({ 'PATCH /api/passages/signs/s1': () => jsonResponse({ error: 'invalid passage request: t_ms is not inside any passage' }, 400) })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    scrub(400)
+    fireEvent.click(screen.getByRole('button', { name: 'Move sign here' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('not inside any passage')
+  })
+
+  it('a nudge moves the sign by its amount and seeks the replay there', async () => {
+    signs = [sign('s1', 250)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].body).toEqual({ t_ms: t(310) })
+    await waitFor(() => expect(atTime()).toBe('310'))
+    fireEvent.click(screen.getByRole('button', { name: '−1 min' }))
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes[1].body).toEqual({ t_ms: t(250) })
+    fireEvent.click(screen.getByRole('button', { name: '−10 s' }))
+    await waitFor(() => expect(writes).toHaveLength(3))
+    expect(writes[2].body).toEqual({ t_ms: t(240) })
+  })
+
+  it('rapid nudges add up from the latest time, not the one on screen', async () => {
+    signs = [sign('s1', 250)]
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => { release = r })
+    stub({
+      'PATCH /api/passages/signs/s1': async (req: StubRequest) => {
+        writes.push({ method: 'PATCH', url: req.url, body: req.body })
+        if (writes.length === 1) await gate
+        signs = signs.map((s) => (s.id === 's1' ? { ...s, ...(req.body as object) } : s))
+        return { sign: signs[0] }
+      },
+    })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    const later = screen.getByRole('button', { name: '+10 s' })
+    fireEvent.click(later)
+    fireEvent.click(later)
+    fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
+    release()
+    await waitFor(() => expect(writes).toHaveLength(3))
+    expect(writes.map((w) => (w.body as { t_ms: number }).t_ms)).toEqual([t(260), t(270), t(330)])
+  })
+
+  it('a nudge the server refuses shows why and the next one starts from the saved time', async () => {
+    signs = [sign('s1', 250)]
+    let n = 0
+    stub({
+      'PATCH /api/passages/signs/s1': (req: StubRequest) => {
+        writes.push({ method: 'PATCH', url: req.url, body: req.body })
+        if (n++ === 0) return jsonResponse({ error: 'invalid passage request: t_ms is not inside any passage' }, 400)
+        signs = signs.map((s) => (s.id === 's1' ? { ...s, ...(req.body as object) } : s))
+        return { sign: signs[0] }
+      },
+    })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('not inside any passage')
+    fireEvent.click(screen.getByRole('button', { name: '+10 s' }))
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes[1].body).toEqual({ t_ms: t(260) })
+  })
+
+  it('a nudge queued behind Back to photo time lands at the photo time plus the nudge', async () => {
+    signs = [sign('s1', 250, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })]
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => { release = r })
+    stub({
+      'GET /api/documents/doc1/content': async () => {
+        await gate
+        return new Response(exifJpeg({ dt: '2026:10:22 09:10:00' }).buffer as ArrayBuffer, { status: 200 })
+      },
+    })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Back to photo time' }))
+    fireEvent.click(screen.getByRole('button', { name: '+10 s' }))
+    release()
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes.map((w) => (w.body as { t_ms: number }).t_ms)).toEqual([t(600), t(610)])
+  })
+
+  it('the next move builds on the patched time even when the signs cannot be read again', async () => {
+    signs = [sign('s1', 250)]
+    let reads = 0
+    stub({
+      'GET /api/passages/signs': () => (++reads > 1 ? jsonResponse({ error: 'down' }, 500) : { signs }),
+    })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
+    await waitFor(() => expect(writes).toHaveLength(1))
+    fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes.map((w) => (w.body as { t_ms: number }).t_ms)).toEqual([t(310), t(370)])
+  })
+
+  it('a failed move does not carry into the moves after it', async () => {
+    signs = [sign('s1', 250)]
+    let n = 0
+    stub({
+      'PATCH /api/passages/signs/s1': (req: StubRequest) => {
+        writes.push({ method: 'PATCH', url: req.url, body: req.body })
+        if (n++ === 0) return jsonResponse({ error: 'invalid passage request: t_ms is not inside any passage' }, 400)
+        signs = signs.map((s) => (s.id === 's1' ? { ...s, ...(req.body as object) } : s))
+        return { sign: signs[0] }
+      },
+    })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    scrub(400)
+    fireEvent.click(screen.getByRole('button', { name: 'Move sign here' }))
+    fireEvent.click(screen.getByRole('button', { name: '+10 s' }))
+    await waitFor(() => expect(writes).toHaveLength(3))
+    expect(writes.map((w) => (w.body as { t_ms: number }).t_ms)).toEqual([t(310), t(400), t(410)])
+  })
+
+  it('sends nothing for a moment the replay does not include, even if the server would accept it', async () => {
+    const second: PassageDetail = {
+      ...passage, id: 'p2', start: new Date((start + 5000) * 1000).toISOString(), end: new Date((start + 6000) * 1000).toISOString(),
+      track_times: [[start + 5000, start + 6000]], replay_times: [[start + 5000, start + 5500, start + 6000]],
+    }
+    signs = [sign('s1', 990)]
+    render(<ReplayPanel passages={[passage, second]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    fireEvent.click(screen.getByRole('button', { name: '+1 min' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('That moment is outside this replay, so the sign was not moved.')
+    expect(writes).toHaveLength(0)
+  })
+
+  it('a nudge queued behind Delete sends no PATCH and says the sign is gone', async () => {
+    signs = [sign('s1', 250)]
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => { release = r })
+    stub({
+      'DELETE /api/passages/signs/s1': async (req: StubRequest) => {
+        await gate
+        writes.push({ method: 'DELETE', url: req.url, body: undefined })
+        signs = []
+        return { deleted: true }
+      },
+    })
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'Delete sign' }))
+    fireEvent.click(screen.getByRole('button', { name: '+10 s' }))
+    release()
+    expect(await screen.findByRole('alert')).toHaveTextContent('That sign is no longer there.')
+    expect(writes.map((w) => w.method)).toEqual(['DELETE'])
+  })
+
+  it('the move controls are off while the fly-in runs', async () => {
+    signs = [sign('s1', 250, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })]
+    let release: () => void = () => {}
+    flyGate = new Promise<void>((r) => { release = r })
+    try {
+      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+      scrub(0)
+      fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+      await waitFor(() => expect(screen.getByRole('button', { name: '+10 s' })).toBeDisabled())
+      expect(screen.getByRole('button', { name: 'Move sign here' })).toBeDisabled()
+      fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
+      expect(await screen.findByRole('menuitem', { name: 'Back to photo time' })).toHaveAttribute('aria-disabled', 'true')
+    } finally {
+      release()
+      flyGate = null
+    }
+  })
+
+  describe('Back to photo time', () => {
+    const withPhoto = () => { signs = [sign('s1', 250, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })] }
+    const photoBytes = (dt: string, offset?: string) => new Response(exifJpeg({ dt, offset }).buffer as ArrayBuffer, { status: 200 })
+    const open = async () => {
+      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Back to photo time' }))
+    }
+
+    it('is not offered on a sign without a photo', async () => {
+      signs = [sign('s1', 250)]
+      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
+      await screen.findByRole('menuitem', { name: 'Upload' })
+      expect(screen.queryByRole('menuitem', { name: 'Back to photo time' })).toBeNull()
+    })
+
+    it('moves the sign to the capture time, read in the boat zone, and seeks there', async () => {
+      withPhoto()
+      stub({ 'GET /api/documents/doc1/content': () => photoBytes('2026:10:22 09:10:00') })
+      await open()
+      await waitFor(() => expect(writes).toHaveLength(1))
+      expect(writes[0]).toMatchObject({ method: 'PATCH', body: { t_ms: t(600) } })
+      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Placed at the time the photo was taken: 22 Oct 09:10 UTC+10')
+      await waitFor(() => expect(atTime()).toBe('600'))
+    })
+
+    it('sends nothing when the sign already stands at the photo time, still says so, and seeks there', async () => {
+      signs = [sign('s1', 600, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })]
+      stub({ 'GET /api/documents/doc1/content': () => photoBytes('2026:10:22 09:10:00') })
+      await open()
+      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Placed at the time the photo was taken: 22 Oct 09:10 UTC+10')
+      expect(writes).toHaveLength(0)
+      await waitFor(() => expect(atTime()).toBe('600'))
+    })
+
+    it('uses the photo\'s own zone when it has one', async () => {
+      withPhoto()
+      stub({ 'GET /api/documents/doc1/content': () => photoBytes('2026:10:21 23:10:00', '+00:00') })
+      await open()
+      await waitFor(() => expect(writes).toHaveLength(1))
+      expect(writes[0].body).toEqual({ t_ms: t(600) })
+    })
+
+    it('leaves the sign where it is when the photo was taken outside the replay', async () => {
+      withPhoto()
+      stub({ 'GET /api/documents/doc1/content': () => photoBytes('2026:10:25 09:10:00') })
+      await open()
+      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('The photo was taken 25 Oct 09:10 UTC+10, outside this replay, so the sign was not moved.')
+      expect(writes).toHaveLength(0)
+    })
+
+    it('leaves the sign where it is when the photo has no capture time', async () => {
+      withPhoto()
+      stub({ 'GET /api/documents/doc1/content': () => new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), { status: 200 }) })
+      await open()
+      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('The photo has no capture time, so the sign was not moved.')
+      expect(writes).toHaveLength(0)
+    })
+
+    it('says so when the photo cannot be read, and moves nothing', async () => {
+      withPhoto()
+      stub({ 'GET /api/documents/doc1/content': () => new Response('gone', { status: 404 }) })
+      await open()
+      expect(await screen.findByTestId('sign-notice')).toHaveTextContent('Could not read when the photo was taken (Could not read the photo, HTTP 404), so the sign was not moved.')
+      expect(writes).toHaveLength(0)
+    })
   })
 })
 

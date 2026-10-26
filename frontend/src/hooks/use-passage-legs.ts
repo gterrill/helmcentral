@@ -21,5 +21,5 @@ export function usePassageLegs(passages: readonly { id: string; start: string; e
   const to = ranges.length > 0 ? Math.max(...ranges.map((r) => r.endMs)) : null
   const { signs, error } = useReplaySigns(from, to)
   const legs = useMemo(() => (ranges.length > 0 ? passageLegs(ranges, signs) : NONE), [ranges, signs])
-  return { legs, signs, error }
+  return { legs, signs, error, from, to }
 }
