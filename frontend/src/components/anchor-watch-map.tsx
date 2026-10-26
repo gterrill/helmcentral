@@ -1969,7 +1969,7 @@ export function AnchorWatchMap({
 
       {/* Metric overlay — top of map. A host can put its own header at the
           top through the hudHeader slot (the Anchor Watch page puts depth,
-          tide and low-water clearance there, ADR 0209); the tile passes none.
+          tide and low-water clearance there, ADR 0212); the tile passes none.
           Under any header, Distance is the first row — the boat's live distance from
           the anchor, same figure and formatting the old promoted Distance
           KPI showed. Distance, Bearing and Radius are dropped from the row

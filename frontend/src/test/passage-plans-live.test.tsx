@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PassagePlans } from '@/components/passages/passage-plans'
 import { usePassageDetail } from '@/hooks/use-passages'
+import { decodePassageDetailExtras } from '@/lib/passage-plans'
 import { resetQueryStore } from '@/lib/api-query'
 import { stubApi } from './helpers/stub-api'
 import { testRouter } from './helpers/router'
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
+const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }))
+vi.mock('sonner', () => ({ toast }))
 
 const stats = {
   distance_nm: 1, underway_seconds: 60, mean_sog_kts: null, max_sog_kts: null, fuel_burned_l: null, tws_mean_kts: null,
@@ -66,5 +68,23 @@ describe('the plan line on a live passage query', () => {
     fireEvent.click(option)
     await waitFor(() => expect(screen.getByRole('combobox')).toHaveTextContent('Went · Sat 24 Oct'))
     expect(reads).toBeGreaterThanOrEqual(1)
+  })
+
+  it('saves a choice when the passage detail is not cached, and reads the passage again', async () => {
+    const mock = stubApi({
+      'PUT /api/passage-decisions/7': () => ({ decision: { id: 7, state: 'went', row_date: '2026-10-24', inferred: false, passage_id: 'p1' } }),
+    })
+    const { wrapper } = testRouter('/passages/p1')
+    // The plans are shown from props, with nothing in the cache under the passage's key.
+    render(<PassagePlans passageId="p1" plans={decodePassageDetailExtras(detail().passage).plannedWithMate} error={null} canWrite />, { wrapper })
+    const trigger = await screen.findByRole('combobox')
+    fireEvent.click(trigger)
+    const option = await screen.findByRole('option', { name: 'Went · Sat 24 Oct' })
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
+    await waitFor(() => expect(mock.mock.calls.some(([, i]) => i?.method === 'PUT')).toBe(true))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(toast.error).not.toHaveBeenCalled()
   })
 })

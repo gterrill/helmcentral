@@ -1,4 +1,4 @@
-# ADR 0210: Wave Figures Are Optional, and a Missing Direction Is Not Checked
+# ADR 0213: Wave Figures Are Optional, and a Missing Direction Is Not Checked
 
 ## Status
 

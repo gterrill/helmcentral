@@ -29,7 +29,7 @@ function clockTime(iso: string | number): string {
 interface AnchorWatchReadingsProps {
   /**
    * 'hud' is the compact version for the map's black top-left panel
-   * (ADR 0209); 'card' is the standalone card shown when there is no map to
+   * (ADR 0212); 'card' is the standalone card shown when there is no map to
    * carry it. The figures and their wording come from the one place below;
    * only the layout classes differ.
    */

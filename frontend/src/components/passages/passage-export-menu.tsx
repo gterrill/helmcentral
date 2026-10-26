@@ -84,7 +84,11 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   // its range over every passage shown (the key the replay saves under); the
   // card and the images draw it the way the replay does.
   const insetRange = useMemo(() => insetViewRange(passages), [passages])
-  const { view: insetView, loading: insetViewLoading, error: insetViewError } = useInsetView(hasTrack ? insetRange : null)
+  const { view: insetView, loading: insetViewLoadingRaw, error: insetViewErrorRaw } = useInsetView(hasTrack ? insetRange : null)
+  // The placement only matters when the overview map is drawn: with it off, a
+  // placement still loading or failed to load must not hold up an export.
+  const insetViewLoading = inset && insetViewLoadingRaw
+  const insetViewError = inset ? insetViewErrorRaw : null
 
   // Signs belong to real time too. The ones inside an exported passage go in
   // when Include signs is on, photos included.

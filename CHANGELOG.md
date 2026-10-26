@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.55.0] - 2026-10-26
+
 ### Added
 
 - **Rate a passage.** A passage's edit panel has a **How it went** section with
@@ -62,11 +64,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Help pages rewritten to read the way you'd say them.** Every help page now
   uses shorter sentences and everyday words. Paragraphs that walked through
   several cases are now lists, one case per point, so it's quicker to find the
-  one that applies to you.
-- **Help pages read more plainly.** Every help page has had a wording pass,
-  and the contents page now links the anchor watch, alarm threshold and alarm
-  notification guides and the Tiles, Alarm rules and Mate lookups reference
-  pages, which were missing from it.
+  one that applies to you. The contents page also links the anchor watch,
+  alarm threshold and alarm notification guides and the Tiles, Alarm rules and
+  Mate lookups reference pages, which were missing from it.
+
 - **The Anchor Watch page is all map.** Depth, tide and the low-water clearance
   warning now sit in the readout panel in the map's top-left corner, above
   current, distance, bearing and radius, instead of in a card above the map.
@@ -1856,7 +1857,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.55.0...HEAD
+[0.55.0]: https://github.com/gterrill/helmcentral/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/gterrill/helmcentral/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/gterrill/helmcentral/compare/v0.52.0...v0.53.0
 [0.52.0]: https://github.com/gterrill/helmcentral/compare/v0.51.0...v0.52.0

@@ -57,20 +57,39 @@ func (r *decisionReconciler) reconcile(from, to time.Time, include ...int64) err
 		return fmt.Errorf("assistant store is not running")
 	}
 	now := r.now()
-	rows, err := asst.PassageDecisionsForInference(now.Add(-2*passageDecisionsWindow), include)
-	if err != nil {
-		return err
-	}
-	var woken map[string]bool
+	// Old cards come in only through a link: to a passage in the woken span, or
+	// to one that is gone. Find those passage ids first so the query does not
+	// load every decision that was ever linked.
+	var callIDs []string
+	passageIDs := map[string]bool{}
 	if !from.IsZero() || !to.IsZero() {
 		ids, err := r.passages.PassageIDsStartingIn(from, to)
 		if err != nil {
 			return err
 		}
-		woken = map[string]bool{}
 		for _, id := range ids {
-			woken[id] = true
+			passageIDs[id] = true
 		}
+	}
+	linked, err := asst.LinkedPassageIDs()
+	if err != nil {
+		return err
+	}
+	exist, err := r.passages.ExistingPassageIDs(linked)
+	if err != nil {
+		return err
+	}
+	for _, id := range linked {
+		if !exist[id] {
+			passageIDs[id] = true
+		}
+	}
+	for id := range passageIDs {
+		callIDs = append(callIDs, id)
+	}
+	rows, err := asst.PassageDecisionsForInference(now.Add(-2*passageDecisionsWindow), include, callIDs)
+	if err != nil {
+		return err
 	}
 	forced := map[int64]bool{}
 	for _, id := range include {
@@ -97,25 +116,12 @@ func (r *decisionReconciler) reconcile(from, to time.Time, include ...int64) err
 		all = append(all, parsed{row, snap, last})
 	}
 
-	// Old cards come in only through a link: to a passage in the woken span, or
-	// to one that is gone. One query finds which linked passages still exist.
-	var linked []string
-	for _, p := range all {
-		if !forced[p.row.ID] && !decisionIsRecent(p.last, now) && p.row.PassageID != "" && !woken[p.row.PassageID] {
-			linked = append(linked, p.row.PassageID)
-		}
-	}
-	exist, err := r.passages.ExistingPassageIDs(linked)
-	if err != nil {
-		return err
-	}
-
 	var inputs []decisionInput
 	var winFrom, winTo time.Time
 	for _, p := range all {
 		row := p.row
 		if !forced[row.ID] && !decisionIsRecent(p.last, now) {
-			if row.PassageID == "" || (!woken[row.PassageID] && exist[row.PassageID]) {
+			if row.PassageID == "" || !passageIDs[row.PassageID] {
 				continue
 			}
 		}
@@ -143,7 +149,7 @@ func (r *decisionReconciler) reconcile(from, to time.Time, include ...int64) err
 	sources := map[string]string{}
 	for _, p := range list {
 		dp := decisionPassage{ID: p.ID, Start: p.Start, End: p.End}
-		if p.Source == "" {
+		if passageSourceUnknown(p.Source) {
 			noteUnknownPassageSource(p.ID)
 			unknown = append(unknown, dp)
 			continue
@@ -267,11 +273,15 @@ func (s *passageStore) PassageIDsStartingIn(from, to time.Time) ([]string, error
 // passage's. A passage of unknown source has no track to match. Passage stats
 // and the page still read the mixed track.
 func (s *passageStore) PassageTrack(rec passageRecord) ([]recordedTrackPoint, error) {
-	if rec.Source == "" {
+	if passageSourceUnknown(rec.Source) {
 		return nil, fmt.Errorf("passage track: source of the passage is unknown")
 	}
 	return s.trackPoints(rec.Start, rec.End, rec.Source)
 }
+
+// passageSourceUnknown says a passage has no single track source to match on:
+// none recorded yet, or its span holds both.
+func passageSourceUnknown(src string) bool { return src == "" || src == passageSourceMixed }
 
 var unknownSourceLogged sync.Map
 
