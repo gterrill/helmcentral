@@ -232,19 +232,45 @@ func (s *assistantStore) PassageDecisionRow(id int64) (passageDecisionRow, error
 	return r, nil
 }
 
-// PassageDecisionsForInference returns the decisions a reconcile may look at:
-// every one whose card was made at or after since, plus any older one that
-// holds a passage link. The caller narrows these by row date.
-func (s *assistantStore) PassageDecisionsForInference(since time.Time, include []int64) ([]passageDecisionRow, error) {
+// LinkedPassageIDs returns each passage id a decision is linked to, once.
+func (s *assistantStore) LinkedPassageIDs() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	where, args := `card_created_ms >= ? OR passage_id IS NOT NULL`, []any{since.UnixMilli()}
+	rows, err := s.db.Query(`SELECT DISTINCT passage_id FROM passage_decisions WHERE passage_id IS NOT NULL`)
+	if err != nil {
+		return nil, fmt.Errorf("list linked passages: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan linked passage: %w", err)
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// PassageDecisionsForInference returns the decisions a reconcile may look at:
+// every one whose card was made at or after since, the ones named in include,
+// and any older one linked to a passage in passageIDs (the passages the caller
+// woke, or whose passage is gone). The caller narrows these by row date.
+func (s *assistantStore) PassageDecisionsForInference(since time.Time, include []int64, passageIDs []string) ([]passageDecisionRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	where, args := `card_created_ms >= ?`, []any{since.UnixMilli()}
 	if len(include) > 0 {
 		marks := strings.TrimSuffix(strings.Repeat("?,", len(include)), ",")
 		where += ` OR id IN (` + marks + `)`
 		for _, id := range include {
 			args = append(args, id)
 		}
+	}
+	if len(passageIDs) > 0 {
+		marks, pargs := inPlaceholders(passageIDs)
+		where += ` OR passage_id IN (` + marks + `)`
+		args = append(args, pargs...)
 	}
 	rows, err := s.db.Query(`SELECT `+passageDecisionRowColumns+` FROM passage_decisions WHERE `+where+` ORDER BY card_created_ms, id`, args...)
 	if err != nil {

@@ -136,7 +136,7 @@ func (s *passageStore) PatchPassage(id string, p passagePatch) (passageRecord, e
 	return rec, tx.Commit()
 }
 
-// splitSnap is how far from a titled join a split still lands on the join.
+// splitSnap is how far from a join a split still lands on the join.
 const splitSnap = 60 * time.Second
 
 // SplitPassage cuts a passage in two at a moment strictly inside it. The first
@@ -160,13 +160,13 @@ func (s *passageStore) SplitPassage(id string, at time.Time) (first, second pass
 		err = invalidf("split time must be inside the passage")
 		return
 	}
-	// A titled join within a minute of the cut is where the operator meant to
-	// cut: take the nearest one's exact time and name.
+	// A join within a minute of the cut, titled or not, is where the operator
+	// meant to cut: take the nearest one's exact time and, if it has one, name.
 	var join string
 	{
 		lo, hi := at.Add(-splitSnap).UnixMilli(), at.Add(splitSnap).UnixMilli()
 		var jt int64
-		jerr := tx.QueryRow(`SELECT t_ms, title FROM replay_signs WHERE starts_leg = 1 AND title != '' AND t_ms >= ? AND t_ms <= ? AND t_ms > ? AND t_ms < ?
+		jerr := tx.QueryRow(`SELECT t_ms, title FROM replay_signs WHERE starts_leg = 1 AND t_ms >= ? AND t_ms <= ? AND t_ms > ? AND t_ms < ?
 			ORDER BY ABS(t_ms - ?), id LIMIT 1`, lo, hi, rec.Start.UnixMilli(), rec.End.UnixMilli(), at.UnixMilli()).Scan(&jt, &join)
 		if jerr != nil && !errors.Is(jerr, sql.ErrNoRows) {
 			err = jerr
@@ -249,10 +249,10 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 	now := time.Now().UTC().UnixMilli()
 	for i := 1; i < len(legs); i++ {
 		a, b := legs[i-1], legs[i]
-		// Points of two sources cannot be read as one track, so a mixed merge
-		// has no known source and is left out of decision matching.
+		// Points of two sources cannot be read as one track, so a merge of
+		// differing sources is mixed and left out of decision matching.
 		if m.Source != b.Source {
-			m.Source = ""
+			m.Source = passageSourceMixed
 		}
 		if m.CruiseID != nil && b.CruiseID != nil && *m.CruiseID != *b.CruiseID {
 			return m, invalidf("the passages are in different cruises")

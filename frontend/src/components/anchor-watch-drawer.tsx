@@ -451,7 +451,7 @@ export function AnchorWatchDrawer({
   const adjustRadiusAtMin = adjustDisplayRadiusM <= adjustBounds.minM
   const adjustRadiusAtMax = adjustDisplayRadiusM >= adjustBounds.maxM
 
-  // The depth/tide/clearance readings as one presenter (ADR 0209): compact
+  // The depth/tide/clearance readings as one presenter (ADR 0212): compact
   // inside the map's own panel when there is a map, a standalone card when
   // there isn't. Only the layout differs.
   const mapHudHeader = hasMap ? (
@@ -465,7 +465,7 @@ export function AnchorWatchDrawer({
     />
   ) : null
 
-  // Drop/Raise float over the map (ADR 0209). Raise stays reachable during
+  // Drop/Raise float over the map (ADR 0212). Raise stays reachable during
   // Adjust, and raising mid-Adjust closes Adjust (the isAnchored effect
   // above).
   const floatDropRaise = hasMap
@@ -512,7 +512,7 @@ export function AnchorWatchDrawer({
             'flex min-w-0 flex-1 flex-col gap-3',
           )}
         >
-          {/* Fallback header card (ADR 0133's amendment, ADR 0209): live depth
+          {/* Fallback header card (ADR 0133's amendment, ADR 0212): live depth
               as the hero KPI, tide context beside it, and the low-water
               clearance warning (ADR 0135) below. Only rendered when there is
               no map to carry these (no GPS fix, or no WebGL2): with a map

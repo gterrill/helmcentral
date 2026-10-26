@@ -125,20 +125,22 @@ Three facts in the code shape the design:
    rating, and a merge keeps the most cautious one among the merged passages
    (`shouldnt_have_gone`, then `lively`, then `comfortable`).
 8. **Each passage records its track source.** `passages.source` holds
-   `recorded` or `imported`, the same values as `track_points.source`.
-   Detection writes `recorded`, GPX import writes `imported`, a split gives
-   both halves the source, and a merge keeps the source when every merged
-   passage has the same one. When they differ, or one is unknown, the merge
-   still goes ahead and the result has no source, because points of two
-   sources cannot be read as one track. Such a passage is left out of matching. Matching reads only the
-   passage's own source, so an overlapping import's points never become a
-   recorded passage's first point or break its segments. Passages with
-   no source are looked at on every start and filled only where the span holds
-   points of exactly one source, so a row that could not be named at one start
-   is named at a later one; a span with points of both, or of none, keeps an
-   empty source. Matching leaves such a passage out and logs it once,
-   instead of guessing, and it blocks an inferred stayed as above. The passage page and the stats still read the mixed
-   track.
+   `recorded`, `imported`, `mixed` or empty. `recorded` and `imported` are the
+   same values as `track_points.source`. Detection writes `recorded`, GPX
+   import writes `imported`, a split gives both halves the source, and a merge
+   keeps the source when every merged passage has the same one. When they
+   differ, or one is unknown, the merge still goes ahead and the result is
+   `mixed`, because points of two sources cannot be read as one track. Matching
+   reads only the passage's own source, so an overlapping import's points never
+   become a recorded passage's first point or break its segments. Passages with
+   an empty source are looked at on every start and filled only where the span
+   holds points of exactly one source, so a row that could not be named at one
+   start is named at a later one. A span with points of both is marked `mixed`
+   and is not looked at again, and a span with no points yet keeps an empty
+   source until they arrive. Matching treats `mixed` and empty alike, as
+   unknown: it leaves such a passage out and logs it once, instead of
+   guessing, and it blocks an inferred stayed as above. The passage page and
+   the stats still read the mixed track.
 9. **Mate is unchanged here.** `list_passages` reads InfluxDB and has no
    passage ids. Letting Mate read decisions and ratings waits for the work that
    proposes limits from them.

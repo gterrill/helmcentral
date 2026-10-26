@@ -52,6 +52,9 @@ type recordedTrackPoint struct {
 const (
 	trackSourceRecorded = "recorded"
 	trackSourceImported = "imported"
+	// passageSourceMixed marks a passage whose span holds points of both
+	// sources. It is a passage source only, never a point's.
+	passageSourceMixed = "mixed"
 )
 
 type passageRecord struct {
@@ -72,8 +75,8 @@ type passageRecord struct {
 	CruiseID       *string   `json:"cruise_id"`
 	CreatedAt      time.Time `json:"created_at"`
 	// Source is the track source the passage was detected from
-	// (trackSourceRecorded or trackSourceImported), or empty when it is not
-	// known. It is internal: decision matching reads only the passage's own
+	// (trackSourceRecorded or trackSourceImported), passageSourceMixed when
+	// its span holds both, or empty when it is not known. It is internal: decision matching reads only the passage's own
 	// source (ADR 0211).
 	Source string `json:"-"`
 	// Rating is how the operator found the passage: blank, or one of
@@ -574,9 +577,10 @@ func (s *passageStore) backfillPassageSources() error { return backfillPassageSo
 
 // backfillPassageSources sets the source of passages that have none. A passage
 // is detected from one source's points and contains them, so a span holding
-// points of exactly one source names it. A span with both, or with none, is
-// left empty: nothing says which it came from, and matching treats an empty
-// source as unknown rather than guessing.
+// points of exactly one source names it, and a span holding both is marked
+// mixed so it is not scanned again. A span with no points yet is left empty to
+// be filled once they arrive. Matching treats empty and mixed alike, as
+// unknown: nothing says which source the passage came from.
 func backfillPassageSources(db *sql.DB) error {
 	for _, src := range []string{trackSourceRecorded, trackSourceImported} {
 		other := trackSourceImported
@@ -589,6 +593,12 @@ func backfillPassageSources(db *sql.DB) error {
 			src, src, other); err != nil {
 			return fmt.Errorf("backfill passage sources: %w", err)
 		}
+	}
+	if _, err := db.Exec(`UPDATE passages SET source = ? WHERE source = ''
+		AND EXISTS (SELECT 1 FROM track_points t WHERE t.t_ms >= passages.start_ms AND t.t_ms <= passages.end_ms AND t.source = ?)
+		AND EXISTS (SELECT 1 FROM track_points t WHERE t.t_ms >= passages.start_ms AND t.t_ms <= passages.end_ms AND t.source = ?)`,
+		passageSourceMixed, trackSourceRecorded, trackSourceImported); err != nil {
+		return fmt.Errorf("backfill passage sources: %w", err)
 	}
 	return nil
 }

@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { PassageDecision } from '@/lib/mate-cards'
 import { formatRowDate } from '@/lib/passage-dates'
-import { passageDecisionsApi, PassageDecisionUnreadableError, type PassageDecisionBody } from '@/lib/passage-decisions-api'
+import { passageDecisionSaved, passageDecisionsApi, PassageDecisionUnreadableError, type PassageDecisionBody } from '@/lib/passage-decisions-api'
 
 const WENT_PREFIX = 'went:'
 
@@ -62,10 +62,13 @@ export function PassageDecisionControl({ decision, rowDates, canWrite, onChange,
     if (value === null || value === optionValue(decision)) return
     setSaving(true)
     try {
-      onChange(await passageDecisionsApi.put(decision.id, bodyFor(value)))
+      const view = await passageDecisionsApi.put(decision.id, bodyFor(value))
+      onChange(view)
+      void passageDecisionSaved(decision.passageId, view)
     } catch (err) {
       if (err instanceof PassageDecisionUnreadableError) {
         toast.error('Saved, but the answer could not be read', { description: 'Showing the saved plan again.' })
+        void passageDecisionSaved(decision.passageId, null)
         onUnreadable?.()
         return
       }

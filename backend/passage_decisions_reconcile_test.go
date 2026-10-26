@@ -245,7 +245,7 @@ func TestReconcile_AMixedMergeLeavesTheCardBlank(t *testing.T) {
 	w.passages.SetDetectorResume(time.Date(2026, 10, 26, 0, 0, 0, 0, pdiBrisbane))
 	imp, _ := w.passages.InsertPassage(passageRecord{Start: w.passage.End.Add(10 * time.Minute), End: w.passage.End.Add(40 * time.Minute), Source: trackSourceImported})
 	m, err := w.passages.MergePassages(w.passage.ID, imp.ID)
-	if err != nil || m.Source != "" {
+	if err != nil || m.Source != passageSourceMixed {
 		t.Fatalf("merge: %+v %v", m, err)
 	}
 	if err := w.rec.reconcile(time.Time{}, time.Time{}); err != nil {

@@ -119,7 +119,8 @@ func TestPassageDecisionsForInference_RecentCardsPlusAnythingLinked(t *testing.T
 	asst.SetOperatorPassageDecision(ids[1], "went", &date)                              // old operator went, unlinked
 	asst.db.Exec(`UPDATE passage_decisions SET passage_id = 'p1' WHERE id = ?`, ids[2]) // old and linked
 	// ids[3]: old blank
-	rows, err := asst.PassageDecisionsForInference(time.Now().Add(-120*24*time.Hour), nil)
+	// An old decision linked to a passage the tick did not wake is left alone.
+	rows, err := asst.PassageDecisionsForInference(time.Now().Add(-120*24*time.Hour), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,11 +128,19 @@ func TestPassageDecisionsForInference_RecentCardsPlusAnythingLinked(t *testing.T
 	for _, r := range rows {
 		got[r.ID] = true
 	}
-	if !got[ids[0]] || got[ids[1]] || !got[ids[2]] || got[ids[3]] || len(rows) != 2 {
+	if !got[ids[0]] || got[ids[1]] || got[ids[2]] || got[ids[3]] || len(rows) != 1 {
 		t.Fatalf("rows = %v (ids %v)", got, ids)
 	}
-	forced, err := asst.PassageDecisionsForInference(time.Now().Add(-120*24*time.Hour), []int64{ids[3]})
-	if err != nil || len(forced) != 3 {
+	// It comes in when its passage is among those asked for (woken or gone).
+	linkedRows, err := asst.PassageDecisionsForInference(time.Now().Add(-120*24*time.Hour), nil, []string{"p1"})
+	if err != nil || len(linkedRows) != 2 {
+		t.Fatalf("an old decision linked to a named passage comes in: %d %v", len(linkedRows), err)
+	}
+	if linked, err := asst.LinkedPassageIDs(); err != nil || len(linked) != 1 || linked[0] != "p1" {
+		t.Fatalf("linked ids = %v %v", linked, err)
+	}
+	forced, err := asst.PassageDecisionsForInference(time.Now().Add(-120*24*time.Hour), []int64{ids[3]}, nil)
+	if err != nil || len(forced) != 2 {
 		t.Fatalf("an included id comes in whatever its age: %d %v", len(forced), err)
 	}
 	one, err := asst.PassageDecisionRow(ids[1])

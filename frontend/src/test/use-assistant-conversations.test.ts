@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { passageWindowPayload } from './helpers/passage-window-fixture'
 import { describeLoadError, useAssistantConversations } from '@/hooks/use-assistant-conversations'
+import { passageDecisionSaved } from '@/lib/passage-decisions-api'
 
 // ADR 0093: conversation list + thread state for the assistant panel. The
 // wire shape is snake_case (Conversation/Message); the hook maps it to the
@@ -680,6 +681,39 @@ describe('describeLoadError', () => {
       const { result } = await open(twoCards)
       act(() => result.current.updatePassageDecision(12, savedView))
       expect(decisions(result)).toEqual([['stayed'], ['']])
+    })
+
+    it('reads the open thread again after a decision is saved, so sibling cards show the server state', async () => {
+      let served = twoCards()
+      const { result } = await open(() => served)
+      expect(decisions(result)).toEqual([[''], ['']])
+      // The server re-matched while saving: card 5's choice changed too.
+      served = {
+        conversation: conversationApi(),
+        messages: [
+          messageApi({ id: 'a1', seq: 1, role: 'assistant', cards: [cardWire(12, 5, 'stayed')] }),
+          messageApi({ id: 'a2', seq: 2, role: 'assistant', cards: [cardWire(5, 9, 'just_looking')] }),
+        ],
+      }
+      // A save from the card.
+      act(() => result.current.updatePassageDecision(12, savedView))
+      await act(async () => { await passageDecisionSaved('p1', savedView) })
+      await waitFor(() => expect(decisions(result)).toEqual([['stayed'], ['just_looking']]))
+    })
+
+    it('reads the open thread again after a save made on the Passages page', async () => {
+      let served = twoCards()
+      const { result } = await open(() => served)
+      served = {
+        conversation: conversationApi(),
+        messages: [
+          messageApi({ id: 'a1', seq: 1, role: 'assistant', cards: [cardWire(12, 5, 'just_looking')] }),
+          messageApi({ id: 'a2', seq: 2, role: 'assistant', cards: [cardWire(5, 9)] }),
+        ],
+      }
+      // No updatePassageDecision: the card was not the one saved.
+      await act(async () => { await passageDecisionSaved(null, { ...savedView, state: 'just_looking' }) })
+      await waitFor(() => expect(decisions(result)).toEqual([['just_looking'], ['']]))
     })
 
     it('keeps a just-saved decision when a reload that began earlier answers with the old copy', async () => {

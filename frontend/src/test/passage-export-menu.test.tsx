@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { saveInsetPreference } from '@/lib/passage-inset-preference'
 import { saveImageryPreference } from '@/lib/passage-imagery-preference'
 import { PassageExportMenu } from '@/components/passages/passage-export-menu'
 import type { PassageDetail, PassageStats } from '@/lib/passages'
@@ -166,6 +167,7 @@ describe('PassageExportMenu, cinematic card', () => {
   })
 
   it('stops an image, saying why, when the overview placement could not be read', async () => {
+    saveInsetPreference(true)
     insetHook.value = { view: null, loading: false, error: 'HTTP 500' }
     render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
     openMenu()
@@ -175,6 +177,7 @@ describe('PassageExportMenu, cinematic card', () => {
   })
 
   it('waits for the saved overview placement before it exports', async () => {
+    saveInsetPreference(true)
     insetHook.value = { view: null, loading: true, error: null }
     render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
     openMenu()
@@ -183,12 +186,30 @@ describe('PassageExportMenu, cinematic card', () => {
   })
 
   it('stops, saying why, when the overview placement could not be read', async () => {
+    saveInsetPreference(true)
     insetHook.value = { view: null, loading: false, error: 'HTTP 500' }
     render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
     openMenu()
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
     expect(toast.error).toHaveBeenCalledWith('Could not read where the overview map goes', { description: 'HTTP 500' })
     expect(screen.queryByRole('textbox', { name: 'Blog embed' })).toBeNull()
+  })
+
+  it('does not wait for or stop on the overview placement while the overview map is off', async () => {
+    saveInsetPreference(false)
+    insetHook.value = { view: null, loading: true, error: null }
+    const { unmount } = render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    expect(await screen.findByRole('menuitem', { name: 'Copy blog embed' })).not.toHaveAttribute('aria-disabled', 'true')
+    expect(screen.getByRole('menuitem', { name: 'Download image 1200 × 630' })).not.toHaveAttribute('aria-disabled', 'true')
+    unmount()
+
+    insetHook.value = { view: null, loading: false, error: 'HTTP 500' }
+    render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+    openMenu()
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+    expect(await screen.findByRole('textbox', { name: 'Blog embed' })).toBeTruthy()
+    expect(toast.error).not.toHaveBeenCalled()
   })
 
   it('leaves the model and the tilt out when 3D is switched off', async () => {

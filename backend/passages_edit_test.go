@@ -231,17 +231,17 @@ func TestMergeKeepsASharedSourceAndForgetsADisagreement(t *testing.T) {
 	if m, err := s.MergePassages(c.ID, d.ID); err != nil || m.Source != "" {
 		t.Fatalf("both unknown: %+v %v", m, err)
 	}
-	// Different sources, or one unknown: the merge goes ahead and the result is unknown.
+	// Different sources, or one unknown: the merge goes ahead and the result is mixed.
 	e, f, g := add(8, trackSourceRecorded), add(10, trackSourceImported), add(12, trackSourceRecorded)
 	m, err := s.MergePassages(e.ID, f.ID, g.ID)
-	if err != nil || m.Source != "" {
+	if err != nil || m.Source != passageSourceMixed {
 		t.Fatalf("mixed: %+v %v", m, err)
 	}
-	if got, _ := s.GetPassage(m.ID); got.Source != "" || got.End != h(13).UTC() {
+	if got, _ := s.GetPassage(m.ID); got.Source != passageSourceMixed || got.End != h(13).UTC() {
 		t.Fatalf("stored: %+v", got)
 	}
 	x, y := add(14, ""), add(16, trackSourceRecorded)
-	if m, err := s.MergePassages(x.ID, y.ID); err != nil || m.Source != "" {
+	if m, err := s.MergePassages(x.ID, y.ID); err != nil || m.Source != passageSourceMixed {
 		t.Fatalf("old with new: %+v %v", m, err)
 	}
 }
@@ -261,14 +261,14 @@ func TestBackfillPassageSourcesOnlyWhereTheTrackSaysExactly(t *testing.T) {
 	if err := s.backfillPassageSources(); err != nil {
 		t.Fatal(err)
 	}
-	for id, want := range map[string]string{onlyRec.ID: trackSourceRecorded, onlyImp.ID: trackSourceImported, none.ID: "", both.ID: ""} {
+	for id, want := range map[string]string{onlyRec.ID: trackSourceRecorded, onlyImp.ID: trackSourceImported, none.ID: "", both.ID: passageSourceMixed} {
 		if got, _ := s.GetPassage(id); got.Source != want {
 			t.Errorf("%s: source %q, want %q", id, got.Source, want)
 		}
 	}
 }
 
-func TestBackfillRunsOnEveryOpenAndLeavesMixedSpansUnknown(t *testing.T) {
+func TestBackfillRunsOnEveryOpenAndMarksMixedSpansAndSkipsThemAfter(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "p.sqlite")
 	s, err := newPassageStore(path)
 	if err != nil {
@@ -298,8 +298,21 @@ func TestBackfillRunsOnEveryOpenAndLeavesMixedSpansUnknown(t *testing.T) {
 	if got, _ := s.GetPassage(later.ID); got.Source != trackSourceImported {
 		t.Fatalf("a later open fills what the first could not: %q", got.Source)
 	}
-	if got, _ := s.GetPassage(mixed.ID); got.Source != "" {
-		t.Fatalf("a genuinely mixed span stays unknown: %q", got.Source)
+	if got, _ := s.GetPassage(mixed.ID); got.Source != passageSourceMixed {
+		t.Fatalf("a genuinely mixed span is marked mixed: %q", got.Source)
+	}
+}
+
+func TestBackfillSkipsMixedPassages(t *testing.T) {
+	s := newTestPassageStore(t)
+	r, _ := s.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(time.Hour), Source: passageSourceMixed})
+	// A span holding only recorded points would be named by a rescan.
+	s.AppendTrackPoint(recordedTrackPoint{At: r.Start.Add(time.Minute), Lat: -20, Lon: 149, Source: trackSourceRecorded})
+	if err := s.backfillPassageSources(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetPassage(r.ID); got.Source != passageSourceMixed {
+		t.Fatalf("a mixed passage is not rescanned: %q", got.Source)
 	}
 }
 

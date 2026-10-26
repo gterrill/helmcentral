@@ -494,3 +494,19 @@ func TestSplitPicksTheNearestOfSeveralJoins(t *testing.T) {
 		t.Errorf("%+v", first)
 	}
 }
+
+func TestSplitNearAnUntitledJoinCutsAtTheJoinAndQueuesNaming(t *testing.T) {
+	s := newTestPassageStore(t)
+	p := seedLeg(t, s, 0, 4, "A", "B")
+	base := passageEpoch.Add(time.Hour)
+	if _, err := s.CreateSign(replaySign{TMs: base.Add(20 * time.Second).UnixMilli(), StartsLeg: true, Visibility: signAfter, ShowS: signShowDef}); err != nil {
+		t.Fatal(err)
+	}
+	first, second, err := s.SplitPassage(p.ID, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.End.Equal(base.Add(20*time.Second)) || !second.Start.Equal(first.End) || first.ToName != "" || second.FromName != "" {
+		t.Errorf("%+v %+v", first, second)
+	}
+}

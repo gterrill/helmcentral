@@ -2,7 +2,7 @@ import { StateChip } from '@/components/assistant-passage-window-card'
 import { PassageDecisionControl } from '@/components/passage-decision-control'
 import { Button } from '@/components/ui/button'
 import { useNavigate } from '@/hooks/use-app-location'
-import { invalidateQueries, setQueryData } from '@/lib/api-query'
+import { getQueryData, setQueryData } from '@/lib/api-query'
 import { formatRowDate } from '@/lib/passage-dates'
 import type { PassagePlan } from '@/lib/passage-plans'
 import { PASSAGES_KEY } from '@/lib/passages-api'
@@ -17,23 +17,24 @@ export interface PassagePlansProps {
 }
 
 // The cached passage is the server's own JSON, so the new view goes back in
-// that shape. It shows at once, and the refetch that follows has the final say.
+// that shape. It shows at once. The save has already asked for the passage to
+// be read again, and that read has the final say. A passage that is not cached
+// has nothing to patch: the save succeeded, so it is simply read again.
 function showDecision(passageId: string, view: PassageDecision) {
   const key = [...PASSAGES_KEY, passageId]
+  if (getQueryData(key) === undefined) return
   setQueryData<{ passage: { planned_with_mate?: { decision: { id: number } }[] | null } }>(key, (prev) => {
-    if (!prev) throw new Error('passage detail is not cached')
-    const plans = prev.passage.planned_with_mate
+    const plans = prev!.passage.planned_with_mate
     return {
-      ...prev,
+      ...prev!,
       passage: {
-        ...prev.passage,
+        ...prev!.passage,
         planned_with_mate: plans?.map((p) => (p.decision.id === view.id
           ? { ...p, decision: { id: view.id, state: view.state, row_date: view.rowDate, inferred: view.inferred, passage_id: view.passageId } }
           : p)),
       },
     }
   })
-  void invalidateQueries(key)
 }
 
 function PlanLine({ passageId, plan, canWrite }: { passageId: string; plan: PassagePlan; canWrite: boolean }) {
@@ -50,7 +51,6 @@ function PlanLine({ passageId, plan, canWrite }: { passageId: string; plan: Pass
         rowDates={plan.rowDates}
         canWrite={canWrite}
         onChange={(view) => showDecision(passageId, view)}
-        onUnreadable={() => { void invalidateQueries(PASSAGES_KEY) }}
       />
       {plan.chatExists && (
         <Button

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 import type { MessageApi } from '@/lib/mate-api'
+import { onPassageDecisionSaved } from '@/lib/passage-decisions-api'
 import { decodeMateCards, type MateCard, type PassageDecision } from '@/lib/mate-cards'
 
 // ADR 0093: the wire shape (Conversation/Message) is snake_case, persisted
@@ -611,6 +612,16 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
       ),
     )
   }, [])
+
+  // The server re-matches passages when it saves a decision, so other cards'
+  // inferred choices can change too, and a change made on the Passages page
+  // never reaches this thread. After any saved decision the open thread is read
+  // again. The card just saved is held by pendingDecisionsRef while that read
+  // is in flight.
+  useEffect(() => {
+    if (activeId === null) return undefined
+    return onPassageDecisionSaved(() => { void reloadMessages(activeId) })
+  }, [activeId, reloadMessages])
 
   // The same for a form draft's Save and Dismiss.
   const updateFormDraft = useCallback((draft: AssistantFormDraft) => {

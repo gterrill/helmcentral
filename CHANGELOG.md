@@ -62,11 +62,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Help pages rewritten to read the way you'd say them.** Every help page now
   uses shorter sentences and everyday words. Paragraphs that walked through
   several cases are now lists, one case per point, so it's quicker to find the
-  one that applies to you.
-- **Help pages read more plainly.** Every help page has had a wording pass,
-  and the contents page now links the anchor watch, alarm threshold and alarm
-  notification guides and the Tiles, Alarm rules and Mate lookups reference
-  pages, which were missing from it.
+  one that applies to you. The contents page also links the anchor watch,
+  alarm threshold and alarm notification guides and the Tiles, Alarm rules and
+  Mate lookups reference pages, which were missing from it.
+
 - **The Anchor Watch page is all map.** Depth, tide and the low-water clearance
   warning now sit in the readout panel in the map's top-left corner, above
   current, distance, bearing and radius, instead of in a card above the map.
