@@ -11,10 +11,10 @@ import { ClusterDial, CLUSTER_DIAL_SIZE } from '@/components/ui/cluster-dial'
 import { Tile, tilePillButtonClass, tilePillClass } from '@/components/ui/tile'
 import { cn } from '@/lib/utils'
 import type { EngineStates } from '@/hooks/use-gauge-values'
-import { reading } from '@/lib/cluster-readings'
-import type { GaugeWidgetConfig, ResolvedClusterConfig } from '@/lib/dashboard-widgets'
-import { CLUSTER_FOOTER_SLOTS } from '@/lib/dashboard-widgets'
+import { clusterSlots, reading } from '@/lib/cluster-readings'
+import type { ResolvedClusterConfig } from '@/lib/dashboard-widgets'
 import { toneFor } from '@/lib/engine-cluster-bullet'
+import { propulsionId } from '@/lib/equipment-tiles'
 import {
   CLUSTER_H, CLUSTER_INNER_H, CLUSTER_INNER_TOP, CLUSTER_W, DIAL_CX, DIAL_CY, clusterLayout,
 } from '@/lib/engine-cluster-layout'
@@ -43,12 +43,6 @@ import { formatDataAge } from '@/lib/staleness'
 function hubText(ring: ReturnType<typeof reading>, unit: string): string | null {
   if (ring.converted === null) return null
   return unit === 'rpm' ? String(Math.round(ring.converted / 10) * 10) : ring.text
-}
-
-/** `propulsion.<id>.*` -> id, or null. */
-function propulsionId(path: string): string | null {
-  const match = /^propulsion\.([^.]+)\./.exec(path)
-  return match ? match[1] : null
 }
 
 /** `map` with every `propulsion.<id>.*` path removed: those readings are unknown while the engine is off. */
@@ -94,20 +88,6 @@ function chipFor(running: boolean, state: ZoneState | null): { text: string; cla
   return null
 }
 
-/** Every bound slot on the card, for the tile's worst-of and staleness. */
-function allSlots(config: ResolvedClusterConfig): GaugeWidgetConfig[] {
-  const slots: Array<GaugeWidgetConfig | undefined> = [
-    config.ring,
-    config.centre,
-    ...config.corners.flatMap((c) => c.rows.slice(0, 1)),
-    config.arcs?.left,
-    config.arcs?.right,
-    ...CLUSTER_FOOTER_SLOTS.map((key) => config.footer?.[key]),
-    ...(config.fuel?.bars ?? []).map((b) => b.level),
-  ]
-  return slots.filter((s): s is GaugeWidgetConfig => s !== undefined && s.path.trim() !== '')
-}
-
 export const EngineClusterTile = memo(function EngineClusterTile({
   config, values: liveValues, ages: liveAges, engines, editing, onConfigure,
 }: EngineClusterTileProps) {
@@ -136,7 +116,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   // engine that is off has no readings of its own (they were removed above), so
   // it adds no state: neutral border, OFF pill. A slot reading another item (the
   // starter battery, a tank) is live and still counts.
-  const readings = allSlots(config).map((slot) => reading(slot, values, ages))
+  const readings = clusterSlots(config).map((slot) => reading(slot, values, ages))
   const state = worstZoneState(readings.map((r) => r.zone))
   const knownAges = readings.filter((r) => r.age !== null)
   const tileStale = knownAges.length > 0 && knownAges.every((r) => r.stale)

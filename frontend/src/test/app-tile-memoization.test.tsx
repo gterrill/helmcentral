@@ -1,16 +1,17 @@
 /**
- * Item D end-to-end check: an SSE tick that changes something App reads
- * (gaugeValues) must re-render App, but must NOT re-render a memoized tile
- * whose own props didn't change — proving the stable-callback fix
- * (configureHandlerFor etc., App.tsx) actually holds up
- * once the whole component tree is wired together, not just in isolation.
+ * Item D end-to-end check, now that tiles subscribe to their own live data
+ * (ADR 0215): a gauge-values tick must not re-render the shell at all, and
+ * must re-render only the gauge whose own reading changed.
  *
- * RouteTile and GaugeTile are wrapped (not replaced) below: the wrapper is
- * itself `memo()`'d with the exact props each real tile receives, so it
- * bails out under the identical conditions the real tile's own memo would —
- * the render-count spy inside it only fires when React actually re-renders
- * that subtree, the same signal `<Profiler onRender>` would give, without
- * depending on Profiler's own timing semantics.
+ * RouteTile is wrapped (not replaced) below: the wrapper is itself `memo()`'d
+ * with the exact props the real tile receives, so it bails out under the
+ * identical conditions the real tile's own memo would.
+ *
+ * A gauge reads the store itself, so a wrapper around GaugeTile would never
+ * see a store-driven render. Tile is wrapped instead and records the title it
+ * is drawn with: every render of a gauge draws its Tile again, so the count
+ * per title is that gauge's render count. DashboardBentoGrid is wrapped
+ * without memo, so its count is the shell's.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act } from '@testing-library/react'
@@ -74,17 +75,31 @@ vi.mock('@/components/route-tile', async (importOriginal) => {
   return { ...actual, RouteTile: Spy }
 })
 
-const gaugeTileRenderSpy = vi.fn()
-vi.mock('@/components/gauge-tile', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/components/gauge-tile')>()
-  const Spy = memo(function GaugeTileRenderSpy(props: ComponentProps<typeof actual.GaugeTile>) {
-    gaugeTileRenderSpy()
-    return <actual.GaugeTile {...props} />
-  })
-  return { ...actual, GaugeTile: Spy }
+const tileTitleSpy = vi.fn()
+vi.mock('@/components/ui/tile', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/tile')>()
+  function TileTitleSpy(props: ComponentProps<typeof actual.Tile>) {
+    tileTitleSpy(props.title)
+    return <actual.Tile {...props} />
+  }
+  return { ...actual, Tile: TileTitleSpy }
 })
 
-// ── a dashboard page with one route tile and one gauge tile bound to the path the test ticks. ────
+const gridRenderSpy = vi.fn()
+vi.mock('@/components/dashboard-bento-grid', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/dashboard-bento-grid')>()
+  function GridRenderSpy(props: ComponentProps<typeof actual.DashboardBentoGrid>) {
+    gridRenderSpy()
+    return <actual.DashboardBentoGrid {...props} />
+  }
+  return { ...actual, DashboardBentoGrid: GridRenderSpy }
+})
+
+function rendersOf(title: string): number {
+  return tileTitleSpy.mock.calls.filter(([t]) => t === title).length
+}
+
+// ── a dashboard page with one route tile and two gauges, on paths a and b. ────
 vi.mock('@/hooks/use-dashboard-pages', () => ({
   useDashboardPages: () => ({
     pages: [{
@@ -92,7 +107,8 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
       name: 'Page 1',
       widgets: [
         { id: 'route', x: 0, y: 0, w: 4, h: 4 },
-        { id: 'gauge:test1', x: 4, y: 0, w: 4, h: 4, gauge: { path: 'a.path', label: 'Test', display: 'numeric', quantity: 'raw', unit: 'raw' } },
+        { id: 'gauge:a', x: 4, y: 0, w: 4, h: 4, gauge: { path: 'a.path', label: 'Gauge A', display: 'numeric', quantity: 'raw', unit: 'raw' } },
+        { id: 'gauge:b', x: 8, y: 0, w: 4, h: 4, gauge: { path: 'b.path', label: 'Gauge B', display: 'numeric', quantity: 'raw', unit: 'raw' } },
       ],
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
@@ -235,29 +251,71 @@ vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, vi.fn()],
 }))
 
+async function mountApp() {
+  render(<App />)
+  // Auth resolution (useAuth, real here) is async even under mode:none —
+  // let it settle before the dashboard (and its widgets) mounts.
+  await act(async () => { await Promise.resolve() })
+  expect(subscribeTelemetryMock).toHaveBeenCalledWith('gauge-values', expect.any(Function))
+  expect(rendersOf('Gauge A')).toBeGreaterThan(0)
+  expect(rendersOf('Gauge B')).toBeGreaterThan(0)
+  // A first reading for both gauges, so the ticks below change one thing each.
+  emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 1 } })
+}
+
 describe('App tile memoization (item D)', () => {
-  it('re-renders App on a gauge-values tick but not a memoized tile whose own props are unaffected', async () => {
-    render(<App />)
-    // Auth resolution (useAuth, real here) is async even under mode:none —
-    // let it settle before the dashboard (and its widgets) mounts.
-    await act(async () => { await Promise.resolve() })
+  it('does not re-render the shell, or a memoized tile, on a gauge-values tick', async () => {
+    await mountApp()
+    const gridRenders = gridRenderSpy.mock.calls.length
+    const routeRenders = routeTileRenderSpy.mock.calls.length
+    const gaugeARenders = rendersOf('Gauge A')
+    expect(gridRenders).toBeGreaterThan(0)
+    expect(routeRenders).toBeGreaterThan(0)
 
-    expect(subscribeTelemetryMock).toHaveBeenCalledWith('gauge-values', expect.any(Function))
-    const routeRendersAfterMount = routeTileRenderSpy.mock.calls.length
-    const gaugeRendersAfterMount = gaugeTileRenderSpy.mock.calls.length
-    expect(routeRendersAfterMount).toBeGreaterThan(0)
-    expect(gaugeRendersAfterMount).toBeGreaterThan(0)
+    emitGaugeValues({ values: { 'a.path': 2, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 1 } })
+    emitGaugeValues({ values: { 'a.path': 3, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 1 } })
 
-    // Two ticks with different values for the path GaugeTile is bound to:
-    // gaugeValues' object identity legitimately changes both times, which
-    // must re-render GaugeTile (it reads gaugeValues[widget.gauge.path]) —
-    // proving the emits actually propagate through App. RouteTile reads
-    // none of gaugeValues; its own props (status, position,
-    // speedKts) are all unchanged, so its memo should bail out both times.
-    emitGaugeValues({ values: { 'a.path': 1 }, ages: {} })
-    emitGaugeValues({ values: { 'a.path': 2 }, ages: {} })
+    // The tick reached the gauge bound to the path that changed.
+    expect(rendersOf('Gauge A')).toBeGreaterThan(gaugeARenders)
+    // The shell holds no gauge values, so it did not render, and nor did the
+    // grid it renders or the route tile below it.
+    expect(gridRenderSpy.mock.calls.length).toBe(gridRenders)
+    expect(routeTileRenderSpy.mock.calls.length).toBe(routeRenders)
+  })
 
-    expect(gaugeTileRenderSpy.mock.calls.length).toBeGreaterThan(gaugeRendersAfterMount)
-    expect(routeTileRenderSpy.mock.calls.length).toBe(routeRendersAfterMount)
+  it('re-renders gauge A, and not gauge B, when only a changes', async () => {
+    await mountApp()
+    const a = rendersOf('Gauge A')
+    const b = rendersOf('Gauge B')
+
+    emitGaugeValues({ values: { 'a.path': 2, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 1 } })
+
+    expect(rendersOf('Gauge A')).toBeGreaterThan(a)
+    expect(rendersOf('Gauge B')).toBe(b)
+  })
+
+  // The server rounds ages to 0.1 s, so most of them move on every tick. An
+  // age that moves without going stale changes nothing either gauge shows.
+  it('re-renders no gauge when ages move only within the fresh band', async () => {
+    await mountApp()
+    const a = rendersOf('Gauge A')
+    const b = rendersOf('Gauge B')
+
+    emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 0.3, 'b.path': 0.7 } })
+    emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 0.7, 'b.path': 1.1 } })
+
+    expect(rendersOf('Gauge A')).toBe(a)
+    expect(rendersOf('Gauge B')).toBe(b)
+  })
+
+  it('re-renders a gauge whose age crosses the stale threshold', async () => {
+    await mountApp()
+    const a = rendersOf('Gauge A')
+    const b = rendersOf('Gauge B')
+
+    emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 121 } })
+
+    expect(rendersOf('Gauge B')).toBeGreaterThan(b)
+    expect(rendersOf('Gauge A')).toBe(a)
   })
 })
