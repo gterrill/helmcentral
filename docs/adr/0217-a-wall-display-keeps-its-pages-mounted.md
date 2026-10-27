@@ -1,4 +1,4 @@
-# ADR 0216: A wall display keeps its pages mounted
+# ADR 0217: A wall display keeps its pages mounted
 
 ## Status
 
