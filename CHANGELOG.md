@@ -18,6 +18,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   switches, it used to redraw every tile on the page, even when nothing had
   changed. Now a tile redraws only when something it shows changes, so an
   older tablet or the wall display has more to spare.
+- **A wall display with a map page no longer slows down and freezes after a few
+  hours.** The screen used to rebuild every tile on each page change, and a
+  small kiosk board never gave that memory back. Pages now stay loaded and only
+  the one showing is visible. A camera embed still loads when its page comes up
+  and lets go when it leaves.
 - **The passage map no longer keeps redrawing while the replay is paused.** With
   3D on, the map redrew many times a second even when nothing was playing, and
   Chrome flagged the Passages tab as slowing the browser. It now draws only
