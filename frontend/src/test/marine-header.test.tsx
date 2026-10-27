@@ -4,6 +4,7 @@ import { act, render, renderHook, screen } from '@testing-library/react'
 
 import { MarineHeader } from '@/components/marine-header'
 import { useVesselClock } from '@/hooks/use-vessel-clock'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 // DESIGN.md's zero-state rule: a placeholder must not be styled as if it
 // were real data. Before this fix, 'VESSEL NAME NOT SET' rendered in the
@@ -12,14 +13,7 @@ import { useVesselClock } from '@/hooks/use-vessel-clock'
 // The header reads the vessel-state store's fields (ADR 0218), so these tests
 // drive the store through the stream, the way the boat does.
 
-let streamListener: ((raw: string) => void) | null = null
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (_event: string, cb: (raw: string) => void) => {
-    streamListener = cb
-    return () => {}
-  },
-}))
+const stream = installFakeTelemetryStream()
 
 let boatModel: string | null = 'Riviera 445'
 vi.mock('@/hooks/use-app-config', () => ({
@@ -27,14 +21,13 @@ vi.mock('@/hooks/use-app-config', () => ({
 }))
 
 function emit(payload: Record<string, unknown>) {
-  act(() => { streamListener?.(JSON.stringify(payload)) })
+  stream.emit('vessel-state', payload)
 }
 
 const reported = { status: 'At Anchor', name: 'Pikorua', vessel_prefix: 'M/V', datetime: '2026-09-14T00:00:00Z' }
 
 beforeEach(() => {
   boatModel = 'Riviera 445'
-  streamListener = null
 })
 
 afterEach(() => {

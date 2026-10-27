@@ -1,38 +1,19 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { act, renderHook } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { useRadarTargets } from '@/hooks/use-radar-targets'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 // use-radar-targets.ts is a thin telemetry consumer, same shape as
-// use-nearby-vessels.ts: it subscribes to one SSE event and sanitizes the
-// payload. Mock the shared telemetry module rather than standing up a real
-// EventSource — use-telemetry-stream.test.ts already covers the transport.
-const subscribeTelemetryMock = vi.fn()
-let capturedListener: ((raw: string) => void) | null = null
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    capturedListener = cb
-    subscribeTelemetryMock(event, cb)
-    return () => {}
-  },
-}))
-
-import { useRadarTargets } from '@/hooks/use-radar-targets'
-
-function emit(payload: unknown) {
-  act(() => {
-    capturedListener?.(JSON.stringify(payload))
-  })
-}
-
-beforeEach(() => {
-  subscribeTelemetryMock.mockClear()
-  capturedListener = null
-})
+// use-nearby-vessels.ts: it reads one SSE event and sanitizes the payload.
+// The real stream and store run over the fake EventSource.
+const stream = installFakeTelemetryStream()
+const emit = (payload: unknown) => stream.emit('radar-targets', payload)
 
 describe('useRadarTargets', () => {
-  it('subscribes to the radar-targets telemetry event', () => {
-    renderHook(() => useRadarTargets())
-    expect(subscribeTelemetryMock).toHaveBeenCalledWith('radar-targets', expect.any(Function))
+  it('reads the radar-targets telemetry event', () => {
+    const { result } = renderHook(() => useRadarTargets())
+    emit({ datetime: '2026-08-28T02:00:12Z', source: 'mayara', radars: [], targets: [] })
+    expect(result.current.source).toBe('mayara')
   })
 
   it('starts loading with no targets, no radars, and a disabled source', () => {

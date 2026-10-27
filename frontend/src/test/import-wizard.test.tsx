@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
 import { ImportConfirmStep } from '@/components/import/import-confirm-step'
@@ -10,7 +11,8 @@ import runFixture from './fixtures/yachtwave-run.json'
 // Pikorua export, parsed by the backend (backend/testdata/yachtwave), so every
 // key, decision and issue has the shape the server actually sends.
 
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ boatName: 'M/V Pikorua', vesselLengthOverallM: 17.9, vesselDraftM: 1.5 })))
+const stream = installFakeTelemetryStream()
+beforeEach(() => { stream.seed('vessel-state', { name: 'Pikorua', vessel_prefix: 'M/V', length_overall_m: 17.9, draft_m: 1.5 }) })
 
 let run: ImportRun
 const fetchMock = vi.fn()

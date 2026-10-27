@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, act, fireEvent, screen } from '@testing-library/react'
 import { memo, type ComponentProps, type ReactNode } from 'react'
 import { App } from '../App'
@@ -74,17 +75,10 @@ function landPages(page: Record<string, unknown>) {
   })
 }
 
-// ── the stream, mocked so every store can be ticked ─────────────────────────
+// ── the stream: the real stream and stores over a fake EventSource, so every
+// store can be ticked ──────────────────────────────────────────────────────
 
-const streamListeners = new Map<string, (raw: string) => void>()
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    streamListeners.set(event, cb)
-    return () => {}
-  },
-  useTelemetryStatus: () => 'connected',
-  subscribeTelemetryStatus: () => () => {},
-}))
+installFakeTelemetryStream()
 
 
 // ── render-count spies ───────────────────────────────────────────────────────

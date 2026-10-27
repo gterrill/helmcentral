@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { App } from '../App'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+import { landAnchorWatch } from './helpers/anchor-watch-poll'
 
 // The drawer now mounts a map at every anchor state (Phase F), including
 // 'none' — this test's vessel position is a real fix, so without this stub
@@ -28,79 +30,37 @@ vi.mock('@/hooks/use-auth', () => ({
 }))
 
 
-const setAnchorHereMock = vi.fn()
-const clearAnchorMock = vi.fn()
-let anchorStateMock: 'none' | 'set' = 'none'
-let positionMock: { latitude: number | null; longitude: number | null; gnssCriticalAlert: boolean } = {
-  latitude: -36.8485, longitude: 174.7633, gnssCriticalAlert: false,
-}
-// ADR 0099: the server-side auto-raise watcher's evidence, surfaced through
-// GET /api/anchor-watch and this hook. null until a test sets it.
-let lastAutoRaiseMock: { at: string; reason: string } | null = null
-let loadedMock = true
+// The boat is at a real fix and its engines are running (the stream seeds it);
+// the watch record is what GET /api/anchor-watch last said.
+const stream = installFakeTelemetryStream()
+const fetchMock = vi.fn()
+const ANCHOR = { lat: -36.8485, lon: 174.7633 }
 beforeEach(() => {
   vi.clearAllMocks()
-  anchorStateMock = 'none'
-  positionMock = { latitude: -36.8485, longitude: 174.7633, gnssCriticalAlert: false }
-  lastAutoRaiseMock = null
-  loadedMock = true
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-    ok: false,
-    json: async () => ({}),
-  }))
+  // The first GET /api/anchor-watch stays unanswered: a test is "loaded" only
+  // once it lands a watch with landWatch, and "before the first answer" is the
+  // state of a page whose poll has not come back, not of one whose poll failed.
+  // Writes fail, as the app's other tests have it; only their requests matter.
+  fetchMock.mockImplementation((url: string, init?: RequestInit) => (
+    String(url).endsWith('/api/anchor-watch') && (init?.method ?? 'GET') === 'GET'
+      ? new Promise(() => {})
+      : Promise.resolve({ ok: false, json: async () => ({}) })
+  ))
+  vi.stubGlobal('fetch', fetchMock)
+  stream.seed('vessel-state', { latitude: ANCHOR.lat, longitude: ANCHOR.lon, gnss_critical_alert: false, engines_running: true })
 })
 
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
-    depth: null,
-    currentDriftKts: null,
-    currentSetDeg: null,
-    navigationState: null,
-    gnssQualityIndicator: null,
-    gnssHdop: null,
-    gnssSatellites: null,
-    gnssValidationState: null,
-    gnssValidationReason: null,
-    headingTrue: null,
-    speedOverGroundKts: null,
-    windSpeedApparentKts: null,
-    windAngleApparentDeg: null,
-    windSide: null,
-    windAngleRelativeDeg: null,
-    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null },
-    generatorState: null,
-    generatorManualStart: false,
-    generatorManualStartTimer: 0,
-    generatorRunningByCondition: null,
-    generatorRuntime: null,
-    enginesRunning: true,
-    ...positionMock,
-  })))
+/** A GET /api/anchor-watch answer: no watch, or one set where the boat is. */
+function landWatch(state: 'none' | 'set', extra: Record<string, unknown> = {}) {
+  landAnchorWatch(state === 'set' ? { active: true, ...ANCHOR, radius_meters: 20, ...extra } : { active: false, ...extra })
+}
 
-
-
-
-
-vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
-    active: anchorStateMock !== 'none', anchorState: anchorStateMock,
-    anchorLat: anchorStateMock === 'set' ? -36.8485 : null,
-    anchorLon: anchorStateMock === 'set' ? 174.7633 : null,
-    radiusMeters: 20,
-    rodeDeployedM: 0,
-    seaState: 'calm',
-    seabedType: 'sand',
-    distanceMeters: 30,
-    bearingDeg: null,
-    setAt: null,
-    planningDepthM: null,
-    planningTideHeightFt: null,
-    lastAutoRaise: lastAutoRaiseMock,
-    loaded: loadedMock,
-    setAnchorHere: setAnchorHereMock,
-    updateRadius: vi.fn(),
-    updateRodeAndConditions: vi.fn(),
-    updatePlanningDepth: vi.fn(),
-    clearAnchor: clearAnchorMock,
-  })))
+/** The writes the app sent to /api/anchor-watch, as [method, body]. */
+function writes(method: string) {
+  return fetchMock.mock.calls
+    .filter(([url, init]) => String(url).endsWith('/api/anchor-watch') && (init as RequestInit | undefined)?.method === method)
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body ?? 'null')))
+}
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
@@ -159,25 +119,24 @@ vi.mock('@/hooks/use-app-config', () => ({
 }))
 
 describe('Anchor watch drawer drop button', () => {
-  // useVesselState mock above has depth: null, so this is the "no sounder at
-  // drop" case (ADR 0063) — setAnchorHere still gets called, now with a
-  // third capture argument carrying explicit nulls rather than silently
-  // omitting them.
+  // The seeded vessel state carries no depth, so this is the "no sounder at
+  // drop" case (ADR 0063) — the drop still goes out, with the planning depth
+  // and tide as the server's -1 "not read" rather than silently omitted.
   it('drops anchor from drawer when no watch is active, capturing null depth/tide when there is no sounder reading', async () => {
+    landWatch('none')
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
     const dropButtons = await screen.findAllByRole('button', { name: 'Drop' })
     fireEvent.click(dropButtons[dropButtons.length - 1])
 
-    expect(setAnchorHereMock).toHaveBeenCalledWith(-36.8485, 174.7633, {
-      planningDepthM: null,
-      planningTideHeightFt: null,
-    })
+    await waitFor(() => expect(writes('POST')).toEqual([
+      { lat: ANCHOR.lat, lon: ANCHOR.lon, apply_bow_offset: true, planning_depth_m: -1, planning_tide_height_ft: -1 },
+    ]))
   })
 
   it('does not show a drawer drop button when anchor watch is active', () => {
-    anchorStateMock = 'set'
+    landWatch('set')
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
@@ -186,7 +145,7 @@ describe('Anchor watch drawer drop button', () => {
   })
 
   it('raises the anchor from the drawer through the confirm dialog when a watch is active', async () => {
-    anchorStateMock = 'set'
+    landWatch('set')
     render(<App />)
 
     fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
@@ -196,7 +155,7 @@ describe('Anchor watch drawer drop button', () => {
     const dialog = screen.getByRole('alertdialog')
     fireEvent.click(within(dialog).getByRole('button', { name: 'Raise' }))
 
-    expect(clearAnchorMock).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(writes('DELETE')).toHaveLength(1))
   })
 })
 
@@ -206,12 +165,12 @@ describe('Anchor watch drawer drop button', () => {
 // event per client by comparing against what it last saw.
 describe('Anchor watch auto-raise toast', () => {
   it('shows the toast once a new last_auto_raise arrives after mount', async () => {
-    const { rerender } = render(<App />)
+    landWatch('none')
+    render(<App />)
 
     expect(screen.queryByText(/raised automatically/i)).not.toBeInTheDocument()
 
-    lastAutoRaiseMock = { at: '2026-09-15T00:00:00Z', reason: 'engines_running' }
-    rerender(<App />)
+    landWatch('none', { last_auto_raise: { at: '2026-09-15T00:00:00Z', reason: 'engines_running' } })
 
     await waitFor(() => expect(screen.getByText(/raised automatically/i)).toBeInTheDocument())
   })
@@ -221,22 +180,19 @@ describe('Anchor watch auto-raise toast', () => {
   // with no auto-raise. An auto-raise from before the page loaded arrives with
   // the first answer and is history, not news.
   it('does not toast for an old last_auto_raise that arrives with the first answer, and does for a new one', async () => {
-    loadedMock = false
-    const { rerender } = render(<App />)
+    // No answer yet: the record is the unloaded one.
+    render(<App />)
 
-    loadedMock = true
-    lastAutoRaiseMock = { at: '2026-09-15T00:00:00Z', reason: 'engines_running' }
-    rerender(<App />)
+    landWatch('none', { last_auto_raise: { at: '2026-09-15T00:00:00Z', reason: 'engines_running' } })
     await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument())
     expect(screen.queryByText(/raised automatically/i)).not.toBeInTheDocument()
 
-    lastAutoRaiseMock = { at: '2026-09-16T00:00:00Z', reason: 'engines_running' }
-    rerender(<App />)
+    landWatch('none', { last_auto_raise: { at: '2026-09-16T00:00:00Z', reason: 'engines_running' } })
     await waitFor(() => expect(screen.getByText(/raised automatically/i)).toBeInTheDocument())
   })
 
   it('does not toast for a last_auto_raise already present at mount', async () => {
-    lastAutoRaiseMock = { at: '2026-09-15T00:00:00Z', reason: 'engines_running' }
+    landWatch('none', { last_auto_raise: { at: '2026-09-15T00:00:00Z', reason: 'engines_running' } })
     render(<App />)
 
     // Give the establishing effect a tick, then confirm no toast fired for

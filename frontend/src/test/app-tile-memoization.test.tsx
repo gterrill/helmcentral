@@ -20,6 +20,8 @@ import { App } from '../App'
 import { setQueryData } from '@/lib/api-query'
 import { screen, within } from '@testing-library/react'
 import * as live from './fixtures/live-stream-payloads'
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 beforeEach(() => {
   // useAuth (real here, not mocked) needs mode:none to clear the shell for
@@ -41,54 +43,23 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-// ── the shared SSE connection, mocked so gauge-values ticks can be driven
-// directly — use-telemetry-stream.test.ts already covers the transport. ────
-const subscribeTelemetryMock = vi.fn()
-let gaugeValuesListener: ((raw: string) => void) | null = null
-let alarmsListener: ((raw: string) => void) | null = null
-let vesselStateListener: ((raw: string) => void) | null = null
-// Every stream's listener, by event, for the phase 5 streams.
-const streamListeners = new Map<string, (raw: string) => void>()
+// ── the shared SSE connection: the real stream and stores over a fake
+// EventSource, so ticks can be driven as the server sends them. ────────────
+const stream = installFakeTelemetryStream()
+// The real stream, with its subscribeTelemetry counted: a store is meant to
+// subscribe to its event once, however many tiles read it.
+vi.mock('@/hooks/use-telemetry-stream', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-telemetry-stream')>()
+  return { ...actual, subscribeTelemetry: vi.fn(actual.subscribeTelemetry) }
+})
+const subscriptionsTo = (event: string) =>
+  vi.mocked(subscribeTelemetry).mock.calls.filter(([name]) => name === event).length
+beforeEach(() => { vi.mocked(subscribeTelemetry).mockClear() })
 
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    subscribeTelemetryMock(event, cb)
-    if (event === 'gauge-values') gaugeValuesListener = cb
-    if (event === 'alarms') alarmsListener = cb
-    if (event === 'vessel-state') vesselStateListener = cb
-    streamListeners.set(event, cb)
-    return () => {}
-  },
-  // Real consumers elsewhere in the tree (vessel-status-bar.tsx
-  // via the vessel clock) just need these to exist and not throw — their
-  // own behavior isn't what this test is checking.
-  useTelemetryStatus: () => 'connected',
-  subscribeTelemetryStatus: () => () => {},
-}))
-
-function emitGaugeValues(payload: unknown) {
-  act(() => {
-    gaugeValuesListener?.(JSON.stringify(payload))
-  })
-}
-
-function emitAlarms(payload: unknown) {
-  act(() => {
-    alarmsListener?.(JSON.stringify(payload))
-  })
-}
-
-function emit(event: string, payload: unknown) {
-  act(() => {
-    streamListeners.get(event)?.(JSON.stringify(payload))
-  })
-}
-
-function emitVesselState(payload: unknown) {
-  act(() => {
-    vesselStateListener?.(JSON.stringify(payload))
-  })
-}
+const emit = (event: string, payload: unknown) => stream.emit(event, payload)
+const emitGaugeValues = (payload: unknown) => emit('gauge-values', payload)
+const emitAlarms = (payload: unknown) => emit('alarms', payload)
+const emitVesselState = (payload: unknown) => emit('vessel-state', payload)
 
 // One vessel-state event from the boat's own server (GET /api/vessel-state,
 // 2026-10-27, at anchor), so the ticks below move fields the way the stream
@@ -306,9 +277,16 @@ async function mountApp() {
   // Auth resolution (useAuth, real here) is async even under mode:none —
   // let it settle before the dashboard (and its widgets) mounts.
   await act(async () => { await Promise.resolve() })
-  expect(subscribeTelemetryMock).toHaveBeenCalledWith('gauge-values', expect.any(Function))
-  expect(rendersOf('Gauge A')).toBeGreaterThan(0)
-  expect(rendersOf('Gauge B')).toBeGreaterThan(0)
+  // However many tiles read a stream, its store subscribes to it once.
+  const events = vi.mocked(subscribeTelemetry).mock.calls.map(([name]) => name)
+  expect(events.length).toBeGreaterThan(0)
+  expect(new Set(events).size).toBe(events.length)
+  if ((pageWidgets as Array<{ id: string }>).some((w) => w.id.startsWith('gauge:'))) {
+    // However many gauges the page draws, the gauge store subscribes once.
+    expect(subscriptionsTo('gauge-values')).toBe(1)
+    expect(rendersOf('Gauge A')).toBeGreaterThan(0)
+    expect(rendersOf('Gauge B')).toBeGreaterThan(0)
+  }
   // A first reading for both gauges, so the ticks below change one thing each.
   emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 1 } })
 }

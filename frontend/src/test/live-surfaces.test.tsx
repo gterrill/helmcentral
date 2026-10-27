@@ -7,6 +7,7 @@
 import { act, render } from '@testing-library/react'
 import { Suspense } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import { setQueryData } from '@/lib/api-query'
@@ -25,13 +26,7 @@ function requestedPaths(): string[] {
   return fetchMock.mock.calls.map((call) => String((call as unknown[])[0]))
 }
 
-const listeners = new Map<string, (raw: string) => void>()
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    listeners.set(event, cb)
-    return () => {}
-  },
-}))
+const stream = installFakeTelemetryStream()
 
 const tileWatches: AnchorWatchResult[] = []
 vi.mock('@/components/anchor-watch-tile', () => ({
@@ -87,9 +82,7 @@ vi.mock('@/components/forecast-page', () => ({
 import { LiveAnchorWatchTile, LiveClockTile, LiveDisplayShell, LiveForecastPage, LiveGeneratorTile, LivePoiMapTile } from '@/components/live-surfaces'
 
 function emitFix(latitude: number, longitude: number) {
-  act(() => {
-    listeners.get('vessel-state')?.(JSON.stringify({ latitude, longitude, gnss_critical_alert: false }))
-  })
+  stream.emit('vessel-state', { latitude, longitude, gnss_critical_alert: false })
 }
 
 /** A GET /api/anchor-watch answer, landed as a poll would land it. */
@@ -219,10 +212,10 @@ describe('LiveDisplayShell', () => {
       value, state: 'warn', phase: 'active', message: 'Barometer falling', silenced: false, can_silence: false, can_acknowledge: true,
     })
     render(<LiveDisplayShell display={{} as never}>{null}</LiveDisplayShell>)
-    act(() => { listeners.get('alarms')?.(JSON.stringify({ alarms: [alarm(-0.03256)], worst: 'warn' })) })
+    stream.emit('alarms', { alarms: [alarm(-0.03256)], worst: 'warn' })
     const renders = displayShellRenders.mock.calls.length
 
-    act(() => { listeners.get('alarms')?.(JSON.stringify({ alarms: [alarm(-0.03251)], worst: 'warn' })) })
+    stream.emit('alarms', { alarms: [alarm(-0.03251)], worst: 'warn' })
 
     expect(displayShellRenders.mock.calls.length).toBe(renders)
   })
@@ -231,9 +224,7 @@ describe('LiveDisplayShell', () => {
 describe('LiveGeneratorTile', () => {
   const electrical = (soc: number) => ({ battery_soc_percent: soc, battery_capacity_ah: 1000, charging_current_a: 100, generator_configured: true })
 
-  function emit(event: string, payload: unknown) {
-    act(() => { listeners.get(event)?.(JSON.stringify(payload)) })
-  }
+  const emit = (event: string, payload: unknown) => stream.emit(event, payload)
 
   it('hands down no battery outside a timed run, and follows Battery at Finish during one', () => {
     generatorProps.length = 0

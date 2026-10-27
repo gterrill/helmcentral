@@ -8,6 +8,7 @@
 import { fireEvent, render as rtlRender, screen, waitFor, within } from '@testing-library/react'
 import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { settingsFormMock } from '@/test/helpers/settings-form-mock'
 
 import { emptyVesselRoles } from '@/lib/vessel-settings'
@@ -58,7 +59,8 @@ vi.mock('@/hooks/use-alarm-transports', async (importOriginal) => {
   }
 })
 
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ boatName: 'M/V Pikorua', vesselLengthOverallM: 17.9, vesselDraftM: null })))
+const stream = installFakeTelemetryStream()
+beforeEach(() => { stream.seed('vessel-state', { name: 'Pikorua', vessel_prefix: 'M/V', length_overall_m: 17.9 }) })
 
 // Stable identity per test: the mocked hook hands this back on every render.
 const defaultSettings = () => ({ roles: { ...emptyVesselRoles } }) as Record<string, unknown>

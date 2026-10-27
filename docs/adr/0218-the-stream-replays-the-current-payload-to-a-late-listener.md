@@ -173,6 +173,36 @@ clock nor a vessel-state tick that changes neither field re-renders it.
 `use-vessel-identity.ts` is deleted, and the callers that wanted only the zone
 read it with `useVesselStateSelector(selectTimeZone)`.
 
+### Tests drive the real stores through a fake EventSource
+
+The EventSource is the seam. The browser's is one adapter and
+`src/test/helpers/fake-telemetry-stream.ts` is the other. A test calls
+`installFakeTelemetryStream()`, then `emit(event, payload)` for a frame from the
+server, or `seed(event, payload)` for what the server holds when a connection
+opens. A connection is seeded once per event, as the hub does, and the stream
+replays the remembered frame to any reader that mounts later, so a newer frame
+is never rewound. `error()`, `heartbeat()` and `open()` move the status, and a
+closed connection redials after the stream's backoff (fake timers advance it)
+and is seeded again. Teardown unmounts the test's components first, then resets
+the stores of whichever copy of the modules is loaded, so a file using
+`vi.resetModules` leaves no watchdog or window listener behind. There is no
+`disconnect()`: the stream reads disconnected only with no subscribers, and a
+mounted store is one. To count a store's subscriptions, wrap the real
+`subscribeTelemetry` in `vi.fn` through `vi.mock` with `importOriginal`. The real stream and the real
+stores run, so a test sees the equality rules and the render counts the boat
+would, and it never touches the listener registry, the seeded list or the
+replay.
+
+This retired the three stand-in store modules (`vessel-state-mock`,
+`electrical-state-mock`, `anchor-watch-mock`). The anchor watch is a poll, so
+its tests land a `GET /api/anchor-watch` answer with `landAnchorWatch`
+(`src/test/helpers/anchor-watch-poll.ts`) and check the writes on the fetch
+stub. What still mocks the stream module is a test of its status alone, where
+no store is mounted to open a connection: `connection-banner`,
+`display-status-badge`, `embed-tile`, `display-shell`,
+`signalk-discovery-prompt` and `use-auth`. `use-telemetry-stream.test.ts`
+tests the stream module itself and keeps its own fake.
+
 ## Rejected
 
 - **Keeping the retain hooks and only documenting the order.** The rule would

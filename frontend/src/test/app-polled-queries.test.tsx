@@ -11,6 +11,7 @@
  * is that tile's render count.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, act } from '@testing-library/react'
 import { memo, type ComponentProps } from 'react'
 import { App } from '../App'
@@ -84,23 +85,11 @@ async function poll(key: string) {
   await act(async () => { await invalidateQueries([key]) })
 }
 
-// ── the stream, mocked so every store can be ticked ─────────────────────────
+// ── the stream: the real stream and stores over a fake EventSource, so every
+// store can be ticked ──────────────────────────────────────────────────────
 
-const streamListeners = new Map<string, (raw: string) => void>()
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    streamListeners.set(event, cb)
-    return () => {}
-  },
-  useTelemetryStatus: () => 'connected',
-  subscribeTelemetryStatus: () => () => {},
-}))
-
-function emit(event: string, payload: unknown) {
-  act(() => {
-    streamListeners.get(event)?.(JSON.stringify(payload))
-  })
-}
+const stream = installFakeTelemetryStream()
+const emit = (event: string, payload: unknown) => stream.emit(event, payload)
 
 // ── render-count spies ───────────────────────────────────────────────────────
 

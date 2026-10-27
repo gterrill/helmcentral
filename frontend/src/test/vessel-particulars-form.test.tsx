@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, screen, waitFor } from '@testing-library/react'
 
 import { VesselParticularsForm } from '@/components/settings/sections/vessel-particulars-form'
@@ -6,7 +7,8 @@ import { VesselParticularsProvider } from '@/components/settings/vessel-particul
 
 // Live vessel data rides a telemetry stream; the form only reads two values
 // from it, so a fixed stand-in is enough.
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ boatName: 'M/V Pikorua', vesselLengthOverallM: 17.9, vesselDraftM: null })))
+const stream = installFakeTelemetryStream()
+beforeEach(() => { stream.seed('vessel-state', { name: 'Pikorua', vessel_prefix: 'M/V', length_overall_m: 17.9 }) })
 
 // GET /api/vessel/particulars example from docs/adr/DRAFT-import-api-contract.md.
 const stored = {

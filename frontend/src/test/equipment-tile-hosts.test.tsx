@@ -1,19 +1,11 @@
-import { act, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, test, vi } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 // The hosts read live readings from the gauge-values store, so the store is
 // seeded through the stream it listens to.
-let gaugeValuesListener: ((raw: string) => void) | null = null
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    if (event === 'gauge-values') gaugeValuesListener = cb
-    return () => {}
-  },
-}))
-
-function emitGaugeValues(payload: unknown) {
-  act(() => { gaugeValuesListener?.(JSON.stringify(payload)) })
-}
+const stream = installFakeTelemetryStream()
+const emitGaugeValues = (payload: unknown) => stream.emit('gauge-values', payload)
 
 import { EngineClusterHost, GaugeGroupHost } from '@/components/equipment-tile-hosts'
 import type { EngineClusterConfig, GaugeGroupWidgetConfig } from '@/lib/dashboard-widgets'

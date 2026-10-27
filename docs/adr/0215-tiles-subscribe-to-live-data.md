@@ -210,7 +210,7 @@ fields read as null, and true wind never borrows from apparent. It exports:
 - `getVesselStateSnapshot()`: the state at this moment, for a click handler.
 - `useRetainVesselState()`: starts the store without listening. (Removed by ADR 0218.)
 - `INITIAL_VESSEL_STATE`: every field unknown, the state before the first
-  event. The tests' stand-in for this module builds on it.
+  event.
 
 `useVesselState()`, the whole state, is gone. The vessel particulars form and
 the import wizard's vessel step read length and draft through
@@ -717,9 +717,10 @@ A new tile follows the same four steps:
 4. **The tests know about it.** A new store registers for the reset after
    each test: `createTelemetryStore` does that itself, and other module
    state calls `onTelemetryTestReset`, both run by
-   `resetTelemetryStoresForTest` in `src/test/setup.ts`. App tests that mock
-   the hook module (`vi.mock('@/hooks/use-...')`) need every export the
-   shell or a wrapper calls, including new selector hooks. A render test in
+   `resetTelemetryStoresForTest` in `src/test/setup.ts`. Tests feed the real
+   store through the fake EventSource (`src/test/helpers/fake-telemetry-stream.ts`,
+   ADR 0218), not a mock of the hook module, so a new selector hook needs no
+   change to any test double. A render test in
    `app-tile-memoization.test.tsx` or `app-polled-queries.test.tsx` shows a
    tick or poll reaching the tile and nothing else, with payloads captured
    off the boat's server.
@@ -785,8 +786,9 @@ and it would not have closed the gap above.
 Tests reset every store, subscription included, after each test
 (`resetTelemetryStoresForTest` in `src/test/setup.ts`), so one test's readings
 never reach the next. The stream is passed in to `createTelemetryStore` and
-read only when a store starts, so a test's mock of the stream still applies
-and a module that only imports a store's types or helpers never touches it.
+read only when a store starts, so a module that only imports a store's types
+or helpers never touches it. Tests no longer mock the stream module for data;
+they replace the EventSource under it (ADR 0218).
 
 ### Phases
 
