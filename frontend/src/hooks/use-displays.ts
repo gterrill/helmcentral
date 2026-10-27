@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import type { Display } from '@/lib/displays'
-import { apiRequest, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
+import { apiRequest, declareQuery, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 
 // Modelled directly on use-dashboard-pages.ts (ADR 0110 §6): same
 // toast/error-state shape, for the same reasons.
@@ -38,12 +38,13 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+declareQuery(DISPLAYS_KEY, { structuralSharing: true })
+
 export function useDisplays() {
   const { data, isLoading, error, refetch } = useApiQuery<Display[]>({
     queryKey: DISPLAYS_KEY,
     path: '/api/displays',
     select: (raw: DisplaysListResponse) => (Array.isArray(raw.displays) ? raw.displays : []),
-    structuralSharing: true,
   })
   const displays = data ?? EMPTY_DISPLAYS
 

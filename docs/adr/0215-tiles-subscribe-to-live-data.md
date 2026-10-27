@@ -7,6 +7,9 @@ Amended by [ADR 0218](0218-the-stream-replays-the-current-payload-to-a-late-list
 the stream now replays the current payload to a late listener, so the
 `useRetain*` hooks described below no longer exist and the shell no longer
 starts the stores. The text below keeps the decisions as they were made.
+Amended again (2026-10-28) by the section "One selection module, and sharing
+belongs to the key" at the end: the reader side is written once, and
+`structuralSharing` is declared by the key, not asked for by each reader.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -707,7 +710,8 @@ A new tile follows the same four steps:
    returns null for a tick that changes nothing shown, `useHeardSelector` for a tile that
    must not claim a value before the server has spoken, a `useRetain*` hook
    (no longer needed since ADR 0218), and selectors (`useStoreFields`, or `useSelector` with an equality). A
-   poll gets a hook over `useApiQuery` with `structuralSharing: true`, or
+   poll gets a hook over `useApiQuery` (its key declares `structuralSharing` with
+   `declareQuery`), or
    over `useApiQuerySelector` when the tile shows a slice.
 2. **A `Live*` wrapper in `components/live-surfaces.tsx`** reads the store or
    query and passes the readings as the props the presentational tile always
@@ -912,3 +916,68 @@ replace the EventSource under it (ADR 0218).
   are gone, so a component cannot take every path again by accident.
 - `EquipmentTileContext` carries only items, profiles and the reporting set.
   Anything live is read by the host that needs it.
+
+## One selection module, and sharing belongs to the key
+
+Amended 2026-10-28. Three things in the text above are superseded.
+
+**The reader side is written once.** The telemetry store, the query cache, the
+shared poller and the gauge subset each had a private copy of the same idea: a
+cached selection over a snapshot, kept by reference while an equality function
+says it did not change. `lib/selection.ts` now holds it as `useSelection`:
+
+```ts
+useSelection<S, T>({
+  subscribe,      // (onChange) => unsubscribe; may listen by key
+  getSnapshot,    // () => S, same reference while nothing changed
+  select,         // (snapshot, previous) => T; may be a fresh closure each render
+  isEqual,        // default Object.is: keeps the previous T when it says equal
+  sameSnapshot,   // default Object.is: when two snapshots are the same input
+})
+```
+
+`useSelector`, `useHeardSelector`, `useApiQuerySelector`, the poller's
+`useSlice` and `useGaugeSubset` are built on it. A fresh `select` costs one
+recompute and no extra render. `useSlice` therefore no longer needs a stable
+`select`, and takes an optional `isEqual`.
+
+**Sharing is a property of the key.** The decision above kept
+`structuralSharing` a per-reader option because about sixty hooks had not been
+audited, and applied it to an entry if any mounted reader asked. A hook that
+never asked then behaved differently depending on what else was on screen.
+The option is removed from the readers. A key declares it once, beside the
+key, with `declareQuery(prefix, { structuralSharing: true })`. It stays opt-in:
+a key that declares nothing keeps new data on every answer, whatever is
+mounted. A declaration covers every key that starts with its prefix, so a parameterised key such as a forecast for a place
+declares its path once. Where readers of one key used to disagree, the key now
+declares sharing, because some reader already relied on it.
+
+**A key can parse its answer once.** `declareQuery(prefix, { parse })` turns
+the raw answer into the value that `useApiQuerySelector`'s `select` sees. It
+runs once per answer however many readers there are (the result is remembered
+by the answer object), and a parse that throws reaches readers as the query's
+error. `useApiQuery`, `getQueryData` and `setQueryData` still deal in the raw
+answer. The anchor watch declares `parseAnchorWatch` this way; before, each
+reader's `select` parsed the record, once per reader per poll.
+
+Three rules keep declarations honest:
+
+- **They sit with the key.** A declaration lives in the module that exports
+  the key's constant or hooks, so importing the key imports its declaration.
+  It is looked up when an answer lands and when a selector reads, with no
+  fallback. A read or prefetch made before the declaring module loaded would
+  get neither sharing nor parse, so no other module may read a declared key
+  without importing the module that declares it. Invalidating a key from
+  elsewhere is safe: it only touches entries that already exist.
+- **They do not overlap.** A declaration whose prefix equals, extends or
+  is extended by another's must carry the same options, or `declareQuery`
+  throws, because the winner would otherwise depend on import order.
+  Declaring the same thing again, as a re-imported or hot-reloaded module
+  does, is a no-op.
+- **Updaters return new objects.** The parse of an answer is remembered by the
+  answer object. A `setQueryData` updater that changes its argument in place
+  and returns it would keep a stale parse, so in development it throws.
+
+A selector on a key whose `parse` throws on an answer is handed the parse of
+"no answer" together with the error, as it was handed `parseAnchorWatch(undefined)`
+before the parse moved to the key.

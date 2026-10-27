@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { useApiQuery } from '@/lib/api-query';
+import { declareQuery, useApiQuery } from '@/lib/api-query';
 
 export interface WeatherToday {
   datetime: string;
@@ -58,13 +58,14 @@ function normalise(data: Partial<WeatherToday>): WeatherToday {
   };
 }
 
+declareQuery(['/api/weather-today'], { structuralSharing: true })
+
 export function useWeatherToday(refreshIntervalSeconds = 600) {
   const { data, error, isLoading } = useApiQuery<WeatherToday>({
     queryKey: ['/api/weather-today'],
     path: '/api/weather-today',
     refetchInterval: refreshIntervalSeconds * 1000,
     select: normalise,
-    structuralSharing: true,
   });
 
   // The tile keeps showing the last reading, so a failure is only logged.

@@ -1,4 +1,4 @@
-import { apiRequest, invalidateQueries, useApiQuery } from '@/lib/api-query'
+import { apiRequest, declareQuery, invalidateQueries, useApiQuery } from '@/lib/api-query'
 import type { EngineProfile, EngineProfileProblem } from '@/lib/engine-profiles'
 
 interface ProfileList {
@@ -8,6 +8,8 @@ interface ProfileList {
 
 const NONE: EngineProfile[] = []
 const NO_PROBLEMS: EngineProfileProblem[] = []
+
+declareQuery(['/api/equipment-profiles'], { structuralSharing: true })
 
 // A failed fetch surfaces as an error with no profiles, so a 500 never renders
 // like an empty profiles directory.
@@ -20,7 +22,6 @@ export function useEquipmentProfiles(enabled: boolean) {
     queryKey: [path],
     path,
     enabled,
-    structuralSharing: true,
     select: (raw: ProfileList | null) => ({
       profiles: Array.isArray(raw?.profiles) ? (raw.profiles as EngineProfile[]) : NONE,
       problems: Array.isArray(raw?.problems) ? (raw.problems as EngineProfileProblem[]) : NO_PROBLEMS,

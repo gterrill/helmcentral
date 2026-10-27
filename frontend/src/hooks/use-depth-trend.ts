@@ -1,4 +1,4 @@
-import { useApiQuery } from '@/lib/api-query'
+import { declareQuery, useApiQuery } from '@/lib/api-query'
 
 export interface DepthTrendPoint {
   time: string
@@ -35,6 +35,8 @@ function toTrend(data: DepthTrendApiResponse): DepthTrendData | null {
   }
 }
 
+declareQuery(['/api/depth-trend'], { structuralSharing: true })
+
 export function useDepthTrend(queryWindow = '3h', refreshInterval = 60): DepthTrendData {
   // Failures are silent: the last good trend stays on screen.
   const { data } = useApiQuery<DepthTrendData | null>({
@@ -42,7 +44,6 @@ export function useDepthTrend(queryWindow = '3h', refreshInterval = 60): DepthTr
     path: `/api/depth-trend?window=${encodeURIComponent(queryWindow)}`,
     refetchInterval: refreshInterval * 1000,
     select: toTrend,
-    structuralSharing: true,
   })
   return data ?? EMPTY_TREND
 }
