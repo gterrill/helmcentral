@@ -42,11 +42,13 @@ afterEach(() => {
 // directly — use-telemetry-stream.test.ts already covers the transport. ────
 const subscribeTelemetryMock = vi.fn()
 let gaugeValuesListener: ((raw: string) => void) | null = null
+let alarmsListener: ((raw: string) => void) | null = null
 
 vi.mock('@/hooks/use-telemetry-stream', () => ({
   subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
     subscribeTelemetryMock(event, cb)
     if (event === 'gauge-values') gaugeValuesListener = cb
+    if (event === 'alarms') alarmsListener = cb
     return () => {}
   },
   // Real consumers elsewhere in the tree (use-autopilot.ts, vessel-status-bar.tsx
@@ -60,6 +62,12 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
 function emitGaugeValues(payload: unknown) {
   act(() => {
     gaugeValuesListener?.(JSON.stringify(payload))
+  })
+}
+
+function emitAlarms(payload: unknown) {
+  act(() => {
+    alarmsListener?.(JSON.stringify(payload))
   })
 }
 
@@ -83,6 +91,18 @@ vi.mock('@/components/ui/tile', async (importOriginal) => {
     return <actual.Tile {...props} />
   }
   return { ...actual, Tile: TileTitleSpy }
+})
+
+// AlarmBanner draws no Tile, so it is wrapped like RouteTile: memo() with the
+// real props, so the spy runs only when the real banner would.
+const bannerRenderSpy = vi.fn()
+vi.mock('@/components/alarm-banner', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/alarm-banner')>()
+  const Spy = memo(function AlarmBannerRenderSpy(props: ComponentProps<typeof actual.AlarmBanner>) {
+    bannerRenderSpy()
+    return <actual.AlarmBanner {...props} />
+  })
+  return { ...actual, AlarmBanner: Spy }
 })
 
 const gridRenderSpy = vi.fn()
@@ -109,6 +129,10 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
         { id: 'route', x: 0, y: 0, w: 4, h: 4 },
         { id: 'gauge:a', x: 4, y: 0, w: 4, h: 4, gauge: { path: 'a.path', label: 'Gauge A', display: 'numeric', quantity: 'raw', unit: 'raw' } },
         { id: 'gauge:b', x: 8, y: 0, w: 4, h: 4, gauge: { path: 'b.path', label: 'Gauge B', display: 'numeric', quantity: 'raw', unit: 'raw' } },
+        // Alarm consumers: the lamp strip reads the whole list and the worst
+        // state, the Nearby Vessels tile only the collision alarms.
+        { id: 'lamps:l', x: 0, y: 4, w: 4, h: 2, lamps: { title: 'Lamps', lamps: [{ path: 'c.path', label: 'C' }], showCheck: true } },
+        { id: 'nearby-vessels', x: 4, y: 4, w: 4, h: 4 },
       ],
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
@@ -241,6 +265,7 @@ vi.mock('@/hooks/use-route-activation', () => {
 vi.mock('@/hooks/use-forecast-warnings', () => ({
   useForecastWarnings: () => ({ activeWarning: null }),
   findActiveWindBulletin: () => null,
+  forecastWarningDetailsUrl: () => null,
 }))
 
 vi.mock('@/hooks/use-server-trails', () => ({
@@ -317,5 +342,63 @@ describe('App tile memoization (item D)', () => {
 
     expect(rendersOf('Gauge B')).toBeGreaterThan(b)
     expect(rendersOf('Gauge A')).toBe(a)
+  })
+})
+
+// ── alarms (ADR 0215 phase 2) ────────────────────────────────────────────────
+
+function houseBankAlarm(overrides: Record<string, unknown> = {}) {
+  return {
+    rule_id: 'house-bank-low', label: 'House Bank Low', path: 'electrical.batteries.house.capacity.stateOfCharge',
+    phase: 'active', state: 'alarm', value: 0.18, message: 'House bank 18%',
+    silenced: false, can_silence: false, can_acknowledge: true,
+    ...overrides,
+  }
+}
+
+describe('App alarm surfaces (ADR 0215 phase 2)', () => {
+  it('re-renders no alarm consumer when the same alarms payload arrives twice', async () => {
+    await mountApp()
+    emitAlarms({ alarms: [houseBankAlarm()], worst: 'alarm' })
+    const banner = bannerRenderSpy.mock.calls.length
+    const lamps = rendersOf('Lamps')
+    const nearby = rendersOf('Nearby Vessels')
+    expect(banner).toBeGreaterThan(0)
+    expect(lamps).toBeGreaterThan(0)
+    expect(nearby).toBeGreaterThan(0)
+
+    // The server sends the list every two seconds whether or not it changed.
+    emitAlarms({ alarms: [houseBankAlarm()], worst: 'alarm' })
+    emitAlarms({ alarms: [houseBankAlarm()], worst: 'alarm' })
+
+    expect(bannerRenderSpy.mock.calls.length).toBe(banner)
+    expect(rendersOf('Lamps')).toBe(lamps)
+    expect(rendersOf('Nearby Vessels')).toBe(nearby)
+  })
+
+  it('does not re-render the shell on an alarms tick', async () => {
+    await mountApp()
+    const grid = gridRenderSpy.mock.calls.length
+
+    emitAlarms({ alarms: [houseBankAlarm()], worst: 'alarm' })
+    emitAlarms({ alarms: [houseBankAlarm({ phase: 'acknowledged' })], worst: 'alarm' })
+    emitAlarms({ alarms: [], worst: 'normal' })
+
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
+  })
+
+  it('re-renders the banner and the lamp strip when an alarm changes', async () => {
+    await mountApp()
+    emitAlarms({ alarms: [houseBankAlarm()], worst: 'alarm' })
+    const banner = bannerRenderSpy.mock.calls.length
+    const lamps = rendersOf('Lamps')
+    const nearby = rendersOf('Nearby Vessels')
+
+    emitAlarms({ alarms: [houseBankAlarm({ phase: 'acknowledged', acked_at: '2026-10-27T02:00:00Z' })], worst: 'alarm' })
+
+    expect(bannerRenderSpy.mock.calls.length).toBeGreaterThan(banner)
+    expect(rendersOf('Lamps')).toBeGreaterThan(lamps)
+    // Not a collision alarm, so nothing the Nearby Vessels tile shows changed.
+    expect(rendersOf('Nearby Vessels')).toBe(nearby)
   })
 })

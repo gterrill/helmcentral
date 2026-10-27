@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-27). Phases 0 and 1 are built; phases 2 to 7 are planned.
+Accepted (2026-10-27). Phases 0 to 2 are built; phases 3 to 7 are planned.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -123,6 +123,52 @@ The presentational tiles, `GaugeTileView`, `EngineClusterTile`,
 render them with fixed readings, and a host is the only thing that wires them
 to the store.
 
+### Alarms (phase 2)
+
+`frontend/src/hooks/use-alarms.ts` holds one store for the `alarms` event,
+the same shape as the gauge store. It exports:
+
+- `useAlarmsSelector(select, isEqual)`: any slice, re-rendering only when
+  `isEqual` calls the new slice different.
+- `useAlarmList()` and `useWorstAlarmState()`: the list and the worst state.
+- `useAisCollisionAlarms()`: vessel id to worst collision state, compared
+  entry by entry, so a rule alarm coming or going leaves the AIS maps alone.
+- `useAnchorDragAlarm()`: the server's drag alarm, for the anchor watch tile.
+- `acknowledgeAlarm` and `silenceAlarm`: plain module functions, stable
+  without `useCallback`.
+- `useRetainAlarms()`: holds the store open without listening.
+
+`useAlarms()` stays, built on the store, for a caller that wants everything.
+
+The server sends the whole list every two seconds, changed or not. The store
+compares each alarm to the one with the same rule id, field by field, and an
+equal alarm keeps its object. When every alarm and the worst state match, the
+snapshot keeps its reference and no listener runs. Every field counts. Unlike
+gauge ages, nothing in an alarm moves on every tick without showing: the
+cards show the reading, the radar figures and the live sensors, so a change
+to any of them is a change on screen.
+
+The surfaces read the store through wrappers in
+`frontend/src/components/live-surfaces.tsx`: `LiveAlarmBanner`,
+`LiveAlarmsDrawer`, `LiveDisplayShell`, and, for the collision colours,
+`LiveNearbyVesselsTile`, `LiveAnchorWatchTile`, `LivePoiMapTile` and
+`LiveAnchorWatchDrawer`. Each wrapper reads its slice and passes it as the
+prop the component always took, so `AlarmBanner`, `AlarmsDrawer`,
+`DisplayShell` and the tiles stay prop-driven and their tests stand. The
+wrappers are memoized; the shell's remaining props are stable.
+`LampStripHost`, and so the pinned ribbon, reads the list and the worst state
+itself, as it reads its lamps.
+
+`LiveDisplayShell` is not memoized: the wall's pages arrive as `children`,
+an element the shell builds. An alarm tick re-renders the frame for its pill,
+React receives the same `children` element, and the pages below it do not
+re-render.
+
+The shell reads no alarm. It calls `useRetainAlarms` and nothing else, for the
+same reason it retains the gauge store: the Alarms page and the wall's pill
+must show the list the moment they mount. The sidebar has no alarm badge, so
+nothing else needed moving.
+
 ### How long a store lives
 
 A store with no holders unsubscribes and empties, so a tile mounted after that
@@ -192,8 +238,10 @@ for the whole session while the shell read the values; it stays open.
   that engine, not every equipment host and not the shell.
 - An age read from the store is exact only once stale. Code that wants the
   true age of a fresh reading cannot get it from these hooks.
-- The shell still re-renders on the vessel-state, alarm, autopilot and other
-  streams until phases 2 to 5 land, and `renderWidget` still runs for every
+- An alarms tick re-renders the surfaces whose slice changed, and a repeat of
+  the same list re-renders nothing. The shell no longer renders on alarms.
+- The shell still re-renders on the vessel-state, autopilot and other
+  streams until phases 3 to 5 land, and `renderWidget` still runs for every
   tile when it does. The gauge tiles are protected from those renders by their
   own memo: their props are now config and stable callbacks only.
 - The gauge-values subscription stays open for the life of the app, as it did

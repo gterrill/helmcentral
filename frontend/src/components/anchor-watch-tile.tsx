@@ -3,7 +3,7 @@ import { lazy, memo, Suspense, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
-import { findAnchorDragAlarm, useAlarms, type AlarmState } from '@/hooks/use-alarms'
+import { acknowledgeAlarm, useAnchorDragAlarm, type AlarmState } from '@/hooks/use-alarms'
 import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
@@ -153,8 +153,8 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
   // are mutually exclusive — audible-and-visible vs. active-but-silenced —
   // and neither implies the other cleared: a silenced drag is still a live
   // condition and must keep rendering something (see the strips below).
-  const { alarms, acknowledge } = useAlarms()
-  const { isAlarming, isSilenced, silence, unsilence } = useAnchorAlarm(findAnchorDragAlarm(alarms), acknowledge)
+  const dragAlarm = useAnchorDragAlarm()
+  const { isAlarming, isSilenced, silence, unsilence } = useAnchorAlarm(dragAlarm, acknowledgeAlarm)
 
   // "38 m of 30 m" — how far the vessel actually is against the radius it's
   // meant to stay inside. Shared by both drag-alarm strips below.

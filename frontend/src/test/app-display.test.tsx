@@ -291,6 +291,14 @@ const { mockAlarmsState } = vi.hoisted(() => ({
 
 vi.mock('@/hooks/use-alarms', () => ({
   useAlarms: () => ({ alarms: mockAlarmsState.alarms, worst: 'normal', acknowledge: vi.fn(), silence: vi.fn() }),
+  // The shell holds the store; the surfaces read it through these (ADR 0215).
+  useRetainAlarms: () => {},
+  useAlarmList: () => mockAlarmsState.alarms,
+  useWorstAlarmState: () => 'normal',
+  useAisCollisionAlarms: () => new Map(),
+  useAnchorDragAlarm: () => null,
+  acknowledgeAlarm: vi.fn(),
+  silenceAlarm: vi.fn(),
   collisionAlarmStatesByVessel: () => new Map(),
   findAnchorDragAlarm: () => null,
   // display-status-badge.tsx now ranks its pill's alarms through

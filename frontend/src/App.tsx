@@ -20,7 +20,15 @@ import {
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
-import { AnchorWatchTile } from '@/components/anchor-watch-tile'
+import {
+  LiveAlarmBanner,
+  LiveAlarmsDrawer,
+  LiveAnchorWatchDrawer,
+  LiveAnchorWatchTile,
+  LiveDisplayShell,
+  LiveNearbyVesselsTile,
+  LivePoiMapTile,
+} from '@/components/live-surfaces'
 import { AlternatorTile } from '@/components/alternator-tile'
 import { BatteryPowerTile } from '@/components/battery-power-tile'
 import { HotWaterTile } from '@/components/hot-water-tile'
@@ -35,8 +43,6 @@ import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { SetupLine } from '@/components/setup-line'
 import { requestSetupFocus } from '@/lib/setup-status'
-import { AlarmBanner } from '@/components/alarm-banner'
-import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
 // Not lazy: prefetchNoteEditor() is a plain function that only reaches into
 // the editor-vendor chunk through a dynamic import() of its own (see that
@@ -45,8 +51,6 @@ import { prefetchNoteEditor } from '@/components/note-editor'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
 import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
 
-const AlarmsDrawer = lazy(() => import('@/components/alarms-drawer').then((mod) => ({ default: mod.AlarmsDrawer })))
-const AnchorWatchDrawer = lazy(() => import('@/components/anchor-watch-drawer').then((mod) => ({ default: mod.AnchorWatchDrawer })))
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
 const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-route-panel').then((mod) => ({ default: mod.PassagesRoutePanel })))
@@ -92,7 +96,6 @@ import { useDisplays } from '@/hooks/use-displays'
 import { LoadError, RefreshFailedOverlay } from '@/components/patterns/refresh-failed-note'
 import { NO_DISPLAY_OPTIONS, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
 import { nextWaypoint, traversalOrder, computeClockTripEta } from '@/lib/next-waypoint'
-import { DisplayShell } from '@/components/display-shell'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
 import { WallDisplaysPanel } from '@/components/wall-displays-panel'
@@ -113,7 +116,7 @@ import { useTideToday } from '@/hooks/use-tide-today'
 import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useVesselState } from '@/hooks/use-vessel-state'
-import { collisionAlarmStatesByVessel, useAlarms } from '@/hooks/use-alarms'
+import { useRetainAlarms } from '@/hooks/use-alarms'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
 import { useSocBands } from '@/hooks/use-soc-bands'
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
@@ -171,7 +174,6 @@ import {
 import { POI_CATEGORY_IDS } from '@/lib/poi'
 import { EmbedTile } from '@/components/embed-tile'
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
-import { PoiMapTile } from '@/components/poi-map-tile'
 import { PoiMapConfigDialog } from '@/components/poi-map-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
 import { GaugeTile } from '@/components/gauge-tile'
@@ -998,11 +1000,11 @@ function AppShell() {
     windLastUpdateAgeS,
   } = useVesselState()
 
-  const { alarms, worst: worstAlarmState, acknowledge: acknowledgeAlarm, silence: silenceAlarm } = useAlarms()
-  // Vessel id -> worst live collision state, for the anchor-watch map's AIS
-  // markers (ADR 0088). Memoized so the map doesn't see a new Map identity
-  // on every render that changes nothing about the alarm list.
-  const aisCollisionAlarms = useMemo(() => collisionAlarmStatesByVessel(alarms), [alarms])
+  // The shell draws no alarm itself. The banner, the Alarms page, the lamp
+  // strips, the wall's pill and the AIS markers each read the alarms store
+  // (ADR 0215); the shell only holds it open, so the list survives page
+  // switches and wall rotations without an alarms tick re-rendering the shell.
+  useRetainAlarms()
   // Lifted out of AlarmsDrawer so a rule saved there reaches the battery
   // tile's SoC bands (useSocBands below) without a reload.
   const {
@@ -1498,10 +1500,10 @@ function AppShell() {
     }
   }, [activePage, effectiveWidgets, poiMapDraft, updatePage])
 
-  // Item D: the shell still re-renders on every vessel-state, alarms,
+  // Item D: the shell still re-renders on every vessel-state,
   // autopilot, electrical, solar, tanks, nearby-vessel, radar and anchor-watch
-  // tick, and on each polled forecast (gauge values no longer: ADR 0215 moved
-  // them into the tiles). renderWidget below runs fresh on every one of those
+  // tick, and on each polled forecast (gauge values and alarms no longer: ADR
+  // 0215 moved them into the tiles). renderWidget below runs fresh on every one of those
   // renders (it is deliberately not memoized itself —
   // see its own comment), so an inline `onConfigure={() => setXDraft(widget)}`
   // handed a memoized tile (EngineClusterTile, LampStripTile, GaugeGroupTile,
@@ -1564,8 +1566,6 @@ function AppShell() {
         <LampStripHost
           config={widget.lamps}
           ctx={equipmentContext}
-          worstAlarmState={worstAlarmState}
-          alarms={alarms}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setLampStripDraft)}
           onOpenAlarms={openAlarmsPanel}
@@ -1610,7 +1610,7 @@ function AppShell() {
     if (isPoiMapWidgetId(id)) {
       if (!widget.poiMap) return null
       return (
-        <PoiMapTile
+        <LivePoiMapTile
           config={widget.poiMap}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setPoiMapDraft)}
@@ -1621,7 +1621,6 @@ function AppShell() {
           gnssCriticalAlert={gnssCriticalAlert}
           positionLastUpdateAgeS={positionLastUpdateAgeS}
           nearbyVessels={nearbyVessels}
-          aisCollisionAlarms={aisCollisionAlarms}
           getSelfTrail={getSelfTrail}
           isDarkTheme={isDarkTheme}
           forceDark={activePage?.skin === 'instrument'}
@@ -1729,7 +1728,7 @@ function AppShell() {
         )
       case 'anchor-watch':
         return (
-          <AnchorWatchTile
+          <LiveAnchorWatchTile
             lastUpdateAgeS={positionLastUpdateAgeS}
             watch={anchorWatch}
             lat={latitude}
@@ -1743,7 +1742,6 @@ function AppShell() {
             vesselTrail={getAnchorTrail}
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
-            aisCollisionAlarms={aisCollisionAlarms}
             radarTargets={radarTargets}
             radars={radarInfos}
             radarSource={radarSource}
@@ -1780,12 +1778,11 @@ function AppShell() {
         )
       case 'nearby-vessels':
         return (
-          <NearbyVesselsTile
+          <LiveNearbyVesselsTile
             vessels={nearbyVessels}
             loading={nearbyVesselsLoading}
             distanceUnits={uiConfig.distanceUnits}
             lastUpdateAgeS={nearbyVesselsAgeS}
-            aisCollisionAlarms={aisCollisionAlarms}
             maxRangeM={nearbyVesselsMaxRangeM}
           />
         )
@@ -2057,8 +2054,6 @@ function AppShell() {
           <LampStripHost
             config={ribbon}
             ctx={equipmentContext}
-            worstAlarmState={worstAlarmState}
-            alarms={alarms}
             editing={layoutEditing}
             onConfigure={openRibbonDialog}
             onOpenAlarms={openAlarmsPanel}
@@ -2213,10 +2208,7 @@ function AppShell() {
         )
       case 'alarms':
         return (
-          <AlarmsDrawer
-            alarms={alarms}
-            onAcknowledge={acknowledgeAlarm}
-            onSilence={silenceAlarm}
+          <LiveAlarmsDrawer
             rules={alarmRules}
             loading={alarmRulesLoading}
             error={alarmRulesError}
@@ -2368,7 +2360,7 @@ function AppShell() {
                 range check away from being -1, not null, when the sentinel
                 fires, which is why the pair is checked explicitly rather than
                 trusting the substituted vesselLat/vesselLon below. */}
-            <AnchorWatchDrawer
+            <LiveAnchorWatchDrawer
               placemarks={placemarks}
               onPlacemarkCreate={createPlacemark}
               onPlacemarkRemove={removePlacemark}
@@ -2397,7 +2389,6 @@ function AppShell() {
               vesselTrail={getAnchorTrail}
               aisVessels={nearbyVessels}
               aisTrails={getAisTrails}
-              aisCollisionAlarms={aisCollisionAlarms}
               radarTargets={radarTargets}
               radars={radarInfos}
               radarSource={radarSource}
@@ -2553,9 +2544,8 @@ function AppShell() {
     }
 
     return (
-      <DisplayShell
+      <LiveDisplayShell
         display={wallDisplay}
-        alarms={alarms}
         preview={displayOptions.preview}
         overlay={
           <>
@@ -2588,7 +2578,7 @@ function AppShell() {
           </>
         )}
         <DisplayRemoteController rotation={displayRotation} onAction={bumpRemoteAnnouncement} />
-      </DisplayShell>
+      </LiveDisplayShell>
     )
   }
 
@@ -3001,10 +2991,8 @@ function AppShell() {
                 tooltip can be anchored to a trigger inside any of them and
                 must remain readable. */}
             <div className={cn('relative z-55', isFullscreenDashboard && 'pr-12')} data-testid="alarm-banner-stack">
-              <AlarmBanner
-                alarms={alarms}
+              <LiveAlarmBanner
                 onOpen={openAlarmsPanel}
-                onAcknowledge={acknowledgeAlarm}
                 forecastWarnings={activeForecastWarning}
               />
             </div>
