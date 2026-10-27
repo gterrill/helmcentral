@@ -147,6 +147,56 @@ function isSeabedType(value: string | undefined): value is SeabedType {
   return value === 'sand' || value === 'mud' || value === 'rock' || value === 'grass'
 }
 
+/**
+ * Where the boat is against the anchor: distance, bearing from the anchor,
+ * and whether that is a drag. Null distance and bearing without a fix or an
+ * anchor.
+ *
+ * A corrupt/jammed GPS fix is surfaced via gnssCritical as a diagnostic, not
+ * folded into anchorState - a brief bad fix (e.g. GPS resettling after a
+ * laptop wakes from sleep) shouldn't sound the same alarm as an actual drag,
+ * which is determined purely by distance from the anchor point.
+ */
+function positionAgainstAnchor(
+  active: boolean,
+  anchorLat: number | null,
+  anchorLon: number | null,
+  radiusMeters: number,
+  currentLat: number | null,
+  currentLon: number | null,
+): { distanceMeters: number | null; bearingDeg: number | null; anchorState: AnchorWatchState } {
+  let distanceMeters: number | null = null
+  let bearingDeg: number | null = null
+  if (anchorLat !== null && anchorLon !== null && currentLat !== null && currentLon !== null) {
+    distanceMeters = haversineMeters(anchorLat, anchorLon, currentLat, currentLon)
+    bearingDeg = Math.round(bearingDegrees(anchorLat, anchorLon, currentLat, currentLon))
+  }
+  let anchorState: AnchorWatchState = 'none'
+  if (active) {
+    anchorState = distanceMeters !== null && distanceMeters > radiusMeters + DRAG_BUFFER_METERS ? 'dragging' : 'set'
+  }
+  return { distanceMeters, bearingDeg, anchorState }
+}
+
+/**
+ * The watch as read at a given fix: the record from useAnchorWatch with its
+ * distance, bearing, drag state and GNSS flag worked out for this position.
+ * AppShell reads the record without a position (ADR 0215), so a fix moving
+ * does not re-render the shell; the anchor watch tile and page apply the live
+ * fix with this.
+ */
+export function anchorWatchAt(
+  watch: AnchorWatchResult,
+  currentLat: number | null,
+  currentLon: number | null,
+  gnssCritical: boolean,
+): AnchorWatchResult {
+  const derived = positionAgainstAnchor(
+    watch.anchorState !== 'none', watch.anchorLat, watch.anchorLon, watch.radiusMeters, currentLat, currentLon,
+  )
+  return { ...watch, ...derived, gnssCritical }
+}
+
 export function useAnchorWatch(
   currentLat: number | null,
   currentLon: number | null,
@@ -311,25 +361,9 @@ export function useAnchorWatch(
     ? serverState.seabed_type
     : DEFAULT_SEABED_TYPE
 
-  let distanceMeters: number | null = null
-  let bearingDeg: number | null = null
-  if (anchorLat !== null && anchorLon !== null && currentLat !== null && currentLon !== null) {
-    distanceMeters = haversineMeters(anchorLat, anchorLon, currentLat, currentLon)
-    bearingDeg = Math.round(bearingDegrees(anchorLat, anchorLon, currentLat, currentLon))
-  }
-
-  // A corrupt/jammed GPS fix is surfaced via gnssCritical as a diagnostic,
-  // not folded into anchorState - a brief bad fix (e.g. GPS resettling after
-  // a laptop wakes from sleep) shouldn't sound the same alarm as an actual
-  // drag, which is determined purely by distance from the anchor point.
-  let anchorState: AnchorWatchState = 'none'
-  if (serverState.active) {
-    if (distanceMeters !== null && distanceMeters > radiusMeters + DRAG_BUFFER_METERS) {
-      anchorState = 'dragging'
-    } else {
-      anchorState = 'set'
-    }
-  }
+  const { distanceMeters, bearingDeg, anchorState } = positionAgainstAnchor(
+    serverState.active, anchorLat, anchorLon, radiusMeters, currentLat, currentLon,
+  )
 
   // Not gated on serverState.active — it never is true alongside an error —
   // but explicitly typeof-checked so a stray non-string value from a future

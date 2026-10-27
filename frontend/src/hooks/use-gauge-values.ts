@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
-import { ageFromPayload, formatDataAge, isStale } from '@/lib/staleness'
+import { ageFromPayload, shownAge } from '@/lib/staleness'
 
 /**
  * Current values for, and the age behind, every path a gauge is bound to.
@@ -92,18 +92,6 @@ function notify(listeners: Map<string, Set<() => void>>, keys: readonly string[]
     if (!set) continue
     for (const listener of set) seen.add(listener)
   }
-}
-
-/**
- * What a tile can show for an age: nothing (unknown), fresh, or stale with a
- * given label. Every tile reading this store uses the age only through
- * isStale at its default threshold and, once stale, formatDataAge, so this is
- * all of it. A tile that needs another threshold has to be keyed here too.
- */
-function shownAge(age: number | null): string {
-  if (age === null || !Number.isFinite(age)) return 'none'
-  if (!isStale(age)) return 'fresh'
-  return formatDataAge(age)
 }
 
 type EnginesPayload = Record<string, { state?: string; last_update?: string }>

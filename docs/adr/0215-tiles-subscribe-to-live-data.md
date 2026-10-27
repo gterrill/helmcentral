@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-27). Phases 0 to 2 are built; phases 3 to 7 are planned.
+Accepted (2026-10-27). Phases 0 to 3 are built; phases 4 to 7 are planned.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -169,6 +169,72 @@ same reason it retains the gauge store: the Alarms page and the wall's pill
 must show the list the moment they mount. The sidebar has no alarm badge, so
 nothing else needed moving.
 
+### Vessel state (phase 3)
+
+`frontend/src/hooks/use-vessel-state.ts` holds one store for the
+`vessel-state` event. It parses each tick once into `VesselStateValue`, with
+the same rules the hook's thirty-odd `useState`s applied: `-1` and absent
+fields read as null, and true wind never borrows from apparent. It exports:
+
+- `useVesselStateSelector(select, isEqual)`: any slice.
+- `useVesselFields(fields)`: the named fields as one object, kept while none
+  of them changed. A tile passes a module constant, its own field list.
+- `getVesselStateSnapshot()`: the state at this moment, for a click handler.
+- `useRetainVesselState()`: holds the store open without listening.
+- `useVesselState()`: the whole state, built on the store. The vessel
+  particulars form and the import wizard's vessel step still call it for
+  length and draft; both are forms, open for a minute, and the test mocks of
+  this module keep working.
+
+A field that shows the same as before keeps its previous value; a tick in
+which every field shows the same keeps the snapshot and notifies nobody. The
+three ages, depth, position and wind, follow the gauge rule: each keeps the
+number last handed out while what a tile shows for it holds (`shownAge`,
+moved into `lib/staleness.ts` so both stores share it). The backend gates
+this event on everything but its ages and `datetime`, so a tick that arrives
+almost always carries a moved age and often nothing else a tile shows. The
+gust ladders compare window by window. `datetime` is not parsed at all.
+
+The tiles read the store through wrappers in `live-surfaces.tsx`, as the
+alarm surfaces do: `LiveWindTile`, `LiveDepthTideTile`, `LivePositionTile`,
+`LiveClockTile`, `LiveCurrentConditionsTile`, `LiveRouteTile`,
+`LiveGeneratorTile`, `LiveAutopilotTile`, `LiveAlternatorTile`,
+`LiveAnchorWatchTile` and `LivePoiMapTile`, and the pages
+`LiveAnchorWatchDrawer`, `LiveRadarDrawer`, `LiveForecastPage` and
+`LiveSignalKDiscoveryPrompt`. The presentational components still take every
+reading as a prop.
+
+Three things moved out of the shell with the readings:
+
+- **The place name.** `usePlaceName` only asks whether there is a fix, but it
+  needed latitude and longitude to ask. The Position and Clock wrappers call
+  it now, sharing one query, so the lookup polls only while one of those
+  tiles is on screen.
+- **The clock's trip ETA.** `computeClockTripEta` needs the fix and speed, so
+  `LiveClockTile` computes it from the route status the shell passes.
+- **The fix against the anchor.** `useAnchorWatch(lat, lon)` worked out
+  distance, bearing and the drag state from the fix it was given, so the
+  shell needed the fix every tick. The shell now calls it with no fix and
+  gets the record: whether a watch is set, the auto-raise, the planning
+  depth. `anchorWatchAt(watch, lat, lon, gnssCritical)` applies a fix to the
+  record, and the anchor watch tile and page call it with their own. The
+  shell's one use of the drag state, whether a watch is set at all, never
+  depended on the fix.
+
+*Drop anchor here* reads the fix and depth with `getVesselStateSnapshot()`
+when it is tapped. A render subscription would re-render the shell every
+second to keep a handler current that runs a few times a season.
+
+The shell selects one field, `navigationState`, for `useDisplayRotation`,
+which picks the wall's pages by it. A navigation state change re-renders the
+shell; nothing else in vessel state does.
+
+Readings from the phase 4 and 5 streams stay on props from the shell for now:
+the anchor watch record, its trails and placemarks, the AIS and radar inputs
+to the anchor and Nearby maps, the Generator tile's power and battery, the
+autopilot's state, the alternator readings, the Depth & Tide tile's tide and
+trend, and the forecasts. Each wrapper moved only the vessel-state part.
+
 ### How long a store lives
 
 A store with no holders unsubscribes and empties, so a tile mounted after that
@@ -240,8 +306,12 @@ for the whole session while the shell read the values; it stays open.
   true age of a fresh reading cannot get it from these hooks.
 - An alarms tick re-renders the surfaces whose slice changed, and a repeat of
   the same list re-renders nothing. The shell no longer renders on alarms.
-- The shell still re-renders on the vessel-state, autopilot and other
-  streams until phases 3 to 5 land, and `renderWidget` still runs for every
+- A vessel-state tick re-renders the tiles whose fields changed. A tick that
+  moves only ages within the fresh band re-renders nothing, and the shell
+  renders only when the navigation state changes.
+- The place-name lookup runs only while a Position or Clock tile is on screen.
+- The shell still re-renders on the autopilot, anchor watch and other
+  streams until phases 4 and 5 land, and `renderWidget` still runs for every
   tile when it does. The gauge tiles are protected from those renders by their
   own memo: their props are now config and stable callbacks only.
 - The gauge-values subscription stays open for the life of the app, as it did

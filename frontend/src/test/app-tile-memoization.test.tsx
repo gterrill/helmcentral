@@ -43,12 +43,14 @@ afterEach(() => {
 const subscribeTelemetryMock = vi.fn()
 let gaugeValuesListener: ((raw: string) => void) | null = null
 let alarmsListener: ((raw: string) => void) | null = null
+let vesselStateListener: ((raw: string) => void) | null = null
 
 vi.mock('@/hooks/use-telemetry-stream', () => ({
   subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
     subscribeTelemetryMock(event, cb)
     if (event === 'gauge-values') gaugeValuesListener = cb
     if (event === 'alarms') alarmsListener = cb
+    if (event === 'vessel-state') vesselStateListener = cb
     return () => {}
   },
   // Real consumers elsewhere in the tree (use-autopilot.ts, vessel-status-bar.tsx
@@ -69,6 +71,33 @@ function emitAlarms(payload: unknown) {
   act(() => {
     alarmsListener?.(JSON.stringify(payload))
   })
+}
+
+function emitVesselState(payload: unknown) {
+  act(() => {
+    vesselStateListener?.(JSON.stringify(payload))
+  })
+}
+
+// One vessel-state event from the boat's own server (GET /api/vessel-state,
+// 2026-10-27, at anchor), so the ticks below move fields the way the stream
+// moves them.
+const LIVE_VESSEL_STATE = {
+  current_drift_impact_kts: 0.1, current_drift_kts: 0.1, current_set_deg: 56.62344246937747,
+  datetime: '2026-10-27T01:58:19Z', depth: 16.27, depth_last_update_age_s: 2.6, draft_m: 1.2,
+  engines_running: null, generator_manual_start: false, generator_manual_start_timer: 0,
+  generator_running_by_condition: 'stopped', generator_runtime: 0, generator_state: 'stopped',
+  gnss_critical_alert: false, gnss_hdop: 0.58, gnss_quality_indicator: 2, gnss_satellites: 12,
+  gnss_validation_reason: '', gnss_validation_state: 'trusted', heading_true: 329.2946244655377,
+  latitude: -20.274677459176406, length_overall_m: 17.9, longitude: 149.07369155347328,
+  max_gust_kts: { '10m': 6.1, '1h': 11, '24h': 16.4, '30m': 6.1 },
+  max_gust_true_kts: { '10m': 6.1, '1h': 8.9, '24h': 15.7, '30m': 6.1 },
+  name: 'Pikorua', position_last_update_age_s: 0, source: 'signalk', speed_over_ground_kts: 0.1,
+  status: 'motoring', timezone: 'Etc/GMT-10', vessel_prefix: 'M/V',
+  wind_angle_apparent_deg: 22.998525896551243, wind_angle_relative_deg: 22.998525896551243,
+  wind_angle_true_deg: 22.998525896551243, wind_angle_true_relative_deg: 22.998525896551243,
+  wind_direction_true_deg: 352.60477746092664, wind_last_update_age_s: 2.1, wind_side: 'starboard',
+  wind_side_true: 'starboard', wind_speed_apparent_kts: 5.09287128, wind_speed_true_kts: 5.09287128,
 }
 
 // ── render-count spies, each wrapping the real tile so its real memo() is
@@ -133,6 +162,9 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
         // state, the Nearby Vessels tile only the collision alarms.
         { id: 'lamps:l', x: 0, y: 4, w: 4, h: 2, lamps: { title: 'Lamps', lamps: [{ path: 'c.path', label: 'C' }], showCheck: true } },
         { id: 'nearby-vessels', x: 4, y: 4, w: 4, h: 4 },
+        // Vessel-state consumers: wind reads the wind fields, position the fix.
+        { id: 'wind', x: 8, y: 4, w: 4, h: 4 },
+        { id: 'position', x: 0, y: 8, w: 4, h: 4 },
       ],
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
@@ -149,21 +181,11 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
 }))
 
 // ── the rest of App's hook surface — same shape as App.smoke.test.tsx.
-// use-gauge-values is deliberately NOT mocked: it needs to run for real so
+// use-gauge-values and use-alarms are deliberately NOT mocked: it needs to run for real so
 // the emits above flow through its actual (now-shared, now-memoized) store. ─
 
-vi.mock('@/hooks/use-vessel-state', () => ({
-  useVesselState: () => ({
-    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
-    headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
-    windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
-    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
-    generatorManualStart: false, generatorManualStartTimer: 0,
-    generatorRunningByCondition: null, generatorRuntime: null,
-    enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
-    gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false,
-  }),
-}))
+// use-vessel-state is not mocked either: the vessel-state ticks below run
+// through its real store.
 
 vi.mock('@/hooks/use-electrical-state', () => ({
   useElectricalState: () => ({
@@ -189,6 +211,7 @@ vi.mock('@/hooks/use-radar-targets', () => ({
 }))
 
 vi.mock('@/hooks/use-anchor-watch', () => ({
+  anchorWatchAt: (watch: unknown) => watch,
   useAnchorWatch: () => ({
     anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
     rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
@@ -400,5 +423,66 @@ describe('App alarm surfaces (ADR 0215 phase 2)', () => {
     expect(rendersOf('Lamps')).toBeGreaterThan(lamps)
     // Not a collision alarm, so nothing the Nearby Vessels tile shows changed.
     expect(rendersOf('Nearby Vessels')).toBe(nearby)
+  })
+})
+
+// ── vessel state (ADR 0215 phase 3) ──────────────────────────────────────────
+
+describe('App vessel-state tiles (ADR 0215 phase 3)', () => {
+  async function mountWithFix() {
+    await mountApp()
+    emitVesselState(LIVE_VESSEL_STATE)
+    expect(rendersOf('Wind')).toBeGreaterThan(0)
+    expect(rendersOf('Position')).toBeGreaterThan(0)
+  }
+
+  it('re-renders Position, and not Wind, when only the latitude changes', async () => {
+    await mountWithFix()
+    const wind = rendersOf('Wind')
+    const position = rendersOf('Position')
+
+    emitVesselState({ ...LIVE_VESSEL_STATE, latitude: -20.2747 })
+
+    expect(rendersOf('Position')).toBeGreaterThan(position)
+    expect(rendersOf('Wind')).toBe(wind)
+  })
+
+  // The server rounds ages to 0.1 s, so they move on almost every tick. Within
+  // the fresh band nothing shows them, so nothing should redraw.
+  it('re-renders nothing when only ages move within the fresh band', async () => {
+    await mountWithFix()
+    const wind = rendersOf('Wind')
+    const position = rendersOf('Position')
+    const route = routeTileRenderSpy.mock.calls.length
+    const grid = gridRenderSpy.mock.calls.length
+
+    emitVesselState({ ...LIVE_VESSEL_STATE, datetime: '2026-10-27T01:58:20Z', depth_last_update_age_s: 3.6, position_last_update_age_s: 0.4, wind_last_update_age_s: 0.3 })
+    emitVesselState({ ...LIVE_VESSEL_STATE, datetime: '2026-10-27T01:58:21Z', depth_last_update_age_s: 4.6, position_last_update_age_s: 1.1, wind_last_update_age_s: 1.3 })
+
+    expect(rendersOf('Wind')).toBe(wind)
+    expect(rendersOf('Position')).toBe(position)
+    expect(routeTileRenderSpy.mock.calls.length).toBe(route)
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
+  })
+
+  it('re-renders Wind when its age crosses into stale', async () => {
+    await mountWithFix()
+    const wind = rendersOf('Wind')
+    const position = rendersOf('Position')
+
+    emitVesselState({ ...LIVE_VESSEL_STATE, wind_last_update_age_s: 121 })
+
+    expect(rendersOf('Wind')).toBeGreaterThan(wind)
+    expect(rendersOf('Position')).toBe(position)
+  })
+
+  it('does not re-render the shell grid on a vessel-state tick', async () => {
+    await mountWithFix()
+    const grid = gridRenderSpy.mock.calls.length
+
+    emitVesselState({ ...LIVE_VESSEL_STATE, latitude: -20.2747, longitude: 149.0737, heading_true: 330.1, wind_speed_apparent_kts: 6.2, depth: 16.1 })
+    emitVesselState({ ...LIVE_VESSEL_STATE, latitude: -20.2748, longitude: 149.0738, heading_true: 331.4, wind_speed_apparent_kts: 5.7, depth: 16.0 })
+
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
   })
 })

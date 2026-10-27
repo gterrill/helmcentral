@@ -67,6 +67,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   changes.** Helmcentral checks the alarm list every two seconds. It used to
   redraw the whole dashboard each time, even when nothing had changed, so a
   page now uses less battery and processor time whilst alarms are up.
+- **Wind, depth, position and the other boat tiles redraw only when their own
+  reading changes.** A new position no longer redraws the Wind tile, and a
+  reading that's only a second older doesn't redraw anything. The dashboard
+  used to redraw every tile each second, so it now uses less battery and
+  processor time, and the last reading still shows straight away when you
+  switch pages.
 
 ## [0.55.0] - 2026-10-26
 
