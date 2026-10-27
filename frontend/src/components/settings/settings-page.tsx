@@ -4,6 +4,7 @@ import { SaveBar } from '@/components/patterns'
 import { SettingsFormProvider, useSettingsFormContext } from '@/components/settings/settings-form-context'
 import { SecretsStatusProvider, useSecretsStatusContext } from '@/components/settings/secrets-status-context'
 import { AlarmTransportsProvider, useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
+import { TankLevelsProvider, useTankLevelsFormContext } from '@/components/settings/tank-levels-context'
 import {
   VesselParticularsProvider,
   useVesselParticularsFormContext,
@@ -62,7 +63,9 @@ export const SettingsPage = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
       <SecretsStatusProvider>
         <AlarmTransportsProvider>
           <VesselParticularsProvider>
-            <SettingsPageContent {...props} ref={ref} />
+            <TankLevelsProvider>
+              <SettingsPageContent {...props} ref={ref} />
+            </TankLevelsProvider>
           </VesselParticularsProvider>
         </AlarmTransportsProvider>
       </SecretsStatusProvider>
@@ -86,6 +89,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   const { touched, saveTouchedKeys, resetTouched } = useSecretsStatusContext()
   const transports = useAlarmTransportsFormContext()
   const particulars = useVesselParticularsFormContext()
+  const tankLevels = useTankLevelsFormContext()
   // Uncontrolled fallback for callers that don't pass activeSectionId (e.g.
   // settings-page.test.tsx, settings-alarms-section.test.tsx) — App.tsx
   // passes both props and this local state just goes along for the ride,
@@ -122,6 +126,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // And the particulars PUT, a fourth: the record lives in its own table
   // (the import wizard writes it too), so it is saved by its own request.
   const [particularsSaveError, setParticularsSaveError] = useState<string | null>(null)
+  // And the tank levels PUT, a fifth, behind its own endpoint.
+  const [tankLevelsSaveError, setTankLevelsSaveError] = useState<string | null>(null)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
 
   // `touched` covers ALL secret keys tracked by useSecretsStatus — the
@@ -135,7 +141,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // The Alarms section's provider is mounted for the whole page, not just
   // while that section is on screen, so an edit there counts as dirty from
   // whichever section you happen to be looking at when you navigate away.
-  const dirty = draftDirty || hasUnsavedSecrets || transports.dirty || particulars.dirty
+  const dirty = draftDirty || hasUnsavedSecrets || transports.dirty || particulars.dirty || tankLevels.dirty
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -170,6 +176,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     // The Save bar shows why (saveBarError); this stops the other callers.
     const limitProblems = Object.values(passageLimitErrors(draft))
     if (limitProblems.length > 0) throw new Error(`Passage limits: ${limitProblems[0]}`)
+    const tankProblems = Object.values(tankLevels.errors)
+    if (tankProblems.length > 0) throw new Error(`Tank levels: ${tankProblems[0]}`)
     await Promise.all([
       // The snapshot moves as soon as THIS request lands, not once all three
       // have: if a sibling fails, Discard must not roll the form back behind
@@ -192,6 +200,10 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         setParticularsSaveError(err instanceof Error ? err.message : 'Unable to save particulars')
         throw err
       }),
+      tankLevels.save().catch((err: unknown) => {
+        setTankLevelsSaveError(err instanceof Error ? err.message : 'Unable to save tank levels')
+        throw err
+      }),
     ])
 
     // Re-read auth after every save. If this save turned authentication on,
@@ -206,7 +218,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     // succeeded. The module publishes to its listeners when it resolves, so the
     // gate applies either way.
     void refreshAuthState()
-  }, [save, draft, saveTouchedKeys, transports, particulars])
+  }, [save, draft, saveTouchedKeys, transports, particulars, tankLevels])
 
   useImperativeHandle(ref, () => ({ save: performSave }), [performSave])
 
@@ -215,6 +227,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     setSecretsSaveError(null)
     setTransportsSaveError(null)
     setParticularsSaveError(null)
+    setTankLevelsSaveError(null)
     setIsSavingSettings(true)
     try {
       await performSave()
@@ -232,22 +245,27 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // Nothing is written, and any failed-save message goes with the edits.
   const transportsReset = transports.reset
   const particularsReset = particulars.reset
+  const tankLevelsReset = tankLevels.reset
   const handleDiscard = useCallback(() => {
     setDraft(savedDraftSnapshot)
     resetTouched()
     transportsReset()
     particularsReset()
+    tankLevelsReset()
     setSettingsSaveError(null)
     setSecretsSaveError(null)
     setTransportsSaveError(null)
     setParticularsSaveError(null)
-  }, [savedDraftSnapshot, resetTouched, transportsReset, particularsReset])
+    setTankLevelsSaveError(null)
+  }, [savedDraftSnapshot, resetTouched, transportsReset, particularsReset, tankLevelsReset])
 
   // The server refuses limits it cannot use; so does the Save bar.
   const limitErrors = Object.values(passageLimitErrors(draft))
   const limitsInvalid = limitErrors.length > 0
+  const tankLevelProblems = Object.values(tankLevels.errors)
+  const tankLevelsInvalid = tankLevelProblems.length > 0
 
-  const saveBarError = [limitsInvalid ? `Passage limits: ${limitErrors[0]}` : null, settingsSaveError, secretsSaveError, transportsSaveError, particularsSaveError].filter(Boolean).join('. ') || null
+  const saveBarError = [limitsInvalid ? `Passage limits: ${limitErrors[0]}` : null, tankLevelsInvalid ? `Tank levels: ${tankLevelProblems[0]}` : null, settingsSaveError, secretsSaveError, transportsSaveError, particularsSaveError, tankLevelsSaveError].filter(Boolean).join('. ') || null
 
   const activeSection = (() => {
     switch (activeSectionId) {
@@ -316,7 +334,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
           dirty={dirty}
           saving={isSavingSettings}
           error={saveBarError}
-          saveDisabled={limitsInvalid}
+          saveDisabled={limitsInvalid || tankLevelsInvalid}
           onSave={() => void handleSaveSettings()}
           onDiscard={handleDiscard}
         />

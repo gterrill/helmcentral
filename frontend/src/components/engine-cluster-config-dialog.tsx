@@ -32,7 +32,6 @@ import {
   type EngineClusterConfig,
   type FuelBarRef,
   type GaugeWidgetConfig,
-  type GaugeZone,
 } from '@/lib/dashboard-widgets'
 import { CLUSTER_ICON_NAMES, iconForSlot } from '@/lib/cluster-icons'
 import { findItem, profileGaugeFor, profileOf, type EquipmentTileContext } from '@/lib/equipment-tiles'
@@ -535,14 +534,9 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                               bars: f.bars.map((b, i) => (i === index ? { ...b, label: e.target.value } : b)),
                             }))} />
                         </Field>
-                        <FuelZones
-                          index={index}
-                          zones={bar.zones ?? []}
-                          onChange={(zones) => setFuel((f) => ({
-                            ...f,
-                            bars: f.bars.map((b, i) => (i === index ? { ...b, zones: zones.length > 0 ? zones : undefined } : b)),
-                          }))}
-                        />
+                        <FieldDescription>
+                          This bar's colours and alarms follow the tank's levels. Change them on the tank's equipment page.
+                        </FieldDescription>
                         <Button size="sm" variant="ghost" className="w-fit" aria-label={`Remove fuel tank ${index + 1}`}
                           onClick={() => setFuel((f) => ({ ...f, bars: f.bars.filter((_, i) => i !== index) }))}>
                           <Trash2 className="size-3.5" /> Remove tank
@@ -633,53 +627,3 @@ function SlotSection({ title, children }: { title: string; children: React.React
   )
 }
 
-const FUEL_ZONE_STATES: { id: GaugeZone['state']; label: string }[] = [
-  { id: 'alert', label: 'Alert' },
-  { id: 'warn', label: 'Warning' },
-  { id: 'alarm', label: 'Alarm' },
-  { id: 'emergency', label: 'Emergency' },
-]
-
-/**
- * Low-fuel bands for one tank, as a level to fall below and a severity. A tank
- * has no equipment profile to hold zones, so these stay with the fuel bar, and
- * each one raises an alarm when the tank's level falls past it.
- */
-function FuelZones({ index, zones, onChange }: { index: number; zones: GaugeZone[]; onChange: (zones: GaugeZone[]) => void }) {
-  const set = (i: number, next: GaugeZone) => onChange(zones.map((z, j) => (j === i ? next : z)))
-  return (
-    <div className="grid gap-2">
-      <FieldDescription>
-        Low fuel alarm. Unlike engine readings, these belong to this bar, because a tank has no profile.
-      </FieldDescription>
-      {zones.map((zone, i) => (
-        <div key={i} className="grid items-end gap-2 sm:grid-cols-[1fr_1fr_auto]">
-          <div className="flex items-center gap-1">
-            <span className="text-xs text-muted-foreground">Below</span>
-            <Input
-              aria-label={`Tank ${index + 1} low fuel level ${i + 1}`}
-              type="number" step="any" min={1} max={99} value={zone.to}
-              onChange={(e) => set(i, { ...zone, from: 0, to: Number(e.target.value) })}
-            />
-            <span className="text-xs text-muted-foreground">%</span>
-          </div>
-          <select
-            aria-label={`Tank ${index + 1} low fuel severity ${i + 1}`}
-            className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-            value={zone.state}
-            onChange={(e) => set(i, { ...zone, state: e.target.value as GaugeZone['state'] })}
-          >
-            {FUEL_ZONE_STATES.map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
-          </select>
-          <Button size="sm" variant="ghost" aria-label={`Remove tank ${index + 1} low fuel level ${i + 1}`}
-            onClick={() => onChange(zones.filter((_, j) => j !== i))}>
-            <Trash2 className="size-3.5" />
-          </Button>
-        </div>
-      ))}
-      <Button size="sm" variant="ghost" className="w-fit" onClick={() => onChange([...zones, { from: 0, to: 15, state: 'warn' }])}>
-        <Plus className="size-3.5" /> Add low fuel alarm
-      </Button>
-    </div>
-  )
-}

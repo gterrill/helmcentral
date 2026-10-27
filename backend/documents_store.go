@@ -893,6 +893,10 @@ func applyEquipmentSourceColumns(db *sql.DB) error {
 		`ALTER TABLE equipment ADD COLUMN cells INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE equipment ADD COLUMN warn_voltage REAL NOT NULL DEFAULT 0`,
 		`ALTER TABLE equipment ADD COLUMN high_voltage REAL NOT NULL DEFAULT 0`,
+		// A tank's own alarm levels (ADR 0214). Zero is blank: use the kind's default.
+		`ALTER TABLE equipment ADD COLUMN tank_warn_percent REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE equipment ADD COLUMN tank_alarm_percent REAL NOT NULL DEFAULT 0`,
+		`ALTER TABLE equipment ADD COLUMN tank_alarms_off INTEGER NOT NULL DEFAULT 0`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column name") {

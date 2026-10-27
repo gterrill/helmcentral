@@ -74,7 +74,7 @@ const particularsStored = {
 const bankItem = {
   id: 'bank-1', name: 'Lithium bank', category: 'general', system: 'electrical', manufacturer: '', model: '', serial: '', quantity: 1, part_number: '',
   required_quantity: null, status: 'deployed', zone_id: null, bin_id: null, zone_name: '', bin_code: '', location_detail: '', install_date: '',
-  signalk_source: 'electrical.batteries.512', capacity_ah: 0, cells: 0, warn_voltage: 0, high_voltage: 0, source_kind: 'battery', hour_meter_source: '',
+  signalk_source: 'electrical.batteries.512', capacity_ah: 0, cells: 0, warn_voltage: 0, high_voltage: 0, tank_warn_percent: 0, tank_alarm_percent: 0, tank_alarms_off: false, source_kind: 'battery', hour_meter_source: '',
   profile_id: '', aliases: [], verified_aboard: false, notes: '', link_count: 0, created_at: '', updated_at: '', photo_ids: [], exclusive_photo_ids: [],
 }
 
@@ -100,6 +100,9 @@ beforeEach(() => {
     }
     if (u.endsWith('/api/vessel/particulars')) {
       return Promise.resolve({ ok: true, json: async () => particularsStored })
+    }
+    if (u.endsWith('/api/alarms/tank-levels')) {
+      return Promise.resolve({ ok: true, json: async () => ({ fuel: { warn: 20, alarm: 10 }, water: { warn: 20, alarm: 10 }, waste: { warn: 80, alarm: 90 } }) })
     }
     return Promise.resolve({ ok: true, json: async () => ({}) })
   })

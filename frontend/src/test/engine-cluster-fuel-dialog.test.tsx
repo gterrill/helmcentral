@@ -40,19 +40,10 @@ function open(overrides: Partial<EngineClusterConfig> = {}) {
 const tankSelect = (index: number) => document.querySelector(`#cluster-fuel-${index}-equipment`) as HTMLSelectElement
 
 describe('the fuel rail section', () => {
-  test('keeps a low fuel alarm on the bar, and lets it be added and changed', () => {
-    const onSave = open({ fuel: { side: 'left', bars: [{ tankId: 'tank-5', label: 'Fwd' }] } })
-    fireEvent.click(screen.getByRole('button', { name: /add low fuel alarm/i }))
-    fireEvent.change(screen.getByLabelText('Tank 1 low fuel level 1'), { target: { value: '20' } })
-    fireEvent.change(screen.getByLabelText('Tank 1 low fuel severity 1'), { target: { value: 'alarm' } })
-    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
-    const saved = onSave.mock.calls[0][0] as EngineClusterConfig
-    expect(saved.fuel!.bars[0].zones).toEqual([{ from: 0, to: 20, state: 'alarm' }])
-  })
-
-  test('shows the low fuel alarm a bar already has', () => {
-    open({ fuel: { side: 'left', bars: [{ tankId: 'tank-5', label: 'Fwd', zones: [{ from: 0, to: 15, state: 'warn' }] }] } })
-    expect((screen.getByLabelText('Tank 1 low fuel level 1') as HTMLInputElement).value).toBe('15')
+  test('has no low fuel alarm of its own: the tank page owns the levels', () => {
+    open({ fuel: { side: 'left', bars: [{ tankId: 'tank-5', label: 'Fwd' }] } })
+    expect(screen.queryByRole('button', { name: /add low fuel alarm/i })).not.toBeInTheDocument()
+    expect(screen.getByText(/follow the tank's levels/i)).toBeInTheDocument()
   })
 
   test('starts a rail with a forward and an aft tank to pick', () => {

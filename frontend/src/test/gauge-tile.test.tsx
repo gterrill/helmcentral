@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
-import { GaugeBody, GaugeTile, majorStepFor } from '@/components/gauge-tile'
+import { GaugeBody, GaugeTileView, majorStepFor } from '@/components/gauge-tile'
 import type { GaugeDisplay, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { severityFill } from '@/lib/severity'
 
@@ -19,23 +19,23 @@ function config(overrides: Partial<GaugeWidgetConfig> = {}): GaugeWidgetConfig {
 describe('GaugeTile', () => {
   test('titles itself from the label, falling back to the path', () => {
     const { rerender } = render(
-      <GaugeTile config={config()} value={241325} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={config()} value={241325} editing={false} onConfigure={vi.fn()} />,
     )
     expect(screen.getByText('Port oil')).toBeInTheDocument()
 
-    rerender(<GaugeTile config={config({ label: '  ' })} value={241325} editing={false} onConfigure={vi.fn()} />)
+    rerender(<GaugeTileView config={config({ label: '  ' })} value={241325} editing={false} onConfigure={vi.fn()} />)
     expect(screen.getByText('propulsion.port.oilPressure')).toBeInTheDocument()
   })
 
   test('converts from the SI value SignalK publishes', () => {
-    render(<GaugeTile config={config()} value={241325} editing={false} onConfigure={vi.fn()} />)
+    render(<GaugeTileView config={config()} value={241325} editing={false} onConfigure={vi.fn()} />)
     expect(screen.getByText('35.0')).toBeInTheDocument()
     expect(screen.getByText('psi')).toBeInTheDocument()
   })
 
   test('draws a standalone numeric gauge with no inner frame, in a size container', () => {
     const { container } = render(
-      <GaugeTile config={config()} value={241325} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={config()} value={241325} editing={false} onConfigure={vi.fn()} />,
     )
     const readout = screen.getByText('35.0')
     expect(container.querySelector('.border.rounded-md.bg-background\\/60')).toBeNull()
@@ -44,7 +44,7 @@ describe('GaugeTile', () => {
   })
 
   test.each<GaugeDisplay>(['numeric', 'lamp'])('puts a %s gauge in a size container, centred by auto margins', (display) => {
-    render(<GaugeTile config={config({ display })} value={241325} editing={false} onConfigure={vi.fn()} />)
+    render(<GaugeTileView config={config({ display })} value={241325} editing={false} onConfigure={vi.fn()} />)
     const fill = screen.getByTestId('gauge-fill')
     expect(fill.className).toContain('[container-type:size]')
     expect(fill.className).not.toContain('justify-center')
@@ -52,7 +52,7 @@ describe('GaugeTile', () => {
   })
 
   test.each<GaugeDisplay>(['bar', 'radial', 'trend'])('keeps a %s gauge out of a size container so it sizes the tile', (display) => {
-    render(<GaugeTile config={config({ display, min: 0, max: 100 })} value={241325} editing={false} onConfigure={vi.fn()} />)
+    render(<GaugeTileView config={config({ display, min: 0, max: 100 })} value={241325} editing={false} onConfigure={vi.fn()} />)
     const fill = screen.getByTestId('gauge-fill')
     expect(fill.className).not.toContain('[container-type:size]')
     expect(fill.className).not.toContain('justify-center')
@@ -60,7 +60,7 @@ describe('GaugeTile', () => {
 
   test.each<GaugeDisplay>(['numeric', 'radial', 'bar', 'lamp'])('renders the %s display', (display) => {
     render(
-      <GaugeTile
+      <GaugeTileView
         config={config({ display, min: 0, max: 100 })}
         value={241325}
         editing={false}
@@ -76,7 +76,7 @@ describe('GaugeTile', () => {
     'shows the structural dash, never a zero, for an absent %s value',
     (display) => {
       render(
-        <GaugeTile config={config({ display })} value={null} editing={false} onConfigure={vi.fn()} />,
+        <GaugeTileView config={config({ display })} value={null} editing={false} onConfigure={vi.fn()} />,
       )
       expect(screen.getByText('--')).toBeInTheDocument()
       expect(screen.queryByText('0')).not.toBeInTheDocument()
@@ -85,7 +85,7 @@ describe('GaugeTile', () => {
 
   test('a genuine zero still reads as zero', () => {
     render(
-      <GaugeTile config={config({ quantity: 'raw', unit: 'raw', decimals: 0 })} value={0} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={config({ quantity: 'raw', unit: 'raw', decimals: 0 })} value={0} editing={false} onConfigure={vi.fn()} />,
     )
     expect(screen.getByText('0')).toBeInTheDocument()
     expect(screen.queryByText('--')).not.toBeInTheDocument()
@@ -94,11 +94,11 @@ describe('GaugeTile', () => {
   test('offers the config button only in layout mode', () => {
     const onConfigure = vi.fn()
     const { rerender } = render(
-      <GaugeTile config={config()} value={241325} editing={false} onConfigure={onConfigure} />,
+      <GaugeTileView config={config()} value={241325} editing={false} onConfigure={onConfigure} />,
     )
     expect(screen.queryByLabelText('Configure Port oil')).not.toBeInTheDocument()
 
-    rerender(<GaugeTile config={config()} value={241325} editing onConfigure={onConfigure} />)
+    rerender(<GaugeTileView config={config()} value={241325} editing onConfigure={onConfigure} />)
     screen.getByLabelText('Configure Port oil').click()
     expect(onConfigure).toHaveBeenCalledOnce()
   })
@@ -124,7 +124,7 @@ describe('GaugeTile trend display (ADR 0051)', () => {
       }),
     }))
 
-    render(<GaugeTile config={trendConfig} value={241325} editing={false} onConfigure={vi.fn()} />)
+    render(<GaugeTileView config={trendConfig} value={241325} editing={false} onConfigure={vi.fn()} />)
 
     // The hero readout is still the live value, converted; the line is secondary.
     expect(screen.getByText('35.0')).toBeInTheDocument()
@@ -143,7 +143,7 @@ describe('GaugeTile trend display (ADR 0051)', () => {
       json: async () => ({ error: 'history needs InfluxDB, which is not configured. Enable it in Settings.' }),
     }))
 
-    render(<GaugeTile config={trendConfig} value={241325} editing={false} onConfigure={vi.fn()} />)
+    render(<GaugeTileView config={trendConfig} value={241325} editing={false} onConfigure={vi.fn()} />)
 
     expect(await screen.findByText(/needs InfluxDB/i)).toBeInTheDocument()
     expect(screen.queryByTestId('gauge-trend-line')).not.toBeInTheDocument()
@@ -154,7 +154,7 @@ describe('GaugeTile trend display (ADR 0051)', () => {
       ok: false, status: 503, json: async () => ({ error: 'history needs InfluxDB' }),
     }))
 
-    render(<GaugeTile config={trendConfig} value={241325} editing={false} onConfigure={vi.fn()} />)
+    render(<GaugeTileView config={trendConfig} value={241325} editing={false} onConfigure={vi.fn()} />)
     expect(await screen.findByText(/needs InfluxDB/i)).toBeInTheDocument()
     expect(screen.getByText('35.0')).toBeInTheDocument()
   })
@@ -166,7 +166,7 @@ describe('healthy zones (ADR 0053)', () => {
   // An advisory band that renders in the border colour is invisible.
   test('renders a normal band visibly, not in the border colour', () => {
     const { container } = render(
-      <GaugeTile config={healthy} value={241325} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={healthy} value={241325} editing={false} onConfigure={vi.fn()} />,
     )
     const strokes = [...container.querySelectorAll('path')].map((p) => p.getAttribute('stroke') ?? '')
     expect(strokes.some((stroke) => stroke.startsWith('hsl(142'))).toBe(true)
@@ -175,7 +175,7 @@ describe('healthy zones (ADR 0053)', () => {
 
   // A healthy band must never colour the readout as though something is wrong.
   test('leaves the readout in the normal gauge colour', () => {
-    render(<GaugeTile config={healthy} value={241325} editing={false} onConfigure={vi.fn()} />)
+    render(<GaugeTileView config={healthy} value={241325} editing={false} onConfigure={vi.fn()} />)
     const readout = screen.getByText('35.0')
     expect(readout.className).toContain('text-gauge-primary')
     expect(readout.className).not.toContain('red')
@@ -194,21 +194,21 @@ describe('tile state (ADR 0081)', () => {
 
   test('carries the active zone up to the tile edge', () => {
     const { container } = render(
-      <GaugeTile config={zoned} value={68947} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={zoned} value={68947} editing={false} onConfigure={vi.fn()} />,
     )
     expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
   })
 
   test('carries no state when the reading is in no zone', () => {
     const { container } = render(
-      <GaugeTile config={zoned} value={689470} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={zoned} value={689470} editing={false} onConfigure={vi.fn()} />,
     )
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
   })
 
   test('carries no state when the value is absent', () => {
     const { container } = render(
-      <GaugeTile config={zoned} value={null} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={zoned} value={null} editing={false} onConfigure={vi.fn()} />,
     )
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
   })
@@ -227,7 +227,7 @@ describe('staleness (ADR 0083)', () => {
 
   test('a frozen source blanks the reading and marks the tile stale, without a zone', () => {
     const { container } = render(
-      <GaugeTile config={zoned} value={68947} ages={{ [zoned.path]: 300 }} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={zoned} value={68947} age={300} editing={false} onConfigure={vi.fn()} />,
     )
     expect(screen.getByTestId('tile-stale-badge')).toBeInTheDocument()
     expect(screen.getByText('--')).toBeInTheDocument()
@@ -237,14 +237,14 @@ describe('staleness (ADR 0083)', () => {
 
   test('a fresh age leaves the reading and state untouched', () => {
     render(
-      <GaugeTile config={config()} value={241325} ages={{ 'propulsion.port.oilPressure': 5 }} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={config()} value={241325} age={5} editing={false} onConfigure={vi.fn()} />,
     )
     expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
     expect(screen.getByText('35.0')).toBeInTheDocument()
   })
 
   test('an unknown age is never stale', () => {
-    render(<GaugeTile config={config()} value={241325} editing={false} onConfigure={vi.fn()} />)
+    render(<GaugeTileView config={config()} value={241325} editing={false} onConfigure={vi.fn()} />)
     expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
     expect(screen.getByText('35.0')).toBeInTheDocument()
   })
@@ -265,7 +265,7 @@ describe('zone wash width (ADR 0080)', () => {
     // 68947 Pa converts to 10.0 psi, inside the 0-20 alarm zone here — use a
     // reading well clear of it instead.
     const { container } = render(
-      <GaugeTile config={zoned} value={689470} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={zoned} value={689470} editing={false} onConfigure={vi.fn()} />,
     )
     const wash = [...container.querySelectorAll('path')]
       .find((p) => p.getAttribute('stroke') === severityFill('alarm'))!
@@ -275,7 +275,7 @@ describe('zone wash width (ADR 0080)', () => {
 
   test('widens to full width when the reading is inside the zone', () => {
     const { container } = render(
-      <GaugeTile config={zoned} value={68947} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={zoned} value={68947} editing={false} onConfigure={vi.fn()} />,
     )
     const wash = [...container.querySelectorAll('path')]
       .find((p) => p.getAttribute('stroke') === severityFill('alarm'))!
@@ -292,7 +292,7 @@ describe('instrument ring style (ADR 0054)', () => {
 
   test('draws ticks and a divided scale', () => {
     const { container } = render(
-      <GaugeTile config={instrument} value={11.638} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={instrument} value={11.638} editing={false} onConfigure={vi.fn()} />,
     )
     expect(container.querySelectorAll('[data-tick="major"]').length).toBeGreaterThan(2)
     // A divided scale has to say so, or 0/10/20/30 is just wrong.
@@ -304,7 +304,7 @@ describe('instrument ring style (ADR 0054)', () => {
   // Every gauge configured before this option existed must render as it did.
   test('leaves the plain arc alone by default', () => {
     const { container } = render(
-      <GaugeTile config={config({ display: 'radial', min: 0, max: 100 })} value={241325} editing={false} onConfigure={vi.fn()} />,
+      <GaugeTileView config={config({ display: 'radial', min: 0, max: 100 })} value={241325} editing={false} onConfigure={vi.fn()} />,
     )
     expect(container.querySelectorAll('[data-tick]')).toHaveLength(0)
     expect(screen.getByText('35.0')).toBeInTheDocument()

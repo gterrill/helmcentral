@@ -1,6 +1,9 @@
+import type { EngineStates } from '@/hooks/use-gauge-values'
 import type { EquipmentItem } from '@/hooks/use-inventory'
+import type { TankLevel } from '@/hooks/use-tanks-state'
 import type { EngineProfile, EngineProfileGauge, EngineProfileZone } from '@/lib/engine-profiles'
 import { convertBetweenUnits } from '@/lib/quantities'
+import { fuelBarZones } from '@/lib/tank-levels'
 import {
   CLUSTER_FOOTER_SLOTS,
   type EngineClusterConfig,
@@ -35,9 +38,9 @@ export interface EquipmentTileContext {
    * than claiming the item is silent.
    */
   reporting: ReadonlySet<string> | null
-  /** Engines whose state the server knows, by instance id (`port`). An engine that is off is known, not silent. */
-  engines?: Readonly<Record<string, unknown>>
 }
+
+
 
 /** Why a tile cannot show its readings. `item` is set when the item exists. */
 export type TileProblem =
@@ -59,11 +62,26 @@ function engineInstance(source: string): string {
   return source.split('.').slice(1).join('.')
 }
 
+/**
+ * The engine an item is, by instance id, or null when it is not an engine.
+ * An engine whose state the server knows is not silent while it is off.
+ */
+export function engineIdOf(item: TileItem | undefined): string | null {
+  return item && item.source_kind === 'engine' && item.signalk_source !== '' ? engineInstance(item.signalk_source) : null
+}
+
+/** `propulsion.<id>.*` -> id, or null: the engine a cluster's readings come from. */
+export function propulsionId(path: string): string | null {
+  const match = /^propulsion\.([^.]+)\./.exec(path)
+  return match ? match[1] : null
+}
+
 /** The problem with an item, or null when its readings can be shown. */
-function itemProblem(ctx: EquipmentTileContext, item: TileItem): TileProblem | null {
+function itemProblem(ctx: EquipmentTileContext, item: TileItem, engines: EngineStates | undefined): TileProblem | null {
   if (item.signalk_source === '') return { kind: 'not-mapped', item }
   if (ctx.reporting !== null && !ctx.reporting.has(item.signalk_source)) {
-    const known = item.source_kind === 'engine' && ctx.engines !== undefined && engineInstance(item.signalk_source) in ctx.engines
+    const id = engineIdOf(item)
+    const known = id !== null && engines !== undefined && id in engines
     if (!known) return { kind: 'not-reporting', item }
   }
   return null
@@ -140,11 +158,20 @@ export function resolveSlot(item: TileItem, profile: EngineProfile | undefined, 
   }
 }
 
-export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileContext): Resolved<ResolvedClusterConfig> {
+/**
+ * `tanks` are the Tanks feed's readings, which carry each tank's resolved
+ * levels; the fuel bars colour from them.
+ */
+export function resolveCluster(
+  config: EngineClusterConfig,
+  ctx: EquipmentTileContext,
+  tanks: TankLevel[] = [],
+  engines?: EngineStates,
+): Resolved<ResolvedClusterConfig> {
   if (!config.equipmentId) return { ok: false, problem: EMPTY_PROBLEM }
   const item = findItem(ctx, config.equipmentId)
   if (!item) return { ok: false, problem: { kind: 'missing' } }
-  const problem = itemProblem(ctx, item)
+  const problem = itemProblem(ctx, item, engines)
   if (problem) return { ok: false, problem }
 
   const profile = profileOf(ctx, item)
@@ -173,10 +200,13 @@ export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileCo
       const tank = findItem(ctx, bar.tankId)
       const source = tank && tank.source_kind === 'tank' ? tank.signalk_source : ''
       const label = bar.label ?? ''
+      // The bar's colours are the tank's own levels (ADR 0214), the numbers its
+      // alarms use. Until the tank has reported them the bar has no bands.
+      const levels = source ? tanks.find((t) => `tanks.${t.id}` === source) : undefined
       return {
         level: {
           path: source ? `${source}.currentLevel` : '', label, display: 'bar' as const, quantity: 'ratio', unit: 'percent', decimals: 0, min: 0, max: 100,
-          ...(bar.zones && bar.zones.length > 0 ? { zones: bar.zones } : {}),
+          ...(levels ? { zones: fuelBarZones(levels.kind, levels) } : {}),
         },
         capacity: { path: source ? `${source}.capacity` : '', label: '', display: 'numeric' as const, quantity: 'volume', unit: 'L', decimals: 0 },
       }
@@ -203,11 +233,11 @@ export function isEquipmentGroup(config: GaugeGroupWidgetConfig): boolean {
   return (config.equipmentKind ?? '') !== ''
 }
 
-export function resolveGaugeGroup(config: GaugeGroupWidgetConfig, ctx: EquipmentTileContext): Resolved<GaugeGroupWidgetConfig> {
+export function resolveGaugeGroup(config: GaugeGroupWidgetConfig, ctx: EquipmentTileContext, engines?: EngineStates): Resolved<GaugeGroupWidgetConfig> {
   if (!config.equipmentId) return { ok: false, problem: EMPTY_PROBLEM }
   const item = findItem(ctx, config.equipmentId)
   if (!item) return { ok: false, problem: { kind: 'missing' } }
-  const problem = itemProblem(ctx, item)
+  const problem = itemProblem(ctx, item, engines)
   if (problem) return { ok: false, problem }
   const profile = profileOf(ctx, item)
   return {

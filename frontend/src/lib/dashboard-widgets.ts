@@ -363,14 +363,8 @@ export interface FuelBarRef {
   /** Unset until a tank is picked. */
   tankId?: string
   label?: string
-  /** The tank's SignalK source while no tank is picked, so the bar's low-fuel zones keep alarming. */
+  /** The tank's SignalK source while no tank is picked. */
   source?: string
-  /**
-   * Bands of the tank's level in percent. A tank has no equipment profile to
-   * hold zones, so a bar keeps its own (the one exception to zones living on the
-   * profile), and a low-fuel band raises its alarm.
-   */
-  zones?: GaugeZone[]
 }
 
 /**

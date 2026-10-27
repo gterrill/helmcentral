@@ -68,6 +68,16 @@ In the edit panel, **How it went** lets you rate the passage as **Comfortable**,
 never fills it in, and Mate doesn't read it yet. When you merge passages, the
 rating that stays is the more cautious one.
 
+The two arrows at the right of the passage's title take you to the next
+passage and the one before it. **Next** goes to the passage that started later
+and **Previous** to the one that started earlier, whichever way the list is
+sorted. The arrows only walk the passages in the list you opened the passage
+from: **All passages**, **Unfiled**, or one cruise. When you reach the first or
+last passage in that list, the arrow greys out instead of starting over. The
+**[** and **]** keys do the same as the two arrows, as long as you aren't typing
+in a field. If you have unsaved edits, the arrows ask what to do with them, just
+as the back arrow does.
+
 Opening a passage shows its track on the chart, with the same basemap and
 OpenSeaMap marks as Anchor Watch. A gap in the log is never bridged with a
 line: if the log has a hole, the track stops and starts again after it.
@@ -83,6 +93,12 @@ and a bay or approach shows the shore. The track gets a white edge while the
 photographs show, so that it stays clear against them. Place names stay on top.
 The photographs come from the boat's internet connection, so the map shows the
 chart alone when the boat is offline.
+
+Under those two buttons are **Zoom in**, **Zoom out** and **Fit track**. Zoom
+moves the map one step each press, and **Fit track** brings the whole track
+back into view. Pinching and scrolling still zoom as they did. The three
+buttons grey out whilst a replay is playing, because the replay is steering the
+camera, and come back when you pause or stop it.
 
 The 3D button beside the satellite button tilts the map and raises the land:
 hills, headlands and mountains stand up from the chart, exaggerated half again
@@ -233,6 +249,15 @@ that is made the first time, or chosen from a photo already in Documents.
   sign keeps its title and note and shows no picture. If a photo is still there
   but can't be loaded, the card says "Photo not available" instead of hiding
   it.
+
+You can change when a sign appears without deleting it. With the sign picked,
+**Move sign here** puts it at the moment the slider is on. The four buttons
+beside it, **−1 min**, **−10 s**, **+10 s** and **+1 min**, shift it a little
+at a time, and the replay jumps to the new moment so you can see where it
+lands. For a sign with a photo, **Back to photo time** in the **Photo** menu
+puts it back at the moment the photo was taken, by the same rules as when you
+made it. If the photo gives no usable time, the sign stays and the editor says
+why. A sign can only move to a moment the replay includes.
 
 Signs belong to the time of day, not to one passage record, so splitting or
 merging passages keeps them. If you trim a passage so a sign falls outside it,

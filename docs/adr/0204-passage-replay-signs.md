@@ -130,7 +130,19 @@ ADR 0176).
     so a slow upload and a title saved a moment later cannot cross, and each
     failure is shown as its own (a later success does not wipe it). The note
     about where a photo went clears when another sign is picked, when a field
-    changes, and when a photo add fails.
+    changes, and when a photo add fails. A selected sign can be moved in time
+    without deleting it. **Move sign here** sets its time to the cursor, and
+    is off while the cursor is already on the sign. Four nudges (−1 min, −10 s,
+    +10 s, +1 min) shift it and seek the replay to the new time. A move works out its
+    target when its queued write runs, from the sign as the server last saved
+    it (the write before it has re-read the signs), so quick clicks add up and
+    a refused move leaves nothing behind. A move for a sign deleted meanwhile
+    sends nothing, and a move to a moment the replay does not include is
+    refused in the page without a request. **Back to photo time**, in the Photo menu of a sign that has a
+    photo, reads the capture time again by the placement rules above and moves
+    the sign if that lands inside a replayed passage. Otherwise the sign stays
+    and the editor gives the same plain reason as the add flow. All three are
+    ordinary queued `PATCH` writes of `t_ms`, and any refusal is shown as it is.
 13. **Reduced motion.** Signs still appear and disappear; only the fade-in is
     dropped.
 
@@ -149,6 +161,12 @@ ADR 0176).
 - **Erasing the stored link when the document is deleted.** Nothing deletes
   implicitly; a document restored or re-uploaded at the same id would not
   come back, but the sign is never silently changed.
+
+- **Dragging the pin on the map to move a sign.** Where a track doubles back,
+  one point on the map is several instants, so the drop does not say which
+  one is meant.
+- **Dragging the sign's tick on the slider.** On a long passage a pixel is
+  minutes, too coarse to land on the moment.
 
 ## Consequences
 

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { toast } from 'sonner'
 
 import { InventoryPanel } from '@/components/inventory/inventory-panel'
@@ -12,7 +13,8 @@ interface InventoryRoutePanelProps {
 // state (the Equipment, location and deck editors, Stocktake, the bin's
 // quick-add) register their own navigation guards, so nothing here mirrors
 // what they hold.
-export function InventoryRoutePanel({ canWrite }: InventoryRoutePanelProps) {
+// AppShell re-renders on every live delta; memo keeps this page out of it.
+export const InventoryRoutePanel = memo(function InventoryRoutePanel({ canWrite }: InventoryRoutePanelProps) {
   const { route, go, close, goSection, locationsHome } = useInventoryRoute()
 
   const section = inventorySectionOf(route)
@@ -73,4 +75,4 @@ export function InventoryRoutePanel({ canWrite }: InventoryRoutePanelProps) {
       onDeckDeleted={() => { settle({ view: 'decks' }) }}
     />
   )
-}
+})

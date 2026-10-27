@@ -1,4 +1,4 @@
-import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
+import { CLUSTER_FOOTER_SLOTS, type GaugeWidgetConfig, type GaugeZone, type ResolvedClusterConfig } from '@/lib/dashboard-widgets'
 import { convertFromSI, formatQuantity, unitOption } from '@/lib/quantities'
 import { severityTextClass } from '@/lib/severity'
 import { isStale } from '@/lib/staleness'
@@ -61,4 +61,24 @@ export function zoneFor(
 
 export function zoneTextClass(state: ReturnType<typeof zoneFor>): string {
   return severityTextClass(state, 'text-gauge-primary')
+}
+
+/** Every bound slot on an Engine Cluster card, for the tile's worst-of and staleness. */
+export function clusterSlots(config: ResolvedClusterConfig): GaugeWidgetConfig[] {
+  const slots: Array<GaugeWidgetConfig | undefined> = [
+    config.ring,
+    config.centre,
+    ...config.corners.flatMap((c) => c.rows.slice(0, 1)),
+    config.arcs?.left,
+    config.arcs?.right,
+    ...CLUSTER_FOOTER_SLOTS.map((key) => config.footer?.[key]),
+    ...(config.fuel?.bars ?? []).map((b) => b.level),
+  ]
+  return slots.filter((s): s is GaugeWidgetConfig => s !== undefined && s.path.trim() !== '')
+}
+
+/** Every path an Engine Cluster reads: its slots, and each fuel bar's capacity for the litres total. */
+export function clusterPaths(config: ResolvedClusterConfig): string[] {
+  const capacities = (config.fuel?.bars ?? []).map((b) => b.capacity.path).filter((p) => p.trim() !== '')
+  return [...new Set([...clusterSlots(config).map((s) => s.path), ...capacities])]
 }

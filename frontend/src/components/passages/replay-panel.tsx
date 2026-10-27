@@ -18,10 +18,12 @@ import { insetViewRange, type InsetView } from '@/lib/passage-inset-view'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
 import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
 import { cameraShotsApi } from '@/lib/camera-shots-api'
-import { replaySignsApi } from '@/lib/replay-signs-api'
+import { getQueryData, setQueryData } from '@/lib/api-query'
+import { replaySignsKey } from '@/hooks/use-replay-signs'
+import { replaySignsApi, type ReplaySignPatch } from '@/lib/replay-signs-api'
 import { usePassageLegs } from '@/hooks/use-passage-legs'
-import { AWAITING_NAME, resolveSigns, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX, visibleSigns } from '@/lib/replay-signs'
-import { placeByCapture } from '@/lib/sign-placement'
+import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX, visibleSigns } from '@/lib/replay-signs'
+import { moveByCapture, placeByCapture } from '@/lib/sign-placement'
 import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-photo'
 import { CameraDirector, shotStartState } from '@/lib/replay-camera'
 import { paceSpans, resolveShots, wallAtTimeline, type CameraMode } from '@/lib/replay-clock'
@@ -160,7 +162,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // Signs, like shots, belong to real time: the ones inside the replayed
   // passages are the ones placed; a trimmed-out sign is kept but not shown.
   const legRanges = built.items.map((i) => ({ id: i.id, start: new Date(i.start * 1000).toISOString(), end: new Date(i.end * 1000).toISOString() }))
-  const { legs, signs } = usePassageLegs(legRanges)
+  const { legs, signs, from: signsFrom, to: signsTo } = usePassageLegs(legRanges)
   const placedSigns = useMemo(() => resolveSigns(signs, timeline), [signs, timeline])
   // A join still waiting for its name is listed but draws nothing on the map.
   const labelledSigns = useMemo(() => placedSigns.filter((r) => r.sign.title !== ''), [placedSigns])
@@ -309,7 +311,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     return signQueue.current
   }
   const seekToSign = (at: number) => {
-    const entry = timeline.entries.find((e) => at >= e.start && at <= e.end)
+    const entry = live.current.timeline.entries.find((e) => at >= e.start && at <= e.end)
     if (!entry) return
     replay.setPlaying(false)
     replay.setClock(entry.offset + (at - entry.start))
@@ -348,21 +350,21 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     addPhotoSign(titleFor(doc.title || doc.filename), () => captureOfDocument(doc.document_id), () => Promise.resolve(doc.document_id))
   const changeSign = (change: SignChange) => {
     setSignNotice(null)
-    if (selectedSign) void runSignWrite(async () => { await replaySignsApi.patch(selectedSign.id, change) })
+    if (selectedSign) void runSignWrite(async () => { await patchSign(selectedSign.id, change) })
   }
   const replacePhoto = (file: File) => {
     if (!selectedSign) return
     setSignNotice(null)
-    void runSignWrite(async () => { await replaySignsApi.patch(selectedSign.id, { document_id: await uploadSignPhoto(file) }) })
+    void runSignWrite(async () => { await patchSign(selectedSign.id, { document_id: await uploadSignPhoto(file) }) })
   }
   const replaceFromLibrary = (doc: DocumentLinkPickerResult) => {
     if (!selectedSign) return
     setSignNotice(null)
-    void runSignWrite(async () => { await replaySignsApi.patch(selectedSign.id, { document_id: doc.document_id }) })
+    void runSignWrite(async () => { await patchSign(selectedSign.id, { document_id: doc.document_id }) })
   }
   const removePhoto = () => {
     setSignNotice(null)
-    if (selectedSign) void runSignWrite(async () => { await replaySignsApi.patch(selectedSign.id, { document_id: null }) })
+    if (selectedSign) void runSignWrite(async () => { await patchSign(selectedSign.id, { document_id: null }) })
   }
   const deleteSign = () => {
     if (!selectedSign) return
@@ -370,6 +372,70 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     void runSignWrite(async () => {
       await replaySignsApi.remove(selectedSign.id)
       setSelectedSignId(null)
+    })
+  }
+  // Queued writes run after the render that queued them: they read the replay
+  // as it is then, and the signs as the server last held them. The patch
+  // returns only once the signs have been read again, so the cache is the
+  // answer to "where is this sign now".
+  const live = useRef({ timeline, lon, signsFrom, signsTo })
+  useEffect(() => { live.current = { timeline, lon, signsFrom, signsTo } }, [timeline, lon, signsFrom, signsTo])
+  const currentSign = (id: string) =>
+    getQueryData<{ signs?: ReplaySign[] }>(replaySignsKey(live.current.signsFrom, live.current.signsTo))?.signs?.find((s) => s.id === id)
+  // The saved sign goes into the cache at once, so a read that fails after the
+  // write cannot leave the next queued move working from the old time.
+  const patchSign = async (id: string, patch: ReplaySignPatch) => {
+    const saved = await replaySignsApi.patch(id, patch)
+    setQueryData<{ signs?: ReplaySign[] }>(replaySignsKey(live.current.signsFrom, live.current.signsTo), (prev) => ({
+      ...prev,
+      signs: (prev?.signs ?? []).map((s) => (s.id === id ? saved : s)),
+    }))
+    return saved
+  }
+  // A move goes only where the replay can show the sign.
+  const checkMoveLands = (tMs: number) => {
+    if (!placeAt(tMs / 1000, live.current.timeline)) {
+      throw new Error('That moment is outside this replay, so the sign was not moved.')
+    }
+  }
+  const moveSignTo = (signId: string, target: (latestMs: number) => number, seek: boolean) => {
+    void runSignWrite(async () => {
+      const sign = currentSign(signId)
+      if (!sign) throw new Error('That sign is no longer there.')
+      const tMs = target(sign.t_ms)
+      checkMoveLands(tMs)
+      await patchSign(signId, { t_ms: tMs })
+      if (seek) seekToSign(tMs / 1000)
+    })
+  }
+  const moveSignHere = () => {
+    if (!selectedSign || !here) return
+    setSignNotice(null)
+    const tMs = Math.round(here.at * 1000)
+    moveSignTo(selectedSign.id, () => tMs, false)
+  }
+  const nudgeSign = (seconds: number) => {
+    if (!selectedSign) return
+    setSignNotice(null)
+    moveSignTo(selectedSign.id, (latest) => latest + seconds * 1000, true)
+  }
+  // Reads the capture time again, by the rules a new photo sign is placed by,
+  // and moves the sign only when that lands inside the replay.
+  const backToPhotoTime = () => {
+    if (!selectedSign || selectedSign.document_id === null) return
+    const { id } = selectedSign
+    setSignNotice(null)
+    void runSignWrite(async () => {
+      const sign = currentSign(id)
+      if (!sign) throw new Error('That sign is no longer there.')
+      if (sign.document_id === null) throw new Error('That sign has no photo.')
+      const placement = moveByCapture(await captureOfDocument(sign.document_id), vesselZone(live.current.lon).offsetHours, live.current.timeline)
+      if (!placement.placedByPhoto) { setSignNotice(placement.message); return }
+      const tMs = Math.round(placement.at * 1000)
+      checkMoveLands(tMs)
+      setSignNotice(placement.message)
+      if (currentSign(id)?.t_ms !== tMs) await patchSign(id, { t_ms: tMs })
+      seekToSign(placement.at)
     })
   }
   const pickSign = (id: string) => {
@@ -516,6 +582,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           hull={hull}
           cameraDriver={cameraDriver}
           onFlatChange={setMapFlat}
+          controlsDisabled={replay.playing || flying}
           markers={
             <SignMarkers
               cards={cards}
@@ -596,6 +663,10 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
             onReplaceFromLibrary={replaceFromLibrary}
             onRemovePhoto={removePhoto}
             onDelete={deleteSign}
+            onMoveHere={moveSignHere}
+            moveHereDisabled={!here || (selectedSign !== null && Math.round(here.at * 1000) === selectedSign.t_ms)}
+            onNudge={nudgeSign}
+            onBackToPhotoTime={backToPhotoTime}
           />
         }
         editor={

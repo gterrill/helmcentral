@@ -54,6 +54,16 @@ export const SIGN_LEAD_S = 0.5
 /** The most cards on screen at once. */
 export const MAX_SIGN_CARDS = 2
 
+/** Where an instant stands on the replay: the passage entry and the track
+ * position, or null in a trimmed-out stretch, a gap, or where the track has no
+ * position. The one rule for "does this moment land in the replay". */
+export function placeAt(at: number, timeline: Timeline) {
+  const entry = timeline.entries.find((e) => at >= e.start && at <= e.end)
+  if (!entry) return null
+  const pos = positionAt(entry.segments, at)
+  return pos ? { entry, pos } : null
+}
+
 /** The signs whose time falls inside a replayed passage, oldest first, each at
  * the track position for its time. A sign in a trimmed-out stretch, in the gap
  * between passages, or where the track has no position is not placed; it is
@@ -62,10 +72,9 @@ export function resolveSigns(signs: readonly ReplaySign[], timeline: Timeline): 
   const out: ResolvedSign[] = []
   for (const sign of signs) {
     const at = sign.t_ms / 1000
-    const entry = timeline.entries.find((e) => at >= e.start && at <= e.end)
-    if (!entry) continue
-    const pos = positionAt(entry.segments, at)
-    if (!pos) continue
+    const placed = placeAt(at, timeline)
+    if (!placed) continue
+    const { entry, pos } = placed
     out.push({ sign, at, entryId: entry.id, clock: entry.offset + (at - entry.start), lat: pos.lat, lon: pos.lon })
   }
   return out.sort((a, b) => a.sign.t_ms - b.sign.t_ms || a.sign.id.localeCompare(b.sign.id))

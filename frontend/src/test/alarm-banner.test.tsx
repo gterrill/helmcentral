@@ -293,7 +293,7 @@ describe('AlarmBanner identifier legibility', () => {
     renderBanner({
       alarms: [
         {
-          id: 'a1',
+          rule_id: 'a1',
           label: 'radar.fur6424a.guardzone.1',
           state: 'alert',
           message: 'Radar fur6424A guard zone 1: target 100000294 acquired',

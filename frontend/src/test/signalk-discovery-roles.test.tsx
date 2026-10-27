@@ -19,7 +19,7 @@ function item(overrides: Record<string, unknown>) {
   return {
     id: 'eq', name: 'Item', category: 'general', system: 'other', manufacturer: '', model: '', serial: '', quantity: 1, part_number: '',
     required_quantity: null, status: 'deployed', zone_id: null, bin_id: null, zone_name: '', bin_code: '', location_detail: '', install_date: '',
-    signalk_source: '', capacity_ah: 0, cells: 0, warn_voltage: 0, high_voltage: 0, source_kind: '', hour_meter_source: '',
+    signalk_source: '', capacity_ah: 0, cells: 0, warn_voltage: 0, high_voltage: 0, tank_warn_percent: 0, tank_alarm_percent: 0, tank_alarms_off: false, source_kind: '', hour_meter_source: '',
     profile_id: '', aliases: [], verified_aboard: false, notes: '', link_count: 0, created_at: '', updated_at: '', photo_ids: [], exclusive_photo_ids: [],
     ...overrides,
   }

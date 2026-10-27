@@ -1,5 +1,19 @@
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { describe, expect, test, vi } from 'vitest'
+
+// The hosts read live readings from the gauge-values store, so the store is
+// seeded through the stream it listens to.
+let gaugeValuesListener: ((raw: string) => void) | null = null
+vi.mock('@/hooks/use-telemetry-stream', () => ({
+  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
+    if (event === 'gauge-values') gaugeValuesListener = cb
+    return () => {}
+  },
+}))
+
+function emitGaugeValues(payload: unknown) {
+  act(() => { gaugeValuesListener?.(JSON.stringify(payload)) })
+}
 
 import { EngineClusterHost, GaugeGroupHost } from '@/components/equipment-tile-hosts'
 import type { EngineClusterConfig, GaugeGroupWidgetConfig } from '@/lib/dashboard-widgets'
@@ -12,7 +26,7 @@ const slot = (suffix: string) => ({ path: '', suffix, label: suffix, display: 'n
 const cluster: EngineClusterConfig = { equipmentId: 'eng-port', title: '', ring: slot('revolutions'), centre: slot('runTime'), corners: [] }
 const ctxOf = (items: TileItem[], reporting: ReadonlySet<string> | null = null): EquipmentTileContext => ({ items, profiles: [], reporting })
 
-const common = { values: {}, editing: false, onConfigure: vi.fn() }
+const common = { editing: false, onConfigure: vi.fn() }
 
 describe('a tile that shows equipment', () => {
   test('says Pick equipment when no item is chosen, and offers to choose', () => {
@@ -54,5 +68,14 @@ describe('a tile that shows equipment', () => {
     render(<GaugeGroupHost {...common} config={plain} ctx={ctxOf([])} />)
     expect(screen.getByText('Wind')).toBeInTheDocument()
     expect(screen.queryByTestId('equipment-tile-notice')).toBeNull()
+  })
+
+  // OFF follows the propulsion id the cluster reads, as it always has, not the
+  // kind the item was given in Inventory.
+  test('shows OFF for a cluster on a non-engine item mapped to an engine that is off', () => {
+    const sensor = item({ source_kind: '' })
+    render(<EngineClusterHost {...common} config={cluster} ctx={ctxOf([sensor])} />)
+    emitGaugeValues({ values: {}, ages: {}, engines: { port: { state: 'off', last_update: '2026-10-06T04:30:00Z' } } })
+    expect(screen.getByTestId('tile-off-badge')).toBeInTheDocument()
   })
 })

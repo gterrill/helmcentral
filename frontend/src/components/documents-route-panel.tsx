@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 
 import { DocumentDetailsPage, type DocumentDetailsPageHandle } from '@/components/document-details-page'
 import { DocumentsPanel } from '@/components/documents-panel'
@@ -20,7 +20,8 @@ interface DocumentsRoutePanelProps {
 // ADR 0171: Documents wired to the app location. The listing and the Details
 // page are one panel, so which renders is the route's view. The Details page
 // holds an explicit Save/Discard draft and owns the navigation guard for it.
-export function DocumentsRoutePanel({
+// AppShell re-renders on every live delta; memo keeps this page out of it.
+export const DocumentsRoutePanel = memo(function DocumentsRoutePanel({
   initialDocumentId,
   onOpenHelp,
   onOpenAssistantSettings,
@@ -57,7 +58,7 @@ export function DocumentsRoutePanel({
       onAskMate={onAskMate}
     />
   )
-}
+})
 
 interface DetailsViewProps {
   documentId: string

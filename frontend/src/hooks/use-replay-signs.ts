@@ -2,6 +2,9 @@ import { useApiQuery } from '@/lib/api-query'
 import { REPLAY_SIGNS_KEY, replaySignsPath } from '@/lib/replay-signs-api'
 import type { ReplaySign } from '@/lib/replay-signs'
 
+/** The cache key of the signs read over a span. */
+export const replaySignsKey = (fromMs: number | null, toMs: number | null) => [...REPLAY_SIGNS_KEY, fromMs, toMs]
+
 const NO_SIGNS: ReplaySign[] = []
 
 /** The signs whose time falls between two Unix-millisecond instants: the span
@@ -9,7 +12,7 @@ const NO_SIGNS: ReplaySign[] = []
 export function useReplaySigns(fromMs: number | null, toMs: number | null) {
   const enabled = fromMs !== null && toMs !== null
   const query = useApiQuery({
-    queryKey: [...REPLAY_SIGNS_KEY, fromMs, toMs],
+    queryKey: replaySignsKey(fromMs, toMs),
     path: enabled ? replaySignsPath(fromMs, toMs) : '',
     enabled,
     select: (raw: { signs?: ReplaySign[] }) => raw.signs ?? NO_SIGNS,

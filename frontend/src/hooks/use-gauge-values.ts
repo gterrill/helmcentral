@@ -1,25 +1,29 @@
-import { useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
-import { ageFromPayload } from '@/lib/staleness'
+import { ageFromPayload, formatDataAge, isStale } from '@/lib/staleness'
 
 /**
  * Current values for, and the age behind, every path a gauge is bound to.
  *
  * The backend works out which paths to send from the dashboard page config it
- * already owns (ADR 0039), so there is no subscription protocol here — the
- * browser just listens.
+ * already owns (ADR 0039), so there is no subscription protocol here: the
+ * browser just listens. Ages ride the same event (ADR 0083).
  *
- * Module-level shared store (same singleton shape as use-app-config.ts and
- * use-vessel-identity.ts): useGaugeValues() and useGaugeAges() used to each
- * open their own subscription to the same `gauge-values` SSE event and parse
- * the payload independently, so a single 1Hz tick did the JSON parse twice
- * and, since both handed back a fresh object literal every time, defeated
- * memoization on every tile reading either one — even on a tick where every
- * bound path's value and age were unchanged. Now there is exactly one
- * subscription (started on the first subscriber to either hook, stopped on
- * the last), one parse per tick, and each snapshot keeps its previous object
- * reference when it's shallow-equal to the new one.
+ * One module-level store: one subscription to the `gauge-values` event and
+ * one parse per tick, however many tiles read it. Each tile reads only the
+ * paths it shows (ADR 0215), through useGaugeValue, useGaugeAge,
+ * useGaugeSubset or useEngineStatus, and listeners are kept per path, so a
+ * tick re-renders only the tiles whose own reading changed. Nothing hands the
+ * whole map to a component.
+ *
+ * The store lives while anything holds it. AppShell holds it for the life of
+ * the app through useRetainGaugeValues, without listening to it, so the last
+ * reading survives the moment between one page's tiles unmounting and the
+ * next page's mounting.
+ *
+ * An age changes, for its listeners, only when what a tile shows for it
+ * changes: unknown, fresh, or the stale label (see shownAge).
  */
 
 type PathMap = Record<string, number | null>
@@ -38,29 +42,68 @@ export interface EngineStatus {
 }
 export type EngineStates = Record<string, EngineStatus>
 
+/** The values and ages for a set of paths. A path the event does not carry has no key. */
+export interface GaugeSubset {
+  values: PathMap
+  ages: PathMap
+}
+
 const EMPTY_ENGINES: EngineStates = {}
 const ENGINE_STATES: readonly string[] = ['running', 'off', 'lost']
 
 let valuesSnapshot: PathMap = EMPTY
 let agesSnapshot: PathMap = EMPTY
 let enginesSnapshot: EngineStates = EMPTY_ENGINES
-const enginesListeners = new Set<() => void>()
-let subscriberCount = 0
-let unsubscribeVesselStream: (() => void) | null = null
-const valuesListeners = new Set<() => void>()
-const agesListeners = new Set<() => void>()
+let holders = 0
+let unsubscribeStream: (() => void) | null = null
+
+const valueListeners = new Map<string, Set<() => void>>()
+const ageListeners = new Map<string, Set<() => void>>()
+const engineListeners = new Map<string, Set<() => void>>()
 
 function shallowEqual(a: PathMap, b: PathMap): boolean {
   if (a === b) return true
   const aKeys = Object.keys(a)
   if (aKeys.length !== Object.keys(b).length) return false
-  return aKeys.every((key) => a[key] === b[key])
+  return aKeys.every((key) => key in b && a[key] === b[key])
 }
 
-function enginesEqual(a: EngineStates, b: EngineStates): boolean {
-  const aKeys = Object.keys(a)
-  if (aKeys.length !== Object.keys(b).length) return false
-  return aKeys.every((key) => a[key]?.state === b[key]?.state && a[key]?.lastUpdate === b[key]?.lastUpdate)
+function sameStatus(a: EngineStatus | undefined, b: EngineStatus | undefined): boolean {
+  return a?.state === b?.state && a?.lastUpdate === b?.lastUpdate
+}
+
+/** Keys whose value differs between two maps, including keys only one of them has. */
+function changedKeys<T>(prev: Record<string, T>, next: Record<string, T>, same: (a: T | undefined, b: T | undefined) => boolean): string[] {
+  const changed: string[] = []
+  for (const key of Object.keys(next)) {
+    if (!(key in prev) || !same(prev[key], next[key])) changed.push(key)
+  }
+  for (const key of Object.keys(prev)) {
+    if (!(key in next)) changed.push(key)
+  }
+  return changed
+}
+
+const sameNumber = (a: number | null | undefined, b: number | null | undefined) => a === b
+
+function notify(listeners: Map<string, Set<() => void>>, keys: readonly string[], seen: Set<() => void>): void {
+  for (const key of keys) {
+    const set = listeners.get(key)
+    if (!set) continue
+    for (const listener of set) seen.add(listener)
+  }
+}
+
+/**
+ * What a tile can show for an age: nothing (unknown), fresh, or stale with a
+ * given label. Every tile reading this store uses the age only through
+ * isStale at its default threshold and, once stale, formatDataAge, so this is
+ * all of it. A tile that needs another threshold has to be keyed here too.
+ */
+function shownAge(age: number | null): string {
+  if (age === null || !Number.isFinite(age)) return 'none'
+  if (!isStale(age)) return 'fresh'
+  return formatDataAge(age)
 }
 
 type EnginesPayload = Record<string, { state?: string; last_update?: string }>
@@ -75,114 +118,168 @@ function applyGaugeValuesEvent(raw: string): void {
   }
 
   const nextValues = payload.values ?? {}
-  if (!shallowEqual(valuesSnapshot, nextValues)) {
-    valuesSnapshot = nextValues
-    for (const listener of valuesListeners) listener()
-  }
 
   // `-1` (ADR 0068's "no timestamp at all" sentinel) is mapped to `null`
   // through ageFromPayload, so a path with no freshness signal reads as
   // unknown rather than as impossibly fresh.
+  //
+  // The server rounds ages to 0.1 s, so most of them move on every tick. An
+  // age that moves without changing what a tile shows keeps the number the
+  // store last handed out, so it notifies nobody. A fresh age can therefore
+  // read lower than the true one; it is never used as a figure until stale.
   const nextAges: PathMap = {}
   for (const [path, value] of Object.entries(payload.ages ?? {})) {
-    nextAges[path] = ageFromPayload(value)
-  }
-  if (!shallowEqual(agesSnapshot, nextAges)) {
-    agesSnapshot = nextAges
-    for (const listener of agesListeners) listener()
+    const age = ageFromPayload(value)
+    const prev = agesSnapshot[path]
+    nextAges[path] = path in agesSnapshot && shownAge(prev) === shownAge(age) ? prev : age
   }
 
+  // An engine whose status is unchanged keeps its object, so a tile reading
+  // one engine does not re-render when the other one changes.
   const nextEngines: EngineStates = {}
   for (const [id, entry] of Object.entries(payload.engines ?? {})) {
     if (!entry || typeof entry.state !== 'string' || !ENGINE_STATES.includes(entry.state)) continue
-    nextEngines[id] = entry.last_update
+    const status: EngineStatus = entry.last_update
       ? { state: entry.state as EngineState, lastUpdate: entry.last_update }
       : { state: entry.state as EngineState }
+    const prev = enginesSnapshot[id]
+    nextEngines[id] = prev && sameStatus(prev, status) ? prev : status
   }
-  if (!enginesEqual(enginesSnapshot, nextEngines)) {
-    enginesSnapshot = Object.keys(nextEngines).length === 0 ? EMPTY_ENGINES : nextEngines
-    for (const listener of enginesListeners) listener()
-  }
+
+  const valuesChanged = changedKeys(valuesSnapshot, nextValues, sameNumber)
+  const agesChanged = changedKeys(agesSnapshot, nextAges, sameNumber)
+  const enginesChanged = changedKeys(enginesSnapshot, nextEngines, sameStatus)
+
+  // Each snapshot keeps its object while nothing in it changed.
+  if (valuesChanged.length > 0) valuesSnapshot = nextValues
+  if (agesChanged.length > 0) agesSnapshot = nextAges
+  if (enginesChanged.length > 0) enginesSnapshot = Object.keys(nextEngines).length === 0 ? EMPTY_ENGINES : nextEngines
+
+  // A listener on several changed paths (a subset) is called once.
+  const toCall = new Set<() => void>()
+  notify(valueListeners, valuesChanged, toCall)
+  notify(ageListeners, agesChanged, toCall)
+  notify(engineListeners, enginesChanged, toCall)
+  for (const listener of toCall) listener()
 }
 
 function acquire(): void {
-  subscriberCount += 1
-  if (subscriberCount === 1) {
-    unsubscribeVesselStream = subscribeTelemetry('gauge-values', applyGaugeValuesEvent)
+  holders += 1
+  if (holders === 1) {
+    unsubscribeStream = subscribeTelemetry('gauge-values', applyGaugeValuesEvent)
   }
 }
 
 function release(): void {
-  subscriberCount = Math.max(0, subscriberCount - 1)
-  if (subscriberCount === 0) {
-    unsubscribeVesselStream?.()
-    unsubscribeVesselStream = null
-    // Nothing is listening, so there's no reason to keep stale data around —
-    // the next subscriber starts exactly like a fresh mount would.
+  holders = Math.max(0, holders - 1)
+  if (holders === 0) {
+    unsubscribeStream?.()
+    unsubscribeStream = null
+    // Nothing holds the store, so its readings would only go stale here; the
+    // next holder starts exactly like a fresh mount.
     valuesSnapshot = EMPTY
     agesSnapshot = EMPTY
     enginesSnapshot = EMPTY_ENGINES
   }
 }
 
-function subscribeValues(callback: () => void): () => void {
-  valuesListeners.add(callback)
-  acquire()
+function listen(listeners: Map<string, Set<() => void>>, keys: readonly string[], callback: () => void): () => void {
+  for (const key of keys) {
+    let set = listeners.get(key)
+    if (!set) {
+      set = new Set()
+      listeners.set(key, set)
+    }
+    set.add(callback)
+  }
   return () => {
-    valuesListeners.delete(callback)
-    release()
+    for (const key of keys) {
+      const set = listeners.get(key)
+      if (!set) continue
+      set.delete(callback)
+      if (set.size === 0) listeners.delete(key)
+    }
   }
 }
 
-function subscribeAges(callback: () => void): () => void {
-  agesListeners.add(callback)
+function subscribeTo(maps: Array<Map<string, Set<() => void>>>, keys: readonly string[], callback: () => void): () => void {
+  const stops = maps.map((map) => listen(map, keys, callback))
   acquire()
   return () => {
-    agesListeners.delete(callback)
+    for (const stop of stops) stop()
     release()
   }
-}
-
-function subscribeEngines(callback: () => void): () => void {
-  enginesListeners.add(callback)
-  acquire()
-  return () => {
-    enginesListeners.delete(callback)
-    release()
-  }
-}
-
-function getEnginesSnapshot(): EngineStates {
-  return enginesSnapshot
-}
-
-function getValuesSnapshot(): PathMap {
-  return valuesSnapshot
-}
-
-function getAgesSnapshot(): PathMap {
-  return agesSnapshot
-}
-
-export function useGaugeValues(): Record<string, number | null> {
-  return useSyncExternalStore(subscribeValues, getValuesSnapshot)
 }
 
 /**
- * Age, in seconds, of the last update behind every path a gauge is bound to.
- *
- * Rides the same gauge-values event useGaugeValues does (ADR 0083) rather
- * than a stream of its own — the backend computes both from the same sample
- * on the same tick, so a sibling hook is all a widget needs.
+ * Holds the store open for as long as the calling component is mounted,
+ * without re-rendering it on any tick. AppShell calls this once.
  */
-export function useGaugeAges(): Record<string, number | null> {
-  return useSyncExternalStore(subscribeAges, getAgesSnapshot)
+export function useRetainGaugeValues(): void {
+  useEffect(() => {
+    acquire()
+    return release
+  }, [])
+}
+
+/** The raw SI value on one path, or null when the event does not carry it. */
+export function useGaugeValue(path: string): number | null {
+  const subscribe = useCallback((cb: () => void) => subscribeTo([valueListeners], [path], cb), [path])
+  return useSyncExternalStore(subscribe, () => valuesSnapshot[path] ?? null)
+}
+
+/** Age, in seconds, of the last update on one path (ADR 0083); null is unknown. */
+export function useGaugeAge(path: string): number | null {
+  const subscribe = useCallback((cb: () => void) => subscribeTo([ageListeners], [path], cb), [path])
+  return useSyncExternalStore(subscribe, () => agesSnapshot[path] ?? null)
+}
+
+function pick(source: PathMap, paths: readonly string[]): PathMap {
+  const out: PathMap = {}
+  for (const path of paths) {
+    if (path in source) out[path] = source[path]
+  }
+  return out
 }
 
 /**
- * Whether each engine reads as running, switched off or lost, from the same
- * gauge-values event. An engine the backend cannot classify has no entry.
+ * Values and ages for the paths one tile shows. The result keeps its
+ * reference while none of those paths changed, so it can feed a memoized
+ * tile. `paths` may be a fresh array on every render.
  */
-export function useEngineStates(): EngineStates {
-  return useSyncExternalStore(subscribeEngines, getEnginesSnapshot)
+export function useGaugeSubset(paths: readonly string[]): GaugeSubset {
+  const key = paths.join('\n')
+  const cache = useRef<{ key: string; values: PathMap; ages: PathMap; subset: GaugeSubset } | null>(null)
+
+  const subscribe = useCallback(
+    (cb: () => void) => subscribeTo([valueListeners, ageListeners], key === '' ? [] : key.split('\n'), cb),
+    [key],
+  )
+
+  const getSnapshot = useCallback((): GaugeSubset => {
+    const prev = cache.current
+    if (prev && prev.key === key && prev.values === valuesSnapshot && prev.ages === agesSnapshot) return prev.subset
+    const list = key === '' ? [] : key.split('\n')
+    const values = pick(valuesSnapshot, list)
+    const ages = pick(agesSnapshot, list)
+    const subset = prev && prev.key === key && shallowEqual(prev.subset.values, values) && shallowEqual(prev.subset.ages, ages)
+      ? prev.subset
+      : { values, ages }
+    cache.current = { key, values: valuesSnapshot, ages: agesSnapshot, subset }
+    return subset
+  }, [key])
+
+  return useSyncExternalStore(subscribe, getSnapshot)
+}
+
+/**
+ * Whether one engine reads as running, switched off or lost, by propulsion id
+ * (`port`). Undefined when the server cannot classify it, or for no engine.
+ */
+export function useEngineStatus(id: string | null): EngineStatus | undefined {
+  const subscribe = useCallback(
+    (cb: () => void) => subscribeTo([engineListeners], id === null ? [] : [id], cb),
+    [id],
+  )
+  return useSyncExternalStore(subscribe, () => (id === null ? undefined : enginesSnapshot[id]))
 }
