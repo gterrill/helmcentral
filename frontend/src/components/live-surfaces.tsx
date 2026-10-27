@@ -4,6 +4,7 @@ import { AlarmBanner } from '@/components/alarm-banner'
 import { AlternatorTile } from '@/components/alternator-tile'
 import { AnchorWatchTile } from '@/components/anchor-watch-tile'
 import { AutopilotTile } from '@/components/autopilot-tile'
+import { BatteryPowerTile } from '@/components/battery-power-tile'
 import { ClockTile } from '@/components/clock-tile'
 import { CurrentConditionsTile } from '@/components/current-conditions-tile'
 import { DepthTideTile } from '@/components/depth-tide-tile'
@@ -12,16 +13,27 @@ import { GeneratorTile } from '@/components/generator-tile'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { PoiMapTile } from '@/components/poi-map-tile'
 import { PositionTile } from '@/components/position-tile'
+import { RadarTargetsTile } from '@/components/radar-targets-tile'
 import { RouteTile } from '@/components/route-tile'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
+import { SolarTile } from '@/components/solar-tile'
+import { TanksTile } from '@/components/tanks-tile'
 import { WindTile } from '@/components/wind-tile'
 import { PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
+import { useAlarmRules } from '@/hooks/use-alarm-rules'
 import { acknowledgeAlarm, silenceAlarm, useAisCollisionAlarms, useAlarmList, useKnownAlarmList } from '@/hooks/use-alarms'
 import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { anchorWatchAt, useAnchorWatch, type AnchorWatchRecord, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
+import { useAutopilot } from '@/hooks/use-autopilot'
+import { useElectricalFields } from '@/hooks/use-electrical-state'
+import { useNearbyVesselList, useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { usePlaceName } from '@/hooks/use-place-name'
+import { useRadarTargets } from '@/hooks/use-radar-targets'
 import { useServerTrails } from '@/hooks/use-server-trails'
+import { useSocBands } from '@/hooks/use-soc-bands'
+import { useSolarState } from '@/hooks/use-solar-state'
+import { useTanksState } from '@/hooks/use-tanks-state'
 import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
 import { useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { computeClockTripEta } from '@/lib/next-waypoint'
@@ -68,10 +80,12 @@ export function LiveDisplayShell(props: Omit<ComponentProps<typeof DisplayShell>
   return <DisplayShell {...props} alarms={alarms} />
 }
 
-/** The Nearby Vessels list, for the collision highlight on each row. */
-export const LiveNearbyVesselsTile = memo(function LiveNearbyVesselsTile(props: Omit<ComponentProps<typeof NearbyVesselsTile>, 'aisCollisionAlarms'>) {
+/** The Nearby Vessels list: the contacts from their own stream, and the collision highlight on each row. */
+export const LiveNearbyVesselsTile = memo(function LiveNearbyVesselsTile(props: Omit<ComponentProps<typeof NearbyVesselsTile>,
+  'aisCollisionAlarms' | 'vessels' | 'loading' | 'lastUpdateAgeS' | 'maxRangeM'>) {
+  const nearby = useNearbyVessels()
   const aisCollisionAlarms = useAisCollisionAlarms()
-  return <NearbyVesselsTile {...props} aisCollisionAlarms={aisCollisionAlarms} />
+  return <NearbyVesselsTile {...props} {...nearby} aisCollisionAlarms={aisCollisionAlarms} />
 })
 
 // ── vessel state (ADR 0215 phase 3) ─────────────────────────────────────────
@@ -183,27 +197,96 @@ export const LiveRouteTile = memo(function LiveRouteTile({ status }: { status: A
 
 const GENERATOR_FIELDS = ['generatorState', 'generatorManualStart', 'generatorManualStartTimer', 'generatorRunningByCondition', 'generatorRuntime'] as const
 
-/** The Generator tile's own state; its power and the battery come from the electrical stream, still passed by the shell. */
-export const LiveGeneratorTile = memo(function LiveGeneratorTile(props: Omit<ComponentProps<typeof GeneratorTile>, (typeof GENERATOR_FIELDS)[number]>) {
+const GENERATOR_ELECTRICAL_FIELDS = ['generatorRealPowerW', 'generatorConfigured', 'generatorNone', 'batterySocPercent', 'batteryRatePercentPerHour'] as const
+
+/** The Generator tile: its own state from vessel state, its power, its role and the battery from the electrical stream. */
+export const LiveGeneratorTile = memo(function LiveGeneratorTile(props: Omit<ComponentProps<typeof GeneratorTile>,
+  (typeof GENERATOR_FIELDS)[number] | (typeof GENERATOR_ELECTRICAL_FIELDS)[number]>) {
   const generator = useVesselFields(GENERATOR_FIELDS)
-  return <GeneratorTile {...props} {...generator} />
+  const electrical = useElectricalFields(GENERATOR_ELECTRICAL_FIELDS)
+  return <GeneratorTile {...props} {...generator} {...electrical} />
 })
 
 const selectHeading = (state: VesselStateValue) => state.headingTrue
 
-/** The autopilot tile's heading; the autopilot's own state is still passed by the shell. */
-export const LiveAutopilotTile = memo(function LiveAutopilotTile(props: Omit<ComponentProps<typeof AutopilotTile>, 'headingTrueDeg'>) {
+/** The autopilot tile: the pilot's state and controls from its own stream, the heading from vessel state. */
+export const LiveAutopilotTile = memo(function LiveAutopilotTile({ readOnly }: { readOnly: boolean }) {
+  const autopilot = useAutopilot()
   const headingTrueDeg = useVesselStateSelector(selectHeading)
-  return <AutopilotTile {...props} headingTrueDeg={headingTrueDeg} />
+  return (
+    <AutopilotTile
+      state={autopilot.state}
+      pending={autopilot.pending}
+      error={autopilot.error}
+      availableModes={autopilot.availableModes}
+      capabilityError={autopilot.capabilityError}
+      onEngage={autopilot.engage}
+      onDisengage={autopilot.disengage}
+      onTack={autopilot.tack}
+      onGybe={autopilot.gybe}
+      onAdjustHeading={autopilot.adjustHeading}
+      onSetMode={autopilot.setMode}
+      onDodge={autopilot.dodge}
+      onClearDodge={autopilot.clearDodge}
+      headingTrueDeg={headingTrueDeg}
+      readOnly={readOnly}
+    />
+  )
 })
 
-const selectEnginesRunning = (state: VesselStateValue) => state.enginesRunning === true
+const selectEnginesRunning = (state: VesselStateValue) => state.enginesRunning
+const ALTERNATOR_FIELDS = ['alternator0', 'alternator1'] as const
 
-/** The alternator tile shows while an engine runs; the alternator readings are still passed by the shell. */
-export const LiveAlternatorTile = memo(function LiveAlternatorTile(props: Omit<ComponentProps<typeof AlternatorTile>, 'enginesRunning'>) {
+/**
+ * The alternator tile: the readings from the electrical stream, shown while an
+ * engine runs. Whether one runs is null until vessel state says, and the tile
+ * then claims neither.
+ */
+export const LiveAlternatorTile = memo(function LiveAlternatorTile() {
   const enginesRunning = useVesselStateSelector(selectEnginesRunning)
-  return <AlternatorTile {...props} enginesRunning={enginesRunning} />
+  const { alternator0, alternator1 } = useElectricalFields(ALTERNATOR_FIELDS)
+  return <AlternatorTile port={alternator0} starboard={alternator1} enginesRunning={enginesRunning} />
 })
+
+const BATTERY_FIELDS = [
+  'batterySocPercent', 'socPath', 'chargingCurrentA', 'chargingPowerW', 'solarOutputW', 'acOutputW', 'dc12vPowerW',
+  'voltageReadoutV', 'voltageReadoutLabel', 'charger0CurrentA', 'charger0AcIn1CurrentA', 'charger0ChargingMode',
+  'charger0Error', 'batteryRatePercentPerHour', 'timeToGoHours', 'lastUpdateAgeS', 'houseBankConfigured', 'houseBankUnresolved',
+] as const
+
+/**
+ * Battery & Power: the electrical stream, and the SoC bands from the alarm
+ * rules on the house bank's path. The rules come from the same query the Alarms
+ * page edits, so a rule saved there recolours the bar without a reload.
+ */
+export const LiveBatteryPowerTile = memo(function LiveBatteryPowerTile(props: Pick<ComponentProps<typeof BatteryPowerTile>, 'overnight' | 'onOpenRoles'>) {
+  const { socPath, ...electrical } = useElectricalFields(BATTERY_FIELDS)
+  const { rules } = useAlarmRules()
+  const socBands = useSocBands(rules, socPath)
+  return <BatteryPowerTile {...props} {...electrical} socBands={socBands} />
+})
+
+/** The Solar tile: the whole solar stream. */
+export const LiveSolarTile = memo(function LiveSolarTile() {
+  return <SolarTile {...useSolarState()} />
+})
+
+/** The Tanks tile: the tanks stream. */
+export const LiveTanksTile = memo(function LiveTanksTile() {
+  return <TanksTile {...useTanksState()} />
+})
+
+/** The Radar Targets list: the radar stream. */
+export const LiveRadarTargetsTile = memo(function LiveRadarTargetsTile(props: Pick<ComponentProps<typeof RadarTargetsTile>, 'distanceUnits'>) {
+  return <RadarTargetsTile {...props} {...useRadarTargets()} />
+})
+
+/** The AIS and radar inputs both anchor maps draw. */
+function useMapContacts() {
+  const aisVessels = useNearbyVesselList()
+  const { targets: radarTargets, radars, source: radarSource } = useRadarTargets()
+  return { aisVessels, radarTargets, radars, radarSource }
+}
 
 /** How often a map on screen asks the server for new trail points. */
 const TRAIL_POLL_MS = 5000
@@ -239,14 +322,15 @@ function usePins(active: boolean) {
 /**
  * The anchor watch tile. It reads the watch record, applies the live fix to it
  * (distance, bearing, drag state), and adds depth, current, heading, the
- * collision colours, the pins and the trails. The trails poll only while the
- * tile is on screen. Its AIS and radar inputs are other streams, still passed
- * by the shell.
+ * collision colours, the pins, the trails and the AIS and radar contacts. The
+ * trails poll only while the tile is on screen.
  */
 export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit<ComponentProps<typeof AnchorWatchTile>,
   'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'
-  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'>) {
+  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
+  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource'>) {
   const watch = useAnchorWatch()
+  const contacts = useMapContacts()
   const v = useVesselFields(ANCHOR_FIELDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
@@ -257,6 +341,7 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
     <AnchorWatchTile
       {...props}
       {...pins}
+      {...contacts}
       watch={atFix}
       vesselTrail={getAnchorTrail}
       aisTrails={getAisTrails}
@@ -275,13 +360,14 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
 
 const POI_FIELDS = ['latitude', 'longitude', 'headingTrue', 'gnssCriticalAlert', 'positionLastUpdateAgeS'] as const
 
-/** The Nearby map tile: own ship from vessel state, the collision colours, and the boat's trail while it is on screen. */
+/** The Nearby map tile: own ship from vessel state, the AIS contacts, the collision colours, and the boat's trail while it is on screen. */
 export const LivePoiMapTile = memo(function LivePoiMapTile(props: Omit<ComponentProps<typeof PoiMapTile>,
-  'aisCollisionAlarms' | 'getSelfTrail' | (typeof POI_FIELDS)[number]>) {
+  'aisCollisionAlarms' | 'getSelfTrail' | 'nearbyVessels' | (typeof POI_FIELDS)[number]>) {
   const ownShip = useVesselFields(POI_FIELDS)
+  const nearbyVessels = useNearbyVesselList()
   const aisCollisionAlarms = useAisCollisionAlarms()
   const { getSelfTrail } = useServerTrails(TRAIL_POLL_MS)
-  return <PoiMapTile {...props} {...ownShip} aisCollisionAlarms={aisCollisionAlarms} getSelfTrail={getSelfTrail} />
+  return <PoiMapTile {...props} {...ownShip} nearbyVessels={nearbyVessels} aisCollisionAlarms={aisCollisionAlarms} getSelfTrail={getSelfTrail} />
 })
 
 const ANCHOR_DRAWER_FIELDS = [
@@ -292,8 +378,8 @@ const ANCHOR_DRAWER_FIELDS = [
 
 /**
  * The anchor watch page. Like the tile, it reads the watch record and applies
- * the live fix; the record's fields and writes, the pins, the trails and
- * everything from vessel state are filled in here.
+ * the live fix; the record's fields and writes, the pins, the trails, the AIS
+ * and radar contacts and everything from vessel state are filled in here.
  *
  * vesselLat/vesselLon fall back from the live fix to the anchor point (e.g.
  * GPS lost after the anchor was already set), and stay null only when neither
@@ -315,8 +401,10 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   | 'anchorLat' | 'anchorLon' | 'radiusMeters' | 'bowOffsetM' | 'bowOffsetApplied' | 'bowOffsetReason' | 'headingAtSetDeg'
   | 'placeName' | 'anchorSetAt' | 'anchorStateKnown' | 'error' | 'onRadiusChange' | 'adjustAnchor' | 'onClearAnchor'
   | 'rodeDeployedM' | 'seaState' | 'seabedType' | 'onUpdateRodeAndConditions'
-  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'>) {
+  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
+  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource'>) {
   const watch = useAnchorWatch()
+  const contacts = useMapContacts()
   const v = useVesselFields(ANCHOR_DRAWER_FIELDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
@@ -328,6 +416,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
     <AnchorWatchDrawer
       {...props}
       {...pins}
+      {...contacts}
       anchorLat={watch.anchorLat}
       anchorLon={watch.anchorLon}
       radiusMeters={watch.radiusMeters}

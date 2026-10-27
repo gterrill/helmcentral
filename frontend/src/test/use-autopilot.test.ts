@@ -68,12 +68,27 @@ function emitAutopilot(payload: unknown) {
 }
 
 describe('useAutopilot', () => {
-  it('starts absent before any event has arrived', async () => {
+  // Before the first event nobody knows whether there is a pilot, so the
+  // state claims nothing, not an absent one (ADR 0215).
+  it('knows nothing before any event has arrived', async () => {
     const { useAutopilot } = await loadModule()
     const { result } = renderHook(() => useAutopilot())
 
-    expect(result.current.state.present).toBe(false)
-    expect(result.current.state.engaged).toBe(false)
+    expect(result.current.state).toBeNull()
+  })
+
+  it('keeps the state object when an equal payload arrives', async () => {
+    const { useAutopilot } = await loadModule()
+    const { result } = renderHook(() => useAutopilot())
+    const payload = { present: true, engaged: true, state: 'auto', mode: 'compass', target: 5.742, available_actions: ['tack'], stale: false }
+    emitAutopilot(payload)
+    const first = result.current.state
+
+    emitAutopilot({ ...payload, available_actions: ['tack'] })
+
+    expect(result.current.state).toBe(first)
+    emitAutopilot({ ...payload, target: 5.8 })
+    expect(result.current.state).not.toBe(first)
   })
 
   it('reflects present/engaged/mode/target/availableActions/stale from the SSE stream', async () => {
@@ -106,11 +121,11 @@ describe('useAutopilot', () => {
     const { result } = renderHook(() => useAutopilot())
 
     emitAutopilot({ present: true, engaged: true, state: 'auto', mode: 'compass', target: 1, available_actions: [], stale: false })
-    expect(result.current.state.present).toBe(true)
+    expect(result.current.state?.present).toBe(true)
 
     emitAutopilot({ present: false })
-    expect(result.current.state.present).toBe(false)
-    expect(result.current.state.engaged).toBe(false)
+    expect(result.current.state?.present).toBe(false)
+    expect(result.current.state?.engaged).toBe(false)
   })
 
   it('does not optimistically flip engaged when engage() is called — only a stream event may change displayed state', async () => {
@@ -121,7 +136,7 @@ describe('useAutopilot', () => {
 
     const { result } = renderHook(() => useAutopilot())
     emitAutopilot({ present: true, engaged: false, state: 'standby', mode: 'compass', target: 0, available_actions: ['engage'], stale: false })
-    expect(result.current.state.engaged).toBe(false)
+    expect(result.current.state?.engaged).toBe(false)
 
     act(() => {
       void result.current.engage()
@@ -129,7 +144,7 @@ describe('useAutopilot', () => {
 
     // Still false: the fetch is deliberately unresolved, so if the hook ever
     // set engaged optimistically it would show up here.
-    expect(result.current.state.engaged).toBe(false)
+    expect(result.current.state?.engaged).toBe(false)
   })
 
   it('tracks a pending action while its request is in flight, keyed so unrelated actions are unaffected', async () => {
@@ -170,7 +185,7 @@ describe('useAutopilot', () => {
 
     expect(result.current.error).toBe('signalk returned status 503: provider offline')
     // A failed command must never leave the tile claiming the boat is under autopilot.
-    expect(result.current.state.engaged).toBe(false)
+    expect(result.current.state?.engaged).toBe(false)
   })
 
   it('posts to the engage/disengage/tack/gybe endpoints with no request body', async () => {
@@ -253,7 +268,7 @@ describe('useAutopilot', () => {
       void result.current.setMode('wind')
     })
 
-    expect(result.current.state.mode).toBe('compass')
+    expect(result.current.state?.mode).toBe('compass')
   })
 
   it('reads the supported mode list from the capability probe, not the stream', async () => {

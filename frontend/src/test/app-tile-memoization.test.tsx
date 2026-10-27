@@ -18,6 +18,8 @@ import { render, act } from '@testing-library/react'
 import { memo, type ComponentProps } from 'react'
 import { App } from '../App'
 import { setQueryData } from '@/lib/api-query'
+import { screen, within } from '@testing-library/react'
+import * as live from './fixtures/live-stream-payloads'
 
 beforeEach(() => {
   // useAuth (real here, not mocked) needs mode:none to clear the shell for
@@ -45,6 +47,8 @@ const subscribeTelemetryMock = vi.fn()
 let gaugeValuesListener: ((raw: string) => void) | null = null
 let alarmsListener: ((raw: string) => void) | null = null
 let vesselStateListener: ((raw: string) => void) | null = null
+// Every stream's listener, by event, for the phase 5 streams.
+const streamListeners = new Map<string, (raw: string) => void>()
 
 vi.mock('@/hooks/use-telemetry-stream', () => ({
   subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
@@ -52,6 +56,7 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
     if (event === 'gauge-values') gaugeValuesListener = cb
     if (event === 'alarms') alarmsListener = cb
     if (event === 'vessel-state') vesselStateListener = cb
+    streamListeners.set(event, cb)
     return () => {}
   },
   // Real consumers elsewhere in the tree (use-autopilot.ts, vessel-status-bar.tsx
@@ -71,6 +76,12 @@ function emitGaugeValues(payload: unknown) {
 function emitAlarms(payload: unknown) {
   act(() => {
     alarmsListener?.(JSON.stringify(payload))
+  })
+}
+
+function emit(event: string, payload: unknown) {
+  act(() => {
+    streamListeners.get(event)?.(JSON.stringify(payload))
   })
 }
 
@@ -193,39 +204,18 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
 // the emits above flow through its actual (now-shared, now-memoized) store. ─
 
 // use-vessel-state is not mocked either: the vessel-state ticks below run
-// through its real store.
+// through its real store. Nor are the phase 5 stores (autopilot, electrical,
+// solar, tanks, nearby vessels, radar targets).
 
-vi.mock('@/hooks/use-electrical-state', () => ({
-  useElectricalState: () => ({
-    batterySocPercent: null, batteryCapacityAh: null, chargingCurrentA: null,
-    chargingPowerW: null, solarOutputW: null, acOutputW: null, dc12vPowerW: null,
-    dc12vCurrentA: null, voltageReadoutV: null, voltageReadoutLabel: null, acLoadsW: null,
-    generatorRealPowerW: null, generatorConfigured: true, batteryRatePercentPerHour: null, timeToGoHours: null,
-    charger0CurrentA: null, charger0AcIn1CurrentA: null,
-    charger0ChargingMode: null, charger0Error: null,
-  }),
-}))
 
-vi.mock('@/hooks/use-solar-state', () => ({
-  useSolarState: () => ({ currentW: null, todayKWh: null, yesterdayKWh: null, peakTodayW: null, controllers: [] }),
-}))
 
-vi.mock('@/hooks/use-nearby-vessels', () => ({
-  useNearbyVessels: () => ({ vessels: [], loading: false }),
-}))
 
-vi.mock('@/hooks/use-radar-targets', () => ({
-  useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
-}))
 
 // use-anchor-watch is real: the polls below land through setQueryData, the
 // way a GET /api/anchor-watch answer does.
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-vi.mock('@/hooks/use-tanks-state', () => ({
-  useTanksState: () => ({ tanks: [], loading: false }),
-}))
 
 vi.mock('@/hooks/use-tide-today', () => ({
   useTideToday: () => ({
@@ -294,7 +284,7 @@ const useServerTrailsSpy = vi.fn()
 vi.mock('@/hooks/use-server-trails', () => ({
   useServerTrails: (...args: unknown[]) => {
     useServerTrailsSpy(...args)
-    return { getSelfTrail: vi.fn(), getAisTrails: vi.fn() }
+    return { getSelfTrail: () => [], getAisTrails: () => new Map() }
   },
 }))
 
@@ -561,5 +551,187 @@ describe('App anchor watch (ADR 0215 phase 4)', () => {
     // Called with no enable flag: the tile mounting is what turns it on.
     expect(useServerTrailsSpy).toHaveBeenCalled()
     expect(useServerTrailsSpy.mock.calls.every((args) => args[1] === undefined)).toBe(true)
+  })
+})
+
+// ── the remaining streams (ADR 0215 phase 5) ─────────────────────────────────
+
+describe('App stream tiles (ADR 0215 phase 5)', () => {
+  const STREAM_PAGE = [
+    { id: 'route', x: 0, y: 0, w: 4, h: 4 },
+    { id: 'autopilot', x: 4, y: 0, w: 4, h: 6 },
+    { id: 'battery-power', x: 8, y: 0, w: 4, h: 6 },
+    { id: 'alternator', x: 0, y: 6, w: 4, h: 4 },
+    { id: 'generator', x: 4, y: 6, w: 4, h: 4 },
+    { id: 'solar', x: 8, y: 6, w: 4, h: 6 },
+    { id: 'tanks', x: 0, y: 12, w: 4, h: 6 },
+    { id: 'nearby-vessels', x: 4, y: 12, w: 4, h: 6 },
+    { id: 'radar-targets', x: 8, y: 12, w: 4, h: 6 },
+  ]
+  const TITLES = ['Autopilot', 'Battery & Power', 'Alternators', 'Generator', 'Solar', 'Tanks', 'Nearby Vessels', 'Radar Targets']
+
+  function counts(): Record<string, number> {
+    return Object.fromEntries(TITLES.map((title) => [title, rendersOf(title)]))
+  }
+
+  /** The render counts that moved since `before`, by tile title. */
+  function moved(before: Record<string, number>): string[] {
+    const now = counts()
+    return TITLES.filter((title) => now[title] !== before[title])
+  }
+
+  /** The card a tile title sits on. */
+  function tile(title: string): HTMLElement {
+    const card = screen.getAllByText(title)
+      .map((el) => el.closest('[data-slot="card"]'))
+      .find((el): el is HTMLElement => el instanceof HTMLElement)
+    if (!card) throw new Error(`no tile titled ${title}`)
+    return card
+  }
+
+  async function mountStreams() {
+    pageWidgets = STREAM_PAGE
+    await mountApp()
+    for (const title of TITLES) expect(rendersOf(title)).toBeGreaterThan(0)
+  }
+
+  // Each stream: its first payload, the same one again with only what no tile
+  // shows moved, a real change, and the one tile that shows that change.
+  const STREAMS: Array<{ event: string; first: unknown; repeat: unknown; change: unknown; shows: string }> = [
+    {
+      event: 'autopilot', first: live.AUTOPILOT,
+      repeat: { ...live.AUTOPILOT, available_actions: [...live.AUTOPILOT.available_actions] },
+      change: { ...live.AUTOPILOT, target: 5.8 }, shows: 'Autopilot',
+    },
+    {
+      event: 'electrical-state', first: live.ELECTRICAL,
+      repeat: { ...live.ELECTRICAL, datetime: '2026-10-27T04:20:16Z', last_update_age_s: 0.4 },
+      change: live.ELECTRICAL_NEXT, shows: 'Battery & Power',
+    },
+    {
+      event: 'solar-state', first: live.SOLAR,
+      repeat: { ...live.SOLAR, datetime: '2026-10-27T04:20:16Z', controllers: live.SOLAR.controllers.map((c) => ({ ...c })) },
+      change: { ...live.SOLAR, current_w: 1366.9 }, shows: 'Solar',
+    },
+    {
+      event: 'tanks-state', first: live.TANKS, repeat: live.TANKS_AGES_ONLY,
+      change: { ...live.TANKS, tanks: live.TANKS.tanks.map((t) => (t.id === 'blackWater.1' ? { ...t, level_percent: 12 } : t)) },
+      shows: 'Tanks',
+    },
+    {
+      event: 'nearby-vessels', first: live.NEARBY,
+      repeat: { ...live.NEARBY, datetime: '2026-10-27T04:20:13Z', last_update_age_s: 83 },
+      change: live.NEARBY_NEXT, shows: 'Nearby Vessels',
+    },
+    {
+      event: 'radar-targets', first: live.RADAR,
+      repeat: { ...live.RADAR, datetime: '2026-10-27T04:20:15Z', targets: live.RADAR.targets.map((t) => ({ ...t, age_seconds: 3.2 })) },
+      change: { ...live.RADAR, targets: live.RADAR.targets.map((t) => ({ ...t, range_m: 1800 })) },
+      shows: 'Radar Targets',
+    },
+  ]
+
+  for (const stream of STREAMS) {
+    describe(stream.event, () => {
+      it('re-renders no tile when the same payload arrives again', async () => {
+        await mountStreams()
+        emit(stream.event, stream.first)
+        const before = counts()
+
+        emit(stream.event, stream.first)
+        emit(stream.event, stream.repeat)
+
+        expect(moved(before)).toEqual([])
+      })
+
+      it('does not re-render the shell grid on a tick', async () => {
+        await mountStreams()
+        const grid = gridRenderSpy.mock.calls.length
+
+        emit(stream.event, stream.first)
+        emit(stream.event, stream.change)
+
+        expect(gridRenderSpy.mock.calls.length).toBe(grid)
+      })
+
+      it(`re-renders only ${stream.shows} when what it shows changes`, async () => {
+        await mountStreams()
+        emit(stream.event, stream.first)
+        const before = counts()
+
+        emit(stream.event, stream.change)
+
+        expect(moved(before)).toEqual([stream.shows])
+      })
+    })
+  }
+
+  describe('before the first event', () => {
+    it('the autopilot tile shows -- and does not say there is no pilot', async () => {
+      await mountStreams()
+      expect(screen.queryByText(/No autopilot detected/)).toBeNull()
+      expect(within(tile('Autopilot')).getByText('--')).toBeInTheDocument()
+    })
+
+    it('the solar tile does not say there are no controllers', async () => {
+      await mountStreams()
+      expect(screen.queryByText('No controller data')).toBeNull()
+      expect(within(tile('Solar')).getAllByText('—').length).toBeGreaterThan(0)
+    })
+
+    it('the alternator tile shows -- and does not say the engines are off', async () => {
+      await mountStreams()
+      expect(screen.queryByText(/not running/)).toBeNull()
+      expect(within(tile('Alternators')).getByText('--')).toBeInTheDocument()
+    })
+
+    it('the battery, generator, tanks, nearby and radar tiles claim no reading', async () => {
+      await mountStreams()
+      expect(within(tile('Battery & Power')).getAllByText('—').length).toBeGreaterThan(0)
+      expect(within(tile('Generator')).getByText('--')).toBeInTheDocument()
+      expect(screen.queryByText('No tank data available')).toBeNull()
+      expect(screen.queryByText(/No vessels/)).toBeNull()
+      expect(within(tile('Radar Targets')).getByText('--')).toBeInTheDocument()
+    })
+  })
+})
+
+// ── every stream at once ─────────────────────────────────────────────────────
+
+describe('App shell across every stream (ADR 0215 phases 1 to 5)', () => {
+  it('a mixed tick of every stream leaves the grid render count unchanged', async () => {
+    pageWidgets = [
+      ...BASE_WIDGETS,
+      { id: 'anchor-watch', x: 0, y: 12, w: 6, h: 8 },
+      { id: 'autopilot', x: 6, y: 12, w: 4, h: 6 },
+      { id: 'battery-power', x: 0, y: 20, w: 4, h: 6 },
+      { id: 'alternator', x: 4, y: 20, w: 4, h: 4 },
+      { id: 'generator', x: 8, y: 20, w: 4, h: 4 },
+      { id: 'solar', x: 0, y: 26, w: 4, h: 6 },
+      { id: 'tanks', x: 4, y: 26, w: 4, h: 6 },
+      { id: 'radar-targets', x: 8, y: 26, w: 4, h: 6 },
+    ]
+    await mountApp()
+    // The two things the shell does draw from: the navigation state picks the
+    // wall's pages, and a watch being set drives the planning depth. Both
+    // settle here, before the count.
+    emitVesselState(LIVE_VESSEL_STATE)
+    landWatch(SET_WATCH)
+    const grid = gridRenderSpy.mock.calls.length
+
+    for (const step of [0, 1]) {
+      emitGaugeValues({ values: { 'a.path': 2 + step, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 1 } })
+      emitAlarms({ alarms: [houseBankAlarm({ value: 0.18 - step / 100 })], worst: 'alarm' })
+      emitVesselState({ ...LIVE_VESSEL_STATE, latitude: -20.2747 - step / 10000, wind_speed_apparent_kts: 5 + step })
+      emit('autopilot', { ...live.AUTOPILOT, target: 5.742 + step / 10 })
+      emit('electrical-state', step === 0 ? live.ELECTRICAL : live.ELECTRICAL_NEXT)
+      emit('solar-state', { ...live.SOLAR, current_w: 1372.3 + step })
+      emit('tanks-state', step === 0 ? live.TANKS : live.TANKS_AGES_ONLY)
+      emit('nearby-vessels', step === 0 ? live.NEARBY : live.NEARBY_NEXT)
+      emit('radar-targets', { ...live.RADAR, targets: live.RADAR.targets.map((t) => ({ ...t, range_m: 1852 - step })) })
+      landWatch({ ...SET_WATCH, radius_meters: 30 + step })
+    }
+
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
   })
 })

@@ -77,10 +77,6 @@ function renderTile() {
   return render(
     <LiveAnchorWatchTile
       isImperial={false}
-      aisVessels={[]}
-      radarTargets={[]}
-      radars={[]}
-      radarSource="disabled"
       isDarkTheme={false}
       showImageryLayer={false}
       onImageryToggle={vi.fn()}
@@ -132,7 +128,6 @@ describe('trail polling (ADR 0215 phase 4)', () => {
           config={{ title: 'Nearby', categories: [], radiusM: 1000, showTrail: true } as never}
           editing={false}
           activeRoute={null}
-          nearbyVessels={[]}
           isDarkTheme={false}
           distanceUnits="metric"
           interactive

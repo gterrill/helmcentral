@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 
-import { useTelemetryEvent } from '@/hooks/use-telemetry-stream'
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { apiRequest } from '@/lib/api-query'
+import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 export type AutopilotSide = 'port' | 'starboard'
 
@@ -56,6 +57,50 @@ function toAutopilotState(payload: AutopilotStreamPayload): AutopilotState {
   }
 }
 
+function sameAutopilot(a: AutopilotState, b: AutopilotState): boolean {
+  return a.present === b.present && a.engaged === b.engaged && a.state === b.state && a.mode === b.mode
+    && a.target === b.target && a.stale === b.stale
+    && a.availableActions.length === b.availableActions.length
+    && a.availableActions.every((action, i) => action === b.availableActions[i])
+}
+
+/*
+ * One store for the `autopilot` event (ADR 0215; lib/telemetry-store.ts). The
+ * state is null until the first event: before it nobody knows whether there is
+ * a pilot, and the tile must not say there is none. toAutopilotState builds a
+ * new object for every payload, so an equal one keeps the previous object and
+ * notifies nobody.
+ */
+function applyAutopilot(previous: AutopilotState | null, raw: string): TelemetryUpdate<AutopilotState | null> | null {
+  let payload: AutopilotStreamPayload
+  try {
+    payload = JSON.parse(raw) as AutopilotStreamPayload
+  } catch (err) {
+    console.error('Failed to parse autopilot event:', err)
+    return null
+  }
+  const next = toAutopilotState(payload)
+  if (previous !== null && sameAutopilot(previous, next)) return null
+  return { state: next }
+}
+
+// Read at start, not at import: a module that only imports this one's
+// helpers or types never touches the stream.
+const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
+
+const store = createTelemetryStore<AutopilotState | null>(listenToStream, 'autopilot', null, applyAutopilot)
+
+/** Starts the autopilot store on mount without re-rendering the caller. AppShell calls this once. */
+export const useRetainAutopilot = store.useRetain
+
+const selectState = (state: AutopilotState | null) => state
+const selectPresent = (state: AutopilotState | null) => state?.present === true
+
+/** What the pilot last reported, or null until the first autopilot event. */
+export function useAutopilotState(): AutopilotState | null {
+  return store.useSelector(selectState)
+}
+
 /**
  * SignalK's v2 autopilot status, as relayed verbatim by GET /api/autopilot.
  * Only `options.modes` is read here: which modes a pilot supports is static
@@ -83,15 +128,11 @@ interface AutopilotCapabilityBody {
  * requirements here explicitly rule out.
  */
 export function useAutopilot() {
-  const [state, setState] = useState<AutopilotState>(ABSENT_AUTOPILOT_STATE)
+  const state = useAutopilotState()
   const [pending, setPending] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
   const [availableModes, setAvailableModes] = useState<string[]>([])
   const [capabilityError, setCapabilityError] = useState<string | null>(null)
-
-  useTelemetryEvent<AutopilotStreamPayload>('autopilot', (payload) => {
-    setState(toAutopilotState(payload))
-  })
 
   // One capability probe per pilot, not a poll: the supported mode list is
   // fixed for a given autopilot, so it is fetched once on mount and again
@@ -101,7 +142,7 @@ export function useAutopilot() {
   // substituting a plausible default set — offering modes the pilot may not
   // support would be exactly the kind of guess the project forbids, and the
   // tile disables the selector and shows this message instead.
-  const present = state.present
+  const present = store.useSelector(selectPresent)
   useEffect(() => {
     let cancelled = false
 

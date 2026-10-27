@@ -27,6 +27,7 @@ import {
   LiveAnchorWatchDrawer,
   LiveAnchorWatchTile,
   LiveAutopilotTile,
+  LiveBatteryPowerTile,
   LiveClockTile,
   LiveCurrentConditionsTile,
   LiveDepthTideTile,
@@ -37,11 +38,13 @@ import {
   LivePoiMapTile,
   LivePositionTile,
   LiveRadarDrawer,
+  LiveRadarTargetsTile,
   LiveRouteTile,
   LiveSignalKDiscoveryPrompt,
+  LiveSolarTile,
+  LiveTanksTile,
   LiveWindTile,
 } from '@/components/live-surfaces'
-import { BatteryPowerTile } from '@/components/battery-power-tile'
 import { HotWaterTile } from '@/components/hot-water-tile'
 import { TodayNowTile } from '@/components/today-now-tile'
 import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
@@ -49,7 +52,6 @@ import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { SetupLine } from '@/components/setup-line'
 import { requestSetupFocus } from '@/lib/setup-status'
-import { RadarTargetsTile } from '@/components/radar-targets-tile'
 // Not lazy: prefetchNoteEditor() is a plain function that only reaches into
 // the editor-vendor chunk through a dynamic import() of its own (see that
 // file's doc comment) — importing the function itself here costs nothing.
@@ -80,8 +82,6 @@ const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ 
 const PatternsGallery = lazy(() => import('@/components/patterns/gallery').then((mod) => ({ default: mod.PatternsGallery })))
 import { NavigationGuardDialog } from '@/components/navigation-guard-dialog'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
-import { SolarTile } from '@/components/solar-tile'
-import { TanksTile } from '@/components/tanks-tile'
 import { CLUSTER_DEFAULT_SIZE, DashboardBentoGrid, raiseGaugeHeight } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
@@ -104,20 +104,19 @@ import { DisplayEditorPanel } from '@/components/display-editor-panel'
 import type { DisplayPatch } from '@/components/page-display-select'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
-import { useElectricalState } from '@/hooks/use-electrical-state'
-import { useSolarState } from '@/hooks/use-solar-state'
-import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
-import { useRadarTargets } from '@/hooks/use-radar-targets'
+import { useRetainElectricalState } from '@/hooks/use-electrical-state'
+import { useRetainSolarState } from '@/hooks/use-solar-state'
+import { useRetainNearbyVessels } from '@/hooks/use-nearby-vessels'
+import { useRetainRadarTargets } from '@/hooks/use-radar-targets'
 import { setAnchorHere, updatePlanningDepth, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
 import { ConnectionBanner } from '@/components/connection-banner'
-import { useTanksState } from '@/hooks/use-tanks-state'
+import { useRetainTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { getVesselStateSnapshot, useRetainVesselState, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { useRetainAlarms } from '@/hooks/use-alarms'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
-import { useSocBands } from '@/hooks/use-soc-bands'
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
@@ -127,7 +126,7 @@ import { useWaveForecast } from '@/hooks/use-wave-forecast'
 import { useUpperAir } from '@/hooks/use-upper-air'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useAuth } from '@/hooks/use-auth'
-import { useAutopilot } from '@/hooks/use-autopilot'
+import { useRetainAutopilot } from '@/hooks/use-autopilot'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
@@ -814,6 +813,12 @@ function AppShell() {
     requestSetupFocus(control)
     openSettingsSection(section)
   }, [openSettingsSection])
+  // The battery and generator tiles' "choose it in the roles" links. The wall
+  // display shares the tile render, and a kiosk has no Settings to go to.
+  const openHouseBankRolesStep = useCallback(() => openSetupStep('signalk', 'role-house_bank'), [openSetupStep])
+  const openGeneratorRolesStep = useCallback(() => openSetupStep('signalk', 'role-generator'), [openSetupStep])
+  const openHouseBankRoles = isDisplay ? undefined : openHouseBankRolesStep
+  const openGeneratorRoles = isDisplay ? undefined : openGeneratorRolesStep
 
   // Mounted unconditionally (rules of hooks) but a no-op on the wall route
   // (`enabled: !isDisplay`) - see the hook's own doc comment. Never on the
@@ -988,8 +993,18 @@ function AppShell() {
   // (ADR 0215); the shell only holds it open, so the list survives page
   // switches and wall rotations without an alarms tick re-rendering the shell.
   useRetainAlarms()
-  // Lifted out of AlarmsDrawer so a rule saved there reaches the battery
-  // tile's SoC bands (useSocBands below) without a reload.
+  // The shell holds the six remaining streams open without listening to any
+  // of them (ADR 0215 phase 5): each tile reads its own through a Live*
+  // wrapper, so a tile mounted at any moment shows the last thing the server
+  // said, and no tick re-renders the shell.
+  useRetainAutopilot()
+  useRetainElectricalState()
+  useRetainSolarState()
+  useRetainTanksState()
+  useRetainNearbyVessels()
+  useRetainRadarTargets()
+  // The Alarms page's rule list. The battery tile reads the same query for its
+  // SoC bands, so a rule saved there recolours the bar without a reload.
   const {
     rules: alarmRules,
     loading: alarmRulesLoading,
@@ -1011,50 +1026,6 @@ function AppShell() {
     () => buildCollisionTuningUrl(currentSettings.signalk?.address, currentSettings.signalk?.port),
     [currentSettings.signalk?.address, currentSettings.signalk?.port],
   )
-  const { vessels: nearbyVessels, loading: nearbyVesselsLoading, lastUpdateAgeS: nearbyVesselsAgeS, maxRangeM: nearbyVesselsMaxRangeM } = useNearbyVessels()
-  const { targets: radarTargets, radars: radarInfos, source: radarSource, loading: radarTargetsLoading } = useRadarTargets()
-  const {
-    tanks,
-    loading: tanksLoading,
-    error: tanksError,
-    lastUpdateAgeS: tanksAgeS,
-  } = useTanksState()
-  const {
-    lastUpdateAgeS: electricalLastUpdateAgeS,
-    batterySocPercent,
-    socPath,
-    chargingCurrentA,
-    chargingPowerW,
-    solarOutputW,
-    acOutputW,
-    dc12vPowerW,
-    voltageReadoutV,
-    voltageReadoutLabel,
-    generatorRealPowerW,
-    generatorConfigured,
-    generatorNone,
-    houseBankConfigured,
-    houseBankUnresolved,
-    alternator0,
-    alternator1,
-    charger0CurrentA,
-    charger0AcIn1CurrentA,
-    charger0ChargingMode,
-    charger0Error,
-    batteryRatePercentPerHour,
-    timeToGoHours,
-  } = useElectricalState()
-  // The bands follow the house bank's own path from the electrical state, so
-  // they do not wait on the dawn projection (which needs a position fix).
-  const socBands = useSocBands(alarmRules, socPath)
-  const {
-    currentW: solarCurrentW,
-    todayKWh: solarTodayKWh,
-    yesterdayKWh: solarYesterdayKWh,
-    peakTodayW: solarPeakTodayW,
-    lastUpdateAgeS: solarLastUpdateAgeS,
-    controllers: solarControllers,
-  } = useSolarState()
   // Both poll on the forecast cadence, not the /api/vessel-state SSE stream's
   // own cadence: the backend caches weather for 900s and tide predictions
   // move on the order of hours, so FORECAST_REFRESH_SECONDS (600s) is
@@ -1139,7 +1110,6 @@ function AppShell() {
   // the active page (or the wall's current page) actually has one placed.
   const activePageHasCZoneWidget = effectiveWidgets.some((w) => w.id === 'czone-switches')
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5, activePageHasCZoneWidget)
-  const autopilot = useAutopilot()
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
 
   // Read at the click, not subscribed: the shell never renders on a fix.
@@ -1511,7 +1481,6 @@ function AppShell() {
         <EngineClusterHost
           config={widget.cluster}
           ctx={equipmentContext}
-          tanks={tanks}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setClusterDraft)}
         />
@@ -1573,7 +1542,6 @@ function AppShell() {
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setPoiMapDraft)}
           activeRoute={activeRoute}
-          nearbyVessels={nearbyVessels}
           isDarkTheme={isDarkTheme}
           forceDark={activePage?.skin === 'instrument'}
           distanceUnits={uiConfig.distanceUnits}
@@ -1645,10 +1613,6 @@ function AppShell() {
         return (
           <LiveAnchorWatchTile
             isImperial={isImperialDistance}
-            aisVessels={nearbyVessels}
-            radarTargets={radarTargets}
-            radars={radarInfos}
-            radarSource={radarSource}
             isDarkTheme={isDarkTheme}
             showImageryLayer={showAnchorImagery}
             onImageryToggle={setShowAnchorImagery}
@@ -1660,110 +1624,27 @@ function AppShell() {
           />
         )
       case 'tanks':
-        return (
-          <TanksTile
-            tanks={tanks}
-            loading={tanksLoading}
-            error={tanksError}
-            lastUpdateAgeS={tanksAgeS}
-          />
-        )
+        return <LiveTanksTile />
       case 'route':
         return (
           <LiveRouteTile status={routeActivationStatus} />
         )
       case 'nearby-vessels':
-        return (
-          <LiveNearbyVesselsTile
-            vessels={nearbyVessels}
-            loading={nearbyVesselsLoading}
-            distanceUnits={uiConfig.distanceUnits}
-            lastUpdateAgeS={nearbyVesselsAgeS}
-            maxRangeM={nearbyVesselsMaxRangeM}
-          />
-        )
+        return <LiveNearbyVesselsTile distanceUnits={uiConfig.distanceUnits} />
       case 'radar-targets':
-        return (
-          <RadarTargetsTile
-            targets={radarTargets}
-            radars={radarInfos}
-            source={radarSource}
-            loading={radarTargetsLoading}
-            distanceUnits={uiConfig.distanceUnits}
-          />
-        )
+        return <LiveRadarTargetsTile distanceUnits={uiConfig.distanceUnits} />
       case 'battery-power':
-        return (
-          <BatteryPowerTile
-            batterySocPercent={batterySocPercent}
-            chargingCurrentA={chargingCurrentA}
-            chargingPowerW={chargingPowerW}
-            solarOutputW={solarOutputW}
-            acOutputW={acOutputW}
-            dc12vPowerW={dc12vPowerW}
-            voltageReadoutV={voltageReadoutV}
-            voltageReadoutLabel={voltageReadoutLabel}
-            charger0CurrentA={charger0CurrentA}
-            charger0AcIn1CurrentA={charger0AcIn1CurrentA}
-            charger0ChargingMode={charger0ChargingMode}
-            charger0Error={charger0Error}
-            batteryRatePercentPerHour={batteryRatePercentPerHour}
-            timeToGoHours={timeToGoHours}
-            lastUpdateAgeS={electricalLastUpdateAgeS}
-            socBands={socBands}
-            overnight={overnight}
-            houseBankConfigured={houseBankConfigured}
-            houseBankUnresolved={houseBankUnresolved}
-            // The wall display shares this render; a kiosk has no Settings to go to.
-            onOpenRoles={isDisplay ? undefined : () => openSetupStep('signalk', 'role-house_bank')}
-          />
-        )
+        return <LiveBatteryPowerTile overnight={overnight} onOpenRoles={openHouseBankRoles} />
       case 'solar':
-        return (
-          <SolarTile
-            currentW={solarCurrentW}
-            todayKWh={solarTodayKWh}
-            yesterdayKWh={solarYesterdayKWh}
-            peakTodayW={solarPeakTodayW}
-            lastUpdateAgeS={solarLastUpdateAgeS}
-            controllers={solarControllers}
-          />
-        )
+        return <LiveSolarTile />
       case 'alternator':
-        return <LiveAlternatorTile port={alternator0} starboard={alternator1} />
+        return <LiveAlternatorTile />
       case 'generator':
-        return (
-          <LiveGeneratorTile
-            generatorRealPowerW={generatorRealPowerW}
-            generatorConfigured={generatorConfigured}
-            generatorNone={generatorNone}
-            onOpenRoles={isDisplay ? undefined : () => openSetupStep('signalk', 'role-generator')}
-            batterySocPercent={batterySocPercent}
-            batteryRatePercentPerHour={batteryRatePercentPerHour}
-            readOnly={!canWrite}
-          />
-        )
+        return <LiveGeneratorTile onOpenRoles={openGeneratorRoles} readOnly={!canWrite} />
       case 'czone-switches':
         return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} error={czoneError} readOnly={!canWrite} />
       case 'autopilot':
-        return (
-          <LiveAutopilotTile
-            state={autopilot.state}
-            pending={autopilot.pending}
-            error={autopilot.error}
-            availableModes={autopilot.availableModes}
-            capabilityError={autopilot.capabilityError}
-            onEngage={autopilot.engage}
-            onDisengage={autopilot.disengage}
-            onTack={autopilot.tack}
-            onGybe={autopilot.gybe}
-            onAdjustHeading={autopilot.adjustHeading}
-            onSetMode={autopilot.setMode}
-            onDodge={autopilot.dodge}
-            onClearDodge={autopilot.clearDodge}
-            readOnly={!canWrite}
-          />
-        )
+        return <LiveAutopilotTile readOnly={!canWrite} />
       case 'hot-water':
         return <HotWaterTile />
       default:
@@ -2237,10 +2118,6 @@ function AppShell() {
                 also applies the live fix to the watch record; see its comment
                 on the GPS fallback and the -1/-1 sentinel. */}
             <LiveAnchorWatchDrawer
-              aisVessels={nearbyVessels}
-              radarTargets={radarTargets}
-              radars={radarInfos}
-              radarSource={radarSource}
               isDarkTheme={isDarkTheme}
               showImageryLayer={showAnchorImagery}
               onImageryToggle={setShowAnchorImagery}

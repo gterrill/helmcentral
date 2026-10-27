@@ -10,7 +10,8 @@ interface SolarTileProps {
   yesterdayKWh: number | null
   peakTodayW: number | null
   lastUpdateAgeS: number | null
-  controllers: SolarController[]
+  /** Null until the first solar event: no rows, and no claim that there are no controllers. */
+  controllers: SolarController[] | null
 }
 
 const NO_VALUE = '—'
@@ -95,11 +96,11 @@ export const SolarTile = memo(function SolarTile({
       </div>
 
       <div className="mt-2 space-y-1.5">
-        {controllers.length === 0 && (
+        {controllers?.length === 0 && (
           <div className="rounded-md border bg-background/60 px-3 py-2 text-xs text-muted-foreground">No controller data</div>
         )}
 
-        {controllers.map((controller) => {
+        {controllers?.map((controller) => {
           // One dead MPPT among healthy ones is worth calling out on its own
           // row: the array total stays live, but that controller's share of it
           // is unknown rather than zero.

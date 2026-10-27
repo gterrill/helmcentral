@@ -146,3 +146,84 @@ export function createTelemetryStore<S>(
 
   return { getSnapshot, start, subscribe, subscribeKeys, useRetain, useSelector }
 }
+
+// ── helpers the store modules share ─────────────────────────────────────────
+
+/** Structural equality for parsed JSON: objects, arrays and primitives. */
+export function sameJSON(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    const other = b as unknown[]
+    return a.length === other.length && a.every((item, i) => sameJSON(item, other[i]))
+  }
+  const aRecord = a as Record<string, unknown>
+  const bRecord = b as Record<string, unknown>
+  const aKeys = Object.keys(aRecord)
+  if (aKeys.length !== Object.keys(bRecord).length) return false
+  return aKeys.every((key) => key in bRecord && sameJSON(aRecord[key], bRecord[key]))
+}
+
+/** Every own key of two flat objects holds the same value (Object.is). */
+export function sameShallow<T extends object>(a: T, b: T): boolean {
+  const keys = Object.keys(a) as Array<keyof T>
+  return keys.length === Object.keys(b).length && keys.every((key) => Object.is(a[key], b[key]))
+}
+
+/**
+ * The parsed state with every field that shows the same as before put back to
+ * its previous value, or null when every field does, so the store keeps its
+ * snapshot and notifies nobody. `same` decides per field; a field it calls
+ * the same keeps its previous object, so a reader holding it sees no change.
+ */
+export function keepUnchanged<S extends object>(
+  previous: S,
+  parsed: S,
+  same: (field: keyof S, a: S[keyof S], b: S[keyof S]) => boolean = (_field, a, b) => Object.is(a, b),
+): S | null {
+  const next = { ...parsed }
+  let changed = false
+  for (const field of Object.keys(parsed) as Array<keyof S>) {
+    if (same(field, previous[field], parsed[field])) {
+      next[field] = previous[field]
+    } else {
+      changed = true
+    }
+  }
+  return changed ? next : null
+}
+
+/**
+ * Each item of the new list replaced by the previous item with the same id
+ * when `same` calls them equal, and the previous list itself when every item
+ * is the one it had and the order holds.
+ */
+export function keepUnchangedItems<T>(
+  previous: readonly T[] | null,
+  incoming: T[],
+  id: (item: T) => string,
+  same: (a: T, b: T) => boolean,
+): T[] {
+  if (previous === null) return incoming
+  const byId = new Map(previous.map((item) => [id(item), item]))
+  const items = incoming.map((item) => {
+    const prev = byId.get(id(item))
+    return prev !== undefined && same(prev, item) ? prev : item
+  })
+  const unchanged = items.length === previous.length && items.every((item, i) => item === previous[i])
+  return unchanged ? (previous as T[]) : items
+}
+
+/**
+ * The named fields of an object-shaped store as one object, kept while none of
+ * them changed. Pass a module constant: `fields` keys the selection.
+ */
+export function useStoreFields<S extends object, K extends keyof S>(store: Pick<TelemetryStore<S>, 'useSelector'>, fields: readonly K[]): Pick<S, K> {
+  const select = useCallback((state: S) => {
+    const out = {} as Pick<S, K>
+    for (const field of fields) out[field] = state[field]
+    return out
+  }, [fields])
+  return store.useSelector(select, sameShallow)
+}

@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useMemo } from 'react'
 
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { shownAge } from '@/lib/staleness'
+import { createTelemetryStore, keepUnchangedItems, sameShallow, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 /**
  * Three source values, not two, so a disabled integration and a broken one
@@ -123,35 +125,72 @@ function sanitizeTarget(item: RadarTarget): RadarTarget | null {
   }
 }
 
+/** What the radar store holds. `received` is false until the first radar-targets event. */
+export interface RadarTargetsValue {
+  received: boolean
+  targets: RadarTarget[]
+  radars: RadarInfo[]
+  source: RadarSource
+}
+
+// 'disabled' before the first event: the tile shows "--" for it, which claims
+// nothing either way.
+const NOT_RECEIVED: RadarTargetsValue = { received: false, targets: [], radars: [], source: 'disabled' }
+
+/**
+ * Every field of a target but its age, which compares on what a tile shows for
+ * it: nothing renders a radar target's age (the backend bands it for its gate
+ * on the same grounds, radar_source.go), and it moves on every tick.
+ */
+function sameTarget(a: RadarTarget, b: RadarTarget): boolean {
+  const { age_seconds: ageA, ...restA } = a
+  const { age_seconds: ageB, ...restB } = b
+  return shownAge(ageA) === shownAge(ageB) && sameShallow(restA, restB)
+}
+
+/*
+ * One store for the `radar-targets` event (ADR 0215; lib/telemetry-store.ts),
+ * sent up to every two seconds. A target or radar that reads the same keeps
+ * its object, and a tick that changes nothing keeps the snapshot.
+ */
+function applyRadarTargets(previous: RadarTargetsValue, raw: string): TelemetryUpdate<RadarTargetsValue> | null {
+  let data: RadarTargetsResponse
+  try {
+    data = JSON.parse(raw) as RadarTargetsResponse
+  } catch (err) {
+    console.error('Failed to parse radar targets event:', err)
+    return null
+  }
+  const radarList = Array.isArray(data.radars) ? data.radars : []
+  const targetList = Array.isArray(data.targets) ? data.targets : []
+  const prior = previous.received ? previous : null
+  const radars = keepUnchangedItems(prior?.radars ?? null, radarList.map(sanitizeRadar).filter((r): r is RadarInfo => r !== null), (r) => r.id, sameShallow)
+  const targets = keepUnchangedItems(prior?.targets ?? null, targetList.map(sanitizeTarget).filter((t): t is RadarTarget => t !== null), (t) => t.id, sameTarget)
+  // An unrecognised source string fails closed to 'disabled' rather than
+  // propagating an unknown value the tile has no treatment for.
+  const source: RadarSource = isRadarSource(data.source) ? data.source : 'disabled'
+  if (prior && radars === prior.radars && targets === prior.targets && source === prior.source) return null
+  return { state: { received: true, targets, radars, source } }
+}
+
+// Read at start, not at import: a module that only imports this one's
+// helpers or types never touches the stream.
+const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
+
+const store = createTelemetryStore(listenToStream, 'radar-targets', NOT_RECEIVED, applyRadarTargets)
+
+/** Starts the store on mount without re-rendering the caller on any tick. AppShell calls this once. */
+export const useRetainRadarTargets = store.useRetain
+
+const selectAll = (state: RadarTargetsValue) => state
+
+/** The targets, the radars and the source, `loading` until the first event. */
 export function useRadarTargets() {
-  const [targets, setTargets] = useState<RadarTarget[]>([])
-  const [radars, setRadars] = useState<RadarInfo[]>([])
-  const [source, setSource] = useState<RadarSource>('disabled')
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const applyRadarTargets = (payload: unknown) => {
-      try {
-        const data = payload as RadarTargetsResponse
-        const radarList = Array.isArray(data.radars) ? data.radars : []
-        const targetList = Array.isArray(data.targets) ? data.targets : []
-
-        setRadars(radarList.map(sanitizeRadar).filter((r): r is RadarInfo => r !== null))
-        setTargets(targetList.map(sanitizeTarget).filter((t): t is RadarTarget => t !== null))
-        // An unrecognised source string fails closed to 'disabled' rather
-        // than propagating an unknown value the tile has no treatment for.
-        setSource(isRadarSource(data.source) ? data.source : 'disabled')
-      } catch (err) {
-        console.error('Failed to process radar targets:', err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    return subscribeTelemetry('radar-targets', (raw) => {
-      applyRadarTargets(JSON.parse(raw))
-    })
-  }, [])
-
-  return { targets, radars, source, loading }
+  const state = store.useSelector(selectAll)
+  return useMemo(() => ({
+    targets: state.targets,
+    radars: state.radars,
+    source: state.source,
+    loading: !state.received,
+  }), [state])
 }

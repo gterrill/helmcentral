@@ -60,27 +60,11 @@ vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mo
     gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false,
   })))
 
-vi.mock('@/hooks/use-electrical-state', () => ({
-  useElectricalState: () => electricalStateMock,
-}))
+vi.mock('@/hooks/use-electrical-state', async () =>
+  (await import('./electrical-state-mock')).electricalStateModule(() => electricalStateMock))
 
-vi.mock('@/hooks/use-solar-state', () => ({
-  useSolarState: () => ({
-    currentW: null,
-    todayKWh: null,
-    yesterdayKWh: null,
-    peakTodayW: null,
-    controllers: [],
-  }),
-}))
 
-vi.mock('@/hooks/use-nearby-vessels', () => ({
-  useNearbyVessels: () => ({ vessels: [], loading: false }),
-}))
 
-vi.mock('@/hooks/use-radar-targets', () => ({
-  useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
-}))
 
 vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
     active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
@@ -94,9 +78,6 @@ vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mo
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-vi.mock('@/hooks/use-tanks-state', () => ({
-  useTanksState: () => ({ tanks: [], loading: false }),
-}))
 
 vi.mock('@/hooks/use-tide-today', () => ({
   useTideToday: () => ({
