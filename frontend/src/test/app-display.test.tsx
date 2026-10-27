@@ -682,6 +682,29 @@ describe('App at /display/<slug> keeps every page of the feed mounted', () => {
     expect(screen.queryByTestId('display-anchor-watch-isdark')).not.toBeInTheDocument()
   })
 
+  it('still draws the board, empty, when ?page= names a page and the wall has none', () => {
+    mockPagesState.pages = []
+    window.history.replaceState({}, '', '/display/flybridge?page=gone')
+    render(<App />)
+    const inner = screen.getByTestId('display-shell-inner')
+    expect(inner.querySelector('[data-wall-page]')).toBeNull()
+    expect(inner.querySelector('.flex.flex-col.gap-4.bg-background')).not.toBeNull()
+  })
+
+  it('shows a page, not a black screen, when ?page= names a page that does not exist', () => {
+    window.history.replaceState({}, '', '/display/flybridge?page=gone')
+    render(<App />)
+    const pagesInDom = Array.from(document.querySelectorAll('[data-wall-page]'))
+    expect(pagesInDom.some((el) => !el.hasAttribute('inert'))).toBe(true)
+  })
+
+  it('says so when the display has no pages in its feed', () => {
+    mockPagesState.pages = []
+    window.history.replaceState({}, '', '/display/flybridge')
+    render(<App />)
+    expect(screen.getByText(/No pages are assigned to Flybridge/)).toBeInTheDocument()
+  })
+
   it('pins one page with ?page= and mounts only that one', () => {
     window.history.replaceState({}, '', '/display/flybridge?page=p1')
     render(<App />)

@@ -1714,7 +1714,6 @@ function AppShell() {
     )
   }
 
-  const dashboardGrid = renderBoard(activePage, true)
 
   const renderPanelFallback = (label: string) => (
     <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-muted-foreground">
@@ -2048,11 +2047,17 @@ function AppShell() {
           </div>
         ) : (
           <>
-            <WallPageStack
-              pages={wallPages}
-              activeId={activePageId}
-              renderPage={(wallPage) => renderBoard(wallPage, false)}
-            />
+            {activePage ? (
+              <WallPageStack
+                pages={wallPages}
+                activeId={activePage.id}
+                renderPage={(wallPage) => renderBoard(wallPage, false)}
+              />
+            ) : (
+              // No page to show yet (boot, a stale ?page=): the empty board,
+              // as before, rather than a stack with nothing visible.
+              renderBoard(null, false)
+            )}
             {pagesError && <RefreshFailedOverlay reason={pagesError} />}
           </>
         )}
@@ -2478,7 +2483,7 @@ function AppShell() {
                 <>
                   {pagesError && pages.length > 0 && <RefreshFailedOverlay reason={pagesError} onRetry={() => { void refetchPages() }} />}
                   {pagesError && pages.length === 0 && <LoadError reason={pagesError} hasRows={false} onRetry={() => { void refetchPages() }} className="px-1 pb-2" />}
-                  {dashboardGrid}
+                  {renderBoard(activePage, true)}
                 </>
               ) : (
                 <div className="h-full min-h-0 overflow-y-auto rounded-lg border bg-card p-4">
