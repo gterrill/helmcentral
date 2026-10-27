@@ -1,8 +1,10 @@
-import { memo, useCallback, useState } from 'react'
+import { memo, useCallback, useState, type ComponentProps } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { apiRequest } from '@/lib/api-query'
+import { useElectricalFields, useElectricalSelector, type ElectricalStateValue } from '@/hooks/use-electrical-state'
+import { useVesselFields } from '@/hooks/use-vessel-state'
 
 interface GeneratorTileProps {
   /** Opens Settings, SignalK, Roles; absent on the wall display, where it is plain text. */
@@ -271,4 +273,45 @@ export const GeneratorTile = memo(function GeneratorTile({
       )}
     </Tile>
   )
+})
+
+const GENERATOR_FIELDS = ['generatorState', 'generatorManualStart', 'generatorManualStartTimer', 'generatorRunningByCondition', 'generatorRuntime'] as const
+
+const GENERATOR_ELECTRICAL_FIELDS = ['generatorRealPowerW', 'generatorConfigured', 'generatorNone'] as const
+
+interface BatteryAtFinish {
+  batterySocPercent: number | null
+  batteryRatePercentPerHour: number | null
+}
+
+const NO_BATTERY_AT_FINISH: BatteryAtFinish = { batterySocPercent: null, batteryRatePercentPerHour: null }
+
+/**
+ * The Generator tile: its own state from vessel state, its power and its role
+ * from the electrical stream.
+ *
+ * The tile uses the battery for one figure only, "Battery at Finish" during a
+ * timed manual run, rounded to a whole percent (projectSocAtFinish). So it
+ * reads the state of charge and the rate only while a timed run is set, and
+ * keeps the pair it has while the rounded figure holds. The bank's figures
+ * move on nearly every electrical tick, and outside a timed run the tile shows
+ * none of them.
+ */
+export const LiveGeneratorTile = memo(function LiveGeneratorTile(props: Omit<ComponentProps<typeof GeneratorTile>,
+  (typeof GENERATOR_FIELDS)[number] | (typeof GENERATOR_ELECTRICAL_FIELDS)[number] | keyof BatteryAtFinish>) {
+  const generator = useVesselFields(GENERATOR_FIELDS)
+  const electrical = useElectricalFields(GENERATOR_ELECTRICAL_FIELDS)
+  const timer = generator.generatorManualStart ? generator.generatorManualStartTimer : 0
+  const selectBattery = useCallback((state: ElectricalStateValue): BatteryAtFinish => (
+    timer > 0 ? { batterySocPercent: state.batterySocPercent, batteryRatePercentPerHour: state.batteryRatePercentPerHour } : NO_BATTERY_AT_FINISH
+  ), [timer])
+  const sameAtFinish = useCallback((a: BatteryAtFinish, b: BatteryAtFinish) => {
+    const at = (x: BatteryAtFinish) => {
+      const projected = projectSocAtFinish(x.batterySocPercent, x.batteryRatePercentPerHour, timer)
+      return projected === null ? null : Math.round(projected)
+    }
+    return at(a) === at(b)
+  }, [timer])
+  const battery = useElectricalSelector(selectBattery, sameAtFinish)
+  return <GeneratorTile {...props} {...generator} {...electrical} {...battery} />
 })

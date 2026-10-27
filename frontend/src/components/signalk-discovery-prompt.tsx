@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, memo } from 'react'
 
 import {
   AlertDialog,
@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { useTelemetryStatus } from '@/hooks/use-telemetry-stream'
 import { useSignalKDiscovery, type DiscoveredServer } from '@/hooks/use-signalk-discovery'
+import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 
 const DISMISSED_KEY = 'helmcentral.signalk-discovery-dismissed-for'
 const UNCONFIGURED_KEY = '__unconfigured__'
@@ -234,3 +235,11 @@ export function SignalKDiscoveryPrompt({ vesselStateSource }: SignalKDiscoveryPr
     </AlertDialog>
   )
 }
+
+const selectSource = (state: VesselStateValue) => state.source
+
+/** Offers to look for a SignalK server that has moved, from which source the server answered. */
+export const LiveSignalKDiscoveryPrompt = memo(function LiveSignalKDiscoveryPrompt() {
+  const vesselStateSource = useVesselStateSelector(selectSource)
+  return <SignalKDiscoveryPrompt vesselStateSource={vesselStateSource} />
+})

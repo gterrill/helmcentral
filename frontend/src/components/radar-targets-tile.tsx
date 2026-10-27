@@ -1,9 +1,9 @@
 import { Radar } from 'lucide-react'
-import { memo } from 'react'
+import { memo, type ComponentProps } from 'react'
 
 import { Tile } from '@/components/ui/tile'
-import type { DistanceUnits } from '@/config/app-config'
-import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
+import { type DistanceUnits } from '@/config/app-config'
+import { useRadarTargets, type RadarInfo, type RadarSource, type RadarTarget } from '@/hooks/use-radar-targets'
 import { cn } from '@/lib/utils'
 
 interface RadarTargetsTileProps {
@@ -128,4 +128,9 @@ export const RadarTargetsTile = memo(function RadarTargetsTile({
       </div>
     </Tile>
   )
+})
+
+/** The Radar Targets list: the radar stream. */
+export const LiveRadarTargetsTile = memo(function LiveRadarTargetsTile(props: Pick<ComponentProps<typeof RadarTargetsTile>, 'distanceUnits'>) {
+  return <RadarTargetsTile {...props} {...useRadarTargets()} />
 })

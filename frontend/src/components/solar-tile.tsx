@@ -1,7 +1,7 @@
 import { Sun } from 'lucide-react'
 import { memo } from 'react'
 import { Tile } from '@/components/ui/tile'
-import type { SolarController } from '@/hooks/use-solar-state'
+import { useSolarState, type SolarController } from '@/hooks/use-solar-state'
 import { formatDataAge, isStale } from '@/lib/staleness'
 
 interface SolarTileProps {
@@ -163,4 +163,9 @@ export const SolarTile = memo(function SolarTile({
       </div>
     </Tile>
   )
+})
+
+/** The Solar tile: the whole solar stream. */
+export const LiveSolarTile = memo(function LiveSolarTile() {
+  return <SolarTile {...useSolarState()} />
 })

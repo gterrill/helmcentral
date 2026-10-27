@@ -1,11 +1,11 @@
-import { createContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { createContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode, type ComponentProps } from 'react'
 import { DisplayStatusBadge } from '@/components/display-status-badge'
 import { usePixelShift } from '@/hooks/use-pixel-shift'
 import { useScreenWakeLock } from '@/hooks/use-screen-wake-lock'
 import { cn } from '@/lib/utils'
 import { useDisplayViewport } from '@/hooks/use-display-viewport'
 import { displayFit, displayRotatedOffset, displayScale, type Display } from '@/lib/displays'
-import type { ActiveAlarm } from '@/hooks/use-alarms'
+import { samePillAlarm, useAlarmListComparedOn, type ActiveAlarm } from '@/hooks/use-alarms'
 
 interface DisplayShellProps {
   display: Display
@@ -260,4 +260,14 @@ export function DisplayShell({ display, alarms, children, overlay, preview = fal
       </div>
     </>
   )
+}
+
+/**
+ * The wall display's frame, for its alarm pill. The pages inside it are
+ * `children`, an element the shell built, so an alarm tick that re-renders
+ * this frame hands React the same element and the pages are not re-rendered.
+ */
+export function LiveDisplayShell(props: Omit<ComponentProps<typeof DisplayShell>, 'alarms'>) {
+  const alarms = useAlarmListComparedOn(samePillAlarm)
+  return <DisplayShell {...props} alarms={alarms} />
 }

@@ -20,15 +20,10 @@ import {
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
-import {
-  LiveAlarmBanner,
-  LiveAlarmsDrawer,
-  LiveAnchorWatchDrawer,
-  LiveDisplayShell,
-  LiveForecastPage,
-  LiveRadarDrawer,
-  LiveSignalKDiscoveryPrompt,
-} from '@/components/live-surfaces'
+import { LiveAlarmBanner } from '@/components/live-alarm-banner'
+import { LiveDisplayShell } from '@/components/display-shell'
+import { LiveAlarmsDrawer, LiveAnchorWatchDrawer, LiveForecastPage, LiveRadarDrawer } from '@/components/live-drawers'
+import { LiveSignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { WidgetHost, type WidgetHostActions } from '@/components/widget-host'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { SetupLine } from '@/components/setup-line'

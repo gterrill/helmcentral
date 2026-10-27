@@ -1,15 +1,16 @@
-import { memo } from 'react'
+import { memo, type ComponentProps } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import { BulletGauge } from '@/components/ui/bullet-gauge'
-import type { WeatherToday } from '@/hooks/use-weather-today'
-import type { WeatherForecastDay, WeatherNextHour } from '@/hooks/use-weather-forecast'
-import type { DistanceUnits } from '@/config/app-config'
+import { useWeatherToday, type WeatherToday } from '@/hooks/use-weather-today'
+import { useWeatherForecast, type WeatherForecastDay, type WeatherNextHour } from '@/hooks/use-weather-forecast'
+import { FORECAST_REFRESH_SECONDS, type DistanceUnits } from '@/config/app-config'
 import { next24hWindBand, todayTempBand } from '@/lib/forecast-bands'
 import { computeNowcastStatus, nowcastIntensityLabel, type NowcastBar } from '@/lib/nowcast'
 import { fahrenheitToCelsius } from '@/lib/units'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { compassPointFor } from '@/lib/format'
+import { useVesselFields } from '@/hooks/use-vessel-state'
 
 export interface CurrentConditionsTileProps {
   depth: number | null
@@ -317,5 +318,27 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
         <p className={`truncate text-xs text-muted-foreground ${nowcast.showChart ? 'mt-1' : ''}`}>{nowcast.line}</p>
       </div>
     </Tile>
+  )
+})
+
+const CONDITIONS_FIELDS = ['depth', 'depthLastUpdateAgeS', 'windSpeedTrueKts', 'windDirectionTrueDeg', 'maxGustTrueKts'] as const
+
+/** Current Conditions: depth and true wind from vessel state, the weather and the forecast from their polls. */
+export const LiveCurrentConditionsTile = memo(function LiveCurrentConditionsTile(props: Pick<ComponentProps<typeof CurrentConditionsTile>, 'distanceUnits'>) {
+  const { depth, depthLastUpdateAgeS, windSpeedTrueKts, windDirectionTrueDeg, maxGustTrueKts } = useVesselFields(CONDITIONS_FIELDS)
+  const { weather } = useWeatherToday(FORECAST_REFRESH_SECONDS)
+  const { forecast, nextHour } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  return (
+    <CurrentConditionsTile
+      {...props}
+      weather={weather}
+      forecast={forecast}
+      nextHour={nextHour}
+      depth={depth}
+      depthLastUpdateAgeS={depthLastUpdateAgeS}
+      windSpeedTrueKts={windSpeedTrueKts}
+      windDirectionTrueDeg={windDirectionTrueDeg}
+      maxTrueWindKts1h={maxGustTrueKts['1h']}
+    />
   )
 })

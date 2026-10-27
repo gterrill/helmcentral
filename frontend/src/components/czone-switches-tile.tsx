@@ -1,8 +1,8 @@
 import { Zap } from 'lucide-react'
-import { memo } from 'react'
+import { memo, type ComponentProps } from 'react'
 
 import { Tile } from '@/components/ui/tile'
-import type { CZoneSwitch } from '@/hooks/use-czone-switches'
+import { useCZoneSwitches, type CZoneSwitch } from '@/hooks/use-czone-switches'
 import { cn } from '@/lib/utils'
 
 type CZoneSwitchesTileProps = {
@@ -173,4 +173,16 @@ export const CZoneSwitchesTile = memo(function CZoneSwitchesTile({ switches, loa
       </div>
     </Tile>
   )
+})
+
+/** How often the CZone tile polls its switches, in seconds. */
+const CZONE_POLL_SECONDS = 5
+
+/**
+ * The CZone tile: the switches, polled only while the tile is on screen. A
+ * failed poll keeps the last list beside the error rather than blanking it.
+ */
+export const LiveCZoneSwitchesTile = memo(function LiveCZoneSwitchesTile(props: Pick<ComponentProps<typeof CZoneSwitchesTile>, 'readOnly'>) {
+  const { switches, loading, pending, error, toggleSwitch } = useCZoneSwitches(CZONE_POLL_SECONDS)
+  return <CZoneSwitchesTile {...props} switches={switches} loading={loading} pending={pending} error={error} onToggle={toggleSwitch} />
 })

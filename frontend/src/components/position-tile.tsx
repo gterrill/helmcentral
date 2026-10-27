@@ -2,6 +2,9 @@ import { memo } from 'react'
 import { formatCoordinate, formatHeading } from '@/lib/format'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
+import { usePlaceName } from '@/hooks/use-place-name'
+import { useVesselFields } from '@/hooks/use-vessel-state'
 
 export interface PositionTileProps {
   latitude: number | null
@@ -77,4 +80,16 @@ export const PositionTile = memo(function PositionTile({
       </div>
     </Tile>
   )
+})
+
+const POSITION_FIELDS = [
+  'positionLastUpdateAgeS', 'latitude', 'longitude', 'headingTrue',
+  'gnssValidationState', 'gnssQualityIndicator', 'gnssHdop', 'gnssValidationReason', 'gnssSatellites',
+] as const
+
+/** The Position tile: the fix and its quality, and the place name the server looks up for it. */
+export const LivePositionTile = memo(function LivePositionTile() {
+  const { positionLastUpdateAgeS, ...fix } = useVesselFields(POSITION_FIELDS)
+  const placeName = usePlaceName(fix.latitude !== null && fix.longitude !== null, PLACE_NAME_REFRESH_SECONDS)
+  return <PositionTile lastUpdateAgeS={positionLastUpdateAgeS} {...fix} placeName={placeName} />
 })

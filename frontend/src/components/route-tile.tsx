@@ -1,9 +1,10 @@
 import { Navigation } from 'lucide-react'
 import { memo } from 'react'
 import { Tile } from '@/components/ui/tile'
-import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
+import { useRouteActivation, type ActiveRouteStatus } from '@/hooks/use-route-activation'
 import { etaToDestination, etaToRouteEnd } from '@/lib/next-waypoint'
 import { formatEtaHours, formatNm } from '@/lib/route-calc'
+import { useVesselFields } from '@/hooks/use-vessel-state'
 
 interface RouteTileProps {
   status: ActiveRouteStatus
@@ -75,4 +76,13 @@ export const RouteTile = memo(function RouteTile({ status, latitude, longitude, 
       </Tile>
     </div>
   )
+})
+
+const ROUTE_FIELDS = ['latitude', 'longitude', 'speedOverGroundKts'] as const
+
+/** The Route tile: what SignalK is navigating, from its poll, and the fix and speed from vessel state. */
+export const LiveRouteTile = memo(function LiveRouteTile() {
+  const { status } = useRouteActivation()
+  const { latitude, longitude, speedOverGroundKts } = useVesselFields(ROUTE_FIELDS)
+  return <RouteTile status={status} latitude={latitude} longitude={longitude} speedKts={speedOverGroundKts ?? 0} />
 })

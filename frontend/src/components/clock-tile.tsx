@@ -1,9 +1,16 @@
-import { memo } from 'react'
+import { memo, useCallback, useMemo } from 'react'
 import { Sunrise, Sunset } from 'lucide-react'
 
 import { Tile } from '@/components/ui/tile'
 import { formatClock, formatDate, formatWeekday, isSameLocalDate } from '@/lib/vessel-time'
 import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
+import { FORECAST_REFRESH_SECONDS, PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
+import { usePlaceName } from '@/hooks/use-place-name'
+import { useRouteActivation, type ActiveRouteStatus } from '@/hooks/use-route-activation'
+import { useVesselClock } from '@/hooks/use-vessel-clock'
+import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+import { useForecastSun } from '@/hooks/use-weather-forecast'
+import { computeClockTripEta } from '@/lib/next-waypoint'
 
 /**
  * The clock tile's trip ETA (ADR 0092, ADR 0125): the whole trip's arrival,
@@ -45,7 +52,7 @@ function hhmm(timePart: string) {
 /**
  * The wall display's clock page (ADR 0092, ADR 0125): time, date, sun and
  * moon, and where the boat is and where it's headed. It takes the boat's time
- * as props; LiveClockTile (live-surfaces.tsx) reads the clock, so this is the
+ * as props; LiveClockTile (below) reads the clock, so this is the
  * one tile on the wall that re-renders every second and every other tile
  * stays clear of it (ADR 0218).
  *
@@ -148,4 +155,53 @@ export const ClockTile = memo(function ClockTile({
       </div>
     </Tile>
   )
+})
+
+interface ClockInputs {
+  hasFix: boolean
+  latitude: number | null
+  longitude: number | null
+  speedOverGroundKts: number | null
+}
+
+function sameClockInputs(a: ClockInputs, b: ClockInputs): boolean {
+  return a.hasFix === b.hasFix && a.latitude === b.latitude && a.longitude === b.longitude && a.speedOverGroundKts === b.speedOverGroundKts
+}
+
+/** Whether there is a trip to time: an active route, or a go-to the Course API names. */
+function hasTrip(status: ActiveRouteStatus): boolean {
+  return status.state === 'active' || (status.state === 'inactive' && status.destination !== null)
+}
+
+/**
+ * The clock tile: today's sun and moon from the forecast, the place name, and
+ * the trip ETA (ADR 0092, ADR 0125).
+ * computeClockTripEta reports to the final waypoint of the route SignalK is
+ * navigating, or to the Course API's bare next point when a chartplotter
+ * go-to has no route behind it.
+ *
+ * The ETA needs the fix and speed only while there is a trip. Without one the
+ * tile reads just whether there is a fix, which is all the place name asks,
+ * so a clock on a boat at anchor does not redraw on every fix. The wrapper
+ * also reads the boat's clock (useVesselClock), so it re-renders each second,
+ * and so does the tile it draws; nothing else on the page does.
+ */
+export const LiveClockTile = memo(function LiveClockTile() {
+  const { status: routeStatus } = useRouteActivation()
+  const { sunriseTime, sunsetTime, moonPhase } = useForecastSun(FORECAST_REFRESH_SECONDS)
+  const trip = hasTrip(routeStatus)
+  const select = useCallback((state: VesselStateValue): ClockInputs => ({
+    hasFix: state.latitude !== null && state.longitude !== null,
+    latitude: trip ? state.latitude : null,
+    longitude: trip ? state.longitude : null,
+    speedOverGroundKts: trip ? state.speedOverGroundKts : null,
+  }), [trip])
+  const { hasFix, latitude, longitude, speedOverGroundKts } = useVesselStateSelector(select, sameClockInputs)
+  const placeName = usePlaceName(hasFix, PLACE_NAME_REFRESH_SECONDS)
+  const tripEta = useMemo(
+    () => computeClockTripEta(routeStatus, latitude, longitude, speedOverGroundKts, new Date()),
+    [routeStatus, latitude, longitude, speedOverGroundKts],
+  )
+  const { now, clock, timeZone } = useVesselClock()
+  return <ClockTile sunriseTime={sunriseTime} sunsetTime={sunsetTime} moonPhase={moonPhase} placeName={placeName} tripEta={tripEta} now={now} clock={clock} timeZone={timeZone} />
 })

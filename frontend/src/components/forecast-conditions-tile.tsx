@@ -1,13 +1,13 @@
-import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 
 import { Tile } from '@/components/ui/tile'
 import { ChartUnavailableMessage } from '@/components/chart-tooltip'
 import { WeatherConditionIcon } from '@/components/forecast/weather-condition-icon'
 import { SEA_STATE_PLOT_INSET } from '@/lib/sea-state-geometry'
 import { buildSeaStateSeries } from '@/lib/sea-state-series'
-import type { WeatherForecastDay } from '@/hooks/use-weather-forecast'
-import type { WaveForecastDay } from '@/hooks/use-wave-forecast'
-import type { DistanceUnits } from '@/config/app-config'
+import { useWeatherForecast, type WeatherForecastDay } from '@/hooks/use-weather-forecast'
+import { useWaveForecast, type WaveForecastDay } from '@/hooks/use-wave-forecast'
+import { FORECAST_REFRESH_SECONDS, type DistanceUnits } from '@/config/app-config'
 import { fahrenheitToCelsius } from '@/lib/units'
 
 export interface ForecastConditionsTileProps {
@@ -198,4 +198,11 @@ export const ForecastConditionsTile = memo(function ForecastConditionsTile({
       </div>
     </Tile>
   )
+})
+
+/** Forecast Conditions: the coming days from the weather and wave forecasts. */
+export const LiveForecastConditionsTile = memo(function LiveForecastConditionsTile(props: Pick<ComponentProps<typeof ForecastConditionsTile>, 'units'>) {
+  const { forecast } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  const { days, loading, error } = useWaveForecast(FORECAST_REFRESH_SECONDS)
+  return <ForecastConditionsTile {...props} forecast={forecast} waveForecastDays={days} waveLoading={loading} waveError={error} />
 })

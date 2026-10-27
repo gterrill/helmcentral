@@ -1,9 +1,13 @@
-import { memo } from 'react'
+import { memo, type ComponentProps } from 'react'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { hoursToBand, socSeverity, type SocBands } from '@/lib/soc-bands'
 import { severityFill, severityTextClass } from '@/lib/severity'
 import { projectSocAtDawn, type DawnEstimate, type OvernightProjection } from '@/lib/soc-projection'
+import { useAlarmRuleList } from '@/hooks/use-alarm-rules'
+import { useElectricalFields } from '@/hooks/use-electrical-state'
+import { useOvernightProjection } from '@/hooks/use-overnight-projection'
+import { useSocBands } from '@/hooks/use-soc-bands'
 
 export interface BatteryPowerTileProps {
   batterySocPercent: number | null
@@ -488,4 +492,23 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
       </div>
     </Tile>
   )
+})
+
+const BATTERY_FIELDS = [
+  'batterySocPercent', 'socPath', 'chargingCurrentA', 'chargingPowerW', 'solarOutputW', 'acOutputW', 'dc12vPowerW',
+  'voltageReadoutV', 'voltageReadoutLabel', 'charger0CurrentA', 'charger0AcIn1CurrentA', 'charger0ChargingMode',
+  'charger0Error', 'batteryRatePercentPerHour', 'timeToGoHours', 'lastUpdateAgeS', 'houseBankConfigured', 'houseBankUnresolved',
+] as const
+
+/**
+ * Battery & Power: the electrical stream, the overnight projection from its
+ * poll, and the SoC bands from the alarm rules on the house bank's path. The rules come from the same query the Alarms
+ * page edits, so a rule saved there recolours the bar without a reload.
+ */
+export const LiveBatteryPowerTile = memo(function LiveBatteryPowerTile(props: Pick<ComponentProps<typeof BatteryPowerTile>, 'onOpenRoles'>) {
+  const { socPath, ...electrical } = useElectricalFields(BATTERY_FIELDS)
+  const rules = useAlarmRuleList()
+  const socBands = useSocBands(rules, socPath)
+  const { projection: overnight } = useOvernightProjection()
+  return <BatteryPowerTile {...props} {...electrical} socBands={socBands} overnight={overnight} />
 })
