@@ -49,6 +49,12 @@ describe('RadarTargetsTile', () => {
     expect(screen.getByText('--')).toBeInTheDocument()
   })
 
+  it('renders -- and claims no source before the first radar event', () => {
+    render(<RadarTargetsTile targets={[]} radars={[]} source={null} loading distanceUnits="metric" />)
+    expect(screen.getByText('--')).toBeInTheDocument()
+    expect(screen.queryByText('RADAR OFFLINE')).not.toBeInTheDocument()
+  })
+
   it('renders RADAR OFFLINE in the alert treatment when mayara is unreachable', () => {
     render(<RadarTargetsTile targets={[]} radars={oneRadar} source="mayara-unreachable" loading={false} distanceUnits="metric" />)
     const offline = screen.getByText('RADAR OFFLINE')

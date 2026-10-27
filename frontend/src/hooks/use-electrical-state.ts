@@ -1,6 +1,5 @@
-import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { shownAge } from '@/lib/staleness'
-import { createTelemetryStore, keepUnchanged, sameShallow, useStoreFields, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, keepUnchanged, sameShallow, useStoreFields, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 export interface AlternatorInstance {
   currentA: number | null
@@ -189,23 +188,12 @@ function sameField(field: ElectricalStateField, a: unknown, b: unknown): boolean
  * rarely do, so the Alternator and Generator tiles sit still while the
  * Battery & Power tile follows the bank.
  */
-function applyElectricalState(previous: ElectricalStateValue, raw: string): TelemetryUpdate<ElectricalStateValue> | null {
-  let data: ElectricalState
-  try {
-    data = JSON.parse(raw) as ElectricalState
-  } catch (err) {
-    console.error('Failed to parse electrical state event:', err)
-    return null
-  }
-  const next = keepUnchanged(previous, parseElectricalState(data), sameField)
+function applyElectricalState(previous: ElectricalStateValue, data: unknown): TelemetryUpdate<ElectricalStateValue> | null {
+  const next = keepUnchanged(previous, parseElectricalState(data as ElectricalState), sameField)
   return next === null ? null : { state: next }
 }
 
-// Read at start, not at import: a module that only imports this one's
-// helpers or types never touches the stream.
-const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
-
-const store = createTelemetryStore(listenToStream, 'electrical-state', INITIAL_ELECTRICAL_STATE, applyElectricalState)
+const store = createTelemetryStore('electrical-state', INITIAL_ELECTRICAL_STATE, applyElectricalState)
 
 /** One slice of the electrical state; see TelemetryStore.useSelector. */
 export const useElectricalSelector = store.useSelector

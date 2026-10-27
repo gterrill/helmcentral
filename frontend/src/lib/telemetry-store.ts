@@ -1,5 +1,12 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { sameShallow } from '@/lib/same-value'
+import { onTelemetryTestReset } from '@/lib/test-reset'
+
+export { sameJSON, sameShallow } from '@/lib/same-value'
+export { onTelemetryTestReset, resetTelemetryStoresForTest } from '@/lib/test-reset'
+
 /**
  * One live store per telemetry event (ADR 0215): one subscription and one
  * parse per tick, however many components read it, with selectors so each
@@ -12,7 +19,9 @@ import { useCallback, useRef, useSyncExternalStore } from 'react'
  * late (ADR 0218), so a store whose first reader mounts after the server's
  * seed starts from the seed, not from silence. Before the first event the
  * snapshot is the store's `initial`, which each store makes an honest
- * "unknown".
+ * "unknown", and the store knows whether it has heard the server yet
+ * (`useHeardSelector`), so no store needs a `received` field or a null that means
+ * "not yet".
  */
 
 /**
@@ -39,43 +48,45 @@ export interface TelemetryStore<S> {
    * a fresh function on every render.
    */
   useSelector: <T>(select: (state: S) => T, isEqual?: (a: T, b: T) => boolean) => T
+  /**
+   * `useSelector` that reads null until the store has had its first event
+   * (since it started or since the last test reset). Before that `initial` is
+   * a placeholder, not a reading: the reader shows dashes or a loading state,
+   * never a value. The flag turns true on any event that decodes to an
+   * object, including one that changes nothing, and every listener, keyed
+   * ones included, hears the flip. One subscription; the null and the
+   * selection share one cache, so the result keeps its reference while the
+   * state holds.
+   */
+  useHeardSelector: <T>(select: (state: S) => T, isEqual?: (a: T, b: T) => boolean) => T | null
 }
 
-const resets = new Set<() => void>()
-
 /**
- * Returns every store to its initial state and drops its subscription, so the
- * next reader starts it afresh. Tests only: src/test/setup.ts calls it after
- * each test, because a store otherwise lives as long as the module.
- */
-export function resetTelemetryStoresForTest(): void {
-  for (const reset of resets) reset()
-}
-
-/**
- * Registers other module-level live state (the autopilot's pending commands,
- * the shared trail pollers) for the same reset after each test.
- */
-export function onTelemetryTestReset(reset: () => void): void {
-  resets.add(reset)
-}
-
-/** use-telemetry-stream.ts's subscribeTelemetry, passed in by each store. */
-export type SubscribeTelemetry = (event: string, onData: (raw: string, receivedAt: number) => void) => () => void
-
-/**
- * A store for one event. `subscribeTelemetry` is passed in rather than
- * imported here, so this module carries no stream of its own and the test
- * setup can reset stores without loading the real stream ahead of a test's
- * mock of it.
+ * A store for one event. The factory owns everything the nine stores used to
+ * repeat: it finds the stream, decodes each frame with JSON.parse, and tracks
+ * whether the first event has arrived. A frame that is not JSON, or is JSON
+ * but not an object (null, a number, a string, an array), is logged with the
+ * event name, once per frame, and changes nothing, the heard flag included: no
+ * default stands in for it.
+ *
+ * `apply` gets the decoded value (untyped on the wire, so the store casts it
+ * to the shape it expects, as it did after its own JSON.parse), the previous
+ * state and `receivedAt`, and returns the update or null for no change.
+ *
+ * `subscribeTelemetry` is imported here, not passed in. A test that spies on
+ * it with vi.mock sees every store's call. That holds because nothing
+ * src/test/setup.ts loads reaches this module: the reset registry is in
+ * test-reset.ts and the equality helpers in same-value.ts, neither of which
+ * imports the stream, so the real stream is not pulled in ahead of a test
+ * file's mock of it.
  */
 export function createTelemetryStore<S>(
-  subscribeTelemetry: SubscribeTelemetry,
   event: string,
   initial: S,
-  apply: (previous: S, raw: string, receivedAt: number) => TelemetryUpdate<S> | null,
+  apply: (previous: S, data: unknown, receivedAt: number) => TelemetryUpdate<S> | null,
 ): TelemetryStore<S> {
   let snapshot = initial
+  let heard = false
   let unsubscribeStream: (() => void) | null = null
   const listeners = new Set<() => void>()
   const keyListeners = new Map<string, Set<() => void>>()
@@ -84,14 +95,32 @@ export function createTelemetryStore<S>(
   // listener that is replayed an older payload is told when it really came.
   // A stream double that passes none means now.
   function onEvent(raw: string, receivedAt: number = performance.now()): void {
-    const update = apply(snapshot, raw, receivedAt)
-    if (update === null) return
-    snapshot = update.state
-    const toCall = new Set(listeners)
-    for (const key of update.changed ?? []) {
-      const set = keyListeners.get(key)
-      if (set) for (const listener of set) toCall.add(listener)
+    let data: unknown
+    try {
+      data = JSON.parse(raw)
+    } catch (err) {
+      console.error(`Failed to parse ${event} event:`, err)
+      return
     }
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      console.error(`Ignored ${event} event: expected a JSON object, got ${data === null ? 'null' : Array.isArray(data) ? 'an array' : typeof data}`)
+      return
+    }
+    const update = apply(snapshot, data, receivedAt)
+    const firstEvent = !heard
+    heard = true
+    if (update === null && !firstEvent) return
+    const toCall = new Set(listeners)
+    if (update !== null) {
+      snapshot = update.state
+      for (const key of update.changed ?? []) {
+        const set = keyListeners.get(key)
+        if (set) for (const listener of set) toCall.add(listener)
+      }
+    }
+    // Hearing the server for the first time is news to every reader, keyed
+    // ones included, whatever the event changed.
+    if (firstEvent) for (const set of keyListeners.values()) for (const listener of set) toCall.add(listener)
     for (const listener of toCall) listener()
   }
 
@@ -99,10 +128,11 @@ export function createTelemetryStore<S>(
     if (unsubscribeStream === null) unsubscribeStream = subscribeTelemetry(event, onEvent)
   }
 
-  resets.add(() => {
+  onTelemetryTestReset(() => {
     unsubscribeStream?.()
     unsubscribeStream = null
     snapshot = initial
+    heard = false
   })
 
   function subscribe(listener: () => void): () => void {
@@ -146,32 +176,23 @@ export function createTelemetryStore<S>(
     return useSyncExternalStore(subscribe, getSelection)
   }
 
-  return { getSnapshot, subscribe, subscribeKeys, useSelector }
+  function useHeardSelector<T>(select: (state: S) => T, isEqual: (a: T, b: T) => boolean = Object.is): T | null {
+    const cache = useRef<{ source: S; heard: boolean; select: (state: S) => T; value: T | null } | null>(null)
+    const getSelection = useCallback((): T | null => {
+      const prev = cache.current
+      if (prev && prev.source === snapshot && prev.heard === heard && prev.select === select) return prev.value
+      const next = heard ? select(snapshot) : null
+      const value = prev && prev.value !== null && next !== null && isEqual(prev.value, next) ? prev.value : next
+      cache.current = { source: snapshot, heard, select, value }
+      return value
+    }, [select, isEqual])
+    return useSyncExternalStore(subscribe, getSelection)
+  }
+
+  return { getSnapshot, subscribe, subscribeKeys, useSelector, useHeardSelector }
 }
 
 // ── helpers the store modules share ─────────────────────────────────────────
-
-/** Structural equality for parsed JSON: objects, arrays and primitives. */
-export function sameJSON(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
-  if (Array.isArray(a) !== Array.isArray(b)) return false
-  if (Array.isArray(a)) {
-    const other = b as unknown[]
-    return a.length === other.length && a.every((item, i) => sameJSON(item, other[i]))
-  }
-  const aRecord = a as Record<string, unknown>
-  const bRecord = b as Record<string, unknown>
-  const aKeys = Object.keys(aRecord)
-  if (aKeys.length !== Object.keys(bRecord).length) return false
-  return aKeys.every((key) => key in bRecord && sameJSON(aRecord[key], bRecord[key]))
-}
-
-/** Every own key of two flat objects holds the same value (Object.is). */
-export function sameShallow<T extends object>(a: T, b: T): boolean {
-  const keys = Object.keys(a) as Array<keyof T>
-  return keys.length === Object.keys(b).length && keys.every((key) => Object.is(a[key], b[key]))
-}
 
 /**
  * The parsed state with every field that shows the same as before put back to

@@ -43,6 +43,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   or not the boat was. It now shows only the model until the boat's state
   arrives. The clock shows dashes until it has the boat's time, rather than
   the time on the screen you are using.
+- **The anchor map no longer says there's no radar before the radar has
+  reported.** When a page first opened, the greyed radar button on the anchor
+  map said no radar was configured. It now says it is waiting for radar data
+  until the first radar report arrives.
 - **The anchor watch's automatic raise notice no longer comes back on every
   reload.** After Helmcentral raised a watch on its own, opening or reloading
   the dashboard showed "Anchor watch raised automatically" again, as if it had

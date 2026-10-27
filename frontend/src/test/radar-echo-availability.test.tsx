@@ -37,6 +37,12 @@ describe('resolveRadarEchoAvailability precedence', () => {
     ).toEqual({ available: false, reason: 'No mayara radar configured' })
   })
 
+  it('makes no claim about the radar before the radar source is known', () => {
+    const result = resolveRadarEchoAvailability({ ...clear, radarSource: null, radars: [] })
+    expect(result.available).toBe(false)
+    expect(result.reason).not.toMatch(/configured|No radar found/)
+  })
+
   it('reports no radar found when the source is live but nothing was discovered', () => {
     expect(
       resolveRadarEchoAvailability({ ...clear, radarSource: 'mayara-unreachable', radars: [] }),
@@ -185,8 +191,16 @@ describe('AnchorWatchMap radar echo toggle availability', () => {
     vi.mocked(useRadarCapabilities).mockReturnValue({ capabilities: null, palette: null, error: null, loading: false })
   })
 
-  it('disables the toggle with no mayara address configured at all (the default props)', () => {
+  it('disables the toggle, claiming nothing, before the radar source is known (the default props)', () => {
     render(mapElement())
+
+    expect(radarButton()).toBeDisabled()
+    expect(radarButton()).not.toHaveAttribute('title', 'No mayara radar configured')
+    expect(radarButton()).toHaveAttribute('title', 'Waiting for radar data…')
+  })
+
+  it('disables the toggle with no mayara address configured at all', () => {
+    render(mapElement({ radarSource: 'disabled' }))
 
     expect(radarButton()).toBeDisabled()
     expect(radarButton()).toHaveAttribute('title', 'No mayara radar configured')

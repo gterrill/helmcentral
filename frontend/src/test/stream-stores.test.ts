@@ -24,6 +24,13 @@ describe('solar store', () => {
     expect(result.current.currentW).toBeNull()
   })
 
+  it('turns the empty controller list into "no controllers" once the first event says so', () => {
+    const { result } = renderHook(() => useSolarState())
+    expect(result.current.controllers).toBeNull()
+    emit('solar-state', { controllers: [] })
+    expect(result.current.controllers).toEqual([])
+  })
+
   it('keeps the snapshot when only datetime and the trend moved', () => {
     const { result } = renderHook(() => useSolarState())
     emit('solar-state', { ...live.SOLAR, trend_24h_total: [{ time: '2026-10-27T04:19:46Z', total_w: 1361.5 }] })
@@ -111,7 +118,7 @@ describe('radar store', () => {
     const { result } = renderHook(() => useRadarTargets())
     expect(result.current.loading).toBe(true)
     expect(result.current.targets).toEqual([])
-    expect(result.current.source).toBe('disabled')
+    expect(result.current.source).toBeNull()
   })
 
   it('keeps the snapshot when only datetime and a fresh target age moved', () => {

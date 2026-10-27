@@ -79,13 +79,17 @@ export interface RadarEchoAvailability {
  * otherwise read as a reason to stay disabled.
  */
 export function resolveRadarEchoAvailability(params: {
-  radarSource: RadarSource
+  /** Null until the first radar frame: the map claims neither on nor off. */
+  radarSource: RadarSource | null
   radars: RadarInfo[]
   capabilitiesError: string | null
   capabilitiesLoading: boolean
   echoEnabled: boolean
   echoStatus: RadarEchoStatus
 }): RadarEchoAvailability {
+  if (params.radarSource === null) {
+    return { available: false, reason: 'Waiting for radar data…' }
+  }
   if (params.radarSource === 'disabled') {
     return { available: false, reason: 'No mayara radar configured' }
   }
@@ -318,7 +322,7 @@ export interface AnchorWatchMapProps {
   // radarTargets, so every existing caller/test with no mayara integration
   // wired up keeps compiling untouched.
   radars?: RadarInfo[]
-  radarSource?: RadarSource
+  radarSource?: RadarSource | null
   isDarkTheme: boolean
   showImageryLayer?: boolean
   onImageryToggle?: (enabled: boolean) => void
@@ -438,7 +442,7 @@ export function AnchorWatchMap({
   aisCollisionAlarms,
   radarTargets = [],
   radars = [],
-  radarSource = 'disabled',
+  radarSource = null,
   isDarkTheme,
   showImageryLayer = false,
   onImageryToggle,
@@ -774,7 +778,7 @@ export function AnchorWatchMap({
   // has already explained why there's nothing to show, and a GET here
   // would just be wasted backend/mayara round-trips for a picture that
   // can't be drawn regardless of what it returns.
-  const radarEchoRadarId = primaryRadar && primaryRadar.transmitting && radarSource !== 'disabled' ? primaryRadar.id : null
+  const radarEchoRadarId = primaryRadar && primaryRadar.transmitting && radarSource !== null && radarSource !== 'disabled' ? primaryRadar.id : null
   const {
     capabilities: radarEchoCapabilities,
     palette: radarEchoPalette,

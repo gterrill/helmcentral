@@ -1,9 +1,8 @@
-import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { apiRequest } from '@/lib/api-query'
 import { useMemo } from 'react'
 
 import { alarmConditionSentence } from '@/lib/alarm-display'
-import { createTelemetryStore, sameJSON, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, sameJSON, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 /** SignalK's notification states (ADR 0038), worst last. */
 export const ALARM_STATES = ['normal', 'alert', 'warn', 'alarm', 'emergency'] as const
@@ -134,11 +133,11 @@ interface AlarmsPayload {
 
 /**
  * What the alarms store holds: the active list and the worst state on it.
- * `received` is false until the first alarms event, and while it is, nothing
- * may read the empty list as "all clear".
+ * Before the first alarms event it holds an empty list, which is a
+ * placeholder and not "all clear": every reader that would claim something
+ * goes through the store's useHeardSelector.
  */
 export interface AlarmsSnapshot {
-  received: boolean
   alarms: ActiveAlarm[]
   worst: AlarmState
 }
@@ -157,16 +156,10 @@ export interface AlarmsSnapshot {
  * the reading, the radar figures and the live sensors, and all of them move.
  */
 
-const NOT_RECEIVED: AlarmsSnapshot = { received: false, alarms: [], worst: 'normal' }
+const INITIAL: AlarmsSnapshot = { alarms: [], worst: 'normal' }
 
-function applyAlarmsEvent(snapshot: AlarmsSnapshot, raw: string): TelemetryUpdate<AlarmsSnapshot> | null {
-  let payload: AlarmsPayload
-  try {
-    payload = JSON.parse(raw) as AlarmsPayload
-  } catch (err) {
-    console.error('Failed to parse alarms event:', err)
-    return null
-  }
+function applyAlarmsEvent(snapshot: AlarmsSnapshot, data: unknown): TelemetryUpdate<AlarmsSnapshot> | null {
+  const payload = data as AlarmsPayload
 
   const previous = new Map(snapshot.alarms.map((alarm) => [alarm.rule_id, alarm]))
   const incoming = Array.isArray(payload.alarms) ? payload.alarms : []
@@ -176,26 +169,18 @@ function applyAlarmsEvent(snapshot: AlarmsSnapshot, raw: string): TelemetryUpdat
   })
   const worst = payload.worst ?? 'normal'
 
-  const unchanged = snapshot.received
-    && worst === snapshot.worst
+  const unchanged = worst === snapshot.worst
     && alarms.length === snapshot.alarms.length
     && alarms.every((alarm, i) => alarm === snapshot.alarms[i])
   if (unchanged) return null
-  return { state: { received: true, alarms, worst } }
+  return { state: { alarms, worst } }
 }
 
-// Read at start, not at import: a module that only imports this one's
-// helpers or types never touches the stream.
-const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
-
-const store = createTelemetryStore(listenToStream, 'alarms', NOT_RECEIVED, applyAlarmsEvent)
-
-/** One slice of the alarms store; see TelemetryStore.useSelector. */
-export const useAlarmsSelector = store.useSelector
+const store = createTelemetryStore('alarms', INITIAL, applyAlarmsEvent)
+const useAlarmsSelector = store.useSelector
 
 const selectAlarms = (state: AlarmsSnapshot) => state.alarms
-const selectWorst = (state: AlarmsSnapshot) => (state.received ? state.worst : null)
-const selectKnownAlarms = (state: AlarmsSnapshot) => (state.received ? state.alarms : null)
+const selectWorstState = (state: AlarmsSnapshot) => state.worst
 
 /**
  * The active alarms compared on what one surface shows of them (ADR 0215).
@@ -236,12 +221,12 @@ export function samePillAlarm(a: ActiveAlarm, b: ActiveAlarm): boolean {
 
 /** The active alarms, or null until the first event, when nobody knows yet. */
 export function useKnownAlarmList(): ActiveAlarm[] | null {
-  return useAlarmsSelector(selectKnownAlarms)
+  return store.useHeardSelector(selectAlarms)
 }
 
 /** The worst state on the active list, or null until the first event. */
 export function useWorstAlarmState(): AlarmState | null {
-  return useAlarmsSelector(selectWorst)
+  return store.useHeardSelector(selectWorstState)
 }
 
 function sameStateMap(a: Map<string, AlarmState>, b: Map<string, AlarmState>): boolean {

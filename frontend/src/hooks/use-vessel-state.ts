@@ -1,11 +1,8 @@
-import { useCallback } from 'react'
-
 import { ageFromPayload, shownAge } from '@/lib/staleness'
 
 import { GUST_WINDOWS, type GustWindow } from '@/lib/gust-windows'
-import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { feedServerTime } from '@/lib/server-clock'
-import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, keepUnchanged, useStoreFields, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 interface VesselState {
   status: string
@@ -177,7 +174,6 @@ export const INITIAL_VESSEL_STATE: VesselStateValue = {
 
 const AGE_FIELDS: readonly VesselStateField[] = ['depthLastUpdateAgeS', 'positionLastUpdateAgeS', 'windLastUpdateAgeS']
 const LADDER_FIELDS: readonly VesselStateField[] = ['maxGustKts', 'maxGustTrueKts']
-const FIELDS = Object.keys(INITIAL_VESSEL_STATE) as VesselStateField[]
 
 const nonNegative = (value: unknown): number | null => (typeof value === 'number' && value >= 0 ? value : null)
 const numberOrNull = (value: unknown): number | null => (typeof value === 'number' ? value : null)
@@ -266,28 +262,13 @@ function sameField(field: VesselStateField, a: VesselStateValue[VesselStateField
  * one. Nothing shows a fresh age as a figure.
  */
 
-function applyVesselState(snapshot: VesselStateValue, raw: string, receivedAt: number): TelemetryUpdate<VesselStateValue> | null {
-  let data: VesselState
-  try {
-    data = JSON.parse(raw) as VesselState
-  } catch (err) {
-    console.error('Failed to parse vessel state event:', err)
-    return null
-  }
+function applyVesselState(snapshot: VesselStateValue, payload: unknown, receivedAt: number): TelemetryUpdate<VesselStateValue> | null {
+  const data = payload as VesselState
   // The one place the event's stamp is read: it moves every tick, so it is not
   // a field of the state, and the clock keeps it for the surfaces that tick.
   feedServerTime(data.datetime, receivedAt)
-  const parsed = parseVesselState(data)
-  const next = { ...parsed } as Record<VesselStateField, unknown>
-  let changed = false
-  for (const field of FIELDS) {
-    if (sameField(field, snapshot[field], parsed[field])) {
-      next[field] = snapshot[field]
-    } else {
-      changed = true
-    }
-  }
-  return changed ? { state: next as unknown as VesselStateValue } : null
+  const next = keepUnchanged(snapshot, parseVesselState(data), sameField)
+  return next === null ? null : { state: next }
 }
 
 // The backend pushes vessel state as it changes (ADR 0037) instead of the
@@ -298,11 +279,7 @@ function applyVesselState(snapshot: VesselStateValue, raw: string, receivedAt: n
 // on its own, so that module reconnects and surfaces the outage via
 // useTelemetryStatus() rather than leaving this store to notice only through
 // `source` going stale.
-// Read at start, not at import: a module that only imports this one's
-// helpers or types never touches the stream.
-const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
-
-const store = createTelemetryStore(listenToStream, 'vessel-state', INITIAL_VESSEL_STATE, applyVesselState)
+const store = createTelemetryStore('vessel-state', INITIAL_VESSEL_STATE, applyVesselState)
 
 /**
  * The current vessel state, read once, for an event handler that needs it at
@@ -313,20 +290,10 @@ export const getVesselStateSnapshot = store.getSnapshot
 /** One slice of the vessel state; see TelemetryStore.useSelector. */
 export const useVesselStateSelector = store.useSelector
 
-function sameFields<T extends object>(a: T, b: T): boolean {
-  const keys = Object.keys(a) as Array<keyof T>
-  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
-}
-
 /**
  * The named fields, as one object that keeps its reference while none of
  * them changed. Pass a constant list: `fields` keys the selection.
  */
 export function useVesselFields<K extends VesselStateField>(fields: readonly K[]): Pick<VesselStateValue, K> {
-  const select = useCallback((state: VesselStateValue) => {
-    const out = {} as Pick<VesselStateValue, K>
-    for (const field of fields) out[field] = state[field]
-    return out
-  }, [fields])
-  return useVesselStateSelector(select, sameFields)
+  return useStoreFields(store, fields)
 }

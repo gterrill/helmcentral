@@ -16,12 +16,12 @@ describe('useRadarTargets', () => {
     expect(result.current.source).toBe('mayara')
   })
 
-  it('starts loading with no targets, no radars, and a disabled source', () => {
+  it('starts loading with no targets, no radars, and no source claimed', () => {
     const { result } = renderHook(() => useRadarTargets())
     expect(result.current.loading).toBe(true)
     expect(result.current.targets).toEqual([])
     expect(result.current.radars).toEqual([])
-    expect(result.current.source).toBe('disabled')
+    expect(result.current.source).toBeNull()
   })
 
   it('propagates the source field and clears loading once a payload lands', () => {

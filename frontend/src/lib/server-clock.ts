@@ -1,4 +1,4 @@
-import { onTelemetryTestReset } from '@/lib/telemetry-store'
+import { onTelemetryTestReset } from '@/lib/test-reset'
 
 /**
  * The boat's clock, for the surfaces that show the time (ADR 0218).

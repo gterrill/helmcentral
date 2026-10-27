@@ -420,7 +420,8 @@ export const LiveRadarTargetsTile = memo(function LiveRadarTargetsTile(props: Pi
 function useMapContacts() {
   const aisVessels = useNearbyVesselList()
   const { targets: radarTargets, radars, source: radarSource } = useRadarTargets()
-  return { aisVessels, radarTargets, radars, radarSource }
+  // Undefined until the first radar event, which the map treats as no radar overlay.
+  return { aisVessels, radarTargets, radars, radarSource: radarSource ?? undefined }
 }
 
 /** How often a map on screen asks the server for new trail points. */

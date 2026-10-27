@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 
 import { apiRequest, useApiQuery, useApiQuerySelector } from '@/lib/api-query'
-import { sameJSON } from '@/lib/telemetry-store'
+import { sameJSON } from '@/lib/same-value'
 import type { AlarmState } from '@/hooks/use-alarms'
 
 export const ALARM_OPERATORS = ['above', 'below', 'equal', 'notEqual', 'stale'] as const

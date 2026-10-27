@@ -395,14 +395,17 @@ Two rules differ from the earlier stores:
 
 Each store claims nothing before its first event:
 
-- **Autopilot:** the state is null, and the tile shows `--`. It used to start
+- **Autopilot:** the state reads null until heard, and the tile shows `--`. It used to start
   as an absent pilot and say "No autopilot detected" until the first event.
-- **Solar:** the controller list is null, so the tile lists none and does not
+- **Solar:** the controller list reads null until heard, so the tile lists none and does not
   say "No controller data".
 - **Electrical:** every reading and both role flags are null, which the
   Battery & Power and Generator tiles already show as dashes.
-- **Tanks, nearby vessels and radar:** `received: false`, read as `loading`,
+- **Tanks, nearby vessels and radar:** `loading` until heard,
   which each tile already showed while it waited.
+
+(The heard flag, described under "How long a store lives", later replaced the
+per-store `received` fields and null states this phase first used.)
 
 The alternator tile made the same false claim from vessel state:
 `enginesRunning` null read as stopped, "Engines not running". It now shows
@@ -699,8 +702,10 @@ The shell passes a tile config, flags and stable callbacks, never a reading.
 A new tile follows the same four steps:
 
 1. **The data has a store or a query.** A stream event gets a store built on
-   `createTelemetryStore` in its own `hooks/use-*.ts`, with an `apply` that
-   returns null for a tick that changes nothing shown, a `useRetain*` hook
+   `createTelemetryStore` in its own `hooks/use-*.ts`, with an `apply(previous, data, receivedAt)` over
+   the already-decoded JSON that
+   returns null for a tick that changes nothing shown, `useHeardSelector` for a tile that
+   must not claim a value before the server has spoken, a `useRetain*` hook
    (no longer needed since ADR 0218), and selectors (`useStoreFields`, or `useSelector` with an equality). A
    poll gets a hook over `useApiQuery` with `structuralSharing: true`, or
    over `useApiQuerySelector` when the tile shows a slice.
@@ -730,12 +735,17 @@ selector with value equality on exactly that, and this ADR says why.
 
 ### How long a store lives
 
-Every store is built by `createTelemetryStore(subscribe, event, initial,
-apply)` in `frontend/src/lib/telemetry-store.ts`. It owns the subscription,
-the snapshot, the listeners, `useSelector`, `getSnapshot` and `useRetain` (the last removed by
-ADR 0218); each store module supplies only its event's parser and equality rules. The
-gauge store's per-path listeners are the helper's keyed listeners, so the
-three stores share one lifecycle.
+Every store is built by `createTelemetryStore(event, initial, apply)` in
+`frontend/src/lib/telemetry-store.ts`. It owns the stream lookup, the
+`JSON.parse` of each frame, the subscription, the snapshot, the listeners,
+`useSelector`, `getSnapshot` and the heard flag (`useHeardSelector`, below); each
+store module supplies only its event name, its initial state and an `apply`
+step with its equality rules. `apply(previous, data, receivedAt)` receives the
+already-decoded JSON and returns the next state or null for no change. A frame
+that is not JSON, or is JSON but not an object (null, a number, a string, an
+array), is logged with the event name (`console.error`), once per frame, and
+changes nothing, the heard flag included; no default stands in for it. The gauge store's per-path
+listeners are the helper's keyed listeners, so the stores share one lifecycle.
 
 A store starts with its first reader and stays subscribed for the life of the
 page. It never empties itself when its last reader leaves.
@@ -767,16 +777,35 @@ boat never happens: `AppShell` starts every store at boot through its
 `useRetain*` hook (ADR 0218 removed them; gauge values, alarms, vessel state, and the six phase 5
 streams), without listening to any of them.
 
-Before its first event, a store holds its `initial`, and each `initial`
-claims nothing:
+Before its first event, a store holds its `initial`, and nothing reads that
+as a reading. One convention says so: the store knows whether it has applied
+its first event, and `useHeardSelector(select, isEqual)` reads through it: it
+is `useSelector` that returns null until the store has heard, from one
+subscription and one cache, so the result keeps its reference while the state
+holds. The flag turns true on any frame that decodes to an object, including
+one that changes nothing, and every listener, keyed ones included, hears the
+flip. `resetTelemetryStoresForTest` turns it back to false. No store keeps a
+`received` field, a `-1` or a null whose only meaning is "not yet". Each store
+makes its `initial` a placeholder and gates the readers that would otherwise
+claim something:
 
-- **Gauge values and vessel state:** every reading null, which every tile
-  shows as `--`.
-- **Alarms:** `received: false`. `useKnownAlarmList` and `useWorstAlarmState`
-  return null, the Alarms page says "Waiting for the alarm list" instead of
+- **Gauge values, vessel state and electrical state:** every reading null,
+  which every tile shows as `--`. Null here is an honest unknown, so these
+  readers need no gate.
+- **Alarms:** an empty list and `normal`, read only through the flag.
+  `useKnownAlarmList` and `useWorstAlarmState`
+  return null until the store has heard, the Alarms page says "Waiting for the alarm list" instead of
   "All clear", and the CHK lamp reads no data instead of clear. The banner
   and the wall pill show nothing until there is something to show, which is
   their behaviour with an empty list anyway.
+- **Autopilot:** the absent pilot as the placeholder. `useAutopilotState`
+  returns null until heard, and the tile shows `--`.
+- **Solar:** an empty controller list as the placeholder. `useSolarState`
+  returns `controllers: null` until heard, so "No controller data" appears
+  only once the server has said so.
+- **Tanks, nearby vessels and radar:** `loading` is `!heard`. The radar
+  source is null until heard (it was `'disabled'`, a claim that the
+  integration is off), and the tile shows `--` for it.
 
 A delayed release, keeping a store a few seconds after its last holder left,
 was considered for phase 1 and rejected. The delay is a guess that has to
@@ -784,11 +813,19 @@ outlast the slowest page mount, it puts a timer into every test of the store,
 and it would not have closed the gap above.
 
 Tests reset every store, subscription included, after each test
-(`resetTelemetryStoresForTest` in `src/test/setup.ts`), so one test's readings
-never reach the next. The stream is passed in to `createTelemetryStore` and
-read only when a store starts, so a module that only imports a store's types
-or helpers never touches it. Tests no longer mock the stream module for data;
-they replace the EventSource under it (ADR 0218).
+(`resetTelemetryStoresForTest`, called from `src/test/setup.ts`), so one test's readings
+never reach the next. `createTelemetryStore` imports `subscribeTelemetry` itself and reads it only
+when a store starts. It used to take the stream as a parameter in every store,
+because `setup.ts` loaded the factory and with it the real stream before a
+test file's `vi.mock` of it could apply. The cause was that
+`setup.ts` reached the factory through `api-query.ts` (importing `sameJSON`)
+and for the reset. The equality helpers now live in `lib/same-value.ts` and
+the reset registry (`resetTelemetryStoresForTest`, `onTelemetryTestReset`) in
+`lib/test-reset.ts`; neither imports the stream, the factory re-exports both,
+and `setup.ts` imports `test-reset` statically. A module that is not a store
+imports the helpers from those two, not from the factory. Tests that count `subscribeTelemetry`
+calls still work. Tests no longer mock the stream module for data; they
+replace the EventSource under it (ADR 0218).
 
 ### Phases
 

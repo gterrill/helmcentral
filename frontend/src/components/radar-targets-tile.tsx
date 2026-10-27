@@ -9,7 +9,8 @@ import { cn } from '@/lib/utils'
 interface RadarTargetsTileProps {
   targets: RadarTarget[]
   radars: RadarInfo[]
-  source: RadarSource
+  /** Null until the first radar event: the tile claims neither on nor off. */
+  source: RadarSource | null
   loading: boolean
   distanceUnits: DistanceUnits
 }
@@ -92,7 +93,7 @@ export const RadarTargetsTile = memo(function RadarTargetsTile({
   return (
     <Tile title="Radar Targets" icon={<Radar className="h-3.5 w-3.5 text-gauge-secondary" />} shrinkToContent>
       <div className="mt-3 space-y-2">
-        {source === 'disabled' ? (
+        {source === null || source === 'disabled' ? (
           <div className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-muted-foreground">--</div>
         ) : (
           <>
