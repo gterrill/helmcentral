@@ -11,16 +11,18 @@ import { VesselStatusBar } from '@/components/vessel-status-bar'
 const mockSignalkConnected = vi.fn<() => boolean | null>()
 const mockTelemetryStatus = vi.fn<() => 'connected' | 'reconnecting' | 'disconnected'>()
 
-vi.mock('@/hooks/use-vessel-identity', () => ({
-  useVesselIdentity: () => ({
+vi.mock('@/hooks/use-vessel-clock', () => ({
+  useVesselClock: () => ({
     currentDate: 'MON, JAN 1, 2026',
     clock: { timePart: '12:00:00', meridiem: 'PM' },
-    vesselStatus: 'At Anchor',
-    boatName: null,
-    boatModel: null,
-    signalkConnected: mockSignalkConnected(),
   }),
 }))
+
+vi.mock('@/hooks/use-vessel-state', async () =>
+  (await import('./vessel-state-mock')).vesselStateModule(() => {
+    const connected = mockSignalkConnected()
+    return { source: connected === null ? null : connected ? 'signalk' : 'backend-fallback' }
+  }))
 
 vi.mock('@/hooks/use-telemetry-stream', () => ({
   useTelemetryStatus: () => mockTelemetryStatus(),

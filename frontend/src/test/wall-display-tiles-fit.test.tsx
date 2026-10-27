@@ -1,3 +1,4 @@
+import { formatClock } from '@/lib/vessel-time'
 import { render } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
@@ -139,7 +140,8 @@ describe('wall-display tiles fit their registered grid constraint', () => {
     // Local-time constructor fixes the calendar date to Sep 12, 2026 - a
     // Saturday, the longest-weekday scenario that was observed wrapping the
     // date line and clipping the place chip below it at this tile's minW.
-    vi.setSystemTime(new Date(2026, 8, 12, 14, 0, 0))
+    const now = new Date(2026, 8, 12, 14, 0, 0)
+    vi.setSystemTime(now)
     const { minW, minH } = WIDGET_CONSTRAINTS.clock!
     renderAtGridBox(
       <ClockTile
@@ -148,6 +150,9 @@ describe('wall-display tiles fit their registered grid constraint', () => {
         moonPhase="waxingGibbous"
         placeName="Airlie Beach, Queensland"
         tripEta={{ label: 'Mooloolaba Marina', etaAt: new Date('2026-06-15T04:00:00Z') }}
+        now={now}
+        clock={formatClock(now)}
+        timeZone={undefined}
       />,
       columnsToPx(minW!),
       gridPixelHeight(minH!),

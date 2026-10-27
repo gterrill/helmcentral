@@ -123,9 +123,6 @@ const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry
 
 const store = createTelemetryStore(listenToStream, 'solar-state', INITIAL_SOLAR_STATE, applySolarState)
 
-/** Starts the store on mount without re-rendering the caller on any tick. AppShell calls this once. */
-export const useRetainSolarState = store.useRetain
-
 const selectAll = (state: SolarStateValue) => state
 
 /** The whole solar state: the Solar tile shows all of it. */

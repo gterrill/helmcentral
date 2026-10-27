@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 
 /**
  * One live store per telemetry event (ADR 0215): one subscription and one
@@ -6,14 +6,13 @@ import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
  * reader re-renders only when its own slice changes.
  *
  * A store starts on its first reader and then stays subscribed for the life
- * of the page. It never empties itself when its last reader leaves. The
- * server seeds a new connection with every event's current payload, but the
- * browser shares one connection between all the stores, so a store that
- * dropped its subscription and came back to a connection already open would
- * hear nothing until that event next changed: vessel-state and gauge-values
- * are change-gated, so that can be a long time. Staying subscribed means the
- * snapshot is always the last thing the server said. Before the first event
- * it is the store's `initial`, which each store makes an honest "unknown".
+ * of the page. It never empties itself when its last reader leaves, so the
+ * snapshot is always the last thing the server said. The stream remembers the
+ * current payload of every event and hands it to a listener that subscribes
+ * late (ADR 0218), so a store whose first reader mounts after the server's
+ * seed starts from the seed, not from silence. Before the first event the
+ * snapshot is the store's `initial`, which each store makes an honest
+ * "unknown".
  */
 
 /**
@@ -30,14 +29,10 @@ export interface TelemetryUpdate<S> {
 export interface TelemetryStore<S> {
   /** The current state, for an event handler that reads it once. */
   getSnapshot: () => S
-  /** Starts the store, if it has not started, without listening to it. */
-  start: () => void
   /** Listens to every change. Starts the store. */
   subscribe: (listener: () => void) => () => void
   /** Listens only to changes on the given keys. Starts the store. */
   subscribeKeys: (keys: readonly string[], listener: () => void) => () => void
-  /** Starts the store on mount without re-rendering the caller on any tick. */
-  useRetain: () => void
   /**
    * One slice of the state. Re-renders only when `select` returns something
    * `isEqual` calls different from what it returned before. `select` may be
@@ -66,7 +61,7 @@ export function onTelemetryTestReset(reset: () => void): void {
 }
 
 /** use-telemetry-stream.ts's subscribeTelemetry, passed in by each store. */
-export type SubscribeTelemetry = (event: string, onData: (raw: string) => void) => () => void
+export type SubscribeTelemetry = (event: string, onData: (raw: string, receivedAt: number) => void) => () => void
 
 /**
  * A store for one event. `subscribeTelemetry` is passed in rather than
@@ -78,15 +73,18 @@ export function createTelemetryStore<S>(
   subscribeTelemetry: SubscribeTelemetry,
   event: string,
   initial: S,
-  apply: (previous: S, raw: string) => TelemetryUpdate<S> | null,
+  apply: (previous: S, raw: string, receivedAt: number) => TelemetryUpdate<S> | null,
 ): TelemetryStore<S> {
   let snapshot = initial
   let unsubscribeStream: (() => void) | null = null
   const listeners = new Set<() => void>()
   const keyListeners = new Map<string, Set<() => void>>()
 
-  function onEvent(raw: string): void {
-    const update = apply(snapshot, raw)
+  // receivedAt is performance.now() when the payload reached the browser: a
+  // listener that is replayed an older payload is told when it really came.
+  // A stream double that passes none means now.
+  function onEvent(raw: string, receivedAt: number = performance.now()): void {
+    const update = apply(snapshot, raw, receivedAt)
     if (update === null) return
     snapshot = update.state
     const toCall = new Set(listeners)
@@ -135,10 +133,6 @@ export function createTelemetryStore<S>(
 
   const getSnapshot = () => snapshot
 
-  function useRetain(): void {
-    useEffect(start, [])
-  }
-
   function useSelector<T>(select: (state: S) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
     const cache = useRef<{ source: S; select: (state: S) => T; value: T } | null>(null)
     const getSelection = useCallback((): T => {
@@ -152,7 +146,7 @@ export function createTelemetryStore<S>(
     return useSyncExternalStore(subscribe, getSelection)
   }
 
-  return { getSnapshot, start, subscribe, subscribeKeys, useRetain, useSelector }
+  return { getSnapshot, subscribe, subscribeKeys, useSelector }
 }
 
 // ── helpers the store modules share ─────────────────────────────────────────

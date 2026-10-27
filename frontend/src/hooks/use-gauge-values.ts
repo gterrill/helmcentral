@@ -20,8 +20,7 @@ import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } f
  *
  * The store starts with its first reader and stays subscribed for the life of
  * the page (lib/telemetry-store.ts), so the last reading survives the moment
- * between one page's tiles unmounting and the next page's mounting. AppShell
- * starts it at boot through useRetainGaugeValues, without listening to it.
+ * between one page's tiles unmounting and the next page's mounting.
  *
  * An age changes, for its listeners, only when what a tile shows for it
  * changes: unknown, fresh, or the stale label (see shownAge).
@@ -153,12 +152,6 @@ function applyGaugeValuesEvent(previous: GaugeState, raw: string): TelemetryUpda
 const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
 
 const store = createTelemetryStore(listenToStream, 'gauge-values', INITIAL, applyGaugeValuesEvent)
-
-/**
- * Starts the store on mount without re-rendering the caller on any tick.
- * AppShell calls this once.
- */
-export const useRetainGaugeValues = store.useRetain
 
 /** The raw SI value on one path, or null when the event does not carry it. */
 export function useGaugeValue(path: string): number | null {

@@ -2,7 +2,7 @@ import { memo } from 'react'
 import { Sunrise, Sunset } from 'lucide-react'
 
 import { Tile } from '@/components/ui/tile'
-import { useVesselIdentity, formatClock, formatDate, formatWeekday, isSameLocalDate } from '@/hooks/use-vessel-identity'
+import { formatClock, formatDate, formatWeekday, isSameLocalDate } from '@/lib/vessel-time'
 import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
 
 /**
@@ -28,6 +28,12 @@ export interface ClockTileProps {
   moonPhase: string | null
   placeName: string | null
   tripEta: ClockTileTripEta | null
+  /** The boat's time, to the second. Null until the server has sent one. */
+  now: Date | null
+  /** `now` as formatClock gives it in the vessel's zone; null with it. */
+  clock: ReturnType<typeof formatClock> | null
+  /** The vessel's IANA zone; undefined until the server has sent one. */
+  timeZone: string | undefined
 }
 
 /** Drops :SS from a formatClock timePart ("14:32:07" -> "14:32"). */
@@ -38,11 +44,10 @@ function hhmm(timePart: string) {
 
 /**
  * The wall display's clock page (ADR 0092, ADR 0125): time, date, sun and
- * moon, and where the boat is and where it's headed. Ticks its own clock
- * from useVesselIdentity() exactly like vessel-status-bar.tsx does, rather
- * than threading the vessel clock down as a prop - this is the one tile on
- * the wall that owns a per-second re-render, and every other tile stays
- * clear of it.
+ * moon, and where the boat is and where it's headed. It takes the boat's time
+ * as props; LiveClockTile (live-surfaces.tsx) reads the clock, so this is the
+ * one tile on the wall that re-renders every second and every other tile
+ * stays clear of it (ADR 0218).
  *
  * The hero time is one step down from the drawer's own convention
  * (`text-6xl`, not `text-7xl`) and the place chip carries the ETA as a
@@ -60,14 +65,16 @@ export const ClockTile = memo(function ClockTile({
   moonPhase,
   placeName,
   tripEta,
+  now,
+  clock,
+  timeZone,
 }: ClockTileProps) {
-  const { now, clock, timeZone } = useVesselIdentity()
   // The header (vessel-status-bar.tsx) shares formatDate's full-weekday output via
   // currentDate; this tile is two grid columns wide (~300px) and a long weekday
   // ("SATURDAY, SEP 12, 2026") wraps to a second line there, pushing the place
   // chip below the tile's bottom edge. The compact option keeps formatDate's
   // weekday-first ordering but stays short enough to hold one line at minW.
-  const compactDate = formatDate(now, { compact: true, timeZone }).toUpperCase()
+  const compactDate = now === null ? '--' : formatDate(now, { compact: true, timeZone }).toUpperCase()
 
   const etaLabel = (() => {
     if (!tripEta) return '—'
@@ -76,7 +83,7 @@ export const ClockTile = memo(function ClockTile({
     // HelmCast prefixed a multi-day passage's ETA with the arrival weekday
     // rather than leaving it looking like it lands today - carried forward
     // here now the trip ETA can span more than one day.
-    const dayPrefix = isSameLocalDate(tripEta.etaAt, now, timeZone) ? '' : `${formatWeekday(tripEta.etaAt, timeZone)} `
+    const dayPrefix = now === null || isSameLocalDate(tripEta.etaAt, now, timeZone) ? '' : `${formatWeekday(tripEta.etaAt, timeZone)} `
     // Include the meridiem the same way the hero clock does (its own
     // `clock.meridiem` span) - a bare "09:40" can't be told from 9:40 PM,
     // and this line has no other AM/PM context of its own to lean on.
@@ -91,8 +98,8 @@ export const ClockTile = memo(function ClockTile({
       <div className="mt-1 flex h-full flex-col justify-between gap-1.5">
         <div>
           <time className="flex items-baseline gap-1 font-display leading-none tabular-nums text-gauge-secondary">
-            <span className="text-6xl">{hhmm(clock.timePart)}</span>
-            <span className="text-2xl">{clock.meridiem}</span>
+            <span className="text-6xl">{hhmm(clock?.timePart ?? '--:--')}</span>
+            <span className="text-2xl">{clock?.meridiem}</span>
             {/* UTC only ever means "no position fix yet" (vesselLocalTimezoneName's
                 honest fallback, ADR 0035) — flagging it here explains an otherwise
                 wrong-looking clock. A real vessel offset needs no such caveat. */}

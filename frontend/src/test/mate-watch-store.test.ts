@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 // Fresh module per test (vi.resetModules pattern - same as
-// use-vessel-identity.test.ts) so the module-level `entries`/`listeners`
+// use-vessel-state.test.ts) so the module-level `entries`/`listeners`
 // state never leaks between assertions.
 async function loadStoreModule() {
   vi.resetModules()

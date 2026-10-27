@@ -44,6 +44,7 @@ import { useTanksState } from '@/hooks/use-tanks-state'
 import { useRouteActivation, type ActiveRouteStatus } from '@/hooks/use-route-activation'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { useUpperAir } from '@/hooks/use-upper-air'
+import { useVesselClock } from '@/hooks/use-vessel-clock'
 import { getVesselStateSnapshot, useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
 import { useForecastSun, useWeatherForecast } from '@/hooks/use-weather-forecast'
@@ -244,7 +245,9 @@ function hasTrip(status: ActiveRouteStatus): boolean {
  *
  * The ETA needs the fix and speed only while there is a trip. Without one the
  * tile reads just whether there is a fix, which is all the place name asks,
- * so a clock on a boat at anchor does not redraw on every fix.
+ * so a clock on a boat at anchor does not redraw on every fix. The wrapper
+ * also reads the boat's clock (useVesselClock), so it re-renders each second,
+ * and so does the tile it draws; nothing else on the page does.
  */
 export const LiveClockTile = memo(function LiveClockTile() {
   const { status: routeStatus } = useRouteActivation()
@@ -262,7 +265,8 @@ export const LiveClockTile = memo(function LiveClockTile() {
     () => computeClockTripEta(routeStatus, latitude, longitude, speedOverGroundKts, new Date()),
     [routeStatus, latitude, longitude, speedOverGroundKts],
   )
-  return <ClockTile sunriseTime={sunriseTime} sunsetTime={sunsetTime} moonPhase={moonPhase} placeName={placeName} tripEta={tripEta} />
+  const { now, clock, timeZone } = useVesselClock()
+  return <ClockTile sunriseTime={sunriseTime} sunsetTime={sunsetTime} moonPhase={moonPhase} placeName={placeName} tripEta={tripEta} now={now} clock={clock} timeZone={timeZone} />
 })
 
 const CONDITIONS_FIELDS = ['depth', 'depthLastUpdateAgeS', 'windSpeedTrueKts', 'windDirectionTrueDeg', 'maxGustTrueKts'] as const

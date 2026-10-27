@@ -291,7 +291,7 @@ describe('useAppConfig', () => {
     expect(result.current.assistant).toEqual({ voiceInput: false, readAloud: false, wakeWord: false })
   })
 
-  // Item C: use-vessel-identity.ts used to poll /api/settings on its own
+  // Item C: the vessel identity hook (now folded into use-vessel-state.ts) used to poll /api/settings on its own
   // timer just for boat.model — this is the same single-flight GET every
   // other operator setting already goes through.
   it('applies the boat model from the settings endpoint', async () => {

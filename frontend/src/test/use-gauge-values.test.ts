@@ -21,7 +21,6 @@ import {
   useGaugeAge,
   useGaugeSubset,
   useGaugeValue,
-  useRetainGaugeValues,
 } from '@/hooks/use-gauge-values'
 
 function emit(payload: unknown) {
@@ -231,7 +230,6 @@ describe('per-path selectors', () => {
 
 describe('store lifetime', () => {
   it('keeps the last reading across the last tile unmounting and a new one mounting', () => {
-    const shell = renderHook(() => useRetainGaugeValues())
     const tile = renderHook(() => useGaugeValue('a'))
     emit({ values: { a: 7 }, ages: { a: 1 } })
     tile.unmount()
@@ -243,13 +241,12 @@ describe('store lifetime', () => {
     expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
 
     next.unmount()
-    shell.unmount()
   })
 
   // The store stays subscribed once started, rather than emptying when its
   // last reader leaves: the shared connection would not re-send a
   // change-gated event to a store that came back to it (ADR 0215).
-  it('keeps the reading, on the one subscription, after nothing retains or reads it', () => {
+  it('keeps the reading, on the one subscription, after nothing reads it', () => {
     const tile = renderHook(() => useGaugeValue('a'))
     emit({ values: { a: 7 }, ages: {} })
     tile.unmount()

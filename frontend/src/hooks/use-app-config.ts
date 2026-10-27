@@ -27,7 +27,7 @@ export type AppConfig = {
   /** ADR 0093 voice phase: Settings → Mate → Voice, read live by
    * hooks/use-mate-voice.ts and components/mate-sheet.tsx. */
   assistant: AssistantVoiceConfig
-  /** Read live by hooks/use-vessel-identity.ts. Null until settings.boat.model
+  /** Read live by components/marine-header.tsx. Null until settings.boat.model
    * is known, or when it's unset/blank. */
   boatModel: string | null
   /** The hull type set under Anchor Watch settings, or null when unset. */

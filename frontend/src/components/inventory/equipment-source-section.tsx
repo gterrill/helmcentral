@@ -5,7 +5,8 @@ import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
 import type { EquipmentInput } from '@/hooks/use-inventory'
-import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { selectTimeZone } from '@/lib/vessel-time'
 import {
   SOURCE_KINDS,
   SOURCE_KIND_LABELS,
@@ -47,7 +48,7 @@ function rowLabel(row: DiscoveryRow, timeZone: string | undefined): string {
 export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrite }: EquipmentSourceSectionProps) {
   const kind = sourceKindOf(draft.signalk_source)
   const known = discovery.groups.some((g) => g.rows.some((r) => r.source === draft.signalk_source))
-  const timeZone = useVesselTimeZone()
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const warning = signatureWarning(discoveryRowFor(discovery, draft.signalk_source))
   const noData = !discovery.connected && discovery.groups.length === 0
 

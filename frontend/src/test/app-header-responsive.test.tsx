@@ -15,14 +15,15 @@ import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { setViewportWidth } from './viewport'
 
-vi.mock('@/hooks/use-vessel-identity', () => ({
-  useVesselIdentity: () => ({
+vi.mock('@/hooks/use-vessel-clock', () => ({
+  useVesselClock: () => ({
     currentDate: 'Monday, Jul 27, 2026',
     clock: { timePart: '09:41:07', meridiem: 'AM' },
-    signalkConnected: true,
   }),
-  useVesselTimeZone: () => undefined,
 }))
+
+vi.mock('@/hooks/use-vessel-state', async () =>
+  (await import('./vessel-state-mock')).vesselStateModule(() => ({ source: 'signalk' })))
 
 const pages = [
   { id: 'p1', name: 'Helm', widgets: [], created_at: '', updated_at: '' },

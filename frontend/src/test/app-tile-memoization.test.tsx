@@ -60,7 +60,7 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
     return () => {}
   },
   // Real consumers elsewhere in the tree (vessel-status-bar.tsx
-  // via use-vessel-identity.ts) just need these to exist and not throw — their
+  // via the vessel clock) just need these to exist and not throw — their
   // own behavior isn't what this test is checking.
   useTelemetryStatus: () => 'connected',
   subscribeTelemetryStatus: () => () => {},

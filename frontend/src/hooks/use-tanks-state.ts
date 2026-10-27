@@ -87,9 +87,6 @@ const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry
 
 const store = createTelemetryStore(listenToStream, 'tanks-state', NOT_RECEIVED, applyTanksState)
 
-/** Starts the store on mount without re-rendering the caller on any tick. AppShell calls this once. */
-export const useRetainTanksState = store.useRetain
-
 const selectAll = (state: TanksStateValue) => state
 const selectTanks = (state: TanksStateValue) => state.tanks
 

@@ -8,7 +8,7 @@ import { ApiError, apiRequest } from '@/lib/api-query'
 // came back already indexed (a duplicate of something already processed) -
 // is polled every 3s until the background indexer (B4) finishes with it.
 // One instance of this hook belongs to one AssistantThread composer; it is
-// not a shared store, unlike e.g. use-vessel-identity.ts.
+// not a shared store, unlike e.g. use-vessel-state.ts.
 
 /** At most this many documents may be staged on one message - mirrors the
  * backend's own cap (documentAttachmentsPerMessageCap, assistant_handlers.go)

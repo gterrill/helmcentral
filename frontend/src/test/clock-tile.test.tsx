@@ -1,8 +1,8 @@
-import { act, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { ClockTile, type ClockTileProps } from '@/components/clock-tile'
-import { formatClock } from '@/hooks/use-vessel-identity'
+import { formatClock } from '@/lib/vessel-time'
 
 // formatClock renders in whatever timezone the test runner's Node process is
 // in (Intl.DateTimeFormat with no explicit timeZone), which fake-timing
@@ -16,52 +16,27 @@ function hhmmFor(date: Date) {
 
 const NOW = new Date('2026-06-14T14:32:07Z')
 
-// use-vessel-identity.ts is the shared module-level store (item C): its
-// `now`/timezone come off the SSE `vessel-state` event, not a poll of its
-// own. Mock the shared telemetry module and drive it directly, the same
-// pattern use-gauge-values.test.ts and use-vessel-identity.test.ts use.
-const subscribeTelemetryMock = vi.fn()
-let capturedListener: ((raw: string) => void) | null = null
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    capturedListener = cb
-    subscribeTelemetryMock(event, cb)
-    return () => {}
-  },
-}))
-
-vi.mock('@/hooks/use-app-config', () => ({
-  useAppConfig: () => ({ boatModel: null }),
-}))
-
-function emitVesselState(payload: { datetime?: string; timezone?: string; status?: string; name?: string }) {
-  act(() => {
-    capturedListener?.(JSON.stringify(payload))
-  })
-}
-
 const defaultProps: ClockTileProps = {
   sunriseTime: null,
   sunsetTime: null,
   moonPhase: null,
   placeName: null,
   tripEta: null,
+  now: null,
+  clock: null,
+  timeZone: undefined,
 }
 
 /**
- * Renders ClockTile, then immediately syncs the shared vessel clock to the
- * current (possibly faked) system time — or to an explicit override, for the
- * timezone-label tests below that need a fixed instant under real timers.
- * The store is a module-level singleton (item C): its `now`/timezone persist
- * across tests in this file rather than resetting per mount, so every render
- * has to re-sync it explicitly rather than relying on a fresh per-instance
- * clock the way the old one-hook-per-consumer implementation did.
+ * Renders ClockTile with the boat's time as props, the way LiveClockTile
+ * hands it down: `datetime` is the boat's time (the current, possibly faked,
+ * system time unless overridden) and `timezone` its zone.
  */
 function renderClockTile(props: Partial<ClockTileProps> = {}, stream: { datetime?: string; timezone?: string } = {}) {
-  const result = render(<ClockTile {...defaultProps} {...props} />)
-  emitVesselState({ datetime: stream.datetime ?? new Date().toISOString(), timezone: stream.timezone })
-  return result
+  const now = new Date(stream.datetime ?? new Date().toISOString())
+  return render(
+    <ClockTile {...defaultProps} now={now} clock={formatClock(now, stream.timezone)} timeZone={stream.timezone} {...props} />,
+  )
 }
 
 beforeEach(() => {
@@ -72,11 +47,16 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   vi.unstubAllGlobals()
-  subscribeTelemetryMock.mockClear()
-  capturedListener = null
 })
 
 describe('ClockTile', () => {
+  test('claims no time before the server has sent one', () => {
+    render(<ClockTile {...defaultProps} />)
+
+    expect(screen.getByText('--:--')).toBeInTheDocument()
+    expect(screen.getByTestId('clock-date')).toHaveTextContent('--')
+  })
+
   test('renders the current time and date from the vessel clock', () => {
     renderClockTile({
       sunriseTime: '6:02AM',

@@ -16,7 +16,8 @@ import {
 } from '@/hooks/use-inventory'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
-import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { selectTimeZone } from '@/lib/vessel-time'
 import { candidateItems, candidateLabels } from '@/lib/equipment-candidates'
 import {
   SOURCE_KINDS,
@@ -145,7 +146,7 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
   const [error, setError] = useState<string | null>(null)
 
   const warning = signatureWarning({ row, label: signatureLabel })
-  const timeZone = useVesselTimeZone()
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const reading = row.metrics.map((m) => `${m.label} ${m.text}`).join(' · ')
 
   const run = async (action: () => Promise<unknown>) => {

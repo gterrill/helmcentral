@@ -180,7 +180,6 @@ const mockAlarm = {
 
 vi.mock('@/hooks/use-alarms', () => ({
   // The shell holds the store; the surfaces read it through these (ADR 0215).
-  useRetainAlarms: () => {},
   useAlarmListComparedOn: () => [mockAlarm],
   sameShownAlarm: () => true,
   sameLampAlarm: () => true,

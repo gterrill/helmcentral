@@ -90,9 +90,6 @@ const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry
 
 const store = createTelemetryStore<AutopilotState | null>(listenToStream, 'autopilot', null, applyAutopilot)
 
-/** Starts the autopilot store on mount without re-rendering the caller. AppShell calls this once. */
-export const useRetainAutopilot = store.useRetain
-
 const selectState = (state: AutopilotState | null) => state
 const selectPresent = (state: AutopilotState | null) => state?.present === true
 

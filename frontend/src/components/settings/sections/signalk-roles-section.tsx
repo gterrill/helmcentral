@@ -6,7 +6,8 @@ import { useSettingsFormContext } from '@/components/settings/settings-form-cont
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
 import { BLANK_DRAFT, createEquipment, useEquipment, type EquipmentItem } from '@/hooks/use-inventory'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
-import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { selectTimeZone } from '@/lib/vessel-time'
 import {
   OPTIONAL_ROLE_FIELDS,
   ROLE_NONE,
@@ -75,7 +76,7 @@ export function SignalKRolesSection({ draft, onChange }: SignalKRolesSectionProp
   const { settings: savedSettings, loading: settingsLoading } = useSettingsFormContext()
   const { items } = useEquipment({})
   const { discovery, loading: discoveryLoading } = useVesselDiscovery()
-  const timeZone = useVesselTimeZone()
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const roles = draft.roles
   // The latest roles, so a choice that waits on creating an item lands on what
   // the draft holds when the item exists, not on what it held when it started.

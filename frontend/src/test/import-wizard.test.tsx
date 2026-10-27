@@ -10,8 +10,7 @@ import runFixture from './fixtures/yachtwave-run.json'
 // Pikorua export, parsed by the backend (backend/testdata/yachtwave), so every
 // key, decision and issue has the shape the server actually sends.
 
-vi.mock('@/hooks/use-vessel-identity', () => ({ useVesselIdentity: () => ({ boatName: 'M/V Pikorua' }) }))
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ vesselLengthOverallM: 17.9, vesselDraftM: 1.5 })))
+vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ boatName: 'M/V Pikorua', vesselLengthOverallM: 17.9, vesselDraftM: 1.5 })))
 
 let run: ImportRun
 const fetchMock = vi.fn()

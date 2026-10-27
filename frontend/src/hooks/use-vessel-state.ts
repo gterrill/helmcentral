@@ -4,11 +4,16 @@ import { ageFromPayload, shownAge } from '@/lib/staleness'
 
 import { GUST_WINDOWS, type GustWindow } from '@/lib/gust-windows'
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { feedServerTime } from '@/lib/server-clock'
 import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 interface VesselState {
   status: string
   datetime: string
+  /** The vessel's IANA zone (ADR 0035). */
+  timezone: string
+  name: string
+  vessel_prefix: string
   depth: number
   length_overall_m: number | null
   draft_m: number | null
@@ -70,7 +75,13 @@ export interface VesselStateValue {
   currentDriftKts: number | null
   currentSetDeg: number | null
   currentDriftImpactKts: number | null
+  // The boat's own state, as the backend names it ("At Anchor", "Underway").
+  // The header shows the same string, so there is one datum for both.
   navigationState: string | null
+  /** The name with its prefix ("M/V Pikorua"), null until the boat reports one. */
+  boatName: string | null
+  /** The vessel's IANA zone (ADR 0035), null until the server sends it. */
+  timeZone: string | null
   latitude: number | null
   longitude: number | null
   gnssQualityIndicator: number | null
@@ -132,6 +143,8 @@ export const INITIAL_VESSEL_STATE: VesselStateValue = {
   currentSetDeg: null,
   currentDriftImpactKts: null,
   navigationState: null,
+  boatName: null,
+  timeZone: null,
   latitude: null,
   longitude: null,
   gnssQualityIndicator: null,
@@ -171,6 +184,13 @@ const numberOrNull = (value: unknown): number | null => (typeof value === 'numbe
 const textOrNull = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null)
 const sideOrNull = (value: unknown): Side => (value === 'port' || value === 'starboard' ? value : null)
 
+function boatName(name: unknown, prefix: unknown): string | null {
+  const vesselName = typeof name === 'string' ? name.trim() : ''
+  if (vesselName === '') return null
+  const vesselPrefix = typeof prefix === 'string' ? prefix.trim() : 'M/V'
+  return `${vesselPrefix} ${vesselName}`.trim()
+}
+
 function ladder(raw: Record<string, number> | undefined): GustLadder {
   return Object.fromEntries(GUST_WINDOWS.map((window) => [window, nonNegative(raw?.[window])])) as GustLadder
 }
@@ -185,6 +205,8 @@ function parseVesselState(data: VesselState): VesselStateValue {
     currentSetDeg: nonNegative(data.current_set_deg),
     currentDriftImpactKts: numberOrNull(data.current_drift_impact_kts),
     navigationState: textOrNull(data.status),
+    boatName: boatName(data.name, data.vessel_prefix),
+    timeZone: textOrNull(data.timezone),
     source: textOrNull(data.source),
     latitude: typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null,
     longitude: typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null,
@@ -244,7 +266,7 @@ function sameField(field: VesselStateField, a: VesselStateValue[VesselStateField
  * one. Nothing shows a fresh age as a figure.
  */
 
-function applyVesselState(snapshot: VesselStateValue, raw: string): TelemetryUpdate<VesselStateValue> | null {
+function applyVesselState(snapshot: VesselStateValue, raw: string, receivedAt: number): TelemetryUpdate<VesselStateValue> | null {
   let data: VesselState
   try {
     data = JSON.parse(raw) as VesselState
@@ -252,6 +274,9 @@ function applyVesselState(snapshot: VesselStateValue, raw: string): TelemetryUpd
     console.error('Failed to parse vessel state event:', err)
     return null
   }
+  // The one place the event's stamp is read: it moves every tick, so it is not
+  // a field of the state, and the clock keeps it for the surfaces that tick.
+  feedServerTime(data.datetime, receivedAt)
   const parsed = parseVesselState(data)
   const next = { ...parsed } as Record<VesselStateField, unknown>
   let changed = false
@@ -278,12 +303,6 @@ function applyVesselState(snapshot: VesselStateValue, raw: string): TelemetryUpd
 const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
 
 const store = createTelemetryStore(listenToStream, 'vessel-state', INITIAL_VESSEL_STATE, applyVesselState)
-
-/**
- * Starts the store on mount without re-rendering the caller on any tick.
- * AppShell calls this once.
- */
-export const useRetainVesselState = store.useRetain
 
 /**
  * The current vessel state, read once, for an event handler that needs it at
