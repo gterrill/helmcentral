@@ -114,10 +114,7 @@ vi.mock('@/hooks/use-radar-targets', () => ({
   useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
 }))
 
-vi.mock('@/hooks/use-anchor-watch', () => ({
-  // The tile and page apply the fix to the record; the record here already has it.
-  anchorWatchAt: (watch: unknown) => watch,
-  useAnchorWatch: () => ({
+vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
     active: anchorStateMock !== 'none', anchorState: anchorStateMock,
     anchorLat: anchorStateMock === 'set' ? -36.8485 : null,
     anchorLon: anchorStateMock === 'set' ? 174.7633 : null,
@@ -136,8 +133,7 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     updateRodeAndConditions: vi.fn(),
     updatePlanningDepth: vi.fn(),
     clearAnchor: clearAnchorMock,
-  }),
-}))
+  })))
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 

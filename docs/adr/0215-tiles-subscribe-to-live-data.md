@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-27). Phases 0 to 3 are built; phases 4 to 7 are planned.
+Accepted (2026-10-27). Phases 0 to 4 are built; phases 5 to 7 are planned.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -242,11 +242,64 @@ The shell selects one field, `navigationState`, for `useDisplayRotation`,
 which picks the wall's pages by it. A navigation state change re-renders the
 shell; nothing else in vessel state does.
 
-Readings from the phase 4 and 5 streams stay on props from the shell for now:
-the anchor watch record, its trails and placemarks, the AIS and radar inputs
-to the anchor and Nearby maps, the Generator tile's power and battery, the
-autopilot's state, the alternator readings, the Depth & Tide tile's tide and
-trend, and the forecasts. Each wrapper moved only the vessel-state part.
+Phase 3 moved only the vessel-state part of each wrapper. The anchor watch
+record, its trails and pins moved in phase 4; the phase 5 streams and the
+forecasts stayed on props.
+
+### Anchor watch, the Nearby map and the drawers (phase 4)
+
+The anchor watch tile and page now read the watch record, the pins and the
+trails themselves. The shell hands them config, toggles and the planning
+depth, nothing it polled.
+
+**The record.** `useAnchorWatch()` is still a poll of `GET /api/anchor-watch`
+through the shared query cache, but it re-renders a reader only when the
+record changes. `useApiQuery` re-renders on every request, because its
+snapshot carries `isFetching`: two renders per poll, every five seconds while
+a watch is set and every minute while none is. The new
+`useApiQuerySelector(options, select, isEqual)` in `lib/api-query.ts` shares
+the entry, the fetch and the poll, and re-renders only when the selection
+changes. `use-anchor-watch.ts` builds on it:
+
+- `parseAnchorWatch(data)`: one answer as every reader sees it, with the
+  same defaults the hook applied.
+- `useAnchorWatchSelector(select, isEqual)`: any slice of the record. The
+  poll cadence still follows `active`.
+- `useAnchorWatch()`: the whole record, kept while a poll answers with an
+  equal one. The auto-raise compares by its time and reason, because every
+  poll parses a new object for it.
+- `setAnchorHere`, `updateAnchorRadius`, `adjustAnchor`,
+  `updateRodeAndConditions`, `updatePlanningDepth` and `clearAnchor`: plain
+  module functions, each landing the server's answer in the shared entry.
+  The record still carries them, so the tile and page take them as before.
+
+The shell selects four fields: `active`, the auto-raise's time, and the
+planning depth pair. Those drive the auto-raise toast, the reset of the
+what-if planning depth when a watch starts or ends, and the depth the drawer
+plans against. A poll that moves the radius, the rode or the bow offset
+re-renders the tile and page, not the shell.
+
+**The trails.** `useServerTrails` and `useAnchorTrail` are called by
+`LiveAnchorWatchTile`, `LiveAnchorWatchDrawer` and `LivePoiMapTile`, so a
+trail polls while the map that draws it is on screen. The shell's gating on
+the page's widgets, and its `activePanel === 'anchor-watch'` clause, are
+gone; nothing else read them.
+
+Two costs come with that, both accepted:
+
+- An anchor watch tile and a Nearby map on the same page each poll
+  `/api/tracks`, where the shell polled once. A shared poller would need its
+  own store and its own lifecycle for a page layout that is rare on the boat.
+- The trail buffer lives with the hook, so moving between the anchor tile
+  and the anchor page fetches the trail again from the start. The server
+  keeps the trail, so nothing is lost, only re-sent.
+
+**The pins.** `useAnchorPlacemarks(active)` moved into the tile and page with
+the record. They share one query entry, so they share one poll.
+
+*Drop anchor here* stays in the shell, with `useCallback` over the tide, and
+calls `setAnchorHere` with the fix read at the tap. The radar page needed
+nothing moved: its only live input is the fix, which phase 3 already gave it.
 
 ### How long a store lives
 
@@ -361,8 +414,12 @@ and a module that only imports a store's types or helpers never touches it.
   moves only ages within the fresh band re-renders nothing, and the shell
   renders only when the navigation state changes.
 - The place-name lookup runs only while a Position or Clock tile is on screen.
-- The shell still re-renders on the autopilot, anchor watch and other
-  streams until phases 4 and 5 land, and `renderWidget` still runs for every
+- An anchor watch poll re-renders the tile and page only when the record
+  changed, and the shell only when a watch starts or ends, an auto-raise
+  arrives, or the planning depth moves.
+- A trail polls only while a map that draws it is on screen.
+- The shell still re-renders on the autopilot and other streams until
+  phase 5 lands, and `renderWidget` still runs for every
   tile when it does. The gauge tiles are protected from those renders by their
   own memo: their props are now config and stable callbacks only.
 - Each store stays subscribed for the life of the page once started. A

@@ -108,8 +108,7 @@ import { useElectricalState } from '@/hooks/use-electrical-state'
 import { useSolarState } from '@/hooks/use-solar-state'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useRadarTargets } from '@/hooks/use-radar-targets'
-import { useAnchorWatch } from '@/hooks/use-anchor-watch'
-import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
+import { setAnchorHere, updatePlanningDepth, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
 import { ConnectionBanner } from '@/components/connection-banner'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
@@ -122,8 +121,6 @@ import { useSocBands } from '@/hooks/use-soc-bands'
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
-import { useAnchorTrail } from '@/hooks/use-anchor-trail'
-import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { buildForecastDrawerProps } from '@/lib/forecast-drawer-props'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
@@ -357,6 +354,26 @@ export function App() {
 }
 
 const selectNavigationState = (state: VesselStateValue) => state.navigationState
+
+/** What the shell reads of the anchor watch: whether one is set, the auto-raise, and the planning depth. */
+interface ShellAnchorWatch {
+  active: boolean
+  lastAutoRaiseAt: string | null
+  planningDepthM: number | null
+  planningTideHeightFt: number | null
+}
+
+const selectShellAnchorWatch = (watch: AnchorWatchFields): ShellAnchorWatch => ({
+  active: watch.active,
+  lastAutoRaiseAt: watch.lastAutoRaise?.at ?? null,
+  planningDepthM: watch.planningDepthM,
+  planningTideHeightFt: watch.planningTideHeightFt,
+})
+
+function sameShellAnchorWatch(a: ShellAnchorWatch, b: ShellAnchorWatch): boolean {
+  return a.active === b.active && a.lastAutoRaiseAt === b.lastAutoRaiseAt
+    && a.planningDepthM === b.planningDepthM && a.planningTideHeightFt === b.planningTideHeightFt
+}
 
 function AppShell() {
   // Called before every other hook, and unconditionally on every render
@@ -1061,11 +1078,11 @@ function AppShell() {
   // itself (config/app-config.ts's ANCHOR_WATCH_ACTIVE/IDLE_REFRESH_SECONDS),
   // since it depends on whether a watch is currently active — not on this
   // component's unrelated vessel-state refresh setting.
-  // The watch record: the shell reads whether a watch is set, the auto-raise
-  // and the planning depth, none of which moves with the boat. The anchor
-  // watch tile and page apply the live fix themselves (anchorWatchAt), so a
-  // position tick does not re-render the shell.
-  const anchorWatch = useAnchorWatch()
+  // The shell reads four things of the watch: whether one is set, the
+  // auto-raise and the planning depth pair. A poll that changes anything else
+  // (the radius, the rode, the bow offset) re-renders the anchor watch tile
+  // and page, which read the record themselves (ADR 0215), and not the shell.
+  const anchorWatch = useAnchorWatchSelector(selectShellAnchorWatch, sameShellAnchorWatch)
   // Surfaces the server's auto-raise decision (ADR 0099, anchor_auto_raise.go)
   // as the same toast the old browser-side auto-close used to fire directly.
   // lastSeenAutoRaiseAtRef starts uninitialized (undefined) so the first
@@ -1076,8 +1093,9 @@ function AppShell() {
   // /api/anchor-watch (useAnchorWatch), which is what makes this "once per
   // event per client" without any of them having decided the raise itself.
   const lastSeenAutoRaiseAtRef = useRef<string | null | undefined>(undefined)
+  const lastAutoRaiseAt = anchorWatch.lastAutoRaiseAt
   useEffect(() => {
-    const at = anchorWatch.lastAutoRaise?.at ?? null
+    const at = lastAutoRaiseAt
     if (lastSeenAutoRaiseAtRef.current === undefined) {
       lastSeenAutoRaiseAtRef.current = at
       return
@@ -1086,7 +1104,7 @@ function AppShell() {
       lastSeenAutoRaiseAtRef.current = at
       setToastMessage('Anchor watch raised automatically: engines running, under way outside the zone')
     }
-  }, [anchorWatch.lastAutoRaise])
+  }, [lastAutoRaiseAt])
   // The Rode Planner's forecast wind band (frontend/src/lib/rode-plan.ts's
   // resolvePlanningWindBand), held here so it outlives the planner closing
   // and reopening. Deliberately not persisted: a band chosen for last night's
@@ -1102,21 +1120,6 @@ function AppShell() {
   // transition below — without that, a pre-drop what-if would reappear once
   // the anchor comes up and is raised again.
   const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tideHeightFt: number | null } | null>(null)
-  // Item B: only the anchor-watch tile/drawer and the Nearby/POI map tile
-  // read getSelfTrail/getAisTrails (AnchorWatchTile, AnchorWatchDrawer and
-  // PoiMapTile below all take them as props) — every other page, including
-  // most of the wall rotation, has nowhere for a trail to go. Gate the poll
-  // on whichever of those is actually on screen, rather than running it
-  // app-wide regardless.
-  const activePageHasTrailConsumerWidget = effectiveWidgets.some(
-    (w) => w.id === 'anchor-watch' || isPoiMapWidgetId(w.id),
-  )
-  const trailsEnabled = activePageHasTrailConsumerWidget || activePanel === 'anchor-watch'
-  const { getSelfTrail, getAisTrails } = useServerTrails(5000, trailsEnabled)
-  // The anchor swing trail has its own server-kept record (ADR 0199); only
-  // the anchor watch tile and drawer draw it.
-  const anchorTrailEnabled = effectiveWidgets.some((w) => w.id === 'anchor-watch') || activePanel === 'anchor-watch'
-  const { getAnchorTrail } = useAnchorTrail(5000, anchorTrailEnabled)
   // The Nearby map's route layer: the route SignalK is navigating, combined
   // once here so the poi-map tile never has to know route activation exists -
   // it only draws whatever waypoints and next-index it's handed. null
@@ -1140,14 +1143,14 @@ function AppShell() {
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
 
   // Read at the click, not subscribed: the shell never renders on a fix.
-  const handleDropAnchorHere = () => {
+  const handleDropAnchorHere = useCallback(() => {
     const { latitude, longitude, depth } = getVesselStateSnapshot()
     if (latitude === null || longitude === null) return
-    void anchorWatch.setAnchorHere(latitude, longitude, {
+    void setAnchorHere(latitude, longitude, {
       planningDepthM: depth,
       planningTideHeightFt: tideHeightFtOrNull(tide),
     })
-  }
+  }, [tide])
 
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
   const hasActiveAnchorWatch = anchorWatch.active
@@ -1199,16 +1202,11 @@ function AppShell() {
       // message and a Retry it can act on) and reverts the depth input to
       // the last-known-good server value, the same pattern the radius
       // stepper and the rode/conditions fields already use.
-      return anchorWatch.updatePlanningDepth(depthM, tideHeightFt ?? -1)
+      return updatePlanningDepth(depthM, tideHeightFt ?? -1)
     }
     setSessionPlanningDepth({ depthM, tideHeightFt })
     return Promise.resolve()
-  }, [hasActiveAnchorWatch, anchorWatch])
-
-  // One poller for the whole app: the tile and the fullscreen drawer both
-  // draw the same session's pins, and each running its own would double the
-  // request rate for identical data.
-  const { placemarks, createPlacemark, removePlacemark } = useAnchorPlacemarks(hasActiveAnchorWatch)
+  }, [hasActiveAnchorWatch])
 
   // Settings hosts Secrets as a subsection (settings-page.tsx), so hiding
   // this one nav item covers both per ADR 0040's tier table — there is no
@@ -1576,7 +1574,6 @@ function AppShell() {
           onConfigure={configureHandlerFor(id, setPoiMapDraft)}
           activeRoute={activeRoute}
           nearbyVessels={nearbyVessels}
-          getSelfTrail={getSelfTrail}
           isDarkTheme={isDarkTheme}
           forceDark={activePage?.skin === 'instrument'}
           distanceUnits={uiConfig.distanceUnits}
@@ -1647,11 +1644,8 @@ function AppShell() {
       case 'anchor-watch':
         return (
           <LiveAnchorWatchTile
-            watch={anchorWatch}
             isImperial={isImperialDistance}
-            vesselTrail={getAnchorTrail}
             aisVessels={nearbyVessels}
-            aisTrails={getAisTrails}
             radarTargets={radarTargets}
             radars={radarInfos}
             radarSource={radarSource}
@@ -1661,9 +1655,6 @@ function AppShell() {
             showRadarEcho={showRadarEcho}
             onRadarEchoToggle={setShowRadarEcho}
             onFullscreen={openAnchorWatchPanel}
-            placemarks={placemarks}
-            onPlacemarkCreate={createPlacemark}
-            onPlacemarkRemove={removePlacemark}
             tide={tide}
             interactive={!isDisplay}
           />
@@ -2246,24 +2237,7 @@ function AppShell() {
                 also applies the live fix to the watch record; see its comment
                 on the GPS fallback and the -1/-1 sentinel. */}
             <LiveAnchorWatchDrawer
-              watch={anchorWatch}
-              placemarks={placemarks}
-              onPlacemarkCreate={createPlacemark}
-              onPlacemarkRemove={removePlacemark}
-              anchorLat={anchorWatch.anchorLat}
-              anchorLon={anchorWatch.anchorLon}
-              radiusMeters={anchorWatch.radiusMeters}
-              bowOffsetM={anchorWatch.bowOffsetM}
-              bowOffsetApplied={anchorWatch.bowOffsetApplied}
-              bowOffsetReason={anchorWatch.bowOffsetReason}
-              headingAtSetDeg={anchorWatch.headingAtSetDeg}
-              placeName={anchorWatch.placeName}
-              anchorSetAt={anchorWatch.setAt}
-              anchorStateKnown={anchorWatch.loaded}
-              error={anchorWatch.error}
-              vesselTrail={getAnchorTrail}
               aisVessels={nearbyVessels}
-              aisTrails={getAisTrails}
               radarTargets={radarTargets}
               radars={radarInfos}
               radarSource={radarSource}
@@ -2272,19 +2246,12 @@ function AppShell() {
               onImageryToggle={setShowAnchorImagery}
               showRadarEcho={showRadarEcho}
               onRadarEchoToggle={setShowRadarEcho}
-              onRadiusChange={anchorWatch.updateRadius}
-              adjustAnchor={anchorWatch.adjustAnchor}
-              onClearAnchor={anchorWatch.clearAnchor}
               isImperial={isImperialDistance}
               onDropAnchor={handleDropAnchorHere}
-              rodeDeployedM={anchorWatch.rodeDeployedM}
-              seaState={anchorWatch.seaState}
-              seabedType={anchorWatch.seabedType}
               tide={tide}
               anchorConfig={anchorConfig}
               windBandId={windBandId}
               onWindBandChange={setWindBandId}
-              onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
               planningDepthM={resolvedPlanningDepthM}
               planningTideHeightFt={resolvedPlanningTideHeightFt}
               onPlanningDepthChange={handlePlanningDepthChange}

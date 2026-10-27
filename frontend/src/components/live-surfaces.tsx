@@ -17,8 +17,11 @@ import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { WindTile } from '@/components/wind-tile'
 import { PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
 import { acknowledgeAlarm, silenceAlarm, useAisCollisionAlarms, useAlarmList, useKnownAlarmList } from '@/hooks/use-alarms'
-import { anchorWatchAt, type AnchorWatchRecord, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
+import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
+import { useAnchorTrail } from '@/hooks/use-anchor-trail'
+import { anchorWatchAt, useAnchorWatch, type AnchorWatchRecord, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import { usePlaceName } from '@/hooks/use-place-name'
+import { useServerTrails } from '@/hooks/use-server-trails'
 import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
 import { useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { computeClockTripEta } from '@/lib/next-waypoint'
@@ -202,6 +205,9 @@ export const LiveAlternatorTile = memo(function LiveAlternatorTile(props: Omit<C
   return <AlternatorTile {...props} enginesRunning={enginesRunning} />
 })
 
+/** How often a map on screen asks the server for new trail points. */
+const TRAIL_POLL_MS = 5000
+
 /**
  * The watch at the live fix, keeping its object while what it says is the
  * same: distance, bearing, drag state and the GNSS flag. Keyed on those
@@ -222,21 +228,38 @@ const ANCHOR_FIELDS = [
 ] as const
 
 /**
- * The anchor watch tile. The shell hands it the watch record without a fix;
- * this applies the live fix to it (distance, bearing, drag state), and adds
- * depth, current, heading and the collision colours. Its AIS, radar and trail
- * inputs are other streams, still passed by the shell.
+ * The session's pins, polled only while a watch is set: with none there is no
+ * session and the server holds no pins. The tile and the page share one query.
  */
-export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile({ watch, ...props }: Omit<ComponentProps<typeof AnchorWatchTile>,
-  'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'>
-  & { watch: AnchorWatchRecord }) {
+function usePins(active: boolean) {
+  const { placemarks, createPlacemark, removePlacemark } = useAnchorPlacemarks(active)
+  return { placemarks, onPlacemarkCreate: createPlacemark, onPlacemarkRemove: removePlacemark }
+}
+
+/**
+ * The anchor watch tile. It reads the watch record, applies the live fix to it
+ * (distance, bearing, drag state), and adds depth, current, heading, the
+ * collision colours, the pins and the trails. The trails poll only while the
+ * tile is on screen. Its AIS and radar inputs are other streams, still passed
+ * by the shell.
+ */
+export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit<ComponentProps<typeof AnchorWatchTile>,
+  'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'
+  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'>) {
+  const watch = useAnchorWatch()
   const v = useVesselFields(ANCHOR_FIELDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
+  const { getAnchorTrail } = useAnchorTrail(TRAIL_POLL_MS)
+  const { getAisTrails } = useServerTrails(TRAIL_POLL_MS)
+  const pins = usePins(watch.active)
   return (
     <AnchorWatchTile
       {...props}
+      {...pins}
       watch={atFix}
+      vesselTrail={getAnchorTrail}
+      aisTrails={getAisTrails}
       lastUpdateAgeS={v.positionLastUpdateAgeS}
       lat={v.latitude}
       lon={v.longitude}
@@ -252,12 +275,13 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile({ watch, ..
 
 const POI_FIELDS = ['latitude', 'longitude', 'headingTrue', 'gnssCriticalAlert', 'positionLastUpdateAgeS'] as const
 
-/** The Nearby map tile: own ship from vessel state, and the collision colours. */
+/** The Nearby map tile: own ship from vessel state, the collision colours, and the boat's trail while it is on screen. */
 export const LivePoiMapTile = memo(function LivePoiMapTile(props: Omit<ComponentProps<typeof PoiMapTile>,
-  'aisCollisionAlarms' | (typeof POI_FIELDS)[number]>) {
+  'aisCollisionAlarms' | 'getSelfTrail' | (typeof POI_FIELDS)[number]>) {
   const ownShip = useVesselFields(POI_FIELDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
-  return <PoiMapTile {...props} {...ownShip} aisCollisionAlarms={aisCollisionAlarms} />
+  const { getSelfTrail } = useServerTrails(TRAIL_POLL_MS)
+  return <PoiMapTile {...props} {...ownShip} aisCollisionAlarms={aisCollisionAlarms} getSelfTrail={getSelfTrail} />
 })
 
 const ANCHOR_DRAWER_FIELDS = [
@@ -267,8 +291,9 @@ const ANCHOR_DRAWER_FIELDS = [
 ] as const
 
 /**
- * The anchor watch page. Like the tile, it takes the watch record and applies
- * the live fix; everything from vessel state is filled in here.
+ * The anchor watch page. Like the tile, it reads the watch record and applies
+ * the live fix; the record's fields and writes, the pins, the trails and
+ * everything from vessel state are filled in here.
  *
  * vesselLat/vesselLon fall back from the live fix to the anchor point (e.g.
  * GPS lost after the anchor was already set), and stay null only when neither
@@ -283,17 +308,46 @@ const ANCHOR_DRAWER_FIELDS = [
  * latitude and longitude here are a plain range check away from being -1, not
  * null, when the sentinel fires, which is why the pair is checked explicitly.
  */
-export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer({ watch, ...props }: Omit<AnchorWatchDrawerProps,
+export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: Omit<AnchorWatchDrawerProps,
   'aisCollisionAlarms' | 'vesselLat' | 'vesselLon' | 'hasGpsFix' | 'vesselHeadingDeg' | 'depthMeters' | 'depthLastUpdateAgeS'
   | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'distanceMeters' | 'bearingDeg' | 'anchorState'
-  | 'canDrop' | 'windSpeedApparentKts' | 'maxGustKts' | 'vesselLengthOverallM' | 'vesselDraftM'> & { watch: AnchorWatchRecord }) {
+  | 'canDrop' | 'windSpeedApparentKts' | 'maxGustKts' | 'vesselLengthOverallM' | 'vesselDraftM'
+  | 'anchorLat' | 'anchorLon' | 'radiusMeters' | 'bowOffsetM' | 'bowOffsetApplied' | 'bowOffsetReason' | 'headingAtSetDeg'
+  | 'placeName' | 'anchorSetAt' | 'anchorStateKnown' | 'error' | 'onRadiusChange' | 'adjustAnchor' | 'onClearAnchor'
+  | 'rodeDeployedM' | 'seaState' | 'seabedType' | 'onUpdateRodeAndConditions'
+  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'>) {
+  const watch = useAnchorWatch()
   const v = useVesselFields(ANCHOR_DRAWER_FIELDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
+  const { getAnchorTrail } = useAnchorTrail(TRAIL_POLL_MS)
+  const { getAisTrails } = useServerTrails(TRAIL_POLL_MS)
+  const pins = usePins(watch.active)
   const hasFix = v.latitude !== null && v.longitude !== null
   return (
     <AnchorWatchDrawer
       {...props}
+      {...pins}
+      anchorLat={watch.anchorLat}
+      anchorLon={watch.anchorLon}
+      radiusMeters={watch.radiusMeters}
+      bowOffsetM={watch.bowOffsetM}
+      bowOffsetApplied={watch.bowOffsetApplied}
+      bowOffsetReason={watch.bowOffsetReason}
+      headingAtSetDeg={watch.headingAtSetDeg}
+      placeName={watch.placeName}
+      anchorSetAt={watch.setAt}
+      anchorStateKnown={watch.loaded}
+      error={watch.error}
+      onRadiusChange={watch.updateRadius}
+      adjustAnchor={watch.adjustAnchor}
+      onClearAnchor={watch.clearAnchor}
+      rodeDeployedM={watch.rodeDeployedM}
+      seaState={watch.seaState}
+      seabedType={watch.seabedType}
+      onUpdateRodeAndConditions={watch.updateRodeAndConditions}
+      vesselTrail={getAnchorTrail}
+      aisTrails={getAisTrails}
       vesselLat={v.latitude ?? watch.anchorLat}
       vesselLon={v.longitude ?? watch.anchorLon}
       hasGpsFix={hasFix && !v.gnssCriticalAlert && !(v.latitude === -1 && v.longitude === -1)}

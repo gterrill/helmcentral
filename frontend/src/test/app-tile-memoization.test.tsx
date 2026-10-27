@@ -17,6 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { memo, type ComponentProps } from 'react'
 import { App } from '../App'
+import { setQueryData } from '@/lib/api-query'
 
 beforeEach(() => {
   // useAuth (real here, not mocked) needs mode:none to clear the shell for
@@ -149,23 +150,30 @@ function rendersOf(title: string): number {
 }
 
 // ── a dashboard page with one route tile and two gauges, on paths a and b. ────
+const BASE_WIDGETS = [
+  { id: 'route', x: 0, y: 0, w: 4, h: 4 },
+  { id: 'gauge:a', x: 4, y: 0, w: 4, h: 4, gauge: { path: 'a.path', label: 'Gauge A', display: 'numeric', quantity: 'raw', unit: 'raw' } },
+  { id: 'gauge:b', x: 8, y: 0, w: 4, h: 4, gauge: { path: 'b.path', label: 'Gauge B', display: 'numeric', quantity: 'raw', unit: 'raw' } },
+  // Alarm consumers: the lamp strip reads the whole list and the worst
+  // state, the Nearby Vessels tile only the collision alarms.
+  { id: 'lamps:l', x: 0, y: 4, w: 4, h: 2, lamps: { title: 'Lamps', lamps: [{ path: 'c.path', label: 'C' }], showCheck: true } },
+  { id: 'nearby-vessels', x: 4, y: 4, w: 4, h: 4 },
+  // Vessel-state consumers: wind reads the wind fields, position the fix.
+  { id: 'wind', x: 8, y: 4, w: 4, h: 4 },
+  { id: 'position', x: 0, y: 8, w: 4, h: 4 },
+]
+// A describe block below swaps in its own page; every test starts on this one.
+let pageWidgets: unknown[] = BASE_WIDGETS
+beforeEach(() => {
+  pageWidgets = BASE_WIDGETS
+})
+
 vi.mock('@/hooks/use-dashboard-pages', () => ({
   useDashboardPages: () => ({
     pages: [{
       id: 'p1',
       name: 'Page 1',
-      widgets: [
-        { id: 'route', x: 0, y: 0, w: 4, h: 4 },
-        { id: 'gauge:a', x: 4, y: 0, w: 4, h: 4, gauge: { path: 'a.path', label: 'Gauge A', display: 'numeric', quantity: 'raw', unit: 'raw' } },
-        { id: 'gauge:b', x: 8, y: 0, w: 4, h: 4, gauge: { path: 'b.path', label: 'Gauge B', display: 'numeric', quantity: 'raw', unit: 'raw' } },
-        // Alarm consumers: the lamp strip reads the whole list and the worst
-        // state, the Nearby Vessels tile only the collision alarms.
-        { id: 'lamps:l', x: 0, y: 4, w: 4, h: 2, lamps: { title: 'Lamps', lamps: [{ path: 'c.path', label: 'C' }], showCheck: true } },
-        { id: 'nearby-vessels', x: 4, y: 4, w: 4, h: 4 },
-        // Vessel-state consumers: wind reads the wind fields, position the fix.
-        { id: 'wind', x: 8, y: 4, w: 4, h: 4 },
-        { id: 'position', x: 0, y: 8, w: 4, h: 4 },
-      ],
+      widgets: pageWidgets,
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     }],
@@ -210,18 +218,8 @@ vi.mock('@/hooks/use-radar-targets', () => ({
   useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
 }))
 
-vi.mock('@/hooks/use-anchor-watch', () => ({
-  anchorWatchAt: (watch: unknown) => watch,
-  useAnchorWatch: () => ({
-    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
-    rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
-    distanceMeters: null, bearingDeg: null,
-    planningDepthM: null, planningTideHeightFt: null,
-    setAnchorHere: vi.fn(), updateRadius: vi.fn(),
-    updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),
-    clearAnchor: vi.fn(),
-  }),
-}))
+// use-anchor-watch is real: the polls below land through setQueryData, the
+// way a GET /api/anchor-watch answer does.
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
@@ -291,8 +289,13 @@ vi.mock('@/hooks/use-forecast-warnings', () => ({
   forecastWarningDetailsUrl: () => null,
 }))
 
+// Records who polls the trails: only a map on screen should (phase 4).
+const useServerTrailsSpy = vi.fn()
 vi.mock('@/hooks/use-server-trails', () => ({
-  useServerTrails: () => ({ getSelfTrail: vi.fn(), getAisTrails: vi.fn() }),
+  useServerTrails: (...args: unknown[]) => {
+    useServerTrailsSpy(...args)
+    return { getSelfTrail: vi.fn(), getAisTrails: vi.fn() }
+  },
 }))
 
 vi.mock('@/hooks/use-dark-mode', () => ({
@@ -484,5 +487,79 @@ describe('App vessel-state tiles (ADR 0215 phase 3)', () => {
     emitVesselState({ ...LIVE_VESSEL_STATE, latitude: -20.2748, longitude: 149.0738, heading_true: 331.4, wind_speed_apparent_kts: 5.7, depth: 16.0 })
 
     expect(gridRenderSpy.mock.calls.length).toBe(grid)
+  })
+})
+
+// ── anchor watch, the Nearby map and the drawers (ADR 0215 phase 4) ─────────
+
+// The record GET /api/anchor-watch answers with while a watch is set: the
+// backend's anchorWatchData fields (backend/anchor.go). The live server had no
+// watch set on 2026-10-27 and answered {"active":false} on every poll.
+const SET_WATCH = {
+  active: true, lat: -20.274677, lon: 149.073691, radius_meters: 30, rode_deployed_m: 40,
+  sea_state: 'calm', seabed_type: 'sand', set_at: '2026-10-27T01:00:00Z',
+  bow_offset_m: 4.2, bow_offset_applied: true, bow_offset_reason: '', heading_at_set_deg: 329.3,
+  place_name: 'Airlie Beach', planning_depth_m: 16.3, planning_tide_height_ft: 4.1,
+}
+
+function landWatch(payload: unknown) {
+  act(() => {
+    setQueryData(['/api/anchor-watch'], payload)
+  })
+}
+
+describe('App anchor watch (ADR 0215 phase 4)', () => {
+  const ANCHOR_PAGE = [
+    { id: 'route', x: 0, y: 0, w: 4, h: 4 },
+    { id: 'anchor-watch', x: 4, y: 0, w: 6, h: 8 },
+  ]
+
+  it('polls no trail while no map is on the page', async () => {
+    useServerTrailsSpy.mockClear()
+    await mountApp()
+
+    expect(useServerTrailsSpy).not.toHaveBeenCalled()
+  })
+
+  it('re-renders no consumer when a poll answers with the same watch', async () => {
+    pageWidgets = ANCHOR_PAGE
+    await mountApp()
+    landWatch(SET_WATCH)
+    const anchor = rendersOf('Anchor Watch')
+    const grid = gridRenderSpy.mock.calls.length
+    expect(anchor).toBeGreaterThan(0)
+
+    // Every poll parses a new object, equal by value to the one before.
+    landWatch({ ...SET_WATCH })
+    landWatch({ ...SET_WATCH })
+
+    expect(rendersOf('Anchor Watch')).toBe(anchor)
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
+  })
+
+  it('re-renders the anchor watch tile, and not the shell grid, when the watch changes', async () => {
+    pageWidgets = ANCHOR_PAGE
+    await mountApp()
+    landWatch(SET_WATCH)
+    const anchor = rendersOf('Anchor Watch')
+    const route = routeTileRenderSpy.mock.calls.length
+    const grid = gridRenderSpy.mock.calls.length
+
+    landWatch({ ...SET_WATCH, radius_meters: 35 })
+    landWatch({ ...SET_WATCH, radius_meters: 35, rode_deployed_m: 45 })
+
+    expect(rendersOf('Anchor Watch')).toBeGreaterThan(anchor)
+    expect(routeTileRenderSpy.mock.calls.length).toBe(route)
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
+  })
+
+  it('the anchor watch tile polls the trails itself', async () => {
+    pageWidgets = ANCHOR_PAGE
+    useServerTrailsSpy.mockClear()
+    await mountApp()
+
+    // Called with no enable flag: the tile mounting is what turns it on.
+    expect(useServerTrailsSpy).toHaveBeenCalled()
+    expect(useServerTrailsSpy.mock.calls.every((args) => args[1] === undefined)).toBe(true)
   })
 })

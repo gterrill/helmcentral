@@ -10,6 +10,7 @@ import {
   resetQueryStore,
   setQueryData,
   useApiQuery,
+  useApiQuerySelector,
 } from '@/lib/api-query'
 import { jsonResponse, stubApi } from './helpers/stub-api'
 
@@ -530,5 +531,40 @@ describe('query store', () => {
     })
     expect(mock.mock.calls.length).toBe(calls)
     unmount()
+  })
+})
+
+describe('useApiQuerySelector', () => {
+  beforeEach(() => {
+    resetQueryStore()
+  })
+
+  const selectCount = (data: { count: number; at: string } | undefined) => data?.count ?? null
+
+  it('re-renders only when its slice changes, not on every request', async () => {
+    stubApi({ 'GET /api/items': { count: 1, at: 't0' } })
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useApiQuerySelector({ queryKey: ['items'], path: '/api/items' }, selectCount)
+    })
+    await waitFor(() => expect(result.current).toBe(1))
+    const settled = renders
+
+    // A poll answering the same count, and one changing only a field the
+    // reader does not select: neither is a change to what it shows.
+    await act(async () => { setQueryData(['items'], { count: 1, at: 't1' }) })
+    await act(async () => { setQueryData(['items'], { count: 1, at: 't2' }) })
+    expect(renders).toBe(settled)
+
+    await act(async () => { setQueryData(['items'], { count: 2, at: 't3' }) })
+    expect(result.current).toBe(2)
+    expect(renders).toBe(settled + 1)
+  })
+
+  it('selects from undefined until the first answer lands', () => {
+    stubApi({ 'GET /api/items': () => new Promise(() => {}) })
+    const { result } = renderHook(() => useApiQuerySelector({ queryKey: ['items'], path: '/api/items' }, selectCount))
+    expect(result.current).toBeNull()
   })
 })

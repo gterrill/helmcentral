@@ -382,13 +382,14 @@ export interface UseApiQueryResult<T> {
 
 const noopSubscribe = () => () => {}
 
-export function useApiQuery<T>({
-  queryKey,
-  path,
-  refetchInterval,
-  enabled = true,
-  select,
-}: UseApiQueryOptions<T>): UseApiQueryResult<T> {
+// One hook instance's subscription to an entry: it mounts the entry, polls at
+// refetchInterval, and retunes the poll in place when the interval changes.
+function useEntrySubscription(
+  queryKey: QueryKey,
+  path: string,
+  refetchInterval: number | undefined,
+  enabled: boolean,
+): { hash: string; key: QueryKey; subscribe: (onChange: () => void) => () => void } {
   const hash = hashKey(queryKey)
 
   // The key array is a fresh literal on most renders; its hash is the identity.
@@ -409,6 +410,44 @@ export function useApiQuery<T>({
   useEffect(() => {
     retunePolling(key, subRef.current, refetchInterval)
   }, [key, refetchInterval])
+  return { hash, key, subscribe }
+}
+
+/**
+ * One slice of a query's data, for a reader that should re-render only when
+ * that slice changes (ADR 0215). useApiQuery re-renders on every request,
+ * because its snapshot carries isFetching; this re-renders only when `select`
+ * returns something `isEqual` calls different. It fetches and polls exactly as
+ * useApiQuery does, sharing the same entry. `select` sees undefined until the
+ * first answer lands, and should be a stable function.
+ */
+export function useApiQuerySelector<T, S>(
+  { queryKey, path, refetchInterval, enabled = true }: Omit<UseApiQueryOptions<T>, 'select'>,
+  select: (data: T | undefined) => S,
+  isEqual: (a: S, b: S) => boolean = Object.is,
+): S {
+  const { hash, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
+  const cache = useRef<{ data: unknown; select: (data: T | undefined) => S; value: S } | null>(null)
+  const getSelection = useCallback((): S => {
+    const data = enabled ? entries.get(hash)?.snapshot.data : undefined
+    const prev = cache.current
+    if (prev && prev.data === data && prev.select === select) return prev.value
+    const next = select(data as T | undefined)
+    const value = prev && isEqual(prev.value, next) ? prev.value : next
+    cache.current = { data, select, value }
+    return value
+  }, [hash, enabled, select, isEqual])
+  return useSyncExternalStore(subscribe, getSelection, getSelection)
+}
+
+export function useApiQuery<T>({
+  queryKey,
+  path,
+  refetchInterval,
+  enabled = true,
+  select,
+}: UseApiQueryOptions<T>): UseApiQueryResult<T> {
+  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
   const getSnapshot = useCallback(
     () => (enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY),
     [hash, enabled],
