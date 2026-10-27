@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
-import { ageFromPayload } from '@/lib/staleness'
+import { ageFromPayload, formatDataAge, isStale } from '@/lib/staleness'
 
 /**
  * Current values for, and the age behind, every path a gauge is bound to.
@@ -21,6 +21,9 @@ import { ageFromPayload } from '@/lib/staleness'
  * the app through useRetainGaugeValues, without listening to it, so the last
  * reading survives the moment between one page's tiles unmounting and the
  * next page's mounting.
+ *
+ * An age changes, for its listeners, only when what a tile shows for it
+ * changes: unknown, fresh, or the stale label (see shownAge).
  */
 
 type PathMap = Record<string, number | null>
@@ -91,6 +94,18 @@ function notify(listeners: Map<string, Set<() => void>>, keys: readonly string[]
   }
 }
 
+/**
+ * What a tile can show for an age: nothing (unknown), fresh, or stale with a
+ * given label. Every tile reading this store uses the age only through
+ * isStale at its default threshold and, once stale, formatDataAge, so this is
+ * all of it. A tile that needs another threshold has to be keyed here too.
+ */
+function shownAge(age: number | null): string {
+  if (age === null || !Number.isFinite(age)) return 'none'
+  if (!isStale(age)) return 'fresh'
+  return formatDataAge(age)
+}
+
 type EnginesPayload = Record<string, { state?: string; last_update?: string }>
 
 function applyGaugeValuesEvent(raw: string): void {
@@ -107,9 +122,16 @@ function applyGaugeValuesEvent(raw: string): void {
   // `-1` (ADR 0068's "no timestamp at all" sentinel) is mapped to `null`
   // through ageFromPayload, so a path with no freshness signal reads as
   // unknown rather than as impossibly fresh.
+  //
+  // The server rounds ages to 0.1 s, so most of them move on every tick. An
+  // age that moves without changing what a tile shows keeps the number the
+  // store last handed out, so it notifies nobody. A fresh age can therefore
+  // read lower than the true one; it is never used as a figure until stale.
   const nextAges: PathMap = {}
   for (const [path, value] of Object.entries(payload.ages ?? {})) {
-    nextAges[path] = ageFromPayload(value)
+    const age = ageFromPayload(value)
+    const prev = agesSnapshot[path]
+    nextAges[path] = path in agesSnapshot && shownAge(prev) === shownAge(age) ? prev : age
   }
 
   // An engine whose status is unchanged keeps its object, so a tile reading

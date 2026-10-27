@@ -294,12 +294,26 @@ describe('App tile memoization (item D)', () => {
     expect(rendersOf('Gauge B')).toBe(b)
   })
 
-  it('does not re-render gauge A when only the age behind b changes', async () => {
+  // The server rounds ages to 0.1 s, so most of them move on every tick. An
+  // age that moves without going stale changes nothing either gauge shows.
+  it('re-renders no gauge when ages move only within the fresh band', async () => {
     await mountApp()
     const a = rendersOf('Gauge A')
     const b = rendersOf('Gauge B')
 
-    emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 2 } })
+    emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 0.3, 'b.path': 0.7 } })
+    emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 0.7, 'b.path': 1.1 } })
+
+    expect(rendersOf('Gauge A')).toBe(a)
+    expect(rendersOf('Gauge B')).toBe(b)
+  })
+
+  it('re-renders a gauge whose age crosses the stale threshold', async () => {
+    await mountApp()
+    const a = rendersOf('Gauge A')
+    const b = rendersOf('Gauge B')
+
+    emitGaugeValues({ values: { 'a.path': 1, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 121 } })
 
     expect(rendersOf('Gauge B')).toBeGreaterThan(b)
     expect(rendersOf('Gauge A')).toBe(a)

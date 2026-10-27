@@ -9,10 +9,12 @@ import { useEngineStatus, useGaugeSubset, type EngineStates } from '@/hooks/use-
 import type { TankLevel } from '@/hooks/use-tanks-state'
 import { formatAppLocation } from '@/lib/app-location'
 import type { EngineClusterConfig, GaugeGroupWidgetConfig, LampStripWidgetConfig } from '@/lib/dashboard-widgets'
+import { clusterPaths } from '@/lib/cluster-readings'
 import {
-  engineInstance,
+  engineIdOf,
   findItem,
   isEquipmentGroup,
+  propulsionId,
   problemMessage,
   resolveCluster,
   resolveGaugeGroup,
@@ -71,43 +73,14 @@ interface HostProps<C> {
   onConfigure: () => void
 }
 
-/**
- * Every bound path in a tile's config: each slot, lamp and bar carries its own
- * `path`, so walking the config cannot miss one a tile later grows.
- */
-function boundPaths(config: unknown): string[] {
-  const out = new Set<string>()
-  const walk = (node: unknown) => {
-    if (Array.isArray(node)) {
-      for (const child of node) walk(child)
-    } else if (node !== null && typeof node === 'object') {
-      for (const [key, child] of Object.entries(node)) {
-        if (key === 'path' && typeof child === 'string') {
-          if (child.trim() !== '') out.add(child)
-        } else {
-          walk(child)
-        }
-      }
-    }
-  }
-  walk(config)
-  return [...out].sort()
-}
-
-/** The live values and ages for the paths a resolved config reads, from the gauge-values store (ADR 0215). */
-function useBoundReadings(config: unknown) {
-  const paths = useMemo(() => boundPaths(config), [config])
-  return useGaugeSubset(paths)
-}
+const NO_PATHS: readonly string[] = []
 
 /**
- * The state of the engine an item is, when it is one, as the one-entry map
- * the resolver and the cluster read. Undefined when the item is not an engine
- * or the server cannot classify it.
+ * The state of one engine, by instance id, as the one-entry map the resolver
+ * and the cluster read. Undefined for no engine, or one the server cannot
+ * classify.
  */
-function useItemEngine(ctx: EquipmentTileContext, equipmentId: string | undefined): EngineStates | undefined {
-  const item = findItem(ctx, equipmentId)
-  const id = item && item.source_kind === 'engine' && item.signalk_source !== '' ? engineInstance(item.signalk_source) : null
+function useEngine(id: string | null): EngineStates | undefined {
   const status = useEngineStatus(id)
   return useMemo(() => (id !== null && status ? { [id]: status } : undefined), [id, status])
 }
@@ -115,26 +88,33 @@ function useItemEngine(ctx: EquipmentTileContext, equipmentId: string | undefine
 export const EngineClusterHost = memo(function EngineClusterHost({
   config, ctx, tanks, editing, onConfigure,
 }: HostProps<EngineClusterConfig> & { tanks?: TankLevel[] }) {
-  const engines = useItemEngine(ctx, config.equipmentId)
-  const resolved = useMemo(() => resolveCluster(config, ctx, tanks, engines), [config, ctx, tanks, engines])
-  const { values, ages } = useBoundReadings(resolved.ok ? resolved.config : null)
+  // An engine item that is off is known, not silent, when it comes to saying
+  // Not reporting. OFF on the card follows the propulsion id the readings come
+  // from, whatever kind the item is.
+  const itemEngine = useEngine(engineIdOf(findItem(ctx, config.equipmentId)))
+  const resolved = useMemo(() => resolveCluster(config, ctx, tanks, itemEngine), [config, ctx, tanks, itemEngine])
+  const shown = resolved.ok ? resolved.config : null
+  const cardEngine = useEngine(shown ? propulsionId(shown.ring.path) : null)
+  const paths = useMemo(() => (shown ? clusterPaths(shown) : NO_PATHS), [shown])
+  const { values, ages } = useGaugeSubset(paths)
   if (!resolved.ok) {
     return <EquipmentTileNotice title={config.title.trim() || 'Engine'} problem={resolved.problem} editing={editing} onConfigure={onConfigure} />
   }
-  return <EngineClusterTile config={resolved.config} values={values} ages={ages} engines={engines} editing={editing} onConfigure={onConfigure} />
+  return <EngineClusterTile config={resolved.config} values={values} ages={ages} engines={cardEngine} editing={editing} onConfigure={onConfigure} />
 })
 
 export const GaugeGroupHost = memo(function GaugeGroupHost({
   config, ctx, editing, onConfigure,
 }: HostProps<GaugeGroupWidgetConfig>) {
   const equipment = isEquipmentGroup(config)
-  const engines = useItemEngine(ctx, equipment ? config.equipmentId : undefined)
+  const engines = useEngine(equipment ? engineIdOf(findItem(ctx, config.equipmentId)) : null)
   const resolved = useMemo(
-    () => (equipment ? resolveGaugeGroup(config, ctx, engines) : null),
-    [equipment, config, ctx, engines],
+    () => (isEquipmentGroup(config) ? resolveGaugeGroup(config, ctx, engines) : null),
+    [config, ctx, engines],
   )
   const shown = resolved ? (resolved.ok ? resolved.config : null) : config
-  const { values, ages } = useBoundReadings(shown)
+  const paths = useMemo(() => (shown ? shown.gauges.map((g) => g.path).filter((p) => p.trim() !== '') : NO_PATHS), [shown])
+  const { values, ages } = useGaugeSubset(paths)
   if (resolved && !resolved.ok) {
     return <EquipmentTileNotice title={config.title.trim() || 'Gauges'} problem={resolved.problem} editing={editing} onConfigure={onConfigure} />
   }
@@ -145,6 +125,7 @@ export const LampStripHost = memo(function LampStripHost({
   config, ctx, ...rest
 }: { config: LampStripWidgetConfig; ctx: EquipmentTileContext } & Omit<React.ComponentProps<typeof LampStripTile>, 'config' | 'values' | 'ages'>) {
   const resolved = useMemo(() => resolveLamps(config, ctx), [config, ctx])
-  const { values, ages } = useBoundReadings(resolved)
+  const paths = useMemo(() => resolved.lamps.map((l) => l.path).filter((p) => p.trim() !== ''), [resolved])
+  const { values, ages } = useGaugeSubset(paths)
   return <LampStripTile config={resolved} values={values} ages={ages} {...rest} />
 })

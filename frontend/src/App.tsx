@@ -1498,8 +1498,11 @@ function AppShell() {
     }
   }, [activePage, effectiveWidgets, poiMapDraft, updatePage])
 
-  // Item D: every SSE tick re-renders App, and renderWidget below runs fresh
-  // on every one of those renders (it is deliberately not memoized itself —
+  // Item D: the shell still re-renders on every vessel-state, alarms,
+  // autopilot, electrical, solar, tanks, nearby-vessel, radar and anchor-watch
+  // tick, and on each polled forecast (gauge values no longer: ADR 0215 moved
+  // them into the tiles). renderWidget below runs fresh on every one of those
+  // renders (it is deliberately not memoized itself —
   // see its own comment), so an inline `onConfigure={() => setXDraft(widget)}`
   // handed a memoized tile (EngineClusterTile, LampStripTile, GaugeGroupTile,
   // GaugeTile) a new function identity every second even when nothing about

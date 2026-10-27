@@ -254,3 +254,62 @@ describe('store lifetime', () => {
     expect(next.result.current).toBeNull()
   })
 })
+
+// The server rounds ages to 0.1 s, so on the live stream most bound ages move
+// on every 1 s tick while far fewer values do. A tile uses an age only to ask
+// whether it is stale and, once stale, to say how old it is, so an age that
+// moves within the same answer must not re-render anything.
+describe('ages that move without changing what a tile shows', () => {
+  const rpm = 'propulsion.port.revolutions'
+  const oil = 'propulsion.port.oilPressure'
+
+  it('keeps the subset, and renders nothing, while ages move within the fresh band', () => {
+    let renders = 0
+    const { result } = renderHook(() => { renders += 1; return useGaugeSubset([rpm, oil]) })
+    emit({ values: { [rpm]: 30.5, [oil]: 241325 }, ages: { [rpm]: 0.3, [oil]: 1.2 } })
+    const first = result.current
+    const after = renders
+
+    emit({ values: { [rpm]: 30.5, [oil]: 241325 }, ages: { [rpm]: 0.7, [oil]: 2.2 } })
+    expect(result.current).toBe(first)
+    expect(renders).toBe(after)
+  })
+
+  it('does not re-render a single-path age reader while the age stays fresh', () => {
+    let renders = 0
+    renderHook(() => { renders += 1; return useGaugeAge(rpm) })
+    emit({ values: {}, ages: { [rpm]: 0.3 } })
+    const after = renders
+    emit({ values: {}, ages: { [rpm]: 0.7 } })
+    expect(renders).toBe(after)
+  })
+
+  it('re-renders when an age crosses the stale threshold, with the real age', () => {
+    const { result } = renderHook(() => useGaugeSubset([rpm]))
+    emit({ values: { [rpm]: 30.5 }, ages: { [rpm]: 119.5 } })
+    const first = result.current
+    emit({ values: { [rpm]: 30.5 }, ages: { [rpm]: 120.4 } })
+    expect(result.current).not.toBe(first)
+    expect(result.current.ages[rpm]).toBe(120.4)
+  })
+
+  it('re-renders a stale age only when the age it shows changes', () => {
+    const { result } = renderHook(() => useGaugeSubset([rpm]))
+    emit({ values: {}, ages: { [rpm]: 130 } })
+    const first = result.current
+    emit({ values: {}, ages: { [rpm]: 130.5 } })
+    expect(result.current).toBe(first)
+    emit({ values: {}, ages: { [rpm]: 185 } })
+    expect(result.current).not.toBe(first)
+    expect(result.current.ages[rpm]).toBe(185)
+  })
+
+  it('re-renders when an age becomes unknown, or known again', () => {
+    const { result } = renderHook(() => useGaugeAge(rpm))
+    emit({ values: {}, ages: { [rpm]: 0.3 } })
+    emit({ values: {}, ages: { [rpm]: -1 } })
+    expect(result.current).toBeNull()
+    emit({ values: {}, ages: { [rpm]: 0.7 } })
+    expect(result.current).toBe(0.7)
+  })
+})

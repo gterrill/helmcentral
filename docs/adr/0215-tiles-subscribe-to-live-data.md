@@ -79,10 +79,44 @@ itself changes.
 
 `GaugeTile` reads its own path. The three equipment hosts,
 `EngineClusterHost`, `GaugeGroupHost` and `LampStripHost`, read the subset of
-paths their resolved config binds; the pinned ribbon is a `LampStripHost`, so
-it does too. The cluster and gauge-group hosts read the state of the engine
-their item is, and pass it to the resolver, which no longer finds it in the
-equipment tile context. `AppShell` reads no gauge value, age or engine state.
+paths their resolved config binds, listed explicitly: the cluster's slots and
+fuel capacities (`clusterPaths`), the group's gauges, the strip's lamps. The
+pinned ribbon is a `LampStripHost`, so it does too. `AppShell` reads no gauge
+value, age or engine state.
+
+Engine state leaves the equipment tile context. Two hosts read it, for two
+different questions:
+
+- **Is the item silent?** An engine item that is off is known, not "Not
+  reporting". `engineIdOf(item)` answers which engine an item is, for both the
+  resolver and the host, so the rule lives in one place.
+- **Is the card OFF?** The cluster's OFF pill follows the propulsion id its
+  ring reads (`propulsion.port.revolutions` → `port`), whatever kind the item
+  was given in Inventory, as it did before.
+
+### Ages change only when what a tile shows changes
+
+The server rounds ages to a tenth of a second. On the live stream 15 to 20 of
+27 bound ages move on every one-second tick, while 7 to 10 values do. Compared
+exactly, those ages would re-render every gauge, cluster, group and lamp tile
+each tick, which is the cost this ADR exists to remove.
+
+A tile uses an age for two things only: `isStale` at its default threshold of
+120 seconds, and `formatDataAge` once stale, for the "Stale 2m" badge. So the
+store compares each path's age on what a tile can show for it:
+
+- `none` for an unknown age
+- `fresh` for one under the stale threshold
+- the `formatDataAge` label for a stale one
+
+While that key holds, the store keeps handing out the age it last handed out,
+and notifies nobody. A fresh age can therefore read lower than the true one.
+Nothing shows a fresh age as a figure, so nothing shows it wrong.
+
+The key uses the default threshold only, because every tile that reads this
+store calls `isStale` without one. Passing a threshold through the hooks would
+serve no tile today. A tile that needs its own threshold has to change the key
+first, or its stale badge will lag by up to a whole band.
 
 The presentational tiles, `GaugeTileView`, `EngineClusterTile`,
 `GaugeGroupTile` and `LampStripTile`, still take values as props. Their tests
@@ -151,10 +185,13 @@ for the whole session while the shell read the values; it stays open.
 ## Consequences
 
 - A gauge-values tick re-renders only the gauges, clusters, groups and lamp
-  strips whose own paths changed. A tick that changes nothing they show
-  re-renders nothing.
+  strips whose own values changed, or whose age crossed into stale or moved
+  to a new stale label. A tick that changes nothing they show re-renders
+  nothing.
 - An engine keying off re-renders the cluster and gauge-group hosts showing
   that engine, not every equipment host and not the shell.
+- An age read from the store is exact only once stale. Code that wants the
+  true age of a fresh reading cannot get it from these hooks.
 - The shell still re-renders on the vessel-state, alarm, autopilot and other
   streams until phases 2 to 5 land, and `renderWidget` still runs for every
   tile when it does. The gauge tiles are protected from those renders by their
