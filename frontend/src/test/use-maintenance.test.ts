@@ -48,13 +48,7 @@ describe('useMaintenanceRules', () => {
       await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
       await setMaintenanceRuleOverrides('r1', {} as never)
       await waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('rules?') && String(c[0]).includes('today=2026-10-13'))).toHaveLength(2))
-      // The 14th's view refetched too. The hook first mounted on the 13th now
-      // reads the 14th, and moves to that entry when it next renders, which
-      // can cost one more read of the 14th: how many is the hook's timing,
-      // not what this checks.
-      const after = fetchMock.mock.calls.map((c) => String(c[0]))
-      const write = after.findIndex((url) => url.includes('/overrides'))
-      expect(after.slice(write).some((url) => url.includes('rules?') && url.includes('today=2026-10-14'))).toBe(true)
+      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes('rules?') && String(c[0]).includes('today=2026-10-14'))).toHaveLength(2)
     } finally {
       vi.useRealTimers()
     }

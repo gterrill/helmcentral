@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useApiQuery } from '@/lib/api-query';
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
@@ -174,16 +174,20 @@ export function useWaveForecast(refreshIntervalSeconds = 3600, options: Forecast
     if (error) console.error('Error fetching wave forecast:', error);
   }, [error]);
 
-  const { days, seaTemperatureF, provider, isCached, updatedAt, ttlSeconds } = data ?? EMPTY_WAVES;
-  return {
-    days,
-    seaTemperatureF,
-    provider,
-    loading: isLoading,
-    error: error ? error.message || 'Failed to load wave forecast data' : null,
-    isCached,
-    updatedAt,
-    ttlSeconds,
-    refetch,
-  };
+  // One object while the answer, the error and the loading state hold, so a
+  // reader that memoizes on it (the Forecast page's props) holds too.
+  return useMemo(() => {
+    const { days, seaTemperatureF, provider, isCached, updatedAt, ttlSeconds } = data ?? EMPTY_WAVES;
+    return {
+      days,
+      seaTemperatureF,
+      provider,
+      loading: isLoading,
+      error: error ? error.message || 'Failed to load wave forecast data' : null,
+      isCached,
+      updatedAt,
+      ttlSeconds,
+      refetch,
+    };
+  }, [data, error, isLoading, refetch]);
 }

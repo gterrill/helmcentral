@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 
 import { FORECAST_SURF_WARNING_PATH, FORECAST_WIND_WARNING_PATH } from '@/lib/alarm-display'
 import { useApiQuery, useApiQuerySelector } from '@/lib/api-query'
@@ -135,26 +135,28 @@ export function useForecastWarnings(refreshIntervalSeconds = 3600, options: Fore
     if (error) console.error('Error fetching forecast warnings:', error)
   }, [error])
 
-  const warnings = data?.warnings ?? null
-  const activeWarning = warnings && warnings.bulletins.length > 0 ? warnings : null
-
-  return {
-    warnings,
-    activeWarning,
-    loading: isLoading,
-    error: error ? error.message || 'Failed to load forecast warnings' : null,
-    isCached: data?.isCached ?? false,
-    updatedAt: data?.updatedAt ?? null,
-    ttlSeconds: data?.ttlSeconds ?? null,
-    refetch,
-  }
+  // One object while the answer, the error and the loading state hold, so a
+  // reader that memoizes on it (the Forecast page's props) holds too.
+  return useMemo(() => {
+    const warnings = data?.warnings ?? null
+    return {
+      warnings,
+      activeWarning: warnings && warnings.bulletins.length > 0 ? warnings : null,
+      loading: isLoading,
+      error: error ? error.message || 'Failed to load forecast warnings' : null,
+      isCached: data?.isCached ?? false,
+      updatedAt: data?.updatedAt ?? null,
+      ttlSeconds: data?.ttlSeconds ?? null,
+      refetch,
+    }
+  }, [data, error, isLoading, refetch])
 }
 
-// A bulletin the server sent and the client could not read is no bulletin, the
-// same as a failed fetch: the sidebar shows no dot, and the Forecast page shows
-// the error.
-function selectHasWindBulletin(data: ForecastWarningsApi | undefined, error: Error | null): boolean {
-  if (data === undefined || error !== null) return false
+// A failed poll keeps the last good warnings beside its error, and the banner
+// keeps showing them through useForecastWarnings, so the dot does too: the two
+// agree. Warnings the client cannot read are no bulletin, with no dot.
+function selectHasWindBulletin(data: ForecastWarningsApi | undefined): boolean {
+  if (data === undefined) return false
   return Boolean(findActiveWindBulletin(mapWarnings(data).warnings))
 }
 

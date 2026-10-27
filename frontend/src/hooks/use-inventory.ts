@@ -370,6 +370,9 @@ export function useEquipmentItem(id: string | null) {
     queryKey: [path],
     path,
     enabled: id !== null,
+    // setItem below asks whether a read is in flight, so the hook re-renders
+    // when one leaves and lands, keeping fetchingRef current.
+    trackFetching: true,
   })
 
   // A write that lands while a read of the same record is in flight would be

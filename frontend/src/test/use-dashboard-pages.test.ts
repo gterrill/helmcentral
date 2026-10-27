@@ -11,6 +11,27 @@ describe('useDashboardPages', () => {
     id: String(index), name, widgets: [], created_at: '', updated_at: '',
   }))
 
+  // The server is Go: a nil slice encodes as null. One page like that must not
+  // blank the list, on the first answer or on a later one.
+  it('reads a page with null or missing widgets as an empty page, beside the others', async () => {
+    const answer = { pages: [
+      { id: 'a', name: 'Anchored', widgets: null, created_at: '', updated_at: '' },
+      { id: 'b', name: 'Underway', created_at: '', updated_at: '' },
+      { id: 'c', name: 'Docked', widgets: [{ id: 'wind', x: 0, y: 0, w: 4, h: 4 }], created_at: '', updated_at: '' },
+    ] }
+    stubApi({ 'GET /api/dashboard-pages': () => structuredClone(answer) })
+    const { result } = renderHook(() => useDashboardPages())
+    await waitFor(() => expect(result.current.pages).toHaveLength(3))
+    expect(result.current.pages.map((p) => p.widgets)).toEqual([[], [], [{ id: 'wind', x: 0, y: 0, w: 4, h: 4 }]])
+
+    answer.pages[2].name = 'Alongside'
+    await act(async () => { await result.current.refetch() })
+
+    expect(result.current.error).toBeNull()
+    expect(result.current.pages.map((p) => p.name)).toEqual(['Anchored', 'Underway', 'Alongside'])
+    expect(result.current.pages.map((p) => p.widgets)).toEqual([[], [], [{ id: 'wind', x: 0, y: 0, w: 4, h: 4 }]])
+  })
+
   it('keeps cached pages and reports the error when a later revalidation fails', async () => {
     let calls = 0
     stubApi({

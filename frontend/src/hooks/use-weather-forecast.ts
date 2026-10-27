@@ -417,20 +417,26 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600, options: Forec
     if (failure) console.error('Error fetching weather forecast:', failure);
   }, [failure]);
 
-  const { forecast, hourlyToday, nextHour, summary, provider, isCached, updatedAt, ttlSeconds } = mapped.value;
-  return {
-    forecast,
-    hourlyToday,
-    nextHour,
-    summary,
-    provider,
-    loading: query.isLoading,
-    error: failure ? failure.message || 'Failed to load forecast data' : null,
-    isCached,
-    updatedAt,
-    ttlSeconds,
-    refetch: query.refetch,
-  };
+  // One object while the forecast, the error and the loading state hold, so a
+  // reader that memoizes on it (the Forecast page's props) holds too.
+  const loading = query.isLoading;
+  const refetch = query.refetch;
+  return useMemo(() => {
+    const { forecast, hourlyToday, nextHour, summary, provider, isCached, updatedAt, ttlSeconds } = mapped.value;
+    return {
+      forecast,
+      hourlyToday,
+      nextHour,
+      summary,
+      provider,
+      loading,
+      error: failure ? failure.message || 'Failed to load forecast data' : null,
+      isCached,
+      updatedAt,
+      ttlSeconds,
+      refetch,
+    };
+  }, [mapped, failure, loading, refetch]);
 }
 
 export interface ForecastSun {
@@ -441,11 +447,12 @@ export interface ForecastSun {
 
 const NO_SUN: ForecastSun = { sunriseTime: null, sunsetTime: null, moonPhase: null };
 
-// Today's sun and moon from the boat's forecast. A failed or unreadable
-// forecast gives none of them, the same as before the first answer, never the
-// times from an older answer.
-function selectSun(data: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi | undefined, error: Error | null): ForecastSun {
-  if (data === undefined || error !== null) return NO_SUN;
+// Today's sun and moon from the boat's forecast. A failed poll keeps the last
+// good forecast beside its error, and so do these times, as useWeatherForecast
+// does for the tiles. A forecast the client cannot read gives none of them:
+// the selector is called again with no data and the error.
+function selectSun(data: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi | undefined): ForecastSun {
+  if (data === undefined) return NO_SUN;
   const day = mapForecastPayload(data).forecast[0];
   if (!day) return NO_SUN;
   return { sunriseTime: day.sunriseTime, sunsetTime: day.sunsetTime, moonPhase: day.moonPhase };
@@ -470,8 +477,8 @@ export interface ForecastSunTimes {
   sunsetTime: string | null;
 }
 
-function selectSunTimes(data: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi | undefined, error: Error | null): ForecastSunTimes {
-  const { sunriseTime, sunsetTime } = selectSun(data, error);
+function selectSunTimes(data: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi | undefined): ForecastSunTimes {
+  const { sunriseTime, sunsetTime } = selectSun(data);
   return { sunriseTime, sunsetTime };
 }
 

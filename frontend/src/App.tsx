@@ -601,12 +601,12 @@ function AppShell() {
   // The latest page and widget list, for the handlers the grid and the tiles
   // hold (latest-ref idiom): each reads them when it runs, so it can stay one
   // stable function for the life of the shell and never re-render the grid.
+  // Assigned as the shell renders, not in an effect, so no handler can run
+  // between a commit and a later effect and write through the page before.
   const activePageRef = useRef(activePage)
+  activePageRef.current = activePage
   const effectiveWidgetsRef = useRef(effectiveWidgets)
-  useEffect(() => {
-    activePageRef.current = activePage
-    effectiveWidgetsRef.current = effectiveWidgets
-  }, [activePage, effectiveWidgets])
+  effectiveWidgetsRef.current = effectiveWidgets
   // namingPageId only means anything for the page it was set on, while
   // layout mode can actually show that page's name field — stale otherwise.
   // PageTitleField's own onDone (an Enter/blur that saved, or an Escape)
@@ -1104,10 +1104,12 @@ function AppShell() {
 
   // The grid's three handlers read the page at the call, so they never change
   // and a page write does not re-render the grid through them.
+  // Returns the write, so the grid knows when the server's answer has landed
+  // and can go back to the stored layout (dashboard-bento-grid.tsx).
   const handleLayoutSettle = useCallback((next: DashboardLayoutItem[]) => {
     const page = activePageRef.current
-    if (!page) return
-    void updatePage(page.id, { widgets: next })
+    if (!page) return Promise.resolve()
+    return updatePage(page.id, { widgets: next })
   }, [updatePage])
 
   const handleRemoveWidget = useCallback((id: DashboardWidgetId) => {

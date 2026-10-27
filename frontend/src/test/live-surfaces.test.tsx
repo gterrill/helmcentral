@@ -5,6 +5,7 @@
  * same object.
  */
 import { act, render } from '@testing-library/react'
+import { Suspense } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
@@ -75,7 +76,15 @@ vi.mock('@/components/generator-tile', async (importOriginal) => ({
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-import { LiveAnchorWatchTile, LiveClockTile, LiveDisplayShell, LiveGeneratorTile, LivePoiMapTile } from '@/components/live-surfaces'
+const forecastPageProps: Array<{ boat: unknown; boatLongitude: number | null }> = []
+vi.mock('@/components/forecast-page', () => ({
+  ForecastPage: (props: { boat: unknown; boatLongitude: number | null }) => {
+    forecastPageProps.push(props)
+    return null
+  },
+}))
+
+import { LiveAnchorWatchTile, LiveClockTile, LiveDisplayShell, LiveForecastPage, LiveGeneratorTile, LivePoiMapTile } from '@/components/live-surfaces'
 
 function emitFix(latitude: number, longitude: number) {
   act(() => {
@@ -246,5 +255,25 @@ describe('LiveGeneratorTile', () => {
 
     emit('electrical-state', electrical(72))
     expect(generatorProps[generatorProps.length - 1].batterySocPercent).toBe(72)
+  })
+})
+
+describe('LiveForecastPage', () => {
+  // The page compares the boat's clock with a planned stay's by longitude, so
+  // a fix re-renders it. The boat's forecast did not change, so the page must
+  // be handed the same forecast props.
+  it('hands the page the same forecast props when only the longitude moves', async () => {
+    forecastPageProps.length = 0
+    render(<Suspense fallback={null}><LiveForecastPage canWrite unit="metric" /></Suspense>)
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    emitFix(-20.2747, 149.0737)
+    const before = forecastPageProps.length
+    const boat = forecastPageProps[before - 1].boat
+
+    emitFix(-20.2747, 149.0738)
+
+    expect(forecastPageProps.length).toBeGreaterThan(before)
+    expect(forecastPageProps[forecastPageProps.length - 1].boatLongitude).toBe(149.0738)
+    expect(forecastPageProps[forecastPageProps.length - 1].boat).toBe(boat)
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useApiQuery } from '@/lib/api-query';
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
@@ -237,16 +237,20 @@ export function useUpperAir(refreshIntervalSeconds = 21600, options: ForecastQue
     if (error) console.error('Error fetching upper-air forecast:', error);
   }, [error]);
 
-  const { days, series, windowBand, provider, updatedAt, ttlSeconds } = data ?? EMPTY_UPPER_AIR;
-  return {
-    days,
-    series,
-    windowBand,
-    provider,
-    loading: isLoading,
-    error: error ? error.message || 'Failed to load upper-air forecast' : null,
-    updatedAt,
-    ttlSeconds,
-    refetch,
-  };
+  // One object while the answer, the error and the loading state hold, so a
+  // reader that memoizes on it (the Forecast page's props) holds too.
+  return useMemo(() => {
+    const { days, series, windowBand, provider, updatedAt, ttlSeconds } = data ?? EMPTY_UPPER_AIR;
+    return {
+      days,
+      series,
+      windowBand,
+      provider,
+      loading: isLoading,
+      error: error ? error.message || 'Failed to load upper-air forecast' : null,
+      updatedAt,
+      ttlSeconds,
+      refetch,
+    };
+  }, [data, error, isLoading, refetch]);
 }

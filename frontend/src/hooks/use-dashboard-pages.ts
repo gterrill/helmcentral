@@ -104,8 +104,15 @@ function sharePages(prev: DashboardPage[] | undefined, next: DashboardPage[]): D
 
 // The error stands beside the last pages it had: a failed refresh is reported,
 // and the panels that read it keep those pages on screen next to the notice.
+// The server is Go, so a page with no widgets can arrive as `widgets: null`
+// (a nil slice) or with none at all. That page is empty, not broken.
+function parsePages(raw: DashboardPagesListResponse): DashboardPage[] {
+  if (!Array.isArray(raw.pages)) return EMPTY_PAGES
+  return raw.pages.map((page) => (Array.isArray(page.widgets) ? page : { ...page, widgets: [] }))
+}
+
 function selectPages(raw: DashboardPagesListResponse | undefined, error: Error | null, previous: PagesSelection | undefined): PagesSelection {
-  const parsed = raw === undefined ? undefined : (Array.isArray(raw.pages) ? raw.pages : EMPTY_PAGES)
+  const parsed = raw === undefined ? undefined : parsePages(raw)
   return {
     pages: parsed === undefined ? EMPTY_PAGES : sharePages(previous?.pages, parsed),
     error,
@@ -131,7 +138,7 @@ export function useDashboardPages() {
   // pages renders nothing, and one that changes a widget hands every other
   // widget, page and the list itself back unchanged (sharePages).
   const { pages, error, loading } = useApiQuerySelector<DashboardPagesListResponse, PagesSelection>(
-    { queryKey: PAGES_KEY, path: PAGES_PATH },
+    { queryKey: PAGES_KEY, path: PAGES_PATH, structuralSharing: true },
     selectPages,
     samePagesSelection,
   )

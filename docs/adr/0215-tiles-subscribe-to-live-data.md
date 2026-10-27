@@ -465,43 +465,56 @@ shell:
 
 #### Two changes to `api-query.ts`
 
-- **`isFetching` notifies only the readers that read it.** The result's
-  `isFetching` is a getter. A reader that never touches it re-renders when the
-  data, the error or the status changes, and not on a request leaving or
-  landing. The getter reads the entry's current value, so a reader that
-  starts reading it mid-life never sees a flip that was left out of its
-  snapshot. One caller reads it, `useEquipmentItem` in `use-inventory.ts`,
-  which destructures it and so is tracked. Every other `useApiQuery` caller
-  was checked: none reads `isFetching`, none spreads the result, none hands it
-  on whole. This change applies to every reader, because a reader that does
-  not read the field cannot tell the difference.
-- **`structuralSharing: true` keeps equal data.** A hook that opts in keeps
-  the data object it holds, and does not re-render, when a request answers
-  with data equal by value (`sameJSON`). It is per reader and whole or
-  nothing: unlike TanStack Query's option of the same name, a changed answer
-  is handed over entire. It is off by default, because a reader with an
-  effect on `data` would no longer see a refetch that changed nothing, and
-  sixty-odd hooks were not audited for that. The hooks that opt in are the
-  ones this phase moved, plus the page, display, ribbon and equipment lists
-  the shell keeps; their consumers were checked for effects keyed on the
-  data, and the two found (the roles section's grouping, the profiles
-  section's first pick) are memos and a run-once default, both indifferent to
-  an equal answer.
+- **`isFetching` re-renders only the readers that ask.** A `useApiQuery`
+  reader re-renders when the data, the error or the status changes, and not
+  when a request leaves or lands. `isFetching` is a plain field, read from
+  the entry as the reader renders, so it is current whenever the reader
+  renders for any reason. A reader that has to re-render on the flips, to
+  show a request in flight, passes `trackFetching: true`.
+- **`structuralSharing: true` keeps equal data, at the entry.** When any
+  reader of a key opts in, an answer equal by value (`sameJSON`) to the
+  entry's data leaves the entry holding the object it had. Every reader,
+  every `useApiQuerySelector` on the key, and `getQueryData` then see no
+  change, and the deep compare runs once per answer, not once per reader.
+  It is whole or nothing: unlike TanStack Query's option of the same name, a
+  changed answer is handed over entire. It is off by default, because a
+  reader with an effect on `data` would no longer see a refetch that changed
+  nothing, and sixty-odd hooks were not audited for that. The hooks that opt
+  in are the ones this phase moved, plus the page, display, ribbon and
+  equipment lists the shell keeps. Their consumers were checked for effects
+  keyed on the data. The two found, the roles section's grouping and the
+  profiles section's first pick, are a memo and a run-once default, both
+  indifferent to an equal answer.
+
+The first version made `isFetching` a getter that marked the reader as one
+that reads it. The review sent it back. The mark was sticky, so a read in a
+click handler or an effect made the reader re-render on every request from
+then on. It was compared against the last snapshot published, so a reader
+that started reading after a flip it was spared could hold a stale value.
+The test for it read the getter from outside render, where it could not
+fail. An explicit option has none of those faults, and only two readers want
+it:
+
+- **`useEquipmentItem`** asks whether a read is in flight when a write lands,
+  and keeps the answer in a ref the hook refreshes as it renders.
+- **`useMaintenanceRules`** reads today's date from the clock as it renders
+  and keys on it. A view open over midnight moves to the new day's key on its
+  next render. Rendering when its own read leaves moves it there while that
+  day's read is still in flight, so it shares the read; rendering only when
+  the read lands would move it after, and fetch the new day twice.
+
+The first version also compared each reader's held data with the entry's on
+every notify. It is gone: with the entry keeping the object, the readers'
+identity checks do the work.
 
 `useApiQuerySelector`'s `select` now also receives the selection it returned
 last time, so a reader can hand back the unchanged parts of a changed answer.
 Phase 7 uses it for the page list.
 
-One test changed its count rather than its claim. `use-maintenance.test.ts`
-mounts a rules view, moves the clock to the next day under it, and writes. It
-asserted exactly two reads of the new day. The view used to re-render while
-the write's refetch was in flight, move to the new day's key, and share that
-read; it now re-renders when the read lands, moves, and revalidates the new
-key once more. The test now checks that the new day was read after the write.
-
 A failed poll still notifies: each failure is a new `Error`, and readers keep
-showing their error state, as before. Nothing shows cached or default data in
-place of an error that was not already doing so.
+showing their error state, as before. The entry keeps the last good data
+beside the error, and readers that showed it still do. Nothing shows default
+data in place of an error.
 
 #### What moved, and where
 
@@ -541,11 +554,14 @@ switch back shows the last answer and revalidates.
 - **Sunrise and sunset**, through `useForecastSunTimes`, a selector on the
   forecast entry compared field by field. Auto mode switches the theme on
   them, and the theme lives in the shell. The Clock reads `useForecastSun`,
-  the same selector with the moon phase.
+  the same selector with the moon phase. A failed poll keeps the last good
+  forecast beside its error, and the times with it, as the shell did when it
+  read `useWeatherForecast`.
 - **Whether a wind bulletin is in force**, through
   `useHasActiveWindBulletin`, a boolean selector on the warnings entry. It
-  draws the sidebar's Forecast dot. A failed or unreadable warnings answer is
-  no dot, the same as before; the Forecast page shows the error.
+  draws the sidebar's Forecast dot. After a failed poll the dot stays while
+  the last good warnings stand, so it agrees with the banner, which reads the
+  same data. Warnings the client cannot read are no dot.
 - **The pages, the displays and the ribbon**, with `structuralSharing`. The
   shell lays the page out, builds the sidebar and the page switcher from the
   list, resolves the wall's display by slug and draws the ribbon. None of them
@@ -603,7 +619,24 @@ the grid and its cells rendering every time.
   through `useApiQuerySelector`, and `sharePages` puts back every widget,
   page and list equal by value to the one before. A write lands the server's
   whole page with every widget a new object; after sharing, only the widget
-  that changed is new.
+  that changed is new. A page whose `widgets` is null or missing (a Go nil
+  slice) reads as an empty page, beside the others.
+- **The handlers' refs are assigned as the shell renders**, not in an
+  effect, so a stable handler never writes through the page before. No test
+  reaches the gap an effect would leave: React flushes passive effects before
+  it dispatches a discrete event such as a drop or a click, and `act()`
+  flushes them in tests, so a handler cannot run between a commit and its
+  effects in either.
+- **A drop always resyncs the grid.** react-grid-layout keeps the geometry a
+  drag left and goes back to its `layout` prop only when the prop changes by
+  value. With the page list keeping identity, a server answer that stores
+  different geometry from the drop (clamped, normalised, refused) could equal
+  the layout from before the drag, and the tile would stay where it was
+  dropped. The grid now shows the dropped geometry from the drop until the
+  write's answer lands (`onLayoutSettle` returns the write), then the stored
+  layout, so the prop changes whenever the two differ.
+  `dashboard-bento-grid-settle-resync.test.tsx` checks it against a stand-in
+  that resyncs as RGL does.
 
 What a shell render now reaches:
 
@@ -644,7 +677,9 @@ A new tile follows the same four steps:
    over `useApiQuerySelector` when the tile shows a slice.
 2. **A `Live*` wrapper in `components/live-surfaces.tsx`** reads the store or
    query and passes the readings as the props the presentational tile always
-   took. It is `memo()`'d and takes from the shell only config, flags and
+   took. A hook it reads returns one object while its data holds (a
+   `useMemo` over the data, error and loading state), so a wrapper that
+   memoizes on it holds too. It is `memo()`'d and takes from the shell only config, flags and
    stable callbacks. The presentational tile stays prop-driven and keeps its
    own tests.
 3. **`WidgetHost` renders the wrapper** for the widget's id. A flag it needs
@@ -789,8 +824,8 @@ and a module that only imports a store's types or helpers never touches it.
   equal answer re-renders nothing. The shell renders on a poll only when the
   sunrise or sunset moves, a wind bulletin starts or ends, or the pages,
   displays, ribbon or equipment change.
-- A `useApiQuery` reader that does not read `isFetching` no longer
-  re-renders when a request leaves or lands.
+- A `useApiQuery` reader no longer re-renders when a request leaves or lands,
+  unless it passes `trackFetching`.
 - A shell render that changes nothing about the tiles does not render the
   grid. A saved config re-renders that tile alone; layout editing, the theme
   and the units re-render every host.
