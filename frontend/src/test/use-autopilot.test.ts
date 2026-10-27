@@ -306,6 +306,72 @@ describe('useAutopilot', () => {
     // selector instead of offering modes the pilot may not support.
     expect(result.current.availableModes).toEqual([])
   })
+
+  it('retries a failed probe by itself while a tile stays mounted', async () => {
+    const { useAutopilot } = await loadModule()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 502, json: async () => ({ error: 'backend restarting' }) })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ present: true, id: 'raymarine', options: { modes: ['compass', 'wind'], states: [] } }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.useFakeTimers()
+    try {
+      const { result } = renderHook(() => useAutopilot())
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      expect(result.current.capabilityError).toBe('backend restarting')
+      expect(result.current.availableModes).toEqual([])
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+
+      expect(result.current.availableModes).toEqual(['compass', 'wind'])
+      expect(result.current.capabilityError).toBeNull()
+      const probes = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/api/autopilot'))
+      expect(probes).toHaveLength(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not retry a failed probe once every tile has unmounted', async () => {
+    const { useAutopilot } = await loadModule()
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 502, json: async () => ({ error: 'down' }) })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.useFakeTimers()
+    try {
+      const { unmount } = renderHook(() => useAutopilot())
+      await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+      unmount()
+      await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
+      const probes = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/api/autopilot'))
+      expect(probes).toHaveLength(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('probes again on the next mount after a failed probe', async () => {
+    const { useAutopilot } = await loadModule()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 502, json: async () => ({ error: 'backend restarting' }) })
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ present: true, id: 'raymarine', options: { modes: ['compass', 'wind'], states: [] } }),
+      })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = renderHook(() => useAutopilot())
+    await waitFor(() => expect(first.result.current.capabilityError).toBe('backend restarting'))
+    expect(first.result.current.availableModes).toEqual([])
+    first.unmount()
+
+    const second = renderHook(() => useAutopilot())
+    await waitFor(() => expect(second.result.current.availableModes).toEqual(['compass', 'wind']))
+    expect(second.result.current.capabilityError).toBeNull()
+    const probes = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/api/autopilot'))
+    expect(probes).toHaveLength(2)
+  })
 })
 
 // The pending set, the last error and the capability probe belong to the

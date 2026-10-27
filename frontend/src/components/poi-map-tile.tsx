@@ -57,13 +57,13 @@ function useActiveRouteLayer() {
   }, [status])
 }
 
-/** The Nearby map tile: own ship from vessel state, the AIS contacts, the collision colours, the active route, and the boat's trail while it is on screen. */
+/** The Nearby map tile: own ship from vessel state, the AIS contacts, the collision colours, the active route, and the boat's trail. The trail polls while the tile is mounted, and only when Show trail is on. */
 export const LivePoiMapTile = memo(function LivePoiMapTile(props: Omit<ComponentProps<typeof PoiMapTile>,
   'aisCollisionAlarms' | 'selfTrail' | 'nearbyVessels' | 'activeRoute' | (typeof POI_FIELDS)[number]>) {
   const ownShip = useVesselFields(POI_FIELDS)
   const activeRoute = useActiveRouteLayer()
   const nearbyVessels = useNearbyVesselList()
   const aisCollisionAlarms = useAisCollisionAlarms()
-  const selfTrail = useSelfTrail(TRAIL_POLL_MS)
+  const selfTrail = useSelfTrail(TRAIL_POLL_MS, props.config.showTrail === true)
   return <PoiMapTile {...props} {...ownShip} activeRoute={activeRoute} nearbyVessels={nearbyVessels} aisCollisionAlarms={aisCollisionAlarms} selfTrail={selfTrail} />
 })

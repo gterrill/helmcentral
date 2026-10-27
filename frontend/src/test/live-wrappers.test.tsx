@@ -154,7 +154,7 @@ describe.each(Object.entries(wrappers))('%s hands its map the watch at the live 
 })
 
 describe('trail polling (ADR 0215 phase 4)', () => {
-  it('the Nearby map polls the boat\'s trail while it is on screen, and stops when it leaves', () => {
+  it('the Nearby map polls the boat\'s trail while it is mounted, and stops when it leaves', () => {
     vi.useFakeTimers()
     try {
       const { unmount } = render(
@@ -178,7 +178,30 @@ describe('trail polling (ADR 0215 phase 4)', () => {
     }
   })
 
-  it('the anchor watch tile polls the swing trail and the AIS trails while it is on screen', () => {
+  it('the Nearby map does not poll the boat\'s trail while Show trail is off', () => {
+    vi.useFakeTimers()
+    try {
+    for (const showTrail of [false, undefined]) {
+      const { unmount } = render(
+        <LivePoiMapTile
+          config={{ title: 'Nearby', categories: [], radiusM: 1000, showTrail } as never}
+          editing={false}
+          isDarkTheme={false}
+          distanceUnits="metric"
+          interactive
+        />,
+      )
+      expect(requestedPaths().filter((path) => path.includes('/api/tracks'))).toHaveLength(0)
+      act(() => { vi.advanceTimersByTime(60_000) })
+      expect(requestedPaths().filter((path) => path.includes('/api/tracks'))).toHaveLength(0)
+      unmount()
+    }
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('the anchor watch tile polls the swing trail and the AIS trails while it is mounted', () => {
     landWatch()
     render(<LiveAnchorWatchTile {...tileProps} />)
 
