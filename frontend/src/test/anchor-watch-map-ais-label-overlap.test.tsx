@@ -132,9 +132,9 @@ function renderMap(aisVessels: NearbyVessel[]) {
       distanceMeters={10}
       bearingDeg={80}
       isImperial={false}
-      vesselTrail={() => []}
+      vesselTrail={[]}
       aisVessels={aisVessels}
-      aisTrails={() => new Map()}
+      aisTrails={new Map()}
       isDarkTheme={false}
     />,
   )
@@ -231,9 +231,9 @@ describe('AnchorWatchMap AIS label suppression per-tick cost', () => {
         distanceMeters={10}
         bearingDeg={80}
         isImperial={false}
-        vesselTrail={() => []}
+        vesselTrail={[]}
         aisVessels={vessels}
-        aisTrails={() => new Map()}
+        aisTrails={new Map()}
         isDarkTheme={false}
       />
     )

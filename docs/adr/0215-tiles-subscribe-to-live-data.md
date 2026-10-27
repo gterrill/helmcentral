@@ -322,6 +322,28 @@ it, so:
 A first version gave each wrapper its own hook, and with it two polls on a
 shared page and a full refetch on every remount. The review sent it back.
 
+The poller is also a store, read the way the telemetry stores are. It holds
+a snapshot (`{ self, ais }` for `/api/tracks`, the point array for the
+anchor trail) and the hooks return it through `useSyncExternalStore`. The
+`/api/tracks` hooks return a slice each, `useSelfTrail` and `useAisTrails`,
+so the Nearby map is not woken by AIS changes it does not draw, nor the
+anchor map by the boat's own fixes. A poll
+publishes a new snapshot only when a trail changed: points appended, the
+buffer trimmed, a restarted trail emptied, or an AIS trail that differs from
+the one held (point by point). A poll that brings nothing leaves the reference alone and wakes
+no reader. The hooks no longer hand out getters, so the maps take the trails
+as plain props and memoize their GeoJSON on them. The anchor map keys its
+AIS trail line on the sorted names of the vessels it draws, not on the vessel
+array, which is new on every AIS delta.
+
+This replaced two guesses. `AnchorWatchMap` ran its own 5 s interval and
+compared a point-count-and-timestamp signature to decide whether a trail had
+changed. The Nearby map recomputed its own-ship trail only when `poi.features`
+changed, which happens when a place fetch succeeds, about once a minute. On
+the Nearby map the boat's trail therefore redrew at the place cadence, and
+stopped altogether while the place fetch was backing off after Overpass
+errors. Both maps now redraw when the trail poll lands points, and only then.
+
 **The pins.** `useAnchorPlacemarks(active)` moved into the tile and page with
 the record. They share one query entry, so they share one poll.
 

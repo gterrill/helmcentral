@@ -13,6 +13,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The Nearby map's boat trail keeps up with the boat.** The trail used to
+  redraw only about once a minute, and it stopped altogether while nearby
+  places were failing to load. It now follows the boat every few seconds.
 - **The dashboard does much less work while it sits open.** Every time
   Helmcentral checked the forecast, the tide, the route or the CZone
   switches, it used to redraw every tile on the page, even when nothing had

@@ -210,9 +210,7 @@ vi.mock('@/hooks/use-forecast-warnings', () => ({
   forecastWarningDetailsUrl: () => null,
 }))
 
-vi.mock('@/hooks/use-server-trails', () => ({
-  useServerTrails: () => ({ getSelfTrail: vi.fn(), getAisTrails: vi.fn() }),
-}))
+vi.mock('@/hooks/use-server-trails', async () => (await import('./trail-mocks')).trailHooksMock)
 
 vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, vi.fn()],

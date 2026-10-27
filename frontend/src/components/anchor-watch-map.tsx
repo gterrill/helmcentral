@@ -234,28 +234,6 @@ function trailToGeoJSON(points: TrailPoint[]): GeoJSON.Feature<GeoJSON.LineStrin
   }
 }
 
-// ── Change detection for the trail GeoJSON refresh tick ────────────────────
-// react-map-gl re-uploads a Source's `data` to maplibre whenever the prop's
-// *identity* changes, even when the GeoJSON it describes is unchanged - and
-// both trail sources below use lineMetrics with line-gradient, one of the
-// more expensive things to re-upload for nothing. vesselTrail()/aisTrails()
-// read ring buffers behind a stable getter (use-server-trails.ts, not owned
-// here), so there's no cheaper signal available than point count plus the
-// last point's own timestamp per trail - enough to tell "actually changed"
-// from "nothing new arrived this tick" without diffing every point.
-function trailSignature(points: TrailPoint[]): string {
-  if (points.length === 0) return '0'
-  return `${points.length}:${points[points.length - 1].timestampMs}`
-}
-
-function aisTrailsSignature(trails: Map<string, TrailPoint[]>): string {
-  let signature = ''
-  for (const [name, points] of trails) {
-    signature += `${name}=${trailSignature(points)};`
-  }
-  return signature
-}
-
 // Two label-suppression sets are equal when their contents match,
 // regardless of identity - used so the AIS-label effect below only calls
 // setState (and forces a second full render of this 1,748-line map) when
@@ -323,9 +301,9 @@ export interface AnchorWatchMapProps {
   distanceMeters: number | null
   bearingDeg: number | null
   isImperial: boolean
-  vesselTrail: () => TrailPoint[]
+  vesselTrail: TrailPoint[]
   aisVessels: NearbyVessel[]
-  aisTrails: () => Map<string, TrailPoint[]>
+  aisTrails: Map<string, TrailPoint[]>
   // Vessel id -> worst live collision-alarm state (ADR 0088), keyed the same
   // way collisionAlarmStatesByVessel keys it. Optional and left undefined by
   // every existing caller/test with no alarm feed wired up — the AIS marker
@@ -613,7 +591,6 @@ export function AnchorWatchMap({
   useEffect(() => () => {
     if (suppressNextMapClickTimerRef.current !== null) clearTimeout(suppressNextMapClickTimerRef.current)
   }, [])
-  const [renderKey, setRenderKey] = useState(0) // bumped each poll cycle to re-render trails
   // Track zoom for marker scaling. No onZoom handler: that used to fire
   // setCurrentZoom on every animation frame of a zoom gesture, and a
   // persistence effect wrote it to localStorage on each of those renders
@@ -849,26 +826,6 @@ export function AnchorWatchMap({
     handleRadarEchoStyleData()
   }, [handleStyleData, handleRadarEchoStyleData])
 
-  // Re-render trails on each poll cycle (trails are stored in refs, not
-  // state) - but only bump renderKey when a trail's signature (point count
-  // plus its last point's own timestamp) actually changed since the last
-  // tick. postAnchorTrailGeoJSON/aisTrailsData below are keyed on renderKey,
-  // so an unconditional bump every 5s used to hand react-map-gl a brand new
-  // GeoJSON object - and force it to re-upload both lineMetrics sources -
-  // even on a tick where not a single point had arrived.
-  const trailSignatureRef = useRef<string>('')
-  useEffect(() => {
-    trailSignatureRef.current = `${trailSignature(vesselTrail())}|${aisTrailsSignature(aisTrails())}`
-    const timer = setInterval(() => {
-      const next = `${trailSignature(vesselTrail())}|${aisTrailsSignature(aisTrails())}`
-      if (next !== trailSignatureRef.current) {
-        trailSignatureRef.current = next
-        setRenderKey((k) => k + 1)
-      }
-    }, 5000)
-    return () => clearInterval(timer)
-  }, [vesselTrail, aisTrails])
-
   // Collapse the enlarged marker after 3 seconds. Only the highlight is
   // transient — every marker's range stays on show permanently.
   const selectVessel = useCallback((id: string) => {
@@ -900,26 +857,22 @@ export function AnchorWatchMap({
     [hasAnchor, anchorLon, anchorLat, radiusMeters],
   )
 
-  // Trail data (re-derived each render triggered by renderKey bump)
-  const postAnchorTrailGeoJSON = useMemo(
-    () => trailToGeoJSON(vesselTrail()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [renderKey, vesselTrail],
-  )
+  // Trail data: the trails are snapshots that change identity only when a point arrives.
+  const postAnchorTrailGeoJSON = useMemo(() => trailToGeoJSON(vesselTrail), [vesselTrail])
 
+  // Keyed on the names, not the array: the array is new on every AIS delta.
+  const activeAisNames = aisVessels.map(v => v.name).sort().join('\n')
   const aisTrailsData = useMemo(() => {
-    const trails = aisTrails()
-    const activeNames = new Set(aisVessels.map(v => v.name))
+    const activeNames = new Set(activeAisNames === '' ? [] : activeAisNames.split('\n'))
     const cutoffMs = Date.now() - AIS_TRAIL_MAX_AGE_MS
     const features: GeoJSON.Feature<GeoJSON.LineString>[] = []
-    for (const [name, points] of trails) {
+    for (const [name, points] of aisTrails) {
       if (!activeNames.has(name)) continue
       const recentPoints = points.filter((p) => p.timestampMs >= cutoffMs)
       if (recentPoints.length >= 2) features.push(trailToGeoJSON(recentPoints))
     }
     return { type: 'FeatureCollection' as const, features }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [renderKey, aisTrails, aisVessels])
+  }, [aisTrails, activeAisNames])
 
   // ── Map click handler ────────────────────────────────────────────────────
   // Editing (reposition, radius drag) is gone entirely — every branch that

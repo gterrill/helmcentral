@@ -118,9 +118,9 @@ function mapElement(aisVessels: NearbyVessel[] = defaultAisVessels, overrides: P
       distanceMeters={10}
       bearingDeg={80}
       isImperial={false}
-      vesselTrail={() => []}
+      vesselTrail={[]}
       aisVessels={aisVessels}
-      aisTrails={() => new Map()}
+      aisTrails={new Map()}
       radarTargets={[]}
       isDarkTheme={false}
       showImageryLayer

@@ -283,12 +283,19 @@ vi.mock('@/hooks/use-forecast-warnings', () => ({
 
 // Records who polls the trails: only a map on screen should (phase 4).
 const useServerTrailsSpy = vi.fn()
-vi.mock('@/hooks/use-server-trails', () => ({
-  useServerTrails: (...args: unknown[]) => {
-    useServerTrailsSpy(...args)
-    return { getSelfTrail: () => [], getAisTrails: () => new Map() }
-  },
-}))
+vi.mock('@/hooks/use-server-trails', async () => {
+  const { trailHooksMock } = await import('./trail-mocks')
+  return {
+    useSelfTrail: (...args: unknown[]) => {
+      useServerTrailsSpy(...args)
+      return trailHooksMock.useSelfTrail()
+    },
+    useAisTrails: (...args: unknown[]) => {
+      useServerTrailsSpy(...args)
+      return trailHooksMock.useAisTrails()
+    },
+  }
+})
 
 vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, vi.fn()],

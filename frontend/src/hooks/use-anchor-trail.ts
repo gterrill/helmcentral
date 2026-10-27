@@ -1,6 +1,6 @@
 import { appendCapped, type TrailPoint } from '@/hooks/use-server-trails'
 import { apiRequest } from '@/lib/api-query'
-import { createSharedPoller } from '@/lib/shared-poller'
+import { createSharedPoller, type PollStore } from '@/lib/shared-poller'
 
 /** Matches the backend's response bound (the newest 10000 points). */
 export const ANCHOR_TRAIL_MAX_POINTS = 10000
@@ -11,17 +11,14 @@ interface AnchorTrailResponse {
   trail_started_at?: string | null
 }
 
-export interface AnchorTrailResult {
-  /** Stable getter for the swing trail since the anchor was set or last moved. */
-  getAnchorTrail: () => TrailPoint[]
-}
+const EMPTY: TrailPoint[] = []
 
-// The swing trail at module level, shared by the anchor watch tile and page.
-let points: TrailPoint[] = []
+// The cursor and the trail's identity sit at module level beside the
+// poller's snapshot, shared by the anchor watch tile and page.
 let since = ''
 let started: string | null = null
 
-async function pollAnchorTrail(signal: AbortSignal): Promise<void> {
+async function pollAnchorTrail(signal: AbortSignal, store: PollStore<TrailPoint[]>): Promise<void> {
   try {
     // The second pass is the full refetch after a restarted trail.
     for (let pass = 0; pass < 2; pass++) {
@@ -31,13 +28,19 @@ async function pollAnchorTrail(signal: AbortSignal): Promise<void> {
       const data = await apiRequest<AnchorTrailResponse>(url, { signal })
       if (signal.aborted) return
 
+      let points = store.get()
       const startedAt = data.trail_started_at ?? null
       if (startedAt !== started) {
         const hadSince = since !== ''
         started = startedAt
-        points = []
+        // The new drop has no trail yet. Showing it empty until the refetch
+        // lands is true; holding the old drop's trail would mask the restart.
+        points = EMPTY
         since = ''
-        if (hadSince && startedAt !== null) continue
+        if (hadSince && startedAt !== null) {
+          store.publish(points)
+          continue
+        }
       }
 
       const incoming = (data.points ?? [])
@@ -47,6 +50,8 @@ async function pollAnchorTrail(signal: AbortSignal): Promise<void> {
         points = appendCapped(points, incoming, ANCHOR_TRAIL_MAX_POINTS)
         since = new Date(incoming[incoming.length - 1].timestampMs).toISOString()
       }
+      // Empty stays the one EMPTY array, so a restart of an empty trail is no change.
+      store.publish(points.length === 0 ? EMPTY : points)
       return
     }
   } catch {
@@ -54,13 +59,10 @@ async function pollAnchorTrail(signal: AbortSignal): Promise<void> {
   }
 }
 
-const poller = createSharedPoller(pollAnchorTrail, () => {
-  points = []
+const poller = createSharedPoller<TrailPoint[]>(EMPTY, pollAnchorTrail, () => {
   since = ''
   started = null
 })
-
-const TRAIL: AnchorTrailResult = { getAnchorTrail: () => points }
 
 /**
  * Polls /api/anchor-watch/trails/self?since=X for the anchor swing trail.
@@ -70,9 +72,10 @@ const TRAIL: AnchorTrailResult = { getAnchorTrail: () => points }
  * full rather than from `since`.
  *
  * The anchor watch tile and page share one poll and one buffer
- * (lib/shared-poller.ts), so moving between them keeps the trail.
+ * (lib/shared-poller.ts), so moving between them keeps the trail. The result
+ * is the trail itself, a new array only when a point arrives or the trail
+ * restarts.
  */
-export function useAnchorTrail(pollIntervalMs = 5000, enabled = true): AnchorTrailResult {
-  poller.usePoll(pollIntervalMs, enabled)
-  return TRAIL
+export function useAnchorTrail(pollIntervalMs = 5000, enabled = true): TrailPoint[] {
+  return poller.useSnapshot(pollIntervalMs, enabled)
 }

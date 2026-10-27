@@ -151,9 +151,9 @@ function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMa
       distanceMeters={10}
       bearingDeg={80}
       isImperial={false}
-      vesselTrail={() => []}
+      vesselTrail={[]}
       aisVessels={defaultAisVessels}
-      aisTrails={() => new Map()}
+      aisTrails={new Map()}
       radarTargets={[]}
       isDarkTheme={false}
       // This suite tests the radar-echo toggle's own availability logic,

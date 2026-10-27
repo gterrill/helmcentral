@@ -64,9 +64,9 @@ function renderMap(aisCollisionAlarms?: ReadonlyMap<string, AlarmState>) {
       distanceMeters={10}
       bearingDeg={80}
       isImperial={false}
-      vesselTrail={() => []}
+      vesselTrail={[]}
       aisVessels={aisVessels}
-      aisTrails={() => new Map()}
+      aisTrails={new Map()}
       aisCollisionAlarms={aisCollisionAlarms}
       isDarkTheme={false}
       showImageryLayer

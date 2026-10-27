@@ -1,4 +1,4 @@
-import { act, render } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AnchorWatchMap } from '@/components/anchor-watch-map'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
@@ -8,11 +8,9 @@ import type { TrailPoint } from '@/hooks/use-server-trails'
 // *identity* changes, even when the GeoJSON it describes is byte-identical
 // - and these two sources (self trail, AIS trails) use lineMetrics with
 // line-gradient, which is one of the more expensive re-uploads to redo for
-// nothing. The old 5s interval bumped renderKey unconditionally, forcing a
-// brand new GeoJSON object (and re-upload) every tick regardless of whether
-// a single point had actually arrived. This suite proves the fix: `data`
-// keeps its identity across a tick where nothing changed, and only gets a
-// new one once the underlying trail actually does.
+// nothing. The trails arrive as snapshots that change identity only when a
+// point does (ADR 0215), so `data` keeps its identity across renders where
+// the trail did not change, and only gets a new one when it does.
 vi.mock('maplibre-gl', () => ({
   default: {},
 }))
@@ -45,7 +43,11 @@ vi.mock('react-map-gl/maplibre', async () => {
 
 
 function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
-  return render(
+  return render(mapElement(overrides))
+}
+
+function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap>> = {}) {
+  return (
     <AnchorWatchMap
       vesselLat={-25.2939}
       vesselLon={152.9103}
@@ -59,74 +61,72 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       distanceMeters={10}
       bearingDeg={80}
       isImperial={false}
-      vesselTrail={() => []}
+      vesselTrail={[]}
       aisVessels={[]}
-      aisTrails={() => new Map()}
+      aisTrails={new Map()}
       radarTargets={[]}
       isDarkTheme={false}
       {...overrides}
-    />,
+    />
   )
 }
 
-describe('AnchorWatchMap trail GeoJSON identity across the 5s renderKey tick', () => {
-  it('keeps the self-trail Source data identity stable across a tick with no new points, and produces a new one once a point actually arrives', () => {
-    vi.useFakeTimers()
+describe('AnchorWatchMap trail GeoJSON identity', () => {
+  it('keeps the self-trail Source data identity while the trail is unchanged, and produces a new one once a point arrives', () => {
     lastSourceData = {}
-
-    let points: TrailPoint[] = [
+    const points: TrailPoint[] = [
       { lat: -25.29, lon: 152.91, timestampMs: 1000 },
       { lat: -25.291, lon: 152.911, timestampMs: 2000 },
     ]
-    const vesselTrail = () => points
 
-    renderMap({ vesselTrail })
-
+    const { rerender } = renderMap({ vesselTrail: points })
     const firstData = lastSourceData['vessel-trail-anchor']
     expect(firstData).toBeDefined()
 
-    // A tick where the underlying trail did not change at all.
-    act(() => { vi.advanceTimersByTime(5000) })
-    const secondData = lastSourceData['vessel-trail-anchor']
-    expect(secondData).toBe(firstData)
+    // The map re-renders for another reason; the trail is the same snapshot.
+    rerender(mapElement({ vesselTrail: points, radiusMeters: 35 }))
+    expect(lastSourceData['vessel-trail-anchor']).toBe(firstData)
 
-    // Now a real point actually arrives before the next tick.
-    points = [...points, { lat: -25.292, lon: 152.912, timestampMs: 3000 }]
-    act(() => { vi.advanceTimersByTime(5000) })
-    const thirdData = lastSourceData['vessel-trail-anchor']
-    expect(thirdData).not.toBe(secondData)
-
-    vi.useRealTimers()
+    rerender(mapElement({ vesselTrail: [...points, { lat: -25.292, lon: 152.912, timestampMs: 3000 }] }))
+    expect(lastSourceData['vessel-trail-anchor']).not.toBe(firstData)
   })
 
-  it('keeps the AIS-trails Source data identity stable across a tick with no new points, and produces a new one once a point actually arrives', () => {
-    vi.useFakeTimers()
+  it('keeps the AIS-trails Source data identity while the trails are unchanged, and produces a new one once a point arrives', () => {
     lastSourceData = {}
-
     const nowMs = Date.now()
     const vessels: NearbyVessel[] = [
       { id: 'urn:mrn:imo:mmsi:100000001', name: 'SPLURGE', lat: -25.2939, lon: 152.9103, range_m: 61, age_seconds: 5 },
     ]
-    let trail: TrailPoint[] = [
+    const trail: TrailPoint[] = [
       { lat: -25.29, lon: 152.91, timestampMs: nowMs - 2000 },
       { lat: -25.291, lon: 152.911, timestampMs: nowMs - 1000 },
     ]
-    const aisTrails = () => new Map([['SPLURGE', trail]])
+    const aisTrails = new Map([['SPLURGE', trail]])
 
-    renderMap({ aisVessels: vessels, aisTrails })
-
+    const { rerender } = renderMap({ aisVessels: vessels, aisTrails })
     const firstData = lastSourceData['ais-trails']
     expect(firstData).toBeDefined()
 
-    act(() => { vi.advanceTimersByTime(5000) })
-    const secondData = lastSourceData['ais-trails']
-    expect(secondData).toBe(firstData)
+    rerender(mapElement({ aisVessels: vessels, aisTrails, radiusMeters: 35 }))
+    expect(lastSourceData['ais-trails']).toBe(firstData)
 
-    trail = [...trail, { lat: -25.292, lon: 152.912, timestampMs: Date.now() }]
-    act(() => { vi.advanceTimersByTime(5000) })
-    const thirdData = lastSourceData['ais-trails']
-    expect(thirdData).not.toBe(secondData)
+    // A fresh vessel array with the same names (every AIS delta makes one).
+    rerender(mapElement({ aisVessels: vessels.map((v) => ({ ...v, range_m: 70 })), aisTrails }))
+    expect(lastSourceData['ais-trails']).toBe(firstData)
 
-    vi.useRealTimers()
+    const next = new Map([['SPLURGE', [...trail, { lat: -25.292, lon: 152.912, timestampMs: nowMs }]]])
+    rerender(mapElement({ aisVessels: vessels, aisTrails: next }))
+    expect(lastSourceData['ais-trails']).not.toBe(firstData)
+  })
+
+  it('runs no timer of its own to look for new trail points', () => {
+    vi.useFakeTimers()
+    try {
+      const spy = vi.spyOn(globalThis, 'setInterval')
+      renderMap()
+      expect(spy.mock.calls.filter(([, ms]) => ms === 5000)).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
