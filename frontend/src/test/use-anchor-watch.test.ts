@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useAnchorWatch } from '@/hooks/use-anchor-watch'
+import { anchorWatchAt, useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 import { toast } from 'sonner'
 
@@ -19,7 +19,7 @@ describe('useAnchorWatch mutation failures', () => {
     ['Drop', 'Could not drop anchor'],
     ['Raise', 'Could not raise anchor'],
   ])('%s surfaces publish and network failures without changing watch state', async (operation, title) => {
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     const before = result.current
     for (const failure of ['http', 'network', 'non-json']) {
@@ -38,7 +38,7 @@ describe('useAnchorWatch mutation failures', () => {
       expect(toast.error).toHaveBeenLastCalledWith(title, {
         description: failure === 'http' ? 'SignalK publish failed' : failure === 'network' ? 'Connection lost' : 'HTTP 502',
       })
-      expect(result.current.anchorState).toBe(before.anchorState)
+      expect(result.current.active).toBe(before.active)
       expect(result.current.anchorLat).toBe(before.anchorLat)
       expect(result.current.anchorLon).toBe(before.anchorLon)
     }
@@ -46,10 +46,10 @@ describe('useAnchorWatch mutation failures', () => {
   })
 
   it('only clears local state after a successful Raise', async () => {
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     await act(async () => { await result.current.clearAnchor() })
-    expect(result.current.anchorState).toBe('none')
+    expect(result.current.active).toBe(false)
     expect(toast.error).not.toHaveBeenCalled()
   })
 })
@@ -67,7 +67,7 @@ describe('useAnchorWatch bow-offset request shape', () => {
 
   it('setAnchorHere posts apply_bow_offset: true', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
 
     // Let the initial GET /api/anchor-watch on mount resolve and clear.
     await act(async () => { await Promise.resolve() })
@@ -99,7 +99,7 @@ describe('useAnchorWatch planning-depth capture', () => {
 
   it('setAnchorHere posts the depth and tide pair when both are known', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -115,7 +115,7 @@ describe('useAnchorWatch planning-depth capture', () => {
 
   it('setAnchorHere posts -1 sentinels when there is no reading, rather than omitting the fields', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -154,7 +154,7 @@ describe('useAnchorWatch updateRadius/updateRodeAndConditions/updatePlanningDept
   ]
 
   it.each(calls)('%s throws on a non-OK response and leaves state unchanged', async (_name, call) => {
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     const before = result.current
 
@@ -172,7 +172,7 @@ describe('useAnchorWatch updateRadius/updateRodeAndConditions/updatePlanningDept
   })
 
   it.each(calls)('%s throws on a network error and leaves state unchanged', async (_name, call) => {
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     const before = result.current
 
@@ -186,7 +186,7 @@ describe('useAnchorWatch updateRadius/updateRodeAndConditions/updatePlanningDept
   })
 
   it.each(calls)('%s throws on a 500 with a non-JSON body, surfacing the HTTP status', async (_name, call) => {
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
 
     vi.mocked(fetch).mockResolvedValueOnce({
@@ -212,7 +212,7 @@ describe('useAnchorWatch updatePlanningDepth', () => {
 
   it('PATCHes planning_depth_m and planning_tide_height_ft together', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -227,7 +227,7 @@ describe('useAnchorWatch updatePlanningDepth', () => {
   })
 
   it('replaces state with the server echo rather than updating optimistically', async () => {
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
 
     await act(async () => {
@@ -253,7 +253,7 @@ describe('useAnchorWatch adjustAnchor', () => {
 
   it('PATCHes lat, lon and radius_meters together', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -268,7 +268,7 @@ describe('useAnchorWatch adjustAnchor', () => {
   })
 
   it('replaces state with the server echo rather than updating optimistically', async () => {
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
 
     await act(async () => {
@@ -292,7 +292,7 @@ describe('useAnchorWatch adjustAnchor', () => {
       ok: true,
       json: async () => ({ active: true, lat: -21.1, lon: 149.2, radius_meters: 40 }),
     } as Response)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -315,7 +315,7 @@ describe('useAnchorWatch adjustAnchor', () => {
   // useAnchorAdjustCommit's Undo action) built, unchanged.
   it('forwards a restore object in the PATCH body when the caller provides one', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -337,7 +337,7 @@ describe('useAnchorWatch adjustAnchor', () => {
 
   it('sends no restore field at all when the caller omits it (an ordinary Set)', async () => {
     const fetchMock = vi.mocked(fetch)
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     fetchMock.mockClear()
 
@@ -366,7 +366,7 @@ describe('useAnchorWatch headingAtSetDeg / placeName', () => {
         heading_at_set_deg: 45, place_name: 'Goldsmith Island',
       }),
     }))
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
 
     expect(result.current.headingAtSetDeg).toBe(45)
@@ -375,7 +375,7 @@ describe('useAnchorWatch headingAtSetDeg / placeName', () => {
 
   it('defaults to -1 / empty when inactive or the fields are absent', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ active: false }) }))
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
 
     expect(result.current.headingAtSetDeg).toBe(-1)
@@ -401,7 +401,7 @@ describe('useAnchorWatch poll cadence', () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ active: false }) })
     vi.stubGlobal('fetch', fetchMock)
 
-    renderHook(() => useAnchorWatch(-21.1, 149.2))
+    renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
@@ -419,7 +419,7 @@ describe('useAnchorWatch poll cadence', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    renderHook(() => useAnchorWatch(-21.1, 149.2))
+    renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
@@ -446,53 +446,44 @@ describe('useAnchorWatch memoized result', () => {
   })
 
   it('returns the same object reference across a re-render when nothing changed', async () => {
-    const { result, rerender } = renderHook(
-      ({ lat, lon }: { lat: number; lon: number }) => useAnchorWatch(lat, lon),
-      { initialProps: { lat: -21.1, lon: 149.2 } },
-    )
+    const { result, rerender } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     const first = result.current
 
-    rerender({ lat: -21.1, lon: 149.2 })
+    rerender()
 
     expect(result.current).toBe(first)
   })
 
   it('keeps stable identities for updateRadius, clearAnchor and updateRodeAndConditions across re-renders', async () => {
-    const { result, rerender } = renderHook(
-      ({ lat, lon }: { lat: number; lon: number }) => useAnchorWatch(lat, lon),
-      { initialProps: { lat: -21.1, lon: 149.2 } },
-    )
+    const { result, rerender } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     const first = result.current
 
-    rerender({ lat: -21.1, lon: 149.2 })
+    rerender()
 
     expect(result.current.updateRadius).toBe(first.updateRadius)
     expect(result.current.clearAnchor).toBe(first.clearAnchor)
     expect(result.current.updateRodeAndConditions).toBe(first.updateRodeAndConditions)
   })
 
-  it('returns a new object once the underlying distance/bearing actually changes', async () => {
-    // Distance/bearing are only derived from the vessel fix while a watch is
-    // active (anchorLat/anchorLon non-null) — with no watch set, moving the
-    // vessel changes nothing about the (all-null/defaulted) output, so this
-    // needs an active watch to exercise the "did anything really change" path.
+  it('reads distance and bearing from the anchor only once a fix is applied', async () => {
+    // The record carries no fix (ADR 0215): anchorWatchAt is the only place
+    // distance, bearing and the drag state are worked out.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ active: true, lat: -21.1, lon: 149.2, radius_meters: 20 }),
     }))
-    const { result, rerender } = renderHook(
-      ({ lat, lon }: { lat: number; lon: number }) => useAnchorWatch(lat, lon),
-      { initialProps: { lat: -21.1, lon: 149.2 } },
-    )
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
-    const first = result.current
 
-    rerender({ lat: -21.2, lon: 149.3 })
+    const atAnchor = anchorWatchAt(result.current, -21.1, 149.2, false)
+    const away = anchorWatchAt(result.current, -21.2, 149.3, false)
 
-    expect(result.current).not.toBe(first)
-    expect(result.current.distanceMeters).not.toBe(first.distanceMeters)
+    expect(atAnchor.distanceMeters).toBe(0)
+    expect(atAnchor.anchorState).toBe('set')
+    expect(away.distanceMeters).toBeGreaterThan(20)
+    expect(away.anchorState).toBe('dragging')
   })
 })
 
@@ -509,7 +500,7 @@ describe('useAnchorWatch loaded', () => {
     let resolveFetch!: (value: { ok: boolean; json: () => Promise<unknown> }) => void
     vi.stubGlobal('fetch', vi.fn().mockReturnValue(new Promise((resolve) => { resolveFetch = resolve })))
 
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     expect(result.current.loaded).toBe(false)
 
     await act(async () => {
@@ -533,7 +524,7 @@ describe('useAnchorWatch loaded', () => {
     const fetchMock = vi.fn().mockImplementationOnce(failingFetch)
     vi.stubGlobal('fetch', fetchMock)
 
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     expect(result.current.loaded).toBe(false)
 
@@ -563,7 +554,7 @@ describe('useAnchorWatch loaded', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     expect(result.current.loaded).toBe(false)
 
     await act(async () => {
@@ -588,7 +579,7 @@ describe('useAnchorWatch loaded', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     expect(result.current.loaded).toBe(false)
 
     await act(async () => { await call(result.current) })
@@ -614,11 +605,11 @@ describe('useAnchorWatch error', () => {
       json: async () => ({ active: false, error: 'parsing anchor watch state (data/anchor_watch.json): unexpected end of JSON input' }),
     }))
 
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
 
     expect(result.current.error).toBe('parsing anchor watch state (data/anchor_watch.json): unexpected end of JSON input')
-    expect(result.current.anchorState).toBe('none')
+    expect(result.current.active).toBe(false)
   })
 
   it('is null for the ordinary no-watch-set response', async () => {
@@ -627,7 +618,7 @@ describe('useAnchorWatch error', () => {
       json: async () => ({ active: false }),
     }))
 
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
 
     expect(result.current.error).toBeNull()
@@ -640,13 +631,13 @@ describe('useAnchorWatch error', () => {
     vi.useFakeTimers()
     vi.stubGlobal('fetch', fetchMock)
 
-    const { result } = renderHook(() => useAnchorWatch(-21.1, 149.2))
+    const { result } = renderHook(() => useAnchorWatch())
     await act(async () => { await Promise.resolve() })
     expect(result.current.error).toBe('parsing anchor watch state (data/anchor_watch.json): boom')
 
     await act(async () => { await vi.advanceTimersByTimeAsync(ANCHOR_WATCH_IDLE_REFRESH_SECONDS * 1000) })
     expect(result.current.error).toBeNull()
-    expect(result.current.anchorState).toBe('set')
+    expect(result.current.active).toBe(true)
 
     vi.useRealTimers()
   })

@@ -1061,11 +1061,11 @@ function AppShell() {
   // itself (config/app-config.ts's ANCHOR_WATCH_ACTIVE/IDLE_REFRESH_SECONDS),
   // since it depends on whether a watch is currently active — not on this
   // component's unrelated vessel-state refresh setting.
-  // The watch record only, without a fix: the shell reads whether a watch is
-  // set, the auto-raise and the planning depth, none of which moves with the
-  // boat. The anchor watch tile and page apply the live fix themselves
-  // (anchorWatchAt), so a position tick does not re-render the shell.
-  const anchorWatch = useAnchorWatch(null, null)
+  // The watch record: the shell reads whether a watch is set, the auto-raise
+  // and the planning depth, none of which moves with the boat. The anchor
+  // watch tile and page apply the live fix themselves (anchorWatchAt), so a
+  // position tick does not re-render the shell.
+  const anchorWatch = useAnchorWatch()
   // Surfaces the server's auto-raise decision (ADR 0099, anchor_auto_raise.go)
   // as the same toast the old browser-side auto-close used to fire directly.
   // lastSeenAutoRaiseAtRef starts uninitialized (undefined) so the first
@@ -1150,7 +1150,7 @@ function AppShell() {
   }
 
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
-  const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
+  const hasActiveAnchorWatch = anchorWatch.active
 
   // Drives activePageId exactly the way a sidebar click or a deep link
   // does (ADR 0089, superseded by ADR 0110), so activePage/effectiveWidgets/

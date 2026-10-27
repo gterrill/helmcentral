@@ -42,17 +42,20 @@ interface AnchorWatchServerState {
   last_auto_raise?: { at: string; reason: string }
 }
 
-export interface AnchorWatchResult {
-  anchorState: AnchorWatchState
-  gnssCritical: boolean
+/**
+ * The anchor watch record as the server keeps it: no live fix in it. AppShell
+ * reads this (ADR 0215); anchorWatchAt applies a fix to it for the anchor
+ * watch tile and page.
+ */
+export interface AnchorWatchRecord {
+  /** Whether a watch is set. */
+  active: boolean
   anchorLat: number | null
   anchorLon: number | null
   radiusMeters: number
   rodeDeployedM: number
   seaState: SeaState
   seabedType: SeabedType
-  distanceMeters: number | null
-  bearingDeg: number | null
   setAt: string | null
   /** True once the first GET /api/anchor-watch has resolved successfully.
    * Until then, `setAt: null` is ambiguous — it means either "no watch is
@@ -67,7 +70,7 @@ export interface AnchorWatchResult {
    * anchor_watch.json) — the backend's own explicit error state, naming the
    * file path and the parse error, never an invented or empty watch in its
    * place. Null in the ordinary "no watch is set" case, which also has
-   * anchorState 'none' but carries no error. */
+   * active false but carries no error. */
   error: string | null
   bowOffsetM: number
   bowOffsetApplied: boolean
@@ -84,9 +87,8 @@ export interface AnchorWatchResult {
   planningDepthM: number | null
   planningTideHeightFt: number | null
   /** The server's most recent automatic raise (ADR 0099), if it has ever
-   * raised one in this process's lifetime - independent of `active`/
-   * `anchorState`, since a successful auto-raise is what makes the watch
-   * inactive. App.tsx watches this for a change to show a one-time toast. */
+   * raised one in this process's lifetime - independent of `active`,
+   * since a successful auto-raise is what makes the watch inactive. App.tsx watches this for a change to show a one-time toast. */
   lastAutoRaise: { at: string; reason: string } | null
   setAnchorHere: (
     lat: number,
@@ -119,6 +121,14 @@ export interface AnchorWatchResult {
   updateRodeAndConditions: (rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType) => Promise<void>
   updatePlanningDepth: (depthM: number, tideHeightFt: number) => Promise<void>
   clearAnchor: () => Promise<void>
+}
+
+/** The record at one fix: where the boat is against the anchor, and whether that is a drag. */
+export interface AnchorWatchResult extends AnchorWatchRecord {
+  anchorState: AnchorWatchState
+  gnssCritical: boolean
+  distanceMeters: number | null
+  bearingDeg: number | null
 }
 
 // Exported for the Adjust mode's own drag-alarm-preview warning ("Alarm
@@ -181,27 +191,24 @@ function positionAgainstAnchor(
 /**
  * The watch as read at a given fix: the record from useAnchorWatch with its
  * distance, bearing, drag state and GNSS flag worked out for this position.
- * AppShell reads the record without a position (ADR 0215), so a fix moving
- * does not re-render the shell; the anchor watch tile and page apply the live
- * fix with this.
+ * This is the only place a fix is applied to the record. AppShell reads the
+ * record alone (ADR 0215), so a fix moving does not re-render the shell; the
+ * anchor watch tile and page apply the live fix with this.
  */
 export function anchorWatchAt(
-  watch: AnchorWatchResult,
+  watch: AnchorWatchRecord,
   currentLat: number | null,
   currentLon: number | null,
   gnssCritical: boolean,
 ): AnchorWatchResult {
   const derived = positionAgainstAnchor(
-    watch.anchorState !== 'none', watch.anchorLat, watch.anchorLon, watch.radiusMeters, currentLat, currentLon,
+    watch.active, watch.anchorLat, watch.anchorLon, watch.radiusMeters, currentLat, currentLon,
   )
   return { ...watch, ...derived, gnssCritical }
 }
 
-export function useAnchorWatch(
-  currentLat: number | null,
-  currentLon: number | null,
-  gnssCritical = false,
-): AnchorWatchResult {
+/** The anchor watch record, polled from the server. Apply a fix with anchorWatchAt. */
+export function useAnchorWatch(): AnchorWatchRecord {
   // `loaded` stays false until a response has landed: a failed or errored
   // poll leaves no data, so "attempted" is never read as "confirmed". Once
   // data exists, a later failed poll keeps the last known state.
@@ -361,10 +368,7 @@ export function useAnchorWatch(
     ? serverState.seabed_type
     : DEFAULT_SEABED_TYPE
 
-  const { distanceMeters, bearingDeg, anchorState } = positionAgainstAnchor(
-    serverState.active, anchorLat, anchorLon, radiusMeters, currentLat, currentLon,
-  )
-
+  const active = serverState.active
   // Not gated on serverState.active — it never is true alongside an error —
   // but explicitly typeof-checked so a stray non-string value from a future
   // backend change can't leak through as a truthy, unrenderable object.
@@ -399,26 +403,18 @@ export function useAnchorWatch(
   // same way would make the one case it exists for unreachable.
   const lastAutoRaise = serverState.last_auto_raise ?? null
 
-  // Memoized: latitude/longitude arrive over the 1Hz vessel-state SSE stream
-  // and every tick re-renders App and therefore re-runs this hook, so without
-  // this every consumer (the anchor-watch tile, its fullscreen drawer) would
-  // see a new object identity every second even while every field below is
-  // unchanged — defeating their own React.memo. The dependency list is the
-  // output values themselves, not the raw inputs, so a tick that leaves every
-  // one of them the same (e.g. a fix arriving with the same coordinates, or
-  // one that moves the vessel by less than distanceMeters/bearingDeg's own
-  // rounding) still returns the previous reference.
+  // Memoized on the output values themselves: AppShell re-runs this hook on
+  // every render from its other streams, and the anchor watch tile and page
+  // memo on this object, so a render that changes nothing here must hand back
+  // the same reference.
   return useMemo(() => ({
-    anchorState,
-    gnssCritical,
+    active,
     anchorLat,
     anchorLon,
     radiusMeters,
     rodeDeployedM,
     seaState,
     seabedType,
-    distanceMeters,
-    bearingDeg,
     setAt,
     loaded,
     error,
@@ -437,8 +433,8 @@ export function useAnchorWatch(
     updatePlanningDepth,
     clearAnchor,
   }), [
-    anchorState, gnssCritical, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
-    seaState, seabedType, distanceMeters, bearingDeg, setAt, loaded, error, bowOffsetM, lastAutoRaise,
+    active, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
+    seaState, seabedType, setAt, loaded, error, bowOffsetM, lastAutoRaise,
     bowOffsetApplied, bowOffsetReason, headingAtSetDeg, placeName, planningDepthM, planningTideHeightFt,
     setAnchorHere, updateRadius, adjustAnchor, updateRodeAndConditions,
     updatePlanningDepth, clearAnchor,

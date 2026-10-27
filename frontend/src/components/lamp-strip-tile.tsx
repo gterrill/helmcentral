@@ -86,8 +86,11 @@ interface LampStripTileProps {
   values: Record<string, number | null>
   /** Age in seconds behind each lamp's bound path (ADR 0083); absent is unknown. */
   ages?: Record<string, number | null>
-  /** The worst currently-active alarm severity, driving the CHK rollup. */
-  worstAlarmState: string
+  /**
+   * The worst currently-active alarm severity, driving the CHK rollup. Null
+   * until the first alarms event: CHK then reads no data, never clear.
+   */
+  worstAlarmState: string | null
   /** Active alarms: a lamp takes the worst one on its path, CHK counts them all. */
   alarms?: ActiveAlarm[]
   editing: boolean
@@ -126,7 +129,8 @@ export const LampStripTile = memo(function LampStripTile({
 
   const runs: Run[] = []
   if (config.showCheck) {
-    const lit = worstAlarmState !== 'normal'
+    const known = worstAlarmState !== null
+    const lit = known && worstAlarmState !== 'normal'
     runs.push({
       group: 'Alerts',
       cells: [
@@ -134,10 +138,10 @@ export const LampStripTile = memo(function LampStripTile({
           key="chk"
           name={lit && worstAlarm ? `CHK · ${live.length} · ${worstAlarm.label}` : 'CHK'}
           icon="generic"
-          state={(lit ? worstAlarmState : 'off') as LampState}
+          state={(lit ? worstAlarmState : known ? 'off' : 'no data') as LampState}
           className={lit ? 'max-w-full' : 'w-32'}
           onClick={onOpenAlarms}
-          ariaLabel={`CHK: ${worstAlarmState}`}
+          ariaLabel={`CHK: ${worstAlarmState ?? 'no data'}`}
         />,
       ],
     })

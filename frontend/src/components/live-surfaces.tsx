@@ -1,4 +1,4 @@
-import { lazy, memo, useMemo, type ComponentProps } from 'react'
+import { lazy, memo, useCallback, useMemo, type ComponentProps } from 'react'
 
 import { AlarmBanner } from '@/components/alarm-banner'
 import { AlternatorTile } from '@/components/alternator-tile'
@@ -16,8 +16,8 @@ import { RouteTile } from '@/components/route-tile'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { WindTile } from '@/components/wind-tile'
 import { PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
-import { acknowledgeAlarm, silenceAlarm, useAisCollisionAlarms, useAlarmList } from '@/hooks/use-alarms'
-import { anchorWatchAt, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
+import { acknowledgeAlarm, silenceAlarm, useAisCollisionAlarms, useAlarmList, useKnownAlarmList } from '@/hooks/use-alarms'
+import { anchorWatchAt, type AnchorWatchRecord, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import { usePlaceName } from '@/hooks/use-place-name'
 import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
 import { useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
@@ -49,9 +49,9 @@ export const LiveAlarmBanner = memo(function LiveAlarmBanner(props: Omit<Compone
   return <AlarmBanner {...props} alarms={alarms} onAcknowledge={acknowledgeAlarm} />
 })
 
-/** The Alarms page: the whole active list, and the two actions. */
+/** The Alarms page: the whole active list, or null until it is known, and the two actions. */
 export const LiveAlarmsDrawer = memo(function LiveAlarmsDrawer(props: Omit<AlarmsDrawerProps, 'alarms' | 'onAcknowledge' | 'onSilence'>) {
-  const alarms = useAlarmList()
+  const alarms = useKnownAlarmList()
   return <AlarmsDrawer {...props} alarms={alarms} onAcknowledge={acknowledgeAlarm} onSilence={silenceAlarm} />
 })
 
@@ -106,21 +106,46 @@ const POSITION_FIELDS = [
 /** The Position tile: the fix and its quality, and the place name the server looks up for it. */
 export const LivePositionTile = memo(function LivePositionTile() {
   const { positionLastUpdateAgeS, ...fix } = useVesselFields(POSITION_FIELDS)
-  const placeName = usePlaceName(fix.latitude, fix.longitude, PLACE_NAME_REFRESH_SECONDS)
+  const placeName = usePlaceName(fix.latitude !== null && fix.longitude !== null, PLACE_NAME_REFRESH_SECONDS)
   return <PositionTile lastUpdateAgeS={positionLastUpdateAgeS} {...fix} placeName={placeName} />
 })
 
-const CLOCK_FIELDS = ['latitude', 'longitude', 'speedOverGroundKts'] as const
+interface ClockInputs {
+  hasFix: boolean
+  latitude: number | null
+  longitude: number | null
+  speedOverGroundKts: number | null
+}
+
+function sameClockInputs(a: ClockInputs, b: ClockInputs): boolean {
+  return a.hasFix === b.hasFix && a.latitude === b.latitude && a.longitude === b.longitude && a.speedOverGroundKts === b.speedOverGroundKts
+}
+
+/** Whether there is a trip to time: an active route, or a go-to the Course API names. */
+function hasTrip(status: ActiveRouteStatus): boolean {
+  return status.state === 'active' || (status.state === 'inactive' && status.destination !== null)
+}
 
 /**
  * The clock tile: the place name, and the trip ETA (ADR 0092, ADR 0125).
  * computeClockTripEta reports to the final waypoint of the route SignalK is
  * navigating, or to the Course API's bare next point when a chartplotter
  * go-to has no route behind it.
+ *
+ * The ETA needs the fix and speed only while there is a trip. Without one the
+ * tile reads just whether there is a fix, which is all the place name asks,
+ * so a clock on a boat at anchor does not redraw on every fix.
  */
 export const LiveClockTile = memo(function LiveClockTile({ routeStatus, ...props }: Omit<ComponentProps<typeof ClockTile>, 'placeName' | 'tripEta'> & { routeStatus: ActiveRouteStatus }) {
-  const { latitude, longitude, speedOverGroundKts } = useVesselFields(CLOCK_FIELDS)
-  const placeName = usePlaceName(latitude, longitude, PLACE_NAME_REFRESH_SECONDS)
+  const trip = hasTrip(routeStatus)
+  const select = useCallback((state: VesselStateValue): ClockInputs => ({
+    hasFix: state.latitude !== null && state.longitude !== null,
+    latitude: trip ? state.latitude : null,
+    longitude: trip ? state.longitude : null,
+    speedOverGroundKts: trip ? state.speedOverGroundKts : null,
+  }), [trip])
+  const { hasFix, latitude, longitude, speedOverGroundKts } = useVesselStateSelector(select, sameClockInputs)
+  const placeName = usePlaceName(hasFix, PLACE_NAME_REFRESH_SECONDS)
   const tripEta = useMemo(
     () => computeClockTripEta(routeStatus, latitude, longitude, speedOverGroundKts, new Date()),
     [routeStatus, latitude, longitude, speedOverGroundKts],
@@ -177,6 +202,20 @@ export const LiveAlternatorTile = memo(function LiveAlternatorTile(props: Omit<C
   return <AlternatorTile {...props} enginesRunning={enginesRunning} />
 })
 
+/**
+ * The watch at the live fix, keeping its object while what it says is the
+ * same: distance, bearing, drag state and the GNSS flag. Keyed on those
+ * outputs, not on the raw fix, so a fix that moves with no watch set (both
+ * distance and bearing stay null) hands the maps below the same watch.
+ */
+function useWatchAtFix(watch: AnchorWatchRecord, latitude: number | null, longitude: number | null, gnssCritical: boolean): AnchorWatchResult {
+  const { distanceMeters, bearingDeg, anchorState } = anchorWatchAt(watch, latitude, longitude, gnssCritical)
+  return useMemo(
+    () => ({ ...watch, distanceMeters, bearingDeg, anchorState, gnssCritical }),
+    [watch, distanceMeters, bearingDeg, anchorState, gnssCritical],
+  )
+}
+
 const ANCHOR_FIELDS = [
   'positionLastUpdateAgeS', 'latitude', 'longitude', 'gnssCriticalAlert', 'depth',
   'currentDriftKts', 'currentSetDeg', 'currentDriftImpactKts', 'headingTrue',
@@ -189,10 +228,11 @@ const ANCHOR_FIELDS = [
  * inputs are other streams, still passed by the shell.
  */
 export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile({ watch, ...props }: Omit<ComponentProps<typeof AnchorWatchTile>,
-  'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'>) {
+  'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'>
+  & { watch: AnchorWatchRecord }) {
   const v = useVesselFields(ANCHOR_FIELDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
-  const atFix = useMemo(() => anchorWatchAt(watch, v.latitude, v.longitude, v.gnssCriticalAlert), [watch, v.latitude, v.longitude, v.gnssCriticalAlert])
+  const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
   return (
     <AnchorWatchTile
       {...props}
@@ -246,10 +286,10 @@ const ANCHOR_DRAWER_FIELDS = [
 export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer({ watch, ...props }: Omit<AnchorWatchDrawerProps,
   'aisCollisionAlarms' | 'vesselLat' | 'vesselLon' | 'hasGpsFix' | 'vesselHeadingDeg' | 'depthMeters' | 'depthLastUpdateAgeS'
   | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'distanceMeters' | 'bearingDeg' | 'anchorState'
-  | 'canDrop' | 'windSpeedApparentKts' | 'maxGustKts' | 'vesselLengthOverallM' | 'vesselDraftM'> & { watch: AnchorWatchResult }) {
+  | 'canDrop' | 'windSpeedApparentKts' | 'maxGustKts' | 'vesselLengthOverallM' | 'vesselDraftM'> & { watch: AnchorWatchRecord }) {
   const v = useVesselFields(ANCHOR_DRAWER_FIELDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
-  const atFix = useMemo(() => anchorWatchAt(watch, v.latitude, v.longitude, v.gnssCriticalAlert), [watch, v.latitude, v.longitude, v.gnssCriticalAlert])
+  const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
   const hasFix = v.latitude !== null && v.longitude !== null
   return (
     <AnchorWatchDrawer

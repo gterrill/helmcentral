@@ -11,7 +11,7 @@ import runFixture from './fixtures/yachtwave-run.json'
 // key, decision and issue has the shape the server actually sends.
 
 vi.mock('@/hooks/use-vessel-identity', () => ({ useVesselIdentity: () => ({ boatName: 'M/V Pikorua' }) }))
-vi.mock('@/hooks/use-vessel-state', () => ({ useVesselState: () => ({ vesselLengthOverallM: 17.9, vesselDraftM: 1.5 }) }))
+vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ vesselLengthOverallM: 17.9, vesselDraftM: 1.5 })))
 
 let run: ImportRun
 const fetchMock = vi.fn()

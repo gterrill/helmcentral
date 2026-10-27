@@ -213,7 +213,7 @@ vi.mock('@/hooks/use-radar-targets', () => ({
 vi.mock('@/hooks/use-anchor-watch', () => ({
   anchorWatchAt: (watch: unknown) => watch,
   useAnchorWatch: () => ({
-    anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
+    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
     rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
     distanceMeters: null, bearingDeg: null,
     planningDepthM: null, planningTideHeightFt: null,

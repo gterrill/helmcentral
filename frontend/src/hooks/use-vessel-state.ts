@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback } from 'react'
 
 import { ageFromPayload, shownAge } from '@/lib/staleness'
 
 import { GUST_WINDOWS, type GustWindow } from '@/lib/gust-windows'
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 interface VesselState {
   status: string
@@ -119,7 +120,8 @@ export type VesselStateField = keyof VesselStateValue
 
 const EMPTY_LADDER: GustLadder = Object.fromEntries(GUST_WINDOWS.map((window) => [window, null])) as GustLadder
 
-const INITIAL: VesselStateValue = {
+/** Every field unknown: the state before the first vessel-state event. */
+export const INITIAL_VESSEL_STATE: VesselStateValue = {
   depth: null,
   depthLastUpdateAgeS: null,
   positionLastUpdateAgeS: null,
@@ -162,7 +164,7 @@ const INITIAL: VesselStateValue = {
 
 const AGE_FIELDS: readonly VesselStateField[] = ['depthLastUpdateAgeS', 'positionLastUpdateAgeS', 'windLastUpdateAgeS']
 const LADDER_FIELDS: readonly VesselStateField[] = ['maxGustKts', 'maxGustTrueKts']
-const FIELDS = Object.keys(INITIAL) as VesselStateField[]
+const FIELDS = Object.keys(INITIAL_VESSEL_STATE) as VesselStateField[]
 
 const nonNegative = (value: unknown): number | null => (typeof value === 'number' && value >= 0 ? value : null)
 const numberOrNull = (value: unknown): number | null => (typeof value === 'number' ? value : null)
@@ -229,7 +231,7 @@ function sameField(field: VesselStateField, a: VesselStateValue[VesselStateField
 }
 
 /*
- * One module-level store for the `vessel-state` event (ADR 0215), the same
+ * One store for the `vessel-state` event (ADR 0215; lib/telemetry-store.ts), the same
  * shape as use-gauge-values.ts and use-alarms.ts: one subscription and one
  * parse per tick, however many tiles read it. Each tile selects the fields it
  * shows, so a tick re-renders only the tiles whose own fields changed.
@@ -242,12 +244,14 @@ function sameField(field: VesselStateField, a: VesselStateValue[VesselStateField
  * one. Nothing shows a fresh age as a figure.
  */
 
-let snapshot: VesselStateValue = INITIAL
-let holders = 0
-let unsubscribeStream: (() => void) | null = null
-const listeners = new Set<() => void>()
-
-function applyVesselState(data: VesselState): void {
+function applyVesselState(snapshot: VesselStateValue, raw: string): TelemetryUpdate<VesselStateValue> | null {
+  let data: VesselState
+  try {
+    data = JSON.parse(raw) as VesselState
+  } catch (err) {
+    console.error('Failed to parse vessel state event:', err)
+    return null
+  }
   const parsed = parseVesselState(data)
   const next = { ...parsed } as Record<VesselStateField, unknown>
   let changed = false
@@ -258,91 +262,37 @@ function applyVesselState(data: VesselState): void {
       changed = true
     }
   }
-  if (!changed) return
-  snapshot = next as unknown as VesselStateValue
-  for (const listener of listeners) listener()
+  return changed ? { state: next as unknown as VesselStateValue } : null
 }
 
 // The backend pushes vessel state as it changes (ADR 0037) instead of the
 // client sampling on a timer. The connection is shared with every other
-// telemetry hook, and reconnection on a dropped stream is owned centrally by
-// use-telemetry-stream.ts, not per-hook: a non-200/wrong-content-type
-// response is a *permanent* EventSource failure per spec, not something the
-// browser retries on its own, so that module reconnects and surfaces the
-// outage via useTelemetryStatus() rather than leaving this store to notice
-// only through `source` going stale.
-function onVesselStateEvent(raw: string): void {
-  try {
-    applyVesselState(JSON.parse(raw) as VesselState)
-  } catch (err) {
-    console.error('Failed to parse vessel state event:', err)
-  }
-}
+// telemetry store, and reconnection on a dropped stream is owned centrally by
+// use-telemetry-stream.ts: a non-200/wrong-content-type response is a
+// *permanent* EventSource failure per spec, not something the browser retries
+// on its own, so that module reconnects and surfaces the outage via
+// useTelemetryStatus() rather than leaving this store to notice only through
+// `source` going stale.
+// Read at start, not at import: a module that only imports this one's
+// helpers or types never touches the stream.
+const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
 
-function acquire(): void {
-  holders += 1
-  if (holders === 1) {
-    unsubscribeStream = subscribeTelemetry('vessel-state', onVesselStateEvent)
-  }
-}
-
-function release(): void {
-  holders = Math.max(0, holders - 1)
-  if (holders === 0) {
-    unsubscribeStream?.()
-    unsubscribeStream = null
-    snapshot = INITIAL
-  }
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  acquire()
-  return () => {
-    listeners.delete(listener)
-    release()
-  }
-}
+const store = createTelemetryStore(listenToStream, 'vessel-state', INITIAL_VESSEL_STATE, applyVesselState)
 
 /**
- * Holds the store open for as long as the calling component is mounted,
- * without re-rendering it on any tick. AppShell calls this once, so the last
- * fix survives page switches and wall rotations.
+ * Starts the store on mount without re-rendering the caller on any tick.
+ * AppShell calls this once.
  */
-export function useRetainVesselState(): void {
-  useEffect(() => {
-    acquire()
-    return release
-  }, [])
-}
+export const useRetainVesselState = store.useRetain
 
 /**
  * The current vessel state, read once, for an event handler that needs it at
  * the moment of a click (Drop anchor here) rather than on every tick.
  */
-export function getVesselStateSnapshot(): VesselStateValue {
-  return snapshot
-}
+export const getVesselStateSnapshot = store.getSnapshot
 
-/**
- * One slice of the vessel state. The component re-renders only when `select`
- * returns something `isEqual` calls different from what it returned before.
- * `select` may be a fresh function on every render.
- */
-export function useVesselStateSelector<T>(select: (state: VesselStateValue) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
-  const cache = useRef<{ source: VesselStateValue; select: (state: VesselStateValue) => T; value: T } | null>(null)
-
-  const getSnapshot = useCallback((): T => {
-    const prev = cache.current
-    if (prev && prev.source === snapshot && prev.select === select) return prev.value
-    const next = select(snapshot)
-    const value = prev && isEqual(prev.value, next) ? prev.value : next
-    cache.current = { source: snapshot, select, value }
-    return value
-  }, [select, isEqual])
-
-  return useSyncExternalStore(subscribe, getSnapshot)
-}
+/** One slice of the vessel state; see TelemetryStore.useSelector. */
+export const useVesselStateSelector = store.useSelector
 
 function sameFields<T extends object>(a: T, b: T): boolean {
   const keys = Object.keys(a) as Array<keyof T>
@@ -360,15 +310,4 @@ export function useVesselFields<K extends VesselStateField>(fields: readonly K[]
     return out
   }, [fields])
   return useVesselStateSelector(select, sameFields)
-}
-
-const selectAll = (state: VesselStateValue) => state
-
-/**
- * The whole vessel state. Re-renders on any change, so a tile reads
- * useVesselFields or useVesselStateSelector instead; this is for a form that
- * wants one or two fields once.
- */
-export function useVesselState(): VesselStateValue {
-  return useVesselStateSelector(selectAll)
 }

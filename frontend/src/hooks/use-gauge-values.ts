@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { ageFromPayload, shownAge } from '@/lib/staleness'
+import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 /**
  * Current values for, and the age behind, every path a gauge is bound to.
@@ -17,10 +18,10 @@ import { ageFromPayload, shownAge } from '@/lib/staleness'
  * tick re-renders only the tiles whose own reading changed. Nothing hands the
  * whole map to a component.
  *
- * The store lives while anything holds it. AppShell holds it for the life of
- * the app through useRetainGaugeValues, without listening to it, so the last
- * reading survives the moment between one page's tiles unmounting and the
- * next page's mounting.
+ * The store starts with its first reader and stays subscribed for the life of
+ * the page (lib/telemetry-store.ts), so the last reading survives the moment
+ * between one page's tiles unmounting and the next page's mounting. AppShell
+ * starts it at boot through useRetainGaugeValues, without listening to it.
  *
  * An age changes, for its listeners, only when what a tile shows for it
  * changes: unknown, fresh, or the stale label (see shownAge).
@@ -51,15 +52,19 @@ export interface GaugeSubset {
 const EMPTY_ENGINES: EngineStates = {}
 const ENGINE_STATES: readonly string[] = ['running', 'off', 'lost']
 
-let valuesSnapshot: PathMap = EMPTY
-let agesSnapshot: PathMap = EMPTY
-let enginesSnapshot: EngineStates = EMPTY_ENGINES
-let holders = 0
-let unsubscribeStream: (() => void) | null = null
+interface GaugeState {
+  values: PathMap
+  ages: PathMap
+  engines: EngineStates
+}
 
-const valueListeners = new Map<string, Set<() => void>>()
-const ageListeners = new Map<string, Set<() => void>>()
-const engineListeners = new Map<string, Set<() => void>>()
+const INITIAL: GaugeState = { values: EMPTY, ages: EMPTY, engines: EMPTY_ENGINES }
+
+// Listener keys, one namespace per map, so a value, an age and an engine
+// with the same name never wake each other's readers.
+const valueKey = (path: string) => `value:${path}`
+const ageKey = (path: string) => `age:${path}`
+const engineKey = (id: string) => `engine:${id}`
 
 function shallowEqual(a: PathMap, b: PathMap): boolean {
   if (a === b) return true
@@ -86,23 +91,15 @@ function changedKeys<T>(prev: Record<string, T>, next: Record<string, T>, same: 
 
 const sameNumber = (a: number | null | undefined, b: number | null | undefined) => a === b
 
-function notify(listeners: Map<string, Set<() => void>>, keys: readonly string[], seen: Set<() => void>): void {
-  for (const key of keys) {
-    const set = listeners.get(key)
-    if (!set) continue
-    for (const listener of set) seen.add(listener)
-  }
-}
-
 type EnginesPayload = Record<string, { state?: string; last_update?: string }>
 
-function applyGaugeValuesEvent(raw: string): void {
+function applyGaugeValuesEvent(previous: GaugeState, raw: string): TelemetryUpdate<GaugeState> | null {
   let payload: { values?: PathMap; ages?: Record<string, number>; engines?: EnginesPayload }
   try {
     payload = JSON.parse(raw) as { values?: PathMap; ages?: Record<string, number>; engines?: EnginesPayload }
   } catch (err) {
     console.error('Failed to parse gauge-values event:', err)
-    return
+    return null
   }
 
   const nextValues = payload.values ?? {}
@@ -118,8 +115,8 @@ function applyGaugeValuesEvent(raw: string): void {
   const nextAges: PathMap = {}
   for (const [path, value] of Object.entries(payload.ages ?? {})) {
     const age = ageFromPayload(value)
-    const prev = agesSnapshot[path]
-    nextAges[path] = path in agesSnapshot && shownAge(prev) === shownAge(age) ? prev : age
+    const prev = previous.ages[path]
+    nextAges[path] = path in previous.ages && shownAge(prev) === shownAge(age) ? prev : age
   }
 
   // An engine whose status is unchanged keeps its object, so a tile reading
@@ -130,96 +127,49 @@ function applyGaugeValuesEvent(raw: string): void {
     const status: EngineStatus = entry.last_update
       ? { state: entry.state as EngineState, lastUpdate: entry.last_update }
       : { state: entry.state as EngineState }
-    const prev = enginesSnapshot[id]
+    const prev = previous.engines[id]
     nextEngines[id] = prev && sameStatus(prev, status) ? prev : status
   }
 
-  const valuesChanged = changedKeys(valuesSnapshot, nextValues, sameNumber)
-  const agesChanged = changedKeys(agesSnapshot, nextAges, sameNumber)
-  const enginesChanged = changedKeys(enginesSnapshot, nextEngines, sameStatus)
+  const valuesChanged = changedKeys(previous.values, nextValues, sameNumber)
+  const agesChanged = changedKeys(previous.ages, nextAges, sameNumber)
+  const enginesChanged = changedKeys(previous.engines, nextEngines, sameStatus)
+  if (valuesChanged.length === 0 && agesChanged.length === 0 && enginesChanged.length === 0) return null
 
-  // Each snapshot keeps its object while nothing in it changed.
-  if (valuesChanged.length > 0) valuesSnapshot = nextValues
-  if (agesChanged.length > 0) agesSnapshot = nextAges
-  if (enginesChanged.length > 0) enginesSnapshot = Object.keys(nextEngines).length === 0 ? EMPTY_ENGINES : nextEngines
-
-  // A listener on several changed paths (a subset) is called once.
-  const toCall = new Set<() => void>()
-  notify(valueListeners, valuesChanged, toCall)
-  notify(ageListeners, agesChanged, toCall)
-  notify(engineListeners, enginesChanged, toCall)
-  for (const listener of toCall) listener()
-}
-
-function acquire(): void {
-  holders += 1
-  if (holders === 1) {
-    unsubscribeStream = subscribeTelemetry('gauge-values', applyGaugeValuesEvent)
+  // Each map keeps its object while nothing in it changed.
+  return {
+    state: {
+      values: valuesChanged.length > 0 ? nextValues : previous.values,
+      ages: agesChanged.length > 0 ? nextAges : previous.ages,
+      engines: enginesChanged.length > 0 ? (Object.keys(nextEngines).length === 0 ? EMPTY_ENGINES : nextEngines) : previous.engines,
+    },
+    // A listener on several changed keys (a subset) is called once.
+    changed: [...valuesChanged.map(valueKey), ...agesChanged.map(ageKey), ...enginesChanged.map(engineKey)],
   }
 }
 
-function release(): void {
-  holders = Math.max(0, holders - 1)
-  if (holders === 0) {
-    unsubscribeStream?.()
-    unsubscribeStream = null
-    // Nothing holds the store, so its readings would only go stale here; the
-    // next holder starts exactly like a fresh mount.
-    valuesSnapshot = EMPTY
-    agesSnapshot = EMPTY
-    enginesSnapshot = EMPTY_ENGINES
-  }
-}
+// Read at start, not at import: a module that only imports this one's
+// helpers or types never touches the stream.
+const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
 
-function listen(listeners: Map<string, Set<() => void>>, keys: readonly string[], callback: () => void): () => void {
-  for (const key of keys) {
-    let set = listeners.get(key)
-    if (!set) {
-      set = new Set()
-      listeners.set(key, set)
-    }
-    set.add(callback)
-  }
-  return () => {
-    for (const key of keys) {
-      const set = listeners.get(key)
-      if (!set) continue
-      set.delete(callback)
-      if (set.size === 0) listeners.delete(key)
-    }
-  }
-}
-
-function subscribeTo(maps: Array<Map<string, Set<() => void>>>, keys: readonly string[], callback: () => void): () => void {
-  const stops = maps.map((map) => listen(map, keys, callback))
-  acquire()
-  return () => {
-    for (const stop of stops) stop()
-    release()
-  }
-}
+const store = createTelemetryStore(listenToStream, 'gauge-values', INITIAL, applyGaugeValuesEvent)
 
 /**
- * Holds the store open for as long as the calling component is mounted,
- * without re-rendering it on any tick. AppShell calls this once.
+ * Starts the store on mount without re-rendering the caller on any tick.
+ * AppShell calls this once.
  */
-export function useRetainGaugeValues(): void {
-  useEffect(() => {
-    acquire()
-    return release
-  }, [])
-}
+export const useRetainGaugeValues = store.useRetain
 
 /** The raw SI value on one path, or null when the event does not carry it. */
 export function useGaugeValue(path: string): number | null {
-  const subscribe = useCallback((cb: () => void) => subscribeTo([valueListeners], [path], cb), [path])
-  return useSyncExternalStore(subscribe, () => valuesSnapshot[path] ?? null)
+  const subscribe = useCallback((cb: () => void) => store.subscribeKeys([valueKey(path)], cb), [path])
+  return useSyncExternalStore(subscribe, () => store.getSnapshot().values[path] ?? null)
 }
 
 /** Age, in seconds, of the last update on one path (ADR 0083); null is unknown. */
 export function useGaugeAge(path: string): number | null {
-  const subscribe = useCallback((cb: () => void) => subscribeTo([ageListeners], [path], cb), [path])
-  return useSyncExternalStore(subscribe, () => agesSnapshot[path] ?? null)
+  const subscribe = useCallback((cb: () => void) => store.subscribeKeys([ageKey(path)], cb), [path])
+  return useSyncExternalStore(subscribe, () => store.getSnapshot().ages[path] ?? null)
 }
 
 function pick(source: PathMap, paths: readonly string[]): PathMap {
@@ -239,12 +189,13 @@ export function useGaugeSubset(paths: readonly string[]): GaugeSubset {
   const key = paths.join('\n')
   const cache = useRef<{ key: string; values: PathMap; ages: PathMap; subset: GaugeSubset } | null>(null)
 
-  const subscribe = useCallback(
-    (cb: () => void) => subscribeTo([valueListeners, ageListeners], key === '' ? [] : key.split('\n'), cb),
-    [key],
-  )
+  const subscribe = useCallback((cb: () => void) => {
+    const list = key === '' ? [] : key.split('\n')
+    return store.subscribeKeys([...list.map(valueKey), ...list.map(ageKey)], cb)
+  }, [key])
 
   const getSnapshot = useCallback((): GaugeSubset => {
+    const { values: valuesSnapshot, ages: agesSnapshot } = store.getSnapshot()
     const prev = cache.current
     if (prev && prev.key === key && prev.values === valuesSnapshot && prev.ages === agesSnapshot) return prev.subset
     const list = key === '' ? [] : key.split('\n')
@@ -266,8 +217,8 @@ export function useGaugeSubset(paths: readonly string[]): GaugeSubset {
  */
 export function useEngineStatus(id: string | null): EngineStatus | undefined {
   const subscribe = useCallback(
-    (cb: () => void) => subscribeTo([engineListeners], id === null ? [] : [id], cb),
+    (cb: () => void) => store.subscribeKeys(id === null ? [] : [engineKey(id)], cb),
     [id],
   )
-  return useSyncExternalStore(subscribe, () => (id === null ? undefined : enginesSnapshot[id]))
+  return useSyncExternalStore(subscribe, () => (id === null ? undefined : store.getSnapshot().engines[id]))
 }

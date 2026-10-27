@@ -246,12 +246,16 @@ describe('store lifetime', () => {
     shell.unmount()
   })
 
-  it('starts empty again once nothing retains or reads it', () => {
+  // The store stays subscribed once started, rather than emptying when its
+  // last reader leaves: the shared connection would not re-send a
+  // change-gated event to a store that came back to it (ADR 0215).
+  it('keeps the reading, on the one subscription, after nothing retains or reads it', () => {
     const tile = renderHook(() => useGaugeValue('a'))
     emit({ values: { a: 7 }, ages: {} })
     tile.unmount()
     const next = renderHook(() => useGaugeValue('a'))
-    expect(next.result.current).toBeNull()
+    expect(next.result.current).toBe(7)
+    expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
   })
 })
 

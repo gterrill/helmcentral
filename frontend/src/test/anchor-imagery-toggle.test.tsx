@@ -108,7 +108,7 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
   // The tile and page apply the fix to the record; the record here already has it.
   anchorWatchAt: (watch: unknown) => watch,
   useAnchorWatch: () => ({
-    anchorState: 'set',
+    active: true, anchorState: 'set',
     anchorLat: -25.2939,
     anchorLon: 152.9103,
     radiusMeters: 34,

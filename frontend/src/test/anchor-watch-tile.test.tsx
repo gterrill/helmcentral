@@ -93,6 +93,7 @@ vi.mock('@/lib/audio-utils', () => ({
 
 function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResult {
   return {
+    active: false,
     anchorState: 'none',
     gnssCritical: false,
     anchorLat: null,

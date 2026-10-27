@@ -108,7 +108,7 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
   // The tile and page apply the fix to the record; the record here already has it.
   anchorWatchAt: (watch: unknown) => watch,
   useAnchorWatch: () => ({
-    anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
+    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
     rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
     distanceMeters: null, bearingDeg: null,
     planningDepthM: null, planningTideHeightFt: null,
@@ -229,9 +229,8 @@ vi.mock('@/hooks/use-forecast-warnings', () => ({
 // One live, acknowledgeable alarm - enough to drive the AlarmBanner (see
 // app-mate-voice.test.tsx's own mock for the same hook) so its own
 // right-aligned View/Acknowledge buttons are actually on screen for the
-// exit-button overlap test below. collisionAlarmStatesByVessel is
-// re-exported from this module and imported alongside useAlarms in
-// App.tsx, so it has to be mocked here too.
+// exit-button overlap test below. The mock lists every hook the shell and
+// its surfaces import from this module.
 const mockAlarm = {
   rule_id: 'helmcentral:test-alarm',
   label: 'Test alarm',
@@ -246,10 +245,10 @@ const mockAlarm = {
 }
 
 vi.mock('@/hooks/use-alarms', () => ({
-  useAlarms: () => ({ alarms: [mockAlarm], worst: 'alarm', acknowledge: vi.fn(), silence: vi.fn() }),
   // The shell holds the store; the surfaces read it through these (ADR 0215).
   useRetainAlarms: () => {},
   useAlarmList: () => [mockAlarm],
+  useKnownAlarmList: () => [mockAlarm],
   useWorstAlarmState: () => 'alarm',
   useAisCollisionAlarms: () => new Map(),
   useAnchorDragAlarm: () => null,
