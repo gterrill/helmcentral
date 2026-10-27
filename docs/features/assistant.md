@@ -22,7 +22,7 @@ sails…") that changes every few seconds.
 A new conversation opens with a short list of what Mate can check, so you can
 see what to ask about. The list covers position and wind, instrument history,
 watching a reading for a few minutes, nearby vessels, forecasts and tides,
-passage estimates, places, equipment and maintenance, and your documents.
+passage estimates, your passages and season, places, equipment and maintenance, and your documents.
 
 Mate answers one question at a time in each conversation. Here is how that
 works:
@@ -199,6 +199,48 @@ can be set up to record other vessels' position history and not just your own,
 though most boats leave this off. If yours does, Mate reads that vessel's own
 track and gives a tighter answer for how long it has been sitting at its
 current spot.
+
+### Your passages and your season
+
+Ask Mate about a season, a cruise, a trip or where you've been, and it tells the
+story from the [Passages](passages.md) page. It reads the passages you've
+recorded there, so it works however long ago they were. Try "Summarise our
+cruising season" or "How far did we go in August?". Mate gives you:
+
+- **The route:** Where you left, then each place you reached in order, using
+  the names on your passages.
+- **The totals:** How many passages, how far you went, how long you were under
+  way, and the fuel burned.
+- **The longest legs:** The longest passages, with their dates.
+- **The stays:** Where the boat sat longest between passages, and for how many
+  days. Mate works a stay out from the gap between one passage ending and the
+  next one starting.
+
+Mate takes places only from your passages. If a passage has no name for where it
+started or finished, Mate leaves that place out and says so. If one passage finished at a
+place and the next left from a differently named one, it tells you both names
+and doesn't pick one. It doesn't work out which way you were heading,
+or what region a place is in.
+
+Mate also reads each passage's rating and notes. It can tell you which passages
+you rated **Lively**, or which ones mention a particular bay.
+
+There are things the log can't tell Mate, and it says so:
+
+- **Fuel:** Passages that came from an imported track, or from before
+  Helmcentral logged your fuel rate, have no fuel figure. Mate adds up the passages that have one and tells you how
+  many it left out.
+- **How you stayed:** The log doesn't record whether you were at anchor, on a
+  mooring or in a marina, so Mate doesn't split stays that way.
+- **Engine hours:** Mate gives the time you were under way, which isn't the same
+  as engine hours.
+
+If the Passages page is empty, or has nothing in the dates you asked about, Mate
+says that. It doesn't go looking for passages in the instrument history.
+
+To look at what a reading did on one passage, ask Mate. It finds the passage in
+your log, then reads the history for that passage's start and end. That needs a
+history log, as described under [When a reading looks wrong](#when-a-reading-looks-wrong).
 
 ### When a reading looks wrong
 

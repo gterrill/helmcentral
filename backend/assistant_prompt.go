@@ -852,8 +852,23 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	b.WriteString("For questions about what a reading did over time - trends, past behaviour, when something " +
 		"started or stopped, what it reached, or \"on the last few passages\" or runs - the logged telemetry is " +
 		"the primary source. Find the paths with check_signalk_paths or get_last_recorded, use list_passages for " +
-		"passage time windows, then call get_path_history for each window. Documents and past conversations are " +
-		"secondary context, not a substitute for the logged figures.\n\n")
+		"passage time windows (it reads the Passages logbook), then call get_path_history for each window. " +
+		"Documents and past conversations are secondary context, not a substitute for the logged figures.\n\n")
+
+	// 2c1b. Seasons, cruises and trips (ADR 0219) - fixed wording, identical
+	// for every turn. Asked to summarise the season, Mate counted runs of
+	// logged speed over the last 60 days and reported 11 passages where the
+	// logbook held 64, then guessed where the earlier ones went.
+	b.WriteString("For a question about a season, a cruise, a trip or where we have been, call get_cruise_summary " +
+		"first, for the whole Passages logbook or for the dates asked about, and list_passages for the detail of " +
+		"particular passages. The Passages logbook is the record of the passages, however long ago they were; the " +
+		"logged telemetry is not, so do not count passages from speed over ground. Tell it as the passages story: " +
+		"where we left, where we went, in order, using the place names on the records, then the notable stays and " +
+		"the longest legs, then the totals the tool gives. Quote its figures rather than adding them up yourself. " +
+		"Say what the logbook lacks (fuel on some passages, whether a stay was at anchor or at a dock) instead of " +
+		"filling it in. Take places only from the records and positions the tools return: never guess the direction " +
+		"of travel, which way a place lies from another, or what region a place is in. If the logbook is empty or " +
+		"has nothing in the dates asked about, say so plainly, and never say passages predate the telemetry.\n\n")
 
 	// 2c1c. Alarms (ADR 0175) - fixed wording, identical for every turn. The
 	// card text names a device ("PortALT"), and investigating that name led

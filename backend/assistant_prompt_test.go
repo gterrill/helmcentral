@@ -1257,3 +1257,21 @@ func TestBuildAssistantSystemPrompt_PassageDistanceIsRoutedNeverStraight(t *test
 		}
 	}
 }
+
+// ADR 0219: season, cruise and trip questions are answered from the Passages
+// logbook, told as the passages story, with no guessed geography.
+func TestBuildAssistantSystemPrompt_SeasonQuestionsUseTheLogbook(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"get_cruise_summary",
+		"season, a cruise, a trip",
+		"Passages logbook",
+		"where we left, where we went",
+		"never guess the direction of travel",
+		"never say passages predate the telemetry",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the logbook rule to mention %q", want)
+		}
+	}
+}

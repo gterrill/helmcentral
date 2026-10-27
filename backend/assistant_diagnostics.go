@@ -986,7 +986,7 @@ var mateToolGetPathHistory = mateTool{
 			"you get 1-minute buckets, so a short range gives the finest detail. Each bucket's min/max " +
 			"show transients shorter than the bucket. Use " +
 			"get_last_recorded or check_signalk_paths first to find the path and, if useful, its source. " +
-			"For \"the last passage\" style questions, get the time windows from list_passages.",
+			"For \"the last passage\" style questions, get the time windows from list_passages (the Passages logbook).",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

@@ -11,6 +11,21 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **Mate tells your season from the Passages page.** Ask it to summarise the
+  season, a cruise or a trip and it now reads the passages you've recorded, with
+  their place names, distances, fuel, ratings and notes. Before, it counted runs
+  of logged speed over the last 60 days, so a season came back with a fraction of
+  its passages. It tells the story in order, then the longest legs and the
+  longest stays. If the Passages page has nothing to read, Mate says so.
+
+### Added
+
+- **Mate can summarise your passages for any dates.** Ask "how far did we go in
+  August?" or "where did we stay longest?" and it adds up the passages in those
+  dates, with the stays worked out from the gaps between them.
+
 ## [0.56.0] - 2026-10-28
 
 ### Breaking

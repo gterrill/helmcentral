@@ -65,7 +65,8 @@ page says so instead of leaving the line out.
 
 In the edit panel, **How it went** lets you rate the passage as **Comfortable**,
 **Lively** or **Shouldn't have gone**. The rating is yours alone. Helmcentral
-never fills it in, and Mate doesn't read it yet. When you merge passages, the
+never fills it in. Mate reads it, along with your notes, when you ask about your
+season or your passages. When you merge passages, the
 rating that stays is the more cautious one.
 
 The two arrows at the right of the passage's title take you to the next

@@ -1,0 +1,413 @@
+package main
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"math"
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
+
+// The fixture is trimmed from GET /api/passages and /api/cruises on the boat
+// (10 of the 64 passages, 2026-10-28), so its shapes are the real ones:
+// blank place names, a passage with no fuel figure, a rating, and a stay
+// whose arrival and next departure carry different names.
+type logbookFixture struct {
+	Cruises  []cruiseRecord `json:"cruises"`
+	Passages []struct {
+		passageRecord
+		Stats passageStats `json:"stats"`
+	} `json:"passages"`
+}
+
+func loadLogbookFixture(t *testing.T) (*passageStore, logbookFixture) {
+	t.Helper()
+	raw, err := os.ReadFile("testdata/passages/logbook_real_shape.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	var fx logbookFixture
+	if err := json.Unmarshal(raw, &fx); err != nil {
+		t.Fatalf("parse fixture: %v", err)
+	}
+	s := newTestPassageStore(t)
+	for _, c := range fx.Cruises {
+		if _, err := s.InsertCruise(c); err != nil {
+			t.Fatalf("insert cruise: %v", err)
+		}
+	}
+	for _, p := range fx.Passages {
+		if _, err := s.InsertPassage(p.passageRecord); err != nil {
+			t.Fatalf("insert passage: %v", err)
+		}
+		buf, _ := json.Marshal(passageFigures{Stats: p.Stats})
+		if _, err := s.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(buf), p.ID); err != nil {
+			t.Fatalf("store stats: %v", err)
+		}
+	}
+	return s, fx
+}
+
+// logbookDeps wires the logbook and fails the test if anything reaches for
+// the telemetry: with the logbook as the source there is no fallback to it.
+func logbookDeps(t *testing.T, s *passageStore) assistantToolDeps {
+	t.Helper()
+	return assistantToolDeps{
+		now:        func() time.Time { return time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC) },
+		passageLog: func() *passageStore { return s },
+		influxRange: func(string, time.Time, time.Time, string) ([]telemetryPoint, error) {
+			t.Fatal("the passage tools must not read telemetry")
+			return nil, nil
+		},
+	}
+}
+
+type listedPassage struct {
+	Start         string   `json:"start"`
+	End           string   `json:"end"`
+	From          string   `json:"from"`
+	To            string   `json:"to"`
+	Cruise        string   `json:"cruise"`
+	Rating        string   `json:"rating"`
+	DistanceNm    float64  `json:"distance_nm"`
+	UnderwayHours float64  `json:"underway_hours"`
+	FuelBurnedL   *float64 `json:"fuel_burned_l"`
+}
+
+type listResult struct {
+	Status       string          `json:"status"`
+	Found        int             `json:"found"`
+	Returned     int             `json:"returned"`
+	LogbookFirst string          `json:"logbook_first_departure"`
+	LogbookLast  string          `json:"logbook_last_arrival"`
+	Note         string          `json:"note"`
+	Passages     []listedPassage `json:"passages"`
+}
+
+func runTool(t *testing.T, d assistantToolDeps, name, args string, into any) string {
+	t.Helper()
+	out, err := d.execute(context.Background(), name, json.RawMessage(args))
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	if err := json.Unmarshal([]byte(out), into); err != nil {
+		t.Fatalf("%s json: %v\n%s", name, err, out)
+	}
+	return out
+}
+
+func TestListPassages_ReadsTheLogbook(t *testing.T) {
+	s, fx := loadLogbookFixture(t)
+	var res listResult
+	runTool(t, logbookDeps(t, s), "list_passages", `{}`, &res)
+
+	if res.Found != 10 || res.Returned != 10 || len(res.Passages) != 10 {
+		t.Fatalf("want 10 passages, got found %d returned %d", res.Found, res.Returned)
+	}
+	// Newest first, with the recorded names, rating and cruise.
+	first := res.Passages[0]
+	if first.From != "Dumbell Island" || first.To != "Haslewood Island" {
+		t.Errorf("newest passage: %+v", first)
+	}
+	if first.FuelBurnedL == nil || math.Abs(*first.FuelBurnedL-35.9) > 0.05 {
+		t.Errorf("fuel: %v", first.FuelBurnedL)
+	}
+	last := res.Passages[9]
+	if last.From != "Pittwater" || last.To != "Newcastle Cruising Yacht Club" || last.Cruise != "NSW" {
+		t.Errorf("oldest passage: %+v", last)
+	}
+	if last.FuelBurnedL != nil {
+		t.Errorf("an unrecorded fuel figure must stay null, got %v", *last.FuelBurnedL)
+	}
+	rated := 0
+	for _, p := range res.Passages {
+		if p.Rating == "comfortable" {
+			rated++
+		}
+	}
+	if rated != 1 {
+		t.Errorf("want the one recorded rating, got %d", rated)
+	}
+	if !strings.HasPrefix(res.LogbookFirst, "2026-02-28T") || !strings.HasPrefix(res.LogbookLast, "2026-10-27T") {
+		t.Errorf("logbook span: %q to %q", res.LogbookFirst, res.LogbookLast)
+	}
+	// A year before the telemetry window: no 60-day ceiling.
+	if _, err := time.Parse(time.RFC3339, last.Start); err != nil {
+		t.Errorf("start not RFC3339: %v", err)
+	}
+	_ = fx
+}
+
+func TestListPassages_RangeLimitAndHidden(t *testing.T) {
+	s, fx := loadLogbookFixture(t)
+	hide := fx.Passages[0].ID // the oldest
+	if _, err := s.db.Exec(`UPDATE passages SET hidden = 1 WHERE id = ?`, hide); err != nil {
+		t.Fatal(err)
+	}
+	d := logbookDeps(t, s)
+	tests := []struct {
+		name       string
+		args       string
+		found, ret int
+		newestFrom string
+	}{
+		{"hidden passages are not in the logbook", `{}`, 9, 9, "Dumbell Island"},
+		{"from date", `{"from":"2026-10-01"}`, 4, 4, "Dumbell Island"},
+		{"to date is inclusive of that day", `{"from":"2026-09-01","to":"2026-09-09"}`, 1, 1, "Hayman Island"},
+		{"nothing departs between the 9th and the 12th", `{"from":"2026-09-01","to":"2026-09-12"}`, 1, 1, "Hayman Island"},
+		{"limit keeps the newest", `{"limit":2}`, 9, 2, "Dumbell Island"},
+		{"RFC3339 bound", `{"from":"2026-10-24T00:00:00Z","to":"2026-10-24T23:59:59Z"}`, 1, 1, "Fairey Reef #2"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var res listResult
+			runTool(t, d, "list_passages", tc.args, &res)
+			if res.Found != tc.found || res.Returned != tc.ret {
+				t.Fatalf("found %d returned %d, want %d and %d", res.Found, res.Returned, tc.found, tc.ret)
+			}
+			if res.Passages[0].From != tc.newestFrom {
+				t.Errorf("newest from %q, want %q", res.Passages[0].From, tc.newestFrom)
+			}
+		})
+	}
+}
+
+func TestListPassages_EmptyAndMisses(t *testing.T) {
+	empty := newTestPassageStore(t)
+	var res listResult
+	runTool(t, logbookDeps(t, empty), "list_passages", `{}`, &res)
+	if res.Status != "empty_logbook" || res.Found != 0 || len(res.Passages) != 0 {
+		t.Fatalf("empty logbook: %+v", res)
+	}
+	for _, want := range []string{"no passages", "not from the telemetry"} {
+		if !strings.Contains(res.Note, want) {
+			t.Errorf("note %q should say %q", res.Note, want)
+		}
+	}
+
+	s, _ := loadLogbookFixture(t)
+	runTool(t, logbookDeps(t, s), "list_passages", `{"from":"2025-01-01","to":"2025-12-31"}`, &res)
+	if res.Status != "none_in_range" || res.Found != 0 || res.LogbookFirst == "" {
+		t.Fatalf("range with none: %+v", res)
+	}
+}
+
+func TestPassageTools_FailPlainly(t *testing.T) {
+	s, _ := loadLogbookFixture(t)
+	d := logbookDeps(t, s)
+	for _, tool := range []string{"list_passages", "get_cruise_summary"} {
+		for _, args := range []string{`{"from":"yesterday"}`, `{"to":"2026-13-40"}`, `{"from":"2026-10-02","to":"2026-10-01"}`} {
+			if _, err := d.execute(context.Background(), tool, json.RawMessage(args)); err == nil {
+				t.Errorf("%s %s: want an error", tool, args)
+			}
+		}
+		none := assistantToolDeps{now: d.now}
+		if _, err := none.execute(context.Background(), tool, nil); err == nil || !strings.Contains(err.Error(), "passage log is not running") {
+			t.Errorf("%s with no store: %v", tool, err)
+		}
+		gone := assistantToolDeps{now: d.now, passageLog: func() *passageStore { return nil }}
+		if _, err := gone.execute(context.Background(), tool, nil); err == nil {
+			t.Errorf("%s with a nil store: want an error", tool)
+		}
+	}
+}
+
+type summaryStay struct {
+	Place         string  `json:"place"`
+	Arrived       string  `json:"arrived"`
+	Departed      string  `json:"departed"`
+	Days          float64 `json:"days"`
+	NextDepartsAt string  `json:"next_departure_place"`
+}
+
+type summaryResult struct {
+	Status        string  `json:"status"`
+	PassageCount  int     `json:"passage_count"`
+	FirstPlace    string  `json:"first_place"`
+	LastPlace     string  `json:"last_place"`
+	FirstDepart   string  `json:"first_departure"`
+	LastArrival   string  `json:"last_arrival"`
+	TotalNm       float64 `json:"total_distance_nm"`
+	UnderwayHours float64 `json:"underway_hours"`
+	Fuel          struct {
+		BurnedL            float64 `json:"burned_l"`
+		PassagesRecorded   int     `json:"passages_with_fuel"`
+		PassagesUnrecorded int     `json:"passages_without_fuel"`
+	} `json:"fuel"`
+	Route   []string `json:"route"`
+	Cruises []struct {
+		Name     string `json:"name"`
+		Passages int    `json:"passages"`
+	} `json:"cruises"`
+	LongestPassages []listedPassage `json:"longest_passages"`
+	StaysTotal      int             `json:"stays_total"`
+	Stays           []summaryStay   `json:"longest_stays"`
+	Note            string          `json:"note"`
+}
+
+func TestGetCruiseSummary_WholeLogbook(t *testing.T) {
+	s, fx := loadLogbookFixture(t)
+	var res summaryResult
+	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{}`, &res)
+
+	var wantNm, wantFuel float64
+	withFuel := 0
+	for _, p := range fx.Passages {
+		wantNm += p.Stats.DistanceNM
+		if p.Stats.FuelBurnedL != nil {
+			wantFuel += *p.Stats.FuelBurnedL
+			withFuel++
+		}
+	}
+	if res.PassageCount != 10 || math.Abs(res.TotalNm-round1(wantNm)) > 0.11 {
+		t.Errorf("count %d, distance %v want %v", res.PassageCount, res.TotalNm, wantNm)
+	}
+	if res.FirstPlace != "Pittwater" || res.LastPlace != "Haslewood Island" {
+		t.Errorf("places from the records: %q to %q", res.FirstPlace, res.LastPlace)
+	}
+	if !strings.HasPrefix(res.FirstDepart, "2026-02-28T") || !strings.HasPrefix(res.LastArrival, "2026-10-27T") {
+		t.Errorf("span: %q to %q", res.FirstDepart, res.LastArrival)
+	}
+	// Fuel is summed only over the passages that recorded it, and says so.
+	if res.Fuel.PassagesRecorded != withFuel || res.Fuel.PassagesUnrecorded != 10-withFuel || math.Abs(res.Fuel.BurnedL-round1(wantFuel)) > 0.11 {
+		t.Errorf("fuel: %+v want %v over %d", res.Fuel, wantFuel, withFuel)
+	}
+	if res.UnderwayHours <= 0 {
+		t.Errorf("underway hours: %v", res.UnderwayHours)
+	}
+	if len(res.Route) == 0 || res.Route[0] != "Pittwater" || res.Route[len(res.Route)-1] != "Haslewood Island" {
+		t.Errorf("route: %v", res.Route)
+	}
+	if len(res.LongestPassages) == 0 || res.LongestPassages[0].To != "Darley Reef" {
+		t.Errorf("longest passage: %+v", res.LongestPassages)
+	}
+	cruises := map[string]int{}
+	for _, c := range res.Cruises {
+		cruises[c.Name] = c.Passages
+	}
+	if cruises["NSW"] != 2 || cruises["Coral Sea"] != 2 || cruises["GBR Southbound"] != 3 {
+		t.Errorf("cruises: %v", cruises)
+	}
+
+	// Nine gaps. The longest is the three months at K'gari.
+	if res.StaysTotal != 9 || len(res.Stays) == 0 {
+		t.Fatalf("stays: total %d, listed %d", res.StaysTotal, len(res.Stays))
+	}
+	top := res.Stays[0]
+	if top.Place != "K'gari" || math.Abs(top.Days-96.9) > 0.1 {
+		t.Errorf("longest stay: %+v", top)
+	}
+	// The boat left from a differently named place: the tool reports both
+	// names and does not decide which is right.
+	if top.NextDepartsAt != "Hayman Island" {
+		t.Errorf("departure place: %q", top.NextDepartsAt)
+	}
+	if res.Stays[1].Place != "Cromartys Bay" || res.Stays[1].NextDepartsAt != "Goat Island" {
+		t.Errorf("second stay: %+v", res.Stays[1])
+	}
+	for i := 1; i < len(res.Stays); i++ {
+		if res.Stays[i].Days > res.Stays[i-1].Days {
+			t.Errorf("stays must run longest first: %+v", res.Stays)
+		}
+	}
+}
+
+func TestGetCruiseSummary_RangeAndGaps(t *testing.T) {
+	s, _ := loadLogbookFixture(t)
+	d := logbookDeps(t, s)
+	tests := []struct {
+		name       string
+		args       string
+		count      int
+		first, end string
+		stays      int
+	}{
+		{"october", `{"from":"2026-10-01"}`, 4, "Breakwater Marina", "Haslewood Island", 3},
+		{"two passages one gap", `{"from":"2026-02-01","to":"2026-03-31"}`, 2, "Pittwater", "Cromartys Bay", 1},
+		{"single passage has no stay", `{"from":"2026-10-27","to":"2026-10-27"}`, 1, "Dumbell Island", "Haslewood Island", 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var res summaryResult
+			runTool(t, d, "get_cruise_summary", tc.args, &res)
+			if res.PassageCount != tc.count || res.FirstPlace != tc.first || res.LastPlace != tc.end || res.StaysTotal != tc.stays {
+				t.Fatalf("got %d %q %q stays %d, want %d %q %q stays %d", res.PassageCount, res.FirstPlace, res.LastPlace, res.StaysTotal, tc.count, tc.first, tc.end, tc.stays)
+			}
+		})
+	}
+}
+
+func TestGetCruiseSummary_BlankNamesAreNotInvented(t *testing.T) {
+	s, _ := loadLogbookFixture(t)
+	var res summaryResult
+	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{"from":"2026-06-01","to":"2026-06-30"}`, &res)
+	if res.PassageCount != 2 {
+		t.Fatalf("count: %d", res.PassageCount)
+	}
+	// Goat Island -> (blank) then (blank) -> K'gari: the stay between has no
+	// recorded place, and the tool leaves it blank.
+	if len(res.Stays) != 1 || res.Stays[0].Place != "" || res.Stays[0].NextDepartsAt != "" {
+		t.Errorf("stay: %+v", res.Stays)
+	}
+	for _, p := range res.Route {
+		if p == "" {
+			t.Errorf("an unnamed place must not appear in the route: %v", res.Route)
+		}
+	}
+	if !strings.Contains(res.Note, "no place name") {
+		t.Errorf("note should say some places are unnamed: %q", res.Note)
+	}
+}
+
+func TestGetCruiseSummary_Empty(t *testing.T) {
+	var res summaryResult
+	runTool(t, logbookDeps(t, newTestPassageStore(t)), "get_cruise_summary", `{}`, &res)
+	if res.Status != "empty_logbook" || res.PassageCount != 0 || !strings.Contains(res.Note, "not from the telemetry") {
+		t.Fatalf("empty logbook: %+v", res)
+	}
+	s, _ := loadLogbookFixture(t)
+	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{"from":"2025-01-01","to":"2025-02-01"}`, &res)
+	if res.Status != "none_in_range" || res.PassageCount != 0 {
+		t.Fatalf("range with none: %+v", res)
+	}
+}
+
+func TestPassageTools_OverlapMakesNoNegativeStay(t *testing.T) {
+	s := newTestPassageStore(t)
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	for _, p := range []passageRecord{
+		{Start: t0, End: t0.Add(4 * time.Hour), FromName: "A", ToName: "B"},
+		{Start: t0.Add(3 * time.Hour), End: t0.Add(8 * time.Hour), FromName: "B", ToName: "C"},
+	} {
+		if _, err := s.InsertPassage(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var res summaryResult
+	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{}`, &res)
+	if res.StaysTotal != 0 || res.PassageCount != 2 {
+		t.Errorf("%+v", res)
+	}
+}
+
+func TestPassageTools_Registered(t *testing.T) {
+	for _, name := range []string{"list_passages", "get_cruise_summary"} {
+		if lookupMateTool(name) == nil {
+			t.Errorf("%s is not in the registry", name)
+		}
+	}
+	d := lookupMateTool("list_passages").function.Description
+	for _, want := range []string{"Passages logbook", "get_path_history"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("list_passages description should mention %q", want)
+		}
+	}
+	if strings.Contains(d, "InfluxDB") || strings.Contains(d, "speed over ground") {
+		t.Errorf("list_passages must no longer describe the telemetry: %s", d)
+	}
+}
+
+var _ = sql.ErrNoRows
