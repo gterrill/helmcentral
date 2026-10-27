@@ -71,7 +71,7 @@ var mateToolEstimatePassage = mateTool{
 			"of telemetry). Give the destination coordinates (from find_places); the run starts at the " +
 			"vessel's position unless you give from_lat and from_lon (a planned leg between two places). The " +
 			"tool routes the run over water around islands and headlands using the offline coastline and " +
-			"returns that distance as distance_nm, with the first leg's bearing_deg and the waypoints; the " +
+			"returns that distance as distance_nm, with course_deg (the longest leg's bearing), the legs and the waypoints; the " +
 			"straight line is returned only as straight_line_nm, for comparison. If it cannot route (a " +
 			"coastline square is not downloaded, an end point is on land, or no water connects the two) it " +
 			"returns an error: report that error, never a straight-line distance. Omit speed to use the " +
@@ -640,7 +640,7 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 
 	// The route comes first: with no passage distance there is nothing to
 	// estimate, and the straight line is never an acceptable stand-in.
-	routed, err := d.routePassage("estimate_passage", args.FromLat, args.FromLon, *args.ToLat, *args.ToLon)
+	routed, err := d.routePassage(ctx, "estimate_passage", args.FromLat, args.FromLon, *args.ToLat, *args.ToLon)
 	if err != nil {
 		return "", err
 	}
@@ -772,10 +772,15 @@ func (d assistantToolDeps) executeEstimatePassage(ctx context.Context, raw json.
 	}
 
 	shrink := func() bool {
+		// The route's waypoints are detail: they go before anything that
+		// answers the question, so distance, time and fuel always survive.
+		if result.assistantRoutedPassage.dropRoute() {
+			return true
+		}
 		if len(result.Table) == 0 {
 			return false
 		}
-		// Drop the least-sampled band first - it says the least about the
+		// Drop the least-sampled band next - it says the least about the
 		// boat's own performance, and every summary field above (hours,
 		// litres, l_per_h, rpm) was already computed before the table is
 		// trimmed, so shrinking it never changes the answer already given.

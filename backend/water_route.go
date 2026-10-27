@@ -1,7 +1,7 @@
 package main
 
 import (
-	"container/heap"
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -65,7 +65,7 @@ const (
 
 // waterRouteMaxNodes bounds the search: the queue holds every candidate edge,
 // so memory grows with the square of this.
-const waterRouteMaxNodes = 3000
+const waterRouteMaxNodes = 2000
 
 var errNoWaterRoute = errors.New("no water route found")
 
@@ -114,12 +114,6 @@ func wrLen(a wrPt) float64           { return math.Hypot(a.x, a.y) }
 func wrDist(a, b wrPt) float64       { return math.Hypot(a.x-b.x, a.y-b.y) }
 func wrScale(a wrPt, k float64) wrPt { return wrPt{a.x * k, a.y * k} }
 func wrAdd(a, b wrPt) wrPt           { return wrPt{a.x + b.x, a.y + b.y} }
-
-// segmentsCross reports whether the open segments ab and cd properly cross.
-// Arguments are x1,y1,x2,y2,x3,y3,x4,y4.
-func segmentsCross(ax, ay, bx, by, cx, cy, dx, dy float64) bool {
-	return wrSegDist(wrSeg{wrPt{ax, ay}, wrPt{bx, by}}, wrSeg{wrPt{cx, cy}, wrPt{dx, dy}}) == 0
-}
 
 func wrPointSegDist(p wrPt, s wrSeg) (dist, t float64) {
 	ab := wrSub(s.b, s.a)
@@ -398,19 +392,54 @@ type wrItem struct {
 	node, from int
 	g, f       float64
 }
+
+// wrHeap is a binary min-heap on f. It is typed so a push does not box.
 type wrHeap []wrItem
 
-func (h wrHeap) Len() int           { return len(h) }
-func (h wrHeap) Less(i, j int) bool { return h[i].f < h[j].f }
-func (h wrHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *wrHeap) Push(x any)        { *h = append(*h, x.(wrItem)) }
-func (h *wrHeap) Pop() any          { o := *h; x := o[len(o)-1]; *h = o[:len(o)-1]; return x }
+func (h *wrHeap) push(it wrItem) {
+	*h = append(*h, it)
+	a := *h
+	i := len(a) - 1
+	for i > 0 {
+		p := (i - 1) / 2
+		if a[p].f <= a[i].f {
+			break
+		}
+		a[p], a[i] = a[i], a[p]
+		i = p
+	}
+}
+
+func (h *wrHeap) pop() wrItem {
+	a := *h
+	top := a[0]
+	last := len(a) - 1
+	a[0] = a[last]
+	a = a[:last]
+	i := 0
+	for {
+		l, r, m := 2*i+1, 2*i+2, i
+		if l < len(a) && a[l].f < a[m].f {
+			m = l
+		}
+		if r < len(a) && a[r].f < a[m].f {
+			m = r
+		}
+		if m == i {
+			break
+		}
+		a[i], a[m] = a[m], a[i]
+		i = m
+	}
+	*h = a
+	return top
+}
 
 // routeOverWater finds the shortest path over water from one point to
 // another. lines must hold every coastline within marginNm of the box the two
 // points span; the caller proves that. marginNm bounds where bends are
 // looked for.
-func routeOverWater(from, to shorelinePoint, lines []shorelineLine, marginNm float64) (waterRoute, error) {
+func routeOverWater(ctx context.Context, from, to shorelinePoint, lines []shorelineLine, marginNm float64) (waterRoute, error) {
 	straight := haversineMeters(from.Lat, from.Lon, to.Lat, to.Lon) / metersPerNauticalMile
 	if straight > waterRouteMaxStraightNm {
 		return waterRoute{}, fmt.Errorf("a %.0f nm run is more than the %.0f nm that can be routed over water in one go; plan it in legs", straight, waterRouteMaxStraightNm)
@@ -473,6 +502,12 @@ func routeOverWater(from, to shorelinePoint, lines []shorelineLine, marginNm flo
 	inBox := func(p wrPt) bool { return p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY }
 	var segs []wrSeg
 	segAt := map[[2]int]int{} // (poly, vertex) -> index of the segment starting there
+	segIdx := func(pi, i int) int {
+		if k, ok := segAt[[2]int{pi, i}]; ok {
+			return k
+		}
+		return -1 // outside the box: never indexed, so nothing to skip
+	}
 	for pi, pts := range polys {
 		for i := 1; i < len(pts); i++ {
 			a, b := pts[i-1], pts[i]
@@ -500,7 +535,7 @@ func routeOverWater(from, to shorelinePoint, lines []shorelineLine, marginNm flo
 		for i := 1; i < len(r.Points); i++ {
 			r.DistanceNm += haversineMeters(r.Points[i-1].Lat, r.Points[i-1].Lon, r.Points[i].Lat, r.Points[i].Lon) / metersPerNauticalMile
 		}
-		r.ExactWithinNm = math.Max(0, (r.DistanceNm-r.StraightLineNm)/2)
+		r.ExactWithinNm = math.Sqrt(math.Max(0, r.DistanceNm*r.DistanceNm-r.StraightLineNm*r.StraightLineNm)) / 2
 		r.InitialBearingDeg = bearingDeg(r.Points[0].Lat, r.Points[0].Lon, r.Points[1].Lat, r.Points[1].Lon)
 		return r
 	}
@@ -529,27 +564,18 @@ func routeOverWater(from, to shorelinePoint, lines []shorelineLine, marginNm flo
 			switch {
 			case i > 0:
 				din, haveIn = wrSub(v, pts[i-1]), true
-				inSeg = segAt[[2]int{pi, i - 1}]
-				if _, ok := segAt[[2]int{pi, i - 1}]; !ok {
-					inSeg = -1
-				}
+				inSeg = segIdx(pi, i-1)
 			case closed:
 				din, haveIn = wrSub(v, pts[len(pts)-2]), true
-				if k, ok := segAt[[2]int{pi, len(pts) - 2}]; ok {
-					inSeg = k
-				}
+				inSeg = segIdx(pi, len(pts)-2)
 			}
 			switch {
 			case i < len(pts)-1:
 				dout, haveOut = wrSub(pts[i+1], v), true
-				if k, ok := segAt[[2]int{pi, i}]; ok {
-					outSeg = k
-				}
+				outSeg = segIdx(pi, i)
 			case closed:
 				dout, haveOut = wrSub(pts[1], v), true
-				if k, ok := segAt[[2]int{pi, 0}]; ok {
-					outSeg = k
-				}
+				outSeg = segIdx(pi, 0)
 			}
 			if closed && i == len(pts)-1 {
 				continue // the same vertex as i == 0
@@ -616,18 +642,24 @@ func routeOverWater(from, to shorelinePoint, lines []shorelineLine, marginNm flo
 	settled := make([]bool, n)
 	h := func(i int) float64 { return wrDist(pos[i], end) }
 	pq := &wrHeap{}
+	pops := 0
 	push := func(from int) {
 		for v := 0; v < n; v++ {
 			if !settled[v] {
 				nd := g[from] + wrDist(pos[from], pos[v])
-				heap.Push(pq, wrItem{node: v, from: from, g: nd, f: nd + h(v)})
+				pq.push(wrItem{node: v, from: from, g: nd, f: nd + h(v)})
 			}
 		}
 	}
 	settled[0] = true
 	push(0)
-	for pq.Len() > 0 {
-		it := heap.Pop(pq).(wrItem)
+	for len(*pq) > 0 {
+		if pops++; pops%256 == 0 {
+			if err := ctx.Err(); err != nil {
+				return waterRoute{}, err
+			}
+		}
+		it := pq.pop()
 		v := it.node
 		if settled[v] {
 			continue

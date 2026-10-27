@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -35,7 +37,7 @@ func routePolylineCrossesShore(route waterRoute, lines []shorelineLine) bool {
 func TestRouteOverWater_ClearWaterIsTheStraightLine(t *testing.T) {
 	from, to := shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}
 	far := []shorelineLine{islandRing("way/far", -20.4, 149.15, 0.02)}
-	r, err := routeOverWater(from, to, far, 5)
+	r, err := routeOverWater(context.Background(), from, to, far, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +55,7 @@ func TestRouteOverWater_ClearWaterIsTheStraightLine(t *testing.T) {
 func TestRouteOverWater_IslandInTheWayIsGoneAround(t *testing.T) {
 	from, to := shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}
 	lines := []shorelineLine{islandRing("way/island", -20.0, 149.15, 0.03)}
-	r, err := routeOverWater(from, to, lines, 5)
+	r, err := routeOverWater(context.Background(), from, to, lines, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +77,7 @@ func TestRouteOverWater_IslandInTheWayIsGoneAround(t *testing.T) {
 func TestRouteOverWater_KeepsClearanceOffTheShore(t *testing.T) {
 	from, to := shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}
 	island := islandRing("way/island", -20.0, 149.15, 0.03)
-	r, err := routeOverWater(from, to, []shorelineLine{island}, 5)
+	r, err := routeOverWater(context.Background(), from, to, []shorelineLine{island}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +95,7 @@ func TestRouteOverWater_OneBlockingFragmentJoinedFromTwoWays(t *testing.T) {
 	a := shorelineLine{ID: "way/a", Kind: "coastline", Points: ring[:3]}
 	b := shorelineLine{ID: "way/b", Kind: "coastline", Points: ring[2:]}
 	lines := []shorelineLine{a, b}
-	r, err := routeOverWater(shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, lines, 5)
+	r, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, lines, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +107,7 @@ func TestRouteOverWater_OneBlockingFragmentJoinedFromTwoWays(t *testing.T) {
 func TestRouteOverWater_ReefsDoNotBlock(t *testing.T) {
 	reef := islandRing("way/reef", -20.0, 149.15, 0.03)
 	reef.Kind = "reef"
-	r, err := routeOverWater(shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, []shorelineLine{reef}, 5)
+	r, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, []shorelineLine{reef}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +119,7 @@ func TestRouteOverWater_ReefsDoNotBlock(t *testing.T) {
 func TestRouteOverWater_StartOnLandIsAnError(t *testing.T) {
 	// 1.5 nm inside a 0.1 degree island is beyond the snap distance.
 	lines := []shorelineLine{islandRing("way/big", -20.0, 149.0, 0.1)}
-	_, err := routeOverWater(shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.5}, lines, 5)
+	_, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.5}, lines, 5)
 	if err == nil || !strings.Contains(err.Error(), "start") || !strings.Contains(err.Error(), "land") {
 		t.Fatalf("want a start-on-land error, got %v", err)
 	}
@@ -125,7 +127,7 @@ func TestRouteOverWater_StartOnLandIsAnError(t *testing.T) {
 
 func TestRouteOverWater_DestinationOnLandIsAnError(t *testing.T) {
 	lines := []shorelineLine{islandRing("way/big", -20.0, 149.3, 0.1)}
-	_, err := routeOverWater(shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, lines, 5)
+	_, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, lines, 5)
 	if err == nil || !strings.Contains(err.Error(), "destination") || !strings.Contains(err.Error(), "land") {
 		t.Fatalf("want a destination-on-land error, got %v", err)
 	}
@@ -135,7 +137,7 @@ func TestRouteOverWater_ShoreSideDestinationIsMovedSeawardAndSaid(t *testing.T) 
 	// A town or a marina sits on the charted shore, a few metres inland.
 	island := islandRing("way/island", -20.0, 149.15, 0.03)
 	to := shorelinePoint{-20.0, 149.15 - 0.03 + 0.0005} // 50 m inside the west shore
-	r, err := routeOverWater(shorelinePoint{-20.0, 148.9}, to, []shorelineLine{island}, 5)
+	r, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 148.9}, to, []shorelineLine{island}, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +160,7 @@ func TestRouteOverWater_EnclosedWaterHasNoRoute(t *testing.T) {
 	lagoon := shorelineLine{ID: "way/lagoon", Kind: "coastline", Closed: true, Points: []shorelinePoint{
 		{-20.05, 149.0}, {-19.95, 149.0}, {-19.95, 149.1}, {-20.05, 149.1}, {-20.05, 149.0},
 	}}
-	_, err := routeOverWater(shorelinePoint{-20.0, 149.05}, shorelinePoint{-20.0, 149.5}, []shorelineLine{island, lagoon}, 5)
+	_, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 149.05}, shorelinePoint{-20.0, 149.5}, []shorelineLine{island, lagoon}, 5)
 	if err == nil || !strings.Contains(err.Error(), "no water route") {
 		t.Fatalf("want a no-route error, got %v", err)
 	}
@@ -170,7 +172,7 @@ func TestRouteOverWater_ChannelBetweenTwoIslandsIsUsed(t *testing.T) {
 	a := islandRing("way/a", -20.03, 149.15, 0.02)
 	b := islandRing("way/b", -19.97, 149.15, 0.02) // gap between lat -20.01 and -19.99
 	lines := []shorelineLine{a, b}
-	r, err := routeOverWater(shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, lines, 5)
+	r, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, lines, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +222,7 @@ func TestRouteOverWater_WhitsundaysRunsRoundTheIslandNotThroughIt(t *testing.T) 
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			start := time.Now()
-			r, err := routeOverWater(haslewood, c.to, lines, 6)
+			r, err := routeOverWater(context.Background(), haslewood, c.to, lines, 6)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -239,5 +241,39 @@ func TestRouteOverWater_WhitsundaysRunsRoundTheIslandNotThroughIt(t *testing.T) 
 				t.Errorf("took %v", time.Since(start))
 			}
 		})
+	}
+}
+
+// segmentsCross reports whether the open segments ab and cd properly cross.
+func segmentsCross(ax, ay, bx, by, cx, cy, dx, dy float64) bool {
+	return wrSegDist(wrSeg{wrPt{ax, ay}, wrPt{bx, by}}, wrSeg{wrPt{cx, cy}, wrPt{dx, dy}}) == 0
+}
+
+func TestRouteOverWater_ExactMarginCoversTheEllipseSideways(t *testing.T) {
+	// Any shorter path lies inside the ellipse with the two ends as foci and
+	// this path's length as its length. It reaches sqrt(L²-s²)/2 to the side
+	// of the line, which is more than the (L-s)/2 it overshoots the ends.
+	lines := []shorelineLine{islandRing("way/island", -20.0, 149.15, 0.03)}
+	r, err := routeOverWater(context.Background(), shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}, lines, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, s := r.DistanceNm, r.StraightLineNm
+	want := math.Sqrt(l*l-s*s) / 2
+	if math.Abs(r.ExactWithinNm-want) > 1e-9 {
+		t.Errorf("ExactWithinNm %.4f, want sqrt(L²-s²)/2 = %.4f", r.ExactWithinNm, want)
+	}
+	if r.ExactWithinNm <= (l-s)/2 {
+		t.Errorf("the sideways reach %.4f must exceed the overshoot %.4f", r.ExactWithinNm, (l-s)/2)
+	}
+}
+
+func TestRouteOverWater_ACancelledContextStopsTheSearch(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	lines := loadShorelineFile(t, "testdata/water_route/whitsundays.json.gz")
+	_, err := routeOverWater(ctx, haslewood, coralSea, lines, 6)
+	if err == nil || !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
 	}
 }

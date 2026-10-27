@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -33,7 +35,7 @@ func holdWhitsundays(t *testing.T, store *coastlineStore, squares ...coverageSqu
 func TestRouteOverWaterReader_WhitsundaysFromStoredSquares(t *testing.T) {
 	r, store := newRouteReader(t, true)
 	holdWhitsundays(t, store, coverageSquare{-21, 149}, coverageSquare{-21, 148})
-	got, err := r.RouteOverWater(haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon)
+	got, err := r.RouteOverWater(context.Background(), haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +52,7 @@ func TestRouteOverWaterReader_AWayHeldInTwoSquaresIsOneCoast(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := r.RouteOverWater(haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon)
+	got, err := r.RouteOverWater(context.Background(), haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +64,7 @@ func TestRouteOverWaterReader_AWayHeldInTwoSquaresIsOneCoast(t *testing.T) {
 func TestRouteOverWaterReader_MissingSquareIsNamed(t *testing.T) {
 	r, store := newRouteReader(t, true)
 	holdWhitsundays(t, store, coverageSquare{-21, 149}) // -21,148 is not held
-	_, err := r.RouteOverWater(haslewood.Lat, haslewood.Lon, coralSea.Lat, coralSea.Lon)
+	_, err := r.RouteOverWater(context.Background(), haslewood.Lat, haslewood.Lon, coralSea.Lat, coralSea.Lon)
 	if err == nil || !strings.Contains(err.Error(), "21°S 148°E") || !strings.Contains(err.Error(), "not downloaded") {
 		t.Fatalf("want the missing square named, got %v", err)
 	}
@@ -74,7 +76,7 @@ func TestRouteOverWaterReader_FailedSquareSaysWhy(t *testing.T) {
 	if err := store.RecordFailure(coverageSquare{-21, 148}, "Overpass timed out", coastlineTestAt, coastlineTestAt.Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	_, err := r.RouteOverWater(haslewood.Lat, haslewood.Lon, coralSea.Lat, coralSea.Lon)
+	_, err := r.RouteOverWater(context.Background(), haslewood.Lat, haslewood.Lon, coralSea.Lat, coralSea.Lon)
 	if err == nil || !strings.Contains(err.Error(), "Overpass timed out") {
 		t.Fatalf("want the failure reason, got %v", err)
 	}
@@ -83,7 +85,7 @@ func TestRouteOverWaterReader_FailedSquareSaysWhy(t *testing.T) {
 func TestRouteOverWaterReader_SwitchOffIsSaid(t *testing.T) {
 	r, store := newRouteReader(t, false)
 	holdWhitsundays(t, store, coverageSquare{-21, 149}, coverageSquare{-21, 148})
-	_, err := r.RouteOverWater(haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon)
+	_, err := r.RouteOverWater(context.Background(), haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon)
 	if err == nil || !strings.Contains(err.Error(), "Offline coastline is off") {
 		t.Fatalf("got %v", err)
 	}
@@ -91,7 +93,17 @@ func TestRouteOverWaterReader_SwitchOffIsSaid(t *testing.T) {
 
 func TestRouteOverWaterReader_NoReaderIsSaid(t *testing.T) {
 	var r *offlineCoastlineReader
-	if _, err := r.RouteOverWater(haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon); err == nil {
+	if _, err := r.RouteOverWater(context.Background(), haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon); err == nil {
 		t.Fatal("expected an error")
+	}
+}
+
+func TestRouteOverWaterReader_ACancelledContextStopsBetweenMargins(t *testing.T) {
+	r, store := newRouteReader(t, true)
+	holdWhitsundays(t, store, coverageSquare{-21, 149}, coverageSquare{-21, 148})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := r.RouteOverWater(ctx, haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon); !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
 	}
 }

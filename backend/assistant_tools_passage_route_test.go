@@ -88,8 +88,21 @@ func TestExecuteEstimatePassage_RoutesRoundAnIslandInsteadOfThroughIt(t *testing
 		t.Errorf("a route round an island has bends: %+v", res.Route)
 	}
 	// The first leg heads south of the straight 284 degrees line.
-	if res.BearingDeg < 150 || res.BearingDeg > 250 {
-		t.Errorf("first leg %03d, expected it to head round the south of Whitsunday Island", res.BearingDeg)
+	if res.FirstLegBearingDeg < 150 || res.FirstLegBearingDeg > 250 {
+		t.Errorf("first leg %03d, expected it to head round the south of Whitsunday Island", res.FirstLegBearingDeg)
+	}
+	if len(res.Legs) != len(res.Route)-1 || res.Legs[0].BearingDeg != res.FirstLegBearingDeg {
+		t.Errorf("legs %+v do not match the route %+v", res.Legs, res.Route)
+	}
+	// The course is the longest leg's, not the first's.
+	longest := res.Legs[0]
+	for _, l := range res.Legs {
+		if l.DistanceNm > longest.DistanceNm {
+			longest = l
+		}
+	}
+	if res.CourseDeg != longest.BearingDeg {
+		t.Errorf("course %03d, the longest leg runs %03d", res.CourseDeg, longest.BearingDeg)
 	}
 	if res.From.Lat != haslewood.Lat || res.To.Lat != cidHarbour.Lat {
 		t.Errorf("from %+v to %+v", res.From, res.To)
@@ -205,5 +218,27 @@ func TestFindPlacesLabelsItsDistanceAsAStraightLine(t *testing.T) {
 	}
 	if strings.Contains(string(raw), `"distance_nm"`) || strings.Contains(string(raw), `"bearing_deg"`) {
 		t.Errorf("a candidate must not carry a bare distance or bearing: %s", raw)
+	}
+}
+
+func TestRouteDistance_ATooLargeResultLosesTheWaypointsNotTheDistance(t *testing.T) {
+	p := assistantRoutedPassage{DistanceNm: 15, StraightLineNm: 7, CourseDeg: 200, FirstLegBearingDeg: 197}
+	for i := 0; i < 3000; i++ {
+		p.Route = append(p.Route, assistantLatLon{Lat: -20.123456 + float64(i)*1e-4, Lon: 149.123456})
+		p.Legs = append(p.Legs, assistantRouteLeg{BearingDeg: 123, DistanceNm: 0.1})
+	}
+	raw, err := capToolResultJSON(&p, p.dropRoute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) > assistantMaxToolResultChars {
+		t.Fatalf("%d chars", len(raw))
+	}
+	var got assistantRoutedPassage
+	if err := json.Unmarshal([]byte(raw), &got); err != nil {
+		t.Fatalf("%v: %s", err, raw)
+	}
+	if got.DistanceNm != 15 || got.CourseDeg != 200 || !got.RouteOmitted || len(got.Route) != 0 {
+		t.Errorf("got %+v", got)
 	}
 }

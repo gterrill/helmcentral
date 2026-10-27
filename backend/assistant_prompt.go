@@ -954,7 +954,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"substitute the straight line, an estimate, or a distance from your own knowledge unless the " +
 		"operator asks for one, and then label it as general knowledge. Say in a few words when the route " +
 		"goes round something (\"round the south of the island, 15 nm against 7 in a straight line\"). " +
-		"Pass estimate_passage's bearing_deg, the first leg's course, as course_deg to get_wind_forecast for the destination and read " +
+		"Pass estimate_passage's course_deg, the course of the longest leg, as course_deg to get_wind_forecast for the destination and read " +
 		"the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, quarter, " +
 		"following); do not work the angle out yourself. A power catamaran runs comfortably in a following " +
 		"sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
@@ -968,7 +968,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		// now-or-forecast-range case as estimate_passage: the planning
 		// question above is already told to use general knowledge.
 		"For a passage leaving from the boat's position within the forecast range through water with tidal " +
-		"streams, after estimate_passage call plan_tidal_departure with estimate_passage's bearing_deg as course_deg " +
+		"streams, after estimate_passage call plan_tidal_departure with estimate_passage's course_deg as course_deg " +
 		"and the estimated hours as passage_hours. Take flood_set_deg, the direction the flood stream sets " +
 		"toward, from the standing notes first, else from general knowledge, and set flood_set_source to match; " +
 		"never present a guessed direction as the notes' own. If you do not know which way the flood sets in " +

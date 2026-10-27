@@ -107,7 +107,7 @@ place on the far side of an island gives you the real run, not the line across
 the chart.
 
 - **What it says:** The distance by water, the straight-line distance beside it
-  for comparison, the course of the first leg, and the bends it rounds.
+  for comparison, the course of the longest leg, each leg, and the bends it rounds.
 - **Clearance:** The route keeps about 90 m (0.05 nm) off the charted shore. A
   gap between islands narrower than that counts as closed.
 - **A place on the shore:** A town, jetty or marina is often charted a few

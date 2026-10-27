@@ -64,12 +64,21 @@ At 0.1 nm a 0.2 nm gap between islands closes. It is a constant, not a setting.
 ### Corridor and coverage
 
 The search runs inside the box the two points span plus a margin: 3 nm first,
-then 8, 20 and 50 if no path is found. A path found inside the box is the
-shortest there is once the margin reaches half the extra distance it adds, since
-any shorter path lies inside the ellipse whose foci are the two points and
-whose length is the path's. When the first answer needs a wider margin to
-be proven, the search runs again at that margin. Nodes outside that ellipse are
-left out. A Whitsundays run of 30 nm takes about 0.25 s.
+then 8, 20 and 50 if no path is found. A path found inside the box is the shortest there is once the margin reaches
+the sideways reach of the ellipse whose foci are the two points and whose
+length is the path's. With path length L and straight-line distance s, that is
+sqrt(L² - s²) / 2, which is more than the (L - s) / 2 the path overshoots the
+ends. When the first answer needs a wider margin to be proven, the search runs
+again at that margin. Nodes outside that ellipse are left out. The shoreline of
+each square is read once per call, however many margins are tried, and the
+search stops when the request is cancelled. A Whitsundays run of 30 nm takes
+about 0.25 s.
+
+If the wider run cannot happen (a square beyond the first corridor is missing,
+or the coast is too intricate), the call fails and names the reason. It does
+not return the path already found. That path might be too long, and offering it
+as the distance is the quiet substitution this record removes. A caveat in the
+result would leave the operator and Mate to notice it, so the tool fails.
 
 ### Ends on the shore
 
@@ -102,15 +111,18 @@ knowledge unless the operator asks, and then to label it.
   `from_lon`. With no start it uses the vessel's fix. It has no distance
   argument. It routes first, so a failed route fails before any telemetry is
   read. Time and fuel use the routed distance. The result adds
-  `straight_line_nm`, `bearing_deg` (the first leg, true), the waypoints in
-  `route`, and a `route_note` when an end was moved.
+  `straight_line_nm`, `course_deg` (the bearing of the longest leg, true),
+  `first_leg_bearing_deg`, the waypoints in `route`, each leg's bearing and
+  length in `legs`, and a `route_note` when an end was moved. A result too large
+  for the chat budget loses `route` and `legs` first and says so in
+  `route_omitted`, so the distance, time and fuel always survive.
 - `route_distance` is the same route with no time or fuel. A planned leg months
   away has no use for the boat's fuel history, and `estimate_passage` fails
   without it.
 - `find_places` keeps a figure per candidate, now named `straight_line_nm` and
   `straight_line_bearing_deg`. The place search on the Planned stay form reads
   the same fields. Mate takes the course for wind angle and tidal stream from
-  the route's `bearing_deg`.
+  the route's `course_deg`. A route whose legs differ widely is better read leg by leg.
 
 ## Consequences
 
@@ -132,7 +144,8 @@ knowledge unless the operator asks, and then to label it.
   where the answer is a different route, not a longer one.
 - **A visibility graph over every vertex.** Two thousand nodes in 15 nm of
   island water meant 900,000 edge tests and several seconds.
-- **Ask Mate to add via points.** It guessed headlands from memory. The
-  coastline is aboard.
+- **Ask Mate to add via points.** It guessed headlands from memory, and the
+  coastline is aboard. `assess_passage_window` now takes its via points from
+  the route's waypoints.
 - **Fall back to the straight line when coverage is missing.** The failure is
   the same one this record fixes, made quietly.

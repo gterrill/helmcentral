@@ -1242,7 +1242,7 @@ func TestBuildAssistantSystemPrompt_PassageDistanceIsRoutedNeverStraight(t *test
 		"never work out a distance yourself",
 		"cannot give a passage distance",
 		"do not substitute the straight line",
-		"estimate_passage's bearing_deg",
+		"estimate_passage's course_deg",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("expected the prompt to say %q, got:\n%s", want, prompt)
