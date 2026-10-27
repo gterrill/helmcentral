@@ -3,8 +3,9 @@
 The offline coastline is a copy of the charted coastline and reefs, kept aboard
 for the water around the boat. It means questions about land and shelter still
 get an answer at anchor with no signal. Today Mate uses it to say which wind
-directions an anchorage is protected from. A land layer for the chart and
-distance-to-land checks could use it later.
+directions an anchorage is protected from. It also uses it to work out how far a
+passage is by water, round the islands and headlands in the way. A land layer
+for the chart and distance-to-land checks could use it later.
 
 It's **off until you turn it on**, because filling it uses the internet. The
 steps are in [Turn on the offline
@@ -97,12 +98,45 @@ them isn't held yet, Mate says which, and why:
 Mate never falls back to looking the coastline up over the internet at that
 moment. Either the squares are aboard or it says they aren't.
 
+### Passage distances
+
+When you ask how far it is to a place, Mate finds the shortest way **over
+water** from the boat, or from a start you name. It does the same when you ask
+for the time and fuel to get there. It goes round any island in the way. So a
+place on the far side of an island gives you the real run, not the line across
+the chart.
+
+- **What it says:** The distance by water, the straight-line distance beside it
+  for comparison, the course of the first leg, and the bends it rounds.
+- **Clearance:** The route keeps about 90 m (0.05 nm) off the charted shore. A
+  gap between islands narrower than that counts as closed.
+- **A place on the shore:** A town, jetty or marina is often charted a few
+  metres inland. Mate measures to the water in front of it, up to half a mile
+  out, and says it did.
+- **Reefs:** A reef isn't treated as land. Mate's route can cross one, so check
+  the chart.
+
+A route needs every square between the two ends and a few miles either side, so
+if one is missing Mate says which and gives no distance:
+
+- **A square isn't downloaded.** It names the square, such as 21°S 148°E.
+- **A position is on land.** Either end is more than half a mile inland.
+- **No way through.** No water joins the two within 50 nm of the line.
+- **Too far or too intricate.** A run over 300 nm, or a coast too broken to
+  search at once, needs shorter legs.
+
+Mate never replaces a missing route with the straight line. It says it can't
+give a passage distance and why.
+
 ## Where it stops
 
 - Coverage doesn't cross the 180° meridian or reach the poles. In those areas
   the page says so and downloads nothing.
 - It's OpenStreetMap's coastline, so it's only as accurate and complete as the
   people who drew it. A position drawn as open sea reads as exposed all round.
+- A route knows nothing of depth, tidal gates, restricted areas or reefs. It
+  finds the shortest water the charted coastline allows, so check it against the
+  chart.
 - A shelter estimate can't see wind bending round a headland, gusts funnelling
   down a valley, or swell wrapping a point or crossing a reef. Treat it as a
   first look and compare it with the forecast.

@@ -34,7 +34,12 @@ type overpassGeomFixture struct {
 
 func loadShorelineFixture(t *testing.T, name string) []shorelineLine {
 	t.Helper()
-	f, err := os.Open("testdata/shelter/" + name + ".json.gz")
+	return loadShorelineFile(t, "testdata/shelter/"+name+".json.gz")
+}
+
+func loadShorelineFile(t *testing.T, path string) []shorelineLine {
+	t.Helper()
+	f, err := os.Open(path)
 	if err != nil {
 		t.Fatalf("open fixture: %v", err)
 	}

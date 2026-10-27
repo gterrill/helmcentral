@@ -19,8 +19,8 @@ interface PlaceCandidateApi {
   kind?: string;
   lat?: number;
   lon?: number;
-  distance_nm?: number;
-  bearing_deg?: number;
+  straight_line_nm?: number;
+  straight_line_bearing_deg?: number;
 }
 
 interface PlaceSearchApi {
@@ -47,8 +47,8 @@ export async function searchPlaces(query: string): Promise<PlaceSearchResult> {
       kind: typeof c.kind === "string" ? c.kind : "",
       lat: c.lat as number,
       lon: c.lon as number,
-      distanceNm: typeof c.distance_nm === "number" ? c.distance_nm : null,
-      bearingDeg: typeof c.bearing_deg === "number" ? c.bearing_deg : null,
+      distanceNm: typeof c.straight_line_nm === "number" ? c.straight_line_nm : null,
+      bearingDeg: typeof c.straight_line_bearing_deg === "number" ? c.straight_line_bearing_deg : null,
     }));
   // The result's own note is addressed to Mate, so it is not passed on.
   return { candidates };

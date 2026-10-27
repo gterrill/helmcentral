@@ -165,9 +165,17 @@ square is missing, Mate tells you which and doesn't guess the shelter.
 
 When InfluxDB is configured, Mate can estimate how long a passage will take and
 how much fuel it will burn. It works from your own boat's logged speed over
-ground and fuel-rate history, not a manufacturer's polar or fuel curve. Give it
-a distance and a planned speed. It reads a burn rate and rpm off what this
-vessel has actually done at that speed over the last few months.
+ground and fuel-rate history, not a manufacturer's polar or fuel curve. It reads
+a burn rate and rpm off what this vessel has actually done at that speed over
+the last few months.
+
+The distance is the way by water. Mate works it out from the boat's position, or
+from a start you name, to the destination. It goes round any island in the way.
+So a place on the far side of an island is the real run, not the line across the
+chart. It needs the [offline coastline](offline-coastline.md) for the water
+round both ends. If that's off, a square is missing or a place is on land, Mate
+says it can't give a passage distance and why. It doesn't fall back to a
+straight line.
 
 It says plainly that this is observed data across whatever conditions occurred,
 not a guarantee. It also says that a head sea will add time and fuel beyond
