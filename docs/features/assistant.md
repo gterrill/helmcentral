@@ -103,8 +103,8 @@ On request, it can look up more than that. Here is what it can do:
 - **Passage time and fuel:** See "Passage estimates" below.
 - **Who else is around:** See "Nearby vessels" below.
 - **Faults in a reading:** See "When a reading looks wrong" below.
-- **Maintenance, inventory, the app and alarms:** Each has its own paragraphs
-  below.
+- **Maintenance, inventory, the boat's details, the app and alarms:** Each has
+  its own paragraphs below.
 
 [What Mate can look up](../reference/mate-tools.md) lists the provider each of
 these draws on. It also explains what counts as "nearby" for a place search,
@@ -263,9 +263,22 @@ picture and you check it's the right one. A plan has to be a JPEG or PNG. If the
 drawing in your documents is a PDF, Mate asks you to upload a picture of that
 page instead.
 
+### The boat's details
+
+Mate can read the boat's details on **Settings → Vessel**: the owner and
+insurance, the home marina and berth, the storm delegate, and the hull and
+registration. It can also propose filling in or correcting them, as the same
+kind of card with **Apply**. Ask "the insurer is now Pantaenius, policy
+PY-1234", or give it an answer while it fills in a form, and it offers to keep
+it.
+
+There's only one record of the boat's details, so Mate can change what's on it
+but can't add a second one or remove it. The boat's name, call sign, MMSI and
+draft aren't on it, because they come from the boat's instruments.
+
 Mate never operates the boat. The autopilot, the generator, switching circuits,
-the anchor watch and alarm acknowledgement are not things it can propose, and
-neither are your settings or logins.
+the anchor watch and alarm acknowledgement are not things it can propose. Apart
+from the boat's details, neither are your settings or logins.
 
 ### The app itself
 
@@ -700,7 +713,8 @@ you through or a figure it worked out. **Save as note** under that answer keeps
 it without retyping. Mate doesn't write the note. Your
 tap creates it, it lands unfiled like any other capture, and you file or edit it
 afterwards. Mate never writes anything itself. The same goes for the
-maintenance schedule: Mate proposes, and your tap on **Apply** makes the change.
+maintenance schedule, the inventory and the boat's details: Mate proposes, and
+your tap on **Apply** makes the change.
 
 Mate is also always told which manuals exist. For each one, it's told the names
 of its top-level sections ("Operations Manual (Before Leaving, Getting
@@ -838,9 +852,9 @@ It needs internet. Without a connection, with no key configured, or switched
 off, it says so plainly rather than pretending to work.
 
 It can look things up, explain how Helmcentral works, watch readings for a few
-minutes and report back, and propose changes to the maintenance schedule, which
-you apply or dismiss. It can't start anything on the boat, change a setting or
-steer. Nothing it proposes takes effect without your tap, whether you typed the
+minutes and report back. It can also propose changes to the maintenance
+schedule, the inventory and the boat's details, which you apply or dismiss. It
+can't start anything on the boat, change any other setting or steer. Nothing it proposes takes effect without your tap, whether you typed the
 question or said it.
 
 A proposal card is applied by tapping it, never by speaking.
