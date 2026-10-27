@@ -5,9 +5,9 @@ import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import { GaugeGroupTile } from '@/components/gauge-group-tile'
 import { LampStripTile } from '@/components/lamp-strip-tile'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
-import { useAlarmList, useWorstAlarmState } from '@/hooks/use-alarms'
+import { sameLampAlarm, useAlarmListComparedOn, useWorstAlarmState } from '@/hooks/use-alarms'
 import { useEngineStatus, useGaugeSubset, type EngineStates } from '@/hooks/use-gauge-values'
-import type { TankLevel } from '@/hooks/use-tanks-state'
+import { useTankAlarmLevels } from '@/hooks/use-tanks-state'
 import { formatAppLocation } from '@/lib/app-location'
 import type { EngineClusterConfig, GaugeGroupWidgetConfig, LampStripWidgetConfig } from '@/lib/dashboard-widgets'
 import { clusterPaths } from '@/lib/cluster-readings'
@@ -87,8 +87,11 @@ function useEngine(id: string | null): EngineStates | undefined {
 }
 
 export const EngineClusterHost = memo(function EngineClusterHost({
-  config, ctx, tanks, editing, onConfigure,
-}: HostProps<EngineClusterConfig> & { tanks?: TankLevel[] }) {
+  config, ctx, editing, onConfigure,
+}: HostProps<EngineClusterConfig>) {
+  // The fuel bars' bands are each tank's own alarm levels, from the tanks
+  // stream; a tank's level moving does not re-resolve the cluster.
+  const tanks = useTankAlarmLevels()
   // An engine item that is off is known, not silent, when it comes to saying
   // Not reporting. OFF on the card follows the propulsion id the readings come
   // from, whatever kind the item is.
@@ -134,7 +137,8 @@ export const LampStripHost = memo(function LampStripHost({
   const resolved = useMemo(() => resolveLamps(config, ctx), [config, ctx])
   const paths = useMemo(() => resolved.lamps.map((l) => l.path).filter((p) => p.trim() !== ''), [resolved])
   const { values, ages } = useGaugeSubset(paths)
-  const alarms = useAlarmList()
+  // Lamps show which alarm is on a path and how bad, never its reading.
+  const alarms = useAlarmListComparedOn(sameLampAlarm)
   const worstAlarmState = useWorstAlarmState()
   return <LampStripTile config={resolved} values={values} ages={ages} alarms={alarms} worstAlarmState={worstAlarmState} {...rest} />
 })

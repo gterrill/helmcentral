@@ -15,8 +15,9 @@ const HOLD_TO_CONFIRM_MS = 800
 const DODGE_STEP_DEG = 5
 
 interface AutopilotTileProps {
-  state: AutopilotState
-  pending: Set<string>
+  /** Null until the first autopilot event: whether there is a pilot is not known yet. */
+  state: AutopilotState | null
+  pending: ReadonlySet<string>
   error: string | null
   /** Modes this pilot supports, from the hook's capability probe — empty if it failed. */
   availableModes: string[]
@@ -160,9 +161,9 @@ export const AutopilotTile = memo(function AutopilotTile({
   headingTrueDeg,
   readOnly = false,
 }: AutopilotTileProps) {
-  const modeBadge = state.present ? (state.mode ?? state.state ?? '').toUpperCase() : ''
+  const modeBadge = state?.present ? (state.mode ?? state.state ?? '').toUpperCase() : ''
 
-  const titleExtra = state.present && modeBadge ? (
+  const titleExtra = state?.present && modeBadge ? (
     <span className={cn(tilePillClass, 'truncate')}>
       {modeBadge}
     </span>
@@ -170,7 +171,9 @@ export const AutopilotTile = memo(function AutopilotTile({
 
   return (
     <Tile title="Autopilot" icon={<Compass className="h-3.5 w-3.5 text-gauge-secondary" />} titleExtra={titleExtra}>
-      {!state.present ? (
+      {state === null ? (
+        <div className="mt-3 rounded-md border border-dashed bg-muted/25 px-3 py-6 text-center text-sm text-muted-foreground">--</div>
+      ) : !state.present ? (
         <div className="mt-3 rounded-md border border-dashed bg-muted/25 px-3 py-6 text-center text-sm text-muted-foreground">
           No autopilot detected on this SignalK server.
         </div>
@@ -213,7 +216,7 @@ function AutopilotControls({
   onClearDodge,
   headingTrueDeg,
   readOnly,
-}: Required<Pick<AutopilotTileProps, 'state' | 'pending' | 'error' | 'availableModes' | 'capabilityError' | 'onEngage' | 'onDisengage' | 'onTack' | 'onGybe' | 'onAdjustHeading' | 'onSetMode' | 'onDodge' | 'onClearDodge' | 'readOnly'>> & { headingTrueDeg?: number | null }) {
+}: { state: AutopilotState } & Required<Pick<AutopilotTileProps, 'pending' | 'error' | 'availableModes' | 'capabilityError' | 'onEngage' | 'onDisengage' | 'onTack' | 'onGybe' | 'onAdjustHeading' | 'onSetMode' | 'onDodge' | 'onClearDodge' | 'readOnly'>> & { headingTrueDeg?: number | null }) {
   const { engaged, target, stale, availableActions, mode } = state
 
   // Stale steering data can't be trusted: no command should go out while the

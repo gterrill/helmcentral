@@ -64,39 +64,11 @@ vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mo
     gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false
   })))
 
-vi.mock('@/hooks/use-electrical-state', () => ({
-  useElectricalState: () => ({
-    batterySocPercent: null, batteryCapacityAh: null, chargingCurrentA: null,
-    chargingPowerW: null, solarOutputW: null, acOutputW: null, dc12vPowerW: null,
-    dc12vCurrentA: null, voltageReadoutV: null, voltageReadoutLabel: null, acLoadsW: null,
-    generatorRealPowerW: null, generatorConfigured: true, batteryRatePercentPerHour: null, timeToGoHours: null,
-    charger0CurrentA: null, charger0AcIn1CurrentA: null,
-    charger0ChargingMode: null, charger0Error: null,
-  }),
-}))
 
-vi.mock('@/hooks/use-solar-state', () => ({
-  useSolarState: () => ({
-    currentW: null,
-    todayKWh: null,
-    yesterdayKWh: null,
-    peakTodayW: null,
-    controllers: [],
-  }),
-}))
 
-vi.mock('@/hooks/use-nearby-vessels', () => ({
-  useNearbyVessels: () => ({ vessels: [], loading: false }),
-}))
 
-vi.mock('@/hooks/use-radar-targets', () => ({
-  useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
-}))
 
-vi.mock('@/hooks/use-anchor-watch', () => ({
-  // The tile and page apply the fix to the record; the record here already has it.
-  anchorWatchAt: (watch: unknown) => watch,
-  useAnchorWatch: () => ({
+vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
     active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
     rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
     distanceMeters: null, bearingDeg: null,
@@ -104,14 +76,10 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     setAnchorHere: vi.fn(), updateRadius: vi.fn(),
     updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),
     clearAnchor: vi.fn(),
-  }),
-}))
+  })))
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-vi.mock('@/hooks/use-tanks-state', () => ({
-  useTanksState: () => ({ tanks: [], loading: false }),
-}))
 
 vi.mock('@/hooks/use-tide-today', () => ({
   useTideToday: () => ({

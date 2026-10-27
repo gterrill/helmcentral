@@ -13,7 +13,8 @@ interface AlternatorData {
 interface AlternatorTileProps {
   port: AlternatorData
   starboard: AlternatorData
-  enginesRunning: boolean
+  /** Null when vessel state has not said, or no engine is set up: the tile claims neither running nor stopped. */
+  enginesRunning: boolean | null
 }
 
 function hasAlternatorData(data: AlternatorData | null | undefined): boolean {
@@ -87,7 +88,11 @@ export const AlternatorTile = memo(function AlternatorTile({ port, starboard, en
 
   return (
     <Tile title={isSingleAlternator ? 'Alternator' : 'Alternators'} icon={<Zap className="h-3.5 w-3.5 text-gauge-secondary" />}>
-      {enginesRunning ? (
+      {enginesRunning === null ? (
+        <div className="mt-1 flex h-24 items-center justify-center rounded-md border bg-background/60">
+          <p className="text-sm text-muted-foreground">--</p>
+        </div>
+      ) : enginesRunning ? (
         isSingleAlternator ? (
           <div className="mt-1">
             <AlternatorColumn data={singleData} />

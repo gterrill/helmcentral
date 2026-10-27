@@ -10,7 +10,10 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
   },
 }))
 
-import { useElectricalState } from '@/hooks/use-electrical-state'
+import { useElectricalSelector, type ElectricalStateValue } from '@/hooks/use-electrical-state'
+
+const selectAll = (state: ElectricalStateValue) => state
+const useElectricalState = () => useElectricalSelector(selectAll)
 
 function emit(payload: unknown) {
   act(() => {
@@ -148,5 +151,38 @@ describe('useElectricalState voltage readout and generator', () => {
     expect(result.current.houseBankUnresolved).toBe(true)
     emit({ datetime: '2026-09-14T00:00:00Z', house_bank_configured: true })
     expect(result.current.houseBankUnresolved).toBe(false)
+  })
+})
+
+describe('electrical store (ADR 0215)', () => {
+  it('claims no reading before the first event', () => {
+    const { result } = renderHook(() => useElectricalState())
+    expect(result.current.batterySocPercent).toBeNull()
+    expect(result.current.generatorConfigured).toBeNull()
+    expect(result.current.houseBankConfigured).toBeNull()
+  })
+
+  it('keeps the snapshot when only datetime and a fresh age moved', () => {
+    const { result } = renderHook(() => useElectricalState())
+    const payload = { datetime: '2026-10-27T04:20:11Z', last_update_age_s: 0, battery_soc_percent: 82, charging_current_a: -27.4 }
+    emit(payload)
+    const first = result.current
+
+    emit({ ...payload, datetime: '2026-10-27T04:20:16Z', last_update_age_s: 0.4 })
+
+    expect(result.current).toBe(first)
+  })
+
+  it('keeps the alternator objects when only the bank moved', () => {
+    const { result } = renderHook(() => useElectricalState())
+    const payload = { battery_soc_percent: 82, charging_current_a: -27.4, alternator_0_current_a: 12, alternator_1_current_a: -1 }
+    emit(payload)
+    const { alternator0, alternator1 } = result.current
+
+    emit({ ...payload, charging_current_a: -29.6 })
+
+    expect(result.current.chargingCurrentA).toBe(-29.6)
+    expect(result.current.alternator0).toBe(alternator0)
+    expect(result.current.alternator1).toBe(alternator1)
   })
 })

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
-
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { shownAge } from '@/lib/staleness'
+import { createTelemetryStore, keepUnchanged, sameShallow, useStoreFields, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
-interface AlternatorInstance {
+export interface AlternatorInstance {
   currentA: number | null
   voltageV: number | null
   powerW: number | null
@@ -59,140 +59,161 @@ function parseSigned(v: unknown): number | null {
   return typeof v === 'number' ? v : null
 }
 
-export function useElectricalState() {
-  const [lastUpdateAgeS, setLastUpdateAgeS] = useState<number | null>(null)
-  const [batterySocPercent, setBatterySocPercent] = useState<number | null>(null)
-  const [socPath, setSocPath] = useState<string | null>(null)
-  const [chargingCurrentA, setChargingCurrentA] = useState<number | null>(null)
-  const [chargingPowerW, setChargingPowerW] = useState<number | null>(null)
-  const [solarOutputW, setSolarOutputW] = useState<number | null>(null)
-  const [acOutputW, setAcOutputW] = useState<number | null>(null)
-  const [dc12vPowerW, setDc12vPowerW] = useState<number | null>(null)
-  const [dc12vCurrentA, setDc12vCurrentA] = useState<number | null>(null)
-  const [voltageReadoutV, setVoltageReadoutV] = useState<number | null>(null)
-  const [voltageReadoutLabel, setVoltageReadoutLabel] = useState<string | null>(null)
-  const [generatorConfigured, setGeneratorConfigured] = useState<boolean | null>(null)
-  const [generatorNone, setGeneratorNone] = useState(false)
-  const [houseBankConfigured, setHouseBankConfigured] = useState<boolean | null>(null)
-  const [houseBankUnresolved, setHouseBankUnresolved] = useState(false)
-  const [acLoadsW, setAcLoadsW] = useState<number | null>(null)
-  const [generatorRealPowerW, setGeneratorRealPowerW] = useState<number | null>(null)
-  const [alternator0, setAlternator0] = useState<AlternatorInstance>({ currentA: null, voltageV: null, powerW: null, temperatureC: null })
-  const [alternator1, setAlternator1] = useState<AlternatorInstance>({ currentA: null, voltageV: null, powerW: null, temperatureC: null })
-  const [charger0CurrentA, setCharger0CurrentA] = useState<number | null>(null)
-  const [charger0AcIn1CurrentA, setCharger0AcIn1CurrentA] = useState<number | null>(null)
-  const [charger0ChargingMode, setCharger0ChargingMode] = useState<string | null>(null)
-  const [charger0Error, setCharger0Error] = useState<string | null>(null)
-  const [batteryRatePercentPerHour, setBatteryRatePercentPerHour] = useState<number | null>(null)
-  const [timeToGoHours, setTimeToGoHours] = useState<number | null>(null)
+/** The electrical state as the tiles read it: parsed, with absent and -1 readings as null. */
+export interface ElectricalStateValue {
+  lastUpdateAgeS: number | null
+  batterySocPercent: number | null
+  socPath: string | null
+  chargingCurrentA: number | null
+  chargingPowerW: number | null
+  solarOutputW: number | null
+  acOutputW: number | null
+  dc12vPowerW: number | null
+  voltageReadoutV: number | null
+  voltageReadoutLabel: string | null
+  generatorRealPowerW: number | null
+  /** A generator instance is chosen in the roles; null while that is not known. */
+  generatorConfigured: boolean | null
+  generatorNone: boolean
+  /** A house bank is chosen in the roles; null while that is not known. */
+  houseBankConfigured: boolean | null
+  houseBankUnresolved: boolean
+  alternator0: AlternatorInstance
+  alternator1: AlternatorInstance
+  charger0CurrentA: number | null
+  charger0AcIn1CurrentA: number | null
+  charger0ChargingMode: string | null
+  charger0Error: string | null
+  batteryRatePercentPerHour: number | null
+  timeToGoHours: number | null
+}
 
-  useEffect(() => {
-    const applyElectricalState = (payload: unknown) => {
-      try {
-        const data = payload as ElectricalState
+export type ElectricalStateField = keyof ElectricalStateValue
 
-        const nextBatterySocPercent =
-          typeof data.battery_soc_percent === 'number' && data.battery_soc_percent >= 0 ? data.battery_soc_percent : null
+const NO_ALTERNATOR: AlternatorInstance = { currentA: null, voltageV: null, powerW: null, temperatureC: null }
 
-        setLastUpdateAgeS(parseAlt(data.last_update_age_s))
-        setBatterySocPercent(nextBatterySocPercent)
-        setSocPath(typeof data.soc_path === 'string' && data.soc_path !== '' ? data.soc_path : null)
-        setChargingCurrentA(parseSigned(data.charging_current_a))
-        setChargingPowerW(parseSigned(data.charging_power_w))
-        setSolarOutputW(typeof data.solar_output_w === 'number' && data.solar_output_w >= 0 ? data.solar_output_w : null)
-        setAcOutputW(typeof data.ac_output_w === 'number' && data.ac_output_w >= 0 ? data.ac_output_w : null)
-        setDc12vPowerW(typeof data.dc_12v_power_w === 'number' && data.dc_12v_power_w >= 0 ? data.dc_12v_power_w : null)
-        setDc12vCurrentA(typeof data.dc_12v_current_a === 'number' && data.dc_12v_current_a >= 0 ? data.dc_12v_current_a : null)
-        const readoutV = typeof data.voltage_readout_v === 'number' && data.voltage_readout_v >= 0 ? data.voltage_readout_v : null
-        const readoutLabel = typeof data.voltage_readout_label === 'string' && data.voltage_readout_label.trim() !== '' ? data.voltage_readout_label.trim() : null
-        // A figure without its name, or a name without a figure, is not a row.
-        setVoltageReadoutV(readoutV !== null && readoutLabel !== null ? readoutV : null)
-        setVoltageReadoutLabel(readoutV !== null && readoutLabel !== null ? readoutLabel : null)
-        setGeneratorConfigured(typeof data.generator_configured === 'boolean' ? data.generator_configured : null)
-        setGeneratorNone(data.generator_none === true)
-        setHouseBankConfigured(typeof data.house_bank_configured === 'boolean' ? data.house_bank_configured : null)
-        setHouseBankUnresolved(data.house_bank_unresolved === true)
-        setAcLoadsW(typeof data.ac_loads_w === 'number' && data.ac_loads_w >= 0 ? data.ac_loads_w : null)
-        setGeneratorRealPowerW(typeof data.generator_real_power_w === 'number' && data.generator_real_power_w >= 0 ? data.generator_real_power_w : null)
-        setAlternator0({ currentA: parseAlt(data.alternator_0_current_a), voltageV: parseAlt(data.alternator_0_voltage_v), powerW: parseAlt(data.alternator_0_power_w), temperatureC: parseAlt(data.alternator_0_temperature_c) })
-        setAlternator1({ currentA: parseAlt(data.alternator_1_current_a), voltageV: parseAlt(data.alternator_1_voltage_v), powerW: parseAlt(data.alternator_1_power_w), temperatureC: parseAlt(data.alternator_1_temperature_c) })
-        setCharger0CurrentA(typeof data.charger_0_current_a === 'number' && data.charger_0_current_a >= 0 ? data.charger_0_current_a : null)
-        setCharger0AcIn1CurrentA(typeof data.charger_0_acin_1_current_a === 'number' && data.charger_0_acin_1_current_a >= 0 ? data.charger_0_acin_1_current_a : null)
-        setCharger0ChargingMode(typeof data.charger_0_charging_mode === 'string' && data.charger_0_charging_mode.trim().length > 0 ? data.charger_0_charging_mode.trim() : null)
-        setCharger0Error(typeof data.charger_0_error === 'string' && data.charger_0_error.trim().length > 0 ? data.charger_0_error.trim() : null)
+/** Every reading unknown: the state before the first electrical-state event. */
+export const INITIAL_ELECTRICAL_STATE: ElectricalStateValue = {
+  lastUpdateAgeS: null,
+  batterySocPercent: null,
+  socPath: null,
+  chargingCurrentA: null,
+  chargingPowerW: null,
+  solarOutputW: null,
+  acOutputW: null,
+  dc12vPowerW: null,
+  voltageReadoutV: null,
+  voltageReadoutLabel: null,
+  generatorRealPowerW: null,
+  generatorConfigured: null,
+  generatorNone: false,
+  houseBankConfigured: null,
+  houseBankUnresolved: false,
+  alternator0: NO_ALTERNATOR,
+  alternator1: NO_ALTERNATOR,
+  charger0CurrentA: null,
+  charger0AcIn1CurrentA: null,
+  charger0ChargingMode: null,
+  charger0Error: null,
+  batteryRatePercentPerHour: null,
+  timeToGoHours: null,
+}
 
-        const batteryCapacityAh =
-          typeof data.battery_capacity_ah === 'number' && data.battery_capacity_ah > 0 ? data.battery_capacity_ah : null
-        const chargingCurrentA = parseSigned(data.charging_current_a)
+const nonNegative = (value: unknown): number | null => (typeof value === 'number' && value >= 0 ? value : null)
+const trimmedText = (value: unknown): string | null => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : null)
 
-        if (nextBatterySocPercent === null) {
-          setBatteryRatePercentPerHour(null)
-          setTimeToGoHours(null)
-          return
-        }
+/** The bank's rate and time to go, from the configured house bank capacity only; no estimate from SoC deltas. */
+function rateAndTimeToGo(socPercent: number | null, capacityAh: number | null, currentA: number | null): { rate: number | null; timeToGo: number | null } {
+  if (socPercent === null) return { rate: null, timeToGo: null }
+  const rate = capacityAh !== null && currentA !== null ? (currentA / capacityAh) * 100 : null
+  if (rate === null || !Number.isFinite(rate)) return { rate: null, timeToGo: null }
+  // A bank at rest has a known rate of zero and no time to go; keeping that
+  // apart from an unknown rate stops the dawn projection reading "unknown" as
+  // "holding steady".
+  if (Math.abs(rate) <= 0.01) return { rate: 0, timeToGo: null }
+  // Charging: time until full. Discharging: time until empty, negative to
+  // signal the direction.
+  return { rate, timeToGo: rate > 0 ? Math.max(0, 100 - socPercent) / rate : -(socPercent / Math.abs(rate)) }
+}
 
-        // Rate comes only from the configured house bank capacity; no estimate from SoC deltas.
-        const rate =
-          batteryCapacityAh !== null && chargingCurrentA !== null ? (chargingCurrentA / batteryCapacityAh) * 100 : null
-
-        if (rate === null || !Number.isFinite(rate)) {
-          setBatteryRatePercentPerHour(null)
-          setTimeToGoHours(null)
-          return
-        }
-
-        // A bank at rest has a known rate of zero and no time to go; keeping
-        // that apart from an unknown rate stops the dawn projection reading
-        // "unknown" as "holding steady".
-        if (Math.abs(rate) <= 0.01) {
-          setBatteryRatePercentPerHour(0)
-          setTimeToGoHours(null)
-          return
-        }
-
-        setBatteryRatePercentPerHour(rate)
-        if (rate > 0) {
-          // Charging: time until full
-          setTimeToGoHours(Math.max(0, 100 - nextBatterySocPercent) / rate)
-        } else {
-          // Discharging: time until empty (returned as negative to signal direction)
-          setTimeToGoHours(-(nextBatterySocPercent / Math.abs(rate)))
-        }
-      } catch (err) {
-        console.error('Failed to fetch electrical state:', err)
-      }
-    }
-
-    return subscribeTelemetry('electrical-state', (raw) => {
-      applyElectricalState(JSON.parse(raw))
-    })
-  }, [])
-
+/** One electrical-state event, parsed the way every tile reads it. */
+function parseElectricalState(data: ElectricalState): ElectricalStateValue {
+  const batterySocPercent = nonNegative(data.battery_soc_percent)
+  const chargingCurrentA = parseSigned(data.charging_current_a)
+  const capacityAh = typeof data.battery_capacity_ah === 'number' && data.battery_capacity_ah > 0 ? data.battery_capacity_ah : null
+  const readoutV = nonNegative(data.voltage_readout_v)
+  const readoutLabel = trimmedText(data.voltage_readout_label)
+  // A figure without its name, or a name without a figure, is not a row.
+  const readout = readoutV !== null && readoutLabel !== null
+  const { rate, timeToGo } = rateAndTimeToGo(batterySocPercent, capacityAh, chargingCurrentA)
   return {
-    lastUpdateAgeS,
+    lastUpdateAgeS: parseAlt(data.last_update_age_s),
     batterySocPercent,
-    socPath,
+    socPath: typeof data.soc_path === 'string' && data.soc_path !== '' ? data.soc_path : null,
     chargingCurrentA,
-    chargingPowerW,
-    solarOutputW,
-    acOutputW,
-    dc12vPowerW,
-    dc12vCurrentA,
-    voltageReadoutV,
-    voltageReadoutLabel,
-    acLoadsW,
-    generatorRealPowerW,
-    generatorConfigured,
-    generatorNone,
-    houseBankConfigured,
-    houseBankUnresolved,
-    alternator0,
-    alternator1,
-    charger0CurrentA,
-    charger0AcIn1CurrentA,
-    charger0ChargingMode,
-    charger0Error,
-    batteryRatePercentPerHour,
-    timeToGoHours,
+    chargingPowerW: parseSigned(data.charging_power_w),
+    solarOutputW: nonNegative(data.solar_output_w),
+    acOutputW: nonNegative(data.ac_output_w),
+    dc12vPowerW: nonNegative(data.dc_12v_power_w),
+    voltageReadoutV: readout ? readoutV : null,
+    voltageReadoutLabel: readout ? readoutLabel : null,
+    generatorRealPowerW: nonNegative(data.generator_real_power_w),
+    generatorConfigured: typeof data.generator_configured === 'boolean' ? data.generator_configured : null,
+    generatorNone: data.generator_none === true,
+    houseBankConfigured: typeof data.house_bank_configured === 'boolean' ? data.house_bank_configured : null,
+    houseBankUnresolved: data.house_bank_unresolved === true,
+    alternator0: { currentA: parseAlt(data.alternator_0_current_a), voltageV: parseAlt(data.alternator_0_voltage_v), powerW: parseAlt(data.alternator_0_power_w), temperatureC: parseAlt(data.alternator_0_temperature_c) },
+    alternator1: { currentA: parseAlt(data.alternator_1_current_a), voltageV: parseAlt(data.alternator_1_voltage_v), powerW: parseAlt(data.alternator_1_power_w), temperatureC: parseAlt(data.alternator_1_temperature_c) },
+    charger0CurrentA: nonNegative(data.charger_0_current_a),
+    charger0AcIn1CurrentA: nonNegative(data.charger_0_acin_1_current_a),
+    charger0ChargingMode: trimmedText(data.charger_0_charging_mode),
+    charger0Error: trimmedText(data.charger_0_error),
+    batteryRatePercentPerHour: rate,
+    timeToGoHours: timeToGo,
   }
+}
+
+/** Whether a field shows the same: the age by what a tile shows for it, an alternator reading by reading. */
+function sameField(field: ElectricalStateField, a: unknown, b: unknown): boolean {
+  if (field === 'lastUpdateAgeS') return shownAge(a as number | null) === shownAge(b as number | null)
+  if (field === 'alternator0' || field === 'alternator1') return sameShallow(a as AlternatorInstance, b as AlternatorInstance)
+  return Object.is(a, b)
+}
+
+/*
+ * One store for the `electrical-state` event (ADR 0215; lib/telemetry-store.ts).
+ * A field that shows the same keeps its previous value, the alternators
+ * included, and a tick in which nothing shows differently keeps the snapshot
+ * and notifies nobody. On the boat the bank, DC and solar figures move on
+ * nearly every five-second tick; the alternators, the charger and the roles
+ * rarely do, so the Alternator and Generator tiles sit still while the
+ * Battery & Power tile follows the bank.
+ */
+function applyElectricalState(previous: ElectricalStateValue, raw: string): TelemetryUpdate<ElectricalStateValue> | null {
+  let data: ElectricalState
+  try {
+    data = JSON.parse(raw) as ElectricalState
+  } catch (err) {
+    console.error('Failed to parse electrical state event:', err)
+    return null
+  }
+  const next = keepUnchanged(previous, parseElectricalState(data), sameField)
+  return next === null ? null : { state: next }
+}
+
+// Read at start, not at import: a module that only imports this one's
+// helpers or types never touches the stream.
+const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
+
+const store = createTelemetryStore(listenToStream, 'electrical-state', INITIAL_ELECTRICAL_STATE, applyElectricalState)
+
+/** Starts the store on mount without re-rendering the caller on any tick. AppShell calls this once. */
+export const useRetainElectricalState = store.useRetain
+
+/** One slice of the electrical state; see TelemetryStore.useSelector. */
+export const useElectricalSelector = store.useSelector
+
+/** The named fields, as one object kept while none of them changed. Pass a constant list. */
+export function useElectricalFields<K extends ElectricalStateField>(fields: readonly K[]): Pick<ElectricalStateValue, K> {
+  return useStoreFields(store, fields)
 }

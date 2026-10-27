@@ -17,6 +17,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, act } from '@testing-library/react'
 import { memo, type ComponentProps } from 'react'
 import { App } from '../App'
+import { setQueryData } from '@/lib/api-query'
+import { screen, within } from '@testing-library/react'
+import * as live from './fixtures/live-stream-payloads'
 
 beforeEach(() => {
   // useAuth (real here, not mocked) needs mode:none to clear the shell for
@@ -44,6 +47,8 @@ const subscribeTelemetryMock = vi.fn()
 let gaugeValuesListener: ((raw: string) => void) | null = null
 let alarmsListener: ((raw: string) => void) | null = null
 let vesselStateListener: ((raw: string) => void) | null = null
+// Every stream's listener, by event, for the phase 5 streams.
+const streamListeners = new Map<string, (raw: string) => void>()
 
 vi.mock('@/hooks/use-telemetry-stream', () => ({
   subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
@@ -51,12 +56,12 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
     if (event === 'gauge-values') gaugeValuesListener = cb
     if (event === 'alarms') alarmsListener = cb
     if (event === 'vessel-state') vesselStateListener = cb
+    streamListeners.set(event, cb)
     return () => {}
   },
-  // Real consumers elsewhere in the tree (use-autopilot.ts, vessel-status-bar.tsx
+  // Real consumers elsewhere in the tree (vessel-status-bar.tsx
   // via use-vessel-identity.ts) just need these to exist and not throw — their
   // own behavior isn't what this test is checking.
-  useTelemetryEvent: () => {},
   useTelemetryStatus: () => 'connected',
   subscribeTelemetryStatus: () => () => {},
 }))
@@ -70,6 +75,12 @@ function emitGaugeValues(payload: unknown) {
 function emitAlarms(payload: unknown) {
   act(() => {
     alarmsListener?.(JSON.stringify(payload))
+  })
+}
+
+function emit(event: string, payload: unknown) {
+  act(() => {
+    streamListeners.get(event)?.(JSON.stringify(payload))
   })
 }
 
@@ -149,23 +160,30 @@ function rendersOf(title: string): number {
 }
 
 // ── a dashboard page with one route tile and two gauges, on paths a and b. ────
+const BASE_WIDGETS = [
+  { id: 'route', x: 0, y: 0, w: 4, h: 4 },
+  { id: 'gauge:a', x: 4, y: 0, w: 4, h: 4, gauge: { path: 'a.path', label: 'Gauge A', display: 'numeric', quantity: 'raw', unit: 'raw' } },
+  { id: 'gauge:b', x: 8, y: 0, w: 4, h: 4, gauge: { path: 'b.path', label: 'Gauge B', display: 'numeric', quantity: 'raw', unit: 'raw' } },
+  // Alarm consumers: the lamp strip reads the whole list and the worst
+  // state, the Nearby Vessels tile only the collision alarms.
+  { id: 'lamps:l', x: 0, y: 4, w: 4, h: 2, lamps: { title: 'Lamps', lamps: [{ path: 'c.path', label: 'C' }], showCheck: true } },
+  { id: 'nearby-vessels', x: 4, y: 4, w: 4, h: 4 },
+  // Vessel-state consumers: wind reads the wind fields, position the fix.
+  { id: 'wind', x: 8, y: 4, w: 4, h: 4 },
+  { id: 'position', x: 0, y: 8, w: 4, h: 4 },
+]
+// A describe block below swaps in its own page; every test starts on this one.
+let pageWidgets: unknown[] = BASE_WIDGETS
+beforeEach(() => {
+  pageWidgets = BASE_WIDGETS
+})
+
 vi.mock('@/hooks/use-dashboard-pages', () => ({
   useDashboardPages: () => ({
     pages: [{
       id: 'p1',
       name: 'Page 1',
-      widgets: [
-        { id: 'route', x: 0, y: 0, w: 4, h: 4 },
-        { id: 'gauge:a', x: 4, y: 0, w: 4, h: 4, gauge: { path: 'a.path', label: 'Gauge A', display: 'numeric', quantity: 'raw', unit: 'raw' } },
-        { id: 'gauge:b', x: 8, y: 0, w: 4, h: 4, gauge: { path: 'b.path', label: 'Gauge B', display: 'numeric', quantity: 'raw', unit: 'raw' } },
-        // Alarm consumers: the lamp strip reads the whole list and the worst
-        // state, the Nearby Vessels tile only the collision alarms.
-        { id: 'lamps:l', x: 0, y: 4, w: 4, h: 2, lamps: { title: 'Lamps', lamps: [{ path: 'c.path', label: 'C' }], showCheck: true } },
-        { id: 'nearby-vessels', x: 4, y: 4, w: 4, h: 4 },
-        // Vessel-state consumers: wind reads the wind fields, position the fix.
-        { id: 'wind', x: 8, y: 4, w: 4, h: 4 },
-        { id: 'position', x: 0, y: 8, w: 4, h: 4 },
-      ],
+      widgets: pageWidgets,
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     }],
@@ -185,49 +203,18 @@ vi.mock('@/hooks/use-dashboard-pages', () => ({
 // the emits above flow through its actual (now-shared, now-memoized) store. ─
 
 // use-vessel-state is not mocked either: the vessel-state ticks below run
-// through its real store.
+// through its real store. Nor are the phase 5 stores (autopilot, electrical,
+// solar, tanks, nearby vessels, radar targets).
 
-vi.mock('@/hooks/use-electrical-state', () => ({
-  useElectricalState: () => ({
-    batterySocPercent: null, batteryCapacityAh: null, chargingCurrentA: null,
-    chargingPowerW: null, solarOutputW: null, acOutputW: null, dc12vPowerW: null,
-    dc12vCurrentA: null, voltageReadoutV: null, voltageReadoutLabel: null, acLoadsW: null,
-    generatorRealPowerW: null, generatorConfigured: true, batteryRatePercentPerHour: null, timeToGoHours: null,
-    charger0CurrentA: null, charger0AcIn1CurrentA: null,
-    charger0ChargingMode: null, charger0Error: null,
-  }),
-}))
 
-vi.mock('@/hooks/use-solar-state', () => ({
-  useSolarState: () => ({ currentW: null, todayKWh: null, yesterdayKWh: null, peakTodayW: null, controllers: [] }),
-}))
 
-vi.mock('@/hooks/use-nearby-vessels', () => ({
-  useNearbyVessels: () => ({ vessels: [], loading: false }),
-}))
 
-vi.mock('@/hooks/use-radar-targets', () => ({
-  useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
-}))
 
-vi.mock('@/hooks/use-anchor-watch', () => ({
-  anchorWatchAt: (watch: unknown) => watch,
-  useAnchorWatch: () => ({
-    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
-    rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
-    distanceMeters: null, bearingDeg: null,
-    planningDepthM: null, planningTideHeightFt: null,
-    setAnchorHere: vi.fn(), updateRadius: vi.fn(),
-    updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),
-    clearAnchor: vi.fn(),
-  }),
-}))
+// use-anchor-watch is real: the polls below land through setQueryData, the
+// way a GET /api/anchor-watch answer does.
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-vi.mock('@/hooks/use-tanks-state', () => ({
-  useTanksState: () => ({ tanks: [], loading: false }),
-}))
 
 vi.mock('@/hooks/use-tide-today', () => ({
   useTideToday: () => ({
@@ -291,8 +278,13 @@ vi.mock('@/hooks/use-forecast-warnings', () => ({
   forecastWarningDetailsUrl: () => null,
 }))
 
+// Records who polls the trails: only a map on screen should (phase 4).
+const useServerTrailsSpy = vi.fn()
 vi.mock('@/hooks/use-server-trails', () => ({
-  useServerTrails: () => ({ getSelfTrail: vi.fn(), getAisTrails: vi.fn() }),
+  useServerTrails: (...args: unknown[]) => {
+    useServerTrailsSpy(...args)
+    return { getSelfTrail: () => [], getAisTrails: () => new Map() }
+  },
 }))
 
 vi.mock('@/hooks/use-dark-mode', () => ({
@@ -379,7 +371,42 @@ function houseBankAlarm(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// The live server's falling-barometer alarm, 2026-10-27: every alarms event
+// moved only its `value`, in the fifth decimal of a Pa/s rate. The card
+// shows it as "Falling 1.2 mb/hr", so nothing on screen changed.
+function barometerAlarm(value: number) {
+  return {
+    rule_id: '6425ac9b-6103-4c63-88e6-0610969010d8', label: 'Barometer falling', path: 'helmcentral.environment.pressureRate',
+    op: 'below', unit: 'Pa/s', value, clear_value: -0.02222222222222222, threshold: -0.027777777777777776, hysteresis: 0.005555555555555556,
+    state: 'warn', phase: 'active', message: 'Barometer falling: -1.3 mb/hr, clears above -0.8 mb/hr', raised_at: '2026-10-27T03:30:00Z',
+    silenced: false, can_silence: false, can_acknowledge: true,
+  }
+}
+
 describe('App alarm surfaces (ADR 0215 phase 2)', () => {
+  it('re-renders neither the banner nor the lamp strip when only an alarm\'s value moves', async () => {
+    await mountApp()
+    emitAlarms({ alarms: [barometerAlarm(-0.032563523232454664)], worst: 'warn' })
+    const banner = bannerRenderSpy.mock.calls.length
+    const lamps = rendersOf('Lamps')
+
+    emitAlarms({ alarms: [barometerAlarm(-0.032562285100966724)], worst: 'warn' })
+    emitAlarms({ alarms: [barometerAlarm(-0.03251325153777651)], worst: 'warn' })
+
+    expect(bannerRenderSpy.mock.calls.length).toBe(banner)
+    expect(rendersOf('Lamps')).toBe(lamps)
+  })
+
+  it('re-renders the banner when the value moves enough to change what it says', async () => {
+    await mountApp()
+    emitAlarms({ alarms: [barometerAlarm(-0.0325)], worst: 'warn' })
+    const banner = bannerRenderSpy.mock.calls.length
+
+    emitAlarms({ alarms: [barometerAlarm(-0.05)], worst: 'warn' })
+
+    expect(bannerRenderSpy.mock.calls.length).toBeGreaterThan(banner)
+  })
+
   it('re-renders no alarm consumer when the same alarms payload arrives twice', async () => {
     await mountApp()
     emitAlarms({ alarms: [houseBankAlarm()], worst: 'alarm' })
@@ -482,6 +509,288 @@ describe('App vessel-state tiles (ADR 0215 phase 3)', () => {
 
     emitVesselState({ ...LIVE_VESSEL_STATE, latitude: -20.2747, longitude: 149.0737, heading_true: 330.1, wind_speed_apparent_kts: 6.2, depth: 16.1 })
     emitVesselState({ ...LIVE_VESSEL_STATE, latitude: -20.2748, longitude: 149.0738, heading_true: 331.4, wind_speed_apparent_kts: 5.7, depth: 16.0 })
+
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
+  })
+})
+
+// ── anchor watch, the Nearby map and the drawers (ADR 0215 phase 4) ─────────
+
+// The record GET /api/anchor-watch answers with while a watch is set: the
+// backend's anchorWatchData fields (backend/anchor.go). The live server had no
+// watch set on 2026-10-27 and answered {"active":false} on every poll.
+const SET_WATCH = {
+  active: true, lat: -20.274677, lon: 149.073691, radius_meters: 30, rode_deployed_m: 40,
+  sea_state: 'calm', seabed_type: 'sand', set_at: '2026-10-27T01:00:00Z',
+  bow_offset_m: 4.2, bow_offset_applied: true, bow_offset_reason: '', heading_at_set_deg: 329.3,
+  place_name: 'Airlie Beach', planning_depth_m: 16.3, planning_tide_height_ft: 4.1,
+}
+
+function landWatch(payload: unknown) {
+  act(() => {
+    setQueryData(['/api/anchor-watch'], payload)
+  })
+}
+
+describe('App anchor watch (ADR 0215 phase 4)', () => {
+  const ANCHOR_PAGE = [
+    { id: 'route', x: 0, y: 0, w: 4, h: 4 },
+    { id: 'anchor-watch', x: 4, y: 0, w: 6, h: 8 },
+  ]
+
+  it('polls no trail while no map is on the page', async () => {
+    useServerTrailsSpy.mockClear()
+    await mountApp()
+
+    expect(useServerTrailsSpy).not.toHaveBeenCalled()
+  })
+
+  it('re-renders no consumer when a poll answers with the same watch', async () => {
+    pageWidgets = ANCHOR_PAGE
+    await mountApp()
+    landWatch(SET_WATCH)
+    const anchor = rendersOf('Anchor Watch')
+    const grid = gridRenderSpy.mock.calls.length
+    expect(anchor).toBeGreaterThan(0)
+
+    // Every poll parses a new object, equal by value to the one before.
+    landWatch({ ...SET_WATCH })
+    landWatch({ ...SET_WATCH })
+
+    expect(rendersOf('Anchor Watch')).toBe(anchor)
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
+  })
+
+  it('re-renders the anchor watch tile, and not the shell grid, when the watch changes', async () => {
+    pageWidgets = ANCHOR_PAGE
+    await mountApp()
+    landWatch(SET_WATCH)
+    const anchor = rendersOf('Anchor Watch')
+    const route = routeTileRenderSpy.mock.calls.length
+    const grid = gridRenderSpy.mock.calls.length
+
+    landWatch({ ...SET_WATCH, radius_meters: 35 })
+    landWatch({ ...SET_WATCH, radius_meters: 35, rode_deployed_m: 45 })
+
+    expect(rendersOf('Anchor Watch')).toBeGreaterThan(anchor)
+    expect(routeTileRenderSpy.mock.calls.length).toBe(route)
+    expect(gridRenderSpy.mock.calls.length).toBe(grid)
+  })
+
+  it('the anchor watch tile polls the trails itself', async () => {
+    pageWidgets = ANCHOR_PAGE
+    useServerTrailsSpy.mockClear()
+    await mountApp()
+
+    // Called with no enable flag: the tile mounting is what turns it on.
+    expect(useServerTrailsSpy).toHaveBeenCalled()
+    expect(useServerTrailsSpy.mock.calls.every((args) => args[1] === undefined)).toBe(true)
+  })
+})
+
+// ── the remaining streams (ADR 0215 phase 5) ─────────────────────────────────
+
+describe('App stream tiles (ADR 0215 phase 5)', () => {
+  const STREAM_PAGE = [
+    { id: 'route', x: 0, y: 0, w: 4, h: 4 },
+    { id: 'autopilot', x: 4, y: 0, w: 4, h: 6 },
+    { id: 'battery-power', x: 8, y: 0, w: 4, h: 6 },
+    { id: 'alternator', x: 0, y: 6, w: 4, h: 4 },
+    { id: 'generator', x: 4, y: 6, w: 4, h: 4 },
+    { id: 'solar', x: 8, y: 6, w: 4, h: 6 },
+    { id: 'tanks', x: 0, y: 12, w: 4, h: 6 },
+    { id: 'nearby-vessels', x: 4, y: 12, w: 4, h: 6 },
+    { id: 'radar-targets', x: 8, y: 12, w: 4, h: 6 },
+  ]
+  const TITLES = ['Autopilot', 'Battery & Power', 'Alternators', 'Generator', 'Solar', 'Tanks', 'Nearby Vessels', 'Radar Targets']
+
+  function counts(): Record<string, number> {
+    return Object.fromEntries(TITLES.map((title) => [title, rendersOf(title)]))
+  }
+
+  /** The render counts that moved since `before`, by tile title. */
+  function moved(before: Record<string, number>): string[] {
+    const now = counts()
+    return TITLES.filter((title) => now[title] !== before[title])
+  }
+
+  /** The card a tile title sits on. */
+  function tile(title: string): HTMLElement {
+    const card = screen.getAllByText(title)
+      .map((el) => el.closest('[data-slot="card"]'))
+      .find((el): el is HTMLElement => el instanceof HTMLElement)
+    if (!card) throw new Error(`no tile titled ${title}`)
+    return card
+  }
+
+  async function mountStreams() {
+    pageWidgets = STREAM_PAGE
+    await mountApp()
+    for (const title of TITLES) expect(rendersOf(title)).toBeGreaterThan(0)
+  }
+
+  // Each stream: its first payload, the same one again with only what no tile
+  // shows moved, a real change, and the one tile that shows that change.
+  const STREAMS: Array<{ event: string; first: unknown; repeat: unknown; change: unknown; shows: string }> = [
+    {
+      event: 'autopilot', first: live.AUTOPILOT,
+      repeat: { ...live.AUTOPILOT, available_actions: [...live.AUTOPILOT.available_actions] },
+      change: { ...live.AUTOPILOT, target: 5.8 }, shows: 'Autopilot',
+    },
+    {
+      event: 'electrical-state', first: live.ELECTRICAL,
+      repeat: { ...live.ELECTRICAL, datetime: '2026-10-27T04:20:16Z', last_update_age_s: 0.4 },
+      change: live.ELECTRICAL_NEXT, shows: 'Battery & Power',
+    },
+    {
+      event: 'solar-state', first: live.SOLAR,
+      repeat: { ...live.SOLAR, datetime: '2026-10-27T04:20:16Z', controllers: live.SOLAR.controllers.map((c) => ({ ...c })) },
+      change: { ...live.SOLAR, current_w: 1366.9 }, shows: 'Solar',
+    },
+    {
+      event: 'tanks-state', first: live.TANKS, repeat: live.TANKS_AGES_ONLY,
+      change: { ...live.TANKS, tanks: live.TANKS.tanks.map((t) => (t.id === 'blackWater.1' ? { ...t, level_percent: 12 } : t)) },
+      shows: 'Tanks',
+    },
+    {
+      event: 'nearby-vessels', first: live.NEARBY,
+      repeat: { ...live.NEARBY, datetime: '2026-10-27T04:20:13Z', last_update_age_s: 83 },
+      change: live.NEARBY_NEXT, shows: 'Nearby Vessels',
+    },
+    {
+      event: 'radar-targets', first: live.RADAR,
+      repeat: { ...live.RADAR, datetime: '2026-10-27T04:20:15Z', targets: live.RADAR.targets.map((t) => ({ ...t, age_seconds: 3.2 })) },
+      change: { ...live.RADAR, targets: live.RADAR.targets.map((t) => ({ ...t, range_m: 1800 })) },
+      shows: 'Radar Targets',
+    },
+  ]
+
+  for (const stream of STREAMS) {
+    describe(stream.event, () => {
+      it('re-renders no tile when the same payload arrives again', async () => {
+        await mountStreams()
+        emit(stream.event, stream.first)
+        const before = counts()
+
+        emit(stream.event, stream.first)
+        emit(stream.event, stream.repeat)
+
+        expect(moved(before)).toEqual([])
+      })
+
+      it('does not re-render the shell grid on a tick', async () => {
+        await mountStreams()
+        const grid = gridRenderSpy.mock.calls.length
+
+        emit(stream.event, stream.first)
+        emit(stream.event, stream.change)
+
+        expect(gridRenderSpy.mock.calls.length).toBe(grid)
+      })
+
+      it(`re-renders only ${stream.shows} when what it shows changes`, async () => {
+        await mountStreams()
+        emit(stream.event, stream.first)
+        const before = counts()
+
+        emit(stream.event, stream.change)
+
+        expect(moved(before)).toEqual([stream.shows])
+      })
+    })
+  }
+
+  // The generator tile shows the battery only as "Battery at Finish" during a
+  // timed run, rounded to a whole percent. Outside one, the bank's state of
+  // charge moving is nothing it shows.
+  it('re-renders only Battery & Power when the state of charge moves with no timed run', async () => {
+    await mountStreams()
+    emit('electrical-state', live.ELECTRICAL)
+    const before = counts()
+
+    emit('electrical-state', { ...live.ELECTRICAL, battery_soc_percent: 83, battery_capacity_ah: 1440 })
+
+    expect(moved(before)).toEqual(['Battery & Power'])
+  })
+
+  // A rules refetch that answers with the same rules (every mount of the
+  // Alarms page revalidates) is nothing the battery tile shows.
+  it('re-renders no tile when the alarm rules refetch unchanged', async () => {
+    await mountStreams()
+    const rules = [{ id: 'r1', label: 'House Bank Low', path: 'electrical.batteries.512.capacity.stateOfCharge', op: 'below', value: 0.5, hysteresis: 0.02, severity: 'warn', enabled: true }]
+    act(() => { setQueryData(['/api/alarm-rules'], { rules }) })
+    const before = counts()
+
+    act(() => { setQueryData(['/api/alarm-rules'], { rules: rules.map((r) => ({ ...r })) }) })
+
+    expect(moved(before)).toEqual([])
+  })
+
+  describe('before the first event', () => {
+    it('the autopilot tile shows -- and does not say there is no pilot', async () => {
+      await mountStreams()
+      expect(screen.queryByText(/No autopilot detected/)).toBeNull()
+      expect(within(tile('Autopilot')).getByText('--')).toBeInTheDocument()
+    })
+
+    it('the solar tile does not say there are no controllers', async () => {
+      await mountStreams()
+      expect(screen.queryByText('No controller data')).toBeNull()
+      expect(within(tile('Solar')).getAllByText('—').length).toBeGreaterThan(0)
+    })
+
+    it('the alternator tile shows -- and does not say the engines are off', async () => {
+      await mountStreams()
+      expect(screen.queryByText(/not running/)).toBeNull()
+      expect(within(tile('Alternators')).getByText('--')).toBeInTheDocument()
+    })
+
+    it('the battery, generator, tanks, nearby and radar tiles claim no reading', async () => {
+      await mountStreams()
+      expect(within(tile('Battery & Power')).getAllByText('—').length).toBeGreaterThan(0)
+      expect(within(tile('Generator')).getByText('--')).toBeInTheDocument()
+      expect(screen.queryByText('No tank data available')).toBeNull()
+      expect(screen.queryByText(/No vessels/)).toBeNull()
+      expect(within(tile('Radar Targets')).getByText('--')).toBeInTheDocument()
+    })
+  })
+})
+
+// ── every stream at once ─────────────────────────────────────────────────────
+
+describe('App shell across every stream (ADR 0215 phases 1 to 5)', () => {
+  it('a mixed tick of every stream leaves the grid render count unchanged', async () => {
+    pageWidgets = [
+      ...BASE_WIDGETS,
+      { id: 'anchor-watch', x: 0, y: 12, w: 6, h: 8 },
+      { id: 'autopilot', x: 6, y: 12, w: 4, h: 6 },
+      { id: 'battery-power', x: 0, y: 20, w: 4, h: 6 },
+      { id: 'alternator', x: 4, y: 20, w: 4, h: 4 },
+      { id: 'generator', x: 8, y: 20, w: 4, h: 4 },
+      { id: 'solar', x: 0, y: 26, w: 4, h: 6 },
+      { id: 'tanks', x: 4, y: 26, w: 4, h: 6 },
+      { id: 'radar-targets', x: 8, y: 26, w: 4, h: 6 },
+    ]
+    await mountApp()
+    // The two things the shell does draw from: the navigation state picks the
+    // wall's pages, and a watch being set drives the planning depth. Both
+    // settle here, before the count.
+    emitVesselState(LIVE_VESSEL_STATE)
+    landWatch(SET_WATCH)
+    const grid = gridRenderSpy.mock.calls.length
+
+    for (const step of [0, 1]) {
+      emitGaugeValues({ values: { 'a.path': 2 + step, 'b.path': 1 }, ages: { 'a.path': 1, 'b.path': 1 } })
+      emitAlarms({ alarms: [houseBankAlarm({ value: 0.18 - step / 100 })], worst: 'alarm' })
+      emitVesselState({ ...LIVE_VESSEL_STATE, latitude: -20.2747 - step / 10000, wind_speed_apparent_kts: 5 + step })
+      emit('autopilot', { ...live.AUTOPILOT, target: 5.742 + step / 10 })
+      emit('electrical-state', step === 0 ? live.ELECTRICAL : live.ELECTRICAL_NEXT)
+      emit('solar-state', { ...live.SOLAR, current_w: 1372.3 + step })
+      emit('tanks-state', step === 0 ? live.TANKS : live.TANKS_AGES_ONLY)
+      emit('nearby-vessels', step === 0 ? live.NEARBY : live.NEARBY_NEXT)
+      emit('radar-targets', { ...live.RADAR, targets: live.RADAR.targets.map((t) => ({ ...t, range_m: 1852 - step })) })
+      landWatch({ ...SET_WATCH, radius_meters: 30 + step })
+    }
 
     expect(gridRenderSpy.mock.calls.length).toBe(grid)
   })

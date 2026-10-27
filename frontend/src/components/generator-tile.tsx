@@ -50,6 +50,17 @@ function formatRunReason(condition: string | null): string | null {
   return labels[condition] ?? condition
 }
 
+/**
+ * Where the battery's state of charge lands when the manual-start timer runs
+ * out, at the current net charge rate. Null unless the bank is charging: a
+ * negative, zero or unknown rate would make "at finish" a misleading thing to
+ * project. The tile shows it rounded to a whole percent.
+ */
+export function projectSocAtFinish(socPercent: number | null, ratePercentPerHour: number | null, timerSeconds: number): number | null {
+  if (socPercent === null || ratePercentPerHour === null || ratePercentPerHour <= 0) return null
+  return Math.max(0, Math.min(100, socPercent + ratePercentPerHour * (timerSeconds / 3600)))
+}
+
 export const GeneratorTile = memo(function GeneratorTile({
   generatorConfigured,
   generatorNone = false,
@@ -93,10 +104,7 @@ export const GeneratorTile = memo(function GeneratorTile({
   // combined, which is what actually determines the battery's trajectory).
   // Only shown while genuinely charging - a negative/zero/unknown rate would
   // make "at finish" a misleading thing to project.
-  const projectedSocPercent =
-    batterySocPercent !== null && batteryRatePercentPerHour !== null && batteryRatePercentPerHour > 0
-      ? Math.max(0, Math.min(100, batterySocPercent + batteryRatePercentPerHour * (generatorManualStartTimer / 3600)))
-      : null
+  const projectedSocPercent = projectSocAtFinish(batterySocPercent, batteryRatePercentPerHour, generatorManualStartTimer)
 
   const handleStart = useCallback(async () => {
     setPending(true)

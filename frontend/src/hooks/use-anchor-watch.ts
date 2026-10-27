@@ -1,8 +1,8 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
-import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
+import { apiRequest, setQueryData, useApiQuerySelector } from '@/lib/api-query'
 import type { AnchorAdjustRestore } from '@/lib/anchor-adjust'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 
@@ -43,9 +43,10 @@ interface AnchorWatchServerState {
 }
 
 /**
- * The anchor watch record as the server keeps it: no live fix in it. AppShell
- * reads this (ADR 0215); anchorWatchAt applies a fix to it for the anchor
- * watch tile and page.
+ * The anchor watch record as the server keeps it: no live fix in it. The
+ * anchor watch tile and page read it (ADR 0215) and apply their own fix with
+ * anchorWatchAt; AppShell reads only the slice it needs through
+ * useAnchorWatchSelector.
  */
 export interface AnchorWatchRecord {
   /** Whether a watch is set. */
@@ -207,236 +208,242 @@ export function anchorWatchAt(
   return { ...watch, ...derived, gnssCritical }
 }
 
-/** The anchor watch record, polled from the server. Apply a fix with anchorWatchAt. */
-export function useAnchorWatch(): AnchorWatchRecord {
-  // `loaded` stays false until a response has landed: a failed or errored
-  // poll leaves no data, so "attempted" is never read as "confirmed". Once
-  // data exists, a later failed poll keeps the last known state.
-  const { data } = useApiQuery<AnchorWatchServerState>({
-    queryKey: ANCHOR_WATCH_KEY,
-    path: '/api/anchor-watch',
+/** The record's fields without its actions: what the server said, parsed. */
+export type AnchorWatchFields = Omit<AnchorWatchRecord,
+  'setAnchorHere' | 'updateRadius' | 'adjustAnchor' | 'updateRodeAndConditions' | 'updatePlanningDepth' | 'clearAnchor'>
+
+/**
+ * One GET /api/anchor-watch answer, as every reader sees it. Undefined (no
+ * answer yet, or none that landed) reads as no watch, with `loaded` false.
+ */
+export function parseAnchorWatch(data: AnchorWatchServerState | undefined): AnchorWatchFields {
+  const serverState = data ?? INACTIVE
+  const on = serverState.active
+  return {
+    active: on,
+    anchorLat: on && serverState.lat !== undefined ? serverState.lat : null,
+    anchorLon: on && serverState.lon !== undefined ? serverState.lon : null,
+    radiusMeters: on && serverState.radius_meters !== undefined ? serverState.radius_meters : DEFAULT_RADIUS_METERS,
+    rodeDeployedM: on && serverState.rode_deployed_m !== undefined && serverState.rode_deployed_m >= 0 ? serverState.rode_deployed_m : 0,
+    seaState: on && isSeaState(serverState.sea_state) ? serverState.sea_state : DEFAULT_SEA_STATE,
+    seabedType: on && isSeabedType(serverState.seabed_type) ? serverState.seabed_type : DEFAULT_SEABED_TYPE,
+    setAt: on && serverState.set_at ? serverState.set_at : null,
+    // `loaded` stays false until a response has landed: a failed or errored
+    // poll leaves no data, so "attempted" is never read as "confirmed". Once
+    // data exists, a later failed poll keeps the last known state.
+    loaded: data !== undefined,
+    // Not gated on active (it never is true alongside an error), but
+    // typeof-checked so a stray non-string value from a future backend change
+    // can't leak through as a truthy, unrenderable object.
+    error: typeof serverState.error === 'string' ? serverState.error : null,
+    bowOffsetM: on && typeof serverState.bow_offset_m === 'number' ? serverState.bow_offset_m : 0,
+    bowOffsetApplied: on ? Boolean(serverState.bow_offset_applied) : false,
+    bowOffsetReason: on && typeof serverState.bow_offset_reason === 'string' ? serverState.bow_offset_reason : '',
+    headingAtSetDeg: on && typeof serverState.heading_at_set_deg === 'number' ? serverState.heading_at_set_deg : -1,
+    placeName: on && typeof serverState.place_name === 'string' ? serverState.place_name : '',
+    // `> 0` for depth and `>= 0` for tide, not `!== -1` (ADR 0063): a legacy
+    // anchor_watch.json with none of these fields decodes them to 0, which
+    // must read as "not recorded", same as the -1 sentinel a fresh POST/PATCH
+    // writes explicitly for "unset".
+    planningDepthM: on && typeof serverState.planning_depth_m === 'number' && serverState.planning_depth_m > 0
+      ? serverState.planning_depth_m
+      : null,
+    planningTideHeightFt: on && typeof serverState.planning_tide_height_ft === 'number' && serverState.planning_tide_height_ft >= 0
+      ? serverState.planning_tide_height_ft
+      : null,
+    // Not gated on active, unlike every field above: a successful auto-raise
+    // is exactly what flips active to false, so gating this the same way
+    // would make the one case it exists for unreachable.
+    lastAutoRaise: serverState.last_auto_raise ?? null,
+  }
+}
+
+/** Fields equal by value; the auto-raise by its time and reason, since every poll parses a new object for it. */
+export function sameAnchorWatchFields(a: AnchorWatchFields, b: AnchorWatchFields): boolean {
+  return (Object.keys(a) as Array<keyof AnchorWatchFields>).every((key) => {
+    if (key === 'lastAutoRaise') {
+      return a.lastAutoRaise === b.lastAutoRaise
+        || (a.lastAutoRaise !== null && b.lastAutoRaise !== null
+          && a.lastAutoRaise.at === b.lastAutoRaise.at && a.lastAutoRaise.reason === b.lastAutoRaise.reason)
+    }
+    return Object.is(a[key], b[key])
   })
+}
+
+// ── the writes ───────────────────────────────────────────────────────────────
+//
+// Plain module functions: each lands the server's answer in the shared query
+// entry, so every reader of the watch hears it, and none closes over anything,
+// so they are stable without useCallback.
+
+/**
+ * Drops the anchor at a fix. Fed the live GPS fix, so the backend should apply
+ * the bow-offset correction (projecting forward by gps_from_bow_m along
+ * heading) if it's configured.
+ *
+ * planning_depth_m/planning_tide_height_ft always ride along, using the -1
+ * sentinel when the caller had nothing to capture (ADR 0063). The capture
+ * argument is required, not optional, so a caller can't silently create a
+ * watch the planner has nothing to plan against.
+ */
+export async function setAnchorHere(
+  lat: number,
+  lon: number,
+  capture: { planningDepthM: number | null; planningTideHeightFt: number | null; radiusMeters?: number },
+): Promise<void> {
+  const payload: {
+    lat: number
+    lon: number
+    radius_meters?: number
+    apply_bow_offset: true
+    planning_depth_m: number
+    planning_tide_height_ft: number
+  } = {
+    lat,
+    lon,
+    apply_bow_offset: true,
+    planning_depth_m: capture.planningDepthM ?? -1,
+    planning_tide_height_ft: capture.planningTideHeightFt ?? -1,
+  }
+  if (typeof capture.radiusMeters === 'number' && capture.radiusMeters > 0) {
+    payload.radius_meters = capture.radiusMeters
+  }
+
+  try {
+    // Landing the response also marks `loaded`: dropping anchor before the
+    // first GET resolves would otherwise leave it false despite a real,
+    // current server state already in hand.
+    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'POST', json: payload }))
+  } catch (error) {
+    toast.error('Could not drop anchor', { description: error instanceof Error ? error.message : 'Request failed' })
+  }
+}
+
+// These PATCH writes used to swallow a failed response (silent no-op on
+// !res.ok), the P1 the impeccable critique of the anchor-watch map raised
+// against updateRadius. apiRequest throws on a non-OK response or a network
+// error, and there's no catch here: on a throw, land() never runs, so state is
+// left exactly as it was, and the rejection propagates to the caller. The
+// drawer's radius stepper, the rode planner's Apply-as-alarm-radius path and
+// the other callers are what show the toast: they know the retry value and
+// want a Retry action, which this module has no context to build.
+
+export async function updateAnchorRadius(radiusMeters: number): Promise<void> {
+  land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: { radius_meters: radiusMeters } }))
+}
+
+export async function adjustAnchor(
+  { lat, lon, radiusMeters, restore }: { lat?: number; lon?: number; radiusMeters: number; restore?: AnchorAdjustRestore },
+): Promise<void> {
+  // lat/lon travel together or not at all: the caller (buildAdjustCommitTargets)
+  // already decides that; this just forwards whatever it built rather than
+  // re-deciding, so a radius-only target really does PATCH radius_meters alone.
+  const body: {
+    radius_meters: number
+    lat?: number
+    lon?: number
+    restore?: {
+      bow_offset_m: number
+      bow_offset_applied: boolean
+      bow_offset_reason: string
+      heading_at_set_deg: number
+      place_name: string
+    }
+  } = { radius_meters: radiusMeters }
+  if (lat !== undefined && lon !== undefined) {
+    body.lat = lat
+    body.lon = lon
+  }
+  // Only ever present alongside lat/lon (buildAdjustCommitTargets never sets
+  // it otherwise), matching the backend's own "restore requires a position
+  // change" rule.
+  if (restore !== undefined) {
+    body.restore = {
+      bow_offset_m: restore.bowOffsetM,
+      bow_offset_applied: restore.bowOffsetApplied,
+      bow_offset_reason: restore.bowOffsetReason,
+      heading_at_set_deg: restore.headingAtSetDeg,
+      place_name: restore.placeName,
+    }
+  }
+  land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: body }))
+}
+
+export async function updateRodeAndConditions(rodeDeployedM: number, seaState: SeaState, seabedType: SeabedType): Promise<void> {
+  land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
+    rode_deployed_m: rodeDeployedM,
+    sea_state: seaState,
+    seabed_type: seabedType,
+  } }))
+}
+
+/**
+ * The planning depth pair is PATCHable: this is how the operator edits the
+ * depth seeded at drop. Await, replace state with the server echo, no
+ * optimistic update.
+ */
+export async function updatePlanningDepth(depthM: number, tideHeightFt: number): Promise<void> {
+  land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
+    planning_depth_m: depthM,
+    planning_tide_height_ft: tideHeightFt,
+  } }))
+}
+
+export async function clearAnchor(): Promise<void> {
+  try {
+    await apiRequest<void>('/api/anchor-watch', { method: 'DELETE' })
+    land(INACTIVE)
+  } catch (error) {
+    toast.error('Could not raise anchor', { description: error instanceof Error ? error.message : 'Request failed' })
+  }
+}
+
+// ── the reads ────────────────────────────────────────────────────────────────
+
+const selectActive = (data: AnchorWatchServerState | undefined) => data?.active === true
+
+/**
+ * One slice of the watch record, polled from the server. The reader
+ * re-renders only when `isEqual` calls the slice different, not on every
+ * poll: AppShell reads three fields this way (ADR 0215), so a poll that
+ * changes the radius or the rode re-renders the anchor watch tile and page,
+ * not the shell. Pass a stable `select`.
+ */
+export function useAnchorWatchSelector<T>(
+  select: (fields: AnchorWatchFields) => T,
+  isEqual: (a: T, b: T) => boolean = Object.is,
+): T {
   // The poll cadence follows the watch (see ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS/
   // ANCHOR_WATCH_IDLE_REFRESH_SECONDS in config/app-config.ts for why the two
   // differ), so the interval is asked for by a second reader of the same
   // entry once the first has said whether a watch is active. The two share
   // one request.
-  useApiQuery<AnchorWatchServerState>({
+  const active = useApiQuerySelector<AnchorWatchServerState, boolean>({ queryKey: ANCHOR_WATCH_KEY, path: '/api/anchor-watch' }, selectActive)
+  const selectParsed = useMemo(() => (data: AnchorWatchServerState | undefined) => select(parseAnchorWatch(data)), [select])
+  return useApiQuerySelector<AnchorWatchServerState, T>({
     queryKey: ANCHOR_WATCH_KEY,
     path: '/api/anchor-watch',
-    refetchInterval:
-      (data?.active ? ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS : ANCHOR_WATCH_IDLE_REFRESH_SECONDS) * 1000,
-  })
-  const serverState = data ?? INACTIVE
-  const loaded = data !== undefined
+    refetchInterval: (active ? ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS : ANCHOR_WATCH_IDLE_REFRESH_SECONDS) * 1000,
+  }, selectParsed, isEqual)
+}
 
-  const setAnchorHere = useCallback(async (
-    lat: number,
-    lon: number,
-    capture: { planningDepthM: number | null; planningTideHeightFt: number | null; radiusMeters?: number },
-  ) => {
-    // Fed the live GPS fix, so the backend should apply the bow-offset
-    // correction (projecting forward by gps_from_bow_m along heading) if
-    // it's configured.
-    //
-    // planning_depth_m/planning_tide_height_ft always ride along, using the
-    // -1 sentinel when the caller had nothing to capture (ADR 0063) — the
-    // capture argument is required, not optional, so a caller can't silently
-    // create a watch the planner has nothing to plan against.
-    const payload: {
-      lat: number
-      lon: number
-      radius_meters?: number
-      apply_bow_offset: true
-      planning_depth_m: number
-      planning_tide_height_ft: number
-    } = {
-      lat,
-      lon,
-      apply_bow_offset: true,
-      planning_depth_m: capture.planningDepthM ?? -1,
-      planning_tide_height_ft: capture.planningTideHeightFt ?? -1,
-    }
-    if (typeof capture.radiusMeters === 'number' && capture.radiusMeters > 0) {
-      payload.radius_meters = capture.radiusMeters
-    }
+const selectFields = (fields: AnchorWatchFields) => fields
 
-    try {
-      // Landing the response also marks `loaded`: dropping anchor before the
-      // first GET resolves would otherwise leave it false despite a real,
-      // current server state already in hand.
-      land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'POST', json: payload }))
-    } catch (error) {
-      toast.error('Could not drop anchor', { description: error instanceof Error ? error.message : 'Request failed' })
-    }
-  }, [])
+const ACTIONS = {
+  setAnchorHere,
+  updateRadius: updateAnchorRadius,
+  adjustAnchor,
+  updateRodeAndConditions,
+  updatePlanningDepth,
+  clearAnchor,
+}
 
-  // These three PATCH mutations used to swallow a failed response (silent
-  // no-op on !res.ok) — the P1 the impeccable critique of the anchor-watch
-  // map raised against updateRadius applies just as much to the other two.
-  // apiRequest throws on a non-OK response or a network error, and
-  // there's no catch here: on a throw, land() never runs, so
-  // state is left exactly as it was, and the rejection propagates to the
-  // caller — the drawer's radius stepper, the rode planner's Apply-as-
-  // alarm-radius path, and (for the other two) their own callers, all of
-  // which are what actually shows the toast (they know the retry value and
-  // want a Retry action, which this hook has no context to build).
-  const updateRadius = useCallback(async (radiusMeters: number) => {
-    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: { radius_meters: radiusMeters } }))
-  }, [])
-
-  const adjustAnchor = useCallback(async (
-    { lat, lon, radiusMeters, restore }: { lat?: number; lon?: number; radiusMeters: number; restore?: AnchorAdjustRestore },
-  ) => {
-    // lat/lon travel together or not at all — the caller (buildAdjustCommitTargets)
-    // already decides that; this just forwards whatever it built rather than
-    // re-deciding, so a radius-only target really does PATCH radius_meters alone.
-    const body: {
-      radius_meters: number
-      lat?: number
-      lon?: number
-      restore?: {
-        bow_offset_m: number
-        bow_offset_applied: boolean
-        bow_offset_reason: string
-        heading_at_set_deg: number
-        place_name: string
-      }
-    } = { radius_meters: radiusMeters }
-    if (lat !== undefined && lon !== undefined) {
-      body.lat = lat
-      body.lon = lon
-    }
-    // Only ever present alongside lat/lon (buildAdjustCommitTargets never
-    // sets it otherwise), matching the backend's own "restore requires a
-    // position change" rule.
-    if (restore !== undefined) {
-      body.restore = {
-        bow_offset_m: restore.bowOffsetM,
-        bow_offset_applied: restore.bowOffsetApplied,
-        bow_offset_reason: restore.bowOffsetReason,
-        heading_at_set_deg: restore.headingAtSetDeg,
-        place_name: restore.placeName,
-      }
-    }
-    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: body }))
-  }, [])
-
-  const updateRodeAndConditions = useCallback(async (
-    rodeDeployedM: number,
-    seaState: SeaState,
-    seabedType: SeabedType,
-  ) => {
-    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
-        rode_deployed_m: rodeDeployedM,
-        sea_state: seaState,
-        seabed_type: seabedType,
-      } }))
-  }, [])
-
-  const updatePlanningDepth = useCallback(async (depthM: number, tideHeightFt: number) => {
-    // The planning depth pair is PATCHable — this is how the operator edits
-    // the depth seeded at drop. Follows updateRodeAndConditions exactly:
-    // await, replace state with the server echo, no optimistic update.
-    land(await apiRequest<AnchorWatchServerState>('/api/anchor-watch', { method: 'PATCH', json: {
-        planning_depth_m: depthM,
-        planning_tide_height_ft: tideHeightFt,
-      } }))
-  }, [])
-
-  const clearAnchor = useCallback(async () => {
-    try {
-      await apiRequest<void>('/api/anchor-watch', { method: 'DELETE' })
-      land(INACTIVE)
-    } catch (error) {
-      toast.error('Could not raise anchor', { description: error instanceof Error ? error.message : 'Request failed' })
-    }
-  }, [])
-
-  const anchorLat = serverState.active && serverState.lat !== undefined ? serverState.lat : null
-  const anchorLon = serverState.active && serverState.lon !== undefined ? serverState.lon : null
-  const radiusMeters = serverState.active && serverState.radius_meters !== undefined
-    ? serverState.radius_meters
-    : DEFAULT_RADIUS_METERS
-  const rodeDeployedM = serverState.active && serverState.rode_deployed_m !== undefined && serverState.rode_deployed_m >= 0
-    ? serverState.rode_deployed_m
-    : 0
-  const seaState = serverState.active && isSeaState(serverState.sea_state)
-    ? serverState.sea_state
-    : DEFAULT_SEA_STATE
-  const seabedType = serverState.active && isSeabedType(serverState.seabed_type)
-    ? serverState.seabed_type
-    : DEFAULT_SEABED_TYPE
-
-  const active = serverState.active
-  // Not gated on serverState.active — it never is true alongside an error —
-  // but explicitly typeof-checked so a stray non-string value from a future
-  // backend change can't leak through as a truthy, unrenderable object.
-  const error = typeof serverState.error === 'string' ? serverState.error : null
-
-  const setAt = serverState.active && serverState.set_at ? serverState.set_at : null
-  const bowOffsetM = serverState.active && typeof serverState.bow_offset_m === 'number' ? serverState.bow_offset_m : 0
-  const bowOffsetApplied = serverState.active ? Boolean(serverState.bow_offset_applied) : false
-  const bowOffsetReason = serverState.active && typeof serverState.bow_offset_reason === 'string'
-    ? serverState.bow_offset_reason
-    : ''
-  const headingAtSetDeg = serverState.active && typeof serverState.heading_at_set_deg === 'number'
-    ? serverState.heading_at_set_deg
-    : -1
-  const placeName = serverState.active && typeof serverState.place_name === 'string'
-    ? serverState.place_name
-    : ''
-
-  // Read predicate is `> 0` for depth and `>= 0` for tide, not `!== -1`
-  // (ADR 0063) — a legacy anchor_watch.json with none of these fields decodes
-  // them to 0, which must read as "not recorded", same as the -1 sentinel a
-  // fresh POST/PATCH writes explicitly for "unset".
-  const planningDepthM = serverState.active && typeof serverState.planning_depth_m === 'number' && serverState.planning_depth_m > 0
-    ? serverState.planning_depth_m
-    : null
-  const planningTideHeightFt = serverState.active && typeof serverState.planning_tide_height_ft === 'number' && serverState.planning_tide_height_ft >= 0
-    ? serverState.planning_tide_height_ft
-    : null
-
-  // Not gated on serverState.active, unlike every field above: a successful
-  // auto-raise is exactly what flips active to false, so gating this the
-  // same way would make the one case it exists for unreachable.
-  const lastAutoRaise = serverState.last_auto_raise ?? null
-
-  // Memoized on the output values themselves: AppShell re-runs this hook on
-  // every render from its other streams, and the anchor watch tile and page
-  // memo on this object, so a render that changes nothing here must hand back
-  // the same reference.
-  return useMemo(() => ({
-    active,
-    anchorLat,
-    anchorLon,
-    radiusMeters,
-    rodeDeployedM,
-    seaState,
-    seabedType,
-    setAt,
-    loaded,
-    error,
-    bowOffsetM,
-    bowOffsetApplied,
-    bowOffsetReason,
-    headingAtSetDeg,
-    placeName,
-    planningDepthM,
-    planningTideHeightFt,
-    lastAutoRaise,
-    setAnchorHere,
-    updateRadius,
-    adjustAnchor,
-    updateRodeAndConditions,
-    updatePlanningDepth,
-    clearAnchor,
-  }), [
-    active, anchorLat, anchorLon, radiusMeters, rodeDeployedM,
-    seaState, seabedType, setAt, loaded, error, bowOffsetM, lastAutoRaise,
-    bowOffsetApplied, bowOffsetReason, headingAtSetDeg, placeName, planningDepthM, planningTideHeightFt,
-    setAnchorHere, updateRadius, adjustAnchor, updateRodeAndConditions,
-    updatePlanningDepth, clearAnchor,
-  ])
+/**
+ * The whole watch record and its writes, for the anchor watch tile and page.
+ * Keeps its object while a poll changes nothing, so a memoized map below it
+ * does not redraw. Apply a fix with anchorWatchAt.
+ */
+export function useAnchorWatch(): AnchorWatchRecord {
+  const fields = useAnchorWatchSelector(selectFields, sameAnchorWatchFields)
+  return useMemo(() => ({ ...fields, ...ACTIONS }), [fields])
 }

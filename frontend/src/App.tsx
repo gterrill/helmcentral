@@ -27,6 +27,7 @@ import {
   LiveAnchorWatchDrawer,
   LiveAnchorWatchTile,
   LiveAutopilotTile,
+  LiveBatteryPowerTile,
   LiveClockTile,
   LiveCurrentConditionsTile,
   LiveDepthTideTile,
@@ -37,11 +38,13 @@ import {
   LivePoiMapTile,
   LivePositionTile,
   LiveRadarDrawer,
+  LiveRadarTargetsTile,
   LiveRouteTile,
   LiveSignalKDiscoveryPrompt,
+  LiveSolarTile,
+  LiveTanksTile,
   LiveWindTile,
 } from '@/components/live-surfaces'
-import { BatteryPowerTile } from '@/components/battery-power-tile'
 import { HotWaterTile } from '@/components/hot-water-tile'
 import { TodayNowTile } from '@/components/today-now-tile'
 import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
@@ -49,7 +52,6 @@ import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { SetupLine } from '@/components/setup-line'
 import { requestSetupFocus } from '@/lib/setup-status'
-import { RadarTargetsTile } from '@/components/radar-targets-tile'
 // Not lazy: prefetchNoteEditor() is a plain function that only reaches into
 // the editor-vendor chunk through a dynamic import() of its own (see that
 // file's doc comment) — importing the function itself here costs nothing.
@@ -80,8 +82,6 @@ const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ 
 const PatternsGallery = lazy(() => import('@/components/patterns/gallery').then((mod) => ({ default: mod.PatternsGallery })))
 import { NavigationGuardDialog } from '@/components/navigation-guard-dialog'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
-import { SolarTile } from '@/components/solar-tile'
-import { TanksTile } from '@/components/tanks-tile'
 import { CLUSTER_DEFAULT_SIZE, DashboardBentoGrid, raiseGaugeHeight } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
@@ -104,33 +104,29 @@ import { DisplayEditorPanel } from '@/components/display-editor-panel'
 import type { DisplayPatch } from '@/components/page-display-select'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { useRouteActivation } from '@/hooks/use-route-activation'
-import { useElectricalState } from '@/hooks/use-electrical-state'
-import { useSolarState } from '@/hooks/use-solar-state'
-import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
-import { useRadarTargets } from '@/hooks/use-radar-targets'
-import { useAnchorWatch } from '@/hooks/use-anchor-watch'
-import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
+import { useRetainElectricalState } from '@/hooks/use-electrical-state'
+import { useRetainSolarState } from '@/hooks/use-solar-state'
+import { useRetainNearbyVessels } from '@/hooks/use-nearby-vessels'
+import { useRetainRadarTargets } from '@/hooks/use-radar-targets'
+import { setAnchorHere, updatePlanningDepth, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
 import { ConnectionBanner } from '@/components/connection-banner'
-import { useTanksState } from '@/hooks/use-tanks-state'
+import { useRetainTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { getVesselStateSnapshot, useRetainVesselState, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { useRetainAlarms } from '@/hooks/use-alarms'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
-import { useSocBands } from '@/hooks/use-soc-bands'
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
-import { useAnchorTrail } from '@/hooks/use-anchor-trail'
-import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { buildForecastDrawerProps } from '@/lib/forecast-drawer-props'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
 import { useUpperAir } from '@/hooks/use-upper-air'
 import { useWeatherToday } from '@/hooks/use-weather-today'
 import { useAuth } from '@/hooks/use-auth'
-import { useAutopilot } from '@/hooks/use-autopilot'
+import { useRetainAutopilot } from '@/hooks/use-autopilot'
 import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
@@ -357,6 +353,28 @@ export function App() {
 }
 
 const selectNavigationState = (state: VesselStateValue) => state.navigationState
+
+/** What the shell reads of the anchor watch: whether the server has answered, whether one is set, the auto-raise, and the planning depth. */
+interface ShellAnchorWatch {
+  loaded: boolean
+  active: boolean
+  lastAutoRaiseAt: string | null
+  planningDepthM: number | null
+  planningTideHeightFt: number | null
+}
+
+const selectShellAnchorWatch = (watch: AnchorWatchFields): ShellAnchorWatch => ({
+  loaded: watch.loaded,
+  active: watch.active,
+  lastAutoRaiseAt: watch.lastAutoRaise?.at ?? null,
+  planningDepthM: watch.planningDepthM,
+  planningTideHeightFt: watch.planningTideHeightFt,
+})
+
+function sameShellAnchorWatch(a: ShellAnchorWatch, b: ShellAnchorWatch): boolean {
+  return a.loaded === b.loaded && a.active === b.active && a.lastAutoRaiseAt === b.lastAutoRaiseAt
+    && a.planningDepthM === b.planningDepthM && a.planningTideHeightFt === b.planningTideHeightFt
+}
 
 function AppShell() {
   // Called before every other hook, and unconditionally on every render
@@ -797,6 +815,12 @@ function AppShell() {
     requestSetupFocus(control)
     openSettingsSection(section)
   }, [openSettingsSection])
+  // The battery and generator tiles' "choose it in the roles" links. The wall
+  // display shares the tile render, and a kiosk has no Settings to go to.
+  const openHouseBankRolesStep = useCallback(() => openSetupStep('signalk', 'role-house_bank'), [openSetupStep])
+  const openGeneratorRolesStep = useCallback(() => openSetupStep('signalk', 'role-generator'), [openSetupStep])
+  const openHouseBankRoles = isDisplay ? undefined : openHouseBankRolesStep
+  const openGeneratorRoles = isDisplay ? undefined : openGeneratorRolesStep
 
   // Mounted unconditionally (rules of hooks) but a no-op on the wall route
   // (`enabled: !isDisplay`) - see the hook's own doc comment. Never on the
@@ -971,8 +995,18 @@ function AppShell() {
   // (ADR 0215); the shell only holds it open, so the list survives page
   // switches and wall rotations without an alarms tick re-rendering the shell.
   useRetainAlarms()
-  // Lifted out of AlarmsDrawer so a rule saved there reaches the battery
-  // tile's SoC bands (useSocBands below) without a reload.
+  // The shell holds the six remaining streams open without listening to any
+  // of them (ADR 0215 phase 5): each tile reads its own through a Live*
+  // wrapper, so a tile mounted at any moment shows the last thing the server
+  // said, and no tick re-renders the shell.
+  useRetainAutopilot()
+  useRetainElectricalState()
+  useRetainSolarState()
+  useRetainTanksState()
+  useRetainNearbyVessels()
+  useRetainRadarTargets()
+  // The Alarms page's rule list. The battery tile reads the same query for its
+  // SoC bands, so a rule saved there recolours the bar without a reload.
   const {
     rules: alarmRules,
     loading: alarmRulesLoading,
@@ -994,50 +1028,6 @@ function AppShell() {
     () => buildCollisionTuningUrl(currentSettings.signalk?.address, currentSettings.signalk?.port),
     [currentSettings.signalk?.address, currentSettings.signalk?.port],
   )
-  const { vessels: nearbyVessels, loading: nearbyVesselsLoading, lastUpdateAgeS: nearbyVesselsAgeS, maxRangeM: nearbyVesselsMaxRangeM } = useNearbyVessels()
-  const { targets: radarTargets, radars: radarInfos, source: radarSource, loading: radarTargetsLoading } = useRadarTargets()
-  const {
-    tanks,
-    loading: tanksLoading,
-    error: tanksError,
-    lastUpdateAgeS: tanksAgeS,
-  } = useTanksState()
-  const {
-    lastUpdateAgeS: electricalLastUpdateAgeS,
-    batterySocPercent,
-    socPath,
-    chargingCurrentA,
-    chargingPowerW,
-    solarOutputW,
-    acOutputW,
-    dc12vPowerW,
-    voltageReadoutV,
-    voltageReadoutLabel,
-    generatorRealPowerW,
-    generatorConfigured,
-    generatorNone,
-    houseBankConfigured,
-    houseBankUnresolved,
-    alternator0,
-    alternator1,
-    charger0CurrentA,
-    charger0AcIn1CurrentA,
-    charger0ChargingMode,
-    charger0Error,
-    batteryRatePercentPerHour,
-    timeToGoHours,
-  } = useElectricalState()
-  // The bands follow the house bank's own path from the electrical state, so
-  // they do not wait on the dawn projection (which needs a position fix).
-  const socBands = useSocBands(alarmRules, socPath)
-  const {
-    currentW: solarCurrentW,
-    todayKWh: solarTodayKWh,
-    yesterdayKWh: solarYesterdayKWh,
-    peakTodayW: solarPeakTodayW,
-    lastUpdateAgeS: solarLastUpdateAgeS,
-    controllers: solarControllers,
-  } = useSolarState()
   // Both poll on the forecast cadence, not the /api/vessel-state SSE stream's
   // own cadence: the backend caches weather for 900s and tide predictions
   // move on the order of hours, so FORECAST_REFRESH_SECONDS (600s) is
@@ -1061,11 +1051,11 @@ function AppShell() {
   // itself (config/app-config.ts's ANCHOR_WATCH_ACTIVE/IDLE_REFRESH_SECONDS),
   // since it depends on whether a watch is currently active — not on this
   // component's unrelated vessel-state refresh setting.
-  // The watch record: the shell reads whether a watch is set, the auto-raise
-  // and the planning depth, none of which moves with the boat. The anchor
-  // watch tile and page apply the live fix themselves (anchorWatchAt), so a
-  // position tick does not re-render the shell.
-  const anchorWatch = useAnchorWatch()
+  // The shell reads four things of the watch: whether one is set, the
+  // auto-raise and the planning depth pair. A poll that changes anything else
+  // (the radius, the rode, the bow offset) re-renders the anchor watch tile
+  // and page, which read the record themselves (ADR 0215), and not the shell.
+  const anchorWatch = useAnchorWatchSelector(selectShellAnchorWatch, sameShellAnchorWatch)
   // Surfaces the server's auto-raise decision (ADR 0099, anchor_auto_raise.go)
   // as the same toast the old browser-side auto-close used to fire directly.
   // lastSeenAutoRaiseAtRef starts uninitialized (undefined) so the first
@@ -1076,8 +1066,14 @@ function AppShell() {
   // /api/anchor-watch (useAnchorWatch), which is what makes this "once per
   // event per client" without any of them having decided the raise itself.
   const lastSeenAutoRaiseAtRef = useRef<string | null | undefined>(undefined)
+  // The baseline is taken from the first answer, not from the record before
+  // it: that one has no auto-raise because nothing has been heard yet, and a
+  // raise from before this page loaded would then toast on every reload.
+  const anchorWatchLoaded = anchorWatch.loaded
+  const lastAutoRaiseAt = anchorWatch.lastAutoRaiseAt
   useEffect(() => {
-    const at = anchorWatch.lastAutoRaise?.at ?? null
+    if (!anchorWatchLoaded) return
+    const at = lastAutoRaiseAt
     if (lastSeenAutoRaiseAtRef.current === undefined) {
       lastSeenAutoRaiseAtRef.current = at
       return
@@ -1086,7 +1082,7 @@ function AppShell() {
       lastSeenAutoRaiseAtRef.current = at
       setToastMessage('Anchor watch raised automatically: engines running, under way outside the zone')
     }
-  }, [anchorWatch.lastAutoRaise])
+  }, [anchorWatchLoaded, lastAutoRaiseAt])
   // The Rode Planner's forecast wind band (frontend/src/lib/rode-plan.ts's
   // resolvePlanningWindBand), held here so it outlives the planner closing
   // and reopening. Deliberately not persisted: a band chosen for last night's
@@ -1102,21 +1098,6 @@ function AppShell() {
   // transition below — without that, a pre-drop what-if would reappear once
   // the anchor comes up and is raised again.
   const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tideHeightFt: number | null } | null>(null)
-  // Item B: only the anchor-watch tile/drawer and the Nearby/POI map tile
-  // read getSelfTrail/getAisTrails (AnchorWatchTile, AnchorWatchDrawer and
-  // PoiMapTile below all take them as props) — every other page, including
-  // most of the wall rotation, has nowhere for a trail to go. Gate the poll
-  // on whichever of those is actually on screen, rather than running it
-  // app-wide regardless.
-  const activePageHasTrailConsumerWidget = effectiveWidgets.some(
-    (w) => w.id === 'anchor-watch' || isPoiMapWidgetId(w.id),
-  )
-  const trailsEnabled = activePageHasTrailConsumerWidget || activePanel === 'anchor-watch'
-  const { getSelfTrail, getAisTrails } = useServerTrails(5000, trailsEnabled)
-  // The anchor swing trail has its own server-kept record (ADR 0199); only
-  // the anchor watch tile and drawer draw it.
-  const anchorTrailEnabled = effectiveWidgets.some((w) => w.id === 'anchor-watch') || activePanel === 'anchor-watch'
-  const { getAnchorTrail } = useAnchorTrail(5000, anchorTrailEnabled)
   // The Nearby map's route layer: the route SignalK is navigating, combined
   // once here so the poi-map tile never has to know route activation exists -
   // it only draws whatever waypoints and next-index it's handed. null
@@ -1136,18 +1117,17 @@ function AppShell() {
   // the active page (or the wall's current page) actually has one placed.
   const activePageHasCZoneWidget = effectiveWidgets.some((w) => w.id === 'czone-switches')
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5, activePageHasCZoneWidget)
-  const autopilot = useAutopilot()
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
 
   // Read at the click, not subscribed: the shell never renders on a fix.
-  const handleDropAnchorHere = () => {
+  const handleDropAnchorHere = useCallback(() => {
     const { latitude, longitude, depth } = getVesselStateSnapshot()
     if (latitude === null || longitude === null) return
-    void anchorWatch.setAnchorHere(latitude, longitude, {
+    void setAnchorHere(latitude, longitude, {
       planningDepthM: depth,
       planningTideHeightFt: tideHeightFtOrNull(tide),
     })
-  }
+  }, [tide])
 
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
   const hasActiveAnchorWatch = anchorWatch.active
@@ -1199,16 +1179,11 @@ function AppShell() {
       // message and a Retry it can act on) and reverts the depth input to
       // the last-known-good server value, the same pattern the radius
       // stepper and the rode/conditions fields already use.
-      return anchorWatch.updatePlanningDepth(depthM, tideHeightFt ?? -1)
+      return updatePlanningDepth(depthM, tideHeightFt ?? -1)
     }
     setSessionPlanningDepth({ depthM, tideHeightFt })
     return Promise.resolve()
-  }, [hasActiveAnchorWatch, anchorWatch])
-
-  // One poller for the whole app: the tile and the fullscreen drawer both
-  // draw the same session's pins, and each running its own would double the
-  // request rate for identical data.
-  const { placemarks, createPlacemark, removePlacemark } = useAnchorPlacemarks(hasActiveAnchorWatch)
+  }, [hasActiveAnchorWatch])
 
   // Settings hosts Secrets as a subsection (settings-page.tsx), so hiding
   // this one nav item covers both per ADR 0040's tier table — there is no
@@ -1471,8 +1446,7 @@ function AppShell() {
   // that widget changed, defeating the tile's own React.memo. One stable
   // handler per widget id, cached here and reused across renders, fixes that
   // without changing any tile's onConfigure signature. effectiveWidgetsRef
-  // mirrors the current widget list (latest-ref idiom, matching
-  // use-telemetry-stream.ts's useTelemetryEvent) so a handler built once
+  // mirrors the current widget list (latest-ref idiom) so a handler built once
   // still resolves to the current widget when it's eventually called.
   const effectiveWidgetsRef = useRef(effectiveWidgets)
   useEffect(() => { effectiveWidgetsRef.current = effectiveWidgets }, [effectiveWidgets])
@@ -1513,7 +1487,6 @@ function AppShell() {
         <EngineClusterHost
           config={widget.cluster}
           ctx={equipmentContext}
-          tanks={tanks}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setClusterDraft)}
         />
@@ -1575,8 +1548,6 @@ function AppShell() {
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setPoiMapDraft)}
           activeRoute={activeRoute}
-          nearbyVessels={nearbyVessels}
-          getSelfTrail={getSelfTrail}
           isDarkTheme={isDarkTheme}
           forceDark={activePage?.skin === 'instrument'}
           distanceUnits={uiConfig.distanceUnits}
@@ -1647,132 +1618,39 @@ function AppShell() {
       case 'anchor-watch':
         return (
           <LiveAnchorWatchTile
-            watch={anchorWatch}
             isImperial={isImperialDistance}
-            vesselTrail={getAnchorTrail}
-            aisVessels={nearbyVessels}
-            aisTrails={getAisTrails}
-            radarTargets={radarTargets}
-            radars={radarInfos}
-            radarSource={radarSource}
             isDarkTheme={isDarkTheme}
             showImageryLayer={showAnchorImagery}
             onImageryToggle={setShowAnchorImagery}
             showRadarEcho={showRadarEcho}
             onRadarEchoToggle={setShowRadarEcho}
             onFullscreen={openAnchorWatchPanel}
-            placemarks={placemarks}
-            onPlacemarkCreate={createPlacemark}
-            onPlacemarkRemove={removePlacemark}
             tide={tide}
             interactive={!isDisplay}
           />
         )
       case 'tanks':
-        return (
-          <TanksTile
-            tanks={tanks}
-            loading={tanksLoading}
-            error={tanksError}
-            lastUpdateAgeS={tanksAgeS}
-          />
-        )
+        return <LiveTanksTile />
       case 'route':
         return (
           <LiveRouteTile status={routeActivationStatus} />
         )
       case 'nearby-vessels':
-        return (
-          <LiveNearbyVesselsTile
-            vessels={nearbyVessels}
-            loading={nearbyVesselsLoading}
-            distanceUnits={uiConfig.distanceUnits}
-            lastUpdateAgeS={nearbyVesselsAgeS}
-            maxRangeM={nearbyVesselsMaxRangeM}
-          />
-        )
+        return <LiveNearbyVesselsTile distanceUnits={uiConfig.distanceUnits} />
       case 'radar-targets':
-        return (
-          <RadarTargetsTile
-            targets={radarTargets}
-            radars={radarInfos}
-            source={radarSource}
-            loading={radarTargetsLoading}
-            distanceUnits={uiConfig.distanceUnits}
-          />
-        )
+        return <LiveRadarTargetsTile distanceUnits={uiConfig.distanceUnits} />
       case 'battery-power':
-        return (
-          <BatteryPowerTile
-            batterySocPercent={batterySocPercent}
-            chargingCurrentA={chargingCurrentA}
-            chargingPowerW={chargingPowerW}
-            solarOutputW={solarOutputW}
-            acOutputW={acOutputW}
-            dc12vPowerW={dc12vPowerW}
-            voltageReadoutV={voltageReadoutV}
-            voltageReadoutLabel={voltageReadoutLabel}
-            charger0CurrentA={charger0CurrentA}
-            charger0AcIn1CurrentA={charger0AcIn1CurrentA}
-            charger0ChargingMode={charger0ChargingMode}
-            charger0Error={charger0Error}
-            batteryRatePercentPerHour={batteryRatePercentPerHour}
-            timeToGoHours={timeToGoHours}
-            lastUpdateAgeS={electricalLastUpdateAgeS}
-            socBands={socBands}
-            overnight={overnight}
-            houseBankConfigured={houseBankConfigured}
-            houseBankUnresolved={houseBankUnresolved}
-            // The wall display shares this render; a kiosk has no Settings to go to.
-            onOpenRoles={isDisplay ? undefined : () => openSetupStep('signalk', 'role-house_bank')}
-          />
-        )
+        return <LiveBatteryPowerTile overnight={overnight} onOpenRoles={openHouseBankRoles} />
       case 'solar':
-        return (
-          <SolarTile
-            currentW={solarCurrentW}
-            todayKWh={solarTodayKWh}
-            yesterdayKWh={solarYesterdayKWh}
-            peakTodayW={solarPeakTodayW}
-            lastUpdateAgeS={solarLastUpdateAgeS}
-            controllers={solarControllers}
-          />
-        )
+        return <LiveSolarTile />
       case 'alternator':
-        return <LiveAlternatorTile port={alternator0} starboard={alternator1} />
+        return <LiveAlternatorTile />
       case 'generator':
-        return (
-          <LiveGeneratorTile
-            generatorRealPowerW={generatorRealPowerW}
-            generatorConfigured={generatorConfigured}
-            generatorNone={generatorNone}
-            onOpenRoles={isDisplay ? undefined : () => openSetupStep('signalk', 'role-generator')}
-            batterySocPercent={batterySocPercent}
-            batteryRatePercentPerHour={batteryRatePercentPerHour}
-            readOnly={!canWrite}
-          />
-        )
+        return <LiveGeneratorTile onOpenRoles={openGeneratorRoles} readOnly={!canWrite} />
       case 'czone-switches':
         return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} error={czoneError} readOnly={!canWrite} />
       case 'autopilot':
-        return (
-          <LiveAutopilotTile
-            state={autopilot.state}
-            pending={autopilot.pending}
-            error={autopilot.error}
-            availableModes={autopilot.availableModes}
-            capabilityError={autopilot.capabilityError}
-            onEngage={autopilot.engage}
-            onDisengage={autopilot.disengage}
-            onTack={autopilot.tack}
-            onGybe={autopilot.gybe}
-            onAdjustHeading={autopilot.adjustHeading}
-            onSetMode={autopilot.setMode}
-            onDodge={autopilot.dodge}
-            onClearDodge={autopilot.clearDodge}
-            readOnly={!canWrite}
-          />
-        )
+        return <LiveAutopilotTile readOnly={!canWrite} />
       case 'hot-water':
         return <HotWaterTile />
       default:
@@ -2246,45 +2124,17 @@ function AppShell() {
                 also applies the live fix to the watch record; see its comment
                 on the GPS fallback and the -1/-1 sentinel. */}
             <LiveAnchorWatchDrawer
-              watch={anchorWatch}
-              placemarks={placemarks}
-              onPlacemarkCreate={createPlacemark}
-              onPlacemarkRemove={removePlacemark}
-              anchorLat={anchorWatch.anchorLat}
-              anchorLon={anchorWatch.anchorLon}
-              radiusMeters={anchorWatch.radiusMeters}
-              bowOffsetM={anchorWatch.bowOffsetM}
-              bowOffsetApplied={anchorWatch.bowOffsetApplied}
-              bowOffsetReason={anchorWatch.bowOffsetReason}
-              headingAtSetDeg={anchorWatch.headingAtSetDeg}
-              placeName={anchorWatch.placeName}
-              anchorSetAt={anchorWatch.setAt}
-              anchorStateKnown={anchorWatch.loaded}
-              error={anchorWatch.error}
-              vesselTrail={getAnchorTrail}
-              aisVessels={nearbyVessels}
-              aisTrails={getAisTrails}
-              radarTargets={radarTargets}
-              radars={radarInfos}
-              radarSource={radarSource}
               isDarkTheme={isDarkTheme}
               showImageryLayer={showAnchorImagery}
               onImageryToggle={setShowAnchorImagery}
               showRadarEcho={showRadarEcho}
               onRadarEchoToggle={setShowRadarEcho}
-              onRadiusChange={anchorWatch.updateRadius}
-              adjustAnchor={anchorWatch.adjustAnchor}
-              onClearAnchor={anchorWatch.clearAnchor}
               isImperial={isImperialDistance}
               onDropAnchor={handleDropAnchorHere}
-              rodeDeployedM={anchorWatch.rodeDeployedM}
-              seaState={anchorWatch.seaState}
-              seabedType={anchorWatch.seabedType}
               tide={tide}
               anchorConfig={anchorConfig}
               windBandId={windBandId}
               onWindBandChange={setWindBandId}
-              onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
               planningDepthM={resolvedPlanningDepthM}
               planningTideHeightFt={resolvedPlanningTideHeightFt}
               onPlanningDepthChange={handlePlanningDepthChange}

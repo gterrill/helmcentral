@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-27). Phases 0 to 3 are built; phases 4 to 7 are planned.
+Accepted (2026-10-27). Phases 0 to 5 are built; phases 6 and 7 are planned.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -149,10 +149,27 @@ change.
 The server sends the whole list every two seconds, changed or not. The store
 compares each alarm to the one with the same rule id, field by field, and an
 equal alarm keeps its object. When every alarm and the worst state match, the
-snapshot keeps its reference and no listener runs. Every field counts. Unlike
-gauge ages, nothing in an alarm moves on every tick without showing: the
-cards show the reading, the radar figures and the live sensors, so a change
-to any of them is a change on screen.
+snapshot keeps its reference and no listener runs. In the store every field
+counts, and the Alarms page reads it that way: its cards show the reading,
+the radar figures and the live sensors.
+
+The other surfaces compare on what they show, through
+`useAlarmListComparedOn(same)`. On the live stream a rule alarm's `value`
+moved on every event while its title, sentence and state held: the falling
+barometer's rate, in the fifth decimal of a Pa/s figure the card shows as
+"Falling 1.2 mb/hr". Compared raw, that redrew the banner every two seconds.
+
+- **The banner** (`sameShownAlarm`): every field but the reading, and the
+  reading as `alarmConditionSentence` puts it.
+- **The lamp strips** (`sameLampAlarm`): rule, path, state and phase. A lamp
+  shows no reading.
+- **The wall's pill** (`samePillAlarm`): rule, state and phase, which is all
+  it counts.
+- **The anchor drag alarm**: every field but the reading. The reading is the
+  distance, which the tile works out from its own fix.
+
+`useAlarmList()` is gone; every surface that took it now says what it
+compares on.
 
 The surfaces read the store through wrappers in
 `frontend/src/components/live-surfaces.tsx`: `LiveAlarmBanner`,
@@ -242,11 +259,193 @@ The shell selects one field, `navigationState`, for `useDisplayRotation`,
 which picks the wall's pages by it. A navigation state change re-renders the
 shell; nothing else in vessel state does.
 
-Readings from the phase 4 and 5 streams stay on props from the shell for now:
-the anchor watch record, its trails and placemarks, the AIS and radar inputs
-to the anchor and Nearby maps, the Generator tile's power and battery, the
-autopilot's state, the alternator readings, the Depth & Tide tile's tide and
-trend, and the forecasts. Each wrapper moved only the vessel-state part.
+Phase 3 moved only the vessel-state part of each wrapper. The anchor watch
+record, its trails and pins moved in phase 4, and the phase 5 streams after
+it. The forecasts stay on props until phase 6.
+
+### Anchor watch, the Nearby map and the drawers (phase 4)
+
+The anchor watch tile and page now read the watch record, the pins and the
+trails themselves. The shell hands them config, toggles and the planning
+depth, nothing it polled.
+
+**The record.** `useAnchorWatch()` is still a poll of `GET /api/anchor-watch`
+through the shared query cache, but it re-renders a reader only when the
+record changes. `useApiQuery` re-renders on every request, because its
+snapshot carries `isFetching`: two renders per poll, every five seconds while
+a watch is set and every minute while none is. The new
+`useApiQuerySelector(options, select, isEqual)` in `lib/api-query.ts` shares
+the entry, the fetch and the poll, and re-renders only when the selection
+changes. `select` gets the data and the query's error. A select that throws,
+on a body it cannot read, is called again with no data and that error, the
+way `useApiQuery` turns a failed select into its error rather than a throw
+during render. `use-anchor-watch.ts` builds on it:
+
+- `parseAnchorWatch(data)`: one answer as every reader sees it, with the
+  same defaults the hook applied.
+- `useAnchorWatchSelector(select, isEqual)`: any slice of the record. The
+  poll cadence still follows `active`.
+- `useAnchorWatch()`: the whole record, kept while a poll answers with an
+  equal one. The auto-raise compares by its time and reason, because every
+  poll parses a new object for it.
+- `setAnchorHere`, `updateAnchorRadius`, `adjustAnchor`,
+  `updateRodeAndConditions`, `updatePlanningDepth` and `clearAnchor`: plain
+  module functions, each landing the server's answer in the shared entry.
+  The record still carries them, so the tile and page take them as before.
+
+The shell selects five fields: `loaded`, `active`, the auto-raise's time,
+and the planning depth pair. Those drive the auto-raise toast, the reset of
+the what-if planning depth when a watch starts or ends, and the depth the
+drawer plans against. The toast takes its baseline from the first answer,
+once `loaded` is true. The record before it carries no auto-raise because
+nothing has been heard yet, and a baseline taken from it made a raise from
+before the page loaded toast on every reload. A poll that moves the radius, the rode or the bow offset
+re-renders the tile and page, not the shell.
+
+**The trails.** `useServerTrails` and `useAnchorTrail` are called by
+`LiveAnchorWatchTile`, `LiveAnchorWatchDrawer` and `LivePoiMapTile`, so a
+trail polls while a map that draws it is on screen. The shell's gating on
+the page's widgets, and its `activePanel === 'anchor-watch'` clause, are
+gone; nothing else read them.
+
+Each trail is one poller at module level, `createSharedPoller` in
+`lib/shared-poller.ts`. The poll runs while at least one reader is mounted
+and stops when the last leaves. The buffer and its `since` cursor sit beside
+it, so:
+
+- **Two maps on one page make one request.** An anchor watch tile and a
+  Nearby map share the `/api/tracks` poll, as they did when the shell held it.
+- **A remount asks only for what is new.** Moving between the anchor tile
+  and the anchor page, or a wall rotation back to a map, keeps the trail and
+  polls from the cursor, not from the start.
+
+A first version gave each wrapper its own hook, and with it two polls on a
+shared page and a full refetch on every remount. The review sent it back.
+
+**The pins.** `useAnchorPlacemarks(active)` moved into the tile and page with
+the record. They share one query entry, so they share one poll.
+
+*Drop anchor here* stays in the shell, with `useCallback` over the tide, and
+calls `setAnchorHere` with the fix read at the tap. The radar page needed
+nothing moved: its only live input is the fix, which phase 3 already gave it.
+
+### The remaining streams (phase 5)
+
+Six more stores, each built on `createTelemetryStore`, each with its own
+equality rule. What a rule ignores was decided from consecutive payloads
+captured off the boat's server (`GET /api/stream`, 2026-10-27, at anchor),
+kept as `src/test/fixtures/live-stream-payloads.ts`:
+
+| Event | Sent | What moved tick to tick | Store compares |
+| --- | --- | --- | --- |
+| `autopilot` | 1 s, on change | nothing; no pilot on that server | every field, the action list item by item |
+| `electrical-state` | 5 s | bank current and power, DC, solar output, datetime | every field; the feed age by `shownAge`; each alternator by reading |
+| `solar-state` | 10 s | each controller's watts and share, totals, `trend_24h_total`, datetime | every shown field; ages by `shownAge`; the trend is not parsed |
+| `tanks-state` | 10 s | every age, datetime, now and then a level | each tank's id, label, kind, level and alarm levels; the feed age by `shownAge` |
+| `nearby-vessels` | 5 s | every vessel's age and bearing, most ranges and CPAs | every vessel field, age included; the feed age by `shownAge` |
+| `radar-targets` | 2 s, on change | nothing; no radar on that server | every target field; its age by `shownAge` |
+
+The hub already sends an event only when its payload, or its gate key,
+changed (`buildAndBroadcast`, `telemetry_gate.go`). A repeat reaching the
+browser is therefore a reconnect's seed, or a tick that moved only what the
+gate drops: datetime, fresh ages, the solar trend. The client rules exist for
+those ticks, and for the objects inside a payload that did change. An
+electrical tick that moves the bank current hands the Alternator and
+Generator tiles the alternator objects and role flags they already hold.
+
+Two rules differ from the earlier stores:
+
+- **A nearby vessel's age counts.** The list shows it on every row ("2m
+  ago"), so it must stay exact; the backend's gate keeps it exact for the
+  same reason. Every contact's age moves every five seconds, so the Nearby
+  Vessels list and both AIS maps redraw on each tick while a contact is in
+  range. That is the stream showing what changed.
+- **A radar target's age does not.** Nothing renders it, and the gate bands
+  it already. A target that changed only its age keeps its object, which can
+  then read lower than the true age: the same trade the gauge ages make.
+
+Each store claims nothing before its first event:
+
+- **Autopilot:** the state is null, and the tile shows `--`. It used to start
+  as an absent pilot and say "No autopilot detected" until the first event.
+- **Solar:** the controller list is null, so the tile lists none and does not
+  say "No controller data".
+- **Electrical:** every reading and both role flags are null, which the
+  Battery & Power and Generator tiles already show as dashes.
+- **Tanks, nearby vessels and radar:** `received: false`, read as `loading`,
+  which each tile already showed while it waited.
+
+The alternator tile made the same false claim from vessel state:
+`enginesRunning` null read as stopped, "Engines not running". It now shows
+`--`. Null also means no engine is set up or none is reporting, and there the
+tile can't tell either way.
+
+The wrappers in `live-surfaces.tsx` read the stores: `LiveAutopilotTile`
+(state and controls from `useAutopilot`, which no longer listens to the
+stream itself), `LiveBatteryPowerTile`, `LiveAlternatorTile`,
+`LiveGeneratorTile`, `LiveSolarTile`, `LiveTanksTile`,
+`LiveNearbyVesselsTile` and `LiveRadarTargetsTile`, plus the AIS and radar
+inputs of `LiveAnchorWatchTile`, `LiveAnchorWatchDrawer` and
+`LivePoiMapTile`.
+
+Three things moved with their data:
+
+- **The SoC bands.** `useSocBands` runs in `LiveBatteryPowerTile`, over the
+  house bank's path from the electrical store and the rules from
+  `useAlarmRuleList()`. That reads the query the Alarms page edits through
+  `useApiQuerySelector`, so a saved rule still recolours the bar without a
+  reload, and a refetch that answers with equal rules re-renders nothing.
+  The shell keeps its own `useAlarmRules` call for the Alarms page.
+- **The cluster's fuel bands.** `EngineClusterHost` took the whole tank list
+  from the shell to colour its fuel bars by each tank's alarm levels. It now
+  reads `useTankAlarmLevels()`, which keeps its list while only levels move,
+  so a tank filling does not re-resolve every cluster.
+- **The roles links.** The battery and generator tiles' "choose it in the
+  roles" callbacks are `useCallback`s in the shell, not arrows rebuilt on
+  every render.
+
+Two consumers needed a narrower selection than their fields:
+
+- **The generator tile** uses the bank's state of charge and rate for one
+  figure, "Battery at Finish" during a timed manual run, rounded to a whole
+  percent (`projectSocAtFinish`). Both move on nearly every electrical tick.
+  `LiveGeneratorTile` reads them only while a timed run is set, and keeps the
+  pair it has while the rounded figure holds. Outside a timed run an
+  electrical tick re-renders Battery & Power and not the generator.
+- **The autopilot's controls.** The pending commands, the last command error
+  and the capability probe live at module level beside the state store, not
+  in each tile. A tile unmounted while Engage is in flight, by a page switch
+  or a wall rotation, comes back with Engage still pending and disabled. A
+  dashboard tile and the wall's tile show the same pending set, and the probe
+  runs once per pilot for the session, again only if a pilot appears or goes.
+  The first version kept them per mount, so a remount re-enabled Engage
+  mid-command: the review caught it.
+
+Solar controllers are matched to their previous reading by id and place in
+the list, because a controller the server sends with no id parses as
+`unknown`, and several of those must each meet their own row.
+
+`useElectricalState()`, the whole snapshot, is gone: its one caller was the
+shell. Tiles read `useElectricalFields(fields)`. The store does not parse
+the DC current or the AC loads, which no tile shows. `useTelemetryEvent`,
+the per-component subscription the autopilot hook was the last to use, is
+gone with it. `useSolarState`,
+`useTanksState`, `useNearbyVessels` and `useRadarTargets` keep their names
+and shapes, now over the stores, because each still feeds one wrapper that
+shows all of it. The shared helpers live in `lib/telemetry-store.ts`:
+`keepUnchanged`, `keepUnchangedItems`, `sameShallow`, `sameJSON` and
+`useStoreFields`.
+
+The shell starts the six stores with their `useRetain*` hooks and reads none
+of them. What it still subscribes to is what it draws or passes on itself:
+
+- **`navigationState`**, which picks the wall's pages.
+- **Five fields of the anchor watch**, for the auto-raise toast and the
+  planning depth.
+- **The polled feeds**: weather, wave, tide, forecast warnings, upper air, the
+  overnight projection, the depth trend, CZone switches and route activation.
+  Phase 6 moves the forecasts; the rest are polls a tile or the shell itself
+  needs, not streams.
 
 ### How long a store lives
 
@@ -279,9 +478,9 @@ whatever the server last said. When the connection drops, the shared stream
 reconnects, the server seeds the new connection, and every store hears it.
 The outage itself shows through `useTelemetryStatus`, not through the stores.
 The cost is one parse per tick for an event nobody is reading, which on the
-boat never happens: `AppShell` starts all three stores at boot through
-`useRetainGaugeValues`, `useRetainAlarms` and `useRetainVesselState`, without
-listening to any of them.
+boat never happens: `AppShell` starts every store at boot through its
+`useRetain*` hook (gauge values, alarms, vessel state, and the six phase 5
+streams), without listening to any of them.
 
 Before its first event, a store holds its `initial`, and each `initial`
 claims nothing:
@@ -361,9 +560,18 @@ and a module that only imports a store's types or helpers never touches it.
   moves only ages within the fresh band re-renders nothing, and the shell
   renders only when the navigation state changes.
 - The place-name lookup runs only while a Position or Clock tile is on screen.
-- The shell still re-renders on the autopilot, anchor watch and other
-  streams until phases 4 and 5 land, and `renderWidget` still runs for every
-  tile when it does. The gauge tiles are protected from those renders by their
+- An anchor watch poll re-renders the tile and page only when the record
+  changed, and the shell only when a watch starts or ends, an auto-raise
+  arrives, or the planning depth moves.
+- A trail polls only while a map that draws it is on screen, once however
+  many maps draw it, and a map that comes back keeps what it had.
+- An alarm whose reading moves without changing what a surface says
+  re-renders only the Alarms page.
+- An autopilot, electrical, solar, tanks, nearby-vessels or radar tick
+  re-renders only the tiles whose readings changed, and never the shell.
+- The shell still renders on what it draws itself and on the polled
+  forecasts until phase 6, and `renderWidget` still runs for every tile when
+  it does. The gauge tiles are protected from those renders by their
   own memo: their props are now config and stable callbacks only.
 - Each store stays subscribed for the life of the page once started. A
   surface mounted at any moment shows the last thing the server said, never

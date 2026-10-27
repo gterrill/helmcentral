@@ -180,3 +180,40 @@ describe('useServerTrails enabled gating', () => {
     expect(result.current.getSelfTrail()).toHaveLength(1)
   })
 })
+
+// One shared poller (ADR 0215 phase 5 review): an anchor watch tile and a
+// Nearby map on one page share a poll, and a map that comes back after a page
+// switch or a wall rotation asks only for what is new.
+describe('useServerTrails shared poller', () => {
+  it('two readers make one poll', async () => {
+    vi.useFakeTimers()
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse({ self: [] }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    renderHook(() => useServerTrails(5000))
+    renderHook(() => useServerTrails(5000))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('a remount keeps the trail and asks only for what is new', async () => {
+    vi.useFakeTimers()
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse({
+      self: [{ lat: 1, lon: 2, timestamp: '2024-01-01T00:00:00.000Z' }],
+    }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    const first = renderHook(() => useServerTrails(5000))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    first.unmount()
+
+    const second = renderHook(() => useServerTrails(5000))
+    expect(second.result.current.getSelfTrail()).toHaveLength(1)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(String(mockFetch.mock.calls[1][0])).toBe('/api/tracks?since=2024-01-01T00%3A00%3A00.000Z')
+  })
+})

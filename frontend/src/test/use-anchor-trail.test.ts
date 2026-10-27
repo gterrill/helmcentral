@@ -79,3 +79,35 @@ describe('useAnchorTrail', () => {
     expect(mockFetch).not.toHaveBeenCalled()
   })
 })
+
+// The anchor tile and the anchor page share one poller, and moving between
+// them keeps the trail rather than fetching it again from the start.
+describe('useAnchorTrail shared poller', () => {
+  it('two readers make one poll', async () => {
+    vi.useFakeTimers()
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse({ points: [pt(0)], trail_started_at: 'A' }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    renderHook(() => useAnchorTrail(5000))
+    renderHook(() => useAnchorTrail(5000))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(mockFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('a remount keeps the trail and asks only for what is new', async () => {
+    vi.useFakeTimers()
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse({ points: [pt(0), pt(5)], trail_started_at: 'A' }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    const first = renderHook(() => useAnchorTrail(5000))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    first.unmount()
+
+    const second = renderHook(() => useAnchorTrail(5000))
+    expect(second.result.current.getAnchorTrail()).toHaveLength(2)
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+
+    expect(String(mockFetch.mock.calls[1][0])).toContain('since=')
+  })
+})

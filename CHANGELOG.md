@@ -17,6 +17,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   3D on, the map redrew many times a second even when nothing was playing, and
   Chrome flagged the Passages tab as slowing the browser. It now draws only
   when the boat moves.
+- **Tiles no longer say there's nothing there before the boat has reported.**
+  When a page first opens, the Autopilot tile used to say no autopilot was
+  detected, the Solar tile said there was no controller data, and the
+  Alternator tile said the engines weren't running, all before Helmcentral had
+  heard a word from the boat. Each now shows a dash until its first reading
+  arrives. The Alternator tile also shows `--`, not "Engines not running", when
+  no engine is set up in the roles or none is reporting, because it can't tell
+  either way.
+- **The anchor watch's automatic raise notice no longer comes back on every
+  reload.** After Helmcentral raised a watch on its own, opening or reloading
+  the dashboard showed "Anchor watch raised automatically" again, as if it had
+  just happened. It now shows only when a raise happens while the page is
+  open.
+
 ### Breaking
 
 - **Mate now needs the offline coastline to give a passage distance.** Ask how

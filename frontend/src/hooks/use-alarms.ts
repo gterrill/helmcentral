@@ -1,6 +1,9 @@
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { apiRequest } from '@/lib/api-query'
-import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { useMemo } from 'react'
+
+import { alarmConditionSentence } from '@/lib/alarm-display'
+import { createTelemetryStore, sameJSON, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 /** SignalK's notification states (ADR 0038), worst last. */
 export const ALARM_STATES = ['normal', 'alert', 'warn', 'alarm', 'emergency'] as const
@@ -156,22 +159,6 @@ export interface AlarmsSnapshot {
 
 const NOT_RECEIVED: AlarmsSnapshot = { received: false, alarms: [], worst: 'normal' }
 
-/** Structural equality for parsed JSON: objects, arrays and primitives. */
-function sameJSON(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
-  if (Array.isArray(a) !== Array.isArray(b)) return false
-  if (Array.isArray(a)) {
-    const other = b as unknown[]
-    return a.length === other.length && a.every((item, i) => sameJSON(item, other[i]))
-  }
-  const aRecord = a as Record<string, unknown>
-  const bRecord = b as Record<string, unknown>
-  const aKeys = Object.keys(aRecord)
-  if (aKeys.length !== Object.keys(bRecord).length) return false
-  return aKeys.every((key) => key in bRecord && sameJSON(aRecord[key], bRecord[key]))
-}
-
 function applyAlarmsEvent(snapshot: AlarmsSnapshot, raw: string): TelemetryUpdate<AlarmsSnapshot> | null {
   let payload: AlarmsPayload
   try {
@@ -218,12 +205,40 @@ const selectWorst = (state: AlarmsSnapshot) => (state.received ? state.worst : n
 const selectKnownAlarms = (state: AlarmsSnapshot) => (state.received ? state.alarms : null)
 
 /**
- * The active alarms; empty until the first event. For a surface where an
- * empty list shows nothing (the banner, the lamps, the wall pill), not one
- * that would say "all clear": that reads useKnownAlarmList.
+ * The active alarms compared on what one surface shows of them (ADR 0215).
+ * The list keeps its reference while `same` calls every alarm equal to the one
+ * in its place, so an alarms tick that moves only what that surface does not
+ * show re-renders nothing. On the boat a live rule alarm's `value` moves on
+ * nearly every event; the banner, the lamp strips and the wall's pill do not
+ * show it raw. Empty until the first event. Pass a module constant.
  */
-export function useAlarmList(): ActiveAlarm[] {
-  return useAlarmsSelector(selectAlarms)
+export function useAlarmListComparedOn(same: (a: ActiveAlarm, b: ActiveAlarm) => boolean): ActiveAlarm[] {
+  const isEqual = useMemo(() => (a: ActiveAlarm[], b: ActiveAlarm[]) => a.length === b.length && a.every((alarm, i) => same(alarm, b[i])), [same])
+  return useAlarmsSelector(selectAlarms, isEqual)
+}
+
+/** Every field but the reading. */
+function sameExceptValue(a: ActiveAlarm, b: ActiveAlarm): boolean {
+  return a === b || sameJSON({ ...a, value: 0 }, { ...b, value: 0 })
+}
+
+/**
+ * The same on a card or the banner: every field but the reading, and the
+ * reading as the sentence shows it ("Falling 1.2 mb/hr"), not to the fifth
+ * decimal of a Pa/s rate.
+ */
+export function sameShownAlarm(a: ActiveAlarm, b: ActiveAlarm): boolean {
+  return sameExceptValue(a, b) && (a.value === b.value || alarmConditionSentence(a) === alarmConditionSentence(b))
+}
+
+/** The same lamp: which path, which rule, how bad and whether acknowledged. Lamps show no reading. */
+export function sameLampAlarm(a: ActiveAlarm, b: ActiveAlarm): boolean {
+  return a.rule_id === b.rule_id && a.path === b.path && a.state === b.state && a.phase === b.phase
+}
+
+/** The same in the wall's pill, which counts alarms by state and phase. */
+export function samePillAlarm(a: ActiveAlarm, b: ActiveAlarm): boolean {
+  return a.rule_id === b.rule_id && a.state === b.state && a.phase === b.phase
 }
 
 /** The active alarms, or null until the first event, when nobody knows yet. */
@@ -257,9 +272,17 @@ export function useAisCollisionAlarms(): Map<string, AlarmState> {
 
 const selectAnchorDrag = (state: AlarmsSnapshot) => findAnchorDragAlarm(state.alarms)
 
-/** The server's own anchor drag alarm while it is up, else null. */
+function sameDragAlarm(a: ActiveAlarm | null, b: ActiveAlarm | null): boolean {
+  return a === b || (a !== null && b !== null && sameExceptValue(a, b))
+}
+
+/**
+ * The server's own anchor drag alarm while it is up, else null. Its reading
+ * is the distance, which the tile shows from its own fix, so the reading
+ * moving alone is no change here.
+ */
 export function useAnchorDragAlarm(): ActiveAlarm | null {
-  return useAlarmsSelector(selectAnchorDrag)
+  return useAlarmsSelector(selectAnchorDrag, sameDragAlarm)
 }
 
 // A refusal is meaningful, not an error to swallow: an emergency cannot be

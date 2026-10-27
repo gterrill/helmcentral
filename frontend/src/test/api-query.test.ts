@@ -10,6 +10,7 @@ import {
   resetQueryStore,
   setQueryData,
   useApiQuery,
+  useApiQuerySelector,
 } from '@/lib/api-query'
 import { jsonResponse, stubApi } from './helpers/stub-api'
 
@@ -530,5 +531,63 @@ describe('query store', () => {
     })
     expect(mock.mock.calls.length).toBe(calls)
     unmount()
+  })
+})
+
+describe('useApiQuerySelector', () => {
+  beforeEach(() => {
+    resetQueryStore()
+  })
+
+  const selectCount = (data: { count: number; at: string } | undefined) => data?.count ?? null
+
+  it('re-renders only when its slice changes, not on every request', async () => {
+    stubApi({ 'GET /api/items': { count: 1, at: 't0' } })
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useApiQuerySelector({ queryKey: ['items'], path: '/api/items' }, selectCount)
+    })
+    await waitFor(() => expect(result.current).toBe(1))
+    const settled = renders
+
+    // A poll answering the same count, and one changing only a field the
+    // reader does not select: neither is a change to what it shows.
+    await act(async () => { setQueryData(['items'], { count: 1, at: 't1' }) })
+    await act(async () => { setQueryData(['items'], { count: 1, at: 't2' }) })
+    expect(renders).toBe(settled)
+
+    await act(async () => { setQueryData(['items'], { count: 2, at: 't3' }) })
+    expect(result.current).toBe(2)
+    expect(renders).toBe(settled + 1)
+  })
+
+  it('selects from undefined until the first answer lands', () => {
+    stubApi({ 'GET /api/items': () => new Promise(() => {}) })
+    const { result } = renderHook(() => useApiQuerySelector({ queryKey: ['items'], path: '/api/items' }, selectCount))
+    expect(result.current).toBeNull()
+  })
+})
+
+describe('useApiQuerySelector with a select that throws', () => {
+  beforeEach(() => {
+    resetQueryStore()
+  })
+
+  // Like useApiQuery's select: a body the selector cannot read becomes the
+  // query's error, handed to the selector, rather than a throw during render
+  // that unmounts the subtree.
+  it('hands the selector the error instead of throwing', async () => {
+    stubApi({ 'GET /api/items': { count: 1 } })
+    const select = (data: { count: number } | null | undefined, error: Error | null) => {
+      if (data === null) throw new Error('no body')
+      return error ? `error: ${error.message}` : (data?.count ?? 'none')
+    }
+    const { result } = renderHook(() => useApiQuerySelector({ queryKey: ['items'], path: '/api/items' }, select))
+    await waitFor(() => expect(result.current).toBe(1))
+
+    await act(async () => { setQueryData(['items'], null) })
+
+    expect(result.current).toBe('error: no body')
   })
 })

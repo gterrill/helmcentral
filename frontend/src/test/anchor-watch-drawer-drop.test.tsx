@@ -37,11 +37,13 @@ let positionMock: { latitude: number | null; longitude: number | null; gnssCriti
 // ADR 0099: the server-side auto-raise watcher's evidence, surfaced through
 // GET /api/anchor-watch and this hook. null until a test sets it.
 let lastAutoRaiseMock: { at: string; reason: string } | null = null
+let loadedMock = true
 beforeEach(() => {
   vi.clearAllMocks()
   anchorStateMock = 'none'
   positionMock = { latitude: -36.8485, longitude: 174.7633, gnssCriticalAlert: false }
   lastAutoRaiseMock = null
+  loadedMock = true
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
     ok: false,
     json: async () => ({}),
@@ -74,50 +76,11 @@ vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mo
     ...positionMock,
   })))
 
-vi.mock('@/hooks/use-electrical-state', () => ({
-  useElectricalState: () => ({
-    batterySocPercent: null,
-    batteryCapacityAh: null,
-    chargingCurrentA: null,
-    chargingPowerW: null,
-    solarOutputW: null,
-    acOutputW: null,
-    dc12vPowerW: null,
-    dc12vCurrentA: null,
-    voltageReadoutV: null, voltageReadoutLabel: null,
-    acLoadsW: null,
-    generatorRealPowerW: null, generatorConfigured: true,
-    charger0CurrentA: null,
-    charger0AcIn1CurrentA: null,
-    charger0ChargingMode: null,
-    charger0Error: null,
-    batteryRatePercentPerHour: null,
-    timeToGoHours: null,
-  }),
-}))
 
-vi.mock('@/hooks/use-solar-state', () => ({
-  useSolarState: () => ({
-    currentW: null,
-    todayKWh: null,
-    yesterdayKWh: null,
-    peakTodayW: null,
-    controllers: [],
-  }),
-}))
 
-vi.mock('@/hooks/use-nearby-vessels', () => ({
-  useNearbyVessels: () => ({ vessels: [], loading: false }),
-}))
 
-vi.mock('@/hooks/use-radar-targets', () => ({
-  useRadarTargets: () => ({ targets: [], radars: [], source: 'disabled', loading: false }),
-}))
 
-vi.mock('@/hooks/use-anchor-watch', () => ({
-  // The tile and page apply the fix to the record; the record here already has it.
-  anchorWatchAt: (watch: unknown) => watch,
-  useAnchorWatch: () => ({
+vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
     active: anchorStateMock !== 'none', anchorState: anchorStateMock,
     anchorLat: anchorStateMock === 'set' ? -36.8485 : null,
     anchorLon: anchorStateMock === 'set' ? 174.7633 : null,
@@ -131,19 +94,16 @@ vi.mock('@/hooks/use-anchor-watch', () => ({
     planningDepthM: null,
     planningTideHeightFt: null,
     lastAutoRaise: lastAutoRaiseMock,
+    loaded: loadedMock,
     setAnchorHere: setAnchorHereMock,
     updateRadius: vi.fn(),
     updateRodeAndConditions: vi.fn(),
     updatePlanningDepth: vi.fn(),
     clearAnchor: clearAnchorMock,
-  }),
-}))
+  })))
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-vi.mock('@/hooks/use-tanks-state', () => ({
-  useTanksState: () => ({ tanks: [], loading: false }),
-}))
 
 vi.mock('@/hooks/use-tide-today', () => ({
   useTideToday: () => ({
@@ -251,6 +211,25 @@ describe('Anchor watch auto-raise toast', () => {
     lastAutoRaiseMock = { at: '2026-09-15T00:00:00Z', reason: 'engines_running' }
     rerender(<App />)
 
+    await waitFor(() => expect(screen.getByText(/raised automatically/i)).toBeInTheDocument())
+  })
+
+  // The real sequence on a reload: the shell mounts before GET
+  // /api/anchor-watch answers, so the first record it sees is the unloaded one
+  // with no auto-raise. An auto-raise from before the page loaded arrives with
+  // the first answer and is history, not news.
+  it('does not toast for an old last_auto_raise that arrives with the first answer, and does for a new one', async () => {
+    loadedMock = false
+    const { rerender } = render(<App />)
+
+    loadedMock = true
+    lastAutoRaiseMock = { at: '2026-09-15T00:00:00Z', reason: 'engines_running' }
+    rerender(<App />)
+    await waitFor(() => expect(screen.getByRole('status')).toBeInTheDocument())
+    expect(screen.queryByText(/raised automatically/i)).not.toBeInTheDocument()
+
+    lastAutoRaiseMock = { at: '2026-09-16T00:00:00Z', reason: 'engines_running' }
+    rerender(<App />)
     await waitFor(() => expect(screen.getByText(/raised automatically/i)).toBeInTheDocument())
   })
 
