@@ -53,6 +53,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and the fuel bars now use the same levels as the tank alarms, so the colour
   you see is the alarm you get.
 
+### Fixed
+
+- **Documents, Passages, Inventory and Settings no longer redraw on every
+  instrument update.** They sit still until something on the page changes, so
+  they use less battery and processor time, and the Passages map stays smooth.
+
 ## [0.55.0] - 2026-10-26
 
 ### Added

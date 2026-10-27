@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { memo, useRef, useState } from 'react'
 
 import { SettingsPage, type SettingsPageHandle } from '@/components/settings/settings-page'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
@@ -15,7 +15,8 @@ interface SettingsRoutePanelProps {
 // guard: leaving the Settings panel while the form holds unsaved edits asks
 // first, with the page's own save behind Save and Continue. Moving between
 // sections is not leaving, and is never held.
-export function SettingsRoutePanel({ onAskMate, onOpenHelp }: SettingsRoutePanelProps) {
+// AppShell re-renders on every live delta; memo keeps this page out of it.
+export const SettingsRoutePanel = memo(function SettingsRoutePanel({ onAskMate, onOpenHelp }: SettingsRoutePanelProps) {
   const { route, go } = useSettingsRoute()
   const pageRef = useRef<SettingsPageHandle>(null)
   const [dirty, setDirty] = useState(false)
@@ -47,4 +48,4 @@ export function SettingsRoutePanel({ onAskMate, onOpenHelp }: SettingsRoutePanel
       onOpenHelp={onOpenHelp}
     />
   )
-}
+})
