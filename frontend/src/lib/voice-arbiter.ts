@@ -18,7 +18,7 @@
  * so a singleton is enough - a context/provider would only be buying
  * indirection for a relationship that already has exactly one listener.
  * Same module-singleton-plus-useSyncExternalStore shape as
- * lib/mate-watch-store.ts, hooks/use-vessel-identity.ts and
+ * lib/mate-watch-store.ts, hooks/use-vessel-state.ts and
  * hooks/use-gauge-values.ts.
  *
  * Ref-counted rather than a plain boolean: claimVoice() returns its own

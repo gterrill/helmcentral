@@ -25,6 +25,5 @@ export async function vesselStateModule(read: () => Record<string, unknown>) {
       return Object.fromEntries(fields.map((f) => [f, s[f]]))
     },
     getVesselStateSnapshot: () => state(),
-    useRetainVesselState: () => {},
   }
 }

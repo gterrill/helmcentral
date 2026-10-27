@@ -14,7 +14,7 @@
  * down through AssistantDrawer/MateSheet/useAssistantChat just to reach
  * App would be prop drilling for a concern those components don't otherwise
  * have. Same module-singleton-plus-useSyncExternalStore shape as
- * hooks/use-vessel-identity.ts and hooks/use-gauge-values.ts.
+ * hooks/use-vessel-state.ts and hooks/use-gauge-values.ts.
  */
 
 export interface MateWatchEntry {

@@ -58,8 +58,7 @@ vi.mock('@/hooks/use-alarm-transports', async (importOriginal) => {
   }
 })
 
-vi.mock('@/hooks/use-vessel-identity', () => ({ useVesselIdentity: () => ({ boatName: 'M/V Pikorua' }), useVesselTimeZone: () => undefined }))
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ vesselLengthOverallM: 17.9, vesselDraftM: null })))
+vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ boatName: 'M/V Pikorua', vesselLengthOverallM: 17.9, vesselDraftM: null })))
 
 // Stable identity per test: the mocked hook hands this back on every render.
 const defaultSettings = () => ({ roles: { ...emptyVesselRoles } }) as Record<string, unknown>

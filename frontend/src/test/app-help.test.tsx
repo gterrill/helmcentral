@@ -121,7 +121,6 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 
 vi.mock('@/hooks/use-alarms', () => ({
   // The shell holds the store; the surfaces read it through these (ADR 0215).
-  useRetainAlarms: () => {},
   useAlarmListComparedOn: () => [],
   sameShownAlarm: () => true,
   sameLampAlarm: () => true,

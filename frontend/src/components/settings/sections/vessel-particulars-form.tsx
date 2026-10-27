@@ -1,11 +1,10 @@
 import { FormRow, FormSection } from '@/components/patterns'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { useVesselIdentity } from '@/hooks/use-vessel-identity'
 import { useVesselFields } from '@/hooks/use-vessel-state'
 
 // What the boat reports for its own size, offered beside the stored figures.
-const PARTICULARS_FIELDS = ['vesselLengthOverallM', 'vesselDraftM'] as const
+const PARTICULARS_FIELDS = ['boatName', 'vesselLengthOverallM', 'vesselDraftM'] as const
 import { useVesselParticularsFormContext } from '@/components/settings/vessel-particulars-context'
 import type { VesselParticulars } from '@/hooks/use-vessel-particulars'
 
@@ -57,8 +56,7 @@ function numberOrNull(raw: string): number | null {
  */
 export function VesselParticularsForm() {
   const { draft, update, fieldError, loadError } = useVesselParticularsFormContext()
-  const { boatName } = useVesselIdentity()
-  const { vesselLengthOverallM, vesselDraftM } = useVesselFields(PARTICULARS_FIELDS)
+  const { boatName, vesselLengthOverallM, vesselDraftM } = useVesselFields(PARTICULARS_FIELDS)
 
   if (loadError !== null) {
     return <p role="alert" className="text-sm text-destructive">{loadError}</p>

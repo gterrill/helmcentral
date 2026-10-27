@@ -265,7 +265,6 @@ const { mockAlarmsState } = vi.hoisted(() => ({
 
 vi.mock('@/hooks/use-alarms', () => ({
   // The shell holds the store; the surfaces read it through these (ADR 0215).
-  useRetainAlarms: () => {},
   useAlarmListComparedOn: () => mockAlarmsState.alarms,
   sameShownAlarm: () => true,
   sameLampAlarm: () => true,

@@ -38,6 +38,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   arrives. The Alternator tile also shows `--`, not "Engines not running", when
   no engine is set up in the roles or none is reporting, because it can't tell
   either way.
+- **The header no longer says "At Anchor" before the boat has reported.** When
+  a page first opened, the Vessel tile showed "At Anchor" for a moment whether
+  or not the boat was. It now shows only the model until the boat's state
+  arrives. The clock shows dashes until it has the boat's time, rather than
+  the time on the screen you are using.
 - **The anchor watch's automatic raise notice no longer comes back on every
   reload.** After Helmcentral raised a watch on its own, opening or reloading
   the dashboard showed "Anchor watch raised automatically" again, as if it had

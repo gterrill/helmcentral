@@ -22,6 +22,5 @@ export async function electricalStateModule(read: () => Record<string, unknown>)
       const s = state()
       return Object.fromEntries(fields.map((f) => [f, s[f]]))
     },
-    useRetainElectricalState: () => {},
   }
 }

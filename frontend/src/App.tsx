@@ -83,21 +83,14 @@ import { WallDisplaysPanel } from '@/components/wall-displays-panel'
 import { DisplayEditorPanel } from '@/components/display-editor-panel'
 import type { DisplayPatch } from '@/components/page-display-select'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
-import { useRetainElectricalState } from '@/hooks/use-electrical-state'
-import { useRetainSolarState } from '@/hooks/use-solar-state'
-import { useRetainNearbyVessels } from '@/hooks/use-nearby-vessels'
-import { useRetainRadarTargets } from '@/hooks/use-radar-targets'
 import { updatePlanningDepth, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
 import { ConnectionBanner } from '@/components/connection-banner'
-import { useRetainTanksState } from '@/hooks/use-tanks-state'
 import { useHasActiveWindBulletin } from '@/hooks/use-forecast-warnings'
-import { useRetainVesselState, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
-import { useRetainAlarms } from '@/hooks/use-alarms'
+import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { useForecastSunTimes } from '@/hooks/use-weather-forecast'
 import { useAuth } from '@/hooks/use-auth'
-import { useRetainAutopilot } from '@/hooks/use-autopilot'
 import { useDarkMode } from '@/hooks/use-dark-mode'
-import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
+import { selectTimeZone } from '@/lib/vessel-time'
 import { FORECAST_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
 import { useAppConfig } from '@/hooks/use-app-config'
 import { useMateVoice } from '@/hooks/use-mate-voice'
@@ -142,7 +135,6 @@ import { EngineClusterConfigDialog } from '@/components/engine-cluster-config-di
 import { LampStripHost } from '@/components/equipment-tile-hosts'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
-import { useRetainGaugeValues } from '@/hooks/use-gauge-values'
 import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -420,10 +412,8 @@ function AppShell() {
   // 3b) exists only here until it holds a valid config.
   const [poiMapDraft, setPoiMapDraft] = useState<DashboardLayoutItem | null>(null)
   // Gauges, engine clusters, gauge groups and lamp strips read their own
-  // readings from the gauge-values store (ADR 0215). The shell holds the store
-  // open, so a page switch never starts a tile blank, but listens to none of
+  // readings from the gauge-values store (ADR 0215). The shell reads none of
   // it: a tick does not re-render the shell.
-  useRetainGaugeValues()
   // The equipment items, profiles and reporting sources that tiles showing a
   // piece of equipment read their paths and zones from (ADR 0187).
   const equipmentContext = useEquipmentTileContext()
@@ -481,7 +471,7 @@ function AppShell() {
   // shell selects those two times and nothing else of the forecast (ADR 0215),
   // so a forecast poll re-renders it only when one of them moves.
   const { sunriseTime, sunsetTime } = useForecastSunTimes(FORECAST_REFRESH_SECONDS)
-  const vesselTimeZone = useVesselTimeZone()
+  const vesselTimeZone = useVesselStateSelector(selectTimeZone)
   const [storedIsDarkTheme, toggleDarkMode, themeState] = useDarkMode({
     sunriseTime,
     sunsetTime,
@@ -965,25 +955,14 @@ function AppShell() {
 
   // The shell reads one field of vessel state itself: the navigation state,
   // which picks the wall's pages (useDisplayRotation below). Every tile and
-  // page reads its own fields from the store (ADR 0215); the shell holds it
-  // open so the last fix survives page switches and wall rotations.
-  useRetainVesselState()
+  // page reads its own fields from the store (ADR 0215). Reading it here also
+  // starts the store at boot, so the last fix survives page switches and wall
+  // rotations.
   const navigationState = useVesselStateSelector(selectNavigationState)
-  // The shell draws no alarm itself. The banner, the Alarms page, the lamp
-  // strips, the wall's pill and the AIS markers each read the alarms store
-  // (ADR 0215); the shell only holds it open, so the list survives page
-  // switches and wall rotations without an alarms tick re-rendering the shell.
-  useRetainAlarms()
-  // The shell holds the six remaining streams open without listening to any
-  // of them (ADR 0215 phase 5): each tile reads its own through a Live*
-  // wrapper, so a tile mounted at any moment shows the last thing the server
-  // said, and no tick re-renders the shell.
-  useRetainAutopilot()
-  useRetainElectricalState()
-  useRetainSolarState()
-  useRetainTanksState()
-  useRetainNearbyVessels()
-  useRetainRadarTargets()
+  // The shell draws no alarm and reads none of the other streams. The banner,
+  // the Alarms page, the lamp strips, the wall's pill, the AIS markers and
+  // every other tile read their own store (ADR 0215), and the stream hands a
+  // store that starts after the server's seed the payload it missed (ADR 0218).
   // The polled feeds (ADR 0215 phase 6): the forecasts, the tide, the active
   // route, the depth trend, the CZone switches, the overnight projection and
   // the alarm rules are each read by the tile or page that shows them, through

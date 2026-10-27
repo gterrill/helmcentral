@@ -119,7 +119,7 @@ describe('use-telemetry-stream reconnection', () => {
     // The subscriber registered before the failure must still receive events
     // - delivered on the NEW instance, since the old one is dead.
     act(() => { revived.emitMessage('vessel-state', '{"depth":1}') })
-    expect(onData).toHaveBeenCalledWith('{"depth":1}')
+    expect(onData).toHaveBeenCalledWith('{"depth":1}', expect.any(Number))
   })
 
   it('leaves a CONNECTING-state error alone (browser already retrying that instance)', async () => {
@@ -276,5 +276,132 @@ describe('use-telemetry-stream reconnection', () => {
     expect(vi.getTimerCount()).toBe(0)
     act(() => { window.dispatchEvent(new Event('online')); window.dispatchEvent(new Event('pageshow')); vi.advanceTimersByTime(60_000) })
     expect(instances).toHaveLength(1)
+  })
+})
+
+describe('use-telemetry-stream replay to a late listener', () => {
+  it('hands the current payload to a listener that subscribes after it was sent, and to that listener only', async () => {
+    const { subscribeTelemetry } = await loadModule()
+    const early = vi.fn()
+    subscribeTelemetry('alarms', early)
+    act(() => { instances[0].emitMessage('alarms', '{"n":1}') })
+    act(() => { instances[0].emitMessage('alarms', '{"n":2}') })
+    expect(early).toHaveBeenCalledTimes(2)
+
+    const late = vi.fn()
+    subscribeTelemetry('alarms', late)
+
+    expect(late).toHaveBeenCalledTimes(1)
+    expect(late).toHaveBeenCalledWith('{"n":2}', expect.any(Number))
+    expect(early).toHaveBeenCalledTimes(2)
+  })
+
+  it('delivers before subscribeTelemetry returns, so no live frame can be overtaken by the replay', async () => {
+    const { subscribeTelemetry } = await loadModule()
+    subscribeTelemetry('alarms', vi.fn())
+    act(() => { instances[0].emitMessage('alarms', '{"n":1}') })
+
+    const order: string[] = []
+    subscribeTelemetry('alarms', (raw) => order.push(raw))
+    order.push('returned')
+    act(() => { instances[0].emitMessage('alarms', '{"n":2}') })
+
+    expect(order).toEqual(['{"n":1}', 'returned', '{"n":2}'])
+  })
+
+  it('remembers a seeded event that nobody was listening to when the server sent it', async () => {
+    const { subscribeTelemetry } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn()) // opens the connection
+    act(() => { instances[0].emitMessage('alarms', '{"alarms":[],"worst":"normal"}') })
+
+    const late = vi.fn()
+    subscribeTelemetry('alarms', late)
+    expect(late).toHaveBeenCalledWith('{"alarms":[],"worst":"normal"}', expect.any(Number))
+  })
+
+  it('keeps remembering a seeded event after its last listener leaves', async () => {
+    const { subscribeTelemetry } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn())
+    const first = subscribeTelemetry('alarms', vi.fn())
+    act(() => { instances[0].emitMessage('alarms', '{"n":1}') })
+    first()
+    act(() => { instances[0].emitMessage('alarms', '{"n":2}') })
+
+    const late = vi.fn()
+    subscribeTelemetry('alarms', late)
+    expect(late).toHaveBeenCalledWith('{"n":2}', expect.any(Number))
+  })
+
+  it('sends nothing to a late listener when the event has not been heard', async () => {
+    const { subscribeTelemetry } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn())
+    act(() => { instances[0].emitMessage('vessel-state', '{"a":1}') })
+    const late = vi.fn()
+    subscribeTelemetry('alarms', late)
+    expect(late).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['a permanent close', (es: FakeEventSource) => es.emitError(FakeEventSource.CLOSED)],
+    ['a transport drop the browser retries', (es: FakeEventSource) => es.emitError(FakeEventSource.CONNECTING)],
+  ])('forgets every remembered frame after %s', async (_name, fail) => {
+    const { subscribeTelemetry } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn())
+    act(() => { instances[0].emitMessage('alarms', '{"n":1}'); instances[0].emitMessage('vessel-state', '{"a":1}') })
+
+    act(() => { fail(instances[0]) })
+
+    const lateAlarms = vi.fn()
+    const lateState = vi.fn()
+    subscribeTelemetry('alarms', lateAlarms)
+    subscribeTelemetry('vessel-state', lateState)
+    expect(lateAlarms).not.toHaveBeenCalled()
+    expect(lateState).not.toHaveBeenCalled()
+  })
+
+  it('gives a listener after a reconnect only what the new connection sent', async () => {
+    const { subscribeTelemetry } = await loadModule()
+    subscribeTelemetry('vessel-state', vi.fn())
+    act(() => { instances[0].emitMessage('alarms', '{"n":"before"}') })
+    act(() => { instances[0].emitError(FakeEventSource.CLOSED) })
+    act(() => { vi.advanceTimersByTime(1_000) })
+    expect(instances).toHaveLength(2)
+
+    const duringOutage = vi.fn()
+    subscribeTelemetry('alarms', duringOutage)
+    expect(duringOutage).not.toHaveBeenCalled()
+
+    act(() => { instances[1].emitMessage('alarms', '{"n":"seed"}') })
+    expect(duringOutage).toHaveBeenCalledWith('{"n":"seed"}', expect.any(Number))
+
+    const after = vi.fn()
+    subscribeTelemetry('alarms', after)
+    expect(after).toHaveBeenCalledWith('{"n":"seed"}', expect.any(Number))
+  })
+
+  it('forgets everything when the last subscriber leaves', async () => {
+    const { subscribeTelemetry } = await loadModule()
+    const unsubscribe = subscribeTelemetry('alarms', vi.fn())
+    act(() => { instances[0].emitMessage('alarms', '{"n":1}') })
+    unsubscribe()
+
+    subscribeTelemetry('vessel-state', vi.fn())
+    const late = vi.fn()
+    subscribeTelemetry('alarms', late)
+    expect(late).not.toHaveBeenCalled()
+  })
+
+  it('tells a listener when each payload arrived: now for a live frame, the stored arrival for a replay', async () => {
+    const { subscribeTelemetry } = await loadModule()
+    const live = vi.fn()
+    subscribeTelemetry('alarms', live)
+    const arrival = performance.now()
+    act(() => { instances[0].emitMessage('alarms', '{"n":1}') })
+    expect(live).toHaveBeenCalledWith('{"n":1}', arrival)
+
+    for (let i = 0; i < 10; i++) act(() => { vi.advanceTimersByTime(30_000); instances[0].emitMessage('heartbeat', '{}') })
+    const late = vi.fn()
+    subscribeTelemetry('alarms', late)
+    expect(late).toHaveBeenCalledWith('{"n":1}', arrival)
   })
 })

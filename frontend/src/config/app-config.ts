@@ -241,7 +241,7 @@ export function normalizeBoatHull(settings: AppConfigSettings | null | undefined
   return parseHullType(settings?.anchor?.hull_type)
 }
 
-// Read live by hooks/use-vessel-identity.ts (the "Vessel" header tile and the
+// Read live by components/marine-header.tsx (the "Vessel" header tile and the
 // wall display's vessel identity), which used to poll /api/settings on its
 // own timer just for this one field — folded into the settings this module
 // already single-flights. Null (not '') is "not set", matching the tile's

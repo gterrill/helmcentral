@@ -3,6 +3,10 @@
 ## Status
 
 Accepted (2026-10-27). Phases 0 to 7 are built, and the migration is complete.
+Amended by [ADR 0218](0218-the-stream-replays-the-current-payload-to-a-late-listener.md):
+the stream now replays the current payload to a late listener, so the
+`useRetain*` hooks described below no longer exist and the shell no longer
+starts the stores. The text below keeps the decisions as they were made.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -75,7 +79,7 @@ itself changes.
   same object while none of them changed, so it can feed a memoized tile.
 - `useEngineStatus(id)`: one engine's running, off or lost state. An engine
   whose status is unchanged keeps its object across ticks.
-- `useRetainGaugeValues()`: holds the store open without listening to it.
+- `useRetainGaugeValues()`: holds the store open without listening to it. (Removed by ADR 0218.)
 
 `GaugeTile` reads its own path. The three equipment hosts,
 `EngineClusterHost`, `GaugeGroupHost` and `LampStripHost`, read the subset of
@@ -140,7 +144,7 @@ the same shape as the gauge store. It exports:
 - `useAnchorDragAlarm()`: the server's drag alarm, for the anchor watch tile.
 - `acknowledgeAlarm` and `silenceAlarm`: plain module functions, stable
   without `useCallback`.
-- `useRetainAlarms()`: starts the store without listening.
+- `useRetainAlarms()`: starts the store without listening. (Removed by ADR 0218.)
 
 `useAlarms()`, the whole list and both actions in one object, is gone: no
 surface wants all of it, and a caller that took it would re-render on every
@@ -187,7 +191,8 @@ an element the shell builds. An alarm tick re-renders the frame for its pill,
 React receives the same `children` element, and the pages below it do not
 re-render.
 
-The shell reads no alarm. It calls `useRetainAlarms` and nothing else, for the
+The shell reads no alarm. It called `useRetainAlarms` and nothing else (ADR 0218
+removed the call), for the
 same reason it retains the gauge store: the Alarms page and the wall's pill
 must show the list the moment they mount. The sidebar has no alarm badge, so
 nothing else needed moving.
@@ -203,7 +208,7 @@ fields read as null, and true wind never borrows from apparent. It exports:
 - `useVesselFields(fields)`: the named fields as one object, kept while none
   of them changed. A tile passes a module constant, its own field list.
 - `getVesselStateSnapshot()`: the state at this moment, for a click handler.
-- `useRetainVesselState()`: starts the store without listening.
+- `useRetainVesselState()`: starts the store without listening. (Removed by ADR 0218.)
 - `INITIAL_VESSEL_STATE`: every field unknown, the state before the first
   event. The tests' stand-in for this module builds on it.
 
@@ -218,7 +223,9 @@ number last handed out while what a tile shows for it holds (`shownAge`,
 moved into `lib/staleness.ts` so both stores share it). The backend gates
 this event on everything but its ages and `datetime`, so a tick that arrives
 almost always carries a moved age and often nothing else a tile shows. The
-gust ladders compare window by window. `datetime` is not parsed at all.
+gust ladders compare window by window. `datetime` is not kept as a field. (ADR
+0218 has the store pass it to the boat's clock as it parses the event, and adds
+the boat's name and time zone as fields.)
 
 The tiles read the store through wrappers in `live-surfaces.tsx`, as the
 alarm surfaces do: `LiveWindTile`, `LiveDepthTideTile`, `LivePositionTile`,
@@ -458,8 +465,8 @@ shows all of it. The shared helpers live in `lib/telemetry-store.ts`:
 `keepUnchanged`, `keepUnchangedItems`, `sameShallow`, `sameJSON` and
 `useStoreFields`.
 
-The shell starts the six stores with their `useRetain*` hooks and reads none
-of them. What it still subscribes to is what it draws or passes on itself:
+The shell starts the six stores with their `useRetain*` hooks (removed by
+ADR 0218) and reads none of them. What it still subscribes to is what it draws or passes on itself:
 
 - **`navigationState`**, which picks the wall's pages.
 - **Five fields of the anchor watch**, for the auto-raise toast and the
@@ -693,8 +700,8 @@ A new tile follows the same four steps:
 
 1. **The data has a store or a query.** A stream event gets a store built on
    `createTelemetryStore` in its own `hooks/use-*.ts`, with an `apply` that
-   returns null for a tick that changes nothing shown, a `useRetain*` hook,
-   and selectors (`useStoreFields`, or `useSelector` with an equality). A
+   returns null for a tick that changes nothing shown, a `useRetain*` hook
+   (no longer needed since ADR 0218), and selectors (`useStoreFields`, or `useSelector` with an equality). A
    poll gets a hook over `useApiQuery` with `structuralSharing: true`, or
    over `useApiQuerySelector` when the tile shows a slice.
 2. **A `Live*` wrapper in `components/live-surfaces.tsx`** reads the store or
@@ -724,8 +731,8 @@ selector with value equality on exactly that, and this ADR says why.
 
 Every store is built by `createTelemetryStore(subscribe, event, initial,
 apply)` in `frontend/src/lib/telemetry-store.ts`. It owns the subscription,
-the snapshot, the listeners, `useSelector`, `getSnapshot` and `useRetain`;
-each store module supplies only its event's parser and equality rules. The
+the snapshot, the listeners, `useSelector`, `getSnapshot` and `useRetain` (the last removed by
+ADR 0218); each store module supplies only its event's parser and equality rules. The
 gauge store's per-path listeners are the helper's keyed listeners, so the
 three stores share one lifecycle.
 
@@ -746,13 +753,17 @@ seconds for alarms, and for the change-gated `vessel-state` and
 a release would have been no better, because a store that had stopped
 listening could not know that snapshot was still true.
 
+(ADR 0218 later fixed the cause: the stream now remembers each event's
+current payload and hands it to a listener that subscribes late. The store
+still does not stop, and nothing needs to start it at boot.)
+
 So the store does not stop. While the connection is up, its snapshot is
 whatever the server last said. When the connection drops, the shared stream
 reconnects, the server seeds the new connection, and every store hears it.
 The outage itself shows through `useTelemetryStatus`, not through the stores.
 The cost is one parse per tick for an event nobody is reading, which on the
 boat never happens: `AppShell` starts every store at boot through its
-`useRetain*` hook (gauge values, alarms, vessel state, and the six phase 5
+`useRetain*` hook (ADR 0218 removed them; gauge values, alarms, vessel state, and the six phase 5
 streams), without listening to any of them.
 
 Before its first event, a store holds its `initial`, and each `initial`

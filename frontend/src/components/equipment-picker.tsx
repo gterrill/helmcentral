@@ -3,7 +3,8 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
-import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { selectTimeZone } from '@/lib/vessel-time'
 import { fetchEquipment, toEquipmentInput, updateEquipment } from '@/hooks/use-inventory'
 import { formatAppLocation } from '@/lib/app-location'
 import { candidateItems, candidateLabels } from '@/lib/equipment-candidates'
@@ -84,7 +85,7 @@ export function EquipmentPicker({ idPrefix, label, kind, value, onChange, ctx }:
 
 function MapHere({ itemId, itemName, kind, idPrefix }: { itemId: string; itemName: string; kind: SourceKind; idPrefix: string }) {
   const { discovery, loading } = useVesselDiscovery(true)
-  const timeZone = useVesselTimeZone()
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const [source, setSource] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)

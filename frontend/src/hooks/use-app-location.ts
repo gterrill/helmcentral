@@ -5,7 +5,7 @@ import type { AppRouter, NavigateOptions, ResumablePanel } from '@/lib/app-route
 
 // ADR 0171: React's way into the router. The router is a plain object
 // (lib/app-router.ts); this file is the context that carries it and the
-// useSyncExternalStore reads, in the same style as hooks/use-vessel-identity.ts.
+// useSyncExternalStore reads, in the same style as hooks/use-vessel-state.ts.
 
 export const AppRouterContext = createContext<AppRouter | null>(null)
 

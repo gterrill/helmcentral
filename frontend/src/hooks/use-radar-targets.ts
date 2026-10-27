@@ -179,9 +179,6 @@ const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry
 
 const store = createTelemetryStore(listenToStream, 'radar-targets', NOT_RECEIVED, applyRadarTargets)
 
-/** Starts the store on mount without re-rendering the caller on any tick. AppShell calls this once. */
-export const useRetainRadarTargets = store.useRetain
-
 const selectAll = (state: RadarTargetsValue) => state
 
 /** The targets, the radars and the source, `loading` until the first event. */

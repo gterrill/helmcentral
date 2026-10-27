@@ -88,9 +88,6 @@ const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry
 
 const store = createTelemetryStore(listenToStream, 'nearby-vessels', NOT_RECEIVED, applyNearbyVessels)
 
-/** Starts the store on mount without re-rendering the caller on any tick. AppShell calls this once. */
-export const useRetainNearbyVessels = store.useRetain
-
 const selectAll = (state: NearbyVesselsValue) => state
 const selectVessels = (state: NearbyVesselsValue) => state.vessels
 

@@ -1,6 +1,7 @@
 import { Circle, LogOut, Moon, Sun } from 'lucide-react'
 
-import { useVesselIdentity } from '@/hooks/use-vessel-identity'
+import { useVesselClock } from '@/hooks/use-vessel-clock'
+import { useVesselFields } from '@/hooks/use-vessel-state'
 import { useTelemetryStatus } from '@/hooks/use-telemetry-stream'
 import { BREAKPOINTS, useMinWidth } from '@/lib/breakpoints'
 
@@ -22,10 +23,15 @@ interface VesselStatusBarProps {
   onLogout?: () => void
 }
 
+const SOURCE_FIELDS = ['source'] as const
+
 export function VesselStatusBar({ isDark = false, themeMode, autoUntil = null, onToggleDarkMode, username = null, onLogout }: VesselStatusBarProps) {
-  const { currentDate, clock, signalkConnected } = useVesselIdentity()
+  const { currentDate, clock } = useVesselClock()
+  const { source } = useVesselFields(SOURCE_FIELDS)
+  // Unknown until the first vessel-state event, and not "no signal" either.
+  const signalkConnected = source === null ? null : source === 'signalk'
   const telemetryStatus = useTelemetryStatus()
-  const [hh = '--', mm = '--', ss = '--'] = clock.timePart.split(':')
+  const [hh = '--', mm = '--', ss = '--'] = clock?.timePart.split(':') ?? []
   const showFullClock = useMinWidth(BREAKPOINTS.sm)
 
   // Two independent things can go wrong: the backend can't reach SignalK
@@ -80,7 +86,7 @@ export function VesselStatusBar({ isDark = false, themeMode, autoUntil = null, o
             jittering as digits change. */}
         {showFullClock && (
           <span className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-[0.1em] text-foreground/85 md:text-xs">
-            {currentDate}
+            {currentDate ?? '--'}
           </span>
         )}
         <time className="inline-flex items-baseline whitespace-nowrap font-display leading-[1.08] tracking-[0.02em] text-gauge-secondary">
@@ -93,7 +99,7 @@ export function VesselStatusBar({ isDark = false, themeMode, autoUntil = null, o
             </span>
           )}
           <span className="ml-1 text-[10px] tracking-[0.06em] sm:text-[1.15rem] md:text-[1.3rem] lg:text-[1.4rem]">
-            {clock.meridiem}
+            {clock?.meridiem}
           </span>
         </time>
       </div>

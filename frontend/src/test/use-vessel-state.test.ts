@@ -16,7 +16,7 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
   },
 }))
 
-import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+import { useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 
 // The whole state, through the store's own selector, so each test can read
 // any field it checks.
@@ -272,5 +272,56 @@ describe('useVesselState enginesRunning', () => {
     emit({ ...basePayload, engine_0_rpm: 900, engine_1_rpm: 900 })
     expect(result.current).not.toHaveProperty('engine0Rpm')
     expect(result.current).not.toHaveProperty('engine1Rpm')
+  })
+})
+
+// The boat's identity rides the same event (ADR 0218): name, state, zone and
+// source are fields of the store, null until the boat has said them.
+describe('vessel identity fields', () => {
+  it('claims nothing before the first event: no name, no state, no zone, no source', () => {
+    const { result } = renderHook(() => useVesselState())
+    expect(result.current.boatName).toBeNull()
+    expect(result.current.navigationState).toBeNull()
+    expect(result.current.timeZone).toBeNull()
+    expect(result.current.source).toBeNull()
+  })
+
+  it('reads the name with its prefix, the state, the zone and the source off the event', () => {
+    const { result } = renderHook(() => useVesselState())
+    emit({ ...basePayload, status: 'Underway', name: 'Pikorua', vessel_prefix: 'M/V', timezone: 'Etc/GMT-10', source: 'signalk' })
+    expect(result.current.boatName).toBe('M/V Pikorua')
+    expect(result.current.navigationState).toBe('Underway')
+    expect(result.current.timeZone).toBe('Etc/GMT-10')
+    expect(result.current.source).toBe('signalk')
+  })
+
+  it('defaults an absent prefix to M/V, keeps an empty one empty, and reads a blank name as unset', () => {
+    const { result } = renderHook(() => useVesselState())
+    emit({ ...basePayload, name: 'Pikorua' })
+    expect(result.current.boatName).toBe('M/V Pikorua')
+    emit({ ...basePayload, name: 'Pikorua', vessel_prefix: '' })
+    expect(result.current.boatName).toBe('Pikorua')
+    emit({ ...basePayload, name: '  ', vessel_prefix: 'M/V' })
+    expect(result.current.boatName).toBeNull()
+  })
+
+  it('does not notify a reader of the identity fields when a tick moves only the datetime', () => {
+    const renders = vi.fn()
+    renderHook(() => {
+      renders()
+      return useVesselFields(['boatName', 'navigationState'] as const)
+    })
+    emit({ ...basePayload, status: 'At Anchor', name: 'Pikorua', vessel_prefix: 'M/V' })
+    const after = renders.mock.calls.length
+    emit({ ...basePayload, status: 'At Anchor', name: 'Pikorua', vessel_prefix: 'M/V', datetime: '2026-09-14T00:00:01Z', depth: 9.9 })
+    expect(renders.mock.calls.length).toBe(after)
+  })
+
+  it('hands every event datetime to the boat clock, though no field keeps it', async () => {
+    const { useVesselClock } = await import('@/hooks/use-vessel-clock')
+    const { result } = renderHook(() => useVesselClock())
+    expect(result.current.now).toBeNull()
+    emit({ ...basePayload, datetime: '2026-09-14T03:04:05Z' })
+    expect(result.current.now?.toISOString()).toBe('2026-09-14T03:04:05.000Z')
   })
 })

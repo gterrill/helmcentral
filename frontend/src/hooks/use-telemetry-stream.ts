@@ -21,7 +21,12 @@ import { useEffect, useState } from 'react'
  * UI can say so instead of rendering stale data as if it were live.
  */
 
-type Listener = (raw: string) => void
+/**
+ * `receivedAt` is performance.now() (monotonic) at the moment the payload
+ * arrived from the server: now for a live frame, the stored arrival for a
+ * replayed one, so a listener can age a replayed payload correctly.
+ */
+type Listener = (raw: string, receivedAt: number) => void
 export type TelemetryStatus = 'connected' | 'reconnecting' | 'disconnected'
 
 // Mirrors backend/signalk_stream.go's defaultStreamMinBackoff /
@@ -57,6 +62,32 @@ const listeners = new Map<string, Set<Listener>>()
 // `removeEventListener` on teardown targets the exact function reference
 // that was added.
 const dispatchers = new Map<string, (e: Event) => void>()
+
+// The events the server's hub seeds a new connection with: the names in
+// backend/vessel_state_stream.go's telemetryEmitters(), less the heartbeat.
+// backend/telemetry_seeded_events_test.go fails if this list and the hub's
+// differ, so a new server event cannot be left out silently. The stream listens for every one of them on each
+// connection, whether or not anything subscribes yet, so the seed is
+// remembered even when its reader mounts later. An event outside this list is
+// remembered from the moment its first listener subscribes.
+const SEEDED_EVENTS = [
+  'gauge-values',
+  'vessel-state',
+  'alarms',
+  'autopilot',
+  'electrical-state',
+  'solar-state',
+  'tanks-state',
+  'nearby-vessels',
+  'radar-targets',
+] as const
+
+// The last payload of each event on the current connection. A listener that
+// subscribes after the server sent an event is handed it at once, because the
+// server will not send it again until it next changes. Dropped whenever the
+// connection errors, closes or reconnects: a reconnect re-seeds from the
+// server, and a late listener must never hear a frame from before an outage.
+const lastFrames = new Map<string, { raw: string; receivedAt: number }>()
 const statusListeners = new Set<(status: TelemetryStatus) => void>()
 
 function dispatcherFor(event: string): (e: Event) => void {
@@ -66,8 +97,10 @@ function dispatcherFor(event: string): (e: Event) => void {
       if (e.currentTarget && e.currentTarget !== source) return
       received()
       const raw = (e as MessageEvent<string>).data
+      const receivedAt = performance.now()
+      lastFrames.set(event, { raw, receivedAt })
       for (const listener of listeners.get(event) ?? []) {
-        listener(raw)
+        listener(raw, receivedAt)
       }
     }
     dispatchers.set(event, dispatcher)
@@ -140,12 +173,14 @@ function attachSource(): void {
     if (source === es) received()
   })
 
-  for (const event of listeners.keys()) {
+  for (const event of new Set<string>([...SEEDED_EVENTS, ...listeners.keys()])) {
     es.addEventListener(event, dispatcherFor(event))
   }
 
   es.onerror = () => {
     if (source !== es) return // stale instance, already replaced
+    // Whatever happens next, what was remembered is from before the outage.
+    lastFrames.clear()
 
     if (es.readyState === EventSource.CONNECTING) {
       // Transport-level drop. The browser is already retrying this exact
@@ -173,6 +208,7 @@ function scheduleReconnect(deadSource: EventSource): void {
   }
   deadSource.close()
   source = null
+  lastFrames.clear()
 
   // A connection that stayed up for a while is evidence the backend is
   // healthy again, so the next drop retries promptly instead of inheriting a
@@ -212,6 +248,7 @@ function release(): void {
     }
     source?.close()
     source = null
+    lastFrames.clear()
     backoff = MIN_BACKOFF_MS
     connectedAt = null
     setStatus('disconnected')
@@ -232,13 +269,26 @@ export function subscribeTelemetry(event: string, onData: Listener): () => void 
   // onto it immediately rather than waiting for the next reconnect.
   source?.addEventListener(event, dispatcherFor(event))
 
+  // Replay: this listener, and only this one, hears the current payload now.
+  // It is synchronous so that nothing can arrive between the subscription and
+  // the replay: a live frame cannot be overtaken by an older remembered one,
+  // and a store applying it has the data before its reader's first check.
+  // Delivered on the connection's current frames only; none survive an outage.
+  const remembered = lastFrames.get(event)
+  if (remembered !== undefined) onData(remembered.raw, remembered.receivedAt)
+
   return () => {
     eventListeners.delete(onData)
     if (eventListeners.size === 0) {
-      const dispatcher = dispatchers.get(event)
-      if (dispatcher) source?.removeEventListener(event, dispatcher)
       listeners.delete(event)
-      dispatchers.delete(event)
+      // A seeded event keeps its dispatcher so its payloads are still
+      // remembered for the next listener.
+      if (!(SEEDED_EVENTS as readonly string[]).includes(event)) {
+        const dispatcher = dispatchers.get(event)
+        if (dispatcher) source?.removeEventListener(event, dispatcher)
+        dispatchers.delete(event)
+        lastFrames.delete(event)
+      }
     }
     release()
   }

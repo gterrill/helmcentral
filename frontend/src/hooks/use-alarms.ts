@@ -190,13 +190,6 @@ const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry
 
 const store = createTelemetryStore(listenToStream, 'alarms', NOT_RECEIVED, applyAlarmsEvent)
 
-/**
- * Starts the alarms store on mount without re-rendering the caller on any
- * tick. AppShell calls this once, so the store is listening before the first
- * surface needs it.
- */
-export const useRetainAlarms = store.useRetain
-
 /** One slice of the alarms store; see TelemetryStore.useSelector. */
 export const useAlarmsSelector = store.useSelector
 

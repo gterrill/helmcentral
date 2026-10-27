@@ -207,9 +207,6 @@ const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry
 
 const store = createTelemetryStore(listenToStream, 'electrical-state', INITIAL_ELECTRICAL_STATE, applyElectricalState)
 
-/** Starts the store on mount without re-rendering the caller on any tick. AppShell calls this once. */
-export const useRetainElectricalState = store.useRetain
-
 /** One slice of the electrical state; see TelemetryStore.useSelector. */
 export const useElectricalSelector = store.useSelector
 

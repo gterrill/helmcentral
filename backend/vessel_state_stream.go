@@ -113,6 +113,11 @@ func (e *streamEmitter) dueAt(now time.Time) bool {
 // Weather, tide and place-name are deliberately absent — they are external API
 // data behind long TTL caches, not vessel telemetry, and pushing them at this
 // cadence would burn work to resend identical cached payloads.
+//
+// The browser lists these event names (less the heartbeat) as SEEDED_EVENTS in
+// frontend/src/hooks/use-telemetry-stream.ts so it can remember each seed for a
+// store that starts late (ADR 0218). telemetry_seeded_events_test.go fails when
+// the two lists differ, so add a new event to both.
 func telemetryEmitters() []*streamEmitter {
 	return []*streamEmitter{
 		{event: "vessel-state", interval: 1 * time.Second, build: buildVesselStatePayload, gateKey: vesselStateGateKey},
