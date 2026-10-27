@@ -1,6 +1,6 @@
 import { renderHook, act } from '@testing-library/react'
 import { vi, describe, it, expect } from 'vitest'
-import { useServerTrails } from '../hooks/use-server-trails'
+import { useAisTrails } from '../hooks/use-server-trails'
 
 describe('useServerTrails', () => {
   it('updates ais trails', async () => {
@@ -17,13 +17,13 @@ describe('useServerTrails', () => {
     })
     vi.stubGlobal('fetch', mockFetch)
 
-    const { result } = renderHook(() => useServerTrails(5000))
+    const { result } = renderHook(() => useAisTrails(5000))
     
     await act(async () => {
       await new Promise(r => setTimeout(r, 100))
     })
 
-    const aisTrails = result.current.getAisTrails()
+    const aisTrails = result.current
     console.log("AIS TRAILS KEYS:", Array.from(aisTrails.keys()))
     expect(aisTrails.get('vessel1')?.length).toBe(2)
   })

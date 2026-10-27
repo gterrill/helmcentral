@@ -60,9 +60,9 @@ interface AnchorWatchTileProps {
   currentDriftImpactKts?: number | null
   isImperial: boolean
   vesselHeadingDeg: number | null
-  vesselTrail: () => TrailPoint[]
+  vesselTrail: TrailPoint[]
   aisVessels: NearbyVessel[]
-  aisTrails: () => Map<string, TrailPoint[]>
+  aisTrails: Map<string, TrailPoint[]>
   // Optional, mirroring AnchorWatchMapProps — passed straight through to the
   // map, which colours an AIS marker red while a collision alarm is in force
   // for that vessel id (ADR 0088).

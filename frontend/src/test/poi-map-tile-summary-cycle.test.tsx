@@ -105,7 +105,7 @@ const defaultProps: Omit<PoiMapTileProps, 'config'> = {
   gnssCriticalAlert: false,
   positionLastUpdateAgeS: 5,
   nearbyVessels: [],
-  getSelfTrail: () => [],
+  selfTrail: [],
   isDarkTheme: false,
   distanceUnits: 'metric',
 }

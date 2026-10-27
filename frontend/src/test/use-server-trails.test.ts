@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { useServerTrails } from '@/hooks/use-server-trails'
+import { useAisTrails, useSelfTrail } from '@/hooks/use-server-trails'
 
 function makeResponse(body: unknown): Response {
   return { ok: true, json: async () => body } as Response
@@ -44,12 +44,12 @@ describe('useServerTrails', () => {
     // replay entirely — the effect then only ever runs once, silently, with
     // no error. `reactStrictMode` avoids the extra layer by having Testing
     // Library apply StrictMode itself, last, around the whole tree.
-    const { result } = renderHook(() => useServerTrails(5000), { reactStrictMode: true })
+    const { result } = renderHook(() => useSelfTrail(5000), { reactStrictMode: true })
 
     await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(2))
-    await waitFor(() => expect(result.current.getSelfTrail().length).toBeGreaterThan(0))
+    await waitFor(() => expect(result.current.length).toBeGreaterThan(0))
 
-    expect(result.current.getSelfTrail().length).toBe(N)
+    expect(result.current.length).toBe(N)
   })
 
   it('does not start a poll while one is in flight', async () => {
@@ -61,7 +61,7 @@ describe('useServerTrails', () => {
     mockFetch.mockResolvedValue(makeResponse({}))
     vi.stubGlobal('fetch', mockFetch)
 
-    renderHook(() => useServerTrails(5000))
+    renderHook(() => useSelfTrail(5000))
 
     // Two interval ticks pass while the first poll is still pending.
     await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
@@ -86,9 +86,8 @@ describe('useServerTrails', () => {
     const mockFetch = vi.fn().mockReturnValue(first.promise)
     vi.stubGlobal('fetch', mockFetch)
 
-    const { result, unmount } = renderHook(() => useServerTrails(5000))
-    const getSelfTrail = result.current.getSelfTrail
-
+    const { unmount } = renderHook(() => useSelfTrail(5000))
+    
     unmount()
 
     const N = 3
@@ -101,11 +100,12 @@ describe('useServerTrails', () => {
 
     await flushMicrotasks()
 
-    expect(getSelfTrail()).toEqual([])
+    const reader = renderHook(() => useSelfTrail(5000, false))
+    expect(reader.result.current).toEqual([])
   })
 })
 
-// Item B: nothing on screen reads getSelfTrail/getAisTrails on most pages
+// Item B: nothing on screen reads the trails on most pages
 // (a kiosk page with no map, for instance), so polling /api/tracks every 5s
 // app-wide is wasted. `enabled` gates the poll; defaults to true so the two
 // suites above (which don't pass it) keep polling unconditionally.
@@ -120,7 +120,7 @@ describe('useServerTrails enabled gating', () => {
     const mockFetch = vi.fn().mockResolvedValue(makeResponse({ self: [] }))
     vi.stubGlobal('fetch', mockFetch)
 
-    renderHook(() => useServerTrails(5000, false))
+    renderHook(() => useSelfTrail(5000, false))
     await act(async () => { await vi.advanceTimersByTimeAsync(20000) })
 
     expect(mockFetch).not.toHaveBeenCalled()
@@ -137,7 +137,7 @@ describe('useServerTrails enabled gating', () => {
       }))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { result, rerender } = renderHook(({ enabled }) => useServerTrails(5000, enabled), {
+    const { result, rerender } = renderHook(({ enabled }) => useSelfTrail(5000, enabled), {
       initialProps: { enabled: false },
     })
     await act(async () => { await vi.advanceTimersByTimeAsync(20000) })
@@ -147,7 +147,7 @@ describe('useServerTrails enabled gating', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(mockFetch).toHaveBeenCalledTimes(1)
     expect(String(mockFetch.mock.calls[0][0])).toBe('/api/tracks')
-    expect(result.current.getSelfTrail()).toHaveLength(1)
+    expect(result.current).toHaveLength(1)
 
     // The next poll must ask only for what's new since the first response's
     // latest timestamp, not refetch from scratch.
@@ -155,7 +155,7 @@ describe('useServerTrails enabled gating', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2)
     const secondUrl = String(mockFetch.mock.calls[1][0])
     expect(secondUrl).toBe('/api/tracks?since=2024-01-01T00%3A00%3A00.000Z')
-    expect(result.current.getSelfTrail()).toHaveLength(2)
+    expect(result.current).toHaveLength(2)
   })
 
   it('stops polling once enabled flips back false, keeping the trail already collected', async () => {
@@ -165,19 +165,19 @@ describe('useServerTrails enabled gating', () => {
     }))
     vi.stubGlobal('fetch', mockFetch)
 
-    const { result, rerender } = renderHook(({ enabled }) => useServerTrails(5000, enabled), {
+    const { result, rerender } = renderHook(({ enabled }) => useSelfTrail(5000, enabled), {
       initialProps: { enabled: true },
     })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(mockFetch).toHaveBeenCalledTimes(1)
-    expect(result.current.getSelfTrail()).toHaveLength(1)
+    expect(result.current).toHaveLength(1)
 
     rerender({ enabled: false })
     await act(async () => { await vi.advanceTimersByTimeAsync(20000) })
 
     expect(mockFetch).toHaveBeenCalledTimes(1)
     // Pausing must not wipe what's already been collected.
-    expect(result.current.getSelfTrail()).toHaveLength(1)
+    expect(result.current).toHaveLength(1)
   })
 })
 
@@ -190,8 +190,8 @@ describe('useServerTrails shared poller', () => {
     const mockFetch = vi.fn().mockResolvedValue(makeResponse({ self: [] }))
     vi.stubGlobal('fetch', mockFetch)
 
-    renderHook(() => useServerTrails(5000))
-    renderHook(() => useServerTrails(5000))
+    renderHook(() => useSelfTrail(5000))
+    renderHook(() => useSelfTrail(5000))
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(mockFetch).toHaveBeenCalledTimes(1)
 
@@ -206,14 +206,106 @@ describe('useServerTrails shared poller', () => {
     }))
     vi.stubGlobal('fetch', mockFetch)
 
-    const first = renderHook(() => useServerTrails(5000))
+    const first = renderHook(() => useSelfTrail(5000))
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     first.unmount()
 
-    const second = renderHook(() => useServerTrails(5000))
-    expect(second.result.current.getSelfTrail()).toHaveLength(1)
+    const second = renderHook(() => useSelfTrail(5000))
+    expect(second.result.current).toHaveLength(1)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
 
     expect(String(mockFetch.mock.calls[1][0])).toBe('/api/tracks?since=2024-01-01T00%3A00%3A00.000Z')
+  })
+})
+
+// The reader side (ADR 0215): each slice changes identity only when its own
+// trail does, so a map re-renders when points arrive and never on a quiet
+// poll, and a reader of one trail is not woken by the other.
+describe('trail slices', () => {
+  const at = (s: number) => ({ lat: s, lon: s, timestamp: new Date(Date.UTC(2024, 0, 1, 0, 0, s)).toISOString() })
+
+  it('re-renders a reader when a poll brings new points, and not when it brings none', async () => {
+    vi.useFakeTimers()
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(makeResponse({ self: [at(0)] }))
+      .mockResolvedValueOnce(makeResponse({ self: [] }))
+      .mockResolvedValueOnce(makeResponse({ self: [at(5)] }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useSelfTrail(5000)
+    })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(result.current).toHaveLength(1)
+    const afterFirst = renders
+    const firstSnapshot = result.current
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(renders).toBe(afterFirst)
+    expect(result.current).toBe(firstSnapshot)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(renders).toBeGreaterThan(afterFirst)
+    expect(result.current).toHaveLength(2)
+  })
+
+  it('keeps the AIS trails identity across a poll that repeats them', async () => {
+    vi.useFakeTimers()
+    const ais = { ais: { v1: [at(0), at(5)] } }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeResponse(ais)))
+
+    const { result } = renderHook(() => useAisTrails(5000))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const first = result.current
+    expect(first.get('v1')).toHaveLength(2)
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(result.current).toBe(first)
+  })
+
+  it('treats an AIS trail with a changed middle point as a change', async () => {
+    vi.useFakeTimers()
+    const moved = { lat: 99, lon: 99, timestamp: at(3).timestamp }
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(makeResponse({ ais: { v1: [at(0), at(3), at(5)] } }))
+      .mockResolvedValueOnce(makeResponse({ ais: { v1: [at(0), moved, at(5)] } }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    const { result } = renderHook(() => useAisTrails(5000))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const first = result.current
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(result.current).not.toBe(first)
+  })
+
+  it('does not wake a self reader for an AIS-only change, nor an AIS reader for a self-only change', async () => {
+    vi.useFakeTimers()
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(makeResponse({ self: [at(0)], ais: { v1: [at(0)] } }))
+      .mockResolvedValueOnce(makeResponse({ ais: { v1: [at(0), at(5)] } }))
+      .mockResolvedValueOnce(makeResponse({ self: [at(10)], ais: { v1: [at(0), at(5)] } }))
+    vi.stubGlobal('fetch', mockFetch)
+
+    let selfRenders = 0
+    let aisRenders = 0
+    renderHook(() => { selfRenders += 1; return useSelfTrail(5000) })
+    renderHook(() => { aisRenders += 1; return useAisTrails(5000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    const selfAfterFirst = selfRenders
+    const aisAfterFirst = aisRenders
+
+    // AIS-only change.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(aisRenders).toBeGreaterThan(aisAfterFirst)
+    expect(selfRenders).toBe(selfAfterFirst)
+
+    // Self-only change.
+    const aisAfterSecond = aisRenders
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(selfRenders).toBeGreaterThan(selfAfterFirst)
+    expect(aisRenders).toBe(aisAfterSecond)
   })
 })

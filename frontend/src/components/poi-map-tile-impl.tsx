@@ -32,7 +32,7 @@ export interface PoiMapActiveRouteWaypoint {
 
 /**
  * The currently active route (ADR 0092's next-waypoint line, reused here):
- * App.tsx derives this once from useRouteActivation and
+ * LivePoiMapTile (live-surfaces.tsx) derives this once from useRouteActivation and
  * nextWaypoint, so this tile never has to know route activation exists, only
  * how to draw one. `waypoints` is in traversal order - the order `nextIndex`
  * indexes into - which is not always the route's authored order; see
@@ -62,7 +62,7 @@ export interface PoiMapTileProps {
   positionLastUpdateAgeS: number | null
   nearbyVessels: NearbyVessel[]
   aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
-  getSelfTrail: () => TrailPoint[]
+  selfTrail: TrailPoint[]
   isDarkTheme: boolean
   /** The instrument skin forces dark regardless of the app-wide theme. */
   forceDark?: boolean
@@ -258,7 +258,7 @@ export default function PoiMapTileImpl({
   positionLastUpdateAgeS,
   nearbyVessels,
   aisCollisionAlarms,
-  getSelfTrail,
+  selfTrail,
   isDarkTheme,
   forceDark = false,
   distanceUnits,
@@ -526,22 +526,19 @@ export default function PoiMapTileImpl({
     setSuppressedLabelIds(resolveMarkerLabelSuppression(points, []))
   }, [poi.features, rankById])
 
-  // getSelfTrail() reads a ref-backed buffer (use-server-trails.ts) whose
-  // identity never changes as new points arrive, so poi.features (which
-  // does change, once a minute) stands in as the recompute tick — the same
-  // trick anchor-watch-map.tsx's own postAnchorTrailGeoJSON uses with its
-  // renderKey.
+  // selfTrail is a snapshot that is a new array only when a trail poll
+  // lands points (use-server-trails.ts), so the GeoJSON follows the trail
+  // poll, not the place fetch.
   const trailGeoJSON = useMemo(
-    () => (config.showTrail ? trailToGeoJSON(getSelfTrail()) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [config.showTrail, getSelfTrail, poi.features],
+    () => (config.showTrail ? trailToGeoJSON(selfTrail) : null),
+    [config.showTrail, selfTrail],
   )
 
   // The active route (ADR 0092/0091): whole route as one line, plus the leg
   // into the next waypoint drawn again on top in a brighter, thicker stroke
   // so the leg actually being sailed reads at a glance. `activeRoute` is
   // already null whenever no route is active or its waypoints are empty
-  // (App.tsx's job, not this tile's), so a plain line needs no extra guard
+  // (the live wrapper's job, not this tile's), so a plain line needs no extra guard
   // beyond the usual "a line needs two points" one.
   const routeLineGeoJSON = useMemo(
     () => (activeRoute && activeRoute.waypoints.length >= 2 ? waypointsToLineGeoJSON(activeRoute.waypoints) : null),

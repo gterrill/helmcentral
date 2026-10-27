@@ -84,9 +84,9 @@ function mapElement(overrides: Partial<React.ComponentProps<typeof AnchorWatchMa
       distanceMeters={10}
       bearingDeg={80}
       isImperial={false}
-      vesselTrail={() => []}
+      vesselTrail={[]}
       aisVessels={[]}
-      aisTrails={() => new Map()}
+      aisTrails={new Map()}
       radarTargets={[]}
       isDarkTheme={false}
       {...overrides}

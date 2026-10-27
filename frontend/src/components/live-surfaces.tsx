@@ -37,7 +37,7 @@ import { useNearbyVesselList, useNearbyVessels } from '@/hooks/use-nearby-vessel
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useRadarTargets } from '@/hooks/use-radar-targets'
-import { useServerTrails } from '@/hooks/use-server-trails'
+import { useAisTrails, useSelfTrail } from '@/hooks/use-server-trails'
 import { useSocBands } from '@/hooks/use-soc-bands'
 import { useSolarState } from '@/hooks/use-solar-state'
 import { useTanksState } from '@/hooks/use-tanks-state'
@@ -466,8 +466,8 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
   const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
-  const { getAnchorTrail } = useAnchorTrail(TRAIL_POLL_MS)
-  const { getAisTrails } = useServerTrails(TRAIL_POLL_MS)
+  const anchorTrail = useAnchorTrail(TRAIL_POLL_MS)
+  const aisTrails = useAisTrails(TRAIL_POLL_MS)
   const pins = usePins(watch.active)
   return (
     <AnchorWatchTile
@@ -476,8 +476,8 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
       {...contacts}
       tide={tide}
       watch={atFix}
-      vesselTrail={getAnchorTrail}
-      aisTrails={getAisTrails}
+      vesselTrail={anchorTrail}
+      aisTrails={aisTrails}
       lastUpdateAgeS={v.positionLastUpdateAgeS}
       lat={v.latitude}
       lon={v.longitude}
@@ -513,13 +513,13 @@ function useActiveRouteLayer() {
 
 /** The Nearby map tile: own ship from vessel state, the AIS contacts, the collision colours, the active route, and the boat's trail while it is on screen. */
 export const LivePoiMapTile = memo(function LivePoiMapTile(props: Omit<ComponentProps<typeof PoiMapTile>,
-  'aisCollisionAlarms' | 'getSelfTrail' | 'nearbyVessels' | 'activeRoute' | (typeof POI_FIELDS)[number]>) {
+  'aisCollisionAlarms' | 'selfTrail' | 'nearbyVessels' | 'activeRoute' | (typeof POI_FIELDS)[number]>) {
   const ownShip = useVesselFields(POI_FIELDS)
   const activeRoute = useActiveRouteLayer()
   const nearbyVessels = useNearbyVesselList()
   const aisCollisionAlarms = useAisCollisionAlarms()
-  const { getSelfTrail } = useServerTrails(TRAIL_POLL_MS)
-  return <PoiMapTile {...props} {...ownShip} activeRoute={activeRoute} nearbyVessels={nearbyVessels} aisCollisionAlarms={aisCollisionAlarms} getSelfTrail={getSelfTrail} />
+  const selfTrail = useSelfTrail(TRAIL_POLL_MS)
+  return <PoiMapTile {...props} {...ownShip} activeRoute={activeRoute} nearbyVessels={nearbyVessels} aisCollisionAlarms={aisCollisionAlarms} selfTrail={selfTrail} />
 })
 
 const ANCHOR_DRAWER_FIELDS = [
@@ -571,8 +571,8 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   }, [tide])
   const aisCollisionAlarms = useAisCollisionAlarms()
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
-  const { getAnchorTrail } = useAnchorTrail(TRAIL_POLL_MS)
-  const { getAisTrails } = useServerTrails(TRAIL_POLL_MS)
+  const anchorTrail = useAnchorTrail(TRAIL_POLL_MS)
+  const aisTrails = useAisTrails(TRAIL_POLL_MS)
   const pins = usePins(watch.active)
   const hasFix = v.latitude !== null && v.longitude !== null
   return (
@@ -600,8 +600,8 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
       seaState={watch.seaState}
       seabedType={watch.seabedType}
       onUpdateRodeAndConditions={watch.updateRodeAndConditions}
-      vesselTrail={getAnchorTrail}
-      aisTrails={getAisTrails}
+      vesselTrail={anchorTrail}
+      aisTrails={aisTrails}
       vesselLat={v.latitude ?? watch.anchorLat}
       vesselLon={v.longitude ?? watch.anchorLon}
       hasGpsFix={hasFix && !v.gnssCriticalAlert && !(v.latitude === -1 && v.longitude === -1)}

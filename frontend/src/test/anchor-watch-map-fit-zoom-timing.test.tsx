@@ -61,9 +61,9 @@ const baseProps = {
   distanceMeters: 10,
   bearingDeg: 80,
   isImperial: false,
-  vesselTrail: () => [],
+  vesselTrail: [],
   aisVessels: [],
-  aisTrails: () => new Map(),
+  aisTrails: new Map(),
   isDarkTheme: false,
 }
 

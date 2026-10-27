@@ -27,6 +27,7 @@ let projectImpl: (lngLat: [number, number]) => { x: number; y: number } = ([lng,
 // Captures every prop the last-mounted <Map> received, so the `interactive`
 // and attribution tests can assert on exactly what reached the underlying
 // maplibre map.
+const sourceData: Record<string, unknown> = {}
 let lastMapProps: { interactive?: boolean; attributionControl?: unknown } | null = null
 
 vi.mock('react-map-gl/maplibre', async () => {
@@ -56,9 +57,10 @@ vi.mock('react-map-gl/maplibre', async () => {
       },
     ),
     Marker: ({ children }: { children?: React.ReactNode }) => <div data-testid="marker">{children}</div>,
-    Source: ({ children, id }: { children?: React.ReactNode; id: string }) => (
-      <div data-testid={`source-${id}`}>{children}</div>
-    ),
+    Source: ({ children, id, data }: { children?: React.ReactNode; id: string; data?: unknown }) => {
+      sourceData[id] = data
+      return <div data-testid={`source-${id}`}>{children}</div>
+    },
     Layer: ({ id }: { id: string }) => <div data-testid={`layer-${id}`} />,
   }
 })
@@ -100,6 +102,7 @@ afterEach(() => {
   projectImpl = ([lng, lat]) => ({ x: lng, y: lat })
   mockHasWebGL2 = true
   lastMapProps = null
+  for (const k of Object.keys(sourceData)) delete sourceData[k]
 })
 
 function feature(overrides: Partial<PoiFeature>): PoiFeature {
@@ -160,7 +163,7 @@ const renderTileDefaultProps: Omit<React.ComponentProps<typeof PoiMapTile>, 'con
   gnssCriticalAlert: false,
   positionLastUpdateAgeS: 5,
   nearbyVessels: [],
-  getSelfTrail: () => [],
+  selfTrail: [],
   isDarkTheme: false,
   distanceUnits: 'metric',
 }
@@ -240,7 +243,7 @@ describe('PoiMapTile', () => {
         gnssCriticalAlert={false}
         positionLastUpdateAgeS={5}
         nearbyVessels={[]}
-        getSelfTrail={() => []}
+        selfTrail={[]}
         isDarkTheme={false}
         distanceUnits="metric"
       />,
@@ -258,7 +261,7 @@ describe('PoiMapTile', () => {
         gnssCriticalAlert={false}
         positionLastUpdateAgeS={5}
         nearbyVessels={[]}
-        getSelfTrail={() => []}
+        selfTrail={[]}
         isDarkTheme={false}
         distanceUnits="metric"
       />,
@@ -288,7 +291,7 @@ describe('PoiMapTile', () => {
         gnssCriticalAlert={false}
         positionLastUpdateAgeS={5}
         nearbyVessels={[aisVessel]}
-        getSelfTrail={() => []}
+        selfTrail={[]}
         isDarkTheme={false}
         distanceUnits="metric"
       />,
@@ -326,7 +329,7 @@ describe('PoiMapTile', () => {
         gnssCriticalAlert={false}
         positionLastUpdateAgeS={5}
         nearbyVessels={[]}
-        getSelfTrail={() => []}
+        selfTrail={[]}
         isDarkTheme={false}
         distanceUnits="metric"
       />,
@@ -1256,5 +1259,35 @@ describe('placeTourTimings', () => {
     expect(t.holdMs).toBe(13200)
     expect(t.hopMs).toBe(3500)
     expect(t.hopHoldMs).toBe(16500)
+  })
+})
+
+describe('PoiMapTile own-ship trail', () => {
+  const trailPoint = (i: number) => ({ lat: -20.27 + i / 1000, lon: 148.94, timestampMs: 1000 * i })
+  const trailCoords = () => (sourceData['poi-map-own-trail'] as GeoJSON.Feature<GeoJSON.LineString>).geometry.coordinates
+
+  it('redraws when a trail poll lands new points while the nearby places have not changed', async () => {
+    // One result object, so the places do not change between renders: the
+    // trail alone must be enough to redraw (a failing place fetch used to
+    // freeze the boat's trail).
+    usePoiMock.mockReturnValue(poiResult({ features: [feature({})] }))
+    const props = { ...renderTileDefaultProps, config: config({ showTrail: true }) }
+    const { rerender } = await renderTile({ selfTrail: [trailPoint(0), trailPoint(1)], config: config({ showTrail: true }) })
+    expect(trailCoords()).toHaveLength(2)
+
+    rerender(<PoiMapTile {...props} selfTrail={[trailPoint(0), trailPoint(1), trailPoint(2)]} />)
+    expect(trailCoords()).toHaveLength(3)
+  })
+
+  it('keeps the trail GeoJSON identity when nothing about the trail changed', async () => {
+    usePoiMock.mockReturnValue(poiResult({ features: [feature({})] }))
+    const trail = [trailPoint(0), trailPoint(1)]
+    const props = { ...renderTileDefaultProps, config: config({ showTrail: true }) }
+    const { rerender } = await renderTile({ selfTrail: trail, config: config({ showTrail: true }) })
+    const first = sourceData['poi-map-own-trail']
+
+    usePoiMock.mockReturnValue(poiResult({ features: [feature({})] }))
+    rerender(<PoiMapTile {...props} selfTrail={trail} />)
+    expect(sourceData['poi-map-own-trail']).toBe(first)
   })
 })

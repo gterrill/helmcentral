@@ -33,9 +33,9 @@ describe('World imagery source config', () => {
         distanceMeters={26}
         bearingDeg={83}
         isImperial={false}
-        vesselTrail={() => []}
+        vesselTrail={[]}
         aisVessels={[]}
-        aisTrails={() => new Map()}
+        aisTrails={new Map()}
         isDarkTheme={false}
         showImageryLayer
         onImageryToggle={() => {}}

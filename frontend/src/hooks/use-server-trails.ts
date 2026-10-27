@@ -1,5 +1,5 @@
 import { apiRequest } from '@/lib/api-query'
-import { createSharedPoller } from '@/lib/shared-poller'
+import { createSharedPoller, type PollStore } from '@/lib/shared-poller'
 
 export interface TrailPoint {
   lat: number
@@ -24,19 +24,37 @@ export function appendCapped(existing: TrailPoint[], incoming: TrailPoint[], max
   return merged.length > max ? merged.slice(merged.length - max) : merged
 }
 
-export interface ServerTrailsResult {
-  /** Stable getter for self post-anchor swing trail (ring-buffer). */
-  getSelfTrail: () => TrailPoint[]
-  /** Stable getter for all AIS vessel trails keyed by vessel name. */
-  getAisTrails: () => Map<string, TrailPoint[]>
+export interface ServerTrails {
+  /** Your own vessel's swing trail (ring buffer), oldest point first. */
+  self: TrailPoint[]
+  /** Every nearby AIS vessel's trail keyed by vessel name. */
+  ais: Map<string, TrailPoint[]>
 }
 
-// The trails at module level, shared by every map that draws them.
-let selfTrail: TrailPoint[] = []
-let aisTrails = new Map<string, TrailPoint[]>()
+const EMPTY: ServerTrails = { self: [], ais: new Map() }
+
+// The cursor sits at module level beside the poller's snapshot, so a remount
+// asks only for what is new.
 let since = ''
 
-async function pollTracks(signal: AbortSignal): Promise<void> {
+function sameTrail(a: TrailPoint[], b: TrailPoint[]): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].lat !== b[i].lat || a[i].lon !== b[i].lon || a[i].timestampMs !== b[i].timestampMs) return false
+  }
+  return true
+}
+
+function sameAis(a: Map<string, TrailPoint[]>, b: Map<string, TrailPoint[]>): boolean {
+  if (a.size !== b.size) return false
+  for (const [name, points] of b) {
+    const held = a.get(name)
+    if (!held || !sameTrail(held, points)) return false
+  }
+  return true
+}
+
+async function pollTracks(signal: AbortSignal, store: PollStore<ServerTrails>): Promise<void> {
   try {
     const url = since ? `/api/tracks?since=${encodeURIComponent(since)}` : '/api/tracks'
     const data = await apiRequest<ServerTracksResponse>(url, { signal })
@@ -44,13 +62,16 @@ async function pollTracks(signal: AbortSignal): Promise<void> {
     // poll nobody owns now.
     if (signal.aborted) return
 
+    const held = store.get()
     let latestMs = since ? new Date(since).getTime() : 0
+    let self = held.self
+    let ais = held.ais
 
     if (data.self) {
       const incoming = data.self
         .map(p => ({ lat: p.lat, lon: p.lon, timestampMs: toMs(p.timestamp) }))
         .sort((a, b) => a.timestampMs - b.timestampMs)
-      selfTrail = appendCapped(selfTrail, incoming)
+      self = appendCapped(self, incoming)
       if (incoming.length > 0) {
         latestMs = Math.max(latestMs, incoming[incoming.length - 1].timestampMs)
       }
@@ -67,26 +88,25 @@ async function pollTracks(signal: AbortSignal): Promise<void> {
           latestMs = Math.max(latestMs, incoming[incoming.length - 1].timestampMs)
         }
       }
-      aisTrails = nextAis
+      // A poll that repeats the trails already held is not a change.
+      if (!sameAis(held.ais, nextAis)) ais = nextAis
     }
 
     if (latestMs > 0) {
       since = new Date(latestMs).toISOString()
     }
+    if (self !== held.self || ais !== held.ais) store.publish({ self, ais })
   } catch {
     // Network error or abort: keep existing data, retry next interval
   }
 }
 
-const poller = createSharedPoller(pollTracks, () => {
-  selfTrail = []
-  aisTrails = new Map()
+const poller = createSharedPoller<ServerTrails>(EMPTY, pollTracks, () => {
   since = ''
 })
 
-const getSelfTrail = () => selfTrail
-const getAisTrails = () => aisTrails
-const TRAILS: ServerTrailsResult = { getSelfTrail, getAisTrails }
+const selectSelf = (trails: ServerTrails) => trails.self
+const selectAis = (trails: ServerTrails) => trails.ais
 
 /**
  * Polls /api/tracks?since=X and keeps the trails for your own vessel and every
@@ -98,8 +118,16 @@ const TRAILS: ServerTrailsResult = { getSelfTrail, getAisTrails }
  * runs while any caller is mounted, two maps on one page make one request,
  * and a map that comes back after a page switch keeps the trail and asks only
  * for what is new. `enabled: false` holds nothing.
+ *
+ * A reader takes the slice it draws, so a map that draws one is not woken by
+ * the other. Each slice changes identity only when its trail does: a poll that
+ * brings nothing new leaves both alone.
  */
-export function useServerTrails(pollIntervalMs = 5000, enabled = true): ServerTrailsResult {
-  poller.usePoll(pollIntervalMs, enabled)
-  return TRAILS
+export function useSelfTrail(pollIntervalMs = 5000, enabled = true): TrailPoint[] {
+  return poller.useSlice(selectSelf, pollIntervalMs, enabled)
+}
+
+/** Every nearby AIS vessel's trail by name; see {@link useSelfTrail}. */
+export function useAisTrails(pollIntervalMs = 5000, enabled = true): Map<string, TrailPoint[]> {
+  return poller.useSlice(selectAis, pollIntervalMs, enabled)
 }

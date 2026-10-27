@@ -85,12 +85,7 @@ vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mo
     clearAnchor: vi.fn(),
   })))
 
-vi.mock('@/hooks/use-server-trails', () => ({
-  useServerTrails: () => ({
-    getSelfTrail: () => [],
-    getAisTrails: () => new Map(),
-  }),
-}))
+vi.mock('@/hooks/use-server-trails', async () => (await import('./trail-mocks')).trailHooksMock)
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => 'Urangan' }))
 

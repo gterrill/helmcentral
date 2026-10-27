@@ -25,10 +25,10 @@ describe('useAnchorTrail', () => {
     const { result } = renderHook(() => useAnchorTrail(5000))
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     expect(String(mockFetch.mock.calls[0][0])).toBe('/api/anchor-watch/trails/self')
-    expect(result.current.getAnchorTrail()).toHaveLength(2)
+    expect(result.current).toHaveLength(2)
     await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
     expect(String(mockFetch.mock.calls[1][0])).toContain('since=')
-    expect(result.current.getAnchorTrail()).toHaveLength(3)
+    expect(result.current).toHaveLength(3)
   })
 
   it('drops its points and refetches in full when the trail restarts', async () => {
@@ -45,7 +45,7 @@ describe('useAnchorTrail', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
     expect(mockFetch).toHaveBeenCalledTimes(3)
     expect(String(mockFetch.mock.calls[2][0])).toBe('/api/anchor-watch/trails/self')
-    const trail = result.current.getAnchorTrail()
+    const trail = result.current
     expect(trail).toHaveLength(2)
     expect(trail[0].timestampMs).toBe(new Date(pt(15).timestamp).getTime())
   })
@@ -58,17 +58,17 @@ describe('useAnchorTrail', () => {
     vi.stubGlobal('fetch', mockFetch)
     const { result } = renderHook(() => useAnchorTrail(5000))
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(result.current.getAnchorTrail()).toHaveLength(1)
+    expect(result.current).toHaveLength(1)
     await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
-    expect(result.current.getAnchorTrail()).toHaveLength(0)
+    expect(result.current).toHaveLength(0)
   })
 
   it('keeps the newest points up to the backend bound', async () => {
     const big = Array.from({ length: ANCHOR_TRAIL_MAX_POINTS + 10 }, (_, i) => pt(i))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeResponse({ points: big, trail_started_at: 'A' })))
     const { result } = renderHook(() => useAnchorTrail(5000))
-    await waitFor(() => expect(result.current.getAnchorTrail().length).toBeGreaterThan(0))
-        expect(result.current.getAnchorTrail()).toHaveLength(ANCHOR_TRAIL_MAX_POINTS)
+    await waitFor(() => expect(result.current.length).toBeGreaterThan(0))
+        expect(result.current).toHaveLength(ANCHOR_TRAIL_MAX_POINTS)
   })
 
   it('does not poll while disabled', async () => {
@@ -105,7 +105,7 @@ describe('useAnchorTrail shared poller', () => {
     first.unmount()
 
     const second = renderHook(() => useAnchorTrail(5000))
-    expect(second.result.current.getAnchorTrail()).toHaveLength(2)
+    expect(second.result.current).toHaveLength(2)
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
 
     expect(String(mockFetch.mock.calls[1][0])).toContain('since=')

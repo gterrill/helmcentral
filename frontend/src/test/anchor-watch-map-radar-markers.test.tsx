@@ -87,9 +87,9 @@ function renderMap(radarTargets: RadarTarget[]) {
       distanceMeters={10}
       bearingDeg={80}
       isImperial={false}
-      vesselTrail={() => []}
+      vesselTrail={[]}
       aisVessels={aisVessels}
-      aisTrails={() => new Map()}
+      aisTrails={new Map()}
       radarTargets={radarTargets}
       isDarkTheme={false}
       showImageryLayer

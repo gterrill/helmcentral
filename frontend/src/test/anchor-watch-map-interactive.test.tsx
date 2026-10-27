@@ -79,9 +79,9 @@ function renderMap(overrides: Partial<React.ComponentProps<typeof AnchorWatchMap
       distanceMeters={10}
       bearingDeg={80}
       isImperial={false}
-      vesselTrail={() => []}
+      vesselTrail={[]}
       aisVessels={defaultAisVessels}
-      aisTrails={() => new Map()}
+      aisTrails={new Map()}
       radarTargets={[]}
       isDarkTheme={false}
       showImageryLayer

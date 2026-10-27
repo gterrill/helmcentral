@@ -296,9 +296,7 @@ vi.mock('@/hooks/use-forecast-warnings', () => ({
   findActiveWindBulletin: () => null,
 }))
 
-vi.mock('@/hooks/use-server-trails', () => ({
-  useServerTrails: () => ({ getSelfTrail: vi.fn(), getAisTrails: vi.fn() }),
-}))
+vi.mock('@/hooks/use-server-trails', async () => (await import('./trail-mocks')).trailHooksMock)
 
 // Stored preference is always light in this suite. Hoisted so the dark-theme
 // override tests below can assert the real underlying preference is never
