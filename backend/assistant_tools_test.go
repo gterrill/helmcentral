@@ -825,7 +825,7 @@ func TestExecuteEstimatePassage_UnreadableSettingsIsNotReportedAsNotSetUp(t *tes
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return nil, errors.New("boom") },
 	}
-	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err == nil || !strings.Contains(err.Error(), "settings could not be read") || strings.Contains(err.Error(), "not set up") {
 		t.Fatalf("expected a settings-unreadable error, got %v", err)
 	}
@@ -882,7 +882,7 @@ func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 	}
 
-	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	raw, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
@@ -939,7 +939,7 @@ func TestExecuteEstimatePassage_OmittedSpeedUsesMostSampledBand(t *testing.T) {
 
 	// 97nm at the single band's 9.7kts mean is exactly 10.0 hours, chosen so
 	// the expected value is exact rather than needing its own rounding.
-	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":97}`))
+	raw, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(97, ``))
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
@@ -976,7 +976,7 @@ func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 	}
 
-	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"days":30}`))
+	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"days":30`))
 	if err == nil {
 		t.Fatalf("expected an error when there is no underway history in the window")
 	}
@@ -1036,7 +1036,7 @@ func estimatePassageWithout(t *testing.T, missing, signature string) error {
 		},
 		engineSignature: func(string) string { return signature },
 	}
-	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"days":30}`))
+	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"days":30`))
 	if err == nil {
 		t.Fatalf("%s: expected an error", missing)
 	}
@@ -1050,7 +1050,7 @@ func TestExecuteEstimatePassage_NoEnginesConfiguredSaysEnginesAreNotSetUp(t *tes
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return nil, nil }, // no vessel.engines
 	}
 
-	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err == nil {
 		t.Fatalf("expected an error when no engines are configured, not an assumed pair")
 	}
@@ -1067,7 +1067,7 @@ func TestExecuteEstimatePassage_FuelAboardKnownAddsMargin(t *testing.T) {
 		fuelAboardM3:      func() (float64, bool) { return 0.6, true }, // 600 L aboard
 	}
 
-	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	raw, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
@@ -1098,7 +1098,7 @@ func TestExecuteEstimatePassage_FuelAboardUnknownOmitsFieldsAndNotesIt(t *testin
 		fuelAboardM3:      func() (float64, bool) { return 0, false },
 	}
 
-	raw, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":10}`))
+	raw, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
@@ -1129,17 +1129,19 @@ func TestExecuteEstimatePassage_FuelAboardUnknownOmitsFieldsAndNotesIt(t *testin
 	}
 }
 
-func TestExecuteEstimatePassage_DistanceRequired(t *testing.T) {
+func TestExecuteEstimatePassage_DestinationRequired(t *testing.T) {
 	deps := assistantToolDeps{now: time.Now}
-	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":0}`))
-	if err == nil {
-		t.Fatalf("expected an error when distance_nm is missing/zero")
+	for _, args := range []string{`{}`, `{"distance_nm":20}`, `{"to_lat":-20}`} {
+		_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(args))
+		if err == nil || !strings.Contains(err.Error(), "to_lat and to_lon are required") {
+			t.Errorf("%s: expected the destination to be required, got %v", args, err)
+		}
 	}
 }
 
 func TestExecuteEstimatePassage_NonPositiveSpeedIsError(t *testing.T) {
 	deps := assistantToolDeps{now: time.Now}
-	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"distance_nm":20,"speed_kts":0}`))
+	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":0`))
 	if err == nil {
 		t.Fatalf("expected an error for a non-positive speed_kts")
 	}
@@ -2332,8 +2334,8 @@ func TestDescribeAssistantToolCall(t *testing.T) {
 		{"get_wind_forecast", `{"lat":-20.1,"lon":149.1,"name":"Blue Pearl Bay"}`, "Fetching wind forecast for Blue Pearl Bay…"},
 		{"get_wind_forecast", `{"lat":-20.1234,"lon":149.5678}`, "Fetching wind forecast for -20.1234,149.5678…"},
 		{"get_tides", `{"lat":-20.1,"lon":149.1,"name":"Blue Pearl Bay"}`, "Fetching tides near Blue Pearl Bay…"},
-		{"estimate_passage", `{"distance_nm":42,"speed_kts":8.5}`, "Estimating 42 nm at 8.5 kts from the log…"},
-		{"estimate_passage", `{"distance_nm":42}`, "Estimating 42 nm at cruising speed from the log…"},
+		{"estimate_passage", `{"to_lat":-20.25,"to_lon":148.95,"speed_kts":8.5}`, "Routing to -20.250, 148.950 and estimating at 8.5 kts from the log…"},
+		{"estimate_passage", `{"to_lat":-20.25,"to_lon":148.95}`, "Routing to -20.250, 148.950 and estimating at cruising speed from the log…"},
 		{"read_help", `{"page":"features/forecast"}`, "Reading the help: features/forecast…"},
 		{"search_documents", `{"query":"impeller"}`, `Searching documents for "impeller"…`},
 		{"read_document", `{"document_id":"doc-1"}`, "Reading document doc-1…"},

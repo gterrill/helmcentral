@@ -906,7 +906,10 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"the season instead: prevailing winds and weather systems for that region in that month, how often a " +
 		"usable weather window comes, and current and tidal-stream patterns, all labelled as general knowledge. " +
 		"Take distances and bearings between the planned points themselves, not from the vessel's position, and " +
-		"do not open with where the boat is now. If the timing is unclear and would change the answer, say which " +
+		"do not open with where the boat is now. Get the distance and bearing of a planned leg from " +
+		"route_distance with from_lat/from_lon and to_lat/to_lon, which routes it over water; never work " +
+		"one out from two positions, because a straight line often crosses an island. If it returns an " +
+		"error, say you cannot give the distance and why. If the timing is unclear and would change the answer, say which " +
 		"you assumed in one line.\n\n")
 
 	b.WriteString("To resolve a place, call find_places with the bare feature name (\"Bona Bay\", not \"Bona Bay, " +
@@ -939,9 +942,19 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 
 		"Whenever the question names where the boat is leaving from and where it is going, or a route, the " +
 		"answer must include a Passage section, even when the question is mainly about the anchorage. For a " +
-		"passage leaving from the boat's position within the forecast range: take the distance_nm and bearing_deg that find_places returns for the destination from the vessel's " +
-		"position; call estimate_passage with that distance and the planned speed and report time, fuel burn " +
-		"and fuel margin; pass that bearing as course_deg to get_wind_forecast for the destination and read " +
+		"passage leaving from the boat's position within the forecast range: call estimate_passage with the " +
+		"destination's lat and lon from find_places and the planned speed, and report the distance_nm it " +
+		"returns, with time, fuel burn and fuel margin. estimate_passage routes the run over water, round " +
+		"islands and headlands, so that distance is the passage distance. Never quote the straight_line_nm " +
+		"or straight_line_bearing_deg that find_places gives as a passage distance or a course, and never " +
+		"work out a distance yourself from two positions: a straight line often crosses an island and makes " +
+		"the run look shorter than it is. If estimate_passage returns an error (a coastline square is not " +
+		"downloaded, an end point is on land, no water route was found), tell the operator you cannot give " +
+		"a passage distance and say why in the tool's words, then offer to carry on without one; do not " +
+		"substitute the straight line, an estimate, or a distance from your own knowledge unless the " +
+		"operator asks for one, and then label it as general knowledge. Say in a few words when the route " +
+		"goes round something (\"round the south of the island, 15 nm against 7 in a straight line\"). " +
+		"Pass estimate_passage's course_deg, the course of the longest leg, as course_deg to get_wind_forecast for the destination and read " +
 		"the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, quarter, " +
 		"following); do not work the angle out yourself. A power catamaran runs comfortably in a following " +
 		"sea and slows and burns more into a head sea. Say which it is for this passage.\n\n" +
@@ -955,7 +968,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		// now-or-forecast-range case as estimate_passage: the planning
 		// question above is already told to use general knowledge.
 		"For a passage leaving from the boat's position within the forecast range through water with tidal " +
-		"streams, after estimate_passage call plan_tidal_departure with find_places' bearing_deg as course_deg " +
+		"streams, after estimate_passage call plan_tidal_departure with estimate_passage's course_deg as course_deg " +
 		"and the estimated hours as passage_hours. Take flood_set_deg, the direction the flood stream sets " +
 		"toward, from the standing notes first, else from general knowledge, and set flood_set_source to match; " +
 		"never present a guessed direction as the notes' own. If you do not know which way the flood sets in " +

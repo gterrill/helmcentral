@@ -1105,8 +1105,9 @@ var mateToolAssessPassageWindow = mateTool{
 			"no_go or no_data with the limiting factor. Use it for \"which day should I leave\" and multi-leg trips " +
 			"with stays (leave Thursday, two nights at Cape Upstart, then Bowen). The limits come from the " +
 			"operator's settings; if they are not set the tool says so and you must tell the operator, never " +
-			"assume numbers. Wind is judged by its angle to each segment of the route, so add a via point at every " +
-			"headland the route rounds. Get coordinates from find_places. For each leg give " +
+			"assume numbers. Wind is judged by its angle to each segment of the route, so give the route's own " +
+			"bends as via points: call route_distance (or read the route waypoints in estimate_passage) for each leg and use its " +
+			"waypoints, never headlands you guess. Get place coordinates from find_places. For each leg give " +
 			"passage_hours (from estimate_passage) or speed_kn; if both are given the hours are used. Give flood_set_deg only from the operator's " +
 			"standing notes or after asking them; never guess it. Dates beyond the forecast show no_data. A card " +
 			"is attached to your reply, so do not repeat the grid as a table. " +
@@ -1125,7 +1126,7 @@ var mateToolAssessPassageWindow = mateTool{
 									"name": {"type": "string", "description": "Optional. Defaults to \"<start> → <end>\" from the point names."},
 									"route": {
 										"type": "array", "minItems": 2, "maxItems": 10,
-										"description": "Start, any via points, end. Use find_places for coordinates and add a via at each headland the route rounds.",
+										"description": "Start, any via points, end. Use find_places for the places and the waypoints route_distance returns for the via points between them.",
 										"items": {
 											"type": "object",
 											"properties": {

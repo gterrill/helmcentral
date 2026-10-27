@@ -14,7 +14,9 @@ var mateToolFindPlaces = mateTool{
 	name: "find_places",
 	function: openRouterFunctionDef{
 		Description: "Resolve a place name (a bay, anchorage, island, reef, marina, harbour or similar) " +
-			"to one or more candidate positions with distance and bearing, searching the " +
+			"to one or more candidate positions, each with its straight-line distance and bearing from the search centre " +
+			"(straight_line_nm, straight_line_bearing_deg: a line across the chart that can cross islands, never a passage " +
+			"distance; use estimate_passage for that), searching the " +
 			"configured place-names plugin. Centres on the vessel's " +
 			"current position unless near_lat/near_lon are given. Call this before any forecast or tide " +
 			"tool for a place you only know by name. Pass the bare feature name (e.g. \"Bona Bay\", not " +
@@ -73,18 +75,22 @@ type assistantLatLon struct {
 }
 
 // assistantPlaceCandidate is one find_places result: a named feature with
-// host-computed distance and bearing from the search centre (ADR 0091's
-// rule that a provider returns raw features and the host alone computes
-// distance/bearing, applied here to the place-names provider and to route
-// waypoints alike).
+// host-computed straight-line distance and bearing from the search centre
+// (ADR 0091's rule that a provider returns raw features and the host alone
+// computes distance/bearing, applied here to the place-names provider and to
+// route waypoints alike).
+//
+// The figures are named for what they are. A straight line crosses islands
+// and headlands, so it is a way to sort candidates and say "about", never
+// the length of a passage: estimate_passage routes that over water.
 type assistantPlaceCandidate struct {
-	Name       string  `json:"name"`
-	Kind       string  `json:"kind"`
-	Lat        float64 `json:"lat"`
-	Lon        float64 `json:"lon"`
-	DistanceNm float64 `json:"distance_nm"`
-	BearingDeg int     `json:"bearing_deg"`
-	Source     string  `json:"source"`
+	Name                   string  `json:"name"`
+	Kind                   string  `json:"kind"`
+	Lat                    float64 `json:"lat"`
+	Lon                    float64 `json:"lon"`
+	StraightLineNm         float64 `json:"straight_line_nm"`
+	StraightLineBearingDeg int     `json:"straight_line_bearing_deg"`
+	Source                 string  `json:"source"`
 }
 
 type assistantFindPlacesResult struct {
@@ -218,18 +224,18 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 
 	for _, m := range searchResult.Results {
 		candidates = append(candidates, assistantPlaceCandidate{
-			Name:       m.Name,
-			Kind:       m.Kind,
-			Lat:        m.Lat,
-			Lon:        m.Lon,
-			DistanceNm: roundTo1(haversineMeters(lat, lon, m.Lat, m.Lon) / metersPerNauticalMile),
-			BearingDeg: int(math.Round(bearingDeg(lat, lon, m.Lat, m.Lon))),
-			Source:     providerID,
+			Name:                   m.Name,
+			Kind:                   m.Kind,
+			Lat:                    m.Lat,
+			Lon:                    m.Lon,
+			StraightLineNm:         roundTo1(haversineMeters(lat, lon, m.Lat, m.Lon) / metersPerNauticalMile),
+			StraightLineBearingDeg: int(math.Round(bearingDeg(lat, lon, m.Lat, m.Lon))),
+			Source:                 providerID,
 		})
 	}
 
 	candidates = dedupeAssistantPlaceCandidates(candidates)
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].DistanceNm < candidates[j].DistanceNm })
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].StraightLineNm < candidates[j].StraightLineNm })
 	if len(candidates) > maxResults {
 		candidates = candidates[:maxResults]
 	}

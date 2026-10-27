@@ -1230,3 +1230,30 @@ func TestBuildAssistantSystemPrompt_AnchorageShelterRule(t *testing.T) {
 		}
 	}
 }
+
+// A straight line across the chart is never a passage distance: the prompt
+// sends Mate to the routing tools and tells it what to say when they fail.
+func TestBuildAssistantSystemPrompt_PassageDistanceIsRoutedNeverStraight(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"route_distance",
+		"routes the run over water",
+		"straight_line_nm",
+		"never work out a distance yourself",
+		"cannot give a passage distance",
+		"do not substitute the straight line",
+		"estimate_passage's course_deg",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the prompt to say %q, got:\n%s", want, prompt)
+		}
+	}
+	for _, notWant := range []string{
+		"take the distance_nm and bearing_deg that find_places returns",
+		"find_places' bearing_deg",
+	} {
+		if strings.Contains(prompt, notWant) {
+			t.Errorf("the prompt still tells Mate to use find_places' straight line: %q", notWant)
+		}
+	}
+}

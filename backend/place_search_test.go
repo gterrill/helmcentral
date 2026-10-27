@@ -32,11 +32,11 @@ func TestPlaceSearch_ReturnsCandidatesWithDistanceAndBearing(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Results) != 2 || res.Results[0].Name != "Coral Coast Marina" || res.Results[0].DistanceNm <= 0 {
+	if len(res.Results) != 2 || res.Results[0].Name != "Coral Coast Marina" || res.Results[0].StraightLineNm <= 0 {
 		t.Fatalf("expected nearest-first candidates with distance, got %+v", res.Results)
 	}
-	if res.Results[0].BearingDeg != 0 && res.Results[0].BearingDeg != 360 {
-		t.Fatalf("the nearer marina is due north, got bearing %d", res.Results[0].BearingDeg)
+	if res.Results[0].StraightLineBearingDeg != 0 && res.Results[0].StraightLineBearingDeg != 360 {
+		t.Fatalf("the nearer marina is due north, got bearing %d", res.Results[0].StraightLineBearingDeg)
 	}
 	if provider.lastCall().Query != "Coral Coast Marina" {
 		t.Fatalf("provider asked for %q", provider.lastCall().Query)

@@ -403,6 +403,7 @@ var mateTools = []mateTool{
 	mateToolGetWindForecast,
 	mateToolGetTides,
 	mateToolEstimatePassage,
+	mateToolRouteDistance,
 	mateToolPlanTidalDeparture,
 	mateToolAssessPassageWindow,
 	mateToolReadHelp,

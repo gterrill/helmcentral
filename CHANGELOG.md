@@ -19,6 +19,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   when the boat moves.
 ### Breaking
 
+- **Mate now needs the offline coastline to give a passage distance.** Ask how
+  far it is to a place, or for the time and fuel to get there, and Mate finds
+  the shortest way by water, round the islands and headlands in the way. Before,
+  a place on the far side of an island came back as the line across it, so the
+  run looked shorter than it was and the time and fuel were too low. Turn on
+  **Settings → Offline coastline** and let the squares round the boat download.
+  Until then, or if a square is missing, a position is on land or no water joins
+  the two places, Mate says it can't give a distance and why. It never falls
+  back to the straight line.
+
 - **Engine Cluster fuel bars no longer raise alarms or set their own colours.**
   A fuel bar now takes its colours from the tank's alarm levels, and the tank
   raises the alarm. Fuel bar zones you set before are ignored. Open the tank's
@@ -28,6 +38,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   longer raises a low fuel alarm. Add the tank as equipment to get one.
 
 ### Added
+
+- **Mate can measure a leg between two places.** Ask how far one place is from
+  another and Mate gives the distance by water and the course of the first leg,
+  starting from the place you name rather than the boat.
 
 - **Previous and next on a passage.** Two arrows at the right of the passage's
   title step to the passage that started later or earlier, within the list you

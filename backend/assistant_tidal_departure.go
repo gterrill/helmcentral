@@ -360,7 +360,7 @@ var mateToolPlanTidalDeparture = mateTool{
 		Description: "Rank departure times by how much of a passage runs with a fair tidal stream. It uses the " +
 			"nearest tide station's high and low water times for the stream's phase and the direction you give " +
 			"for the flood stream's set; stream rate is not modelled. Call it after estimate_passage, with " +
-			"find_places' bearing_deg as course_deg and the estimated hours as passage_hours. Take " +
+			"estimate_passage's course_deg as course_deg and the estimated hours as passage_hours. Take " +
 			"flood_set_deg from the operator's standing notes first, else general knowledge, and say which in " +
 			"flood_set_source. If you do not know which way the flood sets in that water, do not call it.",
 		Parameters: json.RawMessage(`{
@@ -368,7 +368,7 @@ var mateToolPlanTidalDeparture = mateTool{
 					"properties": {
 						"lat": {"type": "number", "description": "Latitude of the departure position, used to find the tide station."},
 						"lon": {"type": "number", "description": "Longitude of the departure position."},
-						"course_deg": {"type": "number", "description": "Passage course in degrees true, 0 to 360 (find_places' bearing_deg)."},
+						"course_deg": {"type": "number", "description": "Passage course in degrees true, 0 to 360 (estimate_passage's course_deg, the longest leg's bearing)."},
 						"passage_hours": {"type": "number", "description": "Passage duration in hours, greater than 0 and at most 24 (from estimate_passage)."},
 						"flood_set_deg": {"type": "number", "description": "Direction in degrees true that the flood stream sets toward, 0 to 360."},
 						"flood_set_source": {
