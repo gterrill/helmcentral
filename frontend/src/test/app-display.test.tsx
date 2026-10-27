@@ -326,6 +326,12 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 // cares about, the same pattern anchor-imagery-toggle.test.tsx uses for
 // AnchorWatchMap. Doubles as a marker for "did the wall show the OTHER
 // display's page" in the cross-display leakage test below.
+vi.mock('@/components/poi-map-tile', () => ({
+  PoiMapTile: (props: { forceDark?: boolean; config: { title: string } }) => (
+    <div data-testid={`poi-force-dark-${props.config.title}`}>{String(props.forceDark)}</div>
+  ),
+}))
+
 const { anchorTileMounts } = vi.hoisted(() => ({ anchorTileMounts: { count: 0 } }))
 vi.mock('@/components/anchor-watch-tile', async () => {
   const { useEffect } = await import('react')
@@ -621,6 +627,25 @@ describe('App at /display/<slug> keeps every page of the feed mounted', () => {
 
     expect(anchorTileMounts.count).toBe(1)
     expect(screen.getByTestId('display-anchor-watch-isdark')).toBe(tile)
+  })
+
+  it("gives a resting page's tile its own page's skin, not the showing page's", () => {
+    const poi = (title: string): DashboardLayoutItem => ({
+      id: `poi-map:${title}`, x: 0, y: 0, w: 6, h: 8,
+      poiMap: { title, categories: [], layout: 'map' },
+    } as unknown as DashboardLayoutItem)
+    mockPagesState.pages = [
+      page('p1', 'Plain', [poi('plain')], { display_id: 'd1', dwell_seconds: 30 }),
+      page('p2', 'Dark', [poi('dark')], { display_id: 'd1', dwell_seconds: 30, skin: 'instrument' }),
+    ]
+    window.history.replaceState({}, '', '/display/flybridge')
+    render(<App />)
+
+    expect(screen.getByTestId('poi-force-dark-plain')).toHaveTextContent('false')
+    expect(screen.getByTestId('poi-force-dark-dark')).toHaveTextContent('true')
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    expect(screen.getByTestId('poi-force-dark-plain')).toHaveTextContent('false')
+    expect(screen.getByTestId('poi-force-dark-dark')).toHaveTextContent('true')
   })
 
   it('hides and inerts the pages that are not showing, and none other', () => {

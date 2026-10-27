@@ -1399,14 +1399,17 @@ function AppShell() {
     onAnchorImageryToggle: setShowAnchorImagery,
     onRadarEchoToggle: setShowRadarEcho,
   }), [openWidgetConfig, openAlarmsPanel, openForecastPanel, openAnchorWatchPanel, openHouseBankRoles, openGeneratorRoles])
-  const forceDarkMaps = activePage?.skin === 'instrument'
-  const renderWidget = useCallback((widget: DashboardLayoutItem): ReactNode => (
+  // Maps follow the skin of the page they sit on, not the page on screen: a
+  // wall keeps its resting pages mounted (ADR 0217), and a resting map that
+  // followed the showing page would swap its style every lap. One stable
+  // callback per skin keeps the memoized grid skipping renders.
+  const renderWidgetFor = useCallback((forceDark: boolean) => (widget: DashboardLayoutItem): ReactNode => (
     <WidgetHost
       widget={widget}
       editing={layoutEditing}
       interactive={!isDisplay}
       isDarkTheme={isDarkTheme}
-      forceDark={forceDarkMaps}
+      forceDark={forceDark}
       distanceUnits={uiConfig.distanceUnits}
       readOnly={!canWrite}
       ctx={equipmentContext}
@@ -1414,7 +1417,9 @@ function AppShell() {
       showRadarEcho={showRadarEcho}
       actions={widgetActions}
     />
-  ), [layoutEditing, isDisplay, isDarkTheme, forceDarkMaps, uiConfig.distanceUnits, canWrite, equipmentContext, showAnchorImagery, showRadarEcho, widgetActions])
+  ), [layoutEditing, isDisplay, isDarkTheme, uiConfig.distanceUnits, canWrite, equipmentContext, showAnchorImagery, showRadarEcho, widgetActions])
+  const renderWidgetPlain = useMemo(() => renderWidgetFor(false), [renderWidgetFor])
+  const renderWidgetInstrument = useMemo(() => renderWidgetFor(true), [renderWidgetFor])
 
   // The Add Tile menu's multi-instance entries (ADR 0107): each opens the
   // same config dialog/draft flow it always has — App.tsx still owns every
@@ -1627,7 +1632,7 @@ function AppShell() {
             // never renders a hero row the backend would have refused to
             // persist in the first place.
             heroId={page?.display_id ? undefined : page?.hero}
-            renderWidget={renderWidget}
+            renderWidget={page?.skin === 'instrument' ? renderWidgetInstrument : renderWidgetPlain}
             onRemoveWidget={handleRemoveWidget}
             onDuplicateWidget={handleDuplicateWidget}
             onLayoutSettle={handleLayoutSettle}
