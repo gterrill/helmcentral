@@ -16,7 +16,12 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
   },
 }))
 
-import { useVesselState } from '@/hooks/use-vessel-state'
+import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+
+// The whole state, through the store's own selector, so each test can read
+// any field it checks.
+const all = (state: VesselStateValue) => state
+const useVesselState = () => useVesselStateSelector(all)
 
 function emit(payload: unknown) {
   act(() => {

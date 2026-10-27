@@ -20,23 +20,35 @@ import {
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { toast } from 'sonner'
 
-import { AnchorWatchTile } from '@/components/anchor-watch-tile'
-import { AlternatorTile } from '@/components/alternator-tile'
+import {
+  LiveAlarmBanner,
+  LiveAlarmsDrawer,
+  LiveAlternatorTile,
+  LiveAnchorWatchDrawer,
+  LiveAnchorWatchTile,
+  LiveAutopilotTile,
+  LiveClockTile,
+  LiveCurrentConditionsTile,
+  LiveDepthTideTile,
+  LiveDisplayShell,
+  LiveForecastPage,
+  LiveGeneratorTile,
+  LiveNearbyVesselsTile,
+  LivePoiMapTile,
+  LivePositionTile,
+  LiveRadarDrawer,
+  LiveRouteTile,
+  LiveSignalKDiscoveryPrompt,
+  LiveWindTile,
+} from '@/components/live-surfaces'
 import { BatteryPowerTile } from '@/components/battery-power-tile'
 import { HotWaterTile } from '@/components/hot-water-tile'
-import { DepthTideTile } from '@/components/depth-tide-tile'
-import { PositionTile } from '@/components/position-tile'
 import { TodayNowTile } from '@/components/today-now-tile'
-import { ClockTile } from '@/components/clock-tile'
-import { CurrentConditionsTile } from '@/components/current-conditions-tile'
 import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
-import { WindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { SetupLine } from '@/components/setup-line'
 import { requestSetupFocus } from '@/lib/setup-status'
-import { AlarmBanner } from '@/components/alarm-banner'
-import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { RadarTargetsTile } from '@/components/radar-targets-tile'
 // Not lazy: prefetchNoteEditor() is a plain function that only reaches into
 // the editor-vendor chunk through a dynamic import() of its own (see that
@@ -45,14 +57,10 @@ import { prefetchNoteEditor } from '@/components/note-editor'
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
 import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
 
-const AlarmsDrawer = lazy(() => import('@/components/alarms-drawer').then((mod) => ({ default: mod.AlarmsDrawer })))
-const AnchorWatchDrawer = lazy(() => import('@/components/anchor-watch-drawer').then((mod) => ({ default: mod.AnchorWatchDrawer })))
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
 const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-route-panel').then((mod) => ({ default: mod.PassagesRoutePanel })))
 const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
-const ForecastPage = lazy(() => import('@/components/forecast-page').then((mod) => ({ default: mod.ForecastPage })))
-const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) => ({ default: mod.RadarDrawer })))
 const SettingsRoutePanel = lazy(() => import('@/components/settings/settings-route-panel').then((mod) => ({ default: mod.SettingsRoutePanel })))
 // MateSheet and HelpSheet (unlike the panels above) fetch nothing and run
 // no effects until they've actually been opened - see the `hasOpened`
@@ -71,12 +79,9 @@ const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ 
 // since the render path that names it is dead code once DEV is false.
 const PatternsGallery = lazy(() => import('@/components/patterns/gallery').then((mod) => ({ default: mod.PatternsGallery })))
 import { NavigationGuardDialog } from '@/components/navigation-guard-dialog'
-import { AutopilotTile } from '@/components/autopilot-tile'
 import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
-import { GeneratorTile } from '@/components/generator-tile'
 import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
-import { RouteTile } from '@/components/route-tile'
 import { CLUSTER_DEFAULT_SIZE, DashboardBentoGrid, raiseGaugeHeight } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
@@ -91,8 +96,7 @@ import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
 import { LoadError, RefreshFailedOverlay } from '@/components/patterns/refresh-failed-note'
 import { NO_DISPLAY_OPTIONS, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
-import { nextWaypoint, traversalOrder, computeClockTripEta } from '@/lib/next-waypoint'
-import { DisplayShell } from '@/components/display-shell'
+import { nextWaypoint, traversalOrder } from '@/lib/next-waypoint'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
 import { WallDisplaysPanel } from '@/components/wall-displays-panel'
@@ -107,19 +111,17 @@ import { useRadarTargets } from '@/hooks/use-radar-targets'
 import { useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
 import { ConnectionBanner } from '@/components/connection-banner'
-import { usePlaceName } from '@/hooks/use-place-name'
 import { useTanksState } from '@/hooks/use-tanks-state'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
-import { useVesselState } from '@/hooks/use-vessel-state'
-import { collisionAlarmStatesByVessel, useAlarms } from '@/hooks/use-alarms'
+import { getVesselStateSnapshot, useRetainVesselState, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+import { useRetainAlarms } from '@/hooks/use-alarms'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
 import { useSocBands } from '@/hooks/use-soc-bands'
 import { useOvernightProjection } from '@/hooks/use-overnight-projection'
 import { useSettingsForm } from '@/hooks/use-settings-form'
 import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
-import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
@@ -133,7 +135,7 @@ import { useCZoneSwitches } from '@/hooks/use-czone-switches'
 import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
-import { FORECAST_REFRESH_SECONDS, PLACE_NAME_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
+import { FORECAST_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
 import { useAppConfig } from '@/hooks/use-app-config'
 import { useMateVoice } from '@/hooks/use-mate-voice'
 import { useMateAnswerWatcher } from '@/hooks/use-mate-answer-watcher'
@@ -171,7 +173,6 @@ import {
 import { POI_CATEGORY_IDS } from '@/lib/poi'
 import { EmbedTile } from '@/components/embed-tile'
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
-import { PoiMapTile } from '@/components/poi-map-tile'
 import { PoiMapConfigDialog } from '@/components/poi-map-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
 import { GaugeTile } from '@/components/gauge-tile'
@@ -354,6 +355,8 @@ export function App() {
     </AppRouterContext.Provider>
   )
 }
+
+const selectNavigationState = (state: VesselStateValue) => state.navigationState
 
 function AppShell() {
   // Called before every other hook, and unconditionally on every render
@@ -957,52 +960,17 @@ function AppShell() {
     return () => clearTimeout(timer)
   }, [toastMessage])
 
-  const {
-    depth,
-    vesselLengthOverallM,
-    vesselDraftM,
-    currentDriftKts,
-    currentSetDeg,
-    currentDriftImpactKts,
-    navigationState,
-    latitude,
-    longitude,
-    gnssQualityIndicator,
-    gnssHdop,
-    gnssSatellites,
-    gnssValidationState,
-    gnssValidationReason,
-    gnssCriticalAlert,
-    headingTrue,
-    windSpeedApparentKts,
-    windAngleApparentDeg,
-    windSide,
-    windAngleRelativeDeg,
-    windSpeedTrueKts,
-    windAngleTrueDeg,
-    windSideTrue,
-    windAngleTrueRelativeDeg,
-    windDirectionTrueDeg,
-    maxGustKts,
-    maxGustTrueKts,
-    generatorState,
-    generatorManualStart,
-    generatorManualStartTimer,
-    generatorRunningByCondition,
-    generatorRuntime,
-    enginesRunning,
-    speedOverGroundKts,
-    source: vesselStateSource,
-    depthLastUpdateAgeS,
-    positionLastUpdateAgeS,
-    windLastUpdateAgeS,
-  } = useVesselState()
-
-  const { alarms, worst: worstAlarmState, acknowledge: acknowledgeAlarm, silence: silenceAlarm } = useAlarms()
-  // Vessel id -> worst live collision state, for the anchor-watch map's AIS
-  // markers (ADR 0088). Memoized so the map doesn't see a new Map identity
-  // on every render that changes nothing about the alarm list.
-  const aisCollisionAlarms = useMemo(() => collisionAlarmStatesByVessel(alarms), [alarms])
+  // The shell reads one field of vessel state itself: the navigation state,
+  // which picks the wall's pages (useDisplayRotation below). Every tile and
+  // page reads its own fields from the store (ADR 0215); the shell holds it
+  // open so the last fix survives page switches and wall rotations.
+  useRetainVesselState()
+  const navigationState = useVesselStateSelector(selectNavigationState)
+  // The shell draws no alarm itself. The banner, the Alarms page, the lamp
+  // strips, the wall's pill and the AIS markers each read the alarms store
+  // (ADR 0215); the shell only holds it open, so the list survives page
+  // switches and wall rotations without an alarms tick re-rendering the shell.
+  useRetainAlarms()
   // Lifted out of AlarmsDrawer so a rule saved there reaches the battery
   // tile's SoC bands (useSocBands below) without a reload.
   const {
@@ -1093,7 +1061,11 @@ function AppShell() {
   // itself (config/app-config.ts's ANCHOR_WATCH_ACTIVE/IDLE_REFRESH_SECONDS),
   // since it depends on whether a watch is currently active — not on this
   // component's unrelated vessel-state refresh setting.
-  const anchorWatch = useAnchorWatch(latitude, longitude, gnssCriticalAlert)
+  // The watch record: the shell reads whether a watch is set, the auto-raise
+  // and the planning depth, none of which moves with the boat. The anchor
+  // watch tile and page apply the live fix themselves (anchorWatchAt), so a
+  // position tick does not re-render the shell.
+  const anchorWatch = useAnchorWatch()
   // Surfaces the server's auto-raise decision (ADR 0099, anchor_auto_raise.go)
   // as the same toast the old browser-side auto-close used to fire directly.
   // lastSeenAutoRaiseAtRef starts uninitialized (undefined) so the first
@@ -1145,18 +1117,6 @@ function AppShell() {
   // the anchor watch tile and drawer draw it.
   const anchorTrailEnabled = effectiveWidgets.some((w) => w.id === 'anchor-watch') || activePanel === 'anchor-watch'
   const { getAnchorTrail } = useAnchorTrail(5000, anchorTrailEnabled)
-  // A reverse geocode of a slowly changing position, cached server-side per
-  // ~550m grid cell — see PLACE_NAME_REFRESH_SECONDS (config/app-config.ts).
-  const placeName = usePlaceName(latitude, longitude, PLACE_NAME_REFRESH_SECONDS)
-  // The clock wall-display tile's trip-ETA line (ADR 0092, ADR 0125):
-  // computeClockTripEta (lib/next-waypoint.ts) reports to the final waypoint
-  // of the route SignalK is navigating, or to the Course API's bare next
-  // point (GET /api/routes/active's `destination`, backend/active_route.go)
-  // when a chartplotter go-to has no route behind it.
-  const clockTripEta = useMemo(
-    () => computeClockTripEta(routeActivationStatus, latitude, longitude, speedOverGroundKts, new Date()),
-    [routeActivationStatus, latitude, longitude, speedOverGroundKts],
-  )
   // The Nearby map's route layer: the route SignalK is navigating, combined
   // once here so the poi-map tile never has to know route activation exists -
   // it only draws whatever waypoints and next-index it's handed. null
@@ -1178,9 +1138,10 @@ function AppShell() {
   const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5, activePageHasCZoneWidget)
   const autopilot = useAutopilot()
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
-  const isAlternatorTileVisible = enginesRunning === true
 
+  // Read at the click, not subscribed: the shell never renders on a fix.
   const handleDropAnchorHere = () => {
+    const { latitude, longitude, depth } = getVesselStateSnapshot()
     if (latitude === null || longitude === null) return
     void anchorWatch.setAnchorHere(latitude, longitude, {
       planningDepthM: depth,
@@ -1189,7 +1150,7 @@ function AppShell() {
   }
 
   const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
-  const hasActiveAnchorWatch = anchorWatch.anchorState !== 'none'
+  const hasActiveAnchorWatch = anchorWatch.active
 
   // Drives activePageId exactly the way a sidebar click or a deep link
   // does (ADR 0089, superseded by ADR 0110), so activePage/effectiveWidgets/
@@ -1498,10 +1459,11 @@ function AppShell() {
     }
   }, [activePage, effectiveWidgets, poiMapDraft, updatePage])
 
-  // Item D: the shell still re-renders on every vessel-state, alarms,
-  // autopilot, electrical, solar, tanks, nearby-vessel, radar and anchor-watch
-  // tick, and on each polled forecast (gauge values no longer: ADR 0215 moved
-  // them into the tiles). renderWidget below runs fresh on every one of those
+  // Item D: the shell still re-renders on every autopilot, electrical, solar,
+  // tanks, nearby-vessel, radar and anchor-watch tick, and on each polled
+  // forecast (gauge values, alarms and vessel state no longer: ADR 0215 moved
+  // them into the tiles; vessel state still re-renders it when the navigation
+  // state changes). renderWidget below runs fresh on every one of those
   // renders (it is deliberately not memoized itself —
   // see its own comment), so an inline `onConfigure={() => setXDraft(widget)}`
   // handed a memoized tile (EngineClusterTile, LampStripTile, GaugeGroupTile,
@@ -1537,8 +1499,8 @@ function AppShell() {
   const openRibbonDialog = useCallback(() => setRibbonDialogOpen(true), [])
 
   // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
-  // (essentially the entire polled-data surface of the component — vessel,
-  // electrical, tanks, nearby-vessels, anchor watch, wind, etc.), several of
+  // (essentially the entire polled-data surface of the component —
+  // electrical, tanks, nearby-vessels, anchor watch, forecasts, etc.), several of
   // which change every few seconds independently. Memoizing would just
   // recreate the reference on nearly every render anyway, so it buys no real
   // stabilization — left as a plain function per the task's own guidance for
@@ -1564,8 +1526,6 @@ function AppShell() {
         <LampStripHost
           config={widget.lamps}
           ctx={equipmentContext}
-          worstAlarmState={worstAlarmState}
-          alarms={alarms}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setLampStripDraft)}
           onOpenAlarms={openAlarmsPanel}
@@ -1610,18 +1570,12 @@ function AppShell() {
     if (isPoiMapWidgetId(id)) {
       if (!widget.poiMap) return null
       return (
-        <PoiMapTile
+        <LivePoiMapTile
           config={widget.poiMap}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setPoiMapDraft)}
-          latitude={latitude}
-          longitude={longitude}
-          headingTrue={headingTrue}
           activeRoute={activeRoute}
-          gnssCriticalAlert={gnssCriticalAlert}
-          positionLastUpdateAgeS={positionLastUpdateAgeS}
           nearbyVessels={nearbyVessels}
-          aisCollisionAlarms={aisCollisionAlarms}
           getSelfTrail={getSelfTrail}
           isDarkTheme={isDarkTheme}
           forceDark={activePage?.skin === 'instrument'}
@@ -1636,32 +1590,12 @@ function AppShell() {
         return <MarineHeader />
       case 'wind':
         return (
-          <WindTile
-            lastUpdateAgeS={windLastUpdateAgeS}
-            headingTrue={headingTrue}
-            windAngleApparentDeg={windAngleApparentDeg}
-            windSide={windSide}
-            windAngleRelativeDeg={windAngleRelativeDeg}
-            windSpeedApparentKts={windSpeedApparentKts}
-            windSpeedTrueKts={windSpeedTrueKts}
-            windAngleTrueDeg={windAngleTrueDeg}
-            windSideTrue={windSideTrue}
-            windAngleTrueRelativeDeg={windAngleTrueRelativeDeg}
-            windDirectionTrueDeg={windDirectionTrueDeg}
-            currentSetDeg={currentSetDeg}
-            currentDriftKts={currentDriftKts}
-            currentDriftImpactKts={currentDriftImpactKts}
-            maxGustKts={maxGustKts}
-            maxGustTrueKts={maxGustTrueKts}
-          />
+          <LiveWindTile />
         )
       case 'depth-tide':
         return (
-          <DepthTideTile
-            lastUpdateAgeS={depthLastUpdateAgeS}
-            depth={depth}
+          <LiveDepthTideTile
             isImperialDistance={isImperialDistance}
-            navigationState={navigationState}
             depthTrend={depthTrend}
             tide={tide}
             onOpen={layoutEditing ? undefined : openForecastPanel}
@@ -1669,18 +1603,7 @@ function AppShell() {
         )
       case 'position':
         return (
-          <PositionTile
-            lastUpdateAgeS={positionLastUpdateAgeS}
-            latitude={latitude}
-            longitude={longitude}
-            headingTrue={headingTrue}
-            gnssValidationState={gnssValidationState}
-            gnssQualityIndicator={gnssQualityIndicator}
-            gnssHdop={gnssHdop}
-            gnssValidationReason={gnssValidationReason}
-            gnssSatellites={gnssSatellites}
-            placeName={placeName}
-          />
+          <LivePositionTile />
         )
       case 'today-now':
         return (
@@ -1695,22 +1618,16 @@ function AppShell() {
         )
       case 'clock':
         return (
-          <ClockTile
+          <LiveClockTile
+            routeStatus={routeActivationStatus}
             sunriseTime={forecast[0]?.sunriseTime ?? null}
             sunsetTime={forecast[0]?.sunsetTime ?? null}
             moonPhase={forecast[0]?.moonPhase ?? null}
-            placeName={placeName}
-            tripEta={clockTripEta}
           />
         )
       case 'current-conditions':
         return (
-          <CurrentConditionsTile
-            depth={depth}
-            depthLastUpdateAgeS={depthLastUpdateAgeS}
-            windSpeedTrueKts={windSpeedTrueKts}
-            windDirectionTrueDeg={windDirectionTrueDeg}
-            maxTrueWindKts1h={maxGustTrueKts['1h']}
+          <LiveCurrentConditionsTile
             weather={weather}
             forecast={forecast}
             nextHour={forecastNextHour}
@@ -1729,21 +1646,12 @@ function AppShell() {
         )
       case 'anchor-watch':
         return (
-          <AnchorWatchTile
-            lastUpdateAgeS={positionLastUpdateAgeS}
+          <LiveAnchorWatchTile
             watch={anchorWatch}
-            lat={latitude}
-            lon={longitude}
-            depthMeters={depth}
-            currentDriftKts={currentDriftKts}
-            currentSetDeg={currentSetDeg}
-            currentDriftImpactKts={currentDriftImpactKts}
             isImperial={isImperialDistance}
-            vesselHeadingDeg={headingTrue}
             vesselTrail={getAnchorTrail}
             aisVessels={nearbyVessels}
             aisTrails={getAisTrails}
-            aisCollisionAlarms={aisCollisionAlarms}
             radarTargets={radarTargets}
             radars={radarInfos}
             radarSource={radarSource}
@@ -1771,21 +1679,15 @@ function AppShell() {
         )
       case 'route':
         return (
-          <RouteTile
-            status={routeActivationStatus}
-            latitude={latitude}
-            longitude={longitude}
-            speedKts={speedOverGroundKts ?? 0}
-          />
+          <LiveRouteTile status={routeActivationStatus} />
         )
       case 'nearby-vessels':
         return (
-          <NearbyVesselsTile
+          <LiveNearbyVesselsTile
             vessels={nearbyVessels}
             loading={nearbyVesselsLoading}
             distanceUnits={uiConfig.distanceUnits}
             lastUpdateAgeS={nearbyVesselsAgeS}
-            aisCollisionAlarms={aisCollisionAlarms}
             maxRangeM={nearbyVesselsMaxRangeM}
           />
         )
@@ -1837,15 +1739,10 @@ function AppShell() {
           />
         )
       case 'alternator':
-        return <AlternatorTile port={alternator0} starboard={alternator1} enginesRunning={isAlternatorTileVisible} />
+        return <LiveAlternatorTile port={alternator0} starboard={alternator1} />
       case 'generator':
         return (
-          <GeneratorTile
-            generatorState={generatorState}
-            generatorManualStart={generatorManualStart}
-            generatorManualStartTimer={generatorManualStartTimer}
-            generatorRunningByCondition={generatorRunningByCondition}
-            generatorRuntime={generatorRuntime}
+          <LiveGeneratorTile
             generatorRealPowerW={generatorRealPowerW}
             generatorConfigured={generatorConfigured}
             generatorNone={generatorNone}
@@ -1859,7 +1756,7 @@ function AppShell() {
         return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} error={czoneError} readOnly={!canWrite} />
       case 'autopilot':
         return (
-          <AutopilotTile
+          <LiveAutopilotTile
             state={autopilot.state}
             pending={autopilot.pending}
             error={autopilot.error}
@@ -1873,7 +1770,6 @@ function AppShell() {
             onSetMode={autopilot.setMode}
             onDodge={autopilot.dodge}
             onClearDodge={autopilot.clearDodge}
-            headingTrueDeg={headingTrue}
             readOnly={!canWrite}
           />
         )
@@ -2057,8 +1953,6 @@ function AppShell() {
           <LampStripHost
             config={ribbon}
             ctx={equipmentContext}
-            worstAlarmState={worstAlarmState}
-            alarms={alarms}
             editing={layoutEditing}
             onConfigure={openRibbonDialog}
             onOpenAlarms={openAlarmsPanel}
@@ -2199,8 +2093,7 @@ function AppShell() {
     switch (activePanel) {
       case 'forecast':
         return (
-          <ForecastPage
-            boatLongitude={longitude}
+          <LiveForecastPage
             canWrite={canWrite}
             boat={buildForecastDrawerProps({
               weather: weatherFeed,
@@ -2213,10 +2106,7 @@ function AppShell() {
         )
       case 'alarms':
         return (
-          <AlarmsDrawer
-            alarms={alarms}
-            onAcknowledge={acknowledgeAlarm}
-            onSilence={silenceAlarm}
+          <LiveAlarmsDrawer
             rules={alarmRules}
             loading={alarmRulesLoading}
             error={alarmRulesError}
@@ -2228,7 +2118,7 @@ function AppShell() {
           />
         )
       case 'radar':
-        return <RadarDrawer latitude={latitude} longitude={longitude} />
+        return <LiveRadarDrawer />
       case 'assistant':
         return (
           <AssistantDrawer
@@ -2351,41 +2241,18 @@ function AppShell() {
       case 'anchor-watch':
         return (
           <>
-            {/* vesselLat/vesselLon fall back from the live fix to the anchor
-                point (e.g. GPS lost after the anchor was already set), and stay
-                null only when neither is available: the drawer renders an
-                explicit "No GPS fix" placeholder in the map slot for that case
-                rather than being handed a fabricated 0,0.
-
-                hasGpsFix (code-review finding) tells the drawer whether that
-                substitution actually happened — its own Adjust-mode "Alarm
-                would sound now" check must not evaluate against the anchor
-                point (distance ~0, warning wrongly never fires) or the
-                backend's -1/-1 "no fix" sentinel (thousands of km away,
-                warning wrongly always fires; see gnss_critical_alert and
-                ~/papercuts.md's own entry on this exact sentinel). latitude/
-                longitude here are use-vessel-state.ts's raw values — a plain
-                range check away from being -1, not null, when the sentinel
-                fires, which is why the pair is checked explicitly rather than
-                trusting the substituted vesselLat/vesselLon below. */}
-            <AnchorWatchDrawer
+            {/* The drawer's fix, depth, current, wind and the vessel's size
+                come from vessel state inside LiveAnchorWatchDrawer, which
+                also applies the live fix to the watch record; see its comment
+                on the GPS fallback and the -1/-1 sentinel. */}
+            <LiveAnchorWatchDrawer
+              watch={anchorWatch}
               placemarks={placemarks}
               onPlacemarkCreate={createPlacemark}
               onPlacemarkRemove={removePlacemark}
-              vesselLat={latitude ?? anchorWatch.anchorLat}
-              vesselLon={longitude ?? anchorWatch.anchorLon}
-              hasGpsFix={latitude !== null && longitude !== null && !gnssCriticalAlert && !(latitude === -1 && longitude === -1)}
-              vesselHeadingDeg={headingTrue}
               anchorLat={anchorWatch.anchorLat}
               anchorLon={anchorWatch.anchorLon}
               radiusMeters={anchorWatch.radiusMeters}
-              depthMeters={depth}
-              depthLastUpdateAgeS={depthLastUpdateAgeS}
-              currentDriftKts={currentDriftKts}
-              currentSetDeg={currentSetDeg}
-              currentDriftImpactKts={currentDriftImpactKts}
-              distanceMeters={anchorWatch.distanceMeters}
-              bearingDeg={anchorWatch.bearingDeg}
               bowOffsetM={anchorWatch.bowOffsetM}
               bowOffsetApplied={anchorWatch.bowOffsetApplied}
               bowOffsetReason={anchorWatch.bowOffsetReason}
@@ -2397,7 +2264,6 @@ function AppShell() {
               vesselTrail={getAnchorTrail}
               aisVessels={nearbyVessels}
               aisTrails={getAisTrails}
-              aisCollisionAlarms={aisCollisionAlarms}
               radarTargets={radarTargets}
               radars={radarInfos}
               radarSource={radarSource}
@@ -2411,17 +2277,11 @@ function AppShell() {
               onClearAnchor={anchorWatch.clearAnchor}
               isImperial={isImperialDistance}
               onDropAnchor={handleDropAnchorHere}
-              canDrop={latitude !== null && longitude !== null}
-              anchorState={anchorWatch.anchorState}
               rodeDeployedM={anchorWatch.rodeDeployedM}
               seaState={anchorWatch.seaState}
               seabedType={anchorWatch.seabedType}
-              windSpeedApparentKts={windSpeedApparentKts}
-              maxGustKts={maxGustKts}
               tide={tide}
               anchorConfig={anchorConfig}
-              vesselLengthOverallM={vesselLengthOverallM}
-              vesselDraftM={vesselDraftM}
               windBandId={windBandId}
               onWindBandChange={setWindBandId}
               onUpdateRodeAndConditions={anchorWatch.updateRodeAndConditions}
@@ -2553,9 +2413,8 @@ function AppShell() {
     }
 
     return (
-      <DisplayShell
+      <LiveDisplayShell
         display={wallDisplay}
-        alarms={alarms}
         preview={displayOptions.preview}
         overlay={
           <>
@@ -2588,7 +2447,7 @@ function AppShell() {
           </>
         )}
         <DisplayRemoteController rotation={displayRotation} onAction={bumpRemoteAnnouncement} />
-      </DisplayShell>
+      </LiveDisplayShell>
     )
   }
 
@@ -3001,10 +2860,8 @@ function AppShell() {
                 tooltip can be anchored to a trigger inside any of them and
                 must remain readable. */}
             <div className={cn('relative z-55', isFullscreenDashboard && 'pr-12')} data-testid="alarm-banner-stack">
-              <AlarmBanner
-                alarms={alarms}
+              <LiveAlarmBanner
                 onOpen={openAlarmsPanel}
-                onAcknowledge={acknowledgeAlarm}
                 forecastWarnings={activeForecastWarning}
               />
             </div>
@@ -3035,7 +2892,7 @@ function AppShell() {
         </div>
       </SidebarInset>
 
-      <SignalKDiscoveryPrompt vesselStateSource={vesselStateSource} />
+      <LiveSignalKDiscoveryPrompt />
 
 
       <NavigationGuardDialog />

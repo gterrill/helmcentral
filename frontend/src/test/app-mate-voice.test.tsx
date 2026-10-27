@@ -76,8 +76,7 @@ vi.mock('@/hooks/use-app-config', () => ({
   publishAppConfigSettings: vi.fn(),
 }))
 
-vi.mock('@/hooks/use-vessel-state', () => ({
-  useVesselState: () => ({
+vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
     depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
     headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
     windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
@@ -86,8 +85,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     generatorRunningByCondition: null, generatorRuntime: null,
     enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
     gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false,
-  }),
-}))
+  })))
 
 vi.mock('@/hooks/use-electrical-state', () => ({
   useElectricalState: () => ({
@@ -113,8 +111,10 @@ vi.mock('@/hooks/use-radar-targets', () => ({
 }))
 
 vi.mock('@/hooks/use-anchor-watch', () => ({
+  // The tile and page apply the fix to the record; the record here already has it.
+  anchorWatchAt: (watch: unknown) => watch,
   useAnchorWatch: () => ({
-    anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
+    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
     rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
     distanceMeters: null, bearingDeg: null,
     planningDepthM: null, planningTideHeightFt: null,
@@ -186,9 +186,8 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 
 // [P1, impeccable critique 2026-09-12] a live alarm has to stay legible over
 // the Mate sheet's own scrim - see the stacking test below. One live alarm
-// is enough to drive the banner; collisionAlarmStatesByVessel is also
-// re-exported from this module (App.tsx imports both), so it has to be
-// mocked here too rather than just useAlarms.
+// is enough to drive the banner, which reads it through useAlarmList; the
+// mock lists every hook the shell and its surfaces import from this module.
 const mockAlarm = {
   rule_id: 'helmcentral:test-alarm',
   label: 'Test alarm',
@@ -203,7 +202,15 @@ const mockAlarm = {
 }
 
 vi.mock('@/hooks/use-alarms', () => ({
-  useAlarms: () => ({ alarms: [mockAlarm], worst: 'alarm', acknowledge: vi.fn(), silence: vi.fn() }),
+  // The shell holds the store; the surfaces read it through these (ADR 0215).
+  useRetainAlarms: () => {},
+  useAlarmList: () => [mockAlarm],
+  useKnownAlarmList: () => [mockAlarm],
+  useWorstAlarmState: () => 'alarm',
+  useAisCollisionAlarms: () => new Map(),
+  useAnchorDragAlarm: () => null,
+  acknowledgeAlarm: vi.fn(),
+  silenceAlarm: vi.fn(),
   collisionAlarmStatesByVessel: () => new Map(),
 }))
 

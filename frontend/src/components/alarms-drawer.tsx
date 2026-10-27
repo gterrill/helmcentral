@@ -40,7 +40,8 @@ function formatDwell(seconds: number): string {
 }
 
 interface AlarmsDrawerProps {
-  alarms: ActiveAlarm[]
+  /** Null until the first alarms event: not known yet, so not "All clear". */
+  alarms: ActiveAlarm[] | null
   onAcknowledge: (ruleId: string) => Promise<void>
   onSilence: (ruleId: string) => Promise<void>
   // Rules are lifted into App and passed down (rather than the drawer
@@ -63,8 +64,10 @@ interface AlarmsDrawerProps {
   forecastWarnings: ForecastWarnings | null
 }
 
+const NO_ALARMS: ActiveAlarm[] = []
+
 export const AlarmsDrawer = memo(function AlarmsDrawer({
-  alarms,
+  alarms: knownAlarms,
   onAcknowledge,
   onSilence,
   rules,
@@ -76,6 +79,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
   collisionTuningUrl,
   forecastWarnings,
 }: AlarmsDrawerProps) {
+  const alarms = knownAlarms ?? NO_ALARMS
   const { entries, refresh: refreshLog } = useAlarmLog(true)
   const { paths: signalKPaths } = useSignalKPaths(true)
   const { identifiers: ignoredSensors, ignore: ignoreSensor } = useIgnoredSensors()
@@ -187,7 +191,9 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
         {ackError && (
           <p className="mb-2 text-xs text-destructive">{ackError}</p>
         )}
-        {alarms.length === 0 ? (
+        {knownAlarms === null ? (
+          <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Waiting for the alarm list</p>
+        ) : alarms.length === 0 ? (
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">All clear</p>
         ) : (
           <div className="flex flex-col gap-2">

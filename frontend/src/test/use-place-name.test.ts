@@ -5,11 +5,6 @@ import { usePlaceName } from '@/hooks/use-place-name'
 
 const REFRESH_SECONDS = 60
 
-interface Fix {
-  latitude: number | null
-  longitude: number | null
-}
-
 function placeNameResponse(name: string) {
   return new Response(JSON.stringify({ name }), { status: 200 })
 }
@@ -29,10 +24,10 @@ afterEach(() => {
 })
 
 describe('usePlaceName', () => {
-  it('does not refetch when the GPS fix moves', async () => {
+  it('does not refetch on a re-render while the fix holds', async () => {
     const { rerender } = renderHook(
-      ({ latitude, longitude }) => usePlaceName(latitude, longitude, REFRESH_SECONDS),
-      { initialProps: { latitude: -25.2986, longitude: 152.9021 } },
+      ({ hasFix }) => usePlaceName(hasFix, REFRESH_SECONDS),
+      { initialProps: { hasFix: true } },
     )
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -40,16 +35,15 @@ describe('usePlaceName', () => {
     // A moving vessel produces a fresh GPS fix several times a second. None of
     // these should trigger a request: the endpoint takes no lat/lon, the
     // backend reads position server-side.
-    rerender({ latitude: -25.2987, longitude: 152.9022 })
-    rerender({ latitude: -25.2988, longitude: 152.9023 })
-    rerender({ latitude: -25.2989, longitude: 152.9024 })
-    rerender({ latitude: -25.299, longitude: 152.9025 })
+    rerender({ hasFix: true })
+    rerender({ hasFix: true })
+    rerender({ hasFix: true })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('polls on the refresh interval', async () => {
-    renderHook(() => usePlaceName(-25.2986, 152.9021, REFRESH_SECONDS))
+    renderHook(() => usePlaceName(true, REFRESH_SECONDS))
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
 
@@ -61,22 +55,21 @@ describe('usePlaceName', () => {
   })
 
   it('waits for a fix before fetching, then fetches once when one arrives', async () => {
-    const noFix: Fix = { latitude: null, longitude: null }
     const { rerender } = renderHook(
-      ({ latitude, longitude }: Fix) => usePlaceName(latitude, longitude, REFRESH_SECONDS),
-      { initialProps: noFix },
+      ({ hasFix }: { hasFix: boolean }) => usePlaceName(hasFix, REFRESH_SECONDS),
+      { initialProps: { hasFix: false } },
     )
 
     expect(fetchMock).not.toHaveBeenCalled()
 
-    rerender({ latitude: -25.2986, longitude: 152.9021 })
+    rerender({ hasFix: true })
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('exposes the resolved place name', async () => {
     // Real timers: testing-library's waitFor does not drive vitest's fake clock.
     vi.useRealTimers()
-    const { result } = renderHook(() => usePlaceName(-25.2986, 152.9021, REFRESH_SECONDS))
+    const { result } = renderHook(() => usePlaceName(true, REFRESH_SECONDS))
 
     await waitFor(() => expect(result.current).toBe('Urangan'))
   })

@@ -5,6 +5,7 @@ import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import { GaugeGroupTile } from '@/components/gauge-group-tile'
 import { LampStripTile } from '@/components/lamp-strip-tile'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
+import { useAlarmList, useWorstAlarmState } from '@/hooks/use-alarms'
 import { useEngineStatus, useGaugeSubset, type EngineStates } from '@/hooks/use-gauge-values'
 import type { TankLevel } from '@/hooks/use-tanks-state'
 import { formatAppLocation } from '@/lib/app-location'
@@ -121,11 +122,19 @@ export const GaugeGroupHost = memo(function GaugeGroupHost({
   return <GaugeGroupTile config={shown ?? config} values={values} ages={ages} editing={editing} onConfigure={onConfigure} />
 })
 
+/**
+ * A lamp strip, and the pinned ribbon, which is one. A lamp takes the worst
+ * alarm on its path and CHK counts them all, so the host reads the alarm list
+ * and the worst state from the alarms store, as it reads its lamps' values
+ * from the gauge store (ADR 0215).
+ */
 export const LampStripHost = memo(function LampStripHost({
   config, ctx, ...rest
-}: { config: LampStripWidgetConfig; ctx: EquipmentTileContext } & Omit<React.ComponentProps<typeof LampStripTile>, 'config' | 'values' | 'ages'>) {
+}: { config: LampStripWidgetConfig; ctx: EquipmentTileContext } & Omit<React.ComponentProps<typeof LampStripTile>, 'config' | 'values' | 'ages' | 'alarms' | 'worstAlarmState'>) {
   const resolved = useMemo(() => resolveLamps(config, ctx), [config, ctx])
   const paths = useMemo(() => resolved.lamps.map((l) => l.path).filter((p) => p.trim() !== ''), [resolved])
   const { values, ages } = useGaugeSubset(paths)
-  return <LampStripTile config={resolved} values={values} ages={ages} {...rest} />
+  const alarms = useAlarmList()
+  const worstAlarmState = useWorstAlarmState()
+  return <LampStripTile config={resolved} values={values} ages={ages} alarms={alarms} worstAlarmState={worstAlarmState} {...rest} />
 })

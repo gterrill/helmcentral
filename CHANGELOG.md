@@ -69,6 +69,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   updated, so a busy dashboard page now uses less battery and processor time.
   Switching pages, or the wall display moving to its next page, still shows the
   last reading straight away.
+- **The alarm banner, the Alarms page and the lamps redraw only when an alarm
+  changes.** Helmcentral checks the alarm list every two seconds. It used to
+  redraw the whole dashboard each time, even when nothing had changed, so a
+  page now uses less battery and processor time whilst alarms are up.
+- **Wind, depth, position and the other boat tiles redraw only when their own
+  reading changes.** A new position no longer redraws the Wind tile, and a
+  reading that's only a second older doesn't redraw anything. The dashboard
+  used to redraw every tile each second, so it now uses less battery and
+  processor time, and the last reading still shows straight away when you
+  switch pages.
+- **The Alarms page no longer says All clear before it has heard from the
+  boat.** Until the first alarm list arrives it says **Waiting for the alarm
+  list**, and the CHK lamp shows no data instead of clear. A page you open
+  later always shows the last list Helmcentral received, never an empty one.
 
 ## [0.55.0] - 2026-10-26
 

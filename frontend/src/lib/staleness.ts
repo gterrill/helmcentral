@@ -72,3 +72,18 @@ export function ageFromPayload(value: unknown): number | null {
   }
   return value
 }
+
+/**
+ * What a tile can show for an age: nothing (unknown), fresh, or stale with a
+ * given label. Every tile that reads a live store uses an age only through
+ * isStale at its default threshold and, once stale, formatDataAge, so two ages
+ * with the same key look the same on screen (ADR 0215). The stores keep the
+ * age they last handed out while this key holds, because the server rounds
+ * ages to a tenth of a second and most of them move on every tick. A tile
+ * that needs another threshold has to be keyed here too.
+ */
+export function shownAge(age: number | null): string {
+  if (age === null || !Number.isFinite(age)) return 'none'
+  if (!isStale(age)) return 'fresh'
+  return formatDataAge(age)
+}

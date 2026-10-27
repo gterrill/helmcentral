@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useCallback } from 'react'
 
-import { ageFromPayload } from '@/lib/staleness'
+import { ageFromPayload, shownAge } from '@/lib/staleness'
 
 import { GUST_WINDOWS, type GustWindow } from '@/lib/gust-windows'
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 interface VesselState {
   status: string
@@ -48,208 +49,265 @@ interface VesselState {
   source: string
 }
 
-// No refresh interval: vessel state is pushed from the backend as it changes
-// (ADR 0037), over a stream shared with the other telemetry hooks.
-export function useVesselState() {
-  const [depth, setDepth] = useState<number | null>(null)
+type GustLadder = Record<GustWindow, number | null>
+type Side = 'port' | 'starboard' | null
+
+/** The vessel state as the tiles read it: parsed, with absent fields as null. */
+export interface VesselStateValue {
+  depth: number | null
+  // Per-source freshness (ADR 0068). Null means the source publishes no
+  // timestamp, which reads as 'not stale' rather than as fresh.
+  depthLastUpdateAgeS: number | null
+  positionLastUpdateAgeS: number | null
+  windLastUpdateAgeS: number | null
   // The Rode Planner's swing radius fallback source when settings.anchor.loa_m
   // is unset (ADR 0047). Backend already nils this out when unpublished, so
   // no >= 0 guard is needed here, unlike the sentinel-bearing fields below.
-  const [vesselLengthOverallM, setVesselLengthOverallM] = useState<number | null>(null)
+  vesselLengthOverallM: number | null
   // The Anchor Watch low-water clearance warning's draft input (ADR 0135).
-  // Backend already nils this out when unpublished, so no >= 0 guard is
-  // needed here, same as vesselLengthOverallM above.
-  const [vesselDraftM, setVesselDraftM] = useState<number | null>(null)
-  const [currentDriftKts, setCurrentDriftKts] = useState<number | null>(null)
-  const [currentSetDeg, setCurrentSetDeg] = useState<number | null>(null)
-  const [currentDriftImpactKts, setCurrentDriftImpactKts] = useState<number | null>(null)
-  const [navigationState, setNavigationState] = useState<string | null>(null)
-  const [latitude, setLatitude] = useState<number | null>(null)
-  const [longitude, setLongitude] = useState<number | null>(null)
-  const [gnssQualityIndicator, setGnssQualityIndicator] = useState<number | null>(null)
-  const [gnssHdop, setGnssHdop] = useState<number | null>(null)
-  const [gnssSatellites, setGnssSatellites] = useState<number | null>(null)
-  const [gnssValidationState, setGnssValidationState] = useState<string | null>(null)
-  const [gnssValidationReason, setGnssValidationReason] = useState<string | null>(null)
-  const [gnssCriticalAlert, setGnssCriticalAlert] = useState<boolean>(false)
-  const [headingTrue, setHeadingTrue] = useState<number | null>(null)
-  const [windSpeedApparentKts, setWindSpeedApparentKts] = useState<number | null>(null)
-  const [windAngleApparentDeg, setWindAngleApparentDeg] = useState<number | null>(null)
-  const [windSide, setWindSide] = useState<'port' | 'starboard' | null>(null)
-  const [windAngleRelativeDeg, setWindAngleRelativeDeg] = useState<number | null>(null)
+  // Backend already nils this out when unpublished, same as above.
+  vesselDraftM: number | null
+  currentDriftKts: number | null
+  currentSetDeg: number | null
+  currentDriftImpactKts: number | null
+  navigationState: string | null
+  latitude: number | null
+  longitude: number | null
+  gnssQualityIndicator: number | null
+  gnssHdop: number | null
+  gnssSatellites: number | null
+  gnssValidationState: string | null
+  gnssValidationReason: string | null
+  gnssCriticalAlert: boolean
+  headingTrue: number | null
+  speedOverGroundKts: number | null
+  windSpeedApparentKts: number | null
+  windAngleApparentDeg: number | null
+  windSide: Side
+  windAngleRelativeDeg: number | null
   // True wind (ADR 0129 / ADR 0130) — parsed the same -1/null-is-absent way
   // as the apparent fields above, but never derived from them: a boat with
-  // no true-wind source reads null here even while apparent is present.
-  // Feeds the Current Conditions tile (ADR 0129: speed/direction, and the
-  // "obs" marker, which reads maxGustTrueKts['1h'] below rather than a
-  // separate field - see maxGustTrueKts' own comment) and the Wind tile's
-  // True mode (ADR 0130: adds angle/side/relative-angle and the rest of the
-  // maxGustTrueKts ladder).
-  const [windSpeedTrueKts, setWindSpeedTrueKts] = useState<number | null>(null)
-  const [windAngleTrueDeg, setWindAngleTrueDeg] = useState<number | null>(null)
-  const [windSideTrue, setWindSideTrue] = useState<'port' | 'starboard' | null>(null)
-  const [windAngleTrueRelativeDeg, setWindAngleTrueRelativeDeg] = useState<number | null>(null)
-  const [windDirectionTrueDeg, setWindDirectionTrueDeg] = useState<number | null>(null)
-  const [speedOverGroundKts, setSpeedOverGroundKts] = useState<number | null>(null)
-  const [maxGustKts, setMaxGustKts] = useState<Record<GustWindow, number | null>>(
-    () => Object.fromEntries(GUST_WINDOWS.map((window) => [window, null])) as Record<GustWindow, number | null>,
-  )
-  const [maxGustTrueKts, setMaxGustTrueKts] = useState<Record<GustWindow, number | null>>(
-    () => Object.fromEntries(GUST_WINDOWS.map((window) => [window, null])) as Record<GustWindow, number | null>,
-  )
-  // Per-source freshness (ADR 0068). Null means the source publishes no
-  // timestamp, which reads as 'not stale' rather than as fresh.
-  const [depthLastUpdateAgeS, setDepthLastUpdateAgeS] = useState<number | null>(null)
-  const [positionLastUpdateAgeS, setPositionLastUpdateAgeS] = useState<number | null>(null)
-  const [windLastUpdateAgeS, setWindLastUpdateAgeS] = useState<number | null>(null)
-  const [generatorState, setGeneratorState] = useState<string | null>(null)
-  const [generatorManualStart, setGeneratorManualStart] = useState<boolean>(false)
-  const [generatorManualStartTimer, setGeneratorManualStartTimer] = useState<number>(0)
-  const [generatorRunningByCondition, setGeneratorRunningByCondition] = useState<string | null>(null)
-  const [generatorRuntime, setGeneratorRuntime] = useState<number | null>(null)
-  // null: no engine is set up in the roles, or none is reporting.
-  const [enginesRunning, setEnginesRunning] = useState<boolean | null>(null)
+  // no true-wind source reads null here even while apparent is present
+  // (no fallback — see AGENTS.md's fallback policy). Feeds the Current
+  // Conditions tile (speed/direction, and the "obs" marker, which reads
+  // maxGustTrueKts['1h']) and the Wind tile's True mode.
+  windSpeedTrueKts: number | null
+  windAngleTrueDeg: number | null
+  windSideTrue: Side
+  windAngleTrueRelativeDeg: number | null
+  windDirectionTrueDeg: number | null
+  maxGustKts: GustLadder
+  // One ladder read by both the Wind tile in True mode and, through its '1h'
+  // entry, the Current Conditions tile's "obs" marker. The backend used to
+  // send a separate max_true_wind_kts_1h from a different buffer, so the two
+  // tiles could show two "last hour" figures at once (see docs/adr/0130's
+  // amendment).
+  maxGustTrueKts: GustLadder
+  generatorState: string | null
+  generatorManualStart: boolean
+  generatorManualStartTimer: number
+  generatorRunningByCondition: string | null
+  generatorRuntime: number | null
+  /** null: no engine is set up in the roles, or none is reporting. */
+  enginesRunning: boolean | null
   // Which source the backend answered from ("signalk", "signalk-unreachable",
   // "backend-fallback"). Surfaced so the app can offer to go looking for a
   // server that has moved, rather than leaving the operator with silent tiles.
-  const [source, setSource] = useState<string | null>(null)
+  source: string | null
+}
 
-  useEffect(() => {
-    const applyVesselState = (data: VesselState) => {
-      if (typeof data.depth === 'number' && data.depth >= 0) {
-        setDepth(data.depth)
-      } else {
-        setDepth(null)
-      }
+export type VesselStateField = keyof VesselStateValue
 
-      setVesselLengthOverallM(typeof data.length_overall_m === 'number' ? data.length_overall_m : null)
-      setVesselDraftM(typeof data.draft_m === 'number' ? data.draft_m : null)
+const EMPTY_LADDER: GustLadder = Object.fromEntries(GUST_WINDOWS.map((window) => [window, null])) as GustLadder
 
-      setCurrentDriftKts(typeof data.current_drift_kts === 'number' && data.current_drift_kts >= 0 ? data.current_drift_kts : null)
-      setCurrentSetDeg(typeof data.current_set_deg === 'number' && data.current_set_deg >= 0 ? data.current_set_deg : null)
-      setCurrentDriftImpactKts(typeof data.current_drift_impact_kts === 'number' ? data.current_drift_impact_kts : null)
+/** Every field unknown: the state before the first vessel-state event. */
+export const INITIAL_VESSEL_STATE: VesselStateValue = {
+  depth: null,
+  depthLastUpdateAgeS: null,
+  positionLastUpdateAgeS: null,
+  windLastUpdateAgeS: null,
+  vesselLengthOverallM: null,
+  vesselDraftM: null,
+  currentDriftKts: null,
+  currentSetDeg: null,
+  currentDriftImpactKts: null,
+  navigationState: null,
+  latitude: null,
+  longitude: null,
+  gnssQualityIndicator: null,
+  gnssHdop: null,
+  gnssSatellites: null,
+  gnssValidationState: null,
+  gnssValidationReason: null,
+  gnssCriticalAlert: false,
+  headingTrue: null,
+  speedOverGroundKts: null,
+  windSpeedApparentKts: null,
+  windAngleApparentDeg: null,
+  windSide: null,
+  windAngleRelativeDeg: null,
+  windSpeedTrueKts: null,
+  windAngleTrueDeg: null,
+  windSideTrue: null,
+  windAngleTrueRelativeDeg: null,
+  windDirectionTrueDeg: null,
+  maxGustKts: EMPTY_LADDER,
+  maxGustTrueKts: EMPTY_LADDER,
+  generatorState: null,
+  generatorManualStart: false,
+  generatorManualStartTimer: 0,
+  generatorRunningByCondition: null,
+  generatorRuntime: null,
+  enginesRunning: null,
+  source: null,
+}
 
-      setNavigationState(typeof data.status === 'string' && data.status !== '' ? data.status : null)
-      setSource(typeof data.source === 'string' && data.source !== '' ? data.source : null)
+const AGE_FIELDS: readonly VesselStateField[] = ['depthLastUpdateAgeS', 'positionLastUpdateAgeS', 'windLastUpdateAgeS']
+const LADDER_FIELDS: readonly VesselStateField[] = ['maxGustKts', 'maxGustTrueKts']
+const FIELDS = Object.keys(INITIAL_VESSEL_STATE) as VesselStateField[]
 
-      setLatitude(typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null)
-      setLongitude(typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null)
-      setGnssQualityIndicator(typeof data.gnss_quality_indicator === 'number' && data.gnss_quality_indicator >= 0 ? data.gnss_quality_indicator : null)
-      setGnssHdop(typeof data.gnss_hdop === 'number' && data.gnss_hdop >= 0 ? data.gnss_hdop : null)
-      setGnssSatellites(typeof data.gnss_satellites === 'number' && data.gnss_satellites >= 0 ? data.gnss_satellites : null)
-      setGnssValidationState(typeof data.gnss_validation_state === 'string' && data.gnss_validation_state !== '' ? data.gnss_validation_state : null)
-      setGnssValidationReason(typeof data.gnss_validation_reason === 'string' && data.gnss_validation_reason !== '' ? data.gnss_validation_reason : null)
-      setGnssCriticalAlert(data.gnss_critical_alert === true)
-      setHeadingTrue(typeof data.heading_true === 'number' && data.heading_true >= 0 ? data.heading_true : null)
-      setDepthLastUpdateAgeS(ageFromPayload(data.depth_last_update_age_s))
-      setPositionLastUpdateAgeS(ageFromPayload(data.position_last_update_age_s))
-      setWindLastUpdateAgeS(ageFromPayload(data.wind_last_update_age_s))
-      setWindSpeedApparentKts(typeof data.wind_speed_apparent_kts === 'number' && data.wind_speed_apparent_kts >= 0 ? data.wind_speed_apparent_kts : null)
-      setWindAngleApparentDeg(typeof data.wind_angle_apparent_deg === 'number' && data.wind_angle_apparent_deg >= 0 ? data.wind_angle_apparent_deg : null)
-      setWindSide(data.wind_side === 'port' || data.wind_side === 'starboard' ? data.wind_side : null)
-      setWindAngleRelativeDeg(typeof data.wind_angle_relative_deg === 'number' && data.wind_angle_relative_deg >= 0 ? data.wind_angle_relative_deg : null)
-      // True wind: same -1-reads-as-null parsing as apparent above, kept in
-      // its own state so an absent/stale true-wind source never inherits
-      // apparent's numbers (no fallback — see AGENTS.md's fallback policy).
-      setWindSpeedTrueKts(typeof data.wind_speed_true_kts === 'number' && data.wind_speed_true_kts >= 0 ? data.wind_speed_true_kts : null)
-      setWindAngleTrueDeg(typeof data.wind_angle_true_deg === 'number' && data.wind_angle_true_deg >= 0 ? data.wind_angle_true_deg : null)
-      setWindSideTrue(data.wind_side_true === 'port' || data.wind_side_true === 'starboard' ? data.wind_side_true : null)
-      setWindAngleTrueRelativeDeg(typeof data.wind_angle_true_relative_deg === 'number' && data.wind_angle_true_relative_deg >= 0 ? data.wind_angle_true_relative_deg : null)
-      setWindDirectionTrueDeg(typeof data.wind_direction_true_deg === 'number' && data.wind_direction_true_deg >= 0 ? data.wind_direction_true_deg : null)
-      // Keeps the previous object when every window's value is unchanged:
-      // this arrives on the same 1Hz vessel-state tick as everything else in
-      // this hook, and a fresh object literal every second defeats WindTile's
-      // own memoization even on a tick where gusts genuinely haven't moved.
-      setMaxGustKts((previous) => {
-        const next = Object.fromEntries(GUST_WINDOWS.map((window) => {
-          const value = data.max_gust_kts?.[window]
-          return [window, typeof value === 'number' && value >= 0 ? value : null]
-        })) as Record<GustWindow, number | null>
-        const unchanged = GUST_WINDOWS.every((window) => previous[window] === next[window])
-        return unchanged ? previous : next
-      })
-      // Same unchanged-object memo trick as maxGustKts above, for the
-      // true-wind ladder's own consumer (WindTile in True mode) - and, via
-      // its '1h' entry, the Current Conditions tile's "obs" marker too
-      // (ADR 0129). The backend used to expose a separate max_true_wind_kts_1h
-      // field for that marker, computed from a different in-memory buffer
-      // behind a different freshness gate than this ladder's, so the two
-      // tiles could show two different "last hour" true wind figures at the
-      // same moment (a code-review finding, 2026-09-25; see docs/adr/0130's
-      // amendment). Consolidated onto this one ladder, read by both tiles.
-      setMaxGustTrueKts((previous) => {
-        const next = Object.fromEntries(GUST_WINDOWS.map((window) => {
-          const value = data.max_gust_true_kts?.[window]
-          return [window, typeof value === 'number' && value >= 0 ? value : null]
-        })) as Record<GustWindow, number | null>
-        const unchanged = GUST_WINDOWS.every((window) => previous[window] === next[window])
-        return unchanged ? previous : next
-      })
-      setSpeedOverGroundKts(typeof data.speed_over_ground_kts === 'number' && data.speed_over_ground_kts >= 0 ? data.speed_over_ground_kts : null)
+const nonNegative = (value: unknown): number | null => (typeof value === 'number' && value >= 0 ? value : null)
+const numberOrNull = (value: unknown): number | null => (typeof value === 'number' ? value : null)
+const textOrNull = (value: unknown): string | null => (typeof value === 'string' && value !== '' ? value : null)
+const sideOrNull = (value: unknown): Side => (value === 'port' || value === 'starboard' ? value : null)
 
-      setGeneratorState(typeof data.generator_state === 'string' && data.generator_state !== '' ? data.generator_state : null)
-      setGeneratorManualStart(data.generator_manual_start === true)
-      setGeneratorManualStartTimer(typeof data.generator_manual_start_timer === 'number' ? data.generator_manual_start_timer : 0)
-      setGeneratorRunningByCondition(typeof data.generator_running_by_condition === 'string' && data.generator_running_by_condition !== '' ? data.generator_running_by_condition : null)
-      setGeneratorRuntime(typeof data.generator_runtime === 'number' && data.generator_runtime >= 0 ? data.generator_runtime : null)
-      setEnginesRunning(typeof data.engines_running === 'boolean' ? data.engines_running : null)
-    }
+function ladder(raw: Record<string, number> | undefined): GustLadder {
+  return Object.fromEntries(GUST_WINDOWS.map((window) => [window, nonNegative(raw?.[window])])) as GustLadder
+}
 
-    // The backend pushes vessel state as it changes (ADR 0037) instead of the
-    // client sampling on a timer. The connection is shared with every other
-    // telemetry hook, and reconnection on a dropped stream is owned centrally
-    // by use-telemetry-stream.ts, not per-hook: a non-200/wrong-content-type
-    // response is a *permanent* EventSource failure per spec, not something
-    // the browser retries on its own, so that module reconnects and surfaces
-    // the outage via useTelemetryStatus() rather than leaving this hook to
-    // notice only through `source` going stale.
-    return subscribeTelemetry('vessel-state', (raw) => {
-      try {
-        applyVesselState(JSON.parse(raw) as VesselState)
-      } catch (err) {
-        console.error('Failed to parse vessel state event:', err)
-      }
-    })
-  }, [])
-
+/** One vessel-state event, parsed the way every tile reads it. -1 and absent both read as null. */
+function parseVesselState(data: VesselState): VesselStateValue {
   return {
-    depth,
-    depthLastUpdateAgeS,
-    positionLastUpdateAgeS,
-    windLastUpdateAgeS,
-    vesselLengthOverallM,
-    vesselDraftM,
-    currentDriftKts,
-    currentSetDeg,
-    currentDriftImpactKts,
-    navigationState,
-    latitude,
-    longitude,
-    gnssQualityIndicator,
-    gnssHdop,
-    gnssSatellites,
-    gnssValidationState,
-    gnssValidationReason,
-    gnssCriticalAlert,
-    headingTrue,
-    speedOverGroundKts,
-    windSpeedApparentKts,
-    windAngleApparentDeg,
-    windSide,
-    windAngleRelativeDeg,
-    windSpeedTrueKts,
-    windAngleTrueDeg,
-    windSideTrue,
-    windAngleTrueRelativeDeg,
-    windDirectionTrueDeg,
-    maxGustKts,
-    maxGustTrueKts,
-    generatorState,
-    generatorManualStart,
-    generatorManualStartTimer,
-    generatorRunningByCondition,
-    generatorRuntime,
-    enginesRunning,
-    source,
+    depth: nonNegative(data.depth),
+    vesselLengthOverallM: numberOrNull(data.length_overall_m),
+    vesselDraftM: numberOrNull(data.draft_m),
+    currentDriftKts: nonNegative(data.current_drift_kts),
+    currentSetDeg: nonNegative(data.current_set_deg),
+    currentDriftImpactKts: numberOrNull(data.current_drift_impact_kts),
+    navigationState: textOrNull(data.status),
+    source: textOrNull(data.source),
+    latitude: typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null,
+    longitude: typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null,
+    gnssQualityIndicator: nonNegative(data.gnss_quality_indicator),
+    gnssHdop: nonNegative(data.gnss_hdop),
+    gnssSatellites: nonNegative(data.gnss_satellites),
+    gnssValidationState: textOrNull(data.gnss_validation_state),
+    gnssValidationReason: textOrNull(data.gnss_validation_reason),
+    gnssCriticalAlert: data.gnss_critical_alert === true,
+    headingTrue: nonNegative(data.heading_true),
+    depthLastUpdateAgeS: ageFromPayload(data.depth_last_update_age_s),
+    positionLastUpdateAgeS: ageFromPayload(data.position_last_update_age_s),
+    windLastUpdateAgeS: ageFromPayload(data.wind_last_update_age_s),
+    windSpeedApparentKts: nonNegative(data.wind_speed_apparent_kts),
+    windAngleApparentDeg: nonNegative(data.wind_angle_apparent_deg),
+    windSide: sideOrNull(data.wind_side),
+    windAngleRelativeDeg: nonNegative(data.wind_angle_relative_deg),
+    windSpeedTrueKts: nonNegative(data.wind_speed_true_kts),
+    windAngleTrueDeg: nonNegative(data.wind_angle_true_deg),
+    windSideTrue: sideOrNull(data.wind_side_true),
+    windAngleTrueRelativeDeg: nonNegative(data.wind_angle_true_relative_deg),
+    windDirectionTrueDeg: nonNegative(data.wind_direction_true_deg),
+    maxGustKts: ladder(data.max_gust_kts),
+    maxGustTrueKts: ladder(data.max_gust_true_kts),
+    speedOverGroundKts: nonNegative(data.speed_over_ground_kts),
+    generatorState: textOrNull(data.generator_state),
+    generatorManualStart: data.generator_manual_start === true,
+    generatorManualStartTimer: typeof data.generator_manual_start_timer === 'number' ? data.generator_manual_start_timer : 0,
+    generatorRunningByCondition: textOrNull(data.generator_running_by_condition),
+    generatorRuntime: nonNegative(data.generator_runtime),
+    enginesRunning: typeof data.engines_running === 'boolean' ? data.engines_running : null,
   }
+}
+
+/** Whether a field shows the same: ages by what a tile shows for them, gust ladders window by window. */
+function sameField(field: VesselStateField, a: VesselStateValue[VesselStateField], b: VesselStateValue[VesselStateField]): boolean {
+  if (AGE_FIELDS.includes(field)) return shownAge(a as number | null) === shownAge(b as number | null)
+  if (LADDER_FIELDS.includes(field)) {
+    const left = a as GustLadder
+    const right = b as GustLadder
+    return GUST_WINDOWS.every((window) => left[window] === right[window])
+  }
+  return a === b
+}
+
+/*
+ * One store for the `vessel-state` event (ADR 0215; lib/telemetry-store.ts), the same
+ * shape as use-gauge-values.ts and use-alarms.ts: one subscription and one
+ * parse per tick, however many tiles read it. Each tile selects the fields it
+ * shows, so a tick re-renders only the tiles whose own fields changed.
+ *
+ * A field that shows the same as before keeps its previous value, and a tick
+ * in which every field shows the same keeps the snapshot and notifies nobody.
+ * The server rounds the three ages to 0.1 s, so they move on almost every
+ * tick; an age keeps the number last handed out until what a tile shows for
+ * it changes (shownAge). A fresh age can therefore read lower than the true
+ * one. Nothing shows a fresh age as a figure.
+ */
+
+function applyVesselState(snapshot: VesselStateValue, raw: string): TelemetryUpdate<VesselStateValue> | null {
+  let data: VesselState
+  try {
+    data = JSON.parse(raw) as VesselState
+  } catch (err) {
+    console.error('Failed to parse vessel state event:', err)
+    return null
+  }
+  const parsed = parseVesselState(data)
+  const next = { ...parsed } as Record<VesselStateField, unknown>
+  let changed = false
+  for (const field of FIELDS) {
+    if (sameField(field, snapshot[field], parsed[field])) {
+      next[field] = snapshot[field]
+    } else {
+      changed = true
+    }
+  }
+  return changed ? { state: next as unknown as VesselStateValue } : null
+}
+
+// The backend pushes vessel state as it changes (ADR 0037) instead of the
+// client sampling on a timer. The connection is shared with every other
+// telemetry store, and reconnection on a dropped stream is owned centrally by
+// use-telemetry-stream.ts: a non-200/wrong-content-type response is a
+// *permanent* EventSource failure per spec, not something the browser retries
+// on its own, so that module reconnects and surfaces the outage via
+// useTelemetryStatus() rather than leaving this store to notice only through
+// `source` going stale.
+// Read at start, not at import: a module that only imports this one's
+// helpers or types never touches the stream.
+const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
+
+const store = createTelemetryStore(listenToStream, 'vessel-state', INITIAL_VESSEL_STATE, applyVesselState)
+
+/**
+ * Starts the store on mount without re-rendering the caller on any tick.
+ * AppShell calls this once.
+ */
+export const useRetainVesselState = store.useRetain
+
+/**
+ * The current vessel state, read once, for an event handler that needs it at
+ * the moment of a click (Drop anchor here) rather than on every tick.
+ */
+export const getVesselStateSnapshot = store.getSnapshot
+
+/** One slice of the vessel state; see TelemetryStore.useSelector. */
+export const useVesselStateSelector = store.useSelector
+
+function sameFields<T extends object>(a: T, b: T): boolean {
+  const keys = Object.keys(a) as Array<keyof T>
+  return keys.length === Object.keys(b).length && keys.every((key) => a[key] === b[key])
+}
+
+/**
+ * The named fields, as one object that keeps its reference while none of
+ * them changed. Pass a constant list: `fields` keys the selection.
+ */
+export function useVesselFields<K extends VesselStateField>(fields: readonly K[]): Pick<VesselStateValue, K> {
+  const select = useCallback((state: VesselStateValue) => {
+    const out = {} as Pick<VesselStateValue, K>
+    for (const field of fields) out[field] = state[field]
+    return out
+  }, [fields])
+  return useVesselStateSelector(select, sameFields)
 }

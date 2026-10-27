@@ -65,9 +65,13 @@ beforeEach(() => {
   )))
 })
 
-vi.mock('@/hooks/use-vessel-state', () => ({
-  useVesselState: () => ({
-    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
+// The navigation state picks the wall's pages; set per test.
+const { mockVesselState } = vi.hoisted(() => ({
+  mockVesselState: { navigationState: null as string | null },
+}))
+
+vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
+    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: mockVesselState.navigationState, latitude: null, longitude: null,
     headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
     windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
     maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
@@ -75,8 +79,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     generatorRunningByCondition: null, generatorRuntime: null,
     enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
     gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false
-  }),
-}))
+  })))
 
 vi.mock('@/hooks/use-electrical-state', () => ({
   useElectricalState: () => ({
@@ -108,8 +111,10 @@ vi.mock('@/hooks/use-radar-targets', () => ({
 }))
 
 vi.mock('@/hooks/use-anchor-watch', () => ({
+  // The tile and page apply the fix to the record; the record here already has it.
+  anchorWatchAt: (watch: unknown) => watch,
   useAnchorWatch: () => ({
-    anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
+    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
     rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
     distanceMeters: null, bearingDeg: null,
     planningDepthM: null, planningTideHeightFt: null,
@@ -290,7 +295,15 @@ const { mockAlarmsState } = vi.hoisted(() => ({
 }))
 
 vi.mock('@/hooks/use-alarms', () => ({
-  useAlarms: () => ({ alarms: mockAlarmsState.alarms, worst: 'normal', acknowledge: vi.fn(), silence: vi.fn() }),
+  // The shell holds the store; the surfaces read it through these (ADR 0215).
+  useRetainAlarms: () => {},
+  useAlarmList: () => mockAlarmsState.alarms,
+  useKnownAlarmList: () => mockAlarmsState.alarms,
+  useWorstAlarmState: () => 'normal',
+  useAisCollisionAlarms: () => new Map(),
+  useAnchorDragAlarm: () => null,
+  acknowledgeAlarm: vi.fn(),
+  silenceAlarm: vi.fn(),
   collisionAlarmStatesByVessel: () => new Map(),
   findAnchorDragAlarm: () => null,
   // display-status-badge.tsx now ranks its pill's alarms through
@@ -389,6 +402,7 @@ describe('App at /display/<slug>', () => {
     globalThis.localStorage?.clear()
     mockTelemetryStatus.value = 'connected'
     mockAlarmsState.alarms = []
+    mockVesselState.navigationState = null
     mockDisplaysState.displays = [FLYBRIDGE]
     mockDisplaysState.loading = false
     mockPagesState.pages = [
@@ -553,6 +567,21 @@ describe('App at /display/<slug>', () => {
     }
   })
 
+  // The shell reads the navigation state from the vessel-state store for this
+  // and nothing else (ADR 0215).
+  it('shows only the pages whose condition matches the navigation state', () => {
+    mockVesselState.navigationState = 'motoring'
+    mockPagesState.pages = [
+      page('p1', 'At anchor', [DEPTH_TIDE_WIDGET], { display_id: 'd1', dwell_seconds: 30, show_when: 'anchored' }),
+      page('p2', 'Under way', [WIND_WIDGET], { display_id: 'd1', dwell_seconds: 30, show_when: 'motoring' }),
+    ]
+    window.history.replaceState({}, '', '/display/flybridge')
+    render(<App />)
+
+    expect(screen.getByText('Wind')).toBeInTheDocument()
+    expect(screen.queryByText('Depth & Tide')).not.toBeInTheDocument()
+  })
+
   it('cycles only the resolved display\'s own pages: a page assigned to another display never shows', async () => {
     mockDisplaysState.displays = [FLYBRIDGE, SALOON]
     mockPagesState.pages = [
@@ -628,6 +657,7 @@ describe('App at / (dashboard authoring)', () => {
     globalThis.localStorage?.clear()
     mockTelemetryStatus.value = 'connected'
     mockAlarmsState.alarms = []
+    mockVesselState.navigationState = null
     mockDisplaysState.displays = [FLYBRIDGE]
     mockDisplaysState.loading = false
     mockPagesState.pages = [

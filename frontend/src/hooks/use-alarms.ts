@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
-
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { apiRequest } from '@/lib/api-query'
+import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 /** SignalK's notification states (ADR 0038), worst last. */
 export const ALARM_STATES = ['normal', 'alert', 'warn', 'alarm', 'emergency'] as const
@@ -131,35 +130,152 @@ interface AlarmsPayload {
 }
 
 /**
- * Active alarms, pushed over the shared telemetry stream (ADR 0037) rather than
- * polled — an alarm the operator learns about ten seconds late is a worse alarm.
+ * What the alarms store holds: the active list and the worst state on it.
+ * `received` is false until the first alarms event, and while it is, nothing
+ * may read the empty list as "all clear".
  */
-export function useAlarms() {
-  const [alarms, setAlarms] = useState<ActiveAlarm[]>([])
-  const [worst, setWorst] = useState<AlarmState>('normal')
+export interface AlarmsSnapshot {
+  received: boolean
+  alarms: ActiveAlarm[]
+  worst: AlarmState
+}
 
-  useEffect(() => {
-    return subscribeTelemetry('alarms', (raw) => {
-      try {
-        const payload = JSON.parse(raw) as AlarmsPayload
-        setAlarms(Array.isArray(payload.alarms) ? payload.alarms : [])
-        setWorst(payload.worst ?? 'normal')
-      } catch (err) {
-        console.error('Failed to parse alarms event:', err)
-      }
-    })
-  }, [])
+/*
+ * One store for the `alarms` event (ADR 0215; lib/telemetry-store.ts): one
+ * subscription and one parse per tick, however many surfaces read it. Each
+ * surface reads what it shows through a selector, so an alarms tick
+ * re-renders the banner, the drawer, the lamp strips and the wall badge, and
+ * never the shell.
+ *
+ * The server sends the whole list every two seconds whether or not it
+ * changed. An alarm equal by value to the one before keeps its object, and a
+ * list in which every alarm and the worst state are unchanged keeps the
+ * snapshot, so a repeat notifies nobody. Every field counts: the cards show
+ * the reading, the radar figures and the live sensors, and all of them move.
+ */
 
-  // A refusal is meaningful, not an error to swallow: an emergency cannot be
-  // silenced, and SignalK reports per notification which actions it offers.
-  const act = useCallback(async (ruleId: string, action: 'acknowledge' | 'silence') => {
-    await apiRequest(`/api/alarms/${encodeURIComponent(ruleId)}/${action}`, { method: 'POST' })
-  }, [])
+const NOT_RECEIVED: AlarmsSnapshot = { received: false, alarms: [], worst: 'normal' }
 
-  const acknowledge = useCallback((ruleId: string) => act(ruleId, 'acknowledge'), [act])
-  const silence = useCallback((ruleId: string) => act(ruleId, 'silence'), [act])
+/** Structural equality for parsed JSON: objects, arrays and primitives. */
+function sameJSON(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false
+  if (Array.isArray(a) !== Array.isArray(b)) return false
+  if (Array.isArray(a)) {
+    const other = b as unknown[]
+    return a.length === other.length && a.every((item, i) => sameJSON(item, other[i]))
+  }
+  const aRecord = a as Record<string, unknown>
+  const bRecord = b as Record<string, unknown>
+  const aKeys = Object.keys(aRecord)
+  if (aKeys.length !== Object.keys(bRecord).length) return false
+  return aKeys.every((key) => key in bRecord && sameJSON(aRecord[key], bRecord[key]))
+}
 
-  return { alarms, worst, acknowledge, silence }
+function applyAlarmsEvent(snapshot: AlarmsSnapshot, raw: string): TelemetryUpdate<AlarmsSnapshot> | null {
+  let payload: AlarmsPayload
+  try {
+    payload = JSON.parse(raw) as AlarmsPayload
+  } catch (err) {
+    console.error('Failed to parse alarms event:', err)
+    return null
+  }
+
+  const previous = new Map(snapshot.alarms.map((alarm) => [alarm.rule_id, alarm]))
+  const incoming = Array.isArray(payload.alarms) ? payload.alarms : []
+  const alarms = incoming.map((alarm) => {
+    const prev = previous.get(alarm.rule_id)
+    return prev && sameJSON(prev, alarm) ? prev : alarm
+  })
+  const worst = payload.worst ?? 'normal'
+
+  const unchanged = snapshot.received
+    && worst === snapshot.worst
+    && alarms.length === snapshot.alarms.length
+    && alarms.every((alarm, i) => alarm === snapshot.alarms[i])
+  if (unchanged) return null
+  return { state: { received: true, alarms, worst } }
+}
+
+// Read at start, not at import: a module that only imports this one's
+// helpers or types never touches the stream.
+const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
+
+const store = createTelemetryStore(listenToStream, 'alarms', NOT_RECEIVED, applyAlarmsEvent)
+
+/**
+ * Starts the alarms store on mount without re-rendering the caller on any
+ * tick. AppShell calls this once, so the store is listening before the first
+ * surface needs it.
+ */
+export const useRetainAlarms = store.useRetain
+
+/** One slice of the alarms store; see TelemetryStore.useSelector. */
+export const useAlarmsSelector = store.useSelector
+
+const selectAlarms = (state: AlarmsSnapshot) => state.alarms
+const selectWorst = (state: AlarmsSnapshot) => (state.received ? state.worst : null)
+const selectKnownAlarms = (state: AlarmsSnapshot) => (state.received ? state.alarms : null)
+
+/**
+ * The active alarms; empty until the first event. For a surface where an
+ * empty list shows nothing (the banner, the lamps, the wall pill), not one
+ * that would say "all clear": that reads useKnownAlarmList.
+ */
+export function useAlarmList(): ActiveAlarm[] {
+  return useAlarmsSelector(selectAlarms)
+}
+
+/** The active alarms, or null until the first event, when nobody knows yet. */
+export function useKnownAlarmList(): ActiveAlarm[] | null {
+  return useAlarmsSelector(selectKnownAlarms)
+}
+
+/** The worst state on the active list, or null until the first event. */
+export function useWorstAlarmState(): AlarmState | null {
+  return useAlarmsSelector(selectWorst)
+}
+
+function sameStateMap(a: Map<string, AlarmState>, b: Map<string, AlarmState>): boolean {
+  if (a.size !== b.size) return false
+  for (const [key, value] of a) {
+    if (b.get(key) !== value) return false
+  }
+  return true
+}
+
+const selectCollisionStates = (state: AlarmsSnapshot) => collisionAlarmStatesByVessel(state.alarms)
+
+/**
+ * Vessel id -> worst live collision state, for the AIS markers and the Nearby
+ * Vessels list (ADR 0088). Keeps its Map while no collision alarm changed, so
+ * a rule alarm coming and going does not redraw a map.
+ */
+export function useAisCollisionAlarms(): Map<string, AlarmState> {
+  return useAlarmsSelector(selectCollisionStates, sameStateMap)
+}
+
+const selectAnchorDrag = (state: AlarmsSnapshot) => findAnchorDragAlarm(state.alarms)
+
+/** The server's own anchor drag alarm while it is up, else null. */
+export function useAnchorDragAlarm(): ActiveAlarm | null {
+  return useAlarmsSelector(selectAnchorDrag)
+}
+
+// A refusal is meaningful, not an error to swallow: an emergency cannot be
+// silenced, and SignalK reports per notification which actions it offers.
+async function act(ruleId: string, action: 'acknowledge' | 'silence'): Promise<void> {
+  await apiRequest(`/api/alarms/${encodeURIComponent(ruleId)}/${action}`, { method: 'POST' })
+}
+
+/** Acknowledges one alarm on the server. Stable: it closes over nothing. */
+export function acknowledgeAlarm(ruleId: string): Promise<void> {
+  return act(ruleId, 'acknowledge')
+}
+
+/** Silences one alarm on the server. Stable: it closes over nothing. */
+export function silenceAlarm(ruleId: string): Promise<void> {
+  return act(ruleId, 'silence')
 }
 
 /** Rule id the server uses for its own anchor drag detection (ADR 0038). */

@@ -35,8 +35,7 @@ vi.mock('@/components/anchor-watch-map', () => ({
   ),
 }))
 
-vi.mock('@/hooks/use-vessel-state', () => ({
-  useVesselState: () => ({
+vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
     depth: 3.2,
     currentDriftKts: 0,
     currentSetDeg: 0,
@@ -61,8 +60,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     generatorManualStartTimer: 0,
     generatorRunningByCondition: null,
     generatorRuntime: 0,
-  }),
-}))
+  })))
 
 vi.mock('@/hooks/use-electrical-state', () => ({
   useElectricalState: () => ({
@@ -107,8 +105,10 @@ vi.mock('@/hooks/use-radar-targets', () => ({
 }))
 
 vi.mock('@/hooks/use-anchor-watch', () => ({
+  // The tile and page apply the fix to the record; the record here already has it.
+  anchorWatchAt: (watch: unknown) => watch,
   useAnchorWatch: () => ({
-    anchorState: 'set',
+    active: true, anchorState: 'set',
     anchorLat: -25.2939,
     anchorLon: 152.9103,
     radiusMeters: 34,

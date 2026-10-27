@@ -61,8 +61,8 @@ vi.mock('@/components/anchor-watch-map', () => ({
 }))
 
 vi.mock('@/hooks/use-alarms', () => ({
-  useAlarms: () => ({ alarms: [], acknowledge: vi.fn() }),
-  findAnchorDragAlarm: () => null,
+  useAnchorDragAlarm: () => null,
+  acknowledgeAlarm: vi.fn(),
 }))
 
 // A plain object each test can mutate via anchorAlarmMock.silence / .unsilence
@@ -93,6 +93,7 @@ vi.mock('@/lib/audio-utils', () => ({
 
 function baseWatch(overrides: Partial<AnchorWatchResult> = {}): AnchorWatchResult {
   return {
+    active: false,
     anchorState: 'none',
     gnssCritical: false,
     anchorLat: null,

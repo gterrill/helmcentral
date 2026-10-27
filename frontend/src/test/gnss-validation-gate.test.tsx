@@ -1,9 +1,9 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { useAnchorWatch } from '@/hooks/use-anchor-watch'
+import { anchorWatchAt, useAnchorWatch } from '@/hooks/use-anchor-watch'
 
 function Probe({ gnssCritical }: { gnssCritical: boolean }) {
-  const watch = useAnchorWatch(-25.2939, 152.9103, gnssCritical)
+  const watch = anchorWatchAt(useAnchorWatch(), -25.2939, 152.9103, gnssCritical)
   return (
     <div>
       <div data-testid="anchor-state">{watch.anchorState}</div>

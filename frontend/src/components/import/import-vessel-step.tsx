@@ -1,6 +1,9 @@
 import { Checkbox } from '@/components/ui/checkbox'
 import { useVesselIdentity } from '@/hooks/use-vessel-identity'
-import { useVesselState } from '@/hooks/use-vessel-state'
+import { useVesselFields } from '@/hooks/use-vessel-state'
+
+// What the boat reports for its own size, offered beside the stored figures.
+const PARTICULARS_FIELDS = ['vesselLengthOverallM', 'vesselDraftM'] as const
 import { issuesFor, type StagedParticular } from '@/lib/import-run'
 import { Pill, RowCard, StepHeading, type StepProps } from '@/components/import/import-shared'
 
@@ -30,7 +33,7 @@ function compare(particular: StagedParticular, live: { name: string | null; leng
 
 export function ImportVesselStep({ run, decisions, setDecision }: StepProps) {
   const { boatName } = useVesselIdentity()
-  const { vesselLengthOverallM, vesselDraftM } = useVesselState()
+  const { vesselLengthOverallM, vesselDraftM } = useVesselFields(PARTICULARS_FIELDS)
   const { particulars } = run.staged
 
   const storable = particulars.filter((p) => p.field !== '' && !p.signalk && p.value !== '')

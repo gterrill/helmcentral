@@ -7,7 +7,7 @@ import { VesselParticularsProvider } from '@/components/settings/vessel-particul
 // Live vessel data rides a telemetry stream; the form only reads two values
 // from it, so a fixed stand-in is enough.
 vi.mock('@/hooks/use-vessel-identity', () => ({ useVesselIdentity: () => ({ boatName: 'M/V Pikorua' }) }))
-vi.mock('@/hooks/use-vessel-state', () => ({ useVesselState: () => ({ vesselLengthOverallM: 17.9, vesselDraftM: null }) }))
+vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({ vesselLengthOverallM: 17.9, vesselDraftM: null })))
 
 // GET /api/vessel/particulars example from docs/adr/DRAFT-import-api-contract.md.
 const stored = {

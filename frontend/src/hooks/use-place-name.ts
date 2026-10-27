@@ -4,13 +4,15 @@ interface PlaceNameResponse {
   name?: string
 }
 
-export function usePlaceName(latitude: number | null, longitude: number | null, refreshInterval: number) {
-  // Only *whether* we have a fix matters, not where it is: /api/place-name
-  // takes no coordinates; the backend reads position server-side. Keying on the
-  // raw lat/lon would refetch on every GPS fix (~75 req/min) instead of one per
-  // refreshInterval. A failed poll is silent and the stale name stays.
-  const hasFix = latitude !== null && longitude !== null
-
+/**
+ * The place the server names for the boat's position. Only *whether* there is
+ * a fix matters, not where it is: /api/place-name takes no coordinates; the
+ * backend reads position server-side. So the caller passes `hasFix`, and a
+ * tile that shows the name does not have to re-render on every fix to ask
+ * (ADR 0215). Keyed on the endpoint alone, so every caller shares one poll. A
+ * failed poll is silent and the stale name stays.
+ */
+export function usePlaceName(hasFix: boolean, refreshInterval: number) {
   const { data } = useApiQuery<string | null>({
     queryKey: ['/api/place-name'],
     path: '/api/place-name',

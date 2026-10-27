@@ -53,8 +53,7 @@ beforeEach(() => {
 
 // ── hook mocks (mirrors app-sidebar-navigation.test.tsx) ───────────────────────
 
-vi.mock('@/hooks/use-vessel-state', () => ({
-  useVesselState: () => ({
+vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
     depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
     headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
     windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
@@ -63,8 +62,7 @@ vi.mock('@/hooks/use-vessel-state', () => ({
     generatorRunningByCondition: null, generatorRuntime: null,
     enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
     gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false
-  }),
-}))
+  })))
 
 vi.mock('@/hooks/use-electrical-state', () => ({
   useElectricalState: () => ({
@@ -96,8 +94,10 @@ vi.mock('@/hooks/use-radar-targets', () => ({
 }))
 
 vi.mock('@/hooks/use-anchor-watch', () => ({
+  // The tile and page apply the fix to the record; the record here already has it.
+  anchorWatchAt: (watch: unknown) => watch,
   useAnchorWatch: () => ({
-    anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
+    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
     rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
     distanceMeters: null, bearingDeg: null,
     planningDepthM: null, planningTideHeightFt: null,
