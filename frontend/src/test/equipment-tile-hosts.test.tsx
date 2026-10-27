@@ -70,4 +70,20 @@ describe('a tile that shows equipment', () => {
     emitGaugeValues({ values: {}, ages: {}, engines: { port: { state: 'off', last_update: '2026-10-06T04:30:00Z' } } })
     expect(screen.getByTestId('tile-off-badge')).toBeInTheDocument()
   })
+
+  test('only this engine being off turns the tile off', () => {
+    render(<EngineClusterHost {...common} config={cluster} ctx={ctxOf([item()])} />)
+    emitGaugeValues({ values: {}, ages: {}, engines: { starboard: { state: 'off', last_update: '2026-10-06T04:30:00Z' }, port: { state: 'running' } } })
+    expect(screen.queryByTestId('tile-off-badge')).toBeNull()
+    emitGaugeValues({ values: {}, ages: {}, engines: { starboard: { state: 'off', last_update: '2026-10-06T04:30:00Z' }, port: { state: 'off', last_update: '2026-10-06T04:31:00Z' } } })
+    expect(screen.getByTestId('tile-off-badge')).toBeInTheDocument()
+  })
+
+  test('a silent non-engine item reading propulsion.port.* still says Not reporting while port is off', () => {
+    const sensor = item({ source_kind: '' })
+    render(<EngineClusterHost {...common} config={cluster} ctx={ctxOf([sensor], new Set(['propulsion.starboard']))} />)
+    emitGaugeValues({ values: {}, ages: {}, engines: { port: { state: 'off', last_update: '2026-10-06T04:30:00Z' } } })
+    expect(screen.getByText('Not reporting')).toBeInTheDocument()
+    expect(screen.queryByTestId('tile-off-badge')).toBeNull()
+  })
 })

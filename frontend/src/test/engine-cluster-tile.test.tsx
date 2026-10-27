@@ -178,7 +178,7 @@ describe('the status chip', () => {
   })
 
   test('is not drawn for an engine whose feed is lost', () => {
-    renderCluster(full, values, { engines: { port: { state: 'lost', lastUpdate: '2026-10-06T04:30:00Z' } } })
+    renderCluster(full, values, { engine: { id: 'port', state: 'lost', lastUpdate: '2026-10-06T04:30:00Z' } })
     expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
@@ -191,7 +191,7 @@ describe('the status chip', () => {
     const { unmount } = renderCluster()
     expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
     unmount()
-    renderCluster(full, values, { engines: { port: { state: 'running' } } })
+    renderCluster(full, values, { engine: { id: 'port', state: 'running' } })
     expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 })
@@ -650,7 +650,7 @@ describe('engine off (ADR 0163)', () => {
 
   test('shows OFF with dashes, a muted pill and a neutral border', () => {
     const { container } = renderCluster(full, values, {
-      ages: engineAges, engines: { port: { state: 'off', lastUpdate: since } },
+      ages: engineAges, engine: { id: 'port', state: 'off', lastUpdate: since },
     })
     const badge = screen.getByTestId('tile-off-badge')
     expect(badge).toHaveTextContent(/off/i)
@@ -675,7 +675,7 @@ describe('engine off (ADR 0163)', () => {
       ...full,
       footer: { ...footer, egt: { ...footer.egt!, zones: [{ from: 0, to: 20, state: 'normal' }, { from: 20, to: 100, state: 'alarm' }] } },
     }
-    const { container } = renderCluster(hot, values, { engines: { port: { state: 'off', lastUpdate: since } } })
+    const { container } = renderCluster(hot, values, { engine: { id: 'port', state: 'off', lastUpdate: since } })
     expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-state', 'alarm')
     // Still off: no status chip, the engine's own readings are dashes.
     expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
@@ -687,18 +687,18 @@ describe('engine off (ADR 0163)', () => {
       ...full,
       ring: { ...full.ring, zones: [{ from: 0, to: 5000, state: 'alarm' }] },
     }
-    const { container } = renderCluster(hot, values, { engines: { port: { state: 'off', lastUpdate: since } } })
+    const { container } = renderCluster(hot, values, { engine: { id: 'port', state: 'off', lastUpdate: since } })
     expect(container.querySelector('[data-slot="card"]')).not.toHaveAttribute('data-state')
   })
 
   test('draws no alternator trace for an engine that is off', () => {
-    renderCluster(full, values, { engines: { port: { state: 'off', lastUpdate: since } } })
+    renderCluster(full, values, { engine: { id: 'port', state: 'off', lastUpdate: since } })
     expect(history.calls.every(([, , enabled]) => enabled === false)).toBe(true)
   })
 
   test('a lost engine keeps the amber stale treatment', () => {
     const { container } = renderCluster(full, values, {
-      ages: engineAges, engines: { port: { state: 'lost', lastUpdate: since } },
+      ages: engineAges, engine: { id: 'port', state: 'lost', lastUpdate: since },
     })
     expect(container.querySelector('[data-slot="card"]')).toHaveAttribute('data-stale', 'true')
     expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
@@ -706,8 +706,20 @@ describe('engine off (ADR 0163)', () => {
     expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()
   })
 
-  test('a running engine, or one the backend says nothing about, is unchanged', () => {
-    renderCluster(full, values, { engines: { port: { state: 'running' }, starboard: { state: 'off', lastUpdate: since } } })
+  test('a running engine is unchanged', () => {
+    renderCluster(full, values, { engine: { id: 'port', state: 'running' } })
+    expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
+    expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('700')
+  })
+
+  test('no status from the backend leaves the tile unchanged', () => {
+    renderCluster(full, values, {})
+    expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
+    expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('700')
+  })
+
+  test('another engine\'s OFF status is ignored by a port tile', () => {
+    renderCluster(full, values, { engine: { id: 'starboard', state: 'off', lastUpdate: since } })
     expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
     expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('700')
   })

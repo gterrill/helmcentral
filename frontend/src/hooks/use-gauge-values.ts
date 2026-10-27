@@ -37,10 +37,12 @@ const EMPTY: PathMap = {}
  */
 export type EngineState = 'running' | 'off' | 'lost'
 export interface EngineStatus {
+  /** The instance id the status is stored under (`port`), so a reader can tell it is the engine it asked for. */
+  id: string
   state: EngineState
   lastUpdate?: string
 }
-export type EngineStates = Record<string, EngineStatus>
+type EngineStates = Record<string, EngineStatus>
 
 /** The values and ages for a set of paths. A path the event does not carry has no key. */
 export interface GaugeSubset {
@@ -111,8 +113,8 @@ function applyGaugeValuesEvent(previous: GaugeState, data: unknown): TelemetryUp
   for (const [id, entry] of Object.entries(payload.engines ?? {})) {
     if (!entry || typeof entry.state !== 'string' || !ENGINE_STATES.includes(entry.state)) continue
     const status: EngineStatus = entry.last_update
-      ? { state: entry.state as EngineState, lastUpdate: entry.last_update }
-      : { state: entry.state as EngineState }
+      ? { id, state: entry.state as EngineState, lastUpdate: entry.last_update }
+      : { id, state: entry.state as EngineState }
     const prev = previous.engines[id]
     nextEngines[id] = prev && sameStatus(prev, status) ? prev : status
   }

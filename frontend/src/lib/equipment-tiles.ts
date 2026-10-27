@@ -1,4 +1,4 @@
-import type { EngineStates } from '@/hooks/use-gauge-values'
+import type { EngineStatus } from '@/hooks/use-gauge-values'
 import type { EquipmentItem } from '@/hooks/use-inventory'
 import type { TankLevel } from '@/hooks/use-tanks-state'
 import type { EngineProfile, EngineProfileGauge, EngineProfileZone } from '@/lib/engine-profiles'
@@ -77,11 +77,12 @@ export function propulsionId(path: string): string | null {
 }
 
 /** The problem with an item, or null when its readings can be shown. */
-function itemProblem(ctx: EquipmentTileContext, item: TileItem, engines: EngineStates | undefined): TileProblem | null {
+function itemProblem(ctx: EquipmentTileContext, item: TileItem, itemEngine: EngineStatus | undefined): TileProblem | null {
   if (item.signalk_source === '') return { kind: 'not-mapped', item }
   if (ctx.reporting !== null && !ctx.reporting.has(item.signalk_source)) {
+    // Known only by a status for this item's own engine.
     const id = engineIdOf(item)
-    const known = id !== null && engines !== undefined && id in engines
+    const known = id !== null && itemEngine?.id === id
     if (!known) return { kind: 'not-reporting', item }
   }
   return null
@@ -166,12 +167,12 @@ export function resolveCluster(
   config: EngineClusterConfig,
   ctx: EquipmentTileContext,
   tanks: TankLevel[] = [],
-  engines?: EngineStates,
+  itemEngine?: EngineStatus,
 ): Resolved<ResolvedClusterConfig> {
   if (!config.equipmentId) return { ok: false, problem: EMPTY_PROBLEM }
   const item = findItem(ctx, config.equipmentId)
   if (!item) return { ok: false, problem: { kind: 'missing' } }
-  const problem = itemProblem(ctx, item, engines)
+  const problem = itemProblem(ctx, item, itemEngine)
   if (problem) return { ok: false, problem }
 
   const profile = profileOf(ctx, item)
@@ -233,11 +234,11 @@ export function isEquipmentGroup(config: GaugeGroupWidgetConfig): boolean {
   return (config.equipmentKind ?? '') !== ''
 }
 
-export function resolveGaugeGroup(config: GaugeGroupWidgetConfig, ctx: EquipmentTileContext, engines?: EngineStates): Resolved<GaugeGroupWidgetConfig> {
+export function resolveGaugeGroup(config: GaugeGroupWidgetConfig, ctx: EquipmentTileContext, itemEngine?: EngineStatus): Resolved<GaugeGroupWidgetConfig> {
   if (!config.equipmentId) return { ok: false, problem: EMPTY_PROBLEM }
   const item = findItem(ctx, config.equipmentId)
   if (!item) return { ok: false, problem: { kind: 'missing' } }
-  const problem = itemProblem(ctx, item, engines)
+  const problem = itemProblem(ctx, item, itemEngine)
   if (problem) return { ok: false, problem }
   const profile = profileOf(ctx, item)
   return {

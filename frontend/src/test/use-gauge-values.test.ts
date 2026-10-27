@@ -119,8 +119,8 @@ describe('useEngineStatus', () => {
       engines: { port: { state: 'off', last_update: '2026-10-06T04:30:00Z' }, starboard: { state: 'running' } },
     })
     expect(result.current).toEqual({
-      port: { state: 'off', lastUpdate: '2026-10-06T04:30:00Z' },
-      starboard: { state: 'running' },
+      port: { id: 'port', state: 'off', lastUpdate: '2026-10-06T04:30:00Z' },
+      starboard: { id: 'starboard', state: 'running' },
     })
   })
 
@@ -188,7 +188,7 @@ describe('per-path selectors', () => {
     const { result } = renderHook(() => useEngineStatus('port'))
     emit({ values: {}, ages: {}, engines: { port: { state: 'off', last_update: 't1' }, starboard: { state: 'running' } } })
     const first = result.current
-    expect(first).toEqual({ state: 'off', lastUpdate: 't1' })
+    expect(first).toEqual({ id: 'port', state: 'off', lastUpdate: 't1' })
 
     emit({ values: {}, ages: {}, engines: { port: { state: 'off', last_update: 't1' }, starboard: { state: 'off' } } })
     expect(result.current).toBe(first)
