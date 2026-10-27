@@ -1,6 +1,7 @@
 import { useEffect, useSyncExternalStore } from 'react'
 
-import { onTelemetryTestReset } from '@/lib/telemetry-store'
+import { useSelection } from '@/lib/selection'
+import { onTelemetryTestReset } from '@/lib/test-reset'
 
 /**
  * One module-level poll shared by every reader of the same data (ADR 0215):
@@ -117,9 +118,9 @@ export function createSharedPoller<S>(
     return useSyncExternalStore(subscribe, getSnapshot)
   }
 
-  function useSlice<T>(select: (snapshot: S) => T, intervalMs: number, enabled = true): T {
+  function useSlice<T>(select: (snapshot: S) => T, intervalMs: number, enabled = true, isEqual: (a: T, b: T) => boolean = Object.is): T {
     useEffect(() => (enabled ? acquire(intervalMs) : undefined), [intervalMs, enabled])
-    return useSyncExternalStore(subscribe, () => select(snapshot))
+    return useSelection({ subscribe, getSnapshot, select, isEqual })
   }
 
   return { useSnapshot, useSlice, getSnapshot, subscribe }

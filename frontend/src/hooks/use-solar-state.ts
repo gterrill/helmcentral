@@ -1,6 +1,5 @@
-import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { shownAge } from '@/lib/staleness'
-import { createTelemetryStore, keepUnchanged, keepUnchangedItems, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, keepUnchanged, keepUnchangedItems, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 interface SolarControllerState {
   id: string
@@ -45,25 +44,31 @@ function normalizeText(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
-/** The solar state as the Solar tile reads it. */
-export interface SolarStateValue {
+/** What the solar store holds. */
+interface SolarStoreState {
   currentW: number | null
   todayKWh: number | null
   yesterdayKWh: number | null
   peakTodayW: number | null
   lastUpdateAgeS: number | null
-  /** Null until the first event: an empty list is a server with no controllers, not one not heard from yet. */
-  controllers: SolarController[] | null
+  controllers: SolarController[]
 }
 
+/**
+ * The solar state as the Solar tile reads it. `controllers` is null until the
+ * first event: an empty list is a server with no controllers, not one not
+ * heard from yet.
+ */
+export type SolarStateValue = Omit<SolarStoreState, 'controllers'> & { controllers: SolarController[] | null }
+
 /** Every reading unknown: the state before the first solar-state event. */
-export const INITIAL_SOLAR_STATE: SolarStateValue = {
+const INITIAL_SOLAR_STATE: SolarStoreState = {
   currentW: null,
   todayKWh: null,
   yesterdayKWh: null,
   peakTodayW: null,
   lastUpdateAgeS: null,
-  controllers: null,
+  controllers: [],
 }
 
 function parseController(controller: SolarControllerState): SolarController {
@@ -92,16 +97,10 @@ function sameController(a: SolarController, b: SolarController): boolean {
  * same keeps its object, ages compared on what the tile shows for them, and a
  * tick that changes nothing the tile shows keeps the snapshot.
  */
-function applySolarState(previous: SolarStateValue, raw: string): TelemetryUpdate<SolarStateValue> | null {
-  let data: SolarState
-  try {
-    data = JSON.parse(raw) as SolarState
-  } catch (err) {
-    console.error('Failed to parse solar state event:', err)
-    return null
-  }
+function applySolarState(previous: SolarStoreState, payload: unknown): TelemetryUpdate<SolarStoreState> | null {
+  const data = payload as SolarState
   const incoming = Array.isArray(data.controllers) ? data.controllers.map(parseController) : []
-  const parsed: SolarStateValue = {
+  const parsed: SolarStoreState = {
     currentW: normalizeNumber(data.current_w),
     todayKWh: normalizeNumber(data.today_kwh),
     yesterdayKWh: normalizeNumber(data.yesterday_kwh),
@@ -117,15 +116,14 @@ function applySolarState(previous: SolarStateValue, raw: string): TelemetryUpdat
   return next === null ? null : { state: next }
 }
 
-// Read at start, not at import: a module that only imports this one's
-// helpers or types never touches the stream.
-const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
+/** What the tile reads before the first event: every reading unknown, and no controller list. */
+const UNHEARD_SOLAR_STATE: SolarStateValue = { ...INITIAL_SOLAR_STATE, controllers: null }
 
-const store = createTelemetryStore(listenToStream, 'solar-state', INITIAL_SOLAR_STATE, applySolarState)
+const store = createTelemetryStore('solar-state', INITIAL_SOLAR_STATE, applySolarState)
 
-const selectAll = (state: SolarStateValue) => state
+const selectAll = (state: SolarStoreState) => state
 
-/** The whole solar state: the Solar tile shows all of it. */
+/** The whole solar state: the Solar tile shows all of it. Controllers are null until the first event. */
 export function useSolarState(): SolarStateValue {
-  return store.useSelector(selectAll)
+  return store.useHeardSelector(selectAll) ?? UNHEARD_SOLAR_STATE
 }

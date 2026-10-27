@@ -77,6 +77,14 @@ describe('useAutopilot', () => {
     expect(result.current.state).toBeNull()
   })
 
+  it('reports an absent pilot, not nothing, once the first event says there is none', async () => {
+    const { useAutopilot } = await loadModule()
+    const { result } = renderHook(() => useAutopilot())
+    emitAutopilot({ present: false })
+
+    expect(result.current.state?.present).toBe(false)
+  })
+
   it('keeps the state object when an equal payload arrives', async () => {
     const { useAutopilot } = await loadModule()
     const { result } = renderHook(() => useAutopilot())

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { apiBaseUrl } from '@/config/api'
-import { sameJSON } from '@/lib/telemetry-store'
+import { sameJSON } from '@/lib/same-value'
+import { useSelection } from '@/lib/selection'
 
 // One request helper and one keyed read cache under the per-resource hooks
 // (ADR 0173). The names (useApiQuery, setQueryData, invalidateQueries,
@@ -116,6 +117,7 @@ interface Entry {
   interval: ReturnType<typeof setInterval> | undefined
   intervalMs: number | undefined
   snapshot: Snapshot
+  declared: { version: number; value: Declaration | undefined } | undefined
 }
 
 const EMPTY: Snapshot = { data: undefined, error: null, status: 'pending', isFetching: false }
@@ -164,6 +166,7 @@ function ensureEntry(key: QueryKey): Entry {
       interval: undefined,
       intervalMs: undefined,
       snapshot: EMPTY,
+      declared: undefined,
     }
     entries.set(hash, entry)
   }
@@ -199,10 +202,10 @@ function startFetch(entry: Entry, path: string): Promise<void> {
       const data = await apiRequest<unknown>(path)
       if (entry.requestId !== id) return entry.inflight
       // An answer equal by value to the data the entry holds keeps that
-      // object, when a reader of the key asked for it (structuralSharing), so
-      // every reader, every selector and getQueryData see no change. Compared
-      // once per answer, here, not once per reader.
-      entry.data = entry.data !== undefined && sharesStructure(entry) && sameJSON(entry.data, data) ? entry.data : data
+      // object, when the key declares it (declareQuery), so every reader,
+      // every selector and getQueryData see no change. Compared once per
+      // answer, here, not once per reader, and whatever is mounted.
+      entry.data = entry.data !== undefined && declarationOf(hashKey(entry.key), entry.key)?.structuralSharing === true && sameJSON(entry.data, data) ? entry.data : data
       entry.error = null
       entry.status = 'success'
     } catch (err) {
@@ -219,9 +222,119 @@ function startFetch(entry: Entry, path: string): Promise<void> {
   return promise
 }
 
-function sharesStructure(entry: Entry): boolean {
-  for (const sub of entry.subscribers) if (sub.structuralSharing) return true
-  return false
+// ------------------------------------------------------------ declarations
+
+/**
+ * What a query key says about its own data, declared once beside the key
+ * rather than by each reader (ADR 0215). Both are off unless declared, and
+ * neither depends on which readers are mounted.
+ */
+export interface QueryDeclaration<Raw = never, Parsed = unknown> {
+  /**
+   * Keep the entry's data object when a request answers with data equal by
+   * value, so no reader of the key sees a change. Named after TanStack
+   * Query's option, which does more: it also keeps the unchanged parts of
+   * changed data. Off unless declared, because a reader with an effect on
+   * `data` would no longer see a refetch that changed nothing.
+   */
+  structuralSharing?: boolean
+  /**
+   * Turns one answer into the value `useApiQuerySelector`'s `select` sees.
+   * It runs once per answer, however many readers there are, and not at all
+   * for an answer nobody selects from. It is called with undefined while no
+   * answer has landed. `useApiQuery`, `getQueryData` and `setQueryData` deal
+   * in the raw answer.
+   */
+  parse?: (raw: Raw | undefined) => Parsed
+}
+
+interface Declaration {
+  prefix: QueryKey
+  structuralSharing: boolean
+  parse: ((raw: unknown) => unknown) | undefined
+  // Parse results by the raw answer they came from (an object), so a second
+  // reader of the same answer finds the first one's result.
+  memo: WeakMap<object, { value: unknown } | { error: unknown }>
+  absent: { value: unknown } | { error: unknown } | undefined
+}
+
+const declarations = new Map<string, Declaration>()
+// Bumped by every new declaration, so an entry's cached lookup knows it is stale.
+let declarationVersion = 0
+
+function overlaps(a: QueryKey, b: QueryKey): boolean {
+  const n = Math.min(a.length, b.length)
+  for (let i = 0; i < n; i++) if (stableStringify(a[i]) !== stableStringify(b[i])) return false
+  return true
+}
+
+/**
+ * Declares what every reader of the keys that start with `prefix` gets.
+ *
+ * Call it at module level in the module that exports the key (the constant or
+ * the hook that builds it), so that importing the key imports its declaration.
+ * A declaration is looked up when an answer lands and when a selector reads,
+ * with no fallback: a key read or fetched before its declaring module has
+ * loaded would get neither parse nor sharing, so never put a declaration
+ * somewhere a reader of the key can skip.
+ *
+ * Declarations may not overlap. A second one that is the same prefix, or a
+ * prefix of, or prefixed by, an existing one with different options throws,
+ * because which would win would depend on import order. Declaring the same
+ * thing again (a module imported twice, hot reload) is a no-op.
+ */
+export function declareQuery<Raw = never, Parsed = unknown>(prefix: QueryKey, options: QueryDeclaration<Raw, Parsed>): void {
+  const sharing = options.structuralSharing === true
+  const parse = options.parse as ((raw: unknown) => unknown) | undefined
+  const hash = hashKey(prefix)
+  for (const [otherHash, other] of declarations) {
+    if (!overlaps(prefix, other.prefix)) continue
+    // A re-evaluated module has a new function with the same source.
+    const sameParse = other.parse === parse || (other.parse !== undefined && parse !== undefined && other.parse.toString() === parse.toString())
+    if (other.structuralSharing === sharing && sameParse) {
+      if (otherHash === hash) other.parse = parse
+      continue
+    }
+    throw new Error(`declareQuery: ${hash} overlaps the declaration for ${otherHash} with different options`)
+  }
+  if (declarations.has(hash)) return
+  declarations.set(hash, { prefix, structuralSharing: sharing, parse, memo: new WeakMap(), absent: undefined })
+  declarationVersion += 1
+}
+
+function resolveDeclaration(key: QueryKey): Declaration | undefined {
+  let best: Declaration | undefined
+  for (const d of declarations.values()) {
+    if (d.prefix.length > key.length || (best && d.prefix.length <= best.prefix.length)) continue
+    if (overlaps(d.prefix, key)) best = d
+  }
+  return best
+}
+
+// The declaration for an entry's key, resolved once per declaration change.
+function declarationOf(hash: string, key: QueryKey): Declaration | undefined {
+  const entry = entries.get(hash)
+  if (!entry) return resolveDeclaration(key)
+  if (entry.declared?.version !== declarationVersion) entry.declared = { version: declarationVersion, value: resolveDeclaration(key) }
+  return entry.declared.value
+}
+
+// The declared parse of one answer, computed once per answer. A parse that
+// throws is remembered too, so a bad body fails once, not once per reader.
+function parsedAnswer(d: Declaration, raw: unknown): unknown {
+  const cacheable = typeof raw === 'object' && raw !== null
+  let hit = cacheable ? d.memo.get(raw) : raw === undefined ? d.absent : undefined
+  if (!hit) {
+    try {
+      hit = { value: d.parse!(raw) }
+    } catch (error) {
+      hit = { error }
+    }
+    if (cacheable) d.memo.set(raw, hit)
+    else if (raw === undefined) d.absent = hit
+  }
+  if ('error' in hit) throw hit.error
+  return hit.value
 }
 
 // Resolves when the request settles. Never rejects: a failure lands in the
@@ -264,7 +377,6 @@ function updatePolling(entry: Entry) {
 
 interface Subscription {
   interval: number | undefined
-  structuralSharing: boolean
 }
 
 function subscribeEntry(
@@ -302,6 +414,13 @@ export function getQueryData<T>(key: QueryKey): T | undefined {
   return entries.get(hashKey(key))?.data as T | undefined
 }
 
+/**
+ * Replaces the entry's data with a value, or with what an updater makes of the
+ * data held. An updater must return a new object and leave its argument alone:
+ * a key's declared parse is remembered by the answer object, so a changed-in-
+ * place argument handed back would keep its old parse. In development an
+ * updater that returns the object it was given throws.
+ */
 export function setQueryData<T>(
   key: QueryKey,
   updater: T | ((prev: T | undefined) => T),
@@ -326,10 +445,19 @@ export function setQueryData<T>(
     commit(entry)
     return
   }
-  entry.data =
-    typeof updater === 'function'
-      ? (updater as (prev: T | undefined) => T)(entry.data as T | undefined)
-      : updater
+  let next: T
+  if (typeof updater === 'function') {
+    const prev = entry.data as T | undefined
+    next = (updater as (prev: T | undefined) => T)(prev)
+    // A parse is remembered by the answer object it read, so an updater that
+    // changes its argument in place and hands it back would leave a stale parse.
+    if (import.meta.env.DEV && prev !== undefined && prev === next && typeof next === 'object' && next !== null) {
+      throw new Error('setQueryData: the updater returned the object it was given. Return a new object.')
+    }
+  } else {
+    next = updater
+  }
+  entry.data = next
   entry.status = 'success'
   entry.error = null
   if (entry.subscribers.size === 0) scheduleGc(entry)
@@ -382,15 +510,6 @@ export interface UseApiQueryOptions<T> {
   enabled?: boolean
   select?: (raw: never) => T
   /**
-   * Keep the entry's data object when a request answers with data equal by
-   * value (ADR 0215), so no reader of the key sees a change. One reader asking
-   * is enough: it applies to the entry. Named after TanStack Query's option,
-   * which does more: it also keeps the unchanged parts of changed data. Off
-   * unless asked for, because a reader with an effect on `data` would no
-   * longer see a refetch that changed nothing.
-   */
-  structuralSharing?: boolean
-  /**
    * Re-render when a request leaves and when it lands, even if the data,
    * error and status did not change. Off by default: a reader re-renders only
    * when one of those changes, and `isFetching` is current whenever it
@@ -416,7 +535,6 @@ function useEntrySubscription(
   path: string,
   refetchInterval: number | undefined,
   enabled: boolean,
-  structuralSharing: boolean,
 ): { hash: string; key: QueryKey; subscribe: (onChange: () => void) => () => void } {
   const hash = hashKey(queryKey)
 
@@ -426,12 +544,11 @@ function useEntrySubscription(
 
   // One subscription record per hook instance; the interval lives on it so a
   // change does not resubscribe.
-  const subRef = useRef<Subscription>({ interval: refetchInterval, structuralSharing })
-  subRef.current.structuralSharing = structuralSharing
+  const subRef = useRef<Subscription>({ interval: refetchInterval })
   const subscribe = useCallback(
     (onChange: () => void) => {
       if (!enabled) return noopSubscribe()
-      subRef.current = { interval: subRef.current.interval, structuralSharing: subRef.current.structuralSharing }
+      subRef.current = { interval: subRef.current.interval }
       return subscribeEntry(key, path, subRef.current, onChange)
     },
     [key, path, enabled],
@@ -448,37 +565,42 @@ function useEntrySubscription(
  * something `isEqual` calls different. It fetches and polls exactly as
  * useApiQuery does, sharing the same entry.
  *
- * `select` sees the data (undefined until the first answer lands), the
+ * `select` sees the data (undefined until the first answer lands; the key's
+ * declared `parse` of it, if it declares one), the
  * query's error, and the selection it returned last time (undefined on the
  * first call), so a reader can hand back the parts that did not change.
  * Like useApiQuery's own select, a body `select` cannot read becomes the
  * error rather than a throw during render: `select` is called again with no
  * data and that error, so the reader shows what it shows for a failed query.
- * Pass a stable `select`.
+ * `select` may be a fresh function on every render.
  */
 export function useApiQuerySelector<T, S>(
-  { queryKey, path, refetchInterval, enabled = true, structuralSharing = false }: Omit<UseApiQueryOptions<T>, 'select' | 'trackFetching'>,
+  { queryKey, path, refetchInterval, enabled = true }: Omit<UseApiQueryOptions<T>, 'select' | 'trackFetching'>,
   select: (data: T | undefined, error: Error | null, previous: S | undefined) => S,
   isEqual: (a: S, b: S) => boolean = Object.is,
 ): S {
-  const { hash, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled, structuralSharing)
-  const cache = useRef<{ snapshot: Snapshot; select: typeof select; value: S } | null>(null)
-  const getSelection = useCallback((): S => {
-    const snapshot = enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY
-    const prev = cache.current
-    if (prev && prev.snapshot.data === snapshot.data && prev.snapshot.error === snapshot.error && prev.select === select) return prev.value
-    let next: S
-    try {
-      next = select(snapshot.data as T | undefined, snapshot.error, prev?.value)
-    } catch (err) {
-      next = select(undefined, err instanceof Error ? err : new Error(String(err)), prev?.value)
-    }
-    const value = prev && isEqual(prev.value, next) ? prev.value : next
-    cache.current = { snapshot, select, value }
-    return value
-  }, [hash, enabled, select, isEqual])
-  return useSyncExternalStore(subscribe, getSelection, getSelection)
+  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
+  const getSnapshot = useCallback((): Snapshot => (enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY), [hash, enabled])
+  const selectSnapshot = useCallback(
+    (snapshot: Snapshot, previous: S | undefined): S => {
+      const declared = declarationOf(hash, key)
+      const read = (data: unknown, error: Error | null): S => select(data as T | undefined, error, previous)
+      try {
+        return read(declared?.parse ? parsedAnswer(declared, snapshot.data) : snapshot.data, snapshot.error)
+      } catch (err) {
+        // The reader shows what it shows for a failed query: no answer, as
+        // the key's parse reads it, and the error.
+        const none = declared?.parse ? parsedAnswer(declared, undefined) : undefined
+        return read(none, err instanceof Error ? err : new Error(String(err)))
+      }
+    },
+    [hash, key, select],
+  )
+  return useSelection({ subscribe, getSnapshot, select: selectSnapshot, isEqual, sameSnapshot: sameAnswer })
 }
+
+// Snapshots that differ only in isFetching or status feed select the same input.
+const sameAnswer = (a: Snapshot, b: Snapshot) => a.data === b.data && a.error === b.error
 
 export function useApiQuery<T>({
   queryKey,
@@ -486,10 +608,9 @@ export function useApiQuery<T>({
   refetchInterval,
   enabled = true,
   select,
-  structuralSharing = false,
   trackFetching = false,
 }: UseApiQueryOptions<T>): UseApiQueryResult<T> {
-  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled, structuralSharing)
+  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
 
   // A request leaving and landing flips isFetching twice. Only a reader that
   // asked (trackFetching) re-renders on those flips (ADR 0215): every other

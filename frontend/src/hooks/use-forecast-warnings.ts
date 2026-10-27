@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react'
 
 import { FORECAST_SURF_WARNING_PATH, FORECAST_WIND_WARNING_PATH } from '@/lib/alarm-display'
-import { useApiQuery, useApiQuerySelector } from '@/lib/api-query'
+import { declareQuery, useApiQuery, useApiQuerySelector } from '@/lib/api-query'
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place'
 
 export interface ForecastWarningSection {
@@ -122,13 +122,14 @@ function mapWarnings(data: ForecastWarningsApi): MappedWarnings {
   }
 }
 
+declareQuery(['/api/forecast-warnings'], { structuralSharing: true })
+
 export function useForecastWarnings(refreshIntervalSeconds = 3600, options: ForecastQueryOptions = {}) {
   const { data, error, isLoading, refetch } = useApiQuery<MappedWarnings>({
     ...forecastQuery('/api/forecast-warnings', options.place),
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
     select: mapWarnings,
-    structuralSharing: true,
   })
 
   useEffect(() => {

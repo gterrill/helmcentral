@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
 import { apiBaseUrl } from '@/config/api'
-import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
+import { ApiError, apiRequest, declareQuery, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 import type { EquipmentDependants } from '@/lib/equipment-dependants'
 import type { SourceKind } from '@/lib/vessel-settings'
 
@@ -275,6 +275,8 @@ export interface InventoryFieldError {
 // key is [EQUIPMENT, filter] and an item key is [EQUIPMENT/<id>], so
 // invalidating [EQUIPMENT] reaches every list and no single item.
 const EQUIPMENT = '/api/inventory/equipment'
+// Lists only: an item's key is the one string EQUIPMENT/<id>.
+declareQuery([EQUIPMENT], { structuralSharing: true })
 const ZONES = '/api/inventory/zones'
 const DECKS = '/api/inventory/decks'
 // Owned by use-maintenance.ts. An equipment write can change its schedule
@@ -352,7 +354,6 @@ export function useEquipment(filter: EquipmentFilter | null) {
     queryKey: [EQUIPMENT, { system: filter?.system ?? '', status: filter?.status ?? '', zone: filter?.zone ?? '', bin: filter?.bin ?? '', q: filter?.q ?? '' }],
     path: `${EQUIPMENT}${qs ? `?${qs}` : ''}`,
     enabled: filter !== null,
-    structuralSharing: true,
     select: (raw: { items?: EquipmentItem[] }) => raw.items ?? [],
   })
 

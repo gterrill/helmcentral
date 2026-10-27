@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
+import { apiRequest, declareQuery, setQueryData, useApiQuery } from '@/lib/api-query'
 
 export type CZoneSwitch = {
   id: string
@@ -28,6 +28,8 @@ const NO_SWITCHES: CZoneSwitch[] = []
  * `/api/czone/switches` every few seconds anyway is pure noise. Defaults to
  * true so existing call sites that don't pass it keep polling unconditionally.
  */
+declareQuery(SWITCHES_KEY, { structuralSharing: true })
+
 export function useCZoneSwitches(refreshInterval: number, enabled = true) {
   const [pending, setPending] = useState<Set<string>>(new Set())
 
@@ -40,7 +42,6 @@ export function useCZoneSwitches(refreshInterval: number, enabled = true) {
     path: '/api/czone/switches',
     enabled,
     refetchInterval: refreshInterval * 1000,
-    structuralSharing: true,
     select: (raw: CZoneSwitchesResponse) =>
       (Array.isArray(raw.switches) ? raw.switches : [])
         .filter(

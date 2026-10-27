@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import type { LampStripWidgetConfig } from '@/lib/dashboard-widgets'
-import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
+import { apiRequest, declareQuery, setQueryData, useApiQuery } from '@/lib/api-query'
 
 interface DashboardRibbonResponse {
   ribbon: LampStripWidgetConfig | null
@@ -17,12 +17,13 @@ const RIBBON_KEY = ['/api/dashboard-ribbon'] as const
  * `ribbon` is `null` when the operator has not pinned one, in which case
  * App.tsx renders nothing in the ribbon's slot.
  */
+declareQuery(RIBBON_KEY, { structuralSharing: true })
+
 export function useDashboardRibbon() {
   const { data, isLoading, error } = useApiQuery<LampStripWidgetConfig | null>({
     queryKey: RIBBON_KEY,
     path: '/api/dashboard-ribbon',
     select: (raw: DashboardRibbonResponse) => raw.ribbon ?? null,
-    structuralSharing: true,
   })
 
   // A null config clears the ribbon; anything else replaces it, validated

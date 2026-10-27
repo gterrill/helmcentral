@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom'
 import { afterEach, beforeEach } from 'vitest'
 import { resetQueryStore } from '@/lib/api-query'
-import { resetTelemetryStoresForTest } from '@/lib/telemetry-store'
+import { resetTelemetryStoresForTest } from '@/lib/test-reset'
 import { setViewportWidth } from './viewport'
 
 // jsdom doesn't implement the Popover API. The real @oddbird/popover-polyfill

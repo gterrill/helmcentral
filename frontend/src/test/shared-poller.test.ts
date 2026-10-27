@@ -2,7 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createSharedPoller, type PollStore } from '@/lib/shared-poller'
-import { resetTelemetryStoresForTest } from '@/lib/telemetry-store'
+import { resetTelemetryStoresForTest } from '@/lib/test-reset'
 
 afterEach(() => {
   vi.useRealTimers()

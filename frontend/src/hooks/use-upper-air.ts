@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useApiQuery } from '@/lib/api-query';
+import { declareQuery, useApiQuery } from '@/lib/api-query';
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 /**
@@ -218,6 +218,8 @@ const EMPTY_UPPER_AIR: MappedUpperAir = {
   ttlSeconds: null,
 };
 
+declareQuery(['/api/upper-air'], { structuralSharing: true })
+
 /**
  * Upper air is optional: a boat with no upper-air plugin installed gets an
  * empty day list and a 200, not an error, because that is a normal
@@ -230,7 +232,6 @@ export function useUpperAir(refreshIntervalSeconds = 21600, options: ForecastQue
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
     select: mapUpperAir,
-    structuralSharing: true,
   });
 
   useEffect(() => {

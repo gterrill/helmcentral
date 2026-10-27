@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useApiQuery } from '@/lib/api-query';
+import { declareQuery, useApiQuery } from '@/lib/api-query';
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 export type WaveSteepnessBand = 'rolling' | 'building' | 'steep' | 'breaking';
@@ -161,13 +161,14 @@ const EMPTY_WAVES: MappedWaveForecast = {
   ttlSeconds: null,
 };
 
+declareQuery(['/api/wave-forecast'], { structuralSharing: true });
+
 export function useWaveForecast(refreshIntervalSeconds = 3600, options: ForecastQueryOptions = {}) {
   const { data, error, isLoading, refetch } = useApiQuery<MappedWaveForecast>({
     ...forecastQuery('/api/wave-forecast', options.place),
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
     select: mapWavePayload,
-    structuralSharing: true,
   });
 
   useEffect(() => {

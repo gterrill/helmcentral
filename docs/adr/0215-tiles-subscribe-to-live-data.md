@@ -7,6 +7,9 @@ Amended by [ADR 0218](0218-the-stream-replays-the-current-payload-to-a-late-list
 the stream now replays the current payload to a late listener, so the
 `useRetain*` hooks described below no longer exist and the shell no longer
 starts the stores. The text below keeps the decisions as they were made.
+Amended again (2026-10-28) by the section "One selection module, and sharing
+belongs to the key" at the end: the reader side is written once, and
+`structuralSharing` is declared by the key, not asked for by each reader.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -403,14 +406,17 @@ Two rules differ from the earlier stores:
 
 Each store claims nothing before its first event:
 
-- **Autopilot:** the state is null, and the tile shows `--`. It used to start
+- **Autopilot:** the state reads null until heard, and the tile shows `--`. It used to start
   as an absent pilot and say "No autopilot detected" until the first event.
-- **Solar:** the controller list is null, so the tile lists none and does not
+- **Solar:** the controller list reads null until heard, so the tile lists none and does not
   say "No controller data".
 - **Electrical:** every reading and both role flags are null, which the
   Battery & Power and Generator tiles already show as dashes.
-- **Tanks, nearby vessels and radar:** `received: false`, read as `loading`,
+- **Tanks, nearby vessels and radar:** `loading` until heard,
   which each tile already showed while it waited.
+
+(The heard flag, described under "How long a store lives", later replaced the
+per-store `received` fields and null states this phase first used.)
 
 The alternator tile made the same false claim from vessel state:
 `enginesRunning` null read as stopped, "Engines not running". It now shows
@@ -707,10 +713,13 @@ The shell passes a tile config, flags and stable callbacks, never a reading.
 A new tile follows the same four steps:
 
 1. **The data has a store or a query.** A stream event gets a store built on
-   `createTelemetryStore` in its own `hooks/use-*.ts`, with an `apply` that
-   returns null for a tick that changes nothing shown, a `useRetain*` hook
+   `createTelemetryStore` in its own `hooks/use-*.ts`, with an `apply(previous, data, receivedAt)` over
+   the already-decoded JSON that
+   returns null for a tick that changes nothing shown, `useHeardSelector` for a tile that
+   must not claim a value before the server has spoken, a `useRetain*` hook
    (no longer needed since ADR 0218), and selectors (`useStoreFields`, or `useSelector` with an equality). A
-   poll gets a hook over `useApiQuery` with `structuralSharing: true`, or
+   poll gets a hook over `useApiQuery` (its key declares `structuralSharing` with
+   `declareQuery`), or
    over `useApiQuerySelector` when the tile shows a slice.
 2. **A `Live*` wrapper, exported from the tile's own file** (beside the
    presentational tile, the way `GaugeTile` sits beside `GaugeTileView`),
@@ -740,12 +749,17 @@ selector with value equality on exactly that, and this ADR says why.
 
 ### How long a store lives
 
-Every store is built by `createTelemetryStore(subscribe, event, initial,
-apply)` in `frontend/src/lib/telemetry-store.ts`. It owns the subscription,
-the snapshot, the listeners, `useSelector`, `getSnapshot` and `useRetain` (the last removed by
-ADR 0218); each store module supplies only its event's parser and equality rules. The
-gauge store's per-path listeners are the helper's keyed listeners, so the
-three stores share one lifecycle.
+Every store is built by `createTelemetryStore(event, initial, apply)` in
+`frontend/src/lib/telemetry-store.ts`. It owns the stream lookup, the
+`JSON.parse` of each frame, the subscription, the snapshot, the listeners,
+`useSelector`, `getSnapshot` and the heard flag (`useHeardSelector`, below); each
+store module supplies only its event name, its initial state and an `apply`
+step with its equality rules. `apply(previous, data, receivedAt)` receives the
+already-decoded JSON and returns the next state or null for no change. A frame
+that is not JSON, or is JSON but not an object (null, a number, a string, an
+array), is logged with the event name (`console.error`), once per frame, and
+changes nothing, the heard flag included; no default stands in for it. The gauge store's per-path
+listeners are the helper's keyed listeners, so the stores share one lifecycle.
 
 A store starts with its first reader and stays subscribed for the life of the
 page. It never empties itself when its last reader leaves.
@@ -777,16 +791,35 @@ boat never happens: `AppShell` starts every store at boot through its
 `useRetain*` hook (ADR 0218 removed them; gauge values, alarms, vessel state, and the six phase 5
 streams), without listening to any of them.
 
-Before its first event, a store holds its `initial`, and each `initial`
-claims nothing:
+Before its first event, a store holds its `initial`, and nothing reads that
+as a reading. One convention says so: the store knows whether it has applied
+its first event, and `useHeardSelector(select, isEqual)` reads through it: it
+is `useSelector` that returns null until the store has heard, from one
+subscription and one cache, so the result keeps its reference while the state
+holds. The flag turns true on any frame that decodes to an object, including
+one that changes nothing, and every listener, keyed ones included, hears the
+flip. `resetTelemetryStoresForTest` turns it back to false. No store keeps a
+`received` field, a `-1` or a null whose only meaning is "not yet". Each store
+makes its `initial` a placeholder and gates the readers that would otherwise
+claim something:
 
-- **Gauge values and vessel state:** every reading null, which every tile
-  shows as `--`.
-- **Alarms:** `received: false`. `useKnownAlarmList` and `useWorstAlarmState`
-  return null, the Alarms page says "Waiting for the alarm list" instead of
+- **Gauge values, vessel state and electrical state:** every reading null,
+  which every tile shows as `--`. Null here is an honest unknown, so these
+  readers need no gate.
+- **Alarms:** an empty list and `normal`, read only through the flag.
+  `useKnownAlarmList` and `useWorstAlarmState`
+  return null until the store has heard, the Alarms page says "Waiting for the alarm list" instead of
   "All clear", and the CHK lamp reads no data instead of clear. The banner
   and the wall pill show nothing until there is something to show, which is
   their behaviour with an empty list anyway.
+- **Autopilot:** the absent pilot as the placeholder. `useAutopilotState`
+  returns null until heard, and the tile shows `--`.
+- **Solar:** an empty controller list as the placeholder. `useSolarState`
+  returns `controllers: null` until heard, so "No controller data" appears
+  only once the server has said so.
+- **Tanks, nearby vessels and radar:** `loading` is `!heard`. The radar
+  source is null until heard (it was `'disabled'`, a claim that the
+  integration is off), and the tile shows `--` for it.
 
 A delayed release, keeping a store a few seconds after its last holder left,
 was considered for phase 1 and rejected. The delay is a guess that has to
@@ -794,11 +827,19 @@ outlast the slowest page mount, it puts a timer into every test of the store,
 and it would not have closed the gap above.
 
 Tests reset every store, subscription included, after each test
-(`resetTelemetryStoresForTest` in `src/test/setup.ts`), so one test's readings
-never reach the next. The stream is passed in to `createTelemetryStore` and
-read only when a store starts, so a module that only imports a store's types
-or helpers never touches it. Tests no longer mock the stream module for data;
-they replace the EventSource under it (ADR 0218).
+(`resetTelemetryStoresForTest`, called from `src/test/setup.ts`), so one test's readings
+never reach the next. `createTelemetryStore` imports `subscribeTelemetry` itself and reads it only
+when a store starts. It used to take the stream as a parameter in every store,
+because `setup.ts` loaded the factory and with it the real stream before a
+test file's `vi.mock` of it could apply. The cause was that
+`setup.ts` reached the factory through `api-query.ts` (importing `sameJSON`)
+and for the reset. The equality helpers now live in `lib/same-value.ts` and
+the reset registry (`resetTelemetryStoresForTest`, `onTelemetryTestReset`) in
+`lib/test-reset.ts`; neither imports the stream, the factory re-exports both,
+and `setup.ts` imports `test-reset` statically. A module that is not a store
+imports the helpers from those two, not from the factory. Tests that count `subscribeTelemetry`
+calls still work. Tests no longer mock the stream module for data; they
+replace the EventSource under it (ADR 0218).
 
 ### Phases
 
@@ -885,3 +926,68 @@ they replace the EventSource under it (ADR 0218).
   are gone, so a component cannot take every path again by accident.
 - `EquipmentTileContext` carries only items, profiles and the reporting set.
   Anything live is read by the host that needs it.
+
+## One selection module, and sharing belongs to the key
+
+Amended 2026-10-28. Three things in the text above are superseded.
+
+**The reader side is written once.** The telemetry store, the query cache, the
+shared poller and the gauge subset each had a private copy of the same idea: a
+cached selection over a snapshot, kept by reference while an equality function
+says it did not change. `lib/selection.ts` now holds it as `useSelection`:
+
+```ts
+useSelection<S, T>({
+  subscribe,      // (onChange) => unsubscribe; may listen by key
+  getSnapshot,    // () => S, same reference while nothing changed
+  select,         // (snapshot, previous) => T; may be a fresh closure each render
+  isEqual,        // default Object.is: keeps the previous T when it says equal
+  sameSnapshot,   // default Object.is: when two snapshots are the same input
+})
+```
+
+`useSelector`, `useHeardSelector`, `useApiQuerySelector`, the poller's
+`useSlice` and `useGaugeSubset` are built on it. A fresh `select` costs one
+recompute and no extra render. `useSlice` therefore no longer needs a stable
+`select`, and takes an optional `isEqual`.
+
+**Sharing is a property of the key.** The decision above kept
+`structuralSharing` a per-reader option because about sixty hooks had not been
+audited, and applied it to an entry if any mounted reader asked. A hook that
+never asked then behaved differently depending on what else was on screen.
+The option is removed from the readers. A key declares it once, beside the
+key, with `declareQuery(prefix, { structuralSharing: true })`. It stays opt-in:
+a key that declares nothing keeps new data on every answer, whatever is
+mounted. A declaration covers every key that starts with its prefix, so a parameterised key such as a forecast for a place
+declares its path once. Where readers of one key used to disagree, the key now
+declares sharing, because some reader already relied on it.
+
+**A key can parse its answer once.** `declareQuery(prefix, { parse })` turns
+the raw answer into the value that `useApiQuerySelector`'s `select` sees. It
+runs once per answer however many readers there are (the result is remembered
+by the answer object), and a parse that throws reaches readers as the query's
+error. `useApiQuery`, `getQueryData` and `setQueryData` still deal in the raw
+answer. The anchor watch declares `parseAnchorWatch` this way; before, each
+reader's `select` parsed the record, once per reader per poll.
+
+Three rules keep declarations honest:
+
+- **They sit with the key.** A declaration lives in the module that exports
+  the key's constant or hooks, so importing the key imports its declaration.
+  It is looked up when an answer lands and when a selector reads, with no
+  fallback. A read or prefetch made before the declaring module loaded would
+  get neither sharing nor parse, so no other module may read a declared key
+  without importing the module that declares it. Invalidating a key from
+  elsewhere is safe: it only touches entries that already exist.
+- **They do not overlap.** A declaration whose prefix equals, extends or
+  is extended by another's must carry the same options, or `declareQuery`
+  throws, because the winner would otherwise depend on import order.
+  Declaring the same thing again, as a re-imported or hot-reloaded module
+  does, is a no-op.
+- **Updaters return new objects.** The parse of an answer is remembered by the
+  answer object. A `setQueryData` updater that changes its argument in place
+  and returns it would keep a stale parse, so in development it throws.
+
+A selector on a key whose `parse` throws on an answer is handed the parse of
+"no answer" together with the error, as it was handed `parseAnchorWatch(undefined)`
+before the parse moved to the key.

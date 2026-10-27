@@ -6,6 +6,7 @@ import {
   ApiError,
   GC_TIME_MS,
   apiRequest,
+  declareQuery,
   getQueryData,
   invalidateQueries,
   resetQueryStore,
@@ -686,60 +687,62 @@ describe('useApiQuery and isFetching', () => {
   })
 })
 
-describe('useApiQuery with structuralSharing', () => {
+declareQuery(['shared-items'], { structuralSharing: true })
+
+describe('useApiQuery with a key that declares structuralSharing', () => {
   beforeEach(() => {
     resetQueryStore()
   })
 
   it('keeps the data object, and does not re-render, when a poll answers with equal data', async () => {
-    stubApi({ 'GET /api/items': () => ({ list: [{ id: 'a', n: 1 }] }) })
+    stubApi({ 'GET /api/shared-items': () => ({ list: [{ id: 'a', n: 1 }] }) })
     let renders = 0
     const { result } = renderHook(() => {
       renders += 1
-      return useApiQuery<{ list: Array<{ id: string; n: number }> }>({ queryKey: ['items'], path: '/api/items', structuralSharing: true }).data
+      return useApiQuery<{ list: Array<{ id: string; n: number }> }>({ queryKey: ['shared-items'], path: '/api/shared-items' }).data
     })
     await waitFor(() => expect(result.current).toEqual({ list: [{ id: 'a', n: 1 }] }))
     const held = result.current
     const settled = renders
 
-    await act(async () => { await invalidateQueries(['items']) })
-    await act(async () => { await invalidateQueries(['items']) })
+    await act(async () => { await invalidateQueries(['shared-items']) })
+    await act(async () => { await invalidateQueries(['shared-items']) })
 
     expect(result.current).toBe(held)
     expect(renders).toBe(settled)
   })
 
   it('keeps the entry\'s data, so getQueryData and every reader of the key see the same object', async () => {
-    stubApi({ 'GET /api/items': () => ({ list: [{ id: 'a', n: 1 }] }) })
-    const { result } = renderHook(() => useApiQuery<{ list: unknown[] }>({ queryKey: ['items'], path: '/api/items', structuralSharing: true }).data)
+    stubApi({ 'GET /api/shared-items': () => ({ list: [{ id: 'a', n: 1 }] }) })
+    const { result } = renderHook(() => useApiQuery<{ list: unknown[] }>({ queryKey: ['shared-items'], path: '/api/shared-items' }).data)
     await waitFor(() => expect(result.current).toBeDefined())
-    const held = getQueryData(['items'])
+    const held = getQueryData(['shared-items'])
 
-    await act(async () => { await invalidateQueries(['items']) })
+    await act(async () => { await invalidateQueries(['shared-items']) })
 
-    expect(getQueryData(['items'])).toBe(held)
+    expect(getQueryData(['shared-items'])).toBe(held)
   })
 
   it('hands over the new data when it changed', async () => {
     let n = 1
-    stubApi({ 'GET /api/items': () => ({ n }) })
-    const { result } = renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['items'], path: '/api/items', structuralSharing: true }).data)
+    stubApi({ 'GET /api/shared-items': () => ({ n }) })
+    const { result } = renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['shared-items'], path: '/api/shared-items' }).data)
     await waitFor(() => expect(result.current).toEqual({ n: 1 }))
 
     n = 2
-    await act(async () => { await invalidateQueries(['items']) })
+    await act(async () => { await invalidateQueries(['shared-items']) })
 
     expect(result.current).toEqual({ n: 2 })
   })
 
   it('still reports an error after equal data, and drops nothing it showed', async () => {
     let fail = false
-    stubApi({ 'GET /api/items': () => (fail ? jsonResponse({ error: 'down' }, 503) : { n: 1 }) })
-    const { result } = renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['items'], path: '/api/items', structuralSharing: true }))
+    stubApi({ 'GET /api/shared-items': () => (fail ? jsonResponse({ error: 'down' }, 503) : { n: 1 }) })
+    const { result } = renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['shared-items'], path: '/api/shared-items' }))
     await waitFor(() => expect(result.current.data).toEqual({ n: 1 }))
 
     fail = true
-    await act(async () => { await invalidateQueries(['items']) })
+    await act(async () => { await invalidateQueries(['shared-items']) })
 
     expect(result.current.error?.message).toBe('down')
   })
@@ -765,5 +768,117 @@ describe('useApiQuerySelector and the previous selection', () => {
 
     expect(result.current[0]).toBe(a)
     expect(result.current[1]).toEqual({ id: 'b', n: 2 })
+  })
+})
+
+describe('declareQuery: sharing and parse belong to the key', () => {
+  beforeEach(() => {
+    resetQueryStore()
+  })
+
+  it('shares structure for a reader that never asked, alone or beside others', async () => {
+    declareQuery(['declared-share'], { structuralSharing: true })
+    stubApi({ 'GET /api/declared-share': () => ({ list: [{ id: 'a' }] }) })
+    const useRead = () => useApiQuery<{ list: unknown[] }>({ queryKey: ['declared-share'], path: '/api/declared-share' }).data
+
+    const alone = renderHook(useRead)
+    await waitFor(() => expect(alone.result.current).toBeDefined())
+    const heldAlone = alone.result.current
+    await act(async () => { await invalidateQueries(['declared-share']) })
+    expect(alone.result.current).toBe(heldAlone)
+    alone.unmount()
+    resetQueryStore()
+
+    const a = renderHook(useRead)
+    const b = renderHook(() => useApiQuerySelector({ queryKey: ['declared-share'], path: '/api/declared-share' }, (d: { list: unknown[] } | undefined) => d))
+    await waitFor(() => expect(a.result.current).toBeDefined())
+    const held = a.result.current
+    await act(async () => { await invalidateQueries(['declared-share']) })
+    expect(a.result.current).toBe(held)
+    expect(b.result.current).toBe(held)
+  })
+
+  it('does not share structure for an undeclared key, whatever else is mounted', async () => {
+    declareQuery(['declared-other'], { structuralSharing: true })
+    stubApi({ 'GET /api/undeclared': () => ({ n: 1 }) })
+    const a = renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['undeclared'], path: '/api/undeclared' }).data)
+    renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['declared-other'], path: '/api/undeclared' }).data)
+    await waitFor(() => expect(a.result.current).toBeDefined())
+    const held = a.result.current
+    await act(async () => { await invalidateQueries(['undeclared']) })
+    expect(a.result.current).not.toBe(held)
+    expect(a.result.current).toEqual(held)
+  })
+
+  it('matches a declaration by key prefix', async () => {
+    declareQuery(['declared-prefix'], { structuralSharing: true })
+    stubApi({ 'GET /api/declared-prefix': () => ({ n: 1 }) })
+    const { result } = renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['declared-prefix', { q: 1 }], path: '/api/declared-prefix' }).data)
+    await waitFor(() => expect(result.current).toBeDefined())
+    const held = result.current
+    await act(async () => { await invalidateQueries(['declared-prefix']) })
+    expect(result.current).toBe(held)
+  })
+
+  it('parses each answer once however many selectors read it, and selectors see the parsed value', async () => {
+    let parses = 0
+    declareQuery(['declared-parse'], { parse: (raw: { n: number } | undefined) => { parses += 1; return { doubled: (raw?.n ?? 0) * 2, loaded: raw !== undefined } } })
+    stubApi({ 'GET /api/declared-parse': () => ({ n: 2 }) })
+    const opts = { queryKey: ['declared-parse'], path: '/api/declared-parse' }
+    const doubled = (p: { doubled: number } | undefined) => p?.doubled
+    const r1 = renderHook(() => useApiQuerySelector(opts, doubled))
+    const r2 = renderHook(() => useApiQuerySelector(opts, doubled))
+    const r3 = renderHook(() => useApiQuerySelector(opts, (p: { loaded: boolean } | undefined) => p?.loaded))
+    await waitFor(() => expect(r1.result.current).toBe(4))
+    expect(r2.result.current).toBe(4)
+    expect(r3.result.current).toBe(true)
+    const afterFirst = parses
+    await act(async () => { await invalidateQueries(['declared-parse']) })
+    // one answer, one parse, not one per reader
+    expect(parses).toBe(afterFirst + 1)
+  })
+})
+
+describe('declareQuery rules', () => {
+  beforeEach(() => {
+    resetQueryStore()
+  })
+
+  it('hands select the parsed undefined, with the error, when a parse throws on an answer', async () => {
+    declareQuery(['parse-throws'], {
+      parse: (raw: { n: number } | undefined) => {
+        if (raw && raw.n < 0) throw new Error('bad body')
+        return { loaded: raw !== undefined }
+      },
+    })
+    stubApi({ 'GET /api/parse-throws': () => ({ n: -1 }) })
+    const seen: Array<{ data: unknown; error: string | null }> = []
+    const { result } = renderHook(() => useApiQuerySelector(
+      { queryKey: ['parse-throws'], path: '/api/parse-throws' },
+      (data: { loaded: boolean } | undefined, error: Error | null) => { seen.push({ data, error: error?.message ?? null }); return data?.loaded ?? null },
+    ))
+    await waitFor(() => expect(seen.some((s) => s.error === 'bad body')).toBe(true))
+    // the reader got the key's parse of "no answer", not raw undefined
+    expect(seen.find((s) => s.error === 'bad body')?.data).toEqual({ loaded: false })
+    expect(result.current).toBe(false)
+  })
+
+  it('throws on a declaration that overlaps another with different options', () => {
+    declareQuery(['overlap'], { structuralSharing: true })
+    expect(() => declareQuery(['overlap'], { structuralSharing: false })).toThrow(/overlap/)
+    expect(() => declareQuery(['overlap', 'child'], { parse: (r: unknown) => r })).toThrow(/overlap/)
+    expect(() => declareQuery([], { parse: (r: unknown) => r })).toThrow(/overlap/)
+  })
+
+  it('accepts an identical redeclaration, even from a re-imported module', () => {
+    const parse = (r: { n: number } | undefined) => r?.n
+    declareQuery(['redeclare'], { structuralSharing: true, parse })
+    expect(() => declareQuery(['redeclare'], { structuralSharing: true, parse })).not.toThrow()
+    expect(() => declareQuery(['redeclare'], { structuralSharing: true, parse: (r: { n: number } | undefined) => r?.n })).not.toThrow()
+  })
+
+  it('refuses an updater that returns the object it was given', () => {
+    setQueryData(['mutating'], { n: 1 })
+    expect(() => setQueryData<{ n: number }>(['mutating'], (prev) => prev!)).toThrow(/new object/)
   })
 })

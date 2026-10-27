@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useApiQuery } from '@/lib/api-query'
+import { declareQuery, useApiQuery } from '@/lib/api-query'
 import type { RouteWaypoint } from '@/lib/route-calc'
 
 /** SignalK's Course API `nextPoint` (ADR 0125), reverse-geocoded server-side. `name` is `''` until the backend's cache resolves it - see GET /api/routes/active's own doc comment (backend/active_route.go). */
@@ -65,12 +65,13 @@ function toStatus(data: ActiveRouteResponse): ActiveRouteStatus {
 }
 
 /** Polls what SignalK is navigating. Read-only: Helmcentral no longer starts or stops routes. */
+declareQuery(ACTIVE_KEY, { structuralSharing: true })
+
 export function useRouteActivation(pollIntervalSeconds = DEFAULT_POLL_INTERVAL_SECONDS) {
   const { data, error } = useApiQuery<ActiveRouteResponse>({
     queryKey: ACTIVE_KEY,
     path: '/api/routes/active',
     refetchInterval: pollIntervalSeconds * 1000,
-    structuralSharing: true,
   })
   // Don't assume inactive on a failed poll: the route may still be active on
   // the boat's N2K bus even if we can't reach SignalK to confirm.

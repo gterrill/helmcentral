@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
-import { apiRequest, refetchQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
-import { sameJSON } from '@/lib/telemetry-store'
+import { apiRequest, declareQuery, refetchQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
+import { sameJSON } from '@/lib/same-value'
 
 export interface DashboardPage {
   id: string
@@ -60,6 +60,7 @@ export interface CreatePageInit {
 const EMPTY_PAGES: DashboardPage[] = []
 
 const PAGES_KEY = ['/api/dashboard-pages'] as const
+declareQuery(PAGES_KEY, { structuralSharing: true })
 
 // The cache holds the raw list response, so patches keep its shape.
 function patchPages(fn: (pages: DashboardPage[]) => DashboardPage[]) {
@@ -138,7 +139,7 @@ export function useDashboardPages() {
   // pages renders nothing, and one that changes a widget hands every other
   // widget, page and the list itself back unchanged (sharePages).
   const { pages, error, loading } = useApiQuerySelector<DashboardPagesListResponse, PagesSelection>(
-    { queryKey: PAGES_KEY, path: PAGES_PATH, structuralSharing: true },
+    { queryKey: PAGES_KEY, path: PAGES_PATH },
     selectPages,
     samePagesSelection,
   )

@@ -2,8 +2,7 @@ import { useMemo } from 'react'
 
 import { ageFromPayload, shownAge } from '@/lib/staleness'
 
-import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
-import { createTelemetryStore, keepUnchangedItems, sameShallow, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, keepUnchangedItems, sameShallow, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 export type TankLevel = {
   id: string
@@ -24,9 +23,8 @@ type TanksStateResponse = {
   error?: string
 }
 
-/** What the tanks store holds. `received` is false until the first tanks-state event. */
+/** What the tanks store holds. */
 export interface TanksStateValue {
-  received: boolean
   tanks: TankLevel[]
   error: string | null
   // Freshest of the per-tank ages (ADR 0068); null when no tank publishes a
@@ -34,7 +32,7 @@ export interface TanksStateValue {
   lastUpdateAgeS: number | null
 }
 
-const NOT_RECEIVED: TanksStateValue = { received: false, tanks: [], error: null, lastUpdateAgeS: null }
+const INITIAL: TanksStateValue = { tanks: [], error: null, lastUpdateAgeS: null }
 
 function isTankLevel(tank: TankLevel): boolean {
   return typeof tank.id === 'string' &&
@@ -64,28 +62,18 @@ function toTankLevel(tank: TankLevel): TankLevel {
  * what the tile shows for it changes, and a tick that changes nothing shown
  * keeps the snapshot.
  */
-function applyTanksState(previous: TanksStateValue, raw: string): TelemetryUpdate<TanksStateValue> | null {
-  let data: TanksStateResponse & { last_update_age_s?: unknown }
-  try {
-    data = JSON.parse(raw) as TanksStateResponse & { last_update_age_s?: unknown }
-  } catch (err) {
-    console.error('Failed to parse tanks state event:', err)
-    return null
-  }
+function applyTanksState(previous: TanksStateValue, payload: unknown): TelemetryUpdate<TanksStateValue> | null {
+  const data = payload as TanksStateResponse & { last_update_age_s?: unknown }
   const list = Array.isArray(data.tanks) ? data.tanks : []
-  const tanks = keepUnchangedItems(previous.received ? previous.tanks : null, list.filter(isTankLevel).map(toTankLevel), (t) => t.id, sameShallow)
+  const tanks = keepUnchangedItems(previous.tanks, list.filter(isTankLevel).map(toTankLevel), (t) => t.id, sameShallow)
   const error = typeof data.error === 'string' && data.error !== '' ? data.error : null
   const age = ageFromPayload(data.last_update_age_s)
   const lastUpdateAgeS = shownAge(age) === shownAge(previous.lastUpdateAgeS) ? previous.lastUpdateAgeS : age
-  if (previous.received && tanks === previous.tanks && error === previous.error && lastUpdateAgeS === previous.lastUpdateAgeS) return null
-  return { state: { received: true, tanks, error, lastUpdateAgeS } }
+  if (tanks === previous.tanks && error === previous.error && lastUpdateAgeS === previous.lastUpdateAgeS) return null
+  return { state: { tanks, error, lastUpdateAgeS } }
 }
 
-// Read at start, not at import: a module that only imports this one's
-// helpers or types never touches the stream.
-const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
-
-const store = createTelemetryStore(listenToStream, 'tanks-state', NOT_RECEIVED, applyTanksState)
+const store = createTelemetryStore('tanks-state', INITIAL, applyTanksState)
 
 const selectAll = (state: TanksStateValue) => state
 const selectTanks = (state: TanksStateValue) => state.tanks
@@ -109,11 +97,11 @@ export function useTankAlarmLevels(): TankLevel[] {
 
 /** The tanks, for the Tanks tile. `loading` until the first event. */
 export function useTanksState() {
-  const state = store.useSelector(selectAll)
+  const heard = store.useHeardSelector(selectAll)
   return useMemo(() => ({
-    tanks: state.tanks,
-    loading: !state.received,
-    error: state.error,
-    lastUpdateAgeS: state.lastUpdateAgeS,
-  }), [state])
+    tanks: (heard ?? INITIAL).tanks,
+    loading: heard === null,
+    error: (heard ?? INITIAL).error,
+    lastUpdateAgeS: (heard ?? INITIAL).lastUpdateAgeS,
+  }), [heard])
 }

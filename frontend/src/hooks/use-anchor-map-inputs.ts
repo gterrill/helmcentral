@@ -9,7 +9,8 @@ import { useRadarTargets } from '@/hooks/use-radar-targets'
 export function useMapContacts() {
   const aisVessels = useNearbyVesselList()
   const { targets: radarTargets, radars, source: radarSource } = useRadarTargets()
-  return { aisVessels, radarTargets, radars, radarSource }
+  // Undefined until the first radar event; the map reads that as not heard yet and claims nothing.
+  return { aisVessels, radarTargets, radars, radarSource: radarSource ?? undefined }
 }
 
 /**
