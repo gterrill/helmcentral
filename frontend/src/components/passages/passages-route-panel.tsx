@@ -1,3 +1,5 @@
+import { memo } from 'react'
+
 import type { DistanceUnits } from '@/config/app-config'
 import { PassageDetailsPage } from '@/components/passages/passage-details-page'
 import { PassagesPanel } from '@/components/passages/passages-panel'
@@ -13,7 +15,8 @@ export interface PassagesRoutePanelProps {
 // ADR 0171: Passages wired to the app location. The listing and the details
 // pages (one passage, one Cruise, a combined selection) are one panel; which
 // renders is the route's view.
-export function PassagesRoutePanel({ units, canWrite, isDarkTheme }: PassagesRoutePanelProps) {
+// AppShell re-renders on every live delta; memo keeps this page out of it.
+export const PassagesRoutePanel = memo(function PassagesRoutePanel({ units, canWrite, isDarkTheme }: PassagesRoutePanelProps) {
   const { route, showFilter, openPassage, openCruise, openCombined, close } = usePassagesRoute()
   const list = usePassageList()
 
@@ -54,4 +57,4 @@ export function PassagesRoutePanel({ units, canWrite, isDarkTheme }: PassagesRou
       onOpenCruise={(id) => { openCruise(id) }}
     />
   )
-}
+})

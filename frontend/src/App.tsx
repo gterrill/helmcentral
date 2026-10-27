@@ -786,6 +786,9 @@ function AppShell() {
     navigate({ panel: 'settings', route: { view: 'section', section } })
   }, [navigate])
 
+  // Stable for DocumentsRoutePanel's memo: AppShell re-renders on every live delta.
+  const openAssistantSettings = useCallback(() => openSettingsSection('assistant'), [openSettingsSection])
+
   // Opens Settings at a section and asks it to focus one control, so a tile or
   // the setup line lands on the exact dropdown rather than the section's top.
   const openSetupStep = useCallback((section: SettingsSectionId, control: string) => {
@@ -2239,7 +2242,7 @@ function AppShell() {
         return (
           <AssistantDrawer
             canWrite={canWrite}
-            onOpenSettings={() => openSettingsSection('assistant')}
+            onOpenSettings={openAssistantSettings}
             initialConversationId={matePanelConversationId}
             onActiveConversationChange={reportMatePanelConversation}
             onHasDraftChange={setMatePanelHasDraft}
@@ -2339,7 +2342,7 @@ function AppShell() {
             // ADR 0120: the toolbar's Mate failure line links straight to
             // Settings → Assistant, the same openSettingsSection helper
             // AssistantDrawer's own "Open Mate settings" button uses above.
-            onOpenAssistantSettings={() => openSettingsSection('assistant')}
+            onOpenAssistantSettings={openAssistantSettings}
             // Ask Mate about a selection (ask-mate-selection.tsx): same
             // openMate the header's Sparkles button and SettingsPage's own
             // onAskMate already call, always starting a fresh conversation.
