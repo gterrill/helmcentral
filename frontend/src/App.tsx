@@ -354,8 +354,9 @@ export function App() {
 
 const selectNavigationState = (state: VesselStateValue) => state.navigationState
 
-/** What the shell reads of the anchor watch: whether one is set, the auto-raise, and the planning depth. */
+/** What the shell reads of the anchor watch: whether the server has answered, whether one is set, the auto-raise, and the planning depth. */
 interface ShellAnchorWatch {
+  loaded: boolean
   active: boolean
   lastAutoRaiseAt: string | null
   planningDepthM: number | null
@@ -363,6 +364,7 @@ interface ShellAnchorWatch {
 }
 
 const selectShellAnchorWatch = (watch: AnchorWatchFields): ShellAnchorWatch => ({
+  loaded: watch.loaded,
   active: watch.active,
   lastAutoRaiseAt: watch.lastAutoRaise?.at ?? null,
   planningDepthM: watch.planningDepthM,
@@ -370,7 +372,7 @@ const selectShellAnchorWatch = (watch: AnchorWatchFields): ShellAnchorWatch => (
 })
 
 function sameShellAnchorWatch(a: ShellAnchorWatch, b: ShellAnchorWatch): boolean {
-  return a.active === b.active && a.lastAutoRaiseAt === b.lastAutoRaiseAt
+  return a.loaded === b.loaded && a.active === b.active && a.lastAutoRaiseAt === b.lastAutoRaiseAt
     && a.planningDepthM === b.planningDepthM && a.planningTideHeightFt === b.planningTideHeightFt
 }
 
@@ -1064,8 +1066,13 @@ function AppShell() {
   // /api/anchor-watch (useAnchorWatch), which is what makes this "once per
   // event per client" without any of them having decided the raise itself.
   const lastSeenAutoRaiseAtRef = useRef<string | null | undefined>(undefined)
+  // The baseline is taken from the first answer, not from the record before
+  // it: that one has no auto-raise because nothing has been heard yet, and a
+  // raise from before this page loaded would then toast on every reload.
+  const anchorWatchLoaded = anchorWatch.loaded
   const lastAutoRaiseAt = anchorWatch.lastAutoRaiseAt
   useEffect(() => {
+    if (!anchorWatchLoaded) return
     const at = lastAutoRaiseAt
     if (lastSeenAutoRaiseAtRef.current === undefined) {
       lastSeenAutoRaiseAtRef.current = at
@@ -1075,7 +1082,7 @@ function AppShell() {
       lastSeenAutoRaiseAtRef.current = at
       setToastMessage('Anchor watch raised automatically: engines running, under way outside the zone')
     }
-  }, [lastAutoRaiseAt])
+  }, [anchorWatchLoaded, lastAutoRaiseAt])
   // The Rode Planner's forecast wind band (frontend/src/lib/rode-plan.ts's
   // resolvePlanningWindBand), held here so it outlives the planner closing
   // and reopening. Deliberately not persisted: a band chosen for last night's
@@ -1439,8 +1446,7 @@ function AppShell() {
   // that widget changed, defeating the tile's own React.memo. One stable
   // handler per widget id, cached here and reused across renders, fixes that
   // without changing any tile's onConfigure signature. effectiveWidgetsRef
-  // mirrors the current widget list (latest-ref idiom, matching
-  // use-telemetry-stream.ts's useTelemetryEvent) so a handler built once
+  // mirrors the current widget list (latest-ref idiom) so a handler built once
   // still resolves to the current widget when it's eventually called.
   const effectiveWidgetsRef = useRef(effectiveWidgets)
   useEffect(() => { effectiveWidgetsRef.current = effectiveWidgets }, [effectiveWidgets])

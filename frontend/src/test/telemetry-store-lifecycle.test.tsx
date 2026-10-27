@@ -52,7 +52,8 @@ afterEach(() => {
 
 describe('alarms store', () => {
   it('keeps the list for a surface that mounts after every reader has gone', async () => {
-    const { useAlarmList } = await import('@/hooks/use-alarms')
+    const { useAlarmListComparedOn, sameShownAlarm } = await import('@/hooks/use-alarms')
+    const useAlarmList = () => useAlarmListComparedOn(sameShownAlarm)
     const first = renderHook(() => useAlarmList())
     emit('alarms', { alarms: [houseBankLow], worst: 'alarm' })
     expect(first.result.current).toHaveLength(1)

@@ -10,7 +10,8 @@ import { vi } from 'vitest'
  *     (await import('./anchor-watch-mock')).anchorWatchModule(() => ({ active: true })))
  *
  * `read` is called on every hook call, so a test can change what it returns
- * between renders. The empty record is the module's own parse of no answer,
+ * between renders. The record is loaded unless `read` says `loaded: false`,
+ * which is how a test walks the shell through the first answer landing. The empty record is the module's own parse of no answer,
  * read through importActual so the mock never drifts from the fields the
  * record has. anchorWatchAt hands the record back as it is: a test that wants
  * a distance or a drag state puts it in the record.
@@ -23,7 +24,10 @@ export async function anchorWatchModule(read: () => Record<string, unknown>) {
   const record = (): any => {
     const overrides = read()
     const defaults = Object.fromEntries(writes.map((name) => [name, vi.fn()]))
-    return { ...EMPTY, ...defaults, ...overrides }
+    // Loaded unless the test says otherwise: most tests render a watch that
+    // has answered. One that passes `loaded: false` gets the record before
+    // the first answer, as the real hook hands it out.
+    return { ...EMPTY, loaded: true, ...defaults, ...overrides }
   }
   // The module's own write functions forward to whatever the record holds now.
   const write = (name: (typeof writes)[number]) => (...args: unknown[]) => {

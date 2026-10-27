@@ -5,7 +5,7 @@ import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import { GaugeGroupTile } from '@/components/gauge-group-tile'
 import { LampStripTile } from '@/components/lamp-strip-tile'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
-import { useAlarmList, useWorstAlarmState } from '@/hooks/use-alarms'
+import { sameLampAlarm, useAlarmListComparedOn, useWorstAlarmState } from '@/hooks/use-alarms'
 import { useEngineStatus, useGaugeSubset, type EngineStates } from '@/hooks/use-gauge-values'
 import { useTankAlarmLevels } from '@/hooks/use-tanks-state'
 import { formatAppLocation } from '@/lib/app-location'
@@ -137,7 +137,8 @@ export const LampStripHost = memo(function LampStripHost({
   const resolved = useMemo(() => resolveLamps(config, ctx), [config, ctx])
   const paths = useMemo(() => resolved.lamps.map((l) => l.path).filter((p) => p.trim() !== ''), [resolved])
   const { values, ages } = useGaugeSubset(paths)
-  const alarms = useAlarmList()
+  // Lamps show which alarm is on a path and how bad, never its reading.
+  const alarms = useAlarmListComparedOn(sameLampAlarm)
   const worstAlarmState = useWorstAlarmState()
   return <LampStripTile config={resolved} values={values} ages={ages} alarms={alarms} worstAlarmState={worstAlarmState} {...rest} />
 })

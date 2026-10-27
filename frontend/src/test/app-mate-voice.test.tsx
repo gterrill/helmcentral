@@ -160,7 +160,7 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 
 // [P1, impeccable critique 2026-09-12] a live alarm has to stay legible over
 // the Mate sheet's own scrim - see the stacking test below. One live alarm
-// is enough to drive the banner, which reads it through useAlarmList; the
+// is enough to drive the banner, which reads it through useAlarmListComparedOn; the
 // mock lists every hook the shell and its surfaces import from this module.
 const mockAlarm = {
   rule_id: 'helmcentral:test-alarm',
@@ -178,7 +178,10 @@ const mockAlarm = {
 vi.mock('@/hooks/use-alarms', () => ({
   // The shell holds the store; the surfaces read it through these (ADR 0215).
   useRetainAlarms: () => {},
-  useAlarmList: () => [mockAlarm],
+  useAlarmListComparedOn: () => [mockAlarm],
+  sameShownAlarm: () => true,
+  sameLampAlarm: () => true,
+  samePillAlarm: () => true,
   useKnownAlarmList: () => [mockAlarm],
   useWorstAlarmState: () => 'alarm',
   useAisCollisionAlarms: () => new Map(),

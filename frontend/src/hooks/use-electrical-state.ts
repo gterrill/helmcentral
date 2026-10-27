@@ -69,10 +69,8 @@ export interface ElectricalStateValue {
   solarOutputW: number | null
   acOutputW: number | null
   dc12vPowerW: number | null
-  dc12vCurrentA: number | null
   voltageReadoutV: number | null
   voltageReadoutLabel: string | null
-  acLoadsW: number | null
   generatorRealPowerW: number | null
   /** A generator instance is chosen in the roles; null while that is not known. */
   generatorConfigured: boolean | null
@@ -104,10 +102,8 @@ export const INITIAL_ELECTRICAL_STATE: ElectricalStateValue = {
   solarOutputW: null,
   acOutputW: null,
   dc12vPowerW: null,
-  dc12vCurrentA: null,
   voltageReadoutV: null,
   voltageReadoutLabel: null,
-  acLoadsW: null,
   generatorRealPowerW: null,
   generatorConfigured: null,
   generatorNone: false,
@@ -159,10 +155,8 @@ function parseElectricalState(data: ElectricalState): ElectricalStateValue {
     solarOutputW: nonNegative(data.solar_output_w),
     acOutputW: nonNegative(data.ac_output_w),
     dc12vPowerW: nonNegative(data.dc_12v_power_w),
-    dc12vCurrentA: nonNegative(data.dc_12v_current_a),
     voltageReadoutV: readout ? readoutV : null,
     voltageReadoutLabel: readout ? readoutLabel : null,
-    acLoadsW: nonNegative(data.ac_loads_w),
     generatorRealPowerW: nonNegative(data.generator_real_power_w),
     generatorConfigured: typeof data.generator_configured === 'boolean' ? data.generator_configured : null,
     generatorNone: data.generator_none === true,

@@ -107,7 +107,9 @@ function applySolarState(previous: SolarStateValue, raw: string): TelemetryUpdat
     yesterdayKWh: normalizeNumber(data.yesterday_kwh),
     peakTodayW: normalizeNumber(data.peak_today_w),
     lastUpdateAgeS: normalizeNumber(data.last_update_age_s),
-    controllers: keepUnchangedItems(previous.controllers, incoming, (c) => c.id, sameController),
+    // Keyed by id and place in the list: a controller with no id parses to
+    // 'unknown', and several of those must each meet their own previous row.
+    controllers: keepUnchangedItems(previous.controllers, incoming, (c, index) => `${c.id}#${index}`, sameController),
   }
   const next = keepUnchanged(previous, parsed, (field, a, b) => (
     field === 'lastUpdateAgeS' ? shownAge(a as number | null) === shownAge(b as number | null) : Object.is(a, b)

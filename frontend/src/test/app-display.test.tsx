@@ -251,7 +251,6 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
   // No-ops: nothing in this suite drives telemetry events, but several
   // hooks (useAutopilot, use-gauge-values) subscribe unconditionally on
   // every render and need a real unsubscribe function back.
-  useTelemetryEvent: () => {},
   subscribeTelemetry: () => () => {},
   subscribeTelemetryStatus: () => () => {},
 }))
@@ -265,7 +264,10 @@ const { mockAlarmsState } = vi.hoisted(() => ({
 vi.mock('@/hooks/use-alarms', () => ({
   // The shell holds the store; the surfaces read it through these (ADR 0215).
   useRetainAlarms: () => {},
-  useAlarmList: () => mockAlarmsState.alarms,
+  useAlarmListComparedOn: () => mockAlarmsState.alarms,
+  sameShownAlarm: () => true,
+  sameLampAlarm: () => true,
+  samePillAlarm: () => true,
   useKnownAlarmList: () => mockAlarmsState.alarms,
   useWorstAlarmState: () => 'normal',
   useAisCollisionAlarms: () => new Map(),

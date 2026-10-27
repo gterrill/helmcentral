@@ -145,3 +145,20 @@ describe('radar store', () => {
     expect(result.current.radars).toBe(first.radars)
   })
 })
+
+describe('solar controllers without an id', () => {
+  // The server may send controllers with no id. Each still compares against
+  // its own previous reading, by its place in the list, not against whichever
+  // id-less controller came last.
+  it('keeps each id-less controller that reads the same', () => {
+    const { result } = renderHook(() => useSolarState())
+    const noIds = live.SOLAR.controllers.slice(0, 2).map((c) => ({ ...c, id: '' }))
+    emit('solar-state', { ...live.SOLAR, controllers: noIds })
+    const [first] = result.current.controllers ?? []
+
+    emit('solar-state', { ...live.SOLAR, controllers: noIds.map((c, i) => (i === 1 ? { ...c, current_w: 400 } : { ...c })) })
+
+    expect(result.current.controllers?.[0]).toBe(first)
+    expect(result.current.controllers?.[1].currentW).toBe(400)
+  })
+})

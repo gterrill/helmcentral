@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 
 /**
  * Shared Server-Sent Events connection for backend-pushed telemetry (ADR 0037).
@@ -252,31 +252,6 @@ export function subscribeTelemetryStatus(onStatus: (status: TelemetryStatus) => 
   statusListeners.add(onStatus)
   onStatus(status)
   return () => { statusListeners.delete(onStatus) }
-}
-
-/**
- * Subscribes a component to one named telemetry event.
- *
- * No retry loop here: reconnection is owned centrally by this module (see
- * subscribeTelemetry above) and shared across every telemetry hook, so a
- * dead stream is recovered - and surfaced via useTelemetryStatus - once for
- * all five consumers rather than five times over.
- */
-export function useTelemetryEvent<T>(event: string, onData: (data: T) => void): void {
-  // Latest-ref idiom, matching useFetch: callers pass inline closures, and
-  // re-subscribing on every render would tear down the shared connection.
-  const handlerRef = useRef(onData)
-  useEffect(() => { handlerRef.current = onData })
-
-  useEffect(() => {
-    return subscribeTelemetry(event, (raw) => {
-      try {
-        handlerRef.current(JSON.parse(raw) as T)
-      } catch (err) {
-        console.error(`Failed to parse ${event} event:`, err)
-      }
-    })
-  }, [event])
 }
 
 /** The shared telemetry connection's current state, for status indicators in the UI. */

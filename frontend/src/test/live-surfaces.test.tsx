@@ -56,9 +56,26 @@ vi.mock('@/components/poi-map-tile', () => ({
   },
 }))
 
+const displayShellRenders = vi.fn()
+vi.mock('@/components/display-shell', () => ({
+  DisplayShell: () => {
+    displayShellRenders()
+    return null
+  },
+}))
+
+const generatorProps: Array<{ batterySocPercent: number | null; batteryRatePercentPerHour: number | null }> = []
+vi.mock('@/components/generator-tile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/generator-tile')>()),
+  GeneratorTile: (props: { batterySocPercent: number | null; batteryRatePercentPerHour: number | null }) => {
+    generatorProps.push(props)
+    return null
+  },
+}))
+
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-import { LiveAnchorWatchTile, LiveClockTile, LivePoiMapTile } from '@/components/live-surfaces'
+import { LiveAnchorWatchTile, LiveClockTile, LiveDisplayShell, LiveGeneratorTile, LivePoiMapTile } from '@/components/live-surfaces'
 
 function emitFix(latitude: number, longitude: number) {
   act(() => {
@@ -178,5 +195,52 @@ describe('LiveClockTile', () => {
     emitFix(-20.2748, 149.0738)
 
     expect(clockRenders.mock.calls.length).toBeGreaterThan(renders)
+  })
+})
+
+describe('LiveDisplayShell', () => {
+  // The wall's pill shows how many alarms and how bad, not their readings.
+  it('does not redraw the frame when only an alarm\'s value moves', () => {
+    const alarm = (value: number) => ({
+      rule_id: 'baro', label: 'Barometer falling', path: 'helmcentral.environment.pressureRate', op: 'below', unit: 'Pa/s',
+      value, state: 'warn', phase: 'active', message: 'Barometer falling', silenced: false, can_silence: false, can_acknowledge: true,
+    })
+    render(<LiveDisplayShell display={{} as never}>{null}</LiveDisplayShell>)
+    act(() => { listeners.get('alarms')?.(JSON.stringify({ alarms: [alarm(-0.03256)], worst: 'warn' })) })
+    const renders = displayShellRenders.mock.calls.length
+
+    act(() => { listeners.get('alarms')?.(JSON.stringify({ alarms: [alarm(-0.03251)], worst: 'warn' })) })
+
+    expect(displayShellRenders.mock.calls.length).toBe(renders)
+  })
+})
+
+describe('LiveGeneratorTile', () => {
+  const electrical = (soc: number) => ({ battery_soc_percent: soc, battery_capacity_ah: 1000, charging_current_a: 100, generator_configured: true })
+
+  function emit(event: string, payload: unknown) {
+    act(() => { listeners.get(event)?.(JSON.stringify(payload)) })
+  }
+
+  it('hands down no battery outside a timed run, and follows Battery at Finish during one', () => {
+    generatorProps.length = 0
+    render(<LiveGeneratorTile readOnly={false} />)
+    emit('electrical-state', electrical(70))
+    expect(generatorProps[generatorProps.length - 1].batterySocPercent).toBeNull()
+    const idle = generatorProps.length
+    emit('electrical-state', electrical(71))
+    expect(generatorProps.length).toBe(idle)
+
+    // An hour's timed run at +10 %/h: 71 % now lands at 81 % at the finish.
+    emit('vessel-state', { generator_manual_start: true, generator_manual_start_timer: 3600, generator_state: 'running' })
+    expect(generatorProps[generatorProps.length - 1].batterySocPercent).toBe(71)
+    const running = generatorProps.length
+
+    // 71.2 % still rounds to 81 % at the finish: nothing the tile shows moved.
+    emit('electrical-state', electrical(71.2))
+    expect(generatorProps.length).toBe(running)
+
+    emit('electrical-state', electrical(72))
+    expect(generatorProps[generatorProps.length - 1].batterySocPercent).toBe(72)
   })
 })

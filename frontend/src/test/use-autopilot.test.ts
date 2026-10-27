@@ -299,3 +299,62 @@ describe('useAutopilot', () => {
     expect(result.current.availableModes).toEqual([])
   })
 })
+
+// The pending set, the last error and the capability probe belong to the
+// pilot, not to one tile (ADR 0215 phase 5 review). A tile unmounted while a
+// command is in flight, by a page switch or a wall rotation, must come back
+// with that command still pending, or Engage could be sent twice.
+describe('useAutopilot shared command state', () => {
+  function stubFetchWithEngage() {
+    let resolveEngage!: () => void
+    const engage = new Promise<Response>((resolve) => {
+      resolveEngage = () => resolve({ ok: true, status: 204, json: async () => ({}) } as Response)
+    })
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/api/autopilot/engage')) return engage
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ present: true, options: { modes: ['compass'] } }) } as Response)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return { fetchMock, resolveEngage }
+  }
+
+  it('keeps an engage pending across an unmount and a remount', async () => {
+    const { resolveEngage } = stubFetchWithEngage()
+    const { useAutopilot } = await loadModule()
+    const first = renderHook(() => useAutopilot())
+    act(() => { void first.result.current.engage() })
+    expect(first.result.current.pending.has('engage')).toBe(true)
+
+    first.unmount()
+    const second = renderHook(() => useAutopilot())
+
+    expect(second.result.current.pending.has('engage')).toBe(true)
+    await act(async () => { resolveEngage() })
+    await waitFor(() => expect(second.result.current.pending.has('engage')).toBe(false))
+  })
+
+  it('shows the same pending command to two tiles', async () => {
+    stubFetchWithEngage()
+    const { useAutopilot } = await loadModule()
+    const dashboard = renderHook(() => useAutopilot())
+    const wall = renderHook(() => useAutopilot())
+
+    act(() => { void dashboard.result.current.engage() })
+
+    expect(wall.result.current.pending.has('engage')).toBe(true)
+  })
+
+  it('probes the capabilities once for two tiles and a remount', async () => {
+    const { fetchMock } = stubFetchWithEngage()
+    const { useAutopilot } = await loadModule()
+    const first = renderHook(() => useAutopilot())
+    renderHook(() => useAutopilot())
+    await waitFor(() => expect(first.result.current.availableModes).toEqual(['compass']))
+    first.unmount()
+    renderHook(() => useAutopilot())
+
+    const probes = fetchMock.mock.calls.filter(([input]) => String(input).endsWith('/api/autopilot'))
+    expect(probes).toHaveLength(1)
+  })
+})

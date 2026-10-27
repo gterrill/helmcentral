@@ -17,7 +17,7 @@ const DODGE_STEP_DEG = 5
 interface AutopilotTileProps {
   /** Null until the first autopilot event: whether there is a pilot is not known yet. */
   state: AutopilotState | null
-  pending: Set<string>
+  pending: ReadonlySet<string>
   error: string | null
   /** Modes this pilot supports, from the hook's capability probe — empty if it failed. */
   availableModes: string[]

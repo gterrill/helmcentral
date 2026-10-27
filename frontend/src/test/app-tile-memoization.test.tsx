@@ -59,10 +59,9 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
     streamListeners.set(event, cb)
     return () => {}
   },
-  // Real consumers elsewhere in the tree (use-autopilot.ts, vessel-status-bar.tsx
+  // Real consumers elsewhere in the tree (vessel-status-bar.tsx
   // via use-vessel-identity.ts) just need these to exist and not throw — their
   // own behavior isn't what this test is checking.
-  useTelemetryEvent: () => {},
   useTelemetryStatus: () => 'connected',
   subscribeTelemetryStatus: () => () => {},
 }))
@@ -372,7 +371,42 @@ function houseBankAlarm(overrides: Record<string, unknown> = {}) {
   }
 }
 
+// The live server's falling-barometer alarm, 2026-10-27: every alarms event
+// moved only its `value`, in the fifth decimal of a Pa/s rate. The card
+// shows it as "Falling 1.2 mb/hr", so nothing on screen changed.
+function barometerAlarm(value: number) {
+  return {
+    rule_id: '6425ac9b-6103-4c63-88e6-0610969010d8', label: 'Barometer falling', path: 'helmcentral.environment.pressureRate',
+    op: 'below', unit: 'Pa/s', value, clear_value: -0.02222222222222222, threshold: -0.027777777777777776, hysteresis: 0.005555555555555556,
+    state: 'warn', phase: 'active', message: 'Barometer falling: -1.3 mb/hr, clears above -0.8 mb/hr', raised_at: '2026-10-27T03:30:00Z',
+    silenced: false, can_silence: false, can_acknowledge: true,
+  }
+}
+
 describe('App alarm surfaces (ADR 0215 phase 2)', () => {
+  it('re-renders neither the banner nor the lamp strip when only an alarm\'s value moves', async () => {
+    await mountApp()
+    emitAlarms({ alarms: [barometerAlarm(-0.032563523232454664)], worst: 'warn' })
+    const banner = bannerRenderSpy.mock.calls.length
+    const lamps = rendersOf('Lamps')
+
+    emitAlarms({ alarms: [barometerAlarm(-0.032562285100966724)], worst: 'warn' })
+    emitAlarms({ alarms: [barometerAlarm(-0.03251325153777651)], worst: 'warn' })
+
+    expect(bannerRenderSpy.mock.calls.length).toBe(banner)
+    expect(rendersOf('Lamps')).toBe(lamps)
+  })
+
+  it('re-renders the banner when the value moves enough to change what it says', async () => {
+    await mountApp()
+    emitAlarms({ alarms: [barometerAlarm(-0.0325)], worst: 'warn' })
+    const banner = bannerRenderSpy.mock.calls.length
+
+    emitAlarms({ alarms: [barometerAlarm(-0.05)], worst: 'warn' })
+
+    expect(bannerRenderSpy.mock.calls.length).toBeGreaterThan(banner)
+  })
+
   it('re-renders no alarm consumer when the same alarms payload arrives twice', async () => {
     await mountApp()
     emitAlarms({ alarms: [houseBankAlarm()], worst: 'alarm' })
@@ -665,6 +699,32 @@ describe('App stream tiles (ADR 0215 phase 5)', () => {
       })
     })
   }
+
+  // The generator tile shows the battery only as "Battery at Finish" during a
+  // timed run, rounded to a whole percent. Outside one, the bank's state of
+  // charge moving is nothing it shows.
+  it('re-renders only Battery & Power when the state of charge moves with no timed run', async () => {
+    await mountStreams()
+    emit('electrical-state', live.ELECTRICAL)
+    const before = counts()
+
+    emit('electrical-state', { ...live.ELECTRICAL, battery_soc_percent: 83, battery_capacity_ah: 1440 })
+
+    expect(moved(before)).toEqual(['Battery & Power'])
+  })
+
+  // A rules refetch that answers with the same rules (every mount of the
+  // Alarms page revalidates) is nothing the battery tile shows.
+  it('re-renders no tile when the alarm rules refetch unchanged', async () => {
+    await mountStreams()
+    const rules = [{ id: 'r1', label: 'House Bank Low', path: 'electrical.batteries.512.capacity.stateOfCharge', op: 'below', value: 0.5, hysteresis: 0.02, severity: 'warn', enabled: true }]
+    act(() => { setQueryData(['/api/alarm-rules'], { rules }) })
+    const before = counts()
+
+    act(() => { setQueryData(['/api/alarm-rules'], { rules: rules.map((r) => ({ ...r })) }) })
+
+    expect(moved(before)).toEqual([])
+  })
 
   describe('before the first event', () => {
     it('the autopilot tile shows -- and does not say there is no pilot', async () => {

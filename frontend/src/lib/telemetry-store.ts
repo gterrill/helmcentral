@@ -57,6 +57,14 @@ export function resetTelemetryStoresForTest(): void {
   for (const reset of resets) reset()
 }
 
+/**
+ * Registers other module-level live state (the autopilot's pending commands,
+ * the shared trail pollers) for the same reset after each test.
+ */
+export function onTelemetryTestReset(reset: () => void): void {
+  resets.add(reset)
+}
+
 /** use-telemetry-stream.ts's subscribeTelemetry, passed in by each store. */
 export type SubscribeTelemetry = (event: string, onData: (raw: string) => void) => () => void
 
@@ -195,20 +203,21 @@ export function keepUnchanged<S extends object>(
 }
 
 /**
- * Each item of the new list replaced by the previous item with the same id
+ * Each item of the new list replaced by the previous item with the same key
  * when `same` calls them equal, and the previous list itself when every item
- * is the one it had and the order holds.
+ * is the one it had and the order holds. `key` gets the item's index too, for
+ * a list whose items may share an id or have none.
  */
 export function keepUnchangedItems<T>(
   previous: readonly T[] | null,
   incoming: T[],
-  id: (item: T) => string,
+  key: (item: T, index: number) => string,
   same: (a: T, b: T) => boolean,
 ): T[] {
   if (previous === null) return incoming
-  const byId = new Map(previous.map((item) => [id(item), item]))
-  const items = incoming.map((item) => {
-    const prev = byId.get(id(item))
+  const byKey = new Map(previous.map((item, index) => [key(item, index), item]))
+  const items = incoming.map((item, index) => {
+    const prev = byKey.get(key(item, index))
     return prev !== undefined && same(prev, item) ? prev : item
   })
   const unchanged = items.length === previous.length && items.every((item, i) => item === previous[i])

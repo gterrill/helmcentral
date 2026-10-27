@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 
-import { apiRequest, useApiQuery } from '@/lib/api-query'
+import { apiRequest, useApiQuery, useApiQuerySelector } from '@/lib/api-query'
+import { sameJSON } from '@/lib/telemetry-store'
 import type { AlarmState } from '@/hooks/use-alarms'
 
 export const ALARM_OPERATORS = ['above', 'below', 'equal', 'notEqual', 'stale'] as const
@@ -58,6 +59,18 @@ export function newAlarmRuleDraft(): AlarmRuleDraft {
 
 const RULES_PATH = '/api/alarm-rules'
 const NO_RULES: AlarmRule[] = []
+
+const selectRuleList = (payload: { rules?: AlarmRule[] } | undefined) => (Array.isArray(payload?.rules) ? payload.rules : NO_RULES)
+
+/**
+ * The rule list alone, for a reader that shows something derived from it (the
+ * battery tile's SoC bands). It shares the Alarms page's query, so a saved rule
+ * reaches it without a reload, and keeps its list while a refetch answers with
+ * equal rules, which every revalidation on mount does.
+ */
+export function useAlarmRuleList(): AlarmRule[] {
+  return useApiQuerySelector({ queryKey: [RULES_PATH], path: RULES_PATH }, selectRuleList, sameJSON)
+}
 
 export function useAlarmRules() {
   const { data, isLoading, error, refetch } = useApiQuery<AlarmRule[]>({

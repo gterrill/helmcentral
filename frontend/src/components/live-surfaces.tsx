@@ -9,7 +9,7 @@ import { ClockTile } from '@/components/clock-tile'
 import { CurrentConditionsTile } from '@/components/current-conditions-tile'
 import { DepthTideTile } from '@/components/depth-tide-tile'
 import { DisplayShell } from '@/components/display-shell'
-import { GeneratorTile } from '@/components/generator-tile'
+import { GeneratorTile, projectSocAtFinish } from '@/components/generator-tile'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { PoiMapTile } from '@/components/poi-map-tile'
 import { PositionTile } from '@/components/position-tile'
@@ -20,13 +20,13 @@ import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
 import { WindTile } from '@/components/wind-tile'
 import { PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
-import { useAlarmRules } from '@/hooks/use-alarm-rules'
-import { acknowledgeAlarm, silenceAlarm, useAisCollisionAlarms, useAlarmList, useKnownAlarmList } from '@/hooks/use-alarms'
+import { useAlarmRuleList } from '@/hooks/use-alarm-rules'
+import { acknowledgeAlarm, sameShownAlarm, samePillAlarm, silenceAlarm, useAisCollisionAlarms, useAlarmListComparedOn, useKnownAlarmList } from '@/hooks/use-alarms'
 import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
 import { anchorWatchAt, useAnchorWatch, type AnchorWatchRecord, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import { useAutopilot } from '@/hooks/use-autopilot'
-import { useElectricalFields } from '@/hooks/use-electrical-state'
+import { useElectricalFields, useElectricalSelector, type ElectricalStateValue } from '@/hooks/use-electrical-state'
 import { useNearbyVesselList, useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useRadarTargets } from '@/hooks/use-radar-targets'
@@ -58,9 +58,9 @@ const RadarDrawer = lazy(() => import('@/components/radar-drawer').then((mod) =>
 type AlarmsDrawerProps = ComponentProps<typeof AlarmsDrawer>
 type AnchorWatchDrawerProps = ComponentProps<typeof AnchorWatchDrawer>
 
-/** The banner over every page: the whole active list. */
+/** The banner over every page: the whole active list, compared on what the banner says of each alarm. */
 export const LiveAlarmBanner = memo(function LiveAlarmBanner(props: Omit<ComponentProps<typeof AlarmBanner>, 'alarms' | 'onAcknowledge'>) {
-  const alarms = useAlarmList()
+  const alarms = useAlarmListComparedOn(sameShownAlarm)
   return <AlarmBanner {...props} alarms={alarms} onAcknowledge={acknowledgeAlarm} />
 })
 
@@ -76,7 +76,7 @@ export const LiveAlarmsDrawer = memo(function LiveAlarmsDrawer(props: Omit<Alarm
  * this frame hands React the same element and the pages are not re-rendered.
  */
 export function LiveDisplayShell(props: Omit<ComponentProps<typeof DisplayShell>, 'alarms'>) {
-  const alarms = useAlarmList()
+  const alarms = useAlarmListComparedOn(samePillAlarm)
   return <DisplayShell {...props} alarms={alarms} />
 }
 
@@ -197,14 +197,43 @@ export const LiveRouteTile = memo(function LiveRouteTile({ status }: { status: A
 
 const GENERATOR_FIELDS = ['generatorState', 'generatorManualStart', 'generatorManualStartTimer', 'generatorRunningByCondition', 'generatorRuntime'] as const
 
-const GENERATOR_ELECTRICAL_FIELDS = ['generatorRealPowerW', 'generatorConfigured', 'generatorNone', 'batterySocPercent', 'batteryRatePercentPerHour'] as const
+const GENERATOR_ELECTRICAL_FIELDS = ['generatorRealPowerW', 'generatorConfigured', 'generatorNone'] as const
 
-/** The Generator tile: its own state from vessel state, its power, its role and the battery from the electrical stream. */
+interface BatteryAtFinish {
+  batterySocPercent: number | null
+  batteryRatePercentPerHour: number | null
+}
+
+const NO_BATTERY_AT_FINISH: BatteryAtFinish = { batterySocPercent: null, batteryRatePercentPerHour: null }
+
+/**
+ * The Generator tile: its own state from vessel state, its power and its role
+ * from the electrical stream.
+ *
+ * The tile uses the battery for one figure only, "Battery at Finish" during a
+ * timed manual run, rounded to a whole percent (projectSocAtFinish). So it
+ * reads the state of charge and the rate only while a timed run is set, and
+ * keeps the pair it has while the rounded figure holds. The bank's figures
+ * move on nearly every electrical tick, and outside a timed run the tile shows
+ * none of them.
+ */
 export const LiveGeneratorTile = memo(function LiveGeneratorTile(props: Omit<ComponentProps<typeof GeneratorTile>,
-  (typeof GENERATOR_FIELDS)[number] | (typeof GENERATOR_ELECTRICAL_FIELDS)[number]>) {
+  (typeof GENERATOR_FIELDS)[number] | (typeof GENERATOR_ELECTRICAL_FIELDS)[number] | keyof BatteryAtFinish>) {
   const generator = useVesselFields(GENERATOR_FIELDS)
   const electrical = useElectricalFields(GENERATOR_ELECTRICAL_FIELDS)
-  return <GeneratorTile {...props} {...generator} {...electrical} />
+  const timer = generator.generatorManualStart ? generator.generatorManualStartTimer : 0
+  const selectBattery = useCallback((state: ElectricalStateValue): BatteryAtFinish => (
+    timer > 0 ? { batterySocPercent: state.batterySocPercent, batteryRatePercentPerHour: state.batteryRatePercentPerHour } : NO_BATTERY_AT_FINISH
+  ), [timer])
+  const sameAtFinish = useCallback((a: BatteryAtFinish, b: BatteryAtFinish) => {
+    const at = (x: BatteryAtFinish) => {
+      const projected = projectSocAtFinish(x.batterySocPercent, x.batteryRatePercentPerHour, timer)
+      return projected === null ? null : Math.round(projected)
+    }
+    return at(a) === at(b)
+  }, [timer])
+  const battery = useElectricalSelector(selectBattery, sameAtFinish)
+  return <GeneratorTile {...props} {...generator} {...electrical} {...battery} />
 })
 
 const selectHeading = (state: VesselStateValue) => state.headingTrue
@@ -261,7 +290,7 @@ const BATTERY_FIELDS = [
  */
 export const LiveBatteryPowerTile = memo(function LiveBatteryPowerTile(props: Pick<ComponentProps<typeof BatteryPowerTile>, 'overnight' | 'onOpenRoles'>) {
   const { socPath, ...electrical } = useElectricalFields(BATTERY_FIELDS)
-  const { rules } = useAlarmRules()
+  const rules = useAlarmRuleList()
   const socBands = useSocBands(rules, socPath)
   return <BatteryPowerTile {...props} {...electrical} socBands={socBands} />
 })

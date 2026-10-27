@@ -418,23 +418,33 @@ function useEntrySubscription(
  * that slice changes (ADR 0215). useApiQuery re-renders on every request,
  * because its snapshot carries isFetching; this re-renders only when `select`
  * returns something `isEqual` calls different. It fetches and polls exactly as
- * useApiQuery does, sharing the same entry. `select` sees undefined until the
- * first answer lands, and should be a stable function.
+ * useApiQuery does, sharing the same entry.
+ *
+ * `select` sees the data (undefined until the first answer lands) and the
+ * query's error. Like useApiQuery's own select, a body `select` cannot read
+ * becomes the error rather than a throw during render: `select` is called
+ * again with no data and that error, so the reader shows what it shows for a
+ * failed query. Pass a stable `select`.
  */
 export function useApiQuerySelector<T, S>(
   { queryKey, path, refetchInterval, enabled = true }: Omit<UseApiQueryOptions<T>, 'select'>,
-  select: (data: T | undefined) => S,
+  select: (data: T | undefined, error: Error | null) => S,
   isEqual: (a: S, b: S) => boolean = Object.is,
 ): S {
   const { hash, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
-  const cache = useRef<{ data: unknown; select: (data: T | undefined) => S; value: S } | null>(null)
+  const cache = useRef<{ snapshot: Snapshot; select: (data: T | undefined, error: Error | null) => S; value: S } | null>(null)
   const getSelection = useCallback((): S => {
-    const data = enabled ? entries.get(hash)?.snapshot.data : undefined
+    const snapshot = enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY
     const prev = cache.current
-    if (prev && prev.data === data && prev.select === select) return prev.value
-    const next = select(data as T | undefined)
+    if (prev && prev.snapshot.data === snapshot.data && prev.snapshot.error === snapshot.error && prev.select === select) return prev.value
+    let next: S
+    try {
+      next = select(snapshot.data as T | undefined, snapshot.error)
+    } catch (err) {
+      next = select(undefined, err instanceof Error ? err : new Error(String(err)))
+    }
     const value = prev && isEqual(prev.value, next) ? prev.value : next
-    cache.current = { data, select, value }
+    cache.current = { snapshot, select, value }
     return value
   }, [hash, enabled, select, isEqual])
   return useSyncExternalStore(subscribe, getSelection, getSelection)
