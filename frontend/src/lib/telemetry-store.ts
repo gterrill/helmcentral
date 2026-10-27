@@ -1,7 +1,8 @@
-import { useCallback, useRef, useSyncExternalStore } from 'react'
+import { useCallback } from 'react'
 
 import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { sameShallow } from '@/lib/same-value'
+import { useSelection } from '@/lib/selection'
 import { onTelemetryTestReset } from '@/lib/test-reset'
 
 export { sameJSON, sameShallow } from '@/lib/same-value'
@@ -61,6 +62,11 @@ export interface TelemetryStore<S> {
   useHeardSelector: <T>(select: (state: S) => T, isEqual?: (a: T, b: T) => boolean) => T | null
 }
 
+interface HeardView<S> {
+  state: S
+  heard: boolean
+}
+
 /**
  * A store for one event. The factory owns everything the nine stores used to
  * repeat: it finds the stream, decodes each frame with JSON.parse, and tracks
@@ -87,6 +93,9 @@ export function createTelemetryStore<S>(
 ): TelemetryStore<S> {
   let snapshot = initial
   let heard = false
+  // The state and the heard flag as one value that changes reference when
+  // either does, so a heard reader caches on one snapshot.
+  let view: HeardView<S> = { state: initial, heard: false }
   let unsubscribeStream: (() => void) | null = null
   const listeners = new Set<() => void>()
   const keyListeners = new Map<string, Set<() => void>>()
@@ -118,6 +127,7 @@ export function createTelemetryStore<S>(
         if (set) for (const listener of set) toCall.add(listener)
       }
     }
+    if (view.state !== snapshot || view.heard !== heard) view = { state: snapshot, heard }
     // Hearing the server for the first time is news to every reader, keyed
     // ones included, whatever the event changed.
     if (firstEvent) for (const set of keyListeners.values()) for (const listener of set) toCall.add(listener)
@@ -133,6 +143,7 @@ export function createTelemetryStore<S>(
     unsubscribeStream = null
     snapshot = initial
     heard = false
+    view = { state: initial, heard: false }
   })
 
   function subscribe(listener: () => void): () => void {
@@ -164,29 +175,15 @@ export function createTelemetryStore<S>(
   const getSnapshot = () => snapshot
 
   function useSelector<T>(select: (state: S) => T, isEqual: (a: T, b: T) => boolean = Object.is): T {
-    const cache = useRef<{ source: S; select: (state: S) => T; value: T } | null>(null)
-    const getSelection = useCallback((): T => {
-      const prev = cache.current
-      if (prev && prev.source === snapshot && prev.select === select) return prev.value
-      const next = select(snapshot)
-      const value = prev && isEqual(prev.value, next) ? prev.value : next
-      cache.current = { source: snapshot, select, value }
-      return value
-    }, [select, isEqual])
-    return useSyncExternalStore(subscribe, getSelection)
+    return useSelection({ subscribe, getSnapshot, select, isEqual })
   }
 
+  const getView = () => view
+
   function useHeardSelector<T>(select: (state: S) => T, isEqual: (a: T, b: T) => boolean = Object.is): T | null {
-    const cache = useRef<{ source: S; heard: boolean; select: (state: S) => T; value: T | null } | null>(null)
-    const getSelection = useCallback((): T | null => {
-      const prev = cache.current
-      if (prev && prev.source === snapshot && prev.heard === heard && prev.select === select) return prev.value
-      const next = heard ? select(snapshot) : null
-      const value = prev && prev.value !== null && next !== null && isEqual(prev.value, next) ? prev.value : next
-      cache.current = { source: snapshot, heard, select, value }
-      return value
-    }, [select, isEqual])
-    return useSyncExternalStore(subscribe, getSelection)
+    const selectHeard = useCallback((v: HeardView<S>): T | null => (v.heard ? select(v.state) : null), [select])
+    const equal = useCallback((a: T | null, b: T | null) => a !== null && b !== null && isEqual(a, b), [isEqual])
+    return useSelection({ subscribe, getSnapshot: getView, select: selectHeard, isEqual: equal })
   }
 
   return { getSnapshot, subscribe, subscribeKeys, useSelector, useHeardSelector }

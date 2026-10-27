@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 
-import { apiRequest, useApiQuery, useApiQuerySelector } from '@/lib/api-query'
+import { apiRequest, declareQuery, useApiQuery, useApiQuerySelector } from '@/lib/api-query'
 import { sameJSON } from '@/lib/same-value'
 import type { AlarmState } from '@/hooks/use-alarms'
 
@@ -60,6 +60,9 @@ export function newAlarmRuleDraft(): AlarmRuleDraft {
 const RULES_PATH = '/api/alarm-rules'
 const NO_RULES: AlarmRule[] = []
 
+// A poll that answers the same rules keeps the same object, for the editor and the list.
+declareQuery([RULES_PATH], { structuralSharing: true })
+
 const selectRuleList = (payload: { rules?: AlarmRule[] } | undefined) => (Array.isArray(payload?.rules) ? payload.rules : NO_RULES)
 
 /**
@@ -77,7 +80,6 @@ export function useAlarmRules() {
     queryKey: [RULES_PATH],
     path: RULES_PATH,
     select: (payload: { rules?: AlarmRule[] }) => (Array.isArray(payload.rules) ? payload.rules : NO_RULES),
-    structuralSharing: true,
   })
 
   // The backend validates and is the authority; its message surfaces verbatim

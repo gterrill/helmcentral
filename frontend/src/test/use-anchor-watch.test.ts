@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { anchorWatchAt, useAnchorWatch } from '@/hooks/use-anchor-watch'
+import { anchorWatchAt, useAnchorWatch, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 import { toast } from 'sonner'
 
@@ -640,5 +640,35 @@ describe('useAnchorWatch error', () => {
     expect(result.current.active).toBe(true)
 
     vi.useRealTimers()
+  })
+})
+
+describe('useAnchorWatchSelector parses the record once per poll', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ active: true, lat: -21.1, lon: 149.2, radius_meters: 20 }),
+    }))
+  })
+
+  it('hands every reader the one parsed object, whatever it selects', async () => {
+    const whole = (fields: AnchorWatchFields) => fields
+    const a = renderHook(() => useAnchorWatchSelector(whole))
+    const b = renderHook(() => useAnchorWatchSelector(whole))
+    const c = renderHook(() => useAnchorWatchSelector(whole))
+    await act(async () => { await Promise.resolve() })
+    expect(a.result.current.radiusMeters).toBe(20)
+    expect(b.result.current).toBe(a.result.current)
+    expect(c.result.current).toBe(a.result.current)
+  })
+})
+
+describe('useAnchorWatchSelector when the poll fails', () => {
+  it('reads as no watch, not loaded, and does not throw', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: 'down' }) }))
+    const { result } = renderHook(() => useAnchorWatchSelector((fields: AnchorWatchFields) => fields))
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.active).toBe(false)
+    expect(result.current.loaded).toBe(false)
   })
 })

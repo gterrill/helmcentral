@@ -1,8 +1,8 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { haversineMeters, bearingDeg as bearingDegrees } from '@/lib/geo'
 import type { SeabedType, SeaState } from '@/lib/catenary'
 import { toast } from 'sonner'
-import { apiRequest, setQueryData, useApiQuerySelector } from '@/lib/api-query'
+import { apiRequest, declareQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
 import type { AnchorAdjustRestore } from '@/lib/anchor-adjust'
 import { ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS, ANCHOR_WATCH_IDLE_REFRESH_SECONDS } from '@/config/app-config'
 
@@ -400,7 +400,11 @@ export async function clearAnchor(): Promise<void> {
 
 // ── the reads ────────────────────────────────────────────────────────────────
 
-const selectActive = (data: AnchorWatchServerState | undefined) => data?.active === true
+// The record is parsed once per answer, here, and every reader selects from
+// the parsed fields: with a dozen readers a poll parses once, not a dozen times.
+declareQuery(ANCHOR_WATCH_KEY, { parse: parseAnchorWatch })
+
+const selectActive = (fields: AnchorWatchFields | undefined) => fields?.active === true
 
 /**
  * One slice of the watch record, polled from the server. The reader
@@ -418,13 +422,13 @@ export function useAnchorWatchSelector<T>(
   // differ), so the interval is asked for by a second reader of the same
   // entry once the first has said whether a watch is active. The two share
   // one request.
-  const active = useApiQuerySelector<AnchorWatchServerState, boolean>({ queryKey: ANCHOR_WATCH_KEY, path: '/api/anchor-watch' }, selectActive)
-  const selectParsed = useMemo(() => (data: AnchorWatchServerState | undefined) => select(parseAnchorWatch(data)), [select])
-  return useApiQuerySelector<AnchorWatchServerState, T>({
+  const active = useApiQuerySelector<AnchorWatchFields, boolean>({ queryKey: ANCHOR_WATCH_KEY, path: '/api/anchor-watch' }, selectActive)
+  const selectFromParsed = useCallback((fields: AnchorWatchFields | undefined) => select(fields as AnchorWatchFields), [select])
+  return useApiQuerySelector<AnchorWatchFields, T>({
     queryKey: ANCHOR_WATCH_KEY,
     path: '/api/anchor-watch',
     refetchInterval: (active ? ANCHOR_WATCH_ACTIVE_REFRESH_SECONDS : ANCHOR_WATCH_IDLE_REFRESH_SECONDS) * 1000,
-  }, selectParsed, isEqual)
+  }, selectFromParsed, isEqual)
 }
 
 const selectFields = (fields: AnchorWatchFields) => fields

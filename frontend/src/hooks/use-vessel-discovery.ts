@@ -1,4 +1,4 @@
-import { useApiQuery } from '@/lib/api-query'
+import { declareQuery, useApiQuery } from '@/lib/api-query'
 import { emptyVesselDiscovery, noTracking, type VesselDiscoveryResponse } from '@/lib/vessel-settings'
 
 /**
@@ -9,12 +9,14 @@ import { emptyVesselDiscovery, noTracking, type VesselDiscoveryResponse } from '
  *
  * Plain fetch-and-throw: a failure is shown, not masked.
  */
+// A poll that answers the same keeps the same object.
+declareQuery(['/api/vessel/discovery'], { structuralSharing: true })
+
 export function useVesselDiscovery(enabled = true) {
   const { data, isLoading, error, refetch } = useApiQuery<VesselDiscoveryResponse>({
     queryKey: ['/api/vessel/discovery'],
     path: '/api/vessel/discovery',
     enabled,
-    structuralSharing: true,
     select: (body: VesselDiscoveryResponse) => ({
       connected: body.connected === true,
       groups: (Array.isArray(body.groups) ? body.groups : []).map((g) => ({

@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react';
-import { useApiQuery, useApiQuerySelector } from '@/lib/api-query';
+import { declareQuery, useApiQuery, useApiQuerySelector } from '@/lib/api-query';
 import { sameShallow } from '@/lib/same-value'
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
@@ -393,12 +393,13 @@ const EMPTY_FORECAST: MappedForecast = {
   ttlSeconds: null,
 };
 
+declareQuery(['/api/weather-forecast'], { structuralSharing: true });
+
 export function useWeatherForecast(refreshIntervalSeconds = 3600, options: ForecastQueryOptions = {}) {
   const query = useApiQuery<WeatherForecastDayApi[] | WeatherForecastEnvelopeApi>({
     ...forecastQuery('/api/weather-forecast', options.place),
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
-    structuralSharing: true,
   });
 
   // A payload of the wrong shape is reported like a failed request, so the

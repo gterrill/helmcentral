@@ -1,5 +1,6 @@
-import { useCallback, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useSyncExternalStore } from 'react'
 
+import { useSelection } from '@/lib/selection'
 import { ageFromPayload, shownAge } from '@/lib/staleness'
 import { createTelemetryStore, sameShallow, type TelemetryUpdate } from '@/lib/telemetry-store'
 
@@ -162,29 +163,22 @@ function pick(source: PathMap, paths: readonly string[]): PathMap {
  */
 export function useGaugeSubset(paths: readonly string[]): GaugeSubset {
   const key = paths.join('\n')
-  const cache = useRef<{ key: string; values: PathMap; ages: PathMap; subset: GaugeSubset } | null>(null)
 
   const subscribe = useCallback((cb: () => void) => {
     const list = key === '' ? [] : key.split('\n')
     return store.subscribeKeys([...list.map(valueKey), ...list.map(ageKey)], cb)
   }, [key])
 
-  const getSnapshot = useCallback((): GaugeSubset => {
-    const { values: valuesSnapshot, ages: agesSnapshot } = store.getSnapshot()
-    const prev = cache.current
-    if (prev && prev.key === key && prev.values === valuesSnapshot && prev.ages === agesSnapshot) return prev.subset
+  const select = useCallback((snapshot: { values: PathMap; ages: PathMap }): GaugeSubset => {
     const list = key === '' ? [] : key.split('\n')
-    const values = pick(valuesSnapshot, list)
-    const ages = pick(agesSnapshot, list)
-    const subset = prev && prev.key === key && sameShallow(prev.subset.values, values) && sameShallow(prev.subset.ages, ages)
-      ? prev.subset
-      : { values, ages }
-    cache.current = { key, values: valuesSnapshot, ages: agesSnapshot, subset }
-    return subset
+    return { values: pick(snapshot.values, list), ages: pick(snapshot.ages, list) }
   }, [key])
 
-  return useSyncExternalStore(subscribe, getSnapshot)
+  return useSelection({ subscribe, getSnapshot: store.getSnapshot, select, isEqual: sameSubset, sameSnapshot: sameParts })
 }
+
+const sameSubset = (a: GaugeSubset, b: GaugeSubset) => sameShallow(a.values, b.values) && sameShallow(a.ages, b.ages)
+const sameParts = (a: { values: PathMap; ages: PathMap }, b: { values: PathMap; ages: PathMap }) => a.values === b.values && a.ages === b.ages
 
 /**
  * Whether one engine reads as running, switched off or lost, by propulsion id

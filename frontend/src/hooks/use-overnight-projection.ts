@@ -1,4 +1,4 @@
-import { useApiQuery } from '@/lib/api-query'
+import { declareQuery, useApiQuery } from '@/lib/api-query'
 import { parseOvernightProjection, type OvernightProjection } from '@/lib/soc-projection'
 
 /**
@@ -8,6 +8,8 @@ import { parseOvernightProjection, type OvernightProjection } from '@/lib/soc-pr
  * value, and the caller reads `error` to know why the dawn segment of the
  * footer is being omitted.
  */
+declareQuery(['/api/electrical/overnight'], { structuralSharing: true })
+
 export function useOvernightProjection(refreshIntervalSeconds = 900): {
   projection: OvernightProjection | null
   error: string | null
@@ -17,7 +19,6 @@ export function useOvernightProjection(refreshIntervalSeconds = 900): {
     path: '/api/electrical/overnight',
     refetchInterval: refreshIntervalSeconds * 1000,
     select: parseOvernightProjection,
-    structuralSharing: true,
   })
 
   // A failed refresh drops the projection instead of showing the last one,
