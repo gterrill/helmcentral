@@ -352,6 +352,7 @@ export function useEquipment(filter: EquipmentFilter | null) {
     queryKey: [EQUIPMENT, { system: filter?.system ?? '', status: filter?.status ?? '', zone: filter?.zone ?? '', bin: filter?.bin ?? '', q: filter?.q ?? '' }],
     path: `${EQUIPMENT}${qs ? `?${qs}` : ''}`,
     enabled: filter !== null,
+    structuralSharing: true,
     select: (raw: { items?: EquipmentItem[] }) => raw.items ?? [],
   })
 

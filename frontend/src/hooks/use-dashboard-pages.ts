@@ -80,6 +80,7 @@ export function useDashboardPages() {
     queryKey: PAGES_KEY,
     path: '/api/dashboard-pages',
     select: (raw: DashboardPagesListResponse) => (Array.isArray(raw.pages) ? raw.pages : []),
+    structuralSharing: true,
   })
   const pages = data ?? EMPTY_PAGES
 

@@ -167,6 +167,7 @@ export function useWaveForecast(refreshIntervalSeconds = 3600, options: Forecast
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
     select: mapWavePayload,
+    structuralSharing: true,
   });
 
   useEffect(() => {

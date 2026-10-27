@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-27). Phases 0 to 5 are built; phases 6 and 7 are planned.
+Accepted (2026-10-27). Phases 0 to 6 are built; phase 7 is planned.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -444,8 +444,126 @@ of them. What it still subscribes to is what it draws or passes on itself:
   planning depth.
 - **The polled feeds**: weather, wave, tide, forecast warnings, upper air, the
   overnight projection, the depth trend, CZone switches and route activation.
-  Phase 6 moves the forecasts; the rest are polls a tile or the shell itself
-  needs, not streams.
+  Phase 6 moved every one of them out.
+
+### The polled feeds (phase 6)
+
+With the streams gone, the shell still rendered about every four seconds on
+the live server. A fiber hook diff put all of it on `useApiQuery` snapshots
+and the arrays built from them. Two causes, one in the cache and one in the
+shell:
+
+- **`useApiQuery` rendered twice per request.** Its snapshot carries
+  `isFetching`, so a request leaving and a request landing were two renders,
+  even when the answer matched the last one.
+- **An equal answer was still new data.** Every poll parses a fresh object,
+  so a reader of `data` saw a change on every answer.
+- **The shell read every feed.** It called the forecast, tide, route,
+  depth-trend, CZone, overnight and alarm-rule hooks to hand their results
+  down, so each of those polls rendered the shell, and through
+  `renderWidget` every tile on the page.
+
+#### Two changes to `api-query.ts`
+
+- **`isFetching` notifies only the readers that read it.** The result's
+  `isFetching` is a getter. A reader that never touches it re-renders when the
+  data, the error or the status changes, and not on a request leaving or
+  landing. The getter reads the entry's current value, so a reader that
+  starts reading it mid-life never sees a flip that was left out of its
+  snapshot. One caller reads it, `useEquipmentItem` in `use-inventory.ts`,
+  which destructures it and so is tracked. Every other `useApiQuery` caller
+  was checked: none reads `isFetching`, none spreads the result, none hands it
+  on whole. This change applies to every reader, because a reader that does
+  not read the field cannot tell the difference.
+- **`structuralSharing: true` keeps equal data.** A hook that opts in keeps
+  the data object it holds, and does not re-render, when a request answers
+  with data equal by value (`sameJSON`). It is per reader and whole or
+  nothing: unlike TanStack Query's option of the same name, a changed answer
+  is handed over entire. It is off by default, because a reader with an
+  effect on `data` would no longer see a refetch that changed nothing, and
+  sixty-odd hooks were not audited for that. The hooks that opt in are the
+  ones this phase moved, plus the page, display, ribbon and equipment lists
+  the shell keeps; their consumers were checked for effects keyed on the
+  data, and the two found (the roles section's grouping, the profiles
+  section's first pick) are memos and a run-once default, both indifferent to
+  an equal answer.
+
+`useApiQuerySelector`'s `select` now also receives the selection it returned
+last time, so a reader can hand back the unchanged parts of a changed answer.
+Phase 7 uses it for the page list.
+
+A failed poll still notifies: each failure is a new `Error`, and readers keep
+showing their error state, as before. Nothing shows cached or default data in
+place of an error that was not already doing so.
+
+#### What moved, and where
+
+| Query | Interval | The shell used it for | Now read by |
+| --- | --- | --- | --- |
+| Route activation | 15 s | the Clock's ETA, the Route tile, the Nearby map's route layer | `LiveClockTile`, `LiveRouteTile`, `LivePoiMapTile` |
+| CZone switches | 5 s, while a CZone tile is placed | the CZone tile | `LiveCZoneSwitchesTile`, polling while it is mounted |
+| Depth trend | 60 s | the Depth & Tide tile | `LiveDepthTideTile` |
+| Overnight projection | 900 s | the Battery & Power footer | `LiveBatteryPowerTile` |
+| Alarm rules | on mount and write | the Alarms page | `LiveAlarmsDrawer` |
+| Settings | on mount | the Alarms page's AIS tuning link | `LiveAlarmsDrawer`, through a selector on the shared settings entry |
+| Weather forecast | 600 s | the Auto theme, Today & Now, Clock, Current Conditions, Forecast Conditions, the Forecast page | the four tiles, `LiveForecastPage`; the shell keeps sunrise and sunset |
+| Weather today | 600 s | Today & Now, Current Conditions | `LiveTodayNowTile`, `LiveCurrentConditionsTile` |
+| Tide today | 600 s | Depth & Tide, the anchor watch tile and page, *Drop anchor here* | `LiveDepthTideTile`, `LiveAnchorWatchTile`, `LiveAnchorWatchDrawer` |
+| Forecast warnings | 600 s | the sidebar dot, the banner, the Alarms page, the Forecast page | `LiveAlarmBanner`, `LiveAlarmsDrawer`, `LiveForecastPage`; the shell keeps the dot |
+| Wave forecast | 600 s | Today & Now's sea temperature, Forecast Conditions, the Forecast page | `LiveTodayNowTile`, `LiveForecastConditionsTile`, `LiveForecastPage` |
+| Upper air | 21 600 s | the Forecast page | `LiveForecastPage` |
+
+The place name had already moved in phase 3. Three wrappers are new:
+`LiveTodayNowTile`, `LiveForecastConditionsTile` and `LiveCZoneSwitchesTile`.
+`LiveForecastPage` builds the boat's forecast props itself and is now
+memoized. *Drop anchor here* moved into `LiveAnchorWatchDrawer`, which reads
+the fix and depth at the tap, as before, and the tide from the reading the
+page shows.
+
+The CZone poll used to be gated on the shell finding a CZone tile on the page.
+The tile now polls while it is mounted, which is the same condition, stated
+where it holds.
+
+Each consumer passes the same interval the shell passed, so a feed shared by
+two tiles polls once, at that interval. A feed whose tiles all leave the page
+stops polling, and the cache keeps its answer for five minutes, so a page
+switch back shows the last answer and revalidates.
+
+#### What the shell still reads, and why
+
+- **Sunrise and sunset**, through `useForecastSunTimes`, a selector on the
+  forecast entry compared field by field. Auto mode switches the theme on
+  them, and the theme lives in the shell. The Clock reads `useForecastSun`,
+  the same selector with the moon phase.
+- **Whether a wind bulletin is in force**, through
+  `useHasActiveWindBulletin`, a boolean selector on the warnings entry. It
+  draws the sidebar's Forecast dot. A failed or unreadable warnings answer is
+  no dot, the same as before; the Forecast page shows the error.
+- **The pages, the displays and the ribbon**, with `structuralSharing`. The
+  shell lays the page out, builds the sidebar and the page switcher from the
+  list, resolves the wall's display by slug and draws the ribbon. None of them
+  polls on the helm; the wall's rotation refetches the pages on each turn,
+  and an equal answer now leaves the shell alone.
+- **The equipment items, profiles and reporting sources**, with
+  `structuralSharing`, for `EquipmentTileContext`. Nothing polls them; they
+  refetch after an equipment or settings write.
+- **The five anchor-watch fields and `navigationState`**, as in phases 3 and 4.
+
+#### Tested against captured payloads
+
+`src/test/app-polled-queries.test.tsx` answers every endpoint with a payload
+captured off the boat's server on 2026-10-27, at anchor
+(`fixtures/live-poll-payloads.ts`, trimmed to a few entries per list), and
+drives each poll through the real cache with `invalidateQueries`. It checks
+that an equal poll of each of the fourteen queries renders neither the shell
+nor any tile, that a changed poll renders only the tiles that show it, and
+that with every stream ticking and every poll answering equal data the shell
+renders 0 times.
+
+Two of those payloads are never equal on the boat. The tide's `datetime` and
+`current_tide_height_ft` move on every poll, and an anchored boat's tide
+always moves. A tide poll therefore re-renders the Depth & Tide tile and the
+anchor watch, and only them: that is the tide changing.
 
 ### How long a store lives
 
@@ -520,9 +638,9 @@ and a module that only imports a store's types or helpers never touches it.
 5. **Electrical, solar, tanks, nearby vessels, radar and autopilot.** One store
    each, with an equality check per field so an unchanged reading keeps its
    object.
-6. **Polled forecasts.** Weather, wave, tide and forecast warnings are fetched
-   by the tiles that show them, through the shared query cache, not by the
-   shell.
+6. **Polled feeds.** Every poll the shell made for a tile or page is made by
+   the tile or page, through the shared query cache. The shell keeps only
+   what it draws, compared on value.
 7. **`WidgetHost` and the grid.** Once no tile takes a live prop, a memoized
    host per widget and a memoized grid stop a shell render from reaching any
    tile.
@@ -569,10 +687,15 @@ and a module that only imports a store's types or helpers never touches it.
   re-renders only the Alarms page.
 - An autopilot, electrical, solar, tanks, nearby-vessels or radar tick
   re-renders only the tiles whose readings changed, and never the shell.
-- The shell still renders on what it draws itself and on the polled
-  forecasts until phase 6, and `renderWidget` still runs for every tile when
-  it does. The gauge tiles are protected from those renders by their
-  own memo: their props are now config and stable callbacks only.
+- A poll re-renders only the tiles and pages that show what changed, and an
+  equal answer re-renders nothing. The shell renders on a poll only when the
+  sunrise or sunset moves, a wind bulletin starts or ends, or the pages,
+  displays, ribbon or equipment change.
+- A `useApiQuery` reader that does not read `isFetching` no longer
+  re-renders when a request leaves or lands.
+- The shell still runs `renderWidget` for every tile when it does render,
+  until phase 7. The tiles are protected by their own memo: their props are
+  config and stable callbacks only.
 - Each store stays subscribed for the life of the page once started. A
   surface mounted at any moment shows the last thing the server said, never
   an empty store's "all clear".

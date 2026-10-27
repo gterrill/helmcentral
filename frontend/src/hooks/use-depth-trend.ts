@@ -42,6 +42,7 @@ export function useDepthTrend(queryWindow = '3h', refreshInterval = 60): DepthTr
     path: `/api/depth-trend?window=${encodeURIComponent(queryWindow)}`,
     refetchInterval: refreshInterval * 1000,
     select: toTrend,
+    structuralSharing: true,
   })
   return data ?? EMPTY_TREND
 }

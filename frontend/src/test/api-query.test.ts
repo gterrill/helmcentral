@@ -591,3 +591,119 @@ describe('useApiQuerySelector with a select that throws', () => {
     expect(result.current).toBe('error: no body')
   })
 })
+
+// ADR 0215 phase 6: a poll that answers with equal data is nothing a reader
+// shows, so it should not cost the reader a render.
+describe('useApiQuery and isFetching', () => {
+  beforeEach(() => {
+    resetQueryStore()
+  })
+
+  it('does not re-render a reader that never reads isFetching on a request in flight', async () => {
+    const answer = deferred<unknown>()
+    let first = true
+    stubApi({ 'GET /api/items': () => { if (first) { first = false; return { count: 1 } } return answer.promise } })
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      const { data } = useApiQuery<{ count: number }>({ queryKey: ['items'], path: '/api/items' })
+      return data
+    })
+    await waitFor(() => expect(result.current).toEqual({ count: 1 }))
+    const settled = renders
+
+    // The request leaves: only isFetching changed.
+    await act(async () => { void invalidateQueries(['items']) })
+    expect(renders).toBe(settled)
+
+    await act(async () => { answer.resolve({ count: 2 }); await answer.promise })
+    expect(result.current).toEqual({ count: 2 })
+    expect(renders).toBe(settled + 1)
+  })
+
+  it('re-renders a reader that reads isFetching when a request leaves and lands', async () => {
+    const answer = deferred<unknown>()
+    let first = true
+    stubApi({ 'GET /api/items': () => { if (first) { first = false; return { count: 1 } } return answer.promise } })
+    const { result } = renderHook(() => useApiQuery<{ count: number }>({ queryKey: ['items'], path: '/api/items' }))
+    await waitFor(() => expect(result.current.data).toEqual({ count: 1 }))
+    expect(result.current.isFetching).toBe(false)
+
+    await act(async () => { void invalidateQueries(['items']) })
+    expect(result.current.isFetching).toBe(true)
+
+    await act(async () => { answer.resolve({ count: 1 }); await answer.promise })
+    expect(result.current.isFetching).toBe(false)
+  })
+})
+
+describe('useApiQuery with structuralSharing', () => {
+  beforeEach(() => {
+    resetQueryStore()
+  })
+
+  it('keeps the data object, and does not re-render, when a poll answers with equal data', async () => {
+    stubApi({ 'GET /api/items': () => ({ list: [{ id: 'a', n: 1 }] }) })
+    let renders = 0
+    const { result } = renderHook(() => {
+      renders += 1
+      return useApiQuery<{ list: Array<{ id: string; n: number }> }>({ queryKey: ['items'], path: '/api/items', structuralSharing: true }).data
+    })
+    await waitFor(() => expect(result.current).toEqual({ list: [{ id: 'a', n: 1 }] }))
+    const held = result.current
+    const settled = renders
+
+    await act(async () => { await invalidateQueries(['items']) })
+    await act(async () => { await invalidateQueries(['items']) })
+
+    expect(result.current).toBe(held)
+    expect(renders).toBe(settled)
+  })
+
+  it('hands over the new data when it changed', async () => {
+    let n = 1
+    stubApi({ 'GET /api/items': () => ({ n }) })
+    const { result } = renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['items'], path: '/api/items', structuralSharing: true }).data)
+    await waitFor(() => expect(result.current).toEqual({ n: 1 }))
+
+    n = 2
+    await act(async () => { await invalidateQueries(['items']) })
+
+    expect(result.current).toEqual({ n: 2 })
+  })
+
+  it('still reports an error after equal data, and drops nothing it showed', async () => {
+    let fail = false
+    stubApi({ 'GET /api/items': () => (fail ? jsonResponse({ error: 'down' }, 503) : { n: 1 }) })
+    const { result } = renderHook(() => useApiQuery<{ n: number }>({ queryKey: ['items'], path: '/api/items', structuralSharing: true }))
+    await waitFor(() => expect(result.current.data).toEqual({ n: 1 }))
+
+    fail = true
+    await act(async () => { await invalidateQueries(['items']) })
+
+    expect(result.current.error?.message).toBe('down')
+  })
+})
+
+describe('useApiQuerySelector and the previous selection', () => {
+  beforeEach(() => {
+    resetQueryStore()
+  })
+
+  it('hands select the previous selection, so a reader can keep the parts that did not change', async () => {
+    stubApi({ 'GET /api/items': { list: [{ id: 'a', n: 1 }, { id: 'b', n: 1 }] } })
+    type Item = { id: string; n: number }
+    const select = (data: { list: Item[] } | undefined, _error: Error | null, previous: Item[] | undefined): Item[] => {
+      const next = data?.list ?? []
+      return next.map((item) => previous?.find((p) => p.id === item.id && p.n === item.n) ?? item)
+    }
+    const { result } = renderHook(() => useApiQuerySelector({ queryKey: ['items'], path: '/api/items' }, select))
+    await waitFor(() => expect(result.current).toHaveLength(2))
+    const [a] = result.current
+
+    await act(async () => { setQueryData(['items'], { list: [{ id: 'a', n: 1 }, { id: 'b', n: 2 }] }) })
+
+    expect(result.current[0]).toBe(a)
+    expect(result.current[1]).toEqual({ id: 'b', n: 2 })
+  })
+})

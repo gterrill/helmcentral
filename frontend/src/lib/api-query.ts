@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { apiBaseUrl } from '@/config/api'
+import { sameJSON } from '@/lib/telemetry-store'
 
 // One request helper and one keyed read cache under the per-resource hooks
 // (ADR 0173). The names (useApiQuery, setQueryData, invalidateQueries,
@@ -370,6 +371,14 @@ export interface UseApiQueryOptions<T> {
   refetchInterval?: number
   enabled?: boolean
   select?: (raw: never) => T
+  /**
+   * Keep the data object this reader already holds, and do not re-render it,
+   * when a request answers with data equal by value (ADR 0215). Named after
+   * TanStack Query's option, which does more: it also keeps the unchanged
+   * parts of changed data. Off unless asked for, because a reader with an
+   * effect on `data` would no longer see a refetch that changed nothing.
+   */
+  structuralSharing?: boolean
 }
 
 export interface UseApiQueryResult<T> {
@@ -415,33 +424,34 @@ function useEntrySubscription(
 
 /**
  * One slice of a query's data, for a reader that should re-render only when
- * that slice changes (ADR 0215). useApiQuery re-renders on every request,
- * because its snapshot carries isFetching; this re-renders only when `select`
- * returns something `isEqual` calls different. It fetches and polls exactly as
+ * that slice changes (ADR 0215). It re-renders only when `select` returns
+ * something `isEqual` calls different. It fetches and polls exactly as
  * useApiQuery does, sharing the same entry.
  *
- * `select` sees the data (undefined until the first answer lands) and the
- * query's error. Like useApiQuery's own select, a body `select` cannot read
- * becomes the error rather than a throw during render: `select` is called
- * again with no data and that error, so the reader shows what it shows for a
- * failed query. Pass a stable `select`.
+ * `select` sees the data (undefined until the first answer lands), the
+ * query's error, and the selection it returned last time (undefined on the
+ * first call), so a reader can hand back the parts that did not change.
+ * Like useApiQuery's own select, a body `select` cannot read becomes the
+ * error rather than a throw during render: `select` is called again with no
+ * data and that error, so the reader shows what it shows for a failed query.
+ * Pass a stable `select`.
  */
 export function useApiQuerySelector<T, S>(
-  { queryKey, path, refetchInterval, enabled = true }: Omit<UseApiQueryOptions<T>, 'select'>,
-  select: (data: T | undefined, error: Error | null) => S,
+  { queryKey, path, refetchInterval, enabled = true }: Omit<UseApiQueryOptions<T>, 'select' | 'structuralSharing'>,
+  select: (data: T | undefined, error: Error | null, previous: S | undefined) => S,
   isEqual: (a: S, b: S) => boolean = Object.is,
 ): S {
   const { hash, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
-  const cache = useRef<{ snapshot: Snapshot; select: (data: T | undefined, error: Error | null) => S; value: S } | null>(null)
+  const cache = useRef<{ snapshot: Snapshot; select: typeof select; value: S } | null>(null)
   const getSelection = useCallback((): S => {
     const snapshot = enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY
     const prev = cache.current
     if (prev && prev.snapshot.data === snapshot.data && prev.snapshot.error === snapshot.error && prev.select === select) return prev.value
     let next: S
     try {
-      next = select(snapshot.data as T | undefined, snapshot.error)
+      next = select(snapshot.data as T | undefined, snapshot.error, prev?.value)
     } catch (err) {
-      next = select(undefined, err instanceof Error ? err : new Error(String(err)))
+      next = select(undefined, err instanceof Error ? err : new Error(String(err)), prev?.value)
     }
     const value = prev && isEqual(prev.value, next) ? prev.value : next
     cache.current = { snapshot, select, value }
@@ -456,12 +466,34 @@ export function useApiQuery<T>({
   refetchInterval,
   enabled = true,
   select,
+  structuralSharing = false,
 }: UseApiQueryOptions<T>): UseApiQueryResult<T> {
   const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
-  const getSnapshot = useCallback(
-    () => (enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY),
-    [hash, enabled],
-  )
+
+  // A request leaving and landing flips isFetching twice. Only a reader that
+  // reads it hears those flips (ADR 0215): every other reader re-renders when
+  // the data, the error or the status changes, and not otherwise. The result's
+  // isFetching is a getter that marks the reader as one that reads it.
+  const readsFetching = useRef(false)
+  const view = useRef<{ source: Snapshot; value: Snapshot } | null>(null)
+  const getSnapshot = useCallback((): Snapshot => {
+    const source = enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY
+    const prev = view.current
+    if (prev && prev.source === source) return prev.value
+    let value = source
+    if (prev) {
+      const last = prev.value
+      const sameData = last.data === source.data || (structuralSharing && sameJSON(last.data, source.data))
+      if (sameData && last.error === source.error && last.status === source.status
+        && (!readsFetching.current || last.isFetching === source.isFetching)) {
+        value = last
+      } else if (sameData && last.data !== source.data) {
+        value = { ...source, data: last.data }
+      }
+    }
+    view.current = { source, value }
+    return value
+  }, [hash, enabled, structuralSharing])
   const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
   const refetch = useCallback(
@@ -489,7 +521,12 @@ export function useApiQuery<T>({
     data: selected.data,
     error,
     isLoading: enabled && snap.status === 'pending' && error === null,
-    isFetching: snap.isFetching,
+    // Read from the entry, not from `snap`: a reader reading it for the first
+    // time may hold a snapshot from which a flip was left out.
+    get isFetching() {
+      readsFetching.current = true
+      return enabled ? (entries.get(hash)?.snapshot.isFetching ?? false) : false
+    },
     refetch,
   }
 }

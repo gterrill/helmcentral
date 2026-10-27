@@ -77,6 +77,7 @@ export function useAlarmRules() {
     queryKey: [RULES_PATH],
     path: RULES_PATH,
     select: (payload: { rules?: AlarmRule[] }) => (Array.isArray(payload.rules) ? payload.rules : NO_RULES),
+    structuralSharing: true,
   })
 
   // The backend validates and is the authority; its message surfaces verbatim

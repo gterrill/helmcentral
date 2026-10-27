@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 
 import { FORECAST_SURF_WARNING_PATH, FORECAST_WIND_WARNING_PATH } from '@/lib/alarm-display'
-import { useApiQuery } from '@/lib/api-query'
+import { useApiQuery, useApiQuerySelector } from '@/lib/api-query'
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place'
 
 export interface ForecastWarningSection {
@@ -128,6 +128,7 @@ export function useForecastWarnings(refreshIntervalSeconds = 3600, options: Fore
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
     select: mapWarnings,
+    structuralSharing: true,
   })
 
   useEffect(() => {
@@ -147,4 +148,24 @@ export function useForecastWarnings(refreshIntervalSeconds = 3600, options: Fore
     ttlSeconds: data?.ttlSeconds ?? null,
     refetch,
   }
+}
+
+// A bulletin the server sent and the client could not read is no bulletin, the
+// same as a failed fetch: the sidebar shows no dot, and the Forecast page shows
+// the error.
+function selectHasWindBulletin(data: ForecastWarningsApi | undefined, error: Error | null): boolean {
+  if (data === undefined || error !== null) return false
+  return Boolean(findActiveWindBulletin(mapWarnings(data).warnings))
+}
+
+/**
+ * Whether a wind bulletin is in force, for the sidebar's Forecast dot (ADR
+ * 0215). It shares useForecastWarnings' query and re-renders its reader only
+ * when the answer to that one question changes.
+ */
+export function useHasActiveWindBulletin(refreshIntervalSeconds = 3600): boolean {
+  return useApiQuerySelector(
+    { ...forecastQuery('/api/forecast-warnings', undefined), refetchInterval: refreshIntervalSeconds * 1000 },
+    selectHasWindBulletin,
+  )
 }

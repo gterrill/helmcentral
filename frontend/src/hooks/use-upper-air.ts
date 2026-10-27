@@ -230,6 +230,7 @@ export function useUpperAir(refreshIntervalSeconds = 21600, options: ForecastQue
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
     select: mapUpperAir,
+    structuralSharing: true,
   });
 
   useEffect(() => {

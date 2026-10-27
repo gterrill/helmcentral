@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
-import { useApiQuery } from '@/lib/api-query';
+import { useApiQuery, useApiQuerySelector } from '@/lib/api-query';
+import { sameShallow } from '@/lib/telemetry-store';
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 import type { NowcastPoint } from '@/lib/nowcast';
@@ -397,6 +398,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600, options: Forec
     ...forecastQuery('/api/weather-forecast', options.place),
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
+    structuralSharing: true,
   });
 
   // A payload of the wrong shape is reported like a failed request, so the
@@ -429,4 +431,55 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600, options: Forec
     ttlSeconds,
     refetch: query.refetch,
   };
+}
+
+export interface ForecastSun {
+  sunriseTime: string | null;
+  sunsetTime: string | null;
+  moonPhase: string | null;
+}
+
+const NO_SUN: ForecastSun = { sunriseTime: null, sunsetTime: null, moonPhase: null };
+
+// Today's sun and moon from the boat's forecast. A failed or unreadable
+// forecast gives none of them, the same as before the first answer, never the
+// times from an older answer.
+function selectSun(data: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi | undefined, error: Error | null): ForecastSun {
+  if (data === undefined || error !== null) return NO_SUN;
+  const day = mapForecastPayload(data).forecast[0];
+  if (!day) return NO_SUN;
+  return { sunriseTime: day.sunriseTime, sunsetTime: day.sunsetTime, moonPhase: day.moonPhase };
+}
+
+/**
+ * Today's sunrise, sunset and moon phase from the boat's forecast, for a reader
+ * that shows nothing else of it (ADR 0215): the Clock tile, and through
+ * useForecastSunTimes the shell's Auto theme. It shares useWeatherForecast's
+ * query and re-renders only when one of the three changes.
+ */
+export function useForecastSun(refreshIntervalSeconds = 3600): ForecastSun {
+  return useApiQuerySelector(
+    { ...forecastQuery('/api/weather-forecast', undefined), refetchInterval: refreshIntervalSeconds * 1000 },
+    selectSun,
+    sameShallow,
+  );
+}
+
+export interface ForecastSunTimes {
+  sunriseTime: string | null;
+  sunsetTime: string | null;
+}
+
+function selectSunTimes(data: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi | undefined, error: Error | null): ForecastSunTimes {
+  const { sunriseTime, sunsetTime } = selectSun(data, error);
+  return { sunriseTime, sunsetTime };
+}
+
+/** Today's sunrise and sunset alone: the shell's Auto theme reads these and nothing else. */
+export function useForecastSunTimes(refreshIntervalSeconds = 3600): ForecastSunTimes {
+  return useApiQuerySelector(
+    { ...forecastQuery('/api/weather-forecast', undefined), refetchInterval: refreshIntervalSeconds * 1000 },
+    selectSunTimes,
+    sameShallow,
+  );
 }

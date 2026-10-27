@@ -100,7 +100,6 @@ function renderTile() {
       showRadarEcho={false}
       onRadarEchoToggle={vi.fn()}
       onFullscreen={vi.fn()}
-      tide={null}
       interactive
     />,
   )
@@ -144,7 +143,6 @@ describe('trail polling (ADR 0215 phase 4)', () => {
         <LivePoiMapTile
           config={{ title: 'Nearby', categories: [], radiusM: 1000, showTrail: true } as never}
           editing={false}
-          activeRoute={null}
           isDarkTheme={false}
           distanceUnits="metric"
           interactive
@@ -173,10 +171,16 @@ describe('trail polling (ADR 0215 phase 4)', () => {
 })
 
 describe('LiveClockTile', () => {
-  const clockProps = { sunriseTime: null, sunsetTime: null, moonPhase: null }
+  /** A GET /api/routes/active answer, landed as its poll would land it. */
+  function landRoute(answer: Record<string, unknown>) {
+    act(() => {
+      setQueryData(['/api/routes/active'], answer)
+    })
+  }
 
   it('does not redraw on a moving fix while there is no trip to time', () => {
-    render(<LiveClockTile {...clockProps} routeStatus={{ state: 'inactive', destination: null }} />)
+    landRoute({ active: false })
+    render(<LiveClockTile />)
     emitFix(-20.2747, 149.0737)
     const renders = clockRenders.mock.calls.length
 
@@ -187,8 +191,8 @@ describe('LiveClockTile', () => {
   })
 
   it('follows the fix while a go-to destination is set', () => {
-    const destination = { name: 'Airlie', lat: -20.27, lon: 148.72 }
-    render(<LiveClockTile {...clockProps} routeStatus={{ state: 'inactive', destination }} />)
+    landRoute({ active: false, destination: { name: 'Airlie', lat: -20.27, lon: 148.72 } })
+    render(<LiveClockTile />)
     emitFix(-20.2747, 149.0737)
     const renders = clockRenders.mock.calls.length
 

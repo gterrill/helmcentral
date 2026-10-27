@@ -70,6 +70,7 @@ export function useRouteActivation(pollIntervalSeconds = DEFAULT_POLL_INTERVAL_S
     queryKey: ACTIVE_KEY,
     path: '/api/routes/active',
     refetchInterval: pollIntervalSeconds * 1000,
+    structuralSharing: true,
   })
   // Don't assume inactive on a failed poll: the route may still be active on
   // the boat's N2K bus even if we can't reach SignalK to confirm.
