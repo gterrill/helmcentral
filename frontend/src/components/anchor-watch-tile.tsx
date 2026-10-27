@@ -1,18 +1,22 @@
 import { Anchor, Volume2 } from 'lucide-react'
-import { lazy, memo, Suspense, useCallback } from 'react'
+import { lazy, memo, Suspense, useCallback, type ComponentProps } from 'react'
 import { Button } from '@/components/ui/button'
 import { Tile } from '@/components/ui/tile'
 import { AnchorDropRaiseButton } from '@/components/anchor-drop-raise-button'
-import { acknowledgeAlarm, useAnchorDragAlarm, type AlarmState } from '@/hooks/use-alarms'
+import { acknowledgeAlarm, useAnchorDragAlarm, type AlarmState, useAisCollisionAlarms } from '@/hooks/use-alarms'
 import { useAnchorAlarm } from '@/hooks/use-anchor-alarm'
-import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
-import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
-import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
-import type { TrailPoint } from '@/hooks/use-server-trails'
-import type { TideToday } from '@/hooks/use-tide-today'
 import { tideHeightFtOrNull } from '@/lib/rode-plan'
 import { formatDataAge, isStale } from '@/lib/staleness'
+import { FORECAST_REFRESH_SECONDS, TRAIL_POLL_MS } from '@/config/app-config'
+import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
+import { useAnchorTrail } from '@/hooks/use-anchor-trail'
+import { useAnchorWatch, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
+import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
+import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
+import { useAisTrails, type TrailPoint } from '@/hooks/use-server-trails'
+import { useTideToday, type TideToday } from '@/hooks/use-tide-today'
+import { useMapContacts, usePins, useWatchAtFix } from '@/hooks/use-anchor-map-inputs'
+import { useVesselFields } from '@/hooks/use-vessel-state'
 
 // anchor-watch-map.tsx imports maplibre-gl and react-map-gl at module scope
 // (map-vendor: 1048 KB raw / 280 KB gzip), and this tile is mounted eagerly
@@ -341,5 +345,51 @@ export const AnchorWatchTile = memo(function AnchorWatchTile({
       )}
       </div>
     </Tile>
+  )
+})
+
+const ANCHOR_FIELDS = [
+  'positionLastUpdateAgeS', 'latitude', 'longitude', 'gnssCriticalAlert', 'depth',
+  'currentDriftKts', 'currentSetDeg', 'currentDriftImpactKts', 'headingTrue',
+] as const
+
+/**
+ * The anchor watch tile. It reads the watch record, applies the live fix to it
+ * (distance, bearing, drag state), and adds depth, current, heading, the tide
+ * a drop records, the collision colours, the pins, the trails and the AIS and
+ * radar contacts. The trails poll only while the tile is on screen.
+ */
+export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit<ComponentProps<typeof AnchorWatchTile>,
+  'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'
+  | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
+  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource' | 'tide'>) {
+  const watch = useAnchorWatch()
+  const contacts = useMapContacts()
+  const v = useVesselFields(ANCHOR_FIELDS)
+  const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
+  const aisCollisionAlarms = useAisCollisionAlarms()
+  const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
+  const anchorTrail = useAnchorTrail(TRAIL_POLL_MS)
+  const aisTrails = useAisTrails(TRAIL_POLL_MS)
+  const pins = usePins(watch.active)
+  return (
+    <AnchorWatchTile
+      {...props}
+      {...pins}
+      {...contacts}
+      tide={tide}
+      watch={atFix}
+      vesselTrail={anchorTrail}
+      aisTrails={aisTrails}
+      lastUpdateAgeS={v.positionLastUpdateAgeS}
+      lat={v.latitude}
+      lon={v.longitude}
+      depthMeters={v.depth}
+      currentDriftKts={v.currentDriftKts}
+      currentSetDeg={v.currentSetDeg}
+      currentDriftImpactKts={v.currentDriftImpactKts}
+      vesselHeadingDeg={v.headingTrue}
+      aisCollisionAlarms={aisCollisionAlarms}
+    />
   )
 })

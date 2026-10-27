@@ -2,8 +2,9 @@ import { Compass } from 'lucide-react'
 import { memo, useCallback, useRef, useState } from 'react'
 
 import { Tile, tilePillClass } from '@/components/ui/tile'
-import type { AutopilotSide, AutopilotState } from '@/hooks/use-autopilot'
+import { useAutopilot, type AutopilotSide, type AutopilotState } from '@/hooks/use-autopilot'
 import { cn } from '@/lib/utils'
+import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 
 // Change who is steering the boat, so a slip of the finger must not trigger
 // them (ADR 0041). The heading nudges below are deliberately NOT held to —
@@ -370,3 +371,30 @@ function AutopilotControls({
     </div>
   )
 }
+
+const selectHeading = (state: VesselStateValue) => state.headingTrue
+
+/** The autopilot tile: the pilot's state and controls from its own stream, the heading from vessel state. */
+export const LiveAutopilotTile = memo(function LiveAutopilotTile({ readOnly }: { readOnly: boolean }) {
+  const autopilot = useAutopilot()
+  const headingTrueDeg = useVesselStateSelector(selectHeading)
+  return (
+    <AutopilotTile
+      state={autopilot.state}
+      pending={autopilot.pending}
+      error={autopilot.error}
+      availableModes={autopilot.availableModes}
+      capabilityError={autopilot.capabilityError}
+      onEngage={autopilot.engage}
+      onDisengage={autopilot.disengage}
+      onTack={autopilot.tack}
+      onGybe={autopilot.gybe}
+      onAdjustHeading={autopilot.adjustHeading}
+      onSetMode={autopilot.setMode}
+      onDodge={autopilot.dodge}
+      onClearDodge={autopilot.clearDodge}
+      headingTrueDeg={headingTrueDeg}
+      readOnly={readOnly}
+    />
+  )
+})

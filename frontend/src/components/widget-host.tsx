@@ -4,29 +4,27 @@ import { EmbedTile } from '@/components/embed-tile'
 import { EngineClusterHost, GaugeGroupHost, LampStripHost } from '@/components/equipment-tile-hosts'
 import { GaugeTile } from '@/components/gauge-tile'
 import { HotWaterTile } from '@/components/hot-water-tile'
-import {
-  LiveAlternatorTile,
-  LiveAnchorWatchTile,
-  LiveAutopilotTile,
-  LiveBatteryPowerTile,
-  LiveClockTile,
-  LiveCurrentConditionsTile,
-  LiveCZoneSwitchesTile,
-  LiveDepthTideTile,
-  LiveForecastConditionsTile,
-  LiveGeneratorTile,
-  LiveNearbyVesselsTile,
-  LivePoiMapTile,
-  LivePositionTile,
-  LiveRadarTargetsTile,
-  LiveRouteTile,
-  LiveSolarTile,
-  LiveTanksTile,
-  LiveTodayNowTile,
-  LiveWindTile,
-} from '@/components/live-surfaces'
+import { LiveAlternatorTile } from '@/components/alternator-tile'
+import { LiveAnchorWatchTile } from '@/components/anchor-watch-tile'
+import { LiveAutopilotTile } from '@/components/autopilot-tile'
+import { LiveBatteryPowerTile } from '@/components/battery-power-tile'
+import { LiveClockTile } from '@/components/clock-tile'
+import { LiveCurrentConditionsTile } from '@/components/current-conditions-tile'
+import { LiveCZoneSwitchesTile } from '@/components/czone-switches-tile'
+import { LiveDepthTideTile } from '@/components/depth-tide-tile'
+import { LiveForecastConditionsTile } from '@/components/forecast-conditions-tile'
+import { LiveGeneratorTile } from '@/components/generator-tile'
+import { LiveNearbyVesselsTile } from '@/components/nearby-vessels-tile'
+import { LivePoiMapTile } from '@/components/poi-map-tile'
+import { LivePositionTile } from '@/components/position-tile'
+import { LiveRadarTargetsTile } from '@/components/radar-targets-tile'
+import { LiveRouteTile } from '@/components/route-tile'
+import { LiveSolarTile } from '@/components/solar-tile'
+import { LiveTanksTile } from '@/components/tanks-tile'
+import { LiveTodayNowTile } from '@/components/today-now-tile'
+import { LiveWindTile } from '@/components/wind-tile'
 import { MarineHeader } from '@/components/marine-header'
-import type { DistanceUnits } from '@/config/app-config'
+import { type DistanceUnits } from '@/config/app-config'
 import {
   isClusterWidgetId,
   isEmbedWidgetId,
@@ -37,7 +35,7 @@ import {
   type DashboardLayoutItem,
   type DashboardWidgetId,
 } from '@/lib/dashboard-widgets'
-import type { EquipmentTileContext } from '@/lib/equipment-tiles'
+import { type EquipmentTileContext } from '@/lib/equipment-tiles'
 
 /**
  * The shell's callbacks a tile can call, in one object the shell builds once

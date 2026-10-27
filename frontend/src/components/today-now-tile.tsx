@@ -1,9 +1,11 @@
 import { CloudSun } from 'lucide-react'
-import { memo } from 'react'
-import type { WeatherToday } from '@/hooks/use-weather-today'
-import type { DistanceUnits } from '@/config/app-config'
+import { memo, type ComponentProps } from 'react'
+import { useWeatherToday, type WeatherToday } from '@/hooks/use-weather-today'
+import { FORECAST_REFRESH_SECONDS, type DistanceUnits } from '@/config/app-config'
 import { Tile } from '@/components/ui/tile'
 import { fahrenheitToCelsius } from '@/lib/units'
+import { useWaveForecast } from '@/hooks/use-wave-forecast'
+import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 
 export interface TodayNowTileProps {
   weather: WeatherToday
@@ -54,5 +56,21 @@ export const TodayNowTile = memo(function TodayNowTile({ weather, highTempF, low
 
       </Tile>
     </div>
+  )
+})
+
+/** Today & Now: the weather now, today's high and low from the forecast, and the sea temperature from the wave forecast. */
+export const LiveTodayNowTile = memo(function LiveTodayNowTile(props: Pick<ComponentProps<typeof TodayNowTile>, 'distanceUnits' | 'onOpen'>) {
+  const { weather } = useWeatherToday(FORECAST_REFRESH_SECONDS)
+  const { forecast } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  const { seaTemperatureF } = useWaveForecast(FORECAST_REFRESH_SECONDS)
+  return (
+    <TodayNowTile
+      {...props}
+      weather={weather}
+      highTempF={forecast[0]?.high ?? -1}
+      lowTempF={forecast[0]?.low ?? -1}
+      seaTemperatureF={seaTemperatureF ?? null}
+    />
   )
 })

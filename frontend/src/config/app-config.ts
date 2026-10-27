@@ -85,6 +85,9 @@ export const ANCHOR_WATCH_IDLE_REFRESH_SECONDS = 60
 // better part of a minute — so there is no benefit to polling faster than this.
 export const PLACE_NAME_REFRESH_SECONDS = 60
 
+/** How often a map on screen asks the server for new trail points, in milliseconds. */
+export const TRAIL_POLL_MS = 5000
+
 export const fallbackAnchorConfig: AnchorConfig = {
   bowRollerHeightM: 1.5,
   chainSizeMm: 12,

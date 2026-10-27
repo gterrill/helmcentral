@@ -3,7 +3,7 @@ import { Droplet, Droplets, Fuel, Icon } from 'lucide-react'
 import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
-import type { TankLevel } from '@/hooks/use-tanks-state'
+import { useTanksState, type TankLevel } from '@/hooks/use-tanks-state'
 import { isLowBadKind, tankTone, type TankTone } from '@/lib/tank-levels'
 import { worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge, isStale } from '@/lib/staleness'
@@ -153,4 +153,9 @@ export const TanksTile = memo(function TanksTile({
       </div>
     </Tile>
   )
+})
+
+/** The Tanks tile: the tanks stream. */
+export const LiveTanksTile = memo(function LiveTanksTile() {
+  return <TanksTile {...useTanksState()} />
 })

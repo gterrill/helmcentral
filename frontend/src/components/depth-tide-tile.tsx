@@ -1,11 +1,13 @@
 import { ArrowDown, ArrowUp } from 'lucide-react'
-import { memo } from 'react'
-import type { DepthTrendData } from '@/hooks/use-depth-trend'
-import type { TideToday } from '@/hooks/use-tide-today'
+import { memo, type ComponentProps } from 'react'
+import { useDepthTrend, type DepthTrendData } from '@/hooks/use-depth-trend'
+import { useTideToday, type TideToday } from '@/hooks/use-tide-today'
 import { DepthSparkline } from '@/components/depth-sparkline'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { estimateDepthAtNextTurn, tideExtremesByTime } from '@/lib/tide-estimate'
+import { FORECAST_REFRESH_SECONDS } from '@/config/app-config'
+import { useVesselFields } from '@/hooks/use-vessel-state'
 
 export interface DepthTideTileProps {
   depth: number | null
@@ -136,4 +138,14 @@ export const DepthTideTile = memo(function DepthTideTile({
       </Tile>
     </Wrapper>
   )
+})
+
+const DEPTH_FIELDS = ['depth', 'depthLastUpdateAgeS', 'navigationState'] as const
+
+/** The Depth & Tide tile: depth and navigation state from vessel state, the tide and the three-hour depth trend from their polls. */
+export const LiveDepthTideTile = memo(function LiveDepthTideTile(props: Omit<ComponentProps<typeof DepthTideTile>, 'depth' | 'lastUpdateAgeS' | 'navigationState' | 'tide' | 'depthTrend'>) {
+  const { depth, depthLastUpdateAgeS, navigationState } = useVesselFields(DEPTH_FIELDS)
+  const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
+  const depthTrend = useDepthTrend('3h', 60)
+  return <DepthTideTile {...props} depth={depth} lastUpdateAgeS={depthLastUpdateAgeS} navigationState={navigationState} tide={tide} depthTrend={depthTrend} />
 })

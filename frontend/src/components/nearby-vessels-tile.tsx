@@ -1,12 +1,12 @@
 import { Ship } from 'lucide-react'
-import { memo, useMemo, useState } from 'react'
+import { memo, useMemo, useState, type ComponentProps } from 'react'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tile } from '@/components/ui/tile'
-import type { DistanceUnits } from '@/config/app-config'
-import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
+import { type DistanceUnits } from '@/config/app-config'
+import { ALARM_STATES, type AlarmState, useAisCollisionAlarms } from '@/hooks/use-alarms'
 import { useVesselSightings, type VesselSighting } from '@/hooks/use-vessel-sightings'
-import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
+import { useNearbyVessels, type NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { formatCoordinate } from '@/lib/format'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
@@ -280,4 +280,12 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
       </div>
     </Tile>
   )
+})
+
+/** The Nearby Vessels list: the contacts from their own stream, and the collision highlight on each row. */
+export const LiveNearbyVesselsTile = memo(function LiveNearbyVesselsTile(props: Omit<ComponentProps<typeof NearbyVesselsTile>,
+  'aisCollisionAlarms' | 'vessels' | 'loading' | 'lastUpdateAgeS' | 'maxRangeM'>) {
+  const nearby = useNearbyVessels()
+  const aisCollisionAlarms = useAisCollisionAlarms()
+  return <NearbyVesselsTile {...props} {...nearby} aisCollisionAlarms={aisCollisionAlarms} />
 })

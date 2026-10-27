@@ -175,16 +175,24 @@ barometer's rate, in the fifth decimal of a Pa/s figure the card shows as
 `useAlarmList()` is gone; every surface that took it now says what it
 compares on.
 
-The surfaces read the store through wrappers in
-`frontend/src/components/live-surfaces.tsx`: `LiveAlarmBanner`,
-`LiveAlarmsDrawer`, `LiveDisplayShell`, and, for the collision colours,
-`LiveNearbyVesselsTile`, `LiveAnchorWatchTile`, `LivePoiMapTile` and
-`LiveAnchorWatchDrawer`. Each wrapper reads its slice and passes it as the
+The surfaces read the store through `Live*` wrappers: `LiveAlarmBanner`
+(`live-alarm-banner.tsx`), `LiveAlarmsDrawer` and `LiveAnchorWatchDrawer`
+(`live-drawers.tsx`), `LiveDisplayShell` (`display-shell.tsx`), and, for the
+collision colours, `LiveNearbyVesselsTile`, `LiveAnchorWatchTile` and
+`LivePoiMapTile`, each in the file of its tile. Each wrapper reads its slice and passes it as the
 prop the component always took, so `AlarmBanner`, `AlarmsDrawer`,
 `DisplayShell` and the tiles stay prop-driven and their tests stand. The
 wrappers are memoized; the shell's remaining props are stable.
 `LampStripHost`, and so the pinned ribbon, reads the list and the worst state
 itself, as it reads its lamps.
+
+`LiveAlarmBanner` has a file of its own so the banner's tests can spy on the
+banner itself, which a wrapper in the same file would hide. The four pages that open as lazy chunks (Alarms, Anchor Watch, Radar and
+Forecast) have their wrappers in `components/live-drawers.tsx`, not beside the
+page. A wrapper is eager and the page is not, so a wrapper in the page's own
+file would pull the page's chunk into the main bundle. The same holds for
+`poi-map-tile.tsx`: `LivePoiMapTile` sits there, in the eager file, and never
+in the lazy `poi-map-tile-impl.tsx`.
 
 `LiveDisplayShell` is not memoized: the wall's pages arrive as `children`,
 an element the shell builds. An alarm tick re-renders the frame for its pill,
@@ -227,8 +235,8 @@ gust ladders compare window by window. `datetime` is not kept as a field. (ADR
 0218 has the store pass it to the boat's clock as it parses the event, and adds
 the boat's name and time zone as fields.)
 
-The tiles read the store through wrappers in `live-surfaces.tsx`, as the
-alarm surfaces do: `LiveWindTile`, `LiveDepthTideTile`, `LivePositionTile`,
+The tiles read the store through wrappers beside each tile, as the alarm
+surfaces do: `LiveWindTile`, `LiveDepthTideTile`, `LivePositionTile`,
 `LiveClockTile`, `LiveCurrentConditionsTile`, `LiveRouteTile`,
 `LiveGeneratorTile`, `LiveAutopilotTile`, `LiveAlternatorTile`,
 `LiveAnchorWatchTile` and `LivePoiMapTile`, and the pages
@@ -409,7 +417,7 @@ The alternator tile made the same false claim from vessel state:
 `--`. Null also means no engine is set up or none is reporting, and there the
 tile can't tell either way.
 
-The wrappers in `live-surfaces.tsx` read the stores: `LiveAutopilotTile`
+The wrappers beside each tile read the stores: `LiveAutopilotTile`
 (state and controls from `useAutopilot`, which no longer listens to the
 stream itself), `LiveBatteryPowerTile`, `LiveAlternatorTile`,
 `LiveGeneratorTile`, `LiveSolarTile`, `LiveTanksTile`,
@@ -704,7 +712,9 @@ A new tile follows the same four steps:
    (no longer needed since ADR 0218), and selectors (`useStoreFields`, or `useSelector` with an equality). A
    poll gets a hook over `useApiQuery` with `structuralSharing: true`, or
    over `useApiQuerySelector` when the tile shows a slice.
-2. **A `Live*` wrapper in `components/live-surfaces.tsx`** reads the store or
+2. **A `Live*` wrapper, exported from the tile's own file** (beside the
+   presentational tile, the way `GaugeTile` sits beside `GaugeTileView`),
+   reads the store or
    query and passes the readings as the props the presentational tile always
    took. A hook it reads returns one object while its data holds (a
    `useMemo` over the data, error and loading state), so a wrapper that

@@ -9,6 +9,7 @@ import { formatHeading } from '@/lib/format'
 import { GUST_WINDOW_LABELS, GUST_WINDOW_SPOKEN, nextGustWindow, parseGustWindow, type GustWindow } from '@/lib/gust-windows'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
+import { useVesselFields } from '@/hooks/use-vessel-state'
 
 type WindMetricCardProps = {
   title: string
@@ -508,4 +509,16 @@ export const WindTile = memo(function WindTile({
       />
     </Tile>
   )
+})
+
+const WIND_FIELDS = [
+  'windLastUpdateAgeS', 'headingTrue', 'windAngleApparentDeg', 'windSide', 'windAngleRelativeDeg',
+  'windSpeedApparentKts', 'windSpeedTrueKts', 'windAngleTrueDeg', 'windSideTrue', 'windAngleTrueRelativeDeg',
+  'windDirectionTrueDeg', 'currentSetDeg', 'currentDriftKts', 'currentDriftImpactKts', 'maxGustKts', 'maxGustTrueKts',
+] as const
+
+/** The Wind tile: wind, heading, current and the gust ladders, all from vessel state. */
+export const LiveWindTile = memo(function LiveWindTile() {
+  const { windLastUpdateAgeS, ...wind } = useVesselFields(WIND_FIELDS)
+  return <WindTile lastUpdateAgeS={windLastUpdateAgeS} {...wind} />
 })

@@ -285,23 +285,25 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 }))
 
 // A minimal stand-in for the map-bearing tile the dark-theme override has to
-// reach (ADR 0089 phase 2): the real AnchorWatchTile pulls in the map's own
+// reach (ADR 0089 phase 2): the real LiveAnchorWatchTile pulls in the map's own
 // STYLE_DARK/STYLE_LIGHT switch, which is exactly the consumer a light
 // basemap bug would show up in. Mocked down to just the one prop this suite
 // cares about, the same pattern anchor-imagery-toggle.test.tsx uses for
 // AnchorWatchMap. Doubles as a marker for "did the wall show the OTHER
 // display's page" in the cross-display leakage test below.
-vi.mock('@/components/poi-map-tile', () => ({
-  PoiMapTile: (props: { forceDark?: boolean; config: { title: string } }) => (
+vi.mock('@/components/poi-map-tile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/poi-map-tile')>()),
+  LivePoiMapTile: (props: { forceDark?: boolean; config: { title: string } }) => (
     <div data-testid={`poi-force-dark-${props.config.title}`}>{String(props.forceDark)}</div>
   ),
 }))
 
 const { anchorTileMounts } = vi.hoisted(() => ({ anchorTileMounts: { count: 0 } }))
-vi.mock('@/components/anchor-watch-tile', async () => {
+vi.mock('@/components/anchor-watch-tile', async (importOriginal) => {
   const { useEffect } = await import('react')
   return {
-    AnchorWatchTile: (props: { isDarkTheme?: boolean }) => {
+    ...(await importOriginal<typeof import('@/components/anchor-watch-tile')>()),
+    LiveAnchorWatchTile: (props: { isDarkTheme?: boolean }) => {
       // Counts real mounts, so a test can tell a tile that stayed up from one rebuilt each lap.
       useEffect(() => { anchorTileMounts.count += 1 }, [])
       return <div data-testid="display-anchor-watch-isdark">{String(props.isDarkTheme)}</div>

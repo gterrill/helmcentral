@@ -62,7 +62,7 @@ describe('alarms store', () => {
   })
 
   it('does not tell the Alarms page "All clear" before the first alarms event', async () => {
-    const { LiveAlarmsDrawer } = await import('@/components/live-surfaces')
+    const { LiveAlarmsDrawer } = await import('@/components/live-drawers')
     render(
       <LiveAlarmsDrawer />,
     )

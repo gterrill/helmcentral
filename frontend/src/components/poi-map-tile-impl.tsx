@@ -1,8 +1,7 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { MapRef } from 'react-map-gl/maplibre'
-import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
+import { Map, Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre'
 import { MapPin, Settings2, Ship } from 'lucide-react'
 
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
@@ -15,10 +14,10 @@ import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '
 import { usePoi } from '@/hooks/use-poi'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 import { useCyclingIndex } from '@/hooks/use-cycling-index'
-import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
-import type { AlarmState } from '@/hooks/use-alarms'
-import type { TrailPoint } from '@/hooks/use-server-trails'
-import type { DistanceUnits } from '@/config/app-config'
+import { type NearbyVessel } from '@/hooks/use-nearby-vessels'
+import { type AlarmState } from '@/hooks/use-alarms'
+import { type TrailPoint } from '@/hooks/use-server-trails'
+import { type DistanceUnits } from '@/config/app-config'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
 import { hasWebGL2 } from '@/lib/webgl'
@@ -32,7 +31,7 @@ export interface PoiMapActiveRouteWaypoint {
 
 /**
  * The currently active route (ADR 0092's next-waypoint line, reused here):
- * LivePoiMapTile (live-surfaces.tsx) derives this once from useRouteActivation and
+ * LivePoiMapTile (poi-map-tile.tsx) derives this once from useRouteActivation and
  * nextWaypoint, so this tile never has to know route activation exists, only
  * how to draw one. `waypoints` is in traversal order - the order `nextIndex`
  * indexes into - which is not always the route's authored order; see
@@ -538,7 +537,7 @@ export default function PoiMapTileImpl({
   // into the next waypoint drawn again on top in a brighter, thicker stroke
   // so the leg actually being sailed reads at a glance. `activeRoute` is
   // already null whenever no route is active or its waypoints are empty
-  // (the live wrapper's job, not this tile's), so a plain line needs no extra guard
+  // (LivePoiMapTile's job in poi-map-tile.tsx, not this tile's), so a plain line needs no extra guard
   // beyond the usual "a line needs two points" one.
   const routeLineGeoJSON = useMemo(
     () => (activeRoute && activeRoute.waypoints.length >= 2 ? waypointsToLineGeoJSON(activeRoute.waypoints) : null),

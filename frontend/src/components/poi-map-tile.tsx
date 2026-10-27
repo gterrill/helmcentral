@@ -1,6 +1,13 @@
-import { lazy, Suspense } from 'react'
+import { lazy, Suspense, memo, useMemo, type ComponentProps } from 'react'
 
-import type { PoiMapActiveRoute, PoiMapActiveRouteWaypoint, PoiMapTileProps } from '@/components/poi-map-tile-impl'
+import { type PoiMapActiveRoute, type PoiMapActiveRouteWaypoint, type PoiMapTileProps } from '@/components/poi-map-tile-impl'
+import { TRAIL_POLL_MS } from '@/config/app-config'
+import { useAisCollisionAlarms } from '@/hooks/use-alarms'
+import { useNearbyVesselList } from '@/hooks/use-nearby-vessels'
+import { useRouteActivation } from '@/hooks/use-route-activation'
+import { useSelfTrail } from '@/hooks/use-server-trails'
+import { useVesselFields } from '@/hooks/use-vessel-state'
+import { nextWaypoint, traversalOrder } from '@/lib/next-waypoint'
 
 // Same kiosk bundle-split reasoning as assistant-markdown.tsx /
 // help-markdown.tsx: this widget imports maplibre-gl and react-map-gl at
@@ -29,3 +36,34 @@ export function PoiMapTile(props: PoiMapTileProps) {
     </Suspense>
   )
 }
+
+const POI_FIELDS = ['latitude', 'longitude', 'headingTrue', 'gnssCriticalAlert', 'positionLastUpdateAgeS'] as const
+
+/**
+ * The route SignalK is navigating, as the Nearby map draws it: its waypoints in
+ * traversal order and the index of the next one. Null with no active route, or
+ * one with no waypoints. `waypoints` is traversalOrder's array, not the
+ * authored order, because the next index counts in traversal order (a reversed
+ * activation makes the two differ; see next-waypoint.ts).
+ */
+function useActiveRouteLayer() {
+  const { status } = useRouteActivation()
+  return useMemo(() => {
+    if (status.state !== 'active') return null
+    const waypoint = nextWaypoint(status)
+    const traversal = traversalOrder(status)
+    if (!waypoint || !traversal) return null
+    return { name: status.route.name.trim() !== '' ? status.route.name : 'Active route', waypoints: traversal, nextIndex: waypoint.index }
+  }, [status])
+}
+
+/** The Nearby map tile: own ship from vessel state, the AIS contacts, the collision colours, the active route, and the boat's trail while it is on screen. */
+export const LivePoiMapTile = memo(function LivePoiMapTile(props: Omit<ComponentProps<typeof PoiMapTile>,
+  'aisCollisionAlarms' | 'selfTrail' | 'nearbyVessels' | 'activeRoute' | (typeof POI_FIELDS)[number]>) {
+  const ownShip = useVesselFields(POI_FIELDS)
+  const activeRoute = useActiveRouteLayer()
+  const nearbyVessels = useNearbyVesselList()
+  const aisCollisionAlarms = useAisCollisionAlarms()
+  const selfTrail = useSelfTrail(TRAIL_POLL_MS)
+  return <PoiMapTile {...props} {...ownShip} activeRoute={activeRoute} nearbyVessels={nearbyVessels} aisCollisionAlarms={aisCollisionAlarms} selfTrail={selfTrail} />
+})

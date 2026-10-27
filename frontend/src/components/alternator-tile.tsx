@@ -2,6 +2,8 @@ import { Zap } from 'lucide-react'
 import { memo } from 'react'
 
 import { Tile } from '@/components/ui/tile'
+import { useElectricalFields } from '@/hooks/use-electrical-state'
+import { useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 
 interface AlternatorData {
   currentA: number | null
@@ -110,4 +112,18 @@ export const AlternatorTile = memo(function AlternatorTile({ port, starboard, en
       )}
     </Tile>
   )
+})
+
+const selectEnginesRunning = (state: VesselStateValue) => state.enginesRunning
+const ALTERNATOR_FIELDS = ['alternator0', 'alternator1'] as const
+
+/**
+ * The alternator tile: the readings from the electrical stream, shown while an
+ * engine runs. Whether one runs is null until vessel state says, and the tile
+ * then claims neither.
+ */
+export const LiveAlternatorTile = memo(function LiveAlternatorTile() {
+  const enginesRunning = useVesselStateSelector(selectEnginesRunning)
+  const { alternator0, alternator1 } = useElectricalFields(ALTERNATOR_FIELDS)
+  return <AlternatorTile port={alternator0} starboard={alternator1} enginesRunning={enginesRunning} />
 })

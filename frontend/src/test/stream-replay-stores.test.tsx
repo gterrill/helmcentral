@@ -33,7 +33,7 @@ afterEach(() => {
 describe('a store reader that mounts after the seed', () => {
   it('shows the seeded alarm list with no new event', async () => {
     const { useVesselStateSelector } = await import('@/hooks/use-vessel-state')
-    const { LiveAlarmsDrawer } = await import('@/components/live-surfaces')
+    const { LiveAlarmsDrawer } = await import('@/components/live-drawers')
     // Something else opens the connection first, as on the boat.
     renderHook(() => useVesselStateSelector((s) => s.latitude))
     expect(stream.connections).toBe(1)

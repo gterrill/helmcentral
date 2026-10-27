@@ -82,18 +82,9 @@ const LIVE_VESSEL_STATE = {
   wind_side_true: 'starboard', wind_speed_apparent_kts: 5.09287128, wind_speed_true_kts: 5.09287128,
 }
 
-// ── render-count spies, each wrapping the real tile so its real memo() is
-// still what decides whether the spy body runs. ────────────────────────────
-const routeTileRenderSpy = vi.fn()
-vi.mock('@/components/route-tile', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/components/route-tile')>()
-  const Spy = memo(function RouteTileRenderSpy(props: ComponentProps<typeof actual.RouteTile>) {
-    routeTileRenderSpy()
-    return <actual.RouteTile {...props} />
-  })
-  return { ...actual, RouteTile: Spy }
-})
-
+// ── render-count spies. A tile's wrapper lives in the tile's own file, so a
+// tile is counted by the Tile it draws (a memo() that bails draws nothing) and
+// the banner by a memo() wrapped round the real AlarmBanner. ────────────────
 const tileTitleSpy = vi.fn()
 vi.mock('@/components/ui/tile', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/ui/tile')>()
@@ -295,7 +286,7 @@ describe('App tile memoization (item D)', () => {
   it('does not re-render the shell, or a memoized tile, on a gauge-values tick', async () => {
     await mountApp()
     const gridRenders = gridRenderSpy.mock.calls.length
-    const routeRenders = routeTileRenderSpy.mock.calls.length
+    const routeRenders = rendersOf('Route')
     const gaugeARenders = rendersOf('Gauge A')
     expect(gridRenders).toBeGreaterThan(0)
     expect(routeRenders).toBeGreaterThan(0)
@@ -308,7 +299,7 @@ describe('App tile memoization (item D)', () => {
     // The shell holds no gauge values, so it did not render, and nor did the
     // grid it renders or the route tile below it.
     expect(gridRenderSpy.mock.calls.length).toBe(gridRenders)
-    expect(routeTileRenderSpy.mock.calls.length).toBe(routeRenders)
+    expect(rendersOf('Route')).toBe(routeRenders)
   })
 
   it('re-renders gauge A, and not gauge B, when only a changes', async () => {
@@ -468,7 +459,7 @@ describe('App vessel-state tiles (ADR 0215 phase 3)', () => {
     await mountWithFix()
     const wind = rendersOf('Wind')
     const position = rendersOf('Position')
-    const route = routeTileRenderSpy.mock.calls.length
+    const route = rendersOf('Route')
     const grid = gridRenderSpy.mock.calls.length
 
     emitVesselState({ ...LIVE_VESSEL_STATE, datetime: '2026-10-27T01:58:20Z', depth_last_update_age_s: 3.6, position_last_update_age_s: 0.4, wind_last_update_age_s: 0.3 })
@@ -476,7 +467,7 @@ describe('App vessel-state tiles (ADR 0215 phase 3)', () => {
 
     expect(rendersOf('Wind')).toBe(wind)
     expect(rendersOf('Position')).toBe(position)
-    expect(routeTileRenderSpy.mock.calls.length).toBe(route)
+    expect(rendersOf('Route')).toBe(route)
     expect(gridRenderSpy.mock.calls.length).toBe(grid)
   })
 
@@ -554,14 +545,14 @@ describe('App anchor watch (ADR 0215 phase 4)', () => {
     await mountApp()
     landWatch(SET_WATCH)
     const anchor = rendersOf('Anchor Watch')
-    const route = routeTileRenderSpy.mock.calls.length
+    const route = rendersOf('Route')
     const grid = gridRenderSpy.mock.calls.length
 
     landWatch({ ...SET_WATCH, radius_meters: 35 })
     landWatch({ ...SET_WATCH, radius_meters: 35, rode_deployed_m: 45 })
 
     expect(rendersOf('Anchor Watch')).toBeGreaterThan(anchor)
-    expect(routeTileRenderSpy.mock.calls.length).toBe(route)
+    expect(rendersOf('Route')).toBe(route)
     expect(gridRenderSpy.mock.calls.length).toBe(grid)
   })
 
