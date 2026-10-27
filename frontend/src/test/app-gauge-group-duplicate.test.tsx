@@ -76,6 +76,8 @@ vi.mock('@/hooks/use-weather-today', () => ({
 }))
 
 vi.mock('@/hooks/use-weather-forecast', () => ({
+  useForecastSunTimes: () => ({ sunriseTime: null, sunsetTime: null }),
+  useForecastSun: () => ({ sunriseTime: null, sunsetTime: null, moonPhase: null }),
   useWeatherForecast: () => ({ forecast: [], loading: false, error: null, provider: null, refetch: vi.fn() }),
 }))
 
@@ -111,6 +113,7 @@ vi.mock('@/hooks/use-route-activation', () => {
 })
 
 vi.mock('@/hooks/use-forecast-warnings', () => ({
+  useHasActiveWindBulletin: () => false,
   useForecastWarnings: () => ({ activeWarning: null }),
   findActiveWindBulletin: () => null,
 }))

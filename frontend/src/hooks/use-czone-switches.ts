@@ -40,6 +40,7 @@ export function useCZoneSwitches(refreshInterval: number, enabled = true) {
     path: '/api/czone/switches',
     enabled,
     refetchInterval: refreshInterval * 1000,
+    structuralSharing: true,
     select: (raw: CZoneSwitchesResponse) =>
       (Array.isArray(raw.switches) ? raw.switches : [])
         .filter(

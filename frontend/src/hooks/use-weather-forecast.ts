@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
-import { useApiQuery } from '@/lib/api-query';
+import { useApiQuery, useApiQuerySelector } from '@/lib/api-query';
+import { sameShallow } from '@/lib/telemetry-store';
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 import type { NowcastPoint } from '@/lib/nowcast';
@@ -397,6 +398,7 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600, options: Forec
     ...forecastQuery('/api/weather-forecast', options.place),
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
+    structuralSharing: true,
   });
 
   // A payload of the wrong shape is reported like a failed request, so the
@@ -415,18 +417,76 @@ export function useWeatherForecast(refreshIntervalSeconds = 3600, options: Forec
     if (failure) console.error('Error fetching weather forecast:', failure);
   }, [failure]);
 
-  const { forecast, hourlyToday, nextHour, summary, provider, isCached, updatedAt, ttlSeconds } = mapped.value;
-  return {
-    forecast,
-    hourlyToday,
-    nextHour,
-    summary,
-    provider,
-    loading: query.isLoading,
-    error: failure ? failure.message || 'Failed to load forecast data' : null,
-    isCached,
-    updatedAt,
-    ttlSeconds,
-    refetch: query.refetch,
-  };
+  // One object while the forecast, the error and the loading state hold, so a
+  // reader that memoizes on it (the Forecast page's props) holds too.
+  const loading = query.isLoading;
+  const refetch = query.refetch;
+  return useMemo(() => {
+    const { forecast, hourlyToday, nextHour, summary, provider, isCached, updatedAt, ttlSeconds } = mapped.value;
+    return {
+      forecast,
+      hourlyToday,
+      nextHour,
+      summary,
+      provider,
+      loading,
+      error: failure ? failure.message || 'Failed to load forecast data' : null,
+      isCached,
+      updatedAt,
+      ttlSeconds,
+      refetch,
+    };
+  }, [mapped, failure, loading, refetch]);
+}
+
+export interface ForecastSun {
+  sunriseTime: string | null;
+  sunsetTime: string | null;
+  moonPhase: string | null;
+}
+
+const NO_SUN: ForecastSun = { sunriseTime: null, sunsetTime: null, moonPhase: null };
+
+// Today's sun and moon from the boat's forecast. A failed poll keeps the last
+// good forecast beside its error, and so do these times, as useWeatherForecast
+// does for the tiles. A forecast the client cannot read gives none of them:
+// the selector is called again with no data and the error.
+function selectSun(data: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi | undefined): ForecastSun {
+  if (data === undefined) return NO_SUN;
+  const day = mapForecastPayload(data).forecast[0];
+  if (!day) return NO_SUN;
+  return { sunriseTime: day.sunriseTime, sunsetTime: day.sunsetTime, moonPhase: day.moonPhase };
+}
+
+/**
+ * Today's sunrise, sunset and moon phase from the boat's forecast, for a reader
+ * that shows nothing else of it (ADR 0215): the Clock tile, and through
+ * useForecastSunTimes the shell's Auto theme. It shares useWeatherForecast's
+ * query and re-renders only when one of the three changes.
+ */
+export function useForecastSun(refreshIntervalSeconds = 3600): ForecastSun {
+  return useApiQuerySelector(
+    { ...forecastQuery('/api/weather-forecast', undefined), refetchInterval: refreshIntervalSeconds * 1000 },
+    selectSun,
+    sameShallow,
+  );
+}
+
+export interface ForecastSunTimes {
+  sunriseTime: string | null;
+  sunsetTime: string | null;
+}
+
+function selectSunTimes(data: WeatherForecastDayApi[] | WeatherForecastEnvelopeApi | undefined): ForecastSunTimes {
+  const { sunriseTime, sunsetTime } = selectSun(data);
+  return { sunriseTime, sunsetTime };
+}
+
+/** Today's sunrise and sunset alone: the shell's Auto theme reads these and nothing else. */
+export function useForecastSunTimes(refreshIntervalSeconds = 3600): ForecastSunTimes {
+  return useApiQuerySelector(
+    { ...forecastQuery('/api/weather-forecast', undefined), refetchInterval: refreshIntervalSeconds * 1000 },
+    selectSunTimes,
+    sameShallow,
+  );
 }

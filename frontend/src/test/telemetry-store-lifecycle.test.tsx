@@ -75,16 +75,7 @@ describe('alarms store', () => {
   it('does not tell the Alarms page "All clear" before the first alarms event', async () => {
     const { LiveAlarmsDrawer } = await import('@/components/live-surfaces')
     render(
-      <LiveAlarmsDrawer
-        rules={[]}
-        loading={false}
-        error={null}
-        createRule={vi.fn()}
-        updateRule={vi.fn()}
-        deleteRule={vi.fn()}
-        collisionTuningUrl={null}
-        forecastWarnings={null}
-      />,
+      <LiveAlarmsDrawer />,
     )
     expect(await screen.findByText('Waiting for the alarm list')).toBeInTheDocument()
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()

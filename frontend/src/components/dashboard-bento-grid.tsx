@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useRef, useState } from 'react'
 import GridLayout, { WidthProvider, type LayoutItem } from 'react-grid-layout/legacy'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -160,7 +160,11 @@ export interface DashboardBentoGridProps {
   onRemoveWidget: (id: DashboardWidgetId) => void
   // Only the token-id kinds can be duplicated; builtins are one per page.
   onDuplicateWidget: (id: DashboardWidgetId) => void
-  onLayoutSettle: (next: DashboardLayoutItem[]) => void
+  /**
+   * Saves a drag, resize or keyboard move. Returns the write, if there is one,
+   * so the grid can go back to the stored layout once its answer has landed.
+   */
+  onLayoutSettle: (next: DashboardLayoutItem[]) => void | Promise<unknown>
   /**
    * The id of this page's hero widget (`DashboardPage.hero`), or undefined/empty
    * for none. The hero renders in its own full-width row above the grid; its
@@ -179,7 +183,13 @@ export interface DashboardBentoGridProps {
   rowMargin?: number
 }
 
-export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle, heroId, rowMargin = GRID_MARGIN }: DashboardBentoGridProps) {
+/**
+ * Memoized (ADR 0215 phase 7): the shell hands it the widget list, which the
+ * page list keeps while it is unchanged, flags, and stable handlers, so a
+ * shell render that changes none of them does not reach the grid. When the
+ * grid does render, each tile's WidgetHost is memoized in turn.
+ */
+export const DashboardBentoGrid = memo(function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle, heroId, rowMargin = GRID_MARGIN }: DashboardBentoGridProps) {
   // Below `lg`, render a plain reflowed stack instead of the RGL grid — never both at once.
   // Toggling between them via CSS (rather than this JS media query) would mount both layouts
   // simultaneously, leaving duplicate DOM nodes per widget: wasted render cost for real users,
@@ -216,15 +226,27 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
     [widgets, neededPx, editing, isDesktopGrid, rowMargin, heroId],
   )
 
+  // The geometry a drag or resize left, held from the moment it is dropped
+  // until the write's answer lands. react-grid-layout keeps the dropped
+  // geometry itself and goes back to its `layout` prop only when that prop
+  // changes by value. Showing the drop here first, and the stored layout once
+  // the answer is in, means the prop always changes when the two differ: a
+  // tile the server put somewhere else (or left where it was) moves there,
+  // even when the page list hands back the very same widgets.
+  const [dropped, setDropped] = useState<{ revision: number; boxes: ReadonlyMap<string, LayoutItem> } | null>(null)
+  const revisionRef = useRef(0)
+
   const rglLayout = useMemo<LayoutItem[]>(
     () => widgets.map((w) => {
       const box = isClusterWidgetId(w.id) ? liftClusterBox({ x: w.x, w: w.w }) : { x: w.x, w: w.w }
+      const drop = dropped?.boxes.get(w.id)
       return {
         i: w.id,
         x: box.x,
         y: w.y,
         w: box.w,
         h: rows[w.id] ?? w.h,
+        ...(drop ? { x: drop.x, y: drop.y, w: drop.w, h: drop.h } : {}),
         // The hero's grid slot is frozen (ADR 0072): react-grid-layout's own
         // compaction skips `static` items entirely (they neither move nor get
         // moved), so every other tile keeps exactly the position it was
@@ -247,11 +269,17 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
                 : WIDGET_CONSTRAINTS[w.id as BuiltinWidgetId]),
       }
     }),
-    [widgets, heroId, rows],
+    [widgets, heroId, rows, dropped],
   )
 
   const commit = useCallback((layout: readonly LayoutItem[]) => {
-    onLayoutSettle(mergeLayoutGeometry(widgets, layout))
+    const revision = (revisionRef.current += 1)
+    const boxes = new Map(layout.map((item) => [item.i, item]))
+    setDropped({ revision, boxes })
+    // Whatever the answer, success or refusal, the stored layout is what the
+    // grid shows next. Only the latest drop clears itself.
+    const clear = () => setDropped((current) => (current?.revision === revision ? null : current))
+    void Promise.resolve(onLayoutSettle(mergeLayoutGeometry(widgets, layout))).then(clear, clear)
   }, [widgets, onLayoutSettle])
 
   // Keyboard parity for the drag handle: arrow keys move exactly one grid
@@ -471,4 +499,4 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       </ReactGridLayout>
     </div>
   )
-}
+})

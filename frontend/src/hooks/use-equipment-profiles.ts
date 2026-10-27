@@ -20,6 +20,7 @@ export function useEquipmentProfiles(enabled: boolean) {
     queryKey: [path],
     path,
     enabled,
+    structuralSharing: true,
     select: (raw: ProfileList | null) => ({
       profiles: Array.isArray(raw?.profiles) ? (raw.profiles as EngineProfile[]) : NONE,
       problems: Array.isArray(raw?.problems) ? (raw.problems as EngineProfileProblem[]) : NO_PROBLEMS,

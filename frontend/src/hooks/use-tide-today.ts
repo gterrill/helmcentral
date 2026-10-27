@@ -70,6 +70,7 @@ export function useTideToday(refreshIntervalSeconds = 600) {
     path: '/api/tide-today',
     refetchInterval: refreshIntervalSeconds * 1000,
     select: normalise,
+    structuralSharing: true,
   });
 
   // The tile keeps showing the last reading, so a failure is only logged.

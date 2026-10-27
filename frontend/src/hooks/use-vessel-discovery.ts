@@ -14,6 +14,7 @@ export function useVesselDiscovery(enabled = true) {
     queryKey: ['/api/vessel/discovery'],
     path: '/api/vessel/discovery',
     enabled,
+    structuralSharing: true,
     select: (body: VesselDiscoveryResponse) => ({
       connected: body.connected === true,
       groups: (Array.isArray(body.groups) ? body.groups : []).map((g) => ({

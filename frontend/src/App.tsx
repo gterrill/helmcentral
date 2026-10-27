@@ -23,32 +23,13 @@ import { toast } from 'sonner'
 import {
   LiveAlarmBanner,
   LiveAlarmsDrawer,
-  LiveAlternatorTile,
   LiveAnchorWatchDrawer,
-  LiveAnchorWatchTile,
-  LiveAutopilotTile,
-  LiveBatteryPowerTile,
-  LiveClockTile,
-  LiveCurrentConditionsTile,
-  LiveDepthTideTile,
   LiveDisplayShell,
   LiveForecastPage,
-  LiveGeneratorTile,
-  LiveNearbyVesselsTile,
-  LivePoiMapTile,
-  LivePositionTile,
   LiveRadarDrawer,
-  LiveRadarTargetsTile,
-  LiveRouteTile,
   LiveSignalKDiscoveryPrompt,
-  LiveSolarTile,
-  LiveTanksTile,
-  LiveWindTile,
 } from '@/components/live-surfaces'
-import { HotWaterTile } from '@/components/hot-water-tile'
-import { TodayNowTile } from '@/components/today-now-tile'
-import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
-import { MarineHeader } from '@/components/marine-header'
+import { WidgetHost, type WidgetHostActions } from '@/components/widget-host'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { SetupLine } from '@/components/setup-line'
 import { requestSetupFocus } from '@/lib/setup-status'
@@ -81,7 +62,6 @@ const HelpSheet = lazy(() => import('@/components/help-sheet').then((mod) => ({ 
 // since the render path that names it is dead code once DEV is false.
 const PatternsGallery = lazy(() => import('@/components/patterns/gallery').then((mod) => ({ default: mod.PatternsGallery })))
 import { NavigationGuardDialog } from '@/components/navigation-guard-dialog'
-import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { CLUSTER_DEFAULT_SIZE, DashboardBentoGrid, raiseGaugeHeight } from '@/components/dashboard-bento-grid'
 import { LayoutModeToggle } from '@/components/layout-mode-toggle'
 import { LayoutToolbar } from '@/components/layout-toolbar'
@@ -96,39 +76,25 @@ import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
 import { LoadError, RefreshFailedOverlay } from '@/components/patterns/refresh-failed-note'
 import { NO_DISPLAY_OPTIONS, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
-import { nextWaypoint, traversalOrder } from '@/lib/next-waypoint'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
 import { WallDisplaysPanel } from '@/components/wall-displays-panel'
 import { DisplayEditorPanel } from '@/components/display-editor-panel'
 import type { DisplayPatch } from '@/components/page-display-select'
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
-import { useRouteActivation } from '@/hooks/use-route-activation'
 import { useRetainElectricalState } from '@/hooks/use-electrical-state'
 import { useRetainSolarState } from '@/hooks/use-solar-state'
 import { useRetainNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useRetainRadarTargets } from '@/hooks/use-radar-targets'
-import { setAnchorHere, updatePlanningDepth, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
+import { updatePlanningDepth, useAnchorWatchSelector, type AnchorWatchFields } from '@/hooks/use-anchor-watch'
 import { ConnectionBanner } from '@/components/connection-banner'
 import { useRetainTanksState } from '@/hooks/use-tanks-state'
-import { useTideToday } from '@/hooks/use-tide-today'
-import { tideHeightFtOrNull } from '@/lib/rode-plan'
-import { findActiveWindBulletin, useForecastWarnings } from '@/hooks/use-forecast-warnings'
-import { getVesselStateSnapshot, useRetainVesselState, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+import { useHasActiveWindBulletin } from '@/hooks/use-forecast-warnings'
+import { useRetainVesselState, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
 import { useRetainAlarms } from '@/hooks/use-alarms'
-import { useAlarmRules } from '@/hooks/use-alarm-rules'
-import { useOvernightProjection } from '@/hooks/use-overnight-projection'
-import { useSettingsForm } from '@/hooks/use-settings-form'
-import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
-import { useWeatherForecast } from '@/hooks/use-weather-forecast'
-import { buildForecastDrawerProps } from '@/lib/forecast-drawer-props'
-import { useWaveForecast } from '@/hooks/use-wave-forecast'
-import { useUpperAir } from '@/hooks/use-upper-air'
-import { useWeatherToday } from '@/hooks/use-weather-today'
+import { useForecastSunTimes } from '@/hooks/use-weather-forecast'
 import { useAuth } from '@/hooks/use-auth'
 import { useRetainAutopilot } from '@/hooks/use-autopilot'
-import { useCZoneSwitches } from '@/hooks/use-czone-switches'
-import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useDarkMode } from '@/hooks/use-dark-mode'
 import { useVesselTimeZone } from '@/hooks/use-vessel-identity'
 import { FORECAST_REFRESH_SECONDS, fallbackAssistantVoiceConfig } from '@/config/app-config'
@@ -167,14 +133,12 @@ import {
   type PoiMapWidgetConfig,
 } from '@/lib/dashboard-widgets'
 import { POI_CATEGORY_IDS } from '@/lib/poi'
-import { EmbedTile } from '@/components/embed-tile'
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
 import { PoiMapConfigDialog } from '@/components/poi-map-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
-import { GaugeTile } from '@/components/gauge-tile'
 import { GaugeGroupConfigDialog } from '@/components/gauge-group-config-dialog'
 import { EngineClusterConfigDialog } from '@/components/engine-cluster-config-dialog'
-import { EngineClusterHost, GaugeGroupHost, LampStripHost } from '@/components/equipment-tile-hosts'
+import { LampStripHost } from '@/components/equipment-tile-hosts'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
 import { useRetainGaugeValues } from '@/hooks/use-gauge-values'
@@ -304,6 +268,8 @@ const SWIPE_PAGE_TOAST_MS = 1500
  * app-location.ts's isCanonicalAppPath check (fed the same value as
  * `firstPageId`) and every call site here agree on exactly one page.
  */
+const NO_WIDGETS: DashboardLayoutItem[] = []
+
 function firstDashboardPageId(pages: readonly DashboardPage[]): string | null {
   return pages.find((p) => !p.display_id)?.id ?? null
 }
@@ -510,14 +476,14 @@ function AppShell() {
   // only: the browser offers no wake lock elsewhere.
   const homeScreenDashboard = runningFromHomeScreen() && !fullscreen.supported && activePanel === null
   useScreenWakeLock((fullscreen.isFullscreen || homeScreenDashboard) && !isDisplay && servedOverHttps())
-  // The forecast hook is called here, ahead of the theme, because Auto mode
-  // reads the same sunrise and sunset the Clock tile shows.
-  const weatherFeed = useWeatherForecast(FORECAST_REFRESH_SECONDS)
-  const { forecast, nextHour: forecastNextHour } = weatherFeed
+  // Auto mode reads the same sunrise and sunset the Clock tile shows. The
+  // shell selects those two times and nothing else of the forecast (ADR 0215),
+  // so a forecast poll re-renders it only when one of them moves.
+  const { sunriseTime, sunsetTime } = useForecastSunTimes(FORECAST_REFRESH_SECONDS)
   const vesselTimeZone = useVesselTimeZone()
   const [storedIsDarkTheme, toggleDarkMode, themeState] = useDarkMode({
-    sunriseTime: forecast[0]?.sunriseTime ?? null,
-    sunsetTime: forecast[0]?.sunsetTime ?? null,
+    sunriseTime,
+    sunsetTime,
     timeZone: vesselTimeZone,
   })
   // The wall display always renders dark (operator decision, ADR 0089
@@ -562,7 +528,6 @@ function AppShell() {
     const id = window.setTimeout(() => { prefetchNoteEditor() }, NOTE_EDITOR_PREFETCH_IDLE_TIMEOUT_MS)
     return () => window.clearTimeout(id)
   }, [isDisplay])
-  const { status: routeActivationStatus } = useRouteActivation()
   const { pages, loading: pagesLoading, error: pagesError, refetch: refetchPages, createPage, updatePage, deletePage, reorderPages, reordering } = useDashboardPages()
   // ADR 0110: the wall display records themselves. Fetched here (not inside
   // the wall branch further down) because the ordinary shell needs the list
@@ -628,7 +593,20 @@ function AppShell() {
   // which widgets the active page (or the wall's current page, which drives
   // activePageId exactly the same way — see useDisplayRotation below) actually
   // holds. Otherwise identical to its previous declaration further down.
-  const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
+  // Keyed on the widget list, not the page: the page list keeps a page's
+  // widgets while they are unchanged (use-dashboard-pages.ts), so a rename or a
+  // skin change leaves this, and so the grid, alone.
+  const activeWidgets = activePage?.widgets
+  const effectiveWidgets = useMemo(() => activeWidgets ?? NO_WIDGETS, [activeWidgets])
+  // The latest page and widget list, for the handlers the grid and the tiles
+  // hold (latest-ref idiom): each reads them when it runs, so it can stay one
+  // stable function for the life of the shell and never re-render the grid.
+  // Assigned as the shell renders, not in an effect, so no handler can run
+  // between a commit and a later effect and write through the page before.
+  const activePageRef = useRef(activePage)
+  activePageRef.current = activePage
+  const effectiveWidgetsRef = useRef(effectiveWidgets)
+  effectiveWidgetsRef.current = effectiveWidgets
   // namingPageId only means anything for the page it was set on, while
   // layout mode can actually show that page's name field — stale otherwise.
   // PageTitleField's own onDone (an Enter/blur that saved, or an Escape)
@@ -1005,48 +983,12 @@ function AppShell() {
   useRetainTanksState()
   useRetainNearbyVessels()
   useRetainRadarTargets()
-  // The Alarms page's rule list. The battery tile reads the same query for its
-  // SoC bands, so a rule saved there recolours the bar without a reload.
-  const {
-    rules: alarmRules,
-    loading: alarmRulesLoading,
-    error: alarmRulesError,
-    createRule: createAlarmRule,
-    updateRule: updateAlarmRule,
-    deleteRule: deleteAlarmRule,
-  } = useAlarmRules()
-  const { projection: overnight } = useOvernightProjection()
-  // Only for deciding whether to offer SignalK discovery. Gated on `loading`
-  // below so an unconfigured-looking empty address during the initial fetch
-  // can't trigger the prompt spuriously.
-  const { settings: currentSettings } = useSettingsForm()
-  // The AIS Target Prioritizer plugin's webapp lives on the SignalK server
-  // itself, so the collision alarm card's tuning link is only as good as
-  // the configured address (ADR 0090); null when unconfigured, which
-  // means no link renders.
-  const collisionTuningHref = useMemo(
-    () => buildCollisionTuningUrl(currentSettings.signalk?.address, currentSettings.signalk?.port),
-    [currentSettings.signalk?.address, currentSettings.signalk?.port],
-  )
-  // Both poll on the forecast cadence, not the /api/vessel-state SSE stream's
-  // own cadence: the backend caches weather for 900s and tide predictions
-  // move on the order of hours, so FORECAST_REFRESH_SECONDS (600s) is
-  // already well inside both — see config/app-config.ts.
-  const { weather } = useWeatherToday(FORECAST_REFRESH_SECONDS)
-  const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
-  const warningsFeed = useForecastWarnings(FORECAST_REFRESH_SECONDS)
-  const { activeWarning: activeForecastWarning } = warningsFeed
-  const wavesFeed = useWaveForecast(FORECAST_REFRESH_SECONDS)
-  const {
-    days: waveForecastDays,
-    seaTemperatureF: waveSeaTemperatureF,
-    loading: waveForecastLoading,
-    error: waveForecastError,
-  } = wavesFeed
-  // Upper air keeps its own refresh cadence: the global models behind it run
-  // four times a day, so polling it on the surface-forecast interval would
-  // re-fetch the same numbers.
-  const upperAirFeed = useUpperAir()
+  // The polled feeds (ADR 0215 phase 6): the forecasts, the tide, the active
+  // route, the depth trend, the CZone switches, the overnight projection and
+  // the alarm rules are each read by the tile or page that shows them, through
+  // the shared query cache. The shell reads one thing of them itself: whether
+  // a wind bulletin is in force, for the sidebar's Forecast dot.
+  const hasActiveWindBulletin = useHasActiveWindBulletin(FORECAST_REFRESH_SECONDS)
   // The anchor-watch record's own poll cadence is chosen inside the hook
   // itself (config/app-config.ts's ANCHOR_WATCH_ACTIVE/IDLE_REFRESH_SECONDS),
   // since it depends on whether a watch is currently active — not on this
@@ -1098,38 +1040,8 @@ function AppShell() {
   // transition below — without that, a pre-drop what-if would reappear once
   // the anchor comes up and is raised again.
   const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tideHeightFt: number | null } | null>(null)
-  // The Nearby map's route layer: the route SignalK is navigating, combined
-  // once here so the poi-map tile never has to know route activation exists -
-  // it only draws whatever waypoints and next-index it's handed. null
-  // whenever no route is active or it has no waypoints. `waypoints` is
-  // traversalOrder's array, not necessarily the authored order, since
-  // nextIndex is an index into that traversal order (see next-waypoint.ts's
-  // own comment on why a reversed activation makes the two differ).
-  const activeRoute = useMemo(() => {
-    if (routeActivationStatus.state !== 'active') return null
-    const waypoint = nextWaypoint(routeActivationStatus)
-    const traversal = traversalOrder(routeActivationStatus)
-    if (!waypoint || !traversal) return null
-    return { name: routeActivationStatus.route.name.trim() !== '' ? routeActivationStatus.route.name : 'Active route', waypoints: traversal, nextIndex: waypoint.index }
-  }, [routeActivationStatus])
-  const depthTrend = useDepthTrend('3h', 60)
-  // Item B: only the czone-switches widget reads this; poll it only while
-  // the active page (or the wall's current page) actually has one placed.
-  const activePageHasCZoneWidget = effectiveWidgets.some((w) => w.id === 'czone-switches')
-  const { switches: czoneSwitches, loading: czoneLoading, pending: czonePending, error: czoneError, toggleSwitch: toggleCZone } = useCZoneSwitches(5, activePageHasCZoneWidget)
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
 
-  // Read at the click, not subscribed: the shell never renders on a fix.
-  const handleDropAnchorHere = useCallback(() => {
-    const { latitude, longitude, depth } = getVesselStateSnapshot()
-    if (latitude === null || longitude === null) return
-    void setAnchorHere(latitude, longitude, {
-      planningDepthM: depth,
-      planningTideHeightFt: tideHeightFtOrNull(tide),
-    })
-  }, [tide])
-
-  const hasActiveWindBulletin = Boolean(findActiveWindBulletin(activeForecastWarning))
   const hasActiveAnchorWatch = anchorWatch.active
 
   // Drives activePageId exactly the way a sidebar click or a deep link
@@ -1190,15 +1102,21 @@ function AppShell() {
   // separate top-level Secrets entry to hide independently.
   const visiblePanelNavItems = canAdmin ? PANEL_NAV_ITEMS : PANEL_NAV_ITEMS.filter((item) => item.id !== 'settings')
 
+  // The grid's three handlers read the page at the call, so they never change
+  // and a page write does not re-render the grid through them.
+  // Returns the write, so the grid knows when the server's answer has landed
+  // and can go back to the stored layout (dashboard-bento-grid.tsx).
   const handleLayoutSettle = useCallback((next: DashboardLayoutItem[]) => {
-    if (!activePage) return
-    void updatePage(activePage.id, { widgets: next })
-  }, [activePage, updatePage])
+    const page = activePageRef.current
+    if (!page) return Promise.resolve()
+    return updatePage(page.id, { widgets: next })
+  }, [updatePage])
 
   const handleRemoveWidget = useCallback((id: DashboardWidgetId) => {
-    if (!activePage) return
-    void updatePage(activePage.id, { widgets: effectiveWidgets.filter((w) => w.id !== id) })
-  }, [activePage, effectiveWidgets, updatePage])
+    const page = activePageRef.current
+    if (!page) return
+    void updatePage(page.id, { widgets: effectiveWidgetsRef.current.filter((w) => w.id !== id) })
+  }, [updatePage])
 
   // Each built-in widget's footprint comes from DASHBOARD_WIDGET_DEFAULT_SIZE
   // (ADR 0107) instead of one hard-coded 4x6 for all of them — that was what
@@ -1379,15 +1297,17 @@ function AppShell() {
    * Persisted first: unlike a fresh draft, a duplicate is already valid.
    */
   const handleDuplicateWidget = useCallback((id: DashboardWidgetId) => {
-    if (!activePage) return
-    const source = effectiveWidgets.find((w) => w.id === id)
+    const page = activePageRef.current
+    const widgets = effectiveWidgetsRef.current
+    if (!page) return
+    const source = widgets.find((w) => w.id === id)
     if (!source) return
-    const copy = duplicateWidget(source, effectiveWidgets)
+    const copy = duplicateWidget(source, widgets)
     if (!copy) return
 
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    const maxY = widgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
     const placed = { ...copy, x: 0, y: maxY }
-    void updatePage(activePage.id, { widgets: [...effectiveWidgets, placed] })
+    void updatePage(page.id, { widgets: [...widgets, placed] })
 
     if (isClusterWidgetId(placed.id)) setClusterDraft(placed)
     else if (isLampStripWidgetId(placed.id)) setLampStripDraft(placed)
@@ -1395,7 +1315,7 @@ function AppShell() {
     else if (isGaugeWidgetId(placed.id)) setGaugeDraft(placed)
     else if (isEmbedWidgetId(placed.id)) setEmbedDraft(placed)
     else if (isPoiMapWidgetId(placed.id)) setPoiMapDraft(placed)
-  }, [activePage, effectiveWidgets, updatePage])
+  }, [updatePage])
 
   const handleSaveEmbed = useCallback((id: DashboardWidgetId, embed: EmbedWidgetConfig) => {
     if (!activePage) return
@@ -1434,37 +1354,20 @@ function AppShell() {
     }
   }, [activePage, effectiveWidgets, poiMapDraft, updatePage])
 
-  // Item D: the shell still re-renders on every autopilot, electrical, solar,
-  // tanks, nearby-vessel, radar and anchor-watch tick, and on each polled
-  // forecast (gauge values, alarms and vessel state no longer: ADR 0215 moved
-  // them into the tiles; vessel state still re-renders it when the navigation
-  // state changes). renderWidget below runs fresh on every one of those
-  // renders (it is deliberately not memoized itself —
-  // see its own comment), so an inline `onConfigure={() => setXDraft(widget)}`
-  // handed a memoized tile (EngineClusterTile, LampStripTile, GaugeGroupTile,
-  // GaugeTile) a new function identity every second even when nothing about
-  // that widget changed, defeating the tile's own React.memo. One stable
-  // handler per widget id, cached here and reused across renders, fixes that
-  // without changing any tile's onConfigure signature. effectiveWidgetsRef
-  // mirrors the current widget list (latest-ref idiom) so a handler built once
-  // still resolves to the current widget when it's eventually called.
-  const effectiveWidgetsRef = useRef(effectiveWidgets)
-  useEffect(() => { effectiveWidgetsRef.current = effectiveWidgets }, [effectiveWidgets])
-  // globalThis.Map, the builtin collection - not a lucide-react icon.
-  const configureHandlersRef = useRef(new globalThis.Map<DashboardWidgetId, () => void>())
-  const configureHandlerFor = useCallback((id: DashboardWidgetId, apply: (widget: DashboardLayoutItem) => void): () => void => {
-    let handler = configureHandlersRef.current.get(id)
-    if (!handler) {
-      handler = () => {
-        const widget = effectiveWidgetsRef.current.find((w) => w.id === id)
-        if (widget) apply(widget)
-      }
-      configureHandlersRef.current.set(id, handler)
-    }
-    return handler
+  // One handler for every widget's gear: WidgetHost binds the id. It reads the
+  // widget at the click, so it never needs rebuilding as the page changes.
+  const openWidgetConfig = useCallback((id: DashboardWidgetId) => {
+    const widget = effectiveWidgetsRef.current.find((w) => w.id === id)
+    if (!widget) return
+    if (isClusterWidgetId(id)) setClusterDraft(widget)
+    else if (isLampStripWidgetId(id)) setLampStripDraft(widget)
+    else if (isGaugeGroupWidgetId(id)) setGaugeGroupDraft(widget)
+    else if (isGaugeWidgetId(id)) setGaugeDraft(widget)
+    else if (isEmbedWidgetId(id)) setEmbedDraft(widget)
+    else if (isPoiMapWidgetId(id)) setPoiMapDraft(widget)
   }, [])
 
-  // Same reasoning as configureHandlerFor above, for the tiles/banner whose
+  // Same reasoning as openWidgetConfig above, for the tiles/banner whose
   // onOpen just navigates — these take no widget-specific argument, so a
   // single stable callback per destination covers every call site.
   const openForecastPanel = useCallback(() => navigate.toPanel('forecast'), [navigate])
@@ -1472,191 +1375,36 @@ function AppShell() {
   const openAnchorWatchPanel = useCallback(() => navigate.toPanel('anchor-watch'), [navigate])
   const openRibbonDialog = useCallback(() => setRibbonDialogOpen(true), [])
 
-  // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
-  // (essentially the entire polled-data surface of the component —
-  // electrical, tanks, nearby-vessels, anchor watch, forecasts, etc.), several of
-  // which change every few seconds independently. Memoizing would just
-  // recreate the reference on nearly every render anyway, so it buys no real
-  // stabilization — left as a plain function per the task's own guidance for
-  // this case.
-  const renderWidget = (widget: DashboardLayoutItem): ReactNode => {
-    const { id } = widget
-    if (isClusterWidgetId(id)) {
-      if (!widget.cluster) return null
-      return (
-        <EngineClusterHost
-          config={widget.cluster}
-          ctx={equipmentContext}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setClusterDraft)}
-        />
-      )
-    }
-
-    if (isLampStripWidgetId(id)) {
-      if (!widget.lamps) return null
-      return (
-        <LampStripHost
-          config={widget.lamps}
-          ctx={equipmentContext}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setLampStripDraft)}
-          onOpenAlarms={openAlarmsPanel}
-        />
-      )
-    }
-
-    if (isGaugeGroupWidgetId(id)) {
-      if (!widget.gaugeGroup) return null
-      return (
-        <GaugeGroupHost
-          config={widget.gaugeGroup}
-          ctx={equipmentContext}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setGaugeGroupDraft)}
-        />
-      )
-    }
-
-    if (isGaugeWidgetId(id)) {
-      if (!widget.gauge) return null
-      return (
-        <GaugeTile
-          config={widget.gauge}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setGaugeDraft)}
-        />
-      )
-    }
-
-    if (isEmbedWidgetId(id)) {
-      return (
-        <EmbedTile
-          config={widget.embed}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setEmbedDraft)}
-          isDarkTheme={isDarkTheme}
-        />
-      )
-    }
-
-    if (isPoiMapWidgetId(id)) {
-      if (!widget.poiMap) return null
-      return (
-        <LivePoiMapTile
-          config={widget.poiMap}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setPoiMapDraft)}
-          activeRoute={activeRoute}
-          isDarkTheme={isDarkTheme}
-          forceDark={activePage?.skin === 'instrument'}
-          distanceUnits={uiConfig.distanceUnits}
-          interactive={!isDisplay}
-        />
-      )
-    }
-
-    switch (id) {
-      case 'vessel':
-        return <MarineHeader />
-      case 'wind':
-        return (
-          <LiveWindTile />
-        )
-      case 'depth-tide':
-        return (
-          <LiveDepthTideTile
-            isImperialDistance={isImperialDistance}
-            depthTrend={depthTrend}
-            tide={tide}
-            onOpen={layoutEditing ? undefined : openForecastPanel}
-          />
-        )
-      case 'position':
-        return (
-          <LivePositionTile />
-        )
-      case 'today-now':
-        return (
-          <TodayNowTile
-            weather={weather}
-            highTempF={forecast[0]?.high ?? -1}
-            lowTempF={forecast[0]?.low ?? -1}
-            seaTemperatureF={waveSeaTemperatureF ?? null}
-            distanceUnits={uiConfig.distanceUnits}
-            onOpen={layoutEditing ? undefined : openForecastPanel}
-          />
-        )
-      case 'clock':
-        return (
-          <LiveClockTile
-            routeStatus={routeActivationStatus}
-            sunriseTime={forecast[0]?.sunriseTime ?? null}
-            sunsetTime={forecast[0]?.sunsetTime ?? null}
-            moonPhase={forecast[0]?.moonPhase ?? null}
-          />
-        )
-      case 'current-conditions':
-        return (
-          <LiveCurrentConditionsTile
-            weather={weather}
-            forecast={forecast}
-            nextHour={forecastNextHour}
-            distanceUnits={uiConfig.distanceUnits}
-          />
-        )
-      case 'forecast-conditions':
-        return (
-          <ForecastConditionsTile
-            forecast={forecast}
-            waveForecastDays={waveForecastDays}
-            waveLoading={waveForecastLoading}
-            waveError={waveForecastError}
-            units={uiConfig.distanceUnits}
-          />
-        )
-      case 'anchor-watch':
-        return (
-          <LiveAnchorWatchTile
-            isImperial={isImperialDistance}
-            isDarkTheme={isDarkTheme}
-            showImageryLayer={showAnchorImagery}
-            onImageryToggle={setShowAnchorImagery}
-            showRadarEcho={showRadarEcho}
-            onRadarEchoToggle={setShowRadarEcho}
-            onFullscreen={openAnchorWatchPanel}
-            tide={tide}
-            interactive={!isDisplay}
-          />
-        )
-      case 'tanks':
-        return <LiveTanksTile />
-      case 'route':
-        return (
-          <LiveRouteTile status={routeActivationStatus} />
-        )
-      case 'nearby-vessels':
-        return <LiveNearbyVesselsTile distanceUnits={uiConfig.distanceUnits} />
-      case 'radar-targets':
-        return <LiveRadarTargetsTile distanceUnits={uiConfig.distanceUnits} />
-      case 'battery-power':
-        return <LiveBatteryPowerTile overnight={overnight} onOpenRoles={openHouseBankRoles} />
-      case 'solar':
-        return <LiveSolarTile />
-      case 'alternator':
-        return <LiveAlternatorTile />
-      case 'generator':
-        return <LiveGeneratorTile onOpenRoles={openGeneratorRoles} readOnly={!canWrite} />
-      case 'czone-switches':
-        return <CZoneSwitchesTile switches={czoneSwitches} loading={czoneLoading} pending={czonePending} onToggle={toggleCZone} error={czoneError} readOnly={!canWrite} />
-      case 'autopilot':
-        return <LiveAutopilotTile readOnly={!canWrite} />
-      case 'hot-water':
-        return <HotWaterTile />
-      default:
-        return null
-    }
-  }
+  // One WidgetHost per widget (ADR 0215 phase 7), memoized, with the shell's
+  // flags and one stable actions object. renderWidget changes only when one of
+  // those flags does, so the memoized grid skips a shell render that changes
+  // nothing about the tiles: opening the Mate sheet, a toast, a rename.
+  const widgetActions = useMemo<WidgetHostActions>(() => ({
+    onConfigure: openWidgetConfig,
+    onOpenAlarms: openAlarmsPanel,
+    onOpenForecast: openForecastPanel,
+    onOpenAnchorWatch: openAnchorWatchPanel,
+    onOpenHouseBankRoles: openHouseBankRoles,
+    onOpenGeneratorRoles: openGeneratorRoles,
+    onAnchorImageryToggle: setShowAnchorImagery,
+    onRadarEchoToggle: setShowRadarEcho,
+  }), [openWidgetConfig, openAlarmsPanel, openForecastPanel, openAnchorWatchPanel, openHouseBankRoles, openGeneratorRoles])
+  const forceDarkMaps = activePage?.skin === 'instrument'
+  const renderWidget = useCallback((widget: DashboardLayoutItem): ReactNode => (
+    <WidgetHost
+      widget={widget}
+      editing={layoutEditing}
+      interactive={!isDisplay}
+      isDarkTheme={isDarkTheme}
+      forceDark={forceDarkMaps}
+      distanceUnits={uiConfig.distanceUnits}
+      readOnly={!canWrite}
+      ctx={equipmentContext}
+      showAnchorImagery={showAnchorImagery}
+      showRadarEcho={showRadarEcho}
+      actions={widgetActions}
+    />
+  ), [layoutEditing, isDisplay, isDarkTheme, forceDarkMaps, uiConfig.distanceUnits, canWrite, equipmentContext, showAnchorImagery, showRadarEcho, widgetActions])
 
   // The Add Tile menu's multi-instance entries (ADR 0107): each opens the
   // same config dialog/draft flow it always has — App.tsx still owns every
@@ -1973,27 +1721,12 @@ function AppShell() {
         return (
           <LiveForecastPage
             canWrite={canWrite}
-            boat={buildForecastDrawerProps({
-              weather: weatherFeed,
-              waves: wavesFeed,
-              upperAir: upperAirFeed,
-              warnings: warningsFeed,
-              unit: uiConfig.distanceUnits as 'imperial' | 'metric',
-            })}
+            unit={uiConfig.distanceUnits as 'imperial' | 'metric'}
           />
         )
       case 'alarms':
         return (
-          <LiveAlarmsDrawer
-            rules={alarmRules}
-            loading={alarmRulesLoading}
-            error={alarmRulesError}
-            createRule={createAlarmRule}
-            updateRule={updateAlarmRule}
-            deleteRule={deleteAlarmRule}
-            collisionTuningUrl={collisionTuningHref}
-            forecastWarnings={activeForecastWarning}
-          />
+          <LiveAlarmsDrawer />
         )
       case 'radar':
         return <LiveRadarDrawer />
@@ -2130,8 +1863,6 @@ function AppShell() {
               showRadarEcho={showRadarEcho}
               onRadarEchoToggle={setShowRadarEcho}
               isImperial={isImperialDistance}
-              onDropAnchor={handleDropAnchorHere}
-              tide={tide}
               anchorConfig={anchorConfig}
               windBandId={windBandId}
               onWindBandChange={setWindBandId}
@@ -2710,10 +2441,7 @@ function AppShell() {
                 tooltip can be anchored to a trigger inside any of them and
                 must remain readable. */}
             <div className={cn('relative z-55', isFullscreenDashboard && 'pr-12')} data-testid="alarm-banner-stack">
-              <LiveAlarmBanner
-                onOpen={openAlarmsPanel}
-                forecastWarnings={activeForecastWarning}
-              />
+              <LiveAlarmBanner onOpen={openAlarmsPanel} />
             </div>
 
             <div ref={swipeContainerRef} data-testid="dashboard-swipe-surface" className="min-h-0 flex-1">

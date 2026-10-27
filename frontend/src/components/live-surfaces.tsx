@@ -7,8 +7,10 @@ import { AutopilotTile } from '@/components/autopilot-tile'
 import { BatteryPowerTile } from '@/components/battery-power-tile'
 import { ClockTile } from '@/components/clock-tile'
 import { CurrentConditionsTile } from '@/components/current-conditions-tile'
+import { CZoneSwitchesTile } from '@/components/czone-switches-tile'
 import { DepthTideTile } from '@/components/depth-tide-tile'
 import { DisplayShell } from '@/components/display-shell'
+import { ForecastConditionsTile } from '@/components/forecast-conditions-tile'
 import { GeneratorTile, projectSocAtFinish } from '@/components/generator-tile'
 import { NearbyVesselsTile } from '@/components/nearby-vessels-tile'
 import { PoiMapTile } from '@/components/poi-map-tile'
@@ -18,31 +20,52 @@ import { RouteTile } from '@/components/route-tile'
 import { SignalKDiscoveryPrompt } from '@/components/signalk-discovery-prompt'
 import { SolarTile } from '@/components/solar-tile'
 import { TanksTile } from '@/components/tanks-tile'
+import { TodayNowTile } from '@/components/today-now-tile'
 import { WindTile } from '@/components/wind-tile'
-import { PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
-import { useAlarmRuleList } from '@/hooks/use-alarm-rules'
+import { FORECAST_REFRESH_SECONDS, PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
+import { useAlarmRuleList, useAlarmRules } from '@/hooks/use-alarm-rules'
 import { acknowledgeAlarm, sameShownAlarm, samePillAlarm, silenceAlarm, useAisCollisionAlarms, useAlarmListComparedOn, useKnownAlarmList } from '@/hooks/use-alarms'
 import { useAnchorPlacemarks } from '@/hooks/use-anchor-placemarks'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
-import { anchorWatchAt, useAnchorWatch, type AnchorWatchRecord, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
+import { anchorWatchAt, setAnchorHere, useAnchorWatch, type AnchorWatchRecord, type AnchorWatchResult } from '@/hooks/use-anchor-watch'
 import { useAutopilot } from '@/hooks/use-autopilot'
+import { useCZoneSwitches } from '@/hooks/use-czone-switches'
+import { useDepthTrend } from '@/hooks/use-depth-trend'
 import { useElectricalFields, useElectricalSelector, type ElectricalStateValue } from '@/hooks/use-electrical-state'
+import { useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useNearbyVesselList, useNearbyVessels } from '@/hooks/use-nearby-vessels'
+import { useOvernightProjection } from '@/hooks/use-overnight-projection'
 import { usePlaceName } from '@/hooks/use-place-name'
 import { useRadarTargets } from '@/hooks/use-radar-targets'
 import { useServerTrails } from '@/hooks/use-server-trails'
 import { useSocBands } from '@/hooks/use-soc-bands'
 import { useSolarState } from '@/hooks/use-solar-state'
 import { useTanksState } from '@/hooks/use-tanks-state'
-import type { ActiveRouteStatus } from '@/hooks/use-route-activation'
-import { useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
-import { computeClockTripEta } from '@/lib/next-waypoint'
+import { useRouteActivation, type ActiveRouteStatus } from '@/hooks/use-route-activation'
+import { useTideToday } from '@/hooks/use-tide-today'
+import { useUpperAir } from '@/hooks/use-upper-air'
+import { getVesselStateSnapshot, useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+import { useWaveForecast } from '@/hooks/use-wave-forecast'
+import { useForecastSun, useWeatherForecast } from '@/hooks/use-weather-forecast'
+import { useWeatherToday } from '@/hooks/use-weather-today'
+import { useApiQuerySelector } from '@/lib/api-query'
+import { collisionTuningUrl as buildCollisionTuningUrl } from '@/lib/collision-tuning'
+import { buildForecastDrawerProps } from '@/lib/forecast-drawer-props'
+import { computeClockTripEta, nextWaypoint, traversalOrder } from '@/lib/next-waypoint'
+import { tideHeightFtOrNull } from '@/lib/rode-plan'
 
 /*
  * The surfaces AppShell renders, wired to the live stores they show (ADR
  * 0215). Each wrapper reads its own slice and hands it to the presentational
  * component as the prop it always took, so those components and their tests
  * stay prop-driven and only these wrappers know a store exists.
+ *
+ * The polled feeds are read here too (phase 6): the forecasts, the tide, the
+ * route SignalK is navigating, the depth trend, the CZone switches, the
+ * overnight projection and the alarm rules. Each query is shared through the
+ * cache, so two tiles on one page make one request, and each hook keeps its
+ * data while a poll answers with equal data (`structuralSharing`), so an
+ * unchanged poll re-renders nothing.
  *
  * Each wrapper is memo()'d: its remaining props come from the shell, which
  * passes stable values and callbacks, so a shell render stops here and only a
@@ -59,15 +82,45 @@ type AlarmsDrawerProps = ComponentProps<typeof AlarmsDrawer>
 type AnchorWatchDrawerProps = ComponentProps<typeof AnchorWatchDrawer>
 
 /** The banner over every page: the whole active list, compared on what the banner says of each alarm. */
-export const LiveAlarmBanner = memo(function LiveAlarmBanner(props: Omit<ComponentProps<typeof AlarmBanner>, 'alarms' | 'onAcknowledge'>) {
+export const LiveAlarmBanner = memo(function LiveAlarmBanner(props: Omit<ComponentProps<typeof AlarmBanner>, 'alarms' | 'onAcknowledge' | 'forecastWarnings'>) {
   const alarms = useAlarmListComparedOn(sameShownAlarm)
-  return <AlarmBanner {...props} alarms={alarms} onAcknowledge={acknowledgeAlarm} />
+  const { activeWarning } = useForecastWarnings(FORECAST_REFRESH_SECONDS)
+  return <AlarmBanner {...props} alarms={alarms} onAcknowledge={acknowledgeAlarm} forecastWarnings={activeWarning} />
 })
 
-/** The Alarms page: the whole active list, or null until it is known, and the two actions. */
-export const LiveAlarmsDrawer = memo(function LiveAlarmsDrawer(props: Omit<AlarmsDrawerProps, 'alarms' | 'onAcknowledge' | 'onSilence'>) {
+const selectCollisionTuningUrl = (settings: { signalk?: { address?: string; port?: number } } | undefined) =>
+  buildCollisionTuningUrl(settings?.signalk?.address, settings?.signalk?.port)
+
+/**
+ * The Alarms page: the whole active list, or null until it is known, and the
+ * two actions; the rules it edits; the forecast warnings its forecast cards
+ * link to; and the AIS Target Prioritizer link, which lives on the SignalK
+ * server and so is only as good as the configured address (ADR 0090). With no
+ * address, or settings that could not be read, there is no link.
+ */
+export const LiveAlarmsDrawer = memo(function LiveAlarmsDrawer(props: Omit<AlarmsDrawerProps,
+  'alarms' | 'onAcknowledge' | 'onSilence' | 'rules' | 'loading' | 'error' | 'createRule' | 'updateRule' | 'deleteRule'
+  | 'collisionTuningUrl' | 'forecastWarnings'>) {
   const alarms = useKnownAlarmList()
-  return <AlarmsDrawer {...props} alarms={alarms} onAcknowledge={acknowledgeAlarm} onSilence={silenceAlarm} />
+  const { rules, loading, error, createRule, updateRule, deleteRule } = useAlarmRules()
+  const { activeWarning } = useForecastWarnings(FORECAST_REFRESH_SECONDS)
+  const collisionTuningUrl = useApiQuerySelector({ queryKey: ['/api/settings'], path: '/api/settings' }, selectCollisionTuningUrl)
+  return (
+    <AlarmsDrawer
+      {...props}
+      alarms={alarms}
+      onAcknowledge={acknowledgeAlarm}
+      onSilence={silenceAlarm}
+      rules={rules}
+      loading={loading}
+      error={error}
+      createRule={createRule}
+      updateRule={updateRule}
+      deleteRule={deleteRule}
+      collisionTuningUrl={collisionTuningUrl}
+      forecastWarnings={activeWarning}
+    />
+  )
 })
 
 /**
@@ -86,6 +139,43 @@ export const LiveNearbyVesselsTile = memo(function LiveNearbyVesselsTile(props: 
   const nearby = useNearbyVessels()
   const aisCollisionAlarms = useAisCollisionAlarms()
   return <NearbyVesselsTile {...props} {...nearby} aisCollisionAlarms={aisCollisionAlarms} />
+})
+
+// ── polled feeds (ADR 0215 phase 6) ─────────────────────────────────────────
+
+/** Today & Now: the weather now, today's high and low from the forecast, and the sea temperature from the wave forecast. */
+export const LiveTodayNowTile = memo(function LiveTodayNowTile(props: Pick<ComponentProps<typeof TodayNowTile>, 'distanceUnits' | 'onOpen'>) {
+  const { weather } = useWeatherToday(FORECAST_REFRESH_SECONDS)
+  const { forecast } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  const { seaTemperatureF } = useWaveForecast(FORECAST_REFRESH_SECONDS)
+  return (
+    <TodayNowTile
+      {...props}
+      weather={weather}
+      highTempF={forecast[0]?.high ?? -1}
+      lowTempF={forecast[0]?.low ?? -1}
+      seaTemperatureF={seaTemperatureF ?? null}
+    />
+  )
+})
+
+/** Forecast Conditions: the coming days from the weather and wave forecasts. */
+export const LiveForecastConditionsTile = memo(function LiveForecastConditionsTile(props: Pick<ComponentProps<typeof ForecastConditionsTile>, 'units'>) {
+  const { forecast } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  const { days, loading, error } = useWaveForecast(FORECAST_REFRESH_SECONDS)
+  return <ForecastConditionsTile {...props} forecast={forecast} waveForecastDays={days} waveLoading={loading} waveError={error} />
+})
+
+/** How often the CZone tile polls its switches, in seconds. */
+const CZONE_POLL_SECONDS = 5
+
+/**
+ * The CZone tile: the switches, polled only while the tile is on screen. A
+ * failed poll keeps the last list beside the error rather than blanking it.
+ */
+export const LiveCZoneSwitchesTile = memo(function LiveCZoneSwitchesTile(props: Pick<ComponentProps<typeof CZoneSwitchesTile>, 'readOnly'>) {
+  const { switches, loading, pending, error, toggleSwitch } = useCZoneSwitches(CZONE_POLL_SECONDS)
+  return <CZoneSwitchesTile {...props} switches={switches} loading={loading} pending={pending} error={error} onToggle={toggleSwitch} />
 })
 
 // ── vessel state (ADR 0215 phase 3) ─────────────────────────────────────────
@@ -109,10 +199,12 @@ export const LiveWindTile = memo(function LiveWindTile() {
 
 const DEPTH_FIELDS = ['depth', 'depthLastUpdateAgeS', 'navigationState'] as const
 
-/** The Depth & Tide tile's depth and navigation state; the tide and trend come from the shell. */
-export const LiveDepthTideTile = memo(function LiveDepthTideTile(props: Omit<ComponentProps<typeof DepthTideTile>, 'depth' | 'lastUpdateAgeS' | 'navigationState'>) {
+/** The Depth & Tide tile: depth and navigation state from vessel state, the tide and the three-hour depth trend from their polls. */
+export const LiveDepthTideTile = memo(function LiveDepthTideTile(props: Omit<ComponentProps<typeof DepthTideTile>, 'depth' | 'lastUpdateAgeS' | 'navigationState' | 'tide' | 'depthTrend'>) {
   const { depth, depthLastUpdateAgeS, navigationState } = useVesselFields(DEPTH_FIELDS)
-  return <DepthTideTile {...props} depth={depth} lastUpdateAgeS={depthLastUpdateAgeS} navigationState={navigationState} />
+  const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
+  const depthTrend = useDepthTrend('3h', 60)
+  return <DepthTideTile {...props} depth={depth} lastUpdateAgeS={depthLastUpdateAgeS} navigationState={navigationState} tide={tide} depthTrend={depthTrend} />
 })
 
 const POSITION_FIELDS = [
@@ -144,7 +236,8 @@ function hasTrip(status: ActiveRouteStatus): boolean {
 }
 
 /**
- * The clock tile: the place name, and the trip ETA (ADR 0092, ADR 0125).
+ * The clock tile: today's sun and moon from the forecast, the place name, and
+ * the trip ETA (ADR 0092, ADR 0125).
  * computeClockTripEta reports to the final waypoint of the route SignalK is
  * navigating, or to the Course API's bare next point when a chartplotter
  * go-to has no route behind it.
@@ -153,7 +246,9 @@ function hasTrip(status: ActiveRouteStatus): boolean {
  * tile reads just whether there is a fix, which is all the place name asks,
  * so a clock on a boat at anchor does not redraw on every fix.
  */
-export const LiveClockTile = memo(function LiveClockTile({ routeStatus, ...props }: Omit<ComponentProps<typeof ClockTile>, 'placeName' | 'tripEta'> & { routeStatus: ActiveRouteStatus }) {
+export const LiveClockTile = memo(function LiveClockTile() {
+  const { status: routeStatus } = useRouteActivation()
+  const { sunriseTime, sunsetTime, moonPhase } = useForecastSun(FORECAST_REFRESH_SECONDS)
   const trip = hasTrip(routeStatus)
   const select = useCallback((state: VesselStateValue): ClockInputs => ({
     hasFix: state.latitude !== null && state.longitude !== null,
@@ -167,17 +262,22 @@ export const LiveClockTile = memo(function LiveClockTile({ routeStatus, ...props
     () => computeClockTripEta(routeStatus, latitude, longitude, speedOverGroundKts, new Date()),
     [routeStatus, latitude, longitude, speedOverGroundKts],
   )
-  return <ClockTile {...props} placeName={placeName} tripEta={tripEta} />
+  return <ClockTile sunriseTime={sunriseTime} sunsetTime={sunsetTime} moonPhase={moonPhase} placeName={placeName} tripEta={tripEta} />
 })
 
 const CONDITIONS_FIELDS = ['depth', 'depthLastUpdateAgeS', 'windSpeedTrueKts', 'windDirectionTrueDeg', 'maxGustTrueKts'] as const
 
-/** Current Conditions: depth and true wind from vessel state; the forecast comes from the shell. */
-export const LiveCurrentConditionsTile = memo(function LiveCurrentConditionsTile(props: Omit<ComponentProps<typeof CurrentConditionsTile>, 'depth' | 'depthLastUpdateAgeS' | 'windSpeedTrueKts' | 'windDirectionTrueDeg' | 'maxTrueWindKts1h'>) {
+/** Current Conditions: depth and true wind from vessel state, the weather and the forecast from their polls. */
+export const LiveCurrentConditionsTile = memo(function LiveCurrentConditionsTile(props: Pick<ComponentProps<typeof CurrentConditionsTile>, 'distanceUnits'>) {
   const { depth, depthLastUpdateAgeS, windSpeedTrueKts, windDirectionTrueDeg, maxGustTrueKts } = useVesselFields(CONDITIONS_FIELDS)
+  const { weather } = useWeatherToday(FORECAST_REFRESH_SECONDS)
+  const { forecast, nextHour } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
   return (
     <CurrentConditionsTile
       {...props}
+      weather={weather}
+      forecast={forecast}
+      nextHour={nextHour}
       depth={depth}
       depthLastUpdateAgeS={depthLastUpdateAgeS}
       windSpeedTrueKts={windSpeedTrueKts}
@@ -189,8 +289,9 @@ export const LiveCurrentConditionsTile = memo(function LiveCurrentConditionsTile
 
 const ROUTE_FIELDS = ['latitude', 'longitude', 'speedOverGroundKts'] as const
 
-/** The Route tile: the route status from the shell, the fix and speed from vessel state. */
-export const LiveRouteTile = memo(function LiveRouteTile({ status }: { status: ActiveRouteStatus }) {
+/** The Route tile: what SignalK is navigating, from its poll, and the fix and speed from vessel state. */
+export const LiveRouteTile = memo(function LiveRouteTile() {
+  const { status } = useRouteActivation()
   const { latitude, longitude, speedOverGroundKts } = useVesselFields(ROUTE_FIELDS)
   return <RouteTile status={status} latitude={latitude} longitude={longitude} speedKts={speedOverGroundKts ?? 0} />
 })
@@ -284,15 +385,16 @@ const BATTERY_FIELDS = [
 ] as const
 
 /**
- * Battery & Power: the electrical stream, and the SoC bands from the alarm
- * rules on the house bank's path. The rules come from the same query the Alarms
+ * Battery & Power: the electrical stream, the overnight projection from its
+ * poll, and the SoC bands from the alarm rules on the house bank's path. The rules come from the same query the Alarms
  * page edits, so a rule saved there recolours the bar without a reload.
  */
-export const LiveBatteryPowerTile = memo(function LiveBatteryPowerTile(props: Pick<ComponentProps<typeof BatteryPowerTile>, 'overnight' | 'onOpenRoles'>) {
+export const LiveBatteryPowerTile = memo(function LiveBatteryPowerTile(props: Pick<ComponentProps<typeof BatteryPowerTile>, 'onOpenRoles'>) {
   const { socPath, ...electrical } = useElectricalFields(BATTERY_FIELDS)
   const rules = useAlarmRuleList()
   const socBands = useSocBands(rules, socPath)
-  return <BatteryPowerTile {...props} {...electrical} socBands={socBands} />
+  const { projection: overnight } = useOvernightProjection()
+  return <BatteryPowerTile {...props} {...electrical} socBands={socBands} overnight={overnight} />
 })
 
 /** The Solar tile: the whole solar stream. */
@@ -350,17 +452,18 @@ function usePins(active: boolean) {
 
 /**
  * The anchor watch tile. It reads the watch record, applies the live fix to it
- * (distance, bearing, drag state), and adds depth, current, heading, the
- * collision colours, the pins, the trails and the AIS and radar contacts. The
- * trails poll only while the tile is on screen.
+ * (distance, bearing, drag state), and adds depth, current, heading, the tide
+ * a drop records, the collision colours, the pins, the trails and the AIS and
+ * radar contacts. The trails poll only while the tile is on screen.
  */
 export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit<ComponentProps<typeof AnchorWatchTile>,
   'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'
   | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
-  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource'>) {
+  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource' | 'tide'>) {
   const watch = useAnchorWatch()
   const contacts = useMapContacts()
   const v = useVesselFields(ANCHOR_FIELDS)
+  const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
   const aisCollisionAlarms = useAisCollisionAlarms()
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
   const { getAnchorTrail } = useAnchorTrail(TRAIL_POLL_MS)
@@ -371,6 +474,7 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
       {...props}
       {...pins}
       {...contacts}
+      tide={tide}
       watch={atFix}
       vesselTrail={getAnchorTrail}
       aisTrails={getAisTrails}
@@ -389,14 +493,33 @@ export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit
 
 const POI_FIELDS = ['latitude', 'longitude', 'headingTrue', 'gnssCriticalAlert', 'positionLastUpdateAgeS'] as const
 
-/** The Nearby map tile: own ship from vessel state, the AIS contacts, the collision colours, and the boat's trail while it is on screen. */
+/**
+ * The route SignalK is navigating, as the Nearby map draws it: its waypoints in
+ * traversal order and the index of the next one. Null with no active route, or
+ * one with no waypoints. `waypoints` is traversalOrder's array, not the
+ * authored order, because the next index counts in traversal order (a reversed
+ * activation makes the two differ; see next-waypoint.ts).
+ */
+function useActiveRouteLayer() {
+  const { status } = useRouteActivation()
+  return useMemo(() => {
+    if (status.state !== 'active') return null
+    const waypoint = nextWaypoint(status)
+    const traversal = traversalOrder(status)
+    if (!waypoint || !traversal) return null
+    return { name: status.route.name.trim() !== '' ? status.route.name : 'Active route', waypoints: traversal, nextIndex: waypoint.index }
+  }, [status])
+}
+
+/** The Nearby map tile: own ship from vessel state, the AIS contacts, the collision colours, the active route, and the boat's trail while it is on screen. */
 export const LivePoiMapTile = memo(function LivePoiMapTile(props: Omit<ComponentProps<typeof PoiMapTile>,
-  'aisCollisionAlarms' | 'getSelfTrail' | 'nearbyVessels' | (typeof POI_FIELDS)[number]>) {
+  'aisCollisionAlarms' | 'getSelfTrail' | 'nearbyVessels' | 'activeRoute' | (typeof POI_FIELDS)[number]>) {
   const ownShip = useVesselFields(POI_FIELDS)
+  const activeRoute = useActiveRouteLayer()
   const nearbyVessels = useNearbyVesselList()
   const aisCollisionAlarms = useAisCollisionAlarms()
   const { getSelfTrail } = useServerTrails(TRAIL_POLL_MS)
-  return <PoiMapTile {...props} {...ownShip} nearbyVessels={nearbyVessels} aisCollisionAlarms={aisCollisionAlarms} getSelfTrail={getSelfTrail} />
+  return <PoiMapTile {...props} {...ownShip} activeRoute={activeRoute} nearbyVessels={nearbyVessels} aisCollisionAlarms={aisCollisionAlarms} getSelfTrail={getSelfTrail} />
 })
 
 const ANCHOR_DRAWER_FIELDS = [
@@ -431,10 +554,21 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   | 'placeName' | 'anchorSetAt' | 'anchorStateKnown' | 'error' | 'onRadiusChange' | 'adjustAnchor' | 'onClearAnchor'
   | 'rodeDeployedM' | 'seaState' | 'seabedType' | 'onUpdateRodeAndConditions'
   | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
-  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource'>) {
+  | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource' | 'tide' | 'onDropAnchor'>) {
   const watch = useAnchorWatch()
   const contacts = useMapContacts()
   const v = useVesselFields(ANCHOR_DRAWER_FIELDS)
+  const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
+  // Read at the tap, not subscribed: the fix and depth come from the store as
+  // the operator drops, and the tide from the reading this page shows.
+  const onDropAnchor = useCallback(() => {
+    const { latitude, longitude, depth } = getVesselStateSnapshot()
+    if (latitude === null || longitude === null) return
+    void setAnchorHere(latitude, longitude, {
+      planningDepthM: depth,
+      planningTideHeightFt: tideHeightFtOrNull(tide),
+    })
+  }, [tide])
   const aisCollisionAlarms = useAisCollisionAlarms()
   const atFix = useWatchAtFix(watch, v.latitude, v.longitude, v.gnssCriticalAlert)
   const { getAnchorTrail } = useAnchorTrail(TRAIL_POLL_MS)
@@ -446,6 +580,8 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
       {...props}
       {...pins}
       {...contacts}
+      tide={tide}
+      onDropAnchor={onDropAnchor}
       anchorLat={watch.anchorLat}
       anchorLon={watch.anchorLon}
       radiusMeters={watch.radiusMeters}
@@ -498,11 +634,25 @@ export const LiveRadarDrawer = memo(function LiveRadarDrawer() {
 
 const selectLongitude = (state: VesselStateValue) => state.longitude
 
-/** The Forecast page, which compares the boat's clock with a planned stay's. */
-export function LiveForecastPage(props: Omit<ComponentProps<typeof ForecastPage>, 'boatLongitude'>) {
+/**
+ * The Forecast page: the boat's own forecast feeds, and the longitude it
+ * compares a planned stay's clock with. The page fetches a planned stay's feeds
+ * itself.
+ */
+export const LiveForecastPage = memo(function LiveForecastPage({ unit, ...props }: Omit<ComponentProps<typeof ForecastPage>, 'boatLongitude' | 'boat'> & { unit: 'imperial' | 'metric' }) {
   const boatLongitude = useVesselStateSelector(selectLongitude)
-  return <ForecastPage {...props} boatLongitude={boatLongitude} />
-}
+  const weather = useWeatherForecast(FORECAST_REFRESH_SECONDS)
+  const waves = useWaveForecast(FORECAST_REFRESH_SECONDS)
+  // Upper air keeps its own cadence: the global models behind it run four
+  // times a day, so the surface-forecast interval would fetch the same numbers.
+  const upperAir = useUpperAir()
+  const warnings = useForecastWarnings(FORECAST_REFRESH_SECONDS)
+  const boat = useMemo(
+    () => buildForecastDrawerProps({ weather, waves, upperAir, warnings, unit }),
+    [weather, waves, upperAir, warnings, unit],
+  )
+  return <ForecastPage {...props} boat={boat} boatLongitude={boatLongitude} />
+})
 
 const selectSource = (state: VesselStateValue) => state.source
 

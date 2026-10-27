@@ -43,6 +43,7 @@ export function useDisplays() {
     queryKey: DISPLAYS_KEY,
     path: '/api/displays',
     select: (raw: DisplaysListResponse) => (Array.isArray(raw.displays) ? raw.displays : []),
+    structuralSharing: true,
   })
   const displays = data ?? EMPTY_DISPLAYS
 

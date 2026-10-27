@@ -5,6 +5,7 @@
  * same object.
  */
 import { act, render } from '@testing-library/react'
+import { Suspense } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { AnchorWatchResult } from '@/hooks/use-anchor-watch'
@@ -75,7 +76,15 @@ vi.mock('@/components/generator-tile', async (importOriginal) => ({
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-import { LiveAnchorWatchTile, LiveClockTile, LiveDisplayShell, LiveGeneratorTile, LivePoiMapTile } from '@/components/live-surfaces'
+const forecastPageProps: Array<{ boat: unknown; boatLongitude: number | null }> = []
+vi.mock('@/components/forecast-page', () => ({
+  ForecastPage: (props: { boat: unknown; boatLongitude: number | null }) => {
+    forecastPageProps.push(props)
+    return null
+  },
+}))
+
+import { LiveAnchorWatchTile, LiveClockTile, LiveDisplayShell, LiveForecastPage, LiveGeneratorTile, LivePoiMapTile } from '@/components/live-surfaces'
 
 function emitFix(latitude: number, longitude: number) {
   act(() => {
@@ -100,7 +109,6 @@ function renderTile() {
       showRadarEcho={false}
       onRadarEchoToggle={vi.fn()}
       onFullscreen={vi.fn()}
-      tide={null}
       interactive
     />,
   )
@@ -144,7 +152,6 @@ describe('trail polling (ADR 0215 phase 4)', () => {
         <LivePoiMapTile
           config={{ title: 'Nearby', categories: [], radiusM: 1000, showTrail: true } as never}
           editing={false}
-          activeRoute={null}
           isDarkTheme={false}
           distanceUnits="metric"
           interactive
@@ -173,10 +180,16 @@ describe('trail polling (ADR 0215 phase 4)', () => {
 })
 
 describe('LiveClockTile', () => {
-  const clockProps = { sunriseTime: null, sunsetTime: null, moonPhase: null }
+  /** A GET /api/routes/active answer, landed as its poll would land it. */
+  function landRoute(answer: Record<string, unknown>) {
+    act(() => {
+      setQueryData(['/api/routes/active'], answer)
+    })
+  }
 
   it('does not redraw on a moving fix while there is no trip to time', () => {
-    render(<LiveClockTile {...clockProps} routeStatus={{ state: 'inactive', destination: null }} />)
+    landRoute({ active: false })
+    render(<LiveClockTile />)
     emitFix(-20.2747, 149.0737)
     const renders = clockRenders.mock.calls.length
 
@@ -187,8 +200,8 @@ describe('LiveClockTile', () => {
   })
 
   it('follows the fix while a go-to destination is set', () => {
-    const destination = { name: 'Airlie', lat: -20.27, lon: 148.72 }
-    render(<LiveClockTile {...clockProps} routeStatus={{ state: 'inactive', destination }} />)
+    landRoute({ active: false, destination: { name: 'Airlie', lat: -20.27, lon: 148.72 } })
+    render(<LiveClockTile />)
     emitFix(-20.2747, 149.0737)
     const renders = clockRenders.mock.calls.length
 
@@ -242,5 +255,25 @@ describe('LiveGeneratorTile', () => {
 
     emit('electrical-state', electrical(72))
     expect(generatorProps[generatorProps.length - 1].batterySocPercent).toBe(72)
+  })
+})
+
+describe('LiveForecastPage', () => {
+  // The page compares the boat's clock with a planned stay's by longitude, so
+  // a fix re-renders it. The boat's forecast did not change, so the page must
+  // be handed the same forecast props.
+  it('hands the page the same forecast props when only the longitude moves', async () => {
+    forecastPageProps.length = 0
+    render(<Suspense fallback={null}><LiveForecastPage canWrite unit="metric" /></Suspense>)
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
+    emitFix(-20.2747, 149.0737)
+    const before = forecastPageProps.length
+    const boat = forecastPageProps[before - 1].boat
+
+    emitFix(-20.2747, 149.0738)
+
+    expect(forecastPageProps.length).toBeGreaterThan(before)
+    expect(forecastPageProps[forecastPageProps.length - 1].boatLongitude).toBe(149.0738)
+    expect(forecastPageProps[forecastPageProps.length - 1].boat).toBe(boat)
   })
 })

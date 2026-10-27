@@ -17,6 +17,7 @@ export function useOvernightProjection(refreshIntervalSeconds = 900): {
     path: '/api/electrical/overnight',
     refetchInterval: refreshIntervalSeconds * 1000,
     select: parseOvernightProjection,
+    structuralSharing: true,
   })
 
   // A failed refresh drops the projection instead of showing the last one,

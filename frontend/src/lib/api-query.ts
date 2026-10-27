@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { apiBaseUrl } from '@/config/api'
+import { sameJSON } from '@/lib/telemetry-store'
 
 // One request helper and one keyed read cache under the per-resource hooks
 // (ADR 0173). The names (useApiQuery, setQueryData, invalidateQueries,
@@ -197,7 +198,11 @@ function startFetch(entry: Entry, path: string): Promise<void> {
     try {
       const data = await apiRequest<unknown>(path)
       if (entry.requestId !== id) return entry.inflight
-      entry.data = data
+      // An answer equal by value to the data the entry holds keeps that
+      // object, when a reader of the key asked for it (structuralSharing), so
+      // every reader, every selector and getQueryData see no change. Compared
+      // once per answer, here, not once per reader.
+      entry.data = entry.data !== undefined && sharesStructure(entry) && sameJSON(entry.data, data) ? entry.data : data
       entry.error = null
       entry.status = 'success'
     } catch (err) {
@@ -212,6 +217,11 @@ function startFetch(entry: Entry, path: string): Promise<void> {
   entry.inflight = promise
   commit(entry)
   return promise
+}
+
+function sharesStructure(entry: Entry): boolean {
+  for (const sub of entry.subscribers) if (sub.structuralSharing) return true
+  return false
 }
 
 // Resolves when the request settles. Never rejects: a failure lands in the
@@ -254,6 +264,7 @@ function updatePolling(entry: Entry) {
 
 interface Subscription {
   interval: number | undefined
+  structuralSharing: boolean
 }
 
 function subscribeEntry(
@@ -370,6 +381,22 @@ export interface UseApiQueryOptions<T> {
   refetchInterval?: number
   enabled?: boolean
   select?: (raw: never) => T
+  /**
+   * Keep the entry's data object when a request answers with data equal by
+   * value (ADR 0215), so no reader of the key sees a change. One reader asking
+   * is enough: it applies to the entry. Named after TanStack Query's option,
+   * which does more: it also keeps the unchanged parts of changed data. Off
+   * unless asked for, because a reader with an effect on `data` would no
+   * longer see a refetch that changed nothing.
+   */
+  structuralSharing?: boolean
+  /**
+   * Re-render when a request leaves and when it lands, even if the data,
+   * error and status did not change. Off by default: a reader re-renders only
+   * when one of those changes, and `isFetching` is current whenever it
+   * renders for any reason. Pass it only to show a request in flight.
+   */
+  trackFetching?: boolean
 }
 
 export interface UseApiQueryResult<T> {
@@ -389,6 +416,7 @@ function useEntrySubscription(
   path: string,
   refetchInterval: number | undefined,
   enabled: boolean,
+  structuralSharing: boolean,
 ): { hash: string; key: QueryKey; subscribe: (onChange: () => void) => () => void } {
   const hash = hashKey(queryKey)
 
@@ -398,11 +426,12 @@ function useEntrySubscription(
 
   // One subscription record per hook instance; the interval lives on it so a
   // change does not resubscribe.
-  const subRef = useRef<Subscription>({ interval: refetchInterval })
+  const subRef = useRef<Subscription>({ interval: refetchInterval, structuralSharing })
+  subRef.current.structuralSharing = structuralSharing
   const subscribe = useCallback(
     (onChange: () => void) => {
       if (!enabled) return noopSubscribe()
-      subRef.current = { interval: subRef.current.interval }
+      subRef.current = { interval: subRef.current.interval, structuralSharing: subRef.current.structuralSharing }
       return subscribeEntry(key, path, subRef.current, onChange)
     },
     [key, path, enabled],
@@ -415,33 +444,34 @@ function useEntrySubscription(
 
 /**
  * One slice of a query's data, for a reader that should re-render only when
- * that slice changes (ADR 0215). useApiQuery re-renders on every request,
- * because its snapshot carries isFetching; this re-renders only when `select`
- * returns something `isEqual` calls different. It fetches and polls exactly as
+ * that slice changes (ADR 0215). It re-renders only when `select` returns
+ * something `isEqual` calls different. It fetches and polls exactly as
  * useApiQuery does, sharing the same entry.
  *
- * `select` sees the data (undefined until the first answer lands) and the
- * query's error. Like useApiQuery's own select, a body `select` cannot read
- * becomes the error rather than a throw during render: `select` is called
- * again with no data and that error, so the reader shows what it shows for a
- * failed query. Pass a stable `select`.
+ * `select` sees the data (undefined until the first answer lands), the
+ * query's error, and the selection it returned last time (undefined on the
+ * first call), so a reader can hand back the parts that did not change.
+ * Like useApiQuery's own select, a body `select` cannot read becomes the
+ * error rather than a throw during render: `select` is called again with no
+ * data and that error, so the reader shows what it shows for a failed query.
+ * Pass a stable `select`.
  */
 export function useApiQuerySelector<T, S>(
-  { queryKey, path, refetchInterval, enabled = true }: Omit<UseApiQueryOptions<T>, 'select'>,
-  select: (data: T | undefined, error: Error | null) => S,
+  { queryKey, path, refetchInterval, enabled = true, structuralSharing = false }: Omit<UseApiQueryOptions<T>, 'select' | 'trackFetching'>,
+  select: (data: T | undefined, error: Error | null, previous: S | undefined) => S,
   isEqual: (a: S, b: S) => boolean = Object.is,
 ): S {
-  const { hash, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
-  const cache = useRef<{ snapshot: Snapshot; select: (data: T | undefined, error: Error | null) => S; value: S } | null>(null)
+  const { hash, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled, structuralSharing)
+  const cache = useRef<{ snapshot: Snapshot; select: typeof select; value: S } | null>(null)
   const getSelection = useCallback((): S => {
     const snapshot = enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY
     const prev = cache.current
     if (prev && prev.snapshot.data === snapshot.data && prev.snapshot.error === snapshot.error && prev.select === select) return prev.value
     let next: S
     try {
-      next = select(snapshot.data as T | undefined, snapshot.error)
+      next = select(snapshot.data as T | undefined, snapshot.error, prev?.value)
     } catch (err) {
-      next = select(undefined, err instanceof Error ? err : new Error(String(err)))
+      next = select(undefined, err instanceof Error ? err : new Error(String(err)), prev?.value)
     }
     const value = prev && isEqual(prev.value, next) ? prev.value : next
     cache.current = { snapshot, select, value }
@@ -456,12 +486,23 @@ export function useApiQuery<T>({
   refetchInterval,
   enabled = true,
   select,
+  structuralSharing = false,
+  trackFetching = false,
 }: UseApiQueryOptions<T>): UseApiQueryResult<T> {
-  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled)
-  const getSnapshot = useCallback(
-    () => (enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY),
-    [hash, enabled],
-  )
+  const { hash, key, subscribe } = useEntrySubscription(queryKey, path, refetchInterval, enabled, structuralSharing)
+
+  // A request leaving and landing flips isFetching twice. Only a reader that
+  // asked (trackFetching) re-renders on those flips (ADR 0215): every other
+  // reader keeps the snapshot it holds while the data, the error and the
+  // status are the same, and so is not notified.
+  const held = useRef<Snapshot | null>(null)
+  const getSnapshot = useCallback((): Snapshot => {
+    const source = enabled ? (entries.get(hash)?.snapshot ?? EMPTY) : EMPTY
+    const last = held.current
+    if (!trackFetching && last && last.data === source.data && last.error === source.error && last.status === source.status) return last
+    held.current = source
+    return source
+  }, [hash, enabled, trackFetching])
   const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
   const refetch = useCallback(
@@ -489,7 +530,9 @@ export function useApiQuery<T>({
     data: selected.data,
     error,
     isLoading: enabled && snap.status === 'pending' && error === null,
-    isFetching: snap.isFetching,
+    // Read from the entry as this render runs, not from the snapshot held: a
+    // reader that does not track it holds one from before the last flip.
+    isFetching: enabled ? (entries.get(hash)?.snapshot.isFetching ?? false) : false,
     refetch,
   }
 }

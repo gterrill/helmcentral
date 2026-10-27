@@ -22,6 +22,7 @@ export function useDashboardRibbon() {
     queryKey: RIBBON_KEY,
     path: '/api/dashboard-ribbon',
     select: (raw: DashboardRibbonResponse) => raw.ribbon ?? null,
+    structuralSharing: true,
   })
 
   // A null config clears the ribbon; anything else replaces it, validated

@@ -278,6 +278,12 @@ export function useMaintenanceRules(filter: MaintenanceRuleFilter | null) {
     queryKey: [RULES, { equipment: filter?.equipment ?? '', system: filter?.system ?? '', includeStored: filter?.includeStored ?? false, today: params.get('today') }],
     path: `${RULES}?${params.toString()}`,
     enabled: filter !== null,
+    // The day is read from the clock as the hook renders, so a view open over
+    // midnight moves to the new day's key on its next render. Rendering when
+    // its own read leaves moves it there while that day's read is still in
+    // flight, so it shares that read. Rendering only when the read lands
+    // would move it after, and fetch the new day a second time.
+    trackFetching: true,
   })
 
   return {

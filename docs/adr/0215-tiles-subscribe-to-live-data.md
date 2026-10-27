@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-27). Phases 0 to 5 are built; phases 6 and 7 are planned.
+Accepted (2026-10-27). Phases 0 to 7 are built, and the migration is complete.
 Keeps the transport of [ADR 0039](0039-bindable-gauge-widgets.md) and
 [ADR 0083](0083-ages-ride-the-gauge-values-stream.md), and the shared stream of
 [ADR 0097](0097-shared-telemetry-stream-hub.md).
@@ -444,8 +444,259 @@ of them. What it still subscribes to is what it draws or passes on itself:
   planning depth.
 - **The polled feeds**: weather, wave, tide, forecast warnings, upper air, the
   overnight projection, the depth trend, CZone switches and route activation.
-  Phase 6 moves the forecasts; the rest are polls a tile or the shell itself
-  needs, not streams.
+  Phase 6 moved every one of them out.
+
+### The polled feeds (phase 6)
+
+With the streams gone, the shell still rendered about every four seconds on
+the live server. A fiber hook diff put all of it on `useApiQuery` snapshots
+and the arrays built from them. Two causes, one in the cache and one in the
+shell:
+
+- **`useApiQuery` rendered twice per request.** Its snapshot carries
+  `isFetching`, so a request leaving and a request landing were two renders,
+  even when the answer matched the last one.
+- **An equal answer was still new data.** Every poll parses a fresh object,
+  so a reader of `data` saw a change on every answer.
+- **The shell read every feed.** It called the forecast, tide, route,
+  depth-trend, CZone, overnight and alarm-rule hooks to hand their results
+  down, so each of those polls rendered the shell, and through
+  `renderWidget` every tile on the page.
+
+#### Two changes to `api-query.ts`
+
+- **`isFetching` re-renders only the readers that ask.** A `useApiQuery`
+  reader re-renders when the data, the error or the status changes, and not
+  when a request leaves or lands. `isFetching` is a plain field, read from
+  the entry as the reader renders, so it is current whenever the reader
+  renders for any reason. A reader that has to re-render on the flips, to
+  show a request in flight, passes `trackFetching: true`.
+- **`structuralSharing: true` keeps equal data, at the entry.** When any
+  reader of a key opts in, an answer equal by value (`sameJSON`) to the
+  entry's data leaves the entry holding the object it had. Every reader,
+  every `useApiQuerySelector` on the key, and `getQueryData` then see no
+  change, and the deep compare runs once per answer, not once per reader.
+  It is whole or nothing: unlike TanStack Query's option of the same name, a
+  changed answer is handed over entire. It is off by default, because a
+  reader with an effect on `data` would no longer see a refetch that changed
+  nothing, and sixty-odd hooks were not audited for that. The hooks that opt
+  in are the ones this phase moved, plus the page, display, ribbon and
+  equipment lists the shell keeps. Their consumers were checked for effects
+  keyed on the data. The two found, the roles section's grouping and the
+  profiles section's first pick, are a memo and a run-once default, both
+  indifferent to an equal answer.
+
+The first version made `isFetching` a getter that marked the reader as one
+that reads it. The review sent it back. The mark was sticky, so a read in a
+click handler or an effect made the reader re-render on every request from
+then on. It was compared against the last snapshot published, so a reader
+that started reading after a flip it was spared could hold a stale value.
+The test for it read the getter from outside render, where it could not
+fail. An explicit option has none of those faults, and only two readers want
+it:
+
+- **`useEquipmentItem`** asks whether a read is in flight when a write lands,
+  and keeps the answer in a ref the hook refreshes as it renders.
+- **`useMaintenanceRules`** reads today's date from the clock as it renders
+  and keys on it. A view open over midnight moves to the new day's key on its
+  next render. Rendering when its own read leaves moves it there while that
+  day's read is still in flight, so it shares the read; rendering only when
+  the read lands would move it after, and fetch the new day twice.
+
+The first version also compared each reader's held data with the entry's on
+every notify. It is gone: with the entry keeping the object, the readers'
+identity checks do the work.
+
+`useApiQuerySelector`'s `select` now also receives the selection it returned
+last time, so a reader can hand back the unchanged parts of a changed answer.
+Phase 7 uses it for the page list.
+
+A failed poll still notifies: each failure is a new `Error`, and readers keep
+showing their error state, as before. The entry keeps the last good data
+beside the error, and readers that showed it still do. Nothing shows default
+data in place of an error.
+
+#### What moved, and where
+
+| Query | Interval | The shell used it for | Now read by |
+| --- | --- | --- | --- |
+| Route activation | 15 s | the Clock's ETA, the Route tile, the Nearby map's route layer | `LiveClockTile`, `LiveRouteTile`, `LivePoiMapTile` |
+| CZone switches | 5 s, while a CZone tile is placed | the CZone tile | `LiveCZoneSwitchesTile`, polling while it is mounted |
+| Depth trend | 60 s | the Depth & Tide tile | `LiveDepthTideTile` |
+| Overnight projection | 900 s | the Battery & Power footer | `LiveBatteryPowerTile` |
+| Alarm rules | on mount and write | the Alarms page | `LiveAlarmsDrawer` |
+| Settings | on mount | the Alarms page's AIS tuning link | `LiveAlarmsDrawer`, through a selector on the shared settings entry |
+| Weather forecast | 600 s | the Auto theme, Today & Now, Clock, Current Conditions, Forecast Conditions, the Forecast page | the four tiles, `LiveForecastPage`; the shell keeps sunrise and sunset |
+| Weather today | 600 s | Today & Now, Current Conditions | `LiveTodayNowTile`, `LiveCurrentConditionsTile` |
+| Tide today | 600 s | Depth & Tide, the anchor watch tile and page, *Drop anchor here* | `LiveDepthTideTile`, `LiveAnchorWatchTile`, `LiveAnchorWatchDrawer` |
+| Forecast warnings | 600 s | the sidebar dot, the banner, the Alarms page, the Forecast page | `LiveAlarmBanner`, `LiveAlarmsDrawer`, `LiveForecastPage`; the shell keeps the dot |
+| Wave forecast | 600 s | Today & Now's sea temperature, Forecast Conditions, the Forecast page | `LiveTodayNowTile`, `LiveForecastConditionsTile`, `LiveForecastPage` |
+| Upper air | 21 600 s | the Forecast page | `LiveForecastPage` |
+
+The place name had already moved in phase 3. Three wrappers are new:
+`LiveTodayNowTile`, `LiveForecastConditionsTile` and `LiveCZoneSwitchesTile`.
+`LiveForecastPage` builds the boat's forecast props itself and is now
+memoized. *Drop anchor here* moved into `LiveAnchorWatchDrawer`, which reads
+the fix and depth at the tap, as before, and the tide from the reading the
+page shows.
+
+The CZone poll used to be gated on the shell finding a CZone tile on the page.
+The tile now polls while it is mounted, which is the same condition, stated
+where it holds.
+
+Each consumer passes the same interval the shell passed, so a feed shared by
+two tiles polls once, at that interval. A feed whose tiles all leave the page
+stops polling, and the cache keeps its answer for five minutes, so a page
+switch back shows the last answer and revalidates.
+
+#### What the shell still reads, and why
+
+- **Sunrise and sunset**, through `useForecastSunTimes`, a selector on the
+  forecast entry compared field by field. Auto mode switches the theme on
+  them, and the theme lives in the shell. The Clock reads `useForecastSun`,
+  the same selector with the moon phase. A failed poll keeps the last good
+  forecast beside its error, and the times with it, as the shell did when it
+  read `useWeatherForecast`.
+- **Whether a wind bulletin is in force**, through
+  `useHasActiveWindBulletin`, a boolean selector on the warnings entry. It
+  draws the sidebar's Forecast dot. After a failed poll the dot stays while
+  the last good warnings stand, so it agrees with the banner, which reads the
+  same data. Warnings the client cannot read are no dot.
+- **The pages, the displays and the ribbon**, with `structuralSharing`. The
+  shell lays the page out, builds the sidebar and the page switcher from the
+  list, resolves the wall's display by slug and draws the ribbon. None of them
+  polls on the helm; the wall's rotation refetches the pages on each turn,
+  and an equal answer now leaves the shell alone.
+- **The equipment items, profiles and reporting sources**, with
+  `structuralSharing`, for `EquipmentTileContext`. Nothing polls them; they
+  refetch after an equipment or settings write.
+- **The five anchor-watch fields and `navigationState`**, as in phases 3 and 4.
+
+#### Tested against captured payloads
+
+`src/test/app-polled-queries.test.tsx` answers every endpoint with a payload
+captured off the boat's server on 2026-10-27, at anchor
+(`fixtures/live-poll-payloads.ts`, trimmed to a few entries per list), and
+drives each poll through the real cache with `invalidateQueries`. It checks
+that an equal poll of each of the fourteen queries renders neither the shell
+nor any tile, that a changed poll renders only the tiles that show it, and
+that with every stream ticking and every poll answering equal data the shell
+renders 0 times.
+
+Two of those payloads are never equal on the boat. The tide's `datetime` and
+`current_tide_height_ft` move on every poll, and an anchored boat's tide
+always moves. A tide poll therefore re-renders the Depth & Tide tile and the
+anchor watch, and only them: that is the tide changing.
+
+### WidgetHost and the grid (phase 7)
+
+Phases 1 to 6 left the shell rendering only on what it draws. When it does
+render (a page switch, layout editing, the Mate sheet opening, a toast, a
+config change), `renderWidget` still ran for every widget and handed each
+tile fresh elements. Each tile's own memo caught most of them; the cost was
+the grid and its cells rendering every time.
+
+- **`WidgetHost`** (`components/widget-host.tsx`) replaces `renderWidget`'s
+  body. It is memoized and takes the widget record, the flags (`editing`,
+  `interactive`, `isDarkTheme`, `forceDark`, `distanceUnits`, `readOnly`, the
+  two anchor-map toggles), the equipment context, and one `actions` object.
+- **`actions` is built once.** The shell builds it with `useMemo` over
+  callbacks that are themselves stable: the config opener, the panel
+  navigations, the two roles links, the two toggle setters. The roles links
+  are undefined on the wall, as before.
+- **One config handler, bound per widget.** `configureHandlerFor`, a cache
+  of one closure per widget id, is gone. The shell passes
+  `openWidgetConfig(id)`, which looks the widget up at the click and opens the
+  matching draft, and `WidgetHost` binds its own id with `useCallback`. The
+  tiles' `onConfigure` stays a stable `() => void`.
+- **`renderWidget` is a `useCallback`** over exactly those props, so it
+  changes only when a flag does.
+- **`DashboardBentoGrid` is memoized.** Its handlers, `handleLayoutSettle`,
+  `handleRemoveWidget` and `handleDuplicateWidget`, read the page and widget
+  list from refs at the call, so they never change. `effectiveWidgets` is
+  keyed on the page's widget list, not the page.
+- **The page list keeps unchanged records.** `useDashboardPages` reads
+  through `useApiQuerySelector`, and `sharePages` puts back every widget,
+  page and list equal by value to the one before. A write lands the server's
+  whole page with every widget a new object; after sharing, only the widget
+  that changed is new. A page whose `widgets` is null or missing (a Go nil
+  slice) reads as an empty page, beside the others.
+- **The handlers' refs are assigned as the shell renders**, not in an
+  effect, so a stable handler never writes through the page before. No test
+  reaches the gap an effect would leave: React flushes passive effects before
+  it dispatches a discrete event such as a drop or a click, and `act()`
+  flushes them in tests, so a handler cannot run between a commit and its
+  effects in either.
+- **A drop always resyncs the grid.** react-grid-layout keeps the geometry a
+  drag left and goes back to its `layout` prop only when the prop changes by
+  value. With the page list keeping identity, a server answer that stores
+  different geometry from the drop (clamped, normalised, refused) could equal
+  the layout from before the drag, and the tile would stay where it was
+  dropped. The grid now shows the dropped geometry from the drop until the
+  write's answer lands (`onLayoutSettle` returns the write), then the stored
+  layout, so the prop changes whenever the two differ.
+  `dashboard-bento-grid-settle-resync.test.tsx` checks it against a stand-in
+  that resyncs as RGL does.
+
+What a shell render now reaches:
+
+| Shell render | Grid | Tiles |
+| --- | --- | --- |
+| Mate sheet, help sheet, toast, header state | skipped | none |
+| Page renamed | skipped | none |
+| Hero changed | renders | the hero, which moves to its own row; no other tile |
+| Skin changed | renders | every `WidgetHost`, because maps follow the instrument skin |
+| One widget's config saved | renders | that tile only |
+| Layout editing toggled | renders | every tile, which shows its gear |
+| Theme, units, read-only, an anchor-map toggle | renders | every `WidgetHost`; each tile's own memo still stops the tiles whose props did not change |
+| Page switch, wall rotation | renders | the new page's tiles |
+
+The wall display is unchanged: `LiveDisplayShell` receives the grid as
+`children`, the rotation drives `activePageId`, and a rotation turn renders
+the grid for the new page. The hero row, drag, resize, remove and duplicate
+go through the same handlers, now stable. The config dialogs and their drafts
+stay in the shell. The ribbon is a `LampStripHost` the shell renders outside
+the grid, as before.
+
+`src/test/app-widget-host.test.tsx` counts the grid's own renders by its
+calls to `renderWidget`, keeping the grid's memo, and each tile's renders by
+its `Tile` title. Opening the Mate sheet and renaming the page ask the grid
+for no tile; saving one gauge's display re-renders that gauge alone; toggling
+layout editing re-renders the gauges.
+
+### Adding a live tile
+
+The shell passes a tile config, flags and stable callbacks, never a reading.
+A new tile follows the same four steps:
+
+1. **The data has a store or a query.** A stream event gets a store built on
+   `createTelemetryStore` in its own `hooks/use-*.ts`, with an `apply` that
+   returns null for a tick that changes nothing shown, a `useRetain*` hook,
+   and selectors (`useStoreFields`, or `useSelector` with an equality). A
+   poll gets a hook over `useApiQuery` with `structuralSharing: true`, or
+   over `useApiQuerySelector` when the tile shows a slice.
+2. **A `Live*` wrapper in `components/live-surfaces.tsx`** reads the store or
+   query and passes the readings as the props the presentational tile always
+   took. A hook it reads returns one object while its data holds (a
+   `useMemo` over the data, error and loading state), so a wrapper that
+   memoizes on it holds too. It is `memo()`'d and takes from the shell only config, flags and
+   stable callbacks. The presentational tile stays prop-driven and keeps its
+   own tests.
+3. **`WidgetHost` renders the wrapper** for the widget's id. A flag it needs
+   becomes a `WidgetHost` prop; a callback becomes a member of
+   `WidgetHostActions`, stable in the shell.
+4. **The tests know about it.** A new store registers for the reset after
+   each test: `createTelemetryStore` does that itself, and other module
+   state calls `onTelemetryTestReset`, both run by
+   `resetTelemetryStoresForTest` in `src/test/setup.ts`. App tests that mock
+   the hook module (`vi.mock('@/hooks/use-...')`) need every export the
+   shell or a wrapper calls, including new selector hooks. A render test in
+   `app-tile-memoization.test.tsx` or `app-polled-queries.test.tsx` shows a
+   tick or poll reaching the tile and nothing else, with payloads captured
+   off the boat's server.
+
+If the shell itself must show something from the new data, it reads a
+selector with value equality on exactly that, and this ADR says why.
 
 ### How long a store lives
 
@@ -520,12 +771,12 @@ and a module that only imports a store's types or helpers never touches it.
 5. **Electrical, solar, tanks, nearby vessels, radar and autopilot.** One store
    each, with an equality check per field so an unchanged reading keeps its
    object.
-6. **Polled forecasts.** Weather, wave, tide and forecast warnings are fetched
-   by the tiles that show them, through the shared query cache, not by the
-   shell.
-7. **`WidgetHost` and the grid.** Once no tile takes a live prop, a memoized
-   host per widget and a memoized grid stop a shell render from reaching any
-   tile.
+6. **Polled feeds.** Every poll the shell made for a tile or page is made by
+   the tile or page, through the shared query cache. The shell keeps only
+   what it draws, compared on value.
+7. **`WidgetHost` and the grid.** A memoized host per widget and a memoized
+   grid stop a shell render from reaching any tile whose record and flags are
+   unchanged.
 
 ## Rejected
 
@@ -569,10 +820,17 @@ and a module that only imports a store's types or helpers never touches it.
   re-renders only the Alarms page.
 - An autopilot, electrical, solar, tanks, nearby-vessels or radar tick
   re-renders only the tiles whose readings changed, and never the shell.
-- The shell still renders on what it draws itself and on the polled
-  forecasts until phase 6, and `renderWidget` still runs for every tile when
-  it does. The gauge tiles are protected from those renders by their
-  own memo: their props are now config and stable callbacks only.
+- A poll re-renders only the tiles and pages that show what changed, and an
+  equal answer re-renders nothing. The shell renders on a poll only when the
+  sunrise or sunset moves, a wind bulletin starts or ends, or the pages,
+  displays, ribbon or equipment change.
+- A `useApiQuery` reader no longer re-renders when a request leaves or lands,
+  unless it passes `trackFetching`.
+- A shell render that changes nothing about the tiles does not render the
+  grid. A saved config re-renders that tile alone; layout editing, the theme
+  and the units re-render every host.
+- A tile's record keeps its object while the server answers it unchanged, so
+  code that compares widgets by reference sees only real changes.
 - Each store stays subscribed for the life of the page once started. A
   surface mounted at any moment shows the last thing the server said, never
   an empty store's "all clear".

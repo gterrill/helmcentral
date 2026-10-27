@@ -1,7 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 
 import { FORECAST_SURF_WARNING_PATH, FORECAST_WIND_WARNING_PATH } from '@/lib/alarm-display'
-import { useApiQuery } from '@/lib/api-query'
+import { useApiQuery, useApiQuerySelector } from '@/lib/api-query'
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place'
 
 export interface ForecastWarningSection {
@@ -128,23 +128,46 @@ export function useForecastWarnings(refreshIntervalSeconds = 3600, options: Fore
     refetchInterval: refreshIntervalSeconds * 1000,
     enabled: options.enabled,
     select: mapWarnings,
+    structuralSharing: true,
   })
 
   useEffect(() => {
     if (error) console.error('Error fetching forecast warnings:', error)
   }, [error])
 
-  const warnings = data?.warnings ?? null
-  const activeWarning = warnings && warnings.bulletins.length > 0 ? warnings : null
+  // One object while the answer, the error and the loading state hold, so a
+  // reader that memoizes on it (the Forecast page's props) holds too.
+  return useMemo(() => {
+    const warnings = data?.warnings ?? null
+    return {
+      warnings,
+      activeWarning: warnings && warnings.bulletins.length > 0 ? warnings : null,
+      loading: isLoading,
+      error: error ? error.message || 'Failed to load forecast warnings' : null,
+      isCached: data?.isCached ?? false,
+      updatedAt: data?.updatedAt ?? null,
+      ttlSeconds: data?.ttlSeconds ?? null,
+      refetch,
+    }
+  }, [data, error, isLoading, refetch])
+}
 
-  return {
-    warnings,
-    activeWarning,
-    loading: isLoading,
-    error: error ? error.message || 'Failed to load forecast warnings' : null,
-    isCached: data?.isCached ?? false,
-    updatedAt: data?.updatedAt ?? null,
-    ttlSeconds: data?.ttlSeconds ?? null,
-    refetch,
-  }
+// A failed poll keeps the last good warnings beside its error, and the banner
+// keeps showing them through useForecastWarnings, so the dot does too: the two
+// agree. Warnings the client cannot read are no bulletin, with no dot.
+function selectHasWindBulletin(data: ForecastWarningsApi | undefined): boolean {
+  if (data === undefined) return false
+  return Boolean(findActiveWindBulletin(mapWarnings(data).warnings))
+}
+
+/**
+ * Whether a wind bulletin is in force, for the sidebar's Forecast dot (ADR
+ * 0215). It shares useForecastWarnings' query and re-renders its reader only
+ * when the answer to that one question changes.
+ */
+export function useHasActiveWindBulletin(refreshIntervalSeconds = 3600): boolean {
+  return useApiQuerySelector(
+    { ...forecastQuery('/api/forecast-warnings', undefined), refetchInterval: refreshIntervalSeconds * 1000 },
+    selectHasWindBulletin,
+  )
 }
