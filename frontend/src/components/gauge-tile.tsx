@@ -3,6 +3,7 @@ import { memo, useId } from 'react'
 
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { DialRing } from '@/components/ui/dial-ring'
+import { useGaugeAge, useGaugeValue } from '@/hooks/use-gauge-values'
 import { useTelemetryHistory, type TelemetryHistoryPoint } from '@/hooks/use-telemetry-history'
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
 import { formatQuantity, convertFromSI, unitOption } from '@/lib/quantities'
@@ -88,17 +89,31 @@ export function GaugeBody({
 
 interface GaugeTileProps {
   config: GaugeWidgetConfig
-  /** Raw SI value from SignalK, or null when the path is absent. */
-  value: number | null
-  /** Age in seconds behind this gauge's bound path (ADR 0083); absent is unknown. */
-  ages?: Record<string, number | null>
   editing: boolean
   onConfigure: () => void
 }
 
-export const GaugeTile = memo(function GaugeTile({ config, value, ages, editing, onConfigure }: GaugeTileProps) {
+/**
+ * A standalone gauge on the dashboard. It reads its own path's value and age
+ * from the gauge-values store (ADR 0215), so a tick re-renders this gauge only
+ * when its own reading changed, and the page around it not at all.
+ */
+export const GaugeTile = memo(function GaugeTile({ config, editing, onConfigure }: GaugeTileProps) {
+  const value = useGaugeValue(config.path)
+  const age = useGaugeAge(config.path)
+  return <GaugeTileView config={config} value={value} age={age} editing={editing} onConfigure={onConfigure} />
+})
+
+interface GaugeTileViewProps extends GaugeTileProps {
+  /** Raw SI value from SignalK, or null when the path is absent. */
+  value: number | null
+  /** Age in seconds behind this gauge's bound path (ADR 0083); absent or null is unknown. */
+  age?: number | null
+}
+
+/** What GaugeTile draws for a given reading, without reading the store. */
+export const GaugeTileView = memo(function GaugeTileView({ config, value, age = null, editing, onConfigure }: GaugeTileViewProps) {
   const title = config.label.trim() || config.path
-  const age = ages?.[config.path] ?? null
   const stale = isStale(age)
   // A frozen source is blanked to the same absence a never-reported path
   // gets (ADR 0068/0083): the frozen value is exactly the one most likely to

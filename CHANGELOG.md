@@ -58,6 +58,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Documents, Passages, Inventory and Settings no longer redraw on every
   instrument update.** They sit still until something on the page changes, so
   they use less battery and processor time, and the Passages map stays smooth.
+- **Gauges, Engine Cluster, gauge group and lamp tiles redraw only when their
+  own reading changes.** They used to redraw every second when any instrument
+  updated, so a busy dashboard page now uses less battery and processor time.
+  Switching pages, or the wall display moving to its next page, still shows the
+  last reading straight away.
 
 ## [0.55.0] - 2026-10-26
 

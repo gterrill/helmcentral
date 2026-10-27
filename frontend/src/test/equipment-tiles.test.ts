@@ -116,7 +116,7 @@ describe('resolveCluster', () => {
   })
 
   it('shows an engine that is off rather than calling it silent', () => {
-    const r = resolveCluster(cluster, ctx([item(), tank], { reporting: new Set(), engines: { port: { state: 'off' } } }))
+    const r = resolveCluster(cluster, ctx([item(), tank], { reporting: new Set() }), [], { port: { state: 'off' } })
     expect(r.ok).toBe(true)
   })
 

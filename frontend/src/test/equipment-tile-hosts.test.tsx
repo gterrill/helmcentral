@@ -12,7 +12,7 @@ const slot = (suffix: string) => ({ path: '', suffix, label: suffix, display: 'n
 const cluster: EngineClusterConfig = { equipmentId: 'eng-port', title: '', ring: slot('revolutions'), centre: slot('runTime'), corners: [] }
 const ctxOf = (items: TileItem[], reporting: ReadonlySet<string> | null = null): EquipmentTileContext => ({ items, profiles: [], reporting })
 
-const common = { values: {}, editing: false, onConfigure: vi.fn() }
+const common = { editing: false, onConfigure: vi.fn() }
 
 describe('a tile that shows equipment', () => {
   test('says Pick equipment when no item is chosen, and offers to choose', () => {

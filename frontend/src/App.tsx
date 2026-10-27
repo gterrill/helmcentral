@@ -180,7 +180,7 @@ import { EngineClusterConfigDialog } from '@/components/engine-cluster-config-di
 import { EngineClusterHost, GaugeGroupHost, LampStripHost } from '@/components/equipment-tile-hosts'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
-import { useEngineStates, useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
+import { useRetainGaugeValues } from '@/hooks/use-gauge-values'
 import { LoginScreen } from '@/components/login-screen'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -431,12 +431,11 @@ function AppShell() {
   // Same pattern as embedDraft: a freshly added Nearby map (ADR 0091 phase
   // 3b) exists only here until it holds a valid config.
   const [poiMapDraft, setPoiMapDraft] = useState<DashboardLayoutItem | null>(null)
-  const gaugeValues = useGaugeValues()
-  // Age behind each bound path (ADR 0083), riding the same gauge-values event
-  // rather than a stream of its own -- see hooks/use-gauge-values.ts.
-  const gaugeAges = useGaugeAges()
-  // Which engines read as switched off, so a cluster says OFF, not stale.
-  const engineStates = useEngineStates()
+  // Gauges, engine clusters, gauge groups and lamp strips read their own
+  // readings from the gauge-values store (ADR 0215). The shell holds the store
+  // open, so a page switch never starts a tile blank, but listens to none of
+  // it: a tick does not re-render the shell.
+  useRetainGaugeValues()
   // The equipment items, profiles and reporting sources that tiles showing a
   // piece of equipment read their paths and zones from (ADR 0187).
   const equipmentContext = useEquipmentTileContext()
@@ -1549,9 +1548,6 @@ function AppShell() {
         <EngineClusterHost
           config={widget.cluster}
           ctx={equipmentContext}
-          values={gaugeValues}
-          ages={gaugeAges}
-          engines={engineStates}
           tanks={tanks}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setClusterDraft)}
@@ -1565,8 +1561,6 @@ function AppShell() {
         <LampStripHost
           config={widget.lamps}
           ctx={equipmentContext}
-          values={gaugeValues}
-          ages={gaugeAges}
           worstAlarmState={worstAlarmState}
           alarms={alarms}
           editing={layoutEditing}
@@ -1582,8 +1576,6 @@ function AppShell() {
         <GaugeGroupHost
           config={widget.gaugeGroup}
           ctx={equipmentContext}
-          values={gaugeValues}
-          ages={gaugeAges}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setGaugeGroupDraft)}
         />
@@ -1595,8 +1587,6 @@ function AppShell() {
       return (
         <GaugeTile
           config={widget.gauge}
-          value={gaugeValues[widget.gauge.path] ?? null}
-          ages={gaugeAges}
           editing={layoutEditing}
           onConfigure={configureHandlerFor(id, setGaugeDraft)}
         />
@@ -2064,8 +2054,6 @@ function AppShell() {
           <LampStripHost
             config={ribbon}
             ctx={equipmentContext}
-            values={gaugeValues}
-            ages={gaugeAges}
             worstAlarmState={worstAlarmState}
             alarms={alarms}
             editing={layoutEditing}

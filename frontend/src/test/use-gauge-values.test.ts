@@ -16,7 +16,13 @@ vi.mock('@/hooks/use-telemetry-stream', () => ({
   },
 }))
 
-import { useEngineStates, useGaugeAges, useGaugeValues } from '@/hooks/use-gauge-values'
+import {
+  useEngineStatus,
+  useGaugeAge,
+  useGaugeSubset,
+  useGaugeValue,
+  useRetainGaugeValues,
+} from '@/hooks/use-gauge-values'
 
 function emit(payload: unknown) {
   act(() => {
@@ -30,140 +36,97 @@ beforeEach(() => {
 })
 
 /**
- * ADR 0083: ages ride the same gauge-values event useGaugeValues does,
- * rather than a stream of their own -- the backend computes both from the
- * same sample in the same tick, so a sibling hook is all a widget needs.
+ * ADR 0083: ages ride the same gauge-values event the values do, rather than
+ * a stream of their own -- the backend computes both from the same sample in
+ * the same tick.
  */
-describe('useGaugeAges', () => {
-  it('subscribes to the same gauge-values event useGaugeValues does', () => {
-    renderHook(() => useGaugeAges())
+describe('useGaugeAge', () => {
+  it('subscribes to the same gauge-values event the values ride', () => {
+    renderHook(() => useGaugeAge('a'))
     expect(subscribeTelemetryMock).toHaveBeenCalledWith('gauge-values', expect.any(Function))
   })
 
-  it('starts empty', () => {
-    const { result } = renderHook(() => useGaugeAges())
-    expect(result.current).toEqual({})
+  it('starts unknown', () => {
+    const { result } = renderHook(() => useGaugeAge('propulsion.port.revolutions'))
+    expect(result.current).toBeNull()
   })
 
-  it('reads the ages map off the payload', () => {
-    const { result } = renderHook(() => useGaugeAges())
+  it('reads the age off the payload', () => {
+    const { result } = renderHook(() => useGaugeAge('propulsion.port.revolutions'))
     emit({ values: {}, ages: { 'propulsion.port.revolutions': 45.2 } })
-    expect(result.current).toEqual({ 'propulsion.port.revolutions': 45.2 })
+    expect(result.current).toBe(45.2)
   })
 
   // The backend's -1 sentinel (ADR 0068) means "no timestamp at all", which
   // must read as unknown rather than as a very fresh negative age.
   it('maps -1 to null through ageFromPayload, so unknown never reads as fresh', () => {
-    const { result } = renderHook(() => useGaugeAges())
+    const { result } = renderHook(() => useGaugeSubset(['environment.outside.pressure', 'navigation.speedOverGround']))
     emit({ values: {}, ages: { 'environment.outside.pressure': -1, 'navigation.speedOverGround': 12 } })
-    expect(result.current).toEqual({ 'environment.outside.pressure': null, 'navigation.speedOverGround': 12 })
+    expect(result.current.ages).toEqual({ 'environment.outside.pressure': null, 'navigation.speedOverGround': 12 })
   })
 
   it('ignores a malformed payload rather than throwing', () => {
-    const { result } = renderHook(() => useGaugeAges())
+    const { result } = renderHook(() => useGaugeAge('a'))
     act(() => {
       capturedListener?.('not json')
     })
-    expect(result.current).toEqual({})
+    expect(result.current).toBeNull()
   })
 })
 
-describe('useGaugeValues', () => {
+describe('useGaugeValue', () => {
   it('subscribes to the gauge-values event', () => {
-    renderHook(() => useGaugeValues())
+    renderHook(() => useGaugeValue('a'))
     expect(subscribeTelemetryMock).toHaveBeenCalledWith('gauge-values', expect.any(Function))
   })
 
-  it('starts empty', () => {
-    const { result } = renderHook(() => useGaugeValues())
-    expect(result.current).toEqual({})
+  it('starts with no value', () => {
+    const { result } = renderHook(() => useGaugeValue('a'))
+    expect(result.current).toBeNull()
   })
 
-  it('reads the values map off the payload', () => {
-    const { result } = renderHook(() => useGaugeValues())
+  it('reads the value off the payload', () => {
+    const { result } = renderHook(() => useGaugeValue('propulsion.port.revolutions'))
     emit({ values: { 'propulsion.port.revolutions': 1200 }, ages: {} })
-    expect(result.current).toEqual({ 'propulsion.port.revolutions': 1200 })
+    expect(result.current).toBe(1200)
   })
 
   it('ignores a malformed payload rather than throwing', () => {
-    const { result } = renderHook(() => useGaugeValues())
+    const { result } = renderHook(() => useGaugeValue('a'))
     act(() => {
       capturedListener?.('not json')
     })
-    expect(result.current).toEqual({})
+    expect(result.current).toBeNull()
   })
 })
 
-// Item D: values/ages used to be a fresh object literal on every single
-// gauge-values tick (1Hz), even on ticks where nothing bound to a gauge
-// actually changed -- defeating any memoized tile reading them. Both hooks
-// also used to parse the same payload independently; they now share one
-// subscription (below).
-describe('useGaugeValues/useGaugeAges stable identity and shared subscription', () => {
-  it('keeps the same values object reference across ticks with identical values', () => {
-    const { result } = renderHook(() => useGaugeValues())
-
-    emit({ values: { 'tanks.fuel.2.currentLevel': 5.6 }, ages: { 'tanks.fuel.2.currentLevel': 1 } })
-    const first = result.current
-
-    emit({ values: { 'tanks.fuel.2.currentLevel': 5.6 }, ages: { 'tanks.fuel.2.currentLevel': 2 } })
-    const second = result.current
-
-    expect(second).toBe(first)
-  })
-
-  it('returns a new values object once a bound value actually changes', () => {
-    const { result } = renderHook(() => useGaugeValues())
-
-    emit({ values: { 'tanks.fuel.2.currentLevel': 5.6 }, ages: {} })
-    const first = result.current
-
-    emit({ values: { 'tanks.fuel.2.currentLevel': 5.4 }, ages: {} })
-    const second = result.current
-
-    expect(second).not.toBe(first)
-    expect(second['tanks.fuel.2.currentLevel']).toBe(5.4)
-  })
-
-  it('keeps the same ages object reference across ticks with identical ages', () => {
-    const { result } = renderHook(() => useGaugeAges())
-
-    emit({ values: {}, ages: { 'propulsion.port.revolutions': 4 } })
-    const first = result.current
-
-    emit({ values: {}, ages: { 'propulsion.port.revolutions': 4 } })
-    const second = result.current
-
-    expect(second).toBe(first)
-  })
-
-  it('subscribes to gauge-values exactly once when both hooks are mounted together', () => {
+describe('shared subscription', () => {
+  it('subscribes to gauge-values exactly once when several readers are mounted together', () => {
     renderHook(() => {
-      useGaugeValues()
-      useGaugeAges()
+      useGaugeValue('a')
+      useGaugeAge('a')
     })
 
     expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
   })
 
   it('keeps values and ages in sync from one shared emit', () => {
-    const { result } = renderHook(() => ({ values: useGaugeValues(), ages: useGaugeAges() }))
+    const { result } = renderHook(() => useGaugeSubset(['a.path']))
 
     emit({ values: { 'a.path': 1 }, ages: { 'a.path': 3 } })
 
-    expect(result.current.values).toEqual({ 'a.path': 1 })
-    expect(result.current.ages).toEqual({ 'a.path': 3 })
+    expect(result.current).toEqual({ values: { 'a.path': 1 }, ages: { 'a.path': 3 } })
   })
 })
 
-describe('useEngineStates', () => {
-  it('starts empty', () => {
-    const { result } = renderHook(() => useEngineStates())
-    expect(result.current).toEqual({})
+describe('useEngineStatus', () => {
+  it('starts with no status', () => {
+    const { result } = renderHook(() => useEngineStatus('port'))
+    expect(result.current).toBeUndefined()
   })
 
-  it('reads the engines map off the payload, mapping last_update', () => {
-    const { result } = renderHook(() => useEngineStates())
+  it('reads the engine off the payload, mapping last_update', () => {
+    const { result } = renderHook(() => ({ port: useEngineStatus('port'), starboard: useEngineStatus('starboard') }))
     emit({
       values: {}, ages: {},
       engines: { port: { state: 'off', last_update: '2026-10-06T04:30:00Z' }, starboard: { state: 'running' } },
@@ -175,8 +138,119 @@ describe('useEngineStates', () => {
   })
 
   it('drops an unrecognised state rather than guessing', () => {
-    const { result } = renderHook(() => useEngineStates())
+    const { result } = renderHook(() => useEngineStatus('port'))
     emit({ values: {}, ages: {}, engines: { port: { state: 'asleep' } } })
-    expect(result.current).toEqual({})
+    expect(result.current).toBeUndefined()
+  })
+})
+
+// ADR 0215: each tile reads only the paths it shows, so a tick re-renders only
+// the tiles whose own reading changed.
+describe('per-path selectors', () => {
+  it('does not re-render a value subscriber when only another path changes', () => {
+    let renders = 0
+    const { result } = renderHook(() => { renders += 1; return useGaugeValue('a') })
+    emit({ values: { a: 1, b: 1 }, ages: {} })
+    expect(result.current).toBe(1)
+    const after = renders
+
+    emit({ values: { a: 1, b: 2 }, ages: {} })
+    expect(renders).toBe(after)
+
+    emit({ values: { a: 2, b: 2 }, ages: {} })
+    expect(renders).toBe(after + 1)
+    expect(result.current).toBe(2)
+  })
+
+  it('does not re-render an age subscriber when only another path ages', () => {
+    let renders = 0
+    const { result } = renderHook(() => { renders += 1; return useGaugeAge('a') })
+    emit({ values: {}, ages: { a: 3, b: 3 } })
+    expect(result.current).toBe(3)
+    const after = renders
+
+    emit({ values: {}, ages: { a: 3, b: 4 } })
+    expect(renders).toBe(after)
+  })
+
+  it('reads null for a path the event does not carry', () => {
+    const { result } = renderHook(() => ({ value: useGaugeValue('missing'), age: useGaugeAge('missing') }))
+    emit({ values: { a: 1 }, ages: { a: 1 } })
+    expect(result.current).toEqual({ value: null, age: null })
+  })
+
+  it('keeps the subset reference while its own paths are unchanged', () => {
+    let renders = 0
+    // A fresh array every render, as a tile computing its paths would pass.
+    const { result } = renderHook(() => { renders += 1; return useGaugeSubset(['a', 'b']) })
+    emit({ values: { a: 1, b: 2, c: 3 }, ages: { a: 5 } })
+    const first = result.current
+    expect(first).toEqual({ values: { a: 1, b: 2 }, ages: { a: 5 } })
+    const after = renders
+
+    emit({ values: { a: 1, b: 2, c: 4 }, ages: { a: 5, c: 9 } })
+    expect(result.current).toBe(first)
+    expect(renders).toBe(after)
+
+    emit({ values: { a: 1, b: 3, c: 4 }, ages: { a: 5, c: 9 } })
+    expect(result.current).not.toBe(first)
+    expect(result.current).toEqual({ values: { a: 1, b: 3 }, ages: { a: 5 } })
+  })
+
+  it('keeps one engine\'s status when only another engine changes', () => {
+    const { result } = renderHook(() => useEngineStatus('port'))
+    emit({ values: {}, ages: {}, engines: { port: { state: 'off', last_update: 't1' }, starboard: { state: 'running' } } })
+    const first = result.current
+    expect(first).toEqual({ state: 'off', lastUpdate: 't1' })
+
+    emit({ values: {}, ages: {}, engines: { port: { state: 'off', last_update: 't1' }, starboard: { state: 'off' } } })
+    expect(result.current).toBe(first)
+  })
+
+  it('reads no status for an engine the server does not classify, or for no engine', () => {
+    const { result } = renderHook(() => ({ port: useEngineStatus('port'), none: useEngineStatus(null) }))
+    emit({ values: {}, ages: {}, engines: { starboard: { state: 'running' } } })
+    expect(result.current).toEqual({ port: undefined, none: undefined })
+  })
+
+  it('still parses each tick once, whatever the number of subscribers', () => {
+    const parse = vi.spyOn(JSON, 'parse')
+    renderHook(() => {
+      useGaugeValue('a')
+      useGaugeAge('a')
+      useGaugeSubset(['a', 'b'])
+      useEngineStatus('port')
+    })
+    expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
+    parse.mockClear()
+    emit({ values: { a: 1 }, ages: { a: 1 } })
+    expect(parse).toHaveBeenCalledTimes(1)
+    parse.mockRestore()
+  })
+})
+
+describe('store lifetime', () => {
+  it('keeps the last reading across the last tile unmounting and a new one mounting', () => {
+    const shell = renderHook(() => useRetainGaugeValues())
+    const tile = renderHook(() => useGaugeValue('a'))
+    emit({ values: { a: 7 }, ages: { a: 1 } })
+    tile.unmount()
+
+    // A page switch or a wall rotation mounts the next page's tile before
+    // the next tick: it must show the reading, not a blank.
+    const next = renderHook(() => ({ value: useGaugeValue('a'), age: useGaugeAge('a') }))
+    expect(next.result.current).toEqual({ value: 7, age: 1 })
+    expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
+
+    next.unmount()
+    shell.unmount()
+  })
+
+  it('starts empty again once nothing retains or reads it', () => {
+    const tile = renderHook(() => useGaugeValue('a'))
+    emit({ values: { a: 7 }, ages: {} })
+    tile.unmount()
+    const next = renderHook(() => useGaugeValue('a'))
+    expect(next.result.current).toBeNull()
   })
 })

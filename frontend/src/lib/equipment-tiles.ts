@@ -37,9 +37,14 @@ export interface EquipmentTileContext {
    * than claiming the item is silent.
    */
   reporting: ReadonlySet<string> | null
-  /** Engines whose state the server knows, by instance id (`port`). An engine that is off is known, not silent. */
-  engines?: Readonly<Record<string, unknown>>
 }
+
+/**
+ * Engines whose state the server knows, by instance id (`port`). An engine
+ * that is off is known, not silent. Not part of the context: it rides the
+ * live gauge-values event, so the host reads it itself (ADR 0215).
+ */
+export type KnownEngines = Readonly<Record<string, unknown>>
 
 /** Why a tile cannot show its readings. `item` is set when the item exists. */
 export type TileProblem =
@@ -57,15 +62,15 @@ export function findItem(ctx: EquipmentTileContext, id: string | undefined): Til
 }
 
 /** `propulsion.port` -> `port`; the instance id of an engine source. */
-function engineInstance(source: string): string {
+export function engineInstance(source: string): string {
   return source.split('.').slice(1).join('.')
 }
 
 /** The problem with an item, or null when its readings can be shown. */
-function itemProblem(ctx: EquipmentTileContext, item: TileItem): TileProblem | null {
+function itemProblem(ctx: EquipmentTileContext, item: TileItem, engines: KnownEngines | undefined): TileProblem | null {
   if (item.signalk_source === '') return { kind: 'not-mapped', item }
   if (ctx.reporting !== null && !ctx.reporting.has(item.signalk_source)) {
-    const known = item.source_kind === 'engine' && ctx.engines !== undefined && engineInstance(item.signalk_source) in ctx.engines
+    const known = item.source_kind === 'engine' && engines !== undefined && engineInstance(item.signalk_source) in engines
     if (!known) return { kind: 'not-reporting', item }
   }
   return null
@@ -146,11 +151,16 @@ export function resolveSlot(item: TileItem, profile: EngineProfile | undefined, 
  * `tanks` are the Tanks feed's readings, which carry each tank's resolved
  * levels; the fuel bars colour from them.
  */
-export function resolveCluster(config: EngineClusterConfig, ctx: EquipmentTileContext, tanks: TankLevel[] = []): Resolved<ResolvedClusterConfig> {
+export function resolveCluster(
+  config: EngineClusterConfig,
+  ctx: EquipmentTileContext,
+  tanks: TankLevel[] = [],
+  engines?: KnownEngines,
+): Resolved<ResolvedClusterConfig> {
   if (!config.equipmentId) return { ok: false, problem: EMPTY_PROBLEM }
   const item = findItem(ctx, config.equipmentId)
   if (!item) return { ok: false, problem: { kind: 'missing' } }
-  const problem = itemProblem(ctx, item)
+  const problem = itemProblem(ctx, item, engines)
   if (problem) return { ok: false, problem }
 
   const profile = profileOf(ctx, item)
@@ -212,11 +222,11 @@ export function isEquipmentGroup(config: GaugeGroupWidgetConfig): boolean {
   return (config.equipmentKind ?? '') !== ''
 }
 
-export function resolveGaugeGroup(config: GaugeGroupWidgetConfig, ctx: EquipmentTileContext): Resolved<GaugeGroupWidgetConfig> {
+export function resolveGaugeGroup(config: GaugeGroupWidgetConfig, ctx: EquipmentTileContext, engines?: KnownEngines): Resolved<GaugeGroupWidgetConfig> {
   if (!config.equipmentId) return { ok: false, problem: EMPTY_PROBLEM }
   const item = findItem(ctx, config.equipmentId)
   if (!item) return { ok: false, problem: { kind: 'missing' } }
-  const problem = itemProblem(ctx, item)
+  const problem = itemProblem(ctx, item, engines)
   if (problem) return { ok: false, problem }
   const profile = profileOf(ctx, item)
   return {

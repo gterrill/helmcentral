@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 
-import { useEngineStates } from '@/hooks/use-gauge-values'
 import { useEquipment } from '@/hooks/use-inventory'
 import { useEquipmentProfiles } from '@/hooks/use-equipment-profiles'
 import { useVesselDiscovery } from '@/hooks/use-vessel-discovery'
@@ -15,12 +14,15 @@ import type { EquipmentTileContext } from '@/lib/equipment-tiles'
  *
  * `reporting` stays null until Discovery has answered, so a tile never says
  * "Not reporting" because a request has not come back yet.
+ *
+ * Nothing live is in here: engine states ride the gauge-values event, and the
+ * host that needs one reads it itself (ADR 0215), so a tick or an engine
+ * keying off never makes every equipment tile re-resolve.
  */
 export function useEquipmentTileContext(enabled = true): EquipmentTileContext {
   const { items } = useEquipment(enabled ? {} : null)
   const { profiles } = useEquipmentProfiles(enabled)
   const { discovery, loading, error } = useVesselDiscovery(enabled)
-  const engines = useEngineStates()
 
   const reporting = useMemo(() => {
     if (!enabled || loading || error || !discovery.connected) return null
@@ -31,5 +33,5 @@ export function useEquipmentTileContext(enabled = true): EquipmentTileContext {
     return set
   }, [enabled, loading, error, discovery])
 
-  return useMemo(() => ({ items, profiles, reporting, engines }), [items, profiles, reporting, engines])
+  return useMemo(() => ({ items, profiles, reporting }), [items, profiles, reporting])
 }
