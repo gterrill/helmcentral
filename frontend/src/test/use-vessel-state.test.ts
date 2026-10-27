@@ -1,33 +1,19 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { act, renderHook } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 // use-vessel-state.ts is a thin telemetry consumer over the shared SSE
-// connection, same shape as use-radar-targets.ts / use-gauge-values.ts. Mock
-// the shared telemetry module rather than standing up a real EventSource --
-// use-telemetry-stream.test.ts already covers the transport.
-const subscribeTelemetryMock = vi.fn()
-let capturedListener: ((raw: string) => void) | null = null
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    capturedListener = cb
-    subscribeTelemetryMock(event, cb)
-    return () => {}
-  },
-}))
-
-import { useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+// connection, same shape as use-radar-targets.ts / use-gauge-values.ts. The
+// real stream and store run over the fake EventSource.
+const stream = installFakeTelemetryStream()
 
 // The whole state, through the store's own selector, so each test can read
 // any field it checks.
 const all = (state: VesselStateValue) => state
 const useVesselState = () => useVesselStateSelector(all)
 
-function emit(payload: unknown) {
-  act(() => {
-    capturedListener?.(JSON.stringify(payload))
-  })
-}
+const emit = (payload: unknown) => stream.emit('vessel-state', payload)
 
 const basePayload = {
   status: 'anchored',
@@ -39,11 +25,6 @@ const basePayload = {
   speed_over_ground_kts: 0.4,
   max_gust_kts: { '10m': 12.3, '30m': 14.1, '1h': 15.2, '24h': 20.1 },
 }
-
-beforeEach(() => {
-  subscribeTelemetryMock.mockClear()
-  capturedListener = null
-})
 
 // Item D: every SSE vessel-state tick (1Hz) re-renders App and, before this
 // fix, handed every downstream consumer of maxGustKts a brand new object

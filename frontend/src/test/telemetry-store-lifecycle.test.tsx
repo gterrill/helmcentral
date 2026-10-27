@@ -8,31 +8,21 @@
  * the next reader blanks, or "no alarms", until then.
  *
  * Each test loads the stores fresh, so module state never leaks between them.
+ * The real stream and stores run over the fake EventSource, which replays the
+ * current payload to a late reader as the boat's stream does (ADR 0218).
  */
-import { render, renderHook, act, screen } from '@testing-library/react'
+import { render, renderHook, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
-const listeners = new Map<string, (raw: string) => void>()
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    listeners.set(event, cb)
-    return () => {
-      if (listeners.get(event) === cb) listeners.delete(event)
-    }
-  },
-}))
+const stream = installFakeTelemetryStream()
 
 vi.mock('@/hooks/use-alarm-rules', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-alarm-rules')>()),
   useAlarmLog: () => ({ entries: [], refresh: vi.fn().mockResolvedValue(undefined) }),
 }))
 
-function emit(event: string, payload: unknown) {
-  act(() => {
-    listeners.get(event)?.(JSON.stringify(payload))
-  })
-}
+const emit = (event: string, payload: unknown) => stream.emit(event, payload)
 
 const houseBankLow = {
   rule_id: 'house-bank-low', label: 'House Bank Low', path: 'electrical.batteries.house.capacity.stateOfCharge',
@@ -41,7 +31,6 @@ const houseBankLow = {
 }
 
 beforeEach(() => {
-  listeners.clear()
   vi.resetModules()
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })))
 })

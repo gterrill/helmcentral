@@ -9,6 +9,8 @@
  * App tree).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { landAnchorWatch } from './helpers/anchor-watch-poll'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { App } from '../App'
 
@@ -56,30 +58,9 @@ vi.mock('@/hooks/use-logs', () => ({
 
 // ── hook mocks (mirrors app-sidebar-navigation.test.tsx) ────────────────────────
 
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
-    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
-    headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
-    windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
-    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
-    generatorManualStart: false, generatorManualStartTimer: 0,
-    generatorRunningByCondition: null, generatorRuntime: null,
-    enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
-    gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false
-  })))
 
 
 
-
-
-vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
-    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
-    rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
-    distanceMeters: null, bearingDeg: null,
-    planningDepthM: null, planningTideHeightFt: null,
-    setAnchorHere: vi.fn(), updateRadius: vi.fn(),
-    updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),
-    clearAnchor: vi.fn(),
-  })))
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
@@ -223,6 +204,11 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 function breadcrumbNav() {
   return screen.getByRole('navigation', { name: /breadcrumb/i })
 }
+
+// The stream is up and has said nothing yet: every reading is unknown.
+installFakeTelemetryStream({ seeds: { 'vessel-state': {} } })
+// The first GET /api/anchor-watch has answered: no watch is set.
+beforeEach(() => { landAnchorWatch() })
 
 describe('App header breadcrumb', () => {
   beforeEach(() => {

@@ -6,27 +6,9 @@
  */
 import { act, render, renderHook, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
-class FakeEventSource {
-  static readonly CONNECTING = 0
-  static readonly OPEN = 1
-  static readonly CLOSED = 2
-  static instances: FakeEventSource[] = []
-  readyState = FakeEventSource.CONNECTING
-  onerror: ((ev: Event) => void) | null = null
-  private listeners = new Map<string, Set<(e: Event) => void>>()
-  constructor(public url: string) { FakeEventSource.instances.push(this) }
-  addEventListener(type: string, listener: (e: Event) => void) {
-    let set = this.listeners.get(type)
-    if (!set) this.listeners.set(type, (set = new Set()))
-    set.add(listener)
-  }
-  removeEventListener(type: string, listener: (e: Event) => void) { this.listeners.get(type)?.delete(listener) }
-  close() { this.readyState = FakeEventSource.CLOSED }
-  emit(event: string, payload: unknown) {
-    for (const l of this.listeners.get(event) ?? []) l({ data: JSON.stringify(payload), currentTarget: this } as unknown as MessageEvent)
-  }
-}
+const stream = installFakeTelemetryStream()
 
 const houseBankLow = {
   rule_id: 'house-bank-low', label: 'House Bank Low', path: 'electrical.batteries.house.capacity.stateOfCharge',
@@ -40,9 +22,7 @@ vi.mock('@/hooks/use-alarm-rules', async (importOriginal) => ({
 }))
 
 beforeEach(() => {
-  FakeEventSource.instances = []
   vi.resetModules()
-  vi.stubGlobal('EventSource', FakeEventSource)
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, json: async () => ({}) })))
 })
 
@@ -56,8 +36,8 @@ describe('a store reader that mounts after the seed', () => {
     const { LiveAlarmsDrawer } = await import('@/components/live-surfaces')
     // Something else opens the connection first, as on the boat.
     renderHook(() => useVesselStateSelector((s) => s.latitude))
-    expect(FakeEventSource.instances).toHaveLength(1)
-    act(() => { FakeEventSource.instances[0].emit('alarms', { alarms: [houseBankLow], worst: 'alarm' }) })
+    expect(stream.connections).toBe(1)
+    stream.emit('alarms', { alarms: [houseBankLow], worst: 'alarm' })
 
     render(<LiveAlarmsDrawer />)
 
@@ -69,7 +49,7 @@ describe('a store reader that mounts after the seed', () => {
     const { useVesselStateSelector } = await import('@/hooks/use-vessel-state')
     const { useKnownAlarmList } = await import('@/hooks/use-alarms')
     renderHook(() => useVesselStateSelector((s) => s.latitude))
-    act(() => { FakeEventSource.instances[0].emit('alarms', { alarms: [], worst: 'normal' }) })
+    stream.emit('alarms', { alarms: [], worst: 'normal' })
 
     const { result } = renderHook(() => useKnownAlarmList())
     expect(result.current).toEqual([])
@@ -79,10 +59,8 @@ describe('a store reader that mounts after the seed', () => {
     const { useGaugeValue } = await import('@/hooks/use-gauge-values')
     const { useVesselStateSelector } = await import('@/hooks/use-vessel-state')
     renderHook(() => useGaugeValue('a.path'))
-    act(() => {
-      FakeEventSource.instances[0].emit('vessel-state', { latitude: -20.2747, longitude: 149.0737 })
-      FakeEventSource.instances[0].emit('gauge-values', { values: { 'a.path': 12 }, ages: { 'a.path': 1 } })
-    })
+    stream.emit('vessel-state', { latitude: -20.2747, longitude: 149.0737 })
+    stream.emit('gauge-values', { values: { 'a.path': 12 }, ages: { 'a.path': 1 } })
 
     const lat = renderHook(() => useVesselStateSelector((s) => s.latitude))
     const gauge = renderHook(() => useGaugeValue('a.path'))
@@ -94,8 +72,8 @@ describe('a store reader that mounts after the seed', () => {
     const { useVesselStateSelector } = await import('@/hooks/use-vessel-state')
     const { useKnownAlarmList } = await import('@/hooks/use-alarms')
     renderHook(() => useVesselStateSelector((s) => s.latitude))
-    act(() => { FakeEventSource.instances[0].emit('alarms', { alarms: [houseBankLow], worst: 'alarm' }) })
-    act(() => { FakeEventSource.instances[0].onerror?.(new Event('error')) })
+    stream.emit('alarms', { alarms: [houseBankLow], worst: 'alarm' })
+    stream.error()
 
     // A store that never started has no snapshot to keep; the old frame is gone.
     const { result } = renderHook(() => useKnownAlarmList())
@@ -110,10 +88,13 @@ describe('the boat clock behind a late store', () => {
       const { useKnownAlarmList } = await import('@/hooks/use-alarms')
       const { useVesselClock } = await import('@/hooks/use-vessel-clock')
       renderHook(() => useKnownAlarmList()) // opens the connection; nothing reads vessel-state yet
-      act(() => { FakeEventSource.instances[0].emit('vessel-state', { datetime: '2026-10-27T10:00:00Z', timezone: 'UTC' }) })
+      stream.emit('vessel-state', { datetime: '2026-10-27T10:00:00Z', timezone: 'UTC' })
 
       // Five quiet minutes of heartbeats, so the connection stays up.
-      for (let i = 0; i < 10; i++) act(() => { vi.advanceTimersByTime(30_000); FakeEventSource.instances[0].emit('heartbeat', {}) })
+      for (let i = 0; i < 10; i++) {
+        act(() => { vi.advanceTimersByTime(30_000) })
+        stream.heartbeat()
+      }
       const { result } = renderHook(() => useVesselClock())
 
       expect(result.current.now?.toISOString()).toBe('2026-10-27T10:05:00.000Z')

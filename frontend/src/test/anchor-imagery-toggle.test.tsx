@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { App } from '../App'
 
@@ -35,55 +37,18 @@ vi.mock('@/components/anchor-watch-map', () => ({
   ),
 }))
 
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
-    depth: 3.2,
-    currentDriftKts: 0,
-    currentSetDeg: 0,
-    navigationState: 'at_anchor',
-    latitude: -25.2939,
-    longitude: 152.9103,
-    gnssQualityIndicator: null,
-    gnssHdop: null,
-    gnssSatellites: null,
-    gnssValidationState: null,
-    gnssValidationReason: null,
-    gnssCriticalAlert: false,
-    headingTrue: 265,
-    speedOverGroundKts: 0,
-    windSpeedApparentKts: 5,
-    windAngleApparentDeg: 220,
-    windSide: 'port',
-    windAngleRelativeDeg: 130,
-    maxGustKts: { '10m': 7, '30m': null, '1h': 12, '24h': null },
-    generatorState: 'stopped',
-    generatorManualStart: false,
-    generatorManualStartTimer: 0,
-    generatorRunningByCondition: null,
-    generatorRuntime: 0,
-  })))
-
-
-
-
-
-vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
-    active: true, anchorState: 'set',
-    anchorLat: -25.2939,
-    anchorLon: 152.9103,
-    radiusMeters: 34,
-    rodeDeployedM: 0,
-    seaState: 'calm',
-    seabedType: 'sand',
-    distanceMeters: 26,
-    bearingDeg: 81,
-    planningDepthM: null,
-    planningTideHeightFt: null,
-    setAnchorHere: vi.fn(),
-    updateRadius: vi.fn(),
-    updateRodeAndConditions: vi.fn(),
-    updatePlanningDepth: vi.fn(),
-    clearAnchor: vi.fn(),
-  })))
+const stream = installFakeTelemetryStream()
+beforeEach(() => {
+  stream.seed('vessel-state', {
+    depth: 3.2, current_drift_kts: 0, current_set_deg: 0, status: 'at_anchor',
+    latitude: -25.2939, longitude: 152.9103, gnss_critical_alert: false,
+    heading_true: 265, speed_over_ground_kts: 0,
+    wind_speed_apparent_kts: 5, wind_angle_apparent_deg: 220, wind_side: 'port', wind_angle_relative_deg: 130,
+    max_gust_kts: { '10m': 7, '1h': 12 },
+    generator_state: 'stopped', generator_manual_start: false, generator_manual_start_timer: 0, generator_runtime: 0,
+  })
+  landAnchorWatch({ active: true, lat: -25.2939, lon: 152.9103, radius_meters: 34 })
+})
 
 vi.mock('@/hooks/use-server-trails', () => ({
   useServerTrails: () => ({

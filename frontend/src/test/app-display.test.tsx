@@ -8,8 +8,10 @@
  * (to control which wall displays exist without a real /api/displays fetch).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import { App } from '../App'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
@@ -65,35 +67,16 @@ beforeEach(() => {
   )))
 })
 
-// The navigation state picks the wall's pages; set per test.
-const { mockVesselState } = vi.hoisted(() => ({
-  mockVesselState: { navigationState: null as string | null },
-}))
-
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
-    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: mockVesselState.navigationState, latitude: null, longitude: null,
-    headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
-    windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
-    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
-    generatorManualStart: false, generatorManualStartTimer: 0,
-    generatorRunningByCondition: null, generatorRuntime: null,
-    enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
-    gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false
-  })))
+// The stream carries the boat's state. Its navigation state picks the wall's
+// pages and is set per test; a reader mounting opens the connection, which the
+// seed makes live.
+const stream = installFakeTelemetryStream()
+beforeEach(() => { stream.seed('vessel-state', {}) })
 
 
 
 
 
-vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
-    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
-    rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
-    distanceMeters: null, bearingDeg: null,
-    planningDepthM: null, planningTideHeightFt: null,
-    setAnchorHere: vi.fn(), updateRadius: vi.fn(),
-    updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),
-    clearAnchor: vi.fn(),
-  })))
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
@@ -242,21 +225,6 @@ vi.mock('@/hooks/use-displays', () => ({
   }),
 }))
 
-// This suite's own addition to the deep-link preamble: telemetry status
-// forced per test, rather than left to the real (never-connects) stub.
-const { mockTelemetryStatus } = vi.hoisted(() => ({
-  mockTelemetryStatus: { value: 'connected' as 'connected' | 'reconnecting' | 'disconnected' },
-}))
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  useTelemetryStatus: () => mockTelemetryStatus.value,
-  // No-ops: nothing in this suite drives telemetry events, but several
-  // hooks (useAutopilot, use-gauge-values) subscribe unconditionally on
-  // every render and need a real unsubscribe function back.
-  subscribeTelemetry: () => () => {},
-  subscribeTelemetryStatus: () => () => {},
-}))
-
 // This suite's own addition too: an active alarm forced per test, rather
 // than the real hook's permanently-empty result under the EventSource stub.
 const { mockAlarmsState } = vi.hoisted(() => ({
@@ -380,13 +348,14 @@ function alarm(overrides: Partial<ActiveAlarm> = {}): ActiveAlarm {
 
 // ── tests ─────────────────────────────────────────────────────────────────────
 
+// The first GET /api/anchor-watch has answered: no watch is set.
+beforeEach(() => { landAnchorWatch() })
+
 describe('App at /display/<slug>', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     globalThis.localStorage?.clear()
-    mockTelemetryStatus.value = 'connected'
     mockAlarmsState.alarms = []
-    mockVesselState.navigationState = null
     mockDisplaysState.displays = [FLYBRIDGE]
     mockDisplaysState.loading = false
     mockPagesState.pages = [
@@ -489,9 +458,9 @@ describe('App at /display/<slug>', () => {
   })
 
   it('shows the signal pill while telemetry is reconnecting', () => {
-    mockTelemetryStatus.value = 'reconnecting'
     window.history.replaceState({}, '', '/display/flybridge')
     render(<App />)
+    stream.error()
 
     expect(screen.getByTestId('display-signal-pill')).toHaveTextContent('Reconnecting')
   })
@@ -554,7 +523,7 @@ describe('App at /display/<slug>', () => {
   // The shell reads the navigation state from the vessel-state store for this
   // and nothing else (ADR 0215).
   it('shows only the pages whose condition matches the navigation state', () => {
-    mockVesselState.navigationState = 'motoring'
+    stream.seed('vessel-state', { status: 'motoring' })
     mockPagesState.pages = [
       page('p1', 'At anchor', [DEPTH_TIDE_WIDGET], { display_id: 'd1', dwell_seconds: 30, show_when: 'anchored' }),
       page('p2', 'Under way', [WIND_WIDGET], { display_id: 'd1', dwell_seconds: 30, show_when: 'motoring' }),
@@ -597,9 +566,7 @@ describe('App at /display/<slug> keeps every page of the feed mounted', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     globalThis.localStorage?.clear()
-    mockTelemetryStatus.value = 'connected'
     mockAlarmsState.alarms = []
-    mockVesselState.navigationState = null
     mockDisplaysState.displays = [FLYBRIDGE]
     mockDisplaysState.loading = false
     mockPagesState.pages = [
@@ -665,19 +632,17 @@ describe('App at /display/<slug> keeps every page of the feed mounted', () => {
   })
 
   it('drops a page from the DOM when it leaves the feed', () => {
-    mockVesselState.navigationState = 'anchored'
+    stream.seed('vessel-state', { status: 'anchored' })
     mockPagesState.pages = [
       page('p1', 'Engines', [DEPTH_TIDE_WIDGET], { display_id: 'd1', dwell_seconds: 30 }),
       page('p2', 'Nearby', [ANCHOR_WATCH_WIDGET], { display_id: 'd1', dwell_seconds: 30, show_when: 'anchored' }),
     ]
     window.history.replaceState({}, '', '/display/flybridge')
-    const { rerender } = render(<App />)
+    render(<App />)
     expect(screen.getByTestId('display-anchor-watch-isdark')).toBeInTheDocument()
 
-    mockVesselState.navigationState = 'motoring'
-    rerender(<App />)
-    // The vessel-state store is mocked as a plain value, so nudge the shell.
-    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    // The store drives the shell on its own: no re-render of the App, no key press.
+    stream.emit('vessel-state', { status: 'motoring' })
     expect(screen.queryByTestId('display-anchor-watch-isdark')).not.toBeInTheDocument()
   })
 
@@ -716,7 +681,6 @@ describe('App at /display (diagnostic states)', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     globalThis.localStorage?.clear()
-    mockTelemetryStatus.value = 'connected'
     mockAlarmsState.alarms = []
     mockPagesState.pages = []
     mockPagesState.loading = false
@@ -758,9 +722,7 @@ describe('App at / (dashboard authoring)', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     globalThis.localStorage?.clear()
-    mockTelemetryStatus.value = 'connected'
     mockAlarmsState.alarms = []
-    mockVesselState.navigationState = null
     mockDisplaysState.displays = [FLYBRIDGE]
     mockDisplaysState.loading = false
     mockPagesState.pages = [

@@ -1,17 +1,10 @@
-import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
-
-let listener: ((raw: string) => void) | null = null
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (_event: string, cb: (raw: string) => void) => {
-    listener = cb
-    return () => {}
-  },
-}))
-
+import { renderHook } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 import { useNearbyVessels } from '@/hooks/use-nearby-vessels'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
-const emit = (payload: object) => act(() => { listener?.(JSON.stringify(payload)) })
+const stream = installFakeTelemetryStream()
+const emit = (payload: object) => stream.emit('nearby-vessels', payload)
 
 describe('useNearbyVessels maxRangeM', () => {
   it('is null until a payload carries it', () => {

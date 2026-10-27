@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+import { act, render, screen } from '@testing-library/react'
 
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 
@@ -8,8 +9,13 @@ import { VesselStatusBar } from '@/components/vessel-status-bar'
 // must not read as "Live" just because the last event it ever received is
 // still sitting in state.
 
-const mockSignalkConnected = vi.fn<() => boolean | null>()
-const mockTelemetryStatus = vi.fn<() => 'connected' | 'reconnecting' | 'disconnected'>()
+// The real stream and vessel-state store run over the fake EventSource. A
+// seeded frame is what makes the stream live; the bar reads the source from it.
+const stream = installFakeTelemetryStream()
+
+function signalk(connected: boolean) {
+  stream.seed('vessel-state', { source: connected ? 'signalk' : 'backend-fallback' })
+}
 
 vi.mock('@/hooks/use-vessel-clock', () => ({
   useVesselClock: () => ({
@@ -18,20 +24,9 @@ vi.mock('@/hooks/use-vessel-clock', () => ({
   }),
 }))
 
-vi.mock('@/hooks/use-vessel-state', async () =>
-  (await import('./vessel-state-mock')).vesselStateModule(() => {
-    const connected = mockSignalkConnected()
-    return { source: connected === null ? null : connected ? 'signalk' : 'backend-fallback' }
-  }))
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  useTelemetryStatus: () => mockTelemetryStatus(),
-}))
-
 describe('VesselStatusBar', () => {
   it('shows Live when SignalK and the telemetry stream are both healthy', () => {
-    mockSignalkConnected.mockReturnValue(true)
-    mockTelemetryStatus.mockReturnValue('connected')
+    signalk(true)
 
     render(<VesselStatusBar />)
 
@@ -39,27 +34,38 @@ describe('VesselStatusBar', () => {
   })
 
   it('shows Reconnecting when the telemetry stream is recovering from a permanent close', () => {
-    mockSignalkConnected.mockReturnValue(true)
-    mockTelemetryStatus.mockReturnValue('reconnecting')
+    signalk(true)
 
     render(<VesselStatusBar />)
+    stream.error({ closed: true })
 
     expect(screen.getByText('Reconnecting')).toBeInTheDocument()
     expect(screen.queryByText('Live')).not.toBeInTheDocument()
   })
 
-  it('shows No Signal when the telemetry stream has no subscribers connected', () => {
-    mockSignalkConnected.mockReturnValue(true)
-    mockTelemetryStatus.mockReturnValue('disconnected')
+  // The stream reads "disconnected" only when it has no subscribers at all.
+  // The bar's own vessel-state reader is one and stays subscribed, so with the
+  // bar on screen that status cannot occur: the real outage is Reconnecting
+  // until the redial's seed brings the badge back.
+  it('goes back to Live when the redial after a permanent close is seeded', () => {
+    vi.useFakeTimers()
+    try {
+      signalk(true)
+      render(<VesselStatusBar />)
+      stream.error({ closed: true })
+      expect(screen.getByText('Reconnecting')).toBeInTheDocument()
 
-    render(<VesselStatusBar />)
+      act(() => { vi.advanceTimersByTime(1_000) })
 
-    expect(screen.getByText('No Signal')).toBeInTheDocument()
+      expect(stream.connections).toBe(2)
+      expect(screen.getByText('Live')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('shows No Signal when SignalK itself is unreachable, even if the browser stream is connected', () => {
-    mockSignalkConnected.mockReturnValue(false)
-    mockTelemetryStatus.mockReturnValue('connected')
+    signalk(false)
 
     render(<VesselStatusBar />)
 
@@ -69,8 +75,7 @@ describe('VesselStatusBar', () => {
   // ── the logout affordance (ADR 0040) ─────────────────────────────────────
 
   it('shows no logout control when onLogout is not provided — mode:none, no behaviour change', () => {
-    mockSignalkConnected.mockReturnValue(true)
-    mockTelemetryStatus.mockReturnValue('connected')
+    signalk(true)
 
     render(<VesselStatusBar />)
 
@@ -78,8 +83,7 @@ describe('VesselStatusBar', () => {
   })
 
   it('shows a logout control that calls onLogout, and names the signed-in user, under mode:signalk', () => {
-    mockSignalkConnected.mockReturnValue(true)
-    mockTelemetryStatus.mockReturnValue('connected')
+    signalk(true)
     const onLogout = vi.fn()
 
     render(<VesselStatusBar username="skipper" onLogout={onLogout} />)
@@ -91,8 +95,7 @@ describe('VesselStatusBar', () => {
   // ── the Day / Night / Auto button ────────────────────────────────────────
 
   function renderBar(props: React.ComponentProps<typeof VesselStatusBar>) {
-    mockSignalkConnected.mockReturnValue(true)
-    mockTelemetryStatus.mockReturnValue('connected')
+    signalk(true)
     return render(<VesselStatusBar {...props} />)
   }
 

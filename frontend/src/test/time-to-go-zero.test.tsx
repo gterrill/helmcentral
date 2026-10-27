@@ -1,4 +1,7 @@
 import { describe, it, vi, beforeEach, expect } from 'vitest'
+import { landAnchorWatch } from './helpers/anchor-watch-poll'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+import * as live from './fixtures/live-stream-payloads'
 import { render, screen, within } from '@testing-library/react'
 import { App } from '../App'
 
@@ -18,27 +21,10 @@ vi.mock('@/hooks/use-auth', () => ({
   }),
 }))
 
-const electricalStateMock = vi.hoisted(() => ({
-  batterySocPercent: 100,
-  batteryCapacityAh: 1440,
-  chargingCurrentA: -73.8,
-  chargingPowerW: -1988,
-  solarOutputW: 0,
-  acOutputW: 1494,
-  dc12vPowerW: 422.2,
-  dc12vCurrentA: 15.7,
-  voltageReadoutV: 26.9, voltageReadoutLabel: "Aft House",
-  acLoadsW: 1494,
-  generatorRealPowerW: 0, generatorConfigured: true,
-  alternator0: { currentA: null, voltageV: null, powerW: null, temperatureC: null },
-  alternator1: { currentA: null, voltageV: null, powerW: null, temperatureC: null },
-  charger0CurrentA: null,
-  charger0AcIn1CurrentA: null,
-  charger0ChargingMode: null,
-  charger0Error: null,
-  batteryRatePercentPerHour: -0.2,
-  timeToGoHours: 0,
-}))
+// The house bank is full (100 %), 1440 Ah. The stream carries the figures and
+// the store works out the rate and time to go from them.
+const stream = installFakeTelemetryStream()
+const bank = { ...live.ELECTRICAL, battery_soc_percent: 100, battery_capacity_ah: 1440 }
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -46,35 +32,9 @@ beforeEach(() => {
     json: async () => ({}),
   }))
   vi.spyOn(console, 'error').mockImplementation(() => {})
-  electricalStateMock.timeToGoHours = 0
+  // Full and charging: time until full computes to zero.
+  stream.seed('electrical-state', { ...bank, charging_current_a: 73.8 })
 })
-
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
-    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
-    headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
-    windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
-    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
-    generatorManualStart: false, generatorManualStartTimer: 0,
-    generatorRunningByCondition: null, generatorRuntime: null,
-    enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
-    gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false,
-  })))
-
-vi.mock('@/hooks/use-electrical-state', async () =>
-  (await import('./electrical-state-mock')).electricalStateModule(() => electricalStateMock))
-
-
-
-
-vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
-    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
-    rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
-    distanceMeters: null, bearingDeg: null,
-    planningDepthM: null, planningTideHeightFt: null,
-    setAnchorHere: vi.fn(), updateRadius: vi.fn(),
-    updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),
-    clearAnchor: vi.fn(),
-  })))
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
@@ -176,6 +136,9 @@ vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, vi.fn()],
 }))
 
+// The first GET /api/anchor-watch has answered: no watch is set.
+beforeEach(() => { landAnchorWatch() })
+
 describe('Battery tile time to go', () => {
   it('shows an em dash when time to go computes to zero', () => {
     render(<App />)
@@ -189,10 +152,13 @@ describe('Battery tile time to go', () => {
     const timeBlock = card.querySelector('.text-right') as HTMLElement
     expect(timeBlock).not.toBeNull()
     expect(timeBlock).toHaveTextContent('—')
+    // The seed arrived: the tile shows the bank's 100 % charge, not an unknown.
+    expect(card).toHaveTextContent('100')
   })
 
   it('shows rounded weeks for very large remaining time', () => {
-    electricalStateMock.timeToGoHours = 2057.15
+    // 0.7 A out of 1440 Ah at 100 % is 2057 hours to empty.
+    stream.seed('electrical-state', { ...bank, charging_current_a: -0.7 })
 
     render(<App />)
 
@@ -202,5 +168,6 @@ describe('Battery tile time to go', () => {
     const timeBlock = card.querySelector('.text-right') as HTMLElement
     expect(timeBlock).not.toBeNull()
     expect(within(timeBlock).getByText('12w')).toBeInTheDocument()
+    expect(timeBlock).toHaveTextContent('To empty')
   })
 })

@@ -12,6 +12,8 @@
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { landAnchorWatch } from './helpers/anchor-watch-poll'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 import { App } from '../App'
 import type { DashboardPage } from '@/hooks/use-dashboard-pages'
@@ -19,30 +21,9 @@ import { setViewportWidth } from './viewport'
 
 // ── hook mocks (same harness as app-gauge-group-duplicate.test.tsx) ────────
 
-vi.mock('@/hooks/use-vessel-state', async () => (await import('./vessel-state-mock')).vesselStateModule(() => ({
-    depth: null, currentDriftKts: null, currentSetDeg: null, navigationState: null, latitude: null, longitude: null,
-    headingTrue: null, speedOverGroundKts: null, windSpeedApparentKts: null,
-    windAngleApparentDeg: null, windSide: null, windAngleRelativeDeg: null,
-    maxGustKts: { '10m': null, '30m': null, '1h': null, '24h': null }, generatorState: null,
-    generatorManualStart: false, generatorManualStartTimer: 0,
-    generatorRunningByCondition: null, generatorRuntime: null,
-    enginesRunning: null, gnssQualityIndicator: null, gnssHdop: null,
-    gnssValidationState: null, gnssValidationReason: null, gnssCriticalAlert: false
-  })))
 
 
 
-
-
-vi.mock('@/hooks/use-anchor-watch', async () => (await import('./anchor-watch-mock')).anchorWatchModule(() => ({
-    active: false, anchorState: 'none', anchorLat: null, anchorLon: null, radiusMeters: 0,
-    rodeDeployedM: 0, seaState: 'calm', seabedType: 'sand',
-    distanceMeters: null, bearingDeg: null,
-    planningDepthM: null, planningTideHeightFt: null,
-    setAnchorHere: vi.fn(), updateRadius: vi.fn(),
-    updateRodeAndConditions: vi.fn(), updatePlanningDepth: vi.fn(),
-    clearAnchor: vi.fn(),
-  })))
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
@@ -213,6 +194,11 @@ async function createNewPage(): Promise<void> {
   // toolbar's name field to actually mount before interacting with it.
   await screen.findByLabelText('Page name')
 }
+
+// The stream is up and has said nothing yet: every reading is unknown.
+installFakeTelemetryStream({ seeds: { 'vessel-state': {} } })
+// The first GET /api/anchor-watch has answered: no watch is set.
+beforeEach(() => { landAnchorWatch() })
 
 describe('creating a dashboard page', () => {
   it('names the new page in place: no dialog, an empty focused field with a placeholder', async () => {

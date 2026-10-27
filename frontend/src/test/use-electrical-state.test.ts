@@ -1,29 +1,14 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest'
-import { act, renderHook } from '@testing-library/react'
-
-let capturedListener: ((raw: string) => void) | null = null
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (_event: string, cb: (raw: string) => void) => {
-    capturedListener = cb
-    return () => {}
-  },
-}))
-
+import { describe, expect, it } from 'vitest'
+import { renderHook } from '@testing-library/react'
 import { useElectricalSelector, type ElectricalStateValue } from '@/hooks/use-electrical-state'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+
+const stream = installFakeTelemetryStream()
 
 const selectAll = (state: ElectricalStateValue) => state
 const useElectricalState = () => useElectricalSelector(selectAll)
 
-function emit(payload: unknown) {
-  act(() => {
-    capturedListener?.(JSON.stringify(payload))
-  })
-}
-
-beforeEach(() => {
-  capturedListener = null
-})
+const emit = (payload: unknown) => stream.emit('electrical-state', payload)
 
 describe('useElectricalState charge rate', () => {
   it('reports no rate when the house bank capacity is unknown, even as SoC changes', () => {

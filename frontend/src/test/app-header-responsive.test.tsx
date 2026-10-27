@@ -9,7 +9,8 @@
  * screenshot at the Phase 4 viewport matrix instead.
  */
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 import { DashboardPageSwitcher } from '@/components/dashboard-page-switcher'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
@@ -22,8 +23,8 @@ vi.mock('@/hooks/use-vessel-clock', () => ({
   }),
 }))
 
-vi.mock('@/hooks/use-vessel-state', async () =>
-  (await import('./vessel-state-mock')).vesselStateModule(() => ({ source: 'signalk' })))
+const stream = installFakeTelemetryStream()
+beforeEach(() => { stream.seed('vessel-state', { source: 'signalk' }) })
 
 const pages = [
   { id: 'p1', name: 'Helm', widgets: [], created_at: '', updated_at: '' },

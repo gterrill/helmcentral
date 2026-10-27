@@ -3,29 +3,19 @@
  * it, while a tick changes nothing a tile shows, and claims nothing before its
  * first event. Payloads are the live server's (fixtures/live-stream-payloads.ts).
  */
-import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { describe, expect, it } from 'vitest'
 
 import * as live from './fixtures/live-stream-payloads'
-
-const listeners = new Map<string, (raw: string) => void>()
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    listeners.set(event, cb)
-    return () => {}
-  },
-}))
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 import { useNearbyVesselList, useNearbyVessels } from '@/hooks/use-nearby-vessels'
 import { useRadarTargets } from '@/hooks/use-radar-targets'
 import { useSolarState } from '@/hooks/use-solar-state'
 import { useTankAlarmLevels, useTanksState } from '@/hooks/use-tanks-state'
 
-function emit(event: string, payload: unknown) {
-  act(() => {
-    listeners.get(event)?.(JSON.stringify(payload))
-  })
-}
+const stream = installFakeTelemetryStream()
+const emit = (event: string, payload: unknown) => stream.emit(event, payload)
 
 describe('solar store', () => {
   it('has no controller list before the first event', () => {

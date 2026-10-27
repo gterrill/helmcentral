@@ -1,38 +1,28 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { act, renderHook } from '@testing-library/react'
-
-// use-gauge-values.ts is a thin telemetry consumer, same shape as
-// use-radar-targets.ts: it subscribes to one SSE event and maps the payload.
-// Mock the shared telemetry module rather than standing up a real
-// EventSource -- use-telemetry-stream.test.ts already covers the transport.
-const subscribeTelemetryMock = vi.fn()
-let capturedListener: ((raw: string) => void) | null = null
-
-vi.mock('@/hooks/use-telemetry-stream', () => ({
-  subscribeTelemetry: (event: string, cb: (raw: string) => void) => {
-    capturedListener = cb
-    subscribeTelemetryMock(event, cb)
-    return () => {}
-  },
-}))
-
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderHook } from '@testing-library/react'
 import {
   useEngineStatus,
   useGaugeAge,
   useGaugeSubset,
   useGaugeValue,
 } from '@/hooks/use-gauge-values'
+import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
-function emit(payload: unknown) {
-  act(() => {
-    capturedListener?.(JSON.stringify(payload))
-  })
-}
-
-beforeEach(() => {
-  subscribeTelemetryMock.mockClear()
-  capturedListener = null
+// use-gauge-values.ts is a thin telemetry consumer, same shape as
+// use-radar-targets.ts: it reads one SSE event and maps the payload. The real
+// stream and store run over the fake EventSource.
+const stream = installFakeTelemetryStream()
+// The real stream, with its subscribeTelemetry counted: a store is meant to
+// subscribe to its event once, however many tiles read it.
+vi.mock('@/hooks/use-telemetry-stream', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-telemetry-stream')>()
+  return { ...actual, subscribeTelemetry: vi.fn(actual.subscribeTelemetry) }
 })
+const subscriptionsTo = (event: string) =>
+  vi.mocked(subscribeTelemetry).mock.calls.filter(([name]) => name === event).length
+beforeEach(() => { vi.mocked(subscribeTelemetry).mockClear() })
+const emit = (payload: unknown) => stream.emit('gauge-values', payload)
 
 /**
  * ADR 0083: ages ride the same gauge-values event the values do, rather than
@@ -40,9 +30,10 @@ beforeEach(() => {
  * the same tick.
  */
 describe('useGaugeAge', () => {
-  it('subscribes to the same gauge-values event the values ride', () => {
-    renderHook(() => useGaugeAge('a'))
-    expect(subscribeTelemetryMock).toHaveBeenCalledWith('gauge-values', expect.any(Function))
+  it('reads the same gauge-values event the values ride', () => {
+    const { result } = renderHook(() => useGaugeAge('a'))
+    emit({ values: { a: 1 }, ages: { a: 2 } })
+    expect(result.current).toBe(2)
   })
 
   it('starts unknown', () => {
@@ -66,17 +57,16 @@ describe('useGaugeAge', () => {
 
   it('ignores a malformed payload rather than throwing', () => {
     const { result } = renderHook(() => useGaugeAge('a'))
-    act(() => {
-      capturedListener?.('not json')
-    })
+    stream.emit('gauge-values', 'not json')
     expect(result.current).toBeNull()
   })
 })
 
 describe('useGaugeValue', () => {
-  it('subscribes to the gauge-values event', () => {
-    renderHook(() => useGaugeValue('a'))
-    expect(subscribeTelemetryMock).toHaveBeenCalledWith('gauge-values', expect.any(Function))
+  it('reads the gauge-values event', () => {
+    const { result } = renderHook(() => useGaugeValue('a'))
+    emit({ values: { a: 1 }, ages: {} })
+    expect(result.current).toBe(1)
   })
 
   it('starts with no value', () => {
@@ -92,21 +82,19 @@ describe('useGaugeValue', () => {
 
   it('ignores a malformed payload rather than throwing', () => {
     const { result } = renderHook(() => useGaugeValue('a'))
-    act(() => {
-      capturedListener?.('not json')
-    })
+    stream.emit('gauge-values', 'not json')
     expect(result.current).toBeNull()
   })
 })
 
 describe('shared subscription', () => {
-  it('subscribes to gauge-values exactly once when several readers are mounted together', () => {
+  it('subscribes to gauge-values once for several readers mounted together', () => {
     renderHook(() => {
       useGaugeValue('a')
       useGaugeAge('a')
     })
 
-    expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
+    expect(subscriptionsTo('gauge-values')).toBe(1)
   })
 
   it('keeps values and ages in sync from one shared emit', () => {
@@ -220,7 +208,7 @@ describe('per-path selectors', () => {
       useGaugeSubset(['a', 'b'])
       useEngineStatus('port')
     })
-    expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
+    expect(subscriptionsTo('gauge-values')).toBe(1)
     parse.mockClear()
     emit({ values: { a: 1 }, ages: { a: 1 } })
     expect(parse).toHaveBeenCalledTimes(1)
@@ -238,7 +226,7 @@ describe('store lifetime', () => {
     // the next tick: it must show the reading, not a blank.
     const next = renderHook(() => ({ value: useGaugeValue('a'), age: useGaugeAge('a') }))
     expect(next.result.current).toEqual({ value: 7, age: 1 })
-    expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
+    expect(subscriptionsTo('gauge-values')).toBe(1)
 
     next.unmount()
   })
@@ -252,7 +240,7 @@ describe('store lifetime', () => {
     tile.unmount()
     const next = renderHook(() => useGaugeValue('a'))
     expect(next.result.current).toBe(7)
-    expect(subscribeTelemetryMock).toHaveBeenCalledTimes(1)
+    expect(subscriptionsTo('gauge-values')).toBe(1)
   })
 })
 
