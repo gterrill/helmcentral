@@ -133,14 +133,29 @@ const getControls = () => controls
 // for a given autopilot, so it is fetched once, for the first tile to mount,
 // and again only if a pilot appears (or goes) after the fact.
 //
+// A failed probe is retried every PROBE_RETRY_MS for as long as at least one
+// tile is mounted (wall pages stay mounted, so a mount alone never recovers),
+// and on the next mount if none is. The error stays up until a probe succeeds.
+//
 // A failed probe leaves the list empty and records why, rather than
 // substituting a plausible default set: offering modes the pilot may not
 // support would be exactly the kind of guess the project forbids, and the tile
 // disables the selector and shows this message instead.
 let probedFor: boolean | null = null
 let probeId = 0
+const PROBE_RETRY_MS = 30_000
+let consumers = 0
+let retryTimer: ReturnType<typeof setTimeout> | null = null
+// What the tiles last asked about, so a retry never re-asks a stale answer.
+let wantedPresent = false
+
+function clearRetry(): void {
+  if (retryTimer !== null) clearTimeout(retryTimer)
+  retryTimer = null
+}
 
 function probeCapabilities(present: boolean): void {
+  wantedPresent = present
   if (probedFor === present) return
   probedFor = present
   const id = (probeId += 1)
@@ -148,9 +163,19 @@ function probeCapabilities(present: boolean): void {
     try {
       const body = await apiRequest<AutopilotCapabilityBody>('/api/autopilot')
       if (id !== probeId) return
+      clearRetry()
       setControls({ availableModes: body.options?.modes ?? [], capabilityError: null })
     } catch (err) {
       if (id !== probeId) return
+      // Forget the probe so the next tile to mount asks again.
+      probedFor = null
+      clearRetry()
+      if (consumers > 0) {
+        retryTimer = setTimeout(() => {
+          retryTimer = null
+          if (consumers > 0) probeCapabilities(wantedPresent)
+        }, PROBE_RETRY_MS)
+      }
       setControls({ availableModes: [], capabilityError: err instanceof Error ? err.message : 'Could not read autopilot capabilities' })
     }
   })()
@@ -160,6 +185,8 @@ onTelemetryTestReset(() => {
   controls = NO_CONTROLS
   probedFor = null
   probeId += 1
+  consumers = 0
+  clearRetry()
 })
 
 async function send(action: string, path: string, method: string, body?: unknown): Promise<void> {
@@ -207,6 +234,13 @@ export function useAutopilot() {
   const state = useAutopilotState()
   const { pending, error, availableModes, capabilityError } = useSyncExternalStore(subscribeControls, getControls, getControls)
   const present = store.useSelector(selectPresent)
+  useEffect(() => {
+    consumers += 1
+    return () => {
+      consumers = Math.max(0, consumers - 1)
+      if (consumers === 0) clearRetry()
+    }
+  }, [])
   useEffect(() => { probeCapabilities(present) }, [present])
 
   return {

@@ -11,47 +11,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
-### Fixed
-
-- **The Nearby map's boat trail keeps up with the boat.** The trail used to
-  redraw only about once a minute, and it stopped altogether while nearby
-  places were failing to load. It now follows the boat every few seconds.
-- **The dashboard does much less work while it sits open.** Every time
-  Helmcentral checked the forecast, the tide, the route or the CZone
-  switches, it used to redraw every tile on the page, even when nothing had
-  changed. Now a tile redraws only when something it shows changes, so an
-  older tablet or the wall display has more to spare.
-- **A wall display with a map page no longer slows down and freezes after a few
-  hours.** The screen used to rebuild every tile on each page change, and a
-  small kiosk board never gave that memory back. Pages now stay loaded and only
-  the one showing is visible. A camera embed still loads when its page comes up
-  and lets go when it leaves.
-- **The passage map no longer keeps redrawing while the replay is paused.** With
-  3D on, the map redrew many times a second even when nothing was playing, and
-  Chrome flagged the Passages tab as slowing the browser. It now draws only
-  when the boat moves.
-- **Tiles no longer say there's nothing there before the boat has reported.**
-  When a page first opens, the Autopilot tile used to say no autopilot was
-  detected, the Solar tile said there was no controller data, and the
-  Alternator tile said the engines weren't running, all before Helmcentral had
-  heard a word from the boat. Each now shows a dash until its first reading
-  arrives. The Alternator tile also shows `--`, not "Engines not running", when
-  no engine is set up in the roles or none is reporting, because it can't tell
-  either way.
-- **The header no longer says "At Anchor" before the boat has reported.** When
-  a page first opened, the Vessel tile showed "At Anchor" for a moment whether
-  or not the boat was. It now shows only the model until the boat's state
-  arrives. The clock shows dashes until it has the boat's time, rather than
-  the time on the screen you are using.
-- **The anchor map no longer says there's no radar before the radar has
-  reported.** When a page first opened, the greyed radar button on the anchor
-  map said no radar was configured. It now says it is waiting for radar data
-  until the first radar report arrives.
-- **The anchor watch's automatic raise notice no longer comes back on every
-  reload.** After Helmcentral raised a watch on its own, opening or reloading
-  the dashboard showed "Anchor watch raised automatically" again, as if it had
-  just happened. It now shows only when a raise happens while the page is
-  open.
+## [0.56.0] - 2026-10-28
 
 ### Breaking
 
@@ -111,6 +71,45 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The Nearby map's boat trail keeps up with the boat.** The trail used to
+  redraw only about once a minute, and it stopped altogether while nearby
+  places were failing to load. It now follows the boat every few seconds.
+- **The dashboard does much less work while it sits open.** Every time
+  Helmcentral checked the forecast, the tide, the route or the CZone
+  switches, it used to redraw every tile on the page, even when nothing had
+  changed. Now a tile redraws only when something it shows changes, so an
+  older tablet or the wall display has more to spare.
+- **A wall display with a map page no longer slows down and freezes after a few
+  hours.** The screen used to rebuild every tile on each page change, and a
+  small kiosk board never gave that memory back. Pages now stay loaded and only
+  the one showing is visible. A camera embed still loads when its page comes up
+  and lets go when it leaves.
+- **The passage map no longer keeps redrawing while the replay is paused.** With
+  3D on, the map redrew many times a second even when nothing was playing, and
+  Chrome flagged the Passages tab as slowing the browser. It now draws only
+  when the boat moves.
+- **Tiles no longer say there's nothing there before the boat has reported.**
+  When a page first opens, the Autopilot tile used to say no autopilot was
+  detected, the Solar tile said there was no controller data, and the
+  Alternator tile said the engines weren't running, all before Helmcentral had
+  heard a word from the boat. Each now shows a dash until its first reading
+  arrives. The Alternator tile also shows `--`, not "Engines not running", when
+  no engine is set up in the roles or none is reporting, because it can't tell
+  either way.
+- **The header no longer says "At Anchor" before the boat has reported.** When
+  a page first opened, the Vessel tile showed "At Anchor" for a moment whether
+  or not the boat was. It now shows only the model until the boat's state
+  arrives. The clock shows dashes until it has the boat's time, rather than
+  the time on the screen you are using.
+- **The anchor map no longer says there's no radar before the radar has
+  reported.** When a page first opened, the greyed radar button on the anchor
+  map said no radar was configured. It now says it is waiting for radar data
+  until the first radar report arrives.
+- **The anchor watch's automatic raise notice no longer comes back on every
+  reload.** After Helmcentral raised a watch on its own, opening or reloading
+  the dashboard showed "Anchor watch raised automatically" again, as if it had
+  just happened. It now shows only when a raise happens while the page is
+  open.
 - **Documents, Passages, Inventory and Settings no longer redraw on every
   instrument update.** They sit still until something on the page changes, so
   they use less battery and processor time, and the Passages map stays smooth.
@@ -1980,7 +1979,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.55.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.56.0...HEAD
+[0.56.0]: https://github.com/gterrill/helmcentral/compare/v0.55.0...v0.56.0
 [0.55.0]: https://github.com/gterrill/helmcentral/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/gterrill/helmcentral/compare/v0.53.0...v0.54.0
 [0.53.0]: https://github.com/gterrill/helmcentral/compare/v0.52.0...v0.53.0

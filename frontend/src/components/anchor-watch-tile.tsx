@@ -357,7 +357,7 @@ const ANCHOR_FIELDS = [
  * The anchor watch tile. It reads the watch record, applies the live fix to it
  * (distance, bearing, drag state), and adds depth, current, heading, the tide
  * a drop records, the collision colours, the pins, the trails and the AIS and
- * radar contacts. The trails poll only while the tile is on screen.
+ * radar contacts. The trails poll while the tile is mounted.
  */
 export const LiveAnchorWatchTile = memo(function LiveAnchorWatchTile(props: Omit<ComponentProps<typeof AnchorWatchTile>,
   'watch' | 'aisCollisionAlarms' | 'lastUpdateAgeS' | 'lat' | 'lon' | 'depthMeters' | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'vesselHeadingDeg'
