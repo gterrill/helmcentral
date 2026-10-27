@@ -1,8 +1,7 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 
-import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { ageFromPayload, shownAge } from '@/lib/staleness'
-import { createTelemetryStore, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, sameShallow, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 /**
  * Current values for, and the age behind, every path a gauge is bound to.
@@ -65,13 +64,6 @@ const valueKey = (path: string) => `value:${path}`
 const ageKey = (path: string) => `age:${path}`
 const engineKey = (id: string) => `engine:${id}`
 
-function shallowEqual(a: PathMap, b: PathMap): boolean {
-  if (a === b) return true
-  const aKeys = Object.keys(a)
-  if (aKeys.length !== Object.keys(b).length) return false
-  return aKeys.every((key) => key in b && a[key] === b[key])
-}
-
 function sameStatus(a: EngineStatus | undefined, b: EngineStatus | undefined): boolean {
   return a?.state === b?.state && a?.lastUpdate === b?.lastUpdate
 }
@@ -92,14 +84,8 @@ const sameNumber = (a: number | null | undefined, b: number | null | undefined) 
 
 type EnginesPayload = Record<string, { state?: string; last_update?: string }>
 
-function applyGaugeValuesEvent(previous: GaugeState, raw: string): TelemetryUpdate<GaugeState> | null {
-  let payload: { values?: PathMap; ages?: Record<string, number>; engines?: EnginesPayload }
-  try {
-    payload = JSON.parse(raw) as { values?: PathMap; ages?: Record<string, number>; engines?: EnginesPayload }
-  } catch (err) {
-    console.error('Failed to parse gauge-values event:', err)
-    return null
-  }
+function applyGaugeValuesEvent(previous: GaugeState, data: unknown): TelemetryUpdate<GaugeState> | null {
+  const payload = data as { values?: PathMap; ages?: Record<string, number>; engines?: EnginesPayload }
 
   const nextValues = payload.values ?? {}
 
@@ -147,11 +133,7 @@ function applyGaugeValuesEvent(previous: GaugeState, raw: string): TelemetryUpda
   }
 }
 
-// Read at start, not at import: a module that only imports this one's
-// helpers or types never touches the stream.
-const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
-
-const store = createTelemetryStore(listenToStream, 'gauge-values', INITIAL, applyGaugeValuesEvent)
+const store = createTelemetryStore('gauge-values', INITIAL, applyGaugeValuesEvent)
 
 /** The raw SI value on one path, or null when the event does not carry it. */
 export function useGaugeValue(path: string): number | null {
@@ -194,7 +176,7 @@ export function useGaugeSubset(paths: readonly string[]): GaugeSubset {
     const list = key === '' ? [] : key.split('\n')
     const values = pick(valuesSnapshot, list)
     const ages = pick(agesSnapshot, list)
-    const subset = prev && prev.key === key && shallowEqual(prev.subset.values, values) && shallowEqual(prev.subset.ages, ages)
+    const subset = prev && prev.key === key && sameShallow(prev.subset.values, values) && sameShallow(prev.subset.ages, ages)
       ? prev.subset
       : { values, ages }
     cache.current = { key, values: valuesSnapshot, ages: agesSnapshot, subset }

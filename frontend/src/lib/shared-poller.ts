@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react'
 
-import { onTelemetryTestReset } from '@/lib/telemetry-store'
+import { onTelemetryTestReset } from '@/lib/test-reset'
 
 /**
  * One module-level poll shared by every reader of the same data (ADR 0215):

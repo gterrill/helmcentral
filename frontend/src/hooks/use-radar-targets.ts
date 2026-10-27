@@ -1,8 +1,7 @@
 import { useMemo } from 'react'
 
-import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { shownAge } from '@/lib/staleness'
-import { createTelemetryStore, keepUnchangedItems, sameShallow, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, keepUnchangedItems, sameShallow, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 /**
  * Three source values, not two, so a disabled integration and a broken one
@@ -125,17 +124,18 @@ function sanitizeTarget(item: RadarTarget): RadarTarget | null {
   }
 }
 
-/** What the radar store holds. `received` is false until the first radar-targets event. */
+/**
+ * What the radar store holds. `source` is null until the first radar-targets
+ * event: the store has not been told whether the integration is on, and
+ * 'disabled' would be a claim that it is off.
+ */
 export interface RadarTargetsValue {
-  received: boolean
   targets: RadarTarget[]
   radars: RadarInfo[]
-  source: RadarSource
+  source: RadarSource | null
 }
 
-// 'disabled' before the first event: the tile shows "--" for it, which claims
-// nothing either way.
-const NOT_RECEIVED: RadarTargetsValue = { received: false, targets: [], radars: [], source: 'disabled' }
+const INITIAL: RadarTargetsValue = { targets: [], radars: [], source: null }
 
 /**
  * Every field of a target but its age, which compares on what a tile shows for
@@ -153,41 +153,30 @@ function sameTarget(a: RadarTarget, b: RadarTarget): boolean {
  * sent up to every two seconds. A target or radar that reads the same keeps
  * its object, and a tick that changes nothing keeps the snapshot.
  */
-function applyRadarTargets(previous: RadarTargetsValue, raw: string): TelemetryUpdate<RadarTargetsValue> | null {
-  let data: RadarTargetsResponse
-  try {
-    data = JSON.parse(raw) as RadarTargetsResponse
-  } catch (err) {
-    console.error('Failed to parse radar targets event:', err)
-    return null
-  }
+function applyRadarTargets(previous: RadarTargetsValue, payload: unknown): TelemetryUpdate<RadarTargetsValue> | null {
+  const data = payload as RadarTargetsResponse
   const radarList = Array.isArray(data.radars) ? data.radars : []
   const targetList = Array.isArray(data.targets) ? data.targets : []
-  const prior = previous.received ? previous : null
-  const radars = keepUnchangedItems(prior?.radars ?? null, radarList.map(sanitizeRadar).filter((r): r is RadarInfo => r !== null), (r) => r.id, sameShallow)
-  const targets = keepUnchangedItems(prior?.targets ?? null, targetList.map(sanitizeTarget).filter((t): t is RadarTarget => t !== null), (t) => t.id, sameTarget)
+  const radars = keepUnchangedItems(previous.radars, radarList.map(sanitizeRadar).filter((r): r is RadarInfo => r !== null), (r) => r.id, sameShallow)
+  const targets = keepUnchangedItems(previous.targets, targetList.map(sanitizeTarget).filter((t): t is RadarTarget => t !== null), (t) => t.id, sameTarget)
   // An unrecognised source string fails closed to 'disabled' rather than
   // propagating an unknown value the tile has no treatment for.
   const source: RadarSource = isRadarSource(data.source) ? data.source : 'disabled'
-  if (prior && radars === prior.radars && targets === prior.targets && source === prior.source) return null
-  return { state: { received: true, targets, radars, source } }
+  if (radars === previous.radars && targets === previous.targets && source === previous.source) return null
+  return { state: { targets, radars, source } }
 }
 
-// Read at start, not at import: a module that only imports this one's
-// helpers or types never touches the stream.
-const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
-
-const store = createTelemetryStore(listenToStream, 'radar-targets', NOT_RECEIVED, applyRadarTargets)
+const store = createTelemetryStore('radar-targets', INITIAL, applyRadarTargets)
 
 const selectAll = (state: RadarTargetsValue) => state
 
-/** The targets, the radars and the source, `loading` until the first event. */
+/** The targets, the radars and the source (null until the first event), `loading` until the first event. */
 export function useRadarTargets() {
-  const state = store.useSelector(selectAll)
+  const heard = store.useHeardSelector(selectAll)
   return useMemo(() => ({
-    targets: state.targets,
-    radars: state.radars,
-    source: state.source,
-    loading: !state.received,
-  }), [state])
+    targets: (heard ?? INITIAL).targets,
+    radars: (heard ?? INITIAL).radars,
+    source: (heard ?? INITIAL).source,
+    loading: heard === null,
+  }), [heard])
 }

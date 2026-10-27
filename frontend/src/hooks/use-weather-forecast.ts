@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useApiQuery, useApiQuerySelector } from '@/lib/api-query';
-import { sameShallow } from '@/lib/telemetry-store';
+import { sameShallow } from '@/lib/same-value'
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 import type { NowcastPoint } from '@/lib/nowcast';

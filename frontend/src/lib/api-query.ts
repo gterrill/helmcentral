@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
 import { apiBaseUrl } from '@/config/api'
-import { sameJSON } from '@/lib/telemetry-store'
+import { sameJSON } from '@/lib/same-value'
 
 // One request helper and one keyed read cache under the per-resource hooks
 // (ADR 0173). The names (useApiQuery, setQueryData, invalidateQueries,

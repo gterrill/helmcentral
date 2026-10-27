@@ -1,8 +1,8 @@
 import { useEffect, useSyncExternalStore } from 'react'
 
-import { subscribeTelemetry } from '@/hooks/use-telemetry-stream'
 import { apiRequest } from '@/lib/api-query'
-import { createTelemetryStore, onTelemetryTestReset, type SubscribeTelemetry, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { onTelemetryTestReset } from '@/lib/test-reset'
 
 export type AutopilotSide = 'port' | 'starboard'
 
@@ -65,37 +65,26 @@ function sameAutopilot(a: AutopilotState, b: AutopilotState): boolean {
 }
 
 /*
- * One store for the `autopilot` event (ADR 0215; lib/telemetry-store.ts). The
- * state is null until the first event: before it nobody knows whether there is
- * a pilot, and the tile must not say there is none. toAutopilotState builds a
- * new object for every payload, so an equal one keeps the previous object and
- * notifies nobody.
+ * One store for the `autopilot` event (ADR 0215; lib/telemetry-store.ts). Its
+ * initial state is the absent pilot, which is a placeholder: before the first
+ * event nobody knows whether there is a pilot, so useAutopilotState hands out
+ * nothing until the store has heard, and the tile must not say there is none.
+ * toAutopilotState builds a new object for every payload, so an equal one keeps
+ * the previous object and notifies nobody.
  */
-function applyAutopilot(previous: AutopilotState | null, raw: string): TelemetryUpdate<AutopilotState | null> | null {
-  let payload: AutopilotStreamPayload
-  try {
-    payload = JSON.parse(raw) as AutopilotStreamPayload
-  } catch (err) {
-    console.error('Failed to parse autopilot event:', err)
-    return null
-  }
-  const next = toAutopilotState(payload)
-  if (previous !== null && sameAutopilot(previous, next)) return null
-  return { state: next }
+function applyAutopilot(previous: AutopilotState, data: unknown): TelemetryUpdate<AutopilotState> | null {
+  const next = toAutopilotState(data as AutopilotStreamPayload)
+  return sameAutopilot(previous, next) ? null : { state: next }
 }
 
-// Read at start, not at import: a module that only imports this one's
-// helpers or types never touches the stream.
-const listenToStream: SubscribeTelemetry = (event, onData) => subscribeTelemetry(event, onData)
+const store = createTelemetryStore<AutopilotState>('autopilot', ABSENT_AUTOPILOT_STATE, applyAutopilot)
 
-const store = createTelemetryStore<AutopilotState | null>(listenToStream, 'autopilot', null, applyAutopilot)
+const selectState = (state: AutopilotState) => state
+const selectPresent = (state: AutopilotState) => state.present
 
-const selectState = (state: AutopilotState | null) => state
-const selectPresent = (state: AutopilotState | null) => state?.present === true
-
-/** What the pilot last reported, or null until the first autopilot event. */
+/** What the pilot last reported, or null until the first autopilot event (the tile's "--"). */
 export function useAutopilotState(): AutopilotState | null {
-  return store.useSelector(selectState)
+  return store.useHeardSelector(selectState)
 }
 
 /**

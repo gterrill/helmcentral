@@ -2,7 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
 import { apiRequest, refetchQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
-import { sameJSON } from '@/lib/telemetry-store'
+import { sameJSON } from '@/lib/same-value'
 
 export interface DashboardPage {
   id: string
