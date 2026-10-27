@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { DisplayShell } from '@/components/display-shell'
+import { WallPageActiveContext } from '@/components/wall-page-stack'
 import { EmbedTile, MOUNT_IDLE_TIMEOUT_MS } from '@/components/embed-tile'
 import type { Display } from '@/lib/displays'
 
@@ -521,6 +522,30 @@ describe('EmbedTile inside a DisplayShell (WPE compositing workaround)', () => {
 // everything below it the same way. Neither is caught by a ResizeObserver
 // on the container alone, so EmbedFrame also watches every ancestor between
 // the container and the shell's own inner box.
+describe('EmbedTile on a wall page that is not showing', () => {
+  function wall(active: boolean) {
+    return (
+      <DisplayShell display={display({ rotate: 180 })} alarms={[]}>
+        <WallPageActiveContext.Provider value={active}>
+          <EmbedTile config={config} editing={false} />
+        </WallPageActiveContext.Provider>
+      </DisplayShell>
+    )
+  }
+
+  test('lets go of its frame while the page rests, and loads it again when the page returns', () => {
+    const { rerender } = render(wall(true))
+    revealAndMount()
+    expect(screen.getByTestId('embed-frame-portal')).toBeInTheDocument()
+
+    rerender(wall(false))
+    expect(document.querySelector('iframe')).toBeNull()
+
+    rerender(wall(true))
+    expect(screen.getByTestId('embed-frame-portal')).toBeInTheDocument()
+  })
+})
+
 describe('EmbedTile portal follows a tile that moves without resizing', () => {
   class FakeResizeObserver {
     static instances: FakeResizeObserver[] = []

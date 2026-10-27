@@ -326,11 +326,17 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 // cares about, the same pattern anchor-imagery-toggle.test.tsx uses for
 // AnchorWatchMap. Doubles as a marker for "did the wall show the OTHER
 // display's page" in the cross-display leakage test below.
-vi.mock('@/components/anchor-watch-tile', () => ({
-  AnchorWatchTile: (props: { isDarkTheme?: boolean }) => (
-    <div data-testid="display-anchor-watch-isdark">{String(props.isDarkTheme)}</div>
-  ),
-}))
+const { anchorTileMounts } = vi.hoisted(() => ({ anchorTileMounts: { count: 0 } }))
+vi.mock('@/components/anchor-watch-tile', async () => {
+  const { useEffect } = await import('react')
+  return {
+    AnchorWatchTile: (props: { isDarkTheme?: boolean }) => {
+      // Counts real mounts, so a test can tell a tile that stayed up from one rebuilt each lap.
+      useEffect(() => { anchorTileMounts.count += 1 }, [])
+      return <div data-testid="display-anchor-watch-isdark">{String(props.isDarkTheme)}</div>
+    },
+  }
+})
 
 beforeEach(() => {
   mockCreatePage.mockReset()
@@ -578,6 +584,83 @@ describe('App at /display/<slug>', () => {
     // Still never the other display's page.
     fireEvent.keyDown(window, { key: 'ArrowRight' })
     await waitFor(() => expect(screen.getByText('Depth & Tide')).toBeInTheDocument())
+    expect(screen.queryByTestId('display-anchor-watch-isdark')).not.toBeInTheDocument()
+  })
+})
+
+describe('App at /display/<slug> keeps every page of the feed mounted', () => {
+  beforeEach(() => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    globalThis.localStorage?.clear()
+    mockTelemetryStatus.value = 'connected'
+    mockAlarmsState.alarms = []
+    mockVesselState.navigationState = null
+    mockDisplaysState.displays = [FLYBRIDGE]
+    mockDisplaysState.loading = false
+    mockPagesState.pages = [
+      page('p1', 'Engines', [DEPTH_TIDE_WIDGET], { display_id: 'd1', dwell_seconds: 30 }),
+      page('p2', 'Nearby', [ANCHOR_WATCH_WIDGET], { display_id: 'd1', dwell_seconds: 30 }),
+    ]
+    mockPagesState.loading = false
+    mockPagesState.error = null
+    anchorTileMounts.count = 0
+  })
+
+  const pageOf = (el: HTMLElement) => el.closest('[data-wall-page]') as HTMLElement
+
+  it('mounts a tile once and keeps the same node across laps', async () => {
+    window.history.replaceState({}, '', '/display/flybridge')
+    render(<App />)
+
+    const tile = screen.getByTestId('display-anchor-watch-isdark')
+    expect(anchorTileMounts.count).toBe(1)
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await waitFor(() => expect(pageOf(screen.getByText('Depth & Tide')).hasAttribute('inert')).toBe(false))
+
+    expect(anchorTileMounts.count).toBe(1)
+    expect(screen.getByTestId('display-anchor-watch-isdark')).toBe(tile)
+  })
+
+  it('hides and inerts the pages that are not showing, and none other', () => {
+    window.history.replaceState({}, '', '/display/flybridge')
+    render(<App />)
+
+    const showing = pageOf(screen.getByText('Depth & Tide'))
+    const resting = pageOf(screen.getByTestId('display-anchor-watch-isdark'))
+    expect(showing).not.toHaveAttribute('inert')
+    expect(showing).not.toHaveAttribute('aria-hidden')
+    expect(resting).toHaveAttribute('inert')
+    expect(resting).toHaveAttribute('aria-hidden', 'true')
+    expect(resting).toHaveClass('invisible', 'absolute')
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    expect(resting).not.toHaveAttribute('inert')
+    expect(showing).toHaveAttribute('inert')
+  })
+
+  it('drops a page from the DOM when it leaves the feed', () => {
+    mockVesselState.navigationState = 'anchored'
+    mockPagesState.pages = [
+      page('p1', 'Engines', [DEPTH_TIDE_WIDGET], { display_id: 'd1', dwell_seconds: 30 }),
+      page('p2', 'Nearby', [ANCHOR_WATCH_WIDGET], { display_id: 'd1', dwell_seconds: 30, show_when: 'anchored' }),
+    ]
+    window.history.replaceState({}, '', '/display/flybridge')
+    const { rerender } = render(<App />)
+    expect(screen.getByTestId('display-anchor-watch-isdark')).toBeInTheDocument()
+
+    mockVesselState.navigationState = 'motoring'
+    rerender(<App />)
+    // The vessel-state store is mocked as a plain value, so nudge the shell.
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    expect(screen.queryByTestId('display-anchor-watch-isdark')).not.toBeInTheDocument()
+  })
+
+  it('pins one page with ?page= and mounts only that one', () => {
+    window.history.replaceState({}, '', '/display/flybridge?page=p1')
+    render(<App />)
+    expect(screen.getByText('Depth & Tide')).toBeInTheDocument()
     expect(screen.queryByTestId('display-anchor-watch-isdark')).not.toBeInTheDocument()
   })
 })

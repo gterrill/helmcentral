@@ -75,7 +75,8 @@ import { useDisplayRotation, type UseDisplayRotationResult } from '@/hooks/use-d
 import { useDisplayRemote } from '@/hooks/use-display-remote'
 import { useDisplays } from '@/hooks/use-displays'
 import { LoadError, RefreshFailedOverlay } from '@/components/patterns/refresh-failed-note'
-import { NO_DISPLAY_OPTIONS, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
+import { WallPageStack } from '@/components/wall-page-stack'
+import { NO_DISPLAY_OPTIONS, displayFeed, displayFoldPx, displayRowMargin, DEFAULT_DWELL_SECONDS, DISPLAY_RECOVERY_POLL_MS } from '@/lib/displays'
 import { DisplayFoldGuide } from '@/components/display-fold-guide'
 import { DisplayRemoteToast } from '@/components/display-remote-toast'
 import { WallDisplaysPanel } from '@/components/wall-displays-panel'
@@ -1040,6 +1041,15 @@ function AppShell() {
   // transition below — without that, a pre-drop what-if would reappear once
   // the anchor comes up and is raised again.
   const [sessionPlanningDepth, setSessionPlanningDepth] = useState<{ depthM: number; tideHeightFt: number | null } | null>(null)
+  // A wall display keeps every page of its feed mounted (ADR 0217): the
+  // pages in the stack, with the one on screen kept until the next step even
+  // if it just left the feed.
+  const wallPages = useMemo(() => {
+    if (!isDisplay || !wallDisplay) return []
+    if (displayOptions.pageId) return activePage ? [activePage] : []
+    const feedIds = new Set(displayFeed(pages, { displayId: wallDisplay.id, navigationState }).map((p) => p.id))
+    return pages.filter((p) => feedIds.has(p.id) || p.id === activePage?.id)
+  }, [isDisplay, wallDisplay, displayOptions.pageId, pages, navigationState, activePage])
   const isImperialDistance = uiConfig.distanceUnits === 'imperial'
 
   const hasActiveAnchorWatch = anchorWatch.active
@@ -1419,12 +1429,6 @@ function AppShell() {
     { label: 'Nearby map…', category: 'navigation', onSelect: handleAddPoiMap },
   ]
 
-  // The display the active page is actually assigned to (ADR 0110), not
-  // wallDisplay - this is the ordinary authoring case (any page, on any
-  // screen this session happens to be viewing), while wallDisplay only ever
-  // means "the screen the wall route itself resolved to".
-  const activePageDisplay = displays.find((d) => d.id === activePage?.display_id) ?? null
-
   const handleDisplayPatch = (id: string, patch: DisplayPatch) => {
     const page = pages.find((p) => p.id === id)
     void updatePage(id, patch).then((saved) => {
@@ -1516,7 +1520,16 @@ function AppShell() {
     })
   }
 
-  const dashboardGrid = (
+  // One page's board. `chrome` is the authoring furniture around it (layout
+  // toolbar, ribbon, config dialogs): the ordinary dashboard has it, the wall
+  // pages in the stack below do not.
+  const renderBoard = (page: DashboardPage | null, chrome: boolean) => {
+    const boardWidgets = page?.widgets ?? []
+    // The display the page is actually assigned to (ADR 0110), not
+    // wallDisplay: the ordinary authoring case, on any screen this session
+    // happens to be viewing.
+    const boardDisplay = displays.find((d) => d.id === page?.display_id) ?? null
+    return (
     // ADR 0060: the skin lives on the page, so the attribute sits on this
     // shared root and every tile beneath it re-skins with no component
     // changes. bg-background is a no-op while unskinned — it is exactly what
@@ -1525,7 +1538,7 @@ function AppShell() {
     // rather than a conditional class for the same reason: a component must
     // never branch on the skin value, only consume tokens the skin redefines.
     <div
-      data-skin={activePage?.skin === 'instrument' ? 'instrument' : undefined}
+      data-skin={page?.skin === 'instrument' ? 'instrument' : undefined}
       className="flex flex-col gap-4 bg-background"
       style={{ padding: 'var(--board-pad)', borderRadius: 'var(--board-radius)' }}
     >
@@ -1534,13 +1547,13 @@ function AppShell() {
           order. Replaces both the old "Layout Mode — Drag to rearrange" pill
           that used to sit here and the separate control row that used to
           sit below the grid. */}
-      {layoutEditing && (
+      {chrome && layoutEditing && (
         <LayoutToolbar
-          page={activePage}
+          page={page}
           namingPageId={namingPageId}
           onSaveName={(id, name) => updatePage(id, { name }).then((saved) => saved !== null)}
           onDoneNaming={() => setNamingPageId(null)}
-          placedWidgetIds={effectiveWidgets.map((w) => w.id)}
+          placedWidgetIds={boardWidgets.map((w) => w.id)}
           onAddWidget={handleAddWidget}
           multiInstanceEntries={addWidgetMultiInstanceEntries}
           onOpenRibbon={() => setRibbonDialogOpen(true)}
@@ -1565,7 +1578,7 @@ function AppShell() {
       {/* The pinned indicator ribbon (ADR 0082): one vessel-level lamp strip
           above the grid on every dashboard page and every width, inside the
           page's own skin rather than among the app-theme banners — the same
-          slot ADR 0072 gave the hero row. Not part of effectiveWidgets, so it
+          slot ADR 0072 gave the hero row. Not part of boardWidgets, so it
           never enters react-grid-layout's managed array.
 
           Never rendered on the wall (ADR 0089, carried into ADR 0110): on a
@@ -1574,7 +1587,7 @@ function AppShell() {
           for free; a page that wants lamps on the wall adds its own
           lamp-strip widget, sized and placed like any other tile, same as
           it would for any other page-specific status row. */}
-      {!isDisplay && ribbon && (
+      {chrome && !isDisplay && ribbon && (
         <div data-testid="dashboard-ribbon" className="w-full min-w-0">
           <LampStripHost
             config={ribbon}
@@ -1594,7 +1607,7 @@ function AppShell() {
           initial GET /api/dashboard-pages resolves there is no active page
           yet either, which reads the same as "empty" — without this the
           prompt flashed on every load, not just on a genuinely empty page. */}
-      {!pagesLoading && effectiveWidgets.length === 0 && !activePage?.hero ? (
+      {!pagesLoading && boardWidgets.length === 0 && !page?.hero ? (
         <EmptyPagePrompt editing={layoutEditing} canEditLayout={canEditLayout} onOpenHelp={openHelp} isKiosk={isDisplay} />
       ) : (
         // relative so DisplayFoldGuide (ADR 0110, superseding ADR 0089) can
@@ -1605,15 +1618,15 @@ function AppShell() {
         // own `absolute` line (drawn at foldPx from the top of this box) has
         // something behind it even on a tall canvas whose content doesn't
         // reach that far down yet.
-        <div className="relative" style={activePageDisplay ? { minHeight: displayFoldPx(activePageDisplay) ?? undefined } : undefined}>
+        <div className="relative" style={boardDisplay ? { minHeight: displayFoldPx(boardDisplay) ?? undefined } : undefined}>
           <DashboardBentoGrid
-            widgets={effectiveWidgets}
+            widgets={boardWidgets}
             editing={layoutEditing}
             // The server rejects a hero on a page that carries a display_id
-            // (ADR 0110) - undefined here, not activePage?.hero, so the grid
+            // (ADR 0110) - undefined here, not page?.hero, so the grid
             // never renders a hero row the backend would have refused to
             // persist in the first place.
-            heroId={activePage?.display_id ? undefined : activePage?.hero}
+            heroId={page?.display_id ? undefined : page?.hero}
             renderWidget={renderWidget}
             onRemoveWidget={handleRemoveWidget}
             onDuplicateWidget={handleDuplicateWidget}
@@ -1624,7 +1637,7 @@ function AppShell() {
             // the helm browser authoring the page lays it out at the same
             // geometry the wall will render it at and the fold guide stays
             // honest.
-            rowMargin={activePageDisplay ? displayRowMargin(activePageDisplay) : undefined}
+            rowMargin={boardDisplay ? displayRowMargin(boardDisplay) : undefined}
           />
 
           {/* Authoring aid, not a wall-display feature: only shown while
@@ -1633,16 +1646,18 @@ function AppShell() {
               against - lib/displays.ts's displayFoldPx), so laying it out on
               the ordinary desktop dashboard shows exactly where that
               screen's canvas cuts off before saving. */}
-          {layoutEditing && activePageDisplay && displayFoldPx(activePageDisplay) !== null && (
+          {layoutEditing && boardDisplay && displayFoldPx(boardDisplay) !== null && (
             <DisplayFoldGuide
-              topPx={displayFoldPx(activePageDisplay) as number}
-              heightPx={activePageDisplay.height}
-              displayName={activePageDisplay.name}
+              topPx={displayFoldPx(boardDisplay) as number}
+              heightPx={boardDisplay.height}
+              displayName={boardDisplay.name}
             />
           )}
         </div>
       )}
 
+      {chrome && (
+      <>
       <GaugeConfigDialog
         widget={gaugeDraft}
         onCancel={() => setGaugeDraft(null)}
@@ -1688,8 +1703,13 @@ function AppShell() {
         onOpenChange={(open) => { if (!open) setPoiMapDraft(null) }}
         onSave={handleSavePoiMap}
       />
+      </>
+      )}
     </div>
-  )
+    )
+  }
+
+  const dashboardGrid = renderBoard(activePage, true)
 
   const renderPanelFallback = (label: string) => (
     <div className="flex h-full min-h-[240px] items-center justify-center text-sm text-muted-foreground">
@@ -2023,7 +2043,11 @@ function AppShell() {
           </div>
         ) : (
           <>
-            {dashboardGrid}
+            <WallPageStack
+              pages={wallPages}
+              activeId={activePageId}
+              renderPage={(wallPage) => renderBoard(wallPage, false)}
+            />
             {pagesError && <RefreshFailedOverlay reason={pagesError} />}
           </>
         )}

@@ -12,6 +12,7 @@ import {
 import { createPortal } from 'react-dom'
 
 import { DisplayTransformContext } from '@/components/display-shell'
+import { WallPageActiveContext } from '@/components/wall-page-stack'
 import { Button } from '@/components/ui/button'
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { useInView } from '@/hooks/use-in-view'
@@ -365,7 +366,12 @@ export const EmbedTile = memo(function EmbedTile({
     // replaced embed URL is cancelled rather than left to fire later.
   }, [inView, src])
 
-  const mountFrame = hasUsableUrl && shouldMount
+  // A wall display keeps its resting pages mounted. A resting page holds no
+  // frame: a camera server serves one viewer at a time, and a stream nobody can
+  // see would lock the next viewer out. The frame loads again on the lap, as
+  // it did before pages were kept.
+  const pageActive = useContext(WallPageActiveContext)
+  const mountFrame = hasUsableUrl && shouldMount && pageActive
   const placeholderClassName =
     'flex h-full min-h-0 flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-background/60 px-3 py-4 text-center'
 
