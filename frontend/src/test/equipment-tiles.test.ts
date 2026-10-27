@@ -116,8 +116,24 @@ describe('resolveCluster', () => {
   })
 
   it('shows an engine that is off rather than calling it silent', () => {
-    const r = resolveCluster(cluster, ctx([item(), tank], { reporting: new Set() }), [], { port: { state: 'off' } })
+    const r = resolveCluster(cluster, ctx([item(), tank], { reporting: new Set() }), [], { id: 'port', state: 'off' })
     expect(r.ok).toBe(true)
+  })
+
+  it('still says Not reporting when the status is another engine\'s', () => {
+    const r = resolveCluster(cluster, ctx([item(), tank], { reporting: new Set() }), [], { id: 'starboard', state: 'off' })
+    expect(!r.ok && r.problem.kind).toBe('not-reporting')
+  })
+
+  it('still says Not reporting with no status at all', () => {
+    const r = resolveCluster(cluster, ctx([item(), tank], { reporting: new Set() }), [], undefined)
+    expect(!r.ok && r.problem.kind).toBe('not-reporting')
+  })
+
+  it('a status does not rescue a non-engine item (it has no engine id)', () => {
+    const sensor = item({ source_kind: '' })
+    const r = resolveCluster(cluster, ctx([sensor, tank], { reporting: new Set() }), [], { id: 'port', state: 'off' })
+    expect(!r.ok && r.problem.kind).toBe('not-reporting')
   })
 
   it('does not claim silence before discovery has answered', () => {

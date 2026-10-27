@@ -10,7 +10,7 @@ import { majorStepFor } from '@/components/gauge-tile'
 import { ClusterDial, CLUSTER_DIAL_SIZE } from '@/components/ui/cluster-dial'
 import { Tile, tilePillButtonClass, tilePillClass } from '@/components/ui/tile'
 import { cn } from '@/lib/utils'
-import type { EngineStates } from '@/hooks/use-gauge-values'
+import type { EngineStatus } from '@/hooks/use-gauge-values'
 import { clusterSlots, reading } from '@/lib/cluster-readings'
 import type { ResolvedClusterConfig } from '@/lib/dashboard-widgets'
 import { toneFor } from '@/lib/engine-cluster-bullet'
@@ -65,10 +65,10 @@ interface EngineClusterTileProps {
   /** Age in seconds behind each bound path (ADR 0083); absent is unknown. */
   ages?: Record<string, number | null>
   /**
-   * Whether each engine reads as switched off (its computer powers down with
+   * Whether this engine reads as switched off (its computer powers down with
    * the key, so its readings just stop). Absent or unknown changes nothing.
    */
-  engines?: EngineStates
+  engine?: EngineStatus
   editing: boolean
   onConfigure: () => void
 }
@@ -89,7 +89,7 @@ function chipFor(running: boolean, state: ZoneState | null): { text: string; cla
 }
 
 export const EngineClusterTile = memo(function EngineClusterTile({
-  config, values: liveValues, ages: liveAges, engines, editing, onConfigure,
+  config, values: liveValues, ages: liveAges, engine, editing, onConfigure,
 }: EngineClusterTileProps) {
   const side = config.side ?? 'port'
 
@@ -97,10 +97,11 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   // own paths read as absent (the dash) and carry no age, so nothing on the
   // tile is stale. Other bound paths, such as the fuel tank, are live.
   const engineId = propulsionId(config.ring.path)
-  const engineStatus = engineId ? engines?.[engineId] : undefined
-  const off = engineStatus?.state === 'off'
-  const values = off && engineId ? withoutEnginePaths(liveValues, engineId)! : liveValues
-  const ages = off && engineId ? withoutEnginePaths(liveAges, engineId) : liveAges
+  const engineStatus = engineId !== null && engine?.id === engineId ? engine : undefined
+  const offEngineId = engineStatus?.state === 'off' ? engineId : null
+  const off = offEngineId !== null
+  const values = offEngineId !== null ? withoutEnginePaths(liveValues, offEngineId)! : liveValues
+  const ages = offEngineId !== null ? withoutEnginePaths(liveAges, offEngineId) : liveAges
 
   const title = config.title.trim() || 'Engine'
   const layout = clusterLayout(side)
