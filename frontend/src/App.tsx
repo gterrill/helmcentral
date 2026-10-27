@@ -23,33 +23,13 @@ import { toast } from 'sonner'
 import {
   LiveAlarmBanner,
   LiveAlarmsDrawer,
-  LiveAlternatorTile,
   LiveAnchorWatchDrawer,
-  LiveAnchorWatchTile,
-  LiveAutopilotTile,
-  LiveBatteryPowerTile,
-  LiveClockTile,
-  LiveCurrentConditionsTile,
-  LiveCZoneSwitchesTile,
-  LiveDepthTideTile,
   LiveDisplayShell,
-  LiveForecastConditionsTile,
   LiveForecastPage,
-  LiveGeneratorTile,
-  LiveNearbyVesselsTile,
-  LivePoiMapTile,
-  LivePositionTile,
   LiveRadarDrawer,
-  LiveRadarTargetsTile,
-  LiveRouteTile,
   LiveSignalKDiscoveryPrompt,
-  LiveSolarTile,
-  LiveTanksTile,
-  LiveTodayNowTile,
-  LiveWindTile,
 } from '@/components/live-surfaces'
-import { HotWaterTile } from '@/components/hot-water-tile'
-import { MarineHeader } from '@/components/marine-header'
+import { WidgetHost, type WidgetHostActions } from '@/components/widget-host'
 import { VesselStatusBar } from '@/components/vessel-status-bar'
 import { SetupLine } from '@/components/setup-line'
 import { requestSetupFocus } from '@/lib/setup-status'
@@ -153,14 +133,12 @@ import {
   type PoiMapWidgetConfig,
 } from '@/lib/dashboard-widgets'
 import { POI_CATEGORY_IDS } from '@/lib/poi'
-import { EmbedTile } from '@/components/embed-tile'
 import { EmbedConfigDialog } from '@/components/embed-config-dialog'
 import { PoiMapConfigDialog } from '@/components/poi-map-config-dialog'
 import { GaugeConfigDialog } from '@/components/gauge-config-dialog'
-import { GaugeTile } from '@/components/gauge-tile'
 import { GaugeGroupConfigDialog } from '@/components/gauge-group-config-dialog'
 import { EngineClusterConfigDialog } from '@/components/engine-cluster-config-dialog'
-import { EngineClusterHost, GaugeGroupHost, LampStripHost } from '@/components/equipment-tile-hosts'
+import { LampStripHost } from '@/components/equipment-tile-hosts'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { LampStripConfigDialog } from '@/components/lamp-strip-config-dialog'
 import { useRetainGaugeValues } from '@/hooks/use-gauge-values'
@@ -290,6 +268,8 @@ const SWIPE_PAGE_TOAST_MS = 1500
  * app-location.ts's isCanonicalAppPath check (fed the same value as
  * `firstPageId`) and every call site here agree on exactly one page.
  */
+const NO_WIDGETS: DashboardLayoutItem[] = []
+
 function firstDashboardPageId(pages: readonly DashboardPage[]): string | null {
   return pages.find((p) => !p.display_id)?.id ?? null
 }
@@ -613,7 +593,20 @@ function AppShell() {
   // which widgets the active page (or the wall's current page, which drives
   // activePageId exactly the same way — see useDisplayRotation below) actually
   // holds. Otherwise identical to its previous declaration further down.
-  const effectiveWidgets = useMemo(() => activePage?.widgets ?? [], [activePage])
+  // Keyed on the widget list, not the page: the page list keeps a page's
+  // widgets while they are unchanged (use-dashboard-pages.ts), so a rename or a
+  // skin change leaves this, and so the grid, alone.
+  const activeWidgets = activePage?.widgets
+  const effectiveWidgets = useMemo(() => activeWidgets ?? NO_WIDGETS, [activeWidgets])
+  // The latest page and widget list, for the handlers the grid and the tiles
+  // hold (latest-ref idiom): each reads them when it runs, so it can stay one
+  // stable function for the life of the shell and never re-render the grid.
+  const activePageRef = useRef(activePage)
+  const effectiveWidgetsRef = useRef(effectiveWidgets)
+  useEffect(() => {
+    activePageRef.current = activePage
+    effectiveWidgetsRef.current = effectiveWidgets
+  }, [activePage, effectiveWidgets])
   // namingPageId only means anything for the page it was set on, while
   // layout mode can actually show that page's name field — stale otherwise.
   // PageTitleField's own onDone (an Enter/blur that saved, or an Escape)
@@ -1109,15 +1102,19 @@ function AppShell() {
   // separate top-level Secrets entry to hide independently.
   const visiblePanelNavItems = canAdmin ? PANEL_NAV_ITEMS : PANEL_NAV_ITEMS.filter((item) => item.id !== 'settings')
 
+  // The grid's three handlers read the page at the call, so they never change
+  // and a page write does not re-render the grid through them.
   const handleLayoutSettle = useCallback((next: DashboardLayoutItem[]) => {
-    if (!activePage) return
-    void updatePage(activePage.id, { widgets: next })
-  }, [activePage, updatePage])
+    const page = activePageRef.current
+    if (!page) return
+    void updatePage(page.id, { widgets: next })
+  }, [updatePage])
 
   const handleRemoveWidget = useCallback((id: DashboardWidgetId) => {
-    if (!activePage) return
-    void updatePage(activePage.id, { widgets: effectiveWidgets.filter((w) => w.id !== id) })
-  }, [activePage, effectiveWidgets, updatePage])
+    const page = activePageRef.current
+    if (!page) return
+    void updatePage(page.id, { widgets: effectiveWidgetsRef.current.filter((w) => w.id !== id) })
+  }, [updatePage])
 
   // Each built-in widget's footprint comes from DASHBOARD_WIDGET_DEFAULT_SIZE
   // (ADR 0107) instead of one hard-coded 4x6 for all of them — that was what
@@ -1298,15 +1295,17 @@ function AppShell() {
    * Persisted first: unlike a fresh draft, a duplicate is already valid.
    */
   const handleDuplicateWidget = useCallback((id: DashboardWidgetId) => {
-    if (!activePage) return
-    const source = effectiveWidgets.find((w) => w.id === id)
+    const page = activePageRef.current
+    const widgets = effectiveWidgetsRef.current
+    if (!page) return
+    const source = widgets.find((w) => w.id === id)
     if (!source) return
-    const copy = duplicateWidget(source, effectiveWidgets)
+    const copy = duplicateWidget(source, widgets)
     if (!copy) return
 
-    const maxY = effectiveWidgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
+    const maxY = widgets.reduce((max, w) => Math.max(max, w.y + w.h), 0)
     const placed = { ...copy, x: 0, y: maxY }
-    void updatePage(activePage.id, { widgets: [...effectiveWidgets, placed] })
+    void updatePage(page.id, { widgets: [...widgets, placed] })
 
     if (isClusterWidgetId(placed.id)) setClusterDraft(placed)
     else if (isLampStripWidgetId(placed.id)) setLampStripDraft(placed)
@@ -1314,7 +1313,7 @@ function AppShell() {
     else if (isGaugeWidgetId(placed.id)) setGaugeDraft(placed)
     else if (isEmbedWidgetId(placed.id)) setEmbedDraft(placed)
     else if (isPoiMapWidgetId(placed.id)) setPoiMapDraft(placed)
-  }, [activePage, effectiveWidgets, updatePage])
+  }, [updatePage])
 
   const handleSaveEmbed = useCallback((id: DashboardWidgetId, embed: EmbedWidgetConfig) => {
     if (!activePage) return
@@ -1353,37 +1352,20 @@ function AppShell() {
     }
   }, [activePage, effectiveWidgets, poiMapDraft, updatePage])
 
-  // Item D: the shell still re-renders on every autopilot, electrical, solar,
-  // tanks, nearby-vessel, radar and anchor-watch tick, and on each polled
-  // forecast (gauge values, alarms and vessel state no longer: ADR 0215 moved
-  // them into the tiles; vessel state still re-renders it when the navigation
-  // state changes). renderWidget below runs fresh on every one of those
-  // renders (it is deliberately not memoized itself —
-  // see its own comment), so an inline `onConfigure={() => setXDraft(widget)}`
-  // handed a memoized tile (EngineClusterTile, LampStripTile, GaugeGroupTile,
-  // GaugeTile) a new function identity every second even when nothing about
-  // that widget changed, defeating the tile's own React.memo. One stable
-  // handler per widget id, cached here and reused across renders, fixes that
-  // without changing any tile's onConfigure signature. effectiveWidgetsRef
-  // mirrors the current widget list (latest-ref idiom) so a handler built once
-  // still resolves to the current widget when it's eventually called.
-  const effectiveWidgetsRef = useRef(effectiveWidgets)
-  useEffect(() => { effectiveWidgetsRef.current = effectiveWidgets }, [effectiveWidgets])
-  // globalThis.Map, the builtin collection - not a lucide-react icon.
-  const configureHandlersRef = useRef(new globalThis.Map<DashboardWidgetId, () => void>())
-  const configureHandlerFor = useCallback((id: DashboardWidgetId, apply: (widget: DashboardLayoutItem) => void): () => void => {
-    let handler = configureHandlersRef.current.get(id)
-    if (!handler) {
-      handler = () => {
-        const widget = effectiveWidgetsRef.current.find((w) => w.id === id)
-        if (widget) apply(widget)
-      }
-      configureHandlersRef.current.set(id, handler)
-    }
-    return handler
+  // One handler for every widget's gear: WidgetHost binds the id. It reads the
+  // widget at the click, so it never needs rebuilding as the page changes.
+  const openWidgetConfig = useCallback((id: DashboardWidgetId) => {
+    const widget = effectiveWidgetsRef.current.find((w) => w.id === id)
+    if (!widget) return
+    if (isClusterWidgetId(id)) setClusterDraft(widget)
+    else if (isLampStripWidgetId(id)) setLampStripDraft(widget)
+    else if (isGaugeGroupWidgetId(id)) setGaugeGroupDraft(widget)
+    else if (isGaugeWidgetId(id)) setGaugeDraft(widget)
+    else if (isEmbedWidgetId(id)) setEmbedDraft(widget)
+    else if (isPoiMapWidgetId(id)) setPoiMapDraft(widget)
   }, [])
 
-  // Same reasoning as configureHandlerFor above, for the tiles/banner whose
+  // Same reasoning as openWidgetConfig above, for the tiles/banner whose
   // onOpen just navigates — these take no widget-specific argument, so a
   // single stable callback per destination covers every call site.
   const openForecastPanel = useCallback(() => navigate.toPanel('forecast'), [navigate])
@@ -1391,159 +1373,36 @@ function AppShell() {
   const openAnchorWatchPanel = useCallback(() => navigate.toPanel('anchor-watch'), [navigate])
   const openRibbonDialog = useCallback(() => setRibbonDialogOpen(true), [])
 
-  // Not wrapped in useCallback: exhaustive-deps reports ~58 dependencies here
-  // (essentially the entire polled-data surface of the component —
-  // electrical, tanks, nearby-vessels, anchor watch, forecasts, etc.), several of
-  // which change every few seconds independently. Memoizing would just
-  // recreate the reference on nearly every render anyway, so it buys no real
-  // stabilization — left as a plain function per the task's own guidance for
-  // this case.
-  const renderWidget = (widget: DashboardLayoutItem): ReactNode => {
-    const { id } = widget
-    if (isClusterWidgetId(id)) {
-      if (!widget.cluster) return null
-      return (
-        <EngineClusterHost
-          config={widget.cluster}
-          ctx={equipmentContext}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setClusterDraft)}
-        />
-      )
-    }
-
-    if (isLampStripWidgetId(id)) {
-      if (!widget.lamps) return null
-      return (
-        <LampStripHost
-          config={widget.lamps}
-          ctx={equipmentContext}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setLampStripDraft)}
-          onOpenAlarms={openAlarmsPanel}
-        />
-      )
-    }
-
-    if (isGaugeGroupWidgetId(id)) {
-      if (!widget.gaugeGroup) return null
-      return (
-        <GaugeGroupHost
-          config={widget.gaugeGroup}
-          ctx={equipmentContext}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setGaugeGroupDraft)}
-        />
-      )
-    }
-
-    if (isGaugeWidgetId(id)) {
-      if (!widget.gauge) return null
-      return (
-        <GaugeTile
-          config={widget.gauge}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setGaugeDraft)}
-        />
-      )
-    }
-
-    if (isEmbedWidgetId(id)) {
-      return (
-        <EmbedTile
-          config={widget.embed}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setEmbedDraft)}
-          isDarkTheme={isDarkTheme}
-        />
-      )
-    }
-
-    if (isPoiMapWidgetId(id)) {
-      if (!widget.poiMap) return null
-      return (
-        <LivePoiMapTile
-          config={widget.poiMap}
-          editing={layoutEditing}
-          onConfigure={configureHandlerFor(id, setPoiMapDraft)}
-          isDarkTheme={isDarkTheme}
-          forceDark={activePage?.skin === 'instrument'}
-          distanceUnits={uiConfig.distanceUnits}
-          interactive={!isDisplay}
-        />
-      )
-    }
-
-    switch (id) {
-      case 'vessel':
-        return <MarineHeader />
-      case 'wind':
-        return (
-          <LiveWindTile />
-        )
-      case 'depth-tide':
-        return (
-          <LiveDepthTideTile
-            isImperialDistance={isImperialDistance}
-            onOpen={layoutEditing ? undefined : openForecastPanel}
-          />
-        )
-      case 'position':
-        return (
-          <LivePositionTile />
-        )
-      case 'today-now':
-        return (
-          <LiveTodayNowTile
-            distanceUnits={uiConfig.distanceUnits}
-            onOpen={layoutEditing ? undefined : openForecastPanel}
-          />
-        )
-      case 'clock':
-        return <LiveClockTile />
-      case 'current-conditions':
-        return <LiveCurrentConditionsTile distanceUnits={uiConfig.distanceUnits} />
-      case 'forecast-conditions':
-        return <LiveForecastConditionsTile units={uiConfig.distanceUnits} />
-      case 'anchor-watch':
-        return (
-          <LiveAnchorWatchTile
-            isImperial={isImperialDistance}
-            isDarkTheme={isDarkTheme}
-            showImageryLayer={showAnchorImagery}
-            onImageryToggle={setShowAnchorImagery}
-            showRadarEcho={showRadarEcho}
-            onRadarEchoToggle={setShowRadarEcho}
-            onFullscreen={openAnchorWatchPanel}
-            interactive={!isDisplay}
-          />
-        )
-      case 'tanks':
-        return <LiveTanksTile />
-      case 'route':
-        return <LiveRouteTile />
-      case 'nearby-vessels':
-        return <LiveNearbyVesselsTile distanceUnits={uiConfig.distanceUnits} />
-      case 'radar-targets':
-        return <LiveRadarTargetsTile distanceUnits={uiConfig.distanceUnits} />
-      case 'battery-power':
-        return <LiveBatteryPowerTile onOpenRoles={openHouseBankRoles} />
-      case 'solar':
-        return <LiveSolarTile />
-      case 'alternator':
-        return <LiveAlternatorTile />
-      case 'generator':
-        return <LiveGeneratorTile onOpenRoles={openGeneratorRoles} readOnly={!canWrite} />
-      case 'czone-switches':
-        return <LiveCZoneSwitchesTile readOnly={!canWrite} />
-      case 'autopilot':
-        return <LiveAutopilotTile readOnly={!canWrite} />
-      case 'hot-water':
-        return <HotWaterTile />
-      default:
-        return null
-    }
-  }
+  // One WidgetHost per widget (ADR 0215 phase 7), memoized, with the shell's
+  // flags and one stable actions object. renderWidget changes only when one of
+  // those flags does, so the memoized grid skips a shell render that changes
+  // nothing about the tiles: opening the Mate sheet, a toast, a rename.
+  const widgetActions = useMemo<WidgetHostActions>(() => ({
+    onConfigure: openWidgetConfig,
+    onOpenAlarms: openAlarmsPanel,
+    onOpenForecast: openForecastPanel,
+    onOpenAnchorWatch: openAnchorWatchPanel,
+    onOpenHouseBankRoles: openHouseBankRoles,
+    onOpenGeneratorRoles: openGeneratorRoles,
+    onAnchorImageryToggle: setShowAnchorImagery,
+    onRadarEchoToggle: setShowRadarEcho,
+  }), [openWidgetConfig, openAlarmsPanel, openForecastPanel, openAnchorWatchPanel, openHouseBankRoles, openGeneratorRoles])
+  const forceDarkMaps = activePage?.skin === 'instrument'
+  const renderWidget = useCallback((widget: DashboardLayoutItem): ReactNode => (
+    <WidgetHost
+      widget={widget}
+      editing={layoutEditing}
+      interactive={!isDisplay}
+      isDarkTheme={isDarkTheme}
+      forceDark={forceDarkMaps}
+      distanceUnits={uiConfig.distanceUnits}
+      readOnly={!canWrite}
+      ctx={equipmentContext}
+      showAnchorImagery={showAnchorImagery}
+      showRadarEcho={showRadarEcho}
+      actions={widgetActions}
+    />
+  ), [layoutEditing, isDisplay, isDarkTheme, forceDarkMaps, uiConfig.distanceUnits, canWrite, equipmentContext, showAnchorImagery, showRadarEcho, widgetActions])
 
   // The Add Tile menu's multi-instance entries (ADR 0107): each opens the
   // same config dialog/draft flow it always has — App.tsx still owns every

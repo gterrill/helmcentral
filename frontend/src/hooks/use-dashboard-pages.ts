@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
-import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
+import { apiRequest, refetchQuery, setQueryData, useApiQuerySelector } from '@/lib/api-query'
+import { sameJSON } from '@/lib/telemetry-store'
 
 export interface DashboardPage {
   id: string
@@ -68,6 +69,56 @@ function patchPages(fn: (pages: DashboardPage[]) => DashboardPage[]) {
   }))
 }
 
+const PAGES_PATH = '/api/dashboard-pages'
+
+interface PagesSelection {
+  pages: DashboardPage[]
+  error: Error | null
+  loading: boolean
+}
+
+/**
+ * `next` with every part equal to `prev` put back to `prev`'s object: a widget
+ * equal to the one with its id, a page whose every field and widget is equal,
+ * a list whose every page is (ADR 0215 phase 7). A write lands the server's
+ * whole page, every widget a new object; this is what lets it reach only the
+ * tile whose record changed.
+ */
+function sharePages(prev: DashboardPage[] | undefined, next: DashboardPage[]): DashboardPage[] {
+  if (!prev) return next
+  const prevById = new Map(prev.map((page) => [page.id, page]))
+  const shared = next.map((page) => {
+    const old = prevById.get(page.id)
+    if (!old) return page
+    if (sameJSON(old, page)) return old
+    const oldWidgets = new Map(old.widgets.map((w) => [w.id, w]))
+    const widgets = page.widgets.map((w) => {
+      const before = oldWidgets.get(w.id)
+      return before && sameJSON(before, w) ? before : w
+    })
+    const sameWidgets = widgets.length === old.widgets.length && widgets.every((w, i) => w === old.widgets[i])
+    return { ...page, widgets: sameWidgets ? old.widgets : widgets }
+  })
+  return shared.length === prev.length && shared.every((page, i) => page === prev[i]) ? prev : shared
+}
+
+// The error stands beside the last pages it had: a failed refresh is reported,
+// and the panels that read it keep those pages on screen next to the notice.
+function selectPages(raw: DashboardPagesListResponse | undefined, error: Error | null, previous: PagesSelection | undefined): PagesSelection {
+  const parsed = raw === undefined ? undefined : (Array.isArray(raw.pages) ? raw.pages : EMPTY_PAGES)
+  return {
+    pages: parsed === undefined ? EMPTY_PAGES : sharePages(previous?.pages, parsed),
+    error,
+    loading: raw === undefined && error === null,
+  }
+}
+
+function samePagesSelection(a: PagesSelection, b: PagesSelection): boolean {
+  return a.pages === b.pages && a.error === b.error && a.loading === b.loading
+}
+
+const refetchPages = () => refetchQuery(PAGES_KEY, PAGES_PATH)
+
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
@@ -76,13 +127,14 @@ export function useDashboardPages() {
   const [reordering, setReordering] = useState(false)
   const reorderPending = useRef(false)
 
-  const { data, isLoading, error, refetch } = useApiQuery<DashboardPage[]>({
-    queryKey: PAGES_KEY,
-    path: '/api/dashboard-pages',
-    select: (raw: DashboardPagesListResponse) => (Array.isArray(raw.pages) ? raw.pages : []),
-    structuralSharing: true,
-  })
-  const pages = data ?? EMPTY_PAGES
+  // Read through a selector, not useApiQuery: a poll that answers the same
+  // pages renders nothing, and one that changes a widget hands every other
+  // widget, page and the list itself back unchanged (sharePages).
+  const { pages, error, loading } = useApiQuerySelector<DashboardPagesListResponse, PagesSelection>(
+    { queryKey: PAGES_KEY, path: PAGES_PATH },
+    selectPages,
+    samePagesSelection,
+  )
 
   // Object-form only (ADR 0110 §6 follow-up): App.tsx's one call site now
   // passes `{ widgets: [] }` explicitly rather than a bare array, so the
@@ -179,11 +231,11 @@ export function useDashboardPages() {
 
   return {
     pages,
-    loading: isLoading,
+    loading,
     // Reported alongside the pages: a failed refresh is not hidden, and the
     // panels that read it keep the cached pages on screen next to the notice.
     error: error?.message ?? null,
-    refetch,
+    refetch: refetchPages,
     createPage,
     updatePage,
     deletePage,

@@ -13,6 +13,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The dashboard does much less work while it sits open.** Every time
+  Helmcentral checked the forecast, the tide, the route or the CZone
+  switches, it used to redraw every tile on the page, even when nothing had
+  changed. Now a tile redraws only when something it shows changes, so an
+  older tablet or the wall display has more to spare.
 - **The passage map no longer keeps redrawing while the replay is paused.** With
   3D on, the map redrew many times a second even when nothing was playing, and
   Chrome flagged the Passages tab as slowing the browser. It now draws only

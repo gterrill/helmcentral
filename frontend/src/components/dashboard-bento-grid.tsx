@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import GridLayout, { WidthProvider, type LayoutItem } from 'react-grid-layout/legacy'
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
@@ -179,7 +179,13 @@ export interface DashboardBentoGridProps {
   rowMargin?: number
 }
 
-export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle, heroId, rowMargin = GRID_MARGIN }: DashboardBentoGridProps) {
+/**
+ * Memoized (ADR 0215 phase 7): the shell hands it the widget list, which the
+ * page list keeps while it is unchanged, flags, and stable handlers, so a
+ * shell render that changes none of them does not reach the grid. When the
+ * grid does render, each tile's WidgetHost is memoized in turn.
+ */
+export const DashboardBentoGrid = memo(function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWidget, onDuplicateWidget, onLayoutSettle, heroId, rowMargin = GRID_MARGIN }: DashboardBentoGridProps) {
   // Below `lg`, render a plain reflowed stack instead of the RGL grid — never both at once.
   // Toggling between them via CSS (rather than this JS media query) would mount both layouts
   // simultaneously, leaving duplicate DOM nodes per widget: wasted render cost for real users,
@@ -471,4 +477,4 @@ export function DashboardBentoGrid({ widgets, editing, renderWidget, onRemoveWid
       </ReactGridLayout>
     </div>
   )
-}
+})
