@@ -35,6 +35,10 @@ type discoveryMetric struct {
 type discoveryItemRef struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Figures names the figures the item holds that only make sense with a
+	// source: "bank" or "tank", blank when it has none. Moving its source away
+	// clears them, so the page says so.
+	Figures string `json:"figures,omitempty"`
 }
 
 // discoveryRow is one source: something the boat reports now, or something an
@@ -353,7 +357,7 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 				row.ChargerInput = namer.isChargerInstance(id)
 			}
 			if it, ok := owner[source]; ok {
-				row.Item = &discoveryItemRef{ID: it.ID, Name: it.Name}
+				row.Item = &discoveryItemRef{ID: it.ID, Name: it.Name, Figures: sourceItemFigures(it)}
 			}
 			rows = append(rows, row)
 		}
@@ -457,4 +461,14 @@ func instanceLess(a, b string) bool {
 		return false
 	}
 	return a < b
+}
+
+func sourceItemFigures(it sourceItem) string {
+	switch {
+	case it.CapacityAh != 0 || it.Cells != 0 || it.WarnVoltage != 0 || it.HighVoltage != 0:
+		return "bank"
+	case it.TankWarnPercent != 0 || it.TankAlarmPercent != 0 || it.TankAlarmsOff:
+		return "tank"
+	}
+	return ""
 }

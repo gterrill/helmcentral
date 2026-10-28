@@ -101,6 +101,8 @@ export interface DiscoveryMetric {
 export interface DiscoveryItemRef {
   id: string
   name: string
+  /** Figures the item holds that only make sense with a source; a move clears them. */
+  figures?: 'bank' | 'tank'
 }
 
 /** A source the boat reports now, or one an item still owns that has gone quiet. */

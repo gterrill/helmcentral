@@ -41,7 +41,8 @@ the data plate:
   reports for it, picked from the live instrument data your boat actually
   publishes. The item's name is then the name that tiles, alarms and Mate use.
   A battery item also holds its bank's cell count and capacity. Leave the field
-  empty for gear the boat doesn't report on. See
+  empty for gear the boat doesn't report on. A source belongs to one item, but
+  you can swap two items' sources or move one in a single save. See
   [Set up your vessel](../how-to/set-up-your-vessel.md).
 - **Hour meter.** You don't enter it. An engine or a generator reads its
   runtime counter from its SignalK source, and the Maintenance section shows it

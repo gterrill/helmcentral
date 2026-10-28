@@ -76,13 +76,47 @@ be made, you're told why and the role stays as it was.
 When the boat reports nothing of that kind, the dropdown says so ("The boat isn't reporting any
 batteries.") or says SignalK isn't connected.
 
-A source belongs to one item. If another item already has it, Helmcentral says
-which one, and you free it there first. A source an item still owns that the
-boat has stopped reporting stays in the list and says **Not reporting now**.
+A source belongs to one item. A source an item still owns that the boat has
+stopped reporting stays in the list and says **Not reporting now**.
 
 You can also set a source from the item itself: open the item in Inventory and
 use **Source** under **SignalK source**. The list is the same one Discovery and
 Roles use, so there is nothing to type.
+
+## Swap two items' sources, or move one
+
+If you find two tanks the wrong way round, you can put them right in one save.
+On the item's **Source** list, a source that another item has is still there. It
+shows its live reading and the item that has it, for example
+"tanks.fuel.5 · 62% · on Fuel port".
+
+1. Open the item that should have the source and choose that source under
+   **Source**.
+2. Read the message that replaces "Unsaved changes" at the top of the page.
+   If the item already has a source of the same kind, it says "Swap sources
+   with Fuel port. Fuel starboard gets tanks.fuel.5, Fuel port gets
+   tanks.fuel.2." and the button reads **Swap sources**.
+3. If the item has no source, or its source is a different kind of thing, it
+   says "Move tanks.fuel.5 from Fuel port. Fuel port will have no source." and
+   the button reads **Move source**. A tank is never handed an engine's source,
+   so a different kind is always a move.
+4. Choose the button. A message at the bottom of the screen says "Sources
+   swapped" or "Source moved". Choosing **Discard** puts everything back.
+
+In a swap, each item keeps its own bank or tank figures, because they describe
+that battery or tank and not the source. A move leaves the other item with no
+source, and an item with no source can't hold those figures. The message says
+so ("...will have no source and loses its tank figures"), and you enter them
+again when you give that item a new source.
+
+If something uses the other item, such as a tile or a role, Helmcentral asks
+you to confirm first. It asks the same thing as when you change an item's own
+source.
+
+If either item's source changes while you have the page open, the save is
+refused and says so. Reload the page and pick it again. That way you only get
+the result you read.
+A new item that hasn't been saved yet can't take a source. Save it first.
 
 ## Only real sources are offered
 

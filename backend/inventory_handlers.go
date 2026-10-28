@@ -66,11 +66,18 @@ type equipmentRequest struct {
 	InstallDate      string  `json:"install_date"`
 	// SignalKSource is the one SignalK node the item owns; the bank figures
 	// apply to a battery item. validateEquipmentSource (the store) checks them.
-	SignalKSource string  `json:"signalk_source"`
-	CapacityAh    float64 `json:"capacity_ah"`
-	Cells         int     `json:"cells"`
-	WarnVoltage   float64 `json:"warn_voltage"`
-	HighVoltage   float64 `json:"high_voltage"`
+	SignalKSource string `json:"signalk_source"`
+	// TakeSourceFrom, on an update only, is the id of the item that owns
+	// SignalKSource now and is to give it up: a swap, or a move when this item
+	// has no source of the same kind to hand back.
+	TakeSourceFrom string `json:"take_source_from"`
+	// TakeSourceMode is what the page told the operator would happen, "swap"
+	// or "move"; the server refuses the save if it would do the other.
+	TakeSourceMode string  `json:"take_source_mode"`
+	CapacityAh     float64 `json:"capacity_ah"`
+	Cells          int     `json:"cells"`
+	WarnVoltage    float64 `json:"warn_voltage"`
+	HighVoltage    float64 `json:"high_voltage"`
 	// The tank figures apply to a tank item (ADR 0214); zero is blank.
 	TankWarnPercent  float64  `json:"tank_warn_percent"`
 	TankAlarmPercent float64  `json:"tank_alarm_percent"`
@@ -380,6 +387,9 @@ func createEquipmentHandler(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
 
+	if strings.TrimSpace(req.TakeSourceFrom) != "" {
+		return writeInventoryValidationError(c, &inventoryValidationError{Field: "take_source_from", Message: "a new item cannot take a source; save it first"})
+	}
 	item, verr := validateEquipmentInput(req, "")
 	if verr != nil {
 		return writeInventoryValidationError(c, verr)
@@ -442,24 +452,30 @@ func updateEquipmentHandler(c echo.Context) error {
 		return writeInventoryValidationError(c, verr)
 	}
 
-	updated, err := globalDocumentStore.UpdateEquipment(c.Param("id"), item)
+	var updated equipmentItem
+	if from := strings.TrimSpace(req.TakeSourceFrom); from != "" {
+		updated, err = globalDocumentStore.UpdateEquipmentTakingSource(c.Param("id"), item, from, strings.TrimSpace(req.TakeSourceMode))
+	} else {
+		updated, err = globalDocumentStore.UpdateEquipment(c.Param("id"), item)
+	}
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
 
-	reseedAnomalyRulesAfterItemSave(updated.ID)
+	// A take changed the other item too, and its source feeds the same views.
+	reseedAnomalyRulesAfterItemSave(updated.ID, strings.TrimSpace(req.TakeSourceFrom))
 
 	return c.JSON(http.StatusOK, map[string]any{"item": updated})
 }
 
 // reseedAnomalyRulesAfterItemSave re-seeds the anomaly-v1 rule sets, and moves
 // any alarm rule bound to the house bank role onto the bank's current source,
-// when equipmentID is an engine or the house bank. Mapping an item to a source,
+// when any of equipmentIDs is an engine or the house bank (a swap changes two). Mapping an item to a source,
 // or changing the profile a bank follows, is what completes or moves those
 // gates (vesselHouseBankReady resolves the profile through the item's own
 // profile_id). No other item has any bearing on them. A failure is logged, not
 // returned: the equipment save itself already succeeded.
-func reseedAnomalyRulesAfterItemSave(equipmentID string) {
+func reseedAnomalyRulesAfterItemSave(equipmentIDs ...string) {
 	// The list of items that own a source is reused for a second; a save or a
 	// delete has just changed it, so the view below must be built from fresh
 	// items, or the rule would be moved onto the source it just left.
@@ -478,10 +494,18 @@ func reseedAnomalyRulesAfterItemSave(equipmentID string) {
 		log.Printf("could not load the vessel roles after an equipment save: %v", err)
 		return
 	}
-	relevant := roles.HouseBank != "" && roles.HouseBank == equipmentID
-	for _, e := range vessel.Engines {
-		if e.EquipmentID == equipmentID {
+	relevant := false
+	for _, equipmentID := range equipmentIDs {
+		if equipmentID == "" {
+			continue
+		}
+		if roles.HouseBank != "" && roles.HouseBank == equipmentID {
 			relevant = true
+		}
+		for _, e := range vessel.Engines {
+			if e.EquipmentID == equipmentID {
+				relevant = true
+			}
 		}
 	}
 	if !relevant {
