@@ -13,6 +13,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Barometer alarms say what the move means.** A 6 mb move in three hours is
+  strong wind, 10 mb is a gale, and a 24 mb fall in a day is a weather bomb.
+  The card says which, and gives the wind to expect.
+
 - **Mate gives a boat status in one go.** Ask "how's the boat?" or for a quick
   update and Mate answers with figures under Power, Tanks, Outside and Boat: the
   house bank, solar and DC load, each tank, depth, true wind and gust, pressure
@@ -24,6 +28,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   are rounded the way an instrument shows them, such as 761 W and 11.3 kn.
 
 ### Changed
+
+- **A barometer alarm's clear point moves under the card.** "Clears once the
+  rise eases to 5.5 mb" now sits beside the time it was raised, in the alarms
+  drawer. The banner across the top shows what is happening and no longer says
+  how it clears.
 
 - **Mate's charts read right.** Asked about the wind, Mate used to draw speed
   and direction on one chart with two scales, and the direction was in radians.
