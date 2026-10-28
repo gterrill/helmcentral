@@ -782,8 +782,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	// 2a-iv. Changing records (ADR 0158) - fixed wording, identical for every
 	// turn. Mate proposes, the operator applies; the field lists come from
 	// describe_record_type so they do not ride along on every turn.
-	b.WriteString("You can propose changes to Helmcentral's records (equipment, locations, bins, decks and the " +
-		"maintenance schedule; describe_record_type lists them) with propose_changes, and read them with list_records " +
+	b.WriteString("You can propose changes to Helmcentral's records (equipment, locations, bins, decks, the " +
+		"maintenance schedule and alarm rules; describe_record_type lists them) with propose_changes, and read them with list_records " +
 		"and get_record. Learn a type's fields with describe_record_type before you propose changes to it, read the " +
 		"records first so you use real ids, and put every change the operator asked for in one proposal: a later " +
 		"operation can refer to a record an earlier one creates as $1, $2. A proposal changes nothing: the operator " +
@@ -794,6 +794,25 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"the drawing is a PDF say a page of a PDF cannot be a plan yet and ask them to upload a picture of that page. " +
 		"You can never operate the boat: the autopilot, the generator, CZone switches, the anchor watch and alarm " +
 		"acknowledgement are not records and cannot be proposed, nor can settings, secrets or logins.\n\n")
+
+	// 2a-iv. Alarm rules (ADR 0225) - fixed wording, identical for every turn.
+	b.WriteString("Alarm rules are records, not settings, so you can propose them (type alarm_rule). When the operator asks " +
+		"to be alerted, warned or watched for something (\"tell me if the bilge runs more than twice an hour\", \"alarm " +
+		"when the house bank drops below 50%\") or accepts a monitoring suggestion of yours, first call list_alarm_rules " +
+		"and edit the rule that already watches the path rather than adding a second; a rule marked read_only (tank " +
+		"levels, gauge zones) is changed where its change_it says, not by an alarm_rule change. Find the path with " +
+		"check_signalk_paths or the other path tools, never from memory. Then propose the rule with propose_changes. " +
+		"Give value and clear_value in the operator's units, as the card and list_alarm_rules show them (percent, " +
+		"degrees, knots), not SI. Always give a clear point so the alarm does not chatter, and how long it must hold " +
+		"(dwell_seconds), and say both in your reply with the severity you chose. The label is the alarm's title for " +
+		"someone reading it at 02:00: the event in a few words, such as \"House Bank Low\", never a path or a rule id, " +
+		"no exclamation marks. A proposal changes nothing until the operator taps Apply, so say it is waiting and " +
+		"never say the alarm is set, on or watching until the conversation shows it was applied. If the dry run is " +
+		"refused, read the reason, fix that field and propose again. Only when the operator asks what they should be " +
+		"monitoring, or something like it: call list_alarm_rules, look at what the boat actually publishes " +
+		"(check_signalk_paths), and suggest at most three readings that matter and have no rule yet, each with the " +
+		"threshold you would use and why. Make each one a proposal they can tap, and do not suggest a reading nothing " +
+		"on the boat produces. Never propose an alarm just because you could.\n\n")
 
 	// 2a-v. Filling in forms (ADR 0165) - fixed wording, identical for every
 	// turn. The order matters: layout, then what is on record, then one

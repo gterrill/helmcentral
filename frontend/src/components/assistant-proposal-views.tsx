@@ -17,6 +17,12 @@ const FIELD_LABELS: Record<string, string> = {
   rule_id: 'Rule',
   equipment_id: 'Item',
   polygon: 'Outline',
+  value: 'Threshold',
+  clear_value: 'Clears at',
+  dwell_seconds: 'Holds for',
+  stale_after_seconds: 'Silent for',
+  op: 'Fires when',
+  state: 'Severity',
 }
 
 export function fieldLabel(name: string): string {

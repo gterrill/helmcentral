@@ -166,6 +166,9 @@ type recordType struct {
 	// AfterCommit runs once the changeset's transaction has committed, for
 	// side effects a command cannot make inside it. Optional.
 	AfterCommit func(res changeOpResult)
+	// Display rewrites the Before and After values a card shows (a number
+	// with its unit). It gets the record's snapshot for the unit. Optional.
+	Display func(snap recordSnapshot, fields map[string]any) map[string]any
 }
 
 func (t *recordType) field(name string) (recordField, bool) {

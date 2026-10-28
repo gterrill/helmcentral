@@ -476,6 +476,7 @@ var mateTools = []mateTool{
 	mateToolFindEquipment,
 	mateToolListMaintenance,
 	mateToolGetMaintenanceLog,
+	mateToolListAlarmRules,
 	mateToolDescribeRecordType,
 	mateToolListRecords,
 	mateToolGetRecord,

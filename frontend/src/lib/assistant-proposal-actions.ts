@@ -2,6 +2,7 @@ import { ApiError, apiRequest, invalidateQueries } from '@/lib/api-query'
 import { mapProposal, type AssistantProposal, type ProposalApi } from '@/hooks/use-assistant-conversations'
 import { todayISO } from '@/lib/local-date'
 import { PLANNED_STAY_PATH } from '@/hooks/use-planned-stay'
+import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
 
 /**
  * Apply and Dismiss on a maintenance proposal card (ADR 0146). Apply is the
@@ -33,6 +34,9 @@ export async function applyAssistantProposal(id: string): Promise<AssistantPropo
   // A planned stay Mate proposed is on the Forecast page the moment the
   // operator applies the card; any open page reads it again.
   if (applied.ops.some((op) => op.type === 'planned_stay')) void invalidateQueries([PLANNED_STAY_PATH])
+  // An alarm rule Mate proposed is live the moment it is applied, so the
+  // Alarms page and the battery tile's bands read the rules again.
+  if (applied.ops.some((op) => op.type === 'alarm_rule')) void invalidateQueries([ALARM_RULES_PATH])
   return applied
 }
 

@@ -104,7 +104,7 @@ On request, it can look up more than that. Here is what it can do:
 - **Who else is around:** See "Nearby vessels" below.
 - **How the boat is doing:** See "A status update" below.
 - **Faults in a reading:** See "When a reading looks wrong" below.
-- **Maintenance, inventory, the boat's details, the app and alarms:** Each has
+- **Maintenance, inventory, alarms, the boat's details and the app:** Each has
   its own paragraphs below.
 
 [What Mate can look up](../reference/mate-tools.md) lists the provider each of
@@ -366,6 +366,22 @@ picture and you check it's the right one. A plan has to be a JPEG or PNG. If the
 drawing in your documents is a PDF, Mate asks you to upload a picture of that
 page instead.
 
+### Alarms
+
+Mate can read every alarm the boat is watching, and it can propose a new one or a change to one you already have. Say what you want to be told about, such as "tell me if the house bank drops below 50%" or "warn me if the fridge goes above 8 degrees", and Mate checks the alarms you already have first. If one already watches that reading, it proposes changing that alarm instead of adding a second one.
+
+The card under its reply names the alarm in a few words, such as House Bank Low, and says in a sentence what it does: how serious it is, the level it fires at, the level it clears at, and how long the reading has to hold before it goes off. The levels are in the units you use on the boat, so a battery reads in percent, a temperature in degrees Celsius and a speed in knots. Mate always sets a clear point a little past the level so that the alarm doesn't chatter, and it tells you what it chose. You can ask for different numbers before you tap **Apply**.
+
+Mate won't say an alarm is set until you've tapped **Apply**. After that the alarm is watching straight away and shows in the Alarms drawer like one you made yourself.
+
+Some alarms aren't Mate's to change:
+
+- Tank alarms: They come from each tank's own levels. Mate changes those on the tank's equipment item, where you'd change them yourself.
+- Gauge zones: A coloured band on a gauge raises its own alarm. You edit the band on the gauge, so Mate can't.
+- Built-in alarms: The ones that came with Helmcentral can be changed, switched off or removed like your own. The card says when it's one of them, and one you remove stays gone.
+
+If you ask "what should I be monitoring?", Mate looks at what the boat actually reports and what has no alarm yet. It suggests a few readings that matter, at most three, with the level it would use and why, and each one comes as a card you can tap. It won't suggest an alarm on something the boat doesn't measure. See [Set an alarm threshold](../how-to/set-an-alarm-threshold.md) for doing it by hand.
+
 ### The boat's details
 
 Mate can read the boat's details on **Settings → Vessel**: the owner and
@@ -380,7 +396,7 @@ but can't add a second one or remove it. The boat's name, call sign, MMSI and
 draft aren't on it, because they come from the boat's instruments.
 
 Mate never operates the boat. The autopilot, the generator, switching circuits,
-the anchor watch and alarm acknowledgement are not things it can propose. Apart
+the anchor watch and acknowledging an alarm are not things it can propose. Apart
 from the boat's details, neither are your settings or logins.
 
 ### The app itself
@@ -865,7 +881,7 @@ you through or a figure it worked out. **Save as note** under that answer keeps
 it without retyping. Mate doesn't write the note. Your
 tap creates it, it lands unfiled like any other capture, and you file or edit it
 afterwards. Mate never writes anything itself. The same goes for the
-maintenance schedule, the inventory and the boat's details: Mate proposes, and
+maintenance schedule, the inventory, your alarms and the boat's details: Mate proposes, and
 your tap on **Apply** makes the change.
 
 Mate is also always told which manuals exist. For each one, it's told the names
@@ -1005,7 +1021,7 @@ off, it says so plainly rather than pretending to work.
 
 It can look things up, explain how Helmcentral works, watch readings for a few
 minutes and report back. It can also propose changes to the maintenance
-schedule, the inventory and the boat's details, which you apply or dismiss. It
+schedule, the inventory, your alarms and the boat's details, which you apply or dismiss. It
 can't start anything on the boat, change any other setting or steer. Nothing it proposes takes effect without your tap, whether you typed the
 question or said it.
 

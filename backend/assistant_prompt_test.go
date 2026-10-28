@@ -1323,3 +1323,27 @@ func TestBuildAssistantSystemPrompt_VesselStatusRule(t *testing.T) {
 		}
 	}
 }
+
+// ADR 0225: alarm rules are records Mate proposes, never settings it writes.
+func TestBuildAssistantSystemPrompt_AlarmProposalGuidance(t *testing.T) {
+	stable, live := assistantSystemPromptParts(basePromptContext())
+	for _, want := range []string{
+		"list_alarm_rules",
+		"alarm rules",
+		"in the operator's units",
+		"clear point",
+		"how long it must hold",
+		"never say the alarm is set",
+		"what they should be monitoring",
+		"no rule yet",
+		"at most three",
+		"never a path",
+	} {
+		if !strings.Contains(stable, want) {
+			t.Errorf("expected the stable prefix to contain %q", want)
+		}
+	}
+	if strings.Contains(live, "list_alarm_rules") {
+		t.Errorf("alarm guidance belongs in the stable prefix only")
+	}
+}

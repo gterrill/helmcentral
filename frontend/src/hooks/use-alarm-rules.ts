@@ -57,7 +57,8 @@ export function newAlarmRuleDraft(): AlarmRuleDraft {
   }
 }
 
-const RULES_PATH = '/api/alarm-rules'
+export const ALARM_RULES_PATH = '/api/alarm-rules'
+const RULES_PATH = ALARM_RULES_PATH
 const NO_RULES: AlarmRule[] = []
 
 // A poll that answers the same rules keeps the same object, for the editor and the list.

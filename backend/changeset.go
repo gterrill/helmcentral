@@ -582,6 +582,14 @@ func (r *recordRegistry) describe(i int, op *changeOp, run opRun) error {
 		op.Before = mergeFields(run.before.Fields, nil)
 	}
 	d := describeInput{Op: *op, Type: t, Before: run.before, After: run.after, Effects: run.effects, Extra: run.extra}
+	if t.Display != nil {
+		if run.before != nil && op.Before != nil {
+			op.Before = t.Display(*run.before, op.Before)
+		}
+		if run.after != nil && op.After != nil {
+			op.After = t.Display(*run.after, op.After)
+		}
+	}
 	var line string
 	if t.Describe != nil {
 		line = t.Describe(d)
