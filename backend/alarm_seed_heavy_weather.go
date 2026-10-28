@@ -1,9 +1,6 @@
 package main
 
-import (
-	"fmt"
-	"time"
-)
+import "time"
 
 /*
 The heavy-weather rule set (ADR 0070, reduced by ADR 0095).
@@ -67,30 +64,10 @@ func heavyWeatherSeedRules(now time.Time) []alarmRule {
 // seedHeavyWeatherRules creates the set once, then records that it has been
 // done. Safe to call on every boot.
 func seedHeavyWeatherRules() error {
-	alarmRulesMu.RLock()
-	for _, marker := range alarmRulesSeededSets {
-		if marker == heavyWeatherSeedMarker {
-			alarmRulesMu.RUnlock()
-			return nil
-		}
-	}
-	alarmRulesMu.RUnlock()
-
-	now := time.Now().UTC()
-	for _, rule := range heavyWeatherSeedRules(now) {
+	rules := heavyWeatherSeedRules(time.Now().UTC())
+	for i := range rules {
 		// Disabled, deliberately: see this file's doc comment.
-		rule.Enabled = false
-		if _, err := createAlarmRule(rule); err != nil {
-			return fmt.Errorf("seeding heavy-weather rule %q: %w", rule.Label, err)
-		}
+		rules[i].Enabled = false
 	}
-
-	alarmRulesMu.Lock()
-	alarmRulesSeededSets = append(alarmRulesSeededSets, heavyWeatherSeedMarker)
-	err := saveAlarmRulesLocked()
-	alarmRulesMu.Unlock()
-	if err != nil {
-		return fmt.Errorf("recording the heavy-weather seed marker: %w", err)
-	}
-	return nil
+	return seedAlarmRuleSet(heavyWeatherSeedMarker, rules, false)
 }

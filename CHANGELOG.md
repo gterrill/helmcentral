@@ -11,6 +11,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Your alarm rules are now kept in the database.** They used to be in
+  `data/alarm-rules.json`. The first time you start this release, Helmcentral
+  copies every rule into `data/helmcentral.sqlite`, along with the record of
+  which built-in sets it has already offered, so none of them reappear. It then
+  renames the file to `alarm-rules.json.imported` and leaves it in the same
+  folder as a copy of what you had. The Alarms drawer works as before. What you
+  need to do: back up `data/helmcentral.sqlite` from now on. A backup that only
+  took `alarm-rules.json` will no longer have your rules. If the old file can't
+  be read, Helmcentral won't start and says why, and the file stays as it was.
+
 ### Added
 
 - **Barometer alarms say what the move means.** A 6 mb move in three hours is
@@ -29,6 +41,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Mate can set a tank's alarm levels.** When you ask it to change an item's
+  tank warn level, alarm level, or to switch a tank's alarms off, it can now
+  propose that, and the same checks apply as on the item page. The alarm level
+  has to be further into the bad side than the warn level, and both stay between
+  0 and 100 percent.
 - **A barometer alarm's clear point moves under the card.** "Clears once the
   rise eases to 5.5 mb" now sits beside the time it was raised, in the alarms
   drawer. The banner across the top shows what is happening and no longer says

@@ -298,3 +298,35 @@ func TestInventory_BinLinkEscapesTheFreeTextCode(t *testing.T) {
 		}
 	}
 }
+
+// A tank's own alarm levels are ordinary writable fields, and they go through
+// the same validation as the item page (validateTankLevels), so Mate cannot
+// save a pair the tank alarm would refuse.
+func TestInventory_TankAlarmLevelsAreWritableAndValidated(t *testing.T) {
+	t.Setenv("TANK_ALARM_DEFAULTS_FILE", t.TempDir()+"/tank-alarm-defaults.json")
+	if err := loadTankAlarmDefaults(); err != nil {
+		t.Fatalf("load defaults: %v", err)
+	}
+	env := newProposalEnv(t)
+	tank := env.equipment(t, equipmentItem{Name: "Fuel", System: sourceSystem(sourceTank), SignalKSource: "tanks.fuel.2", Quantity: 1})
+	env.advance()
+
+	env.applyOK(t, fmt.Sprintf(`{"operations":[{"type":"equipment","action":"update","id":%q,"fields":{"tank_warn_percent":30,"tank_alarm_percent":15,"tank_alarms_off":true}}]}`, tank.ID))
+	got, _ := env.docs.GetEquipment(tank.ID)
+	if got.TankWarnPercent != 30 || got.TankAlarmPercent != 15 || !got.TankAlarmsOff {
+		t.Fatalf("levels not stored: %+v", got)
+	}
+
+	for _, tc := range []struct{ args, want string }{
+		{fmt.Sprintf(`{"operations":[{"type":"equipment","action":"update","id":%q,"fields":{"tank_warn_percent":10,"tank_alarm_percent":20}}]}`, tank.ID), "the alarm level must be lower than the warn level"},
+		{fmt.Sprintf(`{"operations":[{"type":"equipment","action":"update","id":%q,"fields":{"tank_warn_percent":120}}]}`, tank.ID), "tank levels are percentages between 0 and 100"},
+	} {
+		if msg := proposeError(t, env.deps, tc.args); !strings.Contains(msg, tc.want) {
+			t.Errorf("expected %q for %s, got %q", tc.want, tc.args, msg)
+		}
+	}
+	after, _ := env.docs.GetEquipment(tank.ID)
+	if after.TankWarnPercent != 30 || after.TankAlarmPercent != 15 {
+		t.Errorf("a refused change must leave the levels alone: %+v", after)
+	}
+}

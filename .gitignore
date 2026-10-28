@@ -20,6 +20,7 @@ backend/data/secrets.sqlite
 backend/data/secrets.key
 backend/data/sessions.sqlite
 backend/data/alarm-rules.json
+backend/data/alarm-rules.json.imported
 backend/data/documents/
 # helmcentral.sqlite (ADR 0141) replaces documents.sqlite/assistant.sqlite/
 # nearby-contacts.sqlite/alarm-log.sqlite/webpush-subscriptions.sqlite/

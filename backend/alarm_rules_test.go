@@ -15,15 +15,30 @@ func withTempAlarmRules(t *testing.T) string {
 	path := filepath.Join(t.TempDir(), "alarm-rules.json")
 	t.Setenv("ALARM_RULES_FILE", path)
 
-	alarmRulesMu.Lock()
-	alarmRulesState = map[string]*alarmRule{}
-	// The seed markers are part of the rules file's state, so a helper that
-	// stands up a fresh install has to clear them too - otherwise one test's
-	// seeding suppresses another's.
-	alarmRulesSeededSets = nil
-	alarmRulesMu.Unlock()
-	// The ignore lists live in the database, not the rules file; a fresh
-	// install starts with both empty.
+	// The rules live in the record store (ADR 0224). A store a test already
+	// installed is kept; otherwise a fresh one is, so the tables start empty.
+	store := globalDocumentStore
+	if store == nil {
+		var err error
+		store, err = newDocumentStore(filepath.Join(t.TempDir(), "helmcentral.sqlite"))
+		if err != nil {
+			t.Fatalf("open record store: %v", err)
+		}
+		globalDocumentStore = store
+		t.Cleanup(func() {
+			globalDocumentStore = nil
+			_ = store.Close()
+		})
+	}
+	for _, stmt := range []string{`DELETE FROM alarm_rules`, `DELETE FROM alarm_rule_seeded_sets`} {
+		if _, err := store.db.Exec(stmt); err != nil {
+			t.Fatalf("clear alarm rules: %v", err)
+		}
+	}
+	if err := loadAlarmRules(); err != nil {
+		t.Fatalf("loadAlarmRules: %v", err)
+	}
+	// The ignore lists have their own store; a fresh install starts with both empty.
 	withTempIgnoreStore(t)
 
 	return path
@@ -54,8 +69,9 @@ func TestCreateAlarmRuleAssignsIDAndPersists(t *testing.T) {
 		t.Fatalf("expected a generated id")
 	}
 
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("expected rules file written to %s: %v", path, err)
+	// The rules live in the database, not the old file (ADR 0224).
+	if _, err := os.Stat(path); err == nil {
+		t.Fatalf("a rule write must not recreate %s", path)
 	}
 
 	// Reload from disk to prove persistence, not just in-memory state.
@@ -75,11 +91,11 @@ func TestCreateAlarmRuleAssignsIDAndPersists(t *testing.T) {
 	}
 }
 
-func TestLoadAlarmRulesTreatsMissingFileAsEmpty(t *testing.T) {
+func TestLoadAlarmRulesOfAnEmptyStoreIsEmpty(t *testing.T) {
 	withTempAlarmRules(t)
 
 	if err := loadAlarmRules(); err != nil {
-		t.Fatalf("a missing rules file is a fresh install, not an error: %v", err)
+		t.Fatalf("an empty store is a fresh install, not an error: %v", err)
 	}
 	if len(listAlarmRules()) != 0 {
 		t.Fatalf("expected no rules, got %d", len(listAlarmRules()))
@@ -634,8 +650,7 @@ func TestSeedAnomalyRules_BaseSetNeedsNoVesselSetup(t *testing.T) {
 		}
 	}
 	// The rules must persist under their own fixed IDs (code review finding
-	// 7), not whatever createAlarmRule would otherwise assign -- see
-	// createSeededAlarmRule's own doc comment.
+	// 7), not whatever createAlarmRule would otherwise assign.
 	if _, ok := byID[anomalyImpossibleRuleID]; !ok {
 		t.Fatalf("expected a rule persisted under the fixed id %q, got %+v", anomalyImpossibleRuleID, rules)
 	}
@@ -898,7 +913,7 @@ func TestSeedAnomalyRules_DoesNotResurrectADeletedRule(t *testing.T) {
 // only record the set's marker once all of them succeeded. A failure
 // partway through (a disk-full write, a transient I/O error) left the rules
 // that DID save on disk with no marker recorded, so a retry -- the next
-// restart, or the next vessel-settings save -- called createSeededAlarmRule
+// restart, or the next vessel-settings save -- called the old per-rule create
 // again for the same fixed IDs and failed forever with "id already in use",
 // never finishing the set. Simulates the exact state a partial failure
 // leaves behind (rule A saved, rule B and the marker not) and checks the
@@ -914,7 +929,7 @@ func TestSeedAnomalySet_ResumesAfterAPartialFailure(t *testing.T) {
 	// Simulate the first attempt getting partway through the set before
 	// failing: rule A saved, rule B never created, the marker never
 	// recorded.
-	if _, err := createSeededAlarmRule(rules[0]); err != nil {
+	if _, err := insertFixedIDAlarmRuleForTest(t, rules[0]); err != nil {
 		t.Fatalf("simulating the first partial attempt: %v", err)
 	}
 
@@ -943,7 +958,7 @@ func TestSeedAnomalySet_ResumesAfterAPartialFailure(t *testing.T) {
 func TestSeedAnomalySet_RefusesAGenuineIDConflict(t *testing.T) {
 	withTempAlarmRules(t)
 
-	if _, err := createSeededAlarmRule(alarmRule{
+	if _, err := insertFixedIDAlarmRuleForTest(t, alarmRule{
 		ID: "test:seed-conflict", Label: "Something else entirely", Enabled: true,
 		Path: "helmcentral.unrelated.path", Op: alarmOpAbove, Value: 1, DwellSeconds: 10, State: alarmStateWarn,
 	}); err != nil {

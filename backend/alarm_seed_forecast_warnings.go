@@ -1,7 +1,5 @@
 package main
 
-import "fmt"
-
 /*
 The forecast-warnings rule set (plan: fold the forecast warning into the
 alarm system; ADR 0087).
@@ -92,29 +90,10 @@ func forecastWarningsSeedRules() []alarmRule {
 // seedForecastWarningsRules creates the set once, then records that it has
 // been done. Safe to call on every boot, mirroring seedHeavyWeatherRules.
 func seedForecastWarningsRules() error {
-	alarmRulesMu.RLock()
-	for _, marker := range alarmRulesSeededSets {
-		if marker == forecastWarningsSeedMarker {
-			alarmRulesMu.RUnlock()
-			return nil
-		}
-	}
-	alarmRulesMu.RUnlock()
-
-	for _, rule := range forecastWarningsSeedRules() {
+	rules := forecastWarningsSeedRules()
+	for i := range rules {
 		// Enabled, deliberately: see this file's doc comment.
-		rule.Enabled = true
-		if _, err := createAlarmRule(rule); err != nil {
-			return fmt.Errorf("seeding forecast-warnings rule %q: %w", rule.Label, err)
-		}
+		rules[i].Enabled = true
 	}
-
-	alarmRulesMu.Lock()
-	alarmRulesSeededSets = append(alarmRulesSeededSets, forecastWarningsSeedMarker)
-	err := saveAlarmRulesLocked()
-	alarmRulesMu.Unlock()
-	if err != nil {
-		return fmt.Errorf("recording the forecast-warnings seed marker: %w", err)
-	}
-	return nil
+	return seedAlarmRuleSet(forecastWarningsSeedMarker, rules, false)
 }

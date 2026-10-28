@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -378,22 +377,36 @@ func loadConvertItems(tx *sql.Tx) ([]convertItem, error) {
 // adoptHouseBankRules makes every alarm rule that watches the old house bank's
 // state of charge follow the house bank role instead of that literal path.
 func adoptHouseBankRules(socPath string) error {
-	alarmRulesMu.Lock()
-	defer alarmRulesMu.Unlock()
-	changed := false
-	for _, rule := range alarmRulesState {
+	store, err := alarmRuleStore()
+	if err != nil {
+		return err
+	}
+	adopts := false
+	for _, rule := range listAlarmRules() {
 		if rule.PathRole == "" && rule.Path == socPath {
-			rule.PathRole = alarmPathRoleHouseBankSoC
-			changed = true
+			adopts = true
 		}
 	}
-	if !changed {
+	if !adopts {
 		return nil
 	}
-	if err := saveAlarmRulesLocked(); err != nil {
-		return errors.New("saving alarm rules: " + err.Error())
-	}
-	return nil
+	return store.writeAlarmRules("adopt house bank alarm rules", func(tx *sql.Tx, now time.Time) error {
+		rules, err := listAlarmRulesQ(tx)
+		if err != nil {
+			return err
+		}
+		for _, rule := range rules {
+			if rule.PathRole != "" || rule.Path != socPath {
+				continue
+			}
+			rule.PathRole = alarmPathRoleHouseBankSoC
+			rule.UpdatedAt = now
+			if err := updateAlarmRuleTx(tx, rule); err != nil {
+				return fmt.Errorf("saving alarm rules: %w", err)
+			}
+		}
+		return nil
+	})
 }
 
 // tankTypeWords is how an operator says what a tank holds, from the SignalK

@@ -1,10 +1,9 @@
 package main
 
 import (
-	"encoding/json"
+	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -102,17 +101,21 @@ type alarmRule struct {
 
 	EscalateAfterSeconds int `json:"escalate_after_seconds"`
 
+	// SeededBy is the marker of the built-in set that created the rule, empty
+	// for a rule the operator made. It is stored, never sent over the API.
+	SeededBy string `json:"-"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// alarmRulesFile is the retired alarm-rules.json, read once by
+// importLegacyAlarmRules (alarm_rules_import.go).
 type alarmRulesFile struct {
 	Rules []*alarmRule `json:"rules"`
 
-	// SeededSets records which built-in rule sets have already been offered,
-	// so seeding runs once per installation. Keyed on the marker rather than
-	// on the file being empty, because a set the operator deleted on purpose
-	// must never come back on the next restart.
+	// SeededSets records which built-in rule sets had been offered, so the
+	// import can carry the markers into alarm_rule_seeded_sets.
 	SeededSets []string `json:"seeded_sets,omitempty"`
 }
 
@@ -122,63 +125,22 @@ var (
 	alarmRulesSeededSets []string
 )
 
-// Rules live in their own file rather than settings.yaml deliberately: POST
-// /api/settings rebuilds its sections wholesale, so a new top-level key there
-// would be silently destroyed on the next settings save.
+// alarmRulesFilePath is where releases before ADR 0224 kept the rules. It is
+// only the source of the one-time import now.
 func alarmRulesFilePath() string {
 	return cacheFilePath("ALARM_RULES_FILE", "data/alarm-rules.json")
 }
 
+// loadAlarmRules fills the in-memory copy from the database.
 func loadAlarmRules() error {
-	path := alarmRulesFilePath()
-
-	data, err := os.ReadFile(path)
+	store, err := alarmRuleStore()
 	if err != nil {
-		if os.IsNotExist(err) {
-			// A fresh install has no rules; that is not a failure.
-			alarmRulesMu.Lock()
-			alarmRulesState = map[string]*alarmRule{}
-			alarmRulesSeededSets = nil
-			alarmRulesMu.Unlock()
-			return nil
-		}
-		return fmt.Errorf("reading alarm rules: %w", err)
+		return err
 	}
-
-	var file alarmRulesFile
-	if len(data) > 0 {
-		if err := json.Unmarshal(data, &file); err != nil {
-			return fmt.Errorf("parsing alarm rules: %w", err)
-		}
-	}
-
-	next := make(map[string]*alarmRule, len(file.Rules))
-	for _, rule := range file.Rules {
-		if rule == nil || strings.TrimSpace(rule.ID) == "" {
-			continue
-		}
-		next[rule.ID] = rule
-	}
-
-	alarmRulesMu.Lock()
-	alarmRulesState = next
-	alarmRulesSeededSets = file.SeededSets
-	alarmRulesMu.Unlock()
-	return nil
+	return refreshAlarmRules(store)
 }
 
-func saveAlarmRulesLocked() error {
-	list := make([]*alarmRule, 0, len(alarmRulesState))
-	for _, rule := range alarmRulesState {
-		list = append(list, rule)
-	}
-	sortAlarmRules(list)
-	return writeJSONFileAtomic(alarmRulesFilePath(), alarmRulesFile{
-		Rules: list, SeededSets: alarmRulesSeededSets,
-	})
-}
-
-// sortAlarmRules gives both the file and the API a stable order. CreatedAt
+// sortAlarmRules gives the API a stable order. CreatedAt
 // alone is not enough — rules created in the same millisecond would tie.
 func sortAlarmRules(list []*alarmRule) {
 	sort.Slice(list, func(i, j int) bool {
@@ -221,68 +183,17 @@ func createAlarmRule(rule alarmRule) (alarmRule, error) {
 	if err := validateAlarmRule(&rule); err != nil {
 		return alarmRule{}, err
 	}
-
-	now := time.Now().UTC()
-	rule.ID = uuid.NewString()
-	rule.CreatedAt = now
-	rule.UpdatedAt = now
-
-	alarmRulesMu.Lock()
-	defer alarmRulesMu.Unlock()
-
-	alarmRulesState[rule.ID] = &rule
-	if err := saveAlarmRulesLocked(); err != nil {
-		delete(alarmRulesState, rule.ID)
+	store, err := alarmRuleStore()
+	if err != nil {
 		return alarmRule{}, err
 	}
-	return rule, nil
-}
-
-// createSeededAlarmRule creates rule keeping its own ID, rather than
-// createAlarmRule's "always assign a fresh UUID" contract. It exists for
-// exactly one caller shape: a seeding file (alarm_seed_anomaly.go's
-// anomalyImpossibleRuleID and friends) whose rules need a stable, known
-// identity across restarts -- e.g. so a later cycle can look one up by its
-// own constant, and so a test can actually assert seeding produced THIS
-// rule rather than merely "a" rule (code review finding 7; the alternative
-// -- checking Path or Label -- can't tell a seeded rule apart from an
-// operator's own rule that happens to share one).
-//
-// This must never be reachable from the public create-rule HTTP handler:
-// createAlarmRuleHandler binds straight off the request body and passes it
-// to createAlarmRule, and that unconditional UUID assignment is what stops
-// a client from claiming a system rule's ID (or another rule's) by simply
-// putting it in the JSON. createSeededAlarmRule trusts its caller's ID
-// completely -- it must only ever be a literal constant a seeding file
-// wrote itself, never anything that traced back to a request body.
-//
-// Returns an error if rule.ID is empty, or if a rule already exists under
-// it (which would silently replace whatever that was) -- seedAnomalySet's
-// own marker is what normally keeps a set from seeding twice, so this
-// should never actually trigger; it is a fail-fast backstop, not the
-// primary guard.
-func createSeededAlarmRule(rule alarmRule) (alarmRule, error) {
-	if strings.TrimSpace(rule.ID) == "" {
-		return alarmRule{}, fmt.Errorf("createSeededAlarmRule: rule %q has no fixed id", rule.Label)
-	}
-	if err := validateAlarmRule(&rule); err != nil {
-		return alarmRule{}, err
-	}
-
-	now := time.Now().UTC()
-	rule.CreatedAt = now
-	rule.UpdatedAt = now
-
-	alarmRulesMu.Lock()
-	defer alarmRulesMu.Unlock()
-
-	if existing, ok := alarmRulesState[rule.ID]; ok {
-		return alarmRule{}, fmt.Errorf("createSeededAlarmRule: id %q is already in use by %q", rule.ID, existing.Label)
-	}
-
-	alarmRulesState[rule.ID] = &rule
-	if err := saveAlarmRulesLocked(); err != nil {
-		delete(alarmRulesState, rule.ID)
+	err = store.writeAlarmRules("create alarm rule", func(tx *sql.Tx, now time.Time) error {
+		rule.ID = uuid.NewString()
+		rule.CreatedAt = now
+		rule.UpdatedAt = now
+		return insertAlarmRuleTx(tx, rule)
+	})
+	if err != nil {
 		return alarmRule{}, err
 	}
 	return rule, nil
@@ -293,44 +204,43 @@ func updateAlarmRule(id string, next alarmRule) (alarmRule, error) {
 	if err := validateAlarmRuleFor(&next, exists); err != nil {
 		return alarmRule{}, err
 	}
-
-	alarmRulesMu.Lock()
-	defer alarmRulesMu.Unlock()
-
-	existing, ok := alarmRulesState[id]
-	if !ok {
-		return alarmRule{}, fmt.Errorf("no alarm rule with id %q", id)
+	store, err := alarmRuleStore()
+	if err != nil {
+		return alarmRule{}, err
 	}
-
-	// Identity and creation time belong to the server, not the payload.
-	previous := *existing
-	next.ID = existing.ID
-	next.CreatedAt = existing.CreatedAt
-	next.UpdatedAt = time.Now().UTC()
-
-	alarmRulesState[id] = &next
-	if err := saveAlarmRulesLocked(); err != nil {
-		alarmRulesState[id] = &previous
+	err = store.writeAlarmRules("update alarm rule", func(tx *sql.Tx, now time.Time) error {
+		existing, err := alarmRuleByIDQ(tx, id)
+		if errors.Is(err, errAlarmRuleNotFound) {
+			return fmt.Errorf("no alarm rule with id %q", id)
+		}
+		if err != nil {
+			return err
+		}
+		// Identity, origin and creation time belong to the server, not the payload.
+		next.ID = existing.ID
+		next.SeededBy = existing.SeededBy
+		next.CreatedAt = existing.CreatedAt
+		next.UpdatedAt = now
+		return updateAlarmRuleTx(tx, next)
+	})
+	if err != nil {
 		return alarmRule{}, err
 	}
 	return next, nil
 }
 
 func deleteAlarmRule(id string) error {
-	alarmRulesMu.Lock()
-	defer alarmRulesMu.Unlock()
-
-	existing, ok := alarmRulesState[id]
-	if !ok {
-		return fmt.Errorf("no alarm rule with id %q", id)
-	}
-
-	delete(alarmRulesState, id)
-	if err := saveAlarmRulesLocked(); err != nil {
-		alarmRulesState[id] = existing
+	store, err := alarmRuleStore()
+	if err != nil {
 		return err
 	}
-	return nil
+	return store.writeAlarmRules("delete alarm rule", func(tx *sql.Tx, _ time.Time) error {
+		if err := deleteAlarmRuleTx(tx, id); errors.Is(err, errAlarmRuleNotFound) {
+			return fmt.Errorf("no alarm rule with id %q", id)
+		} else {
+			return err
+		}
+	})
 }
 
 // validateAlarmRule normalizes in place and reports the first problem. It is
@@ -440,29 +350,35 @@ func alarmRolePath(role string) (string, error) {
 // stop watching the bank they used to follow instead of watching a stale one.
 // It writes only when something moved.
 func syncRoleBoundRules(vessel vesselView) error {
-	alarmRulesMu.Lock()
-	defer alarmRulesMu.Unlock()
-
-	want := vessel.houseBankSocPath()
-	now := time.Now().UTC()
-	previous := map[string]alarmRule{}
-	for id, rule := range alarmRulesState {
-		if rule.PathRole != alarmPathRoleHouseBankSoC || rule.Path == want {
-			continue
-		}
-		previous[id] = *rule
-		rule.Path = want
-		rule.UpdatedAt = now
-	}
-	if len(previous) == 0 {
-		return nil
-	}
-	if err := saveAlarmRulesLocked(); err != nil {
-		for id, old := range previous {
-			restored := old
-			alarmRulesState[id] = &restored
-		}
+	store, err := alarmRuleStore()
+	if err != nil {
 		return err
 	}
-	return nil
+	want := vessel.houseBankSocPath()
+	moves := false
+	for _, rule := range listAlarmRules() {
+		if rule.PathRole == alarmPathRoleHouseBankSoC && rule.Path != want {
+			moves = true
+		}
+	}
+	if !moves {
+		return nil
+	}
+	return store.writeAlarmRules("move role-bound alarm rules", func(tx *sql.Tx, now time.Time) error {
+		rules, err := listAlarmRulesQ(tx)
+		if err != nil {
+			return err
+		}
+		for _, rule := range rules {
+			if rule.PathRole != alarmPathRoleHouseBankSoC || rule.Path == want {
+				continue
+			}
+			rule.Path = want
+			rule.UpdatedAt = now
+			if err := updateAlarmRuleTx(tx, rule); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

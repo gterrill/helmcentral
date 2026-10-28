@@ -1,7 +1,5 @@
 package main
 
-import "fmt"
-
 /*
 The Law of Storms barometer rule set (ADR 0095), from R. J. Ellis, "Secret
 Law of Storms" (worldstormcentral.co, rules-for-storms-and-gales page).
@@ -149,33 +147,9 @@ func lawOfStormsSeedRules() []alarmRule {
 // done. Safe to call on every boot, mirroring seedHeavyWeatherRules and
 // seedForecastWarningsRules.
 func seedLawOfStormsRules() error {
-	alarmRulesMu.RLock()
-	for _, marker := range alarmRulesSeededSets {
-		if marker == lawOfStormsSeedMarker {
-			alarmRulesMu.RUnlock()
-			return nil
-		}
-	}
-	alarmRulesMu.RUnlock()
-
-	for _, rule := range lawOfStormsSeedRules() {
-		// Unlike the heavy-weather set (forced disabled) and the
-		// forecast-warnings set (forced enabled), this loop does not
-		// overwrite rule.Enabled: lawOfStormsSeedRules already sets each
-		// rule's own Enabled correctly, and the whole point of this set is
-		// that it is not one uniform confidence level -- six of the seven
-		// rules ship live and the storm-signature rule alone ships off.
-		if _, err := createAlarmRule(rule); err != nil {
-			return fmt.Errorf("seeding law-of-storms rule %q: %w", rule.Label, err)
-		}
-	}
-
-	alarmRulesMu.Lock()
-	alarmRulesSeededSets = append(alarmRulesSeededSets, lawOfStormsSeedMarker)
-	err := saveAlarmRulesLocked()
-	alarmRulesMu.Unlock()
-	if err != nil {
-		return fmt.Errorf("recording the law-of-storms seed marker: %w", err)
-	}
-	return nil
+	// Unlike the heavy-weather set (forced disabled) and the forecast-warnings
+	// set (forced enabled), Enabled is left as lawOfStormsSeedRules sets it:
+	// this set is not one uniform confidence level, six of the seven rules
+	// ship live and the storm-signature rule alone ships off.
+	return seedAlarmRuleSet(lawOfStormsSeedMarker, lawOfStormsSeedRules(), false)
 }
