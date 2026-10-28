@@ -195,6 +195,32 @@ function lawOfStormsSentence(alarm: ActiveAlarm): string | null {
     return 'Severe thunderstorm signature: barometer down 4 mb in three hours and 8 mb in twelve hours below 1005 mb.'
   }
 
+  const tendency = tendencyReading(alarm)
+  if (tendency === null) return null
+  const { rising, windowWord, magnitudePa } = tendency
+  const sentence = `${rising ? 'Up' : 'Down'} ${formatAlarmReading(magnitudePa, 'Pa')} in ${windowWord}.`
+  const meaning = tendencyMeaning(alarm.path, rising, tierMagnitudePa(alarm, rising, magnitudePa))
+  return meaning === null ? sentence : `${sentence} ${meaning}`
+}
+
+/**
+ * The magnitude the meaning tier is read from: the reading as the card shows
+ * it (to 0.1 mb, so "10.0 mb" never sits beside the 6 mb tier's wind), or the
+ * rule's own threshold if that is higher, so a latched gale rule easing inside
+ * its hysteresis band still reads as a gale under its gale title.
+ */
+function tierMagnitudePa(alarm: ActiveAlarm, rising: boolean, magnitudePa: number): number {
+  const shown = Math.round(magnitudePa / 10) * 10
+  const { threshold } = alarm
+  if (threshold === undefined || (rising ? threshold <= 0 : threshold >= 0)) return shown
+  return Math.max(shown, Math.abs(threshold))
+}
+
+/**
+ * The live reading of a tendency alarm, or null when the alarm is not one or
+ * its signs disagree (see lawOfStormsSentence).
+ */
+function tendencyReading(alarm: ActiveAlarm): { rising: boolean; windowWord: string; magnitudePa: number } | null {
   const windowWord = TENDENCY_WINDOW_WORDS[alarm.path]
   if (windowWord === undefined) return null
 
@@ -204,15 +230,42 @@ function lawOfStormsSentence(alarm: ActiveAlarm): string | null {
   const rising = op === 'above'
   if (rising ? value <= 0 : value >= 0) return null
   if (clearValue !== undefined && (rising ? clearValue <= 0 : clearValue >= 0)) return null
+  return { rising, windowWord, magnitudePa: Math.abs(value) }
+}
 
-  const direction = rising ? 'Up' : 'Down'
-  const magnitude = formatAlarmReading(Math.abs(value), unit)
-  const sentence = `${direction} ${magnitude} in ${windowWord}.`
-  if (clearValue === undefined) return sentence
+// R. J. Ellis's tiers, the same figures alarm_seed_law_of_storms.go seeds
+// its rules at. Retune one there and retune it here.
+const PA_PER_MB = 100
+const STRONG_WIND_3H_PA = 6 * PA_PER_MB
+const GALE_3H_PA = 10 * PA_PER_MB
+const WEATHER_BOMB_24H_PA = 24 * PA_PER_MB
 
-  const verb = rising ? 'rise' : 'fall'
-  const clears = formatAlarmReading(Math.abs(clearValue), unit)
-  return `${sentence} Clears once the ${verb} eases to ${clears}.`
+/**
+ * What a tendency move means for the weather, keyed on tierMagnitudePa so a
+ * custom rule gets the tier its reading is actually in, or none. Wind ranges
+ * are in knots: alarm readings have no wind-unit preference.
+ */
+
+function tendencyMeaning(path: string, rising: boolean, magnitudePa: number): string | null {
+  if (path === PRESSURE_CHANGE_24H_PATH) {
+    if (rising || magnitudePa < WEATHER_BOMB_24H_PA) return null
+    return 'A low deepening this fast is a weather bomb: expect storm-force wind, 48 kn and over.'
+  }
+  if (path !== PRESSURE_CHANGE_3H_PATH || magnitudePa < STRONG_WIND_3H_PA) return null
+  const lead = rising
+    ? 'A rise this fast brings wind, not fair weather'
+    : 'A fall this fast means a low closing in'
+  return magnitudePa >= GALE_3H_PA
+    ? `${lead}: expect a gale, 34 to 47 kn.`
+    : `${lead}: expect 26 to 33 kn.`
+}
+
+/** The footer clause for a tendency alarm's clear point, or null. */
+function tendencyClearText(alarm: ActiveAlarm): string | null {
+  const tendency = tendencyReading(alarm)
+  if (tendency === null || alarm.clear_value === undefined) return null
+  const clears = formatAlarmReading(Math.abs(alarm.clear_value), 'Pa')
+  return `Clears once the ${tendency.rising ? 'rise' : 'fall'} eases to ${clears}`
 }
 
 const METRES_PER_NM = 1852
@@ -322,11 +375,12 @@ export function isTankAlarm(alarm: ActiveAlarm): boolean {
 
 /**
  * The footer line of a card that says how it clears, for the alarms where
- * Helmcentral knows (a tank's level). Null elsewhere: a bus notification clears
- * however its producer clears it, and nothing here claims to know.
+ * Helmcentral knows (a tank's level, a barometer tendency rule). Null
+ * elsewhere: a bus notification clears however its producer clears it, and
+ * nothing here claims to know.
  */
 export function alarmFooterText(alarm: ActiveAlarm): string | null {
-  if (!isTankAlarm(alarm)) return null
+  if (!isTankAlarm(alarm)) return tendencyClearText(alarm)
   if ((alarm.op !== 'above' && alarm.op !== 'below') || alarm.clear_value === undefined) return null
   return tankClearText(alarm.op, alarm.clear_value)
 }
