@@ -53,6 +53,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate can give a passage distance through the islands.** Asked how far
+  Goldsmith Island was from Airlie Beach, Mate used to say the coast was too
+  intricate and ask you to plan shorter legs. It now gives the distance by
+  water, 37 nm for that run. Mate still asks for shorter legs if a run is over
+  300 nm, or if a stretch of coast is so broken that it can't search it.
+
 - **Engine Cluster footer parts now pick their reading from the equipment.**
   Choose the starter battery for the footer and the tile sets its voltage from
   what the battery is sending. Before, you had to type the reading yourself, and

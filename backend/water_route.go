@@ -19,12 +19,16 @@ import (
 //     the right. That is what tells a point on land from one on water (the
 //     side of the nearest shoreline segment) and which corners a path can
 //     bend round: only a left turn (towards the land) is a headland that
-//     sticks out into the water. Every such corner becomes a graph node, pushed seaward by
-//     waterRouteClearanceNm along the bisector of its two segments.
+//     sticks out into the water. Every such corner becomes a graph node,
+//     pushed seaward by waterRouteClearanceNm along the bisector of its two
+//     segments.
 //  3. Two nodes are joined when the straight line between them crosses no
 //     shoreline segment and stays clear of every one by half the clearance.
-//     The graph is never built whole: A* tests an edge only when it could
-//     improve a node, and a spatial grid keeps each test to the shoreline
+//     The graph is never built whole. A* queues a candidate edge untested
+//     and tests it only when it reaches the front, and a settled node offers
+//     its candidates a batch at a time, shortest through-path first, so the
+//     queue holds the few the search could reach rather than one for every
+//     other corner. A spatial grid keeps each test to the shoreline
 //     segments near the line.
 //
 // Reefs are not shoreline here. A charted reef is a hazard to read off the
@@ -63,11 +67,31 @@ const (
 	waterRouteGridCellNm = 0.25
 )
 
-// waterRouteMaxNodes bounds the search: the queue holds every candidate edge,
-// so memory grows with the square of this.
-const waterRouteMaxNodes = 2000
+// waterRouteMaxQueued bounds the search by what it holds in memory: the
+// entries on the queue, 16 bytes each, so 4 million is 64 MB. The number of
+// corners does not decide this. A coast of several thousand corners routes with
+// a queue of tens of thousands of entries, because a settled node queues its
+// candidate edges a batch at a time. Only a search that reaches the bound is
+// refused, and it is refused rather than answered with a path that was not
+// proven shortest.
+var waterRouteMaxQueued = 4_000_000
+
+// A settled node offers its candidate edges waterRouteBatch at a time, and
+// each further batch is waterRouteBatchGrowth times the last.
+const waterRouteBatchGrowth = 2
+
+// waterRouteBatch is the first batch. A test sets it to one candidate, and
+// to more than there are nodes, to prove the batching does not change the path.
+var waterRouteBatch = 16
 
 var errNoWaterRoute = errors.New("no water route found")
+
+// errWaterRouteTooIntricate marks a refusal because the search outgrew what it
+// is allowed to use, in memory (waterRouteMaxQueued) or in time
+// (waterRouteMaxTime). Callers tell it apart from a coast with no way through
+// (errNoWaterRoute) and from a cancelled request. The advice is the same:
+// plan the run in shorter legs.
+var errWaterRouteTooIntricate = errors.New("too intricate to route in one go")
 
 // waterRoute is a path over water from the start to the destination.
 type waterRoute struct {
@@ -269,8 +293,8 @@ func (ix *wrIndex) cellOf(p wrPt) (int, int) {
 
 // walk calls fn for the cell of each sample along a segment, spaced at
 // step, so a cell the segment crosses is missed only by a corner. fn is not
-// called twice in a row for one cell.
-func (ix *wrIndex) walk(s wrSeg, step float64, fn func(i, j int)) {
+// called twice in a row for one cell. The walk stops when fn returns false.
+func (ix *wrIndex) walk(s wrSeg, step float64, fn func(i, j int) bool) {
 	l := wrDist(s.a, s.b)
 	n := int(math.Ceil(l/step)) + 1
 	li, lj := math.MinInt, math.MinInt
@@ -278,7 +302,9 @@ func (ix *wrIndex) walk(s wrSeg, step float64, fn func(i, j int)) {
 		t := float64(k) / float64(n)
 		i, j := ix.cellOf(wrAdd(s.a, wrScale(wrSub(s.b, s.a), t)))
 		if i != li || j != lj {
-			fn(i, j)
+			if !fn(i, j) {
+				return
+			}
 			li, lj = i, j
 		}
 	}
@@ -294,10 +320,11 @@ func newWRIndex(segs []wrSeg, minX, minY, maxX, maxY float64) *wrIndex {
 	ix.cellSeen = make([]uint32, ix.w*ix.h)
 	ix.seen = make([]uint32, len(segs))
 	for id, s := range segs {
-		ix.walk(s, waterRouteGridCellNm/8, func(i, j int) {
+		ix.walk(s, waterRouteGridCellNm/8, func(i, j int) bool {
 			if k, ok := ix.slot(i, j); ok {
 				ix.cells[k] = append(ix.cells[k], int32(id))
 			}
+			return true
 		})
 	}
 	return ix
@@ -318,7 +345,7 @@ func (ix *wrIndex) clear(s wrSeg, thr float64, skipA, skipB int) bool {
 	loX, hiX := math.Min(s.a.x, s.b.x)-thr, math.Max(s.a.x, s.b.x)+thr
 	loY, hiY := math.Min(s.a.y, s.b.y)-thr, math.Max(s.a.y, s.b.y)+thr
 	ok := true
-	ix.walk(s, waterRouteGridCellNm/2, func(ci, cj int) {
+	ix.walk(s, waterRouteGridCellNm/2, func(ci, cj int) bool {
 		for di := -1; di <= 1 && ok; di++ {
 			for dj := -1; dj <= 1 && ok; dj++ {
 				k, in := ix.slot(ci+di, cj+dj)
@@ -337,11 +364,12 @@ func (ix *wrIndex) clear(s wrSeg, thr float64, skipA, skipB int) bool {
 					}
 					if wrSegDist(s, o) <= thr {
 						ok = false
-						return
+						return false
 					}
 				}
 			}
 		}
+		return ok
 	})
 	return ok
 }
@@ -388,9 +416,13 @@ func nearestShore(p wrPt, segs []wrSeg) (dist float64, q wrPt, water wrPt, onLan
 
 // ── the search ────────────────────────────────────────────────────────────
 
+// wrItem is a candidate edge from one node to another, ordered by f, the
+// shortest the path through it could be. It holds no g: the cost so far is f
+// less the straight run still to go from node, which the search recomputes
+// when the item is taken. At 16 bytes it halves what the queue costs.
 type wrItem struct {
-	node, from int
-	g, f       float64
+	f          float64
+	node, from int32
 }
 
 // wrHeap is a binary min-heap on f. It is typed so a push does not box.
@@ -433,6 +465,55 @@ func (h *wrHeap) pop() wrItem {
 	}
 	*h = a
 	return top
+}
+
+// wrSmallest keeps the limit smallest items offered to it, ordered by f and
+// then node. It is a max-heap, so the largest kept is items[0].
+type wrSmallest struct {
+	items []wrItem
+	limit int
+}
+
+func wrBefore(a, b wrItem) bool { return a.f < b.f || (a.f == b.f && a.node < b.node) }
+
+func (s *wrSmallest) reset(limit int) { s.items, s.limit = s.items[:0], limit }
+func (s *wrSmallest) full() bool      { return len(s.items) >= s.limit }
+
+// wants reports whether offering it would keep it.
+func (s *wrSmallest) wants(it wrItem) bool { return !s.full() || wrBefore(it, s.items[0]) }
+
+func (s *wrSmallest) offer(it wrItem) {
+	a := s.items
+	if len(a) < s.limit {
+		a = append(a, it)
+		i := len(a) - 1
+		for i > 0 {
+			p := (i - 1) / 2
+			if !wrBefore(a[p], a[i]) {
+				break
+			}
+			a[p], a[i] = a[i], a[p]
+			i = p
+		}
+		s.items = a
+		return
+	}
+	a[0] = it
+	i := 0
+	for {
+		l, r, m := 2*i+1, 2*i+2, i
+		if l < len(a) && wrBefore(a[m], a[l]) {
+			m = l
+		}
+		if r < len(a) && wrBefore(a[m], a[r]) {
+			m = r
+		}
+		if m == i {
+			return
+		}
+		a[i], a[m] = a[m], a[i]
+		i = m
+	}
 }
 
 // routeOverWater finds the shortest path over water from one point to
@@ -629,30 +710,72 @@ func routeOverWater(ctx context.Context, from, to shorelinePoint, lines []shorel
 		}
 	}
 
-	if len(pos) > waterRouteMaxNodes {
-		return waterRoute{}, fmt.Errorf("the shoreline between %.4f, %.4f and %.4f, %.4f is too intricate to route in one go (%d corners); plan it in shorter legs", from.Lat, from.Lon, to.Lat, to.Lon, len(pos))
-	}
-
 	// A* with lazy edges: a candidate edge goes on the queue untested and is
 	// tested only when it reaches the front. Most are never reached, and the
-	// visibility test is where all the time goes.
+	// visibility test is where the time goes.
 	n := len(pos)
 	g := make([]float64, n)
 	parent := make([]int, n)
 	settled := make([]bool, n)
-	h := func(i int) float64 { return wrDist(pos[i], end) }
+	hv := make([]float64, n)
+	for i := range hv {
+		hv[i] = wrDist(pos[i], end)
+	}
 	pq := &wrHeap{}
 	pops := 0
-	push := func(from int) {
-		for v := 0; v < n; v++ {
-			if !settled[v] {
-				nd := g[from] + wrDist(pos[from], pos[v])
-				pq.push(wrItem{node: v, from: from, g: nd, f: nd + h(v)})
-			}
+
+	// Each settled node u offers its candidate edges in order of f, a batch at
+	// a time, each batch larger than the last. A batch ends at a cursor, the
+	// last candidate queued; when the search pops it, u's next batch is queued.
+	// The rest of u's candidates wait until the search could reach them, and
+	// most never are. f can only grow along a path, so a later batch never
+	// holds an f below one already popped: the pops come in the order they
+	// would with every candidate queued, and the path found is the same.
+	cursorF := make([]float64, n)
+	cursorV := make([]int32, n)
+	for i := range cursorV {
+		cursorV[i] = -1 // no batch pending
+	}
+	batch := make([]int, n)
+	var pick wrSmallest
+	expand := func(u int, afterF float64, afterV int32) error {
+		// A scan walks every node, so the request is checked on each one
+		// rather than only every few pops.
+		if err := ctx.Err(); err != nil {
+			return err
 		}
+		pick.reset(batch[u])
+		batch[u] *= waterRouteBatchGrowth
+		for v := 0; v < n; v++ {
+			if settled[v] {
+				continue
+			}
+			it := wrItem{f: g[u] + wrDist(pos[u], pos[v]) + hv[v], node: int32(v), from: int32(u)}
+			if it.f < afterF || (it.f == afterF && it.node <= afterV) || !pick.wants(it) {
+				continue
+			}
+			pick.offer(it)
+		}
+		if len(*pq)+len(pick.items) > waterRouteMaxQueued {
+			return fmt.Errorf("the shoreline between %.4f, %.4f and %.4f, %.4f is %w: the search would need to hold more than %d candidate legs at once; plan it in shorter legs",
+				from.Lat, from.Lon, to.Lat, to.Lon, errWaterRouteTooIntricate, waterRouteMaxQueued)
+		}
+		cursorV[u] = -1 // nothing left to offer
+		if pick.full() {
+			last := pick.items[0] // the largest of the smallest
+			cursorF[u], cursorV[u] = last.f, last.node
+		}
+		for _, it := range pick.items {
+			pq.push(it)
+		}
+		return nil
 	}
 	settled[0] = true
-	push(0)
+	parent[0] = -1
+	batch[0] = waterRouteBatch
+	if err := expand(0, math.Inf(-1), -1); err != nil {
+		return waterRoute{}, err
+	}
 	for len(*pq) > 0 {
 		if pops++; pops%256 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -660,14 +783,20 @@ func routeOverWater(ctx context.Context, from, to shorelinePoint, lines []shorel
 			}
 		}
 		it := pq.pop()
-		v := it.node
+		v, from := int(it.node), int(it.from)
+		if cursorV[from] == it.node && cursorF[from] == it.f {
+			if err := expand(from, it.f, it.node); err != nil {
+				return waterRoute{}, err
+			}
+		}
 		if settled[v] {
 			continue
 		}
-		if !ix.clear(wrSeg{pos[it.from], pos[v]}, edgeThr(near[it.from], near[v]), -1, -1) {
+		if !ix.clear(wrSeg{pos[from], pos[v]}, edgeThr(near[from], near[v]), -1, -1) {
 			continue
 		}
-		settled[v], g[v], parent[v] = true, it.g, it.from
+		settled[v], g[v], parent[v] = true, it.f-hv[v], from
+		batch[v] = waterRouteBatch
 		if v == 1 {
 			var rev []wrPt
 			for k := 1; ; k = parent[k] {
@@ -682,7 +811,9 @@ func routeOverWater(ctx context.Context, from, to shorelinePoint, lines []shorel
 			}
 			return finish(path), nil
 		}
-		push(v)
+		if err := expand(v, math.Inf(-1), -1); err != nil {
+			return waterRoute{}, err
+		}
 	}
 	return waterRoute{}, fmt.Errorf("%w from %.4f, %.4f to %.4f, %.4f within %.0f nm of the straight line: the water between them is closed off by charted shoreline", errNoWaterRoute, from.Lat, from.Lon, to.Lat, to.Lon, marginNm)
 }

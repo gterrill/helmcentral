@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -241,6 +242,114 @@ func TestRouteOverWater_WhitsundaysRunsRoundTheIslandNotThroughIt(t *testing.T) 
 				t.Errorf("took %v", time.Since(start))
 			}
 		})
+	}
+}
+
+// The coast between Airlie Beach and Goldsmith Island holds more than 2700
+// corners within 8 nm of the run. It must route, not refuse to.
+var (
+	coralSeaMarina     = shorelinePoint{-20.2666, 148.7099}
+	goldsmithAnchorage = shorelinePoint{-20.668, 149.135}
+)
+
+func TestRouteOverWater_IntricateCoastStillRoutes(t *testing.T) {
+	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
+	start := time.Now()
+	r, err := routeOverWater(context.Background(), coralSeaMarina, goldsmithAnchorage, lines, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%.2f nm routed, %.2f nm straight, %d points, %v", r.DistanceNm, r.StraightLineNm, len(r.Points), time.Since(start))
+	if r.DistanceNm < 36 || r.DistanceNm > 39 {
+		t.Errorf("routed %.2f nm, want 36-39", r.DistanceNm)
+	}
+	if r.DistanceNm < r.StraightLineNm*1.05 {
+		t.Errorf("routed %.2f nm is barely longer than the straight %.2f: it went through land", r.DistanceNm, r.StraightLineNm)
+	}
+	if routePolylineCrossesShore(r, lines) {
+		t.Errorf("route crosses the shoreline: %+v", r.Points)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("took %v", time.Since(start))
+	}
+}
+
+// A settled node queues its candidate edges a batch at a time. That is a way
+// of holding fewer of them, not of choosing among them, so the distance must
+// not depend on the batch size. Route random pairs of water points through the
+// Whitsundays with one candidate to a batch and with every candidate in one,
+// which is the queue as it was before batching, and demand the same distance.
+func TestRouteOverWater_BatchSizeNeverChangesAnAnswer(t *testing.T) {
+	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
+	oldBatch, oldQueued := waterRouteBatch, waterRouteMaxQueued
+	t.Cleanup(func() { waterRouteBatch, waterRouteMaxQueued = oldBatch, oldQueued })
+	waterRouteMaxQueued = 1 << 30 // the all-in-one run must not meet the bound
+
+	// Water points are told from land the way the router does: by the side of
+	// the nearest shoreline segment, in a projection about the middle of the area.
+	proj := newWRProjection(-20.5, 149.0)
+	var segs []wrSeg
+	for _, chain := range chainCoastline(lines) {
+		for i := 1; i < len(chain); i++ {
+			segs = append(segs, wrSeg{proj.fwd(chain[i-1].Lat, chain[i-1].Lon), proj.fwd(chain[i].Lat, chain[i].Lon)})
+		}
+	}
+	rng := rand.New(rand.NewSource(222))
+	water := func() shorelinePoint {
+		for {
+			p := shorelinePoint{Lat: -20.95 + rng.Float64()*0.9, Lon: 148.55 + rng.Float64()*0.9}
+			if d, _, _, onLand, _ := nearestShore(proj.fwd(p.Lat, p.Lon), segs); !onLand && d > 0.1 {
+				return p
+			}
+		}
+	}
+
+	want := 40
+	if testing.Short() {
+		want = 12
+	}
+	var routed, refused int
+	for tried := 0; tried < want; {
+		a, b := water(), water()
+		if straight := haversineMeters(a.Lat, a.Lon, b.Lat, b.Lon) / metersPerNauticalMile; straight < 1 || straight > 25 {
+			continue
+		}
+		tried++
+		waterRouteBatch = 1
+		one, errOne := routeOverWater(context.Background(), a, b, lines, 6)
+		waterRouteBatch = 1 << 20
+		all, errAll := routeOverWater(context.Background(), a, b, lines, 6)
+		switch {
+		case errOne != nil || errAll != nil:
+			if errOne == nil || errAll == nil || errOne.Error() != errAll.Error() {
+				t.Errorf("%v to %v: one at a time gave %v, all at once %v", a, b, errOne, errAll)
+			}
+			refused++
+		case math.Abs(one.DistanceNm-all.DistanceNm) > 1e-6:
+			t.Errorf("%v to %v: one at a time %.6f nm, all at once %.6f nm", a, b, one.DistanceNm, all.DistanceNm)
+		default:
+			routed++
+		}
+	}
+	t.Logf("%d pairs: %d routed the same either way, %d refused alike (closed off, or on land)", want, routed, refused)
+}
+
+// The queue is bounded by what it holds. A search that would hold more is
+// refused, and says so rather than returning the best path it had.
+func TestRouteOverWater_AQueueBeyondTheBoundIsRefused(t *testing.T) {
+	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
+	old := waterRouteMaxQueued
+	t.Cleanup(func() { waterRouteMaxQueued = old })
+	waterRouteMaxQueued = 200
+	_, err := routeOverWater(context.Background(), coralSeaMarina, goldsmithAnchorage, lines, 8)
+	if err == nil || !strings.Contains(err.Error(), "too intricate to route in one go") || !strings.Contains(err.Error(), "shorter legs") {
+		t.Fatalf("want the coast named too intricate, got %v", err)
+	}
+	if errors.Is(err, errNoWaterRoute) {
+		t.Errorf("a refused search is not a closed-off one: %v", err)
+	}
+	if !errors.Is(err, errWaterRouteTooIntricate) {
+		t.Errorf("the refusal should wrap errWaterRouteTooIntricate: %v", err)
 	}
 }
 

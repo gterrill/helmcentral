@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 )
 
 // waterRouteMargins are the corridor margins tried in turn, in nautical
@@ -14,6 +15,12 @@ import (
 // squares, so a route near the edge of the held coastline reports the missing
 // square instead of giving a path that might be too long.
 var waterRouteMargins = []float64{3, 8, 20, 50}
+
+// waterRouteMaxTime bounds one whole call to RouteOverWater, every margin and
+// the retry that proves the answer. The queue bound caps memory but not time,
+// and Mate's run has a budget of its own, so a search that outruns this is
+// refused as too intricate. A var so a test can shorten it.
+var waterRouteMaxTime = 30 * time.Second
 
 // squaresInBox returns the coverage squares a box touches.
 func squaresInBox(south, west, north, east float64) ([]coverageSquare, error) {
@@ -123,6 +130,19 @@ func (l *coastlineLoader) inBox(south, west, north, east float64) ([]shorelineLi
 // tool exists to remove, and an explicit caveat would put the burden of
 // noticing it on Mate and the operator.
 func (r *offlineCoastlineReader) RouteOverWater(ctx context.Context, fromLat, fromLon, toLat, toLon float64) (waterRoute, error) {
+	limit := waterRouteMaxTime
+	timed, cancel := context.WithTimeoutCause(ctx, limit, errWaterRouteTooIntricate)
+	defer cancel()
+	route, err := r.routeWithin(timed, fromLat, fromLon, toLat, toLon)
+	// Only this limit counts. A cancelled or expired parent keeps its own error.
+	if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) && errors.Is(context.Cause(timed), errWaterRouteTooIntricate) {
+		return waterRoute{}, fmt.Errorf("the route from %.4f, %.4f to %.4f, %.4f is %w: the search ran past %v; plan it in shorter legs",
+			fromLat, fromLon, toLat, toLon, errWaterRouteTooIntricate, limit)
+	}
+	return route, err
+}
+
+func (r *offlineCoastlineReader) routeWithin(ctx context.Context, fromLat, fromLon, toLat, toLon float64) (waterRoute, error) {
 	for _, e := range []struct {
 		name     string
 		lat, lon float64

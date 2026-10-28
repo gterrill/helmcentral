@@ -122,8 +122,10 @@ if one is missing Mate says which and gives no distance:
 - **A square isn't downloaded.** It names the square, such as 21°S 148°E.
 - **A position is on land.** Either end is more than half a mile inland.
 - **No way through.** No water joins the two within 50 nm of the line.
-- **Too far or too intricate.** A run over 300 nm, or a coast too broken to
-  search at once, needs shorter legs.
+- **Too far.** A run over 300 nm needs shorter legs.
+- **Too intricate.** Very rarely, a run crosses so much broken coast that Mate
+  can't search all of it at once. It also gives up if the search runs longer
+  than 30 seconds. Either way it says so and asks for shorter legs.
 
 Mate never replaces a missing route with the straight line. It says it can't
 give a passage distance and why.
