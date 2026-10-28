@@ -39,8 +39,8 @@ describe('EquipmentSourceSection: Source select', () => {
     const select = screen.getByLabelText('Source')
     expect(within(select).getByRole('option', { name: 'propulsion.port · not reporting now · last seen 16 Oct' })).not.toBeDisabled()
     expect(within(select).getByRole('option', { name: 'propulsion.starboard · not reporting now · last seen 16 Oct' })).not.toBeDisabled()
-    // propulsion.1 belongs to another item: shown as taken, never as a choice.
-    expect(within(select).getByRole('option', { name: 'propulsion.1 · assigned to Cummins QSB 6.7' })).toBeDisabled()
+    // propulsion.1 belongs to another item: still a choice, which swaps or moves it.
+    expect(within(select).getByRole('option', { name: /^propulsion\.1 · .* · on Cummins QSB 6\.7$/ })).not.toBeDisabled()
     expect(screen.getByRole('alert')).toHaveTextContent('propulsion.0 reports other readings but has never reported RPM')
     expect(screen.getByText(/now or when Helmcentral last saw them/)).toBeInTheDocument()
   })

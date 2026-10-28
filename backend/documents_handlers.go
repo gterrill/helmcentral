@@ -330,7 +330,7 @@ func documentErrorStatus(err error) (int, string) {
 		return http.StatusBadRequest, errEquipmentLocationMismatch.Error()
 	case errors.Is(err, errEquipmentSourceInvalid):
 		return http.StatusBadRequest, err.Error()
-	case isEquipmentSourceTaken(err):
+	case isEquipmentSourceTaken(err), errors.Is(err, errEquipmentSourceMoved), errors.Is(err, errEquipmentSourceChanged):
 		return http.StatusConflict, err.Error()
 	// ADR 0127's photo routes (inventory_store.go's own "equipment photos"
 	// section) share this same mapping function rather than a parallel one,

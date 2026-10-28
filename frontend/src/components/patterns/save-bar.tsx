@@ -22,6 +22,8 @@ import { SAVE_BAR_SLOT_ID } from './save-bar-slot'
 // than a loud failure, and quietly falling back to an inline bar would hide
 // that the shell was wired wrong.
 
+const DEFAULT_MESSAGE = 'Unsaved changes'
+
 export interface SaveBarProps {
   dirty: boolean
   saving?: boolean
@@ -31,6 +33,8 @@ export interface SaveBarProps {
   /** Blocks Save, e.g. while the form holds a value the server would refuse. */
   saveDisabled?: boolean
   saveLabel?: string
+  /** Replaces "Unsaved changes" when the save does something the operator should read first. */
+  message?: string
   discardLabel?: string
   className?: string
 }
@@ -43,6 +47,7 @@ export function SaveBar({
   onDiscard,
   saveDisabled = false,
   saveLabel = 'Save',
+  message = DEFAULT_MESSAGE,
   discardLabel = 'Discard',
   className,
 }: SaveBarProps) {
@@ -67,7 +72,7 @@ export function SaveBar({
       className={cn('flex h-full w-full items-center gap-3 bg-card px-2 sm:px-4', className)}
     >
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-foreground">Unsaved changes</p>
+        <p className={cn('font-medium text-foreground', message === DEFAULT_MESSAGE ? 'truncate text-sm' : 'line-clamp-3 break-words text-xs leading-snug sm:text-sm')}>{message}</p>
         {error && (
           <p role="alert" className="truncate text-xs text-destructive" title={error}>
             {error}
