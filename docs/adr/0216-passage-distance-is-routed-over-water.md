@@ -99,7 +99,9 @@ Nothing masks a missing input. The router returns an error, and the tool says
 - The start or destination is on land beyond 0.5 nm, or in an inland square.
 - No water connects the two inside the widest margin.
 - The run is longer than 300 nm, or the corridor holds more than 3000 corners.
-  The tool asks for shorter legs.
+  The tool asks for shorter legs. ([ADR 0223](0223-water-routing-bounds-the-queue-not-the-corners.md)
+  replaces the corner limit, which the code held at 2000, with a bound on the
+  search queue and one on its time.)
 
 The prompt tells Mate to say it cannot give a passage distance and why, and
 never to substitute the straight line, a guess or a figure from its own

@@ -44,6 +44,69 @@ func TestRouteOverWaterReader_WhitsundaysFromStoredSquares(t *testing.T) {
 	}
 }
 
+func TestRouteOverWaterReader_IntricateCoastStillRoutes(t *testing.T) {
+	r, store := newRouteReader(t, true)
+	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
+	for _, sq := range []coverageSquare{{-21, 148}, {-21, 149}, {-20, 148}, {-20, 149}} {
+		if err := store.SaveSquare(sq, lines, coastlineTestAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := time.Now()
+	got, err := r.RouteOverWater(context.Background(), coralSeaMarina.Lat, coralSeaMarina.Lon, goldsmithAnchorage.Lat, goldsmithAnchorage.Lon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DistanceNm < 36 || got.DistanceNm > 39 || got.DistanceNm < got.StraightLineNm*1.05 {
+		t.Errorf("Coral Sea Marina to Goldsmith: routed %.2f nm, straight %.2f nm", got.DistanceNm, got.StraightLineNm)
+	}
+	if routePolylineCrossesShore(got, lines) {
+		t.Errorf("route crosses the shoreline: %+v", got.Points)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Errorf("took %v", time.Since(start))
+	}
+}
+
+func TestRouteOverWaterReader_ASearchPastTheTimeLimitIsTooIntricate(t *testing.T) {
+	r, store := newRouteReader(t, true)
+	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
+	for _, sq := range []coverageSquare{{-21, 148}, {-21, 149}, {-20, 148}, {-20, 149}} {
+		if err := store.SaveSquare(sq, lines, coastlineTestAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := waterRouteMaxTime
+	t.Cleanup(func() { waterRouteMaxTime = old })
+	waterRouteMaxTime = time.Nanosecond
+	_, err := r.RouteOverWater(context.Background(), coralSeaMarina.Lat, coralSeaMarina.Lon, goldsmithAnchorage.Lat, goldsmithAnchorage.Lon)
+	if !errors.Is(err, errWaterRouteTooIntricate) {
+		t.Fatalf("want the too intricate refusal, got %v", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		t.Errorf("a search that ran too long is a refusal, not the caller's deadline: %v", err)
+	}
+	if !strings.Contains(err.Error(), "too intricate to route in one go") || !strings.Contains(err.Error(), "shorter legs") {
+		t.Errorf("the advice is missing: %v", err)
+	}
+}
+
+func TestRouteOverWaterReader_AParentDeadlineKeepsItsOwnError(t *testing.T) {
+	r, store := newRouteReader(t, true)
+	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
+	for _, sq := range []coverageSquare{{-21, 148}, {-21, 149}, {-20, 148}, {-20, 149}} {
+		if err := store.SaveSquare(sq, lines, coastlineTestAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	_, err := r.RouteOverWater(ctx, coralSeaMarina.Lat, coralSeaMarina.Lon, goldsmithAnchorage.Lat, goldsmithAnchorage.Lon)
+	if !errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errWaterRouteTooIntricate) {
+		t.Fatalf("want the caller's own deadline, got %v", err)
+	}
+}
+
 func TestRouteOverWaterReader_AWayHeldInTwoSquaresIsOneCoast(t *testing.T) {
 	r, store := newRouteReader(t, true)
 	lines := loadShorelineFile(t, "testdata/water_route/whitsundays.json.gz")
