@@ -25,6 +25,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Mate routines.** Ask Mate to "check the boat every hour" or "give me a
+  summary at 06:00 while we're at anchor" and it shows a card for a routine.
+  Tap **Apply** and the routine runs on its schedule, adding one line, "Routine:
+  <name>", and Mate's reply to the routine's own conversation, which carries a
+  **Routine** label in the list. A reply starts with "Nothing to report." or a
+  one-line headline of what needs a look. Routines are off until you turn on
+  **Let routines run on their own** in Settings → Mate, because they spend your
+  OpenRouter credit with nobody watching. A daily limit beside the switch, $1.00
+  to start with, stops new runs once routines have spent that much in 24 hours,
+  and Settings shows what they've spent. Each routine's row says when it last ran
+  and why a run was skipped, and has a switch and a **Delete** button. Daily
+  routines use the boat's clock, so they need a boat position. Findings stay in
+  the app for now and nothing is sent to your phone.
+
 - **Ask Mate about an alarm.** Every alarm card in the Alarms drawer, and every
   row in its History, has an **Ask Mate** button. It opens a new conversation
   with the question already asked, such as "Why did House Bank Low go off?".

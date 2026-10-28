@@ -78,6 +78,19 @@ function passageLimitsToPayload(l: PassageLimitsDraft) {
   }
 }
 
+/** Keep in step with defaultRoutinesDailyCapUSD in backend/mate_routines.go. */
+export const defaultRoutinesDailyCap = '1'
+export const routinesCapMin = 0.05
+export const routinesCapMax = 20
+
+/** Why the routines daily limit cannot be saved, or null. Same range as the server. */
+export function routinesCapError(draft: RegularSettingsDraft): string | null {
+  const n = parseLimit(draft.assistantRoutinesDailyCap)
+  if (n === null || Number.isNaN(n)) return 'enter a dollar amount'
+  if (n < routinesCapMin || n > routinesCapMax) return `enter between $${routinesCapMin.toFixed(2)} and $${routinesCapMax}`
+  return null
+}
+
 /**
  * Same rules as the server: numbers above 0, and a wind against tide
  * reduction above 0 and below every sector's no-go wind. Keyed by field,
@@ -173,6 +186,10 @@ export interface RegularSettingsDraft {
   assistantWakeWord: boolean
   assistantWebSearch: boolean
   assistantWebSearchModel: string
+  /** Routines run on their own (ADR 0227). Off until the operator turns it on. */
+  assistantRoutinesEnabled: boolean
+  /** The most routines may spend in 24 hours, in US dollars, as typed. */
+  assistantRoutinesDailyCap: string
   assistantPassageLimits: PassageLimitsDraft
   // Off until the operator turns it on: it downloads in the background.
   offlineCoastlineEnabled: boolean
@@ -229,6 +246,8 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantWakeWord: false,
   assistantWebSearch: false,
   assistantWebSearchModel: defaultWebSearchModel,
+  assistantRoutinesEnabled: false,
+  assistantRoutinesDailyCap: defaultRoutinesDailyCap,
   assistantPassageLimits: blankPassageLimits(),
   offlineCoastlineEnabled: false,
   roles: null,
@@ -327,6 +346,8 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.assistant?.wake_word === 'boolean') draft.assistantWakeWord = settings.assistant.wake_word
   if (typeof settings.assistant?.web_search === 'boolean') draft.assistantWebSearch = settings.assistant.web_search
   if (typeof settings.assistant?.web_search_model === 'string') draft.assistantWebSearchModel = settings.assistant.web_search_model
+  if (typeof settings.assistant?.routines_enabled === 'boolean') draft.assistantRoutinesEnabled = settings.assistant.routines_enabled
+  if (typeof settings.assistant?.routines_daily_cap_usd === 'number') draft.assistantRoutinesDailyCap = String(settings.assistant.routines_daily_cap_usd)
 
   draft.assistantPassageLimits = passageLimitsFromPayload(settings.assistant?.passage_limits)
 
@@ -392,6 +413,8 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantWakeWord !== b.assistantWakeWord) return false
   if (a.assistantWebSearch !== b.assistantWebSearch) return false
   if (a.assistantWebSearchModel !== b.assistantWebSearchModel) return false
+  if (a.assistantRoutinesEnabled !== b.assistantRoutinesEnabled) return false
+  if (a.assistantRoutinesDailyCap !== b.assistantRoutinesDailyCap) return false
   if (!passageLimitsEqual(a.assistantPassageLimits, b.assistantPassageLimits)) return false
   if (a.offlineCoastlineEnabled !== b.offlineCoastlineEnabled) return false
 
@@ -476,6 +499,9 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       wake_word: draft.assistantWakeWord,
       web_search: draft.assistantWebSearch,
       web_search_model: draft.assistantWebSearchModel.trim(),
+      routines_enabled: draft.assistantRoutinesEnabled,
+      // Invalid text never gets here: routinesCapError blocks Save first.
+      routines_daily_cap_usd: limitNumber(draft.assistantRoutinesDailyCap) ?? undefined,
       passage_limits: passageLimitsToPayload(draft.assistantPassageLimits),
     },
     offline_coastline: {

@@ -89,6 +89,8 @@ export type SettingsPayload = {
     wake_word?: boolean
     web_search?: boolean
     web_search_model?: string
+    routines_enabled?: boolean
+    routines_daily_cap_usd?: number
     passage_limits?: PassageLimitsPayload
   }
   // The on-board coastline Mate's shelter estimate reads. Off by default.

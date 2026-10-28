@@ -66,6 +66,10 @@ var assistantFindPlacesQueryPattern = regexp.MustCompile(`^[\p{L}\p{N} .,'&()-]+
 // injected so tests supply fakes/stubs instead of a live SignalK, WASM
 // plugin registry, place-names provider or InfluxDB connection.
 type assistantToolDeps struct {
+	// unattended marks a routine run (ADR 0227): nobody is watching, so the
+	// tools that hand the operator something to tap, or start a background
+	// watch, are not offered (mateToolsRefusedUnattended).
+	unattended  bool
 	now         func() time.Time
 	vesselState func() (vesselStateData, error)
 	// pathHasData reports whether a SignalK data path (no notifications.
@@ -483,6 +487,7 @@ var mateTools = []mateTool{
 	mateToolListMaintenance,
 	mateToolGetMaintenanceLog,
 	mateToolListAlarmRules,
+	mateToolListRoutines,
 	mateToolDescribeRecordType,
 	mateToolListRecords,
 	mateToolGetRecord,
@@ -494,6 +499,15 @@ var mateTools = []mateTool{
 	mateToolInspectForm,
 	mateToolFillForm,
 	mateToolSearchWeb,
+}
+
+// mateToolsRefusedUnattended are the tools a routine run never gets: each one
+// ends in something the operator must tap or a watch that reports later.
+var mateToolsRefusedUnattended = map[string]bool{
+	assistantProposalToolTag:     true,
+	"start_watch":                true,
+	assistantInspectFormToolName: true,
+	assistantFillFormToolName:    true,
 }
 
 func lookupMateTool(name string) *mateTool {
@@ -512,6 +526,9 @@ func mateToolAvailable(d assistantToolDeps, name string) bool {
 
 // availableTo reports whether the tool is on offer for these deps.
 func (t mateTool) availableTo(d assistantToolDeps) bool {
+	if d.unattended && mateToolsRefusedUnattended[t.name] {
+		return false
+	}
 	return t.available == nil || t.available(d)
 }
 
@@ -554,6 +571,9 @@ func (d assistantToolDeps) execute(ctx context.Context, name string, args json.R
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
 	if !t.availableTo(d) {
+		if d.unattended && mateToolsRefusedUnattended[name] {
+			return "", fmt.Errorf("%s is not available in a routine run: nobody is there to act on it", name)
+		}
 		return "", fmt.Errorf("%s is not available: it is switched off in Settings", name)
 	}
 	return t.execute(d, ctx, args)

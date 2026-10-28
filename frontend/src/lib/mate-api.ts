@@ -10,7 +10,7 @@ export interface MessageApi {
   id: string
   conversation_id: string
   seq: number
-  role: 'user' | 'assistant' | 'watch'
+  role: 'user' | 'assistant' | 'watch' | 'routine'
   content: string
   model?: string
   prompt_tokens?: number
@@ -31,4 +31,5 @@ export interface ConversationApi {
   title: string
   created_at: string
   updated_at: string
+  routine_id?: string
 }

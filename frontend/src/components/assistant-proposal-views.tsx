@@ -21,6 +21,11 @@ const FIELD_LABELS: Record<string, string> = {
 
 /** Labels for one type's fields, ahead of the shared ones. */
 const TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
+  routine: {
+    cadence: 'Runs',
+    daily_time: 'Time of day',
+    focus: 'Looks at',
+  },
   alarm_rule: {
     value: 'Threshold',
     clear_value: 'Clears at',

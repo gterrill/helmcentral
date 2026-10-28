@@ -561,6 +561,9 @@ func main() {
 	// a little slower every week it runs (backend-perf-audit.md Tier 1 #3).
 	go startVesselContextSweeper(streamCtx, vesselContextSweepInterval)
 	go startAlarmEvaluator(streamCtx, alarmEvaluationInterval)
+	// Mate routines (ADR 0227): runs due routines once a minute, only while
+	// the operator has let routines run on their own.
+	go startMateRoutines(streamCtx, settingsPath, time.Minute)
 	go globalAlarmDispatcher.run(streamCtx)
 	go startNotificationDrainer(streamCtx, notifyDrainInterval)
 	go startStreamWatchdog(streamCtx, watchdogCheckInterval)

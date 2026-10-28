@@ -30,6 +30,15 @@ describe('ConversationSearchOverlay', () => {
     expect(options[7]).toHaveTextContent('Conversation 7')
   })
 
+  it('labels a routine\'s conversation', () => {
+    const list = [conversation({ id: 'a', title: 'Morning summary', routineId: 'r1' }), conversation({ id: 'b', title: 'Anchorages' })]
+    render(<ConversationSearchOverlay open onOpenChange={vi.fn()} conversations={list} onSelect={vi.fn()} />)
+
+    const [routine, ordinary] = screen.getAllByRole('option')
+    expect(within(routine).getByText('Routine')).toBeInTheDocument()
+    expect(within(ordinary).queryByText('Routine')).not.toBeInTheDocument()
+  })
+
   it('filters by title as the operator types', () => {
     const list = [
       conversation({ id: 'a', title: 'Gloucester Island Anchorages' }),

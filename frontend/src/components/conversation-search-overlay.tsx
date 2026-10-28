@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 
 import { Trash2 } from 'lucide-react'
 
+import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import type { AssistantConversation } from '@/hooks/use-assistant-conversations'
@@ -132,7 +133,12 @@ export function ConversationSearchOverlay({ open, onOpenChange, conversations, o
                   onClick={() => select(conversation.id)}
                   className="flex min-w-0 flex-1 flex-col items-start gap-0.5 px-3 py-2 text-left"
                 >
-                  <span className="w-full truncate text-sm">{conversation.title}</span>
+                  <span className="flex w-full min-w-0 items-center gap-1.5">
+                    <span className="min-w-0 truncate text-sm">{conversation.title}</span>
+                    {'routineId' in conversation && conversation.routineId ? (
+                      <Badge variant="outline" className="shrink-0">Routine</Badge>
+                    ) : null}
+                  </span>
                   {conversation.snippet && <span className="line-clamp-2 w-full text-xs text-muted-foreground">{conversation.snippet}</span>}
                   <span className="text-xs text-muted-foreground">{formatConversationRelativeTime(conversation.updatedAt)}</span>
                 </button>

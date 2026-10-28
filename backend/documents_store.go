@@ -308,7 +308,11 @@ func createDocumentsSchema(db *sql.DB) error {
 		return err
 	}
 
-	return createAlarmRulesSchema(db)
+	if err := createAlarmRulesSchema(db); err != nil {
+		return err
+	}
+
+	return createMateRoutinesSchema(db)
 }
 
 // newDocumentStore opens (creating if necessary) the SQLite database at

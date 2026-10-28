@@ -1,8 +1,11 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
+import { toast } from 'sonner'
 import { passageWindowPayload } from './helpers/passage-window-fixture'
 import { describeLoadError, useAssistantConversations } from '@/hooks/use-assistant-conversations'
 import { passageDecisionSaved } from '@/lib/passage-decisions-api'
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 
 // ADR 0093: conversation list + thread state for the assistant panel. The
 // wire shape is snake_case (Conversation/Message); the hook maps it to the
@@ -245,6 +248,22 @@ describe('useAssistantConversations', () => {
     expect(fetchMock).toHaveBeenCalledWith('/api/assistant/conversations/c1', expect.objectContaining({ method: 'DELETE' }))
     expect(result.current.conversations.map((c) => c.id)).toEqual(['c2'])
     expect(result.current.activeId).toBe('c2')
+  })
+
+  it('tells the operator why a routine\'s conversation was not deleted, and keeps it', async () => {
+    const message = 'This conversation belongs to the routine "Morning summary". Delete the routine in Mate settings first.'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ conversations: [conversationApi({ id: 'c1', routine_id: 'r1' })] }) })
+      .mockResolvedValueOnce({ ok: false, status: 409, json: async () => ({ error: message }) })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => { await result.current.remove('c1') })
+
+    expect(toast.error).toHaveBeenCalledWith(message)
+    expect(result.current.conversations.map((c) => c.id)).toEqual(['c1'])
+    expect(result.current.errorMessage).toBeNull()
   })
 
   it('remove of the only conversation clears the active selection', async () => {

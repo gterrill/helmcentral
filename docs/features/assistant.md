@@ -668,6 +668,82 @@ Limits:
 - If Mate has been switched off by the time a watch ends, nothing is sent and no
   answer appears.
 
+## Routines
+
+A routine is a check Mate makes on a schedule without being asked each time. Say
+"check the boat every hour" or "give me a morning summary at 06:00 while we're
+at anchor". Mate looks at the routines you already have first. Then it shows a
+card with the new one: its name, how often it runs, and what it should look at.
+Nothing is set until you tap **Apply**.
+
+Each routine has its own conversation, named after it, and a small **Routine**
+label in the conversation list. Every run adds one line there, "Routine: Morning
+summary", followed by Mate's reply. Here is what a reply looks like:
+
+- **Nothing to report:** When nothing needs attention, the first line says
+  exactly "Nothing to report."
+- **Something needs a look:** Otherwise the first line says what needs attention,
+  followed by up to three short findings with their figures. When Mate doesn't
+  know the cause, it asks a question and doesn't guess one.
+- **Alarms:** A routine doesn't stand in for an alarm. If an alarm is active, the
+  reply says so, and the alarm does its own job.
+
+Routines are paused until you allow them. Turn on **Let routines run on their
+own** under Routines in Settings → Mate. Runs happen with nobody watching, and
+they're paid for from your OpenRouter key. So there's a **Daily limit (US
+dollars)** beside the switch. It starts at $1.00 and can be set between $0.05
+and $20.
+Once routines have spent that much in the last 24 hours, the next runs are
+skipped. Settings shows what routines have spent in that time. A run that fails
+partway still counts for what it cost. When a run was cut off after it had
+started, Helmcentral asks OpenRouter what it was charged, which can take up to a
+minute. Helmcentral pauses routines for 24 hours only if it can't find out. A
+dropped connection before the request got through costs nothing and pauses
+nothing. Settings says until when a pause lasts.
+
+Here is when a routine runs:
+
+- **Every hour:** It runs when an hour has passed since its last run.
+- **Daily:** It runs once a day after the time you gave, on the boat's clock.
+  The boat's clock comes from its position, so a daily routine can't run without
+  one. If the position has been missing for more than a day, the routine's row
+  says so.
+- **Once a day:** A daily routine runs at most once a day. If you move its time
+  later after it has already run, it next runs at the new time tomorrow.
+- **Straight away:** An hourly routine runs on the first check after you apply
+  it, and then every hour.
+- **After the box was off:** A routine that was due runs once. Missed runs aren't
+  made up.
+- **One at a time:** Routines run one after another. A routine waits for any
+  question you're asking in its conversation, and skips if that takes more than
+  two minutes.
+
+A run that doesn't happen says why on the routine's row in Settings → Mate. For
+example "Skipped: routines spent $1.00 of the $1.00 daily limit", "Skipped: no boat
+position, so the boat's time is not known" or "Skipped: Mate is not ready". The
+row also shows the first line of the last reply and when it ran.
+
+If Helmcentral can't save the record of a run, it stops all routines until you
+restart it. The routines panel says "Routines stopped" and why. If the routine
+settings can't be read, such as a daily limit that isn't a number between $0.05
+and $20, the panel says "Routines are not running" and why.
+
+In that same place each routine has a switch to pause it and a **Delete**
+button, so you can manage routines without asking Mate. To change what a routine
+looks at or when it runs, ask Mate. You can have up to eight. Deleting a routine
+keeps its conversation, and you can delete that afterwards like any other. While a
+routine exists, Helmcentral won't delete its conversation. It tells you to delete
+the routine in Settings → Mate first.
+
+Limits:
+
+- A routine reads the boat and never changes anything. It can't propose changes
+  or start a watch, because no one is there to tap **Apply**.
+- Findings stay in the app for now. Nothing is sent to your phone, so a routine
+  is something you look in on, and alarms are still what wake you.
+- Each run reads only the last few runs in its conversation, so a long-running
+  routine doesn't get more expensive as the days go by.
+
 ## Documents
 
 Mate can read from the boat's own document library: manuals, receipts,

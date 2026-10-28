@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -538,9 +541,119 @@ func doOpenRouterRequestBody(ctx context.Context, doer openRouterDoer, apiKey, u
 
 	resp, err := doer.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("openrouter request failed: %w", err)
+		return nil, &openRouterRequestError{err: err}
 	}
 	return resp, nil
+}
+
+// openRouterRequestError is a request that never got a response back. Whether
+// OpenRouter was reached (and may have charged) depends on how it failed, which
+// openRouterFailureCharge reads.
+type openRouterRequestError struct{ err error }
+
+func (e *openRouterRequestError) Error() string { return "openrouter request failed: " + e.err.Error() }
+func (e *openRouterRequestError) Unwrap() error { return e.err }
+
+// openRouterPartialError is a request that got a 2xx response and then failed
+// while it was being read. GenerationID is the id of the generation the
+// response started, empty when none had arrived.
+type openRouterPartialError struct {
+	GenerationID string
+	err          error
+}
+
+func (e *openRouterPartialError) Error() string { return e.err.Error() }
+func (e *openRouterPartialError) Unwrap() error { return e.err }
+
+// openRouterCharge says what a failed OpenRouter request cost.
+type openRouterCharge int
+
+const (
+	// chargeNone: the request never reached the model, or was refused.
+	chargeNone openRouterCharge = iota
+	// chargeLookup: a generation started, and its cost can be read back by id.
+	chargeLookup
+	// chargeUnknown: the model may have run and nothing says what it cost.
+	chargeUnknown
+)
+
+// openRouterFailureCharge reads what a failed request cost from how it
+// failed. An error that is not one of OpenRouter's request failures (a
+// validation error before anything was sent) cost nothing.
+func openRouterFailureCharge(err error) (openRouterCharge, string) {
+	var refused *openRouterStatusError
+	if errors.As(err, &refused) {
+		return chargeNone, ""
+	}
+	var partial *openRouterPartialError
+	if errors.As(err, &partial) {
+		if partial.GenerationID != "" {
+			return chargeLookup, partial.GenerationID
+		}
+		return chargeUnknown, ""
+	}
+	var request *openRouterRequestError
+	if errors.As(err, &request) {
+		if openRouterConnectFailure(request.err) {
+			return chargeNone, ""
+		}
+		return chargeUnknown, ""
+	}
+	return chargeNone, ""
+}
+
+// openRouterConnectFailure is a failure that happened before a single byte of
+// the request could have reached OpenRouter: the name did not resolve, nothing
+// answered at the address, or the TLS handshake failed.
+func openRouterConnectFailure(err error) bool {
+	var op *net.OpError
+	if errors.As(err, &op) && op.Op == "dial" {
+		return true
+	}
+	var dns *net.DNSError
+	if errors.As(err, &dns) {
+		return true
+	}
+	var cert *tls.CertificateVerificationError
+	if errors.As(err, &cert) {
+		return true
+	}
+	var record tls.RecordHeaderError
+	return errors.As(err, &record)
+}
+
+// openRouterGenerationURL is where a finished generation's real cost is read.
+const openRouterGenerationURL = "https://openrouter.ai/api/v1/generation"
+
+// openRouterGenerationCost reads what generation id was charged, in dollars.
+// OpenRouter can take a little while to publish it, so an error here is worth
+// retrying.
+func openRouterGenerationCost(ctx context.Context, doer openRouterDoer, apiKey, id string) (float64, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, openRouterGenerationURL+"?id="+url.QueryEscape(id), nil)
+	if err != nil {
+		return 0, fmt.Errorf("build generation request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+	resp, err := doer.Do(httpReq)
+	if err != nil {
+		return 0, fmt.Errorf("generation lookup failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return 0, openRouterNonSuccessError(resp)
+	}
+	var body struct {
+		Data struct {
+			TotalCost *float64 `json:"total_cost"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return 0, fmt.Errorf("parse generation: %w", err)
+	}
+	if body.Data.TotalCost == nil {
+		return 0, errors.New("generation has no total_cost yet")
+	}
+	return *body.Data.TotalCost, nil
 }
 
 // doOpenRouterRequest marshals req and posts it to openRouterChatCompletionsURL
@@ -574,8 +687,16 @@ func openRouterNonSuccessError(resp *http.Response) error {
 	if err := json.Unmarshal(respBody, &parsed); err == nil && parsed.Error != nil && parsed.Error.Message != "" {
 		msg = parsed.Error.Message
 	}
-	return fmt.Errorf("openrouter status %d: %s", resp.StatusCode, firstErrorLine(errors.New(msg)))
+	return &openRouterStatusError{text: fmt.Sprintf("openrouter status %d: %s", resp.StatusCode, firstErrorLine(errors.New(msg)))}
 }
+
+// openRouterStatusError is OpenRouter answering a request with a non-2xx
+// status. Nothing is generated for such a request, so nothing is charged:
+// routine spend (ADR 0227) counts it as free, and any other failure of a
+// request as possibly charged.
+type openRouterStatusError struct{ text string }
+
+func (e *openRouterStatusError) Error() string { return e.text }
 
 // openRouterChatCompletionOnce posts one chat-completion request with
 // stream forced false and decodes a single JSON response body, instead of
@@ -600,20 +721,23 @@ func openRouterChatCompletionOnce(ctx context.Context, doer openRouterDoer, apiK
 		return openRouterChatResponse{}, openRouterNonSuccessError(resp)
 	}
 
+	// A failure from here on came after OpenRouter answered with a 2xx, so it
+	// may have been charged for; the error carries the generation id when the
+	// body got far enough to give one.
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return openRouterChatResponse{}, fmt.Errorf("read openrouter response: %w", err)
+		return openRouterChatResponse{}, &openRouterPartialError{err: fmt.Errorf("read openrouter response: %w", err)}
 	}
 
 	var parsed openRouterChatResponse
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
-		return openRouterChatResponse{}, fmt.Errorf("parse openrouter response: %w", err)
+		return openRouterChatResponse{}, &openRouterPartialError{err: fmt.Errorf("parse openrouter response: %w", err)}
 	}
 	if parsed.Error != nil && parsed.Error.Message != "" {
-		return openRouterChatResponse{}, fmt.Errorf("openrouter error: %s", firstErrorLine(errors.New(parsed.Error.Message)))
+		return openRouterChatResponse{}, &openRouterPartialError{GenerationID: parsed.ID, err: fmt.Errorf("openrouter error: %s", firstErrorLine(errors.New(parsed.Error.Message)))}
 	}
 	if len(parsed.Choices) == 0 {
-		return openRouterChatResponse{}, fmt.Errorf("openrouter returned no choices (status %d)", resp.StatusCode)
+		return openRouterChatResponse{}, &openRouterPartialError{GenerationID: parsed.ID, err: fmt.Errorf("openrouter returned no choices (status %d)", resp.StatusCode)}
 	}
 
 	return parsed, nil
@@ -678,6 +802,10 @@ func openRouterChatCompletion(ctx context.Context, doer openRouterDoer, apiKey s
 		toolCalls       = map[int]*openRouterStreamToolCallAccum{}
 	)
 
+	// Once a 2xx response is open, a failure may still have been charged for;
+	// the error carries the generation id so the cost can be looked up.
+	midStream := func(err error) error { return &openRouterPartialError{GenerationID: id, err: err} }
+
 	reader := bufio.NewReader(resp.Body)
 readLoop:
 	for {
@@ -699,10 +827,10 @@ readLoop:
 
 			var chunk openRouterStreamChunk
 			if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-				return openRouterChatResponse{}, fmt.Errorf("parse openrouter stream chunk: %w", err)
+				return openRouterChatResponse{}, midStream(fmt.Errorf("parse openrouter stream chunk: %w", err))
 			}
 			if chunk.Error != nil {
-				return openRouterChatResponse{}, fmt.Errorf("openrouter error: %s", firstErrorLine(errors.New(chunk.Error.Message)))
+				return openRouterChatResponse{}, midStream(fmt.Errorf("openrouter error: %s", firstErrorLine(errors.New(chunk.Error.Message))))
 			}
 			if chunk.ID != "" {
 				id = chunk.ID
@@ -751,15 +879,15 @@ readLoop:
 			if errors.Is(readErr, io.EOF) {
 				break readLoop
 			}
-			return openRouterChatResponse{}, fmt.Errorf("read openrouter stream: %w", readErr)
+			return openRouterChatResponse{}, midStream(fmt.Errorf("read openrouter stream: %w", readErr))
 		}
 	}
 
 	if !sawDone && finishReason == "" {
-		return openRouterChatResponse{}, errors.New("openrouter stream ended early")
+		return openRouterChatResponse{}, midStream(errors.New("openrouter stream ended early"))
 	}
 	if !sawChoice {
-		return openRouterChatResponse{}, fmt.Errorf("openrouter returned no choices (status %d)", resp.StatusCode)
+		return openRouterChatResponse{}, midStream(fmt.Errorf("openrouter returned no choices (status %d)", resp.StatusCode))
 	}
 
 	if role == "" {
