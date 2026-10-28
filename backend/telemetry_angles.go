@@ -220,6 +220,33 @@ func combineCircular(samples []circularSample, width time.Duration, start time.T
 	return out
 }
 
+// circularMaxSamples bounds the raw points of one angle query that reach Flux
+// after the pushed-down sampling window: a few tens of thousands.
+const circularMaxSamples = 20000
+
+// circularSampleWidth is the finest allowlisted width, at least a minute, that
+// keeps a range to circularMaxSamples sampled points.
+func circularSampleWidth(span time.Duration) (string, time.Duration) {
+	for _, w := range telemetrySeriesBucketWidths {
+		if int((span+w.width-1)/w.width) <= circularMaxSamples {
+			return w.label, w.width
+		}
+	}
+	last := telemetrySeriesBucketWidths[len(telemetrySeriesBucketWidths)-1]
+	return last.label, last.width
+}
+
+// findBucketWidth is an allowlisted width label as a duration, or 0 for one that
+// is not on the list.
+func findBucketWidth(label string) time.Duration {
+	for _, w := range telemetrySeriesBucketWidths {
+		if w.label == label {
+			return w.width
+		}
+	}
+	return 0
+}
+
 // circularSubWidth is the window an angle is first averaged over inside a
 // bucket, so a weight can tell a gale from a breeze within the same hour. It
 // is the widest allowlisted width that fits in a sixth of the bucket and

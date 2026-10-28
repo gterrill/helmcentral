@@ -279,8 +279,16 @@ func TestBuildInfluxPathStatFluxCircularAggregatesMeanTheSineAndCosine(t *testin
 				t.Errorf("%s: flux %q should contain %q", fn, flux, want)
 			}
 		}
-		if strings.Index(flux, "math.") > strings.Index(flux, "aggregateWindow") {
-			t.Errorf("%s: the trig must run on the samples, before they are averaged: %q", fn, flux)
+		// Pushdown: nothing but from, range and filter may come before the first
+		// aggregateWindow, or InfluxDB streams every raw point through Flux. That
+		// first window takes the last sample of each short window, which copies a
+		// value and never averages across north; the trig runs on those.
+		first := strings.Index(flux, "aggregateWindow(")
+		if m := strings.Index(flux, "map("); m < first {
+			t.Errorf("%s: a map() runs before the first aggregateWindow, which stops it being pushed down: %q", fn, flux)
+		}
+		if !strings.Contains(flux[first:], "fn: last,") || !strings.Contains(flux[first:strings.Index(flux, "map(")], "createEmpty: false") {
+			t.Errorf("%s: the first aggregateWindow must sample with last: %q", fn, flux)
 		}
 	}
 	linear, _ := buildInfluxPathStatFlux("SignalK_Data", "value", "a.b", "", start, start.Add(time.Hour), "10m", "mean")
@@ -300,5 +308,49 @@ func TestQueryCircularHistoryBucketsWithNothingLoggedIsNotFound(t *testing.T) {
 	}
 	if got.Found {
 		t.Error("nothing logged")
+	}
+}
+
+func TestCircularSampleWidthKeepsARangeToAFewTensOfThousandsOfPoints(t *testing.T) {
+	day := 24 * time.Hour
+	cases := []struct {
+		span time.Duration
+		want string
+	}{
+		{day, "1m"}, {7 * day, "1m"}, {14 * day, "2m"}, {30 * day, "5m"}, {60 * day, "5m"}, {90 * day, "10m"},
+	}
+	for _, c := range cases {
+		label, w := circularSampleWidth(c.span)
+		if label != c.want {
+			t.Errorf("%v: sample width %s, want %s", c.span, label, c.want)
+		}
+		if n := int(c.span / w); n > circularMaxSamples {
+			t.Errorf("%v at %s is %d points, over %d", c.span, label, n, circularMaxSamples)
+		}
+	}
+}
+
+func TestBuildInfluxPathStatFluxSamplesAtNoMoreThanTheWindowItAverages(t *testing.T) {
+	start := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
+	// A 90 day range samples every 10m, but a 5m window cannot average 10m samples.
+	flux, err := buildInfluxPathStatFlux("b", "value", "a.b", "", start, start.Add(90*24*time.Hour), "5m", "sin_mean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(flux, "aggregateWindow(every: 5m, fn: last,") {
+		t.Errorf("sample width must not exceed the window: %q", flux)
+	}
+}
+
+func TestBuildInfluxPathStatFluxForAThreeDayDirectionQuery(t *testing.T) {
+	start := time.Date(2026, 10, 25, 0, 0, 0, 0, time.UTC)
+	flux, err := buildInfluxPathStatFlux("SignalK_Data", "value", "environment.wind.directionTrue", "", start, start.Add(72*time.Hour), "10m", "sin_mean")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `import "math"
+from(bucket: "SignalK_Data") |> range(start: time(v: "2026-10-25T00:00:00Z"), stop: time(v: "2026-10-28T00:00:00Z")) |> filter(fn: (r) => r._measurement == "environment.wind.directionTrue" and r._field == "value") |> aggregateWindow(every: 1m, fn: last, createEmpty: false, timeSrc: "_start") |> map(fn: (r) => ({r with _value: math.sin(x: r._value)})) |> aggregateWindow(every: 10m, fn: mean, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value"])`
+	if flux != want {
+		t.Errorf("flux =\n%s\nwant\n%s", flux, want)
 	}
 }
