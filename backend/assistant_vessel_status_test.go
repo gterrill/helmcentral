@@ -77,6 +77,9 @@ func statusTestDeps(t *testing.T) assistantToolDeps {
 		derivedPaths: func(time.Time) (map[string]*float64, map[string]float64) {
 			return map[string]*float64{pressureChange3hPath: &minus150}, map[string]float64{pressureChange3hPath: 4}
 		},
+		barometerWindow: func(now time.Time) []telemetryPoint {
+			return []telemetryPoint{{Value: 102412, Timestamp: now.Add(-3 * time.Hour)}, {Value: 102262, Timestamp: now.Add(-time.Minute)}}
+		},
 		engineStates:  func(time.Time) map[string]engineStateInfo { return nil },
 		activeAlarms:  func() []alarmStatus { return nil },
 		ignoredAlarms: func() []string { return nil },
@@ -305,6 +308,18 @@ func TestVesselStatus_EnginesRunningOffAndSilent(t *testing.T) {
 	if res.Boat.Engines[0].State != "off" || res.Boat.Engines[1].State != "running" || !near(res.Boat.Engines[1].RPM.Value, 13.3*60, 0.01) {
 		t.Errorf("engines: %+v", res.Boat.Engines)
 	}
+
+	// Only a bare .rpm path: this boat's engines publish revolutions, and the
+	// Engine Cluster does not read .rpm, so neither does the status.
+	rpmOnly := statusTestTelemetry()
+	delete(rpmOnly.Samples, "propulsion.1.revolutions")
+	rpmOnly.Samples["propulsion.1.rpm"] = fresh(800.0)
+	d.telemetry = func(time.Time) (telemetryReader, error) { return rpmOnly, nil }
+	res = runStatus(t, d)
+	if res.Boat.Engines[1].State != "" || res.Boat.Engines[1].Missing == "" {
+		t.Errorf("rpm-only engine should be unknown: %+v", res.Boat.Engines[1])
+	}
+	d.telemetry = func(time.Time) (telemetryReader, error) { return statusTestTelemetry(), nil }
 
 	// Keyed off: the engine computer is powered down so its readings stop, and
 	// the engine state says so (ADR 0163).
@@ -628,5 +643,140 @@ func TestComputeOvernight_LastNightUnusableLeavesItNil(t *testing.T) {
 	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
 	if result.LastNightRatePercentPerHour != nil || len(result.PriorNightRatesPercentPerHour) != 0 {
 		t.Errorf("last night should not be judged: %v %v", result.LastNightRatePercentPerHour, result.PriorNightRatesPercentPerHour)
+	}
+}
+
+// ── review findings (ADR 0222) ───────────────────────────────────────────
+
+func TestVesselStatus_PressureChangeIsMissingWhenPressureIsStale(t *testing.T) {
+	d := statusTestDeps(t)
+	tel := statusTestTelemetry()
+	tel.Samples["environment.outside.pressure"] = aged(102262.06, 20*time.Minute)
+	d.telemetry = func(time.Time) (telemetryReader, error) { return tel, nil }
+	res := runStatus(t, d)
+	if res.Surroundings.Pressure.Value != nil {
+		t.Fatalf("pressure should be stale: %+v", res.Surroundings.Pressure)
+	}
+	c := res.Surroundings.PressureChange3h
+	if c.Value != nil || !strings.Contains(c.Missing, "pressure") {
+		t.Errorf("a change computed from a silent barometer must not be given: %+v", c)
+	}
+}
+
+func TestVesselStatus_PressureChangeNeedsAboutThreeHoursOfHistory(t *testing.T) {
+	d := statusTestDeps(t)
+	d.barometerWindow = func(now time.Time) []telemetryPoint {
+		return []telemetryPoint{{Value: 102300, Timestamp: now.Add(-45 * time.Minute)}, {Value: 102262, Timestamp: now.Add(-time.Minute)}}
+	}
+	res := runStatus(t, d)
+	c := res.Surroundings.PressureChange3h
+	if c.Value != nil || c.Missing != "pressure history still filling (44 min of 3 h)" {
+		t.Errorf("3h change from 44 minutes: %+v", c)
+	}
+	// 2.5 hours is the least the alarm side's own tendency rule accepts.
+	d.barometerWindow = func(now time.Time) []telemetryPoint {
+		return []telemetryPoint{{Value: 102300, Timestamp: now.Add(-151 * time.Minute)}, {Value: 102262, Timestamp: now.Add(-time.Minute)}}
+	}
+	if res = runStatus(t, d); res.Surroundings.PressureChange3h.Value == nil {
+		t.Errorf("2.5 hours of history should do: %+v", res.Surroundings.PressureChange3h)
+	}
+}
+
+func TestVesselStatus_OvernightWithTooFewEarlierNightsSaysSo(t *testing.T) {
+	d := statusTestDeps(t)
+	d.overnight = func(time.Time) (overnightResult, string) {
+		return nightsResult(-1.5, -0.5, -0.5), ""
+	}
+	obs, unchecked := d.vesselObservationsFor(vesselStatusTestNow)
+	if len(obs) != 0 || len(unchecked) != 1 || !strings.Contains(unchecked[0], "only 2 earlier usable nights, need 3") {
+		t.Errorf("obs=%v unchecked=%v", obs, unchecked)
+	}
+}
+
+func TestOvernightDrawObservation_RatioFailsEvenWhenTheFloorIsCleared(t *testing.T) {
+	// 0.4 points an hour more than typical clears the 0.25 floor, but 1.4x is
+	// under the 1.5x ratio.
+	if o := overnightDrawObservation(nightsResult(-1.4, -1.0, -1.0, -1.0)); o != nil {
+		t.Errorf("1.4x should not be an observation: %+v", o)
+	}
+}
+
+func TestVesselStatus_InvalidTankLevelsSayAlarmsAreNotRunning(t *testing.T) {
+	d := statusTestDeps(t)
+	d.sourceItems = func() ([]sourceItem, error) {
+		return []sourceItem{{ID: "t-fuel", Name: "Port Fuel", Source: "tanks.fuel.2", Group: sourceTank, Instance: "fuel.2", TankWarnPercent: 10, TankAlarmPercent: 30}}, nil
+	}
+	tk := runStatus(t, d).Tanks.Tanks[0]
+	if !strings.Contains(tk.AlarmsNotRunning, "alarm level must be lower than the warn level") {
+		t.Errorf("tank: %+v", tk)
+	}
+	if tk.Level.Value == nil {
+		t.Errorf("the level is still a fresh reading: %+v", tk.Level)
+	}
+	d.sourceItems = func() ([]sourceItem, error) {
+		return []sourceItem{{ID: "t-fuel", Name: "Port Fuel", Source: "tanks.fuel.2", Group: sourceTank, Instance: "fuel.2"}}, nil
+	}
+	if tk = runStatus(t, d).Tanks.Tanks[0]; tk.AlarmsNotRunning != "" {
+		t.Errorf("a valid pair: %+v", tk)
+	}
+}
+
+func TestVesselStatus_NegativeSolarAndDCLoadAreMissing(t *testing.T) {
+	d := statusTestDeps(t)
+	tel := statusTestTelemetry()
+	tel.Samples["electrical.venus.totalPanelPower"] = fresh(-4.0)
+	tel.Samples["electrical.venus.dcPower"] = fresh(-12.0)
+	d.telemetry = func(time.Time) (telemetryReader, error) { return tel, nil }
+	p := runStatus(t, d).Power
+	for name, v := range map[string]statusValue{"solar": p.SolarW, "dc load": p.DCLoadW} {
+		if v.Value != nil || v.Missing != "reading is negative" {
+			t.Errorf("%s: %+v", name, v)
+		}
+	}
+	// A negative controller makes the sum a guess, too.
+	delete(tel.Samples, "electrical.venus.totalPanelPower")
+	tel.Samples["electrical.solar.288.panelPower"] = fresh(66.0)
+	tel.Samples["electrical.solar.289.panelPower"] = fresh(-3.0)
+	if v := runStatus(t, d).Power.SolarW; v.Value != nil || !strings.Contains(v.Missing, "reading is negative") {
+		t.Errorf("solar sum: %+v", v)
+	}
+}
+
+func TestVesselStatus_ImpossibleStateOfChargeIsMissingNotClamped(t *testing.T) {
+	for _, raw := range []float64{150, -5} {
+		d := statusTestDeps(t)
+		tel := statusTestTelemetry()
+		tel.Samples["electrical.batteries.512.capacity.stateOfCharge"] = fresh(raw)
+		d.telemetry = func(time.Time) (telemetryReader, error) { return tel, nil }
+		soc := runStatus(t, d).Power.HouseBank.SocPercent
+		if soc.Value != nil || soc.Missing != "impossible reading" {
+			t.Errorf("soc %v: %+v", raw, soc)
+		}
+	}
+}
+
+func TestVesselStatus_AnchorWithoutAFreshPositionSaysSo(t *testing.T) {
+	d := statusTestDeps(t)
+	d.anchorWatch = func() (anchorWatchData, bool, string) {
+		return anchorWatchData{Lat: -18.2226, Lon: 146.2125, RadiusMeters: 45, SetAt: vesselStatusTestNow.Add(-time.Hour)}, true, ""
+	}
+	d.vesselState = func() (vesselStateData, error) {
+		return vesselStateData{Depth: -1, DepthLastUpdateAge: -1, WindSpeedTrueKts: -1, Latitude: -1, Longitude: -1, PositionLastUpdateAge: -1}, nil
+	}
+	a := runStatus(t, d).Boat.Anchor
+	if !a.Down || a.DistanceFromAnchorM != nil || a.DistanceMissing == "" {
+		t.Errorf("anchor: %+v", a)
+	}
+}
+
+func TestVesselStatus_DCLoadDoesNotFallThroughFromAStaleVenusPath(t *testing.T) {
+	d := statusTestDeps(t)
+	tel := statusTestTelemetry()
+	tel.Samples["electrical.venus.dcPower"] = aged(452.22, 20*time.Minute)
+	tel.Samples["electrical.dc.12v.power"] = fresh(300.0)
+	d.telemetry = func(time.Time) (telemetryReader, error) { return tel, nil }
+	v := runStatus(t, d).Power.DCLoadW
+	if v.Value != nil || !strings.HasPrefix(v.Missing, "no fresh reading") {
+		t.Errorf("a quiet Venus must not be hidden behind another source: %+v", v)
 	}
 }

@@ -264,9 +264,12 @@ report has four headings and then a few things worth a look:
 - **Tanks:** Each tank's level, with the warn and alarm levels set for it. A tank
   that is in warn or alarm says so.
 - **Outside:** Depth, true wind with its gust over the last ten minutes, and the
-  pressure with how far it has moved in the last three hours.
+  pressure with how far it has moved in the last three hours. The three hour
+  change appears once Helmcentral has about three hours of pressure readings, and
+  it starts again after a restart.
 - **Boat:** Whether each engine is running or off, and whether the anchor watch
-  is set. It also lists the alarms active and ignored, and your planned stay
+  is set. An engine whose readings have stopped without it being keyed off shows
+  as unknown, not off. It also lists the alarms active and ignored, and your planned stay
   with how far it is from the boat.
 - **Worth a look:** At most three things. They come from the sensor checks, which
   catch a frozen, impossible or silent sensor. They also come from readings Mate
@@ -276,6 +279,10 @@ When it raises the overnight draw, Mate asks you a question and gives the
 figures. For example: "The bank fell 0.9 percent an hour last night, against
 about 0.5 on the nights before. Is anything running that normally isn't?" It
 doesn't guess what caused it.
+
+A reading that can't be right, such as a charge above 100 percent or a negative
+solar figure, is left out the same way. A tank whose warn and alarm levels don't
+make a sensible pair is shown with a note that its alarm isn't running.
 
 Mate gives each reading in your units. When it has no fresh reading, it leaves
 the figure out and says why in a few words. It might say "no house bank role set"

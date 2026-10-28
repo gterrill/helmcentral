@@ -33,9 +33,12 @@ shows it reads it.
 
 - **Power.** The house bank is the role's item (`vesselView.houseBankPath`): state
   of charge (a 0 to 1 ratio is scaled to percent as the Battery and Power tile
-  does), voltage and signed current. Solar is the Victron total when the boat
+  does), voltage and signed current. A charge outside 0 to 100 percent is
+  "impossible reading", not clamped. Solar is the Victron total when the boat
   publishes one, else the sum of the controllers. DC load is the first of the
-  Venus, `dc.12v` and `loads.12v` power paths that the boat publishes.
+  Venus, `dc.12v` and `loads.12v` power paths that the boat publishes, and it
+  does not fall through to the next if that one is stale. A negative solar or DC
+  load is "reading is negative", not clamped.
 - **Tanks.** One row per equipment item whose source is a tank, with the level
   (`tankLevelPercent`, the one place that decides which scale a number is on),
   the warn and alarm levels the item resolves to (`resolveTankLevels`), whether
@@ -44,11 +47,18 @@ shows it reads it.
   its own recency gates. The gust is the strongest true wind in the Wind tile's
   10 minute buffer. Pressure is `environment.outside.pressure`. Its three hour
   change is the derived `helmcentral.environment.pressureChange3h`, the figure the
-  Law of Storms alarms judge.
-- **Boat.** Each configured engine is running, off or unknown. An engine whose
+  Law of Storms alarms judge. It is given only with a fresh pressure behind it and
+  about 3 hours of record (2.5 hours, the span `tendencyOverWindow` accepts);
+  until then it reads "pressure history still filling (N min of 3 h)". The
+  derived path itself exists after 30 minutes, which is right for the alarms and
+  too short to call a 3 hour change. `barometerHistory` now records only a
+  pressure under 5 minutes old, the gate the true wind buffers beside it
+  already had, so a silent barometer no longer repeats its last value.
+- **Boat.** Each configured engine is running, off or unknown. Speed is read from
+  `.revolutions` only, as the Engine Cluster does. An engine whose
   readings have stopped is off only when the engine state says so (ADR 0163).
   Silence alone is unknown. The anchor watch gives down or not, its radius and
-  when it was set, and how far the boat is from it.
+  when it was set, and how far the boat is from it, or `distance_missing` when there is no fresh position.
 - **Alarms.** Active alarms by the presenter's label, message and state, and the
   titles of ignored network alarms (ADR 0207).
 - **Sensor checks.** The anomaly detector's frozen, impossible and silent counts
@@ -88,7 +98,9 @@ include the night being judged. It is raised only when all three hold:
   produce a big ratio.
 
 Nights with shore power, generator running, a data gap or a net rise are
-excluded by the existing scan, so a charged night is never "last night". The
+excluded by the existing scan, so a charged night is never "last night". With
+fewer than 3 earlier usable nights the check is listed in
+`observations_unchecked` ("only N earlier usable nights, need 3"). The
 summary states the two rates, the ratio and the number of nights, and no cause.
 "Last completed night" is exact: a night still in progress is not scored.
 
@@ -113,6 +125,7 @@ never with a guessed cause. A chart is offered, not drawn unasked.
   observation shows as unchecked with the reason.
 - The gust window and the pressure change are in memory and restart empty. The
   result says so in the field's note or reason.
-- Pressure change and gust are wired as injected functions, so the snapshot's
-  tests use fixtures shaped like the live self tree
-  (`testdata/anomaly/signalk-self-snapshot-2026-09-25.json`).
+- The snapshot's tests use hand-built telemetry (`fakeTelemetry`) whose figures
+  are taken from the live self tree captured in
+  `testdata/anomaly/signalk-self-snapshot-2026-09-25.json`. They are not a replay
+  of the capture itself, which carries no timestamps on its leaves.

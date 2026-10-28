@@ -41,6 +41,10 @@ const (
 	// anything. Half an hour of a five-second poll is several hundred samples.
 	trendMinimumSpan = 30 * time.Minute
 
+	// barometerMaxAge is how old the pressure reading may be and still be
+	// recorded into barometerHistory or given as the current pressure.
+	barometerMaxAge = 5 * time.Minute
+
 	// pressureTrendWindow is the window every barometric figure is taken over.
 	// Three hours is the tendency period every marine forecast already uses,
 	// so the number is comparable with a published one.

@@ -248,6 +248,10 @@ type assistantToolDeps struct {
 	// derivedPaths are the helmcentral.* values and their ages, the pressure
 	// change among them (ADR 0095).
 	derivedPaths func(now time.Time) (map[string]*float64, map[string]float64)
+	// barometerWindow is the recorded barometer readings of the last three
+	// hours, so the three hour change is only given once they cover about
+	// that long.
+	barometerWindow func(now time.Time) []telemetryPoint
 	// trueWindGustKts is the strongest true wind recorded in the last ten
 	// minutes, the Wind tile's gust figure.
 	trueWindGustKts func() (float64, bool)
@@ -367,6 +371,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		tankDefaults:               currentTankAlarmDefaults,
 		derivedPaths:               computeDerivedPaths,
 		trueWindGustKts:            recentTrueWindGustKts,
+		barometerWindow:            func(now time.Time) []telemetryPoint { return barometerHistory.since(now.Add(-pressureTrendWindow)) },
 		engineStates:               func(now time.Time) map[string]engineStateInfo { return engineStatesFor(globalSignalKSnapshot, now) },
 		ignoredAlarms:              ignoredAlarmTitles,
 		anomalyReading:             globalAnomalySlot.get,

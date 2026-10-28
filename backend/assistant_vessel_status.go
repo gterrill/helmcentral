@@ -27,7 +27,7 @@ const (
 	// vesselStatusPressureFreshAge is the barometer's limit. Pressure sensors
 	// report slowly and the figure moves slowly, so a minute-old pressure is
 	// still the pressure, where a minute-old depth is not.
-	vesselStatusPressureFreshAge = 5 * time.Minute
+	vesselStatusPressureFreshAge = barometerMaxAge
 	// vesselStatusPositionFreshAge is the limit on the boat's position when
 	// measuring to the anchor or the planned stay.
 	vesselStatusPositionFreshAge = 5 * time.Minute
@@ -90,9 +90,12 @@ type vesselStatusTank struct {
 	AlarmPercent float64     `json:"alarm_percent"`
 	// BadWhen says which end is the bad one: "low" for fuel and water, "high"
 	// for waste.
-	BadWhen    string `json:"bad_when"`
-	AlarmsOff  bool   `json:"alarms_off,omitempty"`
-	AlarmState string `json:"alarm_state,omitempty"`
+	BadWhen string `json:"bad_when"`
+	// AlarmsNotRunning is set when the warn and alarm levels do not make a
+	// valid pair, so the tank raises no alarm.
+	AlarmsNotRunning string `json:"alarms_not_running,omitempty"`
+	AlarmsOff        bool   `json:"alarms_off,omitempty"`
+	AlarmState       string `json:"alarm_state,omitempty"`
 }
 
 type vesselStatusTanks struct {
@@ -127,6 +130,7 @@ type vesselStatusAnchor struct {
 	RadiusM             float64  `json:"radius_m,omitempty"`
 	SetAt               string   `json:"set_at,omitempty"`
 	DistanceFromAnchorM *float64 `json:"distance_from_anchor_m,omitempty"`
+	DistanceMissing     string   `json:"distance_missing,omitempty"`
 	Missing             string   `json:"missing,omitempty"`
 }
 
@@ -304,6 +308,7 @@ func (d assistantToolDeps) vesselStatusMissingDeps() []string {
 	check("sourceItems", d.sourceItems != nil)
 	check("tankDefaults", d.tankDefaults != nil)
 	check("derivedPaths", d.derivedPaths != nil)
+	check("barometerWindow", d.barometerWindow != nil)
 	check("engineStates", d.engineStates != nil)
 	check("activeAlarms", d.activeAlarms != nil)
 	check("ignoredAlarms", d.ignoredAlarms != nil)
@@ -389,7 +394,9 @@ func vesselStatusPowerFor(t telemetryReader, vessel vesselView, system string) (
 			if percent <= 1 {
 				percent *= 100
 			}
-			if p.HouseBank.SocPercent, err = statusReading(bank, math.Max(0, math.Min(100, percent)), "%", system, soc.Age); err != nil {
+			if percent < 0 || percent > 100 {
+				p.HouseBank.SocPercent = missingValue("impossible reading")
+			} else if p.HouseBank.SocPercent, err = statusReading(bank, percent, "%", system, soc.Age); err != nil {
 				return p, err
 			}
 		}
@@ -424,7 +431,7 @@ func vesselStatusPowerFor(t telemetryReader, vessel vesselView, system string) (
 func solarWatts(t telemetryReader, system string) (statusValue, error) {
 	const total = "electrical.venus.totalPanelPower"
 	if _, ok := t.Number(total); ok {
-		return statusFreshReading(t, total, "W", system, vesselStatusFreshAge, "solar")
+		return nonNegativeReading(t, total, "W", system, "solar")
 	}
 	ids := t.Children("electrical.solar")
 	if len(ids) == 0 {
@@ -436,6 +443,9 @@ func solarWatts(t telemetryReader, system string) (statusValue, error) {
 		n, reason := freshNumber(t, path, vesselStatusFreshAge, "solar controller "+id)
 		if reason != "" {
 			return missingValue(fmt.Sprintf("%s (controller %s), so the total would be a guess", reason, id)), nil
+		}
+		if n.Value < 0 {
+			return missingValue(fmt.Sprintf("reading is negative (controller %s), so the total would be a guess", id)), nil
 		}
 		sum += n.Value
 		if n.Age > oldest {
@@ -451,10 +461,24 @@ func solarWatts(t telemetryReader, system string) (statusValue, error) {
 func firstFreshReading(t telemetryReader, siUnit, system, what string, paths ...string) (statusValue, error) {
 	for _, path := range paths {
 		if _, ok := t.Number(path); ok {
-			return statusFreshReading(t, path, siUnit, system, vesselStatusFreshAge, what)
+			return nonNegativeReading(t, path, siUnit, system, what)
 		}
 	}
 	return missingValue("no " + what + " reading"), nil
+}
+
+// nonNegativeReading is a fresh reading of a quantity that cannot be below
+// zero. A negative one is a faulty sensor or a sign convention nobody has
+// checked, so it is reported as such and not clamped or passed on.
+func nonNegativeReading(t telemetryReader, path, siUnit, system, what string) (statusValue, error) {
+	n, reason := freshNumber(t, path, vesselStatusFreshAge, what)
+	if reason != "" {
+		return missingValue(reason), nil
+	}
+	if n.Value < 0 {
+		return missingValue("reading is negative"), nil
+	}
+	return statusReading(path, n.Value, siUnit, system, n.Age)
 }
 
 // ── tanks ────────────────────────────────────────────────────────────────
@@ -478,6 +502,9 @@ func (d assistantToolDeps) vesselStatusTanksFor(t telemetryReader, system string
 		}
 		if !tankLowIsBad(kind) {
 			tank.BadWhen = "high"
+		}
+		if perr := validateTankLevels(kind, levels); perr != nil {
+			tank.AlarmsNotRunning = perr.Error()
 		}
 		for _, a := range alarms {
 			if a.RuleID == tankAlarmRuleIDPrefix+item.ID {
@@ -543,16 +570,41 @@ func (d assistantToolDeps) vesselStatusSurroundingsFor(t telemetryReader, state 
 		return s, err
 	}
 
-	values, ages := d.derivedPaths(now)
-	change := values[pressureChange3hPath]
-	if change == nil {
-		s.PressureChange3h = missingValue("no 3 hour change yet: the barometer history is still filling, and it starts empty when Helmcentral restarts")
-	} else if age, known := secondsAge(ages[pressureChange3hPath]); !known || age > vesselStatusPressureFreshAge {
-		s.PressureChange3h = missingValue(staleReason(age, known))
-	} else if s.PressureChange3h, err = statusReading(pressureChange3hPath, *change, "Pa", system, age); err != nil {
-		return s, err
+	// The change is judged from the barometer's own history: it needs a fresh
+	// pressure behind it and about three hours of record (the 2.5 hours the
+	// alarm side's tendencyOverWindow accepts), so a half hour of readings is
+	// not called the three hour change. The value is the alarm's own figure.
+	switch {
+	case s.Pressure.Value == nil:
+		s.PressureChange3h = missingValue("no 3 hour change: there is no fresh pressure reading")
+	case !barometerCoversWindow(d.barometerWindow(now)):
+		s.PressureChange3h = missingValue(fmt.Sprintf("pressure history still filling (%d min of 3 h)", barometerSpanMinutes(d.barometerWindow(now))))
+	default:
+		values, ages := d.derivedPaths(now)
+		change := values[pressureChange3hPath]
+		if change == nil {
+			s.PressureChange3h = missingValue("no 3 hour change yet: the barometer history is still filling, and it starts empty when Helmcentral restarts")
+		} else if age, known := secondsAge(ages[pressureChange3hPath]); !known || age > vesselStatusPressureFreshAge {
+			s.PressureChange3h = missingValue(staleReason(age, known))
+		} else if s.PressureChange3h, err = statusReading(pressureChange3hPath, *change, "Pa", system, age); err != nil {
+			return s, err
+		}
 	}
 	return s, nil
+}
+
+func barometerSpanMinutes(points []telemetryPoint) int {
+	if len(points) < 2 {
+		return 0
+	}
+	return int(points[len(points)-1].Timestamp.Sub(points[0].Timestamp).Minutes())
+}
+
+func barometerCoversWindow(points []telemetryPoint) bool {
+	if len(points) < 2 {
+		return false
+	}
+	return points[len(points)-1].Timestamp.Sub(points[0].Timestamp) >= pressureTrendWindow-tendencySpanSlack
 }
 
 // ── boat ─────────────────────────────────────────────────────────────────
@@ -593,6 +645,8 @@ func (d assistantToolDeps) vesselStatusBoatFor(t telemetryReader, vessel vesselV
 		}
 		if noPosition == "" {
 			out.Anchor.DistanceFromAnchorM = floatPtr(roundTo(haversineMeters(lat, lon, watch.Lat, watch.Lon), 0))
+		} else {
+			out.Anchor.DistanceMissing = noPosition + ", so the distance from the anchor is unknown"
 		}
 	}
 	return out, nil
@@ -608,12 +662,10 @@ func engineStatus(t telemetryReader, e vesselEngineSetting, info engineStateInfo
 		out.State = "off"
 		return out
 	}
-	var hz telemetryNumber
-	var reason string
-	if hz, reason = freshNumber(t, prefix+".revolutions", vesselStatusFreshAge, "engine speed"); reason == "" {
+	// Only .revolutions, which is what the Engine Cluster reads.
+	hz, reason := freshNumber(t, prefix+".revolutions", vesselStatusFreshAge, "engine speed")
+	if reason == "" {
 		hz.Value *= 60
-	} else if rpm, rpmReason := freshNumber(t, prefix+".rpm", vesselStatusFreshAge, "engine speed"); rpmReason == "" {
-		hz, reason = rpm, ""
 	}
 	if reason != "" {
 		out.Missing = reason
@@ -737,6 +789,9 @@ func (d assistantToolDeps) vesselObservationsFor(now time.Time) ([]vesselObserva
 		unchecked = append(unchecked, "overnight house bank draw: "+why)
 	case night.LastNightRatePercentPerHour == nil:
 		unchecked = append(unchecked, "overnight house bank draw: the last completed night has no usable record (a gap in the data, shore power, the generator, or the bank charging)")
+	case len(night.PriorNightRatesPercentPerHour) < observationMinPriorNights:
+		unchecked = append(unchecked, fmt.Sprintf("overnight house bank draw: only %d earlier usable nights, need %d",
+			len(night.PriorNightRatesPercentPerHour), observationMinPriorNights))
 	default:
 		if o := overnightDrawObservation(night); o != nil {
 			observations = append(observations, *o)

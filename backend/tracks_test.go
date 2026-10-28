@@ -1131,3 +1131,55 @@ func TestRecordNearbyVesselContacts_RecordsEveryVesselInRangeNotJustTheNearestTe
 		t.Fatalf("expected all 12 in-range vessels to have a sighting-log row, got %d: %+v", len(latest), latest)
 	}
 }
+
+// The barometer feeds the Law of Storms alarms and the status snapshot, so it
+// gets the same age gate the true wind lines beside it have (ADR 0222).
+func TestSampleTracks_SkipsPressureWhenPathHasGoneStale(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+	orig := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	t.Cleanup(func() { barometerHistory = orig })
+
+	staleAt := time.Now().UTC().Add(-10 * time.Minute)
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: staleAt.Format(time.RFC3339),
+			Values:    []signalKValue{{Path: "environment.outside.pressure", Value: 102262.0}},
+		}},
+	}, staleAt)
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	sampleTracks(filepath.Join(t.TempDir(), "settings.yaml"))
+	if pts := barometerHistory.since(time.Time{}); len(pts) != 0 {
+		t.Fatalf("a silent barometer must not keep recording its last value: %+v", pts)
+	}
+}
+
+func TestSampleTracks_RecordsPressureWhenPathIsFresh(t *testing.T) {
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
+	orig := barometerHistory
+	barometerHistory = newTelemetryRingBuffer(windGustHistoryCapacity)
+	t.Cleanup(func() { barometerHistory = orig })
+
+	now := time.Now().UTC()
+	snapshot := newSignalKSnapshot()
+	snapshot.applyDelta(signalKDelta{
+		Context: "vessels.self",
+		Updates: []signalKUpdate{{
+			Timestamp: now.Format(time.RFC3339),
+			Values:    []signalKValue{{Path: "environment.outside.pressure", Value: 102262.0}},
+		}},
+	}, now)
+	snapshot.setSelfContext("vessels.self")
+	withGlobalSnapshot(t, snapshot)
+
+	sampleTracks(filepath.Join(t.TempDir(), "settings.yaml"))
+	if pts := barometerHistory.since(time.Time{}); len(pts) != 1 || pts[0].Value != 102262.0 {
+		t.Fatalf("expected one fresh pressure sample: %+v", pts)
+	}
+}
