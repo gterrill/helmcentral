@@ -224,6 +224,10 @@ type assistantToolDeps struct {
 	// in a range, so show_telemetry_chart can refuse to average two devices.
 	// Production wires queryInfluxPathSources; nil is an error.
 	influxPathSources func(ctx context.Context, path string, start, stop time.Time) ([]string, error)
+	// passageLog is the Passages logbook (ADR 0176) list_passages and
+	// get_cruise_summary read (ADR 0219). Production returns
+	// globalPassageStore; nil, or a nil store, makes both tools fail plainly.
+	passageLog func() *passageStore
 	// cards is the turn's side channel for card payloads too large for the
 	// model's tool result. nil means the tools put no card out of band.
 	cards *assistantCardSink
@@ -323,6 +327,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		displayUnits:               displayUnitsFromSettingsFile(settingsPath),
 		siUnit:                     func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) },
 		influxPathSources:          queryInfluxPathSources,
+		passageLog:                 func() *passageStore { return globalPassageStore },
 		cards:                      newAssistantCardSink(),
 	}
 }
@@ -418,6 +423,7 @@ var mateTools = []mateTool{
 	mateToolGetPathHistory,
 	mateToolShowTelemetryChart,
 	mateToolListPassages,
+	mateToolGetCruiseSummary,
 	mateToolFindEquipment,
 	mateToolListMaintenance,
 	mateToolGetMaintenanceLog,
