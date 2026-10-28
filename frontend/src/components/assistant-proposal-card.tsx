@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-proposal-views'
 import type { AssistantProposal, AssistantProposalOp } from '@/hooks/use-assistant-conversations'
-import { applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus } from '@/lib/assistant-proposal-actions'
+import { appliedProposalOf, applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus } from '@/lib/assistant-proposal-actions'
 import { cn } from '@/lib/utils'
 
 interface AssistantProposalCardProps {
@@ -55,6 +55,9 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
             onChange({ ...proposal, status: 'stale', staleReason: message })
           }
         } else {
+          // Saved but not fully in effect: show it applied, with the reason kept.
+          const saved = kind === 'apply' ? appliedProposalOf(err) : undefined
+          if (saved) onChange(saved)
           setError(message)
         }
       } finally {
@@ -153,7 +156,7 @@ function OpFields({ op, ops }: { op: AssistantProposalOp; ops: AssistantProposal
     <dl className="flex min-w-0 flex-col gap-1 rounded-sm bg-muted/40 p-2 text-xs">
       {names.map((name) => (
         <div key={name} className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
-          <dt className="w-24 shrink-0 truncate text-muted-foreground">{fieldLabel(name)}</dt>
+          <dt className="w-24 shrink-0 truncate text-muted-foreground">{fieldLabel(name, op.type)}</dt>
           <dd className="flex min-w-0 flex-1 flex-wrap items-start gap-x-2 gap-y-1 text-foreground">
             {op.action === 'delete' ? (
               value(op.before, name)

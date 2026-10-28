@@ -198,7 +198,13 @@ func listSourceItems() ([]sourceItem, error) {
 func (s *documentStore) SourceItems() ([]sourceItem, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	rows, err := s.db.Query(`SELECT id, name, signalk_source, profile_id, capacity_ah, cells, warn_voltage, high_voltage,
+	return sourceItemsQ(s.db)
+}
+
+// sourceItemsQ is SourceItems on a queryer the caller already holds the store
+// lock for, such as a changeset's transaction.
+func sourceItemsQ(q sqlQueryer) ([]sourceItem, error) {
+	rows, err := q.Query(`SELECT id, name, signalk_source, profile_id, capacity_ah, cells, warn_voltage, high_voltage,
 			tank_warn_percent, tank_alarm_percent, tank_alarms_off
 		FROM equipment WHERE signalk_source <> ''`)
 	if err != nil {

@@ -30,6 +30,23 @@ To change a rule later, choose it from the rules list to reopen the same form.
 To remove one, choose **Delete**. It asks you to confirm, naming the rule and
 saying whether it's currently firing.
 
+## By asking Mate
+
+You can also describe the alarm in a sentence and let Mate fill in the form.
+
+1. Open Mate and say what you want to hear about, for example "alarm when the
+   house bank drops below 50%".
+2. Read the card under its reply. It names the alarm, says how serious it is,
+   the level it fires at, the level it clears at and how long the reading has
+   to hold, all in your units.
+3. Ask for different numbers if they're not right, then tap **Apply**.
+
+Nothing is set until you tap **Apply**. Afterwards the alarm is in the rules
+list like any other, and you can change it there. Mate can't change an alarm
+that comes from a tank's levels or a gauge zone. It points you to the place that
+does, which is the next section for a gauge and the tank's equipment item for a
+tank.
+
 ## From a gauge
 
 Any gauge with a scale can raise its own alarm, so you don't have to write a

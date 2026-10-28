@@ -25,6 +25,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Mate can set up alarms for you.** Say "tell me if the house bank drops below
+  50%" and Mate checks the alarms you already have, then shows a card with the
+  alarm, where it fires, where it clears and how long the reading has to hold,
+  in your units. Nothing is set until you tap **Apply**, and then it's watching
+  straight away. Ask "what should I be monitoring?" and it suggests a few
+  readings that have no alarm yet, each one a card you can tap. Tank and gauge
+  alarms are still changed on the tank's equipment item or the gauge.
+
 - **Barometer alarms say what the move means.** A 6 mb move in three hours is
   strong wind, 10 mb is a gale, and a 24 mb fall in a day is a weather bomb.
   The card says which, and gives the wind to expect.

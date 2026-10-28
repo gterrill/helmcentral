@@ -2,6 +2,7 @@ import { ApiError, apiRequest, invalidateQueries } from '@/lib/api-query'
 import { mapProposal, type AssistantProposal, type ProposalApi } from '@/hooks/use-assistant-conversations'
 import { todayISO } from '@/lib/local-date'
 import { PLANNED_STAY_PATH } from '@/hooks/use-planned-stay'
+import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
 
 /**
  * Apply and Dismiss on a maintenance proposal card (ADR 0146). Apply is the
@@ -28,11 +29,31 @@ async function post(path: string): Promise<AssistantProposal> {
   return mapProposal(body.proposal)
 }
 
+/** When Apply saved the changes but said something went wrong afterwards (the
+ * alarm rules did not reload), the server answers an error that still carries
+ * the proposal, as applied. The change is real, so the card shows it applied
+ * beside the reason. */
+export function appliedProposalOf(err: unknown): AssistantProposal | undefined {
+  if (!(err instanceof ApiError)) return undefined
+  const proposal = (err.body as { proposal?: ProposalApi } | undefined)?.proposal
+  return proposal && proposal.status === 'applied' ? mapProposal(proposal) : undefined
+}
+
 export async function applyAssistantProposal(id: string): Promise<AssistantProposal> {
-  const applied = await post(`/api/assistant/proposals/${encodeURIComponent(id)}/apply?today=${encodeURIComponent(todayISO())}`)
+  let applied: AssistantProposal
+  try {
+    applied = await post(`/api/assistant/proposals/${encodeURIComponent(id)}/apply?today=${encodeURIComponent(todayISO())}`)
+  } catch (err) {
+    const saved = appliedProposalOf(err)
+    if (saved?.ops.some((op) => op.type === 'alarm_rule')) void invalidateQueries([ALARM_RULES_PATH])
+    throw err
+  }
   // A planned stay Mate proposed is on the Forecast page the moment the
   // operator applies the card; any open page reads it again.
   if (applied.ops.some((op) => op.type === 'planned_stay')) void invalidateQueries([PLANNED_STAY_PATH])
+  // An alarm rule Mate proposed is live the moment it is applied, so the
+  // Alarms page and the battery tile's bands read the rules again.
+  if (applied.ops.some((op) => op.type === 'alarm_rule')) void invalidateQueries([ALARM_RULES_PATH])
   return applied
 }
 

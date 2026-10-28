@@ -260,13 +260,21 @@ var errHouseBankNotChosen = errors.New("choose a house bank in Settings first: t
 // bank is unchosen. A new enabled rule is still refused, because it would watch
 // nothing from the moment it was made.
 func validateAlarmRuleFor(rule *alarmRule, existing bool) error {
+	return validateAlarmRuleResolving(rule, existing, alarmRolePath)
+}
+
+// validateAlarmRuleResolving is validateAlarmRuleFor with the way a role
+// becomes a path given by the caller. A changeset runs inside the record
+// store's transaction and must resolve it through that transaction: the
+// default reads the store again and would wait on a lock the changeset holds.
+func validateAlarmRuleResolving(rule *alarmRule, existing bool, rolePath func(role string) (string, error)) error {
 	rule.Path = strings.TrimSpace(rule.Path)
 	rule.PathRole = strings.TrimSpace(rule.PathRole)
 	if rule.PathRole != "" {
 		if rule.PathRole != alarmPathRoleHouseBankSoC {
 			return fmt.Errorf("unknown path role %q", rule.PathRole)
 		}
-		path, err := alarmRolePath(rule.PathRole)
+		path, err := rolePath(rule.PathRole)
 		switch {
 		case errors.Is(err, errHouseBankNotChosen) && (existing || !rule.Enabled):
 			path = ""
@@ -338,6 +346,24 @@ func alarmRolePath(role string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolving %s: %w", role, err)
 	}
+	return alarmRolePathOf(role, vessel)
+}
+
+// alarmRolePathQ resolves a role reading the items through q, for a caller
+// that already holds the record store.
+func alarmRolePathQ(q sqlQueryer, role string) (string, error) {
+	roles, err := loadVesselRoles(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	if err != nil {
+		return "", fmt.Errorf("resolving %s: %w", role, err)
+	}
+	items, err := sourceItemsQ(q)
+	if err != nil {
+		return "", fmt.Errorf("resolving %s: %w", role, err)
+	}
+	return alarmRolePathOf(role, resolveVesselView(roles, items))
+}
+
+func alarmRolePathOf(role string, vessel vesselView) (string, error) {
 	path := vessel.houseBankSocPath()
 	if path == "" {
 		return "", errHouseBankNotChosen
