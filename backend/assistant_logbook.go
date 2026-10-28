@@ -571,13 +571,18 @@ func (v logbookView) summary() map[string]any {
 	if hiddenInStay {
 		note += " A stay marked hidden_passage_between has a hidden passage inside it, so the boat moved during it."
 	}
+	var fuelTotal *float64 // null when no passage recorded fuel, never 0
+	if withFuel > 0 {
+		f := round1(fuel)
+		fuelTotal = &f
+	}
 	return map[string]any{
 		"status": "ok", "passage_count": len(ps),
 		"first_place": ps[0].FromName, "first_departure": rfc3339(ps[0].Start),
 		"last_place": ps[lastIdx].ToName, "last_arrival": rfc3339(ps[lastIdx].End),
 		"total_distance_nm": round1(nm), "underway_hours": round1(underwaySec / 3600),
 		"fuel": map[string]any{
-			"burned_l": round1(fuel), "passages_with_fuel": withFuel, "passages_without_fuel": len(ps) - withFuel,
+			"burned_l": fuelTotal, "passages_with_fuel": withFuel, "passages_without_fuel": len(ps) - withFuel,
 		},
 		"route": logbookRoute(ps), "cruises": cruises,
 		"longest_passages": longest,

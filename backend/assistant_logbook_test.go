@@ -383,6 +383,21 @@ func TestGetCruiseSummary_BlankNamesAreNotInvented(t *testing.T) {
 	}
 }
 
+// With no fuel figure on any passage in the range, the total is null, not 0.
+func TestGetCruiseSummary_NoFuelRecordedIsNull(t *testing.T) {
+	s, _ := loadLogbookFixture(t)
+	var res struct {
+		Fuel struct {
+			BurnedL *float64 `json:"burned_l"`
+			With    int      `json:"passages_with_fuel"`
+		} `json:"fuel"`
+	}
+	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{"from":"2026-02-01","to":"2026-03-31"}`, &res)
+	if res.Fuel.With != 0 || res.Fuel.BurnedL != nil {
+		t.Errorf("fuel: %+v", res.Fuel)
+	}
+}
+
 func TestGetCruiseSummary_Empty(t *testing.T) {
 	var res summaryResult
 	runTool(t, logbookDeps(t, newTestPassageStore(t)), "get_cruise_summary", `{}`, &res)
