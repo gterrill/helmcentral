@@ -115,7 +115,16 @@ separate cycle and will read this result.
 The answer gives figures under Power, Tanks, Outside and Boat, then at most three
 things worth noting, drawn from the observations, the sensor counts and the
 missing readings. An observation is put as a question, with its figures, and
-never with a guessed cause. A chart is offered, not drawn unasked.
+never with a guessed cause. A chart is offered, not drawn unasked. A missing
+reading is reported as what is missing and the tool's reason, with no possible
+cause or reassurance added ("normal if the engines are off" was a guess Mate
+made on the first live run).
+
+**Rounding.** The display figure is rounded by its unit, as an instrument shows
+it: watts, rpm and degrees whole, volts to hundredths, everything else (knots,
+metres per second, amps, temperature, metres, feet, percent, hectopascals) to
+tenths. The first live run gave "761.31 W" and "11.29 kn". The SI `value` stays
+at four places.
 
 ## Consequences
 

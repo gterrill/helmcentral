@@ -284,6 +284,11 @@ A reading that can't be right, such as a charge above 100 percent or a negative
 solar figure, is left out the same way. A tank whose warn and alarm levels don't
 make a sensible pair is shown with a note that its alarm isn't running.
 
+Figures are given the way an instrument shows them: solar and load in whole
+watts, volts to two places, and wind, current, depth, temperature and levels to
+one. When a reading is missing, Mate says which one and why, and doesn't guess
+at the cause.
+
 Mate gives each reading in your units. When it has no fresh reading, it leaves
 the figure out and says why in a few words. It might say "no house bank role set"
 or "no fresh reading, the last one arrived 20 minutes ago". It never fills the

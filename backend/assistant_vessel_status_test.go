@@ -267,7 +267,7 @@ func TestVesselStatus_ImperialDepthInFeet(t *testing.T) {
 	d := statusTestDeps(t)
 	d.displayUnits = func() (string, error) { return "imperial", nil }
 	res := runStatus(t, d)
-	if !near(res.Surroundings.Depth.Value, 3.3, 0.001) || !near(res.Surroundings.Depth.Display, 10.83, 0.01) || res.Surroundings.Depth.DisplayUnit != "ft" {
+	if !near(res.Surroundings.Depth.Value, 3.3, 0.001) || !near(res.Surroundings.Depth.Display, 10.8, 0.001) || res.Surroundings.Depth.DisplayUnit != "ft" {
 		t.Errorf("depth: %+v", res.Surroundings.Depth)
 	}
 }
@@ -778,5 +778,38 @@ func TestVesselStatus_DCLoadDoesNotFallThroughFromAStaleVenusPath(t *testing.T) 
 	v := runStatus(t, d).Power.DCLoadW
 	if v.Value != nil || !strings.HasPrefix(v.Missing, "no fresh reading") {
 		t.Errorf("a quiet Venus must not be hidden behind another source: %+v", v)
+	}
+}
+
+// A figure is given to the precision the unit deserves: a solar watt is not
+// read to the hundredth (ADR 0222).
+func TestStatusReading_RoundsDisplayByUnit(t *testing.T) {
+	cases := []struct {
+		path, siUnit, system string
+		si                   float64
+		want                 float64
+		wantUnit             string
+	}{
+		{"electrical.solar.total.power", "W", "metric", 761.3149, 761, "W"},
+		{"electrical.dc.load.power", "W", "metric", 188.84, 189, "W"},
+		{"environment.wind.speedTrue", "m/s", "metric", 5.8084, 11.3, "kn"},
+		{"electrical.batteries.0.current", "A", "metric", -12.346, -12.3, "A"},
+		{"electrical.batteries.0.voltage", "V", "metric", 26.4749, 26.47, "V"},
+		{"environment.depth.belowTransducer", "m", "metric", 3.3, 3.3, "m"},
+		{"environment.depth.belowTransducer", "m", "imperial", 3.3, 10.8, "ft"},
+		{"environment.water.temperature", "K", "metric", 290.456, 17.3, "°C"},
+		{"environment.water.temperature", "K", "imperial", 290.456, 63.2, "°F"},
+		{"environment.outside.pressure", "Pa", "metric", 102262.06, 1022.6, "hPa"},
+		{"tanks.fuel.0.currentLevel", "%", "metric", 61.26, 61.3, "%"},
+		{"propulsion.0.revolutions", "Hz", "metric", 20.04, 1202, "rpm"},
+	}
+	for _, c := range cases {
+		got, err := statusReading(c.path, c.si, c.siUnit, c.system, time.Second)
+		if err != nil {
+			t.Fatalf("%s: %v", c.path, err)
+		}
+		if got.Display == nil || got.DisplayUnit != c.wantUnit || !near(got.Display, c.want, 1e-9) {
+			t.Errorf("%s %s: display = %v %s, want %v %s", c.path, c.system, got.Display, got.DisplayUnit, c.want, c.wantUnit)
+		}
 	}
 }
