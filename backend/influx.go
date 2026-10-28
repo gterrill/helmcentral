@@ -515,16 +515,30 @@ func buildInfluxPathStatFlux(bucket, field, path, source string, start, stop tim
 	// sin_mean and cos_mean are the two halves of a circular mean (ADR 0221):
 	// the sine or cosine of each sample, then the plain mean. An angle is
 	// recombined from them in Go, never averaged in radians.
-	prelude, trig := "", ""
+	//
+	// Pushdown rule: InfluxDB runs from() |> range() |> filter() |> aggregateWindow()
+	// inside storage only when nothing sits between the filter and the window,
+	// and a map() there makes it stream every raw point through Flux (a 3 day
+	// direction query timed out that way). So the first window takes the last
+	// value of each short sample window, which is pushed down and copies a value
+	// without averaging it across north. The trig then runs on those sampled
+	// points, and the second window means them. See
+	// https://docs.influxdata.com/influxdb/v2/query-data/optimize-queries/
+	prelude, sample, trig := "", "", ""
 	switch aggFn {
 	case "sin_mean", "cos_mean":
 		prelude = "import \"math\"\n"
+		label, width := circularSampleWidth(stop.Sub(start))
+		if w := findBucketWidth(every); w > 0 && w < width {
+			label = every
+		}
+		sample = fmt.Sprintf(`|> aggregateWindow(every: %s, fn: last, createEmpty: false, timeSrc: "_start") `, label)
 		trig = fmt.Sprintf(`|> map(fn: (r) => ({r with _value: math.%s(x: r._value)})) `, strings.TrimSuffix(aggFn, "_mean"))
 		aggFn = "mean"
 	}
 	return fmt.Sprintf(
-		`%sfrom(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) %s|> aggregateWindow(every: %s, fn: %s, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value"])`,
-		prelude, bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter, trig, every, aggFn,
+		`%sfrom(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) %s%s|> aggregateWindow(every: %s, fn: %s, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value"])`,
+		prelude, bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter, sample, trig, every, aggFn,
 	), nil
 }
 

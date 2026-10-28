@@ -120,5 +120,23 @@ itself.
 - A stored `telemetry_chart` with `axis` and no `panel` decodes as panel 0 and 1.
 - `get_path_history` on an angle path now returns degrees, a `spread`, a `unit` and a
   `method`, and no min or max.
-- Not checked against a live InfluxDB: the Flux for `sin_mean` and `cos_mean` is
-  covered by text tests only.
+- The first live use of the angle queries timed out, which the text tests could not
+  see.
+
+## Pushdown
+
+The first version put `map(sin/cos)` between `filter()` and `aggregateWindow()`.
+InfluxDB pushes an aggregate window into storage only when it follows
+`from() |> range() |> filter()` directly. A `map()` in between makes it stream every
+raw point through the Flux engine, three times for one direction chart (sine, cosine
+and the speed weight), and a 3 day direction query returned 504 after about 9 s
+while the scalar speed took under 1 s. The angle Flux is now: a pushed-down
+`aggregateWindow(fn: last)` sampling window, then `map` to sine or cosine on the
+sampled points, then `aggregateWindow(fn: mean)` per short window. `last` copies a
+value and never averages across north, so sampling is safe for an angle. The sample
+width is the finest allowlisted width (1 minute at least) that keeps the range to
+20,000 points: 1 m up to 13 days, 2 m to 27 days, 5 m to 69 days and 10 m to 90
+days. It never exceeds the window it feeds. The speed weight is a scalar mean straight
+after the filter and needs no change. The rule is also in a comment above
+`buildInfluxPathStatFlux`. Docs:
+https://docs.influxdata.com/influxdb/v2/query-data/optimize-queries/
