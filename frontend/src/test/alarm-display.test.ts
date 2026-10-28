@@ -326,7 +326,54 @@ describe('alarmConditionSentence', () => {
       value: 600,
       clear_value: 550,
     })
-    expect(alarmConditionSentence(alarm)).toBe('Up 6.0 mb in three hours. Clears once the rise eases to 5.5 mb.')
+    expect(alarmConditionSentence(alarm)).toBe('Up 6.0 mb in three hours. A rise this fast brings wind, not fair weather: expect 26 to 33 kn.')
+  })
+
+  const tendency = (over: Partial<ActiveAlarm>) =>
+    makeAlarm({ path: PRESSURE_CHANGE_3H_PATH, unit: 'Pa', op: 'above', value: 600, ...over })
+
+  it('says what a fast three-hour fall means', () => {
+    expect(alarmConditionSentence(tendency({ op: 'below', value: -650, clear_value: -550 })))
+      .toBe('Down 6.5 mb in three hours. A fall this fast means a low closing in: expect 26 to 33 kn.')
+  })
+
+  it('names a gale from a ten millibar three-hour move, keyed on the reading', () => {
+    expect(alarmConditionSentence(tendency({ value: 1000 })))
+      .toBe('Up 10.0 mb in three hours. A rise this fast brings wind, not fair weather: expect a gale, 34 to 47 kn.')
+    expect(alarmConditionSentence(tendency({ op: 'below', value: -1250 })))
+      .toBe('Down 12.5 mb in three hours. A fall this fast means a low closing in: expect a gale, 34 to 47 kn.')
+  })
+
+  it('keeps the rule tier while a latched alarm eases inside its hysteresis', () => {
+    expect(alarmConditionSentence(tendency({ value: 970, threshold: 1000, clear_value: 950 })))
+      .toBe('Up 9.7 mb in three hours. A rise this fast brings wind, not fair weather: expect a gale, 34 to 47 kn.')
+    expect(alarmConditionSentence(makeAlarm({ path: PRESSURE_CHANGE_24H_PATH, unit: 'Pa', op: 'below', value: -2350, threshold: -2400, clear_value: -2300 })))
+      .toBe('Down 23.5 mb in twenty-four hours. A low deepening this fast is a weather bomb: expect storm-force wind, 48 kn and over.')
+  })
+
+  it('picks the tier from the figure the card shows', () => {
+    expect(alarmConditionSentence(tendency({ value: 999.97 })))
+      .toBe('Up 10.0 mb in three hours. A rise this fast brings wind, not fair weather: expect a gale, 34 to 47 kn.')
+  })
+
+  it('gives no meaning for a reading under 6 mb on a custom rule', () => {
+    expect(alarmConditionSentence(tendency({ value: 580 }))).toBe('Up 5.8 mb in three hours.')
+  })
+
+  it('gives no meaning for a twelve-hour window or a twenty-four-hour rise or small fall', () => {
+    expect(alarmConditionSentence(makeAlarm({ path: PRESSURE_CHANGE_12H_PATH, unit: 'Pa', op: 'below', value: -1200 })))
+      .toBe('Down 12.0 mb in twelve hours.')
+    expect(alarmConditionSentence(makeAlarm({ path: PRESSURE_CHANGE_24H_PATH, unit: 'Pa', op: 'above', value: 2600 })))
+      .toBe('Up 26.0 mb in twenty-four hours.')
+    expect(alarmConditionSentence(makeAlarm({ path: PRESSURE_CHANGE_24H_PATH, unit: 'Pa', op: 'below', value: -2000 })))
+      .toBe('Down 20.0 mb in twenty-four hours.')
+  })
+
+  it('moves the tendency clear point to the footer', () => {
+    expect(alarmFooterText(tendency({ clear_value: 550 }))).toBe('Clears once the rise eases to 5.5 mb')
+    expect(alarmFooterText(tendency({ op: 'below', value: -2400, path: PRESSURE_CHANGE_24H_PATH, clear_value: -2300 })))
+      .toBe('Clears once the fall eases to 23.0 mb')
+    expect(alarmFooterText(tendency({}))).toBeNull()
   })
 
   it('reads a falling twelve-hour tendency rule with no clear point configured', () => {
@@ -349,7 +396,7 @@ describe('alarmConditionSentence', () => {
       value: -2400,
       clear_value: -2300,
     })
-    expect(alarmConditionSentence(alarm)).toBe('Down 24.0 mb in twenty-four hours. Clears once the fall eases to 23.0 mb.')
+    expect(alarmConditionSentence(alarm)).toBe('Down 24.0 mb in twenty-four hours. A low deepening this fast is a weather bomb: expect storm-force wind, 48 kn and over.')
   })
 
   // A below rule on a tendency path is not automatically a fall, the same
