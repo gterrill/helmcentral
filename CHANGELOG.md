@@ -98,6 +98,21 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The collision profile alarm no longer piles up.** When Helmcentral couldn't
+  change SignalK's collision profile, it added a new entry to the alarm history
+  every time the boat went from anchored to under way and back. One refusal now
+  stays as one entry, and its card is updated if the reason or the state
+  changes. The card also says what went wrong in plain words, such as SignalK
+  refusing Helmcentral's login, and is titled Collision Profile Not Changed.
+  Entries already piled up in your history stay there and don't clear by
+  themselves.
+
+- **Mate's answers about an alarm are plainer.** Asked why an alarm went off,
+  Mate no longer quotes paths, rule ids or lists what it couldn't find. It says
+  when an alarm keeps going off, and ends with what to check next when the cause
+  points to something you can act on, such as giving Helmcentral's SignalK user
+  read access. It also no longer calls Helmcentral's own checks a deleted rule.
+
 - **Mate can give a passage distance through the islands.** Asked how far
   Goldsmith Island was from Airlie Beach, Mate used to say the coast was too
   intricate and ask you to plan shorter legs. It now gives the distance by

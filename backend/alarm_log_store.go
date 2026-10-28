@@ -121,8 +121,9 @@ func (s *alarmLogStore) Close() error {
 	return s.db.Close()
 }
 
-// RecordRaised opens a new occurrence. Each raise is its own row, so the log
-// shows how often a condition recurs rather than collapsing it to one entry.
+// RecordRaised opens a new occurrence. Each raise after a clear is its own row,
+// so the log shows how often a condition recurs rather than collapsing it to
+// one entry.
 func (s *alarmLogStore) RecordRaised(entry alarmLogEntry) (string, error) {
 	if s == nil {
 		return "", nil
@@ -355,6 +356,24 @@ func (s *alarmLogStore) RaisedCount(ruleID string, since time.Time) (int, error)
 		return 0, fmt.Errorf("count alarm raises: %w", err)
 	}
 	return n, nil
+}
+
+// EarliestRaised is the first raise of a rule since the given time.
+func (s *alarmLogStore) EarliestRaised(ruleID string, since time.Time) (time.Time, bool, error) {
+	if s == nil {
+		return time.Time{}, false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var raised sql.NullInt64
+	if err := s.db.QueryRow(`SELECT MIN(raised_at) FROM alarm_log WHERE rule_id = ? AND raised_at >= ?`,
+		ruleID, since.UTC().Unix()).Scan(&raised); err != nil {
+		return time.Time{}, false, fmt.Errorf("read alarm log: %w", err)
+	}
+	if !raised.Valid {
+		return time.Time{}, false, nil
+	}
+	return time.Unix(raised.Int64, 0).UTC(), true, nil
 }
 
 // ChangedBetween lists occurrences raised or cleared within [from, to],

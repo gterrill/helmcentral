@@ -1373,6 +1373,14 @@ func TestBuildAssistantSystemPrompt_AlarmContextRule(t *testing.T) {
 		"show_telemetry_chart",
 		"alarm_rule",
 		"never apply",
+		"in the operator's words",
+		"never name a SignalK path, rule id, source key, tool name or InfluxDB",
+		"do not list what get_alarm_context left out",
+		"say so plainly",
+		"what to check or do next",
+		"Never invent a cause",
+		"built_in_check",
+		"never offer an alarm_rule proposal",
 	} {
 		if !strings.Contains(stable, want) {
 			t.Errorf("expected the stable prefix to contain %q", want)

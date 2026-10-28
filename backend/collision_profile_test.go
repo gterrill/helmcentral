@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -231,5 +232,158 @@ func TestCollisionProfileSyncerSurfacesALoadFailure(t *testing.T) {
 	events := syncer.check(alarmNow)
 	if len(events) != 1 || events[0].Kind != alarmEventRaised {
 		t.Fatalf("a load failure must surface, got %+v", events)
+	}
+}
+
+func failingLoadSyncer(t *testing.T, loadErr error) *collisionProfileSyncer {
+	t.Helper()
+	return &collisionProfileSyncer{
+		snapshot: snapshotInState("anchored"),
+		load: func() (string, map[string]collisionProfile, error) {
+			return "", nil, loadErr
+		},
+		save: func(string) error { return nil },
+	}
+}
+
+// A refusal that is still standing does not raise again on the next
+// navigation.state change: the log held 327 open rows in a week.
+func TestCollisionProfileSyncerDoesNotRaiseWhileARefusalStands(t *testing.T) {
+	syncer := failingLoadSyncer(t, errors.New("boom"))
+
+	if events := syncer.check(alarmNow); len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("first refusal must raise, got %+v", events)
+	}
+	for i, state := range []string{"motoring", "anchored", "sailing"} {
+		syncer.snapshot = snapshotInState(state)
+		for _, e := range syncer.check(alarmNow.Add(time.Duration(i+1) * time.Hour)) {
+			if e.Kind == alarmEventRaised {
+				t.Fatalf("a standing refusal must not raise again, got %+v", e)
+			}
+		}
+	}
+}
+
+// After the refusal clears through a successful load, a new failure raises again.
+func TestCollisionProfileSyncerRaisesAgainAfterTheRefusalClears(t *testing.T) {
+	loadErr := errors.New("boom")
+	syncer := &collisionProfileSyncer{
+		snapshot: snapshotInState("anchored"),
+		load: func() (string, map[string]collisionProfile, error) {
+			if loadErr != nil {
+				return "", nil, loadErr
+			}
+			return "coastal", map[string]collisionProfile{}, nil
+		},
+		save: func(string) error { return nil },
+	}
+	if events := syncer.check(alarmNow); len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("got %+v", events)
+	}
+
+	loadErr = nil
+	syncer.snapshot = snapshotInState("motoring")
+	if events := syncer.check(alarmNow.Add(time.Hour)); len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("a good load on the new state must clear, got %+v", events)
+	}
+
+	loadErr = errors.New("boom again")
+	syncer.snapshot = snapshotInState("anchored")
+	if events := syncer.check(alarmNow.Add(2 * time.Hour)); len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("a new failure after the clear must raise, got %+v", events)
+	}
+}
+
+// A standing refusal whose cause or state has changed updates the card in place
+// rather than leaving it stale; the same message does nothing.
+func TestCollisionProfileSyncerUpdatesAStandingRefusalWhenTheMessageChanges(t *testing.T) {
+	loadErr := error(&signalkStatusError{Status: 401})
+	syncer := &collisionProfileSyncer{
+		snapshot: snapshotInState("anchored"),
+		load: func() (string, map[string]collisionProfile, error) {
+			return "", nil, loadErr
+		},
+		save: func(string) error { return nil },
+	}
+	syncer.check(alarmNow)
+
+	syncer.snapshot = snapshotInState("motoring")
+	events := syncer.check(alarmNow.Add(time.Hour))
+	if len(events) != 1 || events[0].Kind != alarmEventChanged {
+		t.Fatalf("a new state must update the standing card, got %+v", events)
+	}
+	if !strings.Contains(events[0].Status.Message, "motoring") {
+		t.Errorf("updated body: %q", events[0].Status.Message)
+	}
+
+	loadErr = errors.New("dial tcp: refused")
+	syncer.snapshot = snapshotInState("sailing")
+	events = syncer.check(alarmNow.Add(2 * time.Hour))
+	if len(events) != 1 || events[0].Kind != alarmEventChanged || !strings.Contains(events[0].Status.Message, "could not read") {
+		t.Fatalf("a new cause must update the standing card, got %+v", events)
+	}
+
+	// Back to a state that maps to the same profile with the same failure and
+	// the same words: nothing to say.
+	syncer.snapshot = snapshotInState("motoring")
+	events = syncer.check(alarmNow.Add(3 * time.Hour))
+	if len(events) != 1 { // "motoring" differs from "sailing" in the body
+		t.Fatalf("got %+v", events)
+	}
+	syncer.lastState = ""
+	if events = syncer.check(alarmNow.Add(4 * time.Hour)); len(events) != 0 {
+		t.Fatalf("same message must stay quiet, got %+v", events)
+	}
+}
+
+func TestCollisionProfileSaveRefusedLoginIsClassifiedByStatus(t *testing.T) {
+	syncer, _ := syncerFor(t, "motoring", `{"current":"anchor","coastal":{"warning":{"cpa":2,"tcpa":30,"speed":0},"danger":{"cpa":1,"tcpa":10,"speed":0.5},"guard":{"range":0,"speed":0}}}`)
+	syncer.save = func(string) error { return &signalkStatusError{Status: 403, Body: "<html>nope</html>"} }
+	events := syncer.check(alarmNow)
+	want := `SignalK refused Helmcentral's login when switching to the "coastal" collision profile, so the boat is motoring on the old profile.`
+	if len(events) != 1 || events[0].Status.Message != want {
+		t.Fatalf("got %+v, want %q", events, want)
+	}
+}
+
+func TestCollisionProfileRefusalBodyIsPlainWording(t *testing.T) {
+	authErr := &signalkStatusError{Status: 401, Body: "You do not have permission to view this resource, <a href='/admin/#/login'>Please Login</a>"}
+	events := failingLoadSyncer(t, authErr).check(alarmNow)
+	if len(events) != 1 {
+		t.Fatalf("got %+v", events)
+	}
+	body := events[0].Status.Message
+	want := "SignalK refused Helmcentral's login when reading the collision profiles, so the boat is anchored on the old profile."
+	if body != want {
+		t.Errorf("auth body:\n got %q\nwant %q", body, want)
+	}
+	for _, bad := range []string{"<", "401", "signalk returned", "Please Login"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("body leaks %q: %q", bad, body)
+		}
+	}
+
+	events = failingLoadSyncer(t, errors.New("dial tcp: refused")).check(alarmNow)
+	want = "Helmcentral could not read the collision profiles from SignalK, so the boat is anchored on the old profile."
+	if got := events[0].Status.Message; got != want {
+		t.Errorf("read body:\n got %q\nwant %q", got, want)
+	}
+	if events[0].Rule.Label != "Collision Profile Not Changed" {
+		t.Errorf("title: %q", events[0].Rule.Label)
+	}
+}
+
+func TestCollisionProfileOtherRefusalsAreOperatorWording(t *testing.T) {
+	missing := `{"current":"offshore","offshore":{"warning":{"cpa":4,"tcpa":30,"speed":0},"danger":{"cpa":2,"tcpa":15,"speed":0},"guard":{"range":0,"speed":0}}}`
+	syncer, _ := syncerFor(t, "anchored", missing)
+	got := syncer.check(alarmNow)[0].Status.Message
+	if want := `The "anchor" collision profile is not defined in SignalK, so the boat is anchored on the old profile.`; got != want {
+		t.Errorf("got %q want %q", got, want)
+	}
+
+	syncer, _ = syncerFor(t, "anchored", collisionProfilesJSON)
+	got = syncer.check(alarmNow)[0].Status.Message
+	if want := `The "anchor" collision profile has every CPA and guard range at zero, so it would silence AIS collision alarms. The boat is anchored on the old profile.`; got != want {
+		t.Errorf("got %q want %q", got, want)
 	}
 }
