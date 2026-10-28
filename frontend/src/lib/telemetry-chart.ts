@@ -75,6 +75,20 @@ export function angleAxis(kind: AngleKind): { domain: [number, number]; ticks: n
     : { domain: [-180, 180], ticks: [-180, -90, 0, 90, 180] }
 }
 
+/** The kind of angle a panel draws: set only when every series in it is an angle of one kind. */
+export function panelAngleKind(bodies: (TelemetrySeriesBody | undefined)[], indices: number[]): AngleKind | null {
+  const kinds = indices.map((i) => {
+    const a = bodies.find((b) => b?.series[i]?.angle)?.series[i]?.angle
+    return a === 'bearing' || a === 'relative' ? a : null
+  })
+  return kinds.length > 0 && kinds.every((k) => k !== null && k === kinds[0]) ? kinds[0] : null
+}
+
+/** The unit series i is drawn in: what the server says for an angle, the card's own otherwise. */
+export function drawnUnit(series: Pick<TelemetryChartSeries, 'unit'>[], bodies: (TelemetrySeriesBody | undefined)[], i: number): string {
+  return bodies.find((b) => b?.series[i]?.angle)?.series[i]?.unit || series[i].unit
+}
+
 export function angleTickLabel(kind: AngleKind, v: number): string {
   if (kind === 'relative') return String(v)
   return ({ 0: 'N', 90: 'E', 180: 'S', 270: 'W', 360: 'N' } as Record<number, string>)[v] ?? String(v)
@@ -135,8 +149,11 @@ export function buildTimeRows(body: TelemetrySeriesBody, nSeries: number): TimeR
   // A row made for one series' break must not cut another series that runs
   // through that instant: where it has points on both sides, close together
   // and outside any gap of its own, it continues on the straight line it
-  // would have been drawn along.
+  // would have been drawn along. An angle is never continued this way: the
+  // line between 350 and 10 degrees passes through 180, a direction nothing
+  // measured, so it exists only at its own timestamps.
   kept.forEach(({ pts, gaps }, i) => {
+    if (body.series[i]?.angle) return
     const key = seriesKey(i)
     for (const r of out) {
       if (r[key] !== null || breaks[i].has(r.t)) continue

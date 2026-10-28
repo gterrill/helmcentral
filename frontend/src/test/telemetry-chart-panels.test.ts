@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { angleAxis, angleTickLabel, axisTicks, buildTimeRows, panelsOf, seriesValues } from '@/lib/telemetry-chart'
+import { angleAxis, angleTickLabel, axisTicks, buildTimeRows, drawnUnit, panelAngleKind, panelsOf, seriesValues } from '@/lib/telemetry-chart'
 
 import { bucket, seriesBody, telemetryChartCard } from './helpers/telemetry-chart-fixture'
 
@@ -81,5 +81,38 @@ describe('a decoded card with panels', () => {
   it('reads the panel of each series', () => {
     const card = telemetryChartCard()
     expect(card.series.map((s) => s.panel)).toEqual([0, 1])
+  })
+})
+
+describe('angle series in rows', () => {
+  it('is never interpolated: a direction exists only at its own timestamps', () => {
+    // The wind direction has buckets 0 and 2 and the speed has 0, 1 and 2. A
+    // line between 350 and 10 degrees would put a dot at 180 in bucket 1.
+    const body = seriesBody({ current: [0, 1, 2], soc: [0, 2] })
+    body.series[1] = { ...body.series[1], angle: 'bearing', points: [0, 2].map((i) => ({ t: bucket(i), mean: i === 0 ? 350 : 10 })) } as never
+    const rows = buildTimeRows(body as never, 2)
+    expect(rows.find((r) => r.t === Date.parse(bucket(1)))!.s1).toBeNull()
+    expect(rows.find((r) => r.t === Date.parse(bucket(0)))!.s1).toBe(350)
+  })
+})
+
+describe('panelAngleKind and drawnUnit', () => {
+  const entry = (angle: string, unit: string) => ({ path: 'x', found: true, angle, unit, points: [], gaps: [] })
+  const body = (...entries: ReturnType<typeof entry>[]) => ({ from: '', to: '', bucket: '1h', series: entries }) as never
+
+  it('reads a panel as an angle panel when every series in it is an angle, however many', () => {
+    const b = body(entry('bearing', '°T'), entry('bearing', '°M'))
+    expect(panelAngleKind([b], [0, 1])).toBe('bearing')
+  })
+
+  it('does not call a panel an angle panel when a scalar shares it, or the kinds differ', () => {
+    expect(panelAngleKind([body(entry('bearing', '°T'), entry('', 'kn'))], [0, 1])).toBeNull()
+    expect(panelAngleKind([body(entry('bearing', '°T'), entry('relative', '°'))], [0, 1])).toBeNull()
+  })
+
+  it('shows the unit the server drew an angle in, not the rad an old card stored', () => {
+    const card = telemetryChartCard()
+    expect(drawnUnit(card.series, [body(entry('bearing', '°T'), entry('', '%'))], 0)).toBe('°T')
+    expect(drawnUnit(card.series, [undefined], 0)).toBe('A')
   })
 })

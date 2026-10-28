@@ -13,13 +13,14 @@ import {
   bandKey,
   buildTimeRows,
   dayTicks,
+  drawnUnit,
   formatRange,
   axisTicks,
   pairXY,
+  panelAngleKind,
   panelsOf,
   seriesKey,
   seriesValues,
-  type AngleKind,
   zonedDayStart,
   zonedYmd,
 } from '@/lib/telemetry-chart'
@@ -75,16 +76,6 @@ function Legend({ items }: { items: { label: string; colour: string }[] }) {
   )
 }
 
-/** The unit a series is drawn in: what the server says for an angle, the card's otherwise. */
-function drawnUnit(card: TelemetryChartCard, bodies: (TelemetrySeriesBody | undefined)[], i: number): string {
-  return bodies.find((b) => b?.series[i]?.angle)?.series[i]?.unit || card.series[i].unit
-}
-
-function angleKindOf(bodies: (TelemetrySeriesBody | undefined)[], i: number): AngleKind | null {
-  const a = bodies.find((b) => b?.series[i]?.angle)?.series[i]?.angle
-  return a === 'bearing' || a === 'relative' ? a : null
-}
-
 const TOOLTIP_STYLE = { background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', fontSize: 12 }
 
 /**
@@ -112,15 +103,15 @@ function TimePanel({
   height: number
   last: boolean
 }) {
-  const kind = indices.length === 1 ? angleKindOf(bodies, indices[0]) : null
-  const unit = drawnUnit(card, bodies, indices[0])
+  const kind = panelAngleKind(bodies, indices)
+  const unit = drawnUnit(card.series, bodies, indices[0])
   const angle = kind ? angleAxis(kind) : null
   const ticks = angle ? angle.ticks : axisTicks(indices.flatMap((i) => seriesValues(bodies, i, true)), unit)
   const domain: [number, number] = angle ? angle.domain : [ticks[0], ticks[ticks.length - 1]]
   const dayTickList = dayTicks(from, to, card.timezone)
   return (
     <div data-testid="chart-panel" className="min-w-0">
-      <Legend items={indices.map((i) => ({ label: withUnit(card.series[i].label, drawnUnit(card, bodies, i)), colour: SERIES_COLOURS[i] }))} />
+      <Legend items={indices.map((i) => ({ label: withUnit(card.series[i].label, drawnUnit(card.series, bodies, i)), colour: SERIES_COLOURS[i] }))} />
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
           <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 2" vertical={false} />
@@ -154,7 +145,7 @@ function TimePanel({
             }
             formatter={(v: number, _n, item) => {
               const i = Number(String(item.dataKey).slice(1))
-              return [`${Math.round(v * 100) / 100} ${drawnUnit(card, bodies, i)}`.trim(), card.series[i].label]
+              return [`${Math.round(v * 100) / 100} ${drawnUnit(card.series, bodies, i)}`.trim(), card.series[i].label]
             }}
           />
           {!angle &&
@@ -280,12 +271,12 @@ function XYPlot({
   height: number
 }) {
   const results = bodies.map((b) => (b ? pairXY(b, x, y) : { points: [], paired: 0, total: 0 }))
-  const xTicks = axisTicks(results.flatMap((r) => r.points.map((p) => p.x)), card.series[x].unit)
-  const yTicks = axisTicks(results.flatMap((r) => r.points.map((p) => p.y)), card.series[y].unit)
+  const xTicks = axisTicks(results.flatMap((r) => r.points.map((p) => p.x)), drawnUnit(card.series, bodies, x))
+  const yTicks = axisTicks(results.flatMap((r) => r.points.map((p) => p.y)), drawnUnit(card.series, bodies, y))
   const paired = results.reduce((n, r) => n + r.paired, 0)
   const total = results.reduce((n, r) => n + r.total, 0)
-  const sx = card.series[x]
-  const sy = card.series[y]
+  const sx = { ...card.series[x], unit: drawnUnit(card.series, bodies, x) }
+  const sy = { ...card.series[y], unit: drawnUnit(card.series, bodies, y) }
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <ResponsiveContainer width="100%" height={height}>

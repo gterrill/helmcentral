@@ -36,6 +36,9 @@ type pathHistoryBuckets struct {
 	// no direction (the samples cancelled out, or it was calm).
 	Weighted  bool
 	Undefined int
+	// UnweightedBuckets counts the buckets of a weighted read that had no wind
+	// speed at all, so their mean is not weighted.
+	UnweightedBuckets int
 }
 
 // planPathHistoryRange is the first half of a bucketed history read: it finds
@@ -399,13 +402,20 @@ func telemetrySeriesHandler(c echo.Context) error {
 				}
 			}
 			if angles[i] != angleNone {
-				weight, ambiguous, err := circularWeightPath(ctx, telemetrySeriesPathSources, p, from, to)
+				// The speed series asked for in the same request, with its source.
+				weightSource := ""
+				for j, q := range paths {
+					if q == weightPathFor(p) {
+						weightSource = sources[j]
+					}
+				}
+				weight, ambiguous, err := circularWeightPath(ctx, telemetrySeriesPathSources, p, weightSource, from, to)
 				if err != nil {
 					errs[i] = err
 					return
 				}
-				results[i], errs[i] = queryCircularHistoryBuckets(ctx, telemetrySeriesIO, p, sources[i], weight, "", from, to, false, telemetrySeriesBucketWidth)
-				methods[i] = circularMethod(weight, ambiguous, results[i].Weighted)
+				results[i], errs[i] = queryCircularHistoryBuckets(ctx, telemetrySeriesIO, p, sources[i], weight, weightSource, from, to, false, telemetrySeriesBucketWidth)
+				methods[i] = circularMethod(weight, ambiguous, results[i].Weighted, results[i].UnweightedBuckets)
 				return
 			}
 			results[i], errs[i] = queryPathHistoryBuckets(ctx, telemetrySeriesIO, p, sources[i], from, to, []string{"min", "mean", "max"}, false, telemetrySeriesBucketWidth)
@@ -488,10 +498,15 @@ func telemetrySeriesHandler(c echo.Context) error {
 // weighted by wind speed when one device logs it. If two devices log it,
 // averaging them would chart a figure neither reported, so the speed is left
 // out of the average and the method says why.
-func circularWeightPath(ctx context.Context, list func(context.Context, string, time.Time, time.Time) ([]string, error), path string, from, to time.Time) (weight string, ambiguous bool, err error) {
+func circularWeightPath(ctx context.Context, list func(context.Context, string, time.Time, time.Time) ([]string, error), path, weightSource string, from, to time.Time) (weight string, ambiguous bool, err error) {
 	weight = weightPathFor(path)
 	if weight == "" {
 		return "", false, nil
+	}
+	// The operator already chose a device for the speed: use it, never check
+	// for others.
+	if weightSource != "" {
+		return weight, false, nil
 	}
 	srcs, err := ambiguousSources(ctx, list, weight, from, to)
 	if err != nil {
@@ -506,8 +521,12 @@ func circularWeightPath(ctx context.Context, list func(context.Context, string, 
 // circularMethod says how an angle was averaged, for the reader. weightPath is
 // what circularWeightPath chose ("" for none) and weighted is whether the read
 // found a speed to weight by.
-func circularMethod(weightPath string, ambiguous, weighted bool) string {
+func circularMethod(weightPath string, ambiguous, weighted bool, unweightedBuckets int) string {
 	switch {
+	case weighted && unweightedBuckets == 1:
+		return "vector mean weighted by wind speed, except 1 bucket with no wind speed logged"
+	case weighted && unweightedBuckets > 1:
+		return fmt.Sprintf("vector mean weighted by wind speed, except %d buckets with no wind speed logged", unweightedBuckets)
 	case weighted:
 		return "vector mean weighted by wind speed"
 	case ambiguous:

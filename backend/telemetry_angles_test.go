@@ -96,13 +96,13 @@ func TestCircularSpreadGrowsAsTheVectorShrinks(t *testing.T) {
 func TestCombineCircularWeightsBySpeed(t *testing.T) {
 	t0 := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	sub := func(min int, deg, w float64) circularSample {
-		return circularSample{T: t0.Add(time.Duration(min) * time.Minute), Sin: math.Sin(rad(deg)), Cos: math.Cos(rad(deg)), Weight: w}
+		return circularSample{T: t0.Add(time.Duration(min) * time.Minute), Sin: math.Sin(rad(deg)), Cos: math.Cos(rad(deg)), Weight: w, HasWeight: true}
 	}
 	// One hour bucket: 30 minutes of a 2 kn breeze from the east, 30 of a 20 kn
 	// blow from the south. Unweighted, the mean sits midway (135); weighted, the
 	// blow dominates.
 	subs := []circularSample{sub(0, 90, 1), sub(30, 180, 1)}
-	un := combineCircular(subs, time.Hour)
+	un := combineCircular(subs, time.Hour, t0)
 	if len(un) != 1 || !un[0].Defined {
 		t.Fatalf("unweighted = %+v", un)
 	}
@@ -110,7 +110,7 @@ func TestCombineCircularWeightsBySpeed(t *testing.T) {
 		t.Errorf("unweighted mean = %v, want 135", got)
 	}
 	subs = []circularSample{sub(0, 90, 2), sub(30, 180, 20)}
-	w := combineCircular(subs, time.Hour)
+	w := combineCircular(subs, time.Hour, t0)
 	if got := w[0].Mean * 180 / math.Pi; got < 165 || got > 175 {
 		t.Errorf("speed-weighted mean = %v, want near 174", got)
 	}
@@ -119,14 +119,14 @@ func TestCombineCircularWeightsBySpeed(t *testing.T) {
 func TestCombineCircularCancellationAndCalmAreUndefined(t *testing.T) {
 	t0 := time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC)
 	opposed := []circularSample{
-		{T: t0, Sin: 1, Cos: 0, Weight: 1},
-		{T: t0.Add(30 * time.Minute), Sin: -1, Cos: 0, Weight: 1},
+		{T: t0, Sin: 1, Cos: 0, Weight: 1, HasWeight: true},
+		{T: t0.Add(30 * time.Minute), Sin: -1, Cos: 0, Weight: 1, HasWeight: true},
 	}
-	if b := combineCircular(opposed, time.Hour); len(b) != 1 || b[0].Defined {
+	if b := combineCircular(opposed, time.Hour, t0); len(b) != 1 || b[0].Defined {
 		t.Errorf("opposed vectors = %+v, want one undefined bucket", b)
 	}
-	calm := []circularSample{{T: t0, Sin: 1, Cos: 0, Weight: 0}}
-	if b := combineCircular(calm, time.Hour); len(b) != 1 || b[0].Defined {
+	calm := []circularSample{{T: t0, Sin: 1, Cos: 0, Weight: 0, HasWeight: true}}
+	if b := combineCircular(calm, time.Hour, t0); len(b) != 1 || b[0].Defined {
 		t.Errorf("a calm bucket (zero weight) = %+v, want one undefined bucket", b)
 	}
 }
@@ -137,7 +137,7 @@ func TestCombineCircularGroupsByBucketAndSorts(t *testing.T) {
 		{T: t0.Add(61 * time.Minute), Sin: 0, Cos: 1, Weight: 1},
 		{T: t0, Sin: 0, Cos: 1, Weight: 1},
 	}
-	b := combineCircular(subs, time.Hour)
+	b := combineCircular(subs, time.Hour, t0)
 	if len(b) != 2 || !b[0].T.Before(b[1].T) {
 		t.Fatalf("buckets = %+v", b)
 	}

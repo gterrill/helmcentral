@@ -38,6 +38,7 @@ func TestExecuteGetPathHistory_AnAngleIsAVectorMeanInDegreesWithASpreadAndNoMinM
 		influxPathHistoryStat:      stat,
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(t0, t0.Add(time.Hour), true),
 		siUnit:                     func(path string) string { return map[string]string{"environment.wind.directionTrue": "rad"}[path] },
+		influxPathSources:          func(context.Context, string, time.Time, time.Time) ([]string, error) { return nil, nil },
 	}
 	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"environment.wind.directionTrue","hours_back":3}`))
 	if err != nil {

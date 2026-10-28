@@ -55,8 +55,12 @@ prose cannot disagree. The browser never averages an angle.
   weighted by the true wind speed over that window, so an afternoon blow outweighs
   a dawn breeze. The windows are a sixth of a bucket (`circularSubWidth`). If wind
   speed is not logged in the range, or two devices log it, the mean is unweighted
-  and the result says so in its `method` text. Direction itself is never averaged
-  across devices.
+  and the result says so in its `method` text. If the chart already names a
+  source for the speed series, that source weights the direction. A bucket whose
+  windows have no speed at all keeps its direction as a plain vector mean, and
+  the method text counts those buckets: a speed outage never shows as a direction
+  gap. Direction itself is never averaged across devices. Buckets are labelled
+  the way Flux labels a scalar's, so the first one carries the range start.
 - **No answer when there is none.** The length of the mean vector (1 when every
   sample agrees, 0 when they cancel) must reach 0.1. Below that, the bucket has no
   mean direction: it is left out of the points, counted in `undefined_buckets`,

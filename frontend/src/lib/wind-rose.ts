@@ -1,11 +1,14 @@
 import type { WindRoseCard } from '@/lib/mate-cards'
 import { niceTicks } from '@/lib/telemetry-chart'
 
-const POINTS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'] as const
+import { compassPointFor } from '@/lib/format'
 
-/** The nearest of the sixteen compass points to a bearing. */
-export function compassPoint(deg: number): string {
-  return POINTS[Math.round((((deg % 360) + 360) % 360) / 22.5) % 16]
+/**
+ * A sector's name from its centre bearing: a compass point for 8 or 16
+ * sectors, and degrees for 32, where the sixteen point names would repeat.
+ */
+export function sectorName(centre: number, sectors: number): string {
+  return sectors > 16 ? `${Math.round(centre)}°` : compassPointFor(centre)
 }
 
 export interface RoseBand {
@@ -56,7 +59,7 @@ export function windRoseModel(card: WindRoseCard): RoseModel {
       return band
     })
     const centre = index * width
-    return { index, centre, compass: compassPoint(centre), pct: run, bands }
+    return { index, centre, compass: sectorName(centre, card.sectors), pct: run, bands }
   })
   const maxPct = sectors.reduce((m, s) => Math.max(m, s.pct), 0)
   const top = sectors.reduce<RoseSector | null>((best, s) => (s.pct > (best?.pct ?? 0) ? s : best), null)

@@ -125,17 +125,6 @@ func circularSpreadDegrees(resultant float64) float64 {
 	return math.Sqrt(-2*math.Log(resultant)) * 180 / math.Pi
 }
 
-// compassPoints are the sixteen names of the compass, north first.
-var compassPoints = [16]string{"N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"}
-
-func compassPoint(deg float64) string {
-	i := int(math.Floor(math.Mod(deg, 360)/22.5+0.5)) % 16
-	if i < 0 {
-		i += 16
-	}
-	return compassPoints[i]
-}
-
 // weightPathFor is the series that weights a direction's average. Wind
 // direction is averaged by wind speed, so the afternoon's 20 knots outweighs
 // the dawn's 2. Only the true wind direction has one; a heading has none.
@@ -148,34 +137,52 @@ func weightPathFor(path string) string {
 }
 
 // circularSample is one short window of an angle: its mean sine and cosine, and
-// the weight it carries in the bucket it belongs to.
+// the weight it carries in the bucket it belongs to. HasWeight is false when the
+// window has no speed logged to weight it by.
 type circularSample struct {
-	T        time.Time
-	Sin, Cos float64
-	Weight   float64
+	T         time.Time
+	Sin, Cos  float64
+	Weight    float64
+	HasWeight bool
 }
 
 // circularBucket is the vector mean of the samples in one bucket. Defined is
 // false when they cancel out or carry no weight (a dead calm): there is no
-// mean direction, and none is reported.
+// mean direction, and none is reported. Unweighted is true when none of the
+// bucket's windows had a speed, so its mean is a plain vector mean.
 type circularBucket struct {
-	T         time.Time
-	Mean      float64 // radians in [0, 2π); meaningful only when Defined
-	Resultant float64
-	Weight    float64 // the total weight of the samples
-	Defined   bool
+	T          time.Time
+	Mean       float64 // radians in [0, 2π); meaningful only when Defined
+	Resultant  float64
+	Weight     float64 // the total weight of the samples (their count when Unweighted)
+	Defined    bool
+	Unweighted bool
 }
 
 // combineCircular groups samples into width-sized buckets and takes each
 // bucket's weighted vector mean: the mean of sin and the mean of cos, each
-// weighted, recombined with atan2.
-func combineCircular(samples []circularSample, width time.Duration) []circularBucket {
-	type acc struct{ sumW, sumS, sumC float64 }
+// weighted, recombined with atan2. A bucket is labelled with its boundary, or
+// with start when Flux clipped it, which is how a scalar's first bucket is
+// labelled, so an angle and a scalar read over one range share timestamps.
+//
+// A window with no weight never hides the direction. Where a bucket has windows
+// with weights, only those count. Where it has none, every window counts
+// equally and the bucket is marked Unweighted.
+func combineCircular(samples []circularSample, width time.Duration, start time.Time) []circularBucket {
+	type acc struct {
+		wSum, wS, wC float64
+		hasW         bool
+		n            int
+		uS, uC       float64
+	}
 	by := map[int64]*acc{}
 	at := map[int64]time.Time{}
 	var keys []int64
 	for _, s := range samples {
 		bt := s.T.Truncate(width)
+		if bt.Before(start) {
+			bt = start
+		}
 		k := bt.Unix()
 		a, ok := by[k]
 		if !ok {
@@ -184,17 +191,29 @@ func combineCircular(samples []circularSample, width time.Duration) []circularBu
 			at[k] = bt
 			keys = append(keys, k)
 		}
-		a.sumW += s.Weight
-		a.sumS += s.Weight * s.Sin
-		a.sumC += s.Weight * s.Cos
+		a.n++
+		a.uS += s.Sin
+		a.uC += s.Cos
+		if s.HasWeight {
+			a.hasW = true
+			a.wSum += s.Weight
+			a.wS += s.Weight * s.Sin
+			a.wC += s.Weight * s.Cos
+		}
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
 	out := make([]circularBucket, 0, len(keys))
 	for _, k := range keys {
 		a := by[k]
-		b := circularBucket{T: at[k], Weight: a.sumW}
-		if a.sumW > 0 {
-			b.Mean, b.Resultant, b.Defined = circularMean(a.sumS/a.sumW, a.sumC/a.sumW)
+		b := circularBucket{T: at[k]}
+		if a.hasW {
+			b.Weight = a.wSum
+			if a.wSum > 0 {
+				b.Mean, b.Resultant, b.Defined = circularMean(a.wS/a.wSum, a.wC/a.wSum)
+			}
+		} else {
+			b.Unweighted, b.Weight = true, float64(a.n)
+			b.Mean, b.Resultant, b.Defined = circularMean(a.uS/float64(a.n), a.uC/float64(a.n))
 		}
 		out = append(out, b)
 	}
@@ -269,6 +288,8 @@ func queryCircularHistoryBuckets(ctx context.Context, io pathHistoryIO, path, so
 		}
 	}
 	var samples []circularSample
+	var weightSum float64
+	var weighted int
 	for _, p := range pts[0] {
 		k := p.Timestamp.Unix()
 		c, ok := cos[k]
@@ -277,18 +298,29 @@ func queryCircularHistoryBuckets(ctx context.Context, io pathHistoryIO, path, so
 		}
 		s := circularSample{T: p.Timestamp, Sin: p.Value, Cos: c, Weight: 1}
 		if out.Weighted {
-			w, ok := weights[k]
-			if !ok {
-				// A window with a direction and no speed has no weight to give.
-				continue
+			// A window with a direction and no speed keeps its direction: it has
+			// no weight, and combineCircular falls back for a bucket with none.
+			if w, ok := weights[k]; ok {
+				s.Weight, s.HasWeight = math.Max(w, 0), true
+				weightSum += s.Weight
+				weighted++
 			}
-			s.Weight = math.Max(w, 0)
 		}
 		samples = append(samples, s)
 	}
 
-	for _, b := range combineCircular(samples, out.Width) {
+	// A bucket with no speed carries the average weight per window, so it counts
+	// for about as much as its neighbours in the range's mean.
+	avgW := 1.0
+	if weighted > 0 {
+		avgW = weightSum / float64(weighted)
+	}
+	for _, b := range combineCircular(samples, out.Width, out.QueryStart) {
 		pt := assistantPathHistoryPoint{T: b.T, Weight: b.Weight}
+		if out.Weighted && b.Unweighted {
+			out.UnweightedBuckets++
+			pt.Weight = b.Weight * avgW
+		}
 		if b.Defined {
 			m, r := b.Mean, b.Resultant
 			pt.Mean, pt.Resultant = &m, &r

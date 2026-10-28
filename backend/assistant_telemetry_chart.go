@@ -573,12 +573,20 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 		var h pathHistoryBuckets
 		var err error
 		if s.angle != angleNone {
-			weight, ambiguous, werr := circularWeightPath(ctx, d.influxPathSources, s.path, r.from, r.to)
+			// The speed series in the same chart, if any, says which device
+			// weights the direction.
+			weightSource := ""
+			for _, o := range series {
+				if o.path == weightPathFor(s.path) {
+					weightSource = o.source
+				}
+			}
+			weight, ambiguous, werr := circularWeightPath(ctx, d.influxPathSources, s.path, weightSource, r.from, r.to)
 			if werr != nil {
 				return fmt.Errorf("show_telemetry_chart: reading the sources of %s: %w", s.label, werr)
 			}
-			h, err = queryCircularHistoryBuckets(ctx, io, s.path, s.source, weight, "", r.from, r.to, false, telemetrySeriesBucketWidth)
-			angles[i][j] = chartAngleSummary{method: circularMethod(weight, ambiguous, h.Weighted), undefined: h.Undefined}
+			h, err = queryCircularHistoryBuckets(ctx, io, s.path, s.source, weight, weightSource, r.from, r.to, false, telemetrySeriesBucketWidth)
+			angles[i][j] = chartAngleSummary{method: circularMethod(weight, ambiguous, h.Weighted, h.UnweightedBuckets), undefined: h.Undefined}
 			if mean, _, ok := overallCircularMean(h.Merged); ok {
 				deg := s.convert(mean)
 				angles[i][j].mean = &deg
@@ -646,7 +654,7 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 				if a.mean != nil {
 					mr.Mean = ptr2(*a.mean)
 					if s.angle == angleBearing {
-						mr.Compass = compassPoint(*a.mean)
+						mr.Compass = degreesToDirection(*a.mean)
 					}
 				} else {
 					mr.Note = "the directions cancel out or the wind is too light to have one: there is no mean direction for this range"

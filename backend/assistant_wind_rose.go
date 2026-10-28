@@ -74,6 +74,20 @@ type windRoseTally struct {
 	Samples  int
 	Calm     int
 	Variable int
+	// SectorN and SectorSpeed are each sector's sample count and summed speed,
+	// for the model's summary.
+	SectorN     []int
+	SectorSpeed []float64
+}
+
+// windRoseSectorName names a sector by its centre bearing: a compass point for
+// 8 or 16 sectors, and degrees for 32, where the sixteen point names would
+// repeat.
+func windRoseSectorName(centre float64, sectors int) string {
+	if sectors > 16 {
+		return fmt.Sprintf("%.0f°", centre)
+	}
+	return degreesToDirection(centre)
 }
 
 // windRoseSectorOf is the sector a bearing falls in. Sector 0 is centred on
@@ -98,7 +112,7 @@ func windRoseBinOf(speed float64, edges []float64) int {
 // apart, whatever its direction, and a sample with wind but no mean direction is
 // counted as variable. Neither is put in a sector.
 func buildWindRose(samples []windRoseSample, sectors int, edges []float64, calmBelow float64) windRoseTally {
-	t := windRoseTally{Counts: make([][]int, sectors)}
+	t := windRoseTally{Counts: make([][]int, sectors), SectorN: make([]int, sectors), SectorSpeed: make([]float64, sectors)}
 	for i := range t.Counts {
 		t.Counts[i] = make([]int, len(edges)+1)
 	}
@@ -110,7 +124,10 @@ func buildWindRose(samples []windRoseSample, sectors int, edges []float64, calmB
 		case s.Dir == nil:
 			t.Variable++
 		default:
-			t.Counts[windRoseSectorOf(*s.Dir, sectors)][windRoseBinOf(s.Speed, edges)]++
+			sec := windRoseSectorOf(*s.Dir, sectors)
+			t.Counts[sec][windRoseBinOf(s.Speed, edges)]++
+			t.SectorN[sec]++
+			t.SectorSpeed[sec] += s.Speed
 		}
 	}
 	return t
@@ -371,30 +388,17 @@ func (d assistantToolDeps) executeShowWindRose(ctx context.Context, raw json.Raw
 
 	// The model's summary: the same counts, as percentages of every sample.
 	pct := func(n int) float64 { return round2(100 * float64(n) / float64(tally.Samples)) }
-	type sectorSum struct {
-		n, idx int
-		speed  float64
-	}
-	sec := make([]sectorSum, sectors)
-	for s := range sec {
-		sec[s].idx = s
+	order := make([]int, sectors)
+	for i := range order {
+		order[i] = i
 	}
 	band := make([]int, len(edges)+1)
-	// Sector mean speeds need the samples again; count them from the buckets.
-	for _, smp := range samples {
-		if smp.Speed < windRoseCalmBelow || smp.Dir == nil {
-			continue
-		}
-		s := windRoseSectorOf(*smp.Dir, sectors)
-		sec[s].n++
-		sec[s].speed += smp.Speed
-	}
 	for _, row := range tally.Counts {
 		for b, n := range row {
 			band[b] += n
 		}
 	}
-	sort.SliceStable(sec, func(i, j int) bool { return sec[i].n > sec[j].n })
+	sort.SliceStable(order, func(i, j int) bool { return tally.SectorN[order[i]] > tally.SectorN[order[j]] })
 	model := &windRoseModelResult{
 		Title: title, Unit: unit, Samples: tally.Samples, BucketMinutes: int(width / time.Minute),
 		Range:       rng.from.In(loc).Format("Mon 2 Jan 15:04") + " to " + rng.to.In(loc).Format("Mon 2 Jan 15:04"),
@@ -403,13 +407,14 @@ func (d assistantToolDeps) executeShowWindRose(ctx context.Context, raw json.Raw
 		Note:        fmt.Sprintf("wind direction is where the wind blows from, in degrees true. Each sample is a %d-minute average. Percentages are of all samples; calm is under %g %s and has no direction.", int(width/time.Minute), windRoseCalmBelow, unit),
 		Instruction: windRoseInstr,
 	}
-	for _, s := range sec {
-		if s.n == 0 || len(model.Sectors) == 4 {
+	for _, s := range order {
+		n := tally.SectorN[s]
+		if n == 0 || len(model.Sectors) == 4 {
 			break
 		}
-		centre := float64(s.idx) * 360 / float64(sectors)
+		centre := float64(s) * 360 / float64(sectors)
 		model.Sectors = append(model.Sectors, windRoseModelSector{
-			Compass: compassPoint(centre), Degrees: round2(centre), Percent: pct(s.n), MeanSpeed: round2(s.speed / float64(s.n)),
+			Compass: windRoseSectorName(centre, sectors), Degrees: round2(centre), Percent: pct(n), MeanSpeed: round2(tally.SectorSpeed[s] / float64(n)),
 		})
 	}
 	for b, n := range band {

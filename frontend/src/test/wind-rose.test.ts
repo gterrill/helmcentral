@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { decodeMateCards, type WindRoseCard } from '@/lib/mate-cards'
-import { polar, ringTicks, windRoseModel, wedgePath } from '@/lib/wind-rose'
+import { polar, ringTicks, sectorName, windRoseModel, wedgePath } from '@/lib/wind-rose'
 
 import { windRosePayload } from './helpers/wind-rose-fixture'
 
@@ -127,5 +127,20 @@ describe('decoder: wind_rose', () => {
 
   it('accepts a null mean speed and a null strongest gust', () => {
     expect(decode({ mean_speed: null, strongest: null })).toMatchObject({ kind: 'wind_rose', meanSpeed: null, strongest: null })
+  })
+})
+
+describe('sectorName', () => {
+  it('uses compass points for 8 and 16 sectors and degrees for 32, where the points would repeat', () => {
+    expect(sectorName(90, 16)).toBe('E')
+    expect(sectorName(45, 8)).toBe('NE')
+    expect(sectorName(11.25, 32)).toBe('11°')
+    expect(sectorName(33.75, 32)).toBe('34°')
+  })
+
+  it('names every sector of a 32 sector rose differently', () => {
+    const counts = Array.from({ length: 32 }, () => [0, 0, 0, 0, 0, 0])
+    const m = windRoseModel(card({ sectors: 32, counts, samples: 15, calm: 10, variable: 5 }))
+    expect(new Set(m.sectors.map((s) => s.compass)).size).toBe(32)
   })
 })

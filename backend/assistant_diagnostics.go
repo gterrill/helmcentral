@@ -777,14 +777,15 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	var err error
 	method := ""
 	if kind != angleNone {
-		weight, ambiguous := "", false
-		if d.influxPathSources != nil {
-			if weight, ambiguous, err = circularWeightPath(ctx, d.influxPathSources, path, start, stop); err != nil {
-				return "", fmt.Errorf("get_path_history: reading the sources of %s: %w", weightPathFor(path), err)
-			}
+		if d.influxPathSources == nil {
+			return "", fmt.Errorf("get_path_history: cannot check the sources of the wind speed that weights a direction (needs InfluxDB)")
+		}
+		weight, ambiguous, werr := circularWeightPath(ctx, d.influxPathSources, path, "", start, stop)
+		if werr != nil {
+			return "", fmt.Errorf("get_path_history: reading the sources of %s: %w", weightPathFor(path), werr)
 		}
 		hist, err = queryCircularHistoryBuckets(ctx, hio, path, source, weight, "", start, stop, true, assistantPathHistoryBucketWidth)
-		method = circularMethod(weight, ambiguous, hist.Weighted)
+		method = circularMethod(weight, ambiguous, hist.Weighted, hist.UnweightedBuckets)
 	} else {
 		hist, err = queryPathHistoryBuckets(ctx, hio, path, source, start, stop, []string{"min", "mean", "max"}, true, assistantPathHistoryBucketWidth)
 	}
