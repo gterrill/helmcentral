@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -324,7 +325,7 @@ func TestAlarmLogStore_LooksUpOccurrencesForAskMate(t *testing.T) {
 	if err != nil || n != 2 {
 		t.Fatalf("RaisedCount = %d, %v; want 2 (the ten-day-old raise is outside)", n, err)
 	}
-	near, err := store.ChangedBetween(base.Add(-15*time.Minute), base.Add(15*time.Minute))
+	near, err := store.ChangedBetween(base.Add(-15*time.Minute), base.Add(15*time.Minute), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,8 +336,43 @@ func TestAlarmLogStore_LooksUpOccurrencesForAskMate(t *testing.T) {
 	if !ids["a3"] || !ids["b1"] || ids["a2"] {
 		t.Errorf("ChangedBetween ids = %v, want a3 and b1 only", ids)
 	}
-	later, err := store.ChangedBetween(base.Add(15*time.Minute), base.Add(30*time.Minute))
+	later, err := store.ChangedBetween(base.Add(15*time.Minute), base.Add(30*time.Minute), "")
 	if err != nil || len(later) != 1 || later[0].ID != "a3" {
 		t.Errorf("a clearing inside the window counts: %+v %v", later, err)
+	}
+}
+
+// The alarm being asked about is left out in SQL, so its own repeats cannot
+// use up the row limit and hide the neighbours.
+func TestAlarmLogStore_ChangedBetweenExcludesTheRuleBeforeTheLimit(t *testing.T) {
+	store, err := newAlarmLogStore(filepath.Join(t.TempDir(), "alarm-log.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	base := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	for i := 0; i < 250; i++ {
+		if _, err := store.RecordRaised(alarmLogEntry{ID: fmt.Sprintf("s%03d", i), RuleID: "subject", Label: "S", Path: "p", State: "warn", RaisedAt: base.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.RecordRaised(alarmLogEntry{ID: "n1", RuleID: "neighbour", Label: "N", Path: "p", State: "warn", RaisedAt: base.Add(10 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.ChangedBetween(base.Add(-time.Minute), base.Add(15*time.Minute), "subject")
+	if err != nil || len(got) != 1 || got[0].ID != "n1" {
+		t.Fatalf("want only the neighbour, got %d rows, err %v", len(got), err)
+	}
+}
+
+func TestAlarmLogStore_IndexesClearedAt(t *testing.T) {
+	store, err := newAlarmLogStore(filepath.Join(t.TempDir(), "alarm-log.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	var n int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='alarm_log_cleared_at'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("alarm_log_cleared_at index: %d, %v", n, err)
 	}
 }

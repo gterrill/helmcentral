@@ -695,25 +695,49 @@ func computePathHistoryGaps(start, stop time.Time, width time.Duration, points [
 // as telling as an outright gap - a frozen sensor still "updating" the same
 // stale value), overall min/mean/max, first/last seen, and gaps.
 func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.RawMessage) (string, error) {
-	if err := ctx.Err(); err != nil {
+	result, shrink, err := d.pathHistory(ctx, raw, true)
+	if err != nil {
 		return "", err
+	}
+	return capToolResultJSON(result, shrink)
+}
+
+// pathHistory is executeGetPathHistory's query and shaping. With rounded false
+// the figures keep the full precision of the stored values, for a caller that
+// converts them to another unit before rounding (get_alarm_context): a
+// ratio of 0.4951 rounded to 0.5 first would read as 50 %, not 49.5 %.
+func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage, rounded bool) (*assistantGetPathHistoryResult, func() bool, error) {
+	rp := func(v *float64) *float64 {
+		if rounded {
+			return roundTo2Ptr(v)
+		}
+		return v
+	}
+	r2 := func(v float64) float64 {
+		if rounded {
+			return roundTo2(v)
+		}
+		return v
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
 	}
 
 	var args assistantGetPathHistoryArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return "", fmt.Errorf("parse get_path_history arguments: %w", err)
+		return nil, nil, fmt.Errorf("parse get_path_history arguments: %w", err)
 	}
 
 	path := strings.TrimSpace(args.Path)
 	if path == "" {
-		return "", fmt.Errorf("get_path_history: path is required")
+		return nil, nil, fmt.Errorf("get_path_history: path is required")
 	}
 	if containsFluxInterpolationSyntax(path) {
-		return "", fmt.Errorf("get_path_history: path must not contain '$' or '{'")
+		return nil, nil, fmt.Errorf("get_path_history: path must not contain '$' or '{'")
 	}
 	source := strings.TrimSpace(args.Source)
 	if containsFluxInterpolationSyntax(source) {
-		return "", fmt.Errorf("get_path_history: source must not contain '$' or '{'")
+		return nil, nil, fmt.Errorf("get_path_history: source must not contain '$' or '{'")
 	}
 
 	now := d.now()
@@ -725,11 +749,11 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	case strings.TrimSpace(args.Start) != "" || strings.TrimSpace(args.End) != "":
 		s, err := time.Parse(time.RFC3339, strings.TrimSpace(args.Start))
 		if err != nil {
-			return "", fmt.Errorf("get_path_history: start must be RFC3339 (e.g. 2026-09-21T00:00:00Z): %w", err)
+			return nil, nil, fmt.Errorf("get_path_history: start must be RFC3339 (e.g. 2026-09-21T00:00:00Z): %w", err)
 		}
 		e, err := time.Parse(time.RFC3339, strings.TrimSpace(args.End))
 		if err != nil {
-			return "", fmt.Errorf("get_path_history: end must be RFC3339 (e.g. 2026-09-22T00:00:00Z): %w", err)
+			return nil, nil, fmt.Errorf("get_path_history: end must be RFC3339 (e.g. 2026-09-22T00:00:00Z): %w", err)
 		}
 		start, stop = s, e
 	default:
@@ -738,7 +762,7 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	}
 
 	if !stop.After(start) {
-		return "", fmt.Errorf("get_path_history: end must be after start")
+		return nil, nil, fmt.Errorf("get_path_history: end must be after start")
 	}
 	// A range longer than assistantPathHistoryMaxSpan is clamped, not
 	// rejected - but silently moving the caller's own requested start
@@ -758,7 +782,7 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	}
 
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return nil, nil, err
 	}
 
 	// The shared query (telemetry_series.go) picks the bucket width from the
@@ -778,11 +802,11 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	method := ""
 	if kind != angleNone {
 		if d.influxPathSources == nil {
-			return "", fmt.Errorf("get_path_history: cannot check the sources of the wind speed that weights a direction (needs InfluxDB)")
+			return nil, nil, fmt.Errorf("get_path_history: cannot check the sources of the wind speed that weights a direction (needs InfluxDB)")
 		}
 		weight, ambiguous, werr := circularWeightPath(ctx, d.influxPathSources, path, "", start, stop)
 		if werr != nil {
-			return "", fmt.Errorf("get_path_history: reading the sources of %s: %w", weightPathFor(path), werr)
+			return nil, nil, fmt.Errorf("get_path_history: reading the sources of %s: %w", weightPathFor(path), werr)
 		}
 		hist, err = queryCircularHistoryBuckets(ctx, hio, path, source, weight, "", start, stop, true, assistantPathHistoryBucketWidth)
 		method = circularMethod(weight, ambiguous, hist.Weighted, hist.UnweightedBuckets)
@@ -790,7 +814,7 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		hist, err = queryPathHistoryBuckets(ctx, hio, path, source, start, stop, []string{"min", "mean", "max"}, true, assistantPathHistoryBucketWidth)
 	}
 	if err != nil {
-		return "", fmt.Errorf("get_path_history: %w", err)
+		return nil, nil, fmt.Errorf("get_path_history: %w", err)
 	}
 	firstLastFound, firstSeenAt, lastSeenAt := hist.Found, hist.FirstSeen, hist.LastSeen
 	queryStart, queryStop := hist.QueryStart, hist.QueryStop
@@ -815,8 +839,8 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 			// mean, so a reader sees the hour and that it had no direction.
 			b := assistantPathHistoryBucket{T: m.T.UTC().Format(time.RFC3339)}
 			if m.Mean != nil && m.Resultant != nil {
-				b.Mean = roundTo2Ptr(floatPtr(angleDegrees(kind, *m.Mean)))
-				b.Spread = roundTo2Ptr(floatPtr(circularSpreadDegrees(*m.Resultant)))
+				b.Mean = rp(floatPtr(angleDegrees(kind, *m.Mean)))
+				b.Spread = rp(floatPtr(circularSpreadDegrees(*m.Resultant)))
 			}
 			buckets = append(buckets, b)
 			continue
@@ -828,7 +852,7 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		// Overall min/max are derived from these SAME rounded values, so
 		// they never show more precision than any bucket the model can
 		// already see.
-		minV, meanV, maxV := roundTo2Ptr(m.Min), roundTo2Ptr(m.Mean), roundTo2Ptr(m.Max)
+		minV, meanV, maxV := rp(m.Min), rp(m.Mean), rp(m.Max)
 		buckets = append(buckets, assistantPathHistoryBucket{
 			T:   m.T.UTC().Format(time.RFC3339),
 			Min: minV, Mean: meanV, Max: maxV,
@@ -851,10 +875,10 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		// The mean of the range is the vector mean of its buckets, not the
 		// average of their degrees.
 		if m, _, ok := overallCircularMean(merged); ok {
-			overallMean = roundTo2Ptr(floatPtr(angleDegrees(kind, m)))
+			overallMean = rp(floatPtr(angleDegrees(kind, m)))
 		}
 	} else if meanCount > 0 {
-		v := roundTo2(meanSum / float64(meanCount))
+		v := r2(meanSum / float64(meanCount))
 		overallMean = &v
 	}
 
@@ -945,7 +969,7 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		result.Truncated = true
 		return true
 	}
-	return capToolResultJSON(&result, shrink)
+	return &result, shrink, nil
 }
 
 // roundTo2Ptr rounds *v to two decimal places (roundTo2), or returns nil

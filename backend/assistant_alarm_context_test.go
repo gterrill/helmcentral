@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,13 +12,14 @@ import (
 
 type alarmContextOut struct {
 	Alarm struct {
-		Title    string `json:"title"`
-		Body     string `json:"body"`
-		State    string `json:"state"`
-		Active   bool   `json:"active"`
-		RaisedAt string `json:"raised_at"`
-		Cleared  string `json:"cleared_at"`
-		Source   string `json:"source"`
+		Title     string `json:"title"`
+		Body      string `json:"body"`
+		State     string `json:"state"`
+		Active    bool   `json:"active"`
+		RaisedAt  string `json:"raised_at"`
+		Cleared   string `json:"cleared_at"`
+		ClearNote string `json:"clear_note"`
+		Source    string `json:"source"`
 	} `json:"alarm"`
 	Timezone string `json:"timezone"`
 	Rule     *struct {
@@ -50,6 +52,17 @@ type alarmContextOut struct {
 		FirstSeen string   `json:"first_seen_iso"`
 		LastSeen  string   `json:"last_seen_iso"`
 		GapCount  int      `json:"gap_count"`
+		Mean      *float64 `json:"mean"`
+		Start     string   `json:"start"`
+		End       string   `json:"end"`
+		FirstLoc  string   `json:"first_seen"`
+		LastLoc   string   `json:"last_seen"`
+		Shape     *struct {
+			BucketCount       int      `json:"bucket_count"`
+			BucketMinutes     float64  `json:"bucket_minutes"`
+			MaxStep           *float64 `json:"max_step"`
+			LongestFlatMinute float64  `json:"longest_flat_minutes"`
+		} `json:"shape"`
 	} `json:"history"`
 	HistoryAbsent string `json:"history_absent"`
 	Occurrences   *struct {
@@ -185,10 +198,10 @@ func TestGetAlarmContext_NetworkAlarmWithNoRuleStillReturnsWhatIsKnown(t *testin
 	deps, _ := askMateEnv(t, raisedAt)
 	deps.pathHasData = func(string) bool { return false }
 	deps.activeAlarms = func() []alarmStatus {
-		return []alarmStatus{{RuleID: "signalk:notifications.radar.guardZone1", Label: "Radar Guard Zone 1", Path: "notifications.radar.guardZone1",
+		return []alarmStatus{{RuleID: "notifications:radar.guardZone1", Label: "Radar Guard Zone 1", Path: "notifications.radar.guardZone1",
 			Phase: alarmPhaseActive, State: alarmStateAlarm, Message: "Target in guard zone 1", RaisedAt: raisedAt}}
 	}
-	_, out := runAlarmContext(t, deps, "signalk:notifications.radar.guardZone1")
+	_, out := runAlarmContext(t, deps, "notifications:radar.guardZone1")
 	if out.Alarm.Title != "Radar Guard Zone 1" || out.Alarm.Source == "" {
 		t.Errorf("alarm %+v", out.Alarm)
 	}
@@ -205,13 +218,15 @@ func TestGetAlarmContext_HistoryFailureIsReportedNotHidden(t *testing.T) {
 	rule := seedBuiltInRule(t, alarmRule{Enabled: true, Path: testSoCPath, Label: "House Bank Low", Op: alarmOpBelow, Value: 0.5, State: alarmStateWarn})
 	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
 	deps, _ := askMateEnv(t, raisedAt)
-	deps.influxPathHistoryStat = nil
+	deps.influxPathHistoryStat = func(context.Context, string, string, time.Time, time.Time, string, string) ([]telemetryPoint, error) {
+		return nil, errors.New("influx unreachable")
+	}
 	deps.activeAlarms = func() []alarmStatus {
 		return []alarmStatus{{RuleID: rule.ID, Label: "House Bank Low", Path: testSoCPath, Phase: alarmPhaseActive, State: alarmStateWarn, RaisedAt: raisedAt}}
 	}
 	_, out := runAlarmContext(t, deps, rule.ID)
-	if out.History != nil || !strings.Contains(out.HistoryAbsent, "InfluxDB") {
-		t.Errorf("want a history_absent naming InfluxDB, got %q", out.HistoryAbsent)
+	if out.History != nil || !strings.Contains(out.HistoryAbsent, "influx unreachable") {
+		t.Errorf("want the real query error in history_absent, got %q", out.HistoryAbsent)
 	}
 	if out.Rule == nil {
 		t.Error("the rest of the context still returns")
@@ -225,5 +240,128 @@ func TestGetAlarmContext_UnknownAlarmIsAnError(t *testing.T) {
 	}
 	if _, err := deps.execute(context.Background(), "get_alarm_context", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("alarm_id is required")
+	}
+}
+
+func socDeps(t *testing.T, series map[string][]telemetryPoint, raisedAt time.Time) (assistantToolDeps, string) {
+	t.Helper()
+	alarmProposalEnv(t)
+	rule := seedBuiltInRule(t, alarmRule{Enabled: true, Path: testSoCPath, Label: "House Bank Low", Op: alarmOpBelow, Value: 0.5, State: alarmStateWarn})
+	deps, _ := askMateEnv(t, raisedAt)
+	deps.influxPathHistoryStat = stubInfluxPathHistoryStat(series, nil)
+	deps.activeAlarms = func() []alarmStatus {
+		return []alarmStatus{{RuleID: rule.ID, Label: "House Bank Low", Path: testSoCPath, Phase: alarmPhaseActive, State: alarmStateWarn, RaisedAt: raisedAt}}
+	}
+	return deps, rule.ID
+}
+
+// 0.4951 must read 49.51 %, not 50 %: the ratio is converted before it is rounded.
+func TestGetAlarmContext_HistoryIsConvertedBeforeItIsRounded(t *testing.T) {
+	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
+	series := map[string][]telemetryPoint{
+		"min":  {{Timestamp: raisedAt, Value: 0.4951}},
+		"mean": {{Timestamp: raisedAt, Value: 0.4951}},
+		"max":  {{Timestamp: raisedAt, Value: 0.4951}},
+	}
+	deps, id := socDeps(t, series, raisedAt)
+	_, out := runAlarmContext(t, deps, id)
+	if out.History == nil || out.History.Min == nil || *out.History.Min != 49.51 || out.History.Mean == nil || *out.History.Mean != 49.51 {
+		t.Fatalf("history %+v", out.History)
+	}
+}
+
+func TestGetAlarmContext_HistoryHasShapeAndBoatLocalTimes(t *testing.T) {
+	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
+	pt := func(m int, v float64) telemetryPoint {
+		return telemetryPoint{Timestamp: raisedAt.Add(time.Duration(m) * time.Minute), Value: v}
+	}
+	vals := []float64{0.6, 0.6, 0.6, 0.5, 0.5}
+	var pts []telemetryPoint
+	for i, v := range vals {
+		pts = append(pts, pt(i, v))
+	}
+	series := map[string][]telemetryPoint{"min": pts, "mean": pts, "max": pts}
+	deps, id := socDeps(t, series, raisedAt)
+	_, out := runAlarmContext(t, deps, id)
+	h := out.History
+	if h == nil || h.Shape == nil {
+		t.Fatalf("history %+v", h)
+	}
+	if h.Shape.BucketCount != 5 || h.Shape.BucketMinutes != 1 || h.Shape.MaxStep == nil || *h.Shape.MaxStep != 10 || h.Shape.LongestFlatMinute != 3 {
+		t.Errorf("shape %+v max_step %v", h.Shape, h.Shape.MaxStep)
+	}
+	if h.Start != "Tue 20 Oct 01:30" || h.End == "" || h.FirstLoc == "" || h.LastLoc == "" || out.Timezone == "" {
+		t.Errorf("boat-local strings missing: %+v tz %q", h, out.Timezone)
+	}
+}
+
+func TestGetAlarmContext_NeverClearedOldRowIsNotSwappedForTheLiveAlarm(t *testing.T) {
+	alarmProposalEnv(t)
+	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
+	deps, store := askMateEnv(t, raisedAt)
+	for _, e := range []alarmLogEntry{
+		{ID: "old", RuleID: "own-1", Label: "Cabin Hot", Path: "p", State: "warn", Message: "old", RaisedAt: raisedAt.Add(-72 * time.Hour)},
+		{ID: "new", RuleID: "own-1", Label: "Cabin Hot", Path: "p", State: "warn", Message: "new", RaisedAt: raisedAt},
+	} {
+		if _, err := store.RecordRaised(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deps.activeAlarms = func() []alarmStatus {
+		return []alarmStatus{{RuleID: "own-1", Label: "Cabin Hot", Message: "live today", Phase: alarmPhaseActive, State: alarmStateWarn, RaisedAt: raisedAt}}
+	}
+	_, old := runAlarmContext(t, deps, "old")
+	if old.Alarm.Active || old.Alarm.Body != "old" || !strings.Contains(old.Alarm.ClearNote, "no clear was recorded") {
+		t.Errorf("old row must stay itself: %+v", old.Alarm)
+	}
+	_, cur := runAlarmContext(t, deps, "new")
+	if !cur.Alarm.Active || cur.Alarm.Body != "live today" {
+		t.Errorf("the open occurrence is the live alarm: %+v", cur.Alarm)
+	}
+}
+
+func TestGetAlarmContext_HistoryWindowMaths(t *testing.T) {
+	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name      string
+		clearedIn time.Duration
+		nowIn     time.Duration
+		wantEnd   time.Duration
+	}{
+		{"default is thirty minutes after", 0, 3 * time.Hour, 30 * time.Minute},
+		{"extends to the clear", 90 * time.Minute, 5 * time.Hour, 90 * time.Minute},
+		{"caps at two hours", 5 * time.Hour, 9 * time.Hour, 2 * time.Hour},
+		{"clamps at now", 0, 20 * time.Minute, 20 * time.Minute},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			alarmProposalEnv(t)
+			deps, store := askMateEnv(t, raisedAt)
+			// The first/last query gets the requested window; the stat queries
+			// get it narrowed to where data exists.
+			type win struct{ start, stop time.Time }
+			var calls []win
+			deps.influxPathHistoryFirstLast = func(_ context.Context, _, _ string, start, stop time.Time) (time.Time, time.Time, bool, error) {
+				calls = append(calls, win{start, stop})
+				return time.Time{}, time.Time{}, false, nil
+			}
+			deps.now = func() time.Time { return raisedAt.Add(c.nowIn) }
+			id, err := store.RecordRaised(alarmLogEntry{RuleID: "own-1", Label: "X", Path: "environment.outside.temperature", State: "warn", RaisedAt: raisedAt})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.clearedIn > 0 {
+				if err := store.MarkCleared("own-1", raisedAt.Add(c.clearedIn)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			runAlarmContext(t, deps, id)
+			if len(calls) == 0 {
+				t.Fatal("history was not queried")
+			}
+			if !calls[0].start.Equal(raisedAt.Add(-30*time.Minute)) || !calls[0].stop.Equal(raisedAt.Add(c.wantEnd)) {
+				t.Errorf("window %v - %v, want end raise+%v", calls[0].start, calls[0].stop, c.wantEnd)
+			}
+		})
 	}
 }

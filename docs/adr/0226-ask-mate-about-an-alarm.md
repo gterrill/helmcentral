@@ -28,8 +28,9 @@ and Mate's text never replaces the card's title or body, which have one presente
 `screen` object sent with every question (ADR 0093, 0167) gains `alarm_id` and
 `alarm_title`. `openMate` takes an `alarm` option beside `newConversation`; App
 keeps it in state, layers it over the screen with `withAlarmContext`, and clears
-it when the sheet closes, so a follow-up in the same sheet still means that
-alarm. The server caps `alarm_title` like the other fields. It drops an
+it once the seeded question has been answered (the tool result is then in the
+conversation's history for follow-ups), when the operator starts a new
+conversation or picks another from search, and when the sheet closes. The server caps `alarm_title` like the other fields. It drops an
 `alarm_id` over 200 runes instead of cutting it, because a cut id names a
 different alarm (a collision alarm's id holds a vessel urn).
 `assistantScreenSentence` then says the operator tapped Ask Mate on that alarm
@@ -45,7 +46,8 @@ Acknowledge, and on each History row. Not on the banner. The banner is one strip
 for the whole board, with its own View and Acknowledge buttons, and it already
 has no room for a per-alarm action. View opens the drawer where each card has
 one. Both open a new conversation with a visible question, "Why did House Bank
-Low go off?" (a History row adds the time). The drawer draws no button when the
+Low go off?". A History row sends its log id, which pins the occurrence, so the
+question carries no time. The drawer draws no button when the
 page cannot open Mate.
 
 **`get_alarm_context(alarm_id)`**, a read tool in the registry
@@ -56,7 +58,10 @@ units:
 
 - the alarm as the card shows it: title (the label), body (the message), state,
   phase, raised, acknowledged and cleared times, whether it is still live, and
-  whether a rule or the boat network raised it. Nothing is reworded.
+  whether a rule or the boat network raised it. Nothing is reworded. A log row is
+treated as the live alarm only when it is the rule's open occurrence; an older
+row that was never closed is reported as logged, with a note that no clear was
+recorded.
 - the rule: the same entry `list_alarm_rules` gives (op, value, clear point,
   dwell, severity, built-in or own, version, or read-only with where to change
   it), found among stored and derived rules. A network alarm, or a rule since
@@ -67,10 +72,18 @@ units:
 - history: `get_path_history` is called for the window from 30 minutes before
   the raise to 30 minutes after (or the clearing, up to two hours, never past
   now), and its overall min, mean, max, first and last seen and gap count are
-  given in display units. It is the same query, so angles keep their vector mean.
+  given in display units, converted before they are rounded (a ratio of 0.4951
+  reads 49.51 %, not 50 %). It is the same query, so angles keep their vector
+  mean. A `shape` is computed from the buckets: the largest step between
+  neighbouring readings, the longest run of one identical value, and the bucket
+  count and width, which is what lets Mate speak of a jump or a frozen sensor
+  with figures. The window's start and end and the first and last sample are
+  also given in boat local time with the result's timezone, so every time is in
+  one frame.
 - the alarm's own log: how many times the rule was raised in the last 7 days.
 - what else changed: other alarms raised or cleared within 15 minutes of the
-  raise, from the alarm log, at most 12.
+  raise, from the alarm log, at most 12. The alarm's own rule is left out in
+  SQL, so its repeats cannot use up the row limit; `cleared_at` has an index.
 
 Each part that cannot be given is absent with a reason: no rule, no data path
 (a collision or radar alarm), SignalK not connected, InfluxDB not wired, an
@@ -99,8 +112,7 @@ rule's version, which the operator applies and Mate never does.
 - Asking about a cleared alarm works, within the log's retention.
 - The same turn can end in an Apply card, so the research notes' 02:00 flow
   (alarm, explanation, a fix to tap) is one conversation.
-- The alarm stays on the sheet's screen context until it closes. An unrelated
-  question asked afterwards in the same sheet still carries the alarm, and Mate
-  may read it as about that alarm. Closing the sheet clears it. An alarm card
-  always opens a new conversation, so the context never leaks into an old one.
+- The alarm context is dropped after the seeded question is answered, so an
+  unrelated question later in the same sheet is not read as about the alarm.
+  A follow-up still works because the tool result is in the history.
 - Sibling paths, and the automatic review when an alarm raises, are follow-ups.

@@ -337,6 +337,49 @@ describe('MateSheet', () => {
     expect(await screen.findByText('Replace the membrane.')).toBeInTheDocument()
   })
 
+  // ADR 0226: the alarm an Ask Mate tap names belongs to that first question.
+  // Once it is answered the tool result is in the history, so the context is
+  // handed back to be dropped, and a New conversation or a search pick drops
+  // it too.
+  describe('alarm context', () => {
+    const answer = (conversationId: string) => sseMessageResponse(
+      { id: 'm1', conversation_id: conversationId, seq: 1, role: 'assistant', content: 'It tripped at 49 %.', created_at: '' },
+      { id: conversationId, title: 'House Bank Low', created_at: '', updated_at: '' },
+    )
+
+    it('is released once the seeded question has been answered', async () => {
+      vi.stubGlobal('fetch', buildFetch((id) => answer(id)))
+      const onAlarmContextDone = vi.fn()
+      render(
+        <MateSheet open onOpenChange={vi.fn()} initialQuestion="Why did House Bank Low go off?" newConversation
+          screen={{ panel: 'alarms', alarm_id: 'r1', alarm_title: 'House Bank Low' }} canWrite readAloud={false}
+          onOpenPanel={vi.fn()} onAlarmContextDone={onAlarmContextDone} />,
+      )
+      expect(await screen.findByText(/It tripped at 49/)).toBeInTheDocument()
+      await waitFor(() => expect(onAlarmContextDone).toHaveBeenCalledTimes(1))
+    })
+
+    it('is released by New conversation', async () => {
+      vi.stubGlobal('fetch', buildFetch())
+      const onAlarmContextDone = vi.fn()
+      render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'alarms' }} canWrite readAloud={false}
+        onOpenPanel={vi.fn()} onAlarmContextDone={onAlarmContextDone} />)
+      fireEvent.click(await screen.findByRole('button', { name: 'New conversation' }))
+      expect(onAlarmContextDone).toHaveBeenCalled()
+    })
+
+    it('is released by picking another conversation from search', async () => {
+      vi.stubGlobal('fetch', buildFetch(undefined, [{ id: 'c2', title: 'Hook Reef anchorages', created_at: '', updated_at: '' }]))
+      const onAlarmContextDone = vi.fn()
+      render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'alarms' }} canWrite readAloud={false}
+        onOpenPanel={vi.fn()} onAlarmContextDone={onAlarmContextDone} />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Search conversations' }))
+      await screen.findByRole('textbox', { name: 'Search conversations' })
+      fireEvent.click(screen.getByText('Hook Reef anchorages'))
+      await waitFor(() => expect(onAlarmContextDone).toHaveBeenCalled())
+    })
+  })
+
   // A question handed to the sheet while it is still answering (Hey Mate,
   // Help, a selection) is not sent, and not lost either: it waits in the
   // composer for the operator to send once the answer is in.

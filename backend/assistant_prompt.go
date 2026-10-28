@@ -955,8 +955,9 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	b.WriteString("When the operator asks about one alarm, or a turn names an alarm_id, call get_alarm_context with it first, " +
 		"then explain from what it returns. Say what tripped it with the figures in the operator's units: the reading against " +
 		"the threshold, and the clear point and dwell where the rule has them. Say whether the reading looks real or looks like a sensor " +
-		"problem, as evidence only: how fresh the live reading is, whether the window round the raise moved smoothly or sat flat " +
-		"or jumped, whether other alarms changed in the same window, how often it was raised in the last week. Never offer a cause " +
+		"problem, as evidence only: how fresh the live reading is, the window's history.shape: max_step is " +
+		"the biggest jump between neighbouring readings and longest_flat_minutes the longest time it sat on one identical value, " +
+		"so a large step or a long flat run points at the sensor and a gradual change does not; whether other alarms changed in the same window, how often it was raised in the last week. Never offer a cause " +
 		"the figures do not show, and say plainly what get_alarm_context left out and why. Draw the window with show_telemetry_chart " +
 		"for the trigger path when it has history. Your words never replace the card: do not restate or reword its title or body as " +
 		"if they were yours, and do not call the alarm cleared or fixed unless the result says so. If the threshold looks wrong for how the " +

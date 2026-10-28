@@ -728,6 +728,7 @@ function AppShell() {
   // the answer watcher can tell a conversation the sheet is showing right
   // now apart from one it merely knows about.
   const [mateSheetConversationId, setMateSheetConversationId] = useState<string | null>(null)
+  const clearMateSheetAlarm = useCallback(() => setMateSheetAlarm(null), [])
   const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean; alarm?: MateAlarmContext }) => {
     setMateSheetAlarm(options?.alarm ?? null)
     setMateSheetQuestion(question)
@@ -2511,6 +2512,7 @@ function AppShell() {
             newConversation={mateSheetNewConversation}
             spoken={mateSheetSpoken}
             screen={mateScreen}
+            onAlarmContextDone={clearMateSheetAlarm}
             canWrite={canWrite}
             readAloud={assistantVoiceConfig.readAloud}
             onOpenPanel={(id) => {

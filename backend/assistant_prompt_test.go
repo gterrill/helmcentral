@@ -1366,6 +1366,8 @@ func TestBuildAssistantSystemPrompt_AlarmContextRule(t *testing.T) {
 	stable, live := assistantSystemPromptParts(basePromptContext())
 	for _, want := range []string{
 		"get_alarm_context",
+		"max_step",
+		"longest_flat_minutes",
 		"never replace the card",
 		"evidence",
 		"show_telemetry_chart",

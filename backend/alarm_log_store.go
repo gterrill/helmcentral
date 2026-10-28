@@ -68,6 +68,9 @@ func createAlarmLogSchema(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS alarm_log_raised_at ON alarm_log (raised_at DESC)`); err != nil {
 		return fmt.Errorf("index alarm log: %w", err)
 	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS alarm_log_cleared_at ON alarm_log (cleared_at)`); err != nil {
+		return fmt.Errorf("index alarm log: %w", err)
+	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS alarm_log_open ON alarm_log (rule_id, cleared_at)`); err != nil {
 		return fmt.Errorf("index alarm log: %w", err)
 	}
@@ -355,16 +358,21 @@ func (s *alarmLogStore) RaisedCount(ruleID string, since time.Time) (int, error)
 }
 
 // ChangedBetween lists occurrences raised or cleared within [from, to],
-// oldest first.
-func (s *alarmLogStore) ChangedBetween(from, to time.Time) ([]alarmLogEntry, error) {
+// oldest first, leaving out every row of exceptRuleID (empty keeps all). The
+// exclusion is in SQL so the alarm being asked about, repeating, cannot use up
+// the row limit and hide what else changed. Each half is an indexed range.
+func (s *alarmLogStore) ChangedBetween(from, to time.Time, exceptRuleID string) ([]alarmLogEntry, error) {
 	if s == nil {
 		return nil, nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, t := from.UTC().Unix(), to.UTC().Unix()
-	rows, err := s.db.Query(`SELECT `+alarmLogColumns+` FROM alarm_log
-		WHERE (raised_at BETWEEN ? AND ?) OR (cleared_at BETWEEN ? AND ?) ORDER BY raised_at ASC, id ASC LIMIT 200`, f, t, f, t)
+	rows, err := s.db.Query(`SELECT * FROM (
+			SELECT `+alarmLogColumns+` FROM alarm_log WHERE raised_at BETWEEN ? AND ? AND rule_id <> ?
+			UNION
+			SELECT `+alarmLogColumns+` FROM alarm_log WHERE cleared_at BETWEEN ? AND ? AND rule_id <> ?
+		) ORDER BY raised_at ASC, id ASC LIMIT 200`, f, t, exceptRuleID, f, t, exceptRuleID)
 	if err != nil {
 		return nil, fmt.Errorf("read alarm log: %w", err)
 	}

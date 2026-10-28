@@ -350,7 +350,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                       at 390px was truncating the headline to a few
                       characters and wrapping the sentence word by word).
                     */}
-                    <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
+                    <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
                       <span className={`text-[10px] uppercase tracking-[0.16em] ${severityClass(alarm.state)}`}>
                         {alarm.state}
                       </span>
@@ -363,7 +363,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                           Silenced · still live
                         </span>
                       ) : null}
-                      <div className="flex items-center gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
                         {onAskMate && (
                           <Button
                             size="sm"
@@ -372,7 +372,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                             onClick={() => onAskMate(`Why did ${alarm.label} go off?`, { newConversation: true, alarm: { id: alarm.rule_id, title: alarm.label } })}
                           >
                             <Sparkles className="h-3.5 w-3.5" />
-                            Ask Mate
+                            <span className="hidden sm:inline">Ask Mate</span>
                           </Button>
                         )}
                         {alarm.can_silence && (
@@ -478,7 +478,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                       className="-my-2.5"
                       aria-label={`Ask Mate about ${entry.label}`}
                       title="Ask Mate about this"
-                      onClick={() => onAskMate(`Why did ${entry.label} go off at ${formatTime(entry.raised_at)}?`, { newConversation: true, alarm: { id: entry.id, title: entry.label } })}
+                      onClick={() => onAskMate(`Why did ${entry.label} go off?`, { newConversation: true, alarm: { id: entry.id, title: entry.label } })}
                     >
                       <Sparkles className="h-3.5 w-3.5" />
                     </Button>

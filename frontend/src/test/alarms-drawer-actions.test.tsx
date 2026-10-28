@@ -1,5 +1,5 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AlarmsDrawer } from '@/components/alarms-drawer'
 import type { AlarmLogEntry } from '@/hooks/use-alarm-rules'
@@ -125,6 +125,8 @@ describe('AlarmsDrawer alert actions', () => {
 
 // ADR 0226: the card hands Mate a short question and the alarm's id.
 describe('AlarmsDrawer Ask Mate', () => {
+  afterEach(() => { mockLogEntries.length = 0 })
+
   it('opens a new Mate conversation about the alarm from its card', () => {
     const onAskMate = vi.fn()
     renderDrawer([alarm({ rule_id: 'rule-7', label: 'House Bank Low' })], { onAskMate })
@@ -149,9 +151,20 @@ describe('AlarmsDrawer Ask Mate', () => {
 
     expect(onAskMate).toHaveBeenCalledTimes(1)
     const [question, options] = onAskMate.mock.calls[0]
-    expect(question).toMatch(/^Why did Cabin Hot go off/)
+    // The log id pins the occurrence, so the question carries no browser-local time.
+    expect(question).toBe('Why did Cabin Hot go off?')
     expect(options).toEqual({ newConversation: true, alarm: { id: 'log-9', title: 'Cabin Hot' } })
-    mockLogEntries.length = 0
+  })
+
+  it('keeps the action row inside a phone-width card', () => {
+    renderDrawer([alarm({ label: 'House Bank Low' })], { onAskMate: vi.fn() })
+    const button = screen.getByRole('button', { name: 'Ask Mate about House Bank Low' })
+    const row = button.parentElement as HTMLElement
+    expect(row.className).toContain('flex-wrap')
+    expect(row.parentElement?.className).toContain('min-w-0')
+    // Icon-only below sm: the word is hidden there, the aria-label stays.
+    expect(within(button).getByText('Ask Mate').className).toContain('hidden')
+    expect(within(button).getByText('Ask Mate').className).toContain('sm:inline')
   })
 
   it('shows no button when the page cannot open Mate', () => {

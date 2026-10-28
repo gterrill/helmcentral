@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -39,6 +40,9 @@ type assistantAlarmCard struct {
 	RaisedAt  string `json:"raised_at,omitempty"`
 	AckedAt   string `json:"acked_at,omitempty"`
 	ClearedAt string `json:"cleared_at,omitempty"`
+	// ClearNote says why an occurrence has no cleared time when the log never
+	// recorded one, so a missing clear is not read as "still going".
+	ClearNote string `json:"clear_note,omitempty"`
 }
 
 type assistantAlarmLive struct {
@@ -52,16 +56,32 @@ type assistantAlarmLive struct {
 // assistantAlarmHistory is get_path_history's answer for the window round the
 // raise, cut down to the figures that explain it, in the operator's unit.
 type assistantAlarmHistory struct {
-	StartISO  string   `json:"start_iso"`
-	EndISO    string   `json:"end_iso"`
-	Unit      string   `json:"unit,omitempty"`
-	Min       *float64 `json:"min,omitempty"`
-	Mean      *float64 `json:"mean,omitempty"`
-	Max       *float64 `json:"max,omitempty"`
-	FirstSeen string   `json:"first_seen_iso,omitempty"`
-	LastSeen  string   `json:"last_seen_iso,omitempty"`
-	GapCount  int      `json:"gap_count,omitempty"`
-	Note      string   `json:"note,omitempty"`
+	// Start, End, FirstSeen and LastSeen are boat local time (the result's
+	// timezone), like every other time here; the ISO forms are UTC.
+	Start        string   `json:"start"`
+	End          string   `json:"end"`
+	FirstSeen    string   `json:"first_seen,omitempty"`
+	LastSeen     string   `json:"last_seen,omitempty"`
+	StartISO     string   `json:"start_iso"`
+	EndISO       string   `json:"end_iso"`
+	Unit         string   `json:"unit,omitempty"`
+	Min          *float64 `json:"min,omitempty"`
+	Mean         *float64 `json:"mean,omitempty"`
+	Max          *float64 `json:"max,omitempty"`
+	FirstSeenISO string   `json:"first_seen_iso,omitempty"`
+	LastSeenISO  string   `json:"last_seen_iso,omitempty"`
+	// Shape says how the reading moved, from the buckets: the largest jump
+	// between neighbours and the longest run of an identical value.
+	Shape    *assistantAlarmShape `json:"shape,omitempty"`
+	GapCount int                  `json:"gap_count,omitempty"`
+	Note     string               `json:"note,omitempty"`
+}
+
+type assistantAlarmShape struct {
+	BucketCount        int      `json:"bucket_count"`
+	BucketMinutes      float64  `json:"bucket_minutes"`
+	MaxStep            *float64 `json:"max_step,omitempty"`
+	LongestFlatMinutes float64  `json:"longest_flat_minutes"`
 }
 
 type assistantAlarmOccurrences struct {
@@ -112,6 +132,7 @@ type alarmContextSubject struct {
 	clearedAt time.Time
 	active    bool
 	logID     string
+	clearNote string
 }
 
 func (d assistantToolDeps) findAlarmContextSubject(id string) (alarmContextSubject, error) {
@@ -151,9 +172,19 @@ func (d assistantToolDeps) findAlarmContextSubject(id string) (alarmContextSubje
 	}
 	if entry.ClearedAt != nil {
 		sub.clearedAt = *entry.ClearedAt
-	} else if active := d.liveAlarmFor(entry.RuleID); active != nil {
-		// The occurrence is still open and the alarm is on the board.
-		sub.status, sub.active = *active, true
+	} else {
+		// Only the rule's open occurrence is the alarm on the board. An older
+		// row that was never closed (a restart can leave one) is not today's
+		// alarm, so it is reported as it was logged and its missing clear is said.
+		open, isOpen, err := store.OpenOccurrence(entry.RuleID)
+		if err != nil {
+			return alarmContextSubject{}, fmt.Errorf("get_alarm_context: %w", err)
+		}
+		if active := d.liveAlarmFor(entry.RuleID); active != nil && isOpen && open.ID == entry.ID {
+			sub.status, sub.active = *active, true
+		} else {
+			sub.clearNote = "no clear was recorded for this occurrence, so whether it ended is not known"
+		}
 	}
 	return sub, nil
 }
@@ -216,7 +247,7 @@ func (d assistantToolDeps) executeGetAlarmContext(ctx context.Context, raw json.
 	res.SameWindow, res.SiblingPaths = []assistantAlarmNeighbour{}, []string{}
 	res.Alarm = assistantAlarmCard{
 		ID: id, Title: a.Label, Body: a.Message, State: a.State, Phase: string(a.Phase), Active: sub.active,
-		RaisedAt: stamp(a.RaisedAt), AckedAt: stamp(a.AckedAt), ClearedAt: stamp(sub.clearedAt),
+		RaisedAt: stamp(a.RaisedAt), AckedAt: stamp(a.AckedAt), ClearedAt: stamp(sub.clearedAt), ClearNote: sub.clearNote,
 	}
 
 	// The rule behind it.
@@ -364,16 +395,13 @@ func (d assistantToolDeps) fillAlarmContextHistory(ctx context.Context, res *ass
 		return
 	}
 	args, _ := json.Marshal(assistantGetPathHistoryArgs{Path: dataPath, Start: start.UTC().Format(time.RFC3339), End: end.UTC().Format(time.RFC3339)})
-	raw, err := d.executeGetPathHistory(ctx, args)
+	// Unrounded: the figures are converted to the operator's unit first.
+	hp, _, err := d.pathHistory(ctx, args, false)
 	if err != nil {
 		res.HistoryAbsent = "reading the history failed: " + err.Error()
 		return
 	}
-	var h assistantGetPathHistoryResult
-	if err := json.Unmarshal([]byte(raw), &h); err != nil {
-		res.HistoryAbsent = "the history result could not be read: " + err.Error()
-		return
-	}
+	h := *hp
 	if len(h.Buckets) == 0 {
 		res.HistoryAbsent = "nothing was recorded for this path in the window round the raise"
 		return
@@ -397,10 +425,76 @@ func (d assistantToolDeps) fillAlarmContextHistory(ctx context.Context, res *ass
 		unit = h.Unit
 	}
 	res.History = &assistantAlarmHistory{
+		Start: h.Start, End: h.End, FirstSeen: h.FirstSeen, LastSeen: h.LastSeen,
 		StartISO: h.StartISO, EndISO: h.EndISO, Unit: unit,
 		Min: conv(h.OverallMin), Mean: conv(h.OverallMean), Max: conv(h.OverallMax),
-		FirstSeen: h.FirstSeenISO, LastSeen: h.LastSeenISO, GapCount: h.GapCount, Note: h.Note,
+		FirstSeenISO: h.FirstSeenISO, LastSeenISO: h.LastSeenISO, GapCount: h.GapCount, Note: h.Note,
 	}
+	if h.Unit == "" {
+		res.History.Shape = alarmHistoryShape(h.Buckets, h.Bucket, disp)
+	}
+}
+
+// alarmHistoryShape reads how the reading moved from the history buckets:
+// the largest step between neighbouring bucket means, and the longest run of
+// neighbouring buckets that held one identical value (min, mean and max the
+// same, as a frozen sensor does). Steps are in the operator's unit. nil when
+// the bucket width is not known.
+func alarmHistoryShape(buckets []assistantPathHistoryBucket, every string, disp alarmDisplay) *assistantAlarmShape {
+	width := parseHistoryEvery(every)
+	if width <= 0 || len(buckets) == 0 {
+		return nil
+	}
+	shape := &assistantAlarmShape{BucketCount: len(buckets), BucketMinutes: width.Minutes()}
+	var prev *assistantPathHistoryBucket
+	var prevT time.Time
+	run := 1
+	for i := range buckets {
+		b := &buckets[i]
+		t, err := time.Parse(time.RFC3339, b.T)
+		if err != nil || b.Mean == nil {
+			prev, run = nil, 1
+			continue
+		}
+		flat := b.Min != nil && b.Max != nil && *b.Min == *b.Max
+		if prev != nil && t.Sub(prevT) == width {
+			step := roundTo(disp.toShown(*b.Mean)-disp.toShown(*prev.Mean), 3)
+			if step < 0 {
+				step = -step
+			}
+			if shape.MaxStep == nil || step > *shape.MaxStep {
+				shape.MaxStep = &step
+			}
+			if flat && prev.Min != nil && prev.Max != nil && *prev.Min == *prev.Max && *prev.Mean == *b.Mean {
+				run++
+			} else {
+				run = 1
+			}
+		} else {
+			run = 1
+		}
+		if flat && float64(run)*width.Minutes() > shape.LongestFlatMinutes {
+			shape.LongestFlatMinutes = float64(run) * width.Minutes()
+		}
+		prev, prevT = b, t
+	}
+	return shape
+}
+
+// parseHistoryEvery reads a bucket width such as "5m", "12h" or "2d".
+func parseHistoryEvery(every string) time.Duration {
+	if days, ok := strings.CutSuffix(every, "d"); ok {
+		n, err := strconv.Atoi(days)
+		if err != nil {
+			return 0
+		}
+		return time.Duration(n) * 24 * time.Hour
+	}
+	d, err := time.ParseDuration(every)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 func (d assistantToolDeps) fillAlarmContextLog(res *assistantAlarmContextResult, sub alarmContextSubject, a alarmStatus, stamp func(time.Time) string) {
@@ -424,16 +518,13 @@ func (d assistantToolDeps) fillAlarmContextLog(res *assistantAlarmContextResult,
 		res.SameWindowNote = "the raise time is not known"
 		return
 	}
-	entries, err := store.ChangedBetween(a.RaisedAt.Add(-alarmContextNeighbours), a.RaisedAt.Add(alarmContextNeighbours))
+	entries, err := store.ChangedBetween(a.RaisedAt.Add(-alarmContextNeighbours), a.RaisedAt.Add(alarmContextNeighbours), a.RuleID)
 	if err != nil {
 		res.SameWindowNote = "reading the alarm log failed: " + err.Error()
 		return
 	}
 	lo, hi := a.RaisedAt.Add(-alarmContextNeighbours), a.RaisedAt.Add(alarmContextNeighbours)
 	for _, e := range entries {
-		if e.RuleID == a.RuleID || (sub.logID != "" && e.ID == sub.logID) {
-			continue
-		}
 		if !e.RaisedAt.Before(lo) && !e.RaisedAt.After(hi) {
 			res.SameWindow = append(res.SameWindow, assistantAlarmNeighbour{Title: e.Label, State: e.State, Event: "raised", At: stamp(e.RaisedAt)})
 		}
@@ -454,7 +545,7 @@ var mateToolGetAlarmContext = mateTool{
 			"(title, body, severity state, raised/acknowledged/cleared times in boat local time; read these back, never reword them), " +
 			"the rule behind it (op, value and clear_value in the operator's unit, dwell, built-in or own, version) or why there is none, " +
 			"the path that tripped it with its live reading and age, that path's min/mean/max over the window round the raise " +
-			"(history; InfluxDB), how many times the alarm was raised in the last 7 days, and the other alarms raised or cleared " +
+			"(history; InfluxDB, with a shape: the biggest step between readings and the longest flat run), how many times the alarm was raised in the last 7 days, and the other alarms raised or cleared " +
 			"within 15 minutes of it (same_window). Every part that cannot be given is absent with a *_absent or *_note reason: " +
 			"say so, never fill it in. Pass the alarm_id the turn carries (an alarm's rule_id, or the id of a log row for one " +
 			"that has cleared), or a rule_id from get_active_alarms. Related sibling paths are not given. " +
