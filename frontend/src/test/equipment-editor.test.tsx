@@ -9,6 +9,9 @@ import { downloadDocument } from '@/lib/document-download'
 import type { EquipmentDependants } from '@/lib/equipment-dependants'
 import { testRouter } from './helpers/router'
 import { invalidateQueries, setQueryData } from '@/lib/api-query'
+import { toast } from 'sonner'
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 // ADR 0127: the photo row runs every picked file through downscaleImage
 // before it ever reaches the network (canvas/createImageBitmap aren't
@@ -120,7 +123,7 @@ const discoveryBody = {
     ] },
     { kind: 'battery', mappable: true, rows: [
       { source: 'electrical.batteries.0', instance: '0', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'Voltage', text: '27.20 V' }], item: null },
-      { source: 'electrical.batteries.512', instance: '512', bus_name: '', charger_input: false, reporting: true, metrics: [], item: { id: 'eq-9', name: 'Lithium bank' } },
+      { source: 'electrical.batteries.512', instance: '512', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'Voltage', text: '13.10 V' }], item: { id: 'eq-9', name: 'Lithium bank' } },
     ] },
     { kind: 'generator', mappable: true, rows: [
       { source: 'electrical.generator.0', instance: '0', bus_name: '', charger_input: false, reporting: true, metrics: [{ label: 'State', text: 'stopped' }], item: null },
@@ -487,7 +490,7 @@ describe('EquipmentEditor', () => {
     expect(screen.queryByRole('button', { name: 'Add rule' })).not.toBeInTheDocument()
   })
 
-  it('offers the sources the boat reports, and a source another item owns cannot be taken', async () => {
+  it('offers the sources the boat reports, and a source another item owns shows its reading and owner', async () => {
     currentItem = makeItem()
     render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
     await waitForLoaded()
@@ -495,8 +498,156 @@ describe('EquipmentEditor', () => {
     const picker = await screen.findByLabelText('Source')
     await waitFor(() => expect(within(picker).getByRole('option', { name: 'propulsion.port · 1800 rpm' })).toBeInTheDocument())
     expect(within(picker).getByRole('option', { name: 'None' })).toBeInTheDocument()
-    expect(within(picker).getByRole('option', { name: 'electrical.batteries.512 · assigned to Lithium bank' })).toBeDisabled()
+    expect(within(picker).getByRole('option', { name: 'electrical.batteries.512 · 13.10 V · on Lithium bank' })).not.toBeDisabled()
     expect(within(picker).getByRole('option', { name: 'electrical.generator.0 · stopped' })).not.toBeDisabled()
+  })
+
+  describe('taking a source another item owns', () => {
+    const putBody = () => {
+      const call = fetchMock.mock.calls.find(([url, init]) =>
+        String(url).endsWith('/api/inventory/equipment/eq-1') && (init as RequestInit | undefined)?.method === 'PUT')
+      return call ? JSON.parse(String((call[1] as RequestInit).body)) : undefined
+    }
+
+    async function pick(source: string) {
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      const picker = await screen.findByLabelText('Source')
+      await waitFor(() => expect(within(picker).getByRole('option', { name: new RegExp(`^${source.replace(/\./g, '\\.')} · .* · on `) })).toBeInTheDocument())
+      fireEvent.change(picker, { target: { value: source } })
+    }
+
+    beforeEach(() => {
+      vi.mocked(toast.success).mockClear()
+    })
+
+    it('stages a swap when the item has a source of the same kind, and sends take_source_from on save', async () => {
+      currentItem = makeItem({ signalk_source: 'electrical.batteries.0', source_kind: 'battery' })
+      await pick('electrical.batteries.512')
+
+      expect(screen.getByText('Swap sources with Lithium bank. Generator gets electrical.batteries.512, Lithium bank gets electrical.batteries.0.')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Swap sources' }))
+      await waitFor(() => expect(putBody()).toMatchObject({ signalk_source: 'electrical.batteries.512', take_source_from: 'eq-9', take_source_mode: 'swap' }))
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Sources swapped'))
+    })
+
+    it('stages a move when the item has no source', async () => {
+      currentItem = makeItem()
+      await pick('electrical.batteries.512')
+
+      expect(screen.getByText('Move electrical.batteries.512 from Lithium bank. Lithium bank will have no source.')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Move source' }))
+      await waitFor(() => expect(putBody()).toMatchObject({ signalk_source: 'electrical.batteries.512', take_source_from: 'eq-9', take_source_mode: 'move' }))
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Source moved'))
+    })
+
+    it('stages a move, not a swap, when the item\'s own source is another kind', async () => {
+      currentItem = makeItem({ signalk_source: 'electrical.generator.0', source_kind: 'generator', hour_meter_source: 'electrical.generator.0.runtime' })
+      await pick('electrical.batteries.512')
+
+      expect(screen.getByText('Move electrical.batteries.512 from Lithium bank. Lithium bank will have no source.')).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Move source' })).toBeInTheDocument()
+    })
+
+    it('sends no take_source_from for a source nobody owns', async () => {
+      currentItem = makeItem()
+      render(<EquipmentEditor id="eq-1" onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await waitForLoaded()
+      const picker = await screen.findByLabelText('Source')
+      await waitFor(() => expect(within(picker).getByRole('option', { name: 'electrical.generator.0 · stopped' })).toBeInTheDocument())
+      fireEvent.change(picker, { target: { value: 'electrical.batteries.512' } })
+      fireEvent.change(picker, { target: { value: 'electrical.generator.0' } })
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(putBody()).toBeDefined())
+      expect(putBody()).not.toHaveProperty('take_source_from')
+      expect(toast.success).not.toHaveBeenCalled()
+    })
+
+    it('says when a move takes the owner\'s figures with it', async () => {
+      currentItem = makeItem()
+      const row = discoveryBody.groups[1].rows[1] as { item: { figures?: string } }
+      row.item.figures = 'bank'
+      try {
+        await pick('electrical.batteries.512')
+        expect(screen.getByText('Move electrical.batteries.512 from Lithium bank. Lithium bank will have no source and loses its bank figures.')).toBeInTheDocument()
+      } finally {
+        delete row.item.figures
+      }
+    })
+
+    it('drops the take from the draft after a save even when the operator edited during the request', async () => {
+      currentItem = makeItem()
+      const base = fetchMock.getMockImplementation()!
+      let release: () => void = () => {}
+      let held = false
+      const gate = new Promise<void>((resolve) => { release = resolve })
+      fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+        if (String(url).endsWith('/api/inventory/equipment/eq-1') && init?.method === 'PUT' && !held) {
+          held = true
+          await gate
+        }
+        return base(url, init)
+      })
+      await pick('electrical.batteries.512')
+      fireEvent.click(screen.getByRole('button', { name: 'Move source' }))
+      await waitFor(() => expect(held).toBe(true))
+      fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'typed while saving' } })
+      release()
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Source moved'))
+
+      fetchMock.mockClear()
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument())
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+      await waitFor(() => expect(putBody()).toBeDefined())
+      expect(putBody()).not.toHaveProperty('take_source_from')
+      expect(putBody()).not.toHaveProperty('take_source_mode')
+    })
+
+    it('confirms before the owner loses its source when something uses it', async () => {
+      currentItem = makeItem()
+      dependantsBody = { ...NO_DEPENDANTS, item_id: 'eq-9', roles: [{ role: 'house_bank', label: 'House bank' }] }
+      await pick('electrical.batteries.512')
+      fireEvent.click(screen.getByRole('button', { name: 'Move source' }))
+
+      expect(await screen.findByText('Clear the source of "Lithium bank"?')).toBeInTheDocument()
+      expect(putBody()).toBeUndefined()
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/api/inventory/equipment/eq-9/dependants'))).toBe(true)
+      fireEvent.click(screen.getByRole('button', { name: 'Clear source' }))
+      await waitFor(() => expect(putBody()).toBeDefined())
+    })
+
+    it('asks to change the owner\'s source on a swap, and saves nothing when that is declined', async () => {
+      currentItem = makeItem({ signalk_source: 'electrical.batteries.0', source_kind: 'battery' })
+      dependantsBody = { ...NO_DEPENDANTS, item_id: 'eq-9', roles: [{ role: 'house_bank', label: 'House bank' }] }
+      await pick('electrical.batteries.512')
+      fireEvent.click(screen.getByRole('button', { name: 'Swap sources' }))
+
+      // The item's own source changes too, so it is asked first, then the owner.
+      expect(await screen.findByText('Change the source of "Generator"?')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Change source' }))
+      expect(await screen.findByText('Change the source of "Lithium bank"?')).toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+      await waitFor(() => expect(screen.queryByText('Change the source of "Lithium bank"?')).not.toBeInTheDocument())
+      expect(putBody()).toBeUndefined()
+    })
+
+    it('shows the server\'s refusal and keeps the draft when the owner changed meanwhile', async () => {
+      currentItem = makeItem()
+      const base = fetchMock.getMockImplementation()!
+      fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+        if (String(url).endsWith('/api/inventory/equipment/eq-1') && init?.method === 'PUT') {
+          return Promise.resolve({ ok: false, status: 409, json: async () => ({ error: 'that source has moved to another item since this page loaded; reload and pick it again' }) })
+        }
+        return base(url, init)
+      })
+      await pick('electrical.batteries.512')
+      fireEvent.click(screen.getByRole('button', { name: 'Move source' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent('that source has moved to another item')
+      expect(toast.success).not.toHaveBeenCalled()
+      expect((screen.getByLabelText('Source') as HTMLSelectElement).value).toBe('electrical.batteries.512')
+    })
   })
 
   it('picking a source derives the hour meter and saves the source', async () => {

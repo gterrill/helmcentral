@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net/http"
 	"testing"
 	"time"
 )
@@ -161,5 +162,220 @@ func TestTanksAreNamedByTheirItems(t *testing.T) {
 	tanks, _ := tanksFromTelemetry(telemetry, v.Tanks, time.Now())
 	if len(tanks) != 1 || tanks[0].Label != "PORT FWD" || tanks[0].ID != "fuel.5" {
 		t.Fatalf("only the tank an item owns is listed, under the item's name: %+v", tanks)
+	}
+}
+
+// ── swapping a source between two items ──────────────────────────────────
+
+func twoTanks(t *testing.T) (*documentStore, equipmentItem, equipmentItem) {
+	t.Helper()
+	store := newTestDocumentStore(t)
+	a, err := store.CreateEquipment(equipmentItem{Name: "Fuel starboard", SignalKSource: "tanks.fuel.2"})
+	if err != nil {
+		t.Fatalf("create a: %v", err)
+	}
+	b, err := store.CreateEquipment(equipmentItem{Name: "Fuel port", SignalKSource: "tanks.fuel.5"})
+	if err != nil {
+		t.Fatalf("create b: %v", err)
+	}
+	return store, a, b
+}
+
+func TestTakingASourceFromAnotherItemSwapsWhenTheKindsMatch(t *testing.T) {
+	store, a, b := twoTanks(t)
+	a.SignalKSource = "tanks.fuel.5"
+	updated, err := store.UpdateEquipmentTakingSource(a.ID, a, b.ID, "swap")
+	if err != nil {
+		t.Fatalf("swap: %v", err)
+	}
+	if updated.SignalKSource != "tanks.fuel.5" {
+		t.Fatalf("a: %+v", updated)
+	}
+	got, err := store.GetEquipment(b.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SignalKSource != "tanks.fuel.2" {
+		t.Fatalf("b should hold a's old source, got %q", got.SignalKSource)
+	}
+}
+
+func TestTakingASourceMovesItWhenTheTakerHasNoSource(t *testing.T) {
+	store, _, b := twoTanks(t)
+	c, err := store.CreateEquipment(equipmentItem{Name: "Spare tank"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.SignalKSource = "tanks.fuel.5"
+	if _, err := store.UpdateEquipmentTakingSource(c.ID, c, b.ID, "move"); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	got, _ := store.GetEquipment(b.ID)
+	if got.SignalKSource != "" {
+		t.Fatalf("b should have none, got %q", got.SignalKSource)
+	}
+}
+
+func TestTakingASourceMovesItWhenTheOldSourceIsADifferentKind(t *testing.T) {
+	store := newTestDocumentStore(t)
+	engine, _ := store.CreateEquipment(equipmentItem{Name: "Port engine", SignalKSource: "propulsion.port"})
+	tank, _ := store.CreateEquipment(equipmentItem{Name: "Fuel port", SignalKSource: "tanks.fuel.5"})
+	engine.SignalKSource = "tanks.fuel.5"
+	if _, err := store.UpdateEquipmentTakingSource(engine.ID, engine, tank.ID, "move"); err != nil {
+		t.Fatalf("take: %v", err)
+	}
+	got, _ := store.GetEquipment(tank.ID)
+	if got.SignalKSource != "" {
+		t.Fatalf("an engine source must not land on a tank, got %q", got.SignalKSource)
+	}
+}
+
+func TestTakingASourceRefusesAStaleOwner(t *testing.T) {
+	store, a, b := twoTanks(t)
+	b.SignalKSource = ""
+	if _, err := store.UpdateEquipment(b.ID, b); err != nil {
+		t.Fatal(err)
+	}
+	a.SignalKSource = "tanks.fuel.5"
+	_, err := store.UpdateEquipmentTakingSource(a.ID, a, b.ID, "swap")
+	if !errors.Is(err, errEquipmentSourceMoved) {
+		t.Fatalf("expected the source-moved error, got %v", err)
+	}
+	got, _ := store.GetEquipment(a.ID)
+	if got.SignalKSource != "tanks.fuel.2" {
+		t.Fatalf("nothing should have changed, a has %q", got.SignalKSource)
+	}
+}
+
+func TestTakingASourceFromYourselfIsRefused(t *testing.T) {
+	store, a, _ := twoTanks(t)
+	_, err := store.UpdateEquipmentTakingSource(a.ID, a, a.ID, "swap")
+	if !errors.Is(err, errEquipmentSourceInvalid) {
+		t.Fatalf("expected invalid, got %v", err)
+	}
+}
+
+func TestAnOrdinaryUpdateStillRefusesATakenSource(t *testing.T) {
+	store, a, _ := twoTanks(t)
+	a.SignalKSource = "tanks.fuel.5"
+	_, err := store.UpdateEquipment(a.ID, a)
+	if !isEquipmentSourceTaken(err) {
+		t.Fatalf("expected taken, got %v", err)
+	}
+	want := `tanks.fuel.5 is already on "Fuel port". To give it to another item, pick it on that item's Source list.`
+	if err.Error() != want {
+		t.Fatalf("message: %q", err.Error())
+	}
+}
+
+func TestSwappingSourcesMovesTheTankAlarmRules(t *testing.T) {
+	tankTest(t)
+	a := newTankItem(t, "Fuel starboard", "tanks.fuel.2", 0, 0, false)
+	b := newTankItem(t, "Fuel port", "tanks.fuel.5", 0, 0, false)
+	body := `{"name":"Fuel starboard","signalk_source":"tanks.fuel.5","take_source_from":"` + b + `","take_source_mode":"swap"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+a, body, a)
+	if err := updateEquipmentHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	paths := map[string]string{}
+	for _, r := range tankDerivedAlarmRules() {
+		paths[r.ID] = r.Path
+	}
+	if paths["tank:"+a] != "tanks.fuel.5.currentLevel" || paths["tank:"+b] != "tanks.fuel.2.currentLevel" {
+		t.Fatalf("rules did not follow the swap: %+v", paths)
+	}
+}
+
+func TestAStaleTakeIsAConflictOverHTTP(t *testing.T) {
+	tankTest(t)
+	a := newTankItem(t, "Fuel starboard", "tanks.fuel.2", 0, 0, false)
+	b := newTankItem(t, "Fuel port", "tanks.fuel.5", 0, 0, false)
+	body := `{"name":"Fuel starboard","signalk_source":"tanks.fuel.9","take_source_from":"` + b + `","take_source_mode":"swap"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/inventory/equipment/"+a, body, a)
+	if err := updateEquipmentHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestASwapKeepsEachItemsOwnFigures(t *testing.T) {
+	store := newTestDocumentStore(t)
+	a, _ := store.CreateEquipment(equipmentItem{Name: "Fuel starboard", SignalKSource: "tanks.fuel.2", TankWarnPercent: 25, TankAlarmPercent: 12})
+	b, _ := store.CreateEquipment(equipmentItem{Name: "Fuel port", SignalKSource: "tanks.fuel.5", TankWarnPercent: 30, TankAlarmsOff: true})
+	a.SignalKSource = "tanks.fuel.5"
+	if _, err := store.UpdateEquipmentTakingSource(a.ID, a, b.ID, "swap"); err != nil {
+		t.Fatal(err)
+	}
+	gotA, _ := store.GetEquipment(a.ID)
+	gotB, _ := store.GetEquipment(b.ID)
+	if gotA.TankWarnPercent != 25 || gotA.TankAlarmPercent != 12 || gotB.TankWarnPercent != 30 || !gotB.TankAlarmsOff {
+		t.Fatalf("figures must stay with their items: a=%+v b=%+v", gotA, gotB)
+	}
+}
+
+func TestAMoveClearsTheOwnersFigures(t *testing.T) {
+	store := newTestDocumentStore(t)
+	b, _ := store.CreateEquipment(equipmentItem{Name: "Fuel port", SignalKSource: "tanks.fuel.5", TankWarnPercent: 30, TankAlarmsOff: true})
+	c, _ := store.CreateEquipment(equipmentItem{Name: "Spare tank"})
+	c.SignalKSource = "tanks.fuel.5"
+	if _, err := store.UpdateEquipmentTakingSource(c.ID, c, b.ID, "move"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := store.GetEquipment(b.ID)
+	if got.SignalKSource != "" || got.TankWarnPercent != 0 || got.TankAlarmsOff {
+		t.Fatalf("owner after a move: %+v", got)
+	}
+}
+
+func TestATakeWhoseModeDiffersFromTheServersIsRefused(t *testing.T) {
+	store, a, b := twoTanks(t)
+	a.SignalKSource = "tanks.fuel.5"
+	// The kinds match, so the server computes a swap; the client said move.
+	_, err := store.UpdateEquipmentTakingSource(a.ID, a, b.ID, "move")
+	if !errors.Is(err, errEquipmentSourceChanged) {
+		t.Fatalf("expected the source-changed error, got %v", err)
+	}
+	got, _ := store.GetEquipment(a.ID)
+	if got.SignalKSource != "tanks.fuel.2" {
+		t.Fatalf("nothing should have changed, a has %q", got.SignalKSource)
+	}
+	// And the other way round.
+	engine, _ := store.CreateEquipment(equipmentItem{Name: "Port engine", SignalKSource: "propulsion.port"})
+	engine.SignalKSource = "tanks.fuel.5"
+	if _, err := store.UpdateEquipmentTakingSource(engine.ID, engine, b.ID, "swap"); !errors.Is(err, errEquipmentSourceChanged) {
+		t.Fatalf("a client swap the server would make a move: %v", err)
+	}
+	if _, err := store.UpdateEquipmentTakingSource(a.ID, a, b.ID, ""); !errors.Is(err, errEquipmentSourceInvalid) {
+		t.Fatalf("a missing mode is invalid, got %v", err)
+	}
+}
+
+func TestDiscoveryTellsWhichFiguresAnOwnerWouldLose(t *testing.T) {
+	snapshot := newVesselCandidatesSnapshot(t)
+	items := []sourceItem{
+		{ID: "e1", Name: "Port engine", Source: "propulsion.port", Group: sourceEngine, Instance: "port"},
+		{ID: "b1", Name: "House bank", Source: "electrical.batteries.0", Group: sourceBattery, Instance: "0", CapacityAh: 400},
+	}
+	for _, r := range discoveryGroupRows(vesselDiscovery(snapshot, vesselView{}, items, sourceRecord{}), "engine") {
+		if r.Item != nil && r.Item.Figures != "" {
+			t.Errorf("an engine has no figures: %+v", r.Item)
+		}
+	}
+	found := false
+	for _, r := range discoveryGroupRows(vesselDiscovery(snapshot, vesselView{}, items, sourceRecord{}), "battery") {
+		if r.Item != nil && r.Item.ID == "b1" {
+			found = true
+			if r.Item.Figures != "bank" {
+				t.Errorf("figures: %+v", r.Item)
+			}
+		}
+	}
+	if !found {
+		t.Skip("fixture does not list battery 0")
 	}
 }

@@ -206,6 +206,10 @@ export interface EquipmentInput {
   location_detail: string
   install_date: string
   signalk_source: string
+  /** The id of the item that owns signalk_source and is to give it up (a swap or move); sent on an update only. */
+  take_source_from?: string
+  /** What the page told the operator would happen; the server refuses the save if it would do the other. */
+  take_source_mode?: 'swap' | 'move'
   capacity_ah: number
   cells: number
   warn_voltage: number

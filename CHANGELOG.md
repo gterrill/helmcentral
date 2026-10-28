@@ -24,6 +24,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Fix two items' sources the wrong way round in one save.** On an item's
+  **Source** list, a source that another item has now shows its reading and who
+  has it. Pick it and the Save button becomes **Swap sources**, or **Move
+  source** when the item has nothing of that kind to hand back. Before, you had
+  to clear one item, change the other and go back.
+
 - **Mate can summarise your passages for any dates.** Ask "how far did we go in
   August?" or "where did we stay longest?" and it adds up the passages in those
   dates, with the stays worked out from the gaps between them.

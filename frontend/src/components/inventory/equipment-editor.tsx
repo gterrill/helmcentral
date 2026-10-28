@@ -1,3 +1,4 @@
+import { toast } from 'sonner'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useFollowingDraft, type FollowingDraftOptions } from '@/hooks/use-following-draft'
 import { Download, ExternalLink, File as FileIcon, FileText, Plus, StickyNote, Trash2, Unlink, X } from 'lucide-react'
@@ -59,6 +60,7 @@ import { downscaleAll, downscaleImage } from '@/lib/image-downscale'
 import { fetchNote, saveNote } from '@/lib/note-api'
 import { hourMeterSourceFor } from '@/lib/vessel-settings'
 import { EquipmentSourceSection } from '@/components/inventory/equipment-source-section'
+import { sourceTakeLabel, sourceTakeMessage, sourceTakePlan, sourceTakeToast } from '@/lib/equipment-source-take'
 import { EquipmentTankLevelsSection } from '@/components/inventory/equipment-tank-levels-section'
 import {
   CHANGE_SOURCE_CONSEQUENCE,
@@ -154,6 +156,7 @@ function sameDraft(a: EquipmentInput, b: EquipmentInput): boolean {
     && a.location_detail === b.location_detail
     && a.install_date === b.install_date
     && a.signalk_source === b.signalk_source
+    && (a.take_source_from ?? '') === (b.take_source_from ?? '')
     && a.capacity_ah === b.capacity_ah
     && a.cells === b.cells
     && a.warn_voltage === b.warn_voltage
@@ -252,7 +255,7 @@ export function EquipmentEditor(
   // Taking an item's source away, or moving it, is confirmed when something
   // uses the item: the list of what is asked for at save, like the profile
   // change above, and answered through the same kind of promise.
-  const [sourceChange, setSourceChange] = useState<{ dependants: EquipmentDependants; clearing: boolean } | null>(null)
+  const [sourceChange, setSourceChange] = useState<{ dependants: EquipmentDependants; clearing: boolean; itemName: string } | null>(null)
   const sourceDecision = useRef<{ resolve: () => void; reject: (err: Error) => void } | null>(null)
   const profilePreviewSeq = useRef(0)
   const profilePreviewPending = useRef(false)
@@ -414,6 +417,12 @@ export function EquipmentEditor(
   // baseline needed, unlike the whole-set mirror this replaces.
   const linksDirty = effectiveAdds.length > 0 || effectiveRemoves.length > 0
   const dirty = draftDirty || linksDirty
+  // Picking a source another item owns is a swap or move, spelled out in the
+  // Save bar and confirmed by saving.
+  const takePlan = useMemo(
+    () => sourceTakePlan(draft.take_source_from, draft.signalk_source, item?.signalk_source ?? '', discovery),
+    [draft.take_source_from, draft.signalk_source, item?.signalk_source, discovery],
+  )
 
   // finding 8 (pre-release review): photos still waiting for Retry on the
   // OPEN item are unsaved work for the leave guard, the same way
@@ -751,7 +760,21 @@ export function EquipmentEditor(
         if (hasDependants(dependants)) {
           await new Promise<void>((resolve, reject) => {
             sourceDecision.current = { resolve, reject }
-            setSourceChange({ dependants, clearing: draft.signalk_source.trim() === '' })
+            setSourceChange({ dependants, clearing: draft.signalk_source.trim() === '', itemName: item.name })
+          })
+        }
+      }
+      // Taking a source from another item changes that item's source too, so
+      // what uses it is asked about the same way.
+      if (id !== null && draft.take_source_from) {
+        if (!takePlan) {
+          throw new Error('That source has moved to another item. Reload the page and pick it again.')
+        }
+        const dependants = await fetchEquipmentDependants(takePlan.ownerId)
+        if (hasDependants(dependants)) {
+          await new Promise<void>((resolve, reject) => {
+            sourceDecision.current = { resolve, reject }
+            setSourceChange({ dependants, clearing: takePlan.mode === 'move', itemName: takePlan.ownerName })
           })
         }
       }
@@ -795,7 +818,8 @@ export function EquipmentEditor(
         return
       }
       const sentDraft = draft
-      const updated = await update(draft)
+      const updated = await update(takePlan ? { ...draft, take_source_mode: takePlan.mode } : draft)
+      if (takePlan) toast.success(sourceTakeToast(takePlan))
       // The change is saved: whichever path got here (Save bar, Save and
       // Continue), its preview and confirmation are spent.
       clearProfileChange()
@@ -820,7 +844,14 @@ export function EquipmentEditor(
       // newer draft still differs from the also-just-updated baseline (this
       // save's own record), so `dirty` correctly stays true instead of
       // dropping with no warning that the newer edit was never sent.
-      setDraft((current) => (sameDraft(current, sentDraft) ? draftFromItem(updated) : current))
+      // A swap or move is spent once saved: a draft edited meanwhile keeps its
+      // edits but not the take, or the next save would ask for it again.
+      setDraft((current) => {
+        if (sameDraft(current, sentDraft)) return draftFromItem(updated)
+        const { take_source_from: _spent, ...rest } = current
+        void _spent
+        return rest
+      })
       // PATCH-based diff (backend replaced the whole-set PUT): this tab only
       // ever sends what IT staged - a link it doesn't know about (a photo
       // some other code path just uploaded) is never named in either list,
@@ -839,7 +870,7 @@ export function EquipmentEditor(
       }
       throw err
     }
-  }, [id, item, draft, setDraft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
+  }, [id, item, draft, takePlan, setDraft, profilePreview, profilePreviewError, effectiveAdds, effectiveRemoves, localPhotos, setLocalPhotos, uploadPhotosInOrder, recordPhotoOutcome, update, patchLinkedDocuments, reloadDocuments, onCreated, clearProfileChange])
 
   // ADR 0171: this editor owns the guard for its draft. An unsaved draft has a
   // Save behind Save and Continue; photos still waiting for Retry have nothing
@@ -1385,7 +1416,7 @@ export function EquipmentEditor(
       <ConfirmDelete
         open={sourceChange !== null}
         onOpenChange={(isOpen) => { if (!isOpen) decideSourceChange(false) }}
-        title={sourceChange?.clearing ? `Clear the source of "${item?.name}"?` : `Change the source of "${item?.name}"?`}
+        title={sourceChange?.clearing ? `Clear the source of "${sourceChange.itemName}"?` : `Change the source of "${sourceChange?.itemName}"?`}
         description={sourceChange?.clearing
           ? 'This item will stop reading from the boat. Everything that uses it is affected.'
           : 'This item will read from a different source. Everything that uses it is affected.'}
@@ -1458,6 +1489,8 @@ export function EquipmentEditor(
           error={saveError}
           onSave={() => { void handleSave() }}
           onDiscard={handleDiscard}
+          message={takePlan ? sourceTakeMessage(takePlan, draft.name) : undefined}
+          saveLabel={takePlan ? sourceTakeLabel(takePlan) : undefined}
         />
       )}
     </Page>

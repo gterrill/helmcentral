@@ -4,6 +4,7 @@ import { FormRow, FormSection } from '@/components/patterns'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput, InputGroupText } from '@/components/ui/input-group'
+import { sourceOwner } from '@/lib/equipment-source-take'
 import type { EquipmentInput } from '@/hooks/use-inventory'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { selectTimeZone } from '@/lib/vessel-time'
@@ -39,8 +40,9 @@ function rowLabel(row: DiscoveryRow, timeZone: string | undefined): string {
  * that this item owns. An engine, a battery, an alternator, a solar controller,
  * a tank, a generator, a charger or an inverter owns one; other gear owns none.
  * The list is what the boat is reporting now plus whatever this item already
- * owns, so a source cannot be typed in. A source another item owns is shown
- * but cannot be taken from it here.
+ * owns, so a source cannot be typed in. A source another item owns is listed
+ * with its reading and its owner; choosing it stages a swap or move, which the
+ * editor confirms in its Save bar. A new item cannot take one.
  *
  * A battery item also carries its bank's capacity, cell count and optional
  * voltage overrides, which no instrument reports reliably.
@@ -53,8 +55,13 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
   const noData = !discovery.connected && discovery.groups.length === 0
 
   const pick = (source: string) => {
+    const owner = sourceOwner(discovery, source)
     setDraft((prev) => {
       const next = { ...prev, signalk_source: source }
+      // Choosing a source another item owns asks the server to take it from
+      // that item when this one is saved.
+      if (owner && owner.id !== id) next.take_source_from = owner.id
+      else delete next.take_source_from
       // Bank figures belong to a battery; the server refuses them anywhere else.
       if (sourceKindOf(source) !== 'battery') {
         next.capacity_ah = 0
@@ -100,9 +107,10 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
                 <optgroup key={k} label={SOURCE_KIND_LABELS[k]}>
                   {group.rows.map((row) => {
                     const takenBy = row.item && row.item.id !== id ? row.item.name : null
+                    // A new item has no saved record to swap with, so it cannot take one.
                     return (
-                      <option key={row.source} value={row.source} disabled={takenBy !== null}>
-                        {takenBy ? `${row.source} · assigned to ${takenBy}` : rowLabel(row, timeZone)}
+                      <option key={row.source} value={row.source} disabled={takenBy !== null && id === null}>
+                        {takenBy ? `${rowLabel(row, timeZone)} · on ${takenBy}` : rowLabel(row, timeZone)}
                       </option>
                     )
                   })}
@@ -115,7 +123,7 @@ export function EquipmentSourceSection({ id, draft, setDraft, discovery, canWrit
             <FieldDescription>Helmcentral has no data from SignalK yet, so there is nothing to pick from. Check the connection in Settings.</FieldDescription>
           ) : (
             <FieldDescription>
-              Only sources that report what this kind of item needs, now or when Helmcentral last saw them, can be chosen. A source belongs to one item.
+              Only sources that report what this kind of item needs, now or when Helmcentral last saw them, can be chosen. A source belongs to one item: pick one that another item has to swap with it, or to move it here.
             </FieldDescription>
           )}
           {warning !== '' && <p role="alert" className="text-sm text-destructive">{warning}</p>}
