@@ -1304,6 +1304,7 @@ func tanksFromTelemetry(t telemetryReader, labelOverrides map[string]string, dat
 
 	tanks := make([]tankLevelData, 0)
 	for _, category := range orderedCategories {
+		categoryStart := len(tanks)
 		for _, entryID := range t.Children("tanks." + category) {
 			entry := "tanks." + category + "." + entryID
 
@@ -1326,6 +1327,17 @@ func tanksFromTelemetry(t telemetryReader, labelOverrides map[string]string, dat
 
 			tanks = append(tanks, tankLevelData{ID: category + "." + entryID, Label: label, Category: category, Kind: tankKindFromCategory(category), LevelPercent: level, LastUpdateAge: lastUpdateAge})
 		}
+
+		// Within a category the operator's names decide the order, so port and
+		// starboard sit together whatever order the instruments numbered them.
+		inCategory := tanks[categoryStart:]
+		sort.SliceStable(inCategory, func(i, j int) bool {
+			a, b := strings.ToLower(inCategory[i].Label), strings.ToLower(inCategory[j].Label)
+			if a != b {
+				return a < b
+			}
+			return inCategory[i].ID < inCategory[j].ID
+		})
 	}
 
 	return tanks, datetime

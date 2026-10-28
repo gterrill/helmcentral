@@ -60,6 +60,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The Tanks tile lists tanks by name.** Within each tank type the tanks are
+  sorted by name, so Fuel Port Aft and Fuel Port Fwd sit together. A faint
+  line separates one tank type from the next.
 - **Mate can set a tank's alarm levels.** When you ask it to change an item's
   tank warn level, alarm level, or to switch a tank's alarms off, it can now
   propose that, and the same checks apply as on the item page. The alarm level

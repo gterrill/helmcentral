@@ -379,3 +379,30 @@ func TestDiscoveryTellsWhichFiguresAnOwnerWouldLose(t *testing.T) {
 		t.Skip("fixture does not list battery 0")
 	}
 }
+
+// Tanks of one kind are listed by name, so port and starboard sit together
+// whatever order the instruments numbered them in.
+func TestTanksWithinACategoryAreOrderedByLabel(t *testing.T) {
+	telemetry := fakeTelemetry{Samples: map[string]telemetrySample{
+		"tanks.fuel.2.currentLevel": {Present: true, Value: 0.5},
+		"tanks.fuel.3.currentLevel": {Present: true, Value: 0.5},
+		"tanks.fuel.5.currentLevel": {Present: true, Value: 0.5},
+		"tanks.fuel.6.currentLevel": {Present: true, Value: 0.5},
+	}, Timestamps: map[string]time.Time{}}
+	overrides := map[string]string{
+		"fuel.2": "Fuel Stbd Aft",
+		"fuel.3": "fuel Port Fwd",
+		"fuel.5": "Fuel Stbd Fwd",
+		"fuel.6": "Fuel Port Aft",
+	}
+	tanks, _ := tanksFromTelemetry(telemetry, overrides, time.Now())
+	want := []string{"Fuel Port Aft", "fuel Port Fwd", "Fuel Stbd Aft", "Fuel Stbd Fwd"}
+	if len(tanks) != len(want) {
+		t.Fatalf("tanks: %+v", tanks)
+	}
+	for i, label := range want {
+		if tanks[i].Label != label {
+			t.Fatalf("position %d: want %q, got %+v", i, label, tanks)
+		}
+	}
+}
