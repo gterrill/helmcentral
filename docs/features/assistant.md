@@ -450,8 +450,11 @@ rather than read a summary of it:
 
 The chart appears under the answer. It can be drawn in two ways:
 
-- **Over time:** Each reading is a line, with up to two scales: amps on the left
-  and percent on the right, say.
+- **Over time:** Each reading is a line. Readings in different units get their
+  own panel, stacked one above the other and sharing the same time scale, so
+  amps and percent are never drawn on one axis. Behind each line sits a pale
+  band from the lowest to the highest reading in that stretch of time. For wind
+  speed, the top of the band is the gusts.
 - **One against the other:** Each point is one stretch of time in which both
   readings were logged. That's usually the fairer comparison. An alternator puts
   out less as the bank fills, so a before-and-after on amps alone can mislead if
@@ -477,6 +480,52 @@ Here is how the chart handles the details:
   asks which one you mean rather than averaging them.
 
 Charts need the boat's history log (InfluxDB).
+
+### Directions and the wind rose
+
+A direction isn't a quantity you can average like a speed. A wind that swings
+between 350° and 10° has been blowing from the north, but a plain average of
+the two numbers says south. So Mate treats directions differently from other
+readings:
+
+- **Degrees, true or magnetic:** A direction is shown in degrees, marked °T for
+  true or °M for magnetic, in a panel of its own.
+- **Dots, not a line:** Each stretch of time is a dot on a scale that runs from
+  north round to north. A swing through north shows as a jump between dots
+  instead of a line sweeping across the chart.
+- **Averaged as a direction:** Mate works out the average with the arithmetic
+  for directions. For wind, a stronger wind counts for more than a light one in
+  the same hour. The note under the chart says which method was used.
+- **No average when there isn't one:** Sometimes the wind blew from opposite
+  ways in equal measure, or was too light to have a direction. Then Mate says
+  there is no average direction and leaves that stretch blank. It doesn't invent
+  one.
+
+Ask "how has the wind been trending this week?" and Mate draws true wind speed
+and true wind direction in two panels. Ask "where has the wind been coming
+from?" and it draws a wind rose instead:
+
+> Show me where the wind has come from since Sunday.
+
+The wind rose is a card under the answer. Each petal points to a compass
+direction the wind blew from, and its length is how much of the time it blew
+from there. The petal is split into bands by wind speed, from light to strong,
+in your units.
+
+- **Calm:** Wind under 1 knot has no direction worth drawing, so it's counted
+  apart and shown as a percentage under the rose.
+- **Variable:** Wind with no steady direction in a stretch of time is also
+  counted apart.
+- **Averages, gusts and the strongest wind:** The card gives the mean speed and
+  the strongest gust with its time. Each petal is built from averages over short
+  stretches of time, and the card says how long they are.
+- **Your choice of detail:** Ask for 8, 16 or 32 compass sectors, or for your
+  own speed bands, such as "bands every 10 knots".
+
+The wind rose uses the true wind the boat logs. If the direction or speed was
+never logged in the dates you give, Mate says so. If two devices logged it, Mate
+asks which one you mean. The card is a snapshot of that answer, so changing the
+dates means asking Mate again.
 
 ## Watching a reading
 

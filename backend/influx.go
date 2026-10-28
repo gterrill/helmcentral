@@ -512,9 +512,19 @@ func buildInfluxPathStatFlux(bucket, field, path, source string, start, stop tim
 	// a false one-bucket gap at the start of every range regardless of actual
 	// data completeness. Requesting "_start" instead makes each bucket's
 	// reported time the boundary computePathHistoryGaps already assumes.
+	// sin_mean and cos_mean are the two halves of a circular mean (ADR 0221):
+	// the sine or cosine of each sample, then the plain mean. An angle is
+	// recombined from them in Go, never averaged in radians.
+	prelude, trig := "", ""
+	switch aggFn {
+	case "sin_mean", "cos_mean":
+		prelude = "import \"math\"\n"
+		trig = fmt.Sprintf(`|> map(fn: (r) => ({r with _value: math.%s(x: r._value)})) `, strings.TrimSuffix(aggFn, "_mean"))
+		aggFn = "mean"
+	}
 	return fmt.Sprintf(
-		`from(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) |> aggregateWindow(every: %s, fn: %s, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value"])`,
-		bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter, every, aggFn,
+		`%sfrom(bucket: %s) |> range(start: time(v: %q), stop: time(v: %q)) |> filter(fn: (r) => %s) %s|> aggregateWindow(every: %s, fn: %s, createEmpty: false, timeSrc: "_start") |> keep(columns: ["_time", "_value"])`,
+		prelude, bucketLiteral, start.UTC().Format(time.RFC3339), stop.UTC().Format(time.RFC3339), filter, trig, every, aggFn,
 	), nil
 }
 

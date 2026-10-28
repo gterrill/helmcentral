@@ -54,6 +54,10 @@ func (f *tcFake) stat(ctx context.Context, path, source string, start, stop time
 			p.Value--
 		case "max":
 			p.Value++
+		case "sin_mean":
+			p.Value = math.Sin(p.Value)
+		case "cos_mean":
+			p.Value = math.Cos(p.Value)
 		}
 		out = append(out, p)
 	}
@@ -100,6 +104,9 @@ var tcDeclared = map[string]string{
 	"propulsion.port.temperature":     "K",
 	"environment.depth.belowKeel":     "m",
 	"propulsion.port.fuel.rate":       "m3/s",
+	windSpeedTruePath:                 "m/s",
+	windDirectionTruePath:             "rad",
+	"navigation.headingMagnetic":      "rad",
 }
 
 func tcDeps(f *tcFake, v vesselView, units string) assistantToolDeps {
@@ -384,7 +391,7 @@ func TestShowTelemetryChart_ImperialUnitsFollowTheSetting(t *testing.T) {
 	}
 }
 
-func TestShowTelemetryChart_AxesFollowUnitsAndAThirdUnitIsRefused(t *testing.T) {
+func TestShowTelemetryChart_SeriesWithDifferentUnitsGetPanelsOfTheirOwn(t *testing.T) {
 	f := &tcFake{series: map[string][]telemetryPoint{
 		tcSoc:                             tcHourly(tcStart(), 5, func(int) float64 { return 0.5 }),
 		tcAltStbd:                         tcHourly(tcStart(), 5, func(int) float64 { return 30 }),
@@ -392,22 +399,26 @@ func TestShowTelemetryChart_AxesFollowUnitsAndAThirdUnitIsRefused(t *testing.T) 
 		tcRPMPort:                         tcHourly(tcStart(), 5, func(int) float64 { return 20 }),
 	}}
 	d := tcDeps(f, tcVessel(), "metric")
-	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"role":"starboard_alternator_current"},{"role":"house_bank_soc"},{"role":"port_alternator_current"}],%s}`, tcRange))
+	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"role":"starboard_alternator_current"},{"role":"house_bank_soc"},{"role":"port_alternator_current"},{"role":"engine_rpm","engine":"port"}],%s}`, tcRange))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p := tcPayload(t, d, res)
-	if got := []string{p.Series[0].Axis, p.Series[1].Axis, p.Series[2].Axis}; got[0] != "left" || got[1] != "right" || got[2] != "left" {
-		t.Errorf("axes = %v, want amps left, percent right, amps left", got)
+	cards := d.takeCards(res)
+	if len(cards) != 1 {
+		t.Fatalf("cards = %+v", cards)
 	}
-
-	d = tcDeps(f, tcVessel(), "metric")
-	_, err = tcRun(t, d, fmt.Sprintf(`{"series":[{"role":"starboard_alternator_current"},{"role":"house_bank_soc"},{"role":"engine_rpm","engine":"port"}],%s}`, tcRange))
-	if err == nil || !strings.Contains(err.Error(), "two") {
-		t.Fatalf("a third unit must be refused: %v", err)
+	var p telemetryChartPayload
+	if err := json.Unmarshal(cards[0].Payload, &p); err != nil {
+		t.Fatal(err)
 	}
-	if got := d.cards.take(""); got != nil {
-		t.Error("a refused call made a card")
+	// Amps share panel 0, percent is panel 1, rpm is panel 2: one unit per
+	// panel, in the order each unit first appears. No second axis, and a third
+	// unit is no longer an error.
+	if got := []int{p.Series[0].Panel, p.Series[1].Panel, p.Series[2].Panel, p.Series[3].Panel}; got[0] != 0 || got[1] != 1 || got[2] != 0 || got[3] != 2 {
+		t.Errorf("panels = %v, want amps 0, percent 1, amps 0, rpm 2", got)
+	}
+	if strings.Contains(string(cards[0].Payload), `"axis"`) {
+		t.Error("the payload must not carry an axis any more")
 	}
 }
 
@@ -500,7 +511,7 @@ func TestShowTelemetryChart_ComparisonRangesAreInThePayloadInTheBoatsTimezone(t 
 	if p.Title != "Alternator before and after" || p.View != "time" || p.XY != nil || p.Timezone != "Etc/GMT-10" {
 		t.Errorf("payload header: %+v", p)
 	}
-	if p.Series[0].Label != "Stbd alt" || p.Series[0].Unit != "A" || p.Series[0].Axis != "left" || p.Series[0].Path != tcAltStbd {
+	if p.Series[0].Label != "Stbd alt" || p.Series[0].Unit != "A" || p.Series[0].Panel != 0 || p.Series[0].Path != tcAltStbd {
 		t.Errorf("series: %+v", p.Series[0])
 	}
 	if len(p.Compare) != 2 || p.Compare[0].Label != "Before regulator change" || p.Compare[1].From != "2026-10-14T10:00:00+10:00" {
@@ -655,31 +666,21 @@ func TestShowTelemetryChart_UndeclaredUnitIsNeitherGuessedNorConverted(t *testin
 	}
 }
 
-func TestShowTelemetryChart_EachUndeclaredSeriesIsItsOwnAxisGroup(t *testing.T) {
+func TestShowTelemetryChart_EachUndeclaredSeriesIsItsOwnPanel(t *testing.T) {
 	f := &tcFake{series: map[string][]telemetryPoint{
 		"a.b": tcHourly(tcStart(), 3, func(int) float64 { return 1 }),
 		"c.d": tcHourly(tcStart(), 3, func(int) float64 { return 2 }),
-		"e.f": tcHourly(tcStart(), 3, func(int) float64 { return 2 }),
 		tcSoc: tcHourly(tcStart(), 3, func(int) float64 { return 0.5 }),
 	}}
 	d := tcDeps(f, tcVessel(), "metric")
-	// Two undeclared series are two groups: left and right.
-	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":"a.b"},{"path":"c.d"}],%s}`, tcRange))
+	// Two undeclared units are not known to be the same, so two panels.
+	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":"a.b"},{"path":"c.d"},{"role":"house_bank_soc"}],%s}`, tcRange))
 	if err != nil {
 		t.Fatal(err)
 	}
 	p := tcPayload(t, d, res)
-	if p.Series[0].Axis != "left" || p.Series[1].Axis != "right" {
-		t.Errorf("axes = %s %s, want left right", p.Series[0].Axis, p.Series[1].Axis)
-	}
-	// A third group, declared or not, is refused.
-	d = tcDeps(f, tcVessel(), "metric")
-	if _, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":"a.b"},{"role":"house_bank_soc"},{"path":"c.d"}],%s}`, tcRange)); err == nil || !strings.Contains(err.Error(), "two") {
-		t.Fatalf("a third group must be refused: %v", err)
-	}
-	d = tcDeps(f, tcVessel(), "metric")
-	if _, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":"a.b"},{"path":"c.d"},{"path":"e.f"}],%s}`, tcRange)); err == nil || !strings.Contains(err.Error(), "two") {
-		t.Fatalf("a third undeclared series must be refused: %v", err)
+	if p.Series[0].Panel != 0 || p.Series[1].Panel != 1 || p.Series[2].Panel != 2 {
+		t.Errorf("panels = %d %d %d, want 0 1 2", p.Series[0].Panel, p.Series[1].Panel, p.Series[2].Panel)
 	}
 }
 
@@ -884,5 +885,120 @@ func TestShowTelemetryChart_RolePathIsCheckedBeforeFlux(t *testing.T) {
 	_, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"role":"house_bank_soc"}],%s}`, tcRange))
 	if err == nil || !strings.Contains(err.Error(), "must not contain") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func tcWindFake(deg func(i int) float64, n int) *tcFake {
+	return &tcFake{series: map[string][]telemetryPoint{
+		windSpeedTruePath:     tcHourly(tcStart(), n, func(int) float64 { return 5 }),
+		windDirectionTruePath: tcHourly(tcStart(), n, func(i int) float64 { return deg(i) * math.Pi / 180 }),
+	}}
+}
+
+func TestShowTelemetryChart_WindSpeedAndDirectionAreTwoPanelsWithDirectionInDegreesTrue(t *testing.T) {
+	f := tcWindFake(func(int) float64 { return 90 }, 24)
+	d := tcDeps(f, tcVessel(), "metric")
+	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":%q},{"path":%q}],%s}`, windSpeedTruePath, windDirectionTruePath, tcRange))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := tcPayload(t, d, res)
+	if p.Series[0].Unit != "kn" || p.Series[0].Panel != 0 {
+		t.Errorf("speed = %+v", p.Series[0])
+	}
+	if p.Series[1].Unit != "°T" || p.Series[1].Panel != 1 || p.Series[1].SIUnit != "rad" {
+		t.Errorf("direction = %+v, want °T in its own panel, still declared rad", p.Series[1])
+	}
+	var m chartModelResult
+	if err := json.Unmarshal([]byte(res), &m); err != nil {
+		t.Fatal(err)
+	}
+	dir := m.Series[1].Ranges[0]
+	if m.Series[1].Unit != "°T" || dir.Mean == nil || math.Abs(*dir.Mean-90) > 0.5 || dir.Compass != "E" {
+		t.Errorf("direction summary = %+v %+v", m.Series[1], dir)
+	}
+	if dir.Min != nil || dir.Max != nil {
+		t.Errorf("an angle has no linear min or max: %+v", dir)
+	}
+	if !strings.Contains(m.Series[1].Method, "vector") || !strings.Contains(m.Series[1].Method, "wind speed") {
+		t.Errorf("method = %q, want the vector mean weighted by wind speed", m.Series[1].Method)
+	}
+}
+
+func TestShowTelemetryChart_AWindThatSwingsAcrossNorthAveragesToNorthNotSouth(t *testing.T) {
+	f := tcWindFake(func(i int) float64 { return []float64{350, 10}[i%2] }, 24)
+	d := tcDeps(f, tcVessel(), "metric")
+	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":%q}],%s}`, windDirectionTruePath, tcRange))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m chartModelResult
+	if err := json.Unmarshal([]byte(res), &m); err != nil {
+		t.Fatal(err)
+	}
+	mean := m.Series[0].Ranges[0].Mean
+	if mean == nil || (*mean > 1 && *mean < 359) {
+		t.Fatalf("mean = %v, want north (a linear mean of radians says south)", mean)
+	}
+	if m.Series[0].Ranges[0].Compass != "N" {
+		t.Errorf("compass = %q", m.Series[0].Ranges[0].Compass)
+	}
+}
+
+func TestShowTelemetryChart_DirectionsThatCancelOutHaveNoMeanAndTheResultSaysSo(t *testing.T) {
+	f := tcWindFake(func(i int) float64 { return []float64{90, 270}[i%2] }, 24)
+	// One bucket per hour would still be defined (a single vector); only a
+	// bucket that holds both cancels. Put both in one bucket by sharing the hour.
+	f.series[windDirectionTruePath] = append(tcHourly(tcStart(), 1, func(int) float64 { return math.Pi / 2 }),
+		telemetryPoint{Timestamp: tcStart().Add(10 * time.Minute), Value: 3 * math.Pi / 2})
+	f.series[windSpeedTruePath] = nil
+	d := tcDeps(f, tcVessel(), "metric")
+	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":%q}],%s}`, windDirectionTruePath, tcRange))
+	if err != nil {
+		t.Fatalf("a direction that cancels is an answer, not an error: %v", err)
+	}
+	var m chartModelResult
+	if err := json.Unmarshal([]byte(res), &m); err != nil {
+		t.Fatal(err)
+	}
+	r := m.Series[0].Ranges[0]
+	if r.Mean != nil || r.Compass != "" {
+		t.Errorf("opposed winds must not average to a bearing: %+v", r)
+	}
+	if !strings.Contains(r.Note, "no mean direction") {
+		t.Errorf("note = %q, want it to say there is no mean direction", r.Note)
+	}
+	if r.Undefined != 1 {
+		t.Errorf("undefined buckets = %d, want 1", r.Undefined)
+	}
+}
+
+func TestShowTelemetryChart_EachAngleSeriesGetsAPanelOfItsOwn(t *testing.T) {
+	f := tcWindFake(func(int) float64 { return 90 }, 24)
+	f.series["navigation.headingMagnetic"] = tcHourly(tcStart(), 24, func(int) float64 { return math.Pi })
+	d := tcDeps(f, tcVessel(), "metric")
+	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":%q},{"path":%q},{"path":"navigation.headingMagnetic"}],%s}`, windDirectionTruePath, windSpeedTruePath, tcRange))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := tcPayload(t, d, res)
+	if p.Series[0].Panel != 0 || p.Series[1].Panel != 1 || p.Series[2].Panel != 2 {
+		t.Errorf("panels = %d %d %d, want one each", p.Series[0].Panel, p.Series[1].Panel, p.Series[2].Panel)
+	}
+	if p.Series[2].Unit != "°M" {
+		t.Errorf("heading unit = %q, want °M", p.Series[2].Unit)
+	}
+}
+
+func TestShowTelemetryChart_AnUndeclaredDirectionIsNotGuessedToBeAnAngle(t *testing.T) {
+	f := &tcFake{series: map[string][]telemetryPoint{"some.windDirection": tcHourly(tcStart(), 3, func(int) float64 { return 1.5 })}}
+	d := tcDeps(f, tcVessel(), "metric")
+	res, err := tcRun(t, d, fmt.Sprintf(`{"series":[{"path":"some.windDirection"}],%s}`, tcRange))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := tcPayload(t, d, res)
+	if p.Series[0].Unit != "" || !strings.Contains(p.Series[0].Label, "unit not reported") {
+		t.Errorf("series = %+v, want unconverted and labelled", p.Series[0])
 	}
 }

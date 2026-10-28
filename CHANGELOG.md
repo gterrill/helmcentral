@@ -13,6 +13,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Mate's charts read right.** Asked about the wind, Mate used to draw speed
+  and direction on one chart with two scales, and the direction was in radians.
+  Now readings in different units each get their own panel, stacked on one time
+  scale. Directions are in degrees, marked °T or °M, drawn as dots on a scale
+  that runs from north round to north. A direction is averaged properly, so a
+  wind swinging between 350° and 10° comes out as north and not south. When
+  there is no average direction, Mate says so. Each line also shows a pale band
+  from its lowest to its highest reading, which for wind speed is the gusts.
+  Charts Mate drew before this still open and show in the new layout.
+
 - **The engine cluster's settings are split into tabs.** Dial, Readouts,
   Footer and Fuel each have their own tab, so you no longer scroll past every
   slot to reach the one you want. On a wider screen, a small picture of the
@@ -31,6 +41,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Mate can draw a wind rose.** Ask "where has the wind been coming from?" and
+  Mate shows petals for each compass direction, split by wind speed in your
+  units, with calm and gusts noted.
 - **Fix two items' sources the wrong way round in one save.** On an item's
   **Source** list, a source that another item has now shows its reading and who
   has it. Pick it and the Save button becomes **Swap sources**, or **Move

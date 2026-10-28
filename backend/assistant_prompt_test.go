@@ -1167,6 +1167,26 @@ func TestBuildAssistantSystemPrompt_HistoryQuestionsUseLoggedTelemetry(t *testin
 	}
 }
 
+// ADR 0221: a wind trend is separate speed and direction panels or a wind
+// rose, never one dual-axis chart, and "where has the wind come from" gets the
+// rose.
+func TestBuildAssistantSystemPrompt_WindTrendsUseSeparatePanelsOrARose(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"show_wind_rose",
+		"where the wind has been coming from",
+		"environment.wind.speedTrue",
+		"environment.wind.directionTrue",
+		"separate panels",
+		"never one chart with two axes",
+		"never average a direction as a plain number",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the wind rule to contain %q, got:\n%s", want, prompt)
+		}
+	}
+}
+
 // ADR 0167: on a document's Details page the screen context names the
 // document, so "what period does this cover?" is read as a question about it.
 func TestAssistantScreenSentence_NamesTheDocumentBeingViewed(t *testing.T) {

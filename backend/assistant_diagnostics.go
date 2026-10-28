@@ -501,6 +501,9 @@ type assistantPathHistoryBucket struct {
 	Min  *float64 `json:"min,omitempty"`
 	Mean *float64 `json:"mean,omitempty"`
 	Max  *float64 `json:"max,omitempty"`
+	// Spread is an angle's circular standard deviation in degrees: how widely
+	// the samples in the bucket scattered round the mean. Only an angle has it.
+	Spread *float64 `json:"spread,omitempty"`
 }
 
 type assistantPathHistoryGap struct {
@@ -509,26 +512,32 @@ type assistantPathHistoryGap struct {
 }
 
 type assistantGetPathHistoryResult struct {
-	Path         string                       `json:"path"`
-	Source       string                       `json:"source,omitempty"`
-	Timezone     string                       `json:"timezone"`
-	Start        string                       `json:"start"`
-	StartISO     string                       `json:"start_iso"`
-	End          string                       `json:"end"`
-	EndISO       string                       `json:"end_iso"`
-	Bucket       string                       `json:"bucket"`
-	Buckets      []assistantPathHistoryBucket `json:"buckets"`
-	OverallMin   *float64                     `json:"overall_min,omitempty"`
-	OverallMean  *float64                     `json:"overall_mean,omitempty"`
-	OverallMax   *float64                     `json:"overall_max,omitempty"`
-	FirstSeen    string                       `json:"first_seen,omitempty"`
-	FirstSeenISO string                       `json:"first_seen_iso,omitempty"`
-	LastSeen     string                       `json:"last_seen,omitempty"`
-	LastSeenISO  string                       `json:"last_seen_iso,omitempty"`
-	Gaps         []assistantPathHistoryGap    `json:"gaps,omitempty"`
-	GapCount     int                          `json:"gap_count,omitempty"`
-	Truncated    bool                         `json:"truncated,omitempty"`
-	Note         string                       `json:"note,omitempty"`
+	Path     string `json:"path"`
+	Source   string `json:"source,omitempty"`
+	Timezone string `json:"timezone"`
+	Start    string `json:"start"`
+	StartISO string `json:"start_iso"`
+	End      string `json:"end"`
+	EndISO   string `json:"end_iso"`
+	Bucket   string `json:"bucket"`
+	// Unit, Method and UndefinedBuckets are given for an angle: the degrees it
+	// is in (°T, °M), how it was averaged, and how many buckets had no mean
+	// direction. A scalar's result carries none of them.
+	Unit             string                       `json:"unit,omitempty"`
+	Method           string                       `json:"method,omitempty"`
+	UndefinedBuckets int                          `json:"undefined_buckets,omitempty"`
+	Buckets          []assistantPathHistoryBucket `json:"buckets"`
+	OverallMin       *float64                     `json:"overall_min,omitempty"`
+	OverallMean      *float64                     `json:"overall_mean,omitempty"`
+	OverallMax       *float64                     `json:"overall_max,omitempty"`
+	FirstSeen        string                       `json:"first_seen,omitempty"`
+	FirstSeenISO     string                       `json:"first_seen_iso,omitempty"`
+	LastSeen         string                       `json:"last_seen,omitempty"`
+	LastSeenISO      string                       `json:"last_seen_iso,omitempty"`
+	Gaps             []assistantPathHistoryGap    `json:"gaps,omitempty"`
+	GapCount         int                          `json:"gap_count,omitempty"`
+	Truncated        bool                         `json:"truncated,omitempty"`
+	Note             string                       `json:"note,omitempty"`
 }
 
 // assistantPathHistoryPoint is one merged bucket - the min/mean/max InfluxDB
@@ -540,6 +549,11 @@ type assistantPathHistoryPoint struct {
 	Min  *float64
 	Mean *float64
 	Max  *float64
+	// Resultant and Weight are set on an angle's bucket
+	// (queryCircularHistoryBuckets): the length of its mean vector and the
+	// total weight of the samples behind it. Mean is then radians.
+	Resultant *float64
+	Weight    float64
 }
 
 // assistantPathHistoryBucketWidth picks the aggregation bucket from the
@@ -751,8 +765,30 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	// span that actually holds data, runs the min/mean/max stat queries
 	// concurrently and finds the gaps; /api/telemetry/series uses the same
 	// function for its means.
-	hist, err := queryPathHistoryBuckets(ctx, pathHistoryIO{stat: d.influxPathHistoryStat, firstLast: d.influxPathHistoryFirstLast},
-		path, source, start, stop, []string{"min", "mean", "max"}, true, assistantPathHistoryBucketWidth)
+	hio := pathHistoryIO{stat: d.influxPathHistoryStat, firstLast: d.influxPathHistoryFirstLast}
+	// An angle is averaged as a vector, never as a number (ADR 0221). The boat
+	// declares which paths are angles; a path with no declared unit is not
+	// guessed to be one.
+	kind := angleNone
+	if d.siUnit != nil {
+		kind = angleKindOf(path, d.siUnit(path))
+	}
+	var hist pathHistoryBuckets
+	var err error
+	method := ""
+	if kind != angleNone {
+		if d.influxPathSources == nil {
+			return "", fmt.Errorf("get_path_history: cannot check the sources of the wind speed that weights a direction (needs InfluxDB)")
+		}
+		weight, ambiguous, werr := circularWeightPath(ctx, d.influxPathSources, path, "", start, stop)
+		if werr != nil {
+			return "", fmt.Errorf("get_path_history: reading the sources of %s: %w", weightPathFor(path), werr)
+		}
+		hist, err = queryCircularHistoryBuckets(ctx, hio, path, source, weight, "", start, stop, true, assistantPathHistoryBucketWidth)
+		method = circularMethod(weight, ambiguous, hist.Weighted, hist.UnweightedBuckets)
+	} else {
+		hist, err = queryPathHistoryBuckets(ctx, hio, path, source, start, stop, []string{"min", "mean", "max"}, true, assistantPathHistoryBucketWidth)
+	}
 	if err != nil {
 		return "", fmt.Errorf("get_path_history: %w", err)
 	}
@@ -773,6 +809,18 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	var meanSum float64
 	var meanCount int
 	for _, m := range merged {
+		if kind != angleNone {
+			// An angle's bucket: the vector mean in degrees and its spread.
+			// A bucket whose samples cancelled out stays in the list with no
+			// mean, so a reader sees the hour and that it had no direction.
+			b := assistantPathHistoryBucket{T: m.T.UTC().Format(time.RFC3339)}
+			if m.Mean != nil && m.Resultant != nil {
+				b.Mean = roundTo2Ptr(floatPtr(angleDegrees(kind, *m.Mean)))
+				b.Spread = roundTo2Ptr(floatPtr(circularSpreadDegrees(*m.Resultant)))
+			}
+			buckets = append(buckets, b)
+			continue
+		}
 		// Rounded once here, not left at InfluxDB's own float precision (a
 		// per-bucket compactness fix, code-review finding 2026-09-25): three
 		// unrounded values per bucket (min/mean/max) were the single biggest
@@ -799,7 +847,13 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 		}
 	}
 	var overallMean *float64
-	if meanCount > 0 {
+	if kind != angleNone {
+		// The mean of the range is the vector mean of its buckets, not the
+		// average of their degrees.
+		if m, _, ok := overallCircularMean(merged); ok {
+			overallMean = roundTo2Ptr(floatPtr(angleDegrees(kind, m)))
+		}
+	} else if meanCount > 0 {
 		v := roundTo2(meanSum / float64(meanCount))
 		overallMean = &v
 	}
@@ -832,6 +886,18 @@ func (d assistantToolDeps) executeGetPathHistory(ctx context.Context, raw json.R
 	var notes []string
 	if rangeClampedNote != "" {
 		notes = append(notes, rangeClampedNote)
+	}
+	if kind != angleNone {
+		result.Unit = angleUnitLabel(path)
+		result.Method = method
+		result.UndefinedBuckets = hist.Undefined
+		notes = append(notes, fmt.Sprintf("direction in degrees, averaged as a %s, never as a plain mean of the numbers; min and max are not given for an angle, spread is the scatter round each mean in degrees.", method))
+		if hist.Undefined > 0 {
+			notes = append(notes, fmt.Sprintf("%d bucket(s) have no mean direction because the samples cancel out or the wind was too light; their mean is left out, not filled in.", hist.Undefined))
+		}
+		if overallMean == nil && len(merged) > 0 {
+			notes = append(notes, "no mean direction over the whole range.")
+		}
 	}
 	if firstLastFound {
 		result.FirstSeen = firstSeenAt.In(loc).Format("Mon 2 Jan 15:04")

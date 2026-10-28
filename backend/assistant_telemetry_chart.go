@@ -38,7 +38,10 @@ type telemetryChartSeries struct {
 	Label  string  `json:"label"`
 	Unit   string  `json:"unit"`
 	SIUnit string  `json:"si_unit"`
-	Axis   string  `json:"axis"`
+	// Panel is the stacked panel the series is drawn in, numbered from 0 in the
+	// order each unit first appears. Every panel has one unit and the panels
+	// share the time axis. An angle always has a panel to itself.
+	Panel int `json:"panel"`
 }
 
 type telemetryChartRange struct {
@@ -63,17 +66,26 @@ type chartModelResult struct {
 }
 
 type chartModelSeries struct {
-	Label  string            `json:"label"`
-	Unit   string            `json:"unit"`
+	Label string `json:"label"`
+	Unit  string `json:"unit"`
+	// Method is how an angle was averaged; empty for a scalar.
+	Method string            `json:"method,omitempty"`
 	Ranges []chartModelRange `json:"ranges"`
 }
 
+// chartModelRange summarises one series over one range. For an angle, Mean is
+// the vector mean in degrees (nil when the directions cancel out, with Note
+// saying so), Compass names it, and Min and Max are never given: an angle has
+// no linear extremes.
 type chartModelRange struct {
-	Range   string   `json:"range"`
-	Min     *float64 `json:"min,omitempty"`
-	Mean    *float64 `json:"mean,omitempty"`
-	Max     *float64 `json:"max,omitempty"`
-	Buckets int      `json:"buckets"`
+	Range     string   `json:"range"`
+	Min       *float64 `json:"min,omitempty"`
+	Mean      *float64 `json:"mean,omitempty"`
+	Max       *float64 `json:"max,omitempty"`
+	Compass   string   `json:"compass,omitempty"`
+	Undefined int      `json:"undefined_buckets,omitempty"`
+	Note      string   `json:"note,omitempty"`
+	Buckets   int      `json:"buckets"`
 }
 
 type chartModelXY struct {
@@ -276,31 +288,31 @@ type chartRange struct {
 	from, to time.Time
 }
 
-func (d assistantToolDeps) parseChartRange(what, fromS, toS string) (chartRange, error) {
+func (d assistantToolDeps) parseChartRange(tool, what, fromS, toS string) (chartRange, error) {
 	from, err := time.Parse(time.RFC3339, strings.TrimSpace(fromS))
 	if err != nil {
-		return chartRange{}, fmt.Errorf("show_telemetry_chart: %s from must be RFC3339 (e.g. 2026-10-12T00:00:00Z)", what)
+		return chartRange{}, fmt.Errorf("%s: %s from must be RFC3339 (e.g. 2026-10-12T00:00:00Z)", tool, what)
 	}
 	to, err := time.Parse(time.RFC3339, strings.TrimSpace(toS))
 	if err != nil {
-		return chartRange{}, fmt.Errorf("show_telemetry_chart: %s to must be RFC3339 (e.g. 2026-10-19T00:00:00Z)", what)
+		return chartRange{}, fmt.Errorf("%s: %s to must be RFC3339 (e.g. 2026-10-19T00:00:00Z)", tool, what)
 	}
 	if !to.After(from) {
-		return chartRange{}, fmt.Errorf("show_telemetry_chart: %s to must be after from", what)
+		return chartRange{}, fmt.Errorf("%s: %s to must be after from", tool, what)
 	}
 	if to.Sub(from) > telemetrySeriesMaxSpan {
-		return chartRange{}, fmt.Errorf("show_telemetry_chart: %s must not exceed %d days", what, int(telemetrySeriesMaxSpan/(24*time.Hour)))
+		return chartRange{}, fmt.Errorf("%s: %s must not exceed %d days", tool, what, int(telemetrySeriesMaxSpan/(24*time.Hour)))
 	}
 	now := d.now()
 	if to.After(now.Add(telemetrySeriesMaxFuture)) {
-		return chartRange{}, fmt.Errorf("show_telemetry_chart: %s to must not be in the future", what)
+		return chartRange{}, fmt.Errorf("%s: %s to must not be in the future", tool, what)
 	}
 	// Nothing has happened after now: the live edge is not a sensor gap.
 	if to.After(now) {
 		to = now
 	}
 	if !to.After(from) {
-		return chartRange{}, fmt.Errorf("show_telemetry_chart: %s from must not be in the future", what)
+		return chartRange{}, fmt.Errorf("%s: %s from must not be in the future", tool, what)
 	}
 	return chartRange{from: from, to: to}, nil
 }
@@ -310,6 +322,15 @@ func checkChartText(what, s string, max int) error {
 		return fmt.Errorf("show_telemetry_chart: %s must be at most %d characters", what, max)
 	}
 	return nil
+}
+
+// chartAngleSummary is what an angle series says about one range: the vector
+// mean in display degrees (nil when there is none), how it was averaged and
+// how many buckets had no direction.
+type chartAngleSummary struct {
+	mean      *float64
+	method    string
+	undefined int
 }
 
 // chartPoint is one bucket of one series in display units.
@@ -377,7 +398,7 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 		return "", fmt.Errorf("show_telemetry_chart: compare takes at most 3 ranges, got %d", len(args.Compare))
 	}
 
-	main, err := d.parseChartRange("range", args.From, args.To)
+	main, err := d.parseChartRange("show_telemetry_chart", "range", args.From, args.To)
 	if err != nil {
 		return "", err
 	}
@@ -393,7 +414,7 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 			if err := checkChartText("compare label", label, chartMaxLabelLen); err != nil {
 				return "", err
 			}
-			r, err := d.parseChartRange("compare range "+label, c.From, c.To)
+			r, err := d.parseChartRange("show_telemetry_chart", "compare range "+label, c.From, c.To)
 			if err != nil {
 				return "", err
 			}
@@ -406,8 +427,10 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 	var vessel vesselView
 	vesselRead := false
 	type resolved struct {
-		path, source, label, unit, siUnit, axis string
-		convert                                 func(float64) float64
+		path, source, label, unit, siUnit string
+		angle                             angleKind
+		panel                             int
+		convert                           func(float64) float64
 	}
 	series := make([]resolved, len(args.Series))
 	for i, a := range args.Series {
@@ -456,23 +479,31 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 	}
 
 	// Units: the operator's display unit for the unit the boat declares; a
-	// path with none declared stays as stored and is labelled so. Axes follow
-	// the unit.
+	// path with none declared stays as stored and is labelled so. An angle is
+	// shown in degrees, true or magnetic by its path. Panels follow the unit.
 	system, err := d.displayUnits()
 	if err != nil {
 		return "", fmt.Errorf("show_telemetry_chart: units setting is unreadable: %w", err)
 	}
-	// Axes follow the unit. Each series with no declared unit is a group of
-	// its own: two unreported units are not known to be the same.
-	axisOf := map[string]string{}
+	// One unit to a panel. Each series with no declared unit is a group of its
+	// own: two unreported units are not known to be the same. An angle is never
+	// drawn with anything else, so it is a group of its own too.
+	panelOf := map[string]int{}
 	for i := range series {
 		s := &series[i]
 		s.siUnit = d.siUnit(s.path)
-		unit, conv, err := chartDisplayFor(s.path, s.siUnit, system)
-		if err != nil {
-			return "", fmt.Errorf("show_telemetry_chart: %w", err)
+		s.angle = angleKindOf(s.path, s.siUnit)
+		if s.angle != angleNone {
+			kind := s.angle
+			s.unit = angleUnitLabel(s.path)
+			s.convert = func(rad float64) float64 { return angleDegrees(kind, rad) }
+		} else {
+			unit, conv, err := chartDisplayFor(s.path, s.siUnit, system)
+			if err != nil {
+				return "", fmt.Errorf("show_telemetry_chart: %w", err)
+			}
+			s.unit, s.convert = unit, conv
 		}
-		s.unit, s.convert = unit, conv
 		if s.siUnit == "" {
 			s.label += " (unit not reported)"
 			if err := checkChartText("label", s.label, chartMaxLabelLen); err != nil {
@@ -480,26 +511,15 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 			}
 		}
 		group := s.unit
-		if group == "" {
-			group = fmt.Sprintf("\x00unreported %d", i)
+		if s.angle != angleNone || group == "" {
+			group = fmt.Sprintf("\x00own panel %d", i)
 		}
-		axis, ok := axisOf[group]
+		panel, ok := panelOf[group]
 		if !ok {
-			switch len(axisOf) {
-			case 0:
-				axis = "left"
-			case 1:
-				axis = "right"
-			default:
-				what := fmt.Sprintf("%q", s.unit)
-				if s.unit == "" {
-					what = "a series with no reported unit"
-				}
-				return "", fmt.Errorf("show_telemetry_chart: a chart shows at most two units (a left and a right axis); %s is a third. Chart those series separately", what)
-			}
-			axisOf[group] = axis
+			panel = len(panelOf)
+			panelOf[group] = panel
 		}
-		s.axis = axis
+		s.panel = panel
 	}
 
 	// A path logged by two devices is never averaged: choose the device. The
@@ -542,13 +562,38 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 	// the outcome does not depend on which read finished first.
 	io := pathHistoryIO{stat: d.influxPathHistoryStat, firstLast: d.influxPathHistoryFirstLast}
 	data := make([][][]chartPoint, len(series)) // [series][range]
+	angles := make([][]chartAngleSummary, len(series))
 	for i := range data {
 		data[i] = make([][]chartPoint, len(drawn))
+		angles[i] = make([]chartAngleSummary, len(drawn))
 	}
 	histErrs := runBounded(ctx, len(series)*len(drawn), chartReadConcurrency, func(k int) error {
 		i, j := k/len(drawn), k%len(drawn)
 		s, r := series[i], drawn[j]
-		h, err := queryPathHistoryBuckets(ctx, io, s.path, s.source, r.from, r.to, []string{"min", "mean", "max"}, false, telemetrySeriesBucketWidth)
+		var h pathHistoryBuckets
+		var err error
+		if s.angle != angleNone {
+			// The speed series in the same chart, if any, says which device
+			// weights the direction.
+			weightSource := ""
+			for _, o := range series {
+				if o.path == weightPathFor(s.path) {
+					weightSource = o.source
+				}
+			}
+			weight, ambiguous, werr := circularWeightPath(ctx, d.influxPathSources, s.path, weightSource, r.from, r.to)
+			if werr != nil {
+				return fmt.Errorf("show_telemetry_chart: reading the sources of %s: %w", s.label, werr)
+			}
+			h, err = queryCircularHistoryBuckets(ctx, io, s.path, s.source, weight, weightSource, r.from, r.to, false, telemetrySeriesBucketWidth)
+			angles[i][j] = chartAngleSummary{method: circularMethod(weight, ambiguous, h.Weighted, h.UnweightedBuckets), undefined: h.Undefined}
+			if mean, _, ok := overallCircularMean(h.Merged); ok {
+				deg := s.convert(mean)
+				angles[i][j].mean = &deg
+			}
+		} else {
+			h, err = queryPathHistoryBuckets(ctx, io, s.path, s.source, r.from, r.to, []string{"min", "mean", "max"}, false, telemetrySeriesBucketWidth)
+		}
 		if err != nil {
 			return fmt.Errorf("show_telemetry_chart: %w", err)
 		}
@@ -570,7 +615,9 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 			}
 			pts = append(pts, cp)
 		}
-		if len(pts) == 0 {
+		// An angle whose buckets all cancel out was logged: it has no points
+		// to draw and the summary says there is no mean direction.
+		if len(pts) == 0 && !(s.angle != angleNone && h.Found) {
 			return fmt.Errorf("show_telemetry_chart: %s has no logged data in %s (%s to %s)", s.label, r.label,
 				r.from.UTC().Format(time.RFC3339), r.to.UTC().Format(time.RFC3339))
 		}
@@ -598,6 +645,23 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 		ms := chartModelSeries{Label: s.label, Unit: s.unit}
 		for j, r := range drawn {
 			mr := chartModelRange{Range: r.label, Buckets: len(data[i][j])}
+			if s.angle != angleNone {
+				// An angle's mean is the vector mean of its buckets, never the
+				// mean of their degrees, and it has no min or max.
+				a := angles[i][j]
+				ms.Method = a.method
+				mr.Undefined = a.undefined
+				if a.mean != nil {
+					mr.Mean = ptr2(*a.mean)
+					if s.angle == angleBearing {
+						mr.Compass = degreesToDirection(*a.mean)
+					}
+				} else {
+					mr.Note = "the directions cancel out or the wind is too light to have one: there is no mean direction for this range"
+				}
+				ms.Ranges = append(ms.Ranges, mr)
+				continue
+			}
 			var sum float64
 			var lo, hi *float64
 			for _, p := range data[i][j] {
@@ -701,7 +765,7 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 		Compare: []telemetryChartCmp{},
 	}
 	for i, s := range series {
-		cs := telemetryChartSeries{Path: s.path, Label: s.label, Unit: s.unit, SIUnit: s.siUnit, Axis: s.axis}
+		cs := telemetryChartSeries{Path: s.path, Label: s.label, Unit: s.unit, SIUnit: s.siUnit, Panel: s.panel}
 		if s.source != "" {
 			src := s.source
 			cs.Source = &src
@@ -734,7 +798,11 @@ var mateToolShowTelemetryChart = mateTool{
 			"Use it for \"show me\", \"chart\", \"compare\" and \"is it getting worse\" questions about house bank, " +
 			"alternator and engine figures, or any logged path. Give a role for the boat's own equipment, or a path " +
 			"for anything else you know is logged (find it with get_last_recorded). Values are in the operator's " +
-			"display units. A path logged by two devices must be given a source; the tool names them if you do not. " +
+			"display units. Series in different units are drawn as stacked panels on one shared time axis, one unit " +
+			"to a panel; there is no second axis. A direction (wind direction, heading) is drawn in degrees true " +
+			"(°T) or magnetic (°M) as points and averaged as a vector, never as a plain number, and a scalar shows " +
+			"its min-max band behind the mean. For a wind trend ask for true wind speed and true wind direction " +
+			"together, or use show_wind_rose. A path logged by two devices must be given a source; the tool names them if you do not. " +
 			"Comparison ranges (before and after a change) must come from the operator, who gives you the dates and " +
 			"the labels; never guess a date or search for one. Every series must have data in every range drawn, or " +
 			"the tool says which does not. A card is attached to your reply, so describe what it shows and what " +

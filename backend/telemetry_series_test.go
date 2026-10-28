@@ -27,6 +27,9 @@ var seriesDeclared = map[string]string{
 	"electrical.batteries.1.capacity.stateOfCharge": "ratio",
 	"propulsion.port.temperature":                   "K",
 	"electrical.alternator.12.current":              "A",
+	"environment.wind.directionTrue":                "rad",
+	"environment.wind.speedTrue":                    "m/s",
+	"x.angle":                                       "rad",
 }
 
 func stubSeries(t *testing.T, configured bool, means map[string][]telemetryPoint) {
@@ -43,10 +46,27 @@ func stubSeries(t *testing.T, configured bool, means map[string][]telemetryPoint
 	telemetrySeriesPathSources = func(context.Context, string, time.Time, time.Time) ([]string, error) { return nil, nil }
 	telemetrySeriesIO = pathHistoryIO{
 		stat: func(_ context.Context, path, _ string, _, _ time.Time, _, aggFn string) ([]telemetryPoint, error) {
-			if aggFn != "mean" {
-				t.Errorf("series must only query mean, got %q", aggFn)
+			// min and max sit one below and one above the mean, so a band
+			// built from the wrong aggregate shows. An angle is stored in
+			// radians and read as the mean of its sine or cosine.
+			var out []telemetryPoint
+			for _, p := range means[path] {
+				switch aggFn {
+				case "min":
+					p.Value--
+				case "max":
+					p.Value++
+				case "sin_mean":
+					p.Value = math.Sin(p.Value)
+				case "cos_mean":
+					p.Value = math.Cos(p.Value)
+				case "mean":
+				default:
+					t.Errorf("unexpected aggregate %q", aggFn)
+				}
+				out = append(out, p)
 			}
-			return means[path], nil
+			return out, nil
 		},
 		firstLast: func(_ context.Context, path, _ string, _, _ time.Time) (time.Time, time.Time, bool, error) {
 			t.Errorf("series must not run the first/last query (path %s)", path)
@@ -213,7 +233,7 @@ func TestTelemetrySeriesQueriesPathsConcurrently(t *testing.T) {
 	stubSeries(t, true, nil)
 	var mu sync.Mutex
 	inflight, peak := 0, 0
-	reached := make(chan struct{}, 8)
+	reached := make(chan struct{}, 16)
 	release := make(chan struct{})
 	telemetrySeriesIO.stat = func(ctx context.Context, _, _ string, _, _ time.Time, _, _ string) ([]telemetryPoint, error) {
 		mu.Lock()
@@ -510,8 +530,10 @@ func TestTelemetrySeriesSIUnitConvertsWithoutLiveMeta(t *testing.T) {
 	if got := resp.Series[0].Points[0].Mean; math.Abs(got-1200) > 1e-6 || resp.Series[0].Unit != "rpm" {
 		t.Errorf("stored.rpm = %v %q, want 1200 rpm", got, resp.Series[0].Unit)
 	}
-	if got := resp.Series[1].Points[0].Mean; got != 1.5 || resp.Series[1].Unit != "rad" {
-		t.Errorf("x.angle = %v %q, want 1.5 rad unchanged", got, resp.Series[1].Unit)
+	// An angle is never drawn in radians: a card saved before angles had
+	// their own unit still asks for "rad" and gets degrees.
+	if got := resp.Series[1].Points[0].Mean; math.Abs(got-85.943669) > 1e-4 || resp.Series[1].Unit != "°" {
+		t.Errorf("x.angle = %v %q, want 85.94 degrees", got, resp.Series[1].Unit)
 	}
 	rec = seriesGetValues(t, url.Values{"path": {"a.b", "c.d"}, "si_unit": {"Hz"}})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "si_unit") {
@@ -548,5 +570,105 @@ func TestTelemetrySeriesEmptySourceWithSeveralLoggersIs409(t *testing.T) {
 	}
 	if _, ok := seen.Load("a.one"); !ok {
 		t.Error("a.one was never queried")
+	}
+}
+
+func TestTelemetrySeriesScalarPointsCarryTheBucketMinAndMax(t *testing.T) {
+	t0 := time.Date(2026, 10, 18, 13, 0, 0, 0, time.UTC)
+	stubSeries(t, true, map[string][]telemetryPoint{"environment.wind.speedTrue": {{Timestamp: t0, Value: 5}}})
+	rec := seriesGetValues(t, url.Values{
+		"path": {"environment.wind.speedTrue"}, "unit": {"kn"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	var resp telemetrySeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	p := resp.Series[0].Points[0]
+	kn := 5 / 0.514444
+	if math.Abs(p.Mean-kn) > 1e-2 || p.Min == nil || p.Max == nil || math.Abs(*p.Min-4/0.514444) > 1e-2 || math.Abs(*p.Max-6/0.514444) > 1e-2 {
+		t.Errorf("point = %+v, want mean %v with min 4 and max 6 m/s in knots", p, kn)
+	}
+	if resp.Series[0].Angle != "" {
+		t.Errorf("a speed is not an angle: %q", resp.Series[0].Angle)
+	}
+}
+
+func TestTelemetrySeriesAngleIsAVectorMeanInDegreesWithNoMinOrMax(t *testing.T) {
+	t0 := time.Date(2026, 10, 18, 13, 0, 0, 0, time.UTC)
+	stubSeries(t, true, map[string][]telemetryPoint{
+		// Radians: 350 degrees, then 270 degrees (which is east-west opposed to 90).
+		"environment.wind.directionTrue": {{Timestamp: t0, Value: 350 * math.Pi / 180}, {Timestamp: t0.Add(5 * time.Minute), Value: 3 * math.Pi / 2}},
+	})
+	rec := seriesGetValues(t, url.Values{
+		"path": {"environment.wind.directionTrue"}, "unit": {"°T"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	var resp telemetrySeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	e := resp.Series[0]
+	if e.Angle != "bearing" || e.Unit != "°T" || e.Method == "" {
+		t.Errorf("entry = angle %q unit %q method %q", e.Angle, e.Unit, e.Method)
+	}
+	if len(e.Points) != 2 || math.Abs(e.Points[0].Mean-350) > 1e-6 || math.Abs(e.Points[1].Mean-270) > 1e-6 {
+		t.Errorf("points = %+v, want 350 then 270 degrees", e.Points)
+	}
+	for _, p := range e.Points {
+		if p.Min != nil || p.Max != nil {
+			t.Errorf("an angle has no linear min or max: %+v", p)
+		}
+	}
+	if strings.Contains(rec.Body.String(), `"min"`) {
+		t.Errorf("no min key may be written for an angle: %s", rec.Body)
+	}
+}
+
+func TestTelemetrySeriesRefusesADisplayUnitThatIsNotThePathsAngleLabel(t *testing.T) {
+	stubSeries(t, true, nil)
+	rec := seriesGetValues(t, url.Values{
+		"path": {"environment.wind.directionTrue"}, "unit": {"°M"},
+	})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "°T") {
+		t.Errorf("got %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestTelemetrySeriesAngleBucketsThatCancelAreCountedNotAveraged(t *testing.T) {
+	t0 := time.Date(2026, 10, 18, 13, 0, 0, 0, time.UTC)
+	stubSeries(t, true, map[string][]telemetryPoint{
+		"environment.wind.directionTrue": {{Timestamp: t0, Value: 0}, {Timestamp: t0.Add(time.Hour), Value: math.Pi / 2}},
+	})
+	// Make the first bucket cancel: its sine and cosine means are both ~0.
+	telemetrySeriesIO.stat = func(_ context.Context, path, _ string, _, _ time.Time, _, aggFn string) ([]telemetryPoint, error) {
+		if path == "environment.wind.speedTrue" {
+			return nil, nil
+		}
+		switch aggFn {
+		case "sin_mean":
+			return []telemetryPoint{{Timestamp: t0, Value: 0.01}, {Timestamp: t0.Add(time.Hour), Value: 1}}, nil
+		case "cos_mean":
+			return []telemetryPoint{{Timestamp: t0, Value: -0.02}, {Timestamp: t0.Add(time.Hour), Value: 0}}, nil
+		}
+		return nil, nil
+	}
+	rec := seriesGetValues(t, url.Values{
+		"path": {"environment.wind.directionTrue"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d %s", rec.Code, rec.Body)
+	}
+	var resp telemetrySeriesResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	e := resp.Series[0]
+	if len(e.Points) != 1 || e.UndefinedBuckets != 1 || !e.Found {
+		t.Errorf("entry = %+v, want one point and one undefined bucket", e)
 	}
 }
