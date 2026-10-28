@@ -116,3 +116,28 @@ rule's version, which the operator applies and Mate never does.
   unrelated question later in the same sheet is not read as about the alarm.
   A follow-up still works because the tool result is in the history.
 - Sibling paths, and the automatic review when an alarm raises, are follow-ups.
+
+## Amendment, 2026-10-29: first answers from the dev stack
+
+Two alarms asked about in the dev stack showed four faults, fixed together.
+
+- The collision profile refusal raised a new alarm event on every
+  navigation.state change while the SignalK read kept failing, and the log held
+  327 open rows in a week. The syncer now raises once. While that refusal
+  stands, a refusal with different words (another state or cause) updates the
+  card in place, and the same words do nothing. The alarm log is not changed:
+  a store-level "reuse the open row" rule was rejected, because a restart leaves
+  open rows behind for the watchdog and anchor checks and a fresh raise must not
+  be folded into one.
+- The refusal body is one plain sentence chosen by the HTTP status (401 and 403
+  read as a refused login, on reading and on switching), with the technical error kept in the server log only.
+- `get_alarm_context` reports `built_in_check` instead of "deleted" for ids in
+  `builtInAlarmCheckIDs`, and adds `occurrences.pattern` at 20 or more raises in
+  seven days, a daily rate over the span the raises cover or, under two days,
+  a count since the first raise. The built-in list was kept over a new log
+  source value because rows logged before the change carry the source "rule".
+  A test checks the event builders against the list. The `helmcentral:` prefix is not used to decide, because the
+  seeded stored rules carry it too.
+- The prompt rule now asks for the operator's words, no internals, no list of
+  missing fields, a plain "keeps going off", and a next step only when the cause
+  points to one.

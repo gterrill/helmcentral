@@ -246,7 +246,9 @@ in History has a small Mate button. It opens a new conversation with Mate that
 already knows which alarm you mean, and asks why it went off. Mate looks at the
 level the alarm fires at, the reading and how recent it is, how the reading
 moved around the time it went off, and what else went off or cleared within
-15 minutes either side, then charts it. The card itself isn't changed. See
+15 minutes either side, then charts it. Mate answers in plain words. If the
+alarm keeps going off it says so, and if the cause points to something you can
+check, it ends with what to check. The card itself isn't changed. See
 [Mate](assistant.md) for what it can and can't tell you.
 
 ## Gauge bands are alarm rules

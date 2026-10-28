@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -14,7 +15,7 @@ const (
 	collisionProfilesSavePath = "/plugins/" + collisionPluginID + "/saveCollisionProfiles"
 
 	collisionProfileRuleID = "collision-profile"
-	collisionProfileLabel  = "Collision profile"
+	collisionProfileLabel  = "Collision Profile Not Changed"
 
 	// collisionProfilePath is Helmcentral's own, alongside watchdogPath, and is
 	// registered in ownedNotificationPaths so the bus watcher does not read it
@@ -119,6 +120,10 @@ type collisionProfileSyncer struct {
 	// row for a problem that has since been fixed.
 	refused string
 
+	// refusedMessage is the card body of the standing refusal, so a later
+	// refusal with different words updates the card instead of leaving it stale.
+	refusedMessage string
+
 	load func() (string, map[string]collisionProfile, error)
 	save func(profile string) error
 }
@@ -147,7 +152,13 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 
 	current, profiles, err := s.load()
 	if err != nil {
-		return s.refuse(want, fmt.Sprintf("could not read the collision profiles: %v", err))
+		var statusErr *signalkStatusError
+		if errors.As(err, &statusErr) && (statusErr.Status == http.StatusUnauthorized || statusErr.Status == http.StatusForbidden) {
+			return s.refuse(want, err, fmt.Sprintf(
+				"SignalK refused Helmcentral's login when reading the collision profiles, so the boat is %s on the old profile.", state))
+		}
+		return s.refuse(want, err, fmt.Sprintf(
+			"Helmcentral could not read the collision profiles from SignalK, so the boat is %s on the old profile.", state))
 	}
 	if current == want {
 		return s.resolve()
@@ -155,15 +166,21 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 
 	profile, defined := profiles[want]
 	if !defined {
-		return s.refuse(want, fmt.Sprintf(
-			"the %q collision profile is not defined, and selecting it would stop the plugin evaluating any target", want))
+		return s.refuse(want, nil, fmt.Sprintf(
+			"The %q collision profile is not defined in SignalK, so the boat is %s on the old profile.", want, state))
 	}
 	if !profile.canFire() {
-		return s.refuse(want, fmt.Sprintf(
-			"the %q collision profile has no reachable alarm (every CPA and guard range is zero), so selecting it would silence AIS collision alarms", want))
+		return s.refuse(want, nil, fmt.Sprintf(
+			"The %q collision profile has every CPA and guard range at zero, so it would silence AIS collision alarms. The boat is %s on the old profile.", want, state))
 	}
 	if err := s.save(want); err != nil {
-		return s.refuse(want, fmt.Sprintf("could not select the %q collision profile: %v", want, err))
+		var statusErr *signalkStatusError
+		if errors.As(err, &statusErr) && (statusErr.Status == http.StatusUnauthorized || statusErr.Status == http.StatusForbidden) {
+			return s.refuse(want, err, fmt.Sprintf(
+				"SignalK refused Helmcentral's login when switching to the %q collision profile, so the boat is %s on the old profile.", want, state))
+		}
+		return s.refuse(want, err, fmt.Sprintf(
+			"Helmcentral could not switch SignalK to the %q collision profile, so the boat is %s on the old profile.", want, state))
 	}
 
 	log.Printf("collision profile: vessel is %s, selected %q", state, want)
@@ -173,9 +190,24 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 // refuse leaves the plugin alone and raises Helmcentral's own alarm instead.
 // Staying loud on the wrong profile is a worse night and a better outcome than
 // going quiet on the right one.
-func (s *collisionProfileSyncer) refuse(profile, message string) []alarmEvent {
-	log.Printf("collision profile: refusing %q: %s", profile, message)
-	s.refused = profile
+func (s *collisionProfileSyncer) refuse(profile string, cause error, message string) []alarmEvent {
+	if cause != nil {
+		log.Printf("collision profile: refusing %q: %s: %v", profile, message, cause)
+	} else {
+		log.Printf("collision profile: refusing %q: %s", profile, message)
+	}
+	if s.refused != "" {
+		// One refusal is standing already. Raising again on every navigation
+		// state change piled up hundreds of open rows in the alarm log. The
+		// standing card is updated in place when the words change, so it never
+		// shows an old state or cause.
+		if message == s.refusedMessage {
+			return nil
+		}
+		s.refused, s.refusedMessage = profile, message
+		return []alarmEvent{collisionProfileEvent(alarmEventChanged, alarmStateWarn, message)}
+	}
+	s.refused, s.refusedMessage = profile, message
 	return []alarmEvent{collisionProfileEvent(alarmEventRaised, alarmStateWarn, message)}
 }
 
@@ -183,7 +215,7 @@ func (s *collisionProfileSyncer) resolve() []alarmEvent {
 	if s.refused == "" {
 		return nil
 	}
-	s.refused = ""
+	s.refused, s.refusedMessage = "", ""
 	return []alarmEvent{collisionProfileEvent(alarmEventCleared, alarmStateNormal, "")}
 }
 
@@ -237,9 +269,20 @@ func loadCollisionProfiles() (string, map[string]collisionProfile, error) {
 		return "", nil, err
 	}
 	if status < 200 || status >= 300 {
-		return "", nil, fmt.Errorf("signalk returned status %d: %s", status, string(body))
+		return "", nil, &signalkStatusError{Status: status, Body: string(body)}
 	}
 	return parseCollisionProfiles(body)
+}
+
+// signalkStatusError is a non-2xx answer from SignalK, kept as a status so a
+// refused login can be told from any other failure without reading the body.
+type signalkStatusError struct {
+	Status int
+	Body   string
+}
+
+func (e *signalkStatusError) Error() string {
+	return fmt.Sprintf("signalk returned status %d: %s", e.Status, e.Body)
 }
 
 // saveCollisionProfile switches the active profile and nothing else.
@@ -255,9 +298,16 @@ func saveCollisionProfile(profile string) error {
 		return fmt.Errorf("could not read the SignalK connection settings: %w", err)
 	}
 
-	return signalkRequestJSONWithAuth(
+	status, body, err := signalkRequestJSONWithAuthBody(
 		buildSignalKURL(address, port), settingsPath,
 		collisionProfilesSavePath, http.MethodPut,
 		map[string]string{"current": profile},
 	)
+	if err != nil {
+		return err
+	}
+	if status < 200 || status >= 300 {
+		return &signalkStatusError{Status: status, Body: string(body)}
+	}
+	return nil
 }

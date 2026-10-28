@@ -365,3 +365,92 @@ func TestGetAlarmContext_HistoryWindowMaths(t *testing.T) {
 		})
 	}
 }
+
+func TestGetAlarmContext_BuiltInCheckIsNotReportedAsDeleted(t *testing.T) {
+	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
+	deps, store := askMateEnv(t, raisedAt)
+	for i := 0; i < 30; i++ {
+		id := raisedAt.Add(-time.Duration(i) * 5 * time.Hour)
+		if _, err := store.RecordRaised(alarmLogEntry{RuleID: collisionProfileRuleID, Label: "Collision Profile Not Changed", State: "warn", Message: "x", RaisedAt: id}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.MarkCleared(collisionProfileRuleID, id.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.RecordRaised(alarmLogEntry{RuleID: collisionProfileRuleID, Label: "Collision Profile Not Changed", State: "warn", Message: "x", RaisedAt: raisedAt}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := runAlarmContext(t, deps, collisionProfileRuleID)
+	if strings.Contains(raw, "deleted") {
+		t.Errorf("built-in check must not be called deleted: %s", raw)
+	}
+	var generic map[string]any
+	_ = json.Unmarshal([]byte(raw), &generic)
+	check, _ := generic["built_in_check"].(map[string]any)
+	if check["kind"] != "built_in" || check["note"] == "" {
+		t.Errorf("want built_in_check, got %v", generic["built_in_check"])
+	}
+	if generic["rule_absent"] != nil {
+		t.Errorf("no rule_absent for a built-in check: %v", generic["rule_absent"])
+	}
+	occ, _ := generic["occurrences"].(map[string]any)
+	pattern, _ := occ["pattern"].(string)
+	if !strings.Contains(pattern, "31 times in 6 days") || !strings.Contains(pattern, "about 5 a day") {
+		t.Errorf("want a repeats pattern, got %q", pattern)
+	}
+}
+
+func TestGetAlarmContext_FewRaisesCarryNoPattern(t *testing.T) {
+	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
+	deps, store := askMateEnv(t, raisedAt)
+	if _, err := store.RecordRaised(alarmLogEntry{RuleID: "own-1", Label: "Cabin Hot", State: "warn", RaisedAt: raisedAt}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := runAlarmContext(t, deps, "own-1")
+	if strings.Contains(raw, "pattern") {
+		t.Errorf("one raise is no pattern: %s", raw)
+	}
+}
+
+// Raised often over a short span, the rate is not given as a daily figure.
+func TestGetAlarmContext_ShortSpanPatternSaysSinceNotPerDay(t *testing.T) {
+	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
+	deps, store := askMateEnv(t, raisedAt)
+	for i := 0; i < 25; i++ {
+		at := raisedAt.Add(-time.Duration(i) * time.Minute)
+		if _, err := store.RecordRaised(alarmLogEntry{RuleID: collisionProfileRuleID, Label: "Collision Profile Not Changed", State: "warn", RaisedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.MarkCleared(collisionProfileRuleID, at.Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, _ := runAlarmContext(t, deps, collisionProfileRuleID)
+	var generic map[string]any
+	_ = json.Unmarshal([]byte(raw), &generic)
+	occ, _ := generic["occurrences"].(map[string]any)
+	pattern, _ := occ["pattern"].(string)
+	if !strings.HasPrefix(pattern, "raised 25 times since ") || strings.Contains(pattern, "a day") {
+		t.Errorf("short span pattern: %q", pattern)
+	}
+}
+
+// Every event a Helmcentral check builds for the alarm log must use an id the
+// built-in list knows, or get_alarm_context calls the check a deleted rule.
+func TestBuiltInAlarmCheckListCoversTheEventBuilders(t *testing.T) {
+	events := []alarmEvent{
+		collisionProfileEvent(alarmEventRaised, alarmStateWarn, "x"),
+		anchorWatchStateEvent(alarmEventRaised, alarmStateWarn, "x"),
+	}
+	for _, e := range events {
+		if !isBuiltInAlarmCheck(e.Rule.ID) || !isBuiltInAlarmCheck(e.Status.RuleID) {
+			t.Errorf("event id %q is not in builtInAlarmCheckIDs", e.Rule.ID)
+		}
+	}
+	for _, id := range []string{watchdogRuleID, anchorDragRuleID} {
+		if !isBuiltInAlarmCheck(id) {
+			t.Errorf("%q is not in builtInAlarmCheckIDs", id)
+		}
+	}
+}

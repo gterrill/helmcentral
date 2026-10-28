@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +87,19 @@ type assistantAlarmShape struct {
 
 type assistantAlarmOccurrences struct {
 	RaisedLast7Days int `json:"raised_last_7_days"`
+	// Pattern is set when the alarm keeps going off, in words Mate can repeat.
+	Pattern string `json:"pattern,omitempty"`
+}
+
+// alarmContextRepeatThreshold is how many raises in a week make an alarm one
+// that "keeps going off".
+const alarmContextRepeatThreshold = 20
+
+// assistantBuiltInCheck stands in for the rule of an alarm that Helmcentral's
+// own code raises, which has no stored rule to read or edit.
+type assistantBuiltInCheck struct {
+	Kind string `json:"kind"`
+	Note string `json:"note"`
 }
 
 type assistantAlarmNeighbour struct {
@@ -103,6 +117,8 @@ type assistantAlarmContextResult struct {
 
 	Rule       *assistantAlarmRuleEntry `json:"rule,omitempty"`
 	RuleAbsent string                   `json:"rule_absent,omitempty"`
+	// BuiltInCheck is set instead of a rule for Helmcentral's own checks.
+	BuiltInCheck *assistantBuiltInCheck `json:"built_in_check,omitempty"`
 
 	Trigger struct {
 		Path        string   `json:"path,omitempty"`
@@ -256,6 +272,9 @@ func (d assistantToolDeps) executeGetAlarmContext(ctx context.Context, raw json.
 	case hasRule:
 		res.Rule = &rule
 		res.Alarm.Source = "rule"
+	case isBuiltInAlarmCheck(a.RuleID):
+		res.Alarm.Source = "rule"
+		res.BuiltInCheck = &assistantBuiltInCheck{Kind: "built_in", Note: "Helmcentral's own check, not a rule you can edit"}
 	case sub.active && !strings.HasPrefix(a.RuleID, notificationsRoot+":") && a.Threshold != nil:
 		res.Alarm.Source = "rule"
 		res.RuleAbsent = "the engine holds this rule but it is not in the rule list"
@@ -263,7 +282,7 @@ func (d assistantToolDeps) executeGetAlarmContext(ctx context.Context, raw json.
 		res.Alarm.Source = "network"
 		res.RuleAbsent = "Helmcentral holds no rule for this alarm: it was raised by something else on the boat network, or its rule has since been deleted"
 	}
-	if sub.source == alarmSourceRule && !hasRule {
+	if sub.source == alarmSourceRule && !hasRule && res.BuiltInCheck == nil {
 		res.Alarm.Source = "rule"
 		res.RuleAbsent = "this alarm's rule has since been deleted"
 	}
@@ -497,6 +516,21 @@ func parseHistoryEvery(every string) time.Duration {
 	return d
 }
 
+// alarmRepeatPattern says how often an alarm keeps going off. The rate is over
+// the span the raises actually cover, never a day figure for less than a day;
+// a short span is given as a count since the first raise.
+func (d assistantToolDeps) alarmRepeatPattern(store *alarmLogStore, ruleID string, n int, now time.Time, stamp func(time.Time) string) string {
+	first, ok, err := store.EarliestRaised(ruleID, now.Add(-alarmContextOccurrences))
+	if err != nil || !ok {
+		return fmt.Sprintf("raised %d times in 7 days", n)
+	}
+	span := now.Sub(first)
+	if span < 48*time.Hour {
+		return fmt.Sprintf("raised %d times since %s", n, stamp(first))
+	}
+	return fmt.Sprintf("raised %d times in %d days, about %d a day", n, int(math.Round(span.Hours()/24)), int(math.Round(float64(n)/(span.Hours()/24))))
+}
+
 func (d assistantToolDeps) fillAlarmContextLog(res *assistantAlarmContextResult, sub alarmContextSubject, a alarmStatus, stamp func(time.Time) string) {
 	var store *alarmLogStore
 	if d.alarmLog != nil {
@@ -513,6 +547,9 @@ func (d assistantToolDeps) fillAlarmContextLog(res *assistantAlarmContextResult,
 		res.OccurrencesAbsent = "reading the alarm log failed: " + err.Error()
 	} else {
 		res.Occurrences = &assistantAlarmOccurrences{RaisedLast7Days: n}
+		if n >= alarmContextRepeatThreshold {
+			res.Occurrences.Pattern = d.alarmRepeatPattern(store, a.RuleID, n, now, stamp)
+		}
 	}
 	if a.RaisedAt.IsZero() {
 		res.SameWindowNote = "the raise time is not known"
@@ -547,7 +584,7 @@ var mateToolGetAlarmContext = mateTool{
 			"the path that tripped it with its live reading and age, that path's min/mean/max over the window round the raise " +
 			"(history; InfluxDB, with a shape: the biggest step between readings and the longest flat run), how many times the alarm was raised in the last 7 days, and the other alarms raised or cleared " +
 			"within 15 minutes of it (same_window). Every part that cannot be given is absent with a *_absent or *_note reason: " +
-			"say so, never fill it in. Pass the alarm_id the turn carries (an alarm's rule_id, or the id of a log row for one " +
+			"never fill it in. Pass the alarm_id the turn carries (an alarm's rule_id, or the id of a log row for one " +
 			"that has cleared), or a rule_id from get_active_alarms. Related sibling paths are not given. " +
 			"Call this FIRST when asked about a specific alarm.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {"alarm_id": {"type": "string", "description": "The alarm's id: its rule_id, or a log id for an alarm that has cleared."}}, "required": ["alarm_id"]}`),

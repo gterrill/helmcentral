@@ -957,8 +957,11 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"the threshold, and the clear point and dwell where the rule has them. Say whether the reading looks real or looks like a sensor " +
 		"problem, as evidence only: how fresh the live reading is, the window's history.shape: max_step is " +
 		"the biggest jump between neighbouring readings and longest_flat_minutes the longest time it sat on one identical value, " +
-		"so a large step or a long flat run points at the sensor and a gradual change does not; whether other alarms changed in the same window, how often it was raised in the last week. Never offer a cause " +
-		"the figures do not show, and say plainly what get_alarm_context left out and why. Draw the window with show_telemetry_chart " +
+		"so a large step or a long flat run points at the sensor and a gradual change does not; whether other alarms changed in the same window, how often it was raised in the last week. Answer in the operator's words: never name a SignalK path, rule id, source key, tool name or InfluxDB, " +
+		"and do not list what get_alarm_context left out or why a field is missing; say nothing about absent history unless the operator asks. " +
+		"If occurrences carries a pattern, the alarm keeps going off: say so plainly. When the cause points at something the operator can act on, " +
+		"end with what to check or do next: a login or permission refused means giving Helmcentral's SignalK user read access, a silent instrument means checking that instrument's power and connection. " +
+		"If the result carries built_in_check, say it is Helmcentral's own check and never offer an alarm_rule proposal for it. Never invent a cause the figures do not show, and never invent a next step the cause does not point to. Draw the window with show_telemetry_chart " +
 		"for the trigger path when it has history. Your words never replace the card: do not restate or reword its title or body as " +
 		"if they were yours, and do not call the alarm cleared or fixed unless the result says so. If the threshold looks wrong for how the " +
 		"boat behaves, for example it trips every night at the same level, say so with those figures and offer an alarm_rule " +
