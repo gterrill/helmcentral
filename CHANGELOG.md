@@ -25,6 +25,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Your alarm rules are now kept in the database.** They used to be in
+  `data/alarm-rules.json`. The first time you start this release, Helmcentral
+  copies every rule into `data/helmcentral.sqlite`, along with the record of
+  which built-in sets it has already offered, so none of them reappear. It then
+  renames the file to `alarm-rules.json.imported` and leaves it in the same
+  folder as a copy of what you had. The Alarms drawer works as before. Your
+  backups of the state folder already cover the database, but a backup that only
+  took `alarm-rules.json` will no longer have your latest rules. If the old file
+  can't be read, Helmcentral won't start and says why, and the file stays as it
+  was.
+
+- **Mate can set a tank's alarm levels.** When you ask it to change an item's
+  tank warn level, alarm level, or to switch a tank's alarms off, it can now
+  propose that, and the same checks apply as on the item page. The alarm level
+  has to be further into the bad side than the warn level, and both stay between
+  0 and 100 percent.
+
 - **Mate's charts read right.** Asked about the wind, Mate used to draw speed
   and direction on one chart with two scales, and the direction was in radians.
   Now readings in different units each get their own panel, stacked on one time

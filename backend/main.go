@@ -380,13 +380,22 @@ func main() {
 	if err := loadTankAlarmDefaults(); err != nil {
 		log.Fatalf("tank alarm defaults: %v", err)
 	}
-	if err := loadAlarmRules(); err != nil {
-		log.Fatalf("failed to load alarm rules: %v", err)
-	}
 	// Releases before this kept the ignored-sensor list in alarm-rules.json.
 	// Delete this call, and moveLegacyIgnoredSensors, in a later release.
+	// It runs first: the import below renames the file it empties.
 	if _, err := moveLegacyIgnoredSensors(globalIgnoreStore, alarmRulesFilePath(), time.Now().UTC()); err != nil {
 		log.Fatalf("failed to move the ignored-sensor list: %v", err)
+	}
+	// Releases before ADR 0224 kept the rules themselves in alarm-rules.json.
+	// The first boot on this one moves them into helmcentral.sqlite and renames
+	// the file to alarm-rules.json.imported. Delete this call, and
+	// importLegacyAlarmRules, in a later release. A file it cannot read stops
+	// the boot, with the file left as it was.
+	if _, err := importLegacyAlarmRules(globalDocumentStore, alarmRulesFilePath(), time.Now().UTC()); err != nil {
+		log.Fatalf("failed to import the alarm rules into the database: %v", err)
+	}
+	if err := loadAlarmRules(); err != nil {
+		log.Fatalf("failed to load alarm rules: %v", err)
 	}
 	// Offers the heavy-weather set once per installation, disabled, for the
 	// operator to enable and tune (ADR 0070). A failure here is not fatal: it

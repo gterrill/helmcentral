@@ -31,7 +31,8 @@ minimum that file. There is no key recovery.
 `data/documents/` (every uploaded file's bytes) and `data/helmcentral.sqlite`
 are one backup unit. The database holds documents, notes, the equipment
 registry, inventory, maintenance, Mate's conversation history, the AIS sighting
-log, alarm history, registered phone alert devices and plugin settings. That's
+log, alarm history, your alarm rules, registered phone alert devices and plugin
+settings. That's
 everything Helmcentral knows about your boat and this installation.
 
 On its own the database describes files it can no longer produce, and the
@@ -158,6 +159,7 @@ they're resolved against it.
 | `ANCHOR_WATCH_FILE` | `data/anchor_watch.json` |
 | `ANCHOR_PLACEMARKS_FILE` | `data/anchor_placemarks.json` |
 | `DASHBOARD_PAGES_FILE` | `data/dashboard-pages.json` |
+| `ALARM_RULES_FILE` | `data/alarm-rules.json` (see below) |
 | `SECRETS_DB_PATH` | `data/secrets.sqlite` |
 | `SECRETS_KEY_PATH` | `data/secrets.key` |
 | `SESSIONS_DB_PATH` | `data/sessions.sqlite` |
@@ -169,6 +171,15 @@ they're resolved against it.
 | `PLUGINS_WAVES_DIR` | `plugins/waves` |
 | `PLUGINS_FORECAST_WARNINGS_DIR` | `plugins/forecast-warnings` |
 | `WASM_PLUGIN_TIMEOUT_MS` | `15000` |
+
+`ALARM_RULES_FILE` is only read on the first start after upgrading from a
+release that kept your alarm rules in a file. If the file is there, Helmcentral
+copies the rules into `data/helmcentral.sqlite` and renames the file to
+`alarm-rules.json.imported`, in the same folder. After that the file is never
+read or written again, and your rules are edited in the Alarms drawer as before.
+If the file can't be read, Helmcentral won't start and leaves it as it is. It
+also won't start if `alarm-rules.json.imported` is already there, so move the
+older copy aside first.
 
 ## Secrets
 

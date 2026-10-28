@@ -214,7 +214,7 @@ func enginesToSeedResidualRulesFor(engines []vesselEngineSetting) []vesselEngine
 // to a marker/rules pair since this file has several independent sets
 // rather than one.
 //
-// Uses createSeededAlarmRule, not createAlarmRule: every rule this file
+// Keeps each rule's own ID (seedAlarmRuleSet's fixedIDs): every rule this file
 // builds already carries its own fixed ID (anomalyImpossibleRuleID and
 // friends, or anomalyEngineSeedRules' own per-instance IDs), and that ID
 // must survive onto disk rather than being replaced by a fresh UUID --
@@ -224,78 +224,7 @@ func enginesToSeedResidualRulesFor(engines []vesselEngineSetting) []vesselEngine
 // way to tell "the same rule, seeded again" from "a genuinely new rule"
 // even if it wanted to (code review finding 7).
 func seedAnomalySet(marker string, rules []alarmRule) error {
-	alarmRulesMu.RLock()
-	for _, m := range alarmRulesSeededSets {
-		if m == marker {
-			alarmRulesMu.RUnlock()
-			return nil
-		}
-	}
-	alarmRulesMu.RUnlock()
-
-	for _, rule := range rules {
-		if _, err := createSeededAlarmRule(rule); err != nil {
-			// A previous seeding attempt for this same marker can fail
-			// partway through (a disk-full write, a transient I/O error),
-			// leaving some of its rules saved with the marker never
-			// recorded -- the next call (the next restart, or the next
-			// vessel-settings save) starts this loop over from rule zero
-			// and immediately hits createSeededAlarmRule's own "id already
-			// in use" fail-fast backstop against the rule(s) that DID save.
-			// Treat that specific case -- this rule's own fixed id already
-			// exists with exactly the definition seedAnomalySet would have
-			// created -- as this rule already being done, not a conflict,
-			// so the retry can finish the rest of the set (code review
-			// finding 6). An id collision against a genuinely different
-			// definition is left as the fatal error it already is.
-			if existing, ok := getAlarmRule(rule.ID); ok && seededRuleMatchesExisting(existing, rule) {
-				continue
-			}
-			return fmt.Errorf("seeding %s rule %q: %w", marker, rule.Label, err)
-		}
-	}
-
-	// Re-checked here, under the write lock this time: the RLock check above
-	// is released before the rules are created, so two callers racing the
-	// same not-yet-seeded marker (the startup call and a concurrent
-	// vessel-settings save, say) can both pass it and both reach here.
-	// createSeededAlarmRule's own "already exists, matches" fallback above
-	// already makes that harmless for the RULES themselves, but appending
-	// unconditionally would still leave marker recorded twice in
-	// alarmRulesSeededSets (code review finding 9) -- deduped here instead
-	// of holding this lock across the create loop above, which would
-	// deadlock against createSeededAlarmRule's own alarmRulesMu.Lock() per
-	// rule.
-	alarmRulesMu.Lock()
-	alreadyRecorded := false
-	for _, m := range alarmRulesSeededSets {
-		if m == marker {
-			alreadyRecorded = true
-			break
-		}
-	}
-	if !alreadyRecorded {
-		alarmRulesSeededSets = append(alarmRulesSeededSets, marker)
-	}
-	err := saveAlarmRulesLocked()
-	alarmRulesMu.Unlock()
-	if err != nil {
-		return fmt.Errorf("recording the %s seed marker: %w", marker, err)
-	}
-	return nil
-}
-
-// seededRuleMatchesExisting reports whether existing (already on disk, found
-// under want's own fixed id) is the same seed definition as want, so
-// seedAnomalySet can tell "this rule's own retry, already done" apart from
-// a genuine id collision with something else entirely. Path and State are
-// enough to identify a seeded rule -- the condition it watches and the
-// severity it raises are what make it the rule it is; Value/Enabled/
-// DwellSeconds are deliberately excluded, since an operator may have
-// already tuned a successfully-seeded rule by the time a later rule in the
-// same set is retried, and that is not a conflict either.
-func seededRuleMatchesExisting(existing, want alarmRule) bool {
-	return existing.Path == want.Path && existing.State == want.State
+	return seedAlarmRuleSet(marker, rules, true)
 }
 
 // seedAnomalyRules seeds whichever of the anomaly-v1 sub-sets vessel's
