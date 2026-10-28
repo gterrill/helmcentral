@@ -1310,6 +1310,8 @@ func TestBuildAssistantSystemPrompt_VesselStatusRule(t *testing.T) {
 		"observations",
 		"as a question",
 		"never guess a cause",
+		"never add a possible cause or reassurance",
+		"normal if",
 		"missing reason",
 	} {
 		if !strings.Contains(prompt, want) {

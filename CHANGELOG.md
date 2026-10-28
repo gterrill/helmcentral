@@ -20,7 +20,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the boat is from your planned stay. It finishes with up to three things worth
   a look, such as a sensor gone quiet, or the house bank draining faster
   overnight than it usually does, put as a question and never as an alarm. A
-  reading it can't get is left out with the reason, never filled in.
+  reading it can't get is left out with the reason, never filled in. Figures
+  are rounded the way an instrument shows them, such as 761 W and 11.3 kn.
 
 ### Changed
 

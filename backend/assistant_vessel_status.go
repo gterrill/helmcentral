@@ -250,6 +250,19 @@ func freshNumber(t telemetryReader, path string, maxAge time.Duration, what stri
 	return n, ""
 }
 
+// statusDecimals is how many decimals a displayed figure in this unit carries,
+// the precision an instrument would show: whole watts, whole rpm and degrees,
+// hundredths of a volt, tenths of everything else.
+func statusDecimals(unit string) int {
+	switch unit {
+	case "W", "rpm", "°":
+		return 0
+	case "V":
+		return 2
+	}
+	return 1
+}
+
 // statusReading shapes si (declared as siUnit) for display in system. A
 // percentage has no SI unit and is given as is. The barometer is given in
 // hectopascals on both systems, the unit the barometer alarms are written in.
@@ -259,7 +272,7 @@ func statusReading(path string, si float64, siUnit, system string, age time.Dura
 	out.AgeSeconds = &secs
 	switch siUnit {
 	case "%", "rpm":
-		out.Display, out.DisplayUnit = floatPtr(roundTo(si, 2)), siUnit
+		out.Display, out.DisplayUnit = floatPtr(roundTo(si, statusDecimals(siUnit))), siUnit
 	case "Pa":
 		out.Display, out.DisplayUnit = floatPtr(roundTo(si/100, 1)), "hPa"
 	default:
@@ -267,7 +280,7 @@ func statusReading(path string, si float64, siUnit, system string, age time.Dura
 		if err != nil {
 			return statusValue{}, fmt.Errorf("get_vessel_status: %s: %w", path, err)
 		}
-		out.Display, out.DisplayUnit = floatPtr(roundTo(conv(si), 2)), label
+		out.Display, out.DisplayUnit = floatPtr(roundTo(conv(si), statusDecimals(label))), label
 	}
 	return out, nil
 }
