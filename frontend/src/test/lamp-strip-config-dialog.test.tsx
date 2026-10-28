@@ -35,7 +35,7 @@ const enginesAndGenerator: TileItem[] = [
 
 beforeEach(() => {
   items = []
-  mockedUseSignalKPaths.mockReturnValue({ paths: [] })
+  mockedUseSignalKPaths.mockReturnValue({ paths: [], loading: false, error: null })
 })
 
 describe('LampStripConfigDialog', () => {
@@ -231,6 +231,8 @@ describe('LampStripConfigDialog', () => {
     items = enginesAndGenerator
     mockedUseSignalKPaths.mockReturnValue({
       paths: [{ path: 'propulsion.port.revolutions', value: 1 }, { path: 'propulsion.port.coolantTemperature', value: 1 }, { path: 'propulsion.starboard.state', value: 1 }],
+      loading: false,
+      error: null,
     })
     render(<LampStripConfigDialog widget={{ id: 'lamps:m1x8abcd', lamps: { title: 'S', lamps: [{ path: '', equipmentId: 'eng-p', suffix: 'revolutions', label: 'Port' }], showCheck: true } }} onCancel={vi.fn()} onSave={vi.fn()} />)
     const reading = screen.getByLabelText('Reading') as HTMLSelectElement

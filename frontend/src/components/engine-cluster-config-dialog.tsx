@@ -1,5 +1,5 @@
 import { ChevronRight, Plus, Trash2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -38,6 +38,7 @@ import {
 import { CLUSTER_ICON_NAMES, iconForSlot } from '@/lib/cluster-icons'
 import { findItem, profileGaugeFor, profileOf, type EquipmentTileContext } from '@/lib/equipment-tiles'
 import type { EngineProfile } from '@/lib/engine-profiles'
+import { liveReadings } from '@/lib/live-readings'
 import { ROLE_NONE } from '@/lib/vessel-settings'
 
 /**
@@ -165,6 +166,8 @@ function blankArc(label: string, min: number, max: number): GaugeWidgetConfig {
  */
 export function clusterFromProfile(
   profile: EngineProfile, current: EngineClusterConfig, ctx: EquipmentTileContext, roles: { port_alternator: string; starboard_alternator: string } | null,
+  /** Every path SignalK publishes now, or null while that is not known. */
+  livePaths: readonly string[] | null = null,
 ): EngineClusterConfig {
   // Zones a slot still holds are not the profile's to replace: carry them to
   // the new slot for the same reading, so filling never drops one.
@@ -198,7 +201,23 @@ export function clusterFromProfile(
     const spec = FOREIGN_SLOTS[key]
     // What the operator already chose for this slot stays; only blanks are seeded.
     const existing = (current.footer?.[key]?.suffix ?? '').trim() !== '' ? current.footer?.[key] : undefined
-    footer[key] = existing ?? { ...spec.slot, suffix: spec.suffix, ...(spec.kind === 'alternator' && alternatorId ? { equipmentId: alternatorId } : {}) }
+    if (existing) {
+      footer[key] = existing
+      continue
+    }
+    const seededItem = spec.kind === 'alternator' && spec.suffix !== '' && alternatorId ? alternatorId : ''
+    if (seededItem === '') {
+      footer[key] = { ...spec.slot, suffix: spec.suffix }
+      continue
+    }
+    // Item and reading are seeded together, and only when the alternator is
+    // known to send the reading. Otherwise the slot stays blank and is left out.
+    const sends = livePaths !== null && liveReadings(findItem(ctx, seededItem)?.signalk_source, livePaths).includes(spec.suffix)
+    if (!sends) {
+      footer[key] = { ...spec.slot, suffix: '' }
+      continue
+    }
+    footer[key] = { ...spec.slot, suffix: spec.suffix, equipmentId: seededItem }
   }
   footer.transPressure = { ...pick(SLOT_SUFFIXES.transPressure, 'Gear press'), decimals: 0 }
 
@@ -279,7 +298,9 @@ interface EngineClusterConfigDialogProps {
 export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineClusterConfigDialogProps) {
   const ctx = useEquipmentTileContext(widget !== null)
   const roles = useVesselRoles(widget !== null)
-  const { paths } = useSignalKPaths(widget !== null)
+  const { paths, loading: pathsLoading, error: pathsError } = useSignalKPaths(widget !== null)
+  const pathNames = useMemo(() => paths.map((p) => p.path), [paths])
+  const pathsState: PathsState = pathsError ? 'error' : pathsLoading ? 'loading' : 'ready'
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -329,12 +350,23 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   const footerBound = config ? CLUSTER_FOOTER_SLOTS.filter((key) => footerSlotBound(config, key)).length : 0
   const fuelAttention = config?.fuel !== undefined && (config.fuel.bars.length === 0 || config.fuel.bars.some((bar) => (bar.tankId ?? '') === ''))
 
+  // Footer slots of another item that have the item but no reading: pruning would drop them silently.
+  const slotsNeedingReading = config
+    ? CLUSTER_FOOTER_SLOTS.filter((key) => {
+      const slot = config.footer?.[key]
+      return isForeign(key) && (slot?.equipmentId ?? '') !== '' && (slot?.suffix ?? '').trim() === ''
+    })
+    : []
+
   const saveReason = ((): string | null => {
     if (!config) return null
     if ((config.equipmentId ?? '') === '') return 'Pick the engine.'
     if (dialAttention) return 'Choose a reading for the ring and centre on the Dial tab.'
     if (cornersAttention) return 'Choose a reading for every readout card.'
     if (zoneEditing.unresolved > 0) return 'Settle the zone conflicts above.'
+    if (slotsNeedingReading.length > 0) {
+      return `On the Footer tab, ${slotsNeedingReading.map((key) => FOOTER_TITLES[key]).join('; ')}${slotsNeedingReading.length === 1 ? ' needs a reading' : ' need a reading'}. Pick one it sends, or clear its equipment.`
+    }
     if (fuelAttention) return 'Choose a tank for every fuel bar, or remove the rail.'
     return null
   })()
@@ -395,7 +427,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
               <Button
                 variant="secondary"
                 disabled={!profile}
-                onClick={() => setSlot((c) => clusterFromProfile(profile!, c, ctx, roles))}
+                onClick={() => setSlot((c) => clusterFromProfile(profile!, c, ctx, roles, pathsState === 'ready' ? pathNames : null))}
               >
                 Fill slots from profile
               </Button>
@@ -532,6 +564,8 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                                 : <span className="truncate">{isForeign(key) ? findItem(ctx, slot.equipmentId)?.name : (slot.label || reading)}</span>}
                               {isForeign(key) && <span className="truncate text-muted-foreground">{reading}</span>}
                             </span>
+                          ) : isForeign(key) && slot && (slot.equipmentId ?? '') !== '' ? (
+                            <span className="truncate text-xs text-amber-600 dark:text-amber-400">Needs a reading</span>
                           ) : (
                             <span className="text-xs text-muted-foreground">Not shown</span>
                           )}
@@ -541,7 +575,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                           {isForeign(key) ? (
                             <ForeignSlotForm
                               idPrefix={`cluster-footer-${key}`} slotKey={key} slot={slot ?? { ...FOREIGN_SLOTS[key].slot, suffix: '' }}
-                              ctx={ctx} onChange={set}
+                              ctx={ctx} paths={pathNames} pathsState={pathsState} onChange={set}
                             />
                           ) : (
                             slotForm(slot ?? blankSlot(''), `cluster-footer-${key}`, set)
@@ -631,7 +665,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
         <DialogFooter className="flex-none">
           {saveError
             ? <p role="alert" className="mr-auto text-sm text-destructive">{saveError}</p>
-            : (!canSave && !saving && saveReason && <p className="mr-auto text-xs text-muted-foreground">{saveReason}</p>)}
+            : (!canSave && !saving && saveReason && <p role="status" className="mr-auto text-xs text-muted-foreground">{saveReason}</p>)}
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           <Button disabled={!canSave || saving} onClick={() => { void save() }}>Save</Button>
         </DialogFooter>
@@ -705,41 +739,95 @@ function CardLocator({ active, side }: { active: ClusterTab; side: ClusterSide }
  * source. Its zones come from that item's profile and are edited there, not
  * here. Leaving the reading empty leaves the slot out.
  */
-function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, onChange }: {
+type PathsState = 'loading' | 'error' | 'ready'
+
+function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, paths, pathsState, onChange }: {
   idPrefix: string
   slotKey: keyof typeof FOREIGN_SLOTS
   slot: GaugeWidgetConfig
   ctx: EquipmentTileContext
+  /** Every path SignalK is publishing now. Only meaningful when pathsState is ready. */
+  paths: readonly string[]
+  pathsState: PathsState
   onChange: (next: GaugeWidgetConfig) => void
 }) {
   const spec = FOREIGN_SLOTS[slotKey]
   const item = findItem(ctx, slot.equipmentId)
   const profile = item ? profileOf(ctx, item) : undefined
-  const suffixes = (profile?.gauges ?? []).map((g) => g.path_suffix)
+  const profileSuffixes = useMemo(() => (profile?.gauges ?? []).map((g) => g.path_suffix), [profile])
+  const source = item?.signalk_source ?? ''
+  const live = useMemo(() => (pathsState === 'ready' ? liveReadings(source, paths) : []), [pathsState, source, paths])
+  const suffix = (slot.suffix ?? '').trim()
+  const known = item !== undefined && source !== '' && pathsState === 'ready'
+
   const set = (patch: Partial<GaugeWidgetConfig>) => {
     const next = { ...slot, ...patch }
+    const nextItem = findItem(ctx, next.equipmentId)
     // A reading on the item's profile brings the profile's quantity, unit and scale.
-    const gauge = profileGaugeFor(item ? profileOf(ctx, findItem(ctx, next.equipmentId) ?? item) : undefined, (next.suffix ?? '').trim())
-    onChange(gauge ? slotFromProfileGauge({ ...next, zones: undefined }, gauge) : next)
+    const gauge = profileGaugeFor(nextItem ? profileOf(ctx, nextItem) : undefined, (next.suffix ?? '').trim())
+    if (gauge) return onChange(slotFromProfileGauge({ ...next, zones: undefined }, gauge))
+    if ('equipmentId' in patch && patch.equipmentId !== slot.equipmentId) {
+      // The old item's quantity, scale and zones belong to its profile, not to this one.
+      const { quantity, unit, decimals, display } = spec.slot
+      return onChange({ ...next, quantity, unit, decimals, display, min: undefined, max: undefined, zones: undefined })
+    }
+    onChange(next)
   }
+
+  // Fill the expected reading once per picked item, as soon as SignalK is known
+  // to send it. Clearing the field afterwards is the operator's, and stays.
+  const filledFor = useRef('')
+  useEffect(() => {
+    if (!known || filledFor.current === item.id) return
+    filledFor.current = item.id
+    if (suffix === '' && spec.suffix !== '' && live.includes(spec.suffix)) set({ suffix: spec.suffix })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [known, item?.id])
+
+  const options = useMemo(
+    () => [...new Set([...profileSuffixes, ...live])].filter((v) => v !== ''),
+    [profileSuffixes, live],
+  )
+
+  const pickItem = (id: string) => {
+    const picked = id === '' ? undefined : findItem(ctx, id)
+    filledFor.current = ''
+    // A reading carries over only when the new item is known to send it.
+    // Where that can't be known, it is left empty rather than assumed.
+    const pickedProfile = picked ? profileOf(ctx, picked) : undefined
+    const pickedLive = picked && pathsState === 'ready' ? liveReadings(picked.signalk_source, paths) : []
+    const keep = suffix !== '' && picked !== undefined
+      && (pickedLive.includes(suffix) || (pickedProfile?.gauges ?? []).some((g) => g.path_suffix === suffix))
+    set({ equipmentId: picked ? id : undefined, ...(keep ? {} : { suffix: '' }) })
+  }
+
+  let note: string
+  if (item && source === '') note = `${item.name} has no SignalK source, so it has no readings to pick from.`
+  else if (item && pathsState === 'error') note = "Helmcentral can't read what SignalK is sending right now. Type the reading, or try again."
+  else if (known && suffix === '' && !live.includes(spec.suffix)) {
+    note = spec.suffix !== ''
+      ? `${item.name} isn't sending ${spec.suffix}. Pick a reading it sends.`
+      : `Pick a reading ${item.name} sends.`
+  } else if (known && suffix !== '' && !live.includes(suffix) && !profileSuffixes.includes(suffix)) {
+    note = `${item.name} isn't sending ${suffix}. Pick a reading it sends.`
+  } else if (item && !profile) note = 'This equipment has no profile, so the reading has no zones.'
+  else note = 'Zones come from the equipment\'s profile; edit them on the equipment.'
+
   return (
     <div className="grid gap-2">
       <EquipmentPicker
         idPrefix={idPrefix} label="Equipment" kind={spec.kind} value={slot.equipmentId ?? ''} ctx={ctx}
-        onChange={(id) => set({ equipmentId: id === '' ? undefined : id })}
+        onChange={pickItem}
       />
       <Field>
         <FieldLabel htmlFor={`${idPrefix}-suffix`}>Reading</FieldLabel>
         <Input id={`${idPrefix}-suffix`} list={`${idPrefix}-suffixes`} value={slot.suffix ?? ''}
-          placeholder={spec.suffix || 'reading under the equipment'}
+          placeholder={item ? 'reading this equipment sends' : (spec.suffix || 'reading under the equipment')}
           onChange={(e) => set({ suffix: e.target.value })} />
         <datalist id={`${idPrefix}-suffixes`}>
-          {[spec.suffix, ...suffixes].filter((v, i, a) => v !== '' && a.indexOf(v) === i).map((v) => <option key={v} value={v} />)}
+          {options.map((v) => <option key={v} value={v} />)}
         </datalist>
-        <FieldDescription>
-          {item && !profile ? 'This equipment has no profile, so the reading has no zones.' : 'Zones come from the equipment\'s profile; edit them on the equipment.'}
-          {' '}Leave empty to leave this out.
-        </FieldDescription>
+        <FieldDescription>{note} Leave equipment empty to leave this out.</FieldDescription>
       </Field>
     </div>
   )

@@ -24,6 +24,7 @@ import {
 } from '@/lib/dashboard-widgets'
 import { LAMP_ICON_NAMES } from '@/lib/lamp-icons'
 import { LAMP_READINGS, suggestRibbonLamps } from '@/lib/ribbon-defaults'
+import { liveReadings } from '@/lib/live-readings'
 
 /**
  * A `Pick` of `DashboardLayoutItem` rather than the full type, so this dialog
@@ -67,8 +68,7 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
   const lampReadings = (itemId: string | undefined, current = ''): string[] => {
     const picked = mappedItems.find((i) => i.id === itemId)
     if (!picked) return []
-    const prefix = `${picked.signalk_source}.`
-    const reported = paths.filter((p) => p.path.startsWith(prefix)).map((p) => p.path.slice(prefix.length))
+    const reported = liveReadings(picked.signalk_source, paths.map((p) => p.path))
     const known = picked.source_kind ? (LAMP_READINGS[picked.source_kind] ?? []) : []
     return [...new Set([...known, ...reported, ...(current ? [current] : [])])].sort()
   }
