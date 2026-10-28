@@ -1,4 +1,4 @@
-import { Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,8 @@ import {
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { GaugeFields, slotFromProfileGauge } from '@/components/gauge-fields'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { cn } from '@/lib/utils'
 import { EquipmentPicker } from '@/components/equipment-picker'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
@@ -281,11 +283,14 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   const [config, setConfig] = useState<EngineClusterConfig | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [tab, setTab] = useState<ClusterTab>('dial')
 
   useEffect(() => {
     setConfig(widget?.cluster ? withBlankSlots(structuredClone(widget.cluster)) : null)
     setSaveError(null)
   }, [widget?.id, widget?.cluster])
+
+  useEffect(() => { setTab('dial') }, [widget?.id])
 
   const item = findItem(ctx, config?.equipmentId)
   const zoneEditing = useSlotZoneEditing(ctx, item, config ? clusterSlotList(config) : [], paths)
@@ -296,17 +301,6 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
 
   const setFuel = (update: (rail: ClusterFuelRailRef) => ClusterFuelRailRef) =>
     setSlot((c) => (c.fuel ? { ...c, fuel: update(c.fuel) } : c))
-
-  const slotsFilled = (c: EngineClusterConfig) =>
-    [c.ring, c.centre, ...c.corners.flatMap((corner) => corner.rows)]
-      .every((slot) => (slot.suffix ?? '').trim() !== '')
-
-  const canSave =
-    config !== null &&
-    (config.equipmentId ?? '') !== '' &&
-    slotsFilled(config) &&
-    zoneEditing.unresolved === 0 &&
-    (config.fuel === undefined || (config.fuel.bars.length > 0 && config.fuel.bars.every((bar) => (bar.tankId ?? '') !== '')))
 
   const save = async () => {
     if (!config) return
@@ -330,20 +324,43 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
     <GaugeFields value={slot} paths={[]} idPrefix={idPrefix} onChange={onChange} equipment={zoneEditing.modeFor(slot)} />
   )
 
+  const dialAttention = config ? [config.ring, config.centre].some((s) => (s.suffix ?? '').trim() === '') : false
+  const cornersAttention = config ? config.corners.flatMap((corner) => corner.rows).some((s) => (s.suffix ?? '').trim() === '') : false
+  const footerBound = config ? CLUSTER_FOOTER_SLOTS.filter((key) => footerSlotBound(config, key)).length : 0
+  const fuelAttention = config?.fuel !== undefined && (config.fuel.bars.length === 0 || config.fuel.bars.some((bar) => (bar.tankId ?? '') === ''))
+
+  const saveReason = ((): string | null => {
+    if (!config) return null
+    if ((config.equipmentId ?? '') === '') return 'Pick the engine.'
+    if (dialAttention) return 'Choose a reading for the ring and centre on the Dial tab.'
+    if (cornersAttention) return 'Choose a reading for every readout card.'
+    if (zoneEditing.unresolved > 0) return 'Settle the zone conflicts above.'
+    if (fuelAttention) return 'Choose a tank for every fuel bar, or remove the rail.'
+    return null
+  })()
+  // One list of what blocks Save, so the line beside it always names the reason.
+  const canSave = config !== null && saveReason === null
+
   return (
     <Dialog open={widget !== null} onOpenChange={(open) => { if (!open) onCancel() }}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Engine Cluster</DialogTitle>
-          <DialogDescription>
-            One engine as a tachometer with four readout cards, two temperature arcs, a fuel fan and a
-            footer. Pick the engine, fill the slots from its profile, then adjust any slot.
-          </DialogDescription>
+      <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col gap-3 overflow-y-auto sm:h-[min(85vh,52rem)] sm:overflow-hidden">
+        <DialogHeader className="flex-none">
+          <div className="flex items-start justify-between gap-3 pr-6">
+            <div className="grid min-w-0 gap-1.5">
+              <DialogTitle>Engine Cluster</DialogTitle>
+              <DialogDescription>
+                Pick the engine and fill the card from its profile, then adjust any part on its tab.
+              </DialogDescription>
+            </div>
+            <div className="hidden sm:block">
+              <CardLocator active={tab} side={config?.side ?? 'port'} />
+            </div>
+          </div>
         </DialogHeader>
 
-        <div className="grid gap-3">
-          {config && (
-            <div className="grid items-end gap-2 sm:grid-cols-[1fr_auto]">
+        {config && (
+          <div className="grid flex-none gap-3">
+            <div className="grid items-start gap-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,9rem)]">
               <EquipmentPicker
                 idPrefix="cluster"
                 label="Engine"
@@ -353,6 +370,28 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 onChange={(id) => setSlot((c) => ({ ...c, equipmentId: id, source: id === '' ? c.source : undefined }))}
                 ctx={ctx}
               />
+              <Field>
+                <FieldLabel htmlFor="cluster-title">Title</FieldLabel>
+                <Input id="cluster-title" maxLength={GAUGE_GROUP_TITLE_MAX_LENGTH} value={config.title}
+                  onChange={(e) => setSlot((c) => ({ ...c, title: e.target.value }))} placeholder={item?.name ?? 'Engine name'} />
+                <FieldDescription>Blank shows the engine's name.</FieldDescription>
+              </Field>
+              <Field>
+                <FieldLabel htmlFor="cluster-side">Engine side</FieldLabel>
+                <select id="cluster-side" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                  value={config.side ?? 'port'}
+                  onChange={(e) => setSlot((c) => {
+                    const side = e.target.value as ClusterSide
+                    return { ...c, side, ...(c.fuel ? { fuel: { ...c.fuel, side: fuelEdge(side) } } : {}) }
+                  })}>
+                  <option value="port">Port</option>
+                  <option value="stbd">Starboard</option>
+                </select>
+                <FieldDescription>Starboard mirrors the card.</FieldDescription>
+              </Field>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               <Button
                 variant="secondary"
                 disabled={!profile}
@@ -360,215 +399,303 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
               >
                 Fill slots from profile
               </Button>
+              <FieldDescription className="min-w-0 flex-1 basis-56">
+                {item && !profile ? "This engine has no profile, so there's nothing to fill from and no zones." : ''}
+                {profile ? 'Replaces the engine slots and fills any empty footer row. Readings are live; zones come from the profile.' : ''}
+              </FieldDescription>
             </div>
-          )}
-          {config && (
+
             <ZoneConflicts
               plan={zoneEditing.plan} choices={zoneEditing.choices} onChoose={zoneEditing.setChoice}
               heldWithoutItem={zoneEditing.heldWithoutItem} idPrefix="cluster"
             />
-          )}
-          <FieldDescription>
-            The tile reads this engine's readings live and takes its zones from the engine's profile.
-            {item && !profile ? ' This engine has no profile, so there is nothing to fill from and no zones.' : ''}
-            {profile ? ' Filling replaces the engine slots and seeds the footer; a footer slot you have already set is kept.' : ''}
-          </FieldDescription>
+          </div>
+        )}
 
-          {config && (
-            <>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <Field>
-                  <FieldLabel htmlFor="cluster-title">Title</FieldLabel>
-                  <Input id="cluster-title" maxLength={GAUGE_GROUP_TITLE_MAX_LENGTH} value={config.title}
-                    onChange={(e) => setSlot((c) => ({ ...c, title: e.target.value }))} placeholder={item?.name ?? 'Engine name'} />
-                  <FieldDescription>Blank shows the engine's name.</FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="cluster-side">Engine side</FieldLabel>
-                  <select id="cluster-side" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                    value={config.side ?? 'port'}
-                    onChange={(e) => setSlot((c) => {
-                      const side = e.target.value as ClusterSide
-                      return { ...c, side, ...(c.fuel ? { fuel: { ...c.fuel, side: fuelEdge(side) } } : {}) }
-                    })}>
-                    <option value="port">Port</option>
-                    <option value="stbd">Starboard</option>
-                  </select>
-                  <FieldDescription>Starboard mirrors the card.</FieldDescription>
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="cluster-centre-icon">Hours icon</FieldLabel>
-                  <select id="cluster-centre-icon" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                    value={config.centreIcon ?? ''}
-                    onChange={(e) => setSlot((c) => ({ ...c, centreIcon: e.target.value === '' ? undefined : e.target.value }))}>
-                    <option value="">Auto ({iconForSlot({ path: config.centre.suffix ?? '', quantity: config.centre.quantity })})</option>
-                    {CLUSTER_ICON_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                </Field>
-              </div>
+        {config ? (
+          <Tabs value={tab} onValueChange={(value) => setTab(value as ClusterTab)} className="flex flex-col gap-0 sm:min-h-0 sm:flex-1">
+            <TabsList variant="line" className="flex-none">
+              <TabsTrigger value="dial" className="text-sm">
+                Dial
+                {dialAttention && <AttentionMark />}
+              </TabsTrigger>
+              <TabsTrigger value="readouts" className="text-sm">
+                Readouts
+                {cornersAttention ? <AttentionMark /> : <TabCount shown={config.corners.length} spoken={`${config.corners.length} cards`} />}
+              </TabsTrigger>
+              <TabsTrigger value="footer" className="text-sm">
+                Footer
+                <TabCount shown={`${footerBound}/${CLUSTER_FOOTER_SLOTS.length}`} spoken={`${footerBound} of ${CLUSTER_FOOTER_SLOTS.length} shown`} />
+              </TabsTrigger>
+              <TabsTrigger value="fuel" className="text-sm">
+                Fuel
+                {fuelAttention
+                  ? <AttentionMark />
+                  : <TabCount shown={config.fuel === undefined ? 'Off' : config.fuel.bars.length} spoken={config.fuel === undefined ? 'off' : `${config.fuel.bars.length} tanks`} />}
+              </TabsTrigger>
+            </TabsList>
 
-              <SlotSection title="Ring">
-                {slotForm(config.ring, 'cluster-ring', (next) => setSlot((c) => ({ ...c, ring: next })))}
-              </SlotSection>
-              <SlotSection title="Centre">
-                {slotForm(config.centre, 'cluster-centre', (next) => setSlot((c) => ({ ...c, centre: next })))}
-              </SlotSection>
-
-              {config.corners.map((corner, cornerIndex) => (
-                <div key={cornerIndex} className="rounded-md border border-border p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Input aria-label={`Corner ${cornerIndex + 1} label`} className="h-8 max-w-[12rem]"
-                      value={corner.label}
-                      onChange={(e) => setSlot((c) => ({
-                        ...c,
-                        corners: c.corners.map((x, i) => (i === cornerIndex ? { ...x, label: e.target.value } : x)),
-                      }))} />
-                    <select
-                      aria-label={`Corner ${cornerIndex + 1} icon`}
-                      className="h-8 rounded-md border bg-transparent px-2 text-sm"
-                      value={corner.icon ?? ''}
-                      onChange={(e) => setSlot((c) => ({
-                        ...c,
-                        corners: c.corners.map((x, i) => (i === cornerIndex
-                          ? { ...x, icon: e.target.value === '' ? undefined : e.target.value }
-                          : x)),
-                      }))}
-                    >
-                      <option value="">
-                        Auto{corner.rows[0] ? ` (${iconForSlot({ path: corner.rows[0].suffix ?? '', quantity: corner.rows[0].quantity })})` : ''}
-                      </option>
+            <div className="sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
+              <TabsContent keepMounted value="dial" className="grid min-w-0 gap-3">
+                <SlotSection title="Ring">
+                  {slotForm(config.ring, 'cluster-ring', (next) => setSlot((c) => ({ ...c, ring: next })))}
+                </SlotSection>
+                <SlotSection title="Centre">
+                  <Field className="mb-3">
+                    <FieldLabel htmlFor="cluster-centre-icon">Hours icon</FieldLabel>
+                    <select id="cluster-centre-icon" className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                      value={config.centreIcon ?? ''}
+                      onChange={(e) => setSlot((c) => ({ ...c, centreIcon: e.target.value === '' ? undefined : e.target.value }))}>
+                      <option value="">Auto ({iconForSlot({ path: config.centre.suffix ?? '', quantity: config.centre.quantity })})</option>
                       {CLUSTER_ICON_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
                     </select>
-                    <div className="flex-1" />
-                    <Button size="sm" variant="ghost" aria-label={`Remove corner ${cornerIndex + 1}`}
-                      onClick={() => setSlot((c) => ({ ...c, corners: c.corners.filter((_, i) => i !== cornerIndex) }))}>
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                  </div>
+                  </Field>
+                  {slotForm(config.centre, 'cluster-centre', (next) => setSlot((c) => ({ ...c, centre: next })))}
+                </SlotSection>
+                <SlotSection title="Left arc (coolant)">
+                  {slotForm(config.arcs?.left ?? blankArc('Coolant', 0, 120), 'cluster-arc-left',
+                    (next) => setSlot((c) => ({ ...c, arcs: { ...c.arcs, left: next } })))}
+                </SlotSection>
+                <SlotSection title="Right arc (gearbox oil temperature)">
+                  {slotForm(config.arcs?.right ?? blankArc('Gearbox', 0, 120), 'cluster-arc-right',
+                    (next) => setSlot((c) => ({ ...c, arcs: { ...c.arcs, right: next } })))}
+                </SlotSection>
+              </TabsContent>
 
-                  {corner.rows.slice(0, CLUSTER_MAX_CORNER_ROWS).map((row, rowIndex) => (
-                    <div key={rowIndex}>
-                      {slotForm(row, `cluster-${cornerIndex}-${rowIndex}`, (next) => setSlot((c) => ({
-                        ...c,
-                        corners: c.corners.map((x, i) => (i === cornerIndex
-                          ? { ...x, rows: x.rows.map((r, j) => (j === rowIndex ? next : r)) }
-                          : x)),
-                      })))}
+              <TabsContent keepMounted value="readouts" className="grid min-w-0 gap-3">
+                {config.corners.map((corner, cornerIndex) => (
+                  <div key={cornerIndex} className="rounded-md border border-border p-3">
+                    <div className="mb-2 flex items-center gap-2">
+                      <Input aria-label={`Corner ${cornerIndex + 1} label`} className="h-8 max-w-[12rem]"
+                        value={corner.label}
+                        onChange={(e) => setSlot((c) => ({
+                          ...c,
+                          corners: c.corners.map((x, i) => (i === cornerIndex ? { ...x, label: e.target.value } : x)),
+                        }))} />
+                      <select
+                        aria-label={`Corner ${cornerIndex + 1} icon`}
+                        className="h-8 rounded-md border bg-transparent px-2 text-sm"
+                        value={corner.icon ?? ''}
+                        onChange={(e) => setSlot((c) => ({
+                          ...c,
+                          corners: c.corners.map((x, i) => (i === cornerIndex
+                            ? { ...x, icon: e.target.value === '' ? undefined : e.target.value }
+                            : x)),
+                        }))}
+                      >
+                        <option value="">
+                          Auto{corner.rows[0] ? ` (${iconForSlot({ path: corner.rows[0].suffix ?? '', quantity: corner.rows[0].quantity })})` : ''}
+                        </option>
+                        {CLUSTER_ICON_NAMES.map((name) => <option key={name} value={name}>{name}</option>)}
+                      </select>
+                      <div className="flex-1" />
+                      <Button size="sm" variant="ghost" aria-label={`Remove corner ${cornerIndex + 1}`}
+                        onClick={() => setSlot((c) => ({ ...c, corners: c.corners.filter((_, i) => i !== cornerIndex) }))}>
+                        <Trash2 className="size-3.5" />
+                      </Button>
                     </div>
-                  ))}
-                </div>
-              ))}
 
-              <Button variant="ghost" className="w-fit" disabled={config.corners.length >= CLUSTER_MAX_CORNERS}
-                onClick={() => setSlot((c) => ({ ...c, corners: [...c.corners, { label: 'New', rows: [blankSlot('')] }] }))}>
-                <Plus className="size-3.5" /> Add corner
-              </Button>
-
-              <SlotSection title="Dial arc, left (coolant)">
-                {slotForm(config.arcs?.left ?? blankArc('Coolant', 0, 120), 'cluster-arc-left',
-                  (next) => setSlot((c) => ({ ...c, arcs: { ...c.arcs, left: next } })))}
-              </SlotSection>
-              <SlotSection title="Dial arc, right (gearbox oil temperature)">
-                {slotForm(config.arcs?.right ?? blankArc('Gearbox', 0, 120), 'cluster-arc-right',
-                  (next) => setSlot((c) => ({ ...c, arcs: { ...c.arcs, right: next } })))}
-              </SlotSection>
-
-              {CLUSTER_FOOTER_SLOTS.map((key) => {
-                const slot = config.footer?.[key]
-                const set = (next: GaugeWidgetConfig) => setSlot((c) => ({ ...c, footer: { ...c.footer, [key]: next } }))
-                return (
-                  <SlotSection key={key} title={`Footer: ${FOOTER_TITLES[key]}`}>
-                    {isForeign(key) ? (
-                      <ForeignSlotForm
-                        idPrefix={`cluster-footer-${key}`} slotKey={key} slot={slot ?? { ...FOREIGN_SLOTS[key].slot, suffix: '' }}
-                        ctx={ctx} onChange={set}
-                      />
-                    ) : (
-                      slotForm(slot ?? blankSlot(''), `cluster-footer-${key}`, set)
-                    )}
-                  </SlotSection>
-                )
-              })}
-
-              <div className="rounded-md border border-border p-3">
-                <p className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Fuel rail</p>
-                <FieldDescription className="mb-2">
-                  An arc per tank (forward and aft) on the outer edge of the tile, with the total underneath. Pick the
-                  tank items; their level and capacity are read live.
-                </FieldDescription>
-
-                {config.fuel === undefined ? (
-                  <Button variant="ghost" className="w-fit"
-                    onClick={() => setSlot((c) => ({
-                      ...c,
-                      // The outer edge of the tile, which is the engine's side.
-                      fuel: {
-                        side: fuelEdge(c.side ?? 'port'),
-                        bars: [blankFuelBar('Fwd'), blankFuelBar('Aft')],
-                      },
-                    }))}>
-                    <Plus className="size-3.5" /> Add fuel rail
-                  </Button>
-                ) : (
-                  <>
-                    {config.fuel.bars.map((bar, index) => (
-                      <div key={index} className="mb-2 grid gap-2 border-b border-border/60 pb-2 last:border-b-0">
-                        <EquipmentPicker
-                          idPrefix={`cluster-fuel-${index}`}
-                          label={`Tank ${index + 1}`}
-                          kind="tank"
-                          value={bar.tankId ?? ''}
-                          ctx={ctx}
-                          onChange={(id) => setFuel((f) => ({
-                            ...f,
-                            bars: f.bars.map((b, i) => (i === index
-                              ? { ...b, tankId: id, source: id === '' ? b.source : undefined, label: b.label || (findItem(ctx, id)?.name ?? '') }
-                              : b)),
-                          }))}
-                        />
-                        <Field>
-                          <FieldLabel htmlFor={`cluster-fuel-label-${index}`}>Label</FieldLabel>
-                          <Input id={`cluster-fuel-label-${index}`} maxLength={12} value={bar.label ?? ''}
-                            onChange={(e) => setFuel((f) => ({
-                              ...f,
-                              bars: f.bars.map((b, i) => (i === index ? { ...b, label: e.target.value } : b)),
-                            }))} />
-                        </Field>
-                        <FieldDescription>
-                          This bar's colours and alarms follow the tank's levels. Change them on the tank's equipment page.
-                        </FieldDescription>
-                        <Button size="sm" variant="ghost" className="w-fit" aria-label={`Remove fuel tank ${index + 1}`}
-                          onClick={() => setFuel((f) => ({ ...f, bars: f.bars.filter((_, i) => i !== index) }))}>
-                          <Trash2 className="size-3.5" /> Remove tank
-                        </Button>
+                    {corner.rows.slice(0, CLUSTER_MAX_CORNER_ROWS).map((row, rowIndex) => (
+                      <div key={rowIndex}>
+                        {slotForm(row, `cluster-${cornerIndex}-${rowIndex}`, (next) => setSlot((c) => ({
+                          ...c,
+                          corners: c.corners.map((x, i) => (i === cornerIndex
+                            ? { ...x, rows: x.rows.map((r, j) => (j === rowIndex ? next : r)) }
+                            : x)),
+                        })))}
                       </div>
                     ))}
+                  </div>
+                ))}
 
-                    <div className="flex items-center gap-2">
-                      <Button variant="ghost" className="w-fit"
-                        disabled={config.fuel.bars.length >= CLUSTER_MAX_FUEL_BARS}
-                        onClick={() => setFuel((f) => ({ ...f, bars: [...f.bars, blankFuelBar('')] }))}>
-                        <Plus className="size-3.5" /> Add tank
-                      </Button>
-                      <Button variant="ghost" className="w-fit"
-                        onClick={() => setSlot((c) => ({ ...c, fuel: undefined }))}>
-                        <Trash2 className="size-3.5" /> Remove fuel rail
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </div>
-            </>
-          )}
-        </div>
+                <Button variant="ghost" className="w-fit" disabled={config.corners.length >= CLUSTER_MAX_CORNERS}
+                  onClick={() => setSlot((c) => ({ ...c, corners: [...c.corners, { label: 'New', rows: [blankSlot('')] }] }))}>
+                  <Plus className="size-3.5" /> Add corner
+                </Button>
+              </TabsContent>
 
-        <DialogFooter>
-          {saveError && <p role="alert" className="mr-auto text-sm text-destructive">{saveError}</p>}
+              <TabsContent keepMounted value="footer" className="min-w-0">
+                <div className="divide-y divide-border rounded-md border border-border">
+                  {CLUSTER_FOOTER_SLOTS.map((key) => {
+                    const slot = config.footer?.[key]
+                    const set = (next: GaugeWidgetConfig) => setSlot((c) => ({ ...c, footer: { ...c.footer, [key]: next } }))
+                    const bound = footerSlotBound(config, key)
+                    const reading = (slot?.suffix ?? '').trim()
+                    return (
+                      <details key={key} className="group">
+                        <summary className="flex cursor-pointer list-none items-center gap-2 p-3 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                          <span className="min-w-0 flex-1 truncate">{FOOTER_TITLES[key]}</span>
+                          {bound && slot ? (
+                            <span className="flex min-w-0 max-w-[50%] items-baseline gap-1.5 text-xs">
+                              {isForeign(key) && !findItem(ctx, slot.equipmentId)
+                                ? <span className="truncate text-amber-600 dark:text-amber-400">{ctx.items.length === 0 ? '--' : 'Equipment missing'}</span>
+                                : <span className="truncate">{isForeign(key) ? findItem(ctx, slot.equipmentId)?.name : (slot.label || reading)}</span>}
+                              {isForeign(key) && <span className="truncate text-muted-foreground">{reading}</span>}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Not shown</span>
+                          )}
+                          <ChevronRight aria-hidden className="size-4 flex-none text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none" />
+                        </summary>
+                        <div className="px-3 pb-3">
+                          {isForeign(key) ? (
+                            <ForeignSlotForm
+                              idPrefix={`cluster-footer-${key}`} slotKey={key} slot={slot ?? { ...FOREIGN_SLOTS[key].slot, suffix: '' }}
+                              ctx={ctx} onChange={set}
+                            />
+                          ) : (
+                            slotForm(slot ?? blankSlot(''), `cluster-footer-${key}`, set)
+                          )}
+                        </div>
+                      </details>
+                    )
+                  })}
+                </div>
+              </TabsContent>
+
+              <TabsContent keepMounted value="fuel" className="min-w-0">
+                <div className="rounded-md border border-border p-3">
+                  <FieldDescription className="mb-2">
+                    An arc per tank (forward and aft) on the outer edge of the tile, with the total underneath. Pick the
+                    tank items; their level and capacity are read live.
+                  </FieldDescription>
+
+                  {config.fuel === undefined ? (
+                    <Button variant="ghost" className="w-fit"
+                      onClick={() => setSlot((c) => ({
+                        ...c,
+                        // The outer edge of the tile, which is the engine's side.
+                        fuel: {
+                          side: fuelEdge(c.side ?? 'port'),
+                          bars: [blankFuelBar('Fwd'), blankFuelBar('Aft')],
+                        },
+                      }))}>
+                      <Plus className="size-3.5" /> Add fuel rail
+                    </Button>
+                  ) : (
+                    <>
+                      {config.fuel.bars.map((bar, index) => (
+                        <div key={index} className="mb-2 grid gap-2 border-b border-border/60 pb-2 last:border-b-0">
+                          <EquipmentPicker
+                            idPrefix={`cluster-fuel-${index}`}
+                            label={`Tank ${index + 1}`}
+                            kind="tank"
+                            value={bar.tankId ?? ''}
+                            ctx={ctx}
+                            onChange={(id) => setFuel((f) => ({
+                              ...f,
+                              bars: f.bars.map((b, i) => (i === index
+                                ? { ...b, tankId: id, source: id === '' ? b.source : undefined, label: b.label || (findItem(ctx, id)?.name ?? '') }
+                                : b)),
+                            }))}
+                          />
+                          <Field>
+                            <FieldLabel htmlFor={`cluster-fuel-label-${index}`}>Label</FieldLabel>
+                            <Input id={`cluster-fuel-label-${index}`} maxLength={12} value={bar.label ?? ''}
+                              onChange={(e) => setFuel((f) => ({
+                                ...f,
+                                bars: f.bars.map((b, i) => (i === index ? { ...b, label: e.target.value } : b)),
+                              }))} />
+                          </Field>
+                          <FieldDescription>
+                            This bar's colours and alarms follow the tank's levels. Change them on the tank's equipment page.
+                          </FieldDescription>
+                          <Button size="sm" variant="ghost" className="w-fit" aria-label={`Remove fuel tank ${index + 1}`}
+                            onClick={() => setFuel((f) => ({ ...f, bars: f.bars.filter((_, i) => i !== index) }))}>
+                            <Trash2 className="size-3.5" /> Remove tank
+                          </Button>
+                        </div>
+                      ))}
+
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" className="w-fit"
+                          disabled={config.fuel.bars.length >= CLUSTER_MAX_FUEL_BARS}
+                          onClick={() => setFuel((f) => ({ ...f, bars: [...f.bars, blankFuelBar('')] }))}>
+                          <Plus className="size-3.5" /> Add tank
+                        </Button>
+                        <Button variant="ghost" className="w-fit"
+                          onClick={() => setSlot((c) => ({ ...c, fuel: undefined }))}>
+                          <Trash2 className="size-3.5" /> Remove fuel rail
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </TabsContent>
+            </div>
+          </Tabs>
+        ) : (
+          <div className="min-h-0 flex-1" />
+        )}
+
+        <DialogFooter className="flex-none">
+          {saveError
+            ? <p role="alert" className="mr-auto text-sm text-destructive">{saveError}</p>
+            : (!canSave && !saving && saveReason && <p className="mr-auto text-xs text-muted-foreground">{saveReason}</p>)}
           <Button variant="ghost" onClick={onCancel}>Cancel</Button>
           <Button disabled={!canSave || saving} onClick={() => { void save() }}>Save</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+type ClusterTab = 'dial' | 'readouts' | 'footer' | 'fuel'
+
+/** Whether a footer slot reads something: a reading, and for another item's slot, the item too. Mirrors pruneUnbound. */
+function footerSlotBound(config: EngineClusterConfig, key: ClusterFooterSlot): boolean {
+  const slot = config.footer?.[key]
+  return !!slot && (slot.suffix ?? '').trim() !== '' && (!isForeign(key) || (slot.equipmentId ?? '') !== '')
+}
+
+/** A tab's count: the figure on screen, and what it counts for a screen reader. */
+function TabCount({ shown, spoken }: { shown: string | number; spoken: string }) {
+  return (
+    <>
+      <span aria-hidden className="text-xs text-muted-foreground tabular-nums">{shown}</span>
+      <span className="sr-only">{spoken}</span>
+    </>
+  )
+}
+
+function AttentionMark() {
+  return (
+    <>
+      <span aria-hidden className="size-1.5 rounded-full bg-amber-500" />
+      <span className="sr-only">needs attention</span>
+    </>
+  )
+}
+
+/**
+ * A small schematic of the card with the part the open tab edits lit. Drawn for
+ * a port engine and mirrored for starboard, like the card itself.
+ */
+function CardLocator({ active, side }: { active: ClusterTab; side: ClusterSide }) {
+  const region = (on: boolean) => cn(
+    'transition-colors duration-150 motion-reduce:transition-none',
+    on ? 'fill-primary/20 stroke-primary' : 'fill-muted stroke-border',
+  )
+  const dial = active === 'dial'
+  const corner = active === 'readouts'
+  return (
+    <svg aria-hidden viewBox="0 0 100 77" className="w-24 shrink-0">
+      <g transform={side === 'stbd' ? 'matrix(-1 0 0 1 100 0)' : undefined}>
+        <path d="M 12 8 A 36 36 0 0 0 12 52" strokeWidth={4} strokeLinecap="round"
+          className={cn(
+            'transition-colors duration-150 motion-reduce:transition-none',
+            active === 'fuel' ? 'stroke-primary' : 'stroke-border',
+          )}
+          fill="none" />
+        <circle cx={55} cy={30} r={20} strokeWidth={1.5} className={region(dial)} />
+        <path d="M 46 52 A 14 14 0 0 1 38 49" strokeWidth={1.5} fill="none" className={cn(region(dial), 'fill-transparent')} />
+        <path d="M 64 52 A 14 14 0 0 0 72 49" strokeWidth={1.5} fill="none" className={cn(region(dial), 'fill-transparent')} />
+        {[[20, 4], [76, 4], [20, 40], [76, 40]].map(([x, y]) => (
+          <rect key={`${x}-${y}`} x={x} y={y} width={14} height={12} rx={2} strokeWidth={1.5} className={region(corner)} />
+        ))}
+        <rect x={2} y={62} width={96} height={12} rx={2} strokeWidth={1.5} className={region(active === 'footer')} />
+      </g>
+    </svg>
   )
 }
 

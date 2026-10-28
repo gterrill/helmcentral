@@ -34,6 +34,8 @@ function open(overrides: Partial<EngineClusterConfig> = {}) {
   render(<EngineClusterConfigDialog
     widget={{ ...widget, cluster: { ...cluster, ...overrides } }}
     onCancel={vi.fn()} onSave={onSave} />)
+  // The fuel rail lives on its own tab.
+  fireEvent.click(screen.getByRole('tab', { name: /fuel/i }))
   return onSave
 }
 
