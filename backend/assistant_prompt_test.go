@@ -1295,3 +1295,25 @@ func TestBuildAssistantSystemPrompt_SeasonQuestionsUseTheLogbook(t *testing.T) {
 		}
 	}
 }
+
+// "How's the boat" goes to the status snapshot, and the answer has a fixed
+// shape: four headings, then at most three things worth noting, put as
+// questions and never with a guessed cause (ADR 0222).
+func TestBuildAssistantSystemPrompt_VesselStatusRule(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"get_vessel_status",
+		"\"how's the boat\"",
+		"\"quick update\"",
+		"Power, Tanks, Outside and Boat",
+		"at most three things worth noting",
+		"observations",
+		"as a question",
+		"never guess a cause",
+		"missing reason",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt misses %q", want)
+		}
+	}
+}

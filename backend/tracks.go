@@ -226,8 +226,14 @@ func sampleTracks(settingsPath string) {
 	 * value stays absent rather than becoming a confident zero.
 	 */
 	trend := derivedAwareAlarmReader(globalSignalKSnapshot)
+	// The barometer gets the same age gate as the true wind below: a sensor
+	// that has gone quiet must not keep re-recording its last value, which
+	// would hold the Law of Storms figures and the status snapshot's pressure
+	// change on a frozen number (ADR 0222).
 	if pressure := trend(outsidePressurePath); pressure.Present {
-		barometerHistory.record(pressure.Value, now)
+		if age := alarmSampleAge(pressure, now); age >= 0 && age <= barometerMaxAge.Seconds() {
+			barometerHistory.record(pressure.Value, now)
+		}
 	}
 	// Present alone is not enough here: derived-data can stop producing
 	// speedTrue/directionTrue while the rest of the snapshot - including the

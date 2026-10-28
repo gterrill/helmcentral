@@ -231,6 +231,43 @@ type assistantToolDeps struct {
 	// cards is the turn's side channel for card payloads too large for the
 	// model's tool result. nil means the tools put no card out of band.
 	cards *assistantCardSink
+
+	// The next dependencies are get_vessel_status' (ADR 0222). Every one is
+	// required: the tool reports which are not wired rather than treating the
+	// boat as empty.
+	//
+	// telemetry is the live own-ship reader, ADR 0178; errSignalKNoSelf when
+	// SignalK has delivered nothing.
+	telemetry func(now time.Time) (telemetryReader, error)
+	// sourceItems are the equipment items that own a SignalK source, the tanks
+	// among them.
+	sourceItems func() ([]sourceItem, error)
+	// tankDefaults are the tank alarm levels each kind uses unless its item
+	// overrides them (ADR 0214).
+	tankDefaults func() tankAlarmDefaults
+	// derivedPaths are the helmcentral.* values and their ages, the pressure
+	// change among them (ADR 0095).
+	derivedPaths func(now time.Time) (map[string]*float64, map[string]float64)
+	// barometerWindow is the recorded barometer readings of the last three
+	// hours, so the three hour change is only given once they cover about
+	// that long.
+	barometerWindow func(now time.Time) []telemetryPoint
+	// trueWindGustKts is the strongest true wind recorded in the last ten
+	// minutes, the Wind tile's gust figure.
+	trueWindGustKts func() (float64, bool)
+	// engineStates says which engines are keyed off (ADR 0163).
+	engineStates func(now time.Time) map[string]engineStateInfo
+	// ignoredAlarms are the titles of the network alarms the operator stopped
+	// showing (ADR 0207).
+	ignoredAlarms func() []string
+	// anomalyReading is the sensor checks' latest tick (ADR 0132).
+	anomalyReading func() (anomalyReading, bool)
+	// anchorWatch is the anchor watch, and the message when its file could not
+	// be loaded.
+	anchorWatch func() (watch anchorWatchData, active bool, loadErr string)
+	// overnight is the house bank's recent nights (electrical_overnight.go).
+	// It returns a reason when the nights cannot be looked at at all.
+	overnight func(now time.Time) (overnightResult, string)
 }
 
 // assistantCardSink carries a card from the tool that built it to the run,
@@ -329,6 +366,17 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		influxPathSources:          queryInfluxPathSources,
 		passageLog:                 func() *passageStore { return globalPassageStore },
 		cards:                      newAssistantCardSink(),
+		telemetry:                  liveOwnShipTelemetry,
+		sourceItems:                listSourceItems,
+		tankDefaults:               currentTankAlarmDefaults,
+		derivedPaths:               computeDerivedPaths,
+		trueWindGustKts:            recentTrueWindGustKts,
+		barometerWindow:            func(now time.Time) []telemetryPoint { return barometerHistory.since(now.Add(-pressureTrendWindow)) },
+		engineStates:               func(now time.Time) map[string]engineStateInfo { return engineStatesFor(globalSignalKSnapshot, now) },
+		ignoredAlarms:              ignoredAlarmTitles,
+		anomalyReading:             globalAnomalySlot.get,
+		anchorWatch:                currentAnchorWatch,
+		overnight:                  overnightForStatus,
 	}
 }
 
@@ -435,6 +483,7 @@ var mateTools = []mateTool{
 	mateToolStartWatch,
 	mateToolGetVesselParticulars,
 	mateToolGetPlannedStay,
+	mateToolGetVesselStatus,
 	mateToolInspectForm,
 	mateToolFillForm,
 	mateToolSearchWeb,
