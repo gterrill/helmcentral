@@ -114,10 +114,8 @@ type alarmRule struct {
 type alarmRulesFile struct {
 	Rules []*alarmRule `json:"rules"`
 
-	// SeededSets records which built-in rule sets have already been offered,
-	// so seeding runs once per installation. Keyed on the marker rather than
-	// on the file being empty, because a set the operator deleted on purpose
-	// must never come back on the next restart.
+	// SeededSets records which built-in rule sets had been offered, so the
+	// import can carry the markers into alarm_rule_seeded_sets.
 	SeededSets []string `json:"seeded_sets,omitempty"`
 }
 
@@ -142,7 +140,7 @@ func loadAlarmRules() error {
 	return refreshAlarmRules(store)
 }
 
-// sortAlarmRules gives both the file and the API a stable order. CreatedAt
+// sortAlarmRules gives the API a stable order. CreatedAt
 // alone is not enough — rules created in the same millisecond would tie.
 func sortAlarmRules(list []*alarmRule) {
 	sort.Slice(list, func(i, j int) bool {
@@ -191,54 +189,6 @@ func createAlarmRule(rule alarmRule) (alarmRule, error) {
 	}
 	err = store.writeAlarmRules("create alarm rule", func(tx *sql.Tx, now time.Time) error {
 		rule.ID = uuid.NewString()
-		rule.CreatedAt = now
-		rule.UpdatedAt = now
-		return insertAlarmRuleTx(tx, rule)
-	})
-	if err != nil {
-		return alarmRule{}, err
-	}
-	return rule, nil
-}
-
-// createSeededAlarmRule creates rule keeping its own ID, rather than
-// createAlarmRule's "always assign a fresh UUID" contract. It exists for
-// exactly one caller shape: a seeding file (alarm_seed_anomaly.go's
-// anomalyImpossibleRuleID and friends) whose rules need a stable, known
-// identity across restarts -- e.g. so a later cycle can look one up by its
-// own constant, and so a test can actually assert seeding produced THIS
-// rule rather than merely "a" rule (code review finding 7; the alternative
-// -- checking Path or Label -- can't tell a seeded rule apart from an
-// operator's own rule that happens to share one).
-//
-// This must never be reachable from the public create-rule HTTP handler:
-// createAlarmRuleHandler binds straight off the request body and passes it
-// to createAlarmRule, and that unconditional UUID assignment is what stops
-// a client from claiming a system rule's ID (or another rule's) by simply
-// putting it in the JSON. createSeededAlarmRule trusts its caller's ID
-// completely -- it must only ever be a literal constant a seeding file
-// wrote itself, never anything that traced back to a request body.
-//
-// Returns an error if rule.ID is empty, or if a rule already exists under
-// it (which would silently replace whatever that was). It does not record a
-// seed marker: seedAlarmRuleSet does, in the same transaction as its rules.
-func createSeededAlarmRule(rule alarmRule) (alarmRule, error) {
-	if strings.TrimSpace(rule.ID) == "" {
-		return alarmRule{}, fmt.Errorf("createSeededAlarmRule: rule %q has no fixed id", rule.Label)
-	}
-	if err := validateAlarmRule(&rule); err != nil {
-		return alarmRule{}, err
-	}
-	store, err := alarmRuleStore()
-	if err != nil {
-		return alarmRule{}, err
-	}
-	err = store.writeAlarmRules("create seeded alarm rule", func(tx *sql.Tx, now time.Time) error {
-		if existing, err := alarmRuleByIDQ(tx, rule.ID); err == nil {
-			return fmt.Errorf("createSeededAlarmRule: id %q is already in use by %q", rule.ID, existing.Label)
-		} else if !errors.Is(err, errAlarmRuleNotFound) {
-			return err
-		}
 		rule.CreatedAt = now
 		rule.UpdatedAt = now
 		return insertAlarmRuleTx(tx, rule)
@@ -405,6 +355,15 @@ func syncRoleBoundRules(vessel vesselView) error {
 		return err
 	}
 	want := vessel.houseBankSocPath()
+	moves := false
+	for _, rule := range listAlarmRules() {
+		if rule.PathRole == alarmPathRoleHouseBankSoC && rule.Path != want {
+			moves = true
+		}
+	}
+	if !moves {
+		return nil
+	}
 	return store.writeAlarmRules("move role-bound alarm rules", func(tx *sql.Tx, now time.Time) error {
 		rules, err := listAlarmRulesQ(tx)
 		if err != nil {

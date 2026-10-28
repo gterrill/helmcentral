@@ -381,6 +381,15 @@ func adoptHouseBankRules(socPath string) error {
 	if err != nil {
 		return err
 	}
+	adopts := false
+	for _, rule := range listAlarmRules() {
+		if rule.PathRole == "" && rule.Path == socPath {
+			adopts = true
+		}
+	}
+	if !adopts {
+		return nil
+	}
 	return store.writeAlarmRules("adopt house bank alarm rules", func(tx *sql.Tx, now time.Time) error {
 		rules, err := listAlarmRulesQ(tx)
 		if err != nil {

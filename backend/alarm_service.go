@@ -308,7 +308,7 @@ func createAlarmRuleHandler(c echo.Context) error {
 
 	created, err := createAlarmRule(rule)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return c.JSON(alarmRuleWriteStatus(err, http.StatusBadRequest), map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusCreated, created)
 }
@@ -324,7 +324,7 @@ func updateAlarmRuleHandler(c echo.Context) error {
 
 	updated, err := updateAlarmRule(c.Param("id"), rule)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return c.JSON(alarmRuleWriteStatus(err, http.StatusBadRequest), map[string]string{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, updated)
 }
@@ -334,7 +334,7 @@ func deleteAlarmRuleHandler(c echo.Context) error {
 		return err
 	}
 	if err := deleteAlarmRule(c.Param("id")); err != nil {
-		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+		return c.JSON(alarmRuleWriteStatus(err, http.StatusNotFound), map[string]string{"error": err.Error()})
 	}
 	return c.NoContent(http.StatusNoContent)
 }

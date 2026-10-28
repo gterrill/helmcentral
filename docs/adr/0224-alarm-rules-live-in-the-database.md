@@ -57,7 +57,9 @@ every second and must not touch SQLite to do it. `documentStore.writeAlarmRules`
 runs a write in one transaction and, once it has committed and still holding the
 store lock, reloads the map from the database. Two writers therefore cannot
 leave the map older than the database, and a failed commit leaves the map alone.
-A failed reload after a commit is returned as an error, not ignored. A changeset
+A failed reload after a commit is returned as `errAlarmRulesNotReloaded`, which
+says the change was saved and should not be repeated, and the handlers answer
+500 with that text. A changeset
 that writes through `RunTx` calls `refreshAlarmRules` after the commit, as the
 equipment type's `AfterCommit` does for anomaly rules.
 
@@ -91,13 +93,17 @@ function returns an error naming the record store. Nothing falls back to the fil
 3. If `alarm-rules.json.imported` already exists, stop. Overwriting an earlier
    copy would destroy it.
 4. In one transaction insert every rule that is not already in the database and
-   every marker. A rule already there is kept as the database has it, never
-   overwritten by the file.
-5. Rename the file to `alarm-rules.json.imported`.
+   every marker, then record `legacy-import:alarm-rules.json` in
+   `alarm_rule_seeded_sets`. That table already holds the "offered once, never
+   again" markers and goes with every backup, so the import marker needs no
+   table of its own. If the marker is already there, the file is not read into
+   the database again and only the rename is left. Without it, a file put back
+   after a lost rename would bring back rules deleted since.
+5. Rename the file to `alarm-rules.json.imported` and sync the folder.
 
 The insert commits before the rename. A crash between them leaves the file in
-place, and the next boot repeats the import and changes nothing, so edits made
-in between are not lost. This differs from the ignored-sensor move in the last
+place, and the next boot sees the marker and only renames, so edits and deletions
+made in between are not lost. This differs from the ignored-sensor move in the last
 step: that move rewrites the file without the field, and this one renames it,
 so the operator keeps the whole original as a backup. The one operator has one
 box and no installed base, so the importer, and the call in `main.go`, can be
@@ -112,7 +118,8 @@ The file never recorded which rules a seeder made, so the importer works it out
 and leaves NULL wherever it cannot be sure.
 
 - **Anomaly rules** have fixed ids, which settle it: the base ids to
-  `anomaly-v1`, the frozen id to `anomaly-v1:frozen`, the two full bank ids to
+  `anomaly-v1`, `helmcentral:anomaly-engine-stumble-<instance>` to
+  `anomaly-v1:stumble:<instance>`, the frozen id to `anomaly-v1:frozen`, the two full bank ids to
   `anomaly-v1:battery`, and `helmcentral:anomaly-<quantity>-<instance>-high|low`
   to `anomaly-v1:engine:<instance>`.
 - **Heavy weather, forecast warnings and Law of Storms** rules got random ids.

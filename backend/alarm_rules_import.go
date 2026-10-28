@@ -8,10 +8,18 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 )
+
+// legacyImportMarker is recorded in alarm_rule_seeded_sets by the import's own
+// transaction. It sits beside the seed markers because it means the same thing,
+// that something was offered once and must not be offered again: a file put back
+// after a lost rename is not imported a second time, so it cannot bring back
+// rules the operator deleted since.
+const legacyImportMarker = "legacy-import:alarm-rules.json"
 
 // legacyAlarmRulesImportedSuffix is appended to the old rules file once its
 // contents are in the database.
@@ -51,7 +59,10 @@ func importLegacyAlarmRules(s *documentStore, path string, now time.Time) (int, 
 			return 0, fmt.Errorf("parsing %s for the import into the database: %w", path, err)
 		}
 	}
-	if len(file.IgnoredSensors) > 0 {
+	for _, id := range file.IgnoredSensors {
+		if strings.TrimSpace(id) == "" {
+			continue
+		}
 		return 0, fmt.Errorf("%s still holds an ignored-sensor list; it moves to the database before the rules do", path)
 	}
 	if err := validateLegacyAlarmRules(path, file.Rules); err != nil {
@@ -66,6 +77,13 @@ func importLegacyAlarmRules(s *documentStore, path string, now time.Time) (int, 
 
 	origins := inferLegacySeededBy(file.Rules, file.SeededSets)
 	err = s.writeAlarmRules("import alarm rules", func(tx *sql.Tx, _ time.Time) error {
+		done, err := alarmSeededSetsQ(tx)
+		if err != nil {
+			return err
+		}
+		if containsString(done, legacyImportMarker) {
+			return nil // an earlier boot imported this file; only the rename is left
+		}
 		for _, rule := range file.Rules {
 			if _, err := alarmRuleByIDQ(tx, rule.ID); err == nil {
 				continue
@@ -91,13 +109,20 @@ func importLegacyAlarmRules(s *documentStore, path string, now time.Time) (int, 
 				}
 			}
 		}
-		return nil
+		return recordAlarmSeededSetTx(tx, legacyImportMarker, now)
 	})
 	if err != nil {
 		return 0, fmt.Errorf("importing %s: %w", path, err)
 	}
 	if err := os.Rename(path, imported); err != nil {
 		return 0, fmt.Errorf("the alarm rules are in the database, but %s could not be renamed: %w", path, err)
+	}
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		err = dir.Sync()
+		dir.Close()
+		if err != nil {
+			return 0, fmt.Errorf("syncing the folder after renaming %s: %w", path, err)
+		}
 	}
 	log.Printf("alarm rules: imported %d rule(s) and %d seeded set(s) from %s into helmcentral.sqlite; the file is now %s",
 		len(file.Rules), len(file.SeededSets), path, imported)
@@ -169,6 +194,8 @@ func inferLegacySeededBy(rules []*alarmRule, markers []string) map[string]string
 	for _, r := range rules {
 		if strings.HasPrefix(r.ID, "helmcentral:anomaly-") {
 			switch {
+			case strings.HasPrefix(r.ID, anomalyEngineStumbleRuleID("")):
+				out[r.ID] = anomalyEngineStumbleSeedMarker(strings.TrimPrefix(r.ID, anomalyEngineStumbleRuleID("")))
 			case r.ID == anomalyImpossibleRuleID || r.ID == anomalySilentSourceRuleID:
 				out[r.ID] = anomalyBaseSeedMarker
 			case r.ID == anomalyFrozenRuleID:

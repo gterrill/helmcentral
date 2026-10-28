@@ -11,6 +11,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Your alarm rules are now kept in the database.** They used to be in
+  `data/alarm-rules.json`. The first time you start this release, Helmcentral
+  copies every rule into `data/helmcentral.sqlite`, along with the record of
+  which built-in sets it has already offered, so none of them reappear. It then
+  renames the file to `alarm-rules.json.imported` and leaves it in the same
+  folder as a copy of what you had. The Alarms drawer works as before. What you
+  need to do: back up `data/helmcentral.sqlite` from now on. A backup that only
+  took `alarm-rules.json` will no longer have your rules. If the old file can't
+  be read, Helmcentral won't start and says why, and the file stays as it was.
+
 ### Added
 
 - **Mate gives a boat status in one go.** Ask "how's the boat?" or for a quick
@@ -24,17 +36,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   are rounded the way an instrument shows them, such as 761 W and 11.3 kn.
 
 ### Changed
-
-- **Your alarm rules are now kept in the database.** They used to be in
-  `data/alarm-rules.json`. The first time you start this release, Helmcentral
-  copies every rule into `data/helmcentral.sqlite`, along with the record of
-  which built-in sets it has already offered, so none of them reappear. It then
-  renames the file to `alarm-rules.json.imported` and leaves it in the same
-  folder as a copy of what you had. The Alarms drawer works as before. Your
-  backups of the state folder already cover the database, but a backup that only
-  took `alarm-rules.json` will no longer have your latest rules. If the old file
-  can't be read, Helmcentral won't start and says why, and the file stays as it
-  was.
 
 - **Mate can set a tank's alarm levels.** When you ask it to change an item's
   tank warn level, alarm level, or to switch a tank's alarms off, it can now

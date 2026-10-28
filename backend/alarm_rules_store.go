@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -36,6 +37,20 @@ Derived rules (zone:, tank:) are never stored.
 
 var errAlarmRuleNotFound = errors.New("no such alarm rule")
 
+// errAlarmRulesNotReloaded is a write that committed but whose reload of the
+// engine's copy failed. The change is in the database; repeating it would
+// duplicate it.
+var errAlarmRulesNotReloaded = errors.New("the change was saved, but the alarm engine could not reload the rules; restart Helmcentral to pick it up, and do not repeat the change")
+
+// alarmRuleWriteStatus is the HTTP status for an error from a rule write:
+// fallback for a refused change, 500 for a saved change the engine has not seen.
+func alarmRuleWriteStatus(err error, fallback int) int {
+	if errors.Is(err, errAlarmRulesNotReloaded) {
+		return http.StatusInternalServerError
+	}
+	return fallback
+}
+
 // alarmSQLExecer is the part of *sql.Tx and *sql.DB the rule functions use.
 type alarmSQLExecer interface {
 	sqlQueryer
@@ -58,8 +73,8 @@ func createAlarmRulesSchema(db *sql.DB) error {
 			alarm_level_value      REAL,
 			capacity_path          TEXT NOT NULL DEFAULT '',
 			state                  TEXT NOT NULL,
-			methods_json           TEXT NOT NULL DEFAULT '[]',
-			notify_json            TEXT NOT NULL DEFAULT '[]',
+			methods_json           TEXT,
+			notify_json            TEXT,
 			escalate_after_seconds INTEGER NOT NULL DEFAULT 0,
 			seeded_by              TEXT,
 			created_at             INTEGER NOT NULL,
@@ -85,15 +100,28 @@ func alarmRuleStoreTime(t time.Time) int64 { return t.UTC().UnixNano() }
 
 func alarmRuleFromStoreTime(n int64) time.Time { return time.Unix(0, n).UTC() }
 
-func alarmJSONList(list []string) (string, error) {
+// alarmJSONList is NULL for a nil list, so a rule read back has the same
+// shape (null or []) as the one written.
+func alarmJSONList(list []string) (any, error) {
 	if list == nil {
-		list = []string{}
+		return nil, nil
 	}
 	b, err := json.Marshal(list)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	return string(b), nil
+}
+
+func parseAlarmJSONList(id, field string, raw sql.NullString) ([]string, error) {
+	if !raw.Valid {
+		return nil, nil
+	}
+	var out []string
+	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
+		return nil, fmt.Errorf("alarm rule %s: %s: %w", id, field, err)
+	}
+	return out, nil
 }
 
 func scanAlarmRule(row interface{ Scan(...any) error }) (alarmRule, error) {
@@ -102,7 +130,7 @@ func scanAlarmRule(row interface{ Scan(...any) error }) (alarmRule, error) {
 		enabled                    int
 		level                      sql.NullFloat64
 		seeded                     sql.NullString
-		methods, notify            string
+		methods, notify            sql.NullString
 		createdNanos, updatedNanos int64
 	)
 	if err := row.Scan(&r.ID, &enabled, &r.Path, &r.Label, &r.PathRole, &r.Op, &r.Value, &r.Hysteresis,
@@ -116,11 +144,12 @@ func scanAlarmRule(row interface{ Scan(...any) error }) (alarmRule, error) {
 		r.AlarmLevelValue = &v
 	}
 	r.SeededBy = seeded.String
-	if err := json.Unmarshal([]byte(methods), &r.Methods); err != nil {
-		return alarmRule{}, fmt.Errorf("alarm rule %s: methods: %w", r.ID, err)
+	var err error
+	if r.Methods, err = parseAlarmJSONList(r.ID, "methods", methods); err != nil {
+		return alarmRule{}, err
 	}
-	if err := json.Unmarshal([]byte(notify), &r.Notify); err != nil {
-		return alarmRule{}, fmt.Errorf("alarm rule %s: notify: %w", r.ID, err)
+	if r.Notify, err = parseAlarmJSONList(r.ID, "notify", notify); err != nil {
+		return alarmRule{}, err
 	}
 	r.CreatedAt = alarmRuleFromStoreTime(createdNanos)
 	r.UpdatedAt = alarmRuleFromStoreTime(updatedNanos)
@@ -290,7 +319,7 @@ func (s *documentStore) writeAlarmRules(op string, fn func(tx *sql.Tx, now time.
 		return err
 	}
 	if err := reloadAlarmRulesCache(s.db); err != nil {
-		return fmt.Errorf("%s: reload alarm rules after commit: %w", op, err)
+		return fmt.Errorf("%s: %w (%v)", op, errAlarmRulesNotReloaded, err)
 	}
 	return nil
 }

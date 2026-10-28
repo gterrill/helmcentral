@@ -11,6 +11,20 @@ import (
 	"time"
 )
 
+// insertFixedIDAlarmRuleForTest stores rule under the id it carries, without a
+// seed marker, as a build that died part way through a set would have left it.
+func insertFixedIDAlarmRuleForTest(t *testing.T, rule alarmRule) (alarmRule, error) {
+	t.Helper()
+	if err := validateAlarmRule(&rule); err != nil {
+		return alarmRule{}, err
+	}
+	err := globalDocumentStore.writeAlarmRules("test insert", func(tx *sql.Tx, now time.Time) error {
+		rule.CreatedAt, rule.UpdatedAt = now, now
+		return insertAlarmRuleTx(tx, rule)
+	})
+	return rule, err
+}
+
 func TestAlarmRulesSurviveReopeningTheStore(t *testing.T) {
 	withTempAlarmRules(t)
 	level := 7.5
@@ -230,6 +244,28 @@ func TestImportLegacyAlarmRulesMovesRulesAndMarkersThenRenamesTheFile(t *testing
 	anomaly := anomalyBaseSeedRules()[0]
 	anomaly.CreatedAt, anomaly.UpdatedAt = created, created
 	fileRules = append(fileRules, &anomaly)
+	// Fixed-id anomaly rules from every sub-set are settled by id alone.
+	fixed := map[string]string{}
+	for _, set := range []struct {
+		marker string
+		rules  []alarmRule
+	}{
+		{anomalyFrozenSeedMarker(), anomalyFrozenSeedRules()},
+		{anomalyBatterySeedMarker(), anomalyBatterySeedRules()},
+		{anomalyEngineSeedMarker("port"), anomalyEngineSeedRules("port", "Port")[:2]},
+		{anomalyEngineStumbleSeedMarker("Starboard"), anomalyEngineStumbleSeedRules("Starboard", "Starboard")},
+	} {
+		for _, r := range set.rules {
+			r.CreatedAt, r.UpdatedAt = created, created
+			fileRules = append(fileRules, &r)
+			fixed[r.ID] = set.marker
+		}
+	}
+	// A rule from an older seeder definition (another label) stays the operator's.
+	old := forecast[1]
+	old.ID, old.Label = "uuid-old-definition", "Forecast wind warning (old wording)"
+	old.CreatedAt, old.UpdatedAt = created, created
+	fileRules = append(fileRules, &old)
 	// A rule whose label the operator changed cannot be told from their own.
 	renamed := storms[1]
 	renamed.ID, renamed.Label = "uuid-renamed", "My own storm wording"
@@ -240,6 +276,7 @@ func TestImportLegacyAlarmRulesMovesRulesAndMarkersThenRenamesTheFile(t *testing
 		Rules:      fileRules,
 		SeededSets: []string{lawOfStormsSeedMarker, heavyWeatherSeedMarker, forecastWarningsSeedMarker, anomalyBaseSeedMarker},
 	})
+	wantMarkers := 4
 
 	n, err := importLegacyAlarmRules(globalDocumentStore, path, time.Now().UTC())
 	if err != nil {
@@ -265,14 +302,19 @@ func TestImportLegacyAlarmRulesMovesRulesAndMarkersThenRenamesTheFile(t *testing
 	}
 	for id, want := range map[string]string{
 		"uuid-storm": lawOfStormsSeedMarker, "uuid-heavy": heavyWeatherSeedMarker, "uuid-forecast": forecastWarningsSeedMarker,
-		anomalyImpossibleRuleID: anomalyBaseSeedMarker, "uuid-renamed": "",
+		anomalyImpossibleRuleID: anomalyBaseSeedMarker, "uuid-renamed": "", "uuid-old-definition": "",
 	} {
 		got, ok := getAlarmRule(id)
 		if !ok || got.SeededBy != want {
 			t.Errorf("%s: seeded_by %q (found %v), want %q", id, got.SeededBy, ok, want)
 		}
 	}
-	if len(alarmRulesSeededSets) != 4 {
+	for id, want := range fixed {
+		if got, ok := getAlarmRule(id); !ok || got.SeededBy != want {
+			t.Errorf("%s: seeded_by %q (found %v), want %q", id, got.SeededBy, ok, want)
+		}
+	}
+	if !containsString(alarmRulesSeededSets, legacyImportMarker) || len(alarmRulesSeededSets) != wantMarkers+1 {
 		t.Errorf("markers %v", alarmRulesSeededSets)
 	}
 	// Seeding after the import adds nothing: the markers came across.
@@ -381,5 +423,124 @@ func TestImportLegacyAlarmRulesRunsAfterTheIgnoredSensorMove(t *testing.T) {
 	}
 	if !store.has(ignoredSensorsList, "venus:512") {
 		t.Fatal("the ignored sensor was lost")
+	}
+}
+
+func TestRepeatImportAfterALostRenameDoesNotBringBackDeletedRules(t *testing.T) {
+	path := withTempAlarmRules(t)
+	now := time.Now()
+	writeLegacyRules(t, path, alarmRulesFile{Rules: []*alarmRule{
+		{ID: "keep", Label: "k", Path: "a.b", Op: alarmOpAbove, State: alarmStateWarn, CreatedAt: now, UpdatedAt: now},
+		{ID: "drop", Label: "d", Path: "a.c", Op: alarmOpAbove, State: alarmStateWarn, CreatedAt: now, UpdatedAt: now},
+	}})
+	if _, err := importLegacyAlarmRules(globalDocumentStore, path, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := deleteAlarmRule("drop"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(path+".imported", path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importLegacyAlarmRules(globalDocumentStore, path, now); err != nil {
+		t.Fatalf("repeat: %v", err)
+	}
+	if _, ok := getAlarmRule("drop"); ok {
+		t.Fatal("a deleted rule came back from the restored file")
+	}
+	if _, err := os.Stat(path + ".imported"); err != nil {
+		t.Fatalf("the repeat must still finish the rename: %v", err)
+	}
+}
+
+func TestImportIgnoresABlankIgnoredSensorList(t *testing.T) {
+	path := withTempAlarmRules(t)
+	if err := os.WriteFile(path, []byte(`{"rules":[],"ignored_sensors":["", "  "]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importLegacyAlarmRules(globalDocumentStore, path, time.Now()); err != nil {
+		t.Fatalf("a blank-only list holds nothing to lose: %v", err)
+	}
+}
+
+func TestACommittedWriteWhoseReloadFailsSaysItWasSaved(t *testing.T) {
+	withTempAlarmRules(t)
+	err := globalDocumentStore.writeAlarmRules("break", func(tx *sql.Tx, _ time.Time) error {
+		_, err := tx.Exec(`DROP TABLE alarm_rule_seeded_sets`)
+		return err
+	})
+	if !errors.Is(err, errAlarmRulesNotReloaded) || !strings.Contains(err.Error(), "was saved") {
+		t.Fatalf("got %v", err)
+	}
+	rec := alarmRuleWriteStatus(err, 400)
+	if rec != 500 {
+		t.Fatalf("a saved-but-not-reloaded write is a server fault, got %d", rec)
+	}
+	if alarmRuleWriteStatus(errors.New("other"), 400) != 400 {
+		t.Fatal("other errors keep the handler's status")
+	}
+}
+
+func TestAnEmptyNotifyListRoundTripsAsItWas(t *testing.T) {
+	withTempAlarmRules(t)
+	now := time.Now().UTC()
+	for id, notify := range map[string][]string{"nil": nil, "empty": {}, "some": {"ntfy"}} {
+		r := validRule()
+		r.ID, r.Notify, r.CreatedAt, r.UpdatedAt = id, notify, now, now
+		if err := globalDocumentStore.writeAlarmRules("t", func(tx *sql.Tx, _ time.Time) error { return insertAlarmRuleTx(tx, r) }); err != nil {
+			t.Fatal(err)
+		}
+		got, _ := getAlarmRule(id)
+		if (notify == nil) != (got.Notify == nil) || len(got.Notify) != len(notify) {
+			t.Errorf("%s: wrote %#v, read %#v", id, notify, got.Notify)
+		}
+		a, _ := json.Marshal(r)
+		b, _ := json.Marshal(got)
+		if !strings.Contains(string(a), `"notify"`) == strings.Contains(string(b), `"notify"`) && string(a) != string(b) {
+			t.Errorf("%s: JSON differs:\n%s\n%s", id, a, b)
+		}
+	}
+}
+
+func TestRoleBoundSyncsWriteOnlyWhenSomethingMoves(t *testing.T) {
+	withTempAlarmRules(t)
+	store := globalDocumentStore
+	writes := 0
+	store.lockWaitHook = func() { writes++ }
+	t.Cleanup(func() { store.lockWaitHook = nil })
+
+	bound := validRule()
+	bound.Enabled = false
+	bound.Path, bound.PathRole = "", alarmPathRoleHouseBankSoC
+	created, err := createAlarmRule(bound)
+	if err != nil {
+		t.Fatal(err)
+	}
+	literal := validRule()
+	literal.Path = "electrical.batteries.9.capacity.stateOfCharge"
+	if _, err := createAlarmRule(literal); err != nil {
+		t.Fatal(err)
+	}
+
+	writes = 0
+	if err := syncRoleBoundRules(vesselView{}); err != nil { // want "" == path "", nothing moves
+		t.Fatal(err)
+	}
+	if err := adoptHouseBankRules("electrical.batteries.nothing.here"); err != nil {
+		t.Fatal(err)
+	}
+	if writes != 0 {
+		t.Fatalf("%d store writes with nothing to move", writes)
+	}
+	got, _ := getAlarmRule(created.ID)
+	if !got.UpdatedAt.Equal(created.UpdatedAt) {
+		t.Fatal("an untouched rule's version moved")
+	}
+
+	if err := adoptHouseBankRules(literal.Path); err != nil {
+		t.Fatal(err)
+	}
+	if writes == 0 {
+		t.Fatal("adopting a matching rule must write")
 	}
 }

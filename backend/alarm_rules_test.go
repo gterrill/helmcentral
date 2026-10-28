@@ -650,8 +650,7 @@ func TestSeedAnomalyRules_BaseSetNeedsNoVesselSetup(t *testing.T) {
 		}
 	}
 	// The rules must persist under their own fixed IDs (code review finding
-	// 7), not whatever createAlarmRule would otherwise assign -- see
-	// createSeededAlarmRule's own doc comment.
+	// 7), not whatever createAlarmRule would otherwise assign.
 	if _, ok := byID[anomalyImpossibleRuleID]; !ok {
 		t.Fatalf("expected a rule persisted under the fixed id %q, got %+v", anomalyImpossibleRuleID, rules)
 	}
@@ -914,7 +913,7 @@ func TestSeedAnomalyRules_DoesNotResurrectADeletedRule(t *testing.T) {
 // only record the set's marker once all of them succeeded. A failure
 // partway through (a disk-full write, a transient I/O error) left the rules
 // that DID save on disk with no marker recorded, so a retry -- the next
-// restart, or the next vessel-settings save -- called createSeededAlarmRule
+// restart, or the next vessel-settings save -- called the old per-rule create
 // again for the same fixed IDs and failed forever with "id already in use",
 // never finishing the set. Simulates the exact state a partial failure
 // leaves behind (rule A saved, rule B and the marker not) and checks the
@@ -930,7 +929,7 @@ func TestSeedAnomalySet_ResumesAfterAPartialFailure(t *testing.T) {
 	// Simulate the first attempt getting partway through the set before
 	// failing: rule A saved, rule B never created, the marker never
 	// recorded.
-	if _, err := createSeededAlarmRule(rules[0]); err != nil {
+	if _, err := insertFixedIDAlarmRuleForTest(t, rules[0]); err != nil {
 		t.Fatalf("simulating the first partial attempt: %v", err)
 	}
 
@@ -959,7 +958,7 @@ func TestSeedAnomalySet_ResumesAfterAPartialFailure(t *testing.T) {
 func TestSeedAnomalySet_RefusesAGenuineIDConflict(t *testing.T) {
 	withTempAlarmRules(t)
 
-	if _, err := createSeededAlarmRule(alarmRule{
+	if _, err := insertFixedIDAlarmRuleForTest(t, alarmRule{
 		ID: "test:seed-conflict", Label: "Something else entirely", Enabled: true,
 		Path: "helmcentral.unrelated.path", Op: alarmOpAbove, Value: 1, DwellSeconds: 10, State: alarmStateWarn,
 	}); err != nil {
