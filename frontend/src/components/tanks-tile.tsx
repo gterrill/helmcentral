@@ -95,6 +95,17 @@ export const TanksTile = memo(function TanksTile({
 }: TanksTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
   const visibleTanks = tanks.slice(0, 8)
+  // The server lists tanks grouped by category; each run of one category is
+  // drawn as a group with a faint rule between groups.
+  const tankGroups = visibleTanks.reduce<TankLevel[][]>((groups, tank) => {
+    const last = groups[groups.length - 1]
+    if (last && last[0].category === tank.category) {
+      last.push(tank)
+    } else {
+      groups.push([tank])
+    }
+    return groups
+  }, [])
   // Worst tone across the visible tanks, in the tile-edge vocabulary. A stale
   // feed's tanks all read null here (mirroring the JSX below), which is moot
   // anyway: Tile suppresses the state whenever `stale` is set.
@@ -114,30 +125,38 @@ export const TanksTile = memo(function TanksTile({
       staleLabel={formatDataAge(lastUpdateAgeS)}
     >
       <div className="mt-3 space-y-2">
-        {visibleTanks.map((tank) => {
-          // A stale feed is showing a historical artefact, not a live level —
-          // blanked rather than tinted by a tone it can no longer vouch for.
-          const percent = feedStale ? null : clampPercent(tank.level_percent)
-          const tone: TankTone = percent === null ? 'normal' : tankToneFor(tank, percent)
-          const percentLabel = percent === null ? NO_VALUE : `${Math.round(percent)}%`
-          const toneWord = percent === null ? NO_VALUE : tankToneWord(tank.kind, tone)
+        {tankGroups.length > 0 ? (
+          <div className="divide-y divide-border/60">
+            {tankGroups.map((group) => (
+              <div key={group[0].id} data-testid="tank-group" className="space-y-2 py-2 first:pt-0 last:pb-0">
+                {group.map((tank) => {
+                  // A stale feed is showing a historical artefact, not a live level —
+                  // blanked rather than tinted by a tone it can no longer vouch for.
+                  const percent = feedStale ? null : clampPercent(tank.level_percent)
+                  const tone: TankTone = percent === null ? 'normal' : tankToneFor(tank, percent)
+                  const percentLabel = percent === null ? NO_VALUE : `${Math.round(percent)}%`
+                  const toneWord = percent === null ? NO_VALUE : tankToneWord(tank.kind, tone)
 
-          return (
-            <div key={tank.id} className="flex items-center gap-3">
-              <span className="grid h-6 w-6 shrink-0 place-items-center">{tankKindIcon(tank.kind)}</span>
-              <p className={cn('w-28 shrink-0 font-display text-sm uppercase leading-tight tracking-[0.08em] sm:w-32', toneTextClass(tone))}>
-                {tank.label}
-              </p>
-              <div className="h-5 min-w-0 flex-1 overflow-hidden rounded-md border bg-muted/30">
-                <div className={cn('h-full transition-[width] duration-500', toneBarClass(tone))} style={{ width: `${percent ?? 0}%` }} />
+                  return (
+                    <div key={tank.id} className="flex items-center gap-3">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center">{tankKindIcon(tank.kind)}</span>
+                      <p className={cn('w-28 shrink-0 font-display text-sm uppercase leading-tight tracking-[0.08em] sm:w-32', toneTextClass(tone))}>
+                        {tank.label}
+                      </p>
+                      <div className="h-5 min-w-0 flex-1 overflow-hidden rounded-md border bg-muted/30">
+                        <div className={cn('h-full transition-[width] duration-500', toneBarClass(tone))} style={{ width: `${percent ?? 0}%` }} />
+                      </div>
+                      <div className="flex w-20 shrink-0 flex-col items-end">
+                        <p className={cn('font-display text-2xl leading-none tabular-nums', toneTextClass(tone))}>{percentLabel}</p>
+                        <p className={cn('font-display text-[10px] uppercase leading-none tracking-[0.12em]', toneWordClass(tone))}>{toneWord}</p>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
-              <div className="flex w-20 shrink-0 flex-col items-end">
-                <p className={cn('font-display text-2xl leading-none tabular-nums', toneTextClass(tone))}>{percentLabel}</p>
-                <p className={cn('font-display text-[10px] uppercase leading-none tracking-[0.12em]', toneWordClass(tone))}>{toneWord}</p>
-              </div>
-            </div>
-          )
-        })}
+            ))}
+          </div>
+        ) : null}
 
         {error ? (
           <div role="alert" className="rounded-md border border-dashed bg-muted/25 px-3 py-4 text-center text-sm text-destructive">{error}</div>

@@ -19,6 +19,28 @@ function tank(overrides: Partial<TankLevel>): TankLevel {
 }
 
 describe('TanksTile', () => {
+  it('puts consecutive tanks of one category in a group of their own', () => {
+    render(
+      <TanksTile
+        tanks={[
+          tank({ id: 'freshWater.1', label: 'Fresh', category: 'freshWater', kind: 'water' }),
+          tank({ id: 'fuel.1', label: 'Fuel Port', category: 'fuel' }),
+          tank({ id: 'fuel.2', label: 'Fuel Stbd', category: 'fuel' }),
+          tank({ id: 'blackWater.1', label: 'Black', category: 'blackWater', kind: 'waste' }),
+        ]}
+        loading={false}
+        lastUpdateAgeS={null}
+      />,
+    )
+
+    const groups = screen.getAllByTestId('tank-group')
+    expect(groups).toHaveLength(3)
+    expect(groups[1]).toContainElement(screen.getByText('Fuel Port'))
+    expect(groups[1]).toContainElement(screen.getByText('Fuel Stbd'))
+    expect(groups[0]).not.toContainElement(screen.getByText('Fuel Port'))
+    expect(groups[2]).toContainElement(screen.getByText('Black'))
+  })
+
   // Finding: eight tank rows sat permanently green on a live board. A
   // healthy tank must render with no alert colour at all — neither on the
   // label, the bar nor the number — and the earlier hardcoded hex is gone
