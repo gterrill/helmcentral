@@ -454,3 +454,20 @@ func TestBuiltInAlarmCheckListCoversTheEventBuilders(t *testing.T) {
 		}
 	}
 }
+
+// A failed read of the first raise is reported, never swapped for a plainer
+// pattern that hides it.
+func TestAlarmRepeatPattern_ReadFailureIsAnError(t *testing.T) {
+	store := newTestAlarmLog(t)
+	if err := store.db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
+	pattern, err := assistantToolDeps{}.alarmRepeatPattern(store, collisionProfileRuleID, 25, now, func(t time.Time) string { return t.String() })
+	if err == nil {
+		t.Fatalf("want an error, got pattern %q", pattern)
+	}
+	if pattern != "" {
+		t.Errorf("no pattern on a failed read, got %q", pattern)
+	}
+}

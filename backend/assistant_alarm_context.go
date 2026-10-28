@@ -519,16 +519,19 @@ func parseHistoryEvery(every string) time.Duration {
 // alarmRepeatPattern says how often an alarm keeps going off. The rate is over
 // the span the raises actually cover, never a day figure for less than a day;
 // a short span is given as a count since the first raise.
-func (d assistantToolDeps) alarmRepeatPattern(store *alarmLogStore, ruleID string, n int, now time.Time, stamp func(time.Time) string) string {
+func (d assistantToolDeps) alarmRepeatPattern(store *alarmLogStore, ruleID string, n int, now time.Time, stamp func(time.Time) string) (string, error) {
 	first, ok, err := store.EarliestRaised(ruleID, now.Add(-alarmContextOccurrences))
-	if err != nil || !ok {
-		return fmt.Sprintf("raised %d times in 7 days", n)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("read alarm log: %d raises counted but no first raise found", n)
 	}
 	span := now.Sub(first)
 	if span < 48*time.Hour {
-		return fmt.Sprintf("raised %d times since %s", n, stamp(first))
+		return fmt.Sprintf("raised %d times since %s", n, stamp(first)), nil
 	}
-	return fmt.Sprintf("raised %d times in %d days, about %d a day", n, int(math.Round(span.Hours()/24)), int(math.Round(float64(n)/(span.Hours()/24))))
+	return fmt.Sprintf("raised %d times in %d days, about %d a day", n, int(math.Round(span.Hours()/24)), int(math.Round(float64(n)/(span.Hours()/24)))), nil
 }
 
 func (d assistantToolDeps) fillAlarmContextLog(res *assistantAlarmContextResult, sub alarmContextSubject, a alarmStatus, stamp func(time.Time) string) {
@@ -548,7 +551,13 @@ func (d assistantToolDeps) fillAlarmContextLog(res *assistantAlarmContextResult,
 	} else {
 		res.Occurrences = &assistantAlarmOccurrences{RaisedLast7Days: n}
 		if n >= alarmContextRepeatThreshold {
-			res.Occurrences.Pattern = d.alarmRepeatPattern(store, a.RuleID, n, now, stamp)
+			pattern, err := d.alarmRepeatPattern(store, a.RuleID, n, now, stamp)
+			if err != nil {
+				res.Occurrences = nil
+				res.OccurrencesAbsent = "reading the alarm log failed: " + err.Error()
+			} else {
+				res.Occurrences.Pattern = pattern
+			}
 		}
 	}
 	if a.RaisedAt.IsZero() {
