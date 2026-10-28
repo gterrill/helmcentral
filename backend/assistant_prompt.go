@@ -803,7 +803,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"levels, gauge zones) is changed where its change_it says, not by an alarm_rule change. Find the path with " +
 		"check_signalk_paths or the other path tools, never from memory. Then propose the rule with propose_changes. " +
 		"Give value and clear_value in the operator's units, as the card and list_alarm_rules show them (percent, " +
-		"degrees, knots), not SI. Always give a clear point so the alarm does not chatter, and how long it must hold " +
+		"degrees, knots), not SI. If the refusal says the boat reports no unit for the path, tell the operator to set that level in the Alarms drawer. For an above or below alarm always give a clear point so it does not chatter (an equal, notEqual or stale alarm has none), and always say how long it must hold " +
 		"(dwell_seconds), and say both in your reply with the severity you chose. The label is the alarm's title for " +
 		"someone reading it at 02:00: the event in a few words, such as \"House Bank Low\", never a path or a rule id, " +
 		"no exclamation marks. A proposal changes nothing until the operator taps Apply, so say it is waiting and " +

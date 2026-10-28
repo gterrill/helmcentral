@@ -107,10 +107,11 @@ func equipmentRecordType() *recordType {
 		Effects:  equipmentDeleteEffects,
 		Describe: describeEquipment,
 		Href:     func(r recordSnapshot) string { return "/inventory/equipment/" + r.ID },
-		AfterCommit: func(res changeOpResult) {
+		AfterCommit: func(res changeOpResult) error {
 			if res.Type == recordTypeEquipment && res.Action == changeUpdate {
 				reseedAnomalyRulesAfterItemSave(res.ID)
 			}
+			return nil
 		},
 	}
 }

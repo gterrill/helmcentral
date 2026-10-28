@@ -153,7 +153,7 @@ function OpFields({ op, ops }: { op: AssistantProposalOp; ops: AssistantProposal
     <dl className="flex min-w-0 flex-col gap-1 rounded-sm bg-muted/40 p-2 text-xs">
       {names.map((name) => (
         <div key={name} className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1">
-          <dt className="w-24 shrink-0 truncate text-muted-foreground">{fieldLabel(name)}</dt>
+          <dt className="w-24 shrink-0 truncate text-muted-foreground">{fieldLabel(name, op.type)}</dt>
           <dd className="flex min-w-0 flex-1 flex-wrap items-start gap-x-2 gap-y-1 text-foreground">
             {op.action === 'delete' ? (
               value(op.before, name)

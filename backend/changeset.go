@@ -47,6 +47,10 @@ type changeOp struct {
 	After       map[string]any `json:"after,omitempty"`
 	// Watches are records the operation depends on without targeting them.
 	Watches []recordWatch `json:"watches,omitempty"`
+	// Pins are facts about the world the operation's numbers were read against
+	// when Mate proposed it (the unit a level is in). Apply reads them again
+	// and refuses the changeset as stale if they differ.
+	Pins map[string]string `json:"pins,omitempty"`
 }
 
 // changeOpResult names what one operation wrote, for the card's links.
@@ -451,7 +455,7 @@ func (r *recordRegistry) prepare(store *documentStore, today time.Time, in []cha
 	ops := make([]changeOp, len(in))
 	for i, op := range in {
 		// Output-only fields are never taken from the model.
-		op.Label, op.Description, op.Before, op.After, op.Watches = "", "", nil, nil, nil
+		op.Label, op.Description, op.Before, op.After, op.Watches, op.Pins = "", "", nil, nil, nil, nil
 		ops[i] = op
 	}
 	for i := range ops {
@@ -511,6 +515,13 @@ func (r *recordRegistry) attach(env changeEnv, i int, op *changeOp) error {
 			return fmt.Errorf("%s: %w", head, translateChangeError(t, err))
 		}
 		op.Watches = watches
+	}
+	if t.Pin != nil {
+		pins, err := t.Pin(env.tx, *op)
+		if err != nil {
+			return fmt.Errorf("%s: %w", head, err)
+		}
+		op.Pins = pins
 	}
 	return nil
 }
@@ -686,12 +697,18 @@ func (r *recordRegistry) apply(tx *sql.Tx, now, today time.Time, ops []changeOp)
 }
 
 // afterCommit runs each type's post-commit hook for what its operations wrote.
-func (r *recordRegistry) afterCommit(results []changeOpResult) {
+// A hook's failure is returned, for a change that is saved but not fully in
+// effect, and every other type's hook still runs.
+func (r *recordRegistry) afterCommit(results []changeOpResult) error {
+	var errs []error
 	for _, res := range results {
 		if t, ok := r.types[res.Type]; ok && t.AfterCommit != nil {
-			t.AfterCommit(res)
+			if err := t.AfterCommit(res); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
+	return errors.Join(errs...)
 }
 
 // checkFresh compares every target and watch with its stored version. Two
@@ -714,6 +731,17 @@ func (r *recordRegistry) checkFresh(q sqlQueryer, ops []changeOp) error {
 		for _, w := range op.Watches {
 			if err := r.checkOneFresh(q, w.Type, w.ID, w.Version, w.Label); err != nil {
 				return err
+			}
+		}
+		if t := r.types[op.Type]; t.Pin != nil && len(op.Pins) > 0 {
+			now, err := t.Pin(q, op)
+			if err != nil {
+				return err
+			}
+			for k, want := range op.Pins {
+				if now[k] != want {
+					return &staleProposalError{reason: fmt.Sprintf("the %s for %s changed since Mate proposed this, so nothing was applied", k, op.Label)}
+				}
 			}
 		}
 	}

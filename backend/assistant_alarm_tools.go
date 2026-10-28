@@ -38,7 +38,7 @@ type assistantListAlarmRulesResult struct {
 }
 
 func alarmRuleListEntry(r alarmRule, derived bool) assistantAlarmRuleEntry {
-	d := alarmDisplayFor(r.Path)
+	d, _ := alarmDisplayFor(r.Path, r.PathRole)
 	e := assistantAlarmRuleEntry{
 		ID: r.ID, Label: r.Label, Path: r.Path, Op: r.Op, Value: d.toShown(r.Value), DisplayUnit: d.label,
 		State: r.State, DwellSecs: r.DwellSeconds, StaleSecs: r.StaleAfterSeconds, Enabled: r.Enabled, Origin: "own",

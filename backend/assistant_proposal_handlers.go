@@ -21,6 +21,10 @@ func applyAssistantProposalHandler(c echo.Context) error {
 		return writeInventoryValidationError(c, verr)
 	}
 	p, err := applyAssistantProposal(globalAssistantStore, globalDocumentStore, c.Param("id"), today)
+	if errors.Is(err, errAlarmRulesNotReloaded) {
+		// Saved, so the card gets the proposal as applied beside the reason.
+		return c.JSON(http.StatusInternalServerError, map[string]any{"error": err.Error(), "proposal": p})
+	}
 	if err != nil {
 		return writeAssistantProposalError(c, err)
 	}

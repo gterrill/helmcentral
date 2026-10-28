@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -83,10 +84,10 @@ func TestAlarmRule_CreateIsProposedInOperatorUnitsAndAppliedInSI(t *testing.T) {
 func TestAlarmRule_CreateUsesTheRESTValidator(t *testing.T) {
 	env := alarmProposalEnv(t)
 	for name, tc := range map[string]struct{ fields, want string }{
-		"state":       {`"label":"X","path":"a.b","op":"above","value":1,"state":"normal","dwell_seconds":5`, "state:"},
+		"state":       {`"label":"X","path":"` + testSoCPath + `","op":"above","value":1,"state":"normal","dwell_seconds":5`, "state:"},
 		"no path":     {`"label":"X","path":" ","op":"above","value":1,"state":"warn","dwell_seconds":5`, "path:"},
-		"missing":     {`"label":"X","path":"a.b","op":"above","state":"warn","dwell_seconds":5`, "value: is required"},
-		"wrong clear": {`"label":"X","path":"a.b","op":"below","value":10,"clear_value":8,"state":"warn","dwell_seconds":5`, "clear_value:"},
+		"missing":     {`"label":"X","path":"` + testSoCPath + `","op":"above","state":"warn","dwell_seconds":5`, "value: is required"},
+		"wrong clear": {`"label":"X","path":"` + testSoCPath + `","op":"below","value":10,"clear_value":8,"state":"warn","dwell_seconds":5`, "clear_value:"},
 	} {
 		msg := proposeError(t, env.deps, `{"operations":[{"type":"alarm_rule","action":"create","fields":{`+tc.fields+`}}]}`)
 		if !strings.Contains(msg, tc.want) {
@@ -180,7 +181,11 @@ func TestAlarmRule_DerivedRulesAreRefusedWithAReason(t *testing.T) {
 
 func TestAlarmRule_DeletingABuiltInRuleIsAllowedAndStaysDeleted(t *testing.T) {
 	env := alarmProposalEnv(t)
-	seed := seedBuiltInRule(t, alarmRule{Enabled: true, Path: testSoCPath, Label: "House Bank Low", Op: alarmOpBelow, Value: 0.5, DwellSeconds: 30, State: alarmStateWarn})
+	set := []alarmRule{{Enabled: true, Path: testSoCPath, Label: "House Bank Low", Op: alarmOpBelow, Value: 0.5, DwellSeconds: 30, State: alarmStateWarn}}
+	if err := seedAlarmRuleSet("test-set", set, false); err != nil {
+		t.Fatal(err)
+	}
+	seed := listAlarmRules()[0]
 	env.advance()
 	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"alarm_rule","action":"delete","id":%q}]}`, seed.ID))
 	if d := p.Ops[0].Description; !strings.Contains(d, "House Bank Low") || !strings.Contains(d, "built-in") {
@@ -192,6 +197,12 @@ func TestAlarmRule_DeletingABuiltInRuleIsAllowedAndStaysDeleted(t *testing.T) {
 	}
 	if _, ok := getAlarmRule(seed.ID); ok {
 		t.Error("rule still live after delete")
+	}
+	if err := seedAlarmRuleSet("test-set", set, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(listAlarmRules()); n != 0 {
+		t.Fatalf("a deleted built-in must not be seeded again, got %d rules", n)
 	}
 }
 
@@ -240,5 +251,139 @@ func TestAlarmRuleListEntry_DerivedTankPointsAtTheEquipmentRecord(t *testing.T) 
 	e := alarmRuleListEntry(alarmRule{ID: "tank:x", Label: "Fuel Port Low", Path: "tanks.fuel.0.currentLevel", Op: alarmOpBelow, Value: 0.25, AlarmLevelValue: &alarm, Hysteresis: 0.05, Enabled: true}, true)
 	if !e.ReadOnly || !strings.Contains(e.ChangeIt, "tank_warn_percent") || e.Value != 25 || e.AlarmLevel == nil || *e.AlarmLevel != 10 {
 		t.Errorf("entry %+v", e)
+	}
+}
+
+// ── review fixes ────────────────────────────────────────────────────────
+
+func TestAlarmRule_UpdatingARoleBoundRuleDoesNotReenterTheStoreLock(t *testing.T) {
+	env := alarmProposalEnv(t)
+	t.Setenv("SETTINGS_FILE", t.TempDir()+"/none.yaml")
+	r := alarmRule{ID: "role-rule", Enabled: true, Path: "", PathRole: alarmPathRoleHouseBankSoC, Label: "House Bank Low", Op: alarmOpBelow, Value: 0.5, DwellSeconds: 30, State: alarmStateWarn, Methods: []string{"visual"}}
+	err := globalDocumentStore.writeAlarmRules("seed", func(tx *sql.Tx, now time.Time) error {
+		r.CreatedAt, r.UpdatedAt = now, now
+		return insertAlarmRuleTx(tx, r)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalidateSourceItems()
+	env.advance()
+	done := make(chan assistantProposal, 1)
+	go func() {
+		done <- env.propose(t, `{"operations":[{"type":"alarm_rule","action":"update","id":"role-rule","fields":{"enabled":false}}]}`)
+	}()
+	select {
+	case p := <-done:
+		invalidateSourceItems()
+		env.advance()
+		go func() {
+			_, _ = env.apply(p.ID)
+			done <- p
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("apply deadlocked")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("propose deadlocked")
+	}
+	if got, _ := getAlarmRule("role-rule"); got.Enabled {
+		t.Error("the rule should be switched off")
+	}
+}
+
+func TestAlarmRule_UnknownUnitRefusesNumbersAndNamesThePath(t *testing.T) {
+	env := alarmProposalEnv(t)
+	msg := proposeError(t, env.deps, `{"operations":[{"type":"alarm_rule","action":"create","fields":{
+		"label":"X","path":"a.b","op":"above","value":3,"state":"warn","dwell_seconds":5}}]}`)
+	if !strings.Contains(msg, "value:") || !strings.Contains(msg, "a.b") || !strings.Contains(msg, "unit") {
+		t.Errorf("got %q", msg)
+	}
+	// Without a number there is nothing to convert: switching a rule off is fine.
+	own, err := createAlarmRule(alarmRule{Enabled: true, Path: "a.b", Label: "Mine", Op: alarmOpAbove, Value: 3, State: alarmStateAlarm})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.advance()
+	env.propose(t, fmt.Sprintf(`{"operations":[{"type":"alarm_rule","action":"update","id":%q,"fields":{"enabled":false}}]}`, own.ID))
+}
+
+func TestAlarmRule_HouseBankRoleIsARatio(t *testing.T) {
+	env := alarmProposalEnv(t)
+	r := alarmRule{ID: "role-rule", Enabled: true, Path: "", PathRole: alarmPathRoleHouseBankSoC, Label: "House Bank Low", Op: alarmOpBelow, Value: 0.5, Hysteresis: 0.05, DwellSeconds: 30, State: alarmStateWarn, Methods: []string{"visual"}}
+	if err := globalDocumentStore.writeAlarmRules("seed", func(tx *sql.Tx, now time.Time) error {
+		r.CreatedAt, r.UpdatedAt = now, now
+		return insertAlarmRuleTx(tx, r)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SETTINGS_FILE", t.TempDir()+"/none.yaml")
+	env.advance()
+	p := env.propose(t, `{"operations":[{"type":"alarm_rule","action":"update","id":"role-rule","fields":{"value":40}}]}`)
+	if p.Ops[0].After["value"] != "40 %" {
+		t.Errorf("a rule that follows the house bank is a percentage, got %v", p.Ops[0].After)
+	}
+}
+
+func TestAlarmRule_UnitChangeBetweenProposeAndApplyMakesItStale(t *testing.T) {
+	env := alarmProposalEnv(t)
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"alarm_rule","action":"create","fields":{
+		"label":"House Bank Low","path":%q,"op":"below","value":50,"state":"warn","dwell_seconds":30}}]}`, testSoCPath))
+	prev := alarmRuleUnitFor
+	alarmRuleUnitFor = func(string) string { return "Pa" }
+	t.Cleanup(func() { alarmRuleUnitFor = prev })
+	env.advance()
+	_, err := env.apply(p.ID)
+	if err == nil || !strings.Contains(err.Error(), "unit") {
+		t.Fatalf("expected a stale refusal naming the unit, got %v", err)
+	}
+	if n := len(listAlarmRules()); n != 0 {
+		t.Errorf("nothing is written, got %d", n)
+	}
+}
+
+func TestAlarmRule_ReloadFailureIsReportedOnApply(t *testing.T) {
+	env := alarmProposalEnv(t)
+	other, err := createAlarmRule(alarmRule{Enabled: true, Path: testSoCPath, Label: "Other", Op: alarmOpBelow, Value: 0.2, State: alarmStateWarn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"alarm_rule","action":"create","fields":{
+		"label":"House Bank Low","path":%q,"op":"below","value":50,"state":"warn","dwell_seconds":30}}]}`, testSoCPath))
+	if _, err := globalDocumentStore.db.Exec(`UPDATE alarm_rules SET methods_json = '{bad' WHERE id = ?`, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	env.advance()
+	got, err := env.apply(p.ID)
+	if err == nil || !errors.Is(err, errAlarmRulesNotReloaded) {
+		t.Fatalf("expected the not-reloaded error, got %v", err)
+	}
+	if got.Status != assistantProposalApplied {
+		t.Errorf("the change was saved, so the proposal is applied, got %q", got.Status)
+	}
+}
+
+func TestAlarmRule_ExplicitNullClearPointIsAcceptedOnAnEqualAlarm(t *testing.T) {
+	env := alarmProposalEnv(t)
+	own, err := createAlarmRule(alarmRule{Enabled: true, Path: testSoCPath, Label: "Mine", Op: alarmOpEqual, Value: 1, DwellSeconds: 5, State: alarmStateWarn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.advance()
+	env.propose(t, fmt.Sprintf(`{"operations":[{"type":"alarm_rule","action":"update","id":%q,"fields":{"clear_value":null,"dwell_seconds":9}}]}`, own.ID))
+	msg := proposeError(t, env.deps, fmt.Sprintf(`{"operations":[{"type":"alarm_rule","action":"update","id":%q,"fields":{"clear_value":60}}]}`, own.ID))
+	if !strings.Contains(msg, "no clear point") {
+		t.Errorf("got %q", msg)
+	}
+}
+
+func TestAlarmRule_CardShowsWordsForConditionAndSeverity(t *testing.T) {
+	env := alarmProposalEnv(t)
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"alarm_rule","action":"create","fields":{
+		"label":"Bank Odd","path":%q,"op":"notEqual","value":100,"state":"warn","dwell_seconds":5}}]}`, testSoCPath))
+	if p.Ops[0].After["op"] != "differs from" || p.Ops[0].After["state"] != "Warning" {
+		t.Errorf("got %v", p.Ops[0].After)
 	}
 }

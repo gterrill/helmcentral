@@ -17,16 +17,22 @@ const FIELD_LABELS: Record<string, string> = {
   rule_id: 'Rule',
   equipment_id: 'Item',
   polygon: 'Outline',
-  value: 'Threshold',
-  clear_value: 'Clears at',
-  dwell_seconds: 'Holds for',
-  stale_after_seconds: 'Silent for',
-  op: 'Fires when',
-  state: 'Severity',
 }
 
-export function fieldLabel(name: string): string {
-  const label = FIELD_LABELS[name] ?? name.replace(/_/g, ' ')
+/** Labels for one type's fields, ahead of the shared ones. */
+const TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
+  alarm_rule: {
+    value: 'Threshold',
+    clear_value: 'Clears at',
+    dwell_seconds: 'Holds for',
+    stale_after_seconds: 'Silent for',
+    op: 'Fires when',
+    state: 'Severity',
+  },
+}
+
+export function fieldLabel(name: string, type?: string): string {
+  const label = (type ? TYPE_FIELD_LABELS[type]?.[name] : undefined) ?? FIELD_LABELS[name] ?? name.replace(/_/g, ' ')
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 

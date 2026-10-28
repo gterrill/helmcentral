@@ -165,7 +165,10 @@ type recordType struct {
 	Renames map[string]string
 	// AfterCommit runs once the changeset's transaction has committed, for
 	// side effects a command cannot make inside it. Optional.
-	AfterCommit func(res changeOpResult)
+	AfterCommit func(res changeOpResult) error
+	// Pin reads the facts an operation's numbers depend on, to be stored with
+	// the proposal and read again at Apply (changeOp.Pins). Optional.
+	Pin func(q sqlQueryer, op changeOp) (map[string]string, error)
 	// Display rewrites the Before and After values a card shows (a number
 	// with its unit). It gets the record's snapshot for the unit. Optional.
 	Display func(snap recordSnapshot, fields map[string]any) map[string]any

@@ -43,11 +43,23 @@ type alarmDisplay struct {
 	decimals int
 }
 
-func alarmDisplayFor(path string) alarmDisplay {
-	label, conv, decimals, ok := operatorUnit(alarmRuleUnitFor(path))
+// alarmUnitFor is the SI unit a rule's numbers are in: a rule that follows the
+// house bank is a ratio whatever the boat has declared.
+func alarmUnitFor(path, role string) string {
+	if role == alarmPathRoleHouseBankSoC {
+		return "ratio"
+	}
+	return alarmRuleUnitFor(path)
+}
+
+// alarmDisplayFor is the conversion for a rule's path. known is false when the
+// boat has declared no unit for it: the numbers then stay as stored, and a
+// proposal may not set one, since nothing says what the operator's number means.
+func alarmDisplayFor(path, role string) (d alarmDisplay, known bool) {
+	label, conv, decimals, ok := operatorUnit(alarmUnitFor(path, role))
 	if !ok {
 		same := func(v float64) float64 { return v }
-		return alarmDisplay{toShown: same, toSI: same, decimals: 3}
+		return alarmDisplay{toShown: same, toSI: same, decimals: 3}, false
 	}
 	zero, slope := conv(0), conv(1)-conv(0)
 	return alarmDisplay{
@@ -55,7 +67,7 @@ func alarmDisplayFor(path string) alarmDisplay {
 		toShown:  func(v float64) float64 { return roundTo(conv(v), 3) },
 		toSI:     func(v float64) float64 { return (v - zero) / slope },
 		decimals: decimals,
-	}
+	}, true
 }
 
 // text renders a value already in the shown unit.
@@ -101,9 +113,10 @@ func alarmRuleRecordType() *recordType {
 		Describe: describeAlarmRule,
 		Display:  displayAlarmRuleFields,
 		Href:     func(recordSnapshot) string { return "/alarms" },
-		AfterCommit: func(res changeOpResult) {
+		Pin:      pinAlarmRuleUnit,
+		AfterCommit: func(res changeOpResult) error {
 			if res.Type != recordTypeAlarmRule {
-				return
+				return nil
 			}
 			store, err := alarmRuleStore()
 			if err == nil {
@@ -112,7 +125,9 @@ func alarmRuleRecordType() *recordType {
 			if err != nil {
 				// The rule is committed; only the running copy is behind.
 				log.Printf("alarm rules: applied a proposal but could not reload the running rules: %v", err)
+				return fmt.Errorf("%w (%v)", errAlarmRulesNotReloaded, err)
 			}
+			return nil
 		},
 	}
 }
@@ -120,7 +135,7 @@ func alarmRuleRecordType() *recordType {
 func alarmRuleVersion(r alarmRule) string { return r.UpdatedAt.UTC().Format(time.RFC3339Nano) }
 
 func alarmRuleSnapshot(r alarmRule) recordSnapshot {
-	d := alarmDisplayFor(r.Path)
+	d, _ := alarmDisplayFor(r.Path, r.PathRole)
 	var clear any
 	if c := alarmClearValueFor(r); c != nil {
 		clear = d.toShown(*c)
@@ -203,7 +218,13 @@ func alarmRuleFieldError(err error) error {
 // unit and leave in SI. A clear_value sets the deadband against the threshold
 // it ends up with; without one the existing deadband stays.
 func applyAlarmFields(r alarmRule, given fieldSet) (alarmRule, error) {
-	d := alarmDisplayFor(r.Path)
+	d, known := alarmDisplayFor(r.Path, r.PathRole)
+	needUnit := func(field string) error {
+		if known {
+			return nil
+		}
+		return fieldErr(field, "the boat has not reported a unit for %s, so Mate can't tell what this number means; set the level in the Alarms drawer", r.Path)
+	}
 	if v, ok := given["label"]; ok {
 		r.Label = stringOf(v)
 	}
@@ -223,15 +244,22 @@ func applyAlarmFields(r alarmRule, given fieldSet) (alarmRule, error) {
 		r.StaleAfterSeconds = *v
 	}
 	if v := floatPtrOf(given["value"]); v != nil {
+		if err := needUnit("value"); err != nil {
+			return r, err
+		}
 		r.Value = d.toSI(*v)
 	}
 	if clear, ok := given["clear_value"]; ok {
-		if r.Op != alarmOpAbove && r.Op != alarmOpBelow {
-			return r, fieldErr("clear_value", "a %s alarm has no clear point", r.Op)
-		}
 		if c := floatPtrOf(clear); c == nil {
+			// An explicit null is "no clear point", true of every operator.
 			r.Hysteresis = 0
 		} else {
+			if r.Op != alarmOpAbove && r.Op != alarmOpBelow {
+				return r, fieldErr("clear_value", "a %s alarm has no clear point", r.Op)
+			}
+			if err := needUnit("clear_value"); err != nil {
+				return r, err
+			}
 			gap := d.toSI(*c) - r.Value
 			if r.Op == alarmOpAbove {
 				gap = -gap
@@ -269,6 +297,9 @@ func createAlarmRuleRecord(env changeEnv, given fieldSet) (createdRecord, error)
 	} else if err := requireAlarmFields(given, "value", "dwell_seconds"); err != nil {
 		return createdRecord{}, err
 	}
+	if stringOf(given["path"]) == "" {
+		return createdRecord{}, fieldErr("path", "alarm rule requires a SignalK path")
+	}
 	r := alarmRule{Enabled: true, Path: stringOf(given["path"]), Methods: []string{"visual", "sound"}}
 	if derr := derivedAlarmRuleReason(r.Path); derr != nil {
 		return createdRecord{}, fieldErr("path", "%v", derr)
@@ -277,7 +308,7 @@ func createAlarmRuleRecord(env changeEnv, given fieldSet) (createdRecord, error)
 	if err != nil {
 		return createdRecord{}, err
 	}
-	if err := validateAlarmRule(&r); err != nil {
+	if err := validateAlarmRuleResolving(&r, false, func(role string) (string, error) { return alarmRolePathQ(env.tx, role) }); err != nil {
 		return createdRecord{}, alarmRuleFieldError(err)
 	}
 	r.ID = uuid.NewString()
@@ -300,7 +331,7 @@ func updateAlarmRuleRecord(env changeEnv, before recordSnapshot, given fieldSet)
 	if err != nil {
 		return err
 	}
-	if err := validateAlarmRuleFor(&next, true); err != nil {
+	if err := validateAlarmRuleResolving(&next, true, func(role string) (string, error) { return alarmRolePathQ(env.tx, role) }); err != nil {
 		return alarmRuleFieldError(err)
 	}
 	next.UpdatedAt = env.now
@@ -309,6 +340,25 @@ func updateAlarmRuleRecord(env changeEnv, before recordSnapshot, given fieldSet)
 
 func deleteAlarmRuleRecord(env changeEnv, before recordSnapshot) error {
 	return deleteAlarmRuleTx(env.tx, before.ID)
+}
+
+// pinAlarmRuleUnit records the unit the operation's numbers are read in, when
+// it gives any, so Apply can refuse if the boat's unit for the path moved on.
+func pinAlarmRuleUnit(q sqlQueryer, op changeOp) (map[string]string, error) {
+	_, hasValue := op.Fields["value"]
+	clear, hasClear := op.Fields["clear_value"]
+	if op.Action == changeDelete || (!hasValue && (!hasClear || clear == nil)) {
+		return nil, nil
+	}
+	path, role := stringOf(op.Fields["path"]), ""
+	if op.Action == changeUpdate {
+		r, err := alarmRuleByIDQ(q, op.ID)
+		if err != nil {
+			return nil, err
+		}
+		path, role = r.Path, r.PathRole
+	}
+	return map[string]string{"unit": alarmUnitFor(path, role)}, nil
 }
 
 // ── words ───────────────────────────────────────────────────────────────
@@ -396,6 +446,15 @@ func describeAlarmRule(d describeInput) string {
 	return out
 }
 
+var alarmOpWords = map[string]string{
+	alarmOpAbove: "rises above", alarmOpBelow: "falls below", alarmOpEqual: "equals",
+	alarmOpNotEqual: "differs from", alarmOpStale: "stops reporting",
+}
+
+var alarmStateWords = map[string]string{
+	alarmStateAlert: "Alert", alarmStateWarn: "Warning", alarmStateAlarm: "Alarm", alarmStateEmergency: "Emergency",
+}
+
 // displayAlarmRuleFields is how the card shows a rule's fields: the numbers
 // with their unit, and the unit and origin left to the description.
 func displayAlarmRuleFields(snap recordSnapshot, fields map[string]any) map[string]any {
@@ -408,6 +467,14 @@ func displayAlarmRuleFields(snap recordSnapshot, fields map[string]any) map[stri
 		case "value", "clear_value":
 			if n := floatPtrOf(v); n != nil {
 				v = d.text(*n)
+			}
+		case "op":
+			if w, ok := alarmOpWords[stringOf(v)]; ok {
+				v = w
+			}
+		case "state":
+			if w, ok := alarmStateWords[stringOf(v)]; ok {
+				v = w
 			}
 		case "dwell_seconds", "stale_after_seconds":
 			if n := intPtrOf(v); n != nil {

@@ -275,7 +275,11 @@ func applyAssistantProposal(assistant *assistantStore, records *documentStore, i
 	if err != nil {
 		return assistantProposal{}, err
 	}
-	defaultRecordRegistry.afterCommit(results)
+	// The change is committed whatever a hook says, so the proposal comes
+	// back with the error and the handler can report both.
+	if err := defaultRecordRegistry.afterCommit(results); err != nil {
+		return p, err
+	}
 	return p, nil
 }
 

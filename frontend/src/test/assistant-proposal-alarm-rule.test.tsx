@@ -44,6 +44,16 @@ describe('alarm rule proposal card', () => {
     expect(screen.getByText('40 %')).toBeInTheDocument()
   })
 
+  it('keeps the alarm labels to alarm changes', () => {
+    const other: AssistantProposal = {
+      ...proposal,
+      ops: [{ type: 'equipment', action: 'update', description: 'Change X', before: { value: 'a' }, after: { value: 'b' } }],
+    }
+    render(<AssistantProposalCard proposal={other} canWrite onChange={vi.fn()} />)
+    expect(screen.getByText('Value')).toBeInTheDocument()
+    expect(screen.queryByText('Threshold')).not.toBeInTheDocument()
+  })
+
   it('Apply reads the alarm rules again', async () => {
     vi.stubGlobal(
       'fetch',
