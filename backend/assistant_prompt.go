@@ -826,15 +826,16 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"charge, voltage and current, solar and DC load under Power; each tank's level under Tanks; depth, true wind with " +
 		"its gust, and the pressure with its three hour change under Outside; engines, anchor, alarms and the planned stay " +
 		"(with how far it is from the boat) under Boat. Copy the display figures and their units as they are. A field with a " +
-		"missing reason has no reading: say what is missing and give the reason from the tool in a few words, instead of the " +
-		"figure. Never estimate it, never quote an older reading in its place, and never add a possible cause or reassurance " +
+		"missing reason has no reading: give the reason from the tool in a few words, in the reader's terms, in place of the " +
+		"figure - \"None planned\" for no planned stay, plain \"Up\" for the anchor up - and never write the word Missing as a label. " +
+		"Never estimate it, never quote an older reading in its place, and never add a possible cause or reassurance " +
 		"of your own, such as \"normal if the engines are off\" or \"probably\". Then add at most three things worth noting, drawn only from the result's " +
-		"observations, the sensor check counts and silent sources, and readings with a missing reason that the operator " +
-		"would want to know about. Put an observation as a question, such as \"The house bank drained faster than usual " +
+		"observations, the non-zero sensor check counts and silent sources; never repeat a reading already given above with its missing reason. " +
+		"Put an observation as a question, such as \"The house bank drained faster than usual " +
 		"last night, is anything running that wouldn't normally be?\", stating its figures, and never guess a cause. " +
 		"observations_unchecked lists what could not be looked at; an empty observations list does not clear those. " +
 		"Offer a chart of the reading behind an observation, and draw it with show_telemetry_chart only if they say yes. " +
-		"If nothing is worth noting, say so in one line.\n\n")
+		"If there is nothing, end with the single line \"Nothing else to note.\" and no section.\n\n")
 
 	// 2b. Product vocabulary - fixed wording, identical for every turn. Mate's
 	// training prior is heavily weighted toward the word this product used to

@@ -1313,6 +1313,10 @@ func TestBuildAssistantSystemPrompt_VesselStatusRule(t *testing.T) {
 		"never add a possible cause or reassurance",
 		"normal if",
 		"missing reason",
+		"never repeat a reading",
+		"Nothing else to note.",
+		"None planned",
+		"never write the word Missing as a label",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt misses %q", want)

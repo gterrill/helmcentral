@@ -113,10 +113,13 @@ separate cycle and will read this result.
 
 **Prompt.** "Status", "how's the boat", "quick update" and similar call the tool.
 The answer gives figures under Power, Tanks, Outside and Boat, then at most three
-things worth noting, drawn from the observations, the sensor counts and the
-missing readings. An observation is put as a question, with its figures, and
+things worth noting, drawn only from the observations, the non-zero sensor counts and the
+silent sources. It never repeats a reading already given with its missing reason;
+with nothing left it ends on the one line "Nothing else to note." An observation is put as a question, with its figures, and
 never with a guessed cause. A chart is offered, not drawn unasked. A missing
-reading is reported as what is missing and the tool's reason, with no possible
+reading is reported as the tool's reason in plain words ("None planned", "Up"),
+never labelled "Missing" (the second live run read "Planned stay: Missing" and
+repeated missing readings under "Worth Noting"), with no possible
 cause or reassurance added ("normal if the engines are off" was a guess Mate
 made on the first live run).
 
