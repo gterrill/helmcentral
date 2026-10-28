@@ -102,6 +102,7 @@ On request, it can look up more than that. Here is what it can do:
 - **Anchorage shelter:** See "Sheltered from which winds" below.
 - **Passage time and fuel:** See "Passage estimates" below.
 - **Who else is around:** See "Nearby vessels" below.
+- **How the boat is doing:** See "A status update" below.
 - **Faults in a reading:** See "When a reading looks wrong" below.
 - **Maintenance, inventory, the boat's details, the app and alarms:** Each has
   its own paragraphs below.
@@ -250,6 +251,45 @@ says that. It doesn't go looking for passages in the instrument history.
 To look at what a reading did on one passage, ask Mate. It finds the passage in
 your log, then reads the history for that passage's start and end. That needs a
 history log, as described under [When a reading looks wrong](#when-a-reading-looks-wrong).
+
+### A status update
+
+Ask "how's the boat?", "quick update" or "status" and Mate gives you a short
+report with the figures already worked out. It reads them from the equipment and
+the roles you've set up, so it doesn't have to hunt for the right reading. The
+report has four headings and then a few things worth a look:
+
+- **Power:** The house bank's charge, voltage and current, the solar watts and the
+  DC load.
+- **Tanks:** Each tank's level, with the warn and alarm levels set for it. A tank
+  that is in warn or alarm says so.
+- **Outside:** Depth, true wind with its gust over the last ten minutes, and the
+  pressure with how far it has moved in the last three hours.
+- **Boat:** Whether each engine is running or off, and whether the anchor watch
+  is set. It also lists the alarms active and ignored, and your planned stay
+  with how far it is from the boat.
+- **Worth a look:** At most three things. They come from the sensor checks, which
+  catch a frozen, impossible or silent sensor. They also come from readings Mate
+  couldn't get, and from the house bank draining faster than usual overnight.
+
+When it raises the overnight draw, Mate asks you a question and gives the
+figures. For example: "The bank fell 0.9 percent an hour last night, against
+about 0.5 on the nights before. Is anything running that normally isn't?" It
+doesn't guess what caused it.
+
+Mate gives each reading in your units. When it has no fresh reading, it leaves
+the figure out and says why in a few words. It might say "no house bank role set"
+or "no fresh reading, the last one arrived 20 minutes ago". It never fills the
+gap with an older figure or an estimate.
+
+The overnight check needs three things. Your house bank must be chosen under
+**Settings → SignalK → Roles**. InfluxDB must be set up. And there must be at
+least four recent nights at anchor, with no shore power or generator, for Mate to
+compare. Without them Mate leaves that check out and tells you why.
+
+The overnight check is a question for you and never an alarm, so nothing is sent
+to your phone. Mate doesn't yet notice a sensor reading differently from its
+neighbours, or a source that has been silent since it was installed.
 
 ### When a reading looks wrong
 

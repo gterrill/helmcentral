@@ -202,6 +202,15 @@ type overnightResult struct {
 	OldestNightStart        time.Time `json:"oldest_night_start"`
 	Reason                  *string   `json:"reason"`
 	ComputedAt              time.Time `json:"computed_at"`
+
+	// LastNightRatePercentPerHour is the most recent completed night's own
+	// rate, set only when that night was usable, and LastNightStart is when its
+	// window began. PriorNightRatesPercentPerHour are the usable nights before
+	// it, most recent first. get_vessel_status compares the one with the
+	// median of the others (ADR 0222). None of them are on the wire.
+	LastNightStart                time.Time `json:"-"`
+	LastNightRatePercentPerHour   *float64  `json:"-"`
+	PriorNightRatesPercentPerHour []float64 `json:"-"`
 }
 
 // overnightLookbackNights bounds how far back the history scan looks for
@@ -366,6 +375,9 @@ func computeOvernight(
 	}
 
 	var slopes []float64
+	var lastRate float64
+	var lastStart time.Time
+	var lastUsable bool
 	var nightsConsidered, excludedShore, excludedGenerator, excludedGap, excludedRise int
 	var oldestScanned nightWindow
 	for _, w := range windows {
@@ -381,6 +393,10 @@ func computeOvernight(
 			slope, usable, reason := nightSlopePercentPerHour(socSeries, w, overnightSampleInterval)
 			switch {
 			case usable:
+				if nightsConsidered == 1 {
+					lastRate, lastStart = slope, w.Start
+					lastUsable = true
+				}
 				slopes = append(slopes, slope)
 			case reason == "insufficient samples":
 				excludedGap++
@@ -401,6 +417,11 @@ func computeOvernight(
 	result.NightsExcludedGap = excludedGap
 	result.NightsExcludedRise = excludedRise
 	result.OldestNightStart = oldestScanned.Start
+	if lastUsable {
+		result.LastNightRatePercentPerHour = &lastRate
+		result.LastNightStart = lastStart
+		result.PriorNightRatesPercentPerHour = append([]float64(nil), slopes[1:]...)
+	}
 
 	if median, ok := medianNightRate(slopes); ok {
 		result.Basis = "history"

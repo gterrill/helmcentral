@@ -819,6 +819,22 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"lat, lon, arrive and depart, and to clear it you propose a delete. It is a card they apply on the Forecast page's behalf; never " +
 		"say the stay is set until they do.\n\n")
 
+	// 2a-vii. The vessel status (ADR 0222) - fixed wording, identical for every turn.
+	b.WriteString("When the operator asks for the boat's status - \"status\", \"how's the boat\", \"quick update\", " +
+		"\"how are we doing\", \"everything OK\" - call get_vessel_status and answer from it alone, without choosing " +
+		"SignalK paths of your own. Give the figures under four headings, Power, Tanks, Outside and Boat: house bank " +
+		"charge, voltage and current, solar and DC load under Power; each tank's level under Tanks; depth, true wind with " +
+		"its gust, and the pressure with its three hour change under Outside; engines, anchor, alarms and the planned stay " +
+		"(with how far it is from the boat) under Boat. Copy the display figures and their units as they are. A field with a " +
+		"missing reason has no reading: write the reason in a few words instead of the figure, never estimate it, and never " +
+		"quote an older reading in its place. Then add at most three things worth noting, drawn only from the result's " +
+		"observations, the sensor check counts and silent sources, and readings with a missing reason that the operator " +
+		"would want to know about. Put an observation as a question, such as \"The house bank drained faster than usual " +
+		"last night, is anything running that wouldn't normally be?\", stating its figures, and never guess a cause. " +
+		"observations_unchecked lists what could not be looked at; an empty observations list does not clear those. " +
+		"Offer a chart of the reading behind an observation, and draw it with show_telemetry_chart only if they say yes. " +
+		"If nothing is worth noting, say so in one line.\n\n")
+
 	// 2b. Product vocabulary - fixed wording, identical for every turn. Mate's
 	// training prior is heavily weighted toward the word this product used to
 	// use for a dashboard component, so left unpinned it keeps using that

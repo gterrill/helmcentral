@@ -11,6 +11,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Mate gives a boat status in one go.** Ask "how's the boat?" or for a quick
+  update and Mate answers with figures under Power, Tanks, Outside and Boat: the
+  house bank, solar and DC load, each tank, depth, true wind and gust, pressure
+  and how it has moved over three hours, engines, anchor, alarms, and how far
+  the boat is from your planned stay. It finishes with up to three things worth
+  a look, such as a sensor gone quiet, or the house bank draining faster
+  overnight than it usually does, put as a question and never as an alarm. A
+  reading it can't get is left out with the reason, never filled in.
+
 ### Changed
 
 - **Mate's charts read right.** Asked about the wind, Mate used to draw speed
