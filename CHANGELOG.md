@@ -39,6 +39,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   clock. A passage still under way is mentioned apart and not counted until it
   ends. If the Passages page has nothing to read, Mate says so.
 
+### Fixed
+
+- **Engine Cluster footer parts now pick their reading from the equipment.**
+  Choose the starter battery for the footer and the tile sets its voltage from
+  what the battery is sending. Before, you had to type the reading yourself, and
+  if you didn't, the part was dropped on save and the tile showed `--`. If the
+  equipment isn't sending the reading the part needs, the field says so and lists
+  what it does send. Helmcentral won't save a footer part with equipment and no
+  reading. Open the tile's settings and check any footer part that stayed blank.
+
 ### Added
 
 - **Mate can draw a wind rose.** Ask "where has the wind been coming from?" and

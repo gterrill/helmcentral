@@ -75,6 +75,13 @@ starboard alternator you named under Roles in **Settings → SignalK**. If you
 haven't named an alternator there, the alternator parts stay empty until you
 choose one.
 
+When you pick a piece of equipment for a footer part, Helmcentral looks at what
+that equipment is sending and fills in the reading for you. Pick the starter
+battery and its voltage is set. If the equipment isn't sending the reading
+that part needs, the field says so and lists what it does send. You can't save
+a footer part that has equipment but no reading. Pick a reading, or clear the
+equipment to leave the part out.
+
 ## What it does not do
 
 - **Engine oil temperature:** The tile shows none, because these engines have

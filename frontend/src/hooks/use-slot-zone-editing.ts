@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { GaugeEquipmentMode } from '@/components/gauge-fields'
 import { saveEquipmentProfile } from '@/hooks/use-equipment-profiles'
 import type { GaugeWidgetConfig, GaugeZone } from '@/lib/dashboard-widgets'
+import { liveReadings } from '@/lib/live-readings'
 import {
   effectiveScale,
   gaugeHasZones,
@@ -59,12 +60,9 @@ export function useSlotZoneEditing(ctx: EquipmentTileContext, item: TileItem | u
 
   // What the boat reports under the item's source, as suffixes, for the Reading pick.
   const reportedSuffixes = useMemo(() => {
-    if (!item || item.signalk_source === '') return []
-    const prefix = `${item.signalk_source}.`
+    if (!item) return []
     const inProfile = new Set((profile?.gauges ?? []).map((g) => g.path_suffix))
-    return [...new Set(paths.filter((p) => p.path.startsWith(prefix)).map((p) => p.path.slice(prefix.length)))]
-      .filter((suffix) => suffix !== '' && !inProfile.has(suffix))
-      .sort()
+    return liveReadings(item.signalk_source, paths.map((p) => p.path)).filter((suffix) => !inProfile.has(suffix))
   }, [item, profile, paths])
 
   const notice = profile

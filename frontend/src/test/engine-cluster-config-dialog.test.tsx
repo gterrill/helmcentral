@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import { EngineClusterConfigDialog, clusterFromProfile } from '@/components/engine-cluster-config-dialog'
 import type { DashboardLayoutItem, EngineClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
@@ -18,16 +18,25 @@ const published = new Set<string>(captured.paths)
 const state = vi.hoisted(() => ({
   ctx: null as unknown,
   roles: null as unknown,
+  extraPaths: [] as string[],
+  loading: false,
+  error: null as Error | null,
 }))
 
 vi.mock('@/hooks/use-equipment-tile-context', () => ({ useEquipmentTileContext: () => state.ctx }))
 vi.mock('@/hooks/use-signalk-paths', () => ({
-  useSignalKPaths: () => ({ paths: captured.paths.map((path) => ({ path })), loading: false }),
+  useSignalKPaths: () => ({ paths: [...captured.paths, ...state.extraPaths].map((path) => ({ path })), loading: state.loading, error: state.error }),
 }))
 vi.mock('@/hooks/use-vessel-roles', () => ({ useVesselRoles: () => state.roles }))
 vi.mock('@/hooks/use-vessel-discovery', () => ({
   useVesselDiscovery: () => ({ discovery: { connected: true, groups: [], detectors: {} }, loading: false, error: null }),
 }))
+
+afterEach(() => {
+  state.extraPaths = []
+  state.loading = false
+  state.error = null
+})
 
 async function loadProfile(): Promise<EngineProfile> {
   const [fs, path] = await Promise.all([import('node:fs'), import('node:path')])
@@ -46,6 +55,9 @@ async function setup(side: 'port' | 'starboard', roles: unknown = { port_alterna
       item('alt-2', 'Port alternator', 'electrical.alternator.2', 'alternator'),
       item('alt-12', 'Starboard alternator', 'electrical.alternator.12', 'alternator'),
       item('batt', 'Port start battery', 'electrical.batteries.292', 'battery'),
+      item('batt-quiet', 'Quiet battery', 'electrical.batteries.777', 'battery'),
+      item('batt-nosrc', 'Unmapped battery', '', 'battery'),
+      item('alt-quiet', 'Quiet alternator', 'electrical.alternator.99', 'alternator'),
       item('exh', 'Exhaust node 0', 'propulsion.0', 'engine'),
     ],
     profiles: [engineProfile],
@@ -161,6 +173,8 @@ describe('the alternator belongs to the engine side', () => {
   })
 
   test('a starboard engine takes the starboard alternator', async () => {
+    // The captured vessel has one alternator; give the starboard one the same readings.
+    state.extraPaths = ['current'].map((r) => `electrical.alternator.12.${r}`)
     const saved = await fillAndSave('starboard')
     expect(saved.side).toBe('stbd')
     expect(saved.footer?.altAmps?.equipmentId).toBe('alt-12')
@@ -233,5 +247,156 @@ describe('the slots no profile fills', () => {
     const saved = await vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
     expect(saved.arcs).toBeUndefined()
     expect(saved.footer).toBeUndefined()
+  })
+})
+
+describe('a footer slot reads what the picked item publishes', () => {
+  const pick = (slot: string, id: string) =>
+    fireEvent.change(document.querySelector(`#cluster-footer-${slot}-equipment`) as HTMLSelectElement, { target: { value: id } })
+
+  async function openFresh(extra: string[]) {
+    state.extraPaths = extra
+    await setup('port')
+    return open()
+  }
+
+  test('the expected reading is set from the item without typing', async () => {
+    const onSave = await openFresh(['electrical.batteries.292.voltage', 'electrical.batteries.292.current'])
+    pick('battery', 'batt')
+    expect((document.querySelector('#cluster-footer-battery-suffix') as HTMLInputElement).value).toBe('voltage')
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    const saved = await vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
+    expect(saved.footer?.battery).toMatchObject({ equipmentId: 'batt', suffix: 'voltage' })
+  })
+
+  test('a reading the item does not send is not filled, and the field says so', async () => {
+    const onSave = await openFresh(['electrical.batteries.777.current', 'electrical.batteries.777.capacity.stateOfCharge'])
+    pick('battery', 'batt-quiet')
+    expect((document.querySelector('#cluster-footer-battery-suffix') as HTMLInputElement).value).toBe('')
+    expect(screen.getByText(/Quiet battery isn't sending voltage/i)).toBeTruthy()
+    const options = Array.from(document.querySelectorAll('#cluster-footer-battery-suffixes option')).map((o) => (o as HTMLOptionElement).value)
+    expect(options).toContain('current')
+    expect(options).toContain('capacity.stateOfCharge')
+    expect((screen.getByRole('button', { name: /^save$/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/Starter battery voltage needs a reading/i)).toBeTruthy()
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  test('picking a reading the item sends lets the save through', async () => {
+    const onSave = await openFresh(['electrical.batteries.777.current'])
+    pick('battery', 'batt-quiet')
+    fireEvent.change(document.querySelector('#cluster-footer-battery-suffix') as HTMLInputElement, { target: { value: 'current' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    const saved = await vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
+    expect(saved.footer?.battery).toMatchObject({ equipmentId: 'batt-quiet', suffix: 'current' })
+  })
+
+  const suffixBox = (slot: string) => document.querySelector(`#cluster-footer-${slot}-suffix`) as HTMLInputElement
+
+  test('a reading the newly picked item does not send does not carry over', async () => {
+    await openFresh(['electrical.batteries.777.current'])
+    pick('battery', 'batt')
+    expect(suffixBox('battery').value).toBe('voltage')
+    pick('battery', 'batt-quiet')
+    expect(suffixBox('battery').value).toBe('')
+    expect(screen.getByText(/Quiet battery isn't sending voltage/i)).toBeTruthy()
+  })
+
+  test('a reading the newly picked item sends carries over', async () => {
+    await openFresh(['electrical.batteries.777.current'])
+    pick('battery', 'batt')
+    fireEvent.change(suffixBox('battery'), { target: { value: 'current' } })
+    pick('battery', 'batt-quiet')
+    expect(suffixBox('battery').value).toBe('current')
+  })
+
+  test('clearing the reading leaves it clear', async () => {
+    await openFresh([])
+    pick('battery', 'batt')
+    fireEvent.change(suffixBox('battery'), { target: { value: '' } })
+    expect(suffixBox('battery').value).toBe('')
+  })
+
+  test('while the paths load it claims nothing, then fills when they arrive', async () => {
+    state.loading = true
+    state.extraPaths = []
+    await setup('port')
+    const onSave = vi.fn()
+    const view = render(<EngineClusterConfigDialog widget={widget(blank)} onCancel={vi.fn()} onSave={onSave} />)
+    pick('battery', 'batt')
+    expect(suffixBox('battery').value).toBe('')
+    expect(screen.queryByText(/isn't sending/i)).toBeNull()
+    state.loading = false
+    view.rerender(<EngineClusterConfigDialog widget={widget(blank)} onCancel={vi.fn()} onSave={onSave} />)
+    expect(suffixBox('battery').value).toBe('voltage')
+  })
+
+  test('when SignalK cannot be read it says so and does not claim the item is silent', async () => {
+    state.error = new Error('down')
+    await setup('port')
+    open()
+    pick('battery', 'batt')
+    expect(screen.getByText(/can't read what SignalK is sending/i)).toBeTruthy()
+    expect(screen.queryByText(/isn't sending/i)).toBeNull()
+  })
+
+  test('an item with no SignalK source says so', async () => {
+    await openFresh([])
+    pick('battery', 'batt-nosrc')
+    expect(screen.getByText(/Unmapped battery has no SignalK source/i)).toBeTruthy()
+  })
+
+  test('filling from the profile leaves out an alternator slot the alternator does not send', async () => {
+    await setup('port', { port_alternator: 'alt-quiet', starboard_alternator: 'alt-quiet' })
+    open()
+    fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
+    expect((document.querySelector('#cluster-footer-altTemp-equipment') as HTMLSelectElement).value).toBe('')
+    expect(suffixBox('altTemp').value).toBe('')
+    expect((screen.getByRole('button', { name: /^save$/i }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  test('an alternator sending only current seeds the current slot and leaves the rest blank', async () => {
+    state.extraPaths = ['electrical.alternator.99.current']
+    await setup('port', { port_alternator: 'alt-quiet', starboard_alternator: 'alt-quiet' })
+    const onSave = open()
+    fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
+    for (const k of ['altWatts', 'altTemp', 'altStage']) {
+      expect((document.querySelector(`#cluster-footer-${k}-equipment`) as HTMLSelectElement).value).toBe('')
+    }
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    const saved = await vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
+    expect(saved.footer?.altAmps).toMatchObject({ equipmentId: 'alt-quiet', suffix: 'current' })
+    expect(saved.footer?.altWatts).toBeUndefined()
+    expect(saved.footer?.altTemp).toBeUndefined()
+    expect(saved.footer?.altStage).toBeUndefined()
+  })
+
+  test('a changed item does not keep the old item\'s scale', async () => {
+    const onSave = await openFresh(['propulsion.0.revolutions'])
+    pick('egt', 'eng')
+    fireEvent.change(suffixBox('egt'), { target: { value: 'revolutions' } })
+    pick('egt', 'exh')
+    expect(suffixBox('egt').value).toBe('revolutions')
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    const saved = await vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
+    const egt = saved.footer!.egt!
+    expect([egt.equipmentId, egt.quantity, egt.unit, egt.min, egt.max, egt.zones]).toEqual(['exh', 'temperature', 'C', undefined, undefined, undefined])
+  })
+
+  test('several slots missing a reading are named in one alert', async () => {
+    await openFresh([])
+    pick('battery', 'batt-quiet')
+    pick('egt', 'exh')
+    fireEvent.change(suffixBox('egt'), { target: { value: '' } })
+    const alert = screen.getByRole('status')
+    expect(alert.textContent).toMatch(/Starter battery voltage/)
+    expect(alert.textContent).toMatch(/Exhaust temperature/)
+    expect(alert.textContent).toMatch(/need a reading/)
+  })
+
+  test('a folded footer row says when it has equipment but no reading', async () => {
+    await openFresh([])
+    pick('battery', 'batt-quiet')
+    expect(screen.getByText('Needs a reading')).toBeTruthy()
   })
 })
