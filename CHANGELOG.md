@@ -18,7 +18,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   their place names, distances, fuel, ratings and notes. Before, it counted runs
   of logged speed over the last 60 days, so a season came back with a fraction of
   its passages. It tells the story in order, then the longest legs and the
-  longest stays. If the Passages page has nothing to read, Mate says so.
+  longest stays. Dates you give it, such as "August", are days on the boat's
+  clock. A passage still under way is mentioned apart and not counted until it
+  ends. If the Passages page has nothing to read, Mate says so.
 
 ### Added
 

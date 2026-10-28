@@ -19,7 +19,8 @@ type logbookFixture struct {
 	Cruises  []cruiseRecord `json:"cruises"`
 	Passages []struct {
 		passageRecord
-		Stats passageStats `json:"stats"`
+		Stats    passageStats `json:"stats"`
+		StartLon *float64     `json:"start_lon"`
 	} `json:"passages"`
 }
 
@@ -43,7 +44,7 @@ func loadLogbookFixture(t *testing.T) (*passageStore, logbookFixture) {
 		if _, err := s.InsertPassage(p.passageRecord); err != nil {
 			t.Fatalf("insert passage: %v", err)
 		}
-		buf, _ := json.Marshal(passageFigures{Stats: p.Stats})
+		buf, _ := json.Marshal(passageFigures{Stats: p.Stats, StartLon: p.StartLon})
 		if _, err := s.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(buf), p.ID); err != nil {
 			t.Fatalf("store stats: %v", err)
 		}
@@ -68,6 +69,8 @@ func logbookDeps(t *testing.T, s *passageStore) assistantToolDeps {
 type listedPassage struct {
 	Start         string   `json:"start"`
 	End           string   `json:"end"`
+	StartLocal    string   `json:"start_local"`
+	EndLocal      string   `json:"end_local"`
 	From          string   `json:"from"`
 	To            string   `json:"to"`
 	Cruise        string   `json:"cruise"`
@@ -85,6 +88,11 @@ type listResult struct {
 	LogbookLast  string          `json:"logbook_last_arrival"`
 	Note         string          `json:"note"`
 	Passages     []listedPassage `json:"passages"`
+	UnderWayNow  *struct {
+		Start      string  `json:"start"`
+		StartLocal string  `json:"start_local"`
+		DistanceNm float64 `json:"distance_nm_so_far"`
+	} `json:"under_way_now"`
 }
 
 func runTool(t *testing.T, d assistantToolDeps, name, args string, into any) string {
@@ -124,12 +132,17 @@ func TestListPassages_ReadsTheLogbook(t *testing.T) {
 	}
 	rated := 0
 	for _, p := range res.Passages {
-		if p.Rating == "comfortable" {
+		if p.Rating == "Comfortable" {
 			rated++
 		}
 	}
 	if rated != 1 {
 		t.Errorf("want the one recorded rating, got %d", rated)
+	}
+	// Times are also given in the boat's zone, from the passage's own start
+	// longitude, the way the Passages page shows them.
+	if first.StartLocal != "2026-10-27 10:16 UTC+10" || first.EndLocal != "2026-10-27 11:14 UTC+10" {
+		t.Errorf("local time: %q to %q", first.StartLocal, first.EndLocal)
 	}
 	if !strings.HasPrefix(res.LogbookFirst, "2026-02-28T") || !strings.HasPrefix(res.LogbookLast, "2026-10-27T") {
 		t.Errorf("logbook span: %q to %q", res.LogbookFirst, res.LogbookLast)
@@ -156,8 +169,9 @@ func TestListPassages_RangeLimitAndHidden(t *testing.T) {
 	}{
 		{"hidden passages are not in the logbook", `{}`, 9, 9, "Dumbell Island"},
 		{"from date", `{"from":"2026-10-01"}`, 4, 4, "Dumbell Island"},
-		{"to date is inclusive of that day", `{"from":"2026-09-01","to":"2026-09-09"}`, 1, 1, "Hayman Island"},
-		{"nothing departs between the 9th and the 12th", `{"from":"2026-09-01","to":"2026-09-12"}`, 1, 1, "Hayman Island"},
+		{"a bare date is the boat's day: Hayman left 22:13Z on the 9th, the 10th at +10", `{"from":"2026-09-01","to":"2026-09-09"}`, 0, 0, ""},
+		{"to date is inclusive of that local day", `{"from":"2026-09-01","to":"2026-09-10"}`, 1, 1, "Hayman Island"},
+		{"Hamilton left 23:03Z on the 13th, the 14th at +10", `{"from":"2026-09-01","to":"2026-09-13"}`, 1, 1, "Hayman Island"},
 		{"limit keeps the newest", `{"limit":2}`, 9, 2, "Dumbell Island"},
 		{"RFC3339 bound", `{"from":"2026-10-24T00:00:00Z","to":"2026-10-24T23:59:59Z"}`, 1, 1, "Fairey Reef #2"},
 	}
@@ -167,6 +181,9 @@ func TestListPassages_RangeLimitAndHidden(t *testing.T) {
 			runTool(t, d, "list_passages", tc.args, &res)
 			if res.Found != tc.found || res.Returned != tc.ret {
 				t.Fatalf("found %d returned %d, want %d and %d", res.Found, res.Returned, tc.found, tc.ret)
+			}
+			if tc.ret == 0 {
+				return
 			}
 			if res.Passages[0].From != tc.newestFrom {
 				t.Errorf("newest from %q, want %q", res.Passages[0].From, tc.newestFrom)
@@ -221,6 +238,7 @@ type summaryStay struct {
 	Departed      string  `json:"departed"`
 	Days          float64 `json:"days"`
 	NextDepartsAt string  `json:"next_departure_place"`
+	HiddenBetween bool    `json:"hidden_passage_between"`
 }
 
 type summaryResult struct {
@@ -246,6 +264,9 @@ type summaryResult struct {
 	StaysTotal      int             `json:"stays_total"`
 	Stays           []summaryStay   `json:"longest_stays"`
 	Note            string          `json:"note"`
+	UnderWayNow     *struct {
+		DistanceNm float64 `json:"distance_nm_so_far"`
+	} `json:"under_way_now"`
 }
 
 func TestGetCruiseSummary_WholeLogbook(t *testing.T) {
@@ -357,7 +378,7 @@ func TestGetCruiseSummary_BlankNamesAreNotInvented(t *testing.T) {
 			t.Errorf("an unnamed place must not appear in the route: %v", res.Route)
 		}
 	}
-	if !strings.Contains(res.Note, "no place name") {
+	if !strings.Contains(res.Note, "no place name") || !strings.Contains(res.Note, "stay") {
 		t.Errorf("note should say some places are unnamed: %q", res.Note)
 	}
 }
@@ -411,3 +432,119 @@ func TestPassageTools_Registered(t *testing.T) {
 }
 
 var _ = sql.ErrNoRows
+
+func TestPassageTools_RatingIsTheLabelOnThePage(t *testing.T) {
+	s := newTestPassageStore(t)
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	for i, r := range []string{"comfortable", "lively", "shouldnt_have_gone", ""} {
+		at := t0.Add(time.Duration(i) * 24 * time.Hour)
+		if _, err := s.InsertPassage(passageRecord{Start: at, End: at.Add(time.Hour), Rating: r}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var res listResult
+	runTool(t, logbookDeps(t, s), "list_passages", `{}`, &res)
+	var got []string
+	for _, p := range res.Passages {
+		got = append(got, p.Rating)
+	}
+	if strings.Join(got, "|") != "|Shouldn't have gone|Lively|Comfortable" {
+		t.Errorf("ratings: %q", got)
+	}
+}
+
+// The last place and the last arrival come from one passage, the one that
+// finished last, even when a passage that started later finished earlier.
+func TestGetCruiseSummary_LastPlaceAndArrivalAgree(t *testing.T) {
+	s := newTestPassageStore(t)
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	for _, p := range []passageRecord{
+		{Start: t0, End: t0.Add(10 * time.Hour), FromName: "A", ToName: "B"},
+		{Start: t0.Add(time.Hour), End: t0.Add(5 * time.Hour), FromName: "C", ToName: "D"},
+	} {
+		if _, err := s.InsertPassage(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var res summaryResult
+	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{}`, &res)
+	if res.LastPlace != "B" || res.LastArrival != "2026-05-01T10:00:00Z" {
+		t.Errorf("last: %q at %q", res.LastPlace, res.LastArrival)
+	}
+}
+
+// A hidden passage is left out of the listing and the totals, but it was a
+// move of the boat, so a stay it splits is flagged and not silently merged.
+func TestGetCruiseSummary_HiddenPassageFlagsTheStay(t *testing.T) {
+	s := newTestPassageStore(t)
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	for _, p := range []passageRecord{
+		{Start: t0, End: t0.Add(time.Hour), FromName: "A", ToName: "B"},
+		{Start: t0.Add(48 * time.Hour), End: t0.Add(49 * time.Hour), FromName: "B", ToName: "B2", Hidden: true},
+		{Start: t0.Add(96 * time.Hour), End: t0.Add(97 * time.Hour), FromName: "B2", ToName: "C"},
+		{Start: t0.Add(200 * time.Hour), End: t0.Add(201 * time.Hour), FromName: "C", ToName: "D"},
+	} {
+		if _, err := s.InsertPassage(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var res summaryResult
+	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{}`, &res)
+	if res.PassageCount != 3 {
+		t.Fatalf("hidden passages stay out of the count: %d", res.PassageCount)
+	}
+	flagged := 0
+	for _, st := range res.Stays {
+		if st.HiddenBetween {
+			flagged++
+		}
+	}
+	if res.StaysTotal != 2 || flagged != 1 {
+		t.Errorf("stays %d, flagged %d: %+v", res.StaysTotal, flagged, res.Stays)
+	}
+}
+
+// A passage under way is not in the logbook until it ends. The tools report
+// it from the track log, apart from the totals, and say it is not finished.
+func TestPassageTools_ReportThePassageUnderWay(t *testing.T) {
+	s := newTestPassageStore(t)
+	b := newTrackBuilder().run(90*time.Minute, time.Minute, 6)
+	for _, p := range b.pts {
+		if err := s.AppendTrackPoint(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := logbookDeps(t, s)
+	var res listResult
+	runTool(t, d, "list_passages", `{}`, &res)
+	if res.UnderWayNow == nil || res.UnderWayNow.DistanceNm < 5 || res.UnderWayNow.StartLocal == "" {
+		t.Fatalf("under way: %+v", res.UnderWayNow)
+	}
+	if res.Found != 0 || !strings.Contains(res.Note, "under way") {
+		t.Errorf("found %d, note %q", res.Found, res.Note)
+	}
+	var sum summaryResult
+	runTool(t, d, "get_cruise_summary", `{}`, &sum)
+	if sum.UnderWayNow == nil || sum.PassageCount != 0 {
+		t.Errorf("summary: %+v", sum)
+	}
+
+	// Once nothing is under way, there is no such field.
+	quiet := newTestPassageStore(t)
+	var none listResult
+	runTool(t, logbookDeps(t, quiet), "list_passages", `{}`, &none)
+	if none.UnderWayNow != nil {
+		t.Errorf("under way with an empty track log: %+v", none.UnderWayNow)
+	}
+}
+
+func TestPassageTools_StopWhenCancelled(t *testing.T) {
+	s, _ := loadLogbookFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tool := range []string{"list_passages", "get_cruise_summary"} {
+		if _, err := logbookDeps(t, s).execute(ctx, tool, nil); err == nil {
+			t.Errorf("%s ran on a cancelled context", tool)
+		}
+	}
+}

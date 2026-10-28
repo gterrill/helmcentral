@@ -217,10 +217,19 @@ cruising season" or "How far did we go in August?". Mate gives you:
   next one starting.
 
 Mate takes places only from your passages. If a passage has no name for where it
-started or finished, Mate leaves that place out and says so. If one passage finished at a
+started or finished, Mate leaves that place out of the route and says so. If one passage finished at a
 place and the next left from a differently named one, it tells you both names
 and doesn't pick one. It doesn't work out which way you were heading,
 or what region a place is in.
+
+When you give Mate dates, such as "August", it means those days on the boat's
+clock, in the time zone the Passages page shows for each passage. Mate quotes
+times in that zone too.
+
+If the boat is under way as you ask, that passage isn't in the log yet, because
+it's recorded when it ends. Mate tells you it's under way and how far it has
+gone, and keeps it out of the totals. If a passage you hid on the Passages page
+falls inside a stay, Mate flags that the boat moved during it.
 
 Mate also reads each passage's rating and notes. It can tell you which passages
 you rated **Lively**, or which ones mention a particular bay.

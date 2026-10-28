@@ -46,16 +46,27 @@ also works with InfluxDB off. `get_path_history` still needs InfluxDB, and says 
 
 ### `list_passages`
 
-Arguments: `from` and `to` (a `YYYY-MM-DD` UTC date or RFC3339; a bare `to` date
-covers that whole day) and `limit` (default 20, at most 100). A passage is in the
-range when it departs in it. Hidden passages are not in the logbook, as on the
-page.
+Arguments: `from` and `to` (a `YYYY-MM-DD` date or RFC3339) and `limit` (default 20,
+at most 100). A bare date is a day on the boat's clock: the whole-hour zone the
+Passages page uses for a passage, its start longitude over 15, rounded. So
+"August" is the boat's August and not UTC's. An RFC3339 bound is an instant. A
+passage is in the range when it departs in it. Hidden passages are not in the
+listing, as on the page.
 
-Each passage returns start and end (UTC), the recorded from and to names, title,
-cruise name, rating, notes, duration, time under way, distance in NM, mean and
-max speed, mean true wind and gust, and fuel burned in litres. A figure the log
-did not record is `null`. The tool never fills it in. Distances and fuel keep the
-units the page stores, in the field names, as `list_passages` did.
+Each passage returns start and end in UTC and on the boat's clock
+(`start_local`, `end_local`, such as `2026-10-27 10:16 UTC+10`, so the model does
+no zone arithmetic), the recorded from and to names, title, cruise name, rating,
+notes, duration, time under way, distance in NM, mean and max speed, mean true
+wind and gust, and fuel burned in litres. The rating is the label the page shows
+("Shouldn't have gone"), not the stored id. A figure the log did not record is
+`null`. The tool never fills it in.
+
+**A passage under way.** The logbook stores a passage when it ends, so a run in
+progress is not in it. The tools run the passage detector over the track points
+since it last stopped, as the recorder does, and report a run that is long enough
+to count as `under_way_now` (start, start on the boat's clock, distance so far).
+This reads the track log in SQLite, not the telemetry. The run is kept out of the
+count and the totals, and the result's note says so.
 
 ### `get_cruise_summary`
 
@@ -63,7 +74,8 @@ Same range arguments, everything in the logbook by default. It adds up in Go,
 so the model quotes the totals and does not sum 64 rows:
 
 - passage count, total distance, time under way, and the first place left and
-  last place reached
+  last place reached (the last place and arrival are from the passage that
+  finished last)
 - fuel burned over the passages that recorded it, with how many did and did not
 - the route: the recorded place names in order, repeats collapsed, blanks left out
 - the cruises touched, and the three longest passages
@@ -73,13 +85,16 @@ A **stay** is a gap of six hours or more between one passage's end and the next
 one's start. The place is where the earlier passage arrived. If the next passage
 left from a differently named place, the stay carries both names and the tool
 chooses neither. Shorter gaps are the same day's hops. Overlapping passages make
-no stay. The logbook does not record anchor, mooring or dock, so the tool does
+no stay. A hidden passage inside a gap was a move the operator left off the page,
+so the stay carries `hidden_passage_between`; the tool does not guess whether it
+was real. The logbook does not record anchor, mooring or dock, so the tool does
 not either.
 
 ### What the tools do not know
 
-- **No geography.** Places are the names on the records. A blank name stays blank
-  and the result's note says some places are unnamed. Nothing infers a direction
+- **No geography.** Places are the names on the records. A blank name stays blank:
+  the route leaves it out, a stay there has a blank place, and the result's note
+  says so. Nothing infers a direction
   of travel, a region or a bearing between places.
 - **Time under way is not engine hours.** The tool names the field
   `underway_hours` and the note says so.
@@ -112,8 +127,7 @@ rule keeps its sentence and notes that `list_passages` reads the logbook.
 - Mate sees passage notes and ratings. It can answer "which passages did we rate
   Lively". A passage note's text reaches the model provider when it is
   returned, as document text already does. The help page says Mate reads them.
-- A passage the detector has not yet recorded, such as one under way, is not in
-  the logbook until it ends. Mate answers about the log, not the live boat.
+- A passage under way is reported apart and is not counted until it ends.
 - A time that needs the telemetry, such as when the alternators cut off, still
   goes through `get_path_history` with the passage's start and end. A boat with
   no InfluxDB gets the passage list and not the readings.
