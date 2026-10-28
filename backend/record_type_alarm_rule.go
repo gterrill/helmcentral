@@ -105,15 +105,16 @@ func alarmRuleRecordType() *recordType {
 			{Name: "built_in", Kind: kindBoolean, Description: "true for a rule that came with Helmcentral"},
 			{Name: "path_role", Kind: kindString, Description: "house_bank_soc when the rule follows the house bank"},
 		},
-		Get:      getAlarmRuleRecord,
-		List:     listAlarmRuleRecords,
-		Create:   createAlarmRuleRecord,
-		Update:   updateAlarmRuleRecord,
-		Delete:   deleteAlarmRuleRecord,
-		Describe: describeAlarmRule,
-		Display:  displayAlarmRuleFields,
-		Href:     func(recordSnapshot) string { return "/alarms" },
-		Pin:      pinAlarmRuleUnit,
+		Get:             getAlarmRuleRecord,
+		List:            listAlarmRuleRecords,
+		Create:          createAlarmRuleRecord,
+		Update:          updateAlarmRuleRecord,
+		Delete:          deleteAlarmRuleRecord,
+		Describe:        describeAlarmRule,
+		Display:         displayAlarmRuleFields,
+		Href:            func(recordSnapshot) string { return "/alarms" },
+		Pin:             pinAlarmRuleUnit,
+		AfterCommitOnce: true,
 		AfterCommit: func(res changeOpResult) error {
 			if res.Type != recordTypeAlarmRule {
 				return nil
@@ -347,7 +348,9 @@ func deleteAlarmRuleRecord(env changeEnv, before recordSnapshot) error {
 func pinAlarmRuleUnit(q sqlQueryer, op changeOp) (map[string]string, error) {
 	_, hasValue := op.Fields["value"]
 	clear, hasClear := op.Fields["clear_value"]
-	if op.Action == changeDelete || (!hasValue && (!hasClear || clear == nil)) {
+	// An update of a rule this changeset creates has nothing stored to read;
+	// the create pins the same path.
+	if op.Action == changeDelete || isRef(op.ID) || (!hasValue && (!hasClear || clear == nil)) {
 		return nil, nil
 	}
 	path, role := stringOf(op.Fields["path"]), ""

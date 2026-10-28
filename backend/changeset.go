@@ -701,8 +701,15 @@ func (r *recordRegistry) apply(tx *sql.Tx, now, today time.Time, ops []changeOp)
 // effect, and every other type's hook still runs.
 func (r *recordRegistry) afterCommit(results []changeOpResult) error {
 	var errs []error
+	ran := map[string]bool{}
 	for _, res := range results {
 		if t, ok := r.types[res.Type]; ok && t.AfterCommit != nil {
+			if t.AfterCommitOnce {
+				if ran[res.Type] {
+					continue
+				}
+				ran[res.Type] = true
+			}
 			if err := t.AfterCommit(res); err != nil {
 				errs = append(errs, err)
 			}
@@ -739,6 +746,11 @@ func (r *recordRegistry) checkFresh(q sqlQueryer, ops []changeOp) error {
 				return err
 			}
 			for k, want := range op.Pins {
+				if now[k] == "" && want != "" {
+					// The boat's metadata can be briefly absent. That is not a
+					// change, so the proposal stays as it is and can be tried again.
+					return fmt.Errorf("the %s for %s can't be read right now, try again", k, op.Label)
+				}
 				if now[k] != want {
 					return &staleProposalError{reason: fmt.Sprintf("the %s for %s changed since Mate proposed this, so nothing was applied", k, op.Label)}
 				}

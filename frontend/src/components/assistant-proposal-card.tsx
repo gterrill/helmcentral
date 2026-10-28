@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-proposal-views'
 import type { AssistantProposal, AssistantProposalOp } from '@/hooks/use-assistant-conversations'
-import { applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus } from '@/lib/assistant-proposal-actions'
+import { appliedProposalOf, applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus } from '@/lib/assistant-proposal-actions'
 import { cn } from '@/lib/utils'
 
 interface AssistantProposalCardProps {
@@ -55,6 +55,9 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
             onChange({ ...proposal, status: 'stale', staleReason: message })
           }
         } else {
+          // Saved but not fully in effect: show it applied, with the reason kept.
+          const saved = kind === 'apply' ? appliedProposalOf(err) : undefined
+          if (saved) onChange(saved)
           setError(message)
         }
       } finally {

@@ -67,4 +67,28 @@ describe('alarm rule proposal card', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalled())
     expect(invalidate).toHaveBeenCalledWith(['/api/alarm-rules'])
   })
+
+  it('Apply that saved the rule but could not reload it shows applied, keeps the reason and reads the rules again', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({
+          error: 'the change was saved, but the alarm engine could not reload the rules; restart Helmcentral to pick it up, and do not repeat the change',
+          proposal: { id: 'p1', message_id: 'm1', status: 'applied', ops: proposal.ops },
+        }),
+      }),
+    )
+    const onChange = vi.fn()
+    const { rerender } = render(<AssistantProposalCard proposal={proposal} canWrite onChange={onChange} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1', status: 'applied' })))
+    rerender(<AssistantProposalCard proposal={onChange.mock.calls[0][0]} canWrite onChange={onChange} />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('restart Helmcentral')
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
+    expect(invalidate).toHaveBeenCalledWith(['/api/alarm-rules'])
+  })
 })

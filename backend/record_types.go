@@ -166,6 +166,9 @@ type recordType struct {
 	// AfterCommit runs once the changeset's transaction has committed, for
 	// side effects a command cannot make inside it. Optional.
 	AfterCommit func(res changeOpResult) error
+	// AfterCommitOnce runs the hook once per changeset, for a hook that does
+	// not depend on which record an operation wrote.
+	AfterCommitOnce bool
 	// Pin reads the facts an operation's numbers depend on, to be stored with
 	// the proposal and read again at Apply (changeOp.Pins). Optional.
 	Pin func(q sqlQueryer, op changeOp) (map[string]string, error)

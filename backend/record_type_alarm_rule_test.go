@@ -387,3 +387,60 @@ func TestAlarmRule_CardShowsWordsForConditionAndSeverity(t *testing.T) {
 		t.Errorf("got %v", p.Ops[0].After)
 	}
 }
+
+// ── second review ───────────────────────────────────────────────────────
+
+func TestAlarmRule_UpdateOfARecordCreatedInTheSameChangesetIsProposedAndApplied(t *testing.T) {
+	env := alarmProposalEnv(t)
+	p := env.propose(t, fmt.Sprintf(`{"operations":[
+		{"type":"alarm_rule","action":"create","fields":{"label":"House Bank Low","path":%q,"op":"below","value":50,"state":"warn","dwell_seconds":30}},
+		{"type":"alarm_rule","action":"update","id":"$1","fields":{"value":40}}]}`, testSoCPath))
+	env.advance()
+	if _, err := env.apply(p.ID); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if rules := listAlarmRules(); len(rules) != 1 || rules[0].Value != 0.4 {
+		t.Fatalf("got %+v", rules)
+	}
+}
+
+func TestAlarmRule_ReloadFailureIsReportedOncePerChangeset(t *testing.T) {
+	env := alarmProposalEnv(t)
+	other, err := createAlarmRule(alarmRule{Enabled: true, Path: testSoCPath, Label: "Other", Op: alarmOpBelow, Value: 0.2, State: alarmStateWarn})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := env.propose(t, fmt.Sprintf(`{"operations":[
+		{"type":"alarm_rule","action":"create","fields":{"label":"A","path":%q,"op":"below","value":50,"state":"warn","dwell_seconds":30}},
+		{"type":"alarm_rule","action":"create","fields":{"label":"B","path":%q,"op":"below","value":30,"state":"warn","dwell_seconds":30}}]}`, testSoCPath, testSoCPath))
+	if _, err := globalDocumentStore.db.Exec(`UPDATE alarm_rules SET methods_json = '{bad' WHERE id = ?`, other.ID); err != nil {
+		t.Fatal(err)
+	}
+	env.advance()
+	_, err = env.apply(p.ID)
+	if err == nil || strings.Count(err.Error(), "restart Helmcentral") != 1 {
+		t.Fatalf("expected the not-reloaded sentence once, got %v", err)
+	}
+}
+
+func TestAlarmRule_UnitUnreadableAtApplyIsRetryableNotStale(t *testing.T) {
+	env := alarmProposalEnv(t)
+	p := env.propose(t, fmt.Sprintf(`{"operations":[{"type":"alarm_rule","action":"create","fields":{
+		"label":"House Bank Low","path":%q,"op":"below","value":50,"state":"warn","dwell_seconds":30}}]}`, testSoCPath))
+	prev := alarmRuleUnitFor
+	alarmRuleUnitFor = func(string) string { return "" }
+	t.Cleanup(func() { alarmRuleUnitFor = prev })
+	env.advance()
+	_, err := env.apply(p.ID)
+	if err == nil || errors.Is(err, errAssistantProposalStale) || !strings.Contains(err.Error(), "can't be read right now") {
+		t.Fatalf("expected a retryable refusal, got %v", err)
+	}
+	if got, _ := env.asst.GetProposal(p.ID); got.Status != assistantProposalPending {
+		t.Errorf("the proposal stays pending, got %q", got.Status)
+	}
+	alarmRuleUnitFor = prev
+	env.advance()
+	if _, err := env.apply(p.ID); err != nil {
+		t.Fatalf("retry once the unit is back: %v", err)
+	}
+}
