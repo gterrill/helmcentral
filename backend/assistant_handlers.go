@@ -64,6 +64,20 @@ func trimmedAssistantScreenField(s string) string {
 	return string(runes)
 }
 
+// assistantScreenAlarmIDMaxRunes bounds an alarm id in the screen context. A
+// collision alarm's id carries a vessel urn, longer than the other fields.
+const assistantScreenAlarmIDMaxRunes = 200
+
+// trimmedAssistantScreenAlarmID trims an alarm id and drops it when it is over
+// the cap: a truncated id would name a different alarm.
+func trimmedAssistantScreenAlarmID(s string) string {
+	s = strings.TrimSpace(s)
+	if len([]rune(s)) > assistantScreenAlarmIDMaxRunes {
+		return ""
+	}
+	return s
+}
+
 // assistantReadiness is what GET /api/assistant/status reports, and what
 // postAssistantMessageHandler checks before it will start a run. Problem is
 // empty exactly when the assistant is ready to answer; it never causes a
@@ -1002,6 +1016,8 @@ func postAssistantMessageHandler(c echo.Context) error {
 			// Same 80-rune cap as the other fields; an id is 36 runes.
 			DocumentID:    trimmedAssistantScreenField(body.Screen.DocumentID),
 			DocumentTitle: trimmedAssistantScreenField(body.Screen.DocumentTitle),
+			AlarmID:       trimmedAssistantScreenAlarmID(body.Screen.AlarmID),
+			AlarmTitle:    trimmedAssistantScreenField(body.Screen.AlarmTitle),
 		}
 	}
 

@@ -1347,3 +1347,49 @@ func TestBuildAssistantSystemPrompt_AlarmProposalGuidance(t *testing.T) {
 		t.Errorf("alarm guidance belongs in the stable prefix only")
 	}
 }
+
+// ADR 0226: a turn seeded from an alarm card names the alarm, so Mate reads
+// it with get_alarm_context before anything else.
+func TestAssistantScreenSentence_NamesTheAlarmBeingAskedAbout(t *testing.T) {
+	got := assistantScreenSentence(assistantScreenContext{Panel: "alarms", AlarmID: "rule-7", AlarmTitle: "House Bank Low"})
+	for _, want := range []string{`"House Bank Low"`, "alarm_id rule-7", "get_alarm_context"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in %q", want, got)
+		}
+	}
+	if got := assistantScreenSentence(assistantScreenContext{Panel: "alarms"}); got != "The operator is looking at the Alarms panel.\n\n" {
+		t.Fatalf("an alarms panel with no alarm is unchanged, got %q", got)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_AlarmContextRule(t *testing.T) {
+	stable, live := assistantSystemPromptParts(basePromptContext())
+	for _, want := range []string{
+		"get_alarm_context",
+		"max_step",
+		"longest_flat_minutes",
+		"never replace the card",
+		"evidence",
+		"show_telemetry_chart",
+		"alarm_rule",
+		"never apply",
+	} {
+		if !strings.Contains(stable, want) {
+			t.Errorf("expected the stable prefix to contain %q", want)
+		}
+	}
+	if strings.Contains(live, "get_alarm_context") {
+		t.Errorf("the alarm context rule belongs in the stable prefix only")
+	}
+}
+
+// A truncated alarm id would name a different alarm, so one that is too long
+// is dropped rather than cut.
+func TestTrimmedAssistantScreenAlarmID_DropsAnOverlongID(t *testing.T) {
+	if got := trimmedAssistantScreenAlarmID("  notifications:vessels.urn:mrn:imo:mmsi:123  "); got != "notifications:vessels.urn:mrn:imo:mmsi:123" {
+		t.Errorf("got %q", got)
+	}
+	if got := trimmedAssistantScreenAlarmID(strings.Repeat("x", 201)); got != "" {
+		t.Errorf("an overlong id must be dropped, got %d runes", len(got))
+	}
+}

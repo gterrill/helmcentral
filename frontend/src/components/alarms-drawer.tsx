@@ -1,4 +1,4 @@
-import { BellRing, Pencil, Plus, Trash2, TriangleAlert } from 'lucide-react'
+import { BellRing, Pencil, Plus, Sparkles, Trash2, TriangleAlert } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -23,6 +23,7 @@ import {
 import { COLLISION_ALARM_RULE_PREFIX, type ActiveAlarm } from '@/hooks/use-alarms'
 import { forecastWarningDetailsUrl, type ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
+import type { MateAlarmContext } from '@/lib/mate-screen'
 
 function formatTime(value?: string): string {
   if (!value) return '--'
@@ -39,7 +40,15 @@ function formatDwell(seconds: number): string {
   return `${Math.round(seconds / 3600)}h`
 }
 
+/** How a page opens Mate with a question (App's openMate); the alarm is the one the question is about. */
+export type AskMateAboutAlarm = (question: string, options: { newConversation: true; alarm: MateAlarmContext }) => void
+
 interface AlarmsDrawerProps {
+  /**
+   * Opens Mate on a new conversation about one alarm (ADR 0226). Absent, the
+   * Ask Mate buttons are not drawn.
+   */
+  onAskMate?: AskMateAboutAlarm
   /** Null until the first alarms event: not known yet, so not "All clear". */
   alarms: ActiveAlarm[] | null
   onAcknowledge: (ruleId: string) => Promise<void>
@@ -78,6 +87,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
   deleteRule,
   collisionTuningUrl,
   forecastWarnings,
+  onAskMate,
 }: AlarmsDrawerProps) {
   const alarms = knownAlarms ?? NO_ALARMS
   const { entries, refresh: refreshLog } = useAlarmLog(true)
@@ -340,7 +350,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                       at 390px was truncating the headline to a few
                       characters and wrapping the sentence word by word).
                     */}
-                    <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
+                    <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
                       <span className={`text-[10px] uppercase tracking-[0.16em] ${severityClass(alarm.state)}`}>
                         {alarm.state}
                       </span>
@@ -353,7 +363,18 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                           Silenced · still live
                         </span>
                       ) : null}
-                      <div className="flex items-center gap-2">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        {onAskMate && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Ask Mate about ${alarm.label}`}
+                            onClick={() => onAskMate(`Why did ${alarm.label} go off?`, { newConversation: true, alarm: { id: alarm.rule_id, title: alarm.label } })}
+                          >
+                            <Sparkles className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Ask Mate</span>
+                          </Button>
+                        )}
                         {alarm.can_silence && (
                           <Button size="sm" variant="ghost" onClick={() => void silence(alarm.rule_id)}>
                             Silence
@@ -447,9 +468,21 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                     <span className="ml-1 text-[10px] uppercase tracking-[0.16em] text-muted-foreground">signalk</span>
                   )}
                 </span>
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground">
                   {formatTime(entry.raised_at)}
                   {entry.cleared_at ? ' → cleared' : ''}
+                  {onAskMate && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="-my-2.5"
+                      aria-label={`Ask Mate about ${entry.label}`}
+                      title="Ask Mate about this"
+                      onClick={() => onAskMate(`Why did ${entry.label} go off?`, { newConversation: true, alarm: { id: entry.id, title: entry.label } })}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </span>
               </div>
             ))}

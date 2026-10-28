@@ -239,6 +239,16 @@ from what each rule reads, so there's nothing to categorise by hand. A rule whos
 alarm is live is marked as firing. Each one shows its threshold and the point it
 clears at, in your own units, and deleting one asks first.
 
+## Asking Mate about an alarm
+
+Each alarm card has an **Ask Mate** button next to **Acknowledge**, and each row
+in History has a small Mate button. It opens a new conversation with Mate that
+already knows which alarm you mean, and asks why it went off. Mate looks at the
+level the alarm fires at, the reading and how recent it is, how the reading
+moved around the time it went off, and what else went off or cleared within
+15 minutes either side, then charts it. The card itself isn't changed. See
+[Mate](assistant.md) for what it can and can't tell you.
+
 ## Gauge bands are alarm rules
 
 A coloured band on a gauge set to an alarm severity defines an alarm rule. Drag

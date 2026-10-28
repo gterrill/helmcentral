@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { screenContextFor } from '@/lib/mate-screen'
+import { screenContextFor, withAlarmContext } from '@/lib/mate-screen'
 import type { AppLocation } from '@/lib/app-location'
 
 // ADR 0093 voice phase: screenContextFor turns the shell's current
@@ -64,5 +64,23 @@ describe('screenContextFor', () => {
 
   it('does not name a document on the ordinary Documents listing', () => {
     expect(screenContextFor(documents('browse'), null, 'Stale title')).toEqual({ panel: 'documents' })
+  })
+})
+
+// ADR 0226: a turn seeded from an alarm card carries the alarm on top of the
+// screen the operator is on.
+describe('withAlarmContext', () => {
+  it('adds the alarm id and title to the screen', () => {
+    expect(withAlarmContext({ panel: 'alarms' }, { id: 'rule-1', title: 'House Bank Low' })).toEqual({
+      panel: 'alarms',
+      alarm_id: 'rule-1',
+      alarm_title: 'House Bank Low',
+    })
+  })
+
+  it('carries the alarm even with no screen, and leaves the screen alone with no alarm', () => {
+    expect(withAlarmContext(undefined, { id: 'rule-1', title: 'House Bank Low' })).toEqual({ alarm_id: 'rule-1', alarm_title: 'House Bank Low' })
+    const screen = { panel: 'forecast' }
+    expect(withAlarmContext(screen, null)).toBe(screen)
   })
 })

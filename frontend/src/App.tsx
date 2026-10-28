@@ -164,7 +164,7 @@ import { inventorySectionOf, settingsSectionOf, type AppLocation, type PanelId }
 import { browserHistory, createAppRouter } from '@/lib/app-router'
 import { AppRouterContext, useAppLocation, useAppRouter, useNavigate } from '@/hooks/use-app-location'
 import { useHasNavigationGuard } from '@/hooks/use-navigation-guard'
-import { screenContextFor } from '@/lib/mate-screen'
+import { screenContextFor, withAlarmContext, type MateAlarmContext } from '@/lib/mate-screen'
 import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
 // Its own module, not the patterns barrel: the barrel would drag TanStack
 // Table into the entry chunk for the sake of one empty div.
@@ -648,6 +648,10 @@ function AppShell() {
   // Whether `mateSheetQuestion` came in by voice: only then does Mate write
   // an answer meant for speaking, and only then is it read aloud.
   const [mateSheetSpoken, setMateSheetSpoken] = useState(false)
+  // The alarm the sheet's conversation is about (ADR 0226), set by an Ask Mate
+  // button on an alarm card. It rides on the screen context of every question
+  // asked until the sheet closes, so a follow-up still means that alarm.
+  const [mateSheetAlarm, setMateSheetAlarm] = useState<MateAlarmContext | null>(null)
   // MateSheet is lazy-loaded and does not mount at all until the sheet is
   // opened for the first time - it fetches its conversation list and runs
   // every other effect only while `open`, so there is nothing for it to do
@@ -724,7 +728,9 @@ function AppShell() {
   // the answer watcher can tell a conversation the sheet is showing right
   // now apart from one it merely knows about.
   const [mateSheetConversationId, setMateSheetConversationId] = useState<string | null>(null)
-  const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean }) => {
+  const clearMateSheetAlarm = useCallback(() => setMateSheetAlarm(null), [])
+  const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean; alarm?: MateAlarmContext }) => {
+    setMateSheetAlarm(options?.alarm ?? null)
     setMateSheetQuestion(question)
     setMateSheetNewConversation(Boolean(options?.newConversation))
     setMateSheetSpoken(Boolean(options?.spoken))
@@ -735,8 +741,8 @@ function AppShell() {
     openMate(question, { spoken: true })
   }, [openMate])
   const mateScreen = useMemo(
-    () => screenContextFor(appLocation, activePage?.name ?? null, documentDetailsTitle),
-    [appLocation, activePage, documentDetailsTitle],
+    () => withAlarmContext(screenContextFor(appLocation, activePage?.name ?? null, documentDetailsTitle), mateSheetAlarm),
+    [appLocation, activePage, documentDetailsTitle, mateSheetAlarm],
   )
 
   // mate-answer-toast plan: which conversation(s), if any, are actually on
@@ -1724,7 +1730,7 @@ function AppShell() {
         )
       case 'alarms':
         return (
-          <LiveAlarmsDrawer />
+          <LiveAlarmsDrawer onAskMate={openMate} />
         )
       case 'radar':
         return <LiveRadarDrawer />
@@ -2499,12 +2505,14 @@ function AppShell() {
                 setMateSheetQuestion(undefined)
                 setMateSheetNewConversation(false)
                 setMateSheetSpoken(false)
+                setMateSheetAlarm(null)
               }
             }}
             initialQuestion={mateSheetQuestion}
             newConversation={mateSheetNewConversation}
             spoken={mateSheetSpoken}
             screen={mateScreen}
+            onAlarmContextDone={clearMateSheetAlarm}
             canWrite={canWrite}
             readAloud={assistantVoiceConfig.readAloud}
             onOpenPanel={(id) => {

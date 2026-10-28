@@ -25,6 +25,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Ask Mate about an alarm.** Every alarm card in the Alarms drawer, and every
+  row in its History, has an **Ask Mate** button. It opens a new conversation
+  with the question already asked, such as "Why did House Bank Low go off?".
+  Mate looks at the alarm, the level it fires at, the reading and how recent it
+  is, how the reading moved in the half hour either side, how often the alarm
+  has gone off in the last week and what else went off nearby, then draws the
+  chart. It says whether the reading looks real or looks like a sensor problem,
+  and leaves out what it can't show. The alarm card keeps its own words. If the
+  level looks wrong for your boat, Mate offers a card to change it, and nothing
+  changes until you tap **Apply**.
+
 - **Mate can set up alarms for you.** Say "tell me if the house bank drops below
   50%" and Mate checks the alarms you already have, then shows a card with the
   alarm, where it fires, where it clears and how long the reading has to hold,

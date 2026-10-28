@@ -425,6 +425,35 @@ from the device name on the card. Then it checks that reading's live state and
 history. It tells you what the reading was when the alarm was raised, apart from
 what it is now.
 
+### Asking about one alarm
+
+Every alarm card in the Alarms drawer has an **Ask Mate** button, and so does
+each row in the drawer's History, including alarms that have already cleared.
+Tap it and Mate opens on a new conversation with a question already asked, such
+as "Why did House Bank Low go off?". Mate knows which alarm you mean, so you can
+follow up with "is that normal?" or "what about last night?" without naming it
+again.
+
+Mate starts by looking up that alarm and then tells you:
+
+- What tripped it: The reading against the level the alarm fires at, and where it clears and how long it had to hold, in your units.
+- Whether the reading looks real: Whether the sensor is still reporting, how the reading moved in the half hour either side of the alarm, and whether other alarms went off or cleared within 15 minutes. It gives these as evidence and doesn't guess at a cause.
+- How often it happens: How many times that alarm was raised in the last week.
+
+Under the answer is a chart of the reading around the time the alarm went off.
+Mate doesn't reword the alarm itself. The card keeps its own title and message.
+If the level looks wrong for the way your boat behaves, for example the alarm
+trips every night at the same point, Mate says so with the figures and offers a
+card to change the alarm. Nothing changes until you tap **Apply**.
+
+Some parts can be missing, and Mate says so when they are. An alarm raised by
+another instrument on the network has no level of its own to quote. A collision
+or radar alarm has no reading behind it. Without InfluxDB there is no history to
+chart. Mate doesn't group a reading with related ones, so it can't tell you
+what the other sensors on the same item did unless you ask it to check them.
+The button isn't on the banner across the top. Tap **View** there and the
+buttons are on the cards.
+
 ## Waiting for a weather window
 
 When you're waiting to make a run in stages, ask Mate which days work:

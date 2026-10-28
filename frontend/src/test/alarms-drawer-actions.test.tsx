@@ -1,16 +1,19 @@
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AlarmsDrawer } from '@/components/alarms-drawer'
+import type { AlarmLogEntry } from '@/hooks/use-alarm-rules'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
 
 // useAlarmLog is the one hook the drawer still owns itself; rules now come
 // in as props (lifted into App so a saved rule reaches the battery tile's
 // SoC bands without a reload), so this file passes empty rules directly
 // instead of mocking useAlarmRules.
+const mockLogEntries: AlarmLogEntry[] = []
+
 vi.mock('@/hooks/use-alarm-rules', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/hooks/use-alarm-rules')>()),
-  useAlarmLog: () => ({ entries: [], refresh: vi.fn().mockResolvedValue(undefined) }),
+  useAlarmLog: () => ({ entries: mockLogEntries, refresh: vi.fn().mockResolvedValue(undefined) }),
 }))
 
 /**
@@ -37,6 +40,7 @@ function alarm(overrides: Partial<ActiveAlarm> = {}): ActiveAlarm {
 function renderDrawer(alarms: ActiveAlarm[], handlers: Partial<{
   onAcknowledge: (id: string) => Promise<void>
   onSilence: (id: string) => Promise<void>
+  onAskMate: (question: string, options?: { newConversation?: boolean; alarm?: { id: string; title: string } }) => void
 }> = {}) {
   const onAcknowledge = handlers.onAcknowledge ?? vi.fn().mockResolvedValue(undefined)
   const onSilence = handlers.onSilence ?? vi.fn().mockResolvedValue(undefined)
@@ -53,6 +57,7 @@ function renderDrawer(alarms: ActiveAlarm[], handlers: Partial<{
       deleteRule={vi.fn()}
       collisionTuningUrl={null}
       forecastWarnings={null}
+      onAskMate={handlers.onAskMate}
     />,
   )
   return { onAcknowledge, onSilence }
@@ -115,5 +120,55 @@ describe('AlarmsDrawer alert actions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /silence/i }))
     expect(await screen.findByText(/SignalK does not offer that action/i)).toBeTruthy()
+  })
+})
+
+// ADR 0226: the card hands Mate a short question and the alarm's id.
+describe('AlarmsDrawer Ask Mate', () => {
+  afterEach(() => { mockLogEntries.length = 0 })
+
+  it('opens a new Mate conversation about the alarm from its card', () => {
+    const onAskMate = vi.fn()
+    renderDrawer([alarm({ rule_id: 'rule-7', label: 'House Bank Low' })], { onAskMate })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Mate about House Bank Low' }))
+
+    expect(onAskMate).toHaveBeenCalledWith('Why did House Bank Low go off?', {
+      newConversation: true,
+      alarm: { id: 'rule-7', title: 'House Bank Low' },
+    })
+  })
+
+  it('asks about a cleared alarm in the history by its log id', () => {
+    mockLogEntries.splice(0, mockLogEntries.length, {
+      id: 'log-9', rule_id: 'rule-7', source: 'rule', label: 'Cabin Hot', path: 'p', state: 'warn',
+      message: '31 °C', value_at_raise: 304, raised_at: '2026-10-20T02:00:00Z', cleared_at: '2026-10-20T02:10:00Z',
+    })
+    const onAskMate = vi.fn()
+    renderDrawer([], { onAskMate })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask Mate about Cabin Hot' }))
+
+    expect(onAskMate).toHaveBeenCalledTimes(1)
+    const [question, options] = onAskMate.mock.calls[0]
+    // The log id pins the occurrence, so the question carries no browser-local time.
+    expect(question).toBe('Why did Cabin Hot go off?')
+    expect(options).toEqual({ newConversation: true, alarm: { id: 'log-9', title: 'Cabin Hot' } })
+  })
+
+  it('keeps the action row inside a phone-width card', () => {
+    renderDrawer([alarm({ label: 'House Bank Low' })], { onAskMate: vi.fn() })
+    const button = screen.getByRole('button', { name: 'Ask Mate about House Bank Low' })
+    const row = button.parentElement as HTMLElement
+    expect(row.className).toContain('flex-wrap')
+    expect(row.parentElement?.className).toContain('min-w-0')
+    // Icon-only below sm: the word is hidden there, the aria-label stays.
+    expect(within(button).getByText('Ask Mate').className).toContain('hidden')
+    expect(within(button).getByText('Ask Mate').className).toContain('sm:inline')
+  })
+
+  it('shows no button when the page cannot open Mate', () => {
+    renderDrawer([alarm()])
+    expect(screen.queryByRole('button', { name: /ask mate/i })).toBeNull()
   })
 })

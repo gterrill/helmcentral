@@ -33,3 +33,17 @@ export function screenContextFor(location: AppLocation, pageName: string | null,
 
   return { panel: location.panel }
 }
+
+/** The alarm a turn is about (ADR 0226): the card's id and title. */
+export interface MateAlarmContext {
+  id: string
+  title: string
+}
+
+// Layers the alarm the operator tapped "Ask Mate about this" on over the screen
+// they are on. The backend reads alarm_id and tells Mate to call
+// get_alarm_context with it; the title only names the alarm in that sentence.
+export function withAlarmContext(screen: AssistantScreenContext | undefined, alarm: MateAlarmContext | null): AssistantScreenContext | undefined {
+  if (!alarm) return screen
+  return { ...screen, alarm_id: alarm.id, alarm_title: alarm.title }
+}
