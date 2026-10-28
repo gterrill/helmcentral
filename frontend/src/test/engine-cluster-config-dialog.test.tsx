@@ -188,6 +188,8 @@ describe('the slots no profile fills', () => {
     await setup('port')
     const onSave = open()
     fireEvent.click(screen.getByRole('button', { name: /fill slots from profile/i }))
+    // The footer slots live on the Footer tab.
+    fireEvent.click(screen.getByRole('tab', { name: /footer/i }))
     edit()
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
     return vi.waitFor(() => onSave.mock.calls[0][0] as EngineClusterConfig)
