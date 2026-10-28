@@ -13,6 +13,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The engine cluster's settings are split into tabs.** Dial, Readouts,
+  Footer and Fuel each have their own tab, so you no longer scroll past every
+  slot to reach the one you want. On a wider screen, a small picture of the
+  card shows which part you're editing. The footer rows fold shut and say what each one shows, or
+  **Not shown**. When **Save** is greyed out, the line beside it says what's
+  missing, and a tab with an empty slot has an amber dot.
+
 - **Mate tells your season from the Passages page.** Ask it to summarise the
   season, a cruise or a trip and it now reads the passages you've recorded, with
   their place names, distances, fuel, ratings and notes. Before, it counted runs
