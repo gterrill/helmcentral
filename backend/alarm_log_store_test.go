@@ -287,3 +287,56 @@ func TestAlarmLogNilStoreIsInert(t *testing.T) {
 		t.Fatalf("nil store Recent: %v %v", entries, err)
 	}
 }
+
+func TestAlarmLogStore_LooksUpOccurrencesForAskMate(t *testing.T) {
+	store, err := newAlarmLogStore(filepath.Join(t.TempDir(), "alarm-log.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	base := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
+	raise := func(id, rule string, at time.Time) {
+		t.Helper()
+		if _, err := store.RecordRaised(alarmLogEntry{ID: id, RuleID: rule, Label: rule, Path: "p", State: "warn", RaisedAt: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raise("a1", "r1", base.Add(-10*24*time.Hour))
+	raise("a2", "r1", base.Add(-2*24*time.Hour))
+	raise("a3", "r1", base)
+	raise("b1", "r2", base.Add(5*time.Minute))
+	if err := store.MarkCleared("r1", base.Add(20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := store.Get("a2")
+	if err != nil || !ok || got.RuleID != "r1" {
+		t.Fatalf("Get(a2) = %+v %v %v", got, ok, err)
+	}
+	if _, ok, _ := store.Get("nope"); ok {
+		t.Error("Get of an unknown id must report not found")
+	}
+	latest, ok, err := store.LatestForRule("r1")
+	if err != nil || !ok || latest.ID != "a3" || latest.ClearedAt == nil {
+		t.Fatalf("LatestForRule = %+v %v %v", latest, ok, err)
+	}
+	n, err := store.RaisedCount("r1", base.Add(-7*24*time.Hour))
+	if err != nil || n != 2 {
+		t.Fatalf("RaisedCount = %d, %v; want 2 (the ten-day-old raise is outside)", n, err)
+	}
+	near, err := store.ChangedBetween(base.Add(-15*time.Minute), base.Add(15*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, e := range near {
+		ids[e.ID] = true
+	}
+	if !ids["a3"] || !ids["b1"] || ids["a2"] {
+		t.Errorf("ChangedBetween ids = %v, want a3 and b1 only", ids)
+	}
+	later, err := store.ChangedBetween(base.Add(15*time.Minute), base.Add(30*time.Minute))
+	if err != nil || len(later) != 1 || later[0].ID != "a3" {
+		t.Errorf("a clearing inside the window counts: %+v %v", later, err)
+	}
+}

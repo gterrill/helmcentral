@@ -28,6 +28,9 @@ export interface AssistantScreenContext {
   /** The document open on its Details page (ADR 0167). */
   document_id?: string
   document_title?: string
+  /** The alarm the operator asked Mate about from its card (ADR 0226). */
+  alarm_id?: string
+  alarm_title?: string
 }
 
 export interface AssistantSendOptions {

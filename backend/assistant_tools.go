@@ -167,6 +167,10 @@ type assistantToolDeps struct {
 	// alarm card and banner show (ADR 0175). Production wires activeAlarms;
 	// nil is an error, never an empty list.
 	activeAlarms func() []alarmStatus
+	// alarmLog is the alarm log get_alarm_context reads for raised and cleared
+	// history (ADR 0226). Production returns globalAlarmLogStore; nil, or a nil
+	// store, is reported as absent, never as an empty history.
+	alarmLog func() *alarmLogStore
 	// influxLastRecorded is get_last_recorded's only I/O dependency: the most
 	// recent recorded point for every measurement/source pair matching a
 	// path-prefix and/or source filter, within a lookback window. Production
@@ -354,6 +358,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		},
 		signalKDiagnostics:         signalKDiagnosticsFromGlobalSnapshot,
 		activeAlarms:               activeAlarms,
+		alarmLog:                   func() *alarmLogStore { return globalAlarmLogStore },
 		influxLastRecorded:         queryInfluxLastRecorded,
 		influxPathHistoryStat:      queryInfluxPathStatRange,
 		influxPathHistoryFirstLast: queryInfluxPathFirstLast,
@@ -466,6 +471,7 @@ var mateTools = []mateTool{
 	mateToolReadConversation,
 	mateToolGetNearbyVessels,
 	mateToolGetActiveAlarms,
+	mateToolGetAlarmContext,
 	mateToolCheckSignalKPaths,
 	mateToolGetLastRecorded,
 	mateToolGetPathHistory,

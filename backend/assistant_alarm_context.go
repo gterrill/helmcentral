@@ -1,0 +1,468 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+)
+
+// get_alarm_context (ADR 0226): everything Mate needs to explain one alarm,
+// gathered in one call. The alarm itself is read back exactly as the card
+// shows it; nothing here rewrites its title or body. Each part that cannot be
+// given is absent with a reason, never filled in.
+
+const (
+	alarmContextHistoryBefore = 30 * time.Minute
+	alarmContextHistoryAfter  = 30 * time.Minute
+	alarmContextHistoryMax    = 2 * time.Hour
+	alarmContextNeighbours    = 15 * time.Minute
+	alarmContextMaxNeighbours = 12
+	alarmContextOccurrences   = 7 * 24 * time.Hour
+)
+
+type assistantAlarmContextArgs struct {
+	AlarmID string `json:"alarm_id"`
+}
+
+// assistantAlarmCard is the alarm as the card presents it.
+type assistantAlarmCard struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Body      string `json:"body,omitempty"`
+	State     string `json:"state"`
+	Phase     string `json:"phase,omitempty"`
+	Active    bool   `json:"active"`
+	Source    string `json:"source"`
+	RaisedAt  string `json:"raised_at,omitempty"`
+	AckedAt   string `json:"acked_at,omitempty"`
+	ClearedAt string `json:"cleared_at,omitempty"`
+}
+
+type assistantAlarmLive struct {
+	Value      float64 `json:"value"`
+	Unit       string  `json:"unit,omitempty"`
+	Source     string  `json:"source,omitempty"`
+	AgeSeconds float64 `json:"age_seconds"`
+	Stale      bool    `json:"stale"`
+}
+
+// assistantAlarmHistory is get_path_history's answer for the window round the
+// raise, cut down to the figures that explain it, in the operator's unit.
+type assistantAlarmHistory struct {
+	StartISO  string   `json:"start_iso"`
+	EndISO    string   `json:"end_iso"`
+	Unit      string   `json:"unit,omitempty"`
+	Min       *float64 `json:"min,omitempty"`
+	Mean      *float64 `json:"mean,omitempty"`
+	Max       *float64 `json:"max,omitempty"`
+	FirstSeen string   `json:"first_seen_iso,omitempty"`
+	LastSeen  string   `json:"last_seen_iso,omitempty"`
+	GapCount  int      `json:"gap_count,omitempty"`
+	Note      string   `json:"note,omitempty"`
+}
+
+type assistantAlarmOccurrences struct {
+	RaisedLast7Days int `json:"raised_last_7_days"`
+}
+
+type assistantAlarmNeighbour struct {
+	Title string `json:"title"`
+	State string `json:"state"`
+	Event string `json:"event"`
+	At    string `json:"at"`
+}
+
+type assistantAlarmContextResult struct {
+	Alarm    assistantAlarmCard `json:"alarm"`
+	Timezone string             `json:"timezone"`
+	// TimezoneNote is set when the boat's time zone could not be read.
+	TimezoneNote string `json:"timezone_note,omitempty"`
+
+	Rule       *assistantAlarmRuleEntry `json:"rule,omitempty"`
+	RuleAbsent string                   `json:"rule_absent,omitempty"`
+
+	Trigger struct {
+		Path        string   `json:"path,omitempty"`
+		Investigate []string `json:"investigate,omitempty"`
+	} `json:"trigger"`
+
+	Live       *assistantAlarmLive `json:"live,omitempty"`
+	LiveAbsent string              `json:"live_absent,omitempty"`
+
+	History       *assistantAlarmHistory `json:"history,omitempty"`
+	HistoryAbsent string                 `json:"history_absent,omitempty"`
+
+	Occurrences       *assistantAlarmOccurrences `json:"occurrences,omitempty"`
+	OccurrencesAbsent string                     `json:"occurrences_absent,omitempty"`
+
+	SameWindow       []assistantAlarmNeighbour `json:"same_window"`
+	SameWindowNote   string                    `json:"same_window_note,omitempty"`
+	SiblingPaths     []string                  `json:"sibling_paths"`
+	SiblingPathsNote string                    `json:"siblings_note"`
+}
+
+// alarmContextSubject is the alarm being asked about, whether it is live or
+// only in the log.
+type alarmContextSubject struct {
+	status    alarmStatus
+	source    string
+	clearedAt time.Time
+	active    bool
+	logID     string
+}
+
+func (d assistantToolDeps) findAlarmContextSubject(id string) (alarmContextSubject, error) {
+	if d.activeAlarms != nil {
+		for _, a := range d.activeAlarms() {
+			if a.RuleID == id {
+				return alarmContextSubject{status: a, active: true}, nil
+			}
+		}
+	}
+	var store *alarmLogStore
+	if d.alarmLog != nil {
+		store = d.alarmLog()
+	}
+	if store == nil {
+		return alarmContextSubject{}, fmt.Errorf("get_alarm_context: no active alarm has the id %q and the alarm log is not available", id)
+	}
+	entry, ok, err := store.Get(id)
+	if err == nil && !ok {
+		entry, ok, err = store.LatestForRule(id)
+	}
+	if err != nil {
+		return alarmContextSubject{}, fmt.Errorf("get_alarm_context: %w", err)
+	}
+	if !ok {
+		return alarmContextSubject{}, fmt.Errorf("get_alarm_context: no alarm, live or logged, has the id %q (get_active_alarms lists the live ones)", id)
+	}
+	sub := alarmContextSubject{
+		status: alarmStatus{
+			RuleID: entry.RuleID, Label: entry.Label, Path: entry.Path, State: entry.State, Message: entry.Message,
+			Phase: alarmPhaseNormal, RaisedAt: entry.RaisedAt,
+		},
+		source: entry.Source, logID: entry.ID,
+	}
+	if entry.AckedAt != nil {
+		sub.status.AckedAt = *entry.AckedAt
+	}
+	if entry.ClearedAt != nil {
+		sub.clearedAt = *entry.ClearedAt
+	} else if active := d.liveAlarmFor(entry.RuleID); active != nil {
+		// The occurrence is still open and the alarm is on the board.
+		sub.status, sub.active = *active, true
+	}
+	return sub, nil
+}
+
+func (d assistantToolDeps) liveAlarmFor(ruleID string) *alarmStatus {
+	if d.activeAlarms == nil {
+		return nil
+	}
+	for _, a := range d.activeAlarms() {
+		if a.RuleID == ruleID {
+			return &a
+		}
+	}
+	return nil
+}
+
+// alarmContextRule finds the rule behind an alarm: a stored one or one
+// Helmcentral derives. ok is false for a network alarm or a deleted rule.
+func alarmContextRule(ruleID string) (assistantAlarmRuleEntry, bool) {
+	if r, ok := getAlarmRule(ruleID); ok {
+		return alarmRuleListEntry(r, false), true
+	}
+	for _, r := range derivedAlarmRules() {
+		if r.ID == ruleID {
+			return alarmRuleListEntry(r, true), true
+		}
+	}
+	return assistantAlarmRuleEntry{}, false
+}
+
+func (d assistantToolDeps) executeGetAlarmContext(ctx context.Context, raw json.RawMessage) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	var args assistantAlarmContextArgs
+	if err := json.Unmarshal(raw, &args); err != nil {
+		return "", fmt.Errorf("parse get_alarm_context arguments: %w", err)
+	}
+	id := strings.TrimSpace(args.AlarmID)
+	if id == "" {
+		return "", errors.New("get_alarm_context: alarm_id is required (the id of the alarm the operator asked about, or a rule_id from get_active_alarms)")
+	}
+	sub, err := d.findAlarmContextSubject(id)
+	if err != nil {
+		return "", err
+	}
+	now := d.now()
+	a := sub.status
+
+	loc, tz, tzNote := d.alarmContextLocation()
+	stamp := func(t time.Time) string {
+		if t.IsZero() {
+			return ""
+		}
+		return t.In(loc).Format("Mon 2 Jan 15:04")
+	}
+
+	var res assistantAlarmContextResult
+	res.Timezone, res.TimezoneNote = tz, tzNote
+	res.SameWindow, res.SiblingPaths = []assistantAlarmNeighbour{}, []string{}
+	res.Alarm = assistantAlarmCard{
+		ID: id, Title: a.Label, Body: a.Message, State: a.State, Phase: string(a.Phase), Active: sub.active,
+		RaisedAt: stamp(a.RaisedAt), AckedAt: stamp(a.AckedAt), ClearedAt: stamp(sub.clearedAt),
+	}
+
+	// The rule behind it.
+	rule, hasRule := alarmContextRule(a.RuleID)
+	switch {
+	case hasRule:
+		res.Rule = &rule
+		res.Alarm.Source = "rule"
+	case sub.active && !strings.HasPrefix(a.RuleID, notificationsRoot+":") && a.Threshold != nil:
+		res.Alarm.Source = "rule"
+		res.RuleAbsent = "the engine holds this rule but it is not in the rule list"
+	default:
+		res.Alarm.Source = "network"
+		res.RuleAbsent = "Helmcentral holds no rule for this alarm: it was raised by something else on the boat network, or its rule has since been deleted"
+	}
+	if sub.source == alarmSourceRule && !hasRule {
+		res.Alarm.Source = "rule"
+		res.RuleAbsent = "this alarm's rule has since been deleted"
+	}
+
+	// What to read.
+	path := a.Path
+	res.Trigger.Investigate = d.alarmInvestigateTargets(a)
+	if hasRule {
+		path = rule.Path
+	}
+	if len(res.Trigger.Investigate) == 1 {
+		path = res.Trigger.Investigate[0]
+	}
+	dataPath := ""
+	if len(res.Trigger.Investigate) == 1 {
+		dataPath = res.Trigger.Investigate[0]
+	}
+	res.Trigger.Path = path
+
+	d.fillAlarmContextLive(&res, dataPath, now)
+	d.fillAlarmContextHistory(ctx, &res, dataPath, a, sub.clearedAt, now)
+	d.fillAlarmContextLog(&res, sub, a, stamp)
+
+	res.SiblingPathsNote = "not given: Helmcentral keeps no grouping of related paths, so compare against the item's other readings with check_signalk_paths if it matters"
+
+	return capToolResultJSON(&res, func() bool {
+		if n := len(res.SameWindow); n > 4 {
+			res.SameWindow = res.SameWindow[:n/2]
+			res.SameWindowNote = "list cut to fit"
+			return true
+		}
+		return false
+	})
+}
+
+func (d assistantToolDeps) alarmContextLocation() (*time.Location, string, string) {
+	if d.vesselState == nil {
+		return time.UTC, "UTC", "vessel time zone unavailable: vessel state is not wired; these times are UTC, not boat time"
+	}
+	state, err := d.vesselState()
+	if err == nil && !hasUsableVesselPosition(state.Latitude, state.Longitude) {
+		err = errors.New("no usable vessel position")
+	}
+	if err != nil {
+		return time.UTC, "UTC", fmt.Sprintf("vessel time zone unavailable: %v; these times are UTC, not boat time", err)
+	}
+	return vesselLocalLocation(state.Longitude), assistantTimeZoneLabel(state.Longitude), ""
+}
+
+func (d assistantToolDeps) fillAlarmContextLive(res *assistantAlarmContextResult, dataPath string, now time.Time) {
+	if dataPath == "" {
+		res.LiveAbsent = "this alarm has no data path of its own to read"
+		return
+	}
+	if d.signalKDiagnostics == nil {
+		res.LiveAbsent = "the live SignalK view is not wired"
+		return
+	}
+	snap := d.signalKDiagnostics(now)
+	if !snap.HasSelfTree {
+		res.LiveAbsent = "SignalK is not connected, so there is no live reading"
+		return
+	}
+	for _, s := range snap.Samples {
+		if s.Path != dataPath {
+			continue
+		}
+		v, ok := s.Value.(float64)
+		if !ok {
+			res.LiveAbsent = fmt.Sprintf("%s is not a number right now", dataPath)
+			return
+		}
+		role := ""
+		if r, ok := getAlarmRuleByPath(res.Rule, dataPath); ok {
+			role = r
+		}
+		disp, _ := alarmDisplayFor(dataPath, role)
+		live := assistantAlarmLive{Value: roundTo(disp.toShown(v), 3), Unit: disp.label, Source: s.Source}
+		if s.AgeSeconds >= 0 {
+			live.AgeSeconds = roundTo1(s.AgeSeconds)
+			live.Stale = s.AgeSeconds > assistantDiagnosticsStaleAfter.Seconds()
+		} else {
+			res.LiveAbsent = fmt.Sprintf("%s has a value but nothing says how old it is", dataPath)
+			return
+		}
+		res.Live = &live
+		return
+	}
+	res.LiveAbsent = fmt.Sprintf("%s is not in the live SignalK tree right now: it may have gone quiet", dataPath)
+}
+
+// getAlarmRuleByPath returns the path role of the rule entry's stored rule, so
+// a role-bound rule converts like its card does.
+func getAlarmRuleByPath(entry *assistantAlarmRuleEntry, path string) (string, bool) {
+	if entry == nil {
+		return "", false
+	}
+	if r, ok := getAlarmRule(entry.ID); ok && r.Path == path {
+		return r.PathRole, r.PathRole != ""
+	}
+	return "", false
+}
+
+func (d assistantToolDeps) fillAlarmContextHistory(ctx context.Context, res *assistantAlarmContextResult, dataPath string, a alarmStatus, clearedAt, now time.Time) {
+	switch {
+	case dataPath == "":
+		res.HistoryAbsent = "this alarm has no data path of its own, so there is no history to read"
+		return
+	case a.RaisedAt.IsZero():
+		res.HistoryAbsent = "the raise time is not known, so there is no window to read"
+		return
+	case d.influxPathHistoryStat == nil || d.influxPathHistoryFirstLast == nil || d.vesselState == nil:
+		res.HistoryAbsent = "InfluxDB history is not available on this install"
+		return
+	}
+	start := a.RaisedAt.Add(-alarmContextHistoryBefore)
+	end := a.RaisedAt.Add(alarmContextHistoryAfter)
+	if !clearedAt.IsZero() && clearedAt.After(end) {
+		end = clearedAt
+	}
+	if limit := a.RaisedAt.Add(alarmContextHistoryMax); end.After(limit) {
+		end = limit
+	}
+	if end.After(now) {
+		end = now
+	}
+	if !end.After(start) {
+		res.HistoryAbsent = "the window round the raise is empty"
+		return
+	}
+	args, _ := json.Marshal(assistantGetPathHistoryArgs{Path: dataPath, Start: start.UTC().Format(time.RFC3339), End: end.UTC().Format(time.RFC3339)})
+	raw, err := d.executeGetPathHistory(ctx, args)
+	if err != nil {
+		res.HistoryAbsent = "reading the history failed: " + err.Error()
+		return
+	}
+	var h assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &h); err != nil {
+		res.HistoryAbsent = "the history result could not be read: " + err.Error()
+		return
+	}
+	if len(h.Buckets) == 0 {
+		res.HistoryAbsent = "nothing was recorded for this path in the window round the raise"
+		return
+	}
+	role := ""
+	if res.Rule != nil {
+		role, _ = getAlarmRuleByPath(res.Rule, dataPath)
+	}
+	disp, _ := alarmDisplayFor(dataPath, role)
+	conv := func(v *float64) *float64 {
+		if v == nil {
+			return nil
+		}
+		if h.Unit != "" { // an angle is already in degrees
+			return v
+		}
+		return roundTo2Ptr(floatPtr(disp.toShown(*v)))
+	}
+	unit := disp.label
+	if h.Unit != "" {
+		unit = h.Unit
+	}
+	res.History = &assistantAlarmHistory{
+		StartISO: h.StartISO, EndISO: h.EndISO, Unit: unit,
+		Min: conv(h.OverallMin), Mean: conv(h.OverallMean), Max: conv(h.OverallMax),
+		FirstSeen: h.FirstSeenISO, LastSeen: h.LastSeenISO, GapCount: h.GapCount, Note: h.Note,
+	}
+}
+
+func (d assistantToolDeps) fillAlarmContextLog(res *assistantAlarmContextResult, sub alarmContextSubject, a alarmStatus, stamp func(time.Time) string) {
+	var store *alarmLogStore
+	if d.alarmLog != nil {
+		store = d.alarmLog()
+	}
+	if store == nil {
+		res.OccurrencesAbsent = "the alarm log is not available"
+		res.SameWindowNote = "the alarm log is not available"
+		return
+	}
+	now := d.now()
+	n, err := store.RaisedCount(a.RuleID, now.Add(-alarmContextOccurrences))
+	if err != nil {
+		res.OccurrencesAbsent = "reading the alarm log failed: " + err.Error()
+	} else {
+		res.Occurrences = &assistantAlarmOccurrences{RaisedLast7Days: n}
+	}
+	if a.RaisedAt.IsZero() {
+		res.SameWindowNote = "the raise time is not known"
+		return
+	}
+	entries, err := store.ChangedBetween(a.RaisedAt.Add(-alarmContextNeighbours), a.RaisedAt.Add(alarmContextNeighbours))
+	if err != nil {
+		res.SameWindowNote = "reading the alarm log failed: " + err.Error()
+		return
+	}
+	lo, hi := a.RaisedAt.Add(-alarmContextNeighbours), a.RaisedAt.Add(alarmContextNeighbours)
+	for _, e := range entries {
+		if e.RuleID == a.RuleID || (sub.logID != "" && e.ID == sub.logID) {
+			continue
+		}
+		if !e.RaisedAt.Before(lo) && !e.RaisedAt.After(hi) {
+			res.SameWindow = append(res.SameWindow, assistantAlarmNeighbour{Title: e.Label, State: e.State, Event: "raised", At: stamp(e.RaisedAt)})
+		}
+		if e.ClearedAt != nil && !e.ClearedAt.Before(lo) && !e.ClearedAt.After(hi) {
+			res.SameWindow = append(res.SameWindow, assistantAlarmNeighbour{Title: e.Label, State: e.State, Event: "cleared", At: stamp(*e.ClearedAt)})
+		}
+		if len(res.SameWindow) >= alarmContextMaxNeighbours {
+			res.SameWindowNote = "list cut to the first " + fmt.Sprint(alarmContextMaxNeighbours)
+			break
+		}
+	}
+}
+
+var mateToolGetAlarmContext = mateTool{
+	name: "get_alarm_context",
+	function: openRouterFunctionDef{
+		Description: "Everything needed to explain ONE alarm, in one call: the alarm exactly as its card shows it " +
+			"(title, body, severity state, raised/acknowledged/cleared times in boat local time; read these back, never reword them), " +
+			"the rule behind it (op, value and clear_value in the operator's unit, dwell, built-in or own, version) or why there is none, " +
+			"the path that tripped it with its live reading and age, that path's min/mean/max over the window round the raise " +
+			"(history; InfluxDB), how many times the alarm was raised in the last 7 days, and the other alarms raised or cleared " +
+			"within 15 minutes of it (same_window). Every part that cannot be given is absent with a *_absent or *_note reason: " +
+			"say so, never fill it in. Pass the alarm_id the turn carries (an alarm's rule_id, or the id of a log row for one " +
+			"that has cleared), or a rule_id from get_active_alarms. Related sibling paths are not given. " +
+			"Call this FIRST when asked about a specific alarm.",
+		Parameters: json.RawMessage(`{"type": "object", "properties": {"alarm_id": {"type": "string", "description": "The alarm's id: its rule_id, or a log id for an alarm that has cleared."}}, "required": ["alarm_id"]}`),
+	},
+	execute: assistantToolDeps.executeGetAlarmContext,
+	describe: func(json.RawMessage) string {
+		return "Looking into the alarm…"
+	},
+}

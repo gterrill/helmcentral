@@ -404,6 +404,11 @@ type assistantScreenContext struct {
 	// page (ADR 0167). Only meaningful when Panel=="documents".
 	DocumentID    string `json:"document_id"`
 	DocumentTitle string `json:"document_title"`
+	// AlarmID and AlarmTitle name the alarm the operator tapped "Ask Mate about
+	// this" on (ADR 0226). AlarmID is the alarm's rule id, or the log id of
+	// one that has cleared; the title is the card's own, for the sentence only.
+	AlarmID    string `json:"alarm_id"`
+	AlarmTitle string `json:"alarm_title"`
 }
 
 // collectAssistantPromptContext reads settings once via readSettings +
@@ -590,6 +595,15 @@ func assistantScreenSentence(screen assistantScreenContext) string {
 			"Questions that say \"this\" or \"it\", or that ask about a period, figure or section without naming "+
 			"a source, most likely refer to that document. Read it with read_document using that document_id "+
 			"before answering, rather than asking which source they mean.\n\n", name, docID)
+	}
+
+	if alarmID := strings.TrimSpace(screen.AlarmID); alarmID != "" {
+		name := "an alarm"
+		if title := strings.TrimSpace(screen.AlarmTitle); title != "" {
+			name = fmt.Sprintf("the alarm %q", title)
+		}
+		return fmt.Sprintf("The operator tapped \"Ask Mate about this\" on %s (alarm_id %s), so their question is about that alarm. "+
+			"Call get_alarm_context with that alarm_id before answering, and explain from what it returns.\n\n", name, alarmID)
 	}
 
 	if panel == "" && section == "" && page == "" {
@@ -935,6 +949,20 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"live value now (live_sensors, live_evidence; live_same_as_raised means they match; only sensor-health alarms carry these, so a missing one says nothing for other alarms), and say which one " +
 		"you are quoting. If times carry a timezone_note they are UTC, not boat time. An empty list means " +
 		"nothing is alarming now; say so rather than guessing.\n\n")
+
+	// 2c1d. Asking about one alarm (ADR 0226) - fixed wording, identical for
+	// every turn.
+	b.WriteString("When the operator asks about one alarm, or a turn names an alarm_id, call get_alarm_context with it first, " +
+		"then explain from what it returns. Say what tripped it with the figures in the operator's units: the reading against " +
+		"the threshold, and the clear point and dwell where the rule has them. Say whether the reading looks real or looks like a sensor " +
+		"problem, as evidence only: how fresh the live reading is, whether the window round the raise moved smoothly or sat flat " +
+		"or jumped, whether other alarms changed in the same window, how often it was raised in the last week. Never offer a cause " +
+		"the figures do not show, and say plainly what get_alarm_context left out and why. Draw the window with show_telemetry_chart " +
+		"for the trigger path when it has history. Your words never replace the card: do not restate or reword its title or body as " +
+		"if they were yours, and do not call the alarm cleared or fixed unless the result says so. If the threshold looks wrong for how the " +
+		"boat behaves, for example it trips every night at the same level, say so with those figures and offer an alarm_rule " +
+		"update proposal for the rule's id with its version, as the alarm rules guidance above describes. A proposal is the " +
+		"operator's to apply; you never apply it, and never change a rule you only described.\n\n")
 
 	// 2c2. Watches (ADR 0160) - fixed wording, identical for every turn. The
 	// chat that prompted this had Mate say it could not sit and watch a

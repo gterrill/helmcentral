@@ -289,6 +289,97 @@ func (s *alarmLogStore) Recent(limit int) ([]alarmLogEntry, error) {
 	return entries, rows.Err()
 }
 
+// logRowScanner is what *sql.Row and *sql.Rows share.
+type logRowScanner interface{ Scan(dest ...any) error }
+
+const alarmLogColumns = `id, rule_id, source, label, path, state, message, value_at_raise, raised_at, acked_at, cleared_at`
+
+func scanAlarmLogRow(r logRowScanner) (alarmLogEntry, error) {
+	var entry alarmLogEntry
+	var raised int64
+	var acked, cleared sql.NullInt64
+	if err := r.Scan(&entry.ID, &entry.RuleID, &entry.Source, &entry.Label, &entry.Path,
+		&entry.State, &entry.Message, &entry.ValueAtRaise, &raised, &acked, &cleared); err != nil {
+		return alarmLogEntry{}, err
+	}
+	entry.RaisedAt = time.Unix(raised, 0).UTC()
+	if acked.Valid {
+		t := time.Unix(acked.Int64, 0).UTC()
+		entry.AckedAt = &t
+	}
+	if cleared.Valid {
+		t := time.Unix(cleared.Int64, 0).UTC()
+		entry.ClearedAt = &t
+	}
+	return entry, nil
+}
+
+// Get returns one occurrence by its log id (Ask Mate about a cleared alarm).
+func (s *alarmLogStore) Get(id string) (alarmLogEntry, bool, error) {
+	return s.one(`SELECT `+alarmLogColumns+` FROM alarm_log WHERE id = ?`, id)
+}
+
+// LatestForRule returns the newest occurrence of a rule, open or cleared.
+func (s *alarmLogStore) LatestForRule(ruleID string) (alarmLogEntry, bool, error) {
+	return s.one(`SELECT `+alarmLogColumns+` FROM alarm_log WHERE rule_id = ? ORDER BY raised_at DESC, id DESC LIMIT 1`, ruleID)
+}
+
+func (s *alarmLogStore) one(query string, args ...any) (alarmLogEntry, bool, error) {
+	if s == nil {
+		return alarmLogEntry{}, false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, err := scanAlarmLogRow(s.db.QueryRow(query, args...))
+	if errors.Is(err, sql.ErrNoRows) {
+		return alarmLogEntry{}, false, nil
+	}
+	if err != nil {
+		return alarmLogEntry{}, false, fmt.Errorf("read alarm log: %w", err)
+	}
+	return entry, true, nil
+}
+
+// RaisedCount is how many times a rule was raised since the given time.
+func (s *alarmLogStore) RaisedCount(ruleID string, since time.Time) (int, error) {
+	if s == nil {
+		return 0, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM alarm_log WHERE rule_id = ? AND raised_at >= ?`, ruleID, since.UTC().Unix()).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count alarm raises: %w", err)
+	}
+	return n, nil
+}
+
+// ChangedBetween lists occurrences raised or cleared within [from, to],
+// oldest first.
+func (s *alarmLogStore) ChangedBetween(from, to time.Time) ([]alarmLogEntry, error) {
+	if s == nil {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, t := from.UTC().Unix(), to.UTC().Unix()
+	rows, err := s.db.Query(`SELECT `+alarmLogColumns+` FROM alarm_log
+		WHERE (raised_at BETWEEN ? AND ?) OR (cleared_at BETWEEN ? AND ?) ORDER BY raised_at ASC, id ASC LIMIT 200`, f, t, f, t)
+	if err != nil {
+		return nil, fmt.Errorf("read alarm log: %w", err)
+	}
+	defer rows.Close()
+	var out []alarmLogEntry
+	for rows.Next() {
+		e, err := scanAlarmLogRow(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan alarm log: %w", err)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // alarmLogRetention bounds how long an alarm_log row is kept. Unlike
 // notification_queue (a delivery-attempt queue, retained only notifyMaxAge
 // before a late send is deemed as-good-as-lost) this table is a diagnostic
