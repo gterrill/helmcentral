@@ -119,11 +119,11 @@ describe('decodeMateCards: passage_window', () => {
 })
 
 describe('decodeMateCards against the backend golden fixture', () => {
-  it('decodes the passage_window and telemetry_chart cards the Go side writes into message.sse', () => {
+  it('decodes the passage_window, telemetry_chart and wind_rose cards the Go side writes into message.sse', () => {
     const sse = readFileSync(join(__dirname, '../../../backend/testdata/mate_events/message.sse'), 'utf8')
     const data = sse.split('\n').find((l) => l.startsWith('data: '))!.slice('data: '.length)
     const cards = decodeMateCards(JSON.parse(data).message.cards)
-    expect(cards.map((c) => c.kind)).toEqual(['passage_window', 'telemetry_chart'])
+    expect(cards.map((c) => c.kind)).toEqual(['passage_window', 'telemetry_chart', 'telemetry_chart', 'wind_rose'])
   })
 
   describe('passage decision', () => {

@@ -48,10 +48,37 @@ export function zonedYmd(ms: number, timeZone: string): string {
 
 export interface TimeRow {
   t: number
-  [seriesKey: string]: number | null
+  /** `s{i}` is series i's mean; `b{i}` its [min, max] band, or null. */
+  [seriesKey: string]: number | null | [number, number]
 }
 
 export const seriesKey = (i: number) => `s${i}`
+export const bandKey = (i: number) => `b${i}`
+
+/** A card's series grouped into its stacked panels, in panel order. */
+export function panelsOf(series: Pick<TelemetryChartSeries, 'panel'>[]): { panel: number; indices: number[] }[] {
+  const by = new Map<number, number[]>()
+  series.forEach((s, i) => by.set(s.panel, [...(by.get(s.panel) ?? []), i]))
+  return [...by.entries()].sort((a, b) => a[0] - b[0]).map(([panel, indices]) => ({ panel, indices }))
+}
+
+export type AngleKind = 'bearing' | 'relative'
+
+/**
+ * The y axis of an angle panel. A bearing runs 0 to 360 with north at both
+ * ends, so a wrap through north is a jump between dots, not a line across the
+ * chart. A relative angle runs -180 to 180.
+ */
+export function angleAxis(kind: AngleKind): { domain: [number, number]; ticks: number[] } {
+  return kind === 'bearing'
+    ? { domain: [0, 360], ticks: [0, 90, 180, 270, 360] }
+    : { domain: [-180, 180], ticks: [-180, -90, 0, 90, 180] }
+}
+
+export function angleTickLabel(kind: AngleKind, v: number): string {
+  if (kind === 'relative') return String(v)
+  return ({ 0: 'N', 90: 'E', 180: 'S', 270: 'W', 360: 'N' } as Record<number, string>)[v] ?? String(v)
+}
 
 function bucketMs(body: TelemetrySeriesBody): number {
   const m = /^(\d+)(s|m|h|d)$/.exec(body.bucket)
@@ -71,13 +98,16 @@ export function buildTimeRows(body: TelemetrySeriesBody, nSeries: number): TimeR
     let r = rows.get(t)
     if (!r) {
       r = { t }
-      for (let i = 0; i < nSeries; i++) r[seriesKey(i)] = null
+      for (let i = 0; i < nSeries; i++) {
+        r[seriesKey(i)] = null
+        r[bandKey(i)] = null
+      }
       rows.set(t, r)
     }
     return r
   }
   const kept = body.series.slice(0, nSeries).map((s) => ({
-    pts: s.points.map((p) => ({ t: Date.parse(p.t), mean: p.mean })).sort((a, b) => a.t - b.t),
+    pts: s.points.map((p) => ({ t: Date.parse(p.t), mean: p.mean, min: p.min, max: p.max })).sort((a, b) => a.t - b.t),
     gaps: s.gaps.map((g) => ({ from: Date.parse(g.from), to: Date.parse(g.to) })),
   }))
   // breaks[i] is every timestamp at which series i is deliberately null.
@@ -85,7 +115,9 @@ export function buildTimeRows(body: TelemetrySeriesBody, nSeries: number): TimeR
   kept.forEach(({ pts, gaps }, i) => {
     const key = seriesKey(i)
     pts.forEach((p, j) => {
-      row(p.t)[key] = p.mean
+      const r = row(p.t)
+      r[key] = p.mean
+      if (p.min !== undefined && p.max !== undefined) r[bandKey(i)] = [p.min, p.max]
       const next = pts[j + 1]
       if (next && step > 0 && next.t - p.t > step * 2) {
         row(p.t + step)[key] = null
@@ -114,7 +146,11 @@ export function buildTimeRows(body: TelemetrySeriesBody, nSeries: number): TimeR
       const a = pts[after - 1]
       const b = pts[after]
       if (step > 0 && b.t - a.t > step * 2) continue
-      r[key] = a.mean + ((b.mean - a.mean) * (r.t - a.t)) / (b.t - a.t)
+      const f = (r.t - a.t) / (b.t - a.t)
+      r[key] = a.mean + (b.mean - a.mean) * f
+      if (a.min !== undefined && a.max !== undefined && b.min !== undefined && b.max !== undefined) {
+        r[bandKey(i)] = [a.min + (b.min - a.min) * f, a.max + (b.max - a.max) * f]
+      }
     }
   })
   return out
@@ -154,12 +190,13 @@ export function extent(values: number[]): [number, number] {
   return [lo - pad, hi + pad]
 }
 
-export function seriesValues(bodies: (TelemetrySeriesBody | undefined)[], i: number): number[] {
-  return bodies.flatMap((b) => b?.series[i]?.points.map((p) => p.mean) ?? [])
-}
-
-export function axisUnit(series: TelemetryChartSeries[], axis: 'left' | 'right'): string | null {
-  return series.find((s) => s.axis === axis)?.unit ?? null
+/** Every plotted value of series i across the ranges. With `band`, the min and
+ * max of each bucket too, so the axis reaches the gusts and not only the mean. */
+export function seriesValues(bodies: (TelemetrySeriesBody | undefined)[], i: number, band = false): number[] {
+  return bodies.flatMap(
+    (b) =>
+      b?.series[i]?.points.flatMap((p) => (band ? [p.mean, ...(p.min !== undefined ? [p.min] : []), ...(p.max !== undefined ? [p.max] : [])] : [p.mean])) ?? [],
+  )
 }
 
 /** Round, evenly spaced tick values covering [lo, hi]: 1, 2 or 5 times a power of ten. */

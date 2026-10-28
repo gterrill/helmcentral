@@ -855,6 +855,17 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"passage time windows (it reads the Passages logbook), then call get_path_history for each window. " +
 		"Documents and past conversations are secondary context, not a substitute for the logged figures.\n\n")
 
+	// 2c1a2. Wind trends (ADR 0221) - fixed wording, identical for every turn.
+	// Asked for the wind trend, Mate drew speed and a radian direction on one
+	// dual-axis chart and averaged the direction as a plain number.
+	b.WriteString("For a question about how the wind has behaved over days, show it as a wind rose with " +
+		"show_wind_rose, or as a chart of true wind speed (environment.wind.speedTrue) and true wind direction " +
+		"(environment.wind.directionTrue) in separate panels, never one chart with two axes. For \"where the wind " +
+		"has been coming from\" or the prevailing wind, prefer the wind rose. The chart tool draws a direction in " +
+		"degrees as points and gives the mean as a vector mean, so quote that figure and never average a " +
+		"direction as a plain number yourself: 350 and 10 degrees average to north, not to 180. If a result says " +
+		"there is no mean direction, say the wind was too light or too variable to have one rather than quoting one.\n\n")
+
 	// 2c1b. Seasons, cruises and trips (ADR 0219) - fixed wording, identical
 	// for every turn. Asked to summarise the season, Mate counted runs of
 	// logged speed over the last 60 days and reported 11 passages where the

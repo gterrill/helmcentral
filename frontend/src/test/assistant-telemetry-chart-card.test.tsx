@@ -35,8 +35,18 @@ describe('decoder: telemetry_chart', () => {
   it('accepts the contract example', () => {
     const c = decode({})
     expect(c).toMatchObject({ kind: 'telemetry_chart', title: 'Alternator current against house bank SOC', view: 'time', xy: null })
-    expect(c.kind === 'telemetry_chart' && c.series[0]).toMatchObject({ source: 'venus.c0619ab9d0ee', axis: 'left', unit: 'A' })
+    expect(c.kind === 'telemetry_chart' && c.series[0]).toMatchObject({ source: 'venus.c0619ab9d0ee', panel: 0, unit: 'A' })
     expect(c.kind === 'telemetry_chart' && c.series[1].source).toBeNull()
+  })
+
+  it('reads a card saved before panels, turning its left and right axis into panels 0 and 1', () => {
+    const c = decode({
+      series: [
+        { path: 'a', source: null, label: 'Speed', unit: 'kn', si_unit: 'm/s', axis: 'left' },
+        { path: 'b', source: null, label: 'Direction', unit: 'rad', si_unit: 'rad', axis: 'right' },
+      ],
+    })
+    expect(c.kind === 'telemetry_chart' && c.series.map((s) => s.panel)).toEqual([0, 1])
   })
 
   it('accepts an xy view with two valid indices and compare ranges', () => {
@@ -54,12 +64,16 @@ describe('decoder: telemetry_chart', () => {
     ['xy indices equal', { view: 'xy', xy: { x: 1, y: 1 } }, 'xy'],
     ['time view carrying xy', { view: 'time', xy: { x: 0, y: 1 } }, 'xy'],
     ['unknown view', { view: 'polar' }, 'view'],
-    ['missing si_unit', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', axis: 'left' }] }, 'series[0].si_unit'],
-    ['si_unit not a string', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 3, axis: 'left' }] }, 'series[0].si_unit'],
-    ['bad axis', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 'A', axis: 'middle' }] }, 'series[0].axis'],
+    ['missing si_unit', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', panel: 0 }] }, 'series[0].si_unit'],
+    ['si_unit not a string', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 3, panel: 0 }] }, 'series[0].si_unit'],
+    ['panel not a number', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 'A', panel: 'top' }] }, 'series[0].panel'],
+    ['panel past the series', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 'A', panel: 1 }] }, 'series[0].panel'],
+    ['negative panel', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 'A', panel: -1 }] }, 'series[0].panel'],
+    ['neither panel nor axis', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 'A' }] }, 'series[0].panel'],
+    ['a legacy axis that is neither side', { series: [{ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 'A', axis: 'middle' }] }, 'series[0].axis'],
     ['no series', { series: [] }, 'series'],
-    ['five series', { series: Array.from({ length: 5 }, () => ({ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 'A', axis: 'left' })) }, 'series'],
-    ['source not string or null', { series: [{ path: 'a', source: 3, label: 'A', unit: 'A', si_unit: 'A', axis: 'left' }] }, 'series[0].source'],
+    ['five series', { series: Array.from({ length: 5 }, () => ({ path: 'a', source: null, label: 'A', unit: 'A', si_unit: 'A', panel: 0 })) }, 'series'],
+    ['source not string or null', { series: [{ path: 'a', source: 3, label: 'A', unit: 'A', si_unit: 'A', panel: 0 }] }, 'series[0].source'],
     ['bad range time', { range: { from: 'soon', to: '2026-10-19T00:00:00+10:00' } }, 'range.from'],
     ['bad timezone', { timezone: 'Mars/Olympus' }, 'timezone'],
     ['four compare ranges', { compare: Array.from({ length: 4 }, () => ({ label: 'x', from: '2026-10-01T00:00:00Z', to: '2026-10-02T00:00:00Z' })) }, 'compare'],
@@ -94,6 +108,71 @@ describe('AssistantTelemetryChartCard', () => {
     expect(p.getAll('si_unit')).toEqual(['A', '%'])
     expect(Date.parse(p.get('from')!)).toBe(Date.parse('2026-10-12T00:00:00+10:00'))
     expect(Date.parse(p.get('to')!)).toBe(Date.parse('2026-10-19T00:00:00+10:00'))
+  })
+
+  it('draws one panel for each unit, each headed by its own legend, on one time axis', async () => {
+    render(<AssistantTelemetryChartCard card={telemetryChartCard()} />)
+    const panels = await screen.findAllByTestId('chart-panel')
+    expect(panels).toHaveLength(2)
+    expect(within(panels[0]).getByText('Starboard alternator current (A)')).toBeInTheDocument()
+    expect(within(panels[1]).getByText('House bank SOC (%)')).toBeInTheDocument()
+  })
+
+  it('draws series that share a panel as one panel with both in its legend', async () => {
+    const card = telemetryChartCard({
+      series: [
+        { path: 'a.one', source: null, label: 'Port current', unit: 'A', si_unit: 'A', panel: 0 },
+        { path: 'a.two', source: null, label: 'Starboard current', unit: 'A', si_unit: 'A', panel: 0 },
+      ],
+    })
+    reply = { ok: true, status: 200, body: seriesBody() }
+    render(<AssistantTelemetryChartCard card={card} />)
+    const panels = await screen.findAllByTestId('chart-panel')
+    expect(panels).toHaveLength(1)
+    expect(within(panels[0]).getByText('Port current (A)')).toBeInTheDocument()
+    expect(within(panels[0]).getByText('Starboard current (A)')).toBeInTheDocument()
+  })
+
+  it('stacks the panels of every compared range', async () => {
+    const card = telemetryChartCard({
+      compare: [
+        { label: 'Before', from: '2026-10-01T00:00:00+10:00', to: '2026-10-05T00:00:00+10:00' },
+        { label: 'After', from: '2026-10-12T00:00:00+10:00', to: '2026-10-16T00:00:00+10:00' },
+      ],
+    })
+    render(<AssistantTelemetryChartCard card={card} />)
+    expect(await screen.findAllByTestId('chart-panel')).toHaveLength(4)
+  })
+
+  it('names the unit the server drew a direction in, says how it was averaged, and counts the buckets with none', async () => {
+    const card = telemetryChartCard({
+      series: [
+        { path: 'environment.wind.speedTrue', source: null, label: 'True wind speed', unit: 'kn', si_unit: 'm/s', panel: 0 },
+        { path: 'environment.wind.directionTrue', source: null, label: 'True wind direction', unit: '°T', si_unit: 'rad', panel: 1 },
+      ],
+    })
+    const body = seriesBody()
+    body.series[0] = { ...body.series[0], path: 'environment.wind.speedTrue', unit: 'kn' }
+    body.series[1] = {
+      ...body.series[1],
+      path: 'environment.wind.directionTrue',
+      unit: '°T',
+      angle: 'bearing',
+      method: 'vector mean weighted by wind speed',
+      undefined_buckets: 12,
+    } as never
+    reply = { ok: true, status: 200, body }
+    render(<AssistantTelemetryChartCard card={card} />)
+    const panels = await screen.findAllByTestId('chart-panel')
+    expect(within(panels[1]).getByText('True wind direction (°T)')).toBeInTheDocument()
+    expect(screen.getByText(/True wind direction: vector mean weighted by wind speed/)).toBeInTheDocument()
+    expect(screen.getByText(/No direction in 12 buckets/)).toBeInTheDocument()
+  })
+
+  it('says nothing about averaging for a series that is not an angle', async () => {
+    render(<AssistantTelemetryChartCard card={telemetryChartCard()} />)
+    await screen.findAllByTestId('chart-panel')
+    expect(screen.queryByText(/vector mean/)).toBeNull()
   })
 
   it('labels the chart for assistive tech with the title and range', async () => {
@@ -199,8 +278,8 @@ describe('AssistantTelemetryChartCard', () => {
   it('omits the parentheses when a series has no unit', async () => {
     const card = telemetryChartCard({
       series: [
-        { path: 'a.b', source: null, label: 'Engine state', unit: '', si_unit: '', axis: 'left' },
-        { path: 'c.d', source: null, label: 'House bank SOC', unit: '%', si_unit: '', axis: 'right' },
+        { path: 'a.b', source: null, label: 'Engine state', unit: '', si_unit: '', panel: 0 },
+        { path: 'c.d', source: null, label: 'House bank SOC', unit: '%', si_unit: '', panel: 1 },
       ],
     })
     const { container } = render(<AssistantTelemetryChartCard card={card} />)

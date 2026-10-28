@@ -1,6 +1,6 @@
 import { ChartLine } from 'lucide-react'
 import { useId, useMemo, useState } from 'react'
-import { CartesianGrid, ComposedChart, Label, Line, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
+import { Area, CartesianGrid, ComposedChart, Label, Line, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis } from 'recharts'
 
 import { Skeleton } from '@/components/ui/skeleton'
 import { useIsMobile } from '@/hooks/use-mobile'
@@ -8,13 +8,18 @@ import { useTelemetrySeries, type TelemetrySeriesBody } from '@/hooks/use-teleme
 import type { TelemetryChartCard } from '@/lib/mate-cards'
 import {
   DAY_MS,
+  angleAxis,
+  angleTickLabel,
+  bandKey,
   buildTimeRows,
   dayTicks,
   formatRange,
   axisTicks,
   pairXY,
+  panelsOf,
   seriesKey,
   seriesValues,
+  type AngleKind,
   zonedDayStart,
   zonedYmd,
 } from '@/lib/telemetry-chart'
@@ -70,6 +75,137 @@ function Legend({ items }: { items: { label: string; colour: string }[] }) {
   )
 }
 
+/** The unit a series is drawn in: what the server says for an angle, the card's otherwise. */
+function drawnUnit(card: TelemetryChartCard, bodies: (TelemetrySeriesBody | undefined)[], i: number): string {
+  return bodies.find((b) => b?.series[i]?.angle)?.series[i]?.unit || card.series[i].unit
+}
+
+function angleKindOf(bodies: (TelemetrySeriesBody | undefined)[], i: number): AngleKind | null {
+  const a = bodies.find((b) => b?.series[i]?.angle)?.series[i]?.angle
+  return a === 'bearing' || a === 'relative' ? a : null
+}
+
+const TOOLTIP_STYLE = { background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', fontSize: 12 }
+
+/**
+ * One stacked panel: one unit, one legend, the shared time axis. A scalar is a
+ * mean line over its min-max band. An angle is points on a 0-360 (or -180-180)
+ * scale, so a swing through north is a jump between dots, not a line across the
+ * chart. Only the lowest panel shows the time labels.
+ */
+function TimePanel({
+  card,
+  indices,
+  rows,
+  bodies,
+  from,
+  to,
+  height,
+  last,
+}: {
+  card: TelemetryChartCard
+  indices: number[]
+  rows: ReturnType<typeof buildTimeRows>
+  bodies: (TelemetrySeriesBody | undefined)[]
+  from: number
+  to: number
+  height: number
+  last: boolean
+}) {
+  const kind = indices.length === 1 ? angleKindOf(bodies, indices[0]) : null
+  const unit = drawnUnit(card, bodies, indices[0])
+  const angle = kind ? angleAxis(kind) : null
+  const ticks = angle ? angle.ticks : axisTicks(indices.flatMap((i) => seriesValues(bodies, i, true)), unit)
+  const domain: [number, number] = angle ? angle.domain : [ticks[0], ticks[ticks.length - 1]]
+  const dayTickList = dayTicks(from, to, card.timezone)
+  return (
+    <div data-testid="chart-panel" className="min-w-0">
+      <Legend items={indices.map((i) => ({ label: withUnit(card.series[i].label, drawnUnit(card, bodies, i)), colour: SERIES_COLOURS[i] }))} />
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+          <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 2" vertical={false} />
+          <XAxis
+            dataKey="t"
+            type="number"
+            scale="time"
+            domain={[from, to]}
+            {...(dayTickList ? { ticks: dayTickList } : { tickCount: 5 })}
+            tick={last ? AXIS_TICK : false}
+            {...(last ? {} : { height: 4 })}
+            tickLine={false}
+            axisLine={false}
+            tickFormatter={timeTickFormatter(to - from, card.timezone)}
+          />
+          <YAxis
+            yAxisId="y"
+            domain={domain}
+            ticks={ticks}
+            interval={0}
+            tick={AXIS_TICK}
+            tickLine={false}
+            axisLine={false}
+            width={44}
+            tickFormatter={kind ? (v: number) => angleTickLabel(kind, v) : topTickFormatter(ticks, unit)}
+          />
+          <Tooltip
+            contentStyle={TOOLTIP_STYLE}
+            labelFormatter={(ms: number) =>
+              new Intl.DateTimeFormat('en-GB', { timeZone: card.timezone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms))
+            }
+            formatter={(v: number, _n, item) => {
+              const i = Number(String(item.dataKey).slice(1))
+              return [`${Math.round(v * 100) / 100} ${drawnUnit(card, bodies, i)}`.trim(), card.series[i].label]
+            }}
+          />
+          {!angle &&
+            indices.map((i) => (
+              <Area
+                key={`band-${i}`}
+                yAxisId="y"
+                dataKey={bandKey(i)}
+                type="monotone"
+                stroke="none"
+                fill={SERIES_COLOURS[i]}
+                fillOpacity={0.16}
+                tooltipType="none"
+                activeDot={false}
+                connectNulls={false}
+                isAnimationActive={false}
+              />
+            ))}
+          {indices.map((i) =>
+            angle ? (
+              <Line
+                key={i}
+                yAxisId="y"
+                dataKey={seriesKey(i)}
+                stroke="none"
+                dot={{ r: 2, fill: SERIES_COLOURS[i], stroke: 'none' }}
+                activeDot={{ r: 3 }}
+                connectNulls={false}
+                isAnimationActive={false}
+              />
+            ) : (
+              <Line
+                key={i}
+                yAxisId="y"
+                dataKey={seriesKey(i)}
+                type="monotone"
+                stroke={SERIES_COLOURS[i]}
+                strokeWidth={1.5}
+                dot={false}
+                connectNulls={false}
+                isAnimationActive={false}
+              />
+            ),
+          )}
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+/** Stacked panels, one unit to a panel, on one time axis; one such stack per compared range. */
 function TimePanels({
   card,
   ranges,
@@ -81,84 +217,51 @@ function TimePanels({
   bodies: (TelemetrySeriesBody | undefined)[]
   height: number
 }) {
-  const axes = (['left', 'right'] as const)
-    .map((axis) => {
-      const idx = card.series.map((s, i) => (s.axis === axis ? i : -1)).filter((i) => i >= 0)
-      if (idx.length === 0) return null
-      const unit = card.series[idx[0]].unit
-      const ticks = axisTicks(idx.flatMap((i) => seriesValues(bodies, i)), unit)
-      return { axis, unit, ticks }
-    })
-    .filter((a) => a !== null)
+  const panels = panelsOf(card.series)
   const stacked = ranges.length > 1
+  const panelHeight = Math.max(120, Math.round(height * (panels.length > 1 ? 0.62 : 1) * (stacked ? 0.7 : 1)))
   return (
-    <div className="flex min-w-0 flex-col gap-2">
+    <div className="flex min-w-0 flex-col gap-3">
       {ranges.map((r, ri) => {
         const body = bodies[ri]
         const rows = body ? buildTimeRows(body, card.series.length) : []
         const from = Date.parse(r.from)
         const to = Date.parse(r.to)
         return (
-          <div key={ri} className="min-w-0">
+          <div key={ri} className="flex min-w-0 flex-col gap-1">
             {stacked && <p className="mb-0.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{r.label}</p>}
-            <ResponsiveContainer width="100%" height={stacked ? Math.round(height * 0.7) : height}>
-              <ComposedChart data={rows} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                <CartesianGrid stroke="hsl(var(--border))" strokeDasharray="2 2" vertical={false} />
-                <XAxis
-                  dataKey="t"
-                  type="number"
-                  scale="time"
-                  domain={[from, to]}
-                  {...(dayTicks(from, to, card.timezone) ? { ticks: dayTicks(from, to, card.timezone)! } : { tickCount: 5 })}
-                  tick={AXIS_TICK}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={timeTickFormatter(to - from, card.timezone)}
-                />
-                {axes.map((a) => (
-                  <YAxis
-                    key={a.axis}
-                    yAxisId={a.axis}
-                    orientation={a.axis}
-                    domain={[a.ticks[0], a.ticks[a.ticks.length - 1]]}
-                    ticks={a.ticks}
-                    tick={AXIS_TICK}
-                    tickLine={false}
-                    axisLine={false}
-                    width={a.axis === 'left' ? 44 : 48}
-                    tickFormatter={topTickFormatter(a.ticks, a.unit)}
-                  />
-                ))}
-                <Tooltip
-                  contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', fontSize: 12 }}
-                  labelFormatter={(ms: number) =>
-                    new Intl.DateTimeFormat('en-GB', { timeZone: card.timezone, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms))
-                  }
-                  formatter={(v: number, _n, item) => {
-                    const i = Number(String(item.dataKey).slice(1))
-                    return [`${Math.round(v * 100) / 100} ${card.series[i].unit}`, card.series[i].label]
-                  }}
-                />
-                {card.series.map((s, i) => (
-                  <Line
-                    key={i}
-                    yAxisId={s.axis}
-                    dataKey={seriesKey(i)}
-                    type="monotone"
-                    stroke={SERIES_COLOURS[i]}
-                    strokeWidth={1.5}
-                    dot={false}
-                    connectNulls={false}
-                    isAnimationActive={false}
-                  />
-                ))}
-              </ComposedChart>
-            </ResponsiveContainer>
+            {panels.map((pn, pi) => (
+              <TimePanel
+                key={pn.panel}
+                card={card}
+                indices={pn.indices}
+                rows={rows}
+                bodies={[body]}
+                from={from}
+                to={to}
+                height={panelHeight}
+                last={pi === panels.length - 1}
+              />
+            ))}
           </div>
         )
       })}
     </div>
   )
+}
+
+/** One line for each angle: how it was averaged, and the buckets that had no direction to average. */
+function angleNotes(card: TelemetryChartCard, bodies: (TelemetrySeriesBody | undefined)[]): string[] {
+  const notes: string[] = []
+  card.series.forEach((s, i) => {
+    const entries = bodies.map((b) => b?.series[i]).filter((e) => e?.angle)
+    const method = entries.find((e) => e?.method)?.method
+    if (!method) return
+    const none = entries.reduce((n, e) => n + (e?.undefined_buckets ?? 0), 0)
+    const blank = none > 0 ? ` No direction in ${none} ${none === 1 ? 'bucket' : 'buckets'} (calm, or too variable to average), left blank.` : ''
+    notes.push(`${s.label}: ${method}.${blank}`)
+  })
+  return notes
 }
 
 function XYPlot({
@@ -292,7 +395,7 @@ export function AssistantTelemetryChartCard({ card }: { card: TelemetryChartCard
   })
 
   const plotted = view === 'xy' && card.series.length >= 2 ? (card.view === 'xy' ? defaultXY : { x: 0, y: 1 }) : null
-  const swatches = card.series.map((s, i) => ({ label: withUnit(s.label, s.unit), colour: SERIES_COLOURS[i] }))
+  const notes = angleNotes(card, bodies)
 
   return (
     <section
@@ -392,14 +495,16 @@ export function AssistantTelemetryChartCard({ card }: { card: TelemetryChartCard
           {plotted ? (
             <XYPlot card={card} ranges={ranges} bodies={bodies} x={plotted.x} y={plotted.y} height={height} />
           ) : (
-            <div className="flex min-w-0 flex-col gap-2">
-              <TimePanels card={card} ranges={ranges} bodies={bodies} height={height} />
-              <Legend items={swatches} />
-            </div>
+            <TimePanels card={card} ranges={ranges} bodies={bodies} height={height} />
           )}
         </div>
       )}
 
+      {notes.map((n) => (
+        <p key={n} className="min-w-0 text-xs text-muted-foreground">
+          {n}
+        </p>
+      ))}
       {missing.map((m) => (
         <p key={m} className="min-w-0 text-xs text-muted-foreground">
           {m}

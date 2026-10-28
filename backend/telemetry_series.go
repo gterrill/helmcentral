@@ -31,31 +31,22 @@ type pathHistoryBuckets struct {
 	Merged                []assistantPathHistoryPoint
 	Gaps                  []assistantPathHistoryGap // every gap, uncapped
 	GapCount              int
+	// Weighted and Undefined are set by queryCircularHistoryBuckets: whether
+	// the direction was averaged with a speed weight, and how many buckets had
+	// no direction (the samples cancelled out, or it was calm).
+	Weighted  bool
+	Undefined int
 }
 
-// queryPathHistoryBuckets is the one bucketed-history query behind both
-// get_path_history and /api/telemetry/series. It finds the first and last raw
-// sample, picks the bucket width with widthFor, runs one
-// aggregate query per aggFns entry ("min", "mean", "max") concurrently, merges
-// them and works out the gaps.
-//
-// With fitToData the width follows the span that holds data and the buckets
-// are trimmed to it (get_path_history). Without it the width follows the
-// requested span and the buckets cover all of [start, stop), so several paths
-// queried over one range share a bucket width (the series endpoint).
-func queryPathHistoryBuckets(ctx context.Context, io pathHistoryIO, path, source string, start, stop time.Time, aggFns []string, fitToData bool, widthFor func(time.Duration) (string, time.Duration)) (pathHistoryBuckets, error) {
+// planPathHistoryRange is the first half of a bucketed history read: it finds
+// the first and last raw sample when fitToData, picks the bucket width and
+// works out the range the buckets cover. Both the linear and the circular
+// reads start here.
+func planPathHistoryRange(ctx context.Context, io pathHistoryIO, path, source string, start, stop time.Time, fitToData bool, widthFor func(time.Duration) (string, time.Duration)) (pathHistoryBuckets, error) {
 	var out pathHistoryBuckets
-	for _, fn := range aggFns {
-		switch fn {
-		case "min", "mean", "max":
-		default:
-			return out, fmt.Errorf("unknown aggregate %q (want min, mean or max)", fn)
-		}
-	}
 	if err := ctx.Err(); err != nil {
 		return out, err
 	}
-
 	// With fitToData the first/last read runs first: the bucket width must
 	// follow the span that actually holds data, not the span that was asked
 	// for. A six-hour request over an engine that has run for twenty minutes
@@ -86,6 +77,32 @@ func queryPathHistoryBuckets(ctx context.Context, io pathHistoryIO, path, source
 	}
 
 	if err := ctx.Err(); err != nil {
+		return out, err
+	}
+
+	return out, nil
+}
+
+// queryPathHistoryBuckets is the one bucketed-history query behind both
+// get_path_history and /api/telemetry/series. It finds the first and last raw
+// sample, picks the bucket width with widthFor, runs one
+// aggregate query per aggFns entry ("min", "mean", "max") concurrently, merges
+// them and works out the gaps.
+//
+// With fitToData the width follows the span that holds data and the buckets
+// are trimmed to it (get_path_history). Without it the width follows the
+// requested span and the buckets cover all of [start, stop), so several paths
+// queried over one range share a bucket width (the series endpoint).
+func queryPathHistoryBuckets(ctx context.Context, io pathHistoryIO, path, source string, start, stop time.Time, aggFns []string, fitToData bool, widthFor func(time.Duration) (string, time.Duration)) (pathHistoryBuckets, error) {
+	for _, fn := range aggFns {
+		switch fn {
+		case "min", "mean", "max":
+		default:
+			return pathHistoryBuckets{}, fmt.Errorf("unknown aggregate %q (want min, mean or max)", fn)
+		}
+	}
+	out, err := planPathHistoryRange(ctx, io, path, source, start, stop, fitToData, widthFor)
+	if err != nil {
 		return out, err
 	}
 
@@ -145,17 +162,30 @@ var (
 	telemetrySeriesTimeout = 20 * time.Second
 )
 
+// telemetrySeriesPoint is one bucket. Min and Max are the bucket's linear
+// extremes, which a scalar has (a gust is a wind speed's max) and an angle
+// does not: an angle's Mean is a vector mean and it carries neither.
 type telemetrySeriesPoint struct {
-	T    string  `json:"t"`
-	Mean float64 `json:"mean"`
+	T    string   `json:"t"`
+	Mean float64  `json:"mean"`
+	Min  *float64 `json:"min,omitempty"`
+	Max  *float64 `json:"max,omitempty"`
 }
 
 type telemetrySeriesEntry struct {
-	Path   string                    `json:"path"`
-	Found  bool                      `json:"found"`
-	Unit   string                    `json:"unit"` // the unit the points are in; "" is the stored unit
-	Points []telemetrySeriesPoint    `json:"points"`
-	Gaps   []assistantPathHistoryGap `json:"gaps"`
+	Path  string `json:"path"`
+	Found bool   `json:"found"`
+	Unit  string `json:"unit"` // the unit the points are in; "" is the stored unit
+	// Angle is "bearing" or "relative" for an angle path, "" for a scalar. The
+	// points of an angle are in degrees, drawn as points on a circle's scale.
+	Angle string `json:"angle"`
+	// Method names how an angle was averaged; empty for a scalar.
+	Method string `json:"method,omitempty"`
+	// UndefinedBuckets counts an angle's buckets with no direction: the samples
+	// cancelled out or it was calm. They are left out of Points.
+	UndefinedBuckets int                       `json:"undefined_buckets"`
+	Points           []telemetrySeriesPoint    `json:"points"`
+	Gaps             []assistantPathHistoryGap `json:"gaps"`
 }
 
 type telemetrySeriesResponse struct {
@@ -276,6 +306,7 @@ func telemetrySeriesHandler(c echo.Context) error {
 		return seriesBadRequest(c, fmt.Sprintf("si_unit must be given once per path (%d paths, %d si_units); use an empty value for none", len(paths), len(siUnits)))
 	}
 	converters := make([]func(float64) float64, len(paths))
+	angles := make([]angleKind, len(paths))
 	for i := range paths {
 		sources[i] = strings.TrimSpace(sources[i])
 		units[i] = strings.TrimSpace(units[i])
@@ -291,6 +322,18 @@ func telemetrySeriesHandler(c echo.Context) error {
 			si = strings.TrimSpace(siUnits[i])
 		} else {
 			si = telemetrySeriesSIUnit(paths[i])
+		}
+		if kind := angleKindOf(paths[i], si); kind != angleNone {
+			// An angle is drawn in degrees, whatever was asked. A card saved
+			// before angles had a unit of their own asks for "rad".
+			label := angleUnitLabel(paths[i])
+			if units[i] != "" && units[i] != "rad" && units[i] != label {
+				return seriesBadRequest(c, fmt.Sprintf("%s is an angle and is shown in %s, not %q", paths[i], label, units[i]))
+			}
+			angles[i] = kind
+			units[i] = label
+			converters[i] = func(rad float64) float64 { return angleDegrees(kind, rad) }
+			continue
 		}
 		conv, err := chartConvertFromSI(si, paths[i], units[i])
 		if err != nil {
@@ -337,6 +380,7 @@ func telemetrySeriesHandler(c echo.Context) error {
 	// Paths (at most telemetrySeriesMaxPaths) are queried concurrently, and
 	// results land by index so the first error is the first by path order.
 	results := make([]pathHistoryBuckets, len(paths))
+	methods := make([]string, len(paths))
 	errs := make([]error, len(paths))
 	var wg sync.WaitGroup
 	for i, p := range paths {
@@ -354,7 +398,17 @@ func telemetrySeriesHandler(c echo.Context) error {
 					return
 				}
 			}
-			results[i], errs[i] = queryPathHistoryBuckets(ctx, telemetrySeriesIO, p, sources[i], from, to, []string{"mean"}, false, telemetrySeriesBucketWidth)
+			if angles[i] != angleNone {
+				weight, ambiguous, err := circularWeightPath(ctx, telemetrySeriesPathSources, p, from, to)
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				results[i], errs[i] = queryCircularHistoryBuckets(ctx, telemetrySeriesIO, p, sources[i], weight, "", from, to, false, telemetrySeriesBucketWidth)
+				methods[i] = circularMethod(weight, ambiguous, results[i].Weighted)
+				return
+			}
+			results[i], errs[i] = queryPathHistoryBuckets(ctx, telemetrySeriesIO, p, sources[i], from, to, []string{"min", "mean", "max"}, false, telemetrySeriesBucketWidth)
 		}()
 	}
 	wg.Wait()
@@ -393,7 +447,18 @@ func telemetrySeriesHandler(c echo.Context) error {
 			if m.Mean == nil {
 				continue
 			}
-			points = append(points, telemetrySeriesPoint{T: m.T.UTC().Format(time.RFC3339), Mean: converters[i](*m.Mean)})
+			pt := telemetrySeriesPoint{T: m.T.UTC().Format(time.RFC3339), Mean: converters[i](*m.Mean)}
+			if angles[i] == angleNone {
+				if m.Min != nil {
+					v := converters[i](*m.Min)
+					pt.Min = &v
+				}
+				if m.Max != nil {
+					v := converters[i](*m.Max)
+					pt.Max = &v
+				}
+			}
+			points = append(points, pt)
 		}
 		gaps := h.Gaps
 		if gaps == nil || !h.Found {
@@ -402,7 +467,10 @@ func telemetrySeriesHandler(c echo.Context) error {
 		if !h.Found {
 			missing = append(missing, p)
 		}
-		entries = append(entries, telemetrySeriesEntry{Path: p, Found: h.Found, Unit: units[i], Points: points, Gaps: gaps})
+		entries = append(entries, telemetrySeriesEntry{
+			Path: p, Found: h.Found, Unit: units[i], Angle: string(angles[i]), Method: methods[i],
+			UndefinedBuckets: h.Undefined, Points: points, Gaps: gaps,
+		})
 	}
 	if len(missing) == len(paths) {
 		return c.JSON(http.StatusNotFound, map[string]string{
@@ -414,6 +482,40 @@ func telemetrySeriesHandler(c echo.Context) error {
 		From: from.UTC().Format(time.RFC3339), To: to.UTC().Format(time.RFC3339),
 		Bucket: bucket, Series: entries,
 	})
+}
+
+// circularWeightPath decides what weights an angle's average. Wind direction is
+// weighted by wind speed when one device logs it. If two devices log it,
+// averaging them would chart a figure neither reported, so the speed is left
+// out of the average and the method says why.
+func circularWeightPath(ctx context.Context, list func(context.Context, string, time.Time, time.Time) ([]string, error), path string, from, to time.Time) (weight string, ambiguous bool, err error) {
+	weight = weightPathFor(path)
+	if weight == "" {
+		return "", false, nil
+	}
+	srcs, err := ambiguousSources(ctx, list, weight, from, to)
+	if err != nil {
+		return "", false, err
+	}
+	if srcs != nil {
+		return "", true, nil
+	}
+	return weight, false, nil
+}
+
+// circularMethod says how an angle was averaged, for the reader. weightPath is
+// what circularWeightPath chose ("" for none) and weighted is whether the read
+// found a speed to weight by.
+func circularMethod(weightPath string, ambiguous, weighted bool) string {
+	switch {
+	case weighted:
+		return "vector mean weighted by wind speed"
+	case ambiguous:
+		return "vector mean, not weighted by wind speed (the speed is logged by more than one source)"
+	case weightPath != "":
+		return "vector mean, not weighted by wind speed (no wind speed is logged in this range)"
+	}
+	return "vector mean"
 }
 
 // telemetrySeriesRoutes returns the /api route for charting recorded telemetry

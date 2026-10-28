@@ -12,6 +12,8 @@ const AssistantTelemetryChartCard = lazy(() =>
   import('./assistant-telemetry-chart-card').then((m) => ({ default: m.AssistantTelemetryChartCard })),
 )
 
+const AssistantWindRoseCard = lazy(() => import('./assistant-wind-rose-card').then((m) => ({ default: m.AssistantWindRoseCard })))
+
 /** One card under a Mate reply (ADR 0191), chosen by `kind`. An `error` entry
  * is shown, not hidden: the operator should know a card was meant to be here. */
 export function AssistantCard({
@@ -40,6 +42,14 @@ export function AssistantCard({
           fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
         >
           <AssistantTelemetryChartCard card={card} />
+        </Suspense>
+      )
+    case 'wind_rose':
+      return (
+        <Suspense
+          fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
+        >
+          <AssistantWindRoseCard card={card} />
         </Suspense>
       )
     case 'error':

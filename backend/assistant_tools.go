@@ -422,6 +422,7 @@ var mateTools = []mateTool{
 	mateToolGetLastRecorded,
 	mateToolGetPathHistory,
 	mateToolShowTelemetryChart,
+	mateToolShowWindRose,
 	mateToolListPassages,
 	mateToolGetCruiseSummary,
 	mateToolFindEquipment,

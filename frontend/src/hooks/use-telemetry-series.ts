@@ -4,12 +4,21 @@ import type { TelemetryChartSeries } from '@/lib/mate-cards'
 export interface TelemetrySeriesPoint {
   t: string
   mean: number
+  /** The bucket's lowest and highest reading. Absent for an angle, which has no linear extremes. */
+  min?: number
+  max?: number
 }
 
 export interface TelemetrySeriesEntry {
   path: string
   found: boolean
   unit?: string
+  /** "bearing" or "relative" for an angle, drawn in degrees as points; "" for a scalar. */
+  angle?: '' | 'bearing' | 'relative'
+  /** How an angle was averaged ("vector mean weighted by wind speed"). */
+  method?: string
+  /** An angle's buckets with no mean direction: calm, or the samples cancelled out. */
+  undefined_buckets?: number
   points: TelemetrySeriesPoint[]
   gaps: { from: string; to: string }[]
 }

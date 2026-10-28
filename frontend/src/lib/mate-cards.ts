@@ -3,7 +3,7 @@
  * keyed by `kind`. `error` is not a server kind: it is what the decoder makes
  * of an entry it cannot read, so the thread can say so for that message.
  */
-export type MateCard = PassageWindowCard | TelemetryChartCard | { kind: 'error'; reason: string; rawKind?: string }
+export type MateCard = PassageWindowCard | TelemetryChartCard | WindRoseCard | { kind: 'error'; reason: string; rawKind?: string }
 
 export type PassageState = 'go' | 'marginal' | 'no_go' | 'no_data'
 export type PassageFactor = 'wind' | 'gust' | 'wave' | 'wind_against_tide' | 'daylight'
@@ -61,7 +61,8 @@ export interface TelemetryChartSeries {
   unit: string
   /** The unit the boat declared for the path when the tool ran; "" if undeclared. */
   siUnit: string
-  axis: 'left' | 'right'
+  /** The stacked panel the series is drawn in. One unit to a panel; panels share the time axis. */
+  panel: number
 }
 
 export interface TelemetryChartRange {
@@ -80,6 +81,34 @@ export interface TelemetryChartCard {
   series: TelemetryChartSeries[]
   range: TelemetryChartRange
   compare: (TelemetryChartRange & { label: string })[]
+}
+
+/**
+ * A wind rose (ADR 0221): the logged true wind counted into compass sectors and
+ * speed bands. It stores the counts, not a reference to them: the figures are
+ * small and the prose beside the card was written about exactly these.
+ */
+export interface WindRoseCard {
+  kind: 'wind_rose'
+  title: string
+  timezone: string
+  range: TelemetryChartRange
+  /** Bearings are where the wind blows from, true. */
+  reference: 'true'
+  sectors: 8 | 16 | 32
+  speedUnit: string
+  /** Speed bands, lowest first. The last has `to` null, the open top band. */
+  bins: { from: number; to: number | null }[]
+  /** `counts[sector][band]`. Sector 0 is centred on north, then clockwise. */
+  counts: number[][]
+  samples: number
+  calm: number
+  calmBelow: number
+  variable: number
+  unpaired: number
+  bucketMinutes: number
+  meanSpeed: number | null
+  strongest: { speed: number; at: string } | null
 }
 
 export const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
@@ -198,6 +227,20 @@ function decodePassageWindow(raw: unknown): PassageWindowCard {
   }
 }
 
+/**
+ * A series' panel. A card saved before panels (ADR 0221) carried a left or right
+ * axis instead; those read as panels 0 and 1, which is the stacked layout a
+ * two-unit chart gets now.
+ */
+function panelOf(o: Record<string, unknown>, i: number): number {
+  if (o.panel === undefined && o.axis !== undefined) {
+    return oneOf<'left' | 'right'>(o.axis, ['left', 'right'], `series[${i}].axis`) === 'left' ? 0 : 1
+  }
+  const p = o.panel
+  if (typeof p !== 'number' || !Number.isInteger(p) || p < 0 || p > 3) bad(`series[${i}].panel`, 'expected a panel number from 0 to 3')
+  return p as number
+}
+
 function decodeTelemetryChart(raw: unknown): TelemetryChartCard {
   const p = obj(raw, 'payload')
   const series = arr(p.series, 'series').map((s, i): TelemetryChartSeries => {
@@ -210,10 +253,13 @@ function decodeTelemetryChart(raw: unknown): TelemetryChartCard {
       label: str(o.label, `series[${i}].label`),
       unit: str(o.unit, `series[${i}].unit`),
       siUnit: str(o.si_unit, `series[${i}].si_unit`),
-      axis: oneOf<'left' | 'right'>(o.axis, ['left', 'right'], `series[${i}].axis`),
+      panel: panelOf(o, i),
     }
   })
   if (series.length < 1 || series.length > 4) bad('series', 'expected 1 to 4 series')
+  series.forEach((s, i) => {
+    if (s.panel >= series.length) bad(`series[${i}].panel`, 'expected a panel number below the number of series')
+  })
   const view = oneOf<'time' | 'xy'>(p.view, ['time', 'xy'], 'view')
   let xy: TelemetryChartCard['xy'] = null
   if (view === 'xy') {
@@ -249,6 +295,69 @@ function decodeTelemetryChart(raw: unknown): TelemetryChartCard {
   }
 }
 
+function nonNegInt(v: unknown, path: string): number {
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) bad(path, 'expected a non-negative whole number')
+  return v as number
+}
+function finite(v: unknown, path: string): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) bad(path, 'expected a number')
+  return v as number
+}
+
+function decodeWindRose(raw: unknown): WindRoseCard {
+  const p = obj(raw, 'payload')
+  const sectors = p.sectors
+  if (sectors !== 8 && sectors !== 16 && sectors !== 32) bad('sectors', 'expected 8, 16 or 32')
+  const bins = arr(p.bins, 'bins').map((b, i) => {
+    const o = obj(b, `bins[${i}]`)
+    const to = o.to === null ? null : finite(o.to, `bins[${i}].to`)
+    return { from: finite(o.from, `bins[${i}].from`), to }
+  })
+  if (bins.length < 2) bad('bins', 'expected at least two speed bands')
+  bins.forEach((b, i) => {
+    if (i === 0 && b.from !== 0) bad('bins[0].from', 'expected the first band to start at 0')
+    if (i > 0 && b.from !== bins[i - 1].to) bad(`bins[${i}]`, 'expected each band to start where the last ended')
+    if (i < bins.length - 1 && (b.to === null || b.to <= b.from)) bad(`bins[${i}].to`, 'expected an upper edge above the lower')
+  })
+  if (bins[bins.length - 1].to !== null) bad('bins', 'expected the top band to be open-ended')
+  const counts = arr(p.counts, 'counts')
+  if (counts.length !== sectors) bad('counts', `expected ${sectors} rows, one for each sector`)
+  const grid = counts.map((row, s) => {
+    const r = arr(row, `counts[${s}]`)
+    if (r.length !== bins.length) bad(`counts[${s}]`, `expected ${bins.length} counts, one for each speed band`)
+    return r.map((n, b) => nonNegInt(n, `counts[${s}][${b}]`))
+  })
+  const samples = nonNegInt(p.samples, 'samples')
+  const calm = nonNegInt(p.calm, 'calm')
+  const variable = nonNegInt(p.variable, 'variable')
+  const binned = grid.reduce((n, row) => n + row.reduce((a, b) => a + b, 0), 0)
+  if (binned + calm + variable !== samples) bad('samples', 'expected the sectors, calm and variable to add up to the samples')
+  const range = obj(p.range, 'range')
+  const strongest = p.strongest === null ? null : (() => {
+    const o = obj(p.strongest, 'strongest')
+    return { speed: finite(o.speed, 'strongest.speed'), at: stamp(o.at, 'strongest.at') }
+  })()
+  return {
+    kind: 'wind_rose',
+    title: str(p.title, 'title'),
+    timezone: zone(p.timezone, 'timezone'),
+    range: { from: stamp(range.from, 'range.from'), to: stamp(range.to, 'range.to') },
+    reference: oneOf<'true'>(p.reference, ['true'], 'reference'),
+    sectors,
+    speedUnit: str(p.speed_unit, 'speed_unit'),
+    bins,
+    counts: grid,
+    samples,
+    calm,
+    calmBelow: finite(p.calm_below, 'calm_below'),
+    variable,
+    unpaired: nonNegInt(p.unpaired, 'unpaired'),
+    bucketMinutes: nonNegInt(p.bucket_minutes, 'bucket_minutes'),
+    meanSpeed: p.mean_speed === null ? null : finite(p.mean_speed, 'mean_speed'),
+    strongest,
+  }
+}
+
 // `entry` is the whole stored card: a passage window also reads the `id` and
 // `decision` that sit beside its payload (ADR 0211). Both are optional.
 const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>) => MateCard> = {
@@ -269,6 +378,7 @@ const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>
     return card
   },
   telemetry_chart: (payload) => decodeTelemetryChart(payload),
+  wind_rose: (payload) => decodeWindRose(payload),
 }
 
 /**
