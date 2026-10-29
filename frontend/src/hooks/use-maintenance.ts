@@ -246,8 +246,8 @@ export interface MaintenanceRuleFilter {
   includeStored?: boolean
 }
 
-export const RULES = '/api/inventory/maintenance/rules'
-export const LOG = '/api/inventory/maintenance/log'
+const RULES = '/api/inventory/maintenance/rules'
+const LOG = '/api/inventory/maintenance/log'
 const NO_RULES: MaintenanceRule[] = []
 const NO_SCHEDULE_ERRORS: MaintenanceScheduleError[] = []
 const NO_RESETS: HourMeterReset[] = []
@@ -402,6 +402,17 @@ export async function previewProfileChange(equipmentId: string, profileId: strin
     `${equipmentMaintenance(equipmentId)}/profile-change-preview?${qs}`,
   )
   return { kept: data.kept ?? [], leaving: data.leaving ?? [], new: data.new ?? [] }
+}
+
+/** Mate's Apply wrote maintenance rules. */
+export function maintenanceRulesRecordApplied(): void {
+  invalidateQueries([RULES])
+}
+
+/** Mate's Apply wrote log entries; a completed job also moves its rule. */
+export function maintenanceLogRecordApplied(): void {
+  invalidateQueries([LOG])
+  invalidateQueries([RULES])
 }
 
 function equipmentMaintenance(equipmentId: string): string {

@@ -278,16 +278,16 @@ export interface InventoryFieldError {
 // Cache keys follow lib/api-query.ts: the URL path, then the filter. A list
 // key is [EQUIPMENT, filter] and an item key is [EQUIPMENT/<id>], so
 // invalidating [EQUIPMENT] reaches every list and no single item.
-export const EQUIPMENT = '/api/inventory/equipment'
+const EQUIPMENT = '/api/inventory/equipment'
 // Lists only: an item's key is the one string EQUIPMENT/<id>.
 declareQuery([EQUIPMENT], { structuralSharing: true })
-export const ZONES = '/api/inventory/zones'
-export const DECKS = '/api/inventory/decks'
+const ZONES = '/api/inventory/zones'
+const DECKS = '/api/inventory/decks'
 // Owned by use-maintenance.ts. An equipment write can change its schedule
 // (profile, stored/deployed), so it invalidates the same prefix.
-export const MAINTENANCE_RULES = '/api/inventory/maintenance/rules'
-export const DISCOVERY = '/api/vessel/discovery'
-export const SETUP_STATUS = '/api/setup/status'
+const MAINTENANCE_RULES = '/api/inventory/maintenance/rules'
+const DISCOVERY = '/api/vessel/discovery'
+const SETUP_STATUS = '/api/setup/status'
 
 const NO_ITEMS: EquipmentItem[] = []
 const NO_DOCUMENTS: EquipmentDocument[] = []
@@ -551,6 +551,34 @@ export async function deleteEquipment(id: string, deletePhotos = false): Promise
   // Settles once the lists have re-read, so a caller can close its dialog on
   // fresh rows without asking for the list again.
   await equipmentDeleted(id)
+}
+
+/**
+ * Mate's Apply wrote equipment records, so the pages that read them read again,
+ * as the direct write would. A delete leaves the removed item's own keys alone
+ * (a read of them would answer 404); an update also reaches the item's details
+ * page. A create has no id to name yet, so only the lists move.
+ */
+export function equipmentRecordApplied(action: string, id?: string): void {
+  if (action === 'delete' && id) {
+    void equipmentDeleted(id)
+    return
+  }
+  if (id) invalidateQueries([itemPath(id)])
+  equipmentChanged()
+}
+
+/** Mate's Apply wrote locations or bins: the zone list (bins are nested in it)
+ * and the equipment rows that show their names read again. */
+export function zonesRecordApplied(): void {
+  invalidateQueries([ZONES])
+  equipmentListsChanged()
+}
+
+/** Mate's Apply wrote decks. A deck delete clears its zones' outlines. */
+export function decksRecordApplied(): void {
+  invalidateQueries([DECKS])
+  invalidateQueries([ZONES])
 }
 
 // ── equipment photos (ADR 0127) ─────────────────────────────────────────

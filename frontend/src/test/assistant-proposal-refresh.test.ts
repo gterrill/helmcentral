@@ -1,29 +1,31 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@/lib/api-query'
-import { applyAssistantProposal, PROPOSAL_REFRESH } from '@/lib/assistant-proposal-actions'
+import { applyAssistantProposal } from '@/lib/assistant-proposal-actions'
 
 // Apply writes records the open pages read. Each op type names the cached
 // reads it changes, so a page already on screen reads them again.
 const invalidated: string[] = []
+const skips: Array<{ path: string; skip?: (key: readonly unknown[]) => boolean }> = []
 vi.mock('@/lib/api-query', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/api-query')>()
   return {
     ...actual,
-    invalidateQueries: vi.fn((prefix: readonly unknown[]) => {
+    invalidateQueries: vi.fn((prefix: readonly unknown[], skip?: (key: readonly unknown[]) => boolean) => {
       invalidated.push(String(prefix[0]))
+      skips.push({ path: String(prefix[0]), skip })
       return Promise.resolve()
     }),
   }
 })
 
-function proposalBody(types: string[]) {
+function proposalBody(types: string[], action = 'create', id?: string) {
   return {
     proposal: {
       id: 'p1',
       message_id: 'm1',
       status: 'applied',
-      ops: types.map((type) => ({ type, action: 'create', description: 'x' })),
+      ops: types.map((type) => ({ type, action, id, description: 'x' })),
     },
   }
 }
@@ -31,12 +33,29 @@ function proposalBody(types: string[]) {
 describe('applying a proposal refreshes the pages it changed', () => {
   beforeEach(() => {
     invalidated.length = 0
+    skips.length = 0
   })
   afterEach(() => vi.unstubAllGlobals())
 
-  function reply(types: string[]) {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => proposalBody(types) }))
+  function reply(types: string[], action = 'create', id?: string) {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => proposalBody(types, action, id) }))
   }
+
+  it('reaches the Equipment details page when an item is updated', async () => {
+    reply(['equipment'], 'update', 'e1')
+    await applyAssistantProposal('p1')
+    expect(invalidated).toContain('/api/inventory/equipment/e1')
+    expect(invalidated).toContain('/api/inventory/equipment')
+  })
+
+  it('leaves the deleted item’s own maintenance reads alone', async () => {
+    reply(['equipment'], 'delete', 'e1')
+    await applyAssistantProposal('p1')
+    expect(invalidated).not.toContain('/api/inventory/equipment/e1')
+    const rules = skips.find((c) => c.path === '/api/inventory/maintenance/rules')
+    expect(rules?.skip?.(['/api/inventory/maintenance/rules', { equipment: 'e1' }])).toBe(true)
+    expect(rules?.skip?.(['/api/inventory/maintenance/rules', { equipment: 'e2' }])).toBe(false)
+  })
 
   it('reads the decks and zones again after a deck is added', async () => {
     reply(['deck'])
@@ -86,11 +105,5 @@ describe('applying a proposal refreshes the pages it changed', () => {
     await applyAssistantProposal('p1')
     expect(spy).toHaveBeenCalledWith(expect.stringContaining('sprocket'))
     spy.mockRestore()
-  })
-
-  it('has a table entry for every op type', () => {
-    expect(Object.keys(PROPOSAL_REFRESH).sort()).toEqual(
-      ['alarm_rule', 'bin', 'deck', 'equipment', 'location', 'maintenance_log', 'maintenance_rule', 'planned_stay', 'vessel_particulars', 'watch'],
-    )
   })
 })

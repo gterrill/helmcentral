@@ -1,49 +1,42 @@
 import { ApiError, apiRequest, invalidateQueries } from '@/lib/api-query'
-import { mapProposal, type AssistantProposal, type ProposalApi } from '@/hooks/use-assistant-conversations'
+import { mapProposal, type AssistantProposal, type AssistantProposalOp, type ProposalApi } from '@/hooks/use-assistant-conversations'
 import { todayISO } from '@/lib/local-date'
 import { PLANNED_STAY_PATH } from '@/hooks/use-planned-stay'
 import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
 import { WATCHES_PATH } from '@/hooks/use-watches'
-import { DECKS, DISCOVERY, EQUIPMENT, MAINTENANCE_RULES, SETUP_STATUS, ZONES } from '@/hooks/use-inventory'
-import { LOG as MAINTENANCE_LOG } from '@/hooks/use-maintenance'
-import { PATH as VESSEL_PARTICULARS_PATH } from '@/hooks/use-vessel-particulars'
+import { decksRecordApplied, equipmentRecordApplied, zonesRecordApplied } from '@/hooks/use-inventory'
+import { maintenanceLogRecordApplied, maintenanceRulesRecordApplied } from '@/hooks/use-maintenance'
+import { vesselParticularsRecordApplied } from '@/hooks/use-vessel-particulars'
 
-const SETTINGS_PATH = '/api/settings'
+const reads = (path: string) => () => void invalidateQueries([path])
 
 /**
- * The cached reads each kind of change touches, by op type. Apply writes the
- * records, and any open page that reads them asks again. Every record type the
- * backend registers needs a line here (a backend test checks), so a new type
- * cannot leave its page stale after Apply.
- *
- * A bin lives inside its zone, so bins and zones both reload ZONES. A deck
- * holds zones' outlines, and equipment sits in zones and bins, so each reloads
- * the other's lists.
+ * What to read again after Apply, by op type. Apply writes the records, and any
+ * open page that shows them asks again. Inventory and maintenance types call
+ * the same refresh their own pages run after a direct write, so a delete skips
+ * the keys that would answer 404 and an update reaches the details page. Every
+ * record type the backend registers needs a line here (a backend test checks),
+ * so a new type cannot leave its page stale after Apply.
  */
-export const PROPOSAL_REFRESH: Record<string, readonly string[]> = {
-  planned_stay: [PLANNED_STAY_PATH],
-  alarm_rule: [ALARM_RULES_PATH],
-  watch: [WATCHES_PATH],
-  equipment: [EQUIPMENT, ZONES, MAINTENANCE_RULES, DISCOVERY, SETUP_STATUS, SETTINGS_PATH],
-  location: [ZONES, DECKS, EQUIPMENT],
-  bin: [ZONES, EQUIPMENT],
-  deck: [DECKS, ZONES],
-  maintenance_rule: [MAINTENANCE_RULES],
-  maintenance_log: [MAINTENANCE_RULES, MAINTENANCE_LOG],
-  vessel_particulars: [VESSEL_PARTICULARS_PATH],
+export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void> = {
+  planned_stay: reads(PLANNED_STAY_PATH),
+  alarm_rule: reads(ALARM_RULES_PATH),
+  watch: reads(WATCHES_PATH),
+  equipment: (op) => equipmentRecordApplied(op.action, op.id),
+  location: zonesRecordApplied,
+  bin: zonesRecordApplied,
+  deck: decksRecordApplied,
+  maintenance_rule: maintenanceRulesRecordApplied,
+  maintenance_log: maintenanceLogRecordApplied,
+  vessel_particulars: vesselParticularsRecordApplied,
 }
 
 function refreshPagesFor(proposal: AssistantProposal | undefined): void {
-  const paths = new Set<string>()
   for (const op of proposal?.ops ?? []) {
-    const entry = PROPOSAL_REFRESH[op.type]
-    if (!entry) {
-      console.error(`Apply changed a "${op.type}" record but no pages are listed to refresh for it`)
-      continue
-    }
-    for (const path of entry) paths.add(path)
+    const refresh = PROPOSAL_REFRESH[op.type]
+    if (refresh) refresh(op)
+    else console.error(`Apply changed a "${op.type}" record but no pages are listed to refresh for it`)
   }
-  for (const path of paths) void invalidateQueries([path])
 }
 
 /**

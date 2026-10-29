@@ -1,4 +1,4 @@
-import { ApiError, apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
+import { ApiError, apiRequest, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 
 // The facts about the boat that live instrument data does not carry: builder,
 // hull, registration and so on. One record, read and replaced whole. Name,
@@ -50,7 +50,12 @@ export class ParticularsSaveError extends Error {
   }
 }
 
-export const PATH = '/api/vessel/particulars'
+const PATH = '/api/vessel/particulars'
+
+/** Mate's Apply wrote the vessel details. */
+export function vesselParticularsRecordApplied(): void {
+  void invalidateQueries([PATH])
+}
 
 export async function saveVesselParticulars(particulars: VesselParticulars): Promise<VesselParticulars> {
   try {
