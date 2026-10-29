@@ -31,7 +31,7 @@ function status(overrides: Partial<OfflineCoastlineStatus> = {}): OfflineCoastli
   }
 }
 
-// ADR 0228: dates and times are the boat's; the runner is on UTC.
+// ADR 0230: dates and times are the boat's; the runner is on UTC.
 const lineIn = (s: OfflineCoastlineStatus, now?: Date) => coastlineStatusLine(s, now, 'UTC')
 
 const NOON = (iso: string) => `${iso}T12:00:00Z`

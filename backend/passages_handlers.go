@@ -22,7 +22,7 @@ const passageDisplayToleranceMeters = 10.0
 type passageSummary struct {
 	passageRecord
 	Stats passageStats `json:"stats"`
-	// Timezone is the IANA zone at the first recorded point (ADR 0228): the
+	// Timezone is the IANA zone at the first recorded point (ADR 0230): the
 	// zone the page shows this passage's dates and times in. Null when the
 	// passage has no zone, and TimezoneError then says why.
 	Timezone      *string `json:"timezone"`

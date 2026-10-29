@@ -230,7 +230,7 @@ test('does not flag the tile stale when no update age is known', () => {
   expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
 })
 
-// ADR 0228: the tide times are the boat's, not the device's. The runner is on
+// ADR 0230: the tide times are the boat's, not the device's. The runner is on
 // UTC, so a half-hour zone away from it shows the difference.
 test('shows tide times in the boat\'s zone, not the device\'s', () => {
   const tide: TideToday = {

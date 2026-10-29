@@ -58,7 +58,7 @@ type nightWindow struct {
 // if it were a full one.
 //
 // Day boundaries for the sunTimes lookups are the boat's own calendar days, in
-// loc, the zone at the boat's position (ADR 0228).
+// loc, the zone at the boat's position (ADR 0230).
 func recentNightWindows(now time.Time, loc *time.Location, lat, lon float64, nights int) []nightWindow {
 	if nights <= 0 {
 		return nil

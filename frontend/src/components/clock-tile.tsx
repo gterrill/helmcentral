@@ -118,7 +118,7 @@ export const ClockTile = memo(function ClockTile({
             <span className="text-6xl">{hhmm(clock?.timePart ?? '--:--')}</span>
             <span className="text-2xl">{clock?.meridiem}</span>
             {/* A live fix needs no caveat. Boat time kept from the last fix, or UTC
-                because no position has ever been seen (ADR 0228), explains an
+                because no position has ever been seen (ADR 0230), explains an
                 otherwise wrong-looking clock. */}
             {zoneNote && (
               <span

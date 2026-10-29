@@ -32,7 +32,7 @@ type plannedStay struct {
 	Arrive    string     `json:"arrive"`
 	Depart    string     `json:"depart"`
 	UpdatedAt *time.Time `json:"updated_at"`
-	// Timezone is the IANA zone at the place (ADR 0228), worked out on every
+	// Timezone is the IANA zone at the place (ADR 0230), worked out on every
 	// read. It is never stored, and a value sent in a write is ignored.
 	Timezone string `json:"timezone"`
 }

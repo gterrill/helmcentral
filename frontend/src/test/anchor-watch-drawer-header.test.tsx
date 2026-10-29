@@ -5,7 +5,7 @@ import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
-// ADR 0228: times are the boat's. The runner is on UTC.
+// ADR 0230: times are the boat's. The runner is on UTC.
 installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
 
 

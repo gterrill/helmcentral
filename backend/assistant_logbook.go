@@ -32,7 +32,7 @@ const (
 )
 
 // logbookRange bounds the passages by departure. A bare date is a day on the
-// boat's clock, the zone at the passage's own start position (ADR 0228), so
+// boat's clock, the zone at the passage's own start position (ADR 0230), so
 // "August" is the boat's August. An RFC3339
 // bound is an instant.
 type logbookRange struct {

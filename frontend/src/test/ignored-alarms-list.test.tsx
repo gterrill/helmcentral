@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { IgnoredAlarmsList } from '@/components/settings/sections/ignored-alarms-list'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
-// ADR 0228: times are the boat's. The runner is on UTC.
+// ADR 0230: times are the boat's. The runner is on UTC.
 installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
 
 

@@ -141,7 +141,7 @@ func TestListPassages_ReadsTheLogbook(t *testing.T) {
 		t.Errorf("want the one recorded rating, got %d", rated)
 	}
 	// Times are also given in the zone at the passage's own start position
-	// (ADR 0228), the way the Passages page shows them.
+	// (ADR 0230), the way the Passages page shows them.
 	if first.StartLocal != "2026-10-27 10:16 AEST (UTC+10)" || first.EndLocal != "2026-10-27 11:14 AEST (UTC+10)" {
 		t.Errorf("local time: %q to %q", first.StartLocal, first.EndLocal)
 	}

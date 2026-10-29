@@ -1,4 +1,4 @@
-// Every time the operator reads is in the boat's time zone (ADR 0228), so a
+// Every time the operator reads is in the boat's time zone (ADR 0230), so a
 // Date must never be written in the zone of whatever device is looking at it.
 // This rule rejects the calls that do that:
 //
@@ -82,7 +82,7 @@ export default {
     schema: [],
     messages: {
       zoneless:
-        '{{what}} reads the device\'s clock, not the boat\'s (ADR 0228). Pass the boat\'s zone through lib/vessel-time, or put "// helm-browser-zone: <reason>" on the line before if this really is the device\'s time.',
+        '{{what}} reads the device\'s clock, not the boat\'s (ADR 0230). Pass the boat\'s zone through lib/vessel-time, or put "// helm-browser-zone: <reason>" on the line before if this really is the device\'s time.',
     },
   },
   create(context) {

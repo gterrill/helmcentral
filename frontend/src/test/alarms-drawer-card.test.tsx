@@ -7,7 +7,7 @@ import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 const stream = installFakeTelemetryStream()
 
-// ADR 0228: the card's times are the boat's. The runner is on UTC; the boat is in Adelaide.
+// ADR 0230: the card's times are the boat's. The runner is on UTC; the boat is in Adelaide.
 beforeEach(() => {
   stream.seed('vessel-state', { timezone: 'Australia/Adelaide', timezone_source: 'fix' })
 })
