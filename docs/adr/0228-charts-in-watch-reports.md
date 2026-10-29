@@ -95,7 +95,9 @@ route that serves it, since nothing would call one.
   <reason>" in the email text and HTML and in the ntfy message, and a `problem`
   field in place of `png_base64` on that webhook entry. The run also records
   "<channel>: sent without the chart (<reason>)". The same rule holds for an
-  attachment the ntfy server refuses.
+  attachment the ntfy server refuses. The operator approved this exception to
+  the fail-fast policy on 2026-10-30. There is no flag, because a send that left
+  out a chart is never silent: the message, the run and the log all say so.
 - Web push is unchanged. The link opens the run, where the page draws the chart.
 
 **The Watches page draws the stored data** with a chart component that shares the
