@@ -5,7 +5,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar } from '@/components/patterns'
+import { ConfirmDelete, DetailsLayout, EmptyState, FormSection, Page, RefreshFailedNote, SaveBar } from '@/components/patterns'
 import { DeckPlan } from '@/components/inventory/deck-plan'
 import { DeckPlanEditor } from '@/components/inventory/deck-plan-editor'
 import { deckPlanUrl, useInventoryDecks, useInventoryZones } from '@/hooks/use-inventory'
@@ -216,6 +216,20 @@ export function DeckEditor(
     )
   }
 
+  const hasPlan = !!deck.plan_document_id
+  const planPicker = (label: string, small: boolean) => (
+    <Button
+      type="button"
+      variant="outline"
+      size={small ? 'sm' : 'default'}
+      className="gap-2"
+      disabled={uploading}
+      onClick={() => fileInput.current?.click()}
+    >
+      <ImageUp className="h-4 w-4" aria-hidden="true" />
+      {uploading ? 'Uploading…' : label}
+    </Button>
+  )
   const deckNames = Object.fromEntries(decks.map((d) => [d.id, d.name]))
 
   return (
@@ -252,38 +266,6 @@ export function DeckEditor(
         </FormSection>
 
         <FormSection
-          title="Plan image"
-          description="A JPEG or PNG of the deck, such as the builder's general arrangement drawing. Export a PDF drawing to an image first."
-        >
-          {canWrite && (
-            <div className="flex flex-wrap items-center gap-3">
-              <input
-                ref={fileInput}
-                type="file"
-                accept="image/jpeg,image/png"
-                className="hidden"
-                tabIndex={-1}
-                aria-label="Plan image file"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) void handlePickPlan(file)
-                }}
-              />
-              <Button type="button" variant="outline" size="sm" className="gap-2" disabled={uploading} onClick={() => fileInput.current?.click()}>
-                <ImageUp className="h-4 w-4" aria-hidden="true" />
-                {uploading ? 'Uploading…' : deck.plan_document_id ? 'Replace plan' : 'Upload plan'}
-              </Button>
-            </div>
-          )}
-          {uploadError && <p role="alert" className="text-sm text-destructive">{uploadError}</p>}
-          {shapeWarning && (
-            <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-foreground">
-              {shapeWarning}
-            </p>
-          )}
-        </FormSection>
-
-        <FormSection
           title="Locations on this plan"
           description="Outline each location and pin its bins. Changes are kept as a draft until you save."
         >
@@ -297,12 +279,47 @@ export function DeckEditor(
             </div>
           ) : zonesLoading && zones.length === 0 ? (
             <p className="text-sm text-muted-foreground">Loading...</p>
-          ) : !deck.plan_document_id ? (
-            <p className="text-sm text-muted-foreground">Upload a plan image to start drawing.</p>
-          ) : canWrite ? (
-            <DeckPlanEditor deck={deck} zones={zones} deckNames={deckNames} layout={layout} onChange={setLayout} />
-          ) : (
-            <DeckPlan deck={deck} zones={zones} />
+          ) : hasPlan ? (
+            canWrite ? (
+              <DeckPlanEditor deck={deck} zones={zones} deckNames={deckNames} layout={layout} onChange={setLayout} />
+            ) : (
+              <DeckPlan deck={deck} zones={zones} />
+            )
+          ) : null}
+          {!hasPlan && (
+            <EmptyState
+              className="rounded-md border border-dashed border-border py-12"
+              icon={canWrite ? <ImageUp className="h-8 w-8 text-muted-foreground" aria-hidden="true" /> : undefined}
+              title="No plan yet"
+              description={canWrite ? "Upload a JPEG or PNG of the deck, such as the builder's general arrangement drawing. Export a PDF drawing to an image first." : undefined}
+              action={canWrite ? planPicker('Upload plan', false) : undefined}
+            />
+          )}
+          {canWrite && (
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/jpeg,image/png"
+              className="hidden"
+              tabIndex={-1}
+              aria-label="Plan image file"
+              onChange={(e) => {
+                const file = e.target.files?.[0]
+                if (file) void handlePickPlan(file)
+              }}
+            />
+          )}
+          {canWrite && hasPlan && (
+            <div className="flex flex-wrap items-center gap-3">
+              {planPicker('Replace plan', true)}
+              <span className="min-w-0 text-xs text-muted-foreground">JPEG or PNG. Export a PDF drawing to an image first.</span>
+            </div>
+          )}
+          {uploadError && <p role="alert" className="text-sm text-destructive">{uploadError}</p>}
+          {shapeWarning && (
+            <p role="status" className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-foreground">
+              {shapeWarning}
+            </p>
           )}
         </FormSection>
       </DetailsLayout>

@@ -122,6 +122,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **A deck's plan picture is uploaded where it will appear.** A new deck shows
+  **Upload plan** under **Locations on this plan**, in the space the picture
+  will fill. Once the plan is up, **Replace plan** sits under it. The separate
+  Plan image section is gone.
 - **Times on screen now follow the boat's time zone, not the device's.** The
   clock, tide times, sunrise, alarm times, passage dates, the "Off since" time
   on an engine tile and every other time you read are now in the zone the boat

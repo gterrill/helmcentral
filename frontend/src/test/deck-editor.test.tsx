@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { DeckEditor } from '@/components/inventory/deck-editor'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import type { LayoutDraft } from '@/lib/deck-layout'
@@ -117,8 +117,62 @@ describe('DeckEditor', () => {
   it('asks for a plan image before offering the drawing surface', async () => {
     renderEditor({ id: 'd2' })
     await screen.findByDisplayValue('Flybridge')
-    expect(screen.getByText(/Upload a plan image to start drawing/i)).toBeInTheDocument()
+    expect(screen.getByText('No plan yet')).toBeInTheDocument()
     expect(screen.queryByTestId('plan-editor')).not.toBeInTheDocument()
+  })
+
+  it('has no Plan image section', async () => {
+    renderEditor()
+    await screen.findByDisplayValue('Main deck')
+    expect(screen.queryByText('Plan image')).not.toBeInTheDocument()
+  })
+
+  it('offers Upload plan inside Locations when there is no plan', async () => {
+    renderEditor({ id: 'd2' })
+    await screen.findByDisplayValue('Flybridge')
+    const section = screen.getByRole('heading', { name: 'Locations on this plan' }).closest('[data-slot="card"]') as HTMLElement
+    expect(within(section).getByText('No plan yet')).toBeInTheDocument()
+    expect(within(section).getByRole('button', { name: 'Upload plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Replace plan' })).not.toBeInTheDocument()
+  })
+
+  it('offers Replace plan, not Upload plan, when there is a plan', async () => {
+    renderEditor()
+    await screen.findByDisplayValue('Main deck')
+    expect(await screen.findByRole('button', { name: 'Replace plan' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Upload plan' })).not.toBeInTheDocument()
+  })
+
+  function failZones() {
+    const base = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      String(url).endsWith('/api/inventory/zones') && (init?.method ?? 'GET') === 'GET'
+        ? Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'zones down' }) })
+        : base(url, init))
+  }
+
+  it('still offers Upload plan when the locations failed to load and there is no plan', async () => {
+    failZones()
+    renderEditor({ id: 'd2' })
+    await screen.findByDisplayValue('Flybridge')
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Upload plan' })).toBeInTheDocument()
+  })
+
+  it('still offers Replace plan when the locations failed to load and there is a plan', async () => {
+    failZones()
+    renderEditor()
+    await screen.findByDisplayValue('Main deck')
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Replace plan' })).toBeInTheDocument()
+    expect(screen.getByText(/Export a PDF drawing to an image first/)).toBeInTheDocument()
+  })
+
+  it('read-only with no plan says so and offers no upload', async () => {
+    renderEditor({ id: 'd2', canWrite: false })
+    await screen.findByDisplayValue('Flybridge')
+    expect(screen.getByText('No plan yet')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Upload plan|Replace plan/ })).not.toBeInTheDocument()
   })
 
   it('renames through the Save bar', async () => {

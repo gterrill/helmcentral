@@ -16,12 +16,12 @@ on.
    and **Plan**.
 2. Press **New deck**, type a name such as `Main deck`, and press **Create**.
    The deck's page opens.
-3. Under **Plan image**, press **Upload plan** and choose the picture. It
-   appears at once under **Locations on this plan**.
+3. Under **Locations on this plan**, press **Upload plan** and choose the
+   picture. It appears there at once.
 
-To swap the picture later, press **Replace plan**. Outlines and pins stay where
-they are on the image. If the new picture is a different shape, a warning tells
-you to check them.
+To swap the picture later, press **Replace plan** under the plan. Outlines and
+pins stay where they are on the image. If the new picture is a different shape,
+a warning tells you to check them.
 
 ## Ask Mate to start a deck
 

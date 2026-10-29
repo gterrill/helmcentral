@@ -374,6 +374,6 @@ describe('App: deck plans under Locations (ADR 0156)', () => {
     window.history.replaceState({}, '', '/inventory/decks/d1')
     render(<App />)
     expect(await screen.findByDisplayValue('Main deck')).toBeInTheDocument()
-    expect(screen.getByText(/Upload a plan image to start drawing/i)).toBeInTheDocument()
+    expect(screen.getByText('No plan yet')).toBeInTheDocument()
   })
 })
