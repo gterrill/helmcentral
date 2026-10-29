@@ -7,7 +7,7 @@ import { createTelemetryStore, keepUnchanged, useStoreFields, type TelemetryUpda
 interface VesselState {
   status: string
   datetime: string
-  /** The boat's IANA zone, found from its position (ADR 0228). */
+  /** The boat's IANA zone, found from its position (ADR 0230). */
   timezone: string
   /** Where that zone came from: the live fix, the last fix, or none (UTC, no fix yet). */
   timezone_source?: 'fix' | 'last_fix' | 'none'

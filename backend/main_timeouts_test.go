@@ -31,7 +31,7 @@ func TestMain(m *testing.M) {
 	// blackholed /24 the handler tests use costs 4 batches of this value.
 	os.Setenv("HELMCENTRAL_DISCOVERY_DIAL_TIMEOUT_MS", "25")
 
-	// The last-fix time zone is remembered in a file (ADR 0228); keep the
+	// The last-fix time zone is remembered in a file (ADR 0230); keep the
 	// suite's copy out of the real data directory.
 	dir, err := os.MkdirTemp("", "helm-boat-zone-")
 	if err != nil {

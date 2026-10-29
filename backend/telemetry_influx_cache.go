@@ -144,7 +144,7 @@ var telemetryInfluxSolarPositionMissing atomic.Bool
 // refresher must not add a second fetch of its own every
 // telemetryInfluxRefreshInterval on top of it.
 //
-// The zone is the one boatTimeAt gives (ADR 0228): the zone at the fix, or the
+// The zone is the one boatTimeAt gives (ADR 0230): the zone at the fix, or the
 // zone of the last fix while there is none. ok is false only when no fix has
 // ever been seen - absent, or one of hasUsableVesselPosition's rejected
 // sentinel pairs (weather_providers.go) with nothing remembered. The caller

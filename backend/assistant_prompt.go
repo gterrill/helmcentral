@@ -47,7 +47,7 @@ type assistantPromptContext struct {
 
 	Latitude  float64
 	Longitude float64
-	// BoatTime is the zone the boat keeps (ADR 0228): the zone at the fix, the
+	// BoatTime is the zone the boat keeps (ADR 0230): the zone at the fix, the
 	// zone of the last fix, or UTC before any fix. The clock line reads it.
 	BoatTime boatTime
 	// PlaceName is the anchor-watch pinned name when a watch is active and

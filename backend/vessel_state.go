@@ -294,7 +294,7 @@ func buildVesselStatePayload() map[string]any {
 		draftM = state.DraftM
 	}
 
-	// The boat's zone (ADR 0228): the zone at the fix, the zone of the last
+	// The boat's zone (ADR 0230): the zone at the fix, the zone of the last
 	// fix, or UTC when no fix has ever been seen. timezone_source says which.
 	boat := boatTimeForState(state, nil)
 

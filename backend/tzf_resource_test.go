@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// The Pi 5 check (ADR 0228): the zone finder builds its index on first use,
+// The Pi 5 check (ADR 0230): the zone finder builds its index on first use,
 // so a slow or hungry build would show up as a stalled first screen. CI runs
 // this on linux/arm64. Skipped under -short because it forces the build.
 func TestZoneFinderInitStaysSmall(t *testing.T) {

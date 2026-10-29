@@ -847,7 +847,7 @@ func TestVesselStateHandler_DraftMAbsentSerializesAsNullNotSentinel(t *testing.T
 
 // TestBuildVesselStatePayload_TimezoneReflectsVesselLocalZone proves the
 // vessel-state payload carries the vessel's local zone found from its
-// position (ADR 0228), not the browser's. The wall display's Ubuntu box is
+// position (ADR 0230), not the browser's. The wall display's Ubuntu box is
 // stuck on UTC, so the frontend clock needs this field to render the
 // vessel's actual local time rather than the browser's.
 func TestBuildVesselStatePayload_TimezoneReflectsVesselLocalZone(t *testing.T) {

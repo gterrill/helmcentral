@@ -317,7 +317,7 @@ func newProductionWatchHost(settingsPath string) *watchHost {
 // the zone of its last trusted fix when the current one is unusable (the
 // -1,-1 sentinel, a critical GNSS alert, a failed read), so a watch still
 // runs on the boat's clock through a GNSS drop-out. Only a boat that has
-// never had a fix has no clock to read a schedule on (ADR 0228).
+// never had a fix has no clock to read a schedule on (ADR 0230).
 func watchBoatLocationOf(state vesselStateData, err error) (*time.Location, error) {
 	bt := boatTimeForState(state, err)
 	if bt.NoFix {

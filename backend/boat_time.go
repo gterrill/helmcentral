@@ -16,7 +16,7 @@ import (
 	"github.com/ringsaturn/tzf"
 )
 
-// Boat time comes from position (ADR 0228). The zone at a latitude and
+// Boat time comes from position (ADR 0230). The zone at a latitude and
 // longitude is looked up in the timezone-boundary-builder data that tzf
 // embeds: a civil zone near land (Australia/Sydney, with its daylight saving),
 // a nautical Etc/GMT zone offshore. A fixed offset taken from longitude, which
@@ -177,7 +177,7 @@ type storedBoatZone struct {
 	Zone string `json:"zone"`
 }
 
-// The last-fix rule (ADR 0228) lives here and only here. With no usable
+// The last-fix rule (ADR 0230) lives here and only here. With no usable
 // own-ship fix the boat keeps the zone of the last trusted one, which is
 // remembered across restarts in a small file. It is logged once each time it
 // starts to apply. Before any fix has ever been seen the zone is UTC.

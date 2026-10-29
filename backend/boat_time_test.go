@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Real coordinates, real zones (ADR 0228). A fixed offset from longitude gets
+// Real coordinates, real zones (ADR 0230). A fixed offset from longitude gets
 // every row of the daylight-saving and half-hour cases wrong.
 func TestZoneAt_PlacesAndOcean(t *testing.T) {
 	cases := []struct {
