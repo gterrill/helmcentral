@@ -5,6 +5,7 @@ import { AssistantMarkdown } from '@/components/assistant-markdown'
 import { ConfirmDelete } from '@/components/patterns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { WatchChart } from '@/components/watches/watch-chart'
 import {
   channelLabel,
   runCostLabel,
@@ -130,10 +131,18 @@ export function WatchRunCard({ run, highlighted, canWrite, onAskMate, onDelete }
       {found && (
         <ul className="flex flex-col gap-1" aria-label="Findings">
           {run.findings.map((f, i) => (
-            <li key={i} className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm text-foreground">
-              <span className={MICRO_LABEL}>{sectionLabel(f.section)}</span>
-              <span className="min-w-0">{f.text}</span>
-              {f.by === 'mate' && <Badge variant="secondary">Mate</Badge>}
+            <li key={i} className="flex min-w-0 flex-col gap-1.5 text-sm text-foreground">
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                <span className={MICRO_LABEL}>{sectionLabel(f.section)}</span>
+                <span className="min-w-0">{f.text}</span>
+                {f.by === 'mate' && <Badge variant="secondary">Mate</Badge>}
+              </div>
+              {(run.charts ?? [])
+                .filter((c) => c.finding_index === i)
+                .map((c, ci) => (
+                  <WatchChart key={ci} chart={c} />
+                ))}
+              {f.chart_problem && <p className="min-w-0 text-xs text-muted-foreground">{f.chart_problem}</p>}
             </li>
           ))}
         </ul>
@@ -153,12 +162,17 @@ export function WatchRunCard({ run, highlighted, canWrite, onAskMate, onDelete }
         </div>
       )}
 
-      {(run.notified.length > 0 || (run.notify_pending ?? []).length > 0 || run.not_sent) && (
+      {(run.notified.length > 0 || (run.notify_pending ?? []).length > 0 || run.not_sent || (run.notify_notes ?? []).length > 0) && (
         <div className="flex flex-col gap-0.5" data-testid="watch-run-notified">
           {run.not_sent && <p className="min-w-0 text-xs text-muted-foreground">Not sent: {run.not_sent}</p>}
           {run.notified.length > 0 && (
             <p className="text-xs text-muted-foreground">Notified: {run.notified.map(channelLabel).join(', ')}</p>
           )}
+          {(run.notify_notes ?? []).map((n) => (
+            <p key={n} className="min-w-0 text-xs text-muted-foreground">
+              {n}
+            </p>
+          ))}
           {(run.notify_pending ?? []).map((p) => (
             <p key={p.channel} className="min-w-0 text-xs text-destructive">
               Not delivered yet to {channelLabel(p.channel)}: {p.reason}

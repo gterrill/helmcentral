@@ -331,3 +331,53 @@ func TestWatchReview_TheLastRunsMateFindingsGoInSoTheSameIssueKeepsItsKey(t *tes
 		}
 	}
 }
+
+func submitWithChart(chart string) json.RawMessage {
+	return json.RawMessage(`{"review":"ok","added_findings":[{"section":"power","key":"pump_current","text":"The pump current rose.","chart":` + chart + `}]}`)
+}
+
+func TestWatchReview_SubmitChecksAChartRequest(t *testing.T) {
+	for name, chart := range map[string]string{
+		"no path":       `{"hours":6,"label":"Pump"}`,
+		"no label":      `{"path":"electrical.pump.current","hours":6}`,
+		"blank label":   `{"path":"electrical.pump.current","hours":6,"label":"  "}`,
+		"zero hours":    `{"path":"electrical.pump.current","hours":0,"label":"Pump"}`,
+		"over 48 hours": `{"path":"electrical.pump.current","hours":49,"label":"Pump"}`,
+		"template path": `{"path":"a.${b}","hours":6,"label":"Pump"}`,
+		"long label":    `{"path":"electrical.pump.current","hours":6,"label":"` + strings.Repeat("x", 61) + `"}`,
+	} {
+		tools := &watchReviewTools{}
+		if _, err := tools.submit(submitWithChart(chart)); err == nil || tools.submission() != nil {
+			t.Errorf("%s should be refused", name)
+		}
+	}
+	tools := &watchReviewTools{}
+	if _, err := tools.submit(submitWithChart(`{"path":"electrical.pump.current","hours":6,"label":"Pump"}`)); err != nil || tools.submission() == nil {
+		t.Fatalf("a chart request is taken: %v", err)
+	}
+}
+
+func TestWatchReview_AddedFindingCarriesAChartSpecForTheWindowAsked(t *testing.T) {
+	withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
+		_, err := tools.execute(ctx, watchReviewToolName, submitWithChart(`{"path":"electrical.pump.current","hours":6,"label":"Pump current"}`))
+		return assistantReply{Content: "done"}, err
+	})
+	w, report, findings := reviewInputs()
+	now := watchTestTime(29, 6, 0)
+	out := runWatchReview(context.Background(), reviewConfig(t), w, report, findings, now, time.UTC)
+	if len(out.Added) != 1 || out.Added[0].chart == nil {
+		t.Fatalf("added %+v", out.Added)
+	}
+	s := out.Added[0].chart
+	if s.Title != "Pump current" || !s.To.Equal(now) || !s.From.Equal(now.Add(-6*time.Hour)) || len(s.Series) != 1 ||
+		s.Series[0].Path != "electrical.pump.current" || s.Series[0].Convert != "display" {
+		t.Errorf("spec %+v", s)
+	}
+}
+
+func TestWatchReviewPrompt_ChartsOnlyWhereTheTrendIsTheEvidence(t *testing.T) {
+	prompt := buildWatchReviewPrompt(assistantPromptContext{}, "metric", watchTestTime(29, 6, 0), time.UTC, false)
+	if !strings.Contains(prompt, "Attach a chart to a finding only where the trend is the evidence") {
+		t.Errorf("the prompt lacks the chart rule:\n%s", prompt)
+	}
+}

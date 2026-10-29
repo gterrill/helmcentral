@@ -33,7 +33,11 @@ written is a failure to surface, not to retry silently.
 */
 
 // watchRunTimeout is the longest a run, its report and Mate's review, may take.
-const watchRunTimeout = 10 * time.Minute
+var watchRunTimeout = 10 * time.Minute
+
+// watchChartTimeout is the time the charts of a run get to read their history.
+// It starts when the review is over, so a slow review cannot use it up.
+const watchChartTimeout = 30 * time.Second
 
 type watchHost struct {
 	store  func() *documentStore
@@ -44,6 +48,10 @@ type watchHost struct {
 	report func(ctx context.Context, w savedWatch, now time.Time, loc *time.Location) (watchReport, []watchFinding, error)
 	// review has Mate read it.
 	review func(ctx context.Context, cfg watchConfig, w savedWatch, rep watchReport, findings []watchFinding, now time.Time, loc *time.Location) watchReviewOutcome
+
+	// chartSources reads the history findings' charts are drawn from. Nil in a
+	// host with none, where a finding that wants a chart says so.
+	chartSources func() watchChartSources
 
 	// dispatchReport hands a watch report to the notification dispatcher, to go
 	// to channels. vesselName is the boat's name on it. Nil in a host that
@@ -240,10 +248,17 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 	}
 	review := h.review(reviewCtx, cfg, w, report, findings, now, loc)
 	all := append(append([]watchFinding{}, findings...), review.Added...)
+	var sources watchChartSources
+	if h.chartSources != nil {
+		sources = h.chartSources()
+	}
+	chartCtx, cancelCharts := context.WithTimeout(context.WithoutCancel(ctx), watchChartTimeout)
+	charts := attachWatchCharts(chartCtx, all, sources, now, loc)
+	cancelCharts()
 
 	run := watchRun{
 		WatchID: w.ID, StartedAt: now, FinishedAt: h.now(), Outcome: watchOutcomeRan,
-		ReportKind: watchReportKindSections, Report: raw, Findings: all,
+		ReportKind: watchReportKindSections, Report: raw, Findings: all, Charts: charts,
 		CostKnown: review.CostKnown, Model: review.Model,
 		BoatTime: watchBoatClock(now, loc), Timezone: watchBoatZone(now, loc),
 	}
@@ -339,7 +354,8 @@ func newProductionWatchHost(settingsPath string) *watchHost {
 			}
 			globalAlarmDispatcher.enqueueWatchReport(report, channels)
 		},
-		vesselName: vesselNameForNotifications,
+		vesselName:   vesselNameForNotifications,
+		chartSources: func() watchChartSources { return productionWatchChartSources(settingsPath) },
 	}
 }
 

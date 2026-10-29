@@ -69,6 +69,12 @@ type watchReviewSubmission struct {
 		Section string `json:"section"`
 		Key     string `json:"key"`
 		Text    string `json:"text"`
+		// Chart asks for a chart of one path's history to go with the finding.
+		Chart *struct {
+			Path  string  `json:"path"`
+			Hours float64 `json:"hours"`
+			Label string  `json:"label"`
+		} `json:"chart"`
 	} `json:"added_findings"`
 }
 
@@ -89,7 +95,17 @@ var watchReviewToolDef = openRouterFunctionDef{
 					"properties": {
 						"section": {"type": "string", "enum": ["power", "anchor", "alarms", "tanks", "weather", "instruments"]},
 						"key": {"type": "string", "description": "A short lower_snake name for the issue, 3 to 40 characters such as port_alternator_output. Name the issue, not the figures. If it is the same issue as one in previous_findings_you_added, use that key exactly."},
-						"text": {"type": "string", "description": "One plain sentence with its figures in the operator's units, at most 300 characters. No question marks, no exclamation marks, no cause you cannot see."}
+						"text": {"type": "string", "description": "One plain sentence with its figures in the operator's units, at most 300 characters. No question marks, no exclamation marks, no cause you cannot see."},
+						"chart": {
+							"type": "object",
+							"description": "Optional. A chart of one SignalK path's recent history to go with the finding. Only when the trend is the evidence.",
+							"properties": {
+								"path": {"type": "string", "description": "The SignalK path to chart."},
+								"hours": {"type": "number", "minimum": 1, "maximum": 48, "description": "How many hours back to chart, 1 to 48."},
+								"label": {"type": "string", "description": "What the line is, in the operator's words such as Pump current, at most 60 characters. Never a SignalK path."}
+							},
+							"required": ["path", "hours", "label"]
+						}
 					},
 					"required": ["section", "key", "text"]
 				}
@@ -153,6 +169,19 @@ func (t *watchReviewTools) submit(args json.RawMessage) (string, error) {
 		}
 		if s.Added[i].Text == "" || utf8.RuneCountInString(s.Added[i].Text) > maxWatchReviewFindingText {
 			return "", fmt.Errorf("%s: added_findings[%d].text must be 1 to %d characters", watchReviewToolName, i, maxWatchReviewFindingText)
+		}
+		if c := s.Added[i].Chart; c != nil {
+			c.Path, c.Label = strings.TrimSpace(c.Path), strings.TrimSpace(c.Label)
+			switch {
+			case c.Path == "" || containsFluxInterpolationSyntax(c.Path):
+				return "", fmt.Errorf("%s: added_findings[%d].chart.path must be a SignalK path", watchReviewToolName, i)
+			case c.Label == "":
+				return "", fmt.Errorf("%s: added_findings[%d].chart.label is required: name the line in the operator's words, such as Pump current", watchReviewToolName, i)
+			case !(c.Hours >= 1 && c.Hours <= 48):
+				return "", fmt.Errorf("%s: added_findings[%d].chart.hours must be from 1 to 48", watchReviewToolName, i)
+			case utf8.RuneCountInString(c.Label) > 60:
+				return "", fmt.Errorf("%s: added_findings[%d].chart.label must be at most 60 characters", watchReviewToolName, i)
+			}
 		}
 		if strings.ContainsAny(s.Added[i].Text, "!?") {
 			return "", fmt.Errorf("%s: added_findings[%d].text states what you saw; questions belong in the review, and no exclamation marks", watchReviewToolName, i)
@@ -291,7 +320,13 @@ func runWatchReview(ctx context.Context, cfg watchConfig, w savedWatch, report w
 	}
 	out.Review = sub.Review
 	for _, a := range sub.Added {
-		out.Added = append(out.Added, watchFinding{Section: a.Section, Rule: "mate_review", Text: a.Text, By: watchByMate, Key: a.Key})
+		f := watchFinding{Section: a.Section, Rule: "mate_review", Text: a.Text, By: watchByMate, Key: a.Key}
+		if c := a.Chart; c != nil {
+			title := c.Label
+			f.chart = &watchChartSpec{Title: title, From: now.Add(-time.Duration(c.Hours * float64(time.Hour))), To: now,
+				Series: []watchChartSeriesSpec{{Label: title, Path: c.Path, Convert: "display"}}}
+		}
+		out.Added = append(out.Added, f)
 	}
 	return out
 }
@@ -364,6 +399,7 @@ func buildWatchReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 		"- Lead with your judgement. At most four short sentences, then up to three questions for the skipper. Do not restate the report: the skipper reads it beside your review.\n" +
 		"- Never claim anything the report's figures do not show. Say an alarm is still going only when the report marks it active now; never say one cleared.\n" +
 		"- Never suggest a remedy or a setting change (muting an alarm, raising a threshold) unless the figures point to it, and never name a cause the figures do not show.\n" +
+		"- Attach a chart to a finding only where the trend is the evidence (a figure that fell or climbed over hours); most findings need none.\n" +
 		"- If nothing needs attention, say so in one sentence.\n" +
 		"- Use tools only to check something the report does not show; start from the report. The tools only read.\n")
 	if webSearch {

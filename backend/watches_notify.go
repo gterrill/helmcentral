@@ -71,8 +71,11 @@ type watchReportMessage struct {
 		Outcome  string `json:"outcome"`
 	} `json:"run"`
 	Findings []watchFinding `json:"findings"`
-	Report   *watchReport   `json:"report"`
-	Review   *string        `json:"review"`
+	// Charts are the findings' charts as data; finding_index says which finding
+	// each belongs to. A webhook payload also carries each as png_base64.
+	Charts []watchChart `json:"charts"`
+	Report *watchReport `json:"report"`
+	Review *string      `json:"review"`
 	// Path is where the run is in the app. There is no public address to
 	// build a full link from, so the receiver adds its own Helmcentral address.
 	Path string `json:"path"`
@@ -220,7 +223,7 @@ func watchEncodedHeaderText(s string) string {
 }
 
 func buildWatchReportMessage(w savedWatch, run watchRun, vessel, linkBase string) watchReportMessage {
-	m := watchReportMessage{Kind: notificationKindWatchReport, Vessel: vessel, Findings: nonNilFindings(run.Findings), Review: run.Review}
+	m := watchReportMessage{Kind: notificationKindWatchReport, Vessel: vessel, Findings: nonNilFindings(run.Findings), Review: run.Review, Charts: nonNilCharts(run.Charts)}
 	m.Watch.ID, m.Watch.Name, m.Watch.ScheduleSentence = w.ID, w.Name, watchSentenceOrCron(w)
 	m.Run.ID, m.Run.BoatTime, m.Run.Outcome = run.ID, run.BoatTime, run.Outcome
 	m.Path = "/watches/" + w.ID + "?run=" + run.ID
@@ -283,8 +286,16 @@ func watchEmailText(m watchReportMessage) string {
 	}
 	if len(m.Findings) > 0 {
 		b.WriteString("Findings\n")
-		for _, f := range m.Findings {
+		for i, f := range m.Findings {
 			b.WriteString("- " + f.Text + "\n")
+			if f.ChartProblem != "" {
+				b.WriteString("  (" + f.ChartProblem + ")\n")
+			}
+			for _, c := range m.Charts {
+				if c.FindingIndex == i && c.Problem != "" {
+					b.WriteString("  Chart left out: " + c.Problem + "\n")
+				}
+			}
 		}
 		b.WriteString("\n")
 	}
@@ -445,4 +456,26 @@ func withWatchPreviousMate(ctx context.Context, previous []watchFinding) context
 func watchPreviousMateFrom(ctx context.Context) []watchFinding {
 	v, _ := ctx.Value(watchPreviousMateKey{}).([]watchFinding)
 	return v
+}
+
+func nonNilCharts(c []watchChart) []watchChart {
+	if c == nil {
+		return []watchChart{}
+	}
+	return c
+}
+
+// recordWatchNotifyNote notes on the run where a delivery was not as meant.
+func recordWatchNotifyNote(watchID, runID, note string) {
+	store := globalDocumentStore
+	if store == nil {
+		log.Printf("watches: run %s: %s, but the record store is not open, so the run will not say so", runID, note)
+		return
+	}
+	err := store.RunTx("record watch delivery note", func(tx *sql.Tx, _ time.Time) error {
+		return addWatchRunNotifyNoteTx(tx, watchID, runID, note)
+	})
+	if err != nil && !errors.Is(err, errWatchRunNotFound) {
+		log.Printf("watches: run %s: %s, and that could not be recorded on the run: %v", runID, note, err)
+	}
 }
