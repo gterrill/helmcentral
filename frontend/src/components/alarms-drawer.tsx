@@ -24,11 +24,12 @@ import { COLLISION_ALARM_RULE_PREFIX, type ActiveAlarm } from '@/hooks/use-alarm
 import { forecastWarningDetailsUrl, type ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import type { MateAlarmContext } from '@/lib/mate-screen'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { formatDayTimeIn, selectTimeZone } from '@/lib/vessel-time'
 
-function formatTime(value?: string): string {
+function formatTime(value: string | undefined, timeZone: string | undefined): string {
   if (!value) return '--'
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? '--' : parsed.toLocaleString()
+  return formatDayTimeIn(value, timeZone)
 }
 
 // The dwell field is stored in seconds but read on a phone screen, so it
@@ -90,6 +91,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
   onAskMate,
 }: AlarmsDrawerProps) {
   const alarms = knownAlarms ?? NO_ALARMS
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const { entries, refresh: refreshLog } = useAlarmLog(true)
   const { paths: signalKPaths } = useSignalKPaths(true)
   const { identifiers: ignoredSensors, ignore: ignoreSensor } = useIgnoredSensors()
@@ -212,8 +214,8 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
               // and where" facts on the card; a missing time is omitted
               // rather than rendered as "--" (formatAlarmTime already
               // returns null for that).
-              const raised = formatAlarmTime(alarm.raised_at)
-              const acked = formatAlarmTime(alarm.acked_at)
+              const raised = formatAlarmTime(alarm.raised_at, timeZone)
+              const acked = formatAlarmTime(alarm.acked_at, timeZone)
               const timeParts = [raised && `Raised ${raised}`, acked && `acknowledged ${acked}`, alarmFooterText(alarm)].filter(Boolean)
               const hasMeta = timeParts.length > 0
               // The URL lives on the forecast-warnings payload, not on the
@@ -469,7 +471,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                   )}
                 </span>
                 <span className="flex shrink-0 items-center gap-1 text-xs tabular-nums text-muted-foreground">
-                  {formatTime(entry.raised_at)}
+                  {formatTime(entry.raised_at, timeZone)}
                   {entry.cleared_at ? ' → cleared' : ''}
                   {onAskMate && (
                     <Button

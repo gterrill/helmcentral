@@ -2,7 +2,7 @@ import { useMemo, useSyncExternalStore } from 'react'
 
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { readServerClock, subscribeServerClock } from '@/lib/server-clock'
-import { formatClock, formatDate, selectTimeZone } from '@/lib/vessel-time'
+import { formatClock, formatDate, selectTimeZone, selectTimeZoneSource, unknownZoneMessage } from '@/lib/vessel-time'
 
 /**
  * The boat's time as the clock surfaces show it (ADR 0218), re-rendering the
@@ -17,10 +17,15 @@ import { formatClock, formatDate, selectTimeZone } from '@/lib/vessel-time'
  */
 export function useVesselClock() {
   const timeZone = useVesselStateSelector(selectTimeZone)
+  const timeZoneSource = useVesselStateSelector(selectTimeZoneSource)
   const now = useSyncExternalStore(subscribeServerClock, readServerClock)
 
-  const currentDate = useMemo(() => (now === null ? null : formatDate(now, { timeZone }).toUpperCase()), [now, timeZone])
-  const clock = useMemo(() => (now === null ? null : formatClock(now, timeZone)), [now, timeZone])
+  // A zone this browser's ICU does not know is shown as an error where the
+  // time goes (the header sits outside any tile boundary), never as a throw
+  // and never as another zone's clock.
+  const zoneError = unknownZoneMessage(timeZone)
+  const currentDate = useMemo(() => (now === null || zoneError ? null : formatDate(now, { timeZone }).toUpperCase()), [now, timeZone, zoneError])
+  const clock = useMemo(() => (now === null || zoneError ? null : formatClock(now, timeZone)), [now, timeZone, zoneError])
 
-  return { now, currentDate, clock, timeZone }
+  return { now: zoneError ? null : now, currentDate, clock, timeZone, timeZoneSource, zoneError }
 }

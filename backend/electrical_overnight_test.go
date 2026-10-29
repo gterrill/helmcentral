@@ -126,7 +126,7 @@ func failIfCalledQuery(t *testing.T) func(path string, start, stop time.Time, ev
 
 func TestComputeOvernight_InfluxNotConfiguredLinearWhenFlagOn(t *testing.T) {
 	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, false, failIfCalledQuery(t))
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, false, failIfCalledQuery(t))
 
 	if result.Basis != "linear" {
 		t.Fatalf("basis: got %q, want linear", result.Basis)
@@ -144,7 +144,7 @@ func TestComputeOvernight_InfluxNotConfiguredLinearWhenFlagOn(t *testing.T) {
 
 func TestComputeOvernight_InfluxNotConfiguredNoneWhenFlagOff(t *testing.T) {
 	now := time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, false, false, failIfCalledQuery(t))
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, false, false, failIfCalledQuery(t))
 
 	if result.Basis != "none" {
 		t.Fatalf("basis: got %q, want none", result.Basis)
@@ -161,7 +161,7 @@ func TestComputeOvernight_QueryFailureSurfacesReason(t *testing.T) {
 		return nil, queryErr
 	}
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 	if result.Basis != "linear" {
 		t.Fatalf("basis: got %q, want linear", result.Basis)
 	}
@@ -181,7 +181,7 @@ func TestComputeOvernight_QueryFailureSurfacesReason(t *testing.T) {
 func allLookbackWindows(t *testing.T) (now time.Time, windows []nightWindow) {
 	t.Helper()
 	now = time.Date(2026, 9, 7, 10, 0, 0, 0, time.UTC)
-	windows = recentNightWindows(now, vesselLat, vesselLon, overnightLookbackNights)
+	windows = recentNightWindows(now, mustLocationAt(t, vesselLat, vesselLon), vesselLat, vesselLon, overnightLookbackNights)
 	if len(windows) != overnightLookbackNights {
 		t.Fatalf("recentNightWindows: got %d windows, want %d", len(windows), overnightLookbackNights)
 	}
@@ -242,7 +242,7 @@ func TestComputeOvernight_ThreeCleanNightsMedian(t *testing.T) {
 	)
 	query := lookbackQuery(t, socSeries, nil, nil)
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "history" {
 		t.Fatalf("basis: got %q, want history (reason=%v)", result.Basis, result.Reason)
@@ -283,7 +283,7 @@ func TestComputeOvernight_NetRiseNightExcludedButOthersStillCount(t *testing.T) 
 	)
 	query := lookbackQuery(t, socSeries, nil, nil)
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "history" {
 		t.Fatalf("basis: got %q, want history (reason=%v)", result.Basis, result.Reason)
@@ -308,7 +308,7 @@ func TestComputeOvernight_GapNightExcluded(t *testing.T) {
 	socSeries := concatPoints(fullNight0, fullNight1, gapNight2)
 	query := lookbackQuery(t, socSeries, nil, nil)
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "history" {
 		t.Fatalf("basis: got %q, want history (reason=%v)", result.Basis, result.Reason)
@@ -326,7 +326,7 @@ func TestComputeOvernight_OneUsableNightLinearWhenFlagOn(t *testing.T) {
 	socSeries := syntheticSlopeSeries(windows[0], overnightSampleInterval, 65, 65+(-1.0)*windows[0].End.Sub(windows[0].Start).Hours())
 	query := lookbackQuery(t, socSeries, nil, nil)
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "linear" {
 		t.Fatalf("basis: got %q, want linear", result.Basis)
@@ -345,7 +345,7 @@ func TestComputeOvernight_OneUsableNightNoneWhenFlagOff(t *testing.T) {
 	socSeries := syntheticSlopeSeries(windows[0], overnightSampleInterval, 65, 65+(-1.0)*windows[0].End.Sub(windows[0].Start).Hours())
 	query := lookbackQuery(t, socSeries, nil, nil)
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, false, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, false, true, query)
 
 	if result.Basis != "none" {
 		t.Fatalf("basis: got %q, want none", result.Basis)
@@ -379,7 +379,7 @@ func TestComputeOvernight_ShorePowerNightsExcluded(t *testing.T) {
 	}
 
 	query := lookbackQuery(t, socSeries, shoreSeries, nil)
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "history" {
 		t.Fatalf("basis: got %q, want history (reason=%v)", result.Basis, result.Reason)
@@ -416,7 +416,7 @@ func TestComputeOvernight_GeneratorNightExcluded(t *testing.T) {
 	)
 	query := lookbackQuery(t, socSeries, nil, genPoint)
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "history" {
 		t.Fatalf("basis: got %q, want history (reason=%v)", result.Basis, result.Reason)
@@ -441,7 +441,7 @@ func TestComputeOvernight_StopsAtTargetNights(t *testing.T) {
 	}
 	query := lookbackQuery(t, socSeries, nil, nil)
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.NightsUsed != overnightTargetNights {
 		t.Fatalf("nights_used: got %d, want %d", result.NightsUsed, overnightTargetNights)
@@ -465,7 +465,7 @@ func TestComputeOvernight_LookbackExhaustion(t *testing.T) {
 	}
 	query := lookbackQuery(t, socSeries, nil, nil)
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "history" {
 		t.Fatalf("basis: got %q, want history (reason=%v) - 4 usable nights is still >= the minimum of 2", result.Basis, result.Reason)
@@ -506,7 +506,7 @@ func TestComputeOvernight_ShoreQueryFailureFailsFastEvenWithGoodSoc(t *testing.T
 		}
 	}
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "linear" {
 		t.Fatalf("basis: got %q, want linear - a failed shore query must not be treated as \"no shore power\"", result.Basis)
@@ -584,7 +584,7 @@ func TestComputeOvernight_RealFixtureReachesHistory(t *testing.T) {
 		return out, nil
 	}
 
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "history" {
 		t.Fatalf("basis: got %q (reason=%v), want history - the vessel has been at anchor with a week of history", result.Basis, result.Reason)
@@ -844,7 +844,7 @@ func TestComputeOvernight_UnsetExclusionsAreSkippedAndReported(t *testing.T) {
 		return socSeries, nil
 	}
 
-	result := computeOvernight(now, vesselLat, vesselLon, overnightPaths{Soc: defaultSocMeasurement}, true, true, query)
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, overnightPaths{Soc: defaultSocMeasurement}, true, true, query)
 	if result.ShoreChecked || result.GeneratorChecked {
 		t.Fatalf("checked flags: shore %v generator %v, want both false", result.ShoreChecked, result.GeneratorChecked)
 	}
@@ -859,7 +859,7 @@ func TestComputeOvernight_UnsetExclusionsAreSkippedAndReported(t *testing.T) {
 func TestComputeOvernight_SetExclusionsAreReportedAsChecked(t *testing.T) {
 	now, windows := allLookbackWindows(t)
 	socSeries := syntheticSlopeSeries(windows[0], overnightSampleInterval, 65, 60)
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
 	if !result.ShoreChecked || !result.GeneratorChecked {
 		t.Fatalf("checked flags: shore %v generator %v, want both true", result.ShoreChecked, result.GeneratorChecked)
 	}
@@ -875,5 +875,49 @@ func TestOvernightCache_KeyedOnTheExclusionPaths(t *testing.T) {
 	}
 	if soc.cacheKey() == (overnightPaths{Soc: "soc", Shore: "shore-a"}).cacheKey() {
 		t.Fatal("clearing the generator must not be served the old result")
+	}
+}
+
+func mustLocationAt(t *testing.T, lat, lon float64) *time.Location {
+	t.Helper()
+	z, err := zoneAt(lat, lon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return z.Loc
+}
+
+// A boat in Sydney in summer is on UTC+11, so "last night" is cut on its own
+// calendar day, not on a whole-hour offset from longitude.
+func TestRecentNightWindows_FollowTheBoatsDaylightSaving(t *testing.T) {
+	loc := mustLocationAt(t, -33.85, 151.2)
+	now := time.Date(2026, 1, 15, 3, 0, 0, 0, time.UTC) // 14:00 AEDT
+	w := recentNightWindows(now, loc, -33.85, 151.2, 2)
+	if len(w) != 2 {
+		t.Fatalf("want 2 windows, got %d", len(w))
+	}
+	for _, n := range w {
+		if n.Start.IsZero() || !n.End.After(n.Start) || !n.End.Before(now) {
+			t.Errorf("window %+v is not a completed night", n)
+		}
+	}
+}
+
+func boatAtForTest(t *testing.T, lat, lon float64) boatTime {
+	t.Helper()
+	z, err := zoneAt(lat, lon)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return boatTime{placeZone: z}
+}
+
+// Before any fix has been seen the boat has no zone, so the nights cannot be
+// cut and the projection says why instead of using one it worked out itself.
+func TestComputeOvernight_NoBoatZoneYet(t *testing.T) {
+	now := time.Date(2026, 1, 15, 3, 0, 0, 0, time.UTC)
+	r := computeOvernight(now, boatTime{placeZone: utcZone, NoFix: true}, vesselLat, vesselLon, testOvernightPaths, true, false, failIfCalledQuery(t))
+	if r.Basis != "none" || r.Reason == nil || !strings.Contains(*r.Reason, "time zone") {
+		t.Fatalf("want basis none with a time zone reason, got %q %v", r.Basis, r.Reason)
 	}
 }

@@ -21,9 +21,9 @@ import {
   panelsOf,
   seriesKey,
   seriesValues,
-  zonedDayStart,
   zonedYmd,
 } from '@/lib/telemetry-chart'
+import { zonedDayStart } from '@/lib/vessel-time'
 import { cn } from '@/lib/utils'
 
 // Series colours: the forecast charts' own series tokens, none of them alert
@@ -329,7 +329,7 @@ function XYPlot({
 /** The exclusive end for an inclusive local end date: the start of the next day, never past now. */
 function inclusiveEnd(ymd: string, timeZone: string): string {
   const [y, m, d] = ymd.split('-').map(Number)
-  const next = zonedDayStart(new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10), timeZone)
+  const next = zonedDayStart(new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10), timeZone).getTime()
   return new Date(Math.min(next, Date.now())).toISOString()
 }
 
@@ -355,7 +355,7 @@ export function AssistantTelemetryChartCard({ card }: { card: TelemetryChartCard
   const defaultXY = card.xy ?? { x: 0, y: 1 }
   const [view, setView] = useState<'time' | 'xy'>(card.view)
 
-  const shownEnd = range.toDay ? new Date(zonedDayStart(range.toDay, tz)).toISOString() : range.to
+  const shownEnd = range.toDay ? zonedDayStart(range.toDay, tz).toISOString() : range.to
   const comparing = card.compare.length > 0
   const ranges: RangeSpec[] = useMemo(
     () => (comparing ? card.compare : [{ label: formatRange(range.from, shownEnd, tz), from: range.from, to: range.to }]).slice(0, MAX_RANGES),
@@ -439,7 +439,7 @@ export function AssistantTelemetryChartCard({ card }: { card: TelemetryChartCard
                 id={fromId}
                 type="date"
                 value={zonedYmd(Date.parse(range.from), tz)}
-                onChange={(e) => e.target.value && setRange((r) => ({ ...r, from: new Date(zonedDayStart(e.target.value, tz)).toISOString() }))}
+                onChange={(e) => e.target.value && setRange((r) => ({ ...r, from: zonedDayStart(e.target.value, tz).toISOString() }))}
                 className="h-7 min-w-0 rounded border border-border bg-background px-1.5 text-xs text-foreground"
               />
               <label htmlFor={toId} className="text-xs text-muted-foreground">

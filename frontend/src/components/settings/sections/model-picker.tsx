@@ -84,6 +84,7 @@ function formatCreatedDate(value: string): string {
   if (!value) return '--'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return '--'
+  // helm-browser-zone: the day a model was listed upstream, not an event aboard.
   return date.toLocaleDateString()
 }
 

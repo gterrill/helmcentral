@@ -17,7 +17,7 @@ const mockedChart = vi.mocked(useTideChart);
 const mockedProviders = vi.mocked(useTideProviders);
 const mockedNearest = vi.mocked(usePlaceTideStation);
 
-const PLACE = { name: "Coral Coast Marina", lat: -27.2, lon: 153.1 };
+const PLACE = { name: "Coral Coast Marina", lat: -27.2, lon: 153.1, timezone: "Australia/Brisbane" };
 const STATION = {
   stationId: "BRI",
   name: "Brisbane Bar",
@@ -117,6 +117,28 @@ describe("ForecastPlaceTideSection", () => {
     expect(
       screen.queryByTestId("forecast-place-tide-far"),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows an error in place of the chart when this browser does not know the place's zone", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    mockedNearest.mockReturnValue({
+      nearest: { station: STATION, distanceNm: 9.4 },
+      loading: false,
+      error: null,
+    });
+    mockedChart.mockReturnValue(chartFor("2026-10-27"));
+
+    render(
+      <ForecastPlaceTideSection
+        isImperial={false}
+        place={{ ...PLACE, timezone: "Not/AZone" }}
+        dayKey="2026-10-27"
+      />,
+    );
+
+    expect(screen.getByTestId("forecast-place-tide-zone-error")).toHaveTextContent(
+      "Zone Not/AZone unknown to this browser",
+    );
   });
 
   it("flags a station more than twenty nautical miles away", () => {

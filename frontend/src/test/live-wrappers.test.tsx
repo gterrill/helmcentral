@@ -71,9 +71,9 @@ function Counted({ children }: { children: ReactNode }) {
 
 vi.mock('@/hooks/use-place-name', () => ({ usePlaceName: () => null }))
 
-const forecastPageProps: Array<{ boat: unknown; boatLongitude: number | null }> = []
+const forecastPageProps: Array<{ boat: unknown; boatTimeZone: string | undefined }> = []
 vi.mock('@/components/forecast-page', () => ({
-  ForecastPage: (props: { boat: unknown; boatLongitude: number | null }) => {
+  ForecastPage: (props: { boat: unknown; boatTimeZone: string | undefined }) => {
     forecastPageProps.push(props)
     return null
   },
@@ -303,10 +303,10 @@ describe('LiveGeneratorTile', () => {
 })
 
 describe('LiveForecastPage', () => {
-  // The page compares the boat's clock with a planned stay's by longitude, so
-  // a fix re-renders it. The boat's forecast did not change, so the page must
-  // be handed the same forecast props.
-  it('hands the page the same forecast props when only the longitude moves', async () => {
+  // The page compares the boat's clock with a planned stay's by zone. The
+  // boat's forecast did not change, so the page must be handed the same
+  // forecast props when the zone arrives.
+  it('hands the page the boat\'s zone and the same forecast props when it arrives', async () => {
     forecastPageProps.length = 0
     render(<Suspense fallback={null}><LiveForecastPage canWrite unit="metric" /></Suspense>)
     await act(async () => { await new Promise((r) => setTimeout(r, 0)) })
@@ -314,10 +314,10 @@ describe('LiveForecastPage', () => {
     const before = forecastPageProps.length
     const boat = forecastPageProps[before - 1].boat
 
-    emitFix(-20.2747, 149.0738)
+    stream.emit('vessel-state', { latitude: -20.2747, longitude: 149.0738, gnss_critical_alert: false, timezone: 'Australia/Lindeman', timezone_source: 'fix' })
 
     expect(forecastPageProps.length).toBeGreaterThan(before)
-    expect(forecastPageProps[forecastPageProps.length - 1].boatLongitude).toBe(149.0738)
+    expect(forecastPageProps[forecastPageProps.length - 1].boatTimeZone).toBe('Australia/Lindeman')
     expect(forecastPageProps[forecastPageProps.length - 1].boat).toBe(boat)
   })
 })

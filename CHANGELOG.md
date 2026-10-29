@@ -84,6 +84,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Times on screen now follow the boat's time zone, not the device's.** The
+  clock, tide times, sunrise, alarm times, passage dates, the "Off since" time
+  on an engine tile and every other time you read are now in the zone the boat
+  is in. A phone or tablet ashore, or a wall screen left on UTC, shows the same
+  time as the boat. The clock tile says "last fix" when the zone is kept from
+  the last good position, and "UTC · no position yet" before the first position
+  arrives. Times you recorded yourself, such as when a document was uploaded or a
+  checklist step was ticked, stay on the device's own clock. There's nothing for
+  you to do.
 - **The Tanks tile lists tanks by name.** Within each tank type the tanks are
   sorted by name, so Fuel Port Aft and Fuel Port Fwd sit together. A faint
   line separates one tank type from the next.

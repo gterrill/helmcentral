@@ -7,6 +7,11 @@ import { AssistantTileCardFallback } from '@/components/assistant-tile-card-fall
 import { TILE_CARD_HEADER_PX } from '@/lib/mate-tile-size'
 
 import { tileCard } from './helpers/tile-card-fixture'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+
+// ADR 0228: times are the boat's. The runner is on UTC.
+installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'Australia/Brisbane', timezone_source: 'fix' } } })
+
 
 vi.mock('@/hooks/use-app-config', () => ({ useAppConfig: () => ({ ui: { distanceUnits: 'metric' } }) }))
 
@@ -22,7 +27,8 @@ vi.mock('@/hooks/use-tide-today', async (importOriginal) => {
   return { ...original, useTideToday: () => ({ tide: original.defaultTide, loading: false }) }
 })
 
-const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+// 04:03 UTC is 14:03 in Brisbane: the card shows the boat's time, not the runner's.
+const clock = (iso: string) => ({ '2026-10-28T04:03:00Z': '14:03' })[iso] as string
 
 describe('AssistantTileCard', () => {
   it('draws the live tile with a Live marker while its reply is the newest', async () => {

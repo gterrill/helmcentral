@@ -1,4 +1,5 @@
 import { useId } from 'react'
+import { formatTimeOfDay } from '@/lib/vessel-time'
 import type { DepthTrendPoint, DepthTrendSince, TideType } from '@/hooks/use-depth-trend'
 
 interface DepthSparklineProps {
@@ -8,11 +9,13 @@ interface DepthSparklineProps {
   tideType?: TideType
   tideDepthM?: number
   className?: string
+  /** The boat's IANA zone for the time labels. */
+  timeZone: string | undefined
 }
 
 const METERS_TO_FEET = 3.28084
 
-export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM, className }: DepthSparklineProps) {
+export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM, className, timeZone }: DepthSparklineProps) {
   const gradientId = useId()
 
   if (points.length < 2) return null
@@ -56,12 +59,7 @@ export function DepthSparkline({ points, isImperial, since, tideType, tideDepthM
 
   const unit = isImperial ? 'ft' : 'm'
   const fmt = (v: number) => v.toFixed(1)
-  const fmtTime = (t: string) =>
-    new Date(t).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    })
+  const fmtTime = (t: string) => formatTimeOfDay(t, timeZone)
 
   const yTicks = [maxVal, (minVal + maxVal) / 2, minVal]
   const xTickIndexes = [0, Math.floor((points.length - 1) / 2), points.length - 1]

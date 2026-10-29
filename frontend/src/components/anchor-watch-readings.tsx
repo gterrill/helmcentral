@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { lowWaterClearanceReasonLabel, underKeelPhrase, type computeLowWaterClearance } from '@/lib/low-water-clearance'
@@ -21,9 +23,9 @@ function depthValueDisplay(meters: number, isImperial: boolean): string {
   return (isImperial ? metersToFeet(meters) : meters).toFixed(1)
 }
 
-/** A tide time as the host reads it on a clock, e.g. "9:13 AM". */
-function clockTime(iso: string | number): string {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+/** A tide time as the host reads it on the boat's clock, e.g. "9:13 AM". */
+function clockTime(iso: string | number, timeZone: string | undefined): string {
+  return formatTimeOfDay(iso, timeZone, { hour12: true })
 }
 
 interface AnchorWatchReadingsProps {
@@ -53,6 +55,7 @@ export function AnchorWatchReadings({
   isImperial,
   adjustAction,
 }: AnchorWatchReadingsProps) {
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const hud = variant === 'hud'
   const depthStale = isStale(depthLastUpdateAgeS)
   const depthStaleLabel = formatDataAge(depthLastUpdateAgeS)
@@ -109,7 +112,7 @@ export function AnchorWatchReadings({
       {nextTurn.isHigh ? 'High' : 'Low'}
       <span className={quiet}> {tideValueDisplay(nextTurn.heightFt, isImperial)} {lengthUnit}</span>
       {' · '}
-      {clockTime(nextTurn.time)}
+      {clockTime(nextTurn.time, timeZone)}
     </>
   )
 
@@ -170,12 +173,12 @@ export function AnchorWatchReadings({
               : 'mt-2 rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-red-600 dark:text-red-400',
           )}
         >
-          Too shallow at low water · {underKeelPhrase(lowWaterClearance.clearanceM)} at {clockTime(lowWaterClearance.lowTideTime)}
+          Too shallow at low water · {underKeelPhrase(lowWaterClearance.clearanceM)} at {clockTime(lowWaterClearance.lowTideTime, timeZone)}
         </div>
       )}
       {lowWaterClearance.status === 'ok' && (
         <p data-testid="low-water-clearance" className={quietLine}>
-          {underKeelPhrase(lowWaterClearance.clearanceM)} at low water · {clockTime(lowWaterClearance.lowTideTime)}
+          {underKeelPhrase(lowWaterClearance.clearanceM)} at low water · {clockTime(lowWaterClearance.lowTideTime, timeZone)}
         </p>
       )}
       {lowWaterClearance.status === 'unknown' && (

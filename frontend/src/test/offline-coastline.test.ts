@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   coastlineCheckFailures,
@@ -31,6 +31,9 @@ function status(overrides: Partial<OfflineCoastlineStatus> = {}): OfflineCoastli
   }
 }
 
+// ADR 0228: dates and times are the boat's; the runner is on UTC.
+const lineIn = (s: OfflineCoastlineStatus, now?: Date) => coastlineStatusLine(s, now, 'UTC')
+
 const NOON = (iso: string) => `${iso}T12:00:00Z`
 
 describe('squareLabel', () => {
@@ -40,68 +43,83 @@ describe('squareLabel', () => {
   })
 })
 
+describe('coastlineStatusLine dates the browser cannot read', () => {
+  const held = status({ held: 3, oldest_downloaded_at: NOON('2026-10-03') })
+
+  it('shows -- for the oldest date when the zone is unknown to this browser', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {})
+    expect(coastlineStatusLine(held, new Date(NOON('2026-10-20')), 'Not/AZone')).toBe('Coverage: 3 squares · oldest --')
+    quiet.mockRestore()
+  })
+
+  it('shows -- for an oldest date that is not a date', () => {
+    const bad = status({ held: 3, oldest_downloaded_at: 'garbage' })
+    expect(coastlineStatusLine(bad, new Date(NOON('2026-10-20')), 'UTC')).toBe('Coverage: 3 squares · oldest --')
+  })
+})
+
 describe('coastlineStatusLine', () => {
   it('says it is off', () => {
-    expect(coastlineStatusLine(status({ enabled: false, state: 'off' }))).toBe('Off. Nothing is downloaded or checked.')
+    expect(lineIn(status({ enabled: false, state: 'off' }))).toBe('Off. Nothing is downloaded or checked.')
   })
 
   it('shows coverage with the oldest date and edits since', () => {
-    const line = coastlineStatusLine(status({
+    const line = lineIn(status({
       held: 31, oldest_downloaded_at: NOON('2026-10-03'), edits_since: 12, squares_with_edits: 3,
     }), new Date(NOON('2026-10-20')))
     expect(line).toBe('Coverage: 31 squares · oldest 3 Oct · 12 edits since')
   })
 
   it('leaves out edits when there are none and says square in the singular', () => {
-    expect(coastlineStatusLine(status({ held: 1, oldest_downloaded_at: NOON('2026-10-03') }), new Date(NOON('2026-10-20'))))
+    expect(lineIn(status({ held: 1, oldest_downloaded_at: NOON('2026-10-03') }), new Date(NOON('2026-10-20'))))
       .toBe('Coverage: 1 square · oldest 3 Oct')
-    expect(coastlineStatusLine(status({ held: 2, oldest_downloaded_at: NOON('2026-10-03'), edits_since: 1, squares_with_edits: 1 }), new Date(NOON('2026-10-20'))))
+    expect(lineIn(status({ held: 2, oldest_downloaded_at: NOON('2026-10-03'), edits_since: 1, squares_with_edits: 1 }), new Date(NOON('2026-10-20'))))
       .toBe('Coverage: 2 squares · oldest 3 Oct · 1 edit since')
   })
 
   it('adds the year to a date from another year', () => {
-    expect(coastlineStatusLine(status({ held: 4, oldest_downloaded_at: NOON('2025-10-03') }), new Date(NOON('2026-10-20'))))
+    expect(lineIn(status({ held: 4, oldest_downloaded_at: NOON('2025-10-03') }), new Date(NOON('2026-10-20'))))
       .toBe('Coverage: 4 squares · oldest 3 Oct 2025')
   })
 
   it('shows progress while downloading', () => {
-    expect(coastlineStatusLine(status({ state: 'downloading', wanted: 25, wanted_held: 7, held: 7, oldest_downloaded_at: NOON('2026-10-03') })))
+    expect(lineIn(status({ state: 'downloading', wanted: 25, wanted_held: 7, held: 7, oldest_downloaded_at: NOON('2026-10-03') })))
       .toBe('Downloading 7 of 25')
   })
 
   it('waits for a position fix, keeping what is held in view', () => {
-    expect(coastlineStatusLine(status({ state: 'waiting_for_fix', has_fix: false, position: undefined })))
+    expect(lineIn(status({ state: 'waiting_for_fix', has_fix: false, position: undefined })))
       .toBe('Waiting for a position fix')
-    expect(coastlineStatusLine(status({
+    expect(lineIn(status({
       state: 'waiting_for_fix', has_fix: false, position: undefined, held: 12, oldest_downloaded_at: NOON('2026-10-03'),
     }), new Date(NOON('2026-10-20')))).toBe('Waiting for a position fix · Coverage: 12 squares · oldest 3 Oct')
   })
 
   it('says how many squares are being updated', () => {
-    expect(coastlineStatusLine(status({ state: 'updating', updating: 3, held: 31, oldest_downloaded_at: NOON('2026-10-03') })))
+    expect(lineIn(status({ state: 'updating', updating: 3, held: 31, oldest_downloaded_at: NOON('2026-10-03') })))
       .toBe('Updating 3 squares')
-    expect(coastlineStatusLine(status({ state: 'updating', updating: 1 }))).toBe('Updating 1 square')
+    expect(lineIn(status({ state: 'updating', updating: 1 }))).toBe('Updating 1 square')
   })
 
   it('names squares waiting to retry', () => {
-    expect(coastlineStatusLine(status({ state: 'retrying', failed: 2, held: 20, oldest_downloaded_at: NOON('2026-10-03') }), new Date(NOON('2026-10-20'))))
+    expect(lineIn(status({ state: 'retrying', failed: 2, held: 20, oldest_downloaded_at: NOON('2026-10-03') }), new Date(NOON('2026-10-20'))))
       .toBe('Coverage: 20 squares · oldest 3 Oct · 2 failed, will retry')
   })
 
   it('reports an error as the server worded it', () => {
-    expect(coastlineStatusLine(status({ state: 'error', error: 'the osm-overpass plugin is too old for the offline coastline: install the updated plugin' })))
+    expect(lineIn(status({ state: 'error', error: 'the osm-overpass plugin is too old for the offline coastline: install the updated plugin' })))
       .toBe('the osm-overpass plugin is too old for the offline coastline: install the updated plugin')
   })
 
   it('says plainly that the map server is refusing and when it will try again', () => {
-    const line = coastlineStatusLine(status({
+    const line = lineIn(status({
       state: 'paused', pause_reason: 'The map server is rate-limiting requests from this boat', retry_at: '2026-10-23T09:05:00Z',
     }))
     expect(line).toMatch(/^The map server is rate-limiting requests from this boat\. Trying again about \d\d:\d\d$/)
   })
 
   it('says when switched on but nothing is held yet', () => {
-    expect(coastlineStatusLine(status({ state: 'idle', held: 0 }))).toBe('Coverage: none yet')
+    expect(lineIn(status({ state: 'idle', held: 0 }))).toBe('Coverage: none yet')
   })
 })
 

@@ -1,4 +1,6 @@
 import { useRef, useState } from 'react'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { formatDayTimeIn, selectTimeZone } from '@/lib/vessel-time'
 import { ArrowDown, ArrowUp, Copy, ExternalLink, Plus, Trash2, Unlink2 } from 'lucide-react'
 
 import {
@@ -289,6 +291,7 @@ function CanvasMagnificationFields({ display, onUpdate, canWrite }: { display: D
  * and offers the one change that fixes it. Says nothing about a canvas that
  * is smaller than the screen: a strip in a bigger window is deliberate. */
 function MeasuredScreen({ display, onUpdate, canWrite }: { display: Display; onUpdate: DisplayEditorPanelProps['onUpdate']; canWrite: boolean }) {
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const viewport = display.viewport
   if (!viewport) {
     return (
@@ -298,7 +301,7 @@ function MeasuredScreen({ display, onUpdate, canWrite }: { display: Display; onU
     )
   }
   const fit = displayFit(display, viewport)
-  const seen = new Date(viewport.measured_at).toLocaleString()
+  const seen = formatDayTimeIn(viewport.measured_at, timeZone)
   return (
     <div data-testid="display-measured" className="order-last flex basis-full flex-col gap-1.5 text-xs">
       <p className="text-muted-foreground">

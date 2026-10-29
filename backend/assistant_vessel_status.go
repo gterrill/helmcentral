@@ -921,7 +921,7 @@ func overnightForStatus(now time.Time) (overnightResult, string) {
 		return overnightResult{}, "no usable boat position, which the night windows need"
 	}
 	result := globalOvernightCache.get(now, lat, lon, paths.cacheKey(), func() overnightResult {
-		return computeOvernight(now, lat, lon, paths, dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
+		return computeOvernight(now, boatTimeForState(state, err), lat, lon, paths, dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
 	})
 	return result, ""
 }

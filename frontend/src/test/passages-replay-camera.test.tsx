@@ -32,7 +32,7 @@ const passage: PassageDetail = {
     distance_nm: 0, underway_seconds: 0, mean_sog_kts: null, max_sog_kts: null, fuel_burned_l: null, tws_mean_kts: null,
     max_gust_kts: null, soc_start_pct: null, soc_end_pct: null, soc_min_pct: null,
   },
-  start_lon: 149,
+  timezone: 'Australia/Brisbane',
   // Due east along the equator, 0.001 degrees a minute or so.
   track: [[[0, 149], [0, 150]]],
   track_times: [[start, start + 1000]],

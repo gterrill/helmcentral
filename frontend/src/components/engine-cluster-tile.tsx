@@ -1,4 +1,6 @@
 import { Gauge as GaugeIcon, Settings2 } from 'lucide-react'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { formatTimeOfDay, NO_TIME, selectTimeZone } from '@/lib/vessel-time'
 import { memo } from 'react'
 
 import {
@@ -52,11 +54,12 @@ function withoutEnginePaths<T>(map: Record<string, T> | undefined, id: string): 
   return Object.fromEntries(Object.entries(map).filter(([path]) => !path.startsWith(prefix)))
 }
 
-/** "Off since 04:30" in the browser's local time, or just "Off" when the time is unusable. */
-function offSinceLabel(lastUpdate: string | undefined): string {
+/** "Off since 04:30" in the boat's time, or just "Off" when the time is unusable. */
+function offSinceLabel(lastUpdate: string | undefined, timeZone: string | undefined): string {
   const at = lastUpdate ? new Date(lastUpdate) : null
   if (!at || Number.isNaN(at.getTime())) return 'Off'
-  return `Off since ${at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}`
+  const time = formatTimeOfDay(at, timeZone)
+  return time === NO_TIME ? 'Off' : `Off since ${time}`
 }
 
 interface EngineClusterTileProps {
@@ -92,6 +95,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   config, values: liveValues, ages: liveAges, engine, editing, onConfigure,
 }: EngineClusterTileProps) {
   const side = config.side ?? 'port'
+  const timeZone = useVesselStateSelector(selectTimeZone)
 
   // A switched-off engine's last readings are idle numbers, not facts: its
   // own paths read as absent (the dash) and carry no age, so nothing on the
@@ -141,7 +145,7 @@ export const EngineClusterTile = memo(function EngineClusterTile({
       stale={tileStale}
       staleLabel={staleLabel}
       off={off}
-      offLabel={off ? offSinceLabel(engineStatus?.lastUpdate) : undefined}
+      offLabel={off ? offSinceLabel(engineStatus?.lastUpdate, timeZone) : undefined}
       icon={<GaugeIcon className="h-3.5 w-3.5 text-gauge-secondary" />}
       titleExtra={
         chip || editing ? (

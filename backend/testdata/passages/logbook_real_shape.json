@@ -59,7 +59,8 @@
     "soc_end_pct": null,
     "soc_min_pct": null
    },
-   "start_lon": 151.303892
+   "start_lon": 151.303892,
+   "start_lat": -33.6
   },
   {
    "id": "64219c68-6957-44f3-a801-9b4f00835079",
@@ -88,7 +89,8 @@
     "soc_end_pct": null,
     "soc_min_pct": null
    },
-   "start_lon": 151.761474
+   "start_lon": 151.761474,
+   "start_lat": -32.92
   },
   {
    "id": "27fcc362-41ba-4094-81d0-c572a983354e",
@@ -117,7 +119,8 @@
     "soc_end_pct": null,
     "soc_min_pct": null
    },
-   "start_lon": 153.122183
+   "start_lon": 153.122183,
+   "start_lat": -27.39
   },
   {
    "id": "7ec43e27-117e-4339-9b0f-0be02bd0eabc",
@@ -146,7 +149,8 @@
     "soc_end_pct": null,
     "soc_min_pct": null
    },
-   "start_lon": 153.151682
+   "start_lon": 153.151682,
+   "start_lat": -27.4
   },
   {
    "id": "d97153cf-10dc-4507-89e1-87dac550cc74",
@@ -175,7 +179,8 @@
     "soc_end_pct": null,
     "soc_min_pct": null
    },
-   "start_lon": 148.879503
+   "start_lon": 148.879503,
+   "start_lat": -20.05
   },
   {
    "id": "69c9b892-893e-40c4-bfcd-40634b230086",
@@ -204,7 +209,8 @@
     "soc_end_pct": null,
     "soc_min_pct": null
    },
-   "start_lon": 148.947298
+   "start_lon": 148.947298,
+   "start_lat": -20.35
   },
   {
    "id": "947a6051-9513-4cb3-858b-550d9f2adb4a",
@@ -233,7 +239,8 @@
     "soc_end_pct": 100,
     "soc_min_pct": 100
    },
-   "start_lon": 146.82431416844452
+   "start_lon": 146.82431416844452,
+   "start_lat": -19.25
   },
   {
    "id": "eb3dfdc8-c5b4-4fa5-8312-38f9e69040fa",
@@ -262,7 +269,8 @@
     "soc_end_pct": 100,
     "soc_min_pct": 99
    },
-   "start_lon": 146.85549463428117
+   "start_lon": 146.85549463428117,
+   "start_lat": -19.17
   },
   {
    "id": "187b63e8-31eb-4832-a58f-ee1516d43a2b",
@@ -291,7 +299,8 @@
     "soc_end_pct": 100,
     "soc_min_pct": 52
    },
-   "start_lon": 148.93722815153524
+   "start_lon": 148.93722815153524,
+   "start_lat": -20.0
   },
   {
    "id": "0400b259-5dee-4ff4-a0e3-6f1af0e80578",
@@ -320,7 +329,8 @@
     "soc_end_pct": 79,
     "soc_min_pct": 63
    },
-   "start_lon": 149.00713743882886
+   "start_lon": 149.00713743882886,
+   "start_lat": -20.1
   }
  ]
 }

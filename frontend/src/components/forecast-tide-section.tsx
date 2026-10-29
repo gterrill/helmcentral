@@ -11,7 +11,9 @@ import { useTideChart } from '@/hooks/use-tide-chart'
 import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useTideSettings } from '@/hooks/use-tide-settings'
 import { usePlaceTideStation } from '@/hooks/use-place-tide-station'
-import { placeDayStart, placeTimeZoneName } from '@/lib/place-time'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { addDaysISO } from '@/lib/stay'
+import { formatDayKey, selectTimeZone, unknownZoneMessage, zonedDayStart } from '@/lib/vessel-time'
 import { isFarFromPlace, TIDE_STATION_FAR_NM } from '@/lib/stay'
 import { classifyTidePhase } from '@/lib/tide-phase'
 
@@ -31,6 +33,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
     saveStation,
   } = useTideSettings()
   const { providers: tideProviders } = useTideProviders()
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const [showPicker, setShowPicker] = useState(false)
   const [autoDetecting, setAutoDetecting] = useState(true)
   const [autoDetectFailed, setAutoDetectFailed] = useState(false)
@@ -55,13 +58,12 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
   )
 
   const { windowStart, windowEnd } = useMemo(() => {
-    const start = new Date()
-    start.setHours(0, 0, 0, 0)
-    start.setDate(start.getDate() + dayOffset)
-    const end = new Date(start)
-    end.setDate(end.getDate() + 1)
-    return { windowStart: start, windowEnd: end }
-  }, [dayOffset])
+    // The boat's day, not the device's: "today" is the date in the boat's zone.
+    if (!timeZone || unknownZoneMessage(timeZone)) return { windowStart: null, windowEnd: null }
+    const day = addDaysISO(formatDayKey(new Date(), timeZone), dayOffset)
+    const start = zonedDayStart(day, timeZone)
+    return { windowStart: start, windowEnd: zonedDayStart(addDaysISO(day, 1), timeZone) }
+  }, [dayOffset, timeZone])
 
   // Rendered beside TideChart's legend at the bottom (same row, right-aligned)
   // once a chart exists to host it; falls back to the section's own bottom
@@ -148,8 +150,10 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
                 Retry
               </Button>
             </div>
-          ) : chart ? (
-            <TideChart chart={chart} isImperial={isImperial} windowStart={windowStart} windowEnd={windowEnd} footerMeta={tideRefreshMeta} />
+          ) : unknownZoneMessage(timeZone) ? (
+            <p data-testid="forecast-tide-zone-error" className="py-6 text-center text-xs text-destructive">{unknownZoneMessage(timeZone)}</p>
+          ) : chart && windowStart && windowEnd && timeZone ? (
+            <TideChart chart={chart} isImperial={isImperial} windowStart={windowStart} windowEnd={windowEnd} footerMeta={tideRefreshMeta} timeZone={timeZone} />
           ) : (
             <p className="py-6 text-center text-xs text-muted-foreground">No tide data available</p>
           )}
@@ -169,7 +173,7 @@ export const ForecastTideSection = memo(function ForecastTideSection({ isImperia
 
 interface ForecastPlaceTideSectionProps {
   isImperial: boolean
-  place: { name: string; lat: number; lon: number }
+  place: { name: string; lat: number; lon: number; timezone: string }
   /** The place's calendar day being read, YYYY-MM-DD. */
   dayKey: string
 }
@@ -190,10 +194,12 @@ export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({
   const { chart, loading, error, isCached, updatedAt, ttlSeconds, refetch } = useTideChart(provider, nearest?.station.stationId ?? '')
 
   const { windowStart, windowEnd } = useMemo(() => {
-    const start = placeDayStart(dayKey, place.lon)
-    return { windowStart: start, windowEnd: new Date(start.getTime() + 24 * 3_600_000) }
-  }, [dayKey, place.lon])
-  const timeZone = placeTimeZoneName(place.lon)
+    if (unknownZoneMessage(place.timezone)) return { windowStart: new Date(NaN), windowEnd: new Date(NaN) }
+    const start = zonedDayStart(dayKey, place.timezone)
+    return { windowStart: start, windowEnd: zonedDayStart(addDaysISO(dayKey, 1), place.timezone) }
+  }, [dayKey, place.timezone])
+  const zoneError = unknownZoneMessage(place.timezone)
+  const timeZone = place.timezone
 
   const refreshMeta = (isCached || updatedAt) ? (
     <p data-testid="forecast-tide-refresh-meta" className="text-sm text-muted-foreground">
@@ -249,6 +255,8 @@ export const ForecastPlaceTideSection = memo(function ForecastPlaceTideSection({
               Retry
             </Button>
           </div>
+        ) : zoneError ? (
+          <p data-testid="forecast-place-tide-zone-error" className="py-6 text-center text-xs text-destructive">{zoneError}</p>
         ) : chart ? (
           <TideChart chart={chart} isImperial={isImperial} windowStart={windowStart} windowEnd={windowEnd} footerMeta={refreshMeta} timeZone={timeZone} />
         ) : (

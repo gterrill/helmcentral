@@ -25,6 +25,7 @@ const defaultProps: ClockTileProps = {
   now: null,
   clock: null,
   timeZone: undefined,
+  timeZoneSource: 'fix',
 }
 
 /**
@@ -237,10 +238,29 @@ describe('ClockTile', () => {
   // box stays on UTC while the boat sits at UTC+10, so its clock read 08:31
   // PM at 06:31 AM boat time) ────────────────────────────────────────────
 
-  test('shows a small UTC label beside the meridiem when the vessel zone is UTC because no position is known', () => {
-    renderClockTile({}, { datetime: NOW.toISOString(), timezone: 'UTC' })
+  test('says UTC with no position yet when the server has never seen a fix', () => {
+    renderClockTile({ timeZoneSource: 'none' }, { datetime: NOW.toISOString(), timezone: 'UTC' })
 
-    expect(screen.getByTestId('clock-timezone-label')).toHaveTextContent('UTC')
+    expect(screen.getByTestId('clock-timezone-label')).toHaveTextContent('UTC · no position yet')
+  })
+
+  test('says last fix when the zone is kept from the last position', () => {
+    renderClockTile({ timeZoneSource: 'last_fix' }, { datetime: NOW.toISOString(), timezone: 'Australia/Adelaide' })
+
+    expect(screen.getByTestId('clock-timezone-label')).toHaveTextContent('last fix')
+  })
+
+  test('shows no label for a live fix, even where the zone really is UTC', () => {
+    renderClockTile({ timeZoneSource: 'fix' }, { datetime: NOW.toISOString(), timezone: 'UTC' })
+
+    expect(screen.queryByTestId('clock-timezone-label')).not.toBeInTheDocument()
+  })
+
+  test('shows the half-hour zone of the boat, not the device\'s', () => {
+    // 14:32 UTC is 00:02 the next day in Adelaide (UTC+9:30), where the runner is on UTC.
+    renderClockTile({}, { datetime: NOW.toISOString(), timezone: 'Australia/Adelaide' })
+
+    expect(screen.getByTestId('clock-date')).toHaveTextContent('MON, JUN 15, 2026')
   })
 
   test('shows no zone label once a real vessel-local offset is known', () => {
@@ -250,5 +270,19 @@ describe('ClockTile', () => {
     // 2026-06-14T14:32:07Z is already Jun 15 local.
     expect(screen.getByTestId('clock-date')).toHaveTextContent('MON, JUN 15, 2026')
     expect(screen.queryByTestId('clock-timezone-label')).not.toBeInTheDocument()
+  })
+
+  test('shows the zone error and an ETA of -- instead of throwing when the browser does not know the zone', () => {
+    const etaAt = new Date('2026-06-14T16:00:00Z')
+    render(
+      <ClockTile
+        {...defaultProps}
+        timeZone="Not/AZone"
+        zoneError="Zone Not/AZone unknown to this browser"
+        tripEta={{ label: 'Mooloolaba', etaAt }}
+      />,
+    )
+    expect(screen.getByTestId('clock-timezone-label')).toHaveTextContent('Zone Not/AZone unknown to this browser')
+    expect(screen.getByTestId('clock-eta')).toHaveTextContent('ETA Mooloolaba --')
   })
 })

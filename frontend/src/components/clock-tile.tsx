@@ -41,6 +41,10 @@ export interface ClockTileProps {
   clock: ReturnType<typeof formatClock> | null
   /** The vessel's IANA zone; undefined until the server has sent one. */
   timeZone: string | undefined
+  /** Where the zone came from: a live fix, the last fix, or none yet (UTC). Null until the server says. */
+  timeZoneSource: VesselStateValue['timeZoneSource']
+  /** Set when this browser does not know the boat's zone; shown where the zone note goes. */
+  zoneError?: string | null
 }
 
 /** Drops :SS from a formatClock timePart ("14:32:07" -> "14:32"). */
@@ -75,6 +79,8 @@ export const ClockTile = memo(function ClockTile({
   now,
   clock,
   timeZone,
+  timeZoneSource,
+  zoneError = null,
 }: ClockTileProps) {
   // The header (vessel-status-bar.tsx) shares formatDate's full-weekday output via
   // currentDate; this tile is two grid columns wide (~300px) and a long weekday
@@ -83,6 +89,8 @@ export const ClockTile = memo(function ClockTile({
   // weekday-first ordering but stays short enough to hold one line at minW.
   const compactDate = now === null ? '--' : formatDate(now, { compact: true, timeZone }).toUpperCase()
 
+  const zoneNote = zoneError ? zoneError : timeZoneSource === 'last_fix' ? 'last fix' : timeZoneSource === 'none' ? 'UTC · no position yet' : null
+
   const etaLabel = (() => {
     if (!tripEta) return '—'
     if (!tripEta.etaAt) return tripEta.label ? `ETA ${tripEta.label} —` : 'ETA —'
@@ -90,6 +98,8 @@ export const ClockTile = memo(function ClockTile({
     // HelmCast prefixed a multi-day passage's ETA with the arrival weekday
     // rather than leaving it looking like it lands today - carried forward
     // here now the trip ETA can span more than one day.
+    // A zone this browser does not know has no clock to put the ETA on.
+    if (zoneError) return `ETA ${tripEta.label ? `${tripEta.label} ` : ''}--`
     const dayPrefix = now === null || isSameLocalDate(tripEta.etaAt, now, timeZone) ? '' : `${formatWeekday(tripEta.etaAt, timeZone)} `
     // Include the meridiem the same way the hero clock does (its own
     // `clock.meridiem` span) - a bare "09:40" can't be told from 9:40 PM,
@@ -107,15 +117,15 @@ export const ClockTile = memo(function ClockTile({
           <time className="flex items-baseline gap-1 font-display leading-none tabular-nums text-gauge-secondary">
             <span className="text-6xl">{hhmm(clock?.timePart ?? '--:--')}</span>
             <span className="text-2xl">{clock?.meridiem}</span>
-            {/* UTC only ever means "no position fix yet" (vesselLocalTimezoneName's
-                honest fallback, ADR 0035) — flagging it here explains an otherwise
-                wrong-looking clock. A real vessel offset needs no such caveat. */}
-            {timeZone === 'UTC' && (
+            {/* A live fix needs no caveat. Boat time kept from the last fix, or UTC
+                because no position has ever been seen (ADR 0228), explains an
+                otherwise wrong-looking clock. */}
+            {zoneNote && (
               <span
                 data-testid="clock-timezone-label"
                 className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
               >
-                UTC
+                {zoneNote}
               </span>
             )}
           </time>
@@ -202,6 +212,6 @@ export const LiveClockTile = memo(function LiveClockTile() {
     () => computeClockTripEta(routeStatus, latitude, longitude, speedOverGroundKts, new Date()),
     [routeStatus, latitude, longitude, speedOverGroundKts],
   )
-  const { now, clock, timeZone } = useVesselClock()
-  return <ClockTile sunriseTime={sunriseTime} sunsetTime={sunsetTime} moonPhase={moonPhase} placeName={placeName} tripEta={tripEta} now={now} clock={clock} timeZone={timeZone} />
+  const { now, clock, timeZone, timeZoneSource, zoneError } = useVesselClock()
+  return <ClockTile sunriseTime={sunriseTime} sunsetTime={sunsetTime} moonPhase={moonPhase} placeName={placeName} tripEta={tripEta} now={now} clock={clock} timeZone={timeZone} timeZoneSource={timeZoneSource} zoneError={zoneError} />
 })

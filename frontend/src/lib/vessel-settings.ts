@@ -14,6 +14,8 @@
  * for data. Only the optional roles accept it (see OPTIONAL_ROLE_FIELDS).
  * Mirrors roleNone in backend/vessel_roles.go.
  */
+import { zoneKnown } from '@/lib/vessel-time'
+
 export const ROLE_NONE = 'none'
 
 /** The roles a boat can lack. The house bank and the voltage readout battery are not on the list. */
@@ -174,6 +176,7 @@ export const emptyVesselDiscovery: VesselDiscoveryResponse = { connected: false,
 
 /** "16 Oct": the day a source's signature reading was last seen, in the vessel's own time zone (the browser's until it is known). */
 export function loggedDay(iso: string, timeZone?: string): string {
+  if (timeZone && !zoneKnown(timeZone)) return '--'
   return new Intl.DateTimeFormat('en-GB', { timeZone, day: 'numeric', month: 'short' }).format(new Date(iso))
 }
 

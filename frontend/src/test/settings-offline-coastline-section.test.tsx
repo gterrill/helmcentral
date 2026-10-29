@@ -14,6 +14,11 @@ import { SETTINGS_SECTIONS } from '@/components/settings/settings-nav'
 import { SETTINGS_HELP_TARGETS } from '@/lib/help-links'
 import { parseAppLocation } from '@/lib/app-location'
 import type { OfflineCoastlineStatus } from '@/lib/offline-coastline'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+
+// ADR 0228: times are the boat's. The runner is on UTC.
+installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
+
 
 const hook = vi.hoisted(() => ({
   status: undefined as unknown,

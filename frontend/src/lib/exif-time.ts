@@ -137,6 +137,9 @@ export function captureUnix(c: ExifCapture, boatOffsetHours: number): { unix: nu
     const zone = `UTC${c.offsetMinutes < 0 ? '-' : '+'}${String(Math.floor(abs / 60)).padStart(2, '0')}:${String(abs % 60).padStart(2, '0')}`
     return { unix: local - c.offsetMinutes * 60, zone, fromPhoto: true }
   }
-  const zone = boatOffsetHours === 0 ? 'UTC' : `UTC${boatOffsetHours > 0 ? '+' : ''}${boatOffsetHours}`
+  const boatMinutes = Math.round(Math.abs(boatOffsetHours) * 60)
+  const zone = boatOffsetHours === 0
+    ? 'UTC'
+    : `UTC${boatOffsetHours > 0 ? '+' : '-'}${Math.floor(boatMinutes / 60)}${boatMinutes % 60 ? `:${String(boatMinutes % 60).padStart(2, '0')}` : ''}`
   return { unix: local - boatOffsetHours * 3600, zone, fromPhoto: false }
 }

@@ -81,6 +81,8 @@ export interface VesselStateValue {
   boatName: string | null
   /** The vessel's IANA zone (ADR 0035), null until the server sends it. */
   timeZone: string | null
+  /** Where that zone came from: the live fix, the last fix, or none (UTC, no fix yet). Null until the server says. */
+  timeZoneSource: 'fix' | 'last_fix' | 'none' | null
   latitude: number | null
   longitude: number | null
   gnssQualityIndicator: number | null
@@ -144,6 +146,7 @@ export const INITIAL_VESSEL_STATE: VesselStateValue = {
   navigationState: null,
   boatName: null,
   timeZone: null,
+  timeZoneSource: null,
   latitude: null,
   longitude: null,
   gnssQualityIndicator: null,
@@ -205,6 +208,7 @@ function parseVesselState(data: VesselState): VesselStateValue {
     navigationState: textOrNull(data.status),
     boatName: boatName(data.name, data.vessel_prefix),
     timeZone: textOrNull(data.timezone),
+    timeZoneSource: data.timezone_source === 'fix' || data.timezone_source === 'last_fix' || data.timezone_source === 'none' ? data.timezone_source : null,
     source: textOrNull(data.source),
     latitude: typeof data.latitude === 'number' && data.latitude >= -90 && data.latitude <= 90 ? data.latitude : null,
     longitude: typeof data.longitude === 'number' && data.longitude >= -180 && data.longitude <= 180 ? data.longitude : null,

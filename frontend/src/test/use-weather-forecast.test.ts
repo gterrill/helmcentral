@@ -126,7 +126,8 @@ describe('useWeatherForecast', () => {
     expect(result.current.ttlSeconds).toBe(3600)
   })
 
-  it('falls back to an ISO date-derived dayKey when day_key is missing', async () => {
+  it('refuses a forecast day with no day_key rather than guessing one from the device clock', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => [
@@ -147,9 +148,26 @@ describe('useWeatherForecast', () => {
       await Promise.resolve()
     })
 
-    expect(result.current.forecast).toHaveLength(1)
-    expect(result.current.forecast[0].dayKey).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(result.current.provider).toBeNull()
+    expect(result.current.forecast).toHaveLength(0)
+    expect(result.current.error).toMatch(/day_key/)
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('writes a missing date and day name from the day_key as a calendar day, in no zone', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [{ day_key: '2026-06-14', condition: 'Clear' }],
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { result } = renderHook(() => useWeatherForecast())
+
+    await act(async () => {
+      await Promise.resolve()
+    })
+
+    expect(result.current.forecast[0].date).toBe('Jun 14')
+    expect(result.current.forecast[0].dayName).toBe('Sunday')
   })
 
   it('maps the next_hour nowcast envelope into typed points', async () => {

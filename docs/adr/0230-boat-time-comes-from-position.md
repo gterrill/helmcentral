@@ -116,6 +116,33 @@ being shown: `AEDT (UTC+11)`, or `UTC+11` offshore where the zone has no name.
 - **Times shift for operators in daylight-saving zones.** Nothing to do on
   upgrade. Existing recorded instants are unchanged. Only the clock they are
   shown on moves.
-- **Screens come next.** The browser still derives some zones itself
-  (`frontend/src/lib/place-time.ts`). Step two moves the screens onto the zone
-  the server sends, so that every surface says the same time.
+- **Screens follow the server (step two, done).** Every time an operator reads
+  is formatted in the boat's zone from the vessel stream, through
+  `frontend/src/lib/vessel-time.ts`. The stream's `timezone_source` is read as
+  well, so the clock tile says "last fix" or "UTC · no position yet". The
+  browser no longer works out a zone from longitude: `place-time.ts` and
+  `vesselZone` are gone. A place's zone comes from the server instead. A
+  passage (summary and detail) and the planned stay each carry a `timezone`
+  field, the IANA name from `zoneAt` at the first recorded point or at the
+  stay's position. A passage with no recorded point has `timezone: null`, and
+  the page shows `--` for its dates. A passage that cannot be placed in a
+  zone says so on its own row: `timezone` is null and `timezone_error` gives the
+  reason in plain words, and the reason is logged. Fail-fast is per record, so
+  one such passage never takes down the passage list, the Mate logbook or the
+  other passages. A position with no zone is never read as UTC. The Mate
+  logbook lists such a passage without local times and with a
+  `time_zone_note`. A bare-date range includes it only when its instant is near
+  enough to the dates for some zone to put it inside them. The stay's `timezone` is worked out on every
+  read, is not stored, and is ignored if a client sends one.
+- **A lint rule keeps it that way.** `helm/no-zoneless-time` rejects
+  `toLocaleTimeString`, `toLocaleDateString`, `toLocaleString` on a Date,
+  `Intl.DateTimeFormat` and the local-zone getters (`getHours`, `getDate` and
+  so on) unless a zone is named. A deliberate device-clock reading opts out with
+  `// helm-browser-zone: <reason>` on the line before. Document timestamps (when
+  the operator uploaded or ticked something) use it, as do the maintenance
+  "today" date (ADR 0138) and the vessel-time formatter's fallback before the
+  first vessel frame.
+- **Exports keep one offset.** The standalone passage player counts days with a
+  single fixed offset. It takes the offset in force at the first passage's
+  departure, in the passage's zone, so a passage that crosses a daylight-saving
+  change keeps that offset throughout.

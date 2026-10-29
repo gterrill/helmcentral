@@ -11,7 +11,7 @@ const stats = {
 }
 const record = (id: string) => ({
   id, start: '2026-03-13T23:30:00Z', end: '2026-03-14T02:00:00Z', from_name: 'A', to_name: 'B', title: '', notes: '',
-  hidden: false, edited: false, cruise_id: null, created_at: '', stats, start_lon: 149,
+  hidden: false, edited: false, cruise_id: null, created_at: '', stats, timezone: 'Australia/Brisbane',
 })
 
 function calls(mock: ReturnType<typeof stubApi>, method: string, path: string) {

@@ -110,6 +110,7 @@ describe("ForecastStaySheet", () => {
       lon: 153.1,
       arrive: "2026-10-27",
       depart: "2026-10-31",
+      timezone: "Australia/Brisbane",
     };
     const props = {
       open: true,
@@ -132,6 +133,7 @@ describe("ForecastStaySheet", () => {
       lon: 153.1,
       arrive: "2026-10-27",
       depart: "2026-10-31",
+      timezone: "Australia/Brisbane",
     };
     const props = {
       onOpenChange: vi.fn(),
@@ -261,6 +263,7 @@ describe("ForecastStaySheet", () => {
       lon: 153.1,
       arrive: "2026-10-27",
       depart: "2026-10-31",
+      timezone: "Australia/Brisbane",
     };
     const { onClear } = setup({ stay });
     expect(screen.getByLabelText("Arrive")).toHaveValue("2026-10-27");

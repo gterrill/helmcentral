@@ -108,10 +108,9 @@ interface TideChartProps {
    * legend. ForecastTideSection owns the data-fetch state this describes and
    * passes it down, since the legend it rides beside lives here. */
   footerMeta?: ReactNode
-  /** IANA zone the times are read in. Absent means this device's own, as the
-   * boat's chart has always read. The stay view passes the place's zone so a
-   * tide at 2PM there is labelled 2PM, not the hour it is here. */
-  timeZone?: string
+  /** IANA zone the times are read in: the boat's for the boat's chart, the
+   * place's for the stay view, so a tide at 2PM there is labelled 2PM. */
+  timeZone: string
 }
 
 export function TideChart({ chart, isImperial, windowStart, windowEnd, footerMeta, timeZone }: TideChartProps) {

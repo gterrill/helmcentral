@@ -21,6 +21,7 @@ type logbookFixture struct {
 		passageRecord
 		Stats    passageStats `json:"stats"`
 		StartLon *float64     `json:"start_lon"`
+		StartLat *float64     `json:"start_lat"`
 	} `json:"passages"`
 }
 
@@ -44,7 +45,7 @@ func loadLogbookFixture(t *testing.T) (*passageStore, logbookFixture) {
 		if _, err := s.InsertPassage(p.passageRecord); err != nil {
 			t.Fatalf("insert passage: %v", err)
 		}
-		buf, _ := json.Marshal(passageFigures{Stats: p.Stats, StartLon: p.StartLon})
+		buf, _ := json.Marshal(passageFigures{Stats: p.Stats, StartLon: p.StartLon, StartLat: p.StartLat})
 		if _, err := s.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(buf), p.ID); err != nil {
 			t.Fatalf("store stats: %v", err)
 		}
@@ -139,9 +140,9 @@ func TestListPassages_ReadsTheLogbook(t *testing.T) {
 	if rated != 1 {
 		t.Errorf("want the one recorded rating, got %d", rated)
 	}
-	// Times are also given in the boat's zone, from the passage's own start
-	// longitude, the way the Passages page shows them.
-	if first.StartLocal != "2026-10-27 10:16 UTC+10" || first.EndLocal != "2026-10-27 11:14 UTC+10" {
+	// Times are also given in the zone at the passage's own start position
+	// (ADR 0228), the way the Passages page shows them.
+	if first.StartLocal != "2026-10-27 10:16 AEST (UTC+10)" || first.EndLocal != "2026-10-27 11:14 AEST (UTC+10)" {
 		t.Errorf("local time: %q to %q", first.StartLocal, first.EndLocal)
 	}
 	if !strings.HasPrefix(res.LogbookFirst, "2026-02-28T") || !strings.HasPrefix(res.LogbookLast, "2026-10-27T") {
@@ -561,5 +562,95 @@ func TestPassageTools_StopWhenCancelled(t *testing.T) {
 		if _, err := logbookDeps(t, s).execute(ctx, tool, nil); err == nil {
 			t.Errorf("%s ran on a cancelled context", tool)
 		}
+	}
+}
+
+// A New South Wales passage in summer is on daylight saving: the zone is the
+// one at its start position, not a whole-hour offset from longitude.
+func TestListPassages_UsesTheZoneAtThePassageStart(t *testing.T) {
+	// start_lat in the fixture is the named place's approximate latitude.
+	s, _ := loadLogbookFixture(t)
+	var res listResult
+	runTool(t, logbookDeps(t, s), "list_passages", `{}`, &res)
+	pittwater := res.Passages[9]
+	// 2026-02-28 20:11 UTC is 07:11 on 1 March at AEDT (UTC+11).
+	if pittwater.StartLocal != "2026-03-01 07:11 AEDT (UTC+11)" {
+		t.Errorf("Pittwater start_local = %q", pittwater.StartLocal)
+	}
+	// A bare date is a day in that zone: 1 March finds it, 28 February does not.
+	var on, before listResult
+	runTool(t, logbookDeps(t, s), "list_passages", `{"from":"2026-03-01","to":"2026-03-01"}`, &on)
+	runTool(t, logbookDeps(t, s), "list_passages", `{"from":"2026-02-28","to":"2026-02-28"}`, &before)
+	if on.Found != 1 || on.Passages[0].From != "Pittwater" || before.Found != 0 {
+		t.Errorf("1 March found %d, 28 February found %d", on.Found, before.Found)
+	}
+}
+
+// A passage with no recorded position has no zone. It lists without local
+// times and says why on its own row.
+func TestListPassages_NoRecordedPositionHasNoZone(t *testing.T) {
+	s := newTestPassageStore(t)
+	t0 := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := s.InsertPassage(passageRecord{Start: t0, End: t0.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Found    int `json:"found"`
+		Passages []struct {
+			StartLocal string `json:"start_local"`
+			EndLocal   string `json:"end_local"`
+			Note       string `json:"time_zone_note"`
+		} `json:"passages"`
+	}
+	runTool(t, logbookDeps(t, s), "list_passages", `{}`, &res)
+	if res.Found != 1 || res.Passages[0].StartLocal != "" || res.Passages[0].EndLocal != "" || !strings.Contains(res.Passages[0].Note, "time zone is not known") {
+		t.Errorf("want one passage with no local times and a reason, got %+v", res.Passages)
+	}
+}
+
+// A bare date asked about is a day on each passage's own clock. A passage with
+// no zone far from that day cannot be in it, so it does not matter; one that
+// could be is listed with a note that its zone is not known. Neither fails the
+// call.
+func TestListPassages_BareDateAndPassagesWithNoZone(t *testing.T) {
+	s := newTestPassageStore(t)
+	far := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	near := time.Date(2026, 3, 1, 5, 0, 0, 0, time.UTC)
+	for _, p := range []passageRecord{
+		{Start: far, End: far.Add(time.Hour), Title: "far"},
+		{Start: near, End: near.Add(time.Hour), Title: "near"},
+	} {
+		if _, err := s.InsertPassage(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var res struct {
+		Found    int `json:"found"`
+		Passages []struct {
+			Title string `json:"title"`
+			Note  string `json:"time_zone_note"`
+		} `json:"passages"`
+	}
+	runTool(t, logbookDeps(t, s), "list_passages", `{"from":"2026-03-01","to":"2026-03-01"}`, &res)
+	if res.Found != 1 || res.Passages[0].Title != "near" || !strings.Contains(res.Passages[0].Note, "time zone is not known") {
+		t.Errorf("want only the near passage, with its note, got %+v", res)
+	}
+}
+
+// The passage under way keeps its place in the logbook even when its zone
+// cannot be worked out.
+func TestOpenRunZone(t *testing.T) {
+	start := time.Date(2026, 10, 27, 0, 0, 0, 0, time.UTC)
+	z, reason := openRunZone([]recordedTrackPoint{{At: start, Lat: -20, Lon: 149}}, start)
+	if z == nil || reason != "" {
+		t.Fatalf("a located run has a zone, got %v %q", z, reason)
+	}
+	z, reason = openRunZone(nil, start)
+	if z != nil || !strings.Contains(reason, "time zone is not known") {
+		t.Fatalf("a run with no point has a reason, got %v %q", z, reason)
+	}
+	z, reason = openRunZone([]recordedTrackPoint{{At: start, Lat: 95, Lon: 10}}, start)
+	if z != nil || !strings.Contains(reason, "time zone") {
+		t.Fatalf("an unplaceable point has a reason, got %v %q", z, reason)
 	}
 }

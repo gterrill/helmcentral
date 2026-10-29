@@ -27,7 +27,12 @@ export interface PlannedStay {
   lon: number;
   arrive: string;
   depart: string;
+  /** IANA zone at the place; the server works it out and ignores a value sent. */
+  timezone: string;
 }
+
+/** What the operator sends: the server adds the zone. */
+export type PlannedStayInput = Omit<PlannedStay, "timezone">;
 
 function parts(dayKey: string): [number, number, number] {
   const [year, month, day] = dayKey.split("-").map(Number);

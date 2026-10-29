@@ -9,6 +9,13 @@ import { passagePlayer } from './vite-plugin-passage-player.ts'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:8080'
 
+// The suite runs on UTC whatever machine runs it. Screens read the boat's
+// zone, never the device's, so a test that needs a zone names one, and a zone
+// that differs from the runner's is how a test proves it. TZ has to be in the
+// environment before the test workers start: setting it from inside a worker
+// does not change the zone Date has already read.
+if (process.env.VITEST) process.env.TZ = 'UTC'
+
 export default defineConfig(({ mode }) => ({
   // React Fast Refresh. Without this plugin Vite has no component boundary to
   // swap at, so every save under src/ degraded to a full page reload — losing

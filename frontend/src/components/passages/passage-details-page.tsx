@@ -67,11 +67,12 @@ function Loading() {
   )
 }
 
-function firstLon(passages: PassageDetail[]): number {
+/** The zone of the first passage that has one: the cruise's dates and times are read in it. */
+function firstTimeZone(passages: PassageDetail[]): string | null {
   for (const p of passages) {
-    if (p.start_lon !== null) return p.start_lon
+    if (p.timezone !== null) return p.timezone
   }
-  return 0
+  return null
 }
 
 function PassageList({
@@ -113,7 +114,7 @@ export function PassageDetailsPage(props: PassageDetailsPageProps) {
 function pagerTarget(p: PassageSummary | null, open: (id: string) => void) {
   if (!p) return null
   const named = p.title.trim() || p.from_name || p.to_name
-  const label = named ? `${passageHeading(p)} · ${formatLocalDate(p.start, p.start_lon ?? 0)}` : passageHeading(p)
+  const label = named ? `${passageHeading(p)} · ${formatLocalDate(p.start, p.timezone)}` : passageHeading(p)
   return { label, onSelect: () => open(p.id) }
 }
 
@@ -148,7 +149,7 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, filter, cruises
             />
           }
         >
-          <p className="text-sm text-muted-foreground">{passage.from_name || passage.to_name ? `${passageRoute(passage)} · ` : ''}{formatLocalDate(passage.start, firstLon([passage]))}</p>
+          <p className="text-sm text-muted-foreground">{passage.from_name || passage.to_name ? `${passageRoute(passage)} · ` : ''}{formatLocalDate(passage.start, passage.timezone)}</p>
           <PassagePlans passageId={passage.id} plans={passage.plannedWithMate} error={passage.plannedWithMateError} canWrite={canWrite} />
           <div className="flex justify-end">
             <PassageExportMenu kind="passage" title={passageHeading(passage)} passages={[passage]} units={units} />
@@ -167,7 +168,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
   const { data, loading, error } = useCruiseDetails(id)
   const visible = (data?.passages ?? []).filter((p) => !p.hidden)
   const { passages, error: tracksError } = usePassageDetails(visible.map((p) => p.id))
-  const lon = firstLon(passages)
+  const timeZone = firstTimeZone(passages)
   const { legs } = usePassageLegs(visible)
 
   const labelRise = async (rise: WaterRise, label: WaterRiseLabel | '') => {
@@ -206,7 +207,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
               <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} />
             </>
           )}
-          <CruiseStatsPanel stats={data.stats} units={units} lon={lon} canWrite={canWrite} onLabelRise={(r, l) => void labelRise(r, l)} />
+          <CruiseStatsPanel stats={data.stats} units={units} timeZone={timeZone} canWrite={canWrite} onLabelRise={(r, l) => void labelRise(r, l)} />
         </DetailsLayout>
       )}
     </Page>

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -275,5 +276,96 @@ func TestGetPlannedStayTool(t *testing.T) {
 	env.deps.now = func() time.Time { return time.Date(2026, 10, 31, 20, 0, 0, 0, time.UTC) } // 1 Nov at UTC+10
 	if out := read(); out["stay"] != nil {
 		t.Fatalf("the day after departure the tool reports none, got %v", out)
+	}
+}
+
+// The stay carries the IANA zone at its position, so the page reads its day
+// boundaries without a zone rule of its own.
+func TestPlannedStayResponsesCarryTheZoneAtThePlace(t *testing.T) {
+	withTestDocumentStore(t)
+	prevNow := plannedStayNow
+	plannedStayNow = func() time.Time { return time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { plannedStayNow = prevNow })
+
+	// A zone sent by the client is ignored: the server works it out.
+	body := `{"name":"Port Adelaide","lat":-34.85,"lon":138.5,"arrive":"2026-10-27","depart":"2026-10-31","timezone":"Etc/GMT+5"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/planned-stay", body, "")
+	if err := putPlannedStayHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("PUT: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"timezone":"Australia/Adelaide"`) {
+		t.Fatalf("PUT should answer with the zone at the place, got %s", rec.Body.String())
+	}
+	c, rec = newDocumentEchoContext(http.MethodGet, "/api/planned-stay", "", "")
+	if err := getPlannedStayHandler(c); err != nil || !strings.Contains(rec.Body.String(), `"timezone":"Australia/Adelaide"`) {
+		t.Fatalf("GET should carry the zone at the place: %v %s", err, rec.Body.String())
+	}
+}
+
+// A position the zone index cannot place is refused before anything is saved,
+// and a saved stay whose zone later cannot be found says so in the stay's own
+// words.
+func TestPlannedStayZoneFailures(t *testing.T) {
+	withTestDocumentStore(t)
+	prevNow := plannedStayNow
+	plannedStayNow = func() time.Time { return time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { plannedStayNow = prevNow })
+	prevZone := stayZoneAt
+	t.Cleanup(func() { stayZoneAt = prevZone })
+
+	stayZoneAt = func(lat, lon float64) (placeZone, error) {
+		return placeZone{}, errors.New("no time zone found for position")
+	}
+	body := `{"name":"Nowhere","lat":10,"lon":20,"arrive":"2026-10-27","depart":"2026-10-31"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/planned-stay", body, "")
+	if err := putPlannedStayHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"field":"lat"`) {
+		t.Fatalf("an unplaceable position is a 400 on lat, got %d %s", rec.Code, rec.Body.String())
+	}
+	if _, ok, _ := globalDocumentStore.GetPlannedStay(); ok {
+		t.Fatal("nothing may be saved")
+	}
+
+	// Saved while the zone could be found, then the index fails on a read.
+	stayZoneAt = prevZone
+	c, rec = newDocumentEchoContext(http.MethodPut, "/api/planned-stay", body, "")
+	if err := putPlannedStayHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("PUT: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	stayZoneAt = func(lat, lon float64) (placeZone, error) { return placeZone{}, errors.New("index unavailable") }
+	c, rec = newDocumentEchoContext(http.MethodGet, "/api/planned-stay", "", "")
+	if err := getPlannedStayHandler(c); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "planned stay") || !strings.Contains(rec.Body.String(), "time zone") {
+		t.Fatalf("want a planned-stay time zone error, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A read looks the stay's zone up once, not once to judge expiry and again to
+// name it.
+func TestPlannedStayGetLooksUpTheZoneOnce(t *testing.T) {
+	withTestDocumentStore(t)
+	prevNow := plannedStayNow
+	plannedStayNow = func() time.Time { return time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { plannedStayNow = prevNow })
+	prevZone := stayZoneAt
+	t.Cleanup(func() { stayZoneAt = prevZone })
+
+	body := `{"name":"Port Adelaide","lat":-34.85,"lon":138.5,"arrive":"2026-10-27","depart":"2026-10-31"}`
+	c, rec := newDocumentEchoContext(http.MethodPut, "/api/planned-stay", body, "")
+	if err := putPlannedStayHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("PUT: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	lookups := 0
+	stayZoneAt = func(lat, lon float64) (placeZone, error) { lookups++; return prevZone(lat, lon) }
+	c, rec = newDocumentEchoContext(http.MethodGet, "/api/planned-stay", "", "")
+	if err := getPlannedStayHandler(c); err != nil || !strings.Contains(rec.Body.String(), `"timezone":"Australia/Adelaide"`) {
+		t.Fatalf("GET: %v %s", err, rec.Body.String())
+	}
+	if lookups != 1 {
+		t.Fatalf("want one zone lookup per GET, got %d", lookups)
 	}
 }

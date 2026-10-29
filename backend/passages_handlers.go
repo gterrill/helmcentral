@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/labstack/echo/v4"
 )
@@ -21,9 +22,11 @@ const passageDisplayToleranceMeters = 10.0
 type passageSummary struct {
 	passageRecord
 	Stats passageStats `json:"stats"`
-	// StartLon is the longitude of the first recorded point, which the page
-	// uses to show dates in the boat's own zone. Nil when no point was kept.
-	StartLon *float64 `json:"start_lon"`
+	// Timezone is the IANA zone at the first recorded point (ADR 0228): the
+	// zone the page shows this passage's dates and times in. Null when the
+	// passage has no zone, and TimezoneError then says why.
+	Timezone      *string `json:"timezone"`
+	TimezoneError string  `json:"timezone_error,omitempty"`
 }
 
 func startLon(pts []recordedTrackPoint) *float64 {
@@ -34,10 +37,66 @@ func startLon(pts []recordedTrackPoint) *float64 {
 	return &lon
 }
 
+func startLat(pts []recordedTrackPoint) *float64 {
+	if len(pts) == 0 {
+		return nil
+	}
+	lat := pts[0].Lat
+	return &lat
+}
+
+// startTimezone is the IANA zone at a passage's first point, or the reason
+// there is none. It is per passage: a passage with no recorded position, or
+// whose position has no zone, says so on its own row (and the reason is logged)
+// and never stops the others. It is not read as UTC.
+func (f passageFigures) startTimezone(id string) (tz *string, reason string) {
+	if f.Timezone != "" {
+		return &f.Timezone, ""
+	}
+	name, reason := f.lookupStartZone(id)
+	if name == "" {
+		return nil, reason
+	}
+	return &name, ""
+}
+
+// passageZoneAt finds a zone for a position. A variable so a test can count
+// lookups or make one fail.
+var passageZoneAt = zoneAt
+
+// passageZoneFailures remembers positions whose zone could not be found, so a
+// failing passage costs one lookup and one log line per process, not per
+// request. The key is the position, so a passage moved by an edit is tried
+// again.
+var passageZoneFailures sync.Map // "lat,lon" -> reason
+
+// lookupStartZone is the zone name at the start position, or the reason there
+// is none.
+func (f passageFigures) lookupStartZone(id string) (name, reason string) {
+	if f.StartLat == nil || f.StartLon == nil {
+		return "", "no track point is stored for this passage, so its time zone is not known"
+	}
+	key := fmt.Sprintf("%v,%v", *f.StartLat, *f.StartLon)
+	if r, ok := passageZoneFailures.Load(key); ok {
+		return "", r.(string)
+	}
+	z, err := passageZoneAt(*f.StartLat, *f.StartLon)
+	if err != nil {
+		reason := "the time zone for this passage's start position could not be found: " + err.Error()
+		if _, loaded := passageZoneFailures.LoadOrStore(key, reason); !loaded {
+			log.Printf("passages: %s: %v", id, err)
+		}
+		return "", reason
+	}
+	return z.Name, ""
+}
+
 type passageDetail struct {
 	passageRecord
-	Stats    passageStats `json:"stats"`
-	StartLon *float64     `json:"start_lon"`
+	Stats passageStats `json:"stats"`
+	// Timezone and TimezoneError are as on passageSummary.
+	Timezone      *string `json:"timezone"`
+	TimezoneError string  `json:"timezone_error,omitempty"`
 	// Track is the display track: one list of [lat, lon] per segment.
 	Track [][][2]float64 `json:"track"`
 	// TrackTimes is the time of each Track point, Unix seconds, same shape.
@@ -100,6 +159,7 @@ func getPassageHandler(c echo.Context) error {
 		log.Printf("passages: %v", err)
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "could not read passage"})
 	}
+	tz, tzReason := figures.startTimezone(rec.ID)
 	// Plans that cannot be read must not hide the passage, and must not look
 	// like "never planned": the error travels with the passage.
 	var plans []passagePlan
@@ -123,7 +183,7 @@ func getPassageHandler(c echo.Context) error {
 		replay = [][][2]float64{}
 		replayTimes = [][]int64{}
 	}
-	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats, StartLon: figures.StartLon, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
+	return c.JSON(http.StatusOK, map[string]any{"passage": passageDetail{passageRecord: rec, Stats: figures.Stats, Timezone: tz, TimezoneError: tzReason, Track: track, TrackTimes: times, ReplayTrack: replay, ReplayTimes: replayTimes, PlannedWithMate: plans, PlannedWithMateError: plansErr}})
 }
 
 // importPassagesHandler is POST /api/passages/import: several .gpx files in

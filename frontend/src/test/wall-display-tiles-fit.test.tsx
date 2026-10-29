@@ -153,6 +153,7 @@ describe('wall-display tiles fit their registered grid constraint', () => {
         now={now}
         clock={formatClock(now)}
         timeZone={undefined}
+        timeZoneSource={null}
       />,
       columnsToPx(minW!),
       gridPixelHeight(minH!),

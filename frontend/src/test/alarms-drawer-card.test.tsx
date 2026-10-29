@@ -1,8 +1,16 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AlarmsDrawer } from '@/components/alarms-drawer'
 import type { ActiveAlarm } from '@/hooks/use-alarms'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+
+const stream = installFakeTelemetryStream()
+
+// ADR 0228: the card's times are the boat's. The runner is on UTC; the boat is in Adelaide.
+beforeEach(() => {
+  stream.seed('vessel-state', { timezone: 'Australia/Adelaide', timezone_source: 'fix' })
+})
 
 // useAlarmLog is the one hook the drawer still owns itself; rules now come
 // in as props (see alarms-drawer-actions.test.tsx for the pattern), so this
@@ -62,8 +70,8 @@ describe('AlarmsDrawer active alarm card', () => {
         unit: 'Pa/s',
         state: 'warn',
         phase: 'acknowledged',
-        raised_at: '2026-09-06T05:41:00',
-        acked_at: '2026-09-06T06:12:00',
+        raised_at: '2026-09-06T05:41:00Z',
+        acked_at: '2026-09-06T06:12:00Z',
         silenced: true,
         can_silence: false,
         can_acknowledge: false,
@@ -185,5 +193,22 @@ describe('AlarmsDrawer active alarm card', () => {
     const alertHeadline = screen.getByText('Alert one')
     const warnHeadline = screen.getByText('Warn one')
     expect(alertHeadline.className).not.toBe(warnHeadline.className)
+  })
+})
+
+describe('AlarmsDrawer times', () => {
+  it('writes raised and acknowledged times in the boat\'s zone, not the device\'s', () => {
+    renderDrawer([
+      makeAlarm({
+        state: 'warn',
+        phase: 'acknowledged',
+        raised_at: '2020-01-02T05:41:00Z',
+        acked_at: '2020-01-02T06:12:00Z',
+        can_acknowledge: false,
+      }),
+    ])
+    // Adelaide is UTC+10:30 in January: 05:41 UTC is 16:11 there, on the same day.
+    expect(screen.getByText(/2 Jan 16:11/)).toBeInTheDocument()
+    expect(screen.getByText(/2 Jan 16:42/)).toBeInTheDocument()
   })
 })

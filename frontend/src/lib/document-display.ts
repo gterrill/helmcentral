@@ -112,12 +112,11 @@ export function formatDocumentTime(iso: string | null | undefined): string | nul
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return null
 
-  const day = date.getDate()
-  const month = MONTHS[date.getMonth()]
-  const year = date.getFullYear()
-  const hh = String(date.getHours()).padStart(2, '0')
-  const mm = String(date.getMinutes()).padStart(2, '0')
-  return `${day} ${month} ${year} ${hh}:${mm}`
+  // helm-browser-zone: a document's upload and index times record when the operator did it, so they read on the device's clock, not the boat's.
+  const local = { day: date.getDate(), month: MONTHS[date.getMonth()], year: date.getFullYear(), hours: date.getHours(), minutes: date.getMinutes() }
+  const hh = String(local.hours).padStart(2, '0')
+  const mm = String(local.minutes).padStart(2, '0')
+  return `${local.day} ${local.month} ${local.year} ${hh}:${mm}`
 }
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'avif', 'bmp'])
@@ -167,6 +166,8 @@ export function formatAdded(iso: string | null | undefined): string | null {
   if (!iso) return null
   const date = new Date(iso)
   if (Number.isNaN(date.getTime())) return null
-  const base = `${date.getDate()} ${MONTHS[date.getMonth()]}`
-  return date.getFullYear() === new Date().getFullYear() ? base : `${base} ${date.getFullYear()}`
+  // helm-browser-zone: the date a document was added records the operator's own day, on the device's calendar.
+  const local = { day: date.getDate(), month: MONTHS[date.getMonth()], year: date.getFullYear(), thisYear: new Date().getFullYear() }
+  const base = `${local.day} ${local.month}`
+  return local.year === local.thisYear ? base : `${base} ${local.year}`
 }

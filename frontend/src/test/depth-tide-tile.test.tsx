@@ -28,6 +28,7 @@ test('shows estimated depth at the next low tide, in metric units', () => {
       depthTrend={emptyTrend}
       tide={baseTide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
@@ -45,6 +46,7 @@ test('shows estimated depth at the next low tide, in imperial units', () => {
       depthTrend={emptyTrend}
       tide={baseTide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
@@ -64,6 +66,7 @@ test('shows estimated depth at the next high tide when rising, in metric units',
       depthTrend={emptyTrend}
       tide={risingTide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
@@ -82,6 +85,7 @@ test('shows estimated depth at the next high tide when rising, in imperial units
       depthTrend={emptyTrend}
       tide={risingTide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
@@ -99,6 +103,7 @@ test('hides the estimate when depth or tide data is unavailable', () => {
       depthTrend={emptyTrend}
       tide={baseTide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
@@ -119,6 +124,7 @@ test('shows no Low row when the tide station has no future low', () => {
       depthTrend={emptyTrend}
       tide={tide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
@@ -136,6 +142,7 @@ test('shows a negative next low height rather than hiding it', () => {
       depthTrend={emptyTrend}
       tide={tide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
@@ -157,6 +164,7 @@ test('becomes a real, clickable button when onOpen is provided', () => {
       depthTrend={emptyTrend}
       tide={baseTide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
       onOpen={onOpen}
     />,
   )
@@ -178,6 +186,7 @@ test('stays a plain, non-interactive wrapper when there is nothing to open', () 
       depthTrend={emptyTrend}
       tide={baseTide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
@@ -197,6 +206,7 @@ test('flags the tile stale once the feed age passes the threshold', () => {
       depthTrend={emptyTrend}
       tide={baseTide}
       lastUpdateAgeS={5940}
+      timeZone="UTC"
     />,
   )
 
@@ -213,8 +223,44 @@ test('does not flag the tile stale when no update age is known', () => {
       depthTrend={emptyTrend}
       tide={baseTide}
       lastUpdateAgeS={null}
+      timeZone="UTC"
     />,
   )
 
   expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
+})
+
+// ADR 0228: the tide times are the boat's, not the device's. The runner is on
+// UTC, so a half-hour zone away from it shows the difference.
+test('shows tide times in the boat\'s zone, not the device\'s', () => {
+  const tide: TideToday = {
+    ...baseTide,
+    high_tide_time: '2026-06-14T04:00:00Z',
+    low_tide_time: '2026-06-14T10:00:00Z',
+  }
+  const props = {
+    depth: 4,
+    isImperialDistance: false,
+    navigationState: 'underway',
+    depthTrend: emptyTrend,
+    tide,
+    lastUpdateAgeS: null,
+  }
+  const { container, rerender } = render(<DepthTideTile {...props} timeZone="Australia/Adelaide" />)
+  // Adelaide is UTC+9:30 in June: 04:00 UTC is 1:30 PM and 10:00 UTC is 7:30 PM.
+  expect(container.textContent).toContain('1:30 PM')
+  expect(container.textContent).toContain('7:30 PM')
+
+  rerender(<DepthTideTile {...props} timeZone="UTC" />)
+  expect(container.textContent).toContain('4:00 AM')
+  expect(container.textContent).toContain('10:00 AM')
+})
+
+test('shows -- for the tide times until the boat has reported a zone', () => {
+  const tide: TideToday = { ...baseTide, high_tide_time: '2026-06-14T04:00:00Z', low_tide_time: '2026-06-14T10:00:00Z' }
+  const { container } = render(
+    <DepthTideTile depth={4} isImperialDistance={false} navigationState="underway" depthTrend={emptyTrend} tide={tide} lastUpdateAgeS={null} timeZone={undefined} />,
+  )
+  expect(container.textContent).not.toContain('AM')
+  expect(container.textContent).not.toContain('PM')
 })

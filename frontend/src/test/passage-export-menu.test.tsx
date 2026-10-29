@@ -32,7 +32,7 @@ function passage(track: [number, number][][]): PassageDetail {
   return {
     id: 'p', start: new Date(t0 * 1000).toISOString(), end: new Date((t0 + 600) * 1000).toISOString(),
     from_name: 'A', to_name: 'B', title: 'Out and back', notes: '', hidden: false, edited: false, cruise_id: null,
-    created_at: '', stats: STATS, start_lon: 148,
+    created_at: '', stats: STATS, timezone: 'Australia/Brisbane',
     track, track_times: track.map((s) => s.map((_, i) => t0 + i * 60)), replay_track: [], replay_times: [],
   }
 }

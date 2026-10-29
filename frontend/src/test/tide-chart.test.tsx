@@ -67,6 +67,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes: [] })}
         isImperial={false}
         windowStart={windowStart}
@@ -89,6 +90,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes: [] })}
         isImperial={false}
         windowStart={windowStart}
@@ -106,6 +108,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 20, 4, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -124,7 +127,7 @@ describe('TideChart', () => {
   it('does not throw when transitioning from no-data (early return) to a loaded chart', () => {
     const { windowStart, windowEnd } = todayWindow()
     const { rerender } = render(
-      <TideChart chart={buildChart({ extremes: [] })} isImperial={false} windowStart={windowStart} windowEnd={windowEnd} />,
+      <TideChart chart={buildChart({ extremes: [] })} isImperial={false} windowStart={windowStart} windowEnd={windowEnd} timeZone="UTC" />,
     )
 
     expect(screen.getByTestId('forecast-tide-unavailable')).toBeInTheDocument()
@@ -132,6 +135,7 @@ describe('TideChart', () => {
     expect(() => {
       rerender(
         <TideChart
+        timeZone="UTC"
           chart={buildChart({
             extremes: [
               { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -158,6 +162,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     const { container } = render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -194,6 +199,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     const { container } = render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -224,6 +230,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -243,6 +250,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = tomorrowWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 15, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -262,6 +270,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -289,6 +298,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     const { container } = render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -313,6 +323,7 @@ describe('TideChart', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -354,6 +365,7 @@ describe('TideChart', () => {
 
     const { container } = render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes })}
         isImperial={false}
         windowStart={windowStart}
@@ -418,6 +430,7 @@ describe('TideChart', () => {
 
     const { container } = render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes })}
         isImperial={false}
         windowStart={windowStart}
@@ -469,6 +482,7 @@ describe('TideChart', () => {
 
     const { container } = render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes })}
         isImperial={false}
         windowStart={windowStart}
@@ -503,6 +517,7 @@ describe('TideChart', () => {
 
     const { rerender } = render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes })}
         isImperial={false}
         windowStart={windowStart}
@@ -515,6 +530,7 @@ describe('TideChart', () => {
 
     rerender(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes, tidalPhase: 'springs+2' })}
         isImperial={false}
         windowStart={windowStart}
@@ -538,6 +554,7 @@ describe('TideChart', () => {
 
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes })}
         isImperial={false}
         windowStart={windowStart}
@@ -568,6 +585,7 @@ describe('TideChart keyboard access', () => {
     const { windowStart, windowEnd } = todayWindow()
     return render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -656,7 +674,7 @@ describe('TideChart pointer tooltip accuracy', () => {
     ]
 
     const { container } = render(
-      <TideChart chart={buildChart({ extremes })} isImperial={false} windowStart={windowStart} windowEnd={windowEnd} />,
+      <TideChart chart={buildChart({ extremes })} isImperial={false} windowStart={windowStart} windowEnd={windowEnd} timeZone="UTC" />,
     )
 
     const overlay = screen.getByRole('img', { name: /Tide height at Test Harbor/i })
@@ -699,6 +717,7 @@ describe('TideChart pointer tooltip accuracy', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({
           extremes: [
             { time: new Date(2026, 5, 14, 5, 0, 0).toISOString(), heightM: 1.8, high: true },
@@ -724,6 +743,7 @@ describe('TideChart pointer tooltip accuracy', () => {
     const { windowStart, windowEnd } = todayWindow()
     render(
       <TideChart
+        timeZone="UTC"
         chart={buildChart({ extremes: [] })}
         isImperial={false}
         windowStart={windowStart}

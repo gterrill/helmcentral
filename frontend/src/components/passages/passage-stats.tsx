@@ -70,7 +70,7 @@ function nightLabel(night: string): string {
 
 interface WaterRiseRowProps {
   rise: WaterRise
-  lon: number
+  timeZone: string | null
   units: DistanceUnits
   canWrite: boolean
   onLabel: (rise: WaterRise, label: WaterRiseLabel | '') => void
@@ -78,14 +78,14 @@ interface WaterRiseRowProps {
 
 const RISE_LABELS: WaterRiseLabel[] = ['Watermaker', 'Dock fill']
 
-export function WaterRiseRow({ rise, lon, units, canWrite, onLabel }: WaterRiseRowProps) {
+export function WaterRiseRow({ rise, timeZone, units, canWrite, onLabel }: WaterRiseRowProps) {
   const confirmed = rise.label as WaterRiseLabel | null
   const suggested = confirmed || rise.suggestion_status !== 'found' ? null : (rise.suggested_label as WaterRiseLabel | null)
   const checkFailed = !confirmed && rise.suggestion_status === 'failed'
   return (
     <li className="flex flex-wrap items-center gap-2 text-xs" data-testid="water-rise-row">
       <span className="min-w-0 flex-1 truncate tabular-nums text-foreground">
-        {formatLocalDateTime(Date.parse(rise.start) / 1000, lon)} · +{fmtVolume(rise.litres, units)}
+        {formatLocalDateTime(Date.parse(rise.start) / 1000, timeZone)} · +{fmtVolume(rise.litres, units)}
       </span>
       <span className="text-muted-foreground">
         {confirmed ? 'Confirmed' : suggested ? `Suggested: ${suggested}` : checkFailed ? "Couldn't check for a marina" : 'Not confirmed'}
@@ -112,15 +112,15 @@ export function WaterRiseRow({ rise, lon, units, canWrite, onLabel }: WaterRiseR
 export interface CruiseStatsPanelProps {
   stats: CruiseStats
   /** Longitude of the cruise, for boat-local dates. */
-  lon: number
+  timeZone: string | null
   units: DistanceUnits
   canWrite: boolean
   onLabelRise: (rise: WaterRise, label: WaterRiseLabel | '') => void
 }
 
-export function CruiseStatsPanel({ stats, units, lon, canWrite, onLabelRise }: CruiseStatsPanelProps) {
+export function CruiseStatsPanel({ stats, units, timeZone, canWrite, onLabelRise }: CruiseStatsPanelProps) {
   const span = stats.departure && stats.arrival
-    ? `${formatLocalDate(stats.departure, lon)} to ${formatLocalDate(stats.arrival, lon)}`
+    ? `${formatLocalDate(stats.departure, timeZone)} to ${formatLocalDate(stats.arrival, timeZone)}`
     : ABSENT
   return (
     <div className="flex flex-col gap-3" data-testid="cruise-stats">
@@ -161,7 +161,7 @@ export function CruiseStatsPanel({ stats, units, lon, canWrite, onLabelRise }: C
         ) : (
           <ul className="flex flex-col gap-2">
             {stats.water_rises.map((r) => (
-              <WaterRiseRow key={r.start} rise={r} lon={lon} units={units} canWrite={canWrite} onLabel={onLabelRise} />
+              <WaterRiseRow key={r.start} rise={r} timeZone={timeZone} units={units} canWrite={canWrite} onLabel={onLabelRise} />
             ))}
           </ul>
         )}

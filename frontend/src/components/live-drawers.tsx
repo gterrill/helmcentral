@@ -9,7 +9,8 @@ import { useForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useAisTrails } from '@/hooks/use-server-trails'
 import { useTideToday } from '@/hooks/use-tide-today'
 import { useUpperAir } from '@/hooks/use-upper-air'
-import { getVesselStateSnapshot, useVesselFields, useVesselStateSelector, type VesselStateValue } from '@/hooks/use-vessel-state'
+import { selectTimeZone } from '@/lib/vessel-time'
+import { getVesselStateSnapshot, useVesselFields, useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { useWaveForecast } from '@/hooks/use-wave-forecast'
 import { useWeatherForecast } from '@/hooks/use-weather-forecast'
 import { useApiQuerySelector } from '@/lib/api-query'
@@ -181,15 +182,14 @@ export const LiveRadarDrawer = memo(function LiveRadarDrawer() {
   return <RadarDrawer latitude={latitude} longitude={longitude} />
 })
 
-const selectLongitude = (state: VesselStateValue) => state.longitude
 
 /**
- * The Forecast page: the boat's own forecast feeds, and the longitude it
+ * The Forecast page: the boat's own forecast feeds, and the boat's time zone it
  * compares a planned stay's clock with. The page fetches a planned stay's feeds
  * itself.
  */
-export const LiveForecastPage = memo(function LiveForecastPage({ unit, ...props }: Omit<ComponentProps<typeof ForecastPage>, 'boatLongitude' | 'boat'> & { unit: 'imperial' | 'metric' }) {
-  const boatLongitude = useVesselStateSelector(selectLongitude)
+export const LiveForecastPage = memo(function LiveForecastPage({ unit, ...props }: Omit<ComponentProps<typeof ForecastPage>, 'boatTimeZone' | 'boat'> & { unit: 'imperial' | 'metric' }) {
+  const boatTimeZone = useVesselStateSelector(selectTimeZone)
   const weather = useWeatherForecast(FORECAST_REFRESH_SECONDS)
   const waves = useWaveForecast(FORECAST_REFRESH_SECONDS)
   // Upper air keeps its own cadence: the global models behind it run four
@@ -200,5 +200,5 @@ export const LiveForecastPage = memo(function LiveForecastPage({ unit, ...props 
     () => buildForecastDrawerProps({ weather, waves, upperAir, warnings, unit }),
     [weather, waves, upperAir, warnings, unit],
   )
-  return <ForecastPage {...props} boat={boat} boatLongitude={boatLongitude} />
+  return <ForecastPage {...props} boat={boat} boatTimeZone={boatTimeZone} />
 })

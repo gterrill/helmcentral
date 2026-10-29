@@ -1,6 +1,7 @@
 import type { DistanceUnits } from '@/config/app-config'
 import type { PassageDetailExtras } from '@/lib/passage-plans'
 import { formatQuantity, unitOption } from '@/lib/quantities'
+import { zonedDateTimeParts } from '@/lib/vessel-time'
 
 // Passages page: the record shapes the backend returns and the pure helpers
 // the page draws from (figure formatting, track segments, replay timeline,
@@ -35,8 +36,10 @@ export interface PassageStats {
 
 export interface PassageSummary extends PassageRecord {
   stats: PassageStats
-  /** Longitude of the first recorded point, for dates in the boat's own zone. */
-  start_lon: number | null
+  /** IANA zone at the first recorded point, for dates in the boat's own time.
+   * Null when the passage has none, and `timezone_error` then says why. */
+  timezone: string | null
+  timezone_error?: string
 }
 
 export interface PassageDetail extends PassageSummary {
@@ -168,49 +171,33 @@ export function titleRepeatsRoute(p: Pick<PassageRecord, 'title' | 'from_name' |
 
 /** The passage's own title; failing that its route; failing that, with no
  * place named at either end, "Passage · <boat-local date>". */
-export function passageHeading(p: Pick<PassageRecord, 'title' | 'from_name' | 'to_name' | 'start'> & { start_lon?: number | null }): string {
+export function passageHeading(p: Pick<PassageRecord, 'title' | 'from_name' | 'to_name' | 'start'> & { timezone?: string | null }): string {
   if (p.title.trim()) return p.title.trim()
-  if (!p.from_name && !p.to_name) return `Passage · ${formatLocalDate(p.start, p.start_lon ?? 0)}`
+  if (!p.from_name && !p.to_name) return `Passage · ${formatLocalDate(p.start, p.timezone)}`
   return passageRoute(p)
 }
 
 // ── boat-local time ──────────────────────────────────────────────────────
 
-/** The vessel's zone, from longitude, the same whole-hour rule the server
- * uses for its nights, so a night on the page is a night in the figures. */
-export function vesselZone(lon: number): { offsetHours: number; label: string } {
-  if (!Number.isFinite(lon) || lon < -180 || lon > 180) return { offsetHours: 0, label: 'UTC' }
-  // Half-way rounds away from zero like the server's math.Round; JS
-  // Math.round would send -7.5 to -7. The `+ 0` turns a -0 into 0.
-  const rounded = Math.sign(lon) * Math.round(Math.abs(lon) / 15) + 0
-  const offsetHours = Math.max(-12, Math.min(14, rounded))
-  return { offsetHours, label: offsetHours === 0 ? 'UTC' : `UTC${offsetHours > 0 ? '+' : ''}${offsetHours}` }
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** `14 Mar 09:32 UTC+10` for a Unix-seconds instant at a longitude. */
-export function formatLocalDateTime(unixSeconds: number, lon: number): string {
-  const { date, time, zone } = localDateTimeParts(unixSeconds, lon)
+/** `14 Mar 09:32 UTC+10` for a Unix-seconds instant in the passage's zone (the
+ * IANA name the server sends as `timezone`). Without one it is `--`. */
+export function formatLocalDateTime(unixSeconds: number, timeZone: string | null | undefined): string {
+  if (!timeZone) return ABSENT
+  const { date, time, zone } = zonedDateTimeParts(unixSeconds, timeZone)
   return `${date} ${time} ${zone}`
 }
 
 /** The pieces of formatLocalDateTime: `14 Mar`, `09:32` and `UTC+10`. */
-export function localDateTimeParts(unixSeconds: number, lon: number): { date: string; time: string; zone: string } {
-  const zone = vesselZone(lon)
-  const d = new Date((unixSeconds + zone.offsetHours * 3600) * 1000)
-  const hh = String(d.getUTCHours()).padStart(2, '0')
-  const mm = String(d.getUTCMinutes()).padStart(2, '0')
-  return { date: `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`, time: `${hh}:${mm}`, zone: zone.label }
+export function localDateTimeParts(unixSeconds: number, timeZone: string | null | undefined): { date: string; time: string; zone: string } {
+  if (!timeZone) return { date: ABSENT, time: ABSENT, zone: '' }
+  return zonedDateTimeParts(unixSeconds, timeZone)
 }
 
-/** `14 Mar` for an ISO instant at a longitude. */
-export function formatLocalDate(iso: string, lon: number): string {
+/** `14 Mar` for an ISO instant in the passage's zone. */
+export function formatLocalDate(iso: string, timeZone: string | null | undefined): string {
   const unix = Date.parse(iso) / 1000
-  if (!Number.isFinite(unix)) return ABSENT
-  const zone = vesselZone(lon)
-  const d = new Date((unix + zone.offsetHours * 3600) * 1000)
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`
+  if (!Number.isFinite(unix) || !timeZone) return ABSENT
+  return zonedDateTimeParts(unix, timeZone).date
 }
 
 // ── track ────────────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -31,6 +32,31 @@ type plannedStay struct {
 	Arrive    string     `json:"arrive"`
 	Depart    string     `json:"depart"`
 	UpdatedAt *time.Time `json:"updated_at"`
+	// Timezone is the IANA zone at the place (ADR 0228), worked out on every
+	// read. It is never stored, and a value sent in a write is ignored.
+	Timezone string `json:"timezone"`
+}
+
+// stayZoneAt finds the zone at a stay's position. A variable so a test can make
+// the lookup fail.
+var stayZoneAt = zoneAt
+
+// plannedStayZoneError answers a read whose stay cannot be placed in a zone, in
+// the stay's own words and under its own log prefix.
+func plannedStayZoneError(c echo.Context, err error) error {
+	log.Printf("planned stay: %v", err)
+	return c.JSON(http.StatusInternalServerError, map[string]string{"error": "the planned stay's time zone could not be found: " + err.Error()})
+}
+
+// withZone sets Timezone from the stay's position. A position with no zone is
+// an error, not UTC.
+func (s plannedStay) withZone() (plannedStay, error) {
+	z, err := stayZoneAt(s.Lat, s.Lon)
+	if err != nil {
+		return s, err
+	}
+	s.Timezone = z.Name
+	return s, nil
 }
 
 // plannedStayNameMax bounds the place name; it is shown in a chip and a
@@ -132,12 +158,19 @@ var plannedStayNow = time.Now
 // its position), not the server's or the device's: it is gone the day after
 // departure. A place whose zone cannot be found is an error, not a guess.
 func plannedStayActive(s plannedStay, now time.Time) (bool, error) {
-	zone, err := zoneAt(s.Lat, s.Lon)
+	active, _, err := plannedStayActiveIn(s, now)
+	return active, err
+}
+
+// plannedStayActiveIn is plannedStayActive that also hands back the zone it
+// looked up, so a caller that needs both (the GET) makes one lookup.
+func plannedStayActiveIn(s plannedStay, now time.Time) (bool, placeZone, error) {
+	zone, err := stayZoneAt(s.Lat, s.Lon)
 	if err != nil {
-		return false, err
+		return false, placeZone{}, err
 	}
 	today := now.In(zone.Loc).Format("2006-01-02")
-	return s.Depart >= today, nil
+	return s.Depart >= today, zone, nil
 }
 
 func plannedStayFrom(q sqlQueryer) (plannedStay, bool, error) {
@@ -231,13 +264,14 @@ func getPlannedStayHandler(c echo.Context) error {
 	if !ok {
 		return c.JSON(http.StatusOK, plannedStayResponse{})
 	}
-	active, zerr := plannedStayActive(stay, plannedStayNow())
+	active, zone, zerr := plannedStayActiveIn(stay, plannedStayNow())
 	if zerr != nil {
-		return writeDocumentError(c, zerr)
+		return plannedStayZoneError(c, zerr)
 	}
 	if !active {
 		return c.JSON(http.StatusOK, plannedStayResponse{})
 	}
+	stay.Timezone = zone.Name
 	return c.JSON(http.StatusOK, plannedStayResponse{Stay: &stay})
 }
 
@@ -256,6 +290,10 @@ func putPlannedStayHandler(c echo.Context) error {
 	}
 	if err != nil {
 		return writeDocumentError(c, err)
+	}
+	saved, err = saved.withZone()
+	if err != nil {
+		return plannedStayZoneError(c, err)
 	}
 	return c.JSON(http.StatusOK, plannedStayResponse{Stay: &saved})
 }
@@ -445,7 +483,11 @@ func (d assistantToolDeps) executeGetPlannedStay(ctx context.Context, _ json.Raw
 	case !active:
 		res.Note = "The last planned stay ended before today, so none is planned."
 	default:
-		res.Stay = &stay
+		withZone, zerr := stay.withZone()
+		if zerr != nil {
+			return "", fmt.Errorf("get_planned_stay: the stay's time zone is not known: %w", zerr)
+		}
+		res.Stay = &withZone
 		res.Note = "The operator set this stay on the Forecast page. Its dates are local to the place. " +
 			"get_wind_forecast and get_tides take its lat and lon."
 	}

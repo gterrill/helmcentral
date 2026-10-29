@@ -47,7 +47,7 @@ every passage not yet in a cruise. The list shows the newest first, with the
 date, where the passage went from and to, the distance, the time underway and
 its cruise. Dates and times on this page are the boat's own local time, taken
 from where the passage began, with daylight saving where the place has it. A time
-that appears with a zone label such as AEDT or UTC+10 is in that zone.
+that appears with a zone label such as UTC+10 or UTC+9:30 is in that zone.
 
 Tick several passages to **View together** on one map, to **Merge** them, to
 **Save as cruise**, or to **Move to cruise**.

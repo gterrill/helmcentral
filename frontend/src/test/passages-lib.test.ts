@@ -21,7 +21,6 @@ import {
   segmentBounds,
   segmentsToGeoJSON,
   timedSegments,
-  vesselZone,
 } from '@/lib/passages'
 
 describe('figure formatting', () => {
@@ -50,7 +49,7 @@ describe('figure formatting', () => {
   })
 
   it('shows an unnamed end as -- and falls back to the route for a missing title', () => {
-    const base = { start: '2026-03-13T23:30:00Z', start_lon: 149 }
+    const base = { start: '2026-03-13T23:30:00Z' }
     expect(passageRoute({ from_name: 'Airlie', to_name: '' })).toBe('Airlie → --')
     expect(passageHeading({ ...base, title: '  ', from_name: 'Airlie', to_name: 'Hamilton' })).toBe('Airlie → Hamilton')
     expect(passageHeading({ ...base, title: 'Delivery leg', from_name: 'A', to_name: 'B' })).toBe('Delivery leg')
@@ -58,9 +57,9 @@ describe('figure formatting', () => {
   })
 
   it('names a passage with no title and no places by its boat-local date', () => {
-    const p = { start: '2026-03-13T23:30:00Z', start_lon: 149, title: '', from_name: '', to_name: '' }
+    const p = { start: '2026-03-13T23:30:00Z', timezone: 'Australia/Brisbane', title: '', from_name: '', to_name: '' }
     expect(passageHeading(p)).toBe('Passage · 14 Mar')
-    expect(passageHeading({ ...p, start_lon: null })).toBe('Passage · 13 Mar')
+    expect(passageHeading({ ...p, timezone: null })).toBe('Passage · --')
   })
 })
 
@@ -73,19 +72,23 @@ describe('volume follows the Units setting', () => {
 })
 
 describe('boat-local time', () => {
-  it('uses whole hours from longitude, matching the server', () => {
-    expect(vesselZone(149)).toEqual({ offsetHours: 10, label: 'UTC+10' })
-    expect(vesselZone(-70)).toEqual({ offsetHours: -5, label: 'UTC-5' })
-    expect(vesselZone(0)).toEqual({ offsetHours: 0, label: 'UTC' })
-    expect(vesselZone(999).label).toBe('UTC')
+  it('reads the zone the server names, daylight saving included', () => {
+    const summer = Date.UTC(2026, 0, 14, 23, 30) / 1000
+    expect(localDateTimeParts(summer, 'Australia/Sydney')).toEqual({ date: '15 Jan', time: '10:30', zone: 'UTC+11' })
+    expect(localDateTimeParts(summer, 'Australia/Adelaide')).toEqual({ date: '15 Jan', time: '10:00', zone: 'UTC+10:30' })
+  })
+
+  it('shows -- for a passage with no zone rather than another zone', () => {
+    expect(formatLocalDateTime(0, null)).toBe('--')
+    expect(formatLocalDate('2026-03-13T23:30:00Z', null)).toBe('--')
   })
 
   it('labels the zone on the time and rolls the date', () => {
     const t = Date.UTC(2026, 2, 13, 23, 30) / 1000
-    expect(localDateTimeParts(t, 149)).toEqual({ date: '14 Mar', time: '09:30', zone: 'UTC+10' })
-    expect(formatLocalDateTime(t, 149)).toBe('14 Mar 09:30 UTC+10')
-    expect(formatLocalDate(new Date(t * 1000).toISOString(), 149)).toBe('14 Mar')
-    expect(formatLocalDate('garbage', 149)).toBe('--')
+    expect(localDateTimeParts(t, 'Australia/Brisbane')).toEqual({ date: '14 Mar', time: '09:30', zone: 'UTC+10' })
+    expect(formatLocalDateTime(t, 'Australia/Brisbane')).toBe('14 Mar 09:30 UTC+10')
+    expect(formatLocalDate(new Date(t * 1000).toISOString(), 'Australia/Brisbane')).toBe('14 Mar')
+    expect(formatLocalDate('garbage', 'Australia/Brisbane')).toBe('--')
   })
 })
 
