@@ -143,3 +143,17 @@ MCP endpoint at `/mcp`.
 - Creating and revoking tokens is admin tier.
 - The trusted-LAN model is unchanged. Reaching `/mcp` from outside the LAN or
   Tailscale needs a public tunnel, which this model doesn't cover.
+
+## Addendum (2026-10-30): the public address for /mcp
+
+ADR 0232 allows one deliberate exception to the trusted-LAN model. An operator
+who wants Claude's phone and web connectors to reach the boat can mount `/mcp`
+alone on Tailscale Funnel, which gives it a public HTTPS address.
+
+- Nothing else is published. A request that arrives through Funnel and is not
+  for exactly `/mcp` is answered 404 by the backend, whatever the Funnel command
+  says.
+- The outside assistant token is then the only gate on a public address. Revoke
+  it if the address or token leaks.
+- The rest of the model is unchanged: everything under `/api` and the dashboard
+  stay on the LAN and Tailscale.

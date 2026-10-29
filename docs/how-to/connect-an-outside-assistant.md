@@ -2,7 +2,9 @@
 
 This connects a program on your computer, such as Claude Code or Claude Desktop,
 so it can read the boat. It can only read, and it only works while the computer
-is on the boat's network or on Tailscale. [Outside
+is on the boat's network or on Tailscale. For Claude on your phone or the web,
+see [Connect Claude on your phone or the
+web](connect-claude-on-the-phone-or-web.md) instead. [Outside
 assistants](../features/outside-assistants.md) explains what it can see.
 
 You need to be signed in as an admin, and Helmcentral needs to be running on a
