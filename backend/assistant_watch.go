@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -27,9 +28,13 @@ import (
 // chat opened later finds it in its history.
 //
 // What this deliberately is not: no InfluxDB (the watch reads what the
-// instruments say now, at 1 Hz, not what the logger kept), no alerting during
-// the watch (alarms already do that), and no persistence (a restart cancels
-// every watch; the tool result and the docs say so).
+// instruments say now, at 1 Hz, not what the logger kept), and no alerting
+// during the watch (alarms already do that).
+//
+// ADR 0227 made the timed watch a saved one-off watch: the registry below
+// still does the sampling in memory, but it writes the watch to the watches
+// table when it starts, checkpoints the samples, stores the finished report
+// as a watch run, and resumes after a restart (watches_oneoff.go).
 
 const (
 	assistantWatchMaxPaths      = 6
@@ -240,7 +245,29 @@ type assistantWatchRegistryDeps struct {
 	// follow-up run already registered by the time it reads "finished".
 	// The registry releases the slot itself if finish returns without.
 	finish func(info assistantWatchInfo, report assistantWatchReport, release func())
+	// persist saves the watch, its samples and its report (ADR 0227). Nil in a
+	// test that does not exercise storage.
+	persist assistantWatchPersister
 }
+
+// assistantWatchPersister is how a one-off watch is kept across a restart.
+type assistantWatchPersister interface {
+	// Start saves the watch before it is registered; an error stops it
+	// starting.
+	Start(info assistantWatchInfo) error
+	// Checkpoint saves the samples taken since the last save: one slice per
+	// path, new samples only. It runs on the watch's writer goroutine and may
+	// be slow.
+	Checkpoint(info assistantWatchInfo, batch [][]assistantWatchSample)
+	// Ended stores the finished report as a run of the watch.
+	Ended(info assistantWatchInfo, report assistantWatchReport)
+	// Stopped notes a watch that was stopped before it ended.
+	Stopped(info assistantWatchInfo)
+}
+
+// assistantWatchCheckpointEvery is how many ticks pass between saves of the
+// samples taken so far.
+const assistantWatchCheckpointEvery = 120
 
 // assistantWatchInfo is a watch as the chip, the tool and the follow-up see
 // it. Paths and the zone stay server-side (json:"-"): the chip names what is
@@ -293,7 +320,105 @@ type assistantWatch struct {
 	info     assistantWatchInfo
 	stop     chan struct{}
 	stopOnce sync.Once
+	// series0 are samples taken before a restart, which sampling carries on
+	// from. note, when set, is added to the report: a watch that ended while
+	// Helmcentral was not running says so.
+	series0 [][]assistantWatchSample
+	note    string
+	// cp saves samples off the sampling goroutine. Set by run.
+	cp *watchCheckpointer
+	// ended is set once the watch's end has been handed to the persister, so a
+	// failure after it is not recorded as a stop.
+	ended atomic.Bool
 }
+
+// watchCheckpointer saves a watch's samples on a goroutine of its own. The
+// sampler hands batches over and never waits: a write that is slow, or stuck,
+// holds up only the queue, which keeps every batch.
+type watchCheckpointer struct {
+	persist assistantWatchPersister
+	info    assistantWatchInfo
+	mu      sync.Mutex
+	pending [][][]assistantWatchSample
+	closed  bool
+	dropped bool
+	wake    chan struct{}
+	done    chan struct{}
+}
+
+func newWatchCheckpointer(persist assistantWatchPersister, info assistantWatchInfo) *watchCheckpointer {
+	c := &watchCheckpointer{persist: persist, info: info, wake: make(chan struct{}, 1), done: make(chan struct{})}
+	go c.loop()
+	return c
+}
+
+func (c *watchCheckpointer) signal() {
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
+}
+
+// add queues one batch of new samples.
+func (c *watchCheckpointer) add(batch [][]assistantWatchSample) {
+	c.mu.Lock()
+	c.pending = append(c.pending, batch)
+	c.mu.Unlock()
+	c.signal()
+}
+
+// close asks the writer to save what is queued and stop.
+func (c *watchCheckpointer) close() {
+	c.mu.Lock()
+	c.closed = true
+	c.mu.Unlock()
+	c.signal()
+}
+
+// abandon drops what is queued: the watch was stopped, deleted or crashed and
+// its samples are no longer wanted.
+func (c *watchCheckpointer) abandon() {
+	c.mu.Lock()
+	c.pending, c.closed, c.dropped = nil, true, true
+	c.mu.Unlock()
+	c.signal()
+}
+
+// drain closes the writer and waits for it to finish what is queued, for at
+// most limit. It says whether it did.
+func (c *watchCheckpointer) drain(limit time.Duration) bool {
+	c.close()
+	select {
+	case <-c.done:
+		return true
+	case <-time.After(limit):
+		return false
+	}
+}
+
+func (c *watchCheckpointer) loop() {
+	defer close(c.done)
+	for {
+		c.mu.Lock()
+		if len(c.pending) == 0 {
+			closed := c.closed
+			c.mu.Unlock()
+			if closed {
+				return
+			}
+			<-c.wake
+			continue
+		}
+		batch := c.pending[0]
+		c.pending = c.pending[1:]
+		c.mu.Unlock()
+		c.persist.Checkpoint(c.info, batch)
+	}
+}
+
+// assistantWatchCheckpointDrain is how long the end of a watch waits for its
+// last samples to be saved before it goes on without them.
+const assistantWatchCheckpointDrain = 5 * time.Second
 
 type assistantWatchRegistry struct {
 	deps assistantWatchRegistryDeps
@@ -317,8 +442,8 @@ func newAssistantWatchRegistry(deps assistantWatchRegistryDeps) *assistantWatchR
 	return &assistantWatchRegistry{deps: deps, watches: map[string]*assistantWatch{}, ended: map[string]*assistantWatchEnded{}}
 }
 
-// globalAssistantWatches is the process-wide registry. In memory only: a
-// restart cancels every watch.
+// globalAssistantWatches is the process-wide registry. It samples in memory
+// and keeps each watch in the record store, so a restart resumes it (ADR 0227).
 var globalAssistantWatches = newAssistantWatchRegistry(assistantWatchRegistryDeps{
 	now: time.Now,
 	newTicker: func(d time.Duration) assistantWatchTicker {
@@ -332,6 +457,7 @@ var globalAssistantWatches = newAssistantWatchRegistry(assistantWatchRegistryDep
 // refuses that as an initialisation cycle.
 func init() {
 	globalAssistantWatches.deps.finish = assistantWatchDeliverReport
+	globalAssistantWatches.deps.persist = newWatchOneOffStore(func() *documentStore { return globalDocumentStore })
 }
 
 // assistantWatchDeliverReport is the production finish hook.
@@ -417,6 +543,12 @@ func (reg *assistantWatchRegistry) start(req assistantWatchRequest) (assistantWa
 		reg.mu.Unlock()
 		return assistantWatchInfo{}, fmt.Errorf("start_watch: %d watches are already running across Helmcentral, the most it runs at once; try again when one has reported", assistantWatchMaxConcurrent)
 	}
+	if reg.deps.persist != nil {
+		if err := reg.deps.persist.Start(info); err != nil {
+			reg.mu.Unlock()
+			return assistantWatchInfo{}, fmt.Errorf("start_watch: the watch could not be saved, so it did not start: %w", err)
+		}
+	}
 	reg.watches[req.ConversationID] = w
 	reg.mu.Unlock()
 
@@ -486,6 +618,9 @@ func (reg *assistantWatchRegistry) stop(conversationID string) (bool, error) {
 	delete(reg.watches, conversationID)
 	reg.mu.Unlock()
 	w.stopOnce.Do(func() { close(w.stop) })
+	if reg.deps.persist != nil {
+		reg.deps.persist.Stopped(w.info)
+	}
 	log.Printf("assistant: watch %s for conversation %s stopped before it ended", w.info.ID, conversationID)
 	return true, nil
 }
@@ -508,10 +643,29 @@ func (reg *assistantWatchRegistry) run(w *assistantWatch, ticker assistantWatchT
 			log.Printf("assistant: watch %s for conversation %s panicked: %v", w.info.ID, w.info.ConversationID, r)
 			reg.remove(w)
 			reg.forgetEnded(w)
+			if w.cp != nil {
+				w.cp.abandon()
+			}
+			// A watch that crashed is over; without this its row stays on and a
+			// restart would pick it up again.
+			if reg.deps.persist != nil && !w.ended.Load() {
+				reg.deps.persist.Stopped(w.info)
+			}
 		}
 	}()
 
 	series := make([][]assistantWatchSample, len(w.info.Paths))
+	copy(series, w.series0)
+	// saved is how many samples of each series the writer has been given.
+	saved := make([]int, len(series))
+	for i := range series {
+		saved[i] = len(series[i])
+	}
+	if reg.deps.persist != nil {
+		w.cp = newWatchCheckpointer(reg.deps.persist, w.info)
+		defer w.cp.abandon()
+	}
+	ticks := 0
 	for {
 		select {
 		case <-w.stop:
@@ -530,6 +684,15 @@ func (reg *assistantWatchRegistry) run(w *assistantWatch, ticker assistantWatchT
 					s.Value, s.OK = r.Value, true
 				}
 				series[i] = append(series[i], s)
+			}
+			ticks++
+			if w.cp != nil && ticks%assistantWatchCheckpointEvery == 0 {
+				batch := make([][]assistantWatchSample, len(series))
+				for i := range series {
+					batch[i] = append([]assistantWatchSample(nil), series[i][saved[i]:]...)
+					saved[i] = len(series[i])
+				}
+				w.cp.add(batch)
 			}
 			if !t.Before(w.info.EndsAt) {
 				reg.finishWatch(w, series)
@@ -551,6 +714,17 @@ func (reg *assistantWatchRegistry) finishWatch(w *assistantWatch, series [][]ass
 	reg.mu.Unlock()
 
 	report := buildAssistantWatchReport(info, series)
+	if w.note != "" {
+		report.Note += " " + w.note
+	}
+	if reg.deps.persist != nil {
+		w.ended.Store(true)
+		if w.cp != nil && !w.cp.drain(assistantWatchCheckpointDrain) {
+			log.Printf("assistant: watch %s: the last samples were still being saved after %s; the end goes on without waiting", info.ID, assistantWatchCheckpointDrain)
+			w.cp.abandon()
+		}
+		reg.deps.persist.Ended(info, report)
+	}
 	log.Printf("assistant: watch %s for conversation %s ended; handing the report to Mate", info.ID, info.ConversationID)
 	var once sync.Once
 	release := func() { once.Do(func() { reg.release(w) }) }
@@ -1162,8 +1336,8 @@ func (d assistantToolDeps) executeStartWatch(ctx context.Context, raw json.RawMe
 		EndsAtISO: info.EndsAt.UTC().Format(time.RFC3339),
 		Timezone:  tzLabel,
 		Note: "The watch is running. Tell the skipper you will report back at ends_at. Its report arrives in this " +
-			"conversation by itself when it ends. A Helmcentral restart cancels it, and the skipper can stop it " +
-			"from the chat.",
+			"conversation by itself when it ends. A Helmcentral restart does not lose it: the watch is saved " +
+			"and carries on, and the skipper can stop it from the chat.",
 	}
 	for i, p := range info.Paths {
 		r := info.StartReadings[i]
@@ -1213,8 +1387,8 @@ var mateToolStartWatch = mateTool{
 			"arrives in this conversation by itself and you will be asked to explain it: per path count, " +
 			"min/mean/max, stdev, first/last, gaps, excursions from a rolling median and the sources seen, and " +
 			"for exactly two paths in the same units the same for their difference. Every path must be live now or the call fails naming it; " +
-			"find exact paths with check_signalk_paths first. One watch per conversation. A Helmcentral " +
-			"restart cancels it, and the skipper can stop it from the chat.",
+			"find exact paths with check_signalk_paths first. One watch per conversation. The watch is saved, " +
+			"so a Helmcentral restart does not lose it, and the skipper can stop it from the chat. It also appears on the Watches page.",
 		Parameters: json.RawMessage(`{
 				"type": "object",
 				"properties": {

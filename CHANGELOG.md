@@ -25,6 +25,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Watches.** A new **Watches** page, in the sidebar, for regular checks of the
+  boat. A watch runs on a schedule you pick: hourly, every few hours, daily at a
+  time, chosen days, or hours such as 22:00 to 06:00. Each run builds the same
+  short report, in your units: power, anchor, alarms, tanks, weather and
+  instruments, whichever you choose. Rules you can change decide what counts as a
+  finding, such as an alarm raised, a sensor gone quiet, the boat outside the
+  anchor watch radius, a tank moving 10 points, or pressure down 3 hPa in
+  3 hours. Mate reads every report and adds its view, and may add a finding but
+  never removes one. Each run shows its report, its findings, Mate's review, what
+  the review cost and an **Ask Mate about this run** button. Times are on the
+  boat's clock, so a watch waits when the boat has no position and says so.
+  Every run is kept for a year, runs with findings are kept for good, and you can
+  delete any run. Ask Mate for "a check every 2 hours while we're at anchor" and
+  it shows a card to apply, and it can run a watch for you straight away. The
+  timed watch Mate starts on a reading now appears here too, as a one-off watch,
+  and it carries on if Helmcentral restarts. Findings stay in the app for now and
+  nothing is sent to your phone.
 - **Mate can show you the Depth & Tide tile.** Ask "what's our depth?" or
   "what's the tide doing?" and Mate answers in words, then puts the tile under
   the answer. The newest answer shows the live tile. An older answer shows the

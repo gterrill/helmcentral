@@ -3,6 +3,7 @@ import { mapProposal, type AssistantProposal, type ProposalApi } from '@/hooks/u
 import { todayISO } from '@/lib/local-date'
 import { PLANNED_STAY_PATH } from '@/hooks/use-planned-stay'
 import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
+import { invalidateWatches } from '@/hooks/use-watches'
 
 /**
  * Apply and Dismiss on a maintenance proposal card (ADR 0146). Apply is the
@@ -46,6 +47,7 @@ export async function applyAssistantProposal(id: string): Promise<AssistantPropo
   } catch (err) {
     const saved = appliedProposalOf(err)
     if (saved?.ops.some((op) => op.type === 'alarm_rule')) void invalidateQueries([ALARM_RULES_PATH])
+    if (saved?.ops.some((op) => op.type === 'watch')) void invalidateWatches()
     throw err
   }
   // A planned stay Mate proposed is on the Forecast page the moment the
@@ -54,6 +56,8 @@ export async function applyAssistantProposal(id: string): Promise<AssistantPropo
   // An alarm rule Mate proposed is live the moment it is applied, so the
   // Alarms page and the battery tile's bands read the rules again.
   if (applied.ops.some((op) => op.type === 'alarm_rule')) void invalidateQueries([ALARM_RULES_PATH])
+  // A watch Mate proposed is on the Watches page the moment it is applied.
+  if (applied.ops.some((op) => op.type === 'watch')) void invalidateWatches()
   return applied
 }
 

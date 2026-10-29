@@ -203,6 +203,7 @@ function startLocation(panel: ResumablePanel): AppLocation {
     case 'inventory': return { panel: 'inventory', route: { view: 'index', section: 'equipment' } }
     case 'wall-displays': return { panel: 'wall-displays', route: { view: 'index' } }
     case 'passages': return { panel: 'passages', route: { view: 'index', filter: { kind: 'all' } } }
+    case 'watches': return { panel: 'watches', route: { view: 'index' } }
     default: return { panel }
   }
 }
@@ -307,7 +308,9 @@ export function createAppRouter(history: HistoryAdapter): AppRouter {
       ? { panel: null, pageId: target.pageId ?? snapshot.pageId }
       : target
     const key = memoryKey(next)
-    if (key !== null) memory.set(key, next)
+    // An unsaved watch has no address to come back to, so it is not remembered.
+    const isDraft = next.panel === 'watches' && next.route.view === 'new'
+    if (key !== null && !isDraft) memory.set(key, next)
     const pageId = next.panel === null ? next.pageId : snapshot.pageId
     snapshot = { ...snapshot, location: next, pageId, pending: null }
     writeAddress(replaceRequested)

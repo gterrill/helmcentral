@@ -23,6 +23,8 @@ require (
 	modernc.org/sqlite v1.34.4
 )
 
+require github.com/robfig/cron/v3 v3.0.1
+
 require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/hhrutter/tiff v1.0.7 // indirect

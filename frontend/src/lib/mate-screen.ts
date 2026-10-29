@@ -47,3 +47,17 @@ export function withAlarmContext(screen: AssistantScreenContext | undefined, ala
   if (!alarm) return screen
   return { ...screen, alarm_id: alarm.id, alarm_title: alarm.title }
 }
+
+/** The watch run a turn is about (ADR 0227): the run's id and its watch's name. */
+export interface MateWatchRunContext {
+  id: string
+  name: string
+}
+
+// Layers the run the operator tapped "Ask Mate about this run" on over the
+// screen they are on. The backend reads watch_run_id and tells Mate to read
+// that run; the name only names the watch in that sentence.
+export function withWatchRunContext(screen: AssistantScreenContext | undefined, run: MateWatchRunContext | null): AssistantScreenContext | undefined {
+  if (!run) return screen
+  return { ...screen, watch_run_id: run.id, watch_name: run.name }
+}

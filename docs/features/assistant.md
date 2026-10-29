@@ -331,7 +331,8 @@ Some faults only show up over time: an engine load that jumps for a second
 every few minutes, or a voltage that dips when something cycles on. Ask Mate to
 keep an eye on it, for example "watch port and starboard engine load for five
 minutes and tell me if port spikes". It starts a watch and tells you when it
-will report back. See [Watching a reading](#watching-a-reading) below.
+will report back. See [Watching a reading](#watching-a-reading) below. For a
+check on a schedule instead, see [Watches](watches.md).
 
 ### Maintenance
 
@@ -672,6 +673,9 @@ If the chat is open, you see the answer arrive. If it isn't, the answer is there
 next time you open the conversation. The answer costs the same as any other
 reply and shows in its footer.
 
+The watch is also kept on the [Watches](watches.md) page, as a one-off watch
+with its report, so you can read it again after the conversation has gone.
+
 Limits:
 
 - Every reading has to be live when the watch starts. If one isn't reporting,
@@ -686,8 +690,9 @@ Limits:
   Helmcentral.
 - Mate doesn't interrupt you during a watch. If something needs your attention
   right away, that's what alarms are for.
-- Restarting Helmcentral cancels any watch in progress, and nothing is reported
-  for it. So does **Stop**, and so does deleting the conversation.
+- Restarting Helmcentral doesn't lose a watch in progress. It picks up where it
+  left off and shows the time it was down as a gap. **Stop** cancels the watch
+  with no report, and so does deleting the conversation.
 - If Mate has been switched off by the time a watch ends, nothing is sent and no
   answer appears.
 
@@ -829,9 +834,11 @@ reach that address, and what to do when the microphone button won't light up.
 Every question sends three things to OpenRouter, and from there to whichever
 model you've chosen: your position, the question text itself, and whatever
 forecast or tide data Mate decided to look up. This only happens when you ask something and Mate
-is switched on. The one exception is a watch you asked for. When it ends, its
-summary of the readings goes to the model so Mate can explain it, and only if
-Mate is still switched on at that moment.
+is switched on. There are two exceptions, and both only happen while Mate is
+switched on. When a watch you asked for ends, its summary of the readings goes to
+the model so Mate can explain it. And every report from a scheduled
+[watch](watches.md) goes to the model so Mate can review it: the report's
+figures, its findings and your **What to look out for** text.
 
 A document you attach to a question, or one Mate reads through its own library
 search, is sent the same way, as text, since it was already read once when it

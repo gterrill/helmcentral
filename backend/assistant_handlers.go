@@ -1018,6 +1018,9 @@ func postAssistantMessageHandler(c echo.Context) error {
 			DocumentTitle: trimmedAssistantScreenField(body.Screen.DocumentTitle),
 			AlarmID:       trimmedAssistantScreenAlarmID(body.Screen.AlarmID),
 			AlarmTitle:    trimmedAssistantScreenField(body.Screen.AlarmTitle),
+			// A run id is a uuid; an over-long one is dropped, not cut.
+			WatchRunID: trimmedAssistantScreenAlarmID(body.Screen.WatchRunID),
+			WatchName:  trimmedAssistantScreenField(body.Screen.WatchName),
 		}
 	}
 

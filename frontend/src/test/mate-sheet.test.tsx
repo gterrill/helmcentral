@@ -349,34 +349,34 @@ describe('MateSheet', () => {
 
     it('is released once the seeded question has been answered', async () => {
       vi.stubGlobal('fetch', buildFetch((id) => answer(id)))
-      const onAlarmContextDone = vi.fn()
+      const onContextDone = vi.fn()
       render(
         <MateSheet open onOpenChange={vi.fn()} initialQuestion="Why did House Bank Low go off?" newConversation
           screen={{ panel: 'alarms', alarm_id: 'r1', alarm_title: 'House Bank Low' }} canWrite readAloud={false}
-          onOpenPanel={vi.fn()} onAlarmContextDone={onAlarmContextDone} />,
+          onOpenPanel={vi.fn()} onContextDone={onContextDone} />,
       )
       expect(await screen.findByText(/It tripped at 49/)).toBeInTheDocument()
-      await waitFor(() => expect(onAlarmContextDone).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(onContextDone).toHaveBeenCalledTimes(1))
     })
 
     it('is released by New conversation', async () => {
       vi.stubGlobal('fetch', buildFetch())
-      const onAlarmContextDone = vi.fn()
+      const onContextDone = vi.fn()
       render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'alarms' }} canWrite readAloud={false}
-        onOpenPanel={vi.fn()} onAlarmContextDone={onAlarmContextDone} />)
+        onOpenPanel={vi.fn()} onContextDone={onContextDone} />)
       fireEvent.click(await screen.findByRole('button', { name: 'New conversation' }))
-      expect(onAlarmContextDone).toHaveBeenCalled()
+      expect(onContextDone).toHaveBeenCalled()
     })
 
     it('is released by picking another conversation from search', async () => {
       vi.stubGlobal('fetch', buildFetch(undefined, [{ id: 'c2', title: 'Hook Reef anchorages', created_at: '', updated_at: '' }]))
-      const onAlarmContextDone = vi.fn()
+      const onContextDone = vi.fn()
       render(<MateSheet open onOpenChange={vi.fn()} screen={{ panel: 'alarms' }} canWrite readAloud={false}
-        onOpenPanel={vi.fn()} onAlarmContextDone={onAlarmContextDone} />)
+        onOpenPanel={vi.fn()} onContextDone={onContextDone} />)
       fireEvent.click(await screen.findByRole('button', { name: 'Search conversations' }))
       await screen.findByRole('textbox', { name: 'Search conversations' })
       fireEvent.click(screen.getByText('Hook Reef anchorages'))
-      await waitFor(() => expect(onAlarmContextDone).toHaveBeenCalled())
+      await waitFor(() => expect(onContextDone).toHaveBeenCalled())
     })
   })
 

@@ -561,6 +561,10 @@ func main() {
 	// a little slower every week it runs (backend-perf-audit.md Tier 1 #3).
 	go startVesselContextSweeper(streamCtx, vesselContextSweepInterval)
 	go startAlarmEvaluator(streamCtx, alarmEvaluationInterval)
+	// Watches (ADR 0227): builds and reviews the report of every due scheduled
+	// watch once a minute, and resumes any one-off watch that was running when
+	// Helmcentral stopped.
+	go startWatches(streamCtx, settingsPath, time.Minute)
 	go globalAlarmDispatcher.run(streamCtx)
 	go startNotificationDrainer(streamCtx, notifyDrainInterval)
 	go startStreamWatchdog(streamCtx, watchdogCheckInterval)
@@ -657,6 +661,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, autopilotRoutes()...)
 	routes = append(routes, mapRoutes(tileFetchClient)...)
 	routes = append(routes, assistantRoutes()...)
+	routes = append(routes, watchRoutes()...)
 	routes = append(routes, passageDecisionRoutes()...)
 	routes = append(routes, helpRoutes()...)
 	routes = append(routes, logRoutes()...)

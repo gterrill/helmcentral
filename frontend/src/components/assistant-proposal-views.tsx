@@ -21,6 +21,15 @@ const FIELD_LABELS: Record<string, string> = {
 
 /** Labels for one type's fields, ahead of the shared ones. */
 const TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
+  watch: {
+    schedule: 'Runs',
+    sections: 'Reports on',
+    look_out_for: 'Looks out for',
+    alarms_raised: 'Alarms that count',
+    instrument_issues: 'Sensor problems that count',
+    tank_change_points: 'Tank change that counts (points)',
+    pressure_fall_hpa: 'Pressure fall that counts (hPa)',
+  },
   alarm_rule: {
     value: 'Threshold',
     clear_value: 'Clears at',

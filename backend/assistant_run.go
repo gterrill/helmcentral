@@ -665,9 +665,141 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 // for the proof - and once assistantTextToolCallMarker finds a marker in
 // the round's accumulated text, no further delta is emitted for the rest
 // of the round at all.
+// assistantCostMeter keeps what a run has been charged so far, so a caller can
+// read it even when the run fails and returns no reply. A watch review (ADR
+// 0227) needs it to show what the review cost. A request that failed after OpenRouter
+// had started a generation is remembered by its id (addPending) and priced at
+// the end with resolve; a failure that leaves no id to look up marks the cost
+// unknown.
+type assistantCostMeter struct {
+	mu      sync.Mutex
+	usd     float64
+	unknown bool
+	pending []string
+}
+
+type assistantCostMeterKey struct{}
+
+func withAssistantCostMeter(ctx context.Context, m *assistantCostMeter) context.Context {
+	return context.WithValue(ctx, assistantCostMeterKey{}, m)
+}
+
+func (m *assistantCostMeter) add(usd float64) {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.usd += usd
+	m.mu.Unlock()
+}
+
+func (m *assistantCostMeter) markUnknown() {
+	if m == nil {
+		return
+	}
+	m.mu.Lock()
+	m.unknown = true
+	m.mu.Unlock()
+}
+
+// addPending remembers a generation whose cost is read back later.
+func (m *assistantCostMeter) addPending(id string) {
+	if m == nil || id == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, p := range m.pending {
+		if p == id {
+			return
+		}
+	}
+	m.pending = append(m.pending, id)
+}
+
+func (m *assistantCostMeter) pendingIDs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.pending...)
+}
+
+// note files a failed request under what it cost: nothing, a generation to look
+// up, or unknown.
+func (m *assistantCostMeter) note(err error) {
+	switch charge, id := openRouterFailureCharge(err); charge {
+	case chargeLookup:
+		m.addPending(id)
+	case chargeUnknown:
+		m.markUnknown()
+	}
+}
+
+func (m *assistantCostMeter) snapshot() (usd float64, known bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.usd, !m.unknown
+}
+
+// generationCostLookupDelays are the waits before each retry of a generation's
+// cost, about a minute in all, since OpenRouter can lag behind the response.
+var generationCostLookupDelays = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second, 25 * time.Second}
+
+// resolve prices every remembered generation with lookup and returns the run's
+// total. Known is false when any cost could not be found, or an earlier
+// failure left none to look for.
+func (m *assistantCostMeter) resolve(ctx context.Context, lookup func(ctx context.Context, id string) (float64, error)) (usd float64, known bool) {
+	for _, id := range m.pendingIDs() {
+		cost, err := lookupWithRetry(ctx, lookup, id)
+		if err != nil {
+			log.Printf("assistant: could not read the cost of generation %s, so the run's cost is unknown: %v", id, err)
+			m.markUnknown()
+			continue
+		}
+		m.add(cost)
+	}
+	m.mu.Lock()
+	m.pending = nil
+	m.mu.Unlock()
+	return m.snapshot()
+}
+
+func lookupWithRetry(ctx context.Context, lookup func(context.Context, string) (float64, error), id string) (float64, error) {
+	var err error
+	for attempt := 0; ; attempt++ {
+		var cost float64
+		if cost, err = lookup(ctx, id); err == nil {
+			return cost, nil
+		}
+		if attempt >= len(generationCostLookupDelays) {
+			return 0, err
+		}
+		select {
+		case <-time.After(generationCostLookupDelays[attempt]):
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+}
+
+// assistantRiskReporter is implemented by a tool executor whose tools make
+// OpenRouter requests of their own that can fail after being charged for:
+// drainRisk returns the generations to look up and whether any cost is
+// unknown, since the last call.
+type assistantRiskReporter interface {
+	drainRisk() (ids []string, unknown bool)
+}
+
+// assistantCostMeterFrom returns the run's meter, or nil when the turn has
+// none (an operator's own turn); a nil meter ignores every call.
+func assistantCostMeterFrom(ctx context.Context) *assistantCostMeter {
+	meter, _ := ctx.Value(assistantCostMeterKey{}).(*assistantCostMeter)
+	return meter
+}
+
 func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
 	ctx, cancel := context.WithTimeout(ctx, assistantRunTimeout)
 	defer cancel()
+	meter := assistantCostMeterFrom(ctx)
 
 	messages := make([]openRouterMessage, 0, len(history)+1)
 	messages = append(messages, assistantSystemMessage(r.model, systemStable, systemLive))
@@ -688,6 +820,10 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	var reply assistantReply
 
 	for round := 0; ; round++ {
+		// Nothing is sent on a run that has already been stopped.
+		if err := ctx.Err(); err != nil {
+			return assistantReply{}, err
+		}
 		r.emit(mateWaitingStatus())
 
 		// session_id makes OpenRouter keep this conversation on one
@@ -778,6 +914,9 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		resp, err := openRouterChatCompletion(completionCtx, r.doer, r.apiKey, req, onContent)
 		cancelCompletion()
 		if err != nil {
+			// A request OpenRouter refused outright cost nothing. Any other
+			// failure may have been charged for what it had generated.
+			meter.note(err)
 			return assistantReply{}, err
 		}
 
@@ -786,6 +925,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		reply.CacheWriteTokens += resp.Usage.PromptTokensDetails.CacheWriteTokens
 		reply.CompletionTokens += resp.Usage.CompletionTokens
 		reply.CostUSD += resp.Usage.Cost
+		meter.add(resp.Usage.Cost)
 		reply.Model = resp.Model
 
 		// Text returned alongside tool calls is thinking aloud, not the
@@ -832,15 +972,9 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		}
 
 		toolMessages, calls, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
-		if terr != nil {
-			return assistantReply{}, terr
-		}
-		for _, tc := range calls {
-			tc.Round = reply.ToolRounds
-			reply.ToolCalls = append(reply.ToolCalls, tc)
-		}
 		// Tools that make their own OpenRouter calls (search_web) report what
-		// those cost, so the reply's footer covers them too.
+		// those cost, so the reply's footer covers them too. This runs before
+		// the error return below: a failed round has still spent.
 		if reporter, ok := r.tools.(assistantUsageReporter); ok {
 			u := reporter.drainUsage()
 			reply.PromptTokens += u.PromptTokens
@@ -848,6 +982,23 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			reply.CacheWriteTokens += u.PromptTokensDetails.CacheWriteTokens
 			reply.CompletionTokens += u.CompletionTokens
 			reply.CostUSD += u.Cost
+			meter.add(u.Cost)
+		}
+		if risk, ok := r.tools.(assistantRiskReporter); ok {
+			ids, unknown := risk.drainRisk()
+			for _, id := range ids {
+				meter.addPending(id)
+			}
+			if unknown {
+				meter.markUnknown()
+			}
+		}
+		if terr != nil {
+			return assistantReply{}, terr
+		}
+		for _, tc := range calls {
+			tc.Round = reply.ToolRounds
+			reply.ToolCalls = append(reply.ToolCalls, tc)
 		}
 		messages = append(messages, toolMessages...)
 

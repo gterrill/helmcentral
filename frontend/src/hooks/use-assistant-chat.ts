@@ -31,6 +31,9 @@ export interface AssistantScreenContext {
   /** The alarm the operator asked Mate about from its card (ADR 0226). */
   alarm_id?: string
   alarm_title?: string
+  /** The watch run the operator asked Mate about from its card (ADR 0227). */
+  watch_run_id?: string
+  watch_name?: string
 }
 
 export interface AssistantSendOptions {

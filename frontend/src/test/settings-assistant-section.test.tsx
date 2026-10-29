@@ -47,6 +47,14 @@ async function chooseNewModel() {
 }
 
 describe('AssistantSection', () => {
+  // ADR 0227: turning Mate on is what lets it read every watch report.
+  it('says in the Enable Mate description that Mate reviews every watch report', () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
+    renderSection()
+
+    expect(screen.getByText(/Mate also reviews every watch report, so each run uses your OpenRouter key\./)).toBeInTheDocument()
+  })
+
   it('renders the enable switch, model select and standing notes by aria-label', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }))
     renderSection()

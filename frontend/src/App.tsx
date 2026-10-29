@@ -13,6 +13,7 @@ import {
   Radar as RadarIcon,
   Settings,
   Ship,
+  Eye,
   Sparkles,
   MonitorPlay,
   Wrench,
@@ -38,6 +39,7 @@ import { INVENTORY_SECTIONS } from '@/components/inventory/inventory-nav'
 const AssistantDrawer = lazy(() => import('@/components/assistant-drawer').then((mod) => ({ default: mod.AssistantDrawer })))
 const DocumentsRoutePanel = lazy(() => import('@/components/documents-route-panel').then((mod) => ({ default: mod.DocumentsRoutePanel })))
 const PassagesRoutePanel = lazy(() => import('@/components/passages/passages-route-panel').then((mod) => ({ default: mod.PassagesRoutePanel })))
+const WatchesRoutePanel = lazy(() => import('@/components/watches/watches-route-panel').then((mod) => ({ default: mod.WatchesRoutePanel })))
 const InventoryRoutePanel = lazy(() => import('@/components/inventory/inventory-route-panel').then((mod) => ({ default: mod.InventoryRoutePanel })))
 const SettingsRoutePanel = lazy(() => import('@/components/settings/settings-route-panel').then((mod) => ({ default: mod.SettingsRoutePanel })))
 // MateSheet and HelpSheet (unlike the panels above) fetch nothing and run
@@ -164,7 +166,7 @@ import { inventorySectionOf, settingsSectionOf, type AppLocation, type PanelId }
 import { browserHistory, createAppRouter } from '@/lib/app-router'
 import { AppRouterContext, useAppLocation, useAppRouter, useNavigate } from '@/hooks/use-app-location'
 import { useHasNavigationGuard } from '@/hooks/use-navigation-guard'
-import { screenContextFor, withAlarmContext, type MateAlarmContext } from '@/lib/mate-screen'
+import { screenContextFor, withAlarmContext, withWatchRunContext, type MateAlarmContext, type MateWatchRunContext } from '@/lib/mate-screen'
 import { helpTargetFor, type HelpTarget } from '@/lib/help-links'
 // Its own module, not the patterns barrel: the barrel would drag TanStack
 // Table into the entry chunk for the sake of one empty div.
@@ -198,6 +200,7 @@ const PANEL_NAV_ITEMS: Array<{ id: Exclude<PanelId, 'display'>; label: string; i
   { id: 'forecast', label: 'Forecast', icon: CloudSun },
   { id: 'radar', label: 'Radar', icon: RadarIcon },
   { id: 'passages', label: 'Passages', icon: Ship },
+  { id: 'watches', label: 'Watches', icon: Eye },
   { id: 'documents', label: 'Documents', icon: FileText },
   { id: 'inventory', label: 'Inventory', icon: Wrench },
   { id: 'assistant', label: 'Mate', icon: Sparkles },
@@ -652,6 +655,8 @@ function AppShell() {
   // button on an alarm card. It rides on the screen context of every question
   // asked until the sheet closes, so a follow-up still means that alarm.
   const [mateSheetAlarm, setMateSheetAlarm] = useState<MateAlarmContext | null>(null)
+  // The watch run the sheet's conversation is about (ADR 0227), the same way.
+  const [mateSheetWatchRun, setMateSheetWatchRun] = useState<MateWatchRunContext | null>(null)
   // MateSheet is lazy-loaded and does not mount at all until the sheet is
   // opened for the first time - it fetches its conversation list and runs
   // every other effect only while `open`, so there is nothing for it to do
@@ -728,9 +733,13 @@ function AppShell() {
   // the answer watcher can tell a conversation the sheet is showing right
   // now apart from one it merely knows about.
   const [mateSheetConversationId, setMateSheetConversationId] = useState<string | null>(null)
-  const clearMateSheetAlarm = useCallback(() => setMateSheetAlarm(null), [])
-  const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean; alarm?: MateAlarmContext }) => {
+  const clearMateSheetContext = useCallback(() => {
+    setMateSheetAlarm(null)
+    setMateSheetWatchRun(null)
+  }, [])
+  const openMate = useCallback((question?: string, options?: { newConversation?: boolean; spoken?: boolean; alarm?: MateAlarmContext; watchRun?: MateWatchRunContext }) => {
     setMateSheetAlarm(options?.alarm ?? null)
+    setMateSheetWatchRun(options?.watchRun ?? null)
     setMateSheetQuestion(question)
     setMateSheetNewConversation(Boolean(options?.newConversation))
     setMateSheetSpoken(Boolean(options?.spoken))
@@ -741,8 +750,8 @@ function AppShell() {
     openMate(question, { spoken: true })
   }, [openMate])
   const mateScreen = useMemo(
-    () => withAlarmContext(screenContextFor(appLocation, activePage?.name ?? null, documentDetailsTitle), mateSheetAlarm),
-    [appLocation, activePage, documentDetailsTitle, mateSheetAlarm],
+    () => withWatchRunContext(withAlarmContext(screenContextFor(appLocation, activePage?.name ?? null, documentDetailsTitle), mateSheetAlarm), mateSheetWatchRun),
+    [appLocation, activePage, documentDetailsTitle, mateSheetAlarm, mateSheetWatchRun],
   )
 
   // mate-answer-toast plan: which conversation(s), if any, are actually on
@@ -1849,6 +1858,8 @@ function AppShell() {
       }
       case 'passages':
         return <PassagesRoutePanel units={uiConfig.distanceUnits} canWrite={canWrite} isDarkTheme={isDarkTheme} />
+      case 'watches':
+        return <WatchesRoutePanel canWrite={canWrite} onAskMate={openMate} />
       case 'inventory':
         return <InventoryRoutePanel canWrite={canWrite} />
       case 'settings':
@@ -2512,7 +2523,7 @@ function AppShell() {
             newConversation={mateSheetNewConversation}
             spoken={mateSheetSpoken}
             screen={mateScreen}
-            onAlarmContextDone={clearMateSheetAlarm}
+            onContextDone={clearMateSheetContext}
             canWrite={canWrite}
             readAloud={assistantVoiceConfig.readAloud}
             onOpenPanel={(id) => {

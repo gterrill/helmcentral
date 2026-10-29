@@ -57,6 +57,7 @@ export const PANEL_HELP_TARGETS: Record<PanelId, HelpTarget> = {
   // mounts the ordinary header, so its Help affordance resolves here.
   'wall-displays': { page: 'features/dashboard', heading: 'Wall displays' },
   passages: { page: 'features/passages' },
+  watches: { page: 'features/watches' },
   // Unreachable (see above) - set to General's target for totality.
   settings: { page: 'index' },
   // Unreachable (see above) - the help index, for totality.

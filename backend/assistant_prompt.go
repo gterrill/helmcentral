@@ -409,6 +409,11 @@ type assistantScreenContext struct {
 	// one that has cleared; the title is the card's own, for the sentence only.
 	AlarmID    string `json:"alarm_id"`
 	AlarmTitle string `json:"alarm_title"`
+	// WatchRunID and WatchName name the watch run the operator tapped "Ask
+	// Mate about this run" on (ADR 0227). The name is the watch's own, for
+	// the sentence only.
+	WatchRunID string `json:"watch_run_id"`
+	WatchName  string `json:"watch_name"`
 }
 
 // collectAssistantPromptContext reads settings once via readSettings +
@@ -573,6 +578,7 @@ var assistantPanelLabels = map[string]string{
 	"radar":        "Radar",
 	"anchor-watch": "Anchor Watch",
 	"alarms":       "Alarms",
+	"watches":      "Watches",
 	"assistant":    "Mate",
 }
 
@@ -604,6 +610,15 @@ func assistantScreenSentence(screen assistantScreenContext) string {
 		}
 		return fmt.Sprintf("The operator tapped \"Ask Mate about this\" on %s (alarm_id %s), so their question is about that alarm. "+
 			"Call get_alarm_context with that alarm_id before answering, and explain from what it returns.\n\n", name, alarmID)
+	}
+
+	if runID := strings.TrimSpace(screen.WatchRunID); runID != "" {
+		name := "a watch run"
+		if title := strings.TrimSpace(screen.WatchName); title != "" {
+			name = fmt.Sprintf("a run of the watch %q", title)
+		}
+		return fmt.Sprintf("The operator tapped \"Ask Mate about this run\" on %s (run_id %s), so their question is about that run. "+
+			"Call get_watch_runs with that run_id before answering, and explain from the report, the findings and the review it returns.\n\n", name, runID)
 	}
 
 	if panel == "" && section == "" && page == "" {
@@ -827,6 +842,18 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"(check_signalk_paths), and suggest at most three readings that matter and have no rule yet, each with the " +
 		"threshold you would use and why. Make each one a proposal they can tap, and do not suggest a reading nothing " +
 		"on the boat produces. Never propose an alarm just because you could.\n\n")
+
+	// 2a-iv-b. Watches (ADR 0227) - fixed wording, identical for every turn.
+	b.WriteString("When the operator asks for a regular check of the boat or a summary at a set time (\"check the boat every " +
+		"hour\", \"give me a morning report at 06:00 at anchor\"), first call list_watches, then propose a watch record " +
+		"(type watch) with propose_changes: a short name, a schedule as five-field cron on the boat's clock (describe_record_type " +
+		"watch has examples), the report sections that matter (power, anchor, alarms, tanks, weather, instruments) and, in the " +
+		"operator's words, what to look out for. Propose a change to an existing watch rather than a second one. " +
+		"Say that each run builds a report, that Helmcentral's rules decide the findings and that Mate reviews every report, " +
+		"that the findings and the review appear on the Watches page, that nothing is sent to their phone yet, and that a watch does not " +
+		"replace an alarm. A watch proposal changes nothing until the operator taps Apply. To show a watch's latest report use " +
+		"get_watch_runs, and run_watch_now to run one straight away. When the screen context names a watch run, read it with " +
+		"get_watch_runs before you answer.\n\n")
 
 	// 2a-v. Filling in forms (ADR 0165) - fixed wording, identical for every
 	// turn. The order matters: layout, then what is on record, then one

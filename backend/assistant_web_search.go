@@ -68,6 +68,31 @@ type assistantSearchWebResult struct {
 type assistantUsageSink struct {
 	mu    sync.Mutex
 	usage openRouterUsage
+	// risk: searches that failed after OpenRouter may have charged for them
+	// (ADR 0227): the generations to look up, and whether any cost is unknown.
+	riskIDs     []string
+	riskUnknown bool
+}
+
+// failed files a search that errored under what it may have cost.
+func (s *assistantUsageSink) failed(err error) {
+	charge, id := openRouterFailureCharge(err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch charge {
+	case chargeLookup:
+		s.riskIDs = append(s.riskIDs, id)
+	case chargeUnknown:
+		s.riskUnknown = true
+	}
+}
+
+func (s *assistantUsageSink) drainRisk() ([]string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids, unknown := s.riskIDs, s.riskUnknown
+	s.riskIDs, s.riskUnknown = nil, false
+	return ids, unknown
 }
 
 func (s *assistantUsageSink) add(u openRouterUsage) {
@@ -88,6 +113,14 @@ func (s *assistantUsageSink) drain() openRouterUsage {
 	u := s.usage
 	s.usage = openRouterUsage{}
 	return u
+}
+
+// drainRisk makes assistantToolDeps an assistantRiskReporter.
+func (d assistantToolDeps) drainRisk() ([]string, bool) {
+	if d.searchUsage == nil {
+		return nil, false
+	}
+	return d.searchUsage.drainRisk()
 }
 
 // drainUsage makes assistantToolDeps an assistantUsageReporter.
@@ -112,6 +145,9 @@ func (d assistantToolDeps) withWebSearch(doer openRouterDoer, apiKey string, mod
 		}
 		results, usage, err := assistantWebSearch(ctx, doer, apiKey, model, query)
 		sink.add(usage)
+		if err != nil {
+			sink.failed(err)
+		}
 		return results, err
 	}
 	return d

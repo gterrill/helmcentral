@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { screenContextFor, withAlarmContext } from '@/lib/mate-screen'
+import { screenContextFor, withAlarmContext, withWatchRunContext } from '@/lib/mate-screen'
 import type { AppLocation } from '@/lib/app-location'
 
 // ADR 0093 voice phase: screenContextFor turns the shell's current
@@ -82,5 +82,24 @@ describe('withAlarmContext', () => {
     expect(withAlarmContext(undefined, { id: 'rule-1', title: 'House Bank Low' })).toEqual({ alarm_id: 'rule-1', alarm_title: 'House Bank Low' })
     const screen = { panel: 'forecast' }
     expect(withAlarmContext(screen, null)).toBe(screen)
+  })
+})
+
+// ADR 0227: a turn seeded from a watch run carries the run on top of the screen.
+describe('withWatchRunContext', () => {
+  it('adds the run id and the watch name to the screen', () => {
+    expect(withWatchRunContext({ panel: 'watches' }, { id: 'run-1', name: 'Morning report' })).toEqual({
+      panel: 'watches',
+      watch_run_id: 'run-1',
+      watch_name: 'Morning report',
+    })
+  })
+
+  it('leaves the screen alone when there is no run', () => {
+    expect(withWatchRunContext({ panel: 'watches' }, null)).toEqual({ panel: 'watches' })
+  })
+
+  it('names the Watches panel on the ordinary screen context', () => {
+    expect(screenContextFor({ panel: 'watches', route: { view: 'index' } }, null)).toEqual({ panel: 'watches' })
   })
 })
