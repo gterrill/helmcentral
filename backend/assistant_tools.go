@@ -273,7 +273,7 @@ type assistantToolDeps struct {
 	// It returns a reason when the nights cannot be looked at at all.
 	overnight func(now time.Time) (overnightResult, string)
 	// tileTide is the tide the Depth and Tide tile shows: the configured
-	// station's /api/tide-today body (ADR 0227).
+	// station's /api/tide-today body (ADR 0229).
 	tileTide func(ctx context.Context, now time.Time) (tideTodayResponse, error)
 	// tileDepthTrend is the tile's depth trend, the /api/depth-trend body.
 	tileDepthTrend func(ctx context.Context, window string) depthTrendResponse

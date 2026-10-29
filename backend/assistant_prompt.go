@@ -947,7 +947,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"direction as a plain number yourself: 350 and 10 degrees average to north, not to 180. If a result says " +
 		"there is no mean direction, say the wind was too light or too variable to have one rather than quoting one.\n\n")
 
-	// 2c1a3. Tiles (ADR 0227) - fixed wording, identical for every turn. A tile
+	// 2c1a3. Tiles (ADR 0229) - fixed wording, identical for every turn. A tile
 	// card is a picture beside the answer, not the answer.
 	b.WriteString("To show the operator a dashboard tile, call show_tile. For \"what's our depth?\" or \"what is the " +
 		"tide doing?\", answer in words first and quote the key figure from the tool's display figures, then let " +

@@ -32,7 +32,7 @@ export function AssistantCard({
   canWrite?: boolean
   onDecisionChange?: (cardId: number, decision: PassageDecision) => void
   onDecisionUnreadable?: () => void
-  /** A tile card draws the live tile when its reply is the newest (ADR 0227). */
+  /** A tile card draws the live tile when its reply is the newest (ADR 0229). */
   liveTile?: boolean
 }) {
   switch (card.kind) {

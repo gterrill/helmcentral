@@ -8,7 +8,7 @@ import { tileBoxHeight, TILE_CARD_HEADER_PX } from '@/lib/mate-tile-size'
 const capturedClock = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit', hour12: false })
 
 /**
- * A dashboard tile in a Mate reply (ADR 0227). The newest reply draws the live
+ * A dashboard tile in a Mate reply (ADR 0229). The newest reply draws the live
  * tile. An older one draws the same tile on the figures the server read when
  * Mate answered, so the picture still agrees with the words above it. Read
  * only: nothing on it opens or configures anything.

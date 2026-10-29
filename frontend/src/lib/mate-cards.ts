@@ -130,7 +130,7 @@ export interface DepthTideSnapshot {
 }
 
 /**
- * A dashboard tile in a Mate reply (ADR 0227): the tile's id, when the server
+ * A dashboard tile in a Mate reply (ADR 0229): the tile's id, when the server
  * read it, and the figures it read. The newest reply draws the live tile; an
  * older one draws the same tile on `snapshot`, so the picture matches the prose.
  */
