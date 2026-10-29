@@ -8,8 +8,8 @@ Accepted (2026-10-28). Builds on [ADR 0175](0175-mate-reads-active-alarms.md)
 (`useMateSession`), [ADR 0225](0225-mate-proposes-alarm-rules.md) (`list_alarm_rules`
 and alarm_rule proposals) and [ADR 0172](0172-mate-tools-are-one-record-each.md)
 (the tool registry). It is cycle 5 of the agent-first plan: ranked opportunity 1
-and the first half of item 8 of `docs/research/agent-first-helmcentral.md`. The
-automatic "Mate reviews" flag is not in this cycle.
+and the first half of item 8. The automatic "Mate reviews" flag is not in this
+cycle.
 
 ## Context
 
