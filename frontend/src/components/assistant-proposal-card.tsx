@@ -1,5 +1,6 @@
 import { Check, Loader2, Wrench } from 'lucide-react'
 import { useCallback, useState } from 'react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-proposal-views'
@@ -43,6 +44,7 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         const updated =
           kind === 'apply' ? await applyAssistantProposal(proposal.id) : await dismissAssistantProposal(proposal.id)
         onChange(updated)
+        if (kind === 'apply') toast.success(`Applied ${updated.ops.length} ${updated.ops.length === 1 ? 'change' : 'changes'}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         // A 409 from Apply names the stored status it refused for. Stale

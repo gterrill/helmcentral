@@ -161,6 +161,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Applying Mate's changes now updates the page you are on.** If you had
+  Decks, Equipment, Maintenance or the vessel details open beside Mate and
+  tapped Apply, the page stayed as it was until you reloaded it. It now shows
+  the new decks, locations, bins, equipment, maintenance and vessel details as
+  soon as you apply them. Apply also shows a short "Applied 3 changes" message,
+  so you can see it went through.
+
 - **The boat's clock now follows daylight saving and half-hour zones.** It used
   to be worked out from longitude alone, which put a boat in Sydney an hour out
   all summer and a boat in Adelaide half an hour out. Helmcentral now finds the

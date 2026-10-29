@@ -246,8 +246,8 @@ export interface MaintenanceRuleFilter {
   includeStored?: boolean
 }
 
-const RULES = '/api/inventory/maintenance/rules'
-const LOG = '/api/inventory/maintenance/log'
+export const RULES = '/api/inventory/maintenance/rules'
+export const LOG = '/api/inventory/maintenance/log'
 const NO_RULES: MaintenanceRule[] = []
 const NO_SCHEDULE_ERRORS: MaintenanceScheduleError[] = []
 const NO_RESETS: HourMeterReset[] = []

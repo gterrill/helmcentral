@@ -278,16 +278,16 @@ export interface InventoryFieldError {
 // Cache keys follow lib/api-query.ts: the URL path, then the filter. A list
 // key is [EQUIPMENT, filter] and an item key is [EQUIPMENT/<id>], so
 // invalidating [EQUIPMENT] reaches every list and no single item.
-const EQUIPMENT = '/api/inventory/equipment'
+export const EQUIPMENT = '/api/inventory/equipment'
 // Lists only: an item's key is the one string EQUIPMENT/<id>.
 declareQuery([EQUIPMENT], { structuralSharing: true })
-const ZONES = '/api/inventory/zones'
-const DECKS = '/api/inventory/decks'
+export const ZONES = '/api/inventory/zones'
+export const DECKS = '/api/inventory/decks'
 // Owned by use-maintenance.ts. An equipment write can change its schedule
 // (profile, stored/deployed), so it invalidates the same prefix.
-const MAINTENANCE_RULES = '/api/inventory/maintenance/rules'
-const DISCOVERY = '/api/vessel/discovery'
-const SETUP_STATUS = '/api/setup/status'
+export const MAINTENANCE_RULES = '/api/inventory/maintenance/rules'
+export const DISCOVERY = '/api/vessel/discovery'
+export const SETUP_STATUS = '/api/setup/status'
 
 const NO_ITEMS: EquipmentItem[] = []
 const NO_DOCUMENTS: EquipmentDocument[] = []

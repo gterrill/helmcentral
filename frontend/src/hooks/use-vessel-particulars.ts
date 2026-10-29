@@ -50,7 +50,7 @@ export class ParticularsSaveError extends Error {
   }
 }
 
-const PATH = '/api/vessel/particulars'
+export const PATH = '/api/vessel/particulars'
 
 export async function saveVesselParticulars(particulars: VesselParticulars): Promise<VesselParticulars> {
   try {
