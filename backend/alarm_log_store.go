@@ -407,6 +407,43 @@ func (s *alarmLogStore) ChangedBetween(from, to time.Time, exceptRuleID string) 
 	return out, rows.Err()
 }
 
+// alarmRaisedGroup is how often one alarm title was raised in a window.
+type alarmRaisedGroup struct {
+	Title       string
+	Count       int
+	First, Last time.Time
+}
+
+// RaisedSummary counts the alarms raised within [from, to] by title, most
+// often raised first and then most recent. The counting is done in SQL, so a
+// window with thousands of rows is counted whole rather than cut at the
+// ChangedBetween row limit.
+func (s *alarmLogStore) RaisedSummary(from, to time.Time) ([]alarmRaisedGroup, error) {
+	if s == nil {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT label, COUNT(*), MIN(raised_at), MAX(raised_at) FROM alarm_log
+		WHERE raised_at BETWEEN ? AND ? GROUP BY label
+		ORDER BY COUNT(*) DESC, MAX(raised_at) DESC, label ASC`, from.UTC().Unix(), to.UTC().Unix())
+	if err != nil {
+		return nil, fmt.Errorf("summarise alarm log: %w", err)
+	}
+	defer rows.Close()
+	var out []alarmRaisedGroup
+	for rows.Next() {
+		var g alarmRaisedGroup
+		var first, last int64
+		if err := rows.Scan(&g.Title, &g.Count, &first, &last); err != nil {
+			return nil, fmt.Errorf("scan alarm log summary: %w", err)
+		}
+		g.First, g.Last = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
+		out = append(out, g)
+	}
+	return out, rows.Err()
+}
+
 // alarmLogRetention bounds how long an alarm_log row is kept. Unlike
 // notification_queue (a delivery-attempt queue, retained only notifyMaxAge
 // before a late send is deemed as-good-as-lost) this table is a diagnostic

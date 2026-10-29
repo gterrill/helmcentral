@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -120,6 +121,19 @@ type collisionProfileSyncer struct {
 	// row for a problem that has since been fixed.
 	refused string
 
+	// mu guards the standing-refusal fields below: check runs on the evaluator
+	// goroutine while active is read by the alarm handlers.
+	mu sync.Mutex
+
+	// standing is true while a refusal is open, whatever profile it declined.
+	standing bool
+
+	// refusedAt is when the standing refusal was raised.
+	refusedAt time.Time
+
+	// checkedAt is the time of the check in progress, used as the raised time.
+	checkedAt time.Time
+
 	// refusedMessage is the card body of the standing refusal, so a later
 	// refusal with different words updates the card instead of leaving it stale.
 	refusedMessage string
@@ -136,7 +150,36 @@ func newCollisionProfileSyncer(snapshot *signalKSnapshot) *collisionProfileSynce
 	}
 }
 
+// adoptOpenRefusal restores the standing refusal from the alarm log's open
+// row, so a restart neither raises a second row for the same problem nor
+// leaves the old one open after a good load. The alarm shows as active again
+// with its original raised time, and nothing is dispatched: it was sent when
+// it was first raised.
+//
+// When the log holds several open rows (earlier restarts piled them up), the
+// caller passes the newest. RecordStateChange and MarkCleared act on the same
+// row, the newest open one for this rule, so updates and the clear land on
+// the adopted row. Older rows are left as they are; no clear is invented.
+func (s *collisionProfileSyncer) adoptOpenRefusal(open alarmLogEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.standing, s.refusedMessage, s.refusedAt = true, open.Message, open.RaisedAt
+}
+
+// active is the standing refusal as an active alarm, empty when none stands.
+func (s *collisionProfileSyncer) active() []alarmStatus {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.standing {
+		return nil
+	}
+	status := collisionProfileEvent(alarmEventRaised, alarmStateWarn, s.refusedMessage).Status
+	status.RaisedAt = s.refusedAt
+	return []alarmStatus{status}
+}
+
 func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
+	s.checkedAt = now
 	state := vesselNavigationState(s.snapshot)
 	if state == "" || state == s.lastState {
 		return nil
@@ -196,7 +239,9 @@ func (s *collisionProfileSyncer) refuse(profile string, cause error, message str
 	} else {
 		log.Printf("collision profile: refusing %q: %s", profile, message)
 	}
-	if s.refused != "" {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.standing {
 		// One refusal is standing already. Raising again on every navigation
 		// state change piled up hundreds of open rows in the alarm log. The
 		// standing card is updated in place when the words change, so it never
@@ -207,15 +252,17 @@ func (s *collisionProfileSyncer) refuse(profile string, cause error, message str
 		s.refused, s.refusedMessage = profile, message
 		return []alarmEvent{collisionProfileEvent(alarmEventChanged, alarmStateWarn, message)}
 	}
-	s.refused, s.refusedMessage = profile, message
+	s.standing, s.refused, s.refusedMessage, s.refusedAt = true, profile, message, s.checkedAt
 	return []alarmEvent{collisionProfileEvent(alarmEventRaised, alarmStateWarn, message)}
 }
 
 func (s *collisionProfileSyncer) resolve() []alarmEvent {
-	if s.refused == "" {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.standing {
 		return nil
 	}
-	s.refused, s.refusedMessage = "", ""
+	s.standing, s.refused, s.refusedMessage, s.refusedAt = false, "", "", time.Time{}
 	return []alarmEvent{collisionProfileEvent(alarmEventCleared, alarmStateNormal, "")}
 }
 

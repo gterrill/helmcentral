@@ -67,23 +67,17 @@ func gatherWatchReportInput(d assistantToolDeps, store *documentStore, w savedWa
 	return in, nil
 }
 
-// watchRaisedAlarms lists the alarms raised in [since, now] from the alarm
-// log. A log that is not open is a reason, never an empty list.
-func watchRaisedAlarms(d assistantToolDeps, since, now time.Time) ([]alarmLogEntry, string) {
+// watchRaisedAlarms counts the alarms raised in [since, now] by title from the
+// alarm log. A log that is not open is a reason, never an empty list.
+func watchRaisedAlarms(d assistantToolDeps, since, now time.Time) ([]alarmRaisedGroup, string) {
 	if d.alarmLog == nil || d.alarmLog() == nil {
 		return nil, "the alarm log is not open"
 	}
-	entries, err := d.alarmLog().ChangedBetween(since, now, "")
+	groups, err := d.alarmLog().RaisedSummary(since, now)
 	if err != nil {
 		return nil, firstErrorLine(err)
 	}
-	var raised []alarmLogEntry
-	for _, e := range entries {
-		if !e.RaisedAt.Before(since) && !e.RaisedAt.After(now) {
-			raised = append(raised, e)
-		}
-	}
-	return raised, ""
+	return groups, ""
 }
 
 // watchLowestNoGoWind is the smallest no-go wind the operator has set in any

@@ -387,3 +387,107 @@ func TestCollisionProfileOtherRefusalsAreOperatorWording(t *testing.T) {
 		t.Errorf("got %q want %q", got, want)
 	}
 }
+
+// A restart forgets the standing refusal. Seeded from the alarm log's open row,
+// the same refusal raises nothing, a changed one updates the row, and a good
+// load clears it.
+func TestCollisionProfileSyncerAdoptsTheOpenRowAfterARestart(t *testing.T) {
+	const words = "Helmcentral could not read the collision profiles from SignalK, so the boat is anchored on the old profile."
+	loadErr := errors.New("boom")
+	newSyncer := func() *collisionProfileSyncer {
+		syncer := &collisionProfileSyncer{
+			snapshot: snapshotInState("anchored"),
+			load: func() (string, map[string]collisionProfile, error) {
+				if loadErr != nil {
+					return "", nil, loadErr
+				}
+				return "coastal", map[string]collisionProfile{}, nil
+			},
+			save: func(string) error { return nil },
+		}
+		syncer.adoptOpenRefusal(alarmLogEntry{RuleID: collisionProfileRuleID, Message: words, RaisedAt: alarmNow.Add(-time.Hour)})
+		return syncer
+	}
+
+	syncer := newSyncer()
+	if events := syncer.check(alarmNow); len(events) != 0 {
+		t.Fatalf("the same refusal after a restart raises nothing, got %+v", events)
+	}
+
+	syncer = newSyncer()
+	loadErr = &signalkStatusError{Status: 401}
+	events := syncer.check(alarmNow)
+	if len(events) != 1 || events[0].Kind != alarmEventChanged {
+		t.Fatalf("a changed message updates the open row, got %+v", events)
+	}
+
+	syncer = newSyncer()
+	loadErr = nil
+	syncer.snapshot = snapshotInState("motoring")
+	if events := syncer.check(alarmNow); len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("a good load clears the adopted row, got %+v", events)
+	}
+}
+
+func withTestProfileSyncer(t *testing.T, syncer *collisionProfileSyncer) {
+	t.Helper()
+	original := globalCollisionProfileSyncer
+	globalCollisionProfileSyncer = syncer
+	t.Cleanup(func() { globalCollisionProfileSyncer = original })
+	engine := globalAlarmEngine
+	globalAlarmEngine = newAlarmEngine()
+	t.Cleanup(func() { globalAlarmEngine = engine })
+	withGlobalSnapshot(t, snapshotInState("anchored"))
+}
+
+func failingProfileSyncer() *collisionProfileSyncer {
+	return &collisionProfileSyncer{
+		snapshot: snapshotInState("anchored"),
+		load:     func() (string, map[string]collisionProfile, error) { return "", nil, errors.New("boom") },
+		save:     func(string) error { return nil },
+	}
+}
+
+func collisionProfileActive() []alarmStatus {
+	var out []alarmStatus
+	for _, a := range activeAlarms() {
+		if a.RuleID == collisionProfileRuleID {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func TestCollisionProfileRefusalShowsAsActiveUntilItClears(t *testing.T) {
+	syncer := failingProfileSyncer()
+	withTestProfileSyncer(t, syncer)
+	if got := collisionProfileActive(); len(got) != 0 {
+		t.Fatalf("nothing standing yet: %+v", got)
+	}
+	syncer.check(alarmNow)
+	got := collisionProfileActive()
+	if len(got) != 1 || got[0].Label != collisionProfileLabel || got[0].Phase != alarmPhaseActive || !got[0].RaisedAt.Equal(alarmNow) || got[0].Message == "" {
+		t.Fatalf("a standing refusal is an active alarm: %+v", got)
+	}
+	if !liveAlarmPaths()[collisionProfilePath] {
+		t.Error("the reconciler must not clear the bus copy as a ghost")
+	}
+	syncer.resolve()
+	if got := collisionProfileActive(); len(got) != 0 {
+		t.Fatalf("resolved: %+v", got)
+	}
+	if liveAlarmPaths()[collisionProfilePath] {
+		t.Error("a resolved refusal holds no path")
+	}
+}
+
+func TestCollisionProfileAdoptedRefusalShowsAsActiveWithItsRaisedTime(t *testing.T) {
+	syncer := failingProfileSyncer()
+	raised := alarmNow.Add(-3 * time.Hour)
+	syncer.adoptOpenRefusal(alarmLogEntry{RuleID: collisionProfileRuleID, Message: "old words", RaisedAt: raised})
+	withTestProfileSyncer(t, syncer)
+	got := collisionProfileActive()
+	if len(got) != 1 || !got[0].RaisedAt.Equal(raised) || got[0].Message != "old words" {
+		t.Fatalf("adopted: %+v", got)
+	}
+}

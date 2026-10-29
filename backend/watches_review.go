@@ -334,10 +334,13 @@ func buildWatchReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 		"- You may add findings the rules missed. You can never remove or soften one the rules reached.\n" +
 		"- Where you are unsure, say so and ask the skipper in the review. Never guess a cause you cannot see in the figures.\n" +
 		"- You do not stand in for an alarm. If an alarm is active, say it is active; do not raise it again.\n" +
-		"- A section marked unavailable is not an all clear. Say what could not be read.\n" +
+		"- A section marked unavailable is not an all clear. Mention it only when it bears on something you flag.\n" +
 		"- Write for someone reading at 02:00: the event in a few words, then where, how close, which way it is going, with the figures in the operator's units. " +
 		"No track ids, paths, device keys or rule ids. No exclamation marks.\n" +
-		"- Keep it short: a few sentences. If nothing needs attention, say so in one sentence.\n" +
+		"- Lead with your judgement. At most four short sentences, then up to three questions for the skipper. Do not restate the report: the skipper reads it beside your review.\n" +
+		"- Never claim anything the report's figures do not show. Say an alarm is still going only when the report marks it active now; never say one cleared.\n" +
+		"- Never suggest a remedy or a setting change (muting an alarm, raising a threshold) unless the figures point to it, and never name a cause the figures do not show.\n" +
+		"- If nothing needs attention, say so in one sentence.\n" +
 		"- Use tools only to check something the report does not show; start from the report. The tools only read.\n")
 	if webSearch {
 		b.WriteString("- Web search is available. Use it only when the review needs a fact from outside the boat.\n")

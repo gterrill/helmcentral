@@ -114,13 +114,13 @@ func TestWatchReport_SinceTheLastRun(t *testing.T) {
 func TestWatchReport_AlarmsRaisedSinceTheLastRun(t *testing.T) {
 	in := baseInput()
 	at := in.Since.Add(40 * time.Minute)
-	in.Raised = []alarmLogEntry{{Label: "Anchor Dragging", RaisedAt: at}, {Label: "House Bank Low", RaisedAt: at.Add(20 * time.Minute)}}
+	in.Raised = []alarmRaisedGroup{{Title: "Anchor Dragging", Count: 1, First: at, Last: at}, {Title: "House Bank Low", Count: 1, First: at.Add(20 * time.Minute), Last: at.Add(20 * time.Minute)}}
 	_, findings := buildWatchReport(baseWatch(), in)
 	got := findingsFor(findings, "alarms")
 	if len(got) != 1 || got[0].Rule != "alarms_raised" || got[0].By != watchByRules {
 		t.Fatalf("findings %+v", got)
 	}
-	if !strings.Contains(got[0].Text, "2 alarms") || !strings.Contains(got[0].Text, "Anchor Dragging") || !strings.Contains(got[0].Text, "03:40") {
+	if !strings.Contains(got[0].Text, "2 alarms raised since 03:00") || !strings.Contains(got[0].Text, "Anchor Dragging, once (03:40)") {
 		t.Errorf("text %q", got[0].Text)
 	}
 	// A higher threshold is respected.
@@ -324,5 +324,81 @@ func TestWatchThresholdsValidate(t *testing.T) {
 	}
 	if err := d.validate(); err != nil {
 		t.Error(err)
+	}
+}
+
+func TestWatchReport_AlarmsAreGroupedByTitleAndMarkedActiveNow(t *testing.T) {
+	in := baseInput()
+	in.Since = in.Now.Add(-24 * time.Hour) // Wed 28 Oct 06:00
+	in.FirstRun = true
+	day := func(d, h, m int) time.Time { return time.Date(2026, 10, d, h, m, 0, 0, in.Now.Location()) }
+	in.Raised = []alarmRaisedGroup{
+		{Title: "Anchor Dragging", Count: 1, First: day(28, 7, 0), Last: day(28, 7, 0)},
+		{Title: "House Bank Low", Count: 2, First: day(28, 20, 0), Last: day(28, 21, 0)},
+		{Title: "Collision Profile Not Changed", Count: 46, First: day(28, 15, 42), Last: day(29, 2, 23)},
+	}
+	in.Status.Alarms.Active = []vesselStatusAlarm{{Title: "Collision Profile Not Changed"}}
+	in.Status.Alarms.ActiveCount = 1
+	report, findings := buildWatchReport(baseWatch(), in)
+	s := sectionOf(t, report, "alarms")
+	text := strings.Join(s.Lines, "|")
+	for _, want := range []string{
+		"49 alarms raised in the last 24 hours",
+		"Collision Profile Not Changed, 46 times (first yesterday 15:42, last 02:23), active now",
+		"House Bank Low, 2 times (first yesterday 20:00, last yesterday 21:00)",
+		"Anchor Dragging, once (yesterday 07:00)",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("lacks %q in %q", want, text)
+		}
+	}
+	if strings.Contains(text, "House Bank Low, 2 times (first yesterday 20:00, last yesterday 21:00), active") || strings.Contains(text, "cleared") || strings.Contains(text, "still open") {
+		t.Errorf("only an alarm in the active list is marked, and nothing is said about clearing: %q", text)
+	}
+	if strings.Index(text, "Collision") > strings.Index(text, "House Bank") || strings.Index(text, "House Bank") > strings.Index(text, "Anchor") {
+		t.Errorf("ordered by count then latest: %q", text)
+	}
+	if strings.Contains(text, "raised since") {
+		t.Errorf("a first run says the last 24 hours: %q", text)
+	}
+	raw, _ := json.Marshal(s.Figures)
+	for _, want := range []string{`"raised":49`, `"others_count":0`, `"active_now":true`, `"active_now":false`, `"Collision Profile Not Changed"`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("figures lack %s: %s", want, raw)
+		}
+	}
+	if strings.Contains(string(raw), "cleared") || strings.Contains(string(raw), `"open"`) {
+		t.Errorf("figures say nothing about clearing: %s", raw)
+	}
+	if got := findingsFor(findings, "alarms"); len(got) != 1 || !strings.Contains(got[0].Text, "Collision Profile Not Changed, 46 times") {
+		t.Errorf("finding %+v", got)
+	}
+}
+
+func TestWatchReport_AlarmTimesCarryTheirDayAndTheListIsCapped(t *testing.T) {
+	in := baseInput()
+	in.Since = in.Now.Add(-8 * 24 * time.Hour)
+	for i := 0; i < 7; i++ {
+		at := in.Now.Add(-time.Duration(i+1) * 24 * time.Hour)
+		in.Raised = append(in.Raised, alarmRaisedGroup{Title: "Alarm " + string(rune('A'+i)), Count: 1, First: at, Last: at})
+	}
+	in.Raised[6].Count, in.Raised[5].Count = 4, 3
+	report, _ := buildWatchReport(baseWatch(), in)
+	s := sectionOf(t, report, "alarms")
+	text := strings.Join(s.Lines, "|")
+	for _, want := range []string{
+		"raised since Wed 21 Oct 06:00",
+		"Alarm A, once (yesterday 06:00)", "Alarm B, once (Tue 06:00)", "Alarm F, 3 times (first Fri 06:00", "Alarm G, 4 times (first Thu 22 Oct 06:00",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("lacks %q in %q", want, text)
+		}
+	}
+	if strings.Contains(text, "Alarm E") || !strings.Contains(text, "and 2 more alarms") {
+		t.Errorf("cap of five titles then a count of the rest: %q", text)
+	}
+	raw, _ := json.Marshal(s.Figures)
+	if !strings.Contains(string(raw), `"others_count":2`) || strings.Contains(string(raw), "Alarm E") || !strings.Contains(string(raw), `"raised":12`) {
+		t.Errorf("figures cap at five titles and count the rest: %s", raw)
 	}
 }
