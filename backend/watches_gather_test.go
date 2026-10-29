@@ -35,7 +35,7 @@ func stayForecastDeps(hours []weatherHourPoint, err error, limits passageLimits)
 }
 
 func TestWatchStayForecastFor_FindsTheStrongestWindOnTheStayDays(t *testing.T) {
-	loc := vesselLocalLocation(146.85)
+	loc := queenslandLoc(t)
 	at := func(day, hour int) time.Time { return time.Date(2026, 10, day, hour, 0, 0, 0, loc) }
 	ms := func(kn float64) float64 { return kn / metersPerSecondToKnots }
 	hours := []weatherHourPoint{

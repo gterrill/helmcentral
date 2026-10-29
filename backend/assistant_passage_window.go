@@ -754,13 +754,17 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 		return passageWindowPayload{}, fmt.Errorf("assess_passage_window: Passage limits aren't set: Settings → Mate → Passage limits")
 	}
 	firstPoint := args.Legs[0].Route[0]
-	loc := vesselLocalLocation(firstPoint.Lon)
+	firstZone, err := zoneAt(firstPoint.Lat, firstPoint.Lon)
+	if err != nil {
+		return passageWindowPayload{}, fmt.Errorf("assess_passage_window: %w", err)
+	}
+	loc := firstZone.Loc
 	as := &passageAssessor{limits: limits, fc: fc, tides: tides, sun: sun, loc: loc,
 		cache: map[string]map[int64]passageHour{}, tideCache: map[string]passageTideResult{}, tideGaps: map[string]bool{}}
 
 	plans := make([]passageLegPlan, len(args.Legs))
 	out := passageWindowPayload{
-		Timezone:     vesselLocalTimezoneName(firstPoint.Lon),
+		Timezone:     firstZone.Name,
 		Provider:     fc.Provider,
 		WaveProvider: fc.WaveProvider,
 		Legs:         make([]passageWindowLeg, len(args.Legs)),
@@ -1040,7 +1044,18 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 		if err := ctx.Err(); err != nil {
 			return passageForecast{}, err
 		}
-		wb, err := wx.FetchForecast(lat, lon, days, vesselLocalTimezoneName(lon))
+		// Every point is fetched in the itinerary's zone, the one the assessor
+		// buckets and labels every day in (assessItinerary), so a provider's
+		// daily rollup can't land on a different boundary from the one read.
+		if len(args.Legs) == 0 || len(args.Legs[0].Route) == 0 {
+			return passageForecast{}, fmt.Errorf("assess_passage_window: the itinerary has no first point to take its time zone from")
+		}
+		first := args.Legs[0].Route[0]
+		itineraryZone, err := zoneAt(first.Lat, first.Lon)
+		if err != nil {
+			return passageForecast{}, err
+		}
+		wb, err := wx.FetchForecast(lat, lon, days, itineraryZone.Name)
 		if err != nil {
 			return passageForecast{}, fmt.Errorf("weather provider %q: %w", wxID, err)
 		}

@@ -766,10 +766,14 @@ func (d assistantToolDeps) vesselStatusStayFor(lat, lon float64, noPosition stri
 	if err != nil {
 		return vesselStatusStay{Missing: "the planned stay could not be read: " + err.Error()}
 	}
-	switch {
-	case !ok:
+	if !ok {
 		return vesselStatusStay{Missing: "no stay is planned"}
-	case !plannedStayActive(stay, now):
+	}
+	active, err := plannedStayActive(stay, now)
+	if err != nil {
+		return vesselStatusStay{Missing: "the stay's time zone is not known: " + firstErrorLine(err)}
+	}
+	if !active {
 		return vesselStatusStay{Missing: "the last planned stay ended before today"}
 	}
 	out := vesselStatusStay{Name: stay.Name, Lat: stay.Lat, Lon: stay.Lon, Arrive: stay.Arrive, Depart: stay.Depart}

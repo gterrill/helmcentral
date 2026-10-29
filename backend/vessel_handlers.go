@@ -379,11 +379,12 @@ func vesselDiscovery(snapshot *signalKSnapshot, vessel vesselView, items []sourc
 	return resp
 }
 
-// vesselLocalDay words t as a day ("21 Oct") in the vessel's time zone, the
-// same one the vessel state stream tells the browser (trustedVesselLongitude);
-// UTC while no fix has been trusted.
+// vesselLocalDay words t as a day ("21 Oct") in the boat's time zone, the
+// same one the vessel state stream tells the browser (boatTimeAt): the zone
+// of the last trusted fix, UTC before any.
 func vesselLocalDay(t time.Time) string {
-	return t.In(vesselLocalLocation(trustedVesselLongitude())).Format("2 Jan")
+	lat, lon, ok := trustedVesselPosition()
+	return t.In(boatTimeAt(lat, lon, ok).Loc).Format("2 Jan")
 }
 
 // discoveryTrackingNote says since when Helmcentral has been watching the boat

@@ -113,8 +113,8 @@
 // 0.0 nm is a catastrophic false reading on a helm display: it means the bow
 // is out of sight. See sentinelHumidityPct/sentinelVisibilityNm below.
 //
-// "timezone" is an IANA zone identifier (from vesselLocalTimezoneName in
-// weather_tide.go, e.g. "Etc/GMT-10" for a vessel at UTC+10). A plugin whose
+// "timezone" is an IANA zone identifier (from zoneAt in boat_time.go, e.g.
+// "Australia/Brisbane" near land or "Etc/GMT-10" offshore). A plugin whose
 // upstream API rolls hourly data up into daily summaries MUST pass it
 // through, so days[] boundaries land on the vessel's local midnight - the
 // host buckets and labels days in that same local zone, and a provider
@@ -123,7 +123,7 @@
 // docs/adr/0035-weather-local-day-boundaries.md.
 //
 // All times are RFC3339 (UTC "Z" or an explicit offset - either is valid;
-// the host does its own local-day bucketing via vesselLocalLocation, never
+// the host does its own local-day bucketing in the place's zone, never
 // trusting an offset embedded in a plugin's timestamp for that purpose). Any
 // numeric field may be omitted/zero if the upstream API genuinely lacks it;
 // the host treats an exactly-zero value for wind speed/gust/direction and
@@ -1041,13 +1041,13 @@ func weatherToday(c echo.Context) error {
 		return c.JSON(status, map[string]string{"error": message})
 	}
 
-	bundle, fetchErr := provider.FetchForecast(point.Lat, point.Lon, 1, vesselLocalTimezoneName(point.Lon))
+	bundle, fetchErr := provider.FetchForecast(point.Lat, point.Lon, 1, point.Zone.Name)
 	if fetchErr != nil {
 		log.Printf("weather provider %q error: %v", configuredProvider, fetchErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("weather provider %q unavailable: %v", configuredProvider, fetchErr)})
 	}
 
-	localLocation := vesselLocalLocation(point.Lon)
+	localLocation := point.Zone.Loc
 
 	condition := "Unknown"
 	if strings.TrimSpace(bundle.Current.Condition) != "" {
@@ -1112,7 +1112,7 @@ func weatherForecast(c echo.Context) error {
 		return c.JSON(status, map[string]string{"error": message})
 	}
 
-	bundle, forecastErr := provider.FetchForecast(point.Lat, point.Lon, 10, vesselLocalTimezoneName(point.Lon))
+	bundle, forecastErr := provider.FetchForecast(point.Lat, point.Lon, 10, point.Zone.Name)
 	if forecastErr != nil {
 		log.Printf("weather provider %q forecast error: %v", configuredProvider, forecastErr)
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("weather provider %q unavailable: %v", configuredProvider, forecastErr)})
@@ -1121,7 +1121,7 @@ func weatherForecast(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "weather forecast response was empty"})
 	}
 
-	localLocation := vesselLocalLocation(point.Lon)
+	localLocation := point.Zone.Loc
 	referenceDatetime := point.Reference
 	localTodayKey := referenceDatetime.In(localLocation).Format("2006-01-02")
 

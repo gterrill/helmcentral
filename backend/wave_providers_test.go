@@ -201,7 +201,7 @@ func TestWaveForecast_ReturnsBadGatewayWhenHourlyEmpty(t *testing.T) {
 func TestWaveForecast_ReturnsOKWithDayBucketingAndSeaTempNull(t *testing.T) {
 	withCleanWaveProviderRegistry(t)
 
-	loc := vesselLocalLocation(153.0)
+	loc := queenslandLoc(t)
 	nowLocal := time.Now().In(loc)
 	todayLocalMidnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 	day2Start := todayLocalMidnight.AddDate(0, 0, 1)
@@ -268,7 +268,7 @@ func TestWaveForecast_ReturnsOKWithDayBucketingAndSeaTempNull(t *testing.T) {
 func TestWaveForecast_ReturnsRealSeaTemperatureFWhenPresent(t *testing.T) {
 	withCleanWaveProviderRegistry(t)
 
-	loc := vesselLocalLocation(153.0)
+	loc := queenslandLoc(t)
 	nowLocal := time.Now().In(loc)
 	todayLocalMidnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 
@@ -639,7 +639,7 @@ func TestWaveIndicators_AbsentDataTripsNothing(t *testing.T) {
 func TestWaveForecast_CarriesDayIndicators(t *testing.T) {
 	withCleanWaveProviderRegistry(t)
 
-	loc := vesselLocalLocation(153.0)
+	loc := queenslandLoc(t)
 	nowLocal := time.Now().In(loc)
 	midnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 

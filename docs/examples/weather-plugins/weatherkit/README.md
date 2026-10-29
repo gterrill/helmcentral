@@ -31,9 +31,9 @@ Two rules from
 day boundaries and misleading precipitation values:
 
 1. **Use the host's `timezone` input.** `fetch_forecast` receives an IANA zone
-   (e.g. `Etc/GMT-10`). If your upstream API rolls hourly data up into daily
-   summaries, pass this through instead of hardcoding a zone or letting the
-   API pick one. The host buckets and labels its own day series in that same
+   (e.g. `Australia/Brisbane`, or `Etc/GMT-10` offshore). If your upstream API
+   rolls hourly data up into daily summaries, pass this through instead of
+   hardcoding a zone or letting the API pick one. The host buckets and labels its own day series in that same
    zone; rolling up on a different boundary silently shifts every day summary
    and drops the record covering local midnight to the offset. An absent
    `timezone` is rejected, not defaulted.

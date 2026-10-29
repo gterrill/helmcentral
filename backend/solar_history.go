@@ -14,7 +14,7 @@ const solarMaxSampleGap = 30 * time.Second // ~6x the 5s poll cadence; caps Riem
 // today/yesterday energy and today's peak wattage.
 type solarDayStats struct {
 	mu           sync.Mutex
-	day          string // local "2006-01-02" in vesselLocalLocation(longitude); "" until first sample
+	day          string // local "2006-01-02" in the boat's zone (boatTimeAt); "" until first sample
 	loc          *time.Location
 	todayKWh     float64
 	yesterdayKWh float64 // -1 sentinel until the first day rollover

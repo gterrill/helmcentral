@@ -144,9 +144,10 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 	// instants and no clock time, rather than a zone guessed.
 	var loc *time.Location
 	zoneLabel := ""
-	zoneNote := "No usable position, so tide times are the instants as given (UTC offset in the string) and carry no boat clock time."
-	if err == nil && hasUsableVesselPosition(state.Latitude, state.Longitude) {
-		loc, zoneLabel = vesselLocalLocation(state.Longitude), assistantTimeZoneLabel(state.Longitude)
+	zoneNote := "No position fix has been seen yet, so tide times are the instants as given (UTC offset in the string) and carry no boat clock time."
+	boat := boatTimeForState(state, err)
+	if !boat.NoFix {
+		loc, zoneLabel = boat.Loc, boat.LabelAt(now)
 		zoneNote = "Tide times in display are boat time (" + zoneLabel + "); the snapshot keeps the tide service's own strings."
 	}
 
@@ -187,7 +188,7 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 			}
 			when := at.UTC().Format(time.RFC3339)
 			if loc != nil {
-				when = at.In(loc).Format("15:04") + " (" + zoneLabel + ")"
+				when = at.In(loc).Format("15:04") + " " + boat.qualify(boat.Label(at))
 			}
 			display[e.key] = fmt.Sprintf("%s %s at %s", fixed(e.ft*perFt, decimals), unit, when)
 		}

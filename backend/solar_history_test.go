@@ -100,7 +100,7 @@ func TestSolarDayStats_DayRolloverFreezesYesterdayAndResetsTodayAndPeak(t *testi
 }
 
 func TestSolarDayStats_RolloverUsesLocalMidnight(t *testing.T) {
-	loc := vesselLocalLocation(153.0) // UTC+10 for local-day semantics.
+	loc := queenslandLoc(t) // UTC+10 for local-day semantics.
 	stats := &solarDayStats{yesterdayKWh: -1, peakTodayW: -1, loc: loc}
 
 	// 2026-07-21 14:00Z is 2026-07-22 00:00 local (UTC+10), so this is the

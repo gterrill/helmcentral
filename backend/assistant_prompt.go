@@ -47,6 +47,9 @@ type assistantPromptContext struct {
 
 	Latitude  float64
 	Longitude float64
+	// BoatTime is the zone the boat keeps (ADR 0230): the zone at the fix, the
+	// zone of the last fix, or UTC before any fix. The clock line reads it.
+	BoatTime boatTime
 	// PlaceName is the anchor-watch pinned name when a watch is active and
 	// has resolved one (it wins over the roaming tick's cache - see
 	// collectAssistantPromptContext), otherwise the roaming
@@ -452,7 +455,9 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 		pc.Notes = payload.Assistant.Notes
 	}
 
-	if state, err := fetchSignalKVesselState(); err == nil {
+	state, stateErr := fetchSignalKVesselState()
+	pc.BoatTime = boatTimeForState(state, stateErr)
+	if stateErr == nil {
 		pc.VesselName = state.Name
 		pc.Latitude = state.Latitude
 		pc.Longitude = state.Longitude
@@ -516,20 +521,6 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 	}
 
 	return pc
-}
-
-// assistantTimeZoneLabel names pc.Longitude's derived fixed-offset zone the
-// way an operator would say it ("UTC+10"), rather than the IANA-style id
-// vesselLocalTimezoneName (weather_tide.go) hands to a weather plugin. A
-// zero offset - including the one a -1 sentinel longitude rounds to -
-// collapses to plain "UTC" rather than the technically-accurate but
-// misleading "UTC+0".
-func assistantTimeZoneLabel(longitude float64) string {
-	label := vesselLocalLocation(longitude).String()
-	if label == "UTC+0" {
-		return "UTC"
-	}
-	return label
 }
 
 // assistantWarningLevelLabel names a wind-ladder level (see
@@ -1203,9 +1194,15 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	// is turn-scoped (screen, spoken).
 	var lb strings.Builder
 
-	loc := vesselLocalLocation(pc.Longitude)
-	fmt.Fprintf(&lb, "Local time: %s (%s, derived from the vessel's longitude). Give every time in this zone unless a tool result states a different zone.\n\n",
-		pc.Now.In(loc).Format("Monday 2 January 2006 15:04"), assistantTimeZoneLabel(pc.Longitude))
+	boat := pc.BoatTime
+	if boat.Loc == nil {
+		// A context built without a boat clock (the stable prompt parts alone
+		// are wanted, assistant_feedback.go) states that no position is known.
+		boat = boatTime{placeZone: utcZone, NoFix: true}
+		pc.BoatTime = boat
+	}
+	fmt.Fprintf(&lb, "Local time: %s (%s). Give every time in this zone unless a tool result states a different zone.\n\n",
+		pc.Now.In(boat.Loc).Format("Monday 2 January 2006 15:04"), boat.PromptClock(pc.Now))
 
 	if hasUsableVesselPosition(pc.Latitude, pc.Longitude) {
 		if place := strings.TrimSpace(pc.PlaceName); place != "" {
@@ -1239,7 +1236,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	case !pc.WarningOK:
 		lb.WriteString("Marine warnings: the forecast warnings feed has not reported yet.\n\n")
 	case pc.WarningLevel <= 0:
-		fmt.Fprintf(&lb, "Marine warnings: no official marine warning as of %s.\n\n", pc.WarningFetchedAt.In(loc).Format("15:04"))
+		fmt.Fprintf(&lb, "Marine warnings: no official marine warning as of %s.\n\n", pc.WarningFetchedAt.In(pc.BoatTime.Loc).Format("15:04"))
 	default:
 		line := fmt.Sprintf("Marine warnings: %s in force (wind level %d).", assistantWarningLevelLabel(pc.WarningLevel), pc.WarningLevel)
 		if pc.WarningSurf {
@@ -1291,7 +1288,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	// has something true to check against.
 	if w := pc.ActiveWatch; w != nil {
 		fmt.Fprintf(&lb, "A watch you started is running in this conversation: %s, until %s. Its report will arrive in this conversation by itself when it ends.\n\n",
-			w.Subject, w.EndsAt.In(loc).Format("15:04"))
+			w.Subject, w.EndsAt.In(pc.BoatTime.Loc).Format("15:04"))
 	}
 
 	live = lb.String()

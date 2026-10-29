@@ -18,7 +18,7 @@ import (
 func TestWatchRun_ARunCarriesTheBoatClockItWasMadeOn(t *testing.T) {
 	f := newWatchHostFixture(t)
 	f.add("Hourly", "0 * * * *")
-	f.host.position = func() (float64, error) { return 175, nil } // UTC+12
+	f.host.boat = func() (*time.Location, error) { return mustZoneAt(-10, 175).Loc, nil } // UTC+12 offshore
 	f.host.tick(context.Background())
 	runs := f.runsOf("id-Hourly")
 	if len(runs) != 1 {
@@ -36,7 +36,7 @@ func TestWatchRun_ARunCarriesTheBoatClockItWasMadeOn(t *testing.T) {
 func TestWatchRun_ASkipForWantOfPositionSaysItIsUTCAndNotBoatTime(t *testing.T) {
 	f := newWatchHostFixture(t)
 	f.add("Hourly", "0 * * * *")
-	f.lonErr = errors.New("no fix")
+	f.zoneErr = errors.New("no fix")
 	f.host.tick(context.Background())
 	runs := f.runsOf("id-Hourly")
 	if len(runs) != 1 || runs[0].Outcome != watchOutcomeSkipped {

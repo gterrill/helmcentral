@@ -294,12 +294,17 @@ func buildVesselStatePayload() map[string]any {
 		draftM = state.DraftM
 	}
 
+	// The boat's zone (ADR 0230): the zone at the fix, the zone of the last
+	// fix, or UTC when no fix has ever been seen. timezone_source says which.
+	boat := boatTimeForState(state, nil)
+
 	return map[string]any{
 		"name":                           state.Name,
 		"vessel_prefix":                  vesselPrefix,
 		"status":                         state.Status,
 		"datetime":                       state.Datetime.Format(time.RFC3339),
-		"timezone":                       vesselLocalTimezoneName(state.Longitude),
+		"timezone":                       boat.Name,
+		"timezone_source":                boat.Source(),
 		"depth":                          state.Depth,
 		"depth_last_update_age_s":        state.DepthLastUpdateAge,
 		"length_overall_m":               lengthOverallM,

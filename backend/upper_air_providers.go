@@ -181,7 +181,7 @@ func upperAirForecast(c echo.Context) error {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("upper-air provider %q unavailable: %s", configured, firstErrorLine(fetchErr))})
 	}
 
-	localLocation := vesselLocalLocation(point.Lon)
+	localLocation := point.Zone.Loc
 	referenceDatetime := point.Reference
 	localTodayKey := referenceDatetime.In(localLocation).Format("2006-01-02")
 

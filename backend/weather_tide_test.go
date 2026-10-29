@@ -480,55 +480,6 @@ func TestForecastStartUsesLocalTimezoneForDateLabels(t *testing.T) {
 	}
 }
 
-func TestVesselLocalLocation_UsesLongitudeOffset(t *testing.T) {
-	loc := vesselLocalLocation(152.38)
-	_, offsetSeconds := time.Now().In(loc).Zone()
-	if offsetSeconds != 10*3600 {
-		t.Fatalf("expected UTC+10 offset, got %d seconds", offsetSeconds)
-	}
-}
-
-func TestVesselLocalLocation_ClampsInvalidLongitudeToUTC(t *testing.T) {
-	loc := vesselLocalLocation(181)
-	if loc != time.UTC {
-		t.Fatalf("expected UTC for invalid longitude, got %s", loc.String())
-	}
-}
-
-// vesselLocalTimezoneName must name the SAME offset vesselLocalLocation
-// produces, expressed as an IANA zone a weather plugin can hand to an
-// upstream API for its daily rollup. Etc/GMT zones invert the sign by POSIX
-// convention: UTC+10 is "Etc/GMT-10". Getting that backwards would roll days
-// up 20 hours away from the host's own bucketing.
-func TestVesselLocalTimezoneName_MatchesVesselLocalLocationOffset(t *testing.T) {
-	for _, tc := range []struct {
-		longitude float64
-		want      string
-	}{
-		{149.22, "Etc/GMT-10"}, // Mackay, UTC+10
-		{-122.4, "Etc/GMT+8"},  // San Francisco, UTC-8
-		{0, "UTC"},             // Greenwich
-		{181, "UTC"},           // invalid longitude clamps to UTC
-	} {
-		got := vesselLocalTimezoneName(tc.longitude)
-		if got != tc.want {
-			t.Errorf("vesselLocalTimezoneName(%v) = %q, want %q", tc.longitude, got, tc.want)
-		}
-
-		// The name must resolve to the same offset vesselLocalLocation uses,
-		// otherwise plugin day boundaries and host day bucketing disagree.
-		loaded, err := time.LoadLocation(got)
-		if err != nil {
-			t.Fatalf("vesselLocalTimezoneName(%v) = %q which is not a loadable IANA zone: %v", tc.longitude, got, err)
-		}
-		_, wantOffset := time.Now().In(vesselLocalLocation(tc.longitude)).Zone()
-		_, gotOffset := time.Now().In(loaded).Zone()
-		if gotOffset != wantOffset {
-			t.Errorf("longitude %v: zone %q has offset %ds, but vesselLocalLocation uses %ds", tc.longitude, got, gotOffset, wantOffset)
-		}
-	}
-}
-
 func TestMapWeatherHourlyEntryResponse_IncludesWindFields(t *testing.T) {
 	entries := []weatherHourlyEntryData{
 		{Label: "Now", Condition: "Clear", TemperatureF: 68, WindSpeedKts: 10, WindGustKts: 15, WindDirection: "E", WindDirectionDeg: 90, Kind: "forecast"},

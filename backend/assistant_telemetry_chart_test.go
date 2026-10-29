@@ -508,7 +508,7 @@ func TestShowTelemetryChart_ComparisonRangesAreInThePayloadInTheBoatsTimezone(t 
 		t.Fatal(err)
 	}
 	p := tcPayload(t, d, res)
-	if p.Title != "Alternator before and after" || p.View != "time" || p.XY != nil || p.Timezone != "Etc/GMT-10" {
+	if p.Title != "Alternator before and after" || p.View != "time" || p.XY != nil || p.Timezone != "Australia/Brisbane" {
 		t.Errorf("payload header: %+v", p)
 	}
 	if p.Series[0].Label != "Stbd alt" || p.Series[0].Unit != "A" || p.Series[0].Panel != 0 || p.Series[0].Path != tcAltStbd {

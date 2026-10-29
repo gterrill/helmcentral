@@ -703,8 +703,8 @@ func (d assistantToolDeps) resolveTideStation(tool string, lat, lon float64) (as
 	}
 
 	// The station's own timezone is preferred (it's the zone tide times are
-	// actually meaningful in); vesselLocalLocation's longitude-derived fixed
-	// offset is the fallback for a station whose catalog entry carries no
+	// actually meaningful in); the zone found at the station's position
+	// (zoneAt) is the fallback for a station whose catalog entry carries no
 	// timezone or names one this binary's embedded zoneinfo (backend/tzdata.go)
 	// doesn't recognise.
 	var loc *time.Location
@@ -715,8 +715,11 @@ func (d assistantToolDeps) resolveTideStation(tool string, lat, lon float64) (as
 		}
 	}
 	if loc == nil {
-		loc = vesselLocalLocation(station.Lon)
-		timeBasis = loc.String()
+		z, zerr := zoneAt(station.Lat, station.Lon)
+		if zerr != nil {
+			return assistantResolvedTideStation{}, fmt.Errorf("%s: the time zone at tide station %q is not known: %w", tool, station.Name, zerr)
+		}
+		loc, timeBasis = z.Loc, z.Name
 	}
 
 	return assistantResolvedTideStation{

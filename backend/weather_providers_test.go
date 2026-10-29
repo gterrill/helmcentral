@@ -300,10 +300,10 @@ func TestWeatherForecast_ReturnsOKWithDayKeyAndNoWaveFields(t *testing.T) {
 
 	// trustedSignalKPayloadServer stamps navigation.datetime with the real
 	// time.Now(), so the bundle's Days/Hourly must be anchored to the actual
-	// "now" (via vesselLocalLocation for this test's longitude) rather than a
+	// "now" (in Brisbane's zone) rather than a
 	// fixed historical date, or the handler's local-day bucketing would
 	// filter every day out as "before today".
-	loc := vesselLocalLocation(153.0)
+	loc := queenslandLoc(t)
 	nowLocal := time.Now().In(loc)
 	todayLocalMidnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 	day1Start := todayLocalMidnight
@@ -369,7 +369,7 @@ func TestWeatherForecast_ReturnsOKWithDayKeyAndNoWaveFields(t *testing.T) {
 func TestWeatherForecast_IncludesNextHourWhenProviderSuppliesIt(t *testing.T) {
 	withCleanWeatherProviderRegistry(t)
 
-	loc := vesselLocalLocation(153.0)
+	loc := queenslandLoc(t)
 	nowLocal := time.Now().In(loc)
 	todayLocalMidnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 
@@ -425,7 +425,7 @@ func TestWeatherForecast_IncludesNextHourWhenProviderSuppliesIt(t *testing.T) {
 func TestWeatherForecast_OmitsNextHourWhenProviderSuppliesNone(t *testing.T) {
 	withCleanWeatherProviderRegistry(t)
 
-	loc := vesselLocalLocation(153.0)
+	loc := queenslandLoc(t)
 	nowLocal := time.Now().In(loc)
 	todayLocalMidnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 
@@ -1262,7 +1262,7 @@ func TestWeatherForecast_PassesVesselLocalTimezoneToProvider(t *testing.T) {
 	if err := weatherForecast(e.NewContext(req, rec)); err != nil {
 		t.Fatalf("weatherForecast returned error: %v", err)
 	}
-	if stub.gotTimezone != "Etc/GMT-10" {
-		t.Fatalf("expected the vessel's local zone Etc/GMT-10 to reach the provider, got %q", stub.gotTimezone)
+	if stub.gotTimezone != "Australia/Brisbane" {
+		t.Fatalf("expected the vessel's local zone Australia/Brisbane to reach the provider, got %q", stub.gotTimezone)
 	}
 }

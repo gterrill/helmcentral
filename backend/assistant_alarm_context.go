@@ -250,7 +250,7 @@ func (d assistantToolDeps) executeGetAlarmContext(ctx context.Context, raw json.
 	now := d.now()
 	a := sub.status
 
-	loc, tz, tzNote := d.alarmContextLocation()
+	loc, tz, tzNote := d.alarmContextLocation(a.RaisedAt, a.AckedAt, sub.clearedAt)
 	stamp := func(t time.Time) string {
 		if t.IsZero() {
 			return ""
@@ -318,18 +318,21 @@ func (d assistantToolDeps) executeGetAlarmContext(ctx context.Context, raw json.
 	})
 }
 
-func (d assistantToolDeps) alarmContextLocation() (*time.Location, string, string) {
-	if d.vesselState == nil {
-		return time.UTC, "UTC", "vessel time zone unavailable: vessel state is not wired; these times are UTC, not boat time"
+func (d assistantToolDeps) alarmContextLocation(ats ...time.Time) (*time.Location, string, string) {
+	return boatTimeNote(d.boatTime(), append(ats, d.now())...)
+}
+
+// boatTimeNote is a boat clock as a tool result states it: the location, the
+// label, and a note only when no fix has ever been seen and the times are UTC.
+func boatTimeNote(b boatTime, ats ...time.Time) (*time.Location, string, string) {
+	note := ""
+	if b.NoFix {
+		note = "no position fix has been seen yet; these times are UTC, not boat time"
+		if b.Err != nil {
+			note = fmt.Sprintf("the last-fix time zone is unreadable (%v); these times are UTC, not boat time", b.Err)
+		}
 	}
-	state, err := d.vesselState()
-	if err == nil && !hasUsableVesselPosition(state.Latitude, state.Longitude) {
-		err = errors.New("no usable vessel position")
-	}
-	if err != nil {
-		return time.UTC, "UTC", fmt.Sprintf("vessel time zone unavailable: %v; these times are UTC, not boat time", err)
-	}
-	return vesselLocalLocation(state.Longitude), assistantTimeZoneLabel(state.Longitude), ""
+	return b.Loc, b.LabelSpan(ats...), note
 }
 
 func (d assistantToolDeps) fillAlarmContextLive(res *assistantAlarmContextResult, dataPath string, now time.Time) {

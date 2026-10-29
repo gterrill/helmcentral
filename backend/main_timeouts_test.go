@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -30,7 +31,17 @@ func TestMain(m *testing.M) {
 	// blackholed /24 the handler tests use costs 4 batches of this value.
 	os.Setenv("HELMCENTRAL_DISCOVERY_DIAL_TIMEOUT_MS", "25")
 
-	os.Exit(m.Run())
+	// The last-fix time zone is remembered in a file (ADR 0230); keep the
+	// suite's copy out of the real data directory.
+	dir, err := os.MkdirTemp("", "helm-boat-zone-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv("BOAT_ZONE_FILE", filepath.Join(dir, "boat_zone.json"))
+
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // Because TestMain overrides both knobs for the whole suite, no other test

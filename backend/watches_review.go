@@ -347,7 +347,7 @@ func buildWatchReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 	if place := strings.TrimSpace(pc.PlaceName); place != "" {
 		fmt.Fprintf(&b, "The boat is at or near %s.\n", place)
 	}
-	fmt.Fprintf(&b, "Boat time: %s. All times in the report are boat time.\n", now.In(loc).Format("Mon 2 Jan 2006 15:04 MST"))
+	fmt.Fprintf(&b, "Boat time: %s. All times in the report are boat time.\n", clockWithZone(now, loc, "Mon 2 Jan 2006 15:04"))
 	fmt.Fprintf(&b, "The operator's units are %s. Quote figures as the report gives them; do not convert.\n", units)
 	if notes := strings.TrimSpace(pc.Notes); notes != "" {
 		b.WriteString("The operator's standing notes about the boat:\n" + clipRunes(notes, 1500) + "\n")

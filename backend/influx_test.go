@@ -128,7 +128,7 @@ func TestQueryInfluxMaxWindGustKtsFor_NotConfiguredReturnsSentinelForEveryWindow
 // what queryInfluxSolarTodayKWh/YesterdayKWh/PeakTodayW used before this
 // fix and is why "today" was reporting yesterday's afternoon onward).
 func TestLocalDayStart_VesselLocalTimezoneNotUTC(t *testing.T) {
-	loc := vesselLocalLocation(153.0) // UTC+10, same derivation solarStats.loc uses.
+	loc := queenslandLoc(t) // UTC+10, same derivation solarStats.loc uses.
 	now := time.Date(2026, 9, 27, 20, 32, 0, 0, time.UTC)
 
 	got := localDayStart(now, loc)
@@ -174,7 +174,7 @@ func TestQueryInfluxSolarTodayKWh_NotConfiguredReturnsSentinel(t *testing.T) {
 	t.Setenv("SETTINGS_FILE", path)
 	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
 
-	if got := queryInfluxSolarTodayKWh(time.Now().UTC(), vesselLocalLocation(153.0)); got != -1 {
+	if got := queryInfluxSolarTodayKWh(time.Now().UTC(), queenslandLoc(t)); got != -1 {
 		t.Fatalf("expected sentinel -1 when Influx is not configured, got %v", got)
 	}
 }
@@ -184,7 +184,7 @@ func TestQueryInfluxSolarYesterdayKWh_NotConfiguredReturnsSentinel(t *testing.T)
 	t.Setenv("SETTINGS_FILE", path)
 	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
 
-	if got := queryInfluxSolarYesterdayKWh(time.Now().UTC(), vesselLocalLocation(153.0)); got != -1 {
+	if got := queryInfluxSolarYesterdayKWh(time.Now().UTC(), queenslandLoc(t)); got != -1 {
 		t.Fatalf("expected sentinel -1 when Influx is not configured, got %v", got)
 	}
 }
@@ -194,7 +194,7 @@ func TestQueryInfluxSolarPeakTodayW_NotConfiguredReturnsSentinel(t *testing.T) {
 	t.Setenv("SETTINGS_FILE", path)
 	withSeededSecretsStore(t, map[string]string{"INFLUXDB_TOKEN": "sometoken"})
 
-	if got := queryInfluxSolarPeakTodayW(time.Now().UTC(), vesselLocalLocation(153.0)); got != -1 {
+	if got := queryInfluxSolarPeakTodayW(time.Now().UTC(), queenslandLoc(t)); got != -1 {
 		t.Fatalf("expected sentinel -1 when Influx is not configured, got %v", got)
 	}
 }

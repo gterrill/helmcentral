@@ -87,7 +87,11 @@ func normalisePlannedStay(s plannedStay, now time.Time) (plannedStay, *plannedSt
 	if verr := validatePlannedStay(s); verr != nil {
 		return plannedStay{}, verr
 	}
-	if !plannedStayActive(s, now) {
+	active, zerr := plannedStayActive(s, now)
+	if zerr != nil {
+		return plannedStay{}, &plannedStayError{Field: "lat", Message: "the place's time zone is not known: " + zerr.Error()}
+	}
+	if !active {
 		return plannedStay{}, &plannedStayError{Field: "depart", Message: "depart has already passed at the place"}
 	}
 	return s, nil
@@ -124,12 +128,16 @@ func validatePlannedStay(s plannedStay) *plannedStayError {
 var plannedStayNow = time.Now
 
 // plannedStayActive reports whether the stay still counts at now. Its dates
-// are the place's own, so "today" is the date at the place (from its
-// longitude), not the server's or the device's: it is gone the day after
-// departure.
-func plannedStayActive(s plannedStay, now time.Time) bool {
-	today := now.In(vesselLocalLocation(s.Lon)).Format("2006-01-02")
-	return s.Depart >= today
+// are the place's own, so "today" is the date at the place (the zone found at
+// its position), not the server's or the device's: it is gone the day after
+// departure. A place whose zone cannot be found is an error, not a guess.
+func plannedStayActive(s plannedStay, now time.Time) (bool, error) {
+	zone, err := zoneAt(s.Lat, s.Lon)
+	if err != nil {
+		return false, err
+	}
+	today := now.In(zone.Loc).Format("2006-01-02")
+	return s.Depart >= today, nil
 }
 
 func plannedStayFrom(q sqlQueryer) (plannedStay, bool, error) {
@@ -220,7 +228,14 @@ func getPlannedStayHandler(c echo.Context) error {
 	if err != nil {
 		return writeDocumentError(c, err)
 	}
-	if !ok || !plannedStayActive(stay, plannedStayNow()) {
+	if !ok {
+		return c.JSON(http.StatusOK, plannedStayResponse{})
+	}
+	active, zerr := plannedStayActive(stay, plannedStayNow())
+	if zerr != nil {
+		return writeDocumentError(c, zerr)
+	}
+	if !active {
 		return c.JSON(http.StatusOK, plannedStayResponse{})
 	}
 	return c.JSON(http.StatusOK, plannedStayResponse{Stay: &stay})
@@ -417,10 +432,17 @@ func (d assistantToolDeps) executeGetPlannedStay(ctx context.Context, _ json.Raw
 		return "", fmt.Errorf("get_planned_stay: %w", err)
 	}
 	var res assistantPlannedStayResult
+	active := false
+	if ok {
+		var zerr error
+		if active, zerr = plannedStayActive(stay, d.now()); zerr != nil {
+			return "", fmt.Errorf("get_planned_stay: the stay's time zone is not known: %w", zerr)
+		}
+	}
 	switch {
 	case !ok:
 		res.Note = "No stay is planned."
-	case !plannedStayActive(stay, d.now()):
+	case !active:
 		res.Note = "The last planned stay ended before today, so none is planned."
 	default:
 		res.Stay = &stay

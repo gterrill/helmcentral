@@ -451,6 +451,7 @@ func TestUnreadableRecordIsSaidInDiscoveryAndSetup(t *testing.T) {
 // position the tree holds. 20:00 UTC on 20 Oct is already 21 Oct for a boat at
 // 150 degrees east.
 func TestWatchingSinceDayIsInTheVesselTimeZone(t *testing.T) {
+	useFreshBoatZone(t)
 	resetGNSSPositionValidationState()
 	t.Cleanup(resetGNSSPositionValidationState)
 	snapshot := newAnomalyTestSnapshot()
@@ -478,7 +479,8 @@ func TestWatchingSinceDayIsInTheVesselTimeZone(t *testing.T) {
 		t.Fatalf("note = %q", disc.Tracking.Note)
 	}
 	// The zone the browser is told for the same fix agrees.
-	if got := vesselLocalTimezoneName(trustedVesselLongitude()); got != "Etc/GMT-10" {
+	tlat, tlon, tok := trustedVesselPosition()
+	if got := boatTimeAt(tlat, tlon, tok).Name; got != "Etc/GMT-10" {
 		t.Fatalf("stream zone = %q", got)
 	}
 

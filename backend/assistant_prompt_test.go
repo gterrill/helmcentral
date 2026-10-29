@@ -18,6 +18,7 @@ func basePromptContext() assistantPromptContext {
 		Now:                  time.Date(2026, 9, 11, 4, 5, 0, 0, time.UTC),
 		Latitude:             -1,
 		Longitude:            149,
+		BoatTime:             boatTime{placeZone: mustZoneAt(-27.47, 153.03)},
 		HeadingTrue:          -1,
 		SpeedOverGroundKts:   -1,
 		WindSpeedApparentKts: -1,
@@ -30,13 +31,38 @@ func TestBuildAssistantSystemPrompt_TimeLabelAtLon149(t *testing.T) {
 
 	prompt := buildAssistantSystemPrompt(pc)
 
-	loc := vesselLocalLocation(149)
+	loc := queenslandLoc(t)
 	wantTimeLabel := pc.Now.In(loc).Format("Monday 2 January 2006 15:04")
 	if !strings.Contains(prompt, wantTimeLabel) {
 		t.Fatalf("expected the prompt to contain the local time label %q, got:\n%s", wantTimeLabel, prompt)
 	}
-	if !strings.Contains(prompt, "UTC+10, derived from the vessel's longitude") {
-		t.Fatalf("expected the prompt to name the UTC+10 zone and its derivation, got:\n%s", prompt)
+	if !strings.Contains(prompt, "(Australia/Brisbane, UTC+10)") {
+		t.Fatalf("expected the prompt to name the real zone and its offset, got:\n%s", prompt)
+	}
+	if strings.Contains(prompt, "longitude)") {
+		t.Fatalf("the clock must not say it is derived from longitude, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_ClockFollowsDaylightSaving(t *testing.T) {
+	pc := basePromptContext()
+	pc.BoatTime = boatTime{placeZone: mustZoneAt(-33.87, 151.21)}
+	pc.Now = time.Date(2026, 10, 29, 0, 34, 0, 0, time.UTC)
+	prompt := buildAssistantSystemPrompt(pc)
+	if !strings.Contains(prompt, "Local time: Thursday 29 October 2026 11:34 (Australia/Sydney, UTC+11).") {
+		t.Fatalf("Sydney in October is on daylight saving, got:\n%s", prompt)
+	}
+}
+
+func TestBuildAssistantSystemPrompt_ClockSaysWhenItIsTheLastFixOrNoFix(t *testing.T) {
+	pc := basePromptContext()
+	pc.BoatTime.LastFix = true
+	if prompt := buildAssistantSystemPrompt(pc); !strings.Contains(prompt, "(Australia/Brisbane, UTC+10, last fix)") {
+		t.Fatalf("last fix must be said, got:\n%s", prompt)
+	}
+	pc.BoatTime = boatTime{placeZone: utcZone, NoFix: true}
+	if prompt := buildAssistantSystemPrompt(pc); !strings.Contains(prompt, "(UTC, no position yet)") {
+		t.Fatalf("UTC before any fix must be stated, got:\n%s", prompt)
 	}
 }
 

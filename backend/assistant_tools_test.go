@@ -420,7 +420,7 @@ func TestExecuteGetWindForecast_RoundsFiltersNullsAndJoinsWaves(t *testing.T) {
 		t.Fatalf("unmarshal: %v (raw %s)", err, raw)
 	}
 
-	wantTZ := vesselLocalTimezoneName(lon)
+	wantTZ := "Australia/Lindeman" // the zone tzdata keeps for the Whitsundays at -20.1, 149.1
 	if result.Timezone != wantTZ {
 		t.Errorf("expected timezone %q, got %q", wantTZ, result.Timezone)
 	}

@@ -138,8 +138,13 @@ func computeCruiseStats(passages []passageRecord, perPassage [][]recordedTrackPo
 	if len(span) == 0 {
 		return st
 	}
-	loc := vesselLocalLocation(span[0].Lon)
-	st.Nights = localMidnightsBetween(start, end, loc)
+	startZone, zerr := zoneAt(span[0].Lat, span[0].Lon)
+	if zerr != nil {
+		log.Printf("cruise stats: no time zone at the first track point, so nights and night SoC are left out: %v", zerr)
+	} else {
+		st.Nights = localMidnightsBetween(start, end, startZone.Loc)
+		st.NightSoC = nightSoCFigures(span, start, end, startZone.Loc)
+	}
 	st.GeneratorHours = generatorHours(span)
 	for _, p := range span {
 		if p.SoCPct != nil && (st.LowestSoCPct == nil || *p.SoCPct < *st.LowestSoCPct) {
@@ -147,7 +152,6 @@ func computeCruiseStats(passages []passageRecord, perPassage [][]recordedTrackPo
 			st.LowestSoCPct = &v
 		}
 	}
-	st.NightSoC = nightSoCFigures(span, start, end, loc)
 	st.WaterRises, st.WaterUsedL, st.WaterTakenOnL = waterFigures(span)
 	return st
 }

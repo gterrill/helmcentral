@@ -67,7 +67,7 @@ func TestTelemetryInfluxFetcherRefresh_UsesInjectedQueryFuncs(t *testing.T) {
 func TestTelemetryInfluxFetcherRefresh_PassesResolvedLocationToSolarQueries(t *testing.T) {
 	resetTelemetryInfluxSlot(t)
 
-	wantLoc := vesselLocalLocation(153.0)
+	wantLoc := queenslandLoc(t)
 
 	var gotTodayLoc, gotYesterdayLoc, gotPeakLoc *time.Location
 	fetcher := &telemetryInfluxFetcher{
@@ -167,7 +167,7 @@ func TestTelemetryInfluxFetcherRefresh_NoPositionReportsSentinelsAndSkipsSolarQu
 func TestTelemetryInfluxFetcherRefresh_PositionFlapReusesLastKnownLocation(t *testing.T) {
 	resetTelemetryInfluxSlot(t)
 
-	knownLoc := vesselLocalLocation(153.0)
+	knownLoc := queenslandLoc(t)
 
 	var gotTodayLoc, gotYesterdayLoc, gotPeakLoc *time.Location
 	positionOK := true // tick 1 has a fix; tick 2 (below) flips this to false
@@ -256,6 +256,7 @@ func TestCurrentVesselLocalLocation_UsesCachedSnapshotPosition(t *testing.T) {
 // process (or a fresh restart) before the delta stream has ever carried a
 // navigation.position update for self.
 func TestCurrentVesselLocalLocation_NoPositionReportsNotOK(t *testing.T) {
+	useFreshBoatZone(t)
 	origSnapshot := globalSignalKSnapshot
 	globalSignalKSnapshot = newSignalKSnapshot()
 	t.Cleanup(func() { globalSignalKSnapshot = origSnapshot })
@@ -270,6 +271,7 @@ func TestCurrentVesselLocalLocation_NoPositionReportsNotOK(t *testing.T) {
 // -1,-1 is a syntactically valid lat/lon but never a real fix, and must not
 // be handed to vesselLocalLocation as if it were.
 func TestCurrentVesselLocalLocation_SentinelPositionReportsNotOK(t *testing.T) {
+	useFreshBoatZone(t)
 	snapshot := snapshotWithSelfValues(map[string]any{
 		"navigation.position": map[string]any{"latitude": -1.0, "longitude": -1.0},
 	})

@@ -97,8 +97,8 @@ func TestWeatherForecast_ExplicitPointSkipsVesselAndUsesPlaceTimezone(t *testing
 	if p.lat != -27.4 || p.lon != 150 {
 		t.Fatalf("provider asked for (%v,%v)", p.lat, p.lon)
 	}
-	if p.gotTimezone != "Etc/GMT-10" {
-		t.Fatalf("expected the place's zone Etc/GMT-10, got %q", p.gotTimezone)
+	if p.gotTimezone != "Australia/Brisbane" {
+		t.Fatalf("expected the place's zone Australia/Brisbane, got %q", p.gotTimezone)
 	}
 }
 

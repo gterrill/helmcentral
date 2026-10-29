@@ -1310,13 +1310,8 @@ func (d assistantToolDeps) executeStartWatch(ctx context.Context, raw json.RawMe
 		return "", err
 	}
 
-	loc, tzLabel := time.UTC, "UTC"
-	if d.vesselState != nil {
-		if state, verr := d.vesselState(); verr == nil && hasUsableVesselPosition(state.Latitude, state.Longitude) {
-			loc = vesselLocalLocation(state.Longitude)
-			tzLabel = assistantTimeZoneLabel(state.Longitude)
-		}
-	}
+	boat := d.boatTime()
+	loc, tzLabel := boat.Loc, boat.LabelAt(d.now())
 
 	info, err := d.watches.start(assistantWatchRequest{
 		ConversationID: conversationID,
