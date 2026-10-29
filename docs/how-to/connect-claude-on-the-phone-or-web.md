@@ -53,11 +53,12 @@ your other programs.
    so the second one puts it back.
 
 2. Run `tailscale funnel status`. It should show an address like
-   `https://<machine>.<tailnet>.ts.net` with only `/mcp` listed under it.
-3. Open `https://<machine>.<tailnet>.ts.net/` in a browser. You should see a
-   plain "404 page not found". If you see Helmcentral's dashboard, turn Funnel
-   off at once (see below) and check the command.
-4. Open `https://<machine>.<tailnet>.ts.net/mcp` in a browser. You should see a
+   `https://<machine>.<tailnet>.ts.net` with only `/mcp` listed under it. This
+   is the check that matters. If it lists `/` or anything besides `/mcp`, turn
+   Funnel off (see below) and run the command again. Helmcentral refuses
+   everything but `/mcp` that comes through Funnel, so a browser shows "404
+   page not found" either way and can't tell you this.
+3. Open `https://<machine>.<tailnet>.ts.net/mcp` in a browser. You should see a
    short message saying that a valid outside assistant token is required.
 
 ## Add the connector in Claude

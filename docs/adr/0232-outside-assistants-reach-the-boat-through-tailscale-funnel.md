@@ -95,8 +95,13 @@ and covers every path, the single-page app's fallback included. A request that
 carries `Tailscale-Funnel-Request` and whose path is not exactly `/mcp` is
 answered with a plain 404, the same body as Tailscale's own. That includes
 `/mcp/`. The handler is mounted at `/mcp` alone, and an exact match leaves no
-room for a prefix trick. It keys on the header being present, whatever its
-value.
+room for a prefix trick. The path compared is the one Echo routes on, which
+is the raw, still-encoded path when a request has one. Comparing the decoded
+path would let `/mc%70` past the guard and on to the single-page app's
+fallback. It keys on the header being present, whatever its value.
+
+A correct `/mcp` mount still forwards `/mcp/<anything>`, so refusals are
+logged as something to check, not as proof of a mistyped command.
 
 Requests without the header are not touched. They are the LAN, Tailscale and
 local clients. A request with the header and the path `/mcp` goes on to the

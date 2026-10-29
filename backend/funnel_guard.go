@@ -46,7 +46,10 @@ func (g *funnelGuard) middleware() echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			req := c.Request()
-			if _, viaFunnel := req.Header[http.CanonicalHeaderKey(funnelRequestHeader)]; !viaFunnel || req.URL.Path == funnelAllowedPath {
+			// The constant is already in canonical form, so the map is read
+			// directly. The path compared is the one Echo routes on: the raw,
+			// still-encoded path when there is one, so /mc%70 is not /mcp.
+			if _, viaFunnel := req.Header[funnelRequestHeader]; !viaFunnel || echo.GetPath(req) == funnelAllowedPath {
 				return next(c)
 			}
 			g.logRefusal(req)
@@ -57,7 +60,9 @@ func (g *funnelGuard) middleware() echo.MiddlewareFunc {
 }
 
 // logRefusal says a Funnel request was refused, at most once a minute, so a
-// misconfigured Funnel is visible without a scanner flooding the log.
+// misconfigured Funnel is visible without a scanner flooding the log. A
+// correct /mcp mount still forwards /mcp/<anything>, so a refusal on its own
+// is not proof of a mistake; the line says what to check.
 func (g *funnelGuard) logRefusal(req *http.Request) {
 	g.mu.Lock()
 	now := g.now()
@@ -69,7 +74,7 @@ func (g *funnelGuard) logRefusal(req *http.Request) {
 	left := g.suppressed
 	g.lastLog, g.suppressed = now, 0
 	g.mu.Unlock()
-	msg := "funnel guard: refused %s %q from %q: only /mcp may be reached through Tailscale Funnel; check the funnel command with `tailscale funnel status`"
+	msg := "funnel guard: refused %s %q from %q: only /mcp is served through Tailscale Funnel; if refused paths fall outside /mcp, `tailscale funnel status` shows more than /mcp is shared"
 	if left > 0 {
 		g.logf(msg+" (%d more refused since the last line)", req.Method, req.URL.Path, req.Header.Get("X-Forwarded-For"), left)
 		return

@@ -35,6 +35,8 @@ func newFunnelGuardEnv() *funnelGuardEnv {
 	env.e.GET("/api/stream", reached)
 	env.e.GET("/", reached)
 	env.e.GET("/mcpx", reached)
+	// The single-page app's fallback, as in main.go.
+	env.e.GET("/*", reached)
 	return env
 }
 
@@ -135,5 +137,17 @@ func TestFunnelGuard_MCPThroughFunnelStillNeedsAToken(t *testing.T) {
 	e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("/mcp through Funnel with no token: want 401, got %d", rec.Code)
+	}
+}
+
+// Echo routes on the still-encoded path when a request has one, so a guard
+// that read only the decoded path would pass /mc%70 and let the router serve
+// it from the app's fallback.
+func TestFunnelGuard_AnEncodedPathThatDecodesToMCPIsRefused(t *testing.T) {
+	env := newFunnelGuardEnv()
+	for _, p := range []string{"/mc%70", "/%6dcp", "/mcp%2F"} {
+		if rec := env.do(http.MethodGet, p, true); rec.Code != http.StatusNotFound {
+			t.Fatalf("%s through Funnel: got %d (%q), want 404", p, rec.Code, rec.Body.String())
+		}
 	}
 }
