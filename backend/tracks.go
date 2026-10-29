@@ -44,6 +44,9 @@ var tracksAISTrails = newTracksAISTrailsCache()
 // every refresh.
 var tracksEndpointMissing atomic.Bool
 
+// solarZoneMissing is set while a good fix has no time zone, so that is logged once.
+var solarZoneMissing atomic.Bool
+
 func newTracksAISTrailsCache() *tracksAISTrailsCache {
 	c := &tracksAISTrailsCache{}
 	c.cond = sync.NewCond(&c.mu)
@@ -260,10 +263,19 @@ func sampleTracks(settingsPath string) {
 	// Only the total is recorded here, so controller names do not matter.
 	solar, solarErr := fetchSignalKSolarState(vesselView{})
 	if solarErr == nil && solar.CurrentW >= 0 {
-		if hasUsableVesselPosition(state.Latitude, state.Longitude) {
-			solarStats.mu.Lock()
-			solarStats.loc = vesselLocalLocation(state.Longitude)
-			solarStats.mu.Unlock()
+		if lat, lon, ok := usableOwnShipFix(state, nil); ok {
+			if boat := boatTimeAt(lat, lon, true); boat.LastFix || boat.NoFix {
+				// No zone for a good fix: leave the solar day boundary where it
+				// was rather than bucket it at UTC.
+				if solarZoneMissing.CompareAndSwap(false, true) {
+					log.Printf("solar: no time zone could be found for the vessel position; the local-day boundary is left as it was")
+				}
+			} else {
+				solarZoneMissing.Store(false)
+				solarStats.mu.Lock()
+				solarStats.loc = boat.Loc
+				solarStats.mu.Unlock()
+			}
 		}
 		solarStats.record(solar.CurrentW, now)
 		solarPowerHistory.record(solar.CurrentW, now)

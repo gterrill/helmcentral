@@ -63,14 +63,16 @@ If the schedule can't run, for example because it's more often than every
 
 Here's how a schedule behaves:
 
-- **Boat time:** Times are on the boat's clock, worked out from its position.
-  They're never read as UTC. Every time on the Watches page is on that clock, not
+- **Boat time:** Times are on the boat's clock, worked out from its position
+  and following daylight saving. They're never read as UTC. Every time on the Watches page is on that clock, not
   the clock of the phone or screen you're looking at. When the boat's time wasn't
   known, a run shows its time as UTC and says "boat time not known".
-- **No position:** If the boat has no position, Helmcentral doesn't know what
-  time it is on board, so it doesn't run the watch. It records a skipped run that
-  says "No boat position, so the boat's time is not known", once for each missed
-  time. The watch runs when the position comes back.
+- **No position:** If the position drops out, the boat keeps the time zone of
+  its last good position and watches carry on. If the boat has never had a
+  position, Helmcentral doesn't know what time it is on board, so it doesn't run
+  the watch. It records a skipped run that says "No boat position, so the boat's
+  time is not known", once for each missed time. The watch runs when the first
+  position arrives.
 - **After the box was off:** A watch that was due runs once. Missed runs aren't
   made up.
 - **Changing a schedule:** The watch runs at its next time on the new schedule.

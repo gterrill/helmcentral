@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ type watchHostFixture struct {
 	clock     time.Time
 	cfg       watchConfig
 	cfgErr    error
-	lonErr    error
+	zoneErr   error
 	posCalls  int
 	cfgCalls  int
 	reports   []string
@@ -43,10 +44,10 @@ func newWatchHostFixture(t *testing.T) *watchHostFixture {
 		review: watchReviewOutcome{Review: "Nothing needs attention.", Reached: true, CostUSD: 0.02, CostKnown: true, Model: "test/model"},
 	}
 	f.host = &watchHost{
-		store:    func() *documentStore { return f.docs },
-		now:      func() time.Time { return f.clock },
-		config:   func() (watchConfig, error) { f.cfgCalls++; return f.cfg, f.cfgErr },
-		position: func() (float64, error) { f.posCalls++; return 0, f.lonErr },
+		store:  func() *documentStore { return f.docs },
+		now:    func() time.Time { return f.clock },
+		config: func() (watchConfig, error) { f.cfgCalls++; return f.cfg, f.cfgErr },
+		boat:   func() (*time.Location, error) { f.posCalls++; return time.UTC, f.zoneErr },
 		report: func(_ context.Context, w savedWatch, now time.Time, loc *time.Location) (watchReport, []watchFinding, error) {
 			f.reports = append(f.reports, w.Name)
 			if f.onReport != nil {
@@ -212,7 +213,7 @@ func TestWatchTick_NoPositionSkipsOncePerMissedInstantAndTheRunStaysOwed(t *test
 	f := newWatchHostFixture(t)
 	f.add("Morning", "0 6 * * *")
 	f.ran("id-Morning", watchTestTime(28, 6, 0))
-	f.lonErr = errors.New("no usable vessel position")
+	f.zoneErr = errors.New("no usable vessel position")
 
 	f.clock = watchTestTime(29, 5, 0) // UTC has not reached 06:00 again, so some zone has not either
 	f.host.tick(context.Background())
@@ -237,7 +238,7 @@ func TestWatchTick_NoPositionSkipsOncePerMissedInstantAndTheRunStaysOwed(t *test
 		t.Fatal("the note is left once, not every minute")
 	}
 
-	f.lonErr = nil
+	f.zoneErr = nil
 	f.clock = f.clock.Add(time.Minute)
 	f.host.tick(context.Background())
 	if len(f.reports) != 1 {
@@ -385,7 +386,7 @@ func TestWatchRunNow_RunsAndCountsAsTheLatestRun(t *testing.T) {
 	if w := f.get("id-Morning"); w.LastRunAt == nil || !w.LastRunAt.Equal(f.clock) {
 		t.Fatalf("%+v", w)
 	}
-	f.lonErr = errors.New("no fix")
+	f.zoneErr = errors.New("no fix")
 	if _, err := f.host.RunNow(context.Background(), f.get("id-Morning")); err == nil || err.Error() != watchNoPositionReason {
 		t.Fatalf("without a position the boat's time is not known: %v", err)
 	}
@@ -442,21 +443,52 @@ func TestPruneWatchHistory_DropsQuietRunsOverAYearOldAndKeepsFindings(t *testing
 	}
 }
 
-func TestWatchBoatLongitude_RefusesWhatTheRestOfTheAppRefuses(t *testing.T) {
+func TestWatchBoatLocation_FollowsTheLastFixAndRefusesOnlyBeforeAny(t *testing.T) {
+	useFreshBoatZone(t)
 	good := vesselStateData{Latitude: -36.8, Longitude: 174.8}
-	if lon, err := watchBoatLongitudeOf(good, nil); err != nil || lon != 174.8 {
-		t.Fatalf("a good fix: %v %v", lon, err)
+	if loc, err := watchBoatLocationOf(good, nil); err != nil || loc.String() != "Pacific/Auckland" {
+		t.Fatalf("a good fix: %v %v", loc, err)
 	}
+	// With a fix remembered, what the rest of the app refuses as a position
+	// keeps the boat's clock instead of stopping the watches.
 	sentinel := vesselStateData{Latitude: -1, Longitude: -1}
-	if _, err := watchBoatLongitudeOf(sentinel, nil); err == nil {
-		t.Error("the -1,-1 pair is the no-position sentinel, not a place")
-	}
 	alert := good
 	alert.GNSSCriticalAlert = true
-	if _, err := watchBoatLongitudeOf(alert, nil); err == nil {
-		t.Error("a critical GNSS alert means the position is not to be trusted")
+	for name, c := range map[string]struct {
+		state vesselStateData
+		err   error
+	}{
+		"the -1,-1 sentinel": {sentinel, nil},
+		"a critical alert":   {alert, nil},
+		"a failed read":      {good, errors.New("signalk down")},
+	} {
+		if loc, err := watchBoatLocationOf(c.state, c.err); err != nil || loc.String() != "Pacific/Auckland" {
+			t.Errorf("%s should keep the last fix's zone: %v %v", name, loc, err)
+		}
 	}
-	if _, err := watchBoatLongitudeOf(good, errors.New("signalk down")); err == nil || !strings.Contains(err.Error(), "signalk down") {
-		t.Errorf("a failed read is reported with its cause: %v", err)
+	// A boat that has never had a fix has no clock to read a schedule on.
+	resetBoatZoneState()
+	t.Setenv("BOAT_ZONE_FILE", t.TempDir()+"/none.json")
+	if _, err := watchBoatLocationOf(sentinel, nil); err == nil {
+		t.Error("no fix ever seen: the schedule has no clock")
+	}
+}
+
+func TestWatchNoClockReason_SaysWhyInPlainWords(t *testing.T) {
+	if got := watchNoClockReason(errors.New("no position fix has ever been seen")); got != watchNoPositionReason {
+		t.Errorf("no fix: %q", got)
+	}
+	got := watchNoClockReason(&boatZoneProblem{errors.New(`time zone "Not/AZone" is not in the embedded zone database`)})
+	if !strings.Contains(got, "saved time zone can't be used") || !strings.Contains(got, "Not/AZone") {
+		t.Errorf("damaged zone: %q", got)
+	}
+	// And a damaged saved zone reaches it through the watch's own reader.
+	path := useFreshBoatZone(t)
+	if err := os.WriteFile(path, []byte(`{"zone":"Not/AZone"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := watchBoatLocationOf(vesselStateData{Latitude: -1, Longitude: -1}, nil)
+	if reason := watchNoClockReason(err); !strings.Contains(reason, "Not/AZone") {
+		t.Errorf("reason from the reader: %q", reason)
 	}
 }

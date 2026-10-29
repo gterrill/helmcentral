@@ -125,6 +125,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The boat's clock now follows daylight saving and half-hour zones.** It used
+  to be worked out from longitude alone, which put a boat in Sydney an hour out
+  all summer and a boat in Adelaide half an hour out. Helmcentral now finds the
+  time zone for the boat's position, so Sydney is on UTC+11 in summer and
+  Adelaide on UTC+9:30. Offshore it uses the ship's zone for the longitude.
+  Mate, the Watches page, passages and the forecasts all use the same clock, and
+  a forecast for a place you ask about uses that place's own time. If the
+  position drops out, the boat keeps the zone of its last good position and Mate
+  says "last fix". Before the first position ever arrives, times are UTC and
+  Mate says so. There's nothing for you to do.
 - **Watch reports are shorter and stick to the facts.** Repeated alarms are
   grouped by title, with how many times, the first and last time, and "active
   now" when the alarm is still going. Times say "yesterday" or the day when they

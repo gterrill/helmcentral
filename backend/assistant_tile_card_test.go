@@ -71,6 +71,7 @@ func tileCardPayload(t *testing.T, d assistantToolDeps, out string) mateTilePayl
 }
 
 func TestShowTileDepthTideCardsTheSnapshotTheModelReads(t *testing.T) {
+	useFreshBoatZone(t)
 	d := tileCardDeps(vesselStateData{Status: "anchored", Depth: 3.3, DepthLastUpdateAge: 2, Latitude: -20, Longitude: 148})
 	out, res := tileCardRun(t, d, `{"tile":"depth-tide"}`)
 	p := tileCardPayload(t, d, out)
@@ -115,7 +116,7 @@ func TestShowTileDepthTideCardsTheSnapshotTheModelReads(t *testing.T) {
 	}
 	// Figures for the model in the operator's units.
 	// Times are boat time (148E is UTC+10), whatever offset the provider wrote.
-	if res.Display["next_high"] != "3.00 m at 14:12 (UTC+10)" || res.Display["next_low"] != "0.50 m at 20:30 (UTC+10)" {
+	if res.Display["next_high"] != "3.00 m at 14:12 AEST (UTC+10)" || res.Display["next_low"] != "0.50 m at 20:30 AEST (UTC+10)" {
 		t.Errorf("tide extremes = %v / %v", res.Display["next_high"], res.Display["next_low"])
 	}
 	if res.Display["depth"] != "3.3 m" || res.Display["tide_now"] != "2.00 m rising" {
@@ -215,6 +216,7 @@ func TestShowTileCurrentTideBelowZeroReadsAsMissingLikeTheTile(t *testing.T) {
 }
 
 func TestShowTileWithoutAPositionGivesInstantsNotClockTimes(t *testing.T) {
+	useFreshBoatZone(t)
 	d := tileCardDeps(vesselStateData{Status: "anchored", Depth: 3.3, DepthLastUpdateAge: 2, Latitude: -1, Longitude: -1})
 	_, res := tileCardRun(t, d, `{"tile":"depth-tide"}`)
 	if res.Display["next_high"] != "3.00 m at 2026-10-29T04:12:00Z" {

@@ -23,7 +23,17 @@ require (
 	modernc.org/sqlite v1.34.4
 )
 
-require github.com/robfig/cron/v3 v3.0.1
+require (
+	github.com/ringsaturn/tzf v1.2.5
+	github.com/robfig/cron/v3 v3.0.1
+)
+
+require (
+	github.com/ringsaturn/orb v0.15.0 // indirect
+	github.com/ringsaturn/tzf-dist v0.0.2026-c-fix1 // indirect
+	github.com/tidwall/geoindex v1.7.0 // indirect
+	github.com/tidwall/rtree v1.10.0 // indirect
+)
 
 require (
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
@@ -59,7 +69,7 @@ require (
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0
 	golang.org/x/time v0.15.0 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.55.3 // indirect
 	modernc.org/mathutil v1.6.0 // indirect

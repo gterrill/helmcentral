@@ -90,6 +90,13 @@ func TestPlannedStay_Validation(t *testing.T) {
 func TestPlannedStayActive_DropsTheDayAfterDepartureAtThePlace(t *testing.T) {
 	s := validStay() // lon 153.1: the place keeps UTC+10
 	at := func(v string) time.Time { x, _ := time.Parse(time.RFC3339, v); return x }
+	plannedStayActive := func(s plannedStay, now time.Time) bool {
+		active, err := plannedStayActive(s, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return active
+	}
 	if !plannedStayActive(s, at("2026-10-20T00:00:00Z")) || !plannedStayActive(s, at("2026-10-31T10:00:00Z")) {
 		t.Fatal("a stay not yet started, and one departing today, are both live")
 	}

@@ -42,6 +42,27 @@ jobs:
         working-directory: backend
         run: go test -short ./...
 
+  # The boat's time zone comes from a position lookup whose index is built the
+  # first time anything needs a zone (backend/boat_time.go). The boat runs on a
+  # Raspberry Pi 5, so this builds it on a native arm64 runner and fails if the
+  # build takes over 3 s or holds over 64 MB. It is skipped by -short above, and
+  # it needs an arm64 runner; if the repository cannot use GitHub's hosted
+  # arm64 runners, run the same command on the Pi itself before a release.
+  zone-index-arm64:
+    name: Zone index on arm64
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Zone index init time and heap
+        working-directory: backend
+        run: go test -count=1 -run TestZoneFinderInitStaysSmall -v .
+
   frontend:
     name: Frontend
     runs-on: ubuntu-latest

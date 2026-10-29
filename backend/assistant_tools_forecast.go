@@ -436,8 +436,11 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		return "", fmt.Errorf("get_wind_forecast: %w", err)
 	}
 
-	tz := vesselLocalTimezoneName(args.Lon)
-	bundle, err := provider.FetchForecast(args.Lat, args.Lon, days, tz)
+	place, err := zoneAt(args.Lat, args.Lon)
+	if err != nil {
+		return "", fmt.Errorf("get_wind_forecast: %w", err)
+	}
+	bundle, err := provider.FetchForecast(args.Lat, args.Lon, days, place.Name)
 	if err != nil {
 		return "", fmt.Errorf("get_wind_forecast: weather provider %q: %w", providerID, err)
 	}
@@ -463,7 +466,7 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		}
 	}
 
-	loc := vesselLocalLocation(args.Lon)
+	loc := place.Loc
 	nowHour := d.now().Truncate(time.Hour)
 
 	dayOrder := make([]string, 0)
@@ -579,7 +582,7 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		Lat:             args.Lat,
 		Lon:             args.Lon,
 		CourseDeg:       args.CourseDeg,
-		Timezone:        tz,
+		Timezone:        place.Name,
 		WeatherProvider: providerID,
 		WaveProvider:    waveProviderID,
 		WavesError:      wavesError,

@@ -346,10 +346,8 @@ func (d assistantToolDeps) executeShowWindRose(ctx context.Context, raw json.Raw
 	}
 	unpaired := len(dir.Merged) + len(speedAt) - 2*len(samples)
 
-	loc, tz := time.UTC, "UTC"
-	if state, verr := d.vesselState(); verr == nil && hasUsableVesselPosition(state.Latitude, state.Longitude) {
-		loc, tz = vesselLocalLocation(state.Longitude), vesselLocalTimezoneName(state.Longitude)
-	}
+	boat := d.boatTime()
+	loc, tz := boat.Loc, boat.Name
 	if strongest != nil {
 		t, _ := time.Parse(time.RFC3339, strongest.At)
 		strongest.At = t.In(loc).Format(time.RFC3339)

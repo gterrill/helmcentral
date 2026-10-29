@@ -431,20 +431,19 @@ func watchSchedulePreviewHandler(c echo.Context) error {
 	}
 	resp.Valid = true
 	resp.Sentence, _ = watchScheduleSentence(body.Schedule)
-	lon, err := watchBoatLongitude()
+	loc, err := watchBoatLocation()
 	if err != nil {
-		resp.NextProblem = watchNoPositionReason
+		resp.NextProblem = watchNoClockReason(err)
 		return c.JSON(http.StatusOK, resp)
 	}
 	resp.BoatTimeKnown = true
-	loc := vesselLocalLocation(lon)
 	next, err := watchNextRuns(body.Schedule, time.Now(), loc, 3)
 	if err != nil {
 		resp.NextProblem = err.Error()
 		return c.JSON(http.StatusOK, resp)
 	}
 	for _, t := range next {
-		resp.Next = append(resp.Next, watchPreviewTime{At: t.UTC().Format(time.RFC3339), Local: t.In(loc).Format("Mon 2 Jan 15:04 MST")})
+		resp.Next = append(resp.Next, watchPreviewTime{At: t.UTC().Format(time.RFC3339), Local: watchClock(t, loc)})
 	}
 	return c.JSON(http.StatusOK, resp)
 }

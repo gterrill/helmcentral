@@ -821,12 +821,8 @@ func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage,
 	every := hist.Every
 	merged := hist.Merged
 
-	loc := time.UTC
-	tzLabel := "UTC"
-	if state, verr := d.vesselState(); verr == nil && hasUsableVesselPosition(state.Latitude, state.Longitude) {
-		loc = vesselLocalLocation(state.Longitude)
-		tzLabel = assistantTimeZoneLabel(state.Longitude)
-	}
+	boat := d.boatTime()
+	loc, tzLabel := boat.Loc, boat.LabelSpan(queryStart, queryStop, firstSeenAt, lastSeenAt)
 
 	buckets := make([]assistantPathHistoryBucket, 0, len(merged))
 	var overallMin, overallMax *float64

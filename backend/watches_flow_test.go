@@ -320,7 +320,7 @@ func TestWatchREST_RunNow(t *testing.T) {
 	if run.Outcome != watchOutcomeRan || run.Review == nil {
 		t.Fatalf("run %+v", run)
 	}
-	f.lonErr = context.Canceled
+	f.zoneErr = context.Canceled
 	c, rec = watchRequestTo(http.MethodPost, "/api/watches/id-Morning/run", "", "id", "id-Morning")
 	_ = runWatchHandler(c)
 	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "No boat position") {
@@ -334,9 +334,9 @@ func TestWatchREST_RunNow(t *testing.T) {
 }
 
 func TestWatchREST_SchedulePreview(t *testing.T) {
-	prev := watchBoatLongitude
-	t.Cleanup(func() { watchBoatLongitude = prev })
-	watchBoatLongitude = func() (float64, error) { return 150, nil } // UTC+10
+	prev := watchBoatLocation
+	t.Cleanup(func() { watchBoatLocation = prev })
+	watchBoatLocation = func() (*time.Location, error) { return mustZoneAt(-27.47, 153.03).Loc, nil } // Brisbane, UTC+10
 
 	c, rec := watchRequestTo(http.MethodPost, "/api/watches/schedule-preview", `{"schedule":"0 6 * * *"}`)
 	if err := watchSchedulePreviewHandler(c); err != nil || rec.Code != http.StatusOK {
@@ -347,7 +347,7 @@ func TestWatchREST_SchedulePreview(t *testing.T) {
 	if !out.Valid || out.Sentence != "Every day at 06:00 boat time" || !out.BoatTimeKnown || len(out.Next) != 3 {
 		t.Fatalf("%+v", out)
 	}
-	if !strings.Contains(out.Next[0].Local, "06:00 UTC+10") {
+	if !strings.Contains(out.Next[0].Local, "06:00 AEST") {
 		t.Errorf("run times are on the boat's clock: %+v", out.Next)
 	}
 	if _, err := time.Parse(time.RFC3339, out.Next[0].At); err != nil {
@@ -362,7 +362,7 @@ func TestWatchREST_SchedulePreview(t *testing.T) {
 		t.Fatalf("%+v", out)
 	}
 
-	watchBoatLongitude = func() (float64, error) { return 0, context.Canceled }
+	watchBoatLocation = func() (*time.Location, error) { return nil, context.Canceled }
 	c, rec = watchRequestTo(http.MethodPost, "/api/watches/schedule-preview", `{"schedule":"0 */2 * * *"}`)
 	_ = watchSchedulePreviewHandler(c)
 	out = watchPreviewResponse{}

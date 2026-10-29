@@ -225,7 +225,10 @@ or what region a place is in.
 
 When you give Mate dates, such as "August", it means those days on the boat's
 clock, in the time zone the Passages page shows for each passage. Mate quotes
-times in that zone too.
+times in that zone too. [Boat time](../reference/boat-time.md) says how that
+zone is chosen. If the boat has lost its position, Mate keeps the zone of the
+last good one and says "last fix". If the boat has never had a position, Mate
+says its times are UTC.
 
 If the boat is under way as you ask, that passage isn't in the log yet, because
 it's recorded when it ends. Mate tells you it's under way and how far it has

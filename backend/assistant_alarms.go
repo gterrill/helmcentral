@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 )
@@ -95,26 +94,16 @@ func (d assistantToolDeps) executeGetActiveAlarms(ctx context.Context, _ json.Ra
 	// The vessel's position is a SignalK round trip, needed only to turn
 	// timestamps into boat time. Without a timestamp to format, skip it.
 	loc := time.UTC
+	var stamps []time.Time
 	for _, a := range alarms {
-		if a.RaisedAt.IsZero() && a.AckedAt.IsZero() {
-			continue
+		for _, t := range []time.Time{a.RaisedAt, a.AckedAt} {
+			if !t.IsZero() {
+				stamps = append(stamps, t)
+			}
 		}
-		result.Timezone = "UTC"
-		var state vesselStateData
-		var verr error
-		if d.vesselState == nil {
-			verr = fmt.Errorf("vessel state is not wired")
-		} else if state, verr = d.vesselState(); verr == nil && !hasUsableVesselPosition(state.Latitude, state.Longitude) {
-			verr = fmt.Errorf("no usable vessel position")
-		}
-		if verr != nil {
-			log.Printf("get_active_alarms: vessel time zone unavailable, times are UTC: %v", verr)
-			result.TimezoneNote = fmt.Sprintf("vessel time zone unavailable: %v; these times are UTC, not boat time", verr)
-		} else {
-			loc = vesselLocalLocation(state.Longitude)
-			result.Timezone = assistantTimeZoneLabel(state.Longitude)
-		}
-		break
+	}
+	if len(stamps) > 0 {
+		loc, result.Timezone, result.TimezoneNote = boatTimeNote(d.boatTime(), stamps...)
 	}
 
 	for _, a := range alarms {

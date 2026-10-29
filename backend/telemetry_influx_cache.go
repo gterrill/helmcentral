@@ -144,18 +144,20 @@ var telemetryInfluxSolarPositionMissing atomic.Bool
 // refresher must not add a second fetch of its own every
 // telemetryInfluxRefreshInterval on top of it.
 //
-// ok is false when no usable position is known yet - absent, or one of
-// hasUsableVesselPosition's rejected sentinel pairs (weather_providers.go),
-// e.g. before the first GNSS fix after a restart. The caller must not fall
-// back to UTC silently in that case (Fallback Policy): refresh reports the
+// The zone is the one boatTimeAt gives (ADR 0228): the zone at the fix, or the
+// zone of the last fix while there is none. ok is false only when no fix has
+// ever been seen - absent, or one of hasUsableVesselPosition's rejected
+// sentinel pairs (weather_providers.go) with nothing remembered. The caller
+// must not fall back to UTC silently in that case (Fallback Policy): refresh reports the
 // solar day-bounded fields as the -1 sentinel for that tick instead of
 // guessing a UTC boundary.
 func currentVesselLocalLocation() (*time.Location, bool) {
 	lat, lon, ok := positionLeaf(globalSignalKSnapshot.liveSelfTelemetry(time.Now().UTC()))
-	if !ok || !hasUsableVesselPosition(lat, lon) {
+	boat := boatTimeAt(lat, lon, ok && hasUsableVesselPosition(lat, lon) && !gnssPositionCritical())
+	if boat.NoFix {
 		return nil, false
 	}
-	return vesselLocalLocation(lon), true
+	return boat.Loc, true
 }
 
 // refresh runs one pass unconditionally, the same way updateNearestTideStation

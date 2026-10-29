@@ -1,7 +1,10 @@
 # ADR 0035: Weather Local Day Boundaries and the Absent-Precipitation Sentinel
 
 ## Status
-Accepted
+Accepted. The longitude rule for the vessel's zone (section 1 and the fixed
+offset it names) is superseded in part by ADR 0228, which finds the zone from
+the boat's position instead. The rest stands: the host still names the zone,
+plugins still must use it, and the absent-precipitation sentinel is unchanged.
 
 Applies the AGENTS.md Fallback Policy ("prefer fail-fast; do not add graceful fallback behavior that masks upstream data/source problems") to the weather-provider path introduced by the weather plugin system (`backend/weather_providers.go`).
 

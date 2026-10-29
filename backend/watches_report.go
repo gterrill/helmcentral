@@ -167,7 +167,7 @@ func buildWatchReport(w savedWatch, in watchReportInput) (watchReport, []watchFi
 
 // watchClock is a time on the boat's clock, with its zone.
 func watchClock(t time.Time, loc *time.Location) string {
-	return t.In(loc).Format("Mon 2 Jan 15:04 MST")
+	return clockWithZone(t, loc, "Mon 2 Jan 15:04")
 }
 
 func watchHM(t time.Time, loc *time.Location) string { return t.In(loc).Format("15:04") }
@@ -583,6 +583,5 @@ func watchBoatZone(t time.Time, loc *time.Location) string {
 	if loc == nil || loc == time.UTC || loc.String() == "UTC" {
 		return ""
 	}
-	name, _ := t.In(loc).Zone()
-	return name
+	return zoneAbbreviation(t, loc)
 }

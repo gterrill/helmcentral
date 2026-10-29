@@ -6,7 +6,7 @@
 // weather_providers.go / wasm_weather_provider.go): a waveProvider
 // interface, a registry, HTTP handlers, and a WASM adapter
 // (wasm_wave_provider.go). The host owns local-day bucketing (via
-// vesselLocalLocation, exactly like weather) and the derived wave summary; a
+// the place's own zone, exactly like weather) and the derived wave summary; a
 // plugin's only job is to answer fetch_waves with SI-unit,
 // RFC3339-timestamped data (see the guest contract doc comment below).
 //
@@ -726,7 +726,7 @@ func waveForecast(c echo.Context) error {
 		})
 	}
 
-	localLocation := vesselLocalLocation(point.Lon)
+	localLocation := point.Zone.Loc
 	referenceDatetime := point.Reference
 	localTodayKey := referenceDatetime.In(localLocation).Format("2006-01-02")
 

@@ -19,10 +19,11 @@ ones that are due, one at a time. A run is the deterministic report, then
 Mate's review of it, then one row in watch_runs. Missed runs are never made up:
 after downtime a due watch runs once.
 
-A schedule is read on the boat's clock, which needs a boat position. Without
-one a run is not made and not read as UTC: a skip is recorded with the reason,
-at most once per missed instant, and the run is still owed when the position
-returns.
+A schedule is read on the boat's clock, which comes from the boat's position
+(the zone of its last fix when the current one is unusable). A boat that has
+never had a fix has no clock: a run is not made and not read as UTC, a skip is
+recorded with the reason, at most once per missed instant, and the run is
+still owed when the first fix arrives.
 
 If a run cannot be saved the scheduler stops every run until Helmcentral is
 restarted, logs it, and says so on GET /api/watches. A history that cannot be
@@ -33,10 +34,10 @@ written is a failure to surface, not to retry silently.
 const watchRunTimeout = 10 * time.Minute
 
 type watchHost struct {
-	store    func() *documentStore
-	now      func() time.Time
-	config   func() (watchConfig, error)
-	position func() (longitude float64, err error)
+	store  func() *documentStore
+	now    func() time.Time
+	config func() (watchConfig, error)
+	boat   func() (loc *time.Location, err error)
 	// report builds the deterministic report and the rules' findings.
 	report func(ctx context.Context, w savedWatch, now time.Time, loc *time.Location) (watchReport, []watchFinding, error)
 	// review has Mate read it.
@@ -87,9 +88,9 @@ func (h *watchHost) save(run watchRun, countsAsRun bool) bool {
 }
 
 // noteNoPosition leaves the no-position note. It is not a run.
-func (h *watchHost) noteNoPosition(w savedWatch, at time.Time) {
-	log.Printf("watches: %q skipped: %s", w.Name, watchNoPositionReason)
-	h.save(watchRun{WatchID: w.ID, StartedAt: at, FinishedAt: at, Outcome: watchOutcomeSkipped, SkipReason: watchNoPositionReason,
+func (h *watchHost) noteNoPosition(w savedWatch, at time.Time, reason string) {
+	log.Printf("watches: %q skipped: %s", w.Name, reason)
+	h.save(watchRun{WatchID: w.ID, StartedAt: at, FinishedAt: at, Outcome: watchOutcomeSkipped, SkipReason: reason,
 		CostKnown: true, Findings: []watchFinding{}}, false)
 }
 
@@ -121,12 +122,7 @@ func (h *watchHost) tick(ctx context.Context) {
 	boatZone := func() (*time.Location, error) {
 		if !boatKnown {
 			boatKnown = true
-			lon, err := h.position()
-			if err != nil {
-				boatErr = err
-			} else {
-				boat = vesselLocalLocation(lon)
-			}
+			boat, boatErr = h.boat()
 		}
 		return boat, boatErr
 	}
@@ -168,7 +164,7 @@ func (h *watchHost) tick(ctx context.Context) {
 		zone, zoneErr := boatZone()
 		if zoneErr != nil {
 			if watchMissedInEveryZone(w, now) {
-				h.noteNoPosition(w, now)
+				h.noteNoPosition(w, now, watchNoClockReason(zoneErr))
 			}
 			continue
 		}
@@ -282,9 +278,9 @@ func (h *watchHost) RunNow(ctx context.Context, w savedWatch) (*watchRun, error)
 	if w.Kind != watchKindScheduled {
 		return nil, errors.New("only a scheduled watch can be run now")
 	}
-	lon, err := h.position()
+	boatLoc, err := h.boat()
 	if err != nil {
-		return nil, errors.New(watchNoPositionReason)
+		return nil, errors.New(watchNoClockReason(err))
 	}
 	cfg, err := h.config()
 	if err != nil {
@@ -292,7 +288,7 @@ func (h *watchHost) RunNow(ctx context.Context, w savedWatch) (*watchRun, error)
 	}
 	// The operator leaving the page, or a chat turn being stopped, must not
 	// cancel a review that is already costing money.
-	run := h.runLocked(context.WithoutCancel(ctx), cfg, w, h.now(), vesselLocalLocation(lon), false)
+	run := h.runLocked(context.WithoutCancel(ctx), cfg, w, h.now(), boatLoc, false)
 	if run == nil {
 		if reason := h.stopReason(); reason != "" {
 			return nil, errors.New(reason)
@@ -306,10 +302,10 @@ func (h *watchHost) RunNow(ctx context.Context, w savedWatch) (*watchRun, error)
 
 func newProductionWatchHost(settingsPath string) *watchHost {
 	return &watchHost{
-		store:    func() *documentStore { return globalDocumentStore },
-		now:      func() time.Time { return time.Now().UTC() },
-		config:   func() (watchConfig, error) { return readWatchConfig(settingsPath) },
-		position: func() (float64, error) { return watchBoatLongitude() },
+		store:  func() *documentStore { return globalDocumentStore },
+		now:    func() time.Time { return time.Now().UTC() },
+		config: func() (watchConfig, error) { return readWatchConfig(settingsPath) },
+		boat:   func() (*time.Location, error) { return watchBoatLocation() },
 		report: func(ctx context.Context, w savedWatch, now time.Time, loc *time.Location) (watchReport, []watchFinding, error) {
 			return productionWatchReport(settingsPath, w, now, loc)
 		},
@@ -317,26 +313,44 @@ func newProductionWatchHost(settingsPath string) *watchHost {
 	}
 }
 
-// watchBoatLongitudeOf is the boat's longitude from the vessel state, or why
-// there is none. It applies the checks the rest of the app applies to a
-// position (usableOwnShipFix): the -1,-1 sentinel and a critical GNSS alert
-// are both refused, not just an out-of-range coordinate.
-func watchBoatLongitudeOf(state vesselStateData, err error) (float64, error) {
-	if err != nil {
-		return 0, err
+// watchBoatLocationOf is the boat's clock, or why there is none. The boat keeps
+// the zone of its last trusted fix when the current one is unusable (the
+// -1,-1 sentinel, a critical GNSS alert, a failed read), so a watch still
+// runs on the boat's clock through a GNSS drop-out. Only a boat that has
+// never had a fix has no clock to read a schedule on (ADR 0228).
+func watchBoatLocationOf(state vesselStateData, err error) (*time.Location, error) {
+	bt := boatTimeForState(state, err)
+	if bt.NoFix {
+		if bt.Err != nil {
+			return nil, &boatZoneProblem{bt.Err}
+		}
+		return nil, errors.New("no position fix has ever been seen")
 	}
-	_, lon, ok := usableOwnShipFix(state, nil)
-	if !ok {
-		return 0, errors.New("no usable vessel position")
-	}
-	return lon, nil
+	return bt.Loc, nil
 }
 
-// watchBoatLongitude reads the boat's longitude for the scheduler and for the
+// boatZoneProblem is a boat clock that exists but can't be read: the saved
+// last-fix zone is damaged or names a zone this build doesn't know.
+type boatZoneProblem struct{ cause error }
+
+func (e *boatZoneProblem) Error() string { return e.cause.Error() }
+func (e *boatZoneProblem) Unwrap() error { return e.cause }
+
+// watchNoClockReason is why a watch can't be read on the boat's clock, in the
+// operator's words: no position yet, or a saved time zone that can't be used.
+func watchNoClockReason(err error) string {
+	var bz *boatZoneProblem
+	if errors.As(err, &bz) {
+		return "The boat's saved time zone can't be used (" + firstErrorLine(bz.cause) + "), so the boat's time is not known"
+	}
+	return watchNoPositionReason
+}
+
+// watchBoatLocation reads the boat's clock for the scheduler and for the
 // schedule preview. A var so a test can supply one.
-var watchBoatLongitude = func() (float64, error) {
+var watchBoatLocation = func() (*time.Location, error) {
 	state, err := fetchSignalKVesselState()
-	return watchBoatLongitudeOf(state, err)
+	return watchBoatLocationOf(state, err)
 }
 
 // productionWatchReport reads the boat and builds the report.

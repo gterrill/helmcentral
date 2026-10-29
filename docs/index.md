@@ -129,6 +129,8 @@ Details to look up: settings, file formats and where things are stored.
 
 - [Configuration](reference/configuration.md): every environment variable,
   where data is kept, and what happens at startup.
+- [Boat time](reference/boat-time.md): how the boat's clock is chosen from its
+  position, what happens without a fix, and where the zone data comes from.
 - [Tiles](reference/tiles.md): the built-in tiles, their fields, and how every
   tile shows stale data and alert colours.
 - [Alarm rules](reference/alarm-rules.md): the built-in alarm rules and the

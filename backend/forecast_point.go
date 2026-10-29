@@ -14,10 +14,11 @@ import (
 // forecastPoint is where a forecast endpoint is asked about. Without lat and
 // lon query parameters it is the boat's own position from SignalK, as it has
 // always been. With both it is the place the operator named (a planned stay),
-// and SignalK is not consulted at all: the day boundaries and time zone come
-// from that place's longitude and "now" is the server clock.
+// and SignalK is not consulted at all: the day boundaries and time zone are
+// the place's own (zoneAt) and "now" is the server clock.
 type forecastPoint struct {
 	Lat, Lon  float64
+	Zone      placeZone
 	Reference time.Time
 	Explicit  bool
 }
@@ -57,7 +58,11 @@ func resolveForecastPoint(c echo.Context, settingsPath string, checkSignalKURL b
 		return forecastPoint{}, http.StatusBadRequest, err.Error()
 	}
 	if explicit {
-		return forecastPoint{Lat: lat, Lon: lon, Reference: time.Now().UTC(), Explicit: true}, 0, ""
+		zone, zerr := zoneAt(lat, lon)
+		if zerr != nil {
+			return forecastPoint{}, http.StatusBadGateway, zerr.Error()
+		}
+		return forecastPoint{Lat: lat, Lon: lon, Zone: zone, Reference: time.Now().UTC(), Explicit: true}, 0, ""
 	}
 
 	if checkSignalKURL {
@@ -78,9 +83,15 @@ func resolveForecastPoint(c echo.Context, settingsPath string, checkSignalKURL b
 	if !hasUsableVesselPosition(vesselState.Latitude, vesselState.Longitude) {
 		return forecastPoint{}, http.StatusBadGateway, "invalid vessel coordinates from SignalK"
 	}
+	// A critical GNSS alert leaves the state at the last trusted fix, so its
+	// zone is the remembered one and the forecast is still for that place.
+	boat := boatTimeForState(vesselState, nil)
+	if boat.NoFix {
+		return forecastPoint{}, http.StatusBadGateway, "no time zone could be found for the vessel position"
+	}
 	reference := vesselState.Datetime
 	if reference.IsZero() {
 		reference = time.Now().UTC()
 	}
-	return forecastPoint{Lat: vesselState.Latitude, Lon: vesselState.Longitude, Reference: reference}, 0, ""
+	return forecastPoint{Lat: vesselState.Latitude, Lon: vesselState.Longitude, Zone: boat.placeZone, Reference: reference}, 0, ""
 }

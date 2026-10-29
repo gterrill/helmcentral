@@ -203,6 +203,7 @@ func TestGetActiveAlarms_ZeroThresholdKeepsZeroValue(t *testing.T) {
 }
 
 func TestGetActiveAlarms_TimesInBoatLocalTime(t *testing.T) {
+	useFreshBoatZone(t)
 	a := sensorHealthAlarmForTest()
 	a.AckedAt = time.Date(2026, 10, 14, 2, 30, 0, 0, time.UTC)
 	deps := assistantToolDeps{
@@ -225,15 +226,16 @@ func TestGetActiveAlarms_TimesInBoatLocalTime(t *testing.T) {
 	if got.Alarms[0].RaisedAt != "Wed 14 Oct 11:02" || got.Alarms[0].AckedAt != "Wed 14 Oct 12:30" {
 		t.Errorf("want UTC+10 local times, got %+v", got.Alarms[0])
 	}
-	if got.Timezone != "UTC+10" {
+	if got.Timezone != "AEST (UTC+10)" {
 		t.Errorf("timezone = %q", got.Timezone)
 	}
 }
 
-func TestGetActiveAlarms_TimesFallBackToUTCLabelled(t *testing.T) {
+func TestGetActiveAlarms_TimesAreUTCAndSaySoBeforeAnyFix(t *testing.T) {
+	useFreshBoatZone(t)
 	deps := assistantToolDeps{activeAlarms: func() []alarmStatus { return []alarmStatus{sensorHealthAlarmForTest()} }}
 	out := runActiveAlarms(t, deps)
-	if !strings.Contains(out, `"timezone":"UTC"`) || !strings.Contains(out, "Wed 14 Oct 01:02") {
+	if !strings.Contains(out, `"timezone":"UTC (no position yet)"`) || !strings.Contains(out, "Wed 14 Oct 01:02") || !strings.Contains(out, "timezone_note") {
 		t.Errorf("want labelled UTC times: %s", out)
 	}
 }
@@ -412,14 +414,28 @@ func TestGetActiveAlarms_NoVesselFetchWithoutTimes(t *testing.T) {
 	}
 }
 
-func TestGetActiveAlarms_TimezoneErrorIsSurfaced(t *testing.T) {
+func TestGetActiveAlarms_ALostVesselReadKeepsTheLastFixZone(t *testing.T) {
+	useFreshBoatZone(t)
+	boatTimeAt(-27.5, 150, true)
 	deps := assistantToolDeps{
 		activeAlarms: func() []alarmStatus { return []alarmStatus{sensorHealthAlarmForTest()} },
 		vesselState:  func() (vesselStateData, error) { return vesselStateData{}, fmt.Errorf("signalk down") },
 	}
 	out := runActiveAlarms(t, deps)
-	if !strings.Contains(out, `"timezone":"UTC"`) || !strings.Contains(out, "timezone_note") || !strings.Contains(out, "signalk down") {
-		t.Errorf("want UTC with a note naming the error: %s", out)
+	if !strings.Contains(out, `"timezone":"AEST (UTC+10, last fix)"`) || !strings.Contains(out, "Wed 14 Oct 11:02") || strings.Contains(out, "timezone_note") {
+		t.Errorf("want the last fix's zone, labelled: %s", out)
+	}
+}
+
+func TestGetActiveAlarms_TimezoneErrorIsSurfaced(t *testing.T) {
+	useFreshBoatZone(t)
+	deps := assistantToolDeps{
+		activeAlarms: func() []alarmStatus { return []alarmStatus{sensorHealthAlarmForTest()} },
+		vesselState:  func() (vesselStateData, error) { return vesselStateData{}, fmt.Errorf("signalk down") },
+	}
+	out := runActiveAlarms(t, deps)
+	if !strings.Contains(out, `"timezone":"UTC (no position yet)"`) || !strings.Contains(out, "timezone_note") || !strings.Contains(out, "not boat time") {
+		t.Errorf("want UTC with a note saying it is not boat time: %s", out)
 	}
 }
 
@@ -469,5 +485,22 @@ func TestGetActiveAlarms_BigListDoesNotStripSmallOne(t *testing.T) {
 	}
 	if alarms[1]["sensor_count"] != nil {
 		t.Errorf("small alarm must not be marked cut: %v", alarms[1]["sensor_count"])
+	}
+}
+
+func TestGetActiveAlarms_TimezoneNamesBothSidesOfTheClocksChanging(t *testing.T) {
+	useFreshBoatZone(t)
+	a, b := sensorHealthAlarmForTest(), sensorHealthAlarmForTest()
+	a.RaisedAt = time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC)  // before Sydney's clocks go forward on 4 October
+	b.RaisedAt = time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC) // after
+	deps := assistantToolDeps{
+		activeAlarms: func() []alarmStatus { return []alarmStatus{a, b} },
+		vesselState: func() (vesselStateData, error) {
+			return vesselStateData{Latitude: -33.87, Longitude: 151.21}, nil
+		},
+	}
+	out := runActiveAlarms(t, deps)
+	if !strings.Contains(out, `"timezone":"AEST (UTC+10) then AEDT (UTC+11)"`) {
+		t.Errorf("one label for two sides of the change would be wrong for one of them: %s", out)
 	}
 }

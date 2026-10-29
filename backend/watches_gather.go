@@ -114,7 +114,12 @@ func watchStayForecastFor(d assistantToolDeps, stay vesselStatusStay, now time.T
 		out.Problem = firstErrorLine(err)
 		return out
 	}
-	loc := vesselLocalLocation(stay.Lon)
+	stayZone, err := zoneAt(stay.Lat, stay.Lon)
+	if err != nil {
+		out.Problem = "the stay's time zone is not known: " + firstErrorLine(err)
+		return out
+	}
+	loc := stayZone.Loc
 	arrive, err1 := time.ParseInLocation("2006-01-02", stay.Arrive, loc)
 	depart, err2 := time.ParseInLocation("2006-01-02", stay.Depart, loc)
 	if err1 != nil || err2 != nil {
@@ -122,7 +127,7 @@ func watchStayForecastFor(d assistantToolDeps, stay vesselStatusStay, now time.T
 		return out
 	}
 	end := depart.AddDate(0, 0, 1)
-	bundle, err := provider.FetchForecast(stay.Lat, stay.Lon, assistantMaxForecastDays, vesselLocalTimezoneName(stay.Lon))
+	bundle, err := provider.FetchForecast(stay.Lat, stay.Lon, assistantMaxForecastDays, stayZone.Name)
 	if err != nil {
 		out.Problem = fmt.Sprintf("weather provider %q: %s", providerID, firstErrorLine(err))
 		return out

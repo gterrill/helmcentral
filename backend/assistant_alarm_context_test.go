@@ -271,6 +271,7 @@ func TestGetAlarmContext_HistoryIsConvertedBeforeItIsRounded(t *testing.T) {
 }
 
 func TestGetAlarmContext_HistoryHasShapeAndBoatLocalTimes(t *testing.T) {
+	useFreshBoatZone(t)
 	raisedAt := time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC)
 	pt := func(m int, v float64) telemetryPoint {
 		return telemetryPoint{Timestamp: raisedAt.Add(time.Duration(m) * time.Minute), Value: v}

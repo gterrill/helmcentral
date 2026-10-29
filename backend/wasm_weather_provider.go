@@ -76,7 +76,7 @@ func newWasmWeatherProviderFromBase(base *wasmPluginBase) *wasmWeatherProvider {
 
 // wasmFetchForecastInput mirrors the guest's fetch_forecast input contract.
 // Timezone is the IANA zone the plugin must roll its days[] up on - see
-// vesselLocalTimezoneName (weather_tide.go) and the guest contract doc
+// zoneAt (boat_time.go) and the guest contract doc
 // comment in weather_providers.go.
 type wasmFetchForecastInput struct {
 	Lat      float64 `json:"lat"`

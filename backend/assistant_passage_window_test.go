@@ -19,7 +19,15 @@ import (
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
-var pwLoc = vesselLocalLocation(147)
+// Loaded by name, not looked up by position: a package-level lookup would build
+// the zone index at test start-up and hide its cost from tzf_resource_test.go.
+var pwLoc = func() *time.Location {
+	l, err := time.LoadLocation("Australia/Brisbane")
+	if err != nil {
+		panic(err)
+	}
+	return l
+}()
 
 func pwF(v float64) *float64 { return &v }
 
@@ -207,7 +215,7 @@ func TestAssessItinerary_ThursdayPlusTwoNightsIsSaturday(t *testing.T) {
 	if p.Legs[0].StayNightsAfter == nil || *p.Legs[0].StayNightsAfter != 2 || p.Legs[1].StayNightsAfter != nil {
 		t.Fatalf("stays = %+v", p.Legs)
 	}
-	if p.Timezone != vesselLocalTimezoneName(147) || p.ForecastFetchedAt != "2026-10-19T09:00:00+10:00" || p.Provider != "test-wx" || p.WaveProvider != "test-waves" {
+	if p.Timezone != "Australia/Brisbane" || p.ForecastFetchedAt != "2026-10-19T09:00:00+10:00" || p.Provider != "test-wx" || p.WaveProvider != "test-waves" {
 		t.Fatalf("header = %+v", p)
 	}
 }

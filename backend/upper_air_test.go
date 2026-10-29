@@ -221,7 +221,7 @@ func TestUpperAirForecast_ConfiguredButMissingProviderIs502(t *testing.T) {
 func TestUpperAirForecast_ServesTheOutlook(t *testing.T) {
 	withCleanUpperAirProviderRegistry(t)
 
-	loc := vesselLocalLocation(153.0)
+	loc := queenslandLoc(t)
 	nowLocal := time.Now().In(loc)
 	midnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 
@@ -464,7 +464,7 @@ func TestUpperAirWindowFor_AbsentWithoutData(t *testing.T) {
 func TestUpperAirForecast_ServesTheTraceAndWindow(t *testing.T) {
 	withCleanUpperAirProviderRegistry(t)
 
-	loc := vesselLocalLocation(153.0)
+	loc := queenslandLoc(t)
 	nowLocal := time.Now().In(loc)
 	midnight := time.Date(nowLocal.Year(), nowLocal.Month(), nowLocal.Day(), 0, 0, 0, 0, loc)
 

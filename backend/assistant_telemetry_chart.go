@@ -633,10 +633,8 @@ func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw js
 		}
 	}
 
-	loc, tz := time.UTC, "UTC"
-	if state, verr := d.vesselState(); verr == nil && hasUsableVesselPosition(state.Latitude, state.Longitude) {
-		loc, tz = vesselLocalLocation(state.Longitude), vesselLocalTimezoneName(state.Longitude)
-	}
+	boat := d.boatTime()
+	loc, tz := boat.Loc, boat.Name
 	at := func(t time.Time) string { return t.In(loc).Format(time.RFC3339) }
 
 	// The model's summary.
