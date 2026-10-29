@@ -244,7 +244,9 @@ func watchPowerSection(_ savedWatch, in watchReportInput) (watchReportSection, [
 	var findings []watchFinding
 	for _, o := range in.Status.Observations {
 		if o.Kind == "overnight_house_draw" {
-			findings = append(findings, ruleFinding(watchSectionPower, "overnight_draw", o.Summary))
+			f := ruleFinding(watchSectionPower, "overnight_draw", o.Summary)
+			f.chart = overnightChartSpec(o)
+			findings = append(findings, f)
 		}
 	}
 	return s, findings
@@ -472,8 +474,10 @@ func watchTanksSection(w savedWatch, in watchReportInput) (watchReportSection, [
 		if delta < 0 {
 			dir = "down"
 		}
-		findings = append(findings, ruleFinding(watchSectionTanks, "tank_change", fmt.Sprintf(
-			"%s is %s %.0f points since %s (%.0f %% to %.0f %%).", tank.Name, dir, math.Abs(delta), watchHM(in.PreviousAt, loc), was, now)))
+		f := ruleFinding(watchSectionTanks, "tank_change", fmt.Sprintf(
+			"%s is %s %.0f points since %s (%.0f %% to %.0f %%).", tank.Name, dir, math.Abs(delta), watchHM(in.PreviousAt, loc), was, now))
+		f.chart = tankChartSpec(tank, in)
+		findings = append(findings, f)
 	}
 	if !havePrev {
 		s.Lines = append(s.Lines, "No earlier report to compare with, so changes are measured from the next one.")
@@ -512,7 +516,9 @@ func watchWeatherSection(w savedWatch, in watchReportInput) (watchReportSection,
 		if now, ok := watchValueText(sur.Pressure); ok {
 			text += ", now " + now
 		}
-		findings = append(findings, ruleFinding(watchSectionWeather, "pressure_fall", text+"."))
+		f := ruleFinding(watchSectionWeather, "pressure_fall", text+".")
+		f.chart = pressureChartSpec(sur, w.Thresholds.PressureFallHPa, in.Now)
+		findings = append(findings, f)
 	}
 	stay := in.Stay
 	switch {
@@ -585,4 +591,56 @@ func watchBoatZone(t time.Time, loc *time.Location) string {
 	}
 	name, _ := t.In(loc).Zone()
 	return name
+}
+
+// ── chart specs (ADR 0228) ──────────────────────────────────────────────
+// What each rule's finding wants drawn. They say where to read the series and
+// in which window; resolveWatchChart (watches_chart.go) reads them.
+
+// watchPressureChartWindow is how far back a pressure chart looks.
+const watchPressureChartWindow = 12 * time.Hour
+
+func pressureChartSpec(sur vesselStatusSurroundings, fallHPa float64, now time.Time) *watchChartSpec {
+	spec := &watchChartSpec{Title: "Pressure, last 12 hours", From: now.Add(-watchPressureChartWindow), To: now}
+	p := sur.Pressure
+	_, conv, _, known := operatorUnit("Pa")
+	if p.Value == nil || p.Unit != "Pa" || p.DisplayUnit == "" || !known {
+		spec.Problem = "the pressure is not given in the operator's unit"
+		return spec
+	}
+	spec.Series = []watchChartSeriesSpec{{Label: "Pressure", Unit: p.DisplayUnit, Barometer: true, SIUnit: "Pa"}}
+	if c := sur.PressureChange3h; c.Value != nil && c.Unit == "Pa" {
+		spec.Threshold = &watchChartThreshold{Label: "3 h fall limit", Value: chartRound(conv(*p.Value - *c.Value - fallHPa*100))}
+	}
+	return spec
+}
+
+func tankChartSpec(tank vesselStatusTank, in watchReportInput) *watchChartSpec {
+	from := in.PreviousAt
+	if latest := in.Now.Add(-time.Hour); from.After(latest) {
+		from = latest
+	}
+	spec := &watchChartSpec{Title: tank.Name + " level", From: from, To: in.Now}
+	if tank.levelPath == "" {
+		spec.Problem = "the tank's SignalK path is not known"
+		return spec
+	}
+	spec.Series = []watchChartSeriesSpec{{Label: tank.Name, Unit: "%", Path: tank.levelPath, Convert: "percent"}}
+	if tank.WarnPercent > 0 && tank.AlarmsNotRunning == "" && !tank.AlarmsOff {
+		spec.Threshold = &watchChartThreshold{Label: "Warning level", Value: tank.WarnPercent}
+	}
+	return spec
+}
+
+func overnightChartSpec(o vesselObservation) *watchChartSpec {
+	spec := &watchChartSpec{Title: "House bank overnight", From: o.nightStart, To: o.nightEnd}
+	if o.bankPath == "" || o.nightStart.IsZero() || !o.nightEnd.After(o.nightStart) {
+		spec.Problem = "the night's window or the house bank's path is not known"
+		return spec
+	}
+	spec.Series = []watchChartSeriesSpec{
+		{Label: "Charge", Unit: "%", Path: o.bankPath + ".capacity.stateOfCharge", Convert: "percent"},
+		{Label: "Current", Unit: "A", Path: o.bankPath + ".current"},
+	}
+	return spec
 }

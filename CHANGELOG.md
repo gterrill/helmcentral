@@ -25,6 +25,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Watch reports can show a chart.** A finding about a trend now comes with a
+  chart: pressure over 12 hours when it falls, the house bank's charge and current
+  over the night it measured, and a tank's level since the last report. Mate can
+  attach a chart to a finding it adds. The Watches page draws it under the finding,
+  and the email carries it as a picture under that finding. ntfy sends the first
+  one as an attachment, and the webhook gets each chart's points and a picture. A
+  chart is only drawn from readings Helmcentral recorded. When it can't read them,
+  the finding says why instead. If your ntfy server won't take attachments, the
+  report goes as text and the run says so. Phone push is unchanged.
 - **Watches can notify you.** Each watch now has a **Notifications** section. Pick
   where its report goes: ntfy, email, a webhook or phone and browser push, the
   same channels your alarms use. A new watch starts with every channel that's

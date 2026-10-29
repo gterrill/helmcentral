@@ -83,11 +83,13 @@ type vesselStatusPower struct {
 }
 
 type vesselStatusTank struct {
-	Name         string      `json:"name"`
-	Kind         string      `json:"kind"`
-	Level        statusValue `json:"level_percent"`
-	WarnPercent  float64     `json:"warn_percent"`
-	AlarmPercent float64     `json:"alarm_percent"`
+	Name  string      `json:"name"`
+	Kind  string      `json:"kind"`
+	Level statusValue `json:"level_percent"`
+	// levelPath is the SignalK path the level was read from; not on the wire.
+	levelPath    string
+	WarnPercent  float64 `json:"warn_percent"`
+	AlarmPercent float64 `json:"alarm_percent"`
 	// BadWhen says which end is the bad one: "low" for fuel and water, "high"
 	// for waste.
 	BadWhen string `json:"bad_when"`
@@ -192,6 +194,9 @@ type vesselObservation struct {
 	Ratio                   float64 `json:"ratio"`
 	NightsCompared          int     `json:"nights_compared"`
 	NightStart              string  `json:"night_start,omitempty"`
+	// The night window and the bank, for a watch's chart. Not on the wire.
+	nightStart, nightEnd time.Time
+	bankPath             string
 }
 
 type vesselStatusResult struct {
@@ -532,6 +537,7 @@ func (d assistantToolDeps) vesselStatusTanksFor(t telemetryReader, system string
 		} else if tank.Level, err = statusReading(item.Source, percent, "%", system, n.Age); err != nil {
 			return vesselStatusTanks{}, err
 		}
+		tank.levelPath = item.Source + ".currentLevel"
 		out.Tanks = append(out.Tanks, tank)
 	}
 	if len(out.Tanks) == 0 {
@@ -845,6 +851,8 @@ func overnightDrawObservation(r overnightResult) *vesselObservation {
 	if !r.LastNightStart.IsZero() {
 		o.NightStart = r.LastNightStart.UTC().Format(time.RFC3339)
 	}
+	o.nightStart, o.nightEnd = r.LastNightStart, r.LastNightEnd
+	o.bankPath = strings.TrimSuffix(r.SocPath, ".capacity.stateOfCharge")
 	o.Summary = fmt.Sprintf("On the last completed night the house bank drained at %.2f %% of charge an hour, %.1f times the %.2f %% an hour it usually drains over the %d nights before.",
 		o.LastNightPercentPerHour, o.Ratio, o.TypicalPercentPerHour, o.NightsCompared)
 	return o

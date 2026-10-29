@@ -131,6 +131,37 @@ On a watch you can change how many alarms or sensor problems count, how far a
 tank has to move, and how far the pressure has to fall. None of the defaults
 belong to a particular boat, so check them against yours.
 
+## Charts
+
+A finding about a trend can come with a chart, so you can see the shape and not
+just read the figure. The page draws it under the finding, and a report sent to
+your phone or inbox carries it as a picture.
+
+- **Pressure down:** The pressure over the last 12 hours, with a dashed line at
+  the fall limit from 3 hours earlier.
+- **Overnight draw:** The house bank's charge and current over the night it
+  measured, one above the other.
+- **A tank that moved:** That tank's level since the last report, with its
+  warning level as a dashed line. It always covers at least the last hour.
+- **Findings Mate adds:** Mate can attach a chart of one reading over 1 to 48
+  hours when the trend is the evidence. It only asks for the reading and the
+  hours. Helmcentral draws the line itself from your recorded history.
+
+A run gets at most two charts. A finding past the second says "Only two charts per report".
+
+A chart is only drawn from readings Helmcentral actually recorded. When it can't
+read them, the finding says why in a grey line. Two examples are:
+
+- "No history to chart: the barometer history is empty (it starts empty when
+  Helmcentral restarts)".
+- "No history to chart: InfluxDB history is not available on this install".
+
+Nothing is filled in. Pressure comes from readings Helmcentral keeps in memory,
+so right after a restart there may be too few. The other charts need InfluxDB.
+
+Times on a chart are on the boat's clock, and the zone is written beside the
+title.
+
 ## Mate's review
 
 Whenever Mate is switched on, it reads every report. There's no separate switch
@@ -203,8 +234,19 @@ What you receive depends on the channel:
   page. They arrive at normal priority, so they don't break through
   do-not-disturb the way an alarm can.
 - **Email:** The title is the subject, and the body is the whole report: every
-  finding, Mate's review and every section's lines.
-- **Webhook:** The report as data. See [Watch report webhook](../reference/webhook-payloads.md).
+  finding, Mate's review and every section's lines. When a finding has a chart,
+  the email also comes as a page with the chart as a picture under that finding.
+  The plain text is still there for mail programs that want it.
+- **When a chart can't be drawn:** The report still goes out without it. The
+  email, the ntfy message and the webhook all say "Chart left out" and why, and
+  the run records it.
+- **ntfy and charts:** The first chart goes with the message as a picture
+  attachment. If your ntfy server won't take attachments, Helmcentral sends the
+  text on its own so the report isn't lost. The run then says "ntfy: sent without
+  the chart" and why. That is the one place a report is sent in a lesser form.
+- **Webhook:** The report as data, with each chart's points and a picture of it.
+  See [Watch report webhook](../reference/webhook-payloads.md).
+- **Phone push:** No picture. Tapping it opens the run, where the chart is.
 
 A link to the run needs to know the address you reach Helmcentral on from off the
 boat, and Helmcentral can't tell. Set it in **Settings** under **Alarms**, in the

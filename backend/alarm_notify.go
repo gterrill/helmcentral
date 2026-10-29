@@ -3,8 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"net/smtp"
 	"strings"
@@ -30,6 +34,10 @@ type notificationMessage struct {
 	// Watch is the report of a watch_report message (watches_notify.go). It
 	// is nil on every alarm notification.
 	Watch *watchReportMessage `json:"watch,omitempty"`
+
+	// note, when set, is told where a delivery was not as meant (a phone
+	// message sent without its chart). It is the dispatcher's, never queued.
+	note func(string)
 }
 
 func (m notificationMessage) isWatchReport() bool { return m.Kind == notificationKindWatchReport }
@@ -87,6 +95,24 @@ type ntfyTransport struct {
 func (t ntfyTransport) ID() string { return transportNtfy }
 
 func (t ntfyTransport) Send(ctx context.Context, msg notificationMessage) error {
+	if msg.isWatchReport() && msg.Watch != nil && len(msg.Watch.Charts) > 0 {
+		err := t.sendWithChart(ctx, msg)
+		var refused *ntfyAttachmentRefused
+		if !errors.As(err, &refused) {
+			return err
+		}
+		// A delivery choice (ADR 0228): the server will not take the picture,
+		// so the report goes as text rather than not at all. It is logged
+		// and noted on the run, never silent.
+		log.Printf("watch report: ntfy refused the chart of %q, so it is sent as text only: %s", msg.Label, refused.reason)
+		if msg.note != nil {
+			msg.note("ntfy: sent without the chart (" + refused.reason + ")")
+		}
+	}
+	return t.sendText(ctx, msg)
+}
+
+func (t ntfyTransport) sendText(ctx context.Context, msg notificationMessage) error {
 	url := t.config.Server + "/" + t.config.Topic
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(msg.Message))
@@ -119,6 +145,90 @@ func (t ntfyTransport) Send(ctx context.Context, msg notificationMessage) error 
 		return fmt.Errorf("ntfy returned status %d", response.StatusCode)
 	}
 	return nil
+}
+
+// withChartLeftOut is the message with a closing line saying a chart was left
+// out and why.
+func withChartLeftOut(msg notificationMessage, problem string) notificationMessage {
+	msg.Message += "\nChart left out: " + problem
+	return msg
+}
+
+// ntfyAttachmentRefused is an ntfy server saying it will not take the chart:
+// attachments are off, or the file is over its limits.
+type ntfyAttachmentRefused struct{ reason string }
+
+func (e *ntfyAttachmentRefused) Error() string { return "ntfy refused the attachment: " + e.reason }
+
+// watchNtfyMessageChars caps the Message header of a report sent with a chart.
+const watchNtfyMessageChars = 500
+
+// sendWithChart sends a watch report with its first chart as an attachment:
+// ntfy's PUT API takes the file as the body and the text in the Message header.
+func (t ntfyTransport) sendWithChart(ctx context.Context, msg notificationMessage) error {
+	charts, pngs := renderChartsForSend(msg.Watch.Charts[:1], "ntfy", msg.note)
+	chart, data := charts[0], pngs[0]
+	if data == nil {
+		// Left out, and the message says so: it goes as text with the line.
+		return t.sendText(ctx, withChartLeftOut(msg, chart.Problem))
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPut, t.config.Server+"/"+t.config.Topic, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Filename", watchChartFilename(chart.Title))
+	request.Header.Set("Message", watchEncodedHeaderText(truncateRunes(watchHeaderText(msg.Message), watchNtfyMessageChars)))
+	request.Header.Set("Title", watchEncodedHeaderText(msg.title()))
+	if msg.Watch.Link != "" {
+		request.Header.Set("Click", msg.Watch.Link)
+	}
+	request.Header.Set("Priority", ntfyPriorityFor(msg))
+	request.Header.Set("Tags", ntfyTagsFor(msg))
+	if t.token != "" {
+		request.Header.Set("Authorization", "Bearer "+t.token)
+	}
+	response, err := notifyHTTPClient().Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(response.Body, 2048))
+	if (response.StatusCode >= 400 && response.StatusCode < 500 || response.StatusCode == http.StatusInsufficientStorage) &&
+		strings.Contains(strings.ToLower(string(body)), "attach") {
+		reason := strings.TrimSpace(string(body))
+		var parsed struct {
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(body, &parsed) == nil && parsed.Error != "" {
+			reason = parsed.Error
+		}
+		return &ntfyAttachmentRefused{reason: fmt.Sprintf("the server answered %d: %s", response.StatusCode, reason)}
+	}
+	return fmt.Errorf("ntfy returned status %d", response.StatusCode)
+}
+
+// watchChartFilename is a title as a file name: "Pressure, last 12 hours" is
+// pressure-last-12-hours.png.
+func watchChartFilename(title string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(title) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			dash = false
+		} else if !dash && b.Len() > 0 {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	name := strings.TrimRight(b.String(), "-")
+	if name == "" {
+		name = "chart"
+	}
+	return name + ".png"
 }
 
 // ntfyPriorityFor maps SignalK severities onto ntfy's 1-5 scale. An emergency
@@ -174,7 +284,15 @@ func (t webhookTransport) Send(ctx context.Context, msg notificationMessage) err
 		if msg.Watch == nil {
 			return fmt.Errorf("watch report has no report to send")
 		}
-		payload = msg.Watch
+		withPNGs := *msg.Watch
+		charts, pngs := renderChartsForSend(msg.Watch.Charts, "webhook", msg.note)
+		for i := range charts {
+			if pngs[i] != nil {
+				charts[i].PNGBase64 = base64.StdEncoding.EncodeToString(pngs[i])
+			}
+		}
+		withPNGs.Charts = charts
+		payload = &withPNGs
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -248,6 +366,9 @@ func buildAlarmEmail(config smtpConfig, msg notificationMessage) []byte {
 }
 
 func buildWatchEmail(config smtpConfig, msg notificationMessage) []byte {
+	if len(msg.Watch.Charts) > 0 {
+		return buildWatchEmailWithCharts(config, msg)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", config.From)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(config.To, ", "))

@@ -87,6 +87,23 @@ export interface WatchFinding {
   rule: string
   text: string
   by: 'rules' | 'mate'
+  /** Why a chart that was asked for could not be drawn. */
+  chart_problem?: string
+}
+
+/** A finding's chart as data: the points, never an image. */
+export interface WatchChartData {
+  /** The finding in the run's findings this chart belongs to. */
+  finding_index: number
+  title: string
+  /** The unit of the first series, which the threshold is in. */
+  unit: string
+  /** The boat clock's offset label ("UTC+12") and its offset in seconds. */
+  timezone: string
+  utc_offset_seconds: number
+  window: { from: string; to: string }
+  series: Array<{ label: string; unit: string; /** [unix ms, value in the series' unit] */ points: [number, number][] }>
+  threshold?: { label: string; value: number }
 }
 
 export interface WatchReportSection {
@@ -142,6 +159,10 @@ export interface WatchRun {
   report_kind: 'sections' | 'samples'
   report?: WatchSectionsReport | WatchSamplesReport
   findings: WatchFinding[]
+  /** The findings' charts. Absent on a run saved before charts existed. */
+  charts?: WatchChartData[]
+  /** Where a delivery was not as meant, such as a message sent without its chart. */
+  notify_notes?: string[]
   review: string | null
   review_problem: string | null
   cost_usd: number | null

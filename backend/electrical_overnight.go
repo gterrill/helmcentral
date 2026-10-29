@@ -209,6 +209,7 @@ type overnightResult struct {
 	// it, most recent first. get_vessel_status compares the one with the
 	// median of the others (ADR 0222). None of them are on the wire.
 	LastNightStart                time.Time `json:"-"`
+	LastNightEnd                  time.Time `json:"-"`
 	LastNightRatePercentPerHour   *float64  `json:"-"`
 	PriorNightRatesPercentPerHour []float64 `json:"-"`
 }
@@ -376,7 +377,7 @@ func computeOvernight(
 
 	var slopes []float64
 	var lastRate float64
-	var lastStart time.Time
+	var lastStart, lastEnd time.Time
 	var lastUsable bool
 	var nightsConsidered, excludedShore, excludedGenerator, excludedGap, excludedRise int
 	var oldestScanned nightWindow
@@ -394,7 +395,7 @@ func computeOvernight(
 			switch {
 			case usable:
 				if nightsConsidered == 1 {
-					lastRate, lastStart = slope, w.Start
+					lastRate, lastStart, lastEnd = slope, w.Start, w.End
 					lastUsable = true
 				}
 				slopes = append(slopes, slope)
@@ -419,7 +420,7 @@ func computeOvernight(
 	result.OldestNightStart = oldestScanned.Start
 	if lastUsable {
 		result.LastNightRatePercentPerHour = &lastRate
-		result.LastNightStart = lastStart
+		result.LastNightStart, result.LastNightEnd = lastStart, lastEnd
 		result.PriorNightRatesPercentPerHour = append([]float64(nil), slopes[1:]...)
 	}
 

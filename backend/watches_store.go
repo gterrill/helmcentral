@@ -121,6 +121,11 @@ type watchFinding struct {
 	// words, so the same issue is the same finding from one run to the next
 	// whatever Mate's wording. Empty on a finding the rules reached.
 	Key string `json:"key,omitempty"`
+	// ChartProblem says why a chart that was asked for could not be drawn.
+	ChartProblem string `json:"chart_problem,omitempty"`
+	// chart is what the finding wants drawn; it is resolved into a watchChart
+	// before the run is saved and never stored.
+	chart *watchChartSpec
 }
 
 type watchRun struct {
@@ -133,6 +138,13 @@ type watchRun struct {
 	ReportKind string          `json:"report_kind"`
 	Report     json.RawMessage `json:"report,omitempty"`
 	Findings   []watchFinding  `json:"findings"`
+	// Charts are the charts of the findings, as data (ADR 0228). Each names
+	// its finding by index. The page draws them and the notifications render
+	// a PNG from them.
+	Charts []watchChart `json:"charts"`
+	// NotifyNotes say where a delivery was not as it was meant to be, such as
+	// a phone message sent without its chart.
+	NotifyNotes []string `json:"notify_notes"`
 	// Review is Mate's reading of the report. ReviewProblem says why there
 	// is none. Exactly one of them is set on a run that produced a report.
 	Review        *string  `json:"review"`
@@ -263,7 +275,9 @@ func createWatchesSchema(db *sql.DB) error {
 			timezone      TEXT NOT NULL DEFAULT '',
 			notified      TEXT NOT NULL DEFAULT '[]',
 			told_keys     TEXT NOT NULL DEFAULT '[]',
-			not_sent      TEXT NOT NULL DEFAULT ''
+			not_sent      TEXT NOT NULL DEFAULT '',
+			charts        TEXT NOT NULL DEFAULT '[]',
+			notify_notes  TEXT NOT NULL DEFAULT '[]'
 		)`); err != nil {
 		return fmt.Errorf("create watch_runs table: %w", err)
 	}
@@ -273,9 +287,11 @@ func createWatchesSchema(db *sql.DB) error {
 		}
 	}
 	for col, decl := range map[string]string{
-		"notified":  "TEXT NOT NULL DEFAULT '[]'",
-		"told_keys": "TEXT NOT NULL DEFAULT '[]'",
-		"not_sent":  "TEXT NOT NULL DEFAULT ''",
+		"notified":     "TEXT NOT NULL DEFAULT '[]'",
+		"told_keys":    "TEXT NOT NULL DEFAULT '[]'",
+		"not_sent":     "TEXT NOT NULL DEFAULT ''",
+		"charts":       "TEXT NOT NULL DEFAULT '[]'",
+		"notify_notes": "TEXT NOT NULL DEFAULT '[]'",
 	} {
 		if err := addColumnIfMissing(db, "watch_runs", col, decl); err != nil {
 			return err
@@ -481,7 +497,7 @@ func countScheduledWatchesQ(q sqlQueryer) (int, error) {
 // ── runs ────────────────────────────────────────────────────────────────
 
 const watchRunColumns = `id, watch_id, started_at, finished_at, outcome, skip_reason, report_kind, report, findings,
-	review, review_problem, cost_usd, cost_known, model, boat_time, timezone, notified, told_keys, not_sent`
+	review, review_problem, cost_usd, cost_known, model, boat_time, timezone, notified, told_keys, not_sent, charts, notify_notes`
 
 func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 	var (
@@ -492,9 +508,10 @@ func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 		cost                  sql.NullFloat64
 		known                 int
 		notified, told        string
+		charts, notes         string
 	)
 	if err := row.Scan(&r.ID, &r.WatchID, &started, &finished, &r.Outcome, &r.SkipReason, &r.ReportKind, &report, &findings,
-		&review, &reviewProblem, &cost, &known, &r.Model, &r.BoatTime, &r.Timezone, &notified, &told, &r.NotSent); err != nil {
+		&review, &reviewProblem, &cost, &known, &r.Model, &r.BoatTime, &r.Timezone, &notified, &told, &r.NotSent, &charts, &notes); err != nil {
 		return watchRun{}, err
 	}
 	if err := json.Unmarshal([]byte(notified), &r.Notified); err != nil {
@@ -502,6 +519,18 @@ func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 	}
 	if r.Notified == nil {
 		r.Notified = []string{}
+	}
+	if err := json.Unmarshal([]byte(charts), &r.Charts); err != nil {
+		return watchRun{}, fmt.Errorf("run %s: the saved charts are unreadable: %w", r.ID, err)
+	}
+	if r.Charts == nil {
+		r.Charts = []watchChart{}
+	}
+	if err := json.Unmarshal([]byte(notes), &r.NotifyNotes); err != nil {
+		return watchRun{}, fmt.Errorf("run %s: the saved delivery notes are unreadable: %w", r.ID, err)
+	}
+	if r.NotifyNotes == nil {
+		r.NotifyNotes = []string{}
 	}
 	if err := json.Unmarshal([]byte(told), &r.ToldKeys); err != nil {
 		return watchRun{}, fmt.Errorf("run %s: the saved told findings are unreadable: %w", r.ID, err)
@@ -550,11 +579,19 @@ func insertWatchRunTx(x alarmSQLExecer, r watchRun, countsAsRun bool) error {
 	if err != nil {
 		return err
 	}
+	charts := r.Charts
+	if charts == nil {
+		charts = []watchChart{}
+	}
+	chartsJSON, err := json.Marshal(charts)
+	if err != nil {
+		return err
+	}
 	if _, err := x.Exec(`INSERT INTO watch_runs (id, watch_id, started_at, finished_at, outcome, skip_reason, report_kind, report,
-		findings, has_finding, review, review_problem, cost_usd, cost_known, model, boat_time, timezone)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		findings, has_finding, review, review_problem, cost_usd, cost_known, model, boat_time, timezone, charts)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WatchID, watchStoreTime(r.StartedAt), watchStoreTime(r.FinishedAt), r.Outcome, r.SkipReason, r.ReportKind, string(r.Report),
-		string(findings), boolToInt(len(r.Findings) > 0), r.Review, r.ReviewProblem, r.CostUSD, boolToInt(r.CostKnown), r.Model, r.BoatTime, r.Timezone); err != nil {
+		string(findings), boolToInt(len(r.Findings) > 0), r.Review, r.ReviewProblem, r.CostUSD, boolToInt(r.CostKnown), r.Model, r.BoatTime, r.Timezone, string(chartsJSON)); err != nil {
 		return fmt.Errorf("record watch run: %w", err)
 	}
 	column := "last_skip_at"
@@ -736,7 +773,7 @@ func watchCostSinceQ(q sqlQueryer, since time.Time) (watchCost, error) {
 func watchStorageBytesQ(q sqlQueryer) (int64, error) {
 	var runs, defs, samples int64
 	if err := q.QueryRow(`SELECT COALESCE(SUM(length(report) + length(findings) + length(skip_reason) + length(report_kind) + length(model)
-		+ COALESCE(length(review), 0) + COALESCE(length(review_problem), 0)), 0) FROM watch_runs`).Scan(&runs); err != nil {
+		+ COALESCE(length(review), 0) + COALESCE(length(review_problem), 0) + length(charts)), 0) FROM watch_runs`).Scan(&runs); err != nil {
 		return 0, fmt.Errorf("measure watch history: %w", err)
 	}
 	if err := q.QueryRow(`SELECT COALESCE(SUM(length(name) + length(schedule) + length(sections) + length(thresholds) + length(look_out_for)
@@ -841,4 +878,31 @@ func lastRanRunBeforeQ(q sqlQueryer, watchID string, startedAt time.Time, runID 
 		return watchRun{}, false, err
 	}
 	return r, true, nil
+}
+
+// addWatchRunNotifyNoteTx notes on a run where a delivery was not as meant, such
+// as a message sent without its chart. The same note is not added twice.
+func addWatchRunNotifyNoteTx(x alarmSQLExecer, watchID, runID, note string) error {
+	var raw string
+	if err := x.QueryRow(`SELECT notify_notes FROM watch_runs WHERE watch_id = ? AND id = ?`, watchID, runID).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errWatchRunNotFound
+		}
+		return fmt.Errorf("read the run's delivery notes: %w", err)
+	}
+	var notes []string
+	if err := json.Unmarshal([]byte(raw), &notes); err != nil {
+		return fmt.Errorf("run %s: the saved delivery notes are unreadable: %w", runID, err)
+	}
+	if containsString(notes, note) {
+		return nil
+	}
+	out, err := json.Marshal(append(notes, note))
+	if err != nil {
+		return err
+	}
+	if _, err := x.Exec(`UPDATE watch_runs SET notify_notes = ? WHERE watch_id = ? AND id = ?`, string(out), watchID, runID); err != nil {
+		return fmt.Errorf("record the run's delivery note: %w", err)
+	}
+	return nil
 }

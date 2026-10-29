@@ -31,7 +31,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.30 // indirect
 	github.com/pdfcpu/pdfcpu v0.16.1
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/image v0.46.0 // indirect
+	golang.org/x/image v0.46.0
 )
 
 require (

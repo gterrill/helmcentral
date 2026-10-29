@@ -55,6 +55,9 @@ type alarmDispatcher struct {
 	watchDelivered func(watchID, runID, channel string)
 	// watchNotSent is told when a report that was due went to no channel at all.
 	watchNotSent func(watchID, runID, reason string)
+	// watchNote is told where a delivery was not as meant, such as a phone
+	// message sent without its chart.
+	watchNote func(watchID, runID, note string)
 
 	// queueMu guards queue below. Separate from any lock store or transports
 	// use, since enqueue must never wait on whatever run/dispatch happen to be
@@ -77,6 +80,7 @@ func newAlarmDispatcher() *alarmDispatcher {
 		// can say who was told.
 		watchDelivered: func(watchID, runID, channel string) { recordWatchDelivery(watchID, runID, channel) },
 		watchNotSent:   func(watchID, runID, reason string) { recordWatchNotSent(watchID, runID, reason) },
+		watchNote:      func(watchID, runID, note string) { recordWatchNotifyNote(watchID, runID, note) },
 	}
 }
 
@@ -283,6 +287,7 @@ func (d *alarmDispatcher) drain(ctx context.Context) {
 			continue
 		}
 
+		d.attachWatchNote(&msg)
 		if err := transport.Send(ctx, msg); err != nil {
 			attempts := item.Attempts + 1
 			next := now.Add(notifyBackoffFor(attempts))
@@ -393,6 +398,15 @@ func (d *alarmDispatcher) supersedeQueuedReports(transportID, key string, newer 
 	}
 }
 
+// attachWatchNote lets a transport say where a watch report's delivery was not
+// as meant, to be noted on the run.
+func (d *alarmDispatcher) attachWatchNote(msg *notificationMessage) {
+	if msg.isWatchReport() && msg.Watch != nil && d.watchNote != nil {
+		watchID, runID := msg.Watch.Watch.ID, msg.Watch.Run.ID
+		msg.note = func(note string) { d.watchNote(watchID, runID, note) }
+	}
+}
+
 func (d *alarmDispatcher) noteWatchDelivered(report watchReportMessage, channel string) {
 	if d.watchDelivered != nil {
 		d.watchDelivered(report.Watch.ID, report.Run.ID, channel)
@@ -433,6 +447,7 @@ func (d *alarmDispatcher) dispatchWatchReport(report watchReportMessage, channel
 	key := watchQueueKey(report.Watch.ID)
 	for _, transport := range selected {
 		d.supersedeQueuedReports(transport.ID(), key, report)
+		d.attachWatchNote(&msg)
 		if err := transport.Send(ctx, msg); err != nil {
 			log.Printf("watch report: %s failed for %q, queued for retry: %v", transport.ID(), report.Title, err)
 			if queueErr := d.store.Enqueue(transport.ID(), key, payload, d.now().Add(notifyMinBackoff)); queueErr != nil {
