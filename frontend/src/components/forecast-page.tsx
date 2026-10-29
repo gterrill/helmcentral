@@ -18,13 +18,13 @@ import {
   buildForecastDrawerProps,
   type ForecastBoatProps,
 } from "@/lib/forecast-drawer-props";
-import { placeClockDiffers, placeOffsetLabel } from "@/lib/place-time";
+import { unknownZoneMessage, zoneClocksDiffer, zoneOffsetLabel } from "@/lib/vessel-time";
 import { formatStayRange } from "@/lib/stay";
 
 interface ForecastPageProps {
   boat: ForecastBoatProps;
-  /** The boat's longitude, to tell whether the stay keeps a different clock. */
-  boatLongitude: number | null;
+  /** The boat's IANA zone, to tell whether the stay keeps a different clock. */
+  boatTimeZone: string | undefined;
   canWrite: boolean;
 }
 
@@ -39,7 +39,7 @@ interface ForecastPageProps {
  */
 export function ForecastPage({
   boat,
-  boatLongitude,
+  boatTimeZone,
   canWrite,
 }: ForecastPageProps) {
   const { stay, save, clear } = usePlannedStay();
@@ -81,12 +81,21 @@ export function ForecastPage({
             lon: stay.lon,
             arrive: stay.arrive,
             depart: stay.depart,
+            timezone: stay.timezone,
           },
         }
       : null;
 
+  // A zone this browser does not know is said plainly; the comparison of
+  // clocks is skipped for it rather than thrown.
+  const zoneProblem = stay
+    ? (unknownZoneMessage(stay.timezone) ?? unknownZoneMessage(boatTimeZone))
+    : null;
   const clockDiffers =
-    stay !== null && placeClockDiffers(stay.lon, boatLongitude);
+    stay !== null &&
+    !zoneProblem &&
+    boatTimeZone !== undefined &&
+    zoneClocksDiffer(stay.timezone, boatTimeZone, Date.now());
 
   return (
     <div className="space-y-3">
@@ -164,12 +173,21 @@ export function ForecastPage({
         </div>
       </div>
 
+      {zoneProblem && (
+        <p
+          data-testid="forecast-stay-zone-error"
+          className="text-xs text-destructive"
+        >
+          {zoneProblem}
+        </p>
+      )}
+
       {clockDiffers && stay && (
         <p
           data-testid="forecast-stay-clock-note"
           className="text-xs text-muted-foreground"
         >
-          Stay times are {placeOffsetLabel(stay.lon)}, local to {stay.name}, not
+          Stay times are {zoneOffsetLabel(stay.timezone, Date.now())}, local to {stay.name}, not
           the boat&apos;s clock.
         </p>
       )}

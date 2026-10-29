@@ -46,6 +46,7 @@ const STAY = {
   lon: 153.1,
   arrive: "2026-10-27",
   depart: "2026-10-31",
+  timezone: "Australia/Brisbane",
 };
 
 const BOAT_DRAY = { dayKey: "boat-day" };
@@ -147,7 +148,7 @@ describe("ForecastPage", () => {
 
   it("with no stay, shows the boat's forecast, names its position and offers to plan a stay", () => {
     stayState(null);
-    render(<ForecastPage boat={boatProps} boatLongitude={153} canWrite />);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
       "Forecast for the boat's position",
     );
@@ -160,7 +161,7 @@ describe("ForecastPage", () => {
 
   it("opens on the boat even when a stay is saved, with the stay as a chip", () => {
     stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatLongitude={153} canWrite />);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
       "Forecast for the boat's position",
     );
@@ -172,7 +173,7 @@ describe("ForecastPage", () => {
 
   it("holds the stay's feeds back while the boat is showing", () => {
     stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatLongitude={153} canWrite />);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     for (const hook of [
       useWeatherForecast,
       useWaveForecast,
@@ -189,7 +190,7 @@ describe("ForecastPage", () => {
 
   it("switches to the stay with one tap, naming the place and that it is not the boat", () => {
     stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatLongitude={153} canWrite />);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     fireEvent.click(
       screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
     );
@@ -204,6 +205,7 @@ describe("ForecastPage", () => {
       lon: 153.1,
       arrive: "2026-10-27",
       depart: "2026-10-31",
+      timezone: "Australia/Brisbane",
     });
     const [, options] = vi
       .mocked(useWeatherForecast)
@@ -225,7 +227,7 @@ describe("ForecastPage", () => {
 
   it("mounts a fresh drawer for each place so the selected day does not carry over", () => {
     stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatLongitude={153} canWrite />);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     fireEvent.click(
       screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
     );
@@ -239,7 +241,7 @@ describe("ForecastPage", () => {
 
   it("returns to the boat with one tap", () => {
     stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatLongitude={153} canWrite />);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     fireEvent.click(
       screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
     );
@@ -252,9 +254,9 @@ describe("ForecastPage", () => {
   });
 
   it("notes the place's clock beside the chip only when it differs from the boat's", () => {
-    stayState({ ...STAY, lon: 174.8 });
+    stayState({ ...STAY, lon: 174.8, timezone: "Pacific/Tarawa" });
     const { unmount } = render(
-      <ForecastPage boat={boatProps} boatLongitude={153} canWrite />,
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />,
     );
     expect(screen.getByTestId("forecast-stay-clock-note")).toHaveTextContent(
       "Stay times are UTC+12",
@@ -262,23 +264,33 @@ describe("ForecastPage", () => {
     unmount();
 
     stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatLongitude={153.5} canWrite />);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Etc/GMT-10" canWrite />);
     expect(
       screen.queryByTestId("forecast-stay-clock-note"),
     ).not.toBeInTheDocument();
   });
 
+  it("says so, without throwing, when this browser does not know the stay's zone", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    stayState({ ...STAY, timezone: "Not/AZone" });
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
+    expect(screen.getByTestId("forecast-stay-zone-error")).toHaveTextContent(
+      "Zone Not/AZone unknown to this browser",
+    );
+    expect(screen.queryByTestId("forecast-stay-clock-note")).not.toBeInTheDocument();
+  });
+
   it("opens the sheet to plan or change a stay", () => {
     stayState(null);
     const { unmount } = render(
-      <ForecastPage boat={boatProps} boatLongitude={153} canWrite />,
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />,
     );
     fireEvent.click(screen.getByRole("button", { name: "Plan a stay" }));
     expect(screen.getByTestId("stay-sheet")).toBeInTheDocument();
     unmount();
 
     stayState(STAY);
-    render(<ForecastPage boat={boatProps} boatLongitude={153} canWrite />);
+    render(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     fireEvent.click(screen.getByRole("button", { name: "Change stay" }));
     expect(screen.getByTestId("stay-sheet")).toBeInTheDocument();
   });
@@ -286,7 +298,7 @@ describe("ForecastPage", () => {
   it("offers a reader no way to plan, change or clear a stay", () => {
     stayState(STAY);
     render(
-      <ForecastPage boat={boatProps} boatLongitude={153} canWrite={false} />,
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite={false} />,
     );
     expect(
       screen.queryByRole("button", { name: "Plan a stay" }),
@@ -303,13 +315,13 @@ describe("ForecastPage", () => {
   it("falls back to the boat when the stay it was showing is cleared", () => {
     stayState(STAY);
     const { rerender } = render(
-      <ForecastPage boat={boatProps} boatLongitude={153} canWrite />,
+      <ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />,
     );
     fireEvent.click(
       screen.getByRole("button", { name: "Coral Coast Marina · 27–31 Oct" }),
     );
     stayState(null);
-    rerender(<ForecastPage boat={boatProps} boatLongitude={153} canWrite />);
+    rerender(<ForecastPage boat={boatProps} boatTimeZone="Australia/Brisbane" canWrite />);
     expect(screen.getByTestId("forecast-place-label")).toHaveTextContent(
       "Forecast for the boat's position",
     );

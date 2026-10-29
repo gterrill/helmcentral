@@ -614,7 +614,7 @@ func TestComputeOvernight_ExposesLastNightApartFromThePriorOnes(t *testing.T) {
 		syntheticSlopeSeries(windows[2], overnightSampleInterval, 65, 65+(-0.6)*hours(2)),
 		syntheticSlopeSeries(windows[3], overnightSampleInterval, 65, 65+(-0.4)*hours(3)),
 	)
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
 	if result.LastNightRatePercentPerHour == nil || !near(result.LastNightRatePercentPerHour, -1.5, 0.001) {
 		t.Fatalf("last night: %v", result.LastNightRatePercentPerHour)
 	}
@@ -640,7 +640,7 @@ func TestComputeOvernight_LastNightUnusableLeavesItNil(t *testing.T) {
 		syntheticSlopeSeries(windows[2], overnightSampleInterval, 65, 65+(-0.6)*hours(2)),
 		syntheticSlopeSeries(windows[3], overnightSampleInterval, 65, 65+(-0.4)*hours(3)),
 	)
-	result := computeOvernight(now, vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
 	if result.LastNightRatePercentPerHour != nil || len(result.PriorNightRatesPercentPerHour) != 0 {
 		t.Errorf("last night should not be judged: %v %v", result.LastNightRatePercentPerHour, result.PriorNightRatesPercentPerHour)
 	}

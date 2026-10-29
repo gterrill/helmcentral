@@ -18,7 +18,7 @@ const stats = {
 const detail = (over: Record<string, unknown> = {}) => ({
   passage: {
     id: 'p1', start: '2026-10-23T00:00:00Z', end: '2026-10-23T03:00:00Z', from_name: '', to_name: '', title: '', notes: '', hidden: false,
-    edited: false, cruise_id: null, created_at: '', start_lon: 149, stats, track: [], track_times: [], replay_track: [], replay_times: [],
+    edited: false, cruise_id: null, created_at: '', stats, track: [], track_times: [], replay_track: [], replay_times: [],
     rating: '',
     planned_with_mate: [{
       decision: { id: 7, state: 'stayed', row_date: null, inferred: false, passage_id: 'p1' },

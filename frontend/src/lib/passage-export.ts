@@ -32,11 +32,11 @@ import {
   passageHeading,
   segmentBounds,
   timedSegments,
-  vesselZone,
   type CruiseStats,
   type PassageDetail,
   type TimedSegment,
 } from '@/lib/passages'
+import { zoneOffsetLabel, zoneOffsetMinutes } from '@/lib/vessel-time'
 import { CARD_LIMIT_BYTES, ESTIMATED_PHOTO_BYTES, EXPORT_PHOTO_PREFIX, exportSigns, oversizeMessage, signsInRange, type ExportSign } from '@/lib/passage-export-signs'
 import type { CameraMode, CameraShot } from '@/lib/replay-clock'
 import type { ReplaySign } from '@/lib/replay-signs'
@@ -348,11 +348,19 @@ export function exportablePassages(passages: PassageDetail[]): { p: PassageDetai
     .filter((x) => x.segments.length > 0)
 }
 
-/** The boat's zone for an export: from where its first passage began. */
+/** The boat's zone for an export: the zone the server names at the point where
+ * its first passage began, as the offset in force at that departure. The
+ * exported player counts days with one fixed offset, so a passage that crosses
+ * a daylight-saving change keeps the departure's offset throughout. Throws when
+ * the first passage carries no zone, since an export of undated nights would be
+ * wrong without saying so. */
 export function exportZone(passages: PassageDetail[]): { offsetHours: number; label: string } {
   const first = exportablePassages(passages)[0]
-  const lon = first ? (first.p.start_lon ?? first.segments[0][0].lon) : 0
-  return vesselZone(lon)
+  if (!first) return { offsetHours: 0, label: 'UTC' }
+  const zone = first.p.timezone
+  if (!zone) throw new Error(`the passage starting ${first.p.start} has no time zone, so its dates cannot be read`)
+  const at = Date.parse(first.p.start)
+  return { offsetHours: zoneOffsetMinutes(zone, at) / 60, label: zoneOffsetLabel(zone, at) }
 }
 
 /** The class suffix the player's stylesheet places each corner by. */

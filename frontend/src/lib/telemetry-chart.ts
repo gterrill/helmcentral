@@ -1,5 +1,6 @@
 import type { TelemetryChartSeries } from '@/lib/mate-cards'
 import type { TelemetrySeriesBody } from '@/hooks/use-telemetry-series'
+import { zonedDayStart } from '@/lib/vessel-time'
 
 const HOUR_MS = 3_600_000
 export const DAY_MS = 24 * HOUR_MS
@@ -23,21 +24,6 @@ export function formatRange(from: string, to: string, timeZone: string): string 
   if (ad === bd && am === bm) return `${ad} ${am}`
   if (am === bm) return `${ad}–${bd} ${bm}`
   return `${ad} ${am} – ${bd} ${bm}`
-}
-
-/** Offset of `timeZone` from UTC at an instant, in ms. */
-function offsetMs(ms: number, timeZone: string): number {
-  const ps = parts(ms, timeZone, { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
-  const asUtc = Date.UTC(+pick(ps, 'year'), +pick(ps, 'month') - 1, +pick(ps, 'day'), +pick(ps, 'hour'), +pick(ps, 'minute'), +pick(ps, 'second'))
-  return asUtc - Math.floor(ms / 1000) * 1000
-}
-
-/** The instant a local `YYYY-MM-DD` starts in `timeZone`. */
-export function zonedDayStart(ymd: string, timeZone: string): number {
-  const [y, m, d] = ymd.split('-').map(Number)
-  const guess = Date.UTC(y, m - 1, d)
-  const first = guess - offsetMs(guess, timeZone)
-  return guess - offsetMs(first, timeZone)
 }
 
 /** The local `YYYY-MM-DD` of an instant in `timeZone`. */
@@ -235,7 +221,7 @@ export function dayTicks(from: number, to: number, timeZone: string, max = 6): n
   const [y, m, d] = zonedYmd(from, timeZone).split('-').map(Number)
   const all: number[] = []
   for (let k = 0; k < 400; k++) {
-    const t = zonedDayStart(new Date(Date.UTC(y, m - 1, d + k)).toISOString().slice(0, 10), timeZone)
+    const t = zonedDayStart(new Date(Date.UTC(y, m - 1, d + k)).toISOString().slice(0, 10), timeZone).getTime()
     if (t > to) break
     if (t >= from) all.push(t)
   }

@@ -22,17 +22,23 @@ describe('formatClock', () => {
     expect(`${timePart} ${meridiem}`).toBe('06:31:00 AM')
   })
 
-  it('falls back to the browser zone without throwing when given an unknown zone name', () => {
+  it('throws for an unknown zone name rather than reading another zone\'s clock', () => {
+    const instant = new Date('2026-09-12T20:31:00Z')
+
+    expect(() => formatClock(instant, 'Not/AZone')).toThrow(RangeError)
+    // Nothing was cached for the bad name: asking again throws again.
+    expect(() => formatClock(instant, 'Not/AZone')).toThrow(RangeError)
+  })
+
+  it('reads the browser zone and says so once while the boat has not reported a zone', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const instant = new Date('2026-09-12T20:31:00Z')
 
-    let result: ReturnType<typeof formatClock> | undefined
-    expect(() => {
-      result = formatClock(instant, 'Not/AZone')
-    }).not.toThrow()
-
-    expect(result).toEqual(formatClock(instant))
-    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(() => formatClock(instant)).not.toThrow()
+    formatClock(instant)
+    formatDate(instant)
+    expect(warnSpy.mock.calls.filter((c) => String(c[0]).includes('no zone yet'))).toHaveLength(1)
+    warnSpy.mockRestore()
   })
 })
 
@@ -45,17 +51,8 @@ describe('formatDate', () => {
     expect(formatDate(instant, { timeZone: 'UTC' })).toContain('Sep 12, 2026')
   })
 
-  it('falls back to the browser zone without throwing when given an unknown zone name', () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const instant = new Date('2026-09-12T20:31:00Z')
-
-    let result: string | undefined
-    expect(() => {
-      result = formatDate(instant, { timeZone: 'Also/NotAZone' })
-    }).not.toThrow()
-
-    expect(result).toBe(formatDate(instant))
-    expect(warnSpy).toHaveBeenCalledTimes(1)
+  it('throws for an unknown zone name', () => {
+    expect(() => formatDate(new Date('2026-09-12T20:31:00Z'), { timeZone: 'Not/AZone' })).toThrow(RangeError)
   })
 })
 

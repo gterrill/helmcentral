@@ -3,6 +3,8 @@
 // words and map shapes. Words follow GLOSSARY.md: coverage, coverage square,
 // edits since. Never "tile" (that is a dashboard tile), "cell" or "region".
 
+import { zoneKnown, formatDayKey, formatDayMonthIn, formatTimeOfDay, NO_TIME } from '@/lib/vessel-time'
+
 export type CoastlineSquareState = 'ready' | 'failed' | 'pending'
 
 export interface CoastlineSquare {
@@ -66,24 +68,25 @@ export function squareLabel(lat: number, lon: number): string {
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
-function shortDate(iso: string, now: Date): string {
+function shortDate(iso: string, now: Date, timeZone: string | undefined): string {
   const d = new Date(iso)
-  const opts: Intl.DateTimeFormatOptions = { day: 'numeric', month: 'short' }
-  if (d.getFullYear() !== now.getFullYear()) opts.year = 'numeric'
-  return d.toLocaleDateString('en-GB', opts)
+  if (Number.isNaN(d.getTime()) || !timeZone || !zoneKnown(timeZone)) return NO_TIME
+  const sameYear = formatDayKey(d, timeZone).slice(0, 4) === formatDayKey(now, timeZone).slice(0, 4)
+  return formatDayMonthIn(d, timeZone, { year: !sameYear })
 }
 
-/** Local HH:MM, or null when the time is unreadable. */
-export function clockTime(iso: string): string | null {
+/** The boat's HH:MM, or null when the time is unreadable. */
+export function clockTime(iso: string, timeZone: string | undefined): string | null {
   const t = new Date(iso)
   if (Number.isNaN(t.getTime())) return null
-  return t.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  const shown = formatTimeOfDay(t, timeZone)
+  return shown === NO_TIME ? null : shown
 }
 
-function coverageText(s: OfflineCoastlineStatus, now: Date): string {
+function coverageText(s: OfflineCoastlineStatus, now: Date, timeZone: string | undefined): string {
   if (s.held === 0) return 'Coverage: none yet'
   const parts = [`Coverage: ${plural(s.held, 'square', 'squares')}`]
-  if (s.oldest_downloaded_at) parts.push(`oldest ${shortDate(s.oldest_downloaded_at, now)}`)
+  if (s.oldest_downloaded_at) parts.push(`oldest ${shortDate(s.oldest_downloaded_at, now, timeZone)}`)
   if (s.edits_since > 0) parts.push(`${plural(s.edits_since, 'edit', 'edits')} since`)
   return parts.join(' · ')
 }
@@ -96,28 +99,28 @@ export function inlandSkippedLine(s: OfflineCoastlineStatus): string | null {
 }
 
 /** The one line under the switch. */
-export function coastlineStatusLine(s: OfflineCoastlineStatus, now: Date = new Date()): string {
+export function coastlineStatusLine(s: OfflineCoastlineStatus, now: Date = new Date(), timeZone?: string): string {
   switch (s.state) {
     case 'off':
       return 'Off. Nothing is downloaded or checked.'
     case 'error':
       return s.error ?? 'Offline coastline cannot run.'
     case 'paused': {
-      const at = s.retry_at ? clockTime(s.retry_at) : null
+      const at = s.retry_at ? clockTime(s.retry_at, timeZone) : null
       return `${s.pause_reason ?? 'The map server is refusing requests'}. ${at ? `Trying again about ${at}` : 'Trying again later'}`
     }
     case 'waiting_for_fix':
       return s.held > 0
-        ? `Waiting for a position fix · ${coverageText(s, now)}`
+        ? `Waiting for a position fix · ${coverageText(s, now, timeZone)}`
         : 'Waiting for a position fix'
     case 'updating':
       return `Updating ${plural(s.updating, 'square', 'squares')}`
     case 'downloading':
       return `Downloading ${s.wanted_held} of ${s.wanted}`
     case 'retrying':
-      return `${coverageText(s, now)} · ${s.failed} failed, will retry`
+      return `${coverageText(s, now, timeZone)} · ${s.failed} failed, will retry`
     case 'idle':
-      return coverageText(s, now)
+      return coverageText(s, now, timeZone)
   }
 }
 

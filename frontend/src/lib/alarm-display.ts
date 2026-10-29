@@ -10,6 +10,7 @@
 import type { ActiveAlarm, SensorHealthEntry } from '@/hooks/use-alarms'
 import { formatQuantity, quantityForSIUnit, unitOption } from '@/lib/quantities'
 import { tankClearText } from '@/lib/tank-levels'
+import { formatDayMonthIn, formatTimeOrDayTime, NO_TIME } from '@/lib/vessel-time'
 
 // SI unit -> the unit id an alarm reading is shown in. Not every quantity's
 // own first unit is what an alarm should show (pressure's first unit is
@@ -385,30 +386,17 @@ export function alarmFooterText(alarm: ActiveAlarm): string | null {
   return tankClearText(alarm.op, alarm.clear_value)
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-/** "HH:MM" for today, "D Mon HH:MM" otherwise. Null for missing/invalid input. */
-export function formatAlarmTime(iso?: string): string | null {
+/** "HH:MM" for today, "D Mon HH:MM" otherwise, in the boat's zone. Null for missing/invalid input. */
+export function formatAlarmTime(iso: string | undefined, timeZone: string | undefined, now: Date = new Date()): string | null {
   if (!iso) return null
-  const date = new Date(iso)
-  if (Number.isNaN(date.getTime())) return null
-
-  const now = new Date()
-  const isToday = date.getFullYear() === now.getFullYear()
-    && date.getMonth() === now.getMonth()
-    && date.getDate() === now.getDate()
-
-  const hh = String(date.getHours()).padStart(2, '0')
-  const mm = String(date.getMinutes()).padStart(2, '0')
-  const time = `${hh}:${mm}`
-
-  return isToday ? time : `${date.getDate()} ${MONTHS[date.getMonth()]} ${time}`
+  if (Number.isNaN(new Date(iso).getTime())) return null
+  return formatTimeOrDayTime(iso, timeZone, now)
 }
 
 /** "12 Oct 2026" for the date an item went onto an ignore list; "" when unknown. */
-export function formatIgnoredOn(iso?: string): string {
+export function formatIgnoredOn(iso: string | undefined, timeZone: string | undefined): string {
   if (!iso) return ''
-  const at = new Date(iso)
-  if (Number.isNaN(at.getTime())) return ''
-  return at.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+  if (Number.isNaN(new Date(iso).getTime())) return ''
+  const shown = formatDayMonthIn(iso, timeZone, { year: true })
+  return shown === NO_TIME ? '' : shown
 }

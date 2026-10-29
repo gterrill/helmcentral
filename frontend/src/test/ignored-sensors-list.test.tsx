@@ -2,6 +2,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { IgnoredSensorsList } from '@/components/settings/sections/ignored-sensors-list'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+
+// ADR 0230: times are the boat's. The runner is on UTC.
+installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
+
 
 describe('IgnoredSensorsList', () => {
   it('shows a message when nothing is ignored', async () => {

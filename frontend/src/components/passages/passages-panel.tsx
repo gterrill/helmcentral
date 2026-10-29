@@ -104,7 +104,7 @@ export function PassagesPanel({
       id: 'date',
       header: 'Date',
       accessorFn: (p) => p.start,
-      cell: ({ row }) => <span className="tabular-nums text-foreground">{formatLocalDate(row.original.start, row.original.start_lon ?? 0)}</span>,
+      cell: ({ row }) => <span className="tabular-nums text-foreground" title={row.original.timezone ? undefined : row.original.timezone_error}>{formatLocalDate(row.original.start, row.original.timezone)}</span>,
     },
     {
       id: 'route',

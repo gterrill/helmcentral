@@ -5,6 +5,11 @@ import { ForecastTideSection } from '@/components/forecast-tide-section'
 import { useTideChart } from '@/hooks/use-tide-chart'
 import { useTideProviders } from '@/hooks/use-tide-providers'
 import { useTideSettings } from '@/hooks/use-tide-settings'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+
+// ADR 0230: times are the boat's. The runner is on UTC.
+installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
+
 
 vi.mock('@/hooks/use-tide-settings')
 vi.mock('@/hooks/use-tide-chart')

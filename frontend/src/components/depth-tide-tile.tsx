@@ -7,7 +7,8 @@ import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { estimateDepthAtNextTurn, tideExtremesByTime } from '@/lib/tide-estimate'
 import { FORECAST_REFRESH_SECONDS } from '@/config/app-config'
-import { useVesselFields } from '@/hooks/use-vessel-state'
+import { useVesselFields, useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
 
 export interface DepthTideTileProps {
   depth: number | null
@@ -25,6 +26,8 @@ export interface DepthTideTileProps {
    * always null until a source actually publishes one.
    */
   lastUpdateAgeS: number | null
+  /** The boat's IANA zone; times show as -- until the boat has reported one. */
+  timeZone: string | undefined
 }
 
 export const DepthTideTile = memo(function DepthTideTile({
@@ -35,6 +38,7 @@ export const DepthTideTile = memo(function DepthTideTile({
   tide,
   onOpen,
   lastUpdateAgeS,
+  timeZone,
 }: DepthTideTileProps) {
   const feedStale = isStale(lastUpdateAgeS)
   const depthValue =
@@ -92,6 +96,7 @@ export const DepthTideTile = memo(function DepthTideTile({
                 tideType={depthTrend.tideType}
                 tideDepthM={depthTrend.tideDepthM}
                 className="min-w-0 flex-1"
+                timeZone={timeZone}
               />
             )}
           </div>
@@ -130,7 +135,7 @@ export const DepthTideTile = memo(function DepthTideTile({
                     show its figure rather than being read as "no data" the
                     way the -1 sentinel once was. */}
                 <span className="text-muted-foreground">({tideFtToDisplay(extreme.heightFt).toFixed(isImperialDistance ? 1 : 2)} {tideUnit})</span>
-                {' '}{new Date(extreme.time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                {' '}{formatTimeOfDay(extreme.time, timeZone, { hour12: true })}
               </p>
             ))}
           </div>
@@ -143,9 +148,10 @@ export const DepthTideTile = memo(function DepthTideTile({
 const DEPTH_FIELDS = ['depth', 'depthLastUpdateAgeS', 'navigationState'] as const
 
 /** The Depth & Tide tile: depth and navigation state from vessel state, the tide and the three-hour depth trend from their polls. */
-export const LiveDepthTideTile = memo(function LiveDepthTideTile(props: Omit<ComponentProps<typeof DepthTideTile>, 'depth' | 'lastUpdateAgeS' | 'navigationState' | 'tide' | 'depthTrend'>) {
+export const LiveDepthTideTile = memo(function LiveDepthTideTile(props: Omit<ComponentProps<typeof DepthTideTile>, 'depth' | 'lastUpdateAgeS' | 'navigationState' | 'tide' | 'depthTrend' | 'timeZone'>) {
   const { depth, depthLastUpdateAgeS, navigationState } = useVesselFields(DEPTH_FIELDS)
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const { tide } = useTideToday(FORECAST_REFRESH_SECONDS)
   const depthTrend = useDepthTrend('3h', 60)
-  return <DepthTideTile {...props} depth={depth} lastUpdateAgeS={depthLastUpdateAgeS} navigationState={navigationState} tide={tide} depthTrend={depthTrend} />
+  return <DepthTideTile {...props} depth={depth} lastUpdateAgeS={depthLastUpdateAgeS} navigationState={navigationState} tide={tide} depthTrend={depthTrend} timeZone={timeZone} />
 })

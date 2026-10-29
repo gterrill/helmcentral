@@ -1,4 +1,6 @@
 import { memo, type ComponentProps } from 'react'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { formatTimeOfDay, selectTimeZone } from '@/lib/vessel-time'
 import { Tile } from '@/components/ui/tile'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { hoursToBand, socSeverity, type SocBands } from '@/lib/soc-bands'
@@ -171,6 +173,7 @@ const NO_READINGS = {
 } as const
 
 export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPowerTileProps) {
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const feedStale = isStale(props.lastUpdateAgeS)
   const {
     batterySocPercent,
@@ -414,7 +417,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
                     })}
                   >
                     {'Dawn '}
-                    {overnightProjection.sunrise.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                    {formatTimeOfDay(overnightProjection.sunrise, timeZone, { hour12: true })}
                     {' · '}
                     <span data-testid="dawn-estimate" className={onShorePower ? 'text-muted-foreground' : dawnEstimateClass}>
                       {onShorePower ? 'on shore power' : dawnEstimateText}

@@ -31,6 +31,7 @@ const STAY = {
   lon: 153.1,
   arrive: "2026-06-22",
   depart: "2026-06-27",
+  timezone: "Australia/Brisbane",
 };
 const DAY_NAMES = [
   "Sunday",

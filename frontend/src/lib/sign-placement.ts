@@ -19,10 +19,16 @@ export type PhotoMove = { at: number; placedByPhoto: true; message: string } | {
 /** What the photo says about when it was taken, in the boat's terms. */
 type Reading = { kind: 'time'; at: number; message: string } | { kind: 'none'; why: string }
 
-function readCapture(capture: ExifCapture | Error | null, boatOffsetHours: number, timeline: Timeline): Reading {
+function readCapture(capture: ExifCapture | Error | null, boatOffsetHours: number | null, timeline: Timeline): Reading {
   if (capture instanceof Error) return { kind: 'none', why: `Could not read when the photo was taken (${capture.message})` }
   if (capture === null) return { kind: 'none', why: 'The photo has no capture time' }
-  const { unix, zone, fromPhoto } = captureUnix(capture, boatOffsetHours)
+  // A photo with no zone of its own is read on the boat's clock. With the
+  // passage's zone unknown there is no boat clock to read it on, and guessing
+  // UTC would put the sign hours off, so it is not placed by its time.
+  if (capture.offsetMinutes === null && boatOffsetHours === null) {
+    return { kind: 'none', why: "This passage's time zone isn't known, so the photo's time can't be matched to the track" }
+  }
+  const { unix, zone, fromPhoto } = captureUnix(capture, boatOffsetHours ?? 0)
   const shown = `${capture.day} ${MONTHS[capture.month - 1]} ${two(capture.hour)}:${two(capture.minute)} ${zone}`
   if (!placeAt(unix, timeline)) return { kind: 'none', why: `The photo was taken ${shown}, outside this replay` }
   return {
@@ -38,7 +44,7 @@ function readCapture(capture: ExifCapture | Error | null, boatOffsetHours: numbe
  * the photo said (null when it carries no time), or the error from reading it.
  * The photo's GPS is not consulted: the track is the reliable source.
  */
-export function placeByCapture(capture: ExifCapture | Error | null, boatOffsetHours: number, timeline: Timeline, cursorAt: number): SignPlacement {
+export function placeByCapture(capture: ExifCapture | Error | null, boatOffsetHours: number | null, timeline: Timeline, cursorAt: number): SignPlacement {
   const r = readCapture(capture, boatOffsetHours, timeline)
   if (r.kind === 'time') return { at: r.at, placedByPhoto: true, message: r.message }
   return { at: cursorAt, placedByPhoto: false, message: `${r.why}, so the sign is at the current position.` }
@@ -46,7 +52,7 @@ export function placeByCapture(capture: ExifCapture | Error | null, boatOffsetHo
 
 /** The same reading for a sign already placed: when the photo cannot place it,
  * the answer carries no time and the sign is left where it is. */
-export function moveByCapture(capture: ExifCapture | Error | null, boatOffsetHours: number, timeline: Timeline): PhotoMove {
+export function moveByCapture(capture: ExifCapture | Error | null, boatOffsetHours: number | null, timeline: Timeline): PhotoMove {
   const r = readCapture(capture, boatOffsetHours, timeline)
   if (r.kind === 'time') return { at: r.at, placedByPhoto: true, message: r.message }
   return { at: null, placedByPhoto: false, message: `${r.why}, so the sign was not moved.` }

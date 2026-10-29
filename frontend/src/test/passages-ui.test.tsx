@@ -36,7 +36,7 @@ function passage(id: string, over: Partial<PassageSummary> = {}): PassageSummary
   return {
     id, start: '2026-03-13T23:30:00Z', end: '2026-03-14T02:00:00Z', from_name: 'Airlie', to_name: 'Hamilton',
     title: '', notes: '', hidden: false, edited: false, cruise_id: null, created_at: '2026-03-14T03:00:00Z',
-    stats, start_lon: 149, ...over,
+    stats, timezone: 'Australia/Brisbane', ...over,
   }
 }
 
@@ -159,7 +159,7 @@ describe('CruiseStatsPanel', () => {
   }
 
   it('prints -- for every figure the log does not hold', () => {
-    render(<CruiseStatsPanel stats={empty} units="metric" lon={149} canWrite onLabelRise={vi.fn()} />)
+    render(<CruiseStatsPanel stats={empty} units="metric" timeZone="Australia/Brisbane" canWrite onLabelRise={vi.fn()} />)
     const grid = screen.getByTestId('cruise-stats-grid')
     expect(grid).toHaveTextContent('Fuel burned--')
     expect(grid).toHaveTextContent('Generator--')
@@ -178,12 +178,12 @@ describe('CruiseStatsPanel', () => {
         suggested_label: 'Dock fill', suggestion_status: 'found', looked_up_at: '2026-03-14T02:00:00Z', label: null,
       }],
     }
-    const { rerender } = render(<CruiseStatsPanel stats={stats} units="metric" lon={149} canWrite onLabelRise={onLabelRise} />)
+    const { rerender } = render(<CruiseStatsPanel stats={stats} units="metric" timeZone="Australia/Brisbane" canWrite onLabelRise={onLabelRise} />)
     expect(screen.getByTestId('night-soc')).toHaveTextContent('13 Mar62%')
     const row = screen.getByTestId('water-rise-row')
     expect(row).toHaveTextContent('Suggested: Dock fill')
     expect(row).toHaveTextContent('+180 L')
-    rerender(<CruiseStatsPanel stats={stats} units="imperial" lon={149} canWrite onLabelRise={onLabelRise} />)
+    rerender(<CruiseStatsPanel stats={stats} units="imperial" timeZone="Australia/Brisbane" canWrite onLabelRise={onLabelRise} />)
     expect(screen.getByTestId('water-rise-row')).toHaveTextContent('+48 gal')
     fireEvent.click(screen.getByRole('button', { name: 'Dock fill' }))
     expect(onLabelRise).toHaveBeenCalledWith(expect.objectContaining({ litres: 180 }), 'Dock fill')
@@ -274,7 +274,7 @@ describe('water rise suggestion status', () => {
     suggested_label, suggestion_status, looked_up_at: null, label: null,
   })
   const row = (r: ReturnType<typeof rise>) => {
-    render(<WaterRiseRow rise={r} lon={149} units="metric" canWrite onLabel={vi.fn()} />)
+    render(<WaterRiseRow rise={r} timeZone="Australia/Brisbane" units="metric" canWrite onLabel={vi.fn()} />)
     return screen.getByTestId('water-rise-row')
   }
 
@@ -286,7 +286,7 @@ describe('water rise suggestion status', () => {
 
   it('says nothing about a check that is pending or found nothing', () => {
     for (const status of ['pending', 'none'] as const) {
-      const { unmount } = render(<WaterRiseRow rise={rise(status)} lon={149} units="metric" canWrite onLabel={vi.fn()} />)
+      const { unmount } = render(<WaterRiseRow rise={rise(status)} timeZone="Australia/Brisbane" units="metric" canWrite onLabel={vi.fn()} />)
       const el = screen.getByTestId('water-rise-row')
       expect(el).not.toHaveTextContent('Suggested')
       expect(el).not.toHaveTextContent("Couldn't")

@@ -13,7 +13,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
 
 const passage: PassageView = {
   id: 'p1', start: '2026-03-13T23:30:00Z', end: '2026-03-14T02:00:00Z', from_name: 'Airlie', to_name: 'Hamilton',
-  title: '', notes: '', hidden: false, edited: false, cruise_id: null, created_at: '', start_lon: 149,
+  title: '', notes: '', hidden: false, edited: false, cruise_id: null, created_at: '', timezone: 'Australia/Brisbane',
   stats: {
     distance_nm: 1, underway_seconds: 60, mean_sog_kts: null, max_sog_kts: null, fuel_burned_l: null, tws_mean_kts: null,
     max_gust_kts: null, soc_start_pct: null, soc_end_pct: null, soc_min_pct: null,

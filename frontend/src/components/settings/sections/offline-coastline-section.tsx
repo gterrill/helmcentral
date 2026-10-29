@@ -1,5 +1,7 @@
 import { useState } from 'react'
 
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { selectTimeZone } from '@/lib/vessel-time'
 import { ConfirmDelete, FormSection, SettingsLayout } from '@/components/patterns'
 import { OfflineCoastlineMap } from '@/components/offline-coastline-map'
 import type { RegularSettingsDraft } from '@/components/settings/settings-draft'
@@ -28,21 +30,22 @@ const OVERPASS_HELP_TARGET: HelpTarget = { page: 'how-to/run-your-own-overpass-s
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
 
-function retryTime(iso: string | undefined): string | null {
+function retryTime(iso: string | undefined, timeZone: string | undefined): string | null {
   if (!iso) return null
   const t = new Date(iso)
   if (Number.isNaN(t.getTime()) || t.getTime() <= Date.now()) return null
-  return clockTime(iso)
+  return clockTime(iso, timeZone)
 }
 
 function Failures({ status }: { status: OfflineCoastlineStatus }) {
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const failures = coastlineFailures(status)
   const checks = coastlineCheckFailures(status)
   if (failures.length === 0 && checks.length === 0) return null
   const list = (items: typeof failures) => (
     <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
       {items.map((f) => {
-        const retry = retryTime(f.nextAttemptAt)
+        const retry = retryTime(f.nextAttemptAt, timeZone)
         return (
           <li key={f.label} className="min-w-0 break-words">
             <span className="font-medium text-foreground">{f.label}</span>: {f.error}
@@ -75,6 +78,7 @@ function Failures({ status }: { status: OfflineCoastlineStatus }) {
 }
 
 export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: OfflineCoastlineSectionProps) {
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const { status, loading, error, update, clearCoverage } = useOfflineCoastline()
   const [actionError, setActionError] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
@@ -178,7 +182,7 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
           ) : error && !status ? (
             <p className="text-sm text-destructive">Could not read the offline coastline status: {error}</p>
           ) : status ? (
-            <p className="text-sm font-medium">{coastlineStatusLine(status)}</p>
+            <p className="text-sm font-medium">{coastlineStatusLine(status, new Date(), timeZone)}</p>
           ) : null}
           {status && inlandSkippedLine(status) && (
             <p className="text-xs text-muted-foreground" data-testid="offline-coastline-inland">

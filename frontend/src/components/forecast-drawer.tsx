@@ -64,6 +64,8 @@ export interface ForecastDrawerStay {
   /** First and last day of the stay, YYYY-MM-DD at the place. */
   arrive: string
   depart: string
+  /** IANA zone at the place, from the server. */
+  timezone: string
 }
 
 export interface ForecastDrawerProps {
@@ -2226,7 +2228,7 @@ export function ForecastDrawer({
             {stay ? (
               <ForecastPlaceTideSection
                 isImperial={unit === 'imperial'}
-                place={{ name: stay.placeName, lat: stay.lat, lon: stay.lon }}
+                place={{ name: stay.placeName, lat: stay.lat, lon: stay.lon, timezone: stay.timezone }}
                 dayKey={selectedDay.dayKey}
               />
             ) : (

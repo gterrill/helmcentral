@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -57,8 +58,11 @@ func TestListPassagesNewestFirstWithStats(t *testing.T) {
 	if first["id"] != newer.ID || list[1].(map[string]any)["id"] != older.ID {
 		t.Errorf("order wrong: %v", list)
 	}
-	if lon, ok := list[1].(map[string]any)["start_lon"].(float64); !ok || lon == 0 {
-		t.Errorf("summary must carry start_lon, got %v", list[1].(map[string]any)["start_lon"])
+	if tz, ok := list[1].(map[string]any)["timezone"].(string); !ok || tz == "" {
+		t.Errorf("summary must carry timezone, got %v", list[1].(map[string]any)["timezone"])
+	}
+	if _, present := list[1].(map[string]any)["start_lon"]; present {
+		t.Errorf("start_lon is no longer part of the payload")
 	}
 	stats := list[1].(map[string]any)["stats"].(map[string]any)
 	if stats["distance_nm"].(float64) < 11 {
@@ -236,5 +240,144 @@ func TestGetPassageAPlanWhoseRowDateIsNotOnItsCardIsAnError(t *testing.T) {
 	asst.db.Exec(`UPDATE passage_decisions SET state='went', row_date='2030-01-01', source='operator', passage_id=? WHERE id=?`, p.ID, msg.Cards[0].Decision.ID)
 	if _, err := asst.PassagePlans(p.ID); err == nil {
 		t.Fatal("want an error")
+	}
+}
+
+// A passage carries the IANA zone at its first point, so the page formats its
+// dates in the boat's time rather than working a zone out from longitude.
+func TestPassageSummaryAndDetailCarryTheZoneAtTheirStart(t *testing.T) {
+	store := withPassageStore(t)
+	b := simpleTrip(2 * time.Hour)
+	appendAll(t, store, b.pts)
+	rec, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At, Title: "t"})
+
+	_, body := getJSON(t, listPassagesHandler, "/api/passages", "")
+	first := body["passages"].([]any)[0].(map[string]any)
+	if first["timezone"] != "Australia/Lindeman" {
+		t.Errorf("summary timezone = %v, want Australia/Lindeman", first["timezone"])
+	}
+	_, body = getJSON(t, getPassageHandler, "/api/passages/x", rec.ID)
+	if tz := body["passage"].(map[string]any)["timezone"]; tz != "Australia/Lindeman" {
+		t.Errorf("detail timezone = %v, want Australia/Lindeman", tz)
+	}
+}
+
+func TestPassageWithNoRecordedPointHasNoZone(t *testing.T) {
+	store := withPassageStore(t)
+	rec, _ := store.InsertPassage(passageRecord{Start: passageEpoch, End: passageEpoch.Add(time.Hour), Title: "empty"})
+	_, body := getJSON(t, getPassageHandler, "/api/passages/x", rec.ID)
+	p := body["passage"].(map[string]any)
+	if tz, present := p["timezone"]; !present || tz != nil {
+		t.Errorf("a passage with no point has a null timezone, got %v (present %v)", tz, present)
+	}
+	if msg, _ := p["timezone_error"].(string); !strings.Contains(msg, "time zone is not known") {
+		t.Errorf("the row must say why it has no zone, got %q", msg)
+	}
+}
+
+// Figures stored before the start latitude was kept are worked out again, so
+// an old row still gets a zone.
+func TestStoredFiguresWithoutAStartLatitudeAreWorkedOutAgain(t *testing.T) {
+	store := withPassageStore(t)
+	b := simpleTrip(2 * time.Hour)
+	appendAll(t, store, b.pts)
+	rec, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At, Title: "t"})
+	old, _ := json.Marshal(map[string]any{"stats": passageStats{}, "start_lon": 149.0})
+	if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(old), rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, body := getJSON(t, getPassageHandler, "/api/passages/x", rec.ID)
+	if tz := body["passage"].(map[string]any)["timezone"]; tz != "Australia/Lindeman" {
+		t.Errorf("timezone from an old row = %v", tz)
+	}
+}
+
+// One passage whose start cannot be placed in a zone says so on its own row.
+// It does not take down the list, and the other passages keep theirs.
+func TestListPassagesOneUnresolvablePassageDoesNotTakeDownTheList(t *testing.T) {
+	store := withPassageStore(t)
+	b := simpleTrip(2 * time.Hour)
+	appendAll(t, store, b.pts)
+	good, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At, Title: "good"})
+	bad, _ := store.InsertPassage(passageRecord{Start: b.pts[360].At.Add(time.Hour), End: b.pts[360].At.Add(2 * time.Hour), Title: "bad"})
+	broken, _ := json.Marshal(map[string]any{"stats": passageStats{}, "start_lat": 95.0, "start_lon": 10.0})
+	if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(broken), bad.ID); err != nil {
+		t.Fatal(err)
+	}
+	code, body := getJSON(t, listPassagesHandler, "/api/passages", "")
+	if code != 200 {
+		t.Fatalf("the list must still answer, got %d", code)
+	}
+	rows := map[string]map[string]any{}
+	for _, r := range body["passages"].([]any) {
+		m := r.(map[string]any)
+		rows[m["id"].(string)] = m
+	}
+	if rows[good.ID]["timezone"] != "Australia/Lindeman" {
+		t.Errorf("the good row keeps its zone, got %v", rows[good.ID]["timezone"])
+	}
+	if rows[bad.ID]["timezone"] != nil {
+		t.Errorf("the bad row has no zone, got %v", rows[bad.ID]["timezone"])
+	}
+	if msg, _ := rows[bad.ID]["timezone_error"].(string); !strings.Contains(msg, "time zone") {
+		t.Errorf("the bad row says why, got %q", msg)
+	}
+	if _, present := rows[good.ID]["timezone_error"]; present {
+		t.Errorf("a row with a zone carries no timezone_error")
+	}
+}
+
+// The zone is kept with the figures: the list asks the zone index once per
+// passage, not once per request, and a passage that fails is looked up and
+// logged once per process.
+func TestPassageZoneIsKeptWithTheFigures(t *testing.T) {
+	store := withPassageStore(t)
+	b := simpleTrip(2 * time.Hour)
+	appendAll(t, store, b.pts)
+	rec, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At, Title: "t"})
+	// A row stored before the zone was kept: position, no zone.
+	old, _ := json.Marshal(map[string]any{"stats": passageStats{}, "start_lat": -20.0, "start_lon": 149.0})
+	if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(old), rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	prev := passageZoneAt
+	t.Cleanup(func() { passageZoneAt = prev })
+	lookups := 0
+	passageZoneAt = func(lat, lon float64) (placeZone, error) { lookups++; return prev(lat, lon) }
+
+	for i := 0; i < 3; i++ {
+		_, body := getJSON(t, listPassagesHandler, "/api/passages", "")
+		if tz := body["passages"].([]any)[0].(map[string]any)["timezone"]; tz != "Australia/Lindeman" {
+			t.Fatalf("request %d: timezone = %v", i, tz)
+		}
+	}
+	if lookups != 1 {
+		t.Fatalf("want one lookup across three lists, got %d", lookups)
+	}
+	var raw string
+	if err := store.db.QueryRow(`SELECT stats_json FROM passages WHERE id = ?`, rec.ID).Scan(&raw); err != nil || !strings.Contains(raw, `"timezone":"Australia/Lindeman"`) {
+		t.Fatalf("the zone must be stored on the row: %v %s", err, raw)
+	}
+}
+
+func TestPassageZoneFailureIsLookedUpOncePerProcess(t *testing.T) {
+	store := withPassageStore(t)
+	b := simpleTrip(2 * time.Hour)
+	appendAll(t, store, b.pts)
+	rec, _ := store.InsertPassage(passageRecord{Start: b.pts[2].At, End: b.pts[360].At, Title: "t"})
+	broken, _ := json.Marshal(map[string]any{"stats": passageStats{}, "start_lat": 95.0, "start_lon": 11.0})
+	if _, err := store.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(broken), rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	passageZoneFailures.Delete("95,11")
+	prev := passageZoneAt
+	t.Cleanup(func() { passageZoneAt = prev; passageZoneFailures.Delete("95,11") })
+	lookups := 0
+	passageZoneAt = func(lat, lon float64) (placeZone, error) { lookups++; return prev(lat, lon) }
+	for i := 0; i < 3; i++ {
+		getJSON(t, listPassagesHandler, "/api/passages", "")
+	}
+	if lookups != 1 {
+		t.Fatalf("want one lookup for a failing passage across three lists, got %d", lookups)
 	}
 }

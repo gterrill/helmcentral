@@ -4,7 +4,9 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { FormSection } from '@/components/patterns'
 import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatIgnoredOn } from '@/lib/alarm-display'
+import { selectTimeZone } from '@/lib/vessel-time'
 
 /**
  * Sees and un-ignores the sensor-health checks' own exclusion list
@@ -15,6 +17,7 @@ import { formatIgnoredOn } from '@/lib/alarm-display'
  * removed.
  */
 export function IgnoredSensorsList() {
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const { sensors, loading, error, unignore } = useIgnoredSensors()
   const [removing, setRemoving] = useState<string | null>(null)
 
@@ -44,8 +47,8 @@ export function IgnoredSensorsList() {
           <div key={identifier} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-1.5">
             <div className="min-w-0">
               <p className="truncate text-sm text-foreground">{label}</p>
-              {formatIgnoredOn(ignored_at) && (
-                <p className="truncate text-xs text-muted-foreground">Ignored {formatIgnoredOn(ignored_at)}</p>
+              {formatIgnoredOn(ignored_at, timeZone) && (
+                <p className="truncate text-xs text-muted-foreground">Ignored {formatIgnoredOn(ignored_at, timeZone)}</p>
               )}
             </div>
             <Button

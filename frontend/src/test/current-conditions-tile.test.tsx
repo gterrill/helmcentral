@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { CurrentConditionsTile } from '@/components/current-conditions-tile'
 import type { WeatherToday } from '@/hooks/use-weather-today'
 import type { WeatherForecastDay } from '@/hooks/use-weather-forecast'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+
+// ADR 0230: times are the boat's. The runner is on UTC.
+installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
+
 
 function weather(overrides: Partial<WeatherToday> = {}): WeatherToday {
   return {

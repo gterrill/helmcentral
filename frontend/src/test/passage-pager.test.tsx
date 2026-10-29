@@ -13,7 +13,7 @@ vi.mock('@/hooks/use-passages', () => ({
 vi.mock('@/hooks/use-passage-legs', () => ({ usePassageLegs: () => ({ legs: [] }) }))
 
 function p(id: string, title: string, start: string, cruise: string | null = null): PassageSummary {
-  return { id, title, start, end: start, from_name: '', to_name: '', cruise_id: cruise, start_lon: 149 } as PassageSummary
+  return { id, title, start, end: start, from_name: '', to_name: '', cruise_id: cruise, timezone: 'Australia/Brisbane' } as PassageSummary
 }
 
 const LIST = [

@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 
 import { apiRequest, setQueryData, useApiQuery } from "@/lib/api-query";
-import type { PlannedStay } from "@/lib/stay";
+import type { PlannedStay, PlannedStayInput } from "@/lib/stay";
 
 // The stay the operator is booked into: one place and its dates, kept on the
 // server so every device sees it. The server drops it the day after departure,
@@ -22,7 +22,7 @@ export function usePlannedStay() {
     refetchInterval: FIVE_MINUTES_MS,
   });
 
-  const save = useCallback(async (stay: PlannedStay): Promise<PlannedStay> => {
+  const save = useCallback(async (stay: PlannedStayInput): Promise<PlannedStay> => {
     const saved = await apiRequest<PlannedStayEnvelope>(PLANNED_STAY_PATH, {
       method: "PUT",
       json: stay,

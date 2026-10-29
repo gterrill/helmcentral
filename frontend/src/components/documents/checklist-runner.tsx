@@ -33,6 +33,7 @@ export interface ChecklistRunnerProps {
 function formatClockTime(iso: string): string {
   const parsed = new Date(iso)
   if (Number.isNaN(parsed.getTime())) return ''
+  // helm-browser-zone: a checklist step records when the operator ticked it, on the device they ticked it from.
   return parsed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 

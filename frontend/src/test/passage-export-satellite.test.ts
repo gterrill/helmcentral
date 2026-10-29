@@ -20,7 +20,7 @@ const passage: PassageDetail = {
     distance_nm: 10, underway_seconds: 3600, mean_sog_kts: 5, max_sog_kts: 6, fuel_burned_l: null, tws_mean_kts: null,
     max_gust_kts: null, soc_start_pct: null, soc_end_pct: null, soc_min_pct: null,
   },
-  start_lon: 148,
+  timezone: 'Australia/Brisbane',
   track: [[[-20, 148], [-20.01, 148.01], [-20.02, 148.02]]],
   track_times: [[t0, t0 + 60, t0 + 120]],
   replay_track: [], replay_times: [],

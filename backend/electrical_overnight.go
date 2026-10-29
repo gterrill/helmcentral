@@ -57,18 +57,14 @@ type nightWindow struct {
 // tonight-in-progress, and including it would score a partial discharge as
 // if it were a full one.
 //
-// The vessel has no named IANA timezone, only a position, so day boundaries
-// for the sunTimes lookups are picked using a fixed offset derived from
-// longitude (15 degrees per hour) rather than a real civil calendar. This
-// is accurate enough to find the right nights; it is never surfaced to an
-// operator as a clock.
-func recentNightWindows(now time.Time, lat, lon float64, nights int) []nightWindow {
+// Day boundaries for the sunTimes lookups are the boat's own calendar days, in
+// loc, the zone at the boat's position (ADR 0230).
+func recentNightWindows(now time.Time, loc *time.Location, lat, lon float64, nights int) []nightWindow {
 	if nights <= 0 {
 		return nil
 	}
 
-	shipLoc := time.FixedZone("ship", int(math.Round(lon/15))*3600)
-	nowLocal := now.In(shipLoc)
+	nowLocal := now.In(loc)
 
 	windows := make([]nightWindow, 0, nights)
 	// Scan more days than requested: sunTimes can decline a day (polar
@@ -254,9 +250,8 @@ func resolveNonHistoryBasis(linearFallback bool) string {
 // Both are needed regardless of basis: the tile's footer always shows a
 // "Dawn HH:MM", and the frontend's projection arithmetic needs to know how
 // far off both sunset and sunrise are, not just whichever comes first.
-func nextSunEvents(now time.Time, lat, lon float64) (sunset, sunrise time.Time, ok bool) {
-	shipLoc := time.FixedZone("ship", int(math.Round(lon/15))*3600)
-	nowLocal := now.In(shipLoc)
+func nextSunEvents(now time.Time, loc *time.Location, lat, lon float64) (sunset, sunrise time.Time, ok bool) {
+	nowLocal := now.In(loc)
 
 	var haveSunset, haveSunrise bool
 	for daysOffset := -1; daysOffset <= 2; daysOffset++ {
@@ -307,6 +302,7 @@ func anyPointExceedsInWindow(points []telemetryPoint, w nightWindow, threshold f
 // overnightLookbackNights bound is exhausted, whichever comes first.
 func computeOvernight(
 	now time.Time,
+	boat boatTime,
 	lat, lon float64,
 	paths overnightPaths,
 	linearFallback bool,
@@ -321,7 +317,15 @@ func computeOvernight(
 		LookbackNights:   overnightLookbackNights,
 	}
 
-	sunset, sunrise, ok := nextSunEvents(now, lat, lon)
+	// The boat's own resolved zone, the one the header clock keeps (with the
+	// last-fix rule), not a fresh lookup. Before any fix has ever been seen
+	// there is no zone, and the days cannot be cut.
+	if boat.NoFix {
+		result.Basis = "none"
+		result.Reason = stringPtr("the boat's time zone is not known yet (no position fix has been seen)")
+		return result
+	}
+	sunset, sunrise, ok := nextSunEvents(now, boat.Loc, lat, lon)
 	if !ok {
 		result.Basis = "none"
 		result.Reason = stringPtr("sun does not rise or set at this position")
@@ -336,7 +340,7 @@ func computeOvernight(
 		return result
 	}
 
-	windows := recentNightWindows(now, lat, lon, overnightLookbackNights)
+	windows := recentNightWindows(now, boat.Loc, lat, lon, overnightLookbackNights)
 	if len(windows) == 0 {
 		result.Basis = resolveNonHistoryBasis(linearFallback)
 		result.Reason = stringPtr("need 2 usable nights, have 0")
@@ -626,7 +630,7 @@ func electricalOvernightHandler(c echo.Context) error {
 	}
 
 	result := globalOvernightCache.get(now, lat, lon, cacheKey, func() overnightResult {
-		r := computeOvernight(now, lat, lon, paths, dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
+		r := computeOvernight(now, boatTimeForState(state, err), lat, lon, paths, dawnLinearFallbackEnabled(), influxTelemetryConfigured(), queryInfluxPathRange)
 		if r.Basis == "history" {
 			log.Printf(
 				"overnight model: basis=history nights_used=%d scanned=%d excluded shore=%d (checked=%t) generator=%d (checked=%t) gap=%d rise=%d oldest=%s",

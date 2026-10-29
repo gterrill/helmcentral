@@ -32,7 +32,7 @@ function passage(): PassageDetail {
   return {
     id: '1', start: new Date(T0 * 1000).toISOString(), end: new Date((T0 + 3600) * 1000).toISOString(),
     from_name: 'A', to_name: 'B', title: 'Leg', notes: '', hidden: false, edited: false,
-    cruise_id: null, created_at: '', stats: STATS, start_lon: 148,
+    cruise_id: null, created_at: '', stats: STATS, timezone: 'Australia/Brisbane',
     track: [pts], track_times: [times], replay_track: [pts], replay_times: [times],
   }
 }

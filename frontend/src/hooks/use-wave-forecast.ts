@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { declareQuery, useApiQuery } from '@/lib/api-query';
+import { calendarDayLabel, requireDayKey } from '@/lib/vessel-time';
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
 export type WaveSteepnessBand = 'rolling' | 'building' | 'steep' | 'breaking';
@@ -107,14 +108,12 @@ interface MappedWaveForecast {
 function mapWavePayload(payload: WaveForecastEnvelopeApi): MappedWaveForecast {
   const rawDays = Array.isArray(payload.days) ? payload.days : [];
 
-  const mappedDays = rawDays.slice(0, 10).map((day, idx): WaveForecastDay => {
-    const fallbackDate = new Date();
-    fallbackDate.setDate(fallbackDate.getDate() + idx);
-
+  const mappedDays = rawDays.slice(0, 10).map((day): WaveForecastDay => {
+    const dayKey = requireDayKey(day.day_key);
     return {
-      dayKey: typeof day.day_key === 'string' && day.day_key !== '' ? day.day_key : fallbackDate.toISOString().slice(0, 10),
-      date: day.date || fallbackDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      dayName: day.day_name || fallbackDate.toLocaleDateString('en-US', { weekday: 'long' }),
+      dayKey,
+      date: day.date || calendarDayLabel(dayKey, { month: 'short', day: 'numeric' }),
+      dayName: day.day_name || calendarDayLabel(dayKey, { weekday: 'long' }),
       waveSummary: typeof day.wave_summary === 'string' && day.wave_summary !== '' ? day.wave_summary : null,
       hourlyWave: Array.isArray(day.hourly_wave)
         ? day.hourly_wave.map((entry) => ({

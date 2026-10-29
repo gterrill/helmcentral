@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildTimeline } from '@/lib/passages'
-import { placeByCapture } from '@/lib/sign-placement'
+import { moveByCapture, placeByCapture } from '@/lib/sign-placement'
 
 // 22 Oct 2026, 09:00-15:00 UTC+10 is 23:00 (21st) to 05:00 UTC.
 const start = Date.UTC(2026, 9, 21, 23, 0) / 1000
@@ -38,5 +38,26 @@ describe('placeByCapture', () => {
     const r = placeByCapture(new Error('The photo\'s EXIF block is damaged'), 10, timeline, cursor)
     expect(r.at).toBe(cursor)
     expect(r.message).toBe('Could not read when the photo was taken (The photo\'s EXIF block is damaged), so the sign is at the current position.')
+  })
+})
+
+describe('a passage whose time zone is not known', () => {
+  it('does not place a photo with no zone of its own by its time, and says why', () => {
+    const r = placeByCapture({ ...base, offsetMinutes: null }, null, timeline, cursor)
+    expect(r.at).toBe(cursor)
+    expect(r.placedByPhoto).toBe(false)
+    expect(r.message).toBe("This passage's time zone isn't known, so the photo's time can't be matched to the track, so the sign is at the current position.")
+  })
+
+  it('leaves an already placed sign where it is', () => {
+    const r = moveByCapture({ ...base, offsetMinutes: null }, null, timeline)
+    expect(r.at).toBeNull()
+    expect(r.message).toBe("This passage's time zone isn't known, so the photo's time can't be matched to the track, so the sign was not moved.")
+  })
+
+  it('still places a photo that carries its own zone', () => {
+    const r = placeByCapture({ ...base, hour: 9, minute: 30, offsetMinutes: 480 }, null, timeline, cursor)
+    expect(r.at).toBe(Date.UTC(2026, 9, 22, 1, 30) / 1000)
+    expect(r.placedByPhoto).toBe(true)
   })
 })

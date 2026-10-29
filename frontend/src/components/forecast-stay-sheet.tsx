@@ -19,14 +19,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { searchPlaces, type PlaceCandidate } from "@/hooks/use-place-search";
 import { todayISO } from "@/lib/local-date";
-import type { PlannedStay } from "@/lib/stay";
+import type { PlannedStay, PlannedStayInput } from "@/lib/stay";
 
 interface ForecastStaySheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The saved stay, to edit or clear; null when none is planned. */
   stay: PlannedStay | null;
-  onSave: (stay: PlannedStay) => Promise<unknown>;
+  onSave: (stay: PlannedStayInput) => Promise<unknown>;
   onClear: () => Promise<unknown>;
 }
 

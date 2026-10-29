@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"sort"
 	"strings"
 	"time"
@@ -33,21 +32,43 @@ const (
 )
 
 // logbookRange bounds the passages by departure. A bare date is a day on the
-// boat's clock, the zone the Passages page shows the passage in (whole hours
-// from its start longitude), so "August" is the boat's August. An RFC3339
+// boat's clock, the zone at the passage's own start position (ADR 0230), so
+// "August" is the boat's August. An RFC3339
 // bound is an instant.
 type logbookRange struct {
 	from, to       time.Time // instants; zero means unbounded; to is exclusive
 	fromDay, toDay string    // YYYY-MM-DD, set instead of the instant for a bare date
 }
 
-func (r logbookRange) has(t time.Time, offsetHours int) bool {
-	day := t.Add(time.Duration(offsetHours) * time.Hour).Format("2006-01-02")
-	if r.fromDay != "" && day < r.fromDay {
-		return false
-	}
-	if r.toDay != "" && day > r.toDay {
-		return false
+// has reports whether a departure is in the range. A bare date is a day in the
+// passage's own zone. A passage with no zone cannot be placed on one, so it is
+// counted in when its instant is near enough to the dates for some zone from
+// UTC-12 to UTC+14 to put it inside them (its row says its zone is not known),
+// and out when it is further away than that.
+func (r logbookRange) has(t time.Time, zone *placeZone) bool {
+	if r.fromDay != "" || r.toDay != "" {
+		if zone == nil {
+			if r.fromDay != "" {
+				lo, _ := time.Parse("2006-01-02", r.fromDay)
+				if t.Before(lo.Add(-14 * time.Hour)) {
+					return false
+				}
+			}
+			if r.toDay != "" {
+				hi, _ := time.Parse("2006-01-02", r.toDay)
+				if !t.Before(hi.Add(36 * time.Hour)) {
+					return false
+				}
+			}
+		} else {
+			day := t.In(zone.Loc).Format("2006-01-02")
+			if r.fromDay != "" && day < r.fromDay {
+				return false
+			}
+			if r.toDay != "" && day > r.toDay {
+				return false
+			}
+		}
 	}
 	return (r.from.IsZero() || !t.Before(r.from)) && (r.to.IsZero() || t.Before(r.to))
 }
@@ -94,29 +115,56 @@ func parseLogbookRange(from, to string) (logbookRange, error) {
 	return r, nil
 }
 
-// boatZone is the whole-hour zone the Passages page and the server's nights
-// use for a passage: the start longitude over 15, rounded, within -12 to +14.
-// With no longitude it is UTC, as on the page.
-func boatZone(lon *float64) (hours int, label string) {
-	if lon != nil && !math.IsNaN(*lon) && *lon >= -180 && *lon <= 180 {
-		hours = int(math.Round(*lon / 15))
-		if hours < -12 {
-			hours = -12
-		}
-		if hours > 14 {
-			hours = 14
-		}
+// localTime is t on the clock of the zone it was recorded in, such as
+// "2026-10-27 10:16 AEST (UTC+10)". The label is worked out at t, because
+// daylight saving makes it depend on the date. With no zone it is empty: a
+// passage with no recorded position has no local time to give.
+func localTime(t time.Time, zone *placeZone) string {
+	if zone == nil {
+		return ""
 	}
-	if hours == 0 {
-		return 0, "UTC"
-	}
-	return hours, fmt.Sprintf("UTC%+d", hours)
+	return t.In(zone.Loc).Format("2006-01-02 15:04") + " " + zone.Label(t)
 }
 
-// localTime is t on the boat's clock, such as "2026-10-27 10:16 UTC+10".
-func localTime(t time.Time, lon *float64) string {
-	h, label := boatZone(lon)
-	return t.UTC().Add(time.Duration(h)*time.Hour).Format("2006-01-02 15:04") + " " + label
+// passageZone is the zone a recorded passage keeps: the one at its first
+// recorded point. A passage that has none, or whose zone name is unreadable,
+// gets no zone and the reason in words. That is that passage's problem and does
+// not stop the others.
+func passageZone(timezone *string, timezoneError string) (*placeZone, string) {
+	if timezone == nil {
+		if timezoneError == "" {
+			timezoneError = "no position was recorded for it"
+		}
+		return nil, timezoneError
+	}
+	z, err := zoneAtName(*timezone)
+	if err != nil {
+		return nil, "its zone name could not be read: " + err.Error()
+	}
+	return &z, ""
+}
+
+// zoneUnknownNote is a row's statement that its time zone is missing.
+func zoneUnknownNote(reason string) string {
+	if reason == "" {
+		return ""
+	}
+	return "The time zone is not known (" + reason + "), so there is no local time for it."
+}
+
+// openRunZone is the zone at the first point of the run under way, or the
+// reason it has none.
+func openRunZone(pts []recordedTrackPoint, start time.Time) (*placeZone, string) {
+	for _, p := range pts {
+		if !p.At.Before(start) {
+			zone, err := zoneAt(p.Lat, p.Lon)
+			if err != nil {
+				return nil, "its start position has no time zone: " + err.Error()
+			}
+			return &zone, ""
+		}
+	}
+	return nil, "no position was recorded for its start, so its time zone is not known"
 }
 
 // passageRatingLabels are the labels the Passages page shows for a rating.
@@ -136,14 +184,18 @@ func ratingLabel(r string) string {
 type logbookPassage struct {
 	passageRecord
 	stats passageStats
-	lon   *float64
+	zone  *placeZone
+	// zoneReason says why zone is nil, for a row that could be in the range.
+	zoneReason string
 }
 
 // logbookOpen is a passage still under way, from the track log.
 type logbookOpen struct {
 	start time.Time
 	nm    float64
-	lon   *float64
+	zone  *placeZone
+	// zoneReason says why zone is nil.
+	zoneReason string
 }
 
 // logbookView is the visible passages whose departure falls in the range,
@@ -197,17 +249,18 @@ func readLogbook(ctx context.Context, d assistantToolDeps, tool string, r logboo
 		if p.End.After(v.last) {
 			v.last = p.End
 		}
-		if h, _ := boatZone(p.StartLon); !r.has(p.Start, h) {
+		zone, reason := passageZone(p.Timezone, p.TimezoneError)
+		if !r.has(p.Start, zone) {
 			continue
 		}
-		v.passages = append(v.passages, logbookPassage{passageRecord: p.passageRecord, stats: p.Stats, lon: p.StartLon})
+		v.passages = append(v.passages, logbookPassage{passageRecord: p.passageRecord, stats: p.Stats, zone: zone, zoneReason: reason})
 	}
 	sort.SliceStable(v.passages, func(i, j int) bool { return v.passages[i].Start.Before(v.passages[j].Start) })
 	if v.open, err = openPassage(store); err != nil {
 		return v, fmt.Errorf("%s: %w", tool, err)
 	}
 	if v.open != nil {
-		if h, _ := boatZone(v.open.lon); !r.has(v.open.start, h) {
+		if !r.has(v.open.start, v.open.zone) {
 			v.open = nil
 		}
 	}
@@ -256,13 +309,7 @@ func openPassage(store *passageStore) (*logbookOpen, error) {
 		return nil, nil
 	}
 	out := &logbookOpen{start: o.Start, nm: o.DistanceNM}
-	for _, p := range pts {
-		if !p.At.Before(o.Start) {
-			lon := p.Lon
-			out.lon = &lon
-			break
-		}
-	}
+	out.zone, out.zoneReason = openRunZone(pts, o.Start)
 	return out, nil
 }
 
@@ -272,10 +319,14 @@ func (v logbookView) addUnderWay(res map[string]any) {
 	if v.open == nil {
 		return
 	}
-	res["under_way_now"] = map[string]any{
-		"start": rfc3339(v.open.start), "start_local": localTime(v.open.start, v.open.lon),
+	underWay := map[string]any{
+		"start": rfc3339(v.open.start), "start_local": localTime(v.open.start, v.open.zone),
 		"distance_nm_so_far": round1(v.open.nm),
 	}
+	if note := zoneUnknownNote(v.open.zoneReason); note != "" {
+		underWay["time_zone_note"] = note
+	}
+	res["under_way_now"] = underWay
 	n, _ := res["note"].(string)
 	res["note"] = n + " The boat is under way now (under_way_now): that passage joins the logbook when it ends, and it is not in found, the count or the totals."
 }
@@ -330,12 +381,14 @@ type assistantPassageJSON struct {
 	FuelBurnedL   *float64 `json:"fuel_burned_l"`
 	MeanTWSKts    *float64 `json:"mean_true_wind_kts"`
 	MaxGustKts    *float64 `json:"max_gust_kts"`
+	// TimeZoneNote says why there is no local time, when the passage has no zone.
+	TimeZoneNote string `json:"time_zone_note,omitempty"`
 }
 
 func (v logbookView) passageJSON(p logbookPassage) assistantPassageJSON {
 	return assistantPassageJSON{
 		Start: rfc3339(p.Start), End: rfc3339(p.End),
-		StartLocal: localTime(p.Start, p.lon), EndLocal: localTime(p.End, p.lon),
+		StartLocal: localTime(p.Start, p.zone), EndLocal: localTime(p.End, p.zone),
 		From: p.FromName, To: p.ToName, Title: p.Title,
 		Cruise: v.cruiseName(p.passageRecord), Rating: ratingLabel(p.Rating), Notes: p.Notes,
 		DurationHours: round1(p.End.Sub(p.Start).Hours()),
@@ -344,6 +397,7 @@ func (v logbookView) passageJSON(p logbookPassage) assistantPassageJSON {
 		MeanSOGKts:    roundPtr1(p.stats.MeanSOGKts), MaxSOGKts: roundPtr1(p.stats.MaxSOGKts),
 		FuelBurnedL: roundPtr1(p.stats.FuelBurnedL),
 		MeanTWSKts:  roundPtr1(p.stats.TWSMeanKts), MaxGustKts: roundPtr1(p.stats.MaxGustKts),
+		TimeZoneNote: zoneUnknownNote(p.zoneReason),
 	}
 }
 

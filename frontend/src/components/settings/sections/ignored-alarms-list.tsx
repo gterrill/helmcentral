@@ -4,7 +4,9 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { FormSection } from '@/components/patterns'
 import { useIgnoredAlarms } from '@/hooks/use-ignored-alarms'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatIgnoredOn } from '@/lib/alarm-display'
+import { selectTimeZone } from '@/lib/vessel-time'
 
 /**
  * Network alarms the operator stopped showing from the alarms drawer
@@ -13,6 +15,7 @@ import { formatIgnoredOn } from '@/lib/alarm-display'
  * brought back.
  */
 export function IgnoredAlarmsList() {
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const { alarms, loading, error, restore } = useIgnoredAlarms()
   const [restoring, setRestoring] = useState<string | null>(null)
 
@@ -42,8 +45,8 @@ export function IgnoredAlarmsList() {
           <div key={kind} className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border/60 bg-background/40 px-2.5 py-1.5">
             <div className="min-w-0">
               <p className="truncate text-sm text-foreground">{title}</p>
-              {formatIgnoredOn(ignored_at) && (
-                <p className="truncate text-xs text-muted-foreground">Ignored {formatIgnoredOn(ignored_at)}</p>
+              {formatIgnoredOn(ignored_at, timeZone) && (
+                <p className="truncate text-xs text-muted-foreground">Ignored {formatIgnoredOn(ignored_at, timeZone)}</p>
               )}
             </div>
             <Button

@@ -1,5 +1,7 @@
 import { memo, type ComponentProps } from 'react'
 
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { hourOfDayIn, NO_TIME, selectTimeZone } from '@/lib/vessel-time'
 import { Tile } from '@/components/ui/tile'
 import { BulletGauge } from '@/components/ui/bullet-gauge'
 import { useWeatherToday, type WeatherToday } from '@/hooks/use-weather-today'
@@ -229,11 +231,14 @@ export const CurrentConditionsTile = memo(function CurrentConditionsTile({
   const depthDisplay = depth !== null ? (isImperial ? depth * METRES_TO_FEET : depth).toFixed(1) : '—'
   const depthUnit = isImperial ? 'ft' : 'm'
 
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const now = new Date()
-  const nowHour = now.getHours()
-  const windBand = next24hWindBand(forecast, nowHour)
+  // The hour is the boat's. Until the boat has reported a zone there is no
+  // hour to read the forecast from, so the band and the rain line stay blank.
+  const nowHour = hourOfDayIn(now, timeZone)
+  const windBand = nowHour === null ? null : next24hWindBand(forecast, nowHour)
   const tempBandF = todayTempBand(forecast[0])
-  const nowcast = computeNowcastStatus({
+  const nowcast = nowHour === null ? { showChart: false, bars: [], isHourlySourced: false, line: NO_TIME } : computeNowcastStatus({
     now,
     // WeatherNextHour (use-weather-forecast.ts) already has exactly the
     // shape computeNowcastStatus's nextHour param wants - no need to repack

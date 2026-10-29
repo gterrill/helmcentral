@@ -4,6 +4,11 @@ import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import type { ResolvedClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { setViewportWidth } from './viewport'
+import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
+
+// ADR 0230: times are the boat's. The runner is on UTC.
+installFakeTelemetryStream({ seeds: { 'vessel-state': { timezone: 'UTC', timezone_source: 'fix' } } })
+
 
 // The alternator's one-hour trace reads history from the server. The tile is
 // tested against a fixed series so no test depends on a network call.

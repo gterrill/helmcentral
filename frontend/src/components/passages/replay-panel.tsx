@@ -28,6 +28,7 @@ import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-ph
 import { CameraDirector, shotStartState } from '@/lib/replay-camera'
 import { paceSpans, resolveShots, wallAtTimeline, type CameraMode } from '@/lib/replay-clock'
 import { REPLAY_3D_PITCH } from '@/lib/terrain'
+import { zoneKnown, zoneOffsetMinutes } from '@/lib/vessel-time'
 import { replaySeconds, useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
   buildTimeline,
@@ -37,7 +38,6 @@ import {
   sailedAt,
   segmentBounds,
   timedSegments,
-  vesselZone,
   type PassageDetail,
   type TimedSegment,
 } from '@/lib/passages'
@@ -109,7 +109,9 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const allSegments = useMemo(() => built.items.flatMap((i) => i.line), [built.items])
   const bounds = useMemo(() => segmentBounds(allSegments), [allSegments])
   // The server cuts nights by the zone of the first fix; read the clock the same way.
-  const lon = passages[0]?.start_lon ?? (bounds ? (bounds[0] + bounds[2]) / 2 : 0)
+  const timeZone = passages[0]?.timezone ?? null
+  // Hours east of UTC at the first departure, for reading a camera's own clock as boat time. Null when the passage has no known zone: a photo with no zone of its own is then not placed by its time.
+  const boatOffsetHours: number | null = timeZone && zoneKnown(timeZone) && passages[0] ? zoneOffsetMinutes(timeZone, Date.parse(passages[0].start)) / 60 : null
 
   // Camera shots belong to real time, so the ones inside the replayed
   // passages are the ones that play; a trimmed-out shot is simply not there.
@@ -334,7 +336,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     setSignNotice(null)
     const cursorAt = here.at
     void runSignWrite(async () => {
-      const placement = placeByCapture(await getCapture(), vesselZone(lon).offsetHours, timeline, cursorAt)
+      const placement = placeByCapture(await getCapture(), boatOffsetHours, timeline, cursorAt)
       const documentId = await getDocumentId()
       const created = await replaySignsApi.create({
         t_ms: Math.round(placement.at * 1000), title: name, note: '', document_id: documentId, visibility: 'passing', show_s: SIGN_SHOW_DEFAULT,
@@ -378,8 +380,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // as it is then, and the signs as the server last held them. The patch
   // returns only once the signs have been read again, so the cache is the
   // answer to "where is this sign now".
-  const live = useRef({ timeline, lon, signsFrom, signsTo })
-  useEffect(() => { live.current = { timeline, lon, signsFrom, signsTo } }, [timeline, lon, signsFrom, signsTo])
+  const live = useRef({ timeline, boatOffsetHours, signsFrom, signsTo })
+  useEffect(() => { live.current = { timeline, boatOffsetHours, signsFrom, signsTo } }, [timeline, boatOffsetHours, signsFrom, signsTo])
   const currentSign = (id: string) =>
     getQueryData<{ signs?: ReplaySign[] }>(replaySignsKey(live.current.signsFrom, live.current.signsTo))?.signs?.find((s) => s.id === id)
   // The saved sign goes into the cache at once, so a read that fails after the
@@ -429,7 +431,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       const sign = currentSign(id)
       if (!sign) throw new Error('That sign is no longer there.')
       if (sign.document_id === null) throw new Error('That sign has no photo.')
-      const placement = moveByCapture(await captureOfDocument(sign.document_id), vesselZone(live.current.lon).offsetHours, live.current.timeline)
+      const placement = moveByCapture(await captureOfDocument(sign.document_id), live.current.boatOffsetHours, live.current.timeline)
       if (!placement.placedByPhoto) { setSignNotice(placement.message); return }
       const tMs = Math.round(placement.at * 1000)
       checkMoveLands(tMs)
@@ -448,7 +450,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const signTicks = placedSigns.map((r) => ({
     id: r.sign.id,
     fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
-    label: `Sign ${r.sign.title || AWAITING_NAME} at ${formatLocalDateTime(r.at, lon)}`,
+    label: `Sign ${r.sign.title || AWAITING_NAME} at ${formatLocalDateTime(r.at, timeZone)}`,
     selected: r.sign.id === selectedSign?.id,
   }))
 
@@ -456,7 +458,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // the full date, time and zone stay in each chip's label.
   const selectedSignId2 = selectedSign?.id
   const signChips = useMemo(() => {
-    const when = placedSigns.map((r) => ({ r, parts: localDateTimeParts(r.at, lon) }))
+    const when = placedSigns.map((r) => ({ r, parts: localDateTimeParts(r.at, timeZone) }))
     const oneDay = new Set(when.map(({ parts }) => parts.date)).size <= 1
     return when.map(({ r, parts }) => ({
       id: r.sign.id,
@@ -466,7 +468,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       photoSrc: signPhotoSrc(r.sign),
       selected: r.sign.id === selectedSignId2,
     }))
-  }, [placedSigns, lon, selectedSignId2])
+  }, [placedSigns, timeZone, selectedSignId2])
 
   const selectShot = (id: string | null) => {
     setSelectedShotId(id)
@@ -526,13 +528,13 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // Times alone on a one-day replay; the date too once the shots span days.
   const selectedShotId2 = selectedShot?.id
   const { shotTicks, shotHeading } = useMemo(() => {
-    const parts = resolved.map((r) => localDateTimeParts(r.at, lon))
+    const parts = resolved.map((r) => localDateTimeParts(r.at, timeZone))
     const oneDay = new Set(parts.map((p) => p.date)).size <= 1
     const short = (p: { date: string; time: string }) => (oneDay ? p.time : `${p.date} ${p.time}`)
     const ticks = resolved.map((r, i) => ({
       id: r.shot.id,
       fraction: timeline.total > 0 ? r.clock / timeline.total : 0,
-      label: `Camera shot ${i + 1}, ${MODE_NAMES[r.shot.mode]}, at ${formatLocalDateTime(r.at, lon)}`,
+      label: `Camera shot ${i + 1}, ${MODE_NAMES[r.shot.mode]}, at ${formatLocalDateTime(r.at, timeZone)}`,
       title: `Shot ${i + 1} · ${short(parts[i])}`,
       selected: r.shot.id === selectedShotId2,
     }))
@@ -545,9 +547,9 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     const lastPassage = entry !== undefined && entry === timeline.entries[timeline.entries.length - 1]
     let to: string | null = null
     if (nextAt !== null && (!entry || nextAt <= entry.end)) to = short(parts[idx + 1])
-    else if (entry && !(nextAt === null && lastPassage)) to = short(localDateTimeParts(entry.end, lon))
+    else if (entry && !(nextAt === null && lastPassage)) to = short(localDateTimeParts(entry.end, timeZone))
     return { shotTicks: ticks, shotHeading: { number: idx + 1, total: resolved.length, from: short(parts[idx]), to } }
-  }, [resolved, lon, timeline, selectedShotId2])
+  }, [resolved, timeZone, timeline, selectedShotId2])
 
   const mapPassages = useMemo(() => built.items.map((i) => ({ id: i.id, segments: i.line })), [built.items])
 
@@ -617,7 +619,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         clock={replay.clock}
         total={timeline.total}
         playing={replay.playing}
-        readout={here ? formatLocalDateTime(here.at, lon) : '--'}
+        readout={here ? formatLocalDateTime(here.at, timeZone) : '--'}
         speed={speed}
         insetOn={insetOn}
         disabled={timeline.total <= 0 || flying}
@@ -651,7 +653,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
             signs={signChips}
             onPick={pickSign}
             disabled={timeline.total <= 0 || flying}
-            whenLabel={selectedSign ? formatLocalDateTime(selectedSign.t_ms / 1000, lon) : null}
+            whenLabel={selectedSign ? formatLocalDateTime(selectedSign.t_ms / 1000, timeZone) : null}
             busy={signWrites > 0}
             error={signError}
             notice={signNotice}

@@ -63,7 +63,7 @@ function passage(over: Partial<PassageDetail> & { id: string; t0: number; points
     cruise_id: null,
     created_at: '2026-09-14T00:00:00Z',
     stats: STATS,
-    start_lon: 148.9,
+    timezone: 'Australia/Brisbane',
     track: [pts.map(([, lon, lat]) => [lat, lon] as [number, number])],
     track_times: [pts.map(([t]) => t)],
     replay_track: [pts.map(([, lon, lat]) => [lat, lon] as [number, number])],
@@ -312,9 +312,9 @@ describe('nights agree with the cruise page', () => {
 
 describe('what an export carries', () => {
   it('orders passages and drops trackless ones the same way for the zone, file date and card', () => {
-    const empty = passage({ id: 'e', t0: T0 - 86400, track: [], track_times: [], start_lon: -100 })
-    const later = passage({ id: 'l', t0: T0 + 86400, start_lon: 150 })
-    const first = passage({ id: 'f', t0: T0, start_lon: 148 })
+    const empty = passage({ id: 'e', t0: T0 - 86400, track: [], track_times: [], timezone: 'America/Denver' })
+    const later = passage({ id: 'l', t0: T0 + 86400, timezone: 'Australia/Sydney' })
+    const first = passage({ id: 'f', t0: T0, timezone: 'Australia/Brisbane' })
     expect(exportablePassages([later, empty, first]).map((x) => x.p.id)).toEqual(['f', 'l'])
     expect(exportZone([later, empty, first])).toEqual({ offsetHours: 10, label: 'UTC+10' })
     const data = prepareExport(input({ kind: 'combined', passages: [later, empty, first] }))

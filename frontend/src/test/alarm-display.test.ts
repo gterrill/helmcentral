@@ -470,18 +470,29 @@ describe('formatAlarmTime', () => {
   })
 
   it('renders HH:MM when the timestamp is today', () => {
-    vi.setSystemTime(new Date('2026-09-06T18:00:00'))
-    expect(formatAlarmTime('2026-09-06T05:41:00')).toBe('05:41')
+    vi.setSystemTime(new Date('2026-09-06T18:00:00Z'))
+    expect(formatAlarmTime('2026-09-06T05:41:00Z', 'UTC')).toBe('05:41')
   })
 
   it('renders D Mon HH:MM when the timestamp is not today', () => {
-    vi.setSystemTime(new Date('2026-09-06T18:00:00'))
-    expect(formatAlarmTime('2026-08-30T05:41:00')).toBe('30 Aug 05:41')
+    vi.setSystemTime(new Date('2026-09-06T18:00:00Z'))
+    expect(formatAlarmTime('2026-08-30T05:41:00Z', 'UTC')).toBe('30 Aug 05:41')
   })
 
   it('returns null for missing or invalid input', () => {
-    expect(formatAlarmTime(undefined)).toBeNull()
-    expect(formatAlarmTime('not a date')).toBeNull()
+    expect(formatAlarmTime(undefined, 'UTC')).toBeNull()
+    expect(formatAlarmTime('not a date', 'UTC')).toBeNull()
+  })
+
+  it('reads the time and the day in the boat\'s zone, not the device\'s', () => {
+    // The runner is on UTC. At 20:00 UTC on 6 Sep it is already 7 Sep, 05:30 in Adelaide.
+    vi.setSystemTime(new Date('2026-09-06T20:00:00Z'))
+    expect(formatAlarmTime('2026-09-06T20:00:00Z', 'Australia/Adelaide')).toBe('05:30')
+    expect(formatAlarmTime('2026-09-06T14:00:00Z', 'Australia/Adelaide')).toBe('6 Sep 23:30')
+  })
+
+  it('says -- until the boat has reported a zone', () => {
+    expect(formatAlarmTime('2026-09-06T05:41:00Z', undefined)).toBe('--')
   })
 })
 

@@ -26,7 +26,7 @@ interface VesselStatusBarProps {
 const SOURCE_FIELDS = ['source'] as const
 
 export function VesselStatusBar({ isDark = false, themeMode, autoUntil = null, onToggleDarkMode, username = null, onLogout }: VesselStatusBarProps) {
-  const { currentDate, clock } = useVesselClock()
+  const { currentDate, clock, zoneError } = useVesselClock()
   const { source } = useVesselFields(SOURCE_FIELDS)
   // Unknown until the first vessel-state event, and not "no signal" either.
   const signalkConnected = source === null ? null : source === 'signalk'
@@ -89,6 +89,15 @@ export function VesselStatusBar({ isDark = false, themeMode, autoUntil = null, o
             {currentDate ?? '--'}
           </span>
         )}
+        {zoneError ? (
+          <span
+            data-testid="clock-zone-error"
+            title={zoneError}
+            className="whitespace-nowrap font-display text-[1.35rem] leading-[1.08] tabular-nums text-destructive sm:text-[1.8rem]"
+          >
+            --:--
+          </span>
+        ) : (
         <time className="inline-flex items-baseline whitespace-nowrap font-display leading-[1.08] tracking-[0.02em] text-gauge-secondary">
           <span className="inline-block w-[5ch] text-right tabular-nums text-[1.35rem] sm:text-[1.8rem] md:text-[2rem] lg:text-[2.15rem]">
             {hh}:{mm}
@@ -102,6 +111,7 @@ export function VesselStatusBar({ isDark = false, themeMode, autoUntil = null, o
             {clock?.meridiem}
           </span>
         </time>
+        )}
       </div>
     </div>
   )

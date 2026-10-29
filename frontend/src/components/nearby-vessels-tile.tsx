@@ -1,4 +1,6 @@
 import { Ship } from 'lucide-react'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { formatDayTimeIn, selectTimeZone } from '@/lib/vessel-time'
 import { memo, useMemo, useState, type ComponentProps } from 'react'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -57,12 +59,12 @@ function vesselContactKey(vessel: NearbyVessel): string {
   return vessel.mmsi ?? ''
 }
 
-function formatSightingTime(seenAt: string) {
+function formatSightingTime(seenAt: string, timeZone: string | undefined) {
   const parsedMs = Date.parse(seenAt)
   if (!Number.isFinite(parsedMs)) {
     return seenAt
   }
-  return new Date(parsedMs).toLocaleString()
+  return formatDayTimeIn(parsedMs, timeZone)
 }
 
 function navContextLabel(navContext: string) {
@@ -80,10 +82,11 @@ function navContextLabel(navContext: string) {
 }
 
 function SightingRow({ sighting }: { sighting: VesselSighting }) {
+  const timeZone = useVesselStateSelector(selectTimeZone)
   const label = navContextLabel(sighting.nav_context)
   return (
     <div className="border-b border-border/60 py-1.5 last:border-b-0">
-      <p className="text-xs font-medium text-foreground">{formatSightingTime(sighting.seen_at)}</p>
+      <p className="text-xs font-medium text-foreground">{formatSightingTime(sighting.seen_at, timeZone)}</p>
       <p className="mt-0.5 font-mono text-xs text-muted-foreground">
         {formatCoordinate(sighting.lat, true)} {formatCoordinate(sighting.lon, false)}
       </p>

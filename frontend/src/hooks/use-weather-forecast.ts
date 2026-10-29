@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { declareQuery, useApiQuery, useApiQuerySelector } from '@/lib/api-query';
+import { calendarDayLabel, requireDayKey } from '@/lib/vessel-time';
 import { sameShallow } from '@/lib/same-value'
 import { forecastQuery, type ForecastQueryOptions } from '@/lib/forecast-place';
 
@@ -283,17 +284,15 @@ function mapForecastPayload(payload: WeatherForecastDayApi[] | WeatherForecastEn
 
   const mappedForecast = rawDays
     .slice(0, 10)
-    .map((day, idx): WeatherForecastDay => {
-      const fallbackDate = new Date();
-      fallbackDate.setDate(fallbackDate.getDate() + idx);
-
+    .map((day): WeatherForecastDay => {
+      const dayKey = requireDayKey(day.day_key);
       const windSpeed = typeof day.wind_speed_kts === 'number' ? day.wind_speed_kts : -1;
       const windGust = typeof day.wind_gust_kts === 'number' ? day.wind_gust_kts : windSpeed;
 
       return {
-        dayKey: typeof day.day_key === 'string' && day.day_key !== '' ? day.day_key : fallbackDate.toISOString().slice(0, 10),
-        date: day.date || fallbackDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        dayName: day.day_name || fallbackDate.toLocaleDateString('en-US', { weekday: 'long' }),
+        dayKey,
+        date: day.date || calendarDayLabel(dayKey, { month: 'short', day: 'numeric' }),
+        dayName: day.day_name || calendarDayLabel(dayKey, { weekday: 'long' }),
         condition: day.condition || 'Unknown',
         high: typeof day.high_temp_f === 'number' ? day.high_temp_f : -1,
         low: typeof day.low_temp_f === 'number' ? day.low_temp_f : -1,

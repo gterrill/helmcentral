@@ -90,6 +90,10 @@ export default [
       // escapes in class tokens, SVG fill/stroke/color/stopColor or style
       // colour properties; use a semantic token.
       'helm/no-arbitrary-color': 'error',
+      // ADR 0230: every time the operator reads is in the boat's zone, so no
+      // device-zone formatting or local getters. A deliberate device-clock
+      // reading opts out with "// helm-browser-zone: <reason>".
+      'helm/no-zoneless-time': 'error',
     },
   },
   {
