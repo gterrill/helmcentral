@@ -462,3 +462,29 @@ next targets and defines its own order, so the slot carries no opinion about
 sorting. Passages is the first user, ordered by start time within the filter it
 was opened from. The other CRUD details pages can adopt it later by passing
 neighbours.
+
+Amended: every CRUD details page now has a pager: Equipment, Location, Deck,
+Bin, Watch, Document and the Wall display editor. The arrows follow the order
+the operator saw in the index, so the index's sort, filter and search moved out
+of component state and into the app location (`InventoryList` on the Inventory
+routes, `sort` on Watches, `tag` and `unfiled` on Documents). The details route
+carries the same state as the index it was opened from, Back returns to that
+view, and an empty or default state gives a clean URL with no parameters. Each
+index has one pure ordering function (`lib/index-order.ts`: `orderEquipment`,
+`orderLocations`, `orderDecks`, `orderWatches`, `orderDocuments`) which the
+index draws its rows with and the details page asks for neighbours, through the
+shared `neighbours` and `recordPager` helpers, so the two orders cannot drift
+apart. `IndexTable` gained a controlled `sorting` and a `manualSorting`
+option: it shows the sort it is given and keeps the order of the rows it is
+given, so the sort is no longer table state. Because the ordering function now
+sorts, text compares with a case-insensitive natural order (`Intl.Collator`)
+instead of TanStack's own, which differs only in edge cases. The Documents sort
+stays a per-device preference in local storage, read by the index and by the
+details page through the same function, rather than going into the URL. Search
+is not in the URL: Documents search is a dialog over the listing whose results
+open the viewer, so a document reached from a search steps through its folder
+listing. The editors are remounted per record (`key`), the details pages take
+their neighbours through the existing navigation guards, and the wall display
+editor commits a field on blur before the arrow's click lands, with its
+in-flight save no longer able to navigate back to a display the operator has
+left.

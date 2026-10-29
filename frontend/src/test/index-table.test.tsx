@@ -274,4 +274,49 @@ describe('IndexTable', () => {
     expect(within(pump).getByText('Hours')).toBeInTheDocument()
     setViewportWidth(1280)
   })
+
+  describe('a sort the caller owns', () => {
+    it('shows the sort it is given and asks the caller for the next one, without moving a row itself', () => {
+      const onSortingChange = vi.fn()
+      render(
+        <IndexTable
+          columns={columns}
+          rows={rows}
+          getRowId={(r) => r.id}
+          sorting={[{ id: 'name', desc: false }]}
+          manualSorting
+          onSortingChange={onSortingChange}
+        />,
+      )
+      const header = screen.getByRole('columnheader', { name: 'Name' })
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
+
+      fireEvent.click(within(header).getByRole('button'))
+      expect(onSortingChange).toHaveBeenLastCalledWith([{ id: 'name', desc: true }])
+      // The caller has not changed `sorting`, so the header has not either.
+      expect(header).toHaveAttribute('aria-sort', 'ascending')
+      // manualSorting: rows are drawn in the order given.
+      const names = screen.getAllByRole('row').slice(1).map((r) => r.textContent)
+      expect(names[0]).toContain('Bilge pump')
+    })
+
+    it('has no multi-column sort, so a shift-click asks for one column only', () => {
+      const onSortingChange = vi.fn()
+      render(
+        <IndexTable columns={columns} rows={rows} getRowId={(r) => r.id} sorting={[{ id: 'name', desc: false }]} manualSorting onSortingChange={onSortingChange} />,
+      )
+      fireEvent.click(within(screen.getByRole('columnheader', { name: 'Hours' })).getByRole('button'), { shiftKey: true })
+      expect(onSortingChange).toHaveBeenLastCalledWith([{ id: 'hours', desc: true }])
+    })
+
+    it('follows the caller when the sort it is given changes', () => {
+      const { rerender } = render(
+        <IndexTable columns={columns} rows={rows} getRowId={(r) => r.id} sorting={[]} manualSorting onSortingChange={vi.fn()} />,
+      )
+      rerender(
+        <IndexTable columns={columns} rows={rows} getRowId={(r) => r.id} sorting={[{ id: 'hours', desc: true }]} manualSorting onSortingChange={vi.fn()} />,
+      )
+      expect(screen.getByRole('columnheader', { name: 'Hours' })).toHaveAttribute('aria-sort', 'descending')
+    })
+  })
 })

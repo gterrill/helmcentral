@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { invalidateQueries } from '@/lib/api-query'
-import { LocationsIndex } from '@/components/inventory/locations-index'
+import { LocationsIndex as BareLocationsIndex } from '@/components/inventory/locations-index'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
 import { stubImageSize } from './stub-image'
+import { withListState } from './helpers/list-state'
+
+const LocationsIndex = withListState(BareLocationsIndex, {})
 
 let zones: InventoryZone[]
 let decks: InventoryDeck[]
@@ -127,6 +130,27 @@ describe('LocationsIndex bin labels', () => {
     expect(within(dialog).getByText('ER-01')).toBeInTheDocument()
     expect(within(dialog).getByText('ER-02')).toBeInTheDocument()
   })
+})
+
+describe('LocationsIndex sort in the address', () => {
+  it('draws the rows in the order of the sort in the address, and shows it on the header', async () => {
+    render(<LocationsIndex onOpenLocation={vi.fn()} initial={{ sort: { id: 'name', desc: false } }} />)
+    await screen.findByText('Lazarette')
+    const names = screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '')
+    expect(names[0]).toContain('Engine room')
+    expect(names[1]).toContain('Lazarette')
+    expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending')
+  })
+
+  it('moves to the next sort when a header is clicked', async () => {
+    render(<LocationsIndex onOpenLocation={vi.fn()} initial={{ sort: { id: 'bins', desc: true } }} />)
+    await screen.findByText('Lazarette')
+    expect(screen.getAllByRole('row')[1].textContent).toContain('Engine room')
+    fireEvent.click(within(screen.getByRole('columnheader', { name: 'Bins' })).getByRole('button'))
+    await waitFor(() => expect(screen.getByRole('columnheader', { name: 'Bins' })).toHaveAttribute('aria-sort', 'ascending'))
+    expect(screen.getAllByRole('row')[1].textContent).toContain('Lazarette')
+  })
+
 })
 
 describe('LocationsIndex plan view (ADR 0156)', () => {

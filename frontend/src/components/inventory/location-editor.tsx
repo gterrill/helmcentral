@@ -9,6 +9,8 @@ import { DeckPlan } from '@/components/inventory/deck-plan'
 import { BinRow } from '@/components/inventory/location-bin-row'
 import { useInventoryDecks, useInventoryZones, type InventoryZone } from '@/hooks/use-inventory'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
+import { useLocationPager } from '@/hooks/use-inventory-pagers'
+import type { InventoryList } from '@/lib/app-location'
 import { inventoryEditorClosedBy } from '@/lib/inventory-navigation-guard'
 
 // ADR 0142: one location's own page - rename it, add and remove its bins,
@@ -38,6 +40,10 @@ interface LocationEditorProps {
   /** ADR 0156: a location not on any plan points to the Decks list. */
   onOpenDecks?: () => void
   canWrite?: boolean
+  /** The Locations table's search and sort this location was opened from. Its arrows step through that list. */
+  list?: InventoryList
+  /** Opens a neighbouring location from the arrows. Without it the page has no arrows. */
+  onOpenNeighbour?: (id: string) => void
 }
 
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
@@ -94,10 +100,11 @@ function OnThePlan({
 }
 
 export function LocationEditor(
-  { id, onBack, onDeleted, onOpenBin = () => {}, onOpenDeck = () => {}, onOpenDecks = () => {}, canWrite = true }: LocationEditorProps,
+  { id, onBack, onDeleted, onOpenBin = () => {}, onOpenDeck = () => {}, onOpenDecks = () => {}, canWrite = true, list, onOpenNeighbour }: LocationEditorProps,
 ) {
   const { zones, loading, error, refresh, renameZone, deleteZone, createBin, renameBin, deleteBin } = useInventoryZones()
   const zone = zones.find((z) => z.id === id) ?? null
+  const pager = useLocationPager(id, list, onOpenNeighbour)
 
   const [name, setName] = useState(zone?.name ?? '')
   const [saving, setSaving] = useState(false)
@@ -253,6 +260,7 @@ export function LocationEditor(
     <Page
       title={zone.name}
       onBack={onBack}
+      pager={pager}
       secondaryActions={
         canWrite
           ? [

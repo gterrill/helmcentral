@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import {
   flexRender,
   getCoreRowModel,
@@ -8,6 +8,7 @@ import {
   type ColumnDef,
   type Row as TanstackRow,
   type SortingState,
+  type Updater,
 } from '@tanstack/react-table'
 import { ArrowUpDown, ChevronDown, ChevronUp, MoreVertical } from 'lucide-react'
 
@@ -176,6 +177,15 @@ export interface IndexTableProps<T> {
   initialSorting?: SortingState
   /** Called whenever the operator changes the sort, so a caller can remember it. */
   onSortingChange?: (sorting: SortingState) => void
+  /** The sort, owned by the caller (it lives in the address, say). The table
+   * shows it and asks for the next one through `onSortingChange`, which then
+   * fires on the click rather than after the table has changed. Takes the
+   * place of `initialSorting`. */
+  sorting?: SortingState
+  /** The rows arrive already in the order of the sort, from the one function
+   * a details page also orders its neighbours with. The table keeps their
+   * order and only draws the header state. */
+  manualSorting?: boolean
   /** Make the header toggle strictly ascending/descending: no third click
    * that clears the sort, and no shift-click multi-sort. */
   twoStateSort?: boolean
@@ -211,21 +221,35 @@ export function IndexTable<T>({
   className,
   initialSorting,
   onSortingChange,
+  sorting: controlledSorting,
+  manualSorting = false,
   twoStateSort = false,
   onRowDragStart,
   isRowDraggable,
 }: IndexTableProps<T>) {
-  const [sorting, setSorting] = useState<SortingState>(initialSorting ?? [])
+  const [ownSorting, setOwnSorting] = useState<SortingState>(initialSorting ?? [])
+  const controlled = controlledSorting !== undefined
+  const sorting = controlledSorting ?? ownSorting
   const onSortingChangeRef = useRef(onSortingChange)
   onSortingChangeRef.current = onSortingChange
   const firstSortRender = useRef(true)
   useEffect(() => {
+    if (controlled) return
     if (firstSortRender.current) {
       firstSortRender.current = false
       return
     }
-    onSortingChangeRef.current?.(sorting)
-  }, [sorting])
+    onSortingChangeRef.current?.(ownSorting)
+  }, [controlled, ownSorting])
+  const sortingRef = useRef(sorting)
+  sortingRef.current = sorting
+  const setSorting = useCallback((updater: Updater<SortingState>) => {
+    if (controlled) {
+      onSortingChangeRef.current?.(typeof updater === 'function' ? updater(sortingRef.current) : updater)
+    } else {
+      setOwnSorting(updater)
+    }
+  }, [controlled])
   const isMobile = useIsMobile()
 
   // The actions column's cell must have a STABLE identity: TanStack's
@@ -249,7 +273,10 @@ export function IndexTable<T>({
     columns: mergedColumns,
     state: { sorting },
     onSortingChange: setSorting,
-    ...(twoStateSort ? { enableSortingRemoval: false, enableMultiSort: false } : {}),
+    manualSorting,
+    ...(twoStateSort ? { enableSortingRemoval: false } : {}),
+    // A sort the caller owns is one column: the address holds only that.
+    ...(twoStateSort || controlled ? { enableMultiSort: false } : {}),
     getRowId: (row) => getRowId(row),
     meta: { rowActions, rowActionsLabel, getRowId } satisfies RowActionsMeta<T>,
     getCoreRowModel: getCoreRowModel(),

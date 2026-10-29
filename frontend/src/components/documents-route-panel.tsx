@@ -2,6 +2,7 @@ import { memo, useRef, useState } from 'react'
 
 import { DocumentDetailsPage, type DocumentDetailsPageHandle } from '@/components/document-details-page'
 import { DocumentsPanel } from '@/components/documents-panel'
+import { useDocumentPager } from '@/hooks/use-document-pager'
 import { useDocumentsRoute } from '@/hooks/use-documents-route'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import type { HelpTarget } from '@/lib/help-links'
@@ -28,7 +29,7 @@ export const DocumentsRoutePanel = memo(function DocumentsRoutePanel({
   onAskMate,
   onDetailsTitleChange,
 }: DocumentsRoutePanelProps) {
-  const { route, openFolder, openSection, openDetails, close, followFolder } = useDocumentsRoute()
+  const { route, openFolder, openSection, openDetails, close, followFolder, setTag, openUnfiled } = useDocumentsRoute()
 
   if (route.view === 'details') {
     return (
@@ -37,6 +38,8 @@ export const DocumentsRoutePanel = memo(function DocumentsRoutePanel({
         // fields or dirty flag while the next loads.
         key={route.id}
         documentId={route.id}
+        list={{ folderId: route.folderId, tag: route.tag ?? null, unfiled: route.unfiled ?? false, sectionId: route.sectionId }}
+        onOpenDocument={openDetails}
         onOpenFolder={(folderId) => { openFolder(folderId) }}
         onBack={() => { close() }}
         onFolderContextChange={followFolder}
@@ -53,6 +56,10 @@ export const DocumentsRoutePanel = memo(function DocumentsRoutePanel({
       onEditDocument={openDetails}
       initialSectionId={route.sectionId}
       onSectionChange={openSection}
+      initialTag={route.tag ?? null}
+      onTagChange={setTag}
+      initialUnfiled={route.unfiled ?? false}
+      onUnfiledChange={(unfiled) => { if (unfiled) openUnfiled() }}
       onOpenHelp={onOpenHelp}
       onOpenAssistantSettings={onOpenAssistantSettings}
       onAskMate={onAskMate}
@@ -62,6 +69,9 @@ export const DocumentsRoutePanel = memo(function DocumentsRoutePanel({
 
 interface DetailsViewProps {
   documentId: string
+  /** The listing this document was opened from, for the arrows. */
+  list: { folderId: string | null; tag: string | null; unfiled: boolean; sectionId: string | null }
+  onOpenDocument: (id: string) => void
   onOpenFolder: (folderId: string | null) => void
   onBack: () => void
   onFolderContextChange: (folderId: string | null) => void
@@ -70,9 +80,10 @@ interface DetailsViewProps {
 
 // Its own component so the draft's dirty flag and its guard live exactly as
 // long as the Details page is on screen.
-function DetailsView({ documentId, onOpenFolder, onBack, onFolderContextChange, onTitleChange }: DetailsViewProps) {
+function DetailsView({ documentId, list, onOpenDocument, onOpenFolder, onBack, onFolderContextChange, onTitleChange }: DetailsViewProps) {
   const pageRef = useRef<DocumentDetailsPageHandle>(null)
   const [dirty, setDirty] = useState(false)
+  const pager = useDocumentPager(documentId, list, onOpenDocument)
 
   // Leaving the page is any move that does not land on this same document:
   // the Documents breadcrumb, a folder crumb, Back, another panel. A Move that
@@ -97,6 +108,7 @@ function DetailsView({ documentId, onOpenFolder, onBack, onFolderContextChange, 
       ref={pageRef}
       documentId={documentId}
       onDirtyChange={setDirty}
+      pager={pager}
       onOpenFolder={onOpenFolder}
       onBack={onBack}
       onFolderContextChange={onFolderContextChange}

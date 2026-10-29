@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle } from 'react'
+import { forwardRef, useImperativeHandle, useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen } from '@testing-library/react'
 import { InventoryPanel } from '@/components/inventory/inventory-panel'
@@ -23,6 +23,8 @@ vi.mock('@/components/inventory/equipment-index', () => ({
   ),
 }))
 
+const editorMounts = vi.hoisted(() => ({ count: 0 }))
+
 vi.mock('@/components/inventory/equipment-editor', () => ({
   EquipmentEditor: forwardRef(function MockEquipmentEditor(
     props: {
@@ -35,8 +37,9 @@ vi.mock('@/components/inventory/equipment-editor', () => ({
     ref,
   ) {
     useImperativeHandle(ref, () => ({ save: saveMock }), [])
+    const [mount] = useState(() => ++editorMounts.count)
     return (
-      <div data-testid="equipment-editor">
+      <div data-testid="equipment-editor" data-mount={mount}>
         {props.id ?? 'new'}
         <button type="button" onClick={() => props.onDirtyChange?.(true)}>make-dirty</button>
         <button type="button" onClick={props.onBack}>editor-back</button>
@@ -149,6 +152,8 @@ function baseProps() {
     onCloseDeck: vi.fn(),
     onDeckDeleted: vi.fn(),
     newEquipmentPreset: null,
+    list: {},
+    onListChange: vi.fn(),
   }
 }
 
@@ -193,6 +198,19 @@ describe('InventoryPanel', () => {
     fireEvent.click(screen.getByText('editor-created'))
     expect(props.onEquipmentCreated).toHaveBeenCalledWith('eq-new')
     expect(props.onCloseEditor).not.toHaveBeenCalled()
+  })
+
+  // The editor is still saving (photo uploads, the photo-work guard) when the
+  // route moves from the draft to the record it just created.
+  it('keeps the same editor across a create, but remounts between two saved records', () => {
+    const props = baseProps()
+    const { rerender } = render(<InventoryPanel {...props} creatingEquipment />)
+    const mounted = screen.getByTestId('equipment-editor').getAttribute('data-mount')
+    fireEvent.click(screen.getByText('editor-created'))
+    rerender(<InventoryPanel {...props} creatingEquipment={false} equipmentEditId="eq-new" />)
+    expect(screen.getByTestId('equipment-editor').getAttribute('data-mount')).toBe(mounted)
+    rerender(<InventoryPanel {...props} creatingEquipment={false} equipmentEditId="eq-2" />)
+    expect(screen.getByTestId('equipment-editor').getAttribute('data-mount')).not.toBe(mounted)
   })
 
   it('a successful delete is its own callback, never a close', () => {

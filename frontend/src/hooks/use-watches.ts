@@ -27,13 +27,14 @@ export function invalidateWatches(): Promise<void> {
 
 const NO_WATCHES: WatchRecord[] = []
 
-export function useWatchList(enabled = true) {
+/** `poll` false reads the list once: a watch's page wants it for its arrows, not to keep it fresh. */
+export function useWatchList(enabled = true, poll = true) {
   const query = useApiQuery<WatchList>({
     queryKey: WATCHES_KEY,
     path: WATCHES_PATH,
     enabled,
     // A one-off watch ends and a scheduled one runs without the page asking.
-    refetchInterval: 30_000,
+    refetchInterval: poll ? 30_000 : undefined,
   })
   const data = query.data
   return {

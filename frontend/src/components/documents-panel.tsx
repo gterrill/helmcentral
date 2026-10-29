@@ -79,6 +79,8 @@ import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { apiRequest } from '@/lib/api-query'
 import { downloadDocument } from '@/lib/document-download'
 import { documentDisplayName, documentFailureMessage, formatAdded, formatBytes, formatDocumentTime } from '@/lib/document-display'
+import { loadDocumentsSort, orderDocuments, saveDocumentsSort } from '@/lib/index-order'
+import type { ListSort } from '@/lib/list-order'
 import type { HelpTarget } from '@/lib/help-links'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
 import { cn } from '@/lib/utils'
@@ -210,33 +212,6 @@ function docStateIcon(doc: DocumentRecord): { className?: string; label?: string
 }
 
 const MAX_LISTED_TAGS = 3
-const SORT_KEY = 'helmcentral.documents.sort'
-const SORTABLE_COLUMNS = ['name', 'added', 'size']
-const DEFAULT_SORT: SortingState = [{ id: 'added', desc: true }]
-
-function loadSort(): SortingState {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(SORT_KEY) ?? 'null')
-    if (
-      Array.isArray(parsed) && parsed.length === 1 &&
-      typeof parsed[0]?.id === 'string' && SORTABLE_COLUMNS.includes(parsed[0].id) &&
-      typeof parsed[0].desc === 'boolean'
-    ) {
-      return [{ id: parsed[0].id, desc: parsed[0].desc }]
-    }
-  } catch {
-    // Unavailable or unreadable storage: fall back to the default sort.
-  }
-  return DEFAULT_SORT
-}
-
-function saveSort(sorting: SortingState): void {
-  try {
-    localStorage.setItem(SORT_KEY, JSON.stringify(sorting))
-  } catch {
-    // Best-effort only.
-  }
-}
 
 interface RenameTarget {
   kind: 'folder' | 'document'
@@ -300,6 +275,14 @@ export interface DocumentsPanelProps {
    * ever reads it), same as app-location.ts's own documentSectionId. */
   initialSectionId?: string | null
   onSectionChange?: (id: string | null) => void
+  /** The tag the listing is filtered by (`?tag=`) and the Unfiled notes view
+   * (`?view=unfiled`), seeded from and mirrored to the address the same way
+   * the folder is. A Details page opened from here carries both, so its
+   * arrows step through the list as filtered. */
+  initialTag?: string | null
+  onTagChange?: (tag: string | null) => void
+  initialUnfiled?: boolean
+  onUnfiledChange?: (unfiled: boolean) => void
   /** Opens the in-app help at a given target - passed straight through the
    * "What to put in it" link in EmptyManualsState's replacement (the
    * revision drops the dedicated empty state, but a Manual-kind folder can
@@ -334,12 +317,16 @@ export function DocumentsPanel({
   onEditDocument,
   initialSectionId = null,
   onSectionChange,
+  initialTag = null,
+  onTagChange,
+  initialUnfiled = false,
+  onUnfiledChange,
   onOpenHelp,
   onOpenAssistantSettings,
   onAskMate,
 }: DocumentsPanelProps) {
   const [folderId, setFolderId] = useState<string | null>(initialFolderId)
-  const documents = useDocuments(folderId)
+  const documents = useDocuments(folderId, initialTag)
   // Ask Mate about a selection (ask-mate-selection.tsx) is hidden entirely
   // unless Mate itself is actually usable right now - the same status
   // AssistantDrawer's own "problem" card already gates its composer on
@@ -384,7 +371,29 @@ export function DocumentsPanel({
   // viewer's Edit/Save for ANY note (patchNote/getNote work on any note id
   // regardless of the list filter) - see the "the viewer" section below.
   const unfiled = useNotes({ unfiledOnly: true })
-  const [view, setView] = useState<'browse' | 'unfiled'>('browse')
+  const [view, setView] = useState<'browse' | 'unfiled'>(initialUnfiled ? 'unfiled' : 'browse')
+  // Back/Forward hands this panel a new prop rather than remounting it (the
+  // same reason the folder and section re-sync below).
+  const previousInitialUnfiledRef = useRef(initialUnfiled)
+  useEffect(() => {
+    const previous = previousInitialUnfiledRef.current
+    previousInitialUnfiledRef.current = initialUnfiled
+    if (initialUnfiled !== previous) setView(initialUnfiled ? 'unfiled' : 'browse')
+  }, [initialUnfiled])
+
+  // The tag filter lives in the address too. useDocuments owns the state the
+  // listing reads; this keeps the two in step in both directions.
+  const { setSelectedTag } = documents
+  const setTag = useCallback((tag: string | null) => {
+    setSelectedTag(tag)
+    onTagChange?.(tag)
+  }, [setSelectedTag, onTagChange])
+  const previousInitialTagRef = useRef(initialTag)
+  useEffect(() => {
+    const previous = previousInitialTagRef.current
+    previousInitialTagRef.current = initialTag
+    if (initialTag !== previous) setSelectedTag(initialTag)
+  }, [initialTag, setSelectedTag])
 
   // ── capture sheet (ADR 0121) ────────────────────────────────────────────
   // The New → Note menu below is the only way in now - no more global
@@ -808,14 +817,16 @@ export function DocumentsPanel({
   // ── the listing: documents only; folders live in the pane ──────────────
   const listRows = documents.documents
   const { patchNote: patchUnfiledNote } = unfiled
-  // IndexTable reads its initial sort once at mount, and it remounts on each
-  // switch between the listing and Unfiled notes / a manual - so the latest
-  // chosen sort lives here, not in a snapshot taken at panel mount.
-  const sortingRef = useRef<SortingState>(loadSort())
+  // The sort is remembered on this device. The rows are ordered here with the
+  // same function a document's Details page steps through the list with.
+  const [sort, setSort] = useState<ListSort>(loadDocumentsSort)
   const rememberSorting = useCallback((sorting: SortingState) => {
-    sortingRef.current = sorting
-    saveSort(sorting)
+    const next = sorting[0]
+    if (!next) return
+    setSort(next)
+    saveDocumentsSort(next)
   }, [])
+  const sortedRows = useMemo(() => orderDocuments(listRows, sort), [listRows, sort])
   const columns = useMemo<ColumnDef<DocumentRecord, unknown>[]>(() => [
     {
       id: 'name',
@@ -974,7 +985,7 @@ export function DocumentsPanel({
         value: documents.selectedTag ?? '',
         allLabel: 'All tags',
         options: tagFilterOptions.map((t) => ({ value: t.tag, label: `${t.tag} (${t.count})` })),
-        onChange: (value) => documents.setSelectedTag(value === '' ? null : value),
+        onChange: (value) => setTag(value === '' ? null : value),
       }]
     : []
 
@@ -1033,7 +1044,7 @@ export function DocumentsPanel({
   }, [view, folderId, folderTree.folders])
   const selectTreeNode = (id: string) => {
     if (id === ALL_DOCUMENTS_NODE) navigate(null)
-    else if (id === UNFILED_NOTES_NODE) setView('unfiled')
+    else if (id === UNFILED_NOTES_NODE) { setView('unfiled'); onUnfiledChange?.(true) }
     else navigate(id)
   }
   const startDocumentDrag = (doc: DocumentRecord, e: DragEvent<HTMLElement>) => {
@@ -1105,7 +1116,7 @@ export function DocumentsPanel({
           searchPlaceholder={`Search documents (${isApplePlatform() ? '⌘K' : 'Ctrl K'})`}
           onSearchActivate={openSearch}
           filters={tagFilters}
-          onClearAll={() => documents.setSelectedTag(null)}
+          onClearAll={() => setTag(null)}
         />
         <MateFailureRow status={documents.embeddingsStatus} onOpenAssistantSettings={onOpenAssistantSettings} />
       </div>
@@ -1193,12 +1204,13 @@ export function DocumentsPanel({
         ) : (
           <IndexTable
             columns={columns}
-            rows={listRows}
+            rows={sortedRows}
             getRowId={rowKey}
             onOpen={(doc) => setViewerId(doc.id)}
             rowActions={rowActions}
             rowActionsLabel={(item) => `Actions for ${rowName(item)}`}
-            initialSorting={sortingRef.current}
+            sorting={[sort]}
+            manualSorting
             twoStateSort
             onSortingChange={rememberSorting}
             selectable
@@ -1280,7 +1292,7 @@ export function DocumentsPanel({
                 <button
                   type="button"
                   aria-label={`Clear tag filter ${documents.selectedTag}`}
-                  onClick={() => documents.setSelectedTag(null)}
+                  onClick={() => setTag(null)}
                   className="flex min-w-0 items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs hover:bg-accent"
                 >
                   <span className="truncate">Tag: {documents.selectedTag}</span>
@@ -1357,7 +1369,7 @@ export function DocumentsPanel({
                         <button
                           key={t.tag}
                           type="button"
-                          onClick={() => { documents.setSelectedTag(t.tag); closeSearchOverlay() }}
+                          onClick={() => { setTag(t.tag); closeSearchOverlay() }}
                           className="rounded-full border border-border px-2.5 py-1 text-xs hover:bg-accent"
                         >
                           {t.tag} ({t.count})

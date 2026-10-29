@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Plus, Wrench } from 'lucide-react'
 import type { ColumnDef } from '@tanstack/react-table'
 
@@ -19,12 +19,14 @@ import {
   deleteEquipment,
   useEquipment,
   useInventoryZones,
-  type EquipmentFilter,
   type EquipmentItem,
   type EquipmentStatus,
   type EquipmentSystem,
 } from '@/hooks/use-inventory'
 import { useEquipmentDependants } from '@/hooks/use-equipment-dependants'
+import type { InventoryList } from '@/lib/app-location'
+import { equipmentFilterOf, equipmentLocationLabel, orderEquipment } from '@/lib/index-order'
+import { patchList } from '@/lib/list-order'
 import {
   DELETE_CONSEQUENCE,
   EquipmentDependantsNotice,
@@ -42,12 +44,6 @@ import {
 // as blocks) is also unchanged, now expressed as IndexTable's groupBy/
 // groupOrder rather than a hand-rolled loop over EQUIPMENT_SYSTEMS.
 
-function locationLabel(item: EquipmentItem): string {
-  if (item.zone_name && item.bin_code) return `${item.zone_name} / ${item.bin_code}`
-  if (item.zone_name) return item.zone_name
-  return '--'
-}
-
 const columns: ColumnDef<EquipmentItem, unknown>[] = [
   {
     accessorKey: 'name',
@@ -62,7 +58,7 @@ const columns: ColumnDef<EquipmentItem, unknown>[] = [
   },
   {
     id: 'location',
-    accessorFn: locationLabel,
+    accessorFn: equipmentLocationLabel,
     header: 'Location',
     cell: ({ getValue }) => <span className="text-muted-foreground">{getValue<string>()}</span>,
   },
@@ -85,22 +81,27 @@ const columns: ColumnDef<EquipmentItem, unknown>[] = [
 ]
 
 interface EquipmentIndexProps {
+  /** The filter, search and sort in force. They live in the address, so the
+   * page an item opens to can step through the same list. */
+  list: InventoryList
+  onListChange: (list: InventoryList) => void
   onOpenItem: (id: string) => void
   onNewItem: () => void
   canWrite?: boolean
 }
 
-export function EquipmentIndex({ onOpenItem, onNewItem, canWrite = true }: EquipmentIndexProps) {
-  const [system, setSystem] = useState<EquipmentSystem | ''>('')
-  const [status, setStatus] = useState<EquipmentStatus | ''>('')
-  const [zone, setZone] = useState('')
-  const [query, setQuery] = useState('')
+export function EquipmentIndex({ list, onListChange, onOpenItem, onNewItem, canWrite = true }: EquipmentIndexProps) {
+  const system = (list.system ?? '') as EquipmentSystem | ''
+  const status = (list.status ?? '') as EquipmentStatus | ''
+  const zone = list.zone ?? ''
+  const query = list.q ?? ''
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const filter: EquipmentFilter = { system, status, zone, q: query }
-  const { items, loading, error, refresh } = useEquipment(filter)
+  const { items: fetched, loading, error, refresh } = useEquipment(equipmentFilterOf(list))
+  // The same function the item's page steps through the list with.
+  const items = useMemo(() => orderEquipment(fetched, list), [fetched, list])
   const { zones } = useInventoryZones()
 
   const filters: IndexFilter[] = [
@@ -109,7 +110,7 @@ export function EquipmentIndex({ onOpenItem, onNewItem, canWrite = true }: Equip
       label: 'Filter by system',
       value: system,
       options: EQUIPMENT_SYSTEMS.map((sys) => ({ value: sys, label: EQUIPMENT_SYSTEM_LABELS[sys] })),
-      onChange: (value) => setSystem(value as EquipmentSystem | ''),
+      onChange: (value) => onListChange(patchList(list, { system: value })),
     },
     {
       id: 'status',
@@ -119,7 +120,7 @@ export function EquipmentIndex({ onOpenItem, onNewItem, canWrite = true }: Equip
         { value: 'deployed', label: 'Deployed' },
         { value: 'stored', label: 'Stored' },
       ],
-      onChange: (value) => setStatus(value as EquipmentStatus | ''),
+      onChange: (value) => onListChange(patchList(list, { status: value })),
     },
     {
       id: 'zone',
@@ -127,7 +128,7 @@ export function EquipmentIndex({ onOpenItem, onNewItem, canWrite = true }: Equip
       value: zone,
       allLabel: 'All zones',
       options: zones.map((z) => ({ value: z.id, label: z.name })),
-      onChange: setZone,
+      onChange: (value) => onListChange(patchList(list, { zone: value })),
     },
   ]
 
@@ -179,20 +180,19 @@ export function EquipmentIndex({ onOpenItem, onNewItem, canWrite = true }: Equip
       <div className="flex h-full min-h-0 flex-col gap-4">
         <IndexFilters
           searchValue={query}
-          onSearchChange={setQuery}
+          onSearchChange={(value) => onListChange(patchList(list, { q: value }))}
           searchLabel="Search equipment"
           searchPlaceholder="Name, alias, manufacturer..."
           filters={filters}
-          onClearAll={() => {
-            setSystem('')
-            setStatus('')
-            setZone('')
-          }}
+          onClearAll={() => onListChange(patchList(list, { system: '', status: '', zone: '' }))}
         />
 
         <IndexTable
           columns={columns}
           rows={items}
+          manualSorting
+          sorting={list.sort ? [list.sort] : []}
+          onSortingChange={(sorting) => onListChange(patchList(list, { sort: sorting[0] }))}
           getRowId={(item) => item.id}
           onOpen={(item) => onOpenItem(item.id)}
           rowActions={rowActions}

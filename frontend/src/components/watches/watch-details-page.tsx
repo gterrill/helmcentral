@@ -4,7 +4,7 @@ import { Play, Trash2 } from 'lucide-react'
 import { WatchNotifySection } from '@/components/watches/watch-notify-section'
 import { WatchRunCard, WatchRunList } from '@/components/watches/watch-run-list'
 import { schedulePreviewBlocksSave, WatchSchedulePicker } from '@/components/watches/watch-schedule-picker'
-import { ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar } from '@/components/patterns'
+import { ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar, type PagerProps } from '@/components/patterns'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -52,6 +52,8 @@ export interface WatchDetailsPageProps {
   /** A run a link points at: shown at the top of the history, scrolled to and highlighted for a moment. */
   linkedRunId?: string | null
   canWrite: boolean
+  /** The watch before and after this one in the index as the operator had it sorted. */
+  pager?: PagerProps
   /** The breadcrumb's Watches: up to the index. */
   onOpenIndex: () => void
   /** A new watch was saved: show it by its id. */
@@ -138,7 +140,7 @@ function oneOffStatus(w: WatchRecord): string {
   return w.ends_at ? `Ended ${oneOffTimeLabel(w, 'ends')}` : 'Finished'
 }
 
-export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, onOpenIndex, onCreated, onDeleted, onAskMate }: WatchDetailsPageProps) {
+export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, pager, onOpenIndex, onCreated, onDeleted, onAskMate }: WatchDetailsPageProps) {
   const id = mode.kind === 'existing' ? mode.id : null
   const detail = useWatchDetail(id)
   const record = detail.watch
@@ -319,6 +321,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, onOpenInd
       <Page
         title={title}
         breadcrumb={breadcrumb}
+        pager={pager}
         secondaryActions={
           canWrite && mode.kind === 'existing'
             ? [{
