@@ -692,7 +692,7 @@ func openRouterNonSuccessError(resp *http.Response) error {
 
 // openRouterStatusError is OpenRouter answering a request with a non-2xx
 // status. Nothing is generated for such a request, so nothing is charged:
-// routine spend (ADR 0227) counts it as free, and any other failure of a
+// a watch review's cost (ADR 0227) counts it as free, and any other failure of a
 // request as possibly charged.
 type openRouterStatusError struct{ text string }
 

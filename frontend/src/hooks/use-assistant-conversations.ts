@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { toast } from 'sonner'
 import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 import type { MessageApi } from '@/lib/mate-api'
 import { onPassageDecisionSaved } from '@/lib/passage-decisions-api'
@@ -17,8 +16,6 @@ interface ConversationApi {
   updated_at: string
   /** The note this conversation was summarised into, when it still exists. */
   summary_note_id?: string
-  /** The routine (ADR 0227) this conversation belongs to. */
-  routine_id?: string
 }
 
 export type AssistantProposalStatus = 'pending' | 'applied' | 'dismissed' | 'stale'
@@ -102,8 +99,6 @@ export interface AssistantConversation {
   title: string
   createdAt: string
   updatedAt: string
-  /** Set when a Mate routine (ADR 0227) owns this conversation. */
-  routineId?: string
 }
 
 export interface AssistantMessageAttachment {
@@ -148,7 +143,7 @@ export interface AssistantMessage {
   clientKey?: string
   conversationId: string
   seq: number
-  role: 'user' | 'assistant' | 'watch' | 'routine'
+  role: 'user' | 'assistant' | 'watch'
   content: string
   model?: string
   promptTokens?: number
@@ -206,7 +201,7 @@ function wireMessage(err: unknown): string {
 }
 
 function mapConversation(api: ConversationApi): AssistantConversation {
-  return { id: api.id, title: api.title, createdAt: api.created_at, updatedAt: api.updated_at, routineId: api.routine_id }
+  return { id: api.id, title: api.title, createdAt: api.created_at, updatedAt: api.updated_at }
 }
 
 export function mapMessage(api: MessageApi): AssistantMessage {
@@ -489,12 +484,6 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
         // A 404 here means the conversation is already gone server-side,
         // which is the outcome the caller wanted anyway - not a failure to
         // surface.
-        if (err instanceof ApiError && err.status === 409) {
-          // A routine's conversation (ADR 0227): the server says which routine
-          // to delete first. Nothing is wrong with the list, so no list error.
-          toast.error(err.message)
-          return
-        }
         if (!(err instanceof ApiError && err.status === 404)) throw err
       }
 

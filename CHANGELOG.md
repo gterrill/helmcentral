@@ -25,19 +25,23 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
-- **Mate routines.** Ask Mate to "check the boat every hour" or "give me a
-  summary at 06:00 while we're at anchor" and it shows a card for a routine.
-  Tap **Apply** and the routine runs on its schedule, adding one line, "Routine:
-  <name>", and Mate's reply to the routine's own conversation, which carries a
-  **Routine** label in the list. A reply starts with "Nothing to report." or a
-  one-line headline of what needs a look. Routines are off until you turn on
-  **Let routines run on their own** in Settings → Mate, because they spend your
-  OpenRouter credit with nobody watching. A daily limit beside the switch, $1.00
-  to start with, stops new runs once routines have spent that much in 24 hours,
-  and Settings shows what they've spent. Each routine's row says when it last ran
-  and why a run was skipped, and has a switch and a **Delete** button. Daily
-  routines use the boat's clock, so they need a boat position. Findings stay in
-  the app for now and nothing is sent to your phone.
+- **Watches.** A new **Watches** page, in the sidebar, for regular checks of the
+  boat. A watch runs on a schedule you pick: hourly, every few hours, daily at a
+  time, chosen days, or hours such as 22:00 to 06:00. Each run builds the same
+  short report, in your units: power, anchor, alarms, tanks, weather and
+  instruments, whichever you choose. Rules you can change decide what counts as a
+  finding, such as an alarm raised, a sensor gone quiet, the boat outside the
+  anchor watch radius, a tank moving 10 points, or pressure down 3 hPa in
+  3 hours. Mate reads every report and adds its view, and may add a finding but
+  never removes one. Each run shows its report, its findings, Mate's review, what
+  the review cost and an **Ask Mate about this run** button. Times are on the
+  boat's clock, so a watch waits when the boat has no position and says so.
+  Every run is kept for a year, runs with findings are kept for good, and you can
+  delete any run. Ask Mate for "a check every 2 hours while we're at anchor" and
+  it shows a card to apply, and it can run a watch for you straight away. The
+  timed watch Mate starts on a reading now appears here too, as a one-off watch,
+  and it carries on if Helmcentral restarts. Findings stay in the app for now and
+  nothing is sent to your phone.
 
 - **Ask Mate about an alarm.** Every alarm card in the Alarms drawer, and every
   row in its History, has an **Ask Mate** button. It opens a new conversation

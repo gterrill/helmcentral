@@ -16,7 +16,6 @@ interface ConversationRecord {
   title: string
   created_at: string
   updated_at: string
-  routine_id?: string
 }
 
 interface FetchLike {
@@ -176,22 +175,6 @@ describe('AssistantDrawer', () => {
     expect(screen.getByRole('button', { name: 'New conversation' })).toBeInTheDocument()
     // Empty-thread help section shows what Mate can check.
     expect(screen.getByText('What Mate can check')).toBeInTheDocument()
-  })
-
-  it('marks a routine\'s conversation with a Routine badge and no other', async () => {
-    vi.stubGlobal('fetch', buildAssistantFetch({
-      status: { enabled: true, configured: true, model: 'anthropic/claude-sonnet-4.5' },
-      conversations: [
-        { id: 'c1', title: 'Hook Reef anchorages', created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z' },
-        { id: 'c2', title: 'Morning summary', created_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z', routine_id: 'r1' },
-      ],
-    }))
-
-    render(<AssistantDrawer canWrite onOpenSettings={vi.fn()} />)
-
-    const row = (await screen.findByText('Morning summary')).closest('button') as HTMLElement
-    expect(within(row).getByText('Routine')).toBeInTheDocument()
-    expect(within((await screen.findByText('Hook Reef anchorages')).closest('button') as HTMLElement).queryByText('Routine')).not.toBeInTheDocument()
   })
 
   // Mate UI cycle ("Mate opens on an empty chat"): clicking Mate must not

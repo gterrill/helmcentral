@@ -29,10 +29,6 @@ type assistantConversation struct {
 	// outlive the note: handlers go through liveAssistantSummaryNoteID, which
 	// reports a deleted note as none.
 	SummaryNoteID *string `json:"summary_note_id,omitempty"`
-	// RoutineID is the routine (ADR 0227) this conversation belongs to, nil
-	// for an ordinary conversation. It stays after the routine is deleted, so
-	// the findings keep their label and their spend stays counted.
-	RoutineID *string `json:"routine_id,omitempty"`
 }
 
 // assistantMessage is one row of a conversation. User and assistant roles
@@ -250,17 +246,6 @@ func createAssistantSchema(db *sql.DB) error {
 		}
 	}
 
-	// routine_id (ADR 0227) marks the conversation a Mate routine owns.
-	var hasRoutineID int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'routine_id'`).Scan(&hasRoutineID); err != nil {
-		return fmt.Errorf("inspect conversations table: %w", err)
-	}
-	if hasRoutineID == 0 {
-		if _, err := db.Exec(`ALTER TABLE conversations ADD COLUMN routine_id TEXT`); err != nil {
-			return fmt.Errorf("add conversations.routine_id: %w", err)
-		}
-	}
-
 	if err := createAssistantSearchSchema(db); err != nil {
 		return err
 	}
@@ -349,7 +334,7 @@ func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at, routine_id FROM conversations ORDER BY updated_at DESC, id DESC`)
+	rows, err := s.db.Query(`SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("list conversations: %w", err)
 	}
@@ -359,12 +344,8 @@ func (s *assistantStore) ListConversations() ([]assistantConversation, error) {
 	for rows.Next() {
 		var conv assistantConversation
 		var created, updated int64
-		var routineID sql.NullString
-		if err := rows.Scan(&conv.ID, &conv.Title, &created, &updated, &routineID); err != nil {
+		if err := rows.Scan(&conv.ID, &conv.Title, &created, &updated); err != nil {
 			return nil, fmt.Errorf("scan conversation: %w", err)
-		}
-		if routineID.Valid {
-			conv.RoutineID = &routineID.String
 		}
 		conv.CreatedAt = time.Unix(created, 0).UTC()
 		conv.UpdatedAt = time.Unix(updated, 0).UTC()
@@ -380,12 +361,12 @@ func (s *assistantStore) GetConversation(id string) (assistantConversation, bool
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	row := s.db.QueryRow(`SELECT id, title, created_at, updated_at, summary_note_id, routine_id FROM conversations WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, title, created_at, updated_at, summary_note_id FROM conversations WHERE id = ?`, id)
 
 	var conv assistantConversation
 	var created, updated int64
-	var noteID, routineID sql.NullString
-	err := row.Scan(&conv.ID, &conv.Title, &created, &updated, &noteID, &routineID)
+	var noteID sql.NullString
+	err := row.Scan(&conv.ID, &conv.Title, &created, &updated, &noteID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return assistantConversation{}, false, nil
 	}
@@ -396,9 +377,6 @@ func (s *assistantStore) GetConversation(id string) (assistantConversation, bool
 	conv.UpdatedAt = time.Unix(updated, 0).UTC()
 	if noteID.Valid {
 		conv.SummaryNoteID = &noteID.String
-	}
-	if routineID.Valid {
-		conv.RoutineID = &routineID.String
 	}
 	return conv, true, nil
 }

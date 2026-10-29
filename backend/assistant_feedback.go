@@ -360,7 +360,7 @@ func (s *assistantStore) readFeedbackPage(n int, curUpdated int64, curID string)
 		       COALESCE(u.content, ''), COALESCE(u.role, '')
 		FROM message_feedback f JOIN messages m ON m.id = f.message_id
 		LEFT JOIN messages u ON u.id = (SELECT p.id FROM messages p
-		                                WHERE p.conversation_id = m.conversation_id AND p.role IN ('user', 'watch', 'routine') AND p.seq < m.seq
+		                                WHERE p.conversation_id = m.conversation_id AND p.role IN ('user', 'watch') AND p.seq < m.seq
 		                                ORDER BY p.seq DESC LIMIT 1)
 		WHERE f.updated_at < ? OR (f.updated_at = ? AND f.message_id > ?)
 		ORDER BY f.updated_at DESC, f.message_id ASC

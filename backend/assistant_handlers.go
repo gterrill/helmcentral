@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -788,23 +787,6 @@ func getAssistantConversationHandler(c echo.Context) error {
 func deleteAssistantConversationHandler(c echo.Context) error {
 	id := c.Param("id")
 
-	// A routine writes its findings here, so it must go first (ADR 0227).
-	if globalDocumentStore != nil {
-		var owner string
-		if err := globalDocumentStore.Read(func(q sqlQueryer) error {
-			err := q.QueryRow(`SELECT name FROM mate_routines WHERE conversation_id = ?`, id).Scan(&owner)
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil
-			}
-			return err
-		}); err != nil {
-			return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
-		}
-		if owner != "" {
-			return c.JSON(http.StatusConflict, map[string]string{"error": fmt.Sprintf("This conversation belongs to the routine %q. Delete the routine in Mate settings first.", owner)})
-		}
-	}
-
 	if err := globalAssistantStore.DeleteConversation(id); err != nil {
 		if errors.Is(err, errAssistantConversationNotFound) {
 			return c.JSON(http.StatusNotFound, map[string]string{"error": "conversation not found"})
@@ -1036,6 +1018,9 @@ func postAssistantMessageHandler(c echo.Context) error {
 			DocumentTitle: trimmedAssistantScreenField(body.Screen.DocumentTitle),
 			AlarmID:       trimmedAssistantScreenAlarmID(body.Screen.AlarmID),
 			AlarmTitle:    trimmedAssistantScreenField(body.Screen.AlarmTitle),
+			// A run id is a uuid; an over-long one is dropped, not cut.
+			WatchRunID: trimmedAssistantScreenAlarmID(body.Screen.WatchRunID),
+			WatchName:  trimmedAssistantScreenField(body.Screen.WatchName),
 		}
 	}
 
@@ -1100,9 +1085,6 @@ type assistantTurnParams struct {
 	today        time.Time
 	spoken       bool
 	screen       *assistantScreenContext
-	// routine is set for a routine's run (ADR 0227): the turn is unattended,
-	// so it gets no proposal tools and the routine-run rule in its prompt.
-	routine *mateRoutine
 }
 
 // assistantTurnParamsFromSettings reads the routing options for a turn. A
@@ -1139,8 +1121,6 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 	// One construction of the turn's tools: the prompt, the version stamped on
 	// the answer and the runner that sends them to the model all read this.
 	toolDeps := assistantTurnToolDeps(p.apiKey, p.settingsPath, p.webSearch, p.today)
-	toolDeps.unattended = p.routine != nil
-	pc.RoutineRun = p.routine
 	pc.WebSearch = mateToolAvailable(toolDeps, "search_web")
 	if p.screen != nil {
 		pc.Screen = *p.screen
@@ -1178,9 +1158,6 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("assistant: run for conversation %s panicked: %v\n%s", id, r, debug.Stack())
-				// What the run spent before it crashed is not known, and a
-				// routine's daily limit must not read that as nothing.
-				assistantCostMeterFrom(runCtx).markUnknown()
 				run.append(mateErrorEvent{Error: fmt.Sprintf("the assistant run crashed: %v", r)})
 				run.finish()
 			}
@@ -1329,12 +1306,6 @@ func assistantRoutes() []apiRoute {
 		// tier: it only reports what is already running.
 		{http.MethodGet, "/api/assistant/conversations/:id/watch", tierRead, getAssistantWatchHandler},
 		{http.MethodPost, "/api/assistant/conversations", tierWrite, createAssistantConversationHandler},
-
-		// Routines (ADR 0227): list with the 24-hour spend, switch one off,
-		// delete one. Creating and rewording go through a Mate proposal.
-		{http.MethodGet, "/api/assistant/routines", tierRead, listMateRoutinesHandler},
-		{http.MethodPatch, "/api/assistant/routines/:id", tierWrite, patchMateRoutineHandler},
-		{http.MethodDelete, "/api/assistant/routines/:id", tierWrite, deleteMateRoutineHandler},
 		{http.MethodDelete, "/api/assistant/conversations/:id", tierWrite, deleteAssistantConversationHandler},
 
 		// Every tool the assistant can call is read-only (a maintenance

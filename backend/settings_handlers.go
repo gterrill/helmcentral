@@ -153,13 +153,6 @@ type settingsPayload struct {
 		// while WebSearch is on: a blank value is rejected on save and never
 		// replaced by the default at search time.
 		WebSearchModel string `json:"web_search_model"`
-		// RoutinesEnabled lets Mate routines run unattended (ADR 0227). Off
-		// by default: a routine spends the operator's OpenRouter key with
-		// nobody watching.
-		RoutinesEnabled bool `json:"routines_enabled"`
-		// RoutinesDailyCapUSD is the most routines may spend in a rolling 24
-		// hours, in US dollars (OpenRouter's own unit).
-		RoutinesDailyCapUSD float64 `json:"routines_daily_cap_usd"`
 		// PassageLimits are the operator's go/no-go thresholds for Mate's
 		// passage assessment (ADR 0191). No defaults: every value is unset
 		// until the operator enters it.
@@ -189,33 +182,6 @@ type settingsPayload struct {
 	RolesError string `json:"roles_error,omitempty"`
 }
 
-// routinesDailyCapFromSettings is the stored routines daily limit in dollars:
-// the default when the key is absent, an error when it is there and is not a
-// number between the minimum and maximum.
-func routinesDailyCapFromSettings(settings map[string]any) (float64, error) {
-	assistantMap, _ := settings["assistant"].(map[string]any)
-	raw, ok := assistantMap["routines_daily_cap_usd"]
-	if !ok || raw == nil {
-		// A key with no value (a bare "routines_daily_cap_usd:") is a missing one.
-		return defaultRoutinesDailyCapUSD, nil
-	}
-	var cap float64
-	switch v := raw.(type) {
-	case int:
-		cap = float64(v)
-	case int64:
-		cap = float64(v)
-	case float64:
-		cap = v
-	default:
-		return 0, fmt.Errorf("assistant.routines_daily_cap_usd is %v, which is not a number", raw)
-	}
-	if !(cap >= minRoutinesDailyCapUSD && cap <= maxRoutinesDailyCapUSD) {
-		return 0, fmt.Errorf("assistant.routines_daily_cap_usd is %v, outside $%.2f to $%.0f", cap, minRoutinesDailyCapUSD, maxRoutinesDailyCapUSD)
-	}
-	return cap, nil
-}
-
 func getSettingsHandler(c echo.Context) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	settings, err := readSettings(settingsPath)
@@ -230,13 +196,6 @@ func getSettingsHandler(c echo.Context) error {
 			log.Printf("settings: %v", err)
 			return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings: passage_limits is unreadable"})
 		}
-	}
-
-	// The same for an unreadable routines limit: a default sent to the page
-	// would be saved over the operator's value.
-	if _, err := routinesDailyCapFromSettings(settings); err != nil {
-		log.Printf("settings: %v", err)
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to read settings: assistant.routines_daily_cap_usd is unreadable"})
 	}
 
 	payload := buildSettingsPayload(settings)
@@ -414,22 +373,20 @@ func updateSettingsHandler(c echo.Context) error {
 		"port":    normalized.Mayara.Port,
 	}
 	settings["assistant"] = map[string]any{
-		"enabled":                normalized.Assistant.Enabled,
-		"model":                  normalized.Assistant.Model,
-		"document_model":         normalized.Assistant.DocumentModel,
-		"embedding_model":        normalized.Assistant.EmbeddingModel,
-		"embedding_dimensions":   normalized.Assistant.EmbeddingDimensions,
-		"notes":                  normalized.Assistant.Notes,
-		"allowed_models":         normalized.Assistant.AllowedModels,
-		"excluded_models":        normalized.Assistant.ExcludedModels,
-		"cost_tier":              normalized.Assistant.CostTier,
-		"voice_input":            normalized.Assistant.VoiceInput,
-		"read_aloud":             normalized.Assistant.ReadAloud,
-		"wake_word":              normalized.Assistant.WakeWord,
-		"web_search":             normalized.Assistant.WebSearch,
-		"web_search_model":       normalized.Assistant.WebSearchModel,
-		"routines_enabled":       normalized.Assistant.RoutinesEnabled,
-		"routines_daily_cap_usd": normalized.Assistant.RoutinesDailyCapUSD,
+		"enabled":              normalized.Assistant.Enabled,
+		"model":                normalized.Assistant.Model,
+		"document_model":       normalized.Assistant.DocumentModel,
+		"embedding_model":      normalized.Assistant.EmbeddingModel,
+		"embedding_dimensions": normalized.Assistant.EmbeddingDimensions,
+		"notes":                normalized.Assistant.Notes,
+		"allowed_models":       normalized.Assistant.AllowedModels,
+		"excluded_models":      normalized.Assistant.ExcludedModels,
+		"cost_tier":            normalized.Assistant.CostTier,
+		"voice_input":          normalized.Assistant.VoiceInput,
+		"read_aloud":           normalized.Assistant.ReadAloud,
+		"wake_word":            normalized.Assistant.WakeWord,
+		"web_search":           normalized.Assistant.WebSearch,
+		"web_search_model":     normalized.Assistant.WebSearchModel,
 	}
 	// No limit set: the key stays out of settings.yaml altogether.
 	if normalized.Assistant.PassageLimits != (passageLimits{}) {
@@ -535,15 +492,6 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 		}
 	}
 
-	// Zero is an unset limit, which normalizeSettingsPayload turns into the
-	// default before a save reaches here.
-	if cap := next.Assistant.RoutinesDailyCapUSD; cap != 0 && !(cap >= minRoutinesDailyCapUSD && cap <= maxRoutinesDailyCapUSD) {
-		return &settingsValidationError{
-			Field:   "assistant.routines_daily_cap_usd",
-			Message: fmt.Sprintf("the routines daily limit must be between $%.2f and $%.0f", minRoutinesDailyCapUSD, maxRoutinesDailyCapUSD),
-		}
-	}
-
 	if invalid := validatePassageLimits(next.Assistant.PassageLimits); invalid != nil {
 		return invalid
 	}
@@ -609,8 +557,6 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 	// An absent web_search_model defaults; a stored blank stays blank (see the
 	// override in the assistant block below).
 	payload.Assistant.WebSearchModel = defaultWebSearchModel
-	// Same split for the routines limit: an absent key is the default.
-	payload.Assistant.RoutinesDailyCapUSD = defaultRoutinesDailyCapUSD
 	// The true default lives here, not in normalizeSettingsPayload's
 	// baseline call above: that function also normalizes genuine save
 	// requests, where a bare bool can't tell "the operator submitted false"
@@ -798,17 +744,6 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if v, ok := assistantMap["web_search"].(bool); ok {
 			payload.Assistant.WebSearch = v
 		}
-		if v, ok := assistantMap["routines_enabled"].(bool); ok {
-			payload.Assistant.RoutinesEnabled = v
-		}
-		// GET /api/settings and the scheduler read this strictly with
-		// routinesDailyCapFromSettings and fail; here an unreadable limit is
-		// logged and the default stands.
-		if cap, err := routinesDailyCapFromSettings(settings); err != nil {
-			log.Printf("settings: %v", err)
-		} else {
-			payload.Assistant.RoutinesDailyCapUSD = cap
-		}
 		// Callers that must not proceed on a bad block (GET /api/settings, the
 		// setup status) decode it themselves with passageLimitsFromSettings
 		// and fail; here an unreadable block is logged and left unset.
@@ -973,13 +908,6 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.WakeWord = req.Assistant.WakeWord
 	normalized.Assistant.WebSearch = req.Assistant.WebSearch
 	normalized.Assistant.WebSearchModel = strings.TrimSpace(req.Assistant.WebSearchModel)
-	normalized.Assistant.RoutinesEnabled = req.Assistant.RoutinesEnabled
-	// An unset (zero) limit takes the default, like the embedding size above;
-	// validateSettingsChange rejects a limit outside the range.
-	normalized.Assistant.RoutinesDailyCapUSD = req.Assistant.RoutinesDailyCapUSD
-	if normalized.Assistant.RoutinesDailyCapUSD == 0 {
-		normalized.Assistant.RoutinesDailyCapUSD = defaultRoutinesDailyCapUSD
-	}
 	normalized.Assistant.PassageLimits = req.Assistant.PassageLimits
 
 	normalized.OfflineCoastline.Enabled = req.OfflineCoastline.Enabled

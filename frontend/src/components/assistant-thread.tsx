@@ -1,4 +1,4 @@
-import { ArrowUp, CalendarClock, Eye, FileText, Loader2, NotebookPen, Paperclip, Square, X } from 'lucide-react'
+import { ArrowUp, Eye, FileText, Loader2, NotebookPen, Paperclip, Square, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type Ref } from 'react'
 import { toast } from 'sonner'
 
@@ -203,14 +203,6 @@ function SaveAsNoteButton({ content }: { content: string }) {
 function watchReportHeadline(content: string): string {
   const index = content.indexOf('\n')
   return index === -1 ? content : content.slice(0, index)
-}
-
-// A routine run (ADR 0227) is kept as the instruction that started it, whose
-// first line is "Routine run: <name>" and nothing else. The operator sees
-// "Routine: <name>"; Mate's reply underneath is what the run found.
-function routineRunHeadline(content: string): string {
-  const first = content.split('\n', 1)[0] ?? ''
-  return `Routine: ${first.replace(/^Routine run:\s*/, '')}`
 }
 
 /**
@@ -545,14 +537,7 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                       messageId={message.id}
                       scrollAnchor={message.role === 'user'}
                     >
-                      {message.role === 'routine' ? (
-                        <Marker className="text-xs" data-testid="mate-routine-run">
-                          <MarkerIcon>
-                            <CalendarClock />
-                          </MarkerIcon>
-                          <MarkerContent>{routineRunHeadline(message.content)}</MarkerContent>
-                        </Marker>
-                      ) : message.role === 'watch' ? (
+                      {message.role === 'watch' ? (
                         <Marker className="text-xs" data-testid="mate-watch-report">
                           <MarkerIcon>
                             <Eye />

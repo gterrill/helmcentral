@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-04). Builds on [ADR 0093](0093-onboard-assistant-over-openrouter.md) (Mate and
+Accepted (2026-10-04). Superseded in part by [ADR 0227](0227-watches.md): a timed watch is now a saved one-off watch, so it survives a restart and its report is also kept as a run. The sampling, the report and the chat follow-up below are unchanged; "a restart cancels every watch" no longer holds. Builds on [ADR 0093](0093-onboard-assistant-over-openrouter.md) (Mate and
 its tool loop), [ADR 0105](0105-mate-streams-its-answer.md) (a reply runs server-side and a page
 rejoins it) and [ADR 0131](0131-mate-diagnoses-missing-and-stale-telemetry.md) (Mate reads the live snapshot and
 InfluxDB for path freshness and history).
@@ -103,7 +103,7 @@ one-per-conversation rule rather than starting a second watch.
 - **Alert during the watch.** Rejected. Alarm rules and the alarm card exist for that, with
   thresholds the operator set and a presenter written for 02:00. A second, model-driven alerting
   channel would compete with them and could not be held to the same wording.
-- **Persist watches across restarts.** Rejected for now. A restart loses the in-memory samples, so
+- **Persist watches across restarts.** Rejected for now, and reversed by [ADR 0227](0227-watches.md), which saves the samples and resumes the watch. A restart loses the in-memory samples, so
   a resumed watch would report a window with a hole in it, and the single-operator boat gains
   little from the bookkeeping. The tool result and the docs say a restart cancels a watch.
 - **A per-path source filter.** Proposed in the design and dropped once it was clear the snapshot

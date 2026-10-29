@@ -33,7 +33,6 @@ import {
   hydrateDraftFromSettings,
   initialRegularSettingsDraft,
   passageLimitErrors,
-  routinesCapError,
   type RegularSettingsDraft,
 } from '@/components/settings/settings-draft'
 interface SettingsPageProps {
@@ -177,8 +176,6 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
     // The Save bar shows why (saveBarError); this stops the other callers.
     const limitProblems = Object.values(passageLimitErrors(draft))
     if (limitProblems.length > 0) throw new Error(`Passage limits: ${limitProblems[0]}`)
-    const capProblem = routinesCapError(draft)
-    if (capProblem !== null) throw new Error(`Routines daily limit: ${capProblem}`)
     const tankProblems = Object.values(tankLevels.errors)
     if (tankProblems.length > 0) throw new Error(`Tank levels: ${tankProblems[0]}`)
     await Promise.all([
@@ -265,11 +262,10 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
   // The server refuses limits it cannot use; so does the Save bar.
   const limitErrors = Object.values(passageLimitErrors(draft))
   const limitsInvalid = limitErrors.length > 0
-  const capProblem = routinesCapError(draft)
   const tankLevelProblems = Object.values(tankLevels.errors)
   const tankLevelsInvalid = tankLevelProblems.length > 0
 
-  const saveBarError = [limitsInvalid ? `Passage limits: ${limitErrors[0]}` : null, capProblem !== null ? `Routines daily limit: ${capProblem}` : null, tankLevelsInvalid ? `Tank levels: ${tankLevelProblems[0]}` : null, settingsSaveError, secretsSaveError, transportsSaveError, particularsSaveError, tankLevelsSaveError].filter(Boolean).join('. ') || null
+  const saveBarError = [limitsInvalid ? `Passage limits: ${limitErrors[0]}` : null, tankLevelsInvalid ? `Tank levels: ${tankLevelProblems[0]}` : null, settingsSaveError, secretsSaveError, transportsSaveError, particularsSaveError, tankLevelsSaveError].filter(Boolean).join('. ') || null
 
   const activeSection = (() => {
     switch (activeSectionId) {
@@ -338,7 +334,7 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
           dirty={dirty}
           saving={isSavingSettings}
           error={saveBarError}
-          saveDisabled={limitsInvalid || capProblem !== null || tankLevelsInvalid}
+          saveDisabled={limitsInvalid || tankLevelsInvalid}
           onSave={() => void handleSaveSettings()}
           onDiscard={handleDiscard}
         />

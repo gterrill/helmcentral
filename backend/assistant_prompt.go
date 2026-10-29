@@ -33,13 +33,6 @@ type assistantPromptContext struct {
 	// can say a watch is running only when one is.
 	ActiveWatch *assistantWatchInfo
 
-	// RoutinesEnabled is assistant.routines_enabled (ADR 0227): whether
-	// routines run on their own. Mate says so when it proposes one.
-	RoutinesEnabled bool
-	// RoutineRun is the routine this turn is running for, nil on an ordinary
-	// turn. It adds the unattended-run rule to the live prompt.
-	RoutineRun *mateRoutine
-
 	VesselName string
 	BoatModel  string
 	// LOAM is anchor.loa_m from settings, 0 when not entered (settings.go's
@@ -416,6 +409,11 @@ type assistantScreenContext struct {
 	// one that has cleared; the title is the card's own, for the sentence only.
 	AlarmID    string `json:"alarm_id"`
 	AlarmTitle string `json:"alarm_title"`
+	// WatchRunID and WatchName name the watch run the operator tapped "Ask
+	// Mate about this run" on (ADR 0227). The name is the watch's own, for
+	// the sentence only.
+	WatchRunID string `json:"watch_run_id"`
+	WatchName  string `json:"watch_name"`
 }
 
 // collectAssistantPromptContext reads settings once via readSettings +
@@ -452,7 +450,6 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 		pc.TideProvider = payload.UI.TideProvider
 		pc.TideStationName = payload.UI.TideStationName
 		pc.Notes = payload.Assistant.Notes
-		pc.RoutinesEnabled = payload.Assistant.RoutinesEnabled
 	}
 
 	if state, err := fetchSignalKVesselState(); err == nil {
@@ -581,6 +578,7 @@ var assistantPanelLabels = map[string]string{
 	"radar":        "Radar",
 	"anchor-watch": "Anchor Watch",
 	"alarms":       "Alarms",
+	"watches":      "Watches",
 	"assistant":    "Mate",
 }
 
@@ -612,6 +610,15 @@ func assistantScreenSentence(screen assistantScreenContext) string {
 		}
 		return fmt.Sprintf("The operator tapped \"Ask Mate about this\" on %s (alarm_id %s), so their question is about that alarm. "+
 			"Call get_alarm_context with that alarm_id before answering, and explain from what it returns.\n\n", name, alarmID)
+	}
+
+	if runID := strings.TrimSpace(screen.WatchRunID); runID != "" {
+		name := "a watch run"
+		if title := strings.TrimSpace(screen.WatchName); title != "" {
+			name = fmt.Sprintf("a run of the watch %q", title)
+		}
+		return fmt.Sprintf("The operator tapped \"Ask Mate about this run\" on %s (run_id %s), so their question is about that run. "+
+			"Call get_watch_runs with that run_id before answering, and explain from the report, the findings and the review it returns.\n\n", name, runID)
 	}
 
 	if panel == "" && section == "" && page == "" {
@@ -836,14 +843,17 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"threshold you would use and why. Make each one a proposal they can tap, and do not suggest a reading nothing " +
 		"on the boat produces. Never propose an alarm just because you could.\n\n")
 
-	// 2a-iv-b. Routines (ADR 0227) - fixed wording, identical for every turn.
+	// 2a-iv-b. Watches (ADR 0227) - fixed wording, identical for every turn.
 	b.WriteString("When the operator asks for a regular check of the boat or a summary at a set time (\"check the boat every " +
-		"hour\", \"give me a morning summary at 06:00 at anchor\"), first call list_routines, then propose a routine record " +
-		"(type routine) with propose_changes: a short name, cadence hourly or daily, daily_time as HH:MM on the boat's clock for a daily one, " +
-		"and a focus in the operator's words that says what to look at. Propose a change to an existing routine rather than a second one. " +
-		"Say plainly that routines run only while \"Let routines run on their own\" is on in Settings, Mate, and tell them if the live " +
-		"context below says it is off. Say that what a routine finds appears in the routine's own conversation, that nothing is " +
-		"sent to their phone yet, and that a routine does not replace an alarm. A routine proposal changes nothing until the operator taps Apply.\n\n")
+		"hour\", \"give me a morning report at 06:00 at anchor\"), first call list_watches, then propose a watch record " +
+		"(type watch) with propose_changes: a short name, a schedule as five-field cron on the boat's clock (describe_record_type " +
+		"watch has examples), the report sections that matter (power, anchor, alarms, tanks, weather, instruments) and, in the " +
+		"operator's words, what to look out for. Propose a change to an existing watch rather than a second one. " +
+		"Say that each run builds a report, that Helmcentral's rules decide the findings and that Mate reviews every report, " +
+		"that the findings and the review appear on the Watches page, that nothing is sent to their phone yet, and that a watch does not " +
+		"replace an alarm. A watch proposal changes nothing until the operator taps Apply. To show a watch's latest report use " +
+		"get_watch_runs, and run_watch_now to run one straight away. When the screen context names a watch run, read it with " +
+		"get_watch_runs before you answer.\n\n")
 
 	// 2a-v. Filling in forms (ADR 0165) - fixed wording, identical for every
 	// turn. The order matters: layout, then what is on record, then one
@@ -1270,23 +1280,6 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	if w := pc.ActiveWatch; w != nil {
 		fmt.Fprintf(&lb, "A watch you started is running in this conversation: %s, until %s. Its report will arrive in this conversation by itself when it ends.\n\n",
 			w.Subject, w.EndsAt.In(loc).Format("15:04"))
-	}
-
-	// 5d. Routines (ADR 0227). Whether they run on their own is live state;
-	// the unattended-run rule is turn-scoped like Screen above.
-	if pc.RoutineRun != nil {
-		lb.WriteString("This turn is an unattended routine run, not a conversation. No one is watching and no one will answer you now. " +
-			"Check the boat with your tools, starting with get_vessel_status and then whatever the routine's focus needs. " +
-			"Do not ask the operator to tap, apply or confirm anything now, and do not propose changes or start a watch. " +
-			"Your first line must be exactly \"" + mateRoutineNothing + "\" when nothing needs attention. Otherwise it is one line " +
-			"saying what needs attention, as a watchkeeper would put it. After that line, add at most three short findings, each with " +
-			"its figures in the operator's units, written as a question when you do not know the cause. Never estimate a cause. " +
-			"You do not stand in for an alarm: if an alarm is active, say it is active and do not raise it again. " +
-			"If a tool fails or a reading is missing, say what you could not read instead of leaving it out.\n\n")
-	} else if pc.RoutinesEnabled {
-		lb.WriteString("Routines run on their own: \"Let routines run on their own\" is on in Settings, Mate.\n\n")
-	} else {
-		lb.WriteString("Routines do not run on their own: \"Let routines run on their own\" is off in Settings, Mate.\n\n")
 	}
 
 	live = lb.String()

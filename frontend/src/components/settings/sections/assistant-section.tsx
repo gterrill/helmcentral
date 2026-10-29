@@ -11,7 +11,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { MateRoutines } from '@/components/settings/sections/mate-routines'
 import { ModelCatalogDialog, ModelPicker } from '@/components/settings/sections/model-picker'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -401,8 +400,6 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
               ) : null}
             </FieldGroup>
           </FormSection>
-
-          <MateRoutines draft={draft} onChange={onChange} />
 
           {/* tabIndex so the setup checklist can scroll to and focus this group. */}
           <div id="passage-limits" tabIndex={-1} className="min-w-0 outline-hidden">

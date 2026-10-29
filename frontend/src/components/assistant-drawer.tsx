@@ -3,7 +3,6 @@ import { History, MessageSquarePlus, Search, Trash2 } from 'lucide-react'
 
 import { AssistantThread } from '@/components/assistant-thread'
 import { ConversationSearchOverlay } from '@/components/conversation-search-overlay'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useConversationSearch } from '@/hooks/use-conversation-search'
@@ -136,12 +135,7 @@ export function AssistantDrawer({ canWrite, onOpenSettings, initialConversationI
                     className="min-w-0 flex-1 text-left"
                     onClick={() => void session.select(conversation.id)}
                   >
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <span className="min-w-0 truncate text-sm">{conversation.title}</span>
-                      {'routineId' in conversation && conversation.routineId ? (
-                        <Badge variant="outline" className="shrink-0">Routine</Badge>
-                      ) : null}
-                    </div>
+                    <div className="truncate text-sm">{conversation.title}</div>
                     {'snippet' in conversation && conversation.snippet && (
                       <div className="line-clamp-2 text-xs text-muted-foreground">{conversation.snippet}</div>
                     )}

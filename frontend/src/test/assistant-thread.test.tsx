@@ -1024,26 +1024,6 @@ describe('AssistantThread: a watch Mate is running (ADR 0160)', () => {
     expect(screen.queryByRole('button', { name: /Save as note/ })).not.toBeInTheDocument()
   })
 
-  it.each([
-    ['Morning summary', 'Daily at 06:00 (boat time)'],
-    ['Hourly look (bilge)', 'Every hour'],
-  ])('shows a routine run by its name only, never the instruction Mate reads (%s)', (name, schedule) => {
-    const run = assistantMessage({
-      id: 'm3',
-      role: 'routine',
-      content: `Routine run: ${name}\nSchedule: ${schedule}\nTime now: Thu 29 Oct 06:00\nFocus: batteries\n[Automatic routine run]`,
-      model: undefined,
-      costUsd: undefined,
-    })
-    const finding = assistantMessage({ id: 'm4', content: 'Nothing to report.' })
-    render(<AssistantThread canWrite session={fakeMateSession({ messages: [run, finding] })} />)
-
-    expect(screen.getByTestId('mate-routine-run')).toHaveTextContent(`Routine: ${name}`)
-    expect(screen.getByTestId('mate-routine-run').textContent).toBe(`Routine: ${name}`)
-    expect(screen.queryByText(/Focus: batteries/)).not.toBeInTheDocument()
-    expect(screen.getByText('Nothing to report.')).toBeInTheDocument()
-  })
-
   it('asks the session to rejoin Mate\'s follow-up when the watch ends', async () => {
     const session = fakeMateSession()
     const { rerender } = render(<AssistantThread canWrite session={session} watch={buildWatch()} />)

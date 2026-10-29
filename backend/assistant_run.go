@@ -666,8 +666,8 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 // the round's accumulated text, no further delta is emitted for the rest
 // of the round at all.
 // assistantCostMeter keeps what a run has been charged so far, so a caller can
-// read it even when the run fails and returns no reply. A routine run (ADR
-// 0227) needs it for its spend limit. A request that failed after OpenRouter
+// read it even when the run fails and returns no reply. A watch review (ADR
+// 0227) needs it to show what the review cost. A request that failed after OpenRouter
 // had started a generation is remembered by its id (addPending) and priced at
 // the end with resolve; a failure that leaves no id to look up marks the cost
 // unknown.
@@ -740,9 +740,9 @@ func (m *assistantCostMeter) snapshot() (usd float64, known bool) {
 	return m.usd, !m.unknown
 }
 
-// routineCostLookupDelays are the waits before each retry of a generation's
+// generationCostLookupDelays are the waits before each retry of a generation's
 // cost, about a minute in all, since OpenRouter can lag behind the response.
-var routineCostLookupDelays = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second, 25 * time.Second}
+var generationCostLookupDelays = []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second, 20 * time.Second, 25 * time.Second}
 
 // resolve prices every remembered generation with lookup and returns the run's
 // total. Known is false when any cost could not be found, or an earlier
@@ -770,11 +770,11 @@ func lookupWithRetry(ctx context.Context, lookup func(context.Context, string) (
 		if cost, err = lookup(ctx, id); err == nil {
 			return cost, nil
 		}
-		if attempt >= len(routineCostLookupDelays) {
+		if attempt >= len(generationCostLookupDelays) {
 			return 0, err
 		}
 		select {
-		case <-time.After(routineCostLookupDelays[attempt]):
+		case <-time.After(generationCostLookupDelays[attempt]):
 		case <-ctx.Done():
 			return 0, ctx.Err()
 		}
@@ -1336,10 +1336,9 @@ func assistantHistoryMessages(msgs []assistantMessage, getDocument func(id strin
 			content += formDraftHistoryBlock(d)
 		}
 		role := m.Role
-		if role == "watch" || role == "routine" {
-			// ADR 0160: a finished watch's report, and (ADR 0227) a routine
-			// run's instruction. The model sees either as a user turn; its own
-			// text says it is automatic, not the skipper.
+		if role == "watch" {
+			// ADR 0160: a finished watch's report. The model sees it as a user
+			// turn; its own text says it is automatic, not the skipper.
 			role = "user"
 		}
 		out = append(out, openRouterMessage{Role: role, Content: openRouterContent(content)})

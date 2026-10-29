@@ -331,7 +331,8 @@ Some faults only show up over time: an engine load that jumps for a second
 every few minutes, or a voltage that dips when something cycles on. Ask Mate to
 keep an eye on it, for example "watch port and starboard engine load for five
 minutes and tell me if port spikes". It starts a watch and tells you when it
-will report back. See [Watching a reading](#watching-a-reading) below.
+will report back. See [Watching a reading](#watching-a-reading) below. For a
+check on a schedule instead, see [Watches](watches.md).
 
 ### Maintenance
 
@@ -649,6 +650,9 @@ If the chat is open, you see the answer arrive. If it isn't, the answer is there
 next time you open the conversation. The answer costs the same as any other
 reply and shows in its footer.
 
+The watch is also kept on the [Watches](watches.md) page, as a one-off watch
+with its report, so you can read it again after the conversation has gone.
+
 Limits:
 
 - Every reading has to be live when the watch starts. If one isn't reporting,
@@ -663,86 +667,11 @@ Limits:
   Helmcentral.
 - Mate doesn't interrupt you during a watch. If something needs your attention
   right away, that's what alarms are for.
-- Restarting Helmcentral cancels any watch in progress, and nothing is reported
-  for it. So does **Stop**, and so does deleting the conversation.
+- Restarting Helmcentral doesn't lose a watch in progress. It picks up where it
+  left off and shows the time it was down as a gap. **Stop** cancels the watch
+  with no report, and so does deleting the conversation.
 - If Mate has been switched off by the time a watch ends, nothing is sent and no
   answer appears.
-
-## Routines
-
-A routine is a check Mate makes on a schedule without being asked each time. Say
-"check the boat every hour" or "give me a morning summary at 06:00 while we're
-at anchor". Mate looks at the routines you already have first. Then it shows a
-card with the new one: its name, how often it runs, and what it should look at.
-Nothing is set until you tap **Apply**.
-
-Each routine has its own conversation, named after it, and a small **Routine**
-label in the conversation list. Every run adds one line there, "Routine: Morning
-summary", followed by Mate's reply. Here is what a reply looks like:
-
-- **Nothing to report:** When nothing needs attention, the first line says
-  exactly "Nothing to report."
-- **Something needs a look:** Otherwise the first line says what needs attention,
-  followed by up to three short findings with their figures. When Mate doesn't
-  know the cause, it asks a question and doesn't guess one.
-- **Alarms:** A routine doesn't stand in for an alarm. If an alarm is active, the
-  reply says so, and the alarm does its own job.
-
-Routines are paused until you allow them. Turn on **Let routines run on their
-own** under Routines in Settings → Mate. Runs happen with nobody watching, and
-they're paid for from your OpenRouter key. So there's a **Daily limit (US
-dollars)** beside the switch. It starts at $1.00 and can be set between $0.05
-and $20.
-Once routines have spent that much in the last 24 hours, the next runs are
-skipped. Settings shows what routines have spent in that time. A run that fails
-partway still counts for what it cost. When a run was cut off after it had
-started, Helmcentral asks OpenRouter what it was charged, which can take up to a
-minute. Helmcentral pauses routines for 24 hours only if it can't find out. A
-dropped connection before the request got through costs nothing and pauses
-nothing. Settings says until when a pause lasts.
-
-Here is when a routine runs:
-
-- **Every hour:** It runs when an hour has passed since its last run.
-- **Daily:** It runs once a day after the time you gave, on the boat's clock.
-  The boat's clock comes from its position, so a daily routine can't run without
-  one. If the position has been missing for more than a day, the routine's row
-  says so.
-- **Once a day:** A daily routine runs at most once a day. If you move its time
-  later after it has already run, it next runs at the new time tomorrow.
-- **Straight away:** An hourly routine runs on the first check after you apply
-  it, and then every hour.
-- **After the box was off:** A routine that was due runs once. Missed runs aren't
-  made up.
-- **One at a time:** Routines run one after another. A routine waits for any
-  question you're asking in its conversation, and skips if that takes more than
-  two minutes.
-
-A run that doesn't happen says why on the routine's row in Settings → Mate. For
-example "Skipped: routines spent $1.00 of the $1.00 daily limit", "Skipped: no boat
-position, so the boat's time is not known" or "Skipped: Mate is not ready". The
-row also shows the first line of the last reply and when it ran.
-
-If Helmcentral can't save the record of a run, it stops all routines until you
-restart it. The routines panel says "Routines stopped" and why. If the routine
-settings can't be read, such as a daily limit that isn't a number between $0.05
-and $20, the panel says "Routines are not running" and why.
-
-In that same place each routine has a switch to pause it and a **Delete**
-button, so you can manage routines without asking Mate. To change what a routine
-looks at or when it runs, ask Mate. You can have up to eight. Deleting a routine
-keeps its conversation, and you can delete that afterwards like any other. While a
-routine exists, Helmcentral won't delete its conversation. It tells you to delete
-the routine in Settings → Mate first.
-
-Limits:
-
-- A routine reads the boat and never changes anything. It can't propose changes
-  or start a watch, because no one is there to tap **Apply**.
-- Findings stay in the app for now. Nothing is sent to your phone, so a routine
-  is something you look in on, and alarms are still what wake you.
-- Each run reads only the last few runs in its conversation, so a long-running
-  routine doesn't get more expensive as the days go by.
 
 ## Documents
 
@@ -882,9 +811,11 @@ reach that address, and what to do when the microphone button won't light up.
 Every question sends three things to OpenRouter, and from there to whichever
 model you've chosen: your position, the question text itself, and whatever
 forecast or tide data Mate decided to look up. This only happens when you ask something and Mate
-is switched on. The one exception is a watch you asked for. When it ends, its
-summary of the readings goes to the model so Mate can explain it, and only if
-Mate is still switched on at that moment.
+is switched on. There are two exceptions, and both only happen while Mate is
+switched on. When a watch you asked for ends, its summary of the readings goes to
+the model so Mate can explain it. And every report from a scheduled
+[watch](watches.md) goes to the model so Mate can review it: the report's
+figures, its findings and your **What to look out for** text.
 
 A document you attach to a question, or one Mate reads through its own library
 search, is sent the same way, as text, since it was already read once when it
