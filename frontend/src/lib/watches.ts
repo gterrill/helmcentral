@@ -30,6 +30,23 @@ export const DEFAULT_WATCH_THRESHOLDS: WatchThresholds = {
 export const MAX_WATCH_NAME = 60
 export const MAX_LOOK_OUT_FOR = 500
 
+/** Where a watch can send its report. SignalK is never one: it would put the report on the bus as an alarm. */
+export const WATCH_CHANNELS = [
+  { id: 'ntfy', label: 'ntfy' },
+  { id: 'smtp', label: 'Email' },
+  { id: 'webhook', label: 'Webhook' },
+  { id: 'webpush', label: 'Phone and browser push' },
+] as const
+
+export type WatchSend = 'findings' | 'every'
+
+export const WATCH_SEND_LABELS: Record<WatchSend, string> = {
+  findings: 'Only when it finds something',
+  every: 'Every report',
+}
+
+export const channelLabel = (id: string) => WATCH_CHANNELS.find((c) => c.id === id)?.label ?? id
+
 export interface WatchRunSummary {
   id: string
   started_at: string
@@ -51,6 +68,9 @@ export interface WatchRecord {
   thresholds: WatchThresholds
   look_out_for: string
   enabled: boolean
+  /** The channels a report is sent to, and when. */
+  notify: string[]
+  send: WatchSend
   last_run_at?: string
   updated_at: string
   /** A one-off watch's start and end on the boat's clock (or UTC, said to be UTC). */
@@ -130,6 +150,12 @@ export interface WatchRun {
   /** When the run started on the boat's clock, or UTC said to be UTC. Never a device time. */
   boat_time: string
   timezone: string
+  /** The channels this run's report reached. */
+  notified: string[]
+  /** Why a report that was due went to no channel at all, such as none being switched on. */
+  not_sent?: string
+  /** Deliveries still being retried, with why the last attempt failed. */
+  notify_pending?: Array<{ channel: string; reason: string }>
 }
 
 export interface WatchList {
@@ -163,6 +189,19 @@ export interface WatchDraft {
   look_out_for: string
   enabled: boolean
   thresholds: WatchThresholds
+  /**
+   * The channels chosen. null on a new watch the operator has not chosen for:
+   * the page shows the channels that are on, the request leaves the field out,
+   * and the server applies the same default.
+   */
+  notify: string[] | null
+  send: WatchSend
+}
+
+/** The body of a create or change: a null notify is left out so the server's default applies. */
+export function draftBody(d: WatchDraft): Omit<WatchDraft, 'notify'> & { notify?: string[] } {
+  const { notify, ...rest } = d
+  return notify === null ? rest : { ...rest, notify }
 }
 
 export function draftOf(w: WatchRecord): WatchDraft {
@@ -173,7 +212,14 @@ export function draftOf(w: WatchRecord): WatchDraft {
     look_out_for: w.look_out_for,
     enabled: w.enabled,
     thresholds: { ...w.thresholds },
+    notify: [...w.notify],
+    send: w.send,
   }
+}
+
+function sameChannels(a: string[] | null, b: string[] | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.length === b.length && a.every((c) => b.includes(c))
 }
 
 export function sameDraft(a: WatchDraft, b: WatchDraft): boolean {
@@ -182,6 +228,8 @@ export function sameDraft(a: WatchDraft, b: WatchDraft): boolean {
     a.schedule === b.schedule &&
     a.look_out_for === b.look_out_for &&
     a.enabled === b.enabled &&
+    a.send === b.send &&
+    sameChannels(a.notify, b.notify) &&
     a.sections.length === b.sections.length &&
     a.sections.every((s) => b.sections.includes(s)) &&
     a.thresholds.alarms_raised === b.thresholds.alarms_raised &&
@@ -221,7 +269,7 @@ export const WATCH_TEMPLATES: WatchTemplate[] = [
   },
 ]
 
-/** A blank watch: every section, the server's default thresholds, switched on. */
+/** A blank watch: every section, the server's default thresholds, switched on, sending wherever the server's default says. */
 export function newWatchDraft(template?: WatchTemplate | null): WatchDraft {
   return {
     name: template?.draft.name ?? '',
@@ -230,6 +278,8 @@ export function newWatchDraft(template?: WatchTemplate | null): WatchDraft {
     look_out_for: '',
     enabled: true,
     thresholds: { ...DEFAULT_WATCH_THRESHOLDS },
+    notify: null,
+    send: 'findings',
   }
 }
 

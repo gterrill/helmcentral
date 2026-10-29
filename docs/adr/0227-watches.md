@@ -234,10 +234,106 @@ it is.
 on the boat, and UTC can be a day off by the date line. The run waits, with its
 reason recorded.
 
-**A push on every finding.** Notifications are the next cycle. They will use
-the existing transports in a category of their own, separate from alarms, so
-that a watch can never be mistaken for one.
+**A push on every finding.** Superseded by the Notifications section below,
+which sends on a new finding only.
 
 **Reusing `beginAssistantTurn` for the review.** It writes a message into a
 conversation and registers a run that an open chat can rejoin. A review has no
 chat to rejoin and no place to be written.
+
+## Notifications (2026-10-29)
+
+A watch can now tell the operator, through the transports alarms use, without
+becoming an alarm.
+
+**Decision.**
+
+- A watch has `notify`, a list of transport ids, and `send`, either `findings`
+  (the default) or `every`. A new watch starts with every enabled transport
+  except SignalK, applied by the server when the request leaves `notify` out.
+  The same validator serves the REST routes and the record type. It lower-cases
+  ids, refuses unknown ones, and refuses SignalK with a plain reason. A watch
+  name may not hold control characters, since it becomes a header.
+- After a scheduled or run-now run is saved, the host re-reads the watch and
+  decides. `every` notifies each run that ran. `findings` notifies when the run
+  has a finding that is not among the keys of the previous run that ran and that
+  the operator was told about. So a standing finding is told once, and a finding
+  that clears and returns is told again.
+- "Told" means a channel accepted a report that carried the finding. Nothing is
+  marked when the report is handed to the dispatcher. Each run keeps `told_keys`:
+  the previous run's told keys that this run repeats, then every key of the run
+  once a channel accepts its report, initially or on a retry. A report that no
+  channel accepted therefore leaves its findings untold, and the next run tries
+  again. When a report is due and no channel is switched on, the run records why
+  (`not_sent`) and the page says so.
+- A rule's key is its section and rule. A finding Mate added has a key Mate gives
+  it, a short lower_snake name for the issue, and is keyed by section and key.
+  Mate is given the keys and texts of the findings it added to the previous run,
+  and told to reuse a key for the same issue. The key is required and checked
+  when the review is submitted.
+- A skipped run never notifies, nor does a run of a watch with no channels. A
+  one-off watch never notifies: its report already goes to the chat that asked.
+- The report travels as `notificationMessage` of kind `watch_report`, carrying a
+  `watchReportMessage`. It goes through the dispatcher's one FIFO worker and its
+  retry queue, keyed `watch:<watch id>` in the queue's `rule_id` column, a prefix
+  no alarm rule id has. A newer report of the same watch replaces an older queued
+  one on the same transport only when the newer one carries every finding key the
+  older one did. Otherwise both stay and are delivered in order, so a bilge alarm
+  reported at 02:00 is not lost to a quiet report at 03:00. It does not touch the
+  alarm presenter, the alarm log, or the banner. An empty channel list sends
+  nothing and does not fall back to every transport, unlike an alarm rule.
+- The signalk transport refuses a `watch_report` in `Send`, the dispatcher
+  filters it out before sending, and the retry drain discards one queued for it
+  with a log line. Three layers, because the failure it prevents is a report
+  appearing on the bus as an alarm.
+- When a channel accepts a report, the run records it (`watch_runs.notified`). A
+  delivery still queued is read back from the retry queue for the run page. A
+  delivery that fails is logged and retried like an alarm's, and is discarded,
+  with a log line, after the same 24 hours.
+- ntfy uses priority 3 and the tag `clipboard`. Email's subject is the title and
+  its body is the whole report. The webhook posts the `watchReportMessage` itself.
+  Web push carries the short message and opens the run. Titles are cleaned of
+  control characters and sent as RFC 2047 encoded words when they are not ASCII,
+  in the ntfy `Title` header and the mail `Subject`.
+- Links. Helmcentral had no setting for its public address, so a new "Address for
+  links" in the notification settings holds it (empty by default, an http or
+  https address with a host). With it set, ntfy gets a `Click` header and email
+  and the webhook get an absolute link, `<address>/watches/<id>?run=<run id>`.
+  Without it there is no link, and the webhook still carries `path`. The link
+  uses a query parameter, not a hash, so the page can ask for the run.
+- `GET /api/watches/<id>/runs/<run id>` returns one run, and the details page
+  shows a linked run pinned at the top of the history whatever page it would be
+  on, scrolls to it and marks it for a moment.
+- `GET /api/watches/channels` is a read-tier route listing the offered channels
+  and the enabled ones, and nothing of their settings, so a user who can only
+  read and write watches can still pick channels. The page uses it instead of the
+  transport settings.
+
+**Rejected.**
+
+**Notifying through the alarm presenter.** It would give a report a severity, a
+badge and a banner, and make "acknowledge" mean something for it. A report is
+information to read when convenient. It also keeps the alarm log honest.
+
+**SignalK.** A report published as a notification is shown by every MFD and
+buzzer plugin on the bus as an alarm.
+
+**Notifying on every unchanged finding.** A bank that stays low all night would
+send twelve identical messages, and the operator would learn to ignore the
+thirteenth, which is the one that matters. `every` is there for the operator who
+wants that.
+
+**Comparing with the last notified run.** A finding that cleared and returned
+would stay quiet, and a finding in a report nobody received would count as told.
+The first draft also marked findings when the report was handed over, which lost
+them whenever no channel was on.
+
+**Defaulting an empty channel list to every transport.** That is how alarm rules
+behave, so that an alarm is never configured into silence. A report the operator
+switched off all channels for should stay unsent.
+
+**Keying Mate's findings by their wording.** The same issue comes back in
+different words, so it would be told again each time.
+
+**Guessing a public address.** The host a phone reaches the boat on is not
+known to the boat. A wrong link is worse than none.

@@ -18,6 +18,9 @@ checking that it works.
    - **Web push (browser & phone)**: read [Web push over
      Tailscale](../reference/configuration.md#web-push-over-tailscale) first.
      Helmcentral has to be served over https before the toggle does anything.
+   - **Address for links**: optional. The address you reach Helmcentral on from
+     your phone, for example `http://boat.local:9091`. Notifications about a
+     watch use it to link to the report. Leave it empty and they carry no link.
 3. Once you've changed something, choose **Save** in the bar that appears
    across the top. **Discard** puts everything back as it was.
 4. Choose **Send Test** at the top of the Notifications panel. It sends a

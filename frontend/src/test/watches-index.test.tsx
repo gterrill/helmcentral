@@ -14,6 +14,8 @@ function watch(overrides: Partial<WatchRecord>): WatchRecord {
     thresholds: { alarms_raised: 1, instrument_issues: 1, tank_change_points: 10, pressure_fall_hpa: 3 },
     look_out_for: '',
     enabled: true,
+    notify: ['ntfy'],
+    send: 'findings',
     updated_at: '2026-10-29T00:00:00Z',
     schedule_sentence: 'Every day at 06:00 boat time',
     last_run: null,

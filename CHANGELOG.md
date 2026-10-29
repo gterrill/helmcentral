@@ -25,6 +25,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Watches can notify you.** Each watch now has a **Notifications** section. Pick
+  where its report goes: ntfy, email, a webhook or phone and browser push, the
+  same channels your alarms use. A new watch starts with every channel that's
+  switched on. The default is **Only when it finds something**, which sends a
+  report only when it has a finding the last one didn't, so a problem that stays
+  doesn't tell you every hour, and tells you again if it clears and comes back.
+  A finding counts as told only once a channel has accepted the report, so if
+  every channel is off or failing, the run says "Not sent" and why, and the next
+  run tries again. **Every report** sends them all. A report arrives
+  as its own message at normal priority. It never appears as an alarm, and it
+  never goes to SignalK. Email carries the whole report, and the webhook posts it
+  as data, described in the new Watch report webhook reference page. A new
+  **Address for links** in the Notifications settings, empty until you set it,
+  puts a link to the run in ntfy, email and the webhook. The link opens the
+  Watches page at that run, even an old one. Each run on
+  the Watches page says which channels it reached, or that one hasn't been
+  delivered yet and why, and Helmcentral keeps trying for up to 24 hours. Watches
+  you made before this send nothing until you pick channels on them. Mate can set
+  the channels and the sending rule when it proposes a watch.
 - **Watches.** A new **Watches** page, in the sidebar, for regular checks of the
   boat. A watch runs on a schedule you pick: hourly, every few hours, daily at a
   time, chosen days, or hours such as 22:00 to 06:00. Each run builds the same
@@ -40,8 +59,7 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   delete any run. Ask Mate for "a check every 2 hours while we're at anchor" and
   it shows a card to apply, and it can run a watch for you straight away. The
   timed watch Mate starts on a reading now appears here too, as a one-off watch,
-  and it carries on if Helmcentral restarts. Findings stay in the app for now and
-  nothing is sent to your phone.
+  and it carries on if Helmcentral restarts.
 - **Mate can show you the Depth & Tide tile.** Ask "what's our depth?" or
   "what's the tide doing?" and Mate answers in words, then puts the tile under
   the answer. The newest answer shows the live tile. An older answer shows the

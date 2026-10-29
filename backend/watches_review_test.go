@@ -55,7 +55,7 @@ func reviewInputs() (savedWatch, watchReport, []watchFinding) {
 func submitArgs(review string, added ...string) json.RawMessage {
 	items := []map[string]string{}
 	for _, text := range added {
-		items = append(items, map[string]string{"section": "tanks", "text": text})
+		items = append(items, map[string]string{"section": "tanks", "key": "diesel_low", "text": text})
 	}
 	raw, _ := json.Marshal(map[string]any{"review": review, "added_findings": items})
 	return raw
@@ -262,5 +262,72 @@ func TestWatchReview_ACrashInTheReviewIsAProblemNotACrashOfTheScheduler(t *testi
 	out := runWatchReview(context.Background(), reviewConfig(t), w, report, findings, watchTestTime(29, 6, 0), time.UTC)
 	if !strings.Contains(out.Problem, "the review crashed: boom") || out.CostKnown {
 		t.Fatalf("%+v", out)
+	}
+}
+
+func TestWatchReview_AddedFindingsNeedAStableLowerSnakeKey(t *testing.T) {
+	tools := &watchReviewTools{}
+	submit := func(key string) error {
+		item := map[string]string{"section": "power", "text": "The port alternator is giving less."}
+		if key != "-" {
+			item["key"] = key
+		}
+		raw, _ := json.Marshal(map[string]any{"review": "Fine.", "added_findings": []any{item}})
+		_, err := tools.submit(raw)
+		return err
+	}
+	for _, bad := range []string{"-", "", "Port Alternator", "port-alternator", "1port", "ab", strings.Repeat("a", 41), "port_alternator!"} {
+		if err := submit(bad); err == nil || !strings.Contains(err.Error(), "key") {
+			t.Errorf("key %q should be refused naming the key, got %v", bad, err)
+		}
+	}
+	if err := submit("port_alternator_output"); err != nil {
+		t.Errorf("a short lower_snake topic is accepted: %v", err)
+	}
+	if sub := tools.submission(); sub == nil || sub.Added[0].Key != "port_alternator_output" {
+		t.Errorf("%+v", sub)
+	}
+}
+
+func TestWatchReview_AddedFindingsCarryTheirKeyOut(t *testing.T) {
+	withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
+		_, err := tools.execute(ctx, watchReviewToolName, submitArgs("Diesel is falling.", "Diesel is down 14 points."))
+		return assistantReply{Content: "done", Model: "m"}, err
+	})
+	w, report, findings := reviewInputs()
+	out := runWatchReview(context.Background(), reviewConfig(t), w, report, findings, watchTestTime(29, 6, 0), time.UTC)
+	if len(out.Added) != 1 || out.Added[0].Key != "diesel_low" || out.Added[0].By != watchByMate {
+		t.Fatalf("%+v", out)
+	}
+}
+
+func TestWatchReview_TheLastRunsMateFindingsGoInSoTheSameIssueKeepsItsKey(t *testing.T) {
+	fake := withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
+		return assistantReply{}, errors.New("stop here")
+	})
+	w, report, findings := reviewInputs()
+	previous := []watchFinding{
+		{Section: "power", Rule: "mate_review", Text: "The port alternator is giving less than the starboard one.", By: watchByMate, Key: "port_alternator_output"},
+		{Section: "tanks", Rule: "tank_change", Text: "A rules finding is not Mate's.", By: watchByRules},
+	}
+	ctx := withWatchPreviousMate(context.Background(), previous)
+	runWatchReview(ctx, reviewConfig(t), w, report, findings, watchTestTime(29, 6, 0), time.UTC)
+
+	message := ""
+	for _, m := range fake.history {
+		message += string(m.Content)
+	}
+	for _, want := range []string{"port_alternator_output", "The port alternator is giving less than the starboard one.", "previous_findings_you_added"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("the review input lacks %q: %s", want, message)
+		}
+	}
+	if strings.Contains(message, "A rules finding is not Mate's") {
+		t.Error("only Mate's own earlier findings are passed")
+	}
+	for _, want := range []string{"reuse its key", "lower_snake"} {
+		if !strings.Contains(fake.system, want) {
+			t.Errorf("the prompt lacks %q", want)
+		}
 	}
 }

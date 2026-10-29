@@ -23,11 +23,14 @@ func TestWatchPromptRule(t *testing.T) {
 	stable, live := assistantSystemPromptParts(basePromptContext())
 	for _, want := range []string{
 		"list_watches", "type watch", "five-field cron", "Watches page", "Mate reviews every report",
-		"nothing is sent to their phone yet", "does not replace an alarm", "taps Apply", "get_watch_runs", "run_watch_now",
+		"notify", "only when it finds something", "never SignalK", "does not replace an alarm", "taps Apply", "get_watch_runs", "run_watch_now",
 	} {
 		if !strings.Contains(stable, want) {
 			t.Errorf("expected the stable prefix to contain %q", want)
 		}
+	}
+	if strings.Contains(stable, "nothing is sent to their phone") {
+		t.Error("a watch can now notify; the rule must not say it cannot")
 	}
 	if strings.Contains(live, "list_watches") {
 		t.Error("the watch rule belongs in the stable prefix only")

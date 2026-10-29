@@ -26,7 +26,7 @@ function Toggle({ id, checked, label, onChange }: { id: string; checked: boolean
  * the one action it still owns, because probing a transport is not a save.
  */
 export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
-  const { draft, setSection, secrets, setSecret, secretsPresent, loading, error, test, testResults, testing } =
+  const { draft, setSection, setLinkAddress, secrets, setSecret, secretsPresent, loading, error, test, testResults, testing } =
     useAlarmTransportsFormContext()
 
   if (loading) {
@@ -154,6 +154,18 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
           enabled={draft.webpush.enabled}
           onEnabledChange={(enabled) => setSection('webpush', { enabled })}
         />
+
+        <section className="rounded-md border bg-background/60 p-3">
+          <Field>
+            <FieldLabel htmlFor="link-address">Address for links</FieldLabel>
+            <Input id="link-address" value={draft.link_address} placeholder="http://boat.local:9091"
+              onChange={(e) => setLinkAddress(e.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              Only used to put a link in notifications about a watch, so a tap opens that report. Use the address you reach
+              Helmcentral on from your phone. Leave it empty and they carry no link.
+            </p>
+          </Field>
+        </section>
 
         <section className="rounded-md border bg-background/60 p-3">
           <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Watchdog</p>

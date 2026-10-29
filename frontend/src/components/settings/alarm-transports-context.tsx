@@ -18,7 +18,8 @@ import {
 
 export interface AlarmTransportsFormValue {
   draft: AlarmTransportConfig
-  setSection: <K extends keyof AlarmTransportConfig>(key: K, value: Partial<AlarmTransportConfig[K]>) => void
+  setSection: <K extends 'ntfy' | 'smtp' | 'webhook' | 'signalk' | 'webpush' | 'watchdog'>(key: K, value: Partial<AlarmTransportConfig[K]>) => void
+  setLinkAddress: (address: string) => void
   secrets: Partial<Record<TransportSecretKey, string>>
   setSecret: (key: TransportSecretKey, value: string) => void
   secretsPresent: Record<string, boolean>
@@ -66,10 +67,12 @@ export function AlarmTransportsProvider({ children }: { children: ReactNode }) {
   }, [config])
 
   const setSection = useCallback(
-    <K extends keyof AlarmTransportConfig>(key: K, value: Partial<AlarmTransportConfig[K]>) =>
+    <K extends 'ntfy' | 'smtp' | 'webhook' | 'signalk' | 'webpush' | 'watchdog'>(key: K, value: Partial<AlarmTransportConfig[K]>) =>
       setDraft((current) => ({ ...current, [key]: { ...current[key], ...value } })),
     [],
   )
+
+  const setLinkAddress = useCallback((link_address: string) => setDraft((current) => ({ ...current, link_address })), [])
 
   const setSecret = useCallback(
     (key: TransportSecretKey, value: string) => setSecrets((current) => ({ ...current, [key]: value })),
@@ -119,10 +122,10 @@ export function AlarmTransportsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AlarmTransportsFormValue>(
     () => ({
-      draft, setSection, secrets, setSecret, secretsPresent,
+      draft, setSection, setLinkAddress, secrets, setSecret, secretsPresent,
       loading, error, dirty, save: persist, reset, test, testResults, testing,
     }),
-    [draft, setSection, secrets, setSecret, secretsPresent, loading, error, dirty, persist, reset, test, testResults, testing],
+    [draft, setSection, setLinkAddress, secrets, setSecret, secretsPresent, loading, error, dirty, persist, reset, test, testResults, testing],
   )
 
   return <AlarmTransportsFormContext.Provider value={value}>{children}</AlarmTransportsFormContext.Provider>

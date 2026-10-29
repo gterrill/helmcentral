@@ -620,3 +620,28 @@ func (s *alarmLogStore) QueueDepth() (int, error) {
 	}
 	return count, nil
 }
+
+// QueuedForKey returns the deliveries still queued under a key, oldest first.
+func (s *alarmLogStore) QueuedForKey(key string) ([]queuedNotification, error) {
+	if s == nil {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(
+		`SELECT id, transport, payload, attempts, last_error FROM notification_queue WHERE rule_id = ? ORDER BY created_at ASC`, key)
+	if err != nil {
+		return nil, fmt.Errorf("read queued notifications: %w", err)
+	}
+	defer rows.Close()
+	var out []queuedNotification
+	for rows.Next() {
+		var item queuedNotification
+		if err := rows.Scan(&item.ID, &item.Transport, &item.Payload, &item.Attempts, &item.LastError); err != nil {
+			return nil, fmt.Errorf("scan queued notifications: %w", err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}

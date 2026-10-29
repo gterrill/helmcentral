@@ -47,6 +47,7 @@ export const WatchesRoutePanel = memo(function WatchesRoutePanel({ canWrite, onA
       // A different watch is a different draft: remount rather than carry one's edits to another.
       key={route.view === 'details' ? route.id : `new:${route.template ?? ''}`}
       mode={mode}
+      linkedRunId={route.view === 'details' ? route.run ?? null : null}
       canWrite={canWrite}
       onOpenIndex={() => { openIndex() }}
       onCreated={(id) => { openWatch(id, { replace: true }) }}

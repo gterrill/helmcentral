@@ -27,9 +27,17 @@ type notificationMessage struct {
 	Unit   string    `json:"unit,omitempty"`
 	Vessel string    `json:"vessel"`
 	At     time.Time `json:"at"`
+	// Watch is the report of a watch_report message (watches_notify.go). It
+	// is nil on every alarm notification.
+	Watch *watchReportMessage `json:"watch,omitempty"`
 }
 
+func (m notificationMessage) isWatchReport() bool { return m.Kind == notificationKindWatchReport }
+
 func (m notificationMessage) title() string {
+	if m.isWatchReport() {
+		return m.Label
+	}
 	prefix := strings.ToUpper(m.State)
 	if m.Kind == alarmEventCleared {
 		prefix = "CLEARED"
@@ -85,7 +93,16 @@ func (t ntfyTransport) Send(ctx context.Context, msg notificationMessage) error 
 	if err != nil {
 		return err
 	}
-	request.Header.Set("Title", msg.title())
+	if msg.isWatchReport() {
+		// A watch's name is typed by the operator: control characters would end
+		// the header line, and anything not ASCII needs RFC 2047.
+		request.Header.Set("Title", watchEncodedHeaderText(msg.title()))
+		if msg.Watch != nil && msg.Watch.Link != "" {
+			request.Header.Set("Click", msg.Watch.Link)
+		}
+	} else {
+		request.Header.Set("Title", msg.title())
+	}
 	request.Header.Set("Priority", ntfyPriorityFor(msg))
 	request.Header.Set("Tags", ntfyTagsFor(msg))
 	if t.token != "" {
@@ -107,6 +124,10 @@ func (t ntfyTransport) Send(ctx context.Context, msg notificationMessage) error 
 // ntfyPriorityFor maps SignalK severities onto ntfy's 1-5 scale. An emergency
 // gets max priority so it bypasses the phone's do-not-disturb.
 func ntfyPriorityFor(msg notificationMessage) string {
+	if msg.isWatchReport() {
+		// A report is never urgent: it waits for the operator, an alarm does not.
+		return "3"
+	}
 	if msg.Kind == alarmEventCleared {
 		return "2"
 	}
@@ -123,6 +144,9 @@ func ntfyPriorityFor(msg notificationMessage) string {
 }
 
 func ntfyTagsFor(msg notificationMessage) string {
+	if msg.isWatchReport() {
+		return "clipboard"
+	}
 	if msg.Kind == alarmEventCleared {
 		return "white_check_mark"
 	}
@@ -145,7 +169,14 @@ type webhookTransport struct {
 func (t webhookTransport) ID() string { return transportWebhook }
 
 func (t webhookTransport) Send(ctx context.Context, msg notificationMessage) error {
-	body, err := json.Marshal(msg)
+	var payload any = msg
+	if msg.isWatchReport() {
+		if msg.Watch == nil {
+			return fmt.Errorf("watch report has no report to send")
+		}
+		payload = msg.Watch
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
@@ -198,6 +229,9 @@ func (t smtpTransport) Send(_ context.Context, msg notificationMessage) error {
 }
 
 func buildAlarmEmail(config smtpConfig, msg notificationMessage) []byte {
+	if msg.isWatchReport() && msg.Watch != nil {
+		return buildWatchEmail(config, msg)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", config.From)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(config.To, ", "))
@@ -213,6 +247,18 @@ func buildAlarmEmail(config smtpConfig, msg notificationMessage) []byte {
 	return []byte(b.String())
 }
 
+func buildWatchEmail(config smtpConfig, msg notificationMessage) []byte {
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", config.From)
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(config.To, ", "))
+	fmt.Fprintf(&b, "Subject: %s\r\n", watchEncodedHeaderText(msg.title()))
+	b.WriteString("MIME-Version: 1.0\r\n")
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	b.WriteString("\r\n")
+	b.WriteString(strings.ReplaceAll(watchEmailText(*msg.Watch), "\n", "\r\n"))
+	return []byte(b.String())
+}
+
 // ── signalk notifications ─────────────────────────────────────────────────────
 
 // signalKNotifyTransport publishes Helmcentral's alarms back onto the bus, so a
@@ -225,6 +271,9 @@ type signalKNotifyTransport struct {
 func (t signalKNotifyTransport) ID() string { return transportSignalK }
 
 func (t signalKNotifyTransport) Send(_ context.Context, msg notificationMessage) error {
+	if msg.isWatchReport() {
+		return fmt.Errorf("a watch report is never published to SignalK: it would appear on the bus as an alarm")
+	}
 	path := notificationsRoot + "." + strings.TrimPrefix(msg.Path, notificationsRoot+".")
 
 	if msg.Kind == alarmEventCleared {

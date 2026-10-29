@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -19,10 +20,12 @@ func watchRoutes() []apiRoute {
 		{http.MethodGet, "/api/watches", tierRead, listWatchesHandler},
 		{http.MethodPost, "/api/watches", tierWrite, createWatchHandler},
 		{http.MethodPost, "/api/watches/schedule-preview", tierRead, watchSchedulePreviewHandler},
+		{http.MethodGet, "/api/watches/channels", tierRead, watchChannelsHandler},
 		{http.MethodGet, "/api/watches/:id", tierRead, getWatchHandler},
 		{http.MethodPatch, "/api/watches/:id", tierWrite, patchWatchHandler},
 		{http.MethodDelete, "/api/watches/:id", tierWrite, deleteWatchHandler},
 		{http.MethodPost, "/api/watches/:id/run", tierWrite, runWatchHandler},
+		{http.MethodGet, "/api/watches/:id/runs/:runId", tierRead, getWatchRunHandler},
 		{http.MethodDelete, "/api/watches/:id/runs/:runId", tierWrite, deleteWatchRunHandler},
 	}
 }
@@ -194,6 +197,10 @@ func getWatchHandler(c echo.Context) error {
 	if err != nil {
 		return watchError(c, err)
 	}
+	if err := attachWatchNotifyPending(resp.Watch.ID, resp.Runs); err != nil {
+		// The runs are still right; only the "not delivered yet" lines are missing.
+		log.Printf("watches: could not read the notifications still being retried for %q: %v", resp.Watch.Name, err)
+	}
 	return c.JSON(http.StatusOK, resp)
 }
 
@@ -206,6 +213,8 @@ type savedWatchRequest struct {
 	LookOutFor *string                 `json:"look_out_for"`
 	Enabled    *bool                   `json:"enabled"`
 	Thresholds *watchThresholdsRequest `json:"thresholds"`
+	Notify     *[]string               `json:"notify"`
+	Send       *string                 `json:"send"`
 }
 
 // watchThresholdsRequest is the thresholds of a create or change. A field not
@@ -239,7 +248,7 @@ func decodeSavedWatchRequest(c echo.Context) (savedWatchRequest, error) {
 	dec := json.NewDecoder(c.Request().Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		return req, fieldErr("body", "send name, schedule, sections, look_out_for, enabled and thresholds as JSON: %s", err.Error())
+		return req, fieldErr("body", "send name, schedule, sections, look_out_for, enabled, thresholds, notify and send as JSON: %s", err.Error())
 	}
 	return req, nil
 }
@@ -263,6 +272,12 @@ func (req savedWatchRequest) applyTo(w savedWatch) savedWatch {
 	if req.Thresholds != nil {
 		w.Thresholds = req.Thresholds.applyTo(w.Thresholds)
 	}
+	if req.Notify != nil {
+		w.Notify = *req.Notify
+	}
+	if req.Send != nil {
+		w.Send = *req.Send
+	}
 	return w
 }
 
@@ -279,7 +294,7 @@ func createWatchHandler(c echo.Context) error {
 	var created savedWatch
 	err = docs.RunTx("create watch", func(tx *sql.Tx, now time.Time) error {
 		var err error
-		created, err = createSavedWatchTx(tx, req.applyTo(savedWatch{Enabled: true, Thresholds: defaultWatchThresholds()}), now)
+		created, err = createSavedWatchTx(tx, req.applyTo(newSavedWatchDefaults()), now)
 		return err
 	})
 	if err != nil {
@@ -447,4 +462,35 @@ func watchSchedulePreviewHandler(c echo.Context) error {
 		resp.Next = append(resp.Next, watchPreviewTime{At: t.UTC().Format(time.RFC3339), Local: t.In(loc).Format("Mon 2 Jan 15:04 MST")})
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// GET /api/watches/channels says which notification channels a watch can use
+// and which of them are switched on. It is a read-tier route so anyone who can
+// open the page can pick channels, and it says nothing about their settings.
+func watchChannelsHandler(c echo.Context) error {
+	return c.JSON(http.StatusOK, map[string][]string{
+		"offered": watchNotifyChannels,
+		"enabled": defaultWatchNotify(getAlarmTransports()),
+	})
+}
+
+// GET /api/watches/:id/runs/:runId is one run, as a link to it opens it.
+func getWatchRunHandler(c echo.Context) error {
+	docs, err := watchStore()
+	if err != nil {
+		return watchError(c, err)
+	}
+	var run watchRun
+	if err := docs.Read(func(q sqlQueryer) error {
+		var err error
+		run, err = watchRunByIDQ(q, c.Param("id"), c.Param("runId"))
+		return err
+	}); err != nil {
+		return watchError(c, err)
+	}
+	runs := []watchRun{run}
+	if err := attachWatchNotifyPending(run.WatchID, runs); err != nil {
+		log.Printf("watches: could not read the notifications still being retried for run %s: %v", run.ID, err)
+	}
+	return c.JSON(http.StatusOK, runs[0])
 }

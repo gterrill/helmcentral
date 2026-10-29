@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -46,6 +47,8 @@ func watchRecordType() *recordType {
 			{Name: "instrument_issues", Kind: kindInteger, Writable: true, Description: "frozen, impossible or silent sensors that make a finding (default 1)"},
 			{Name: "tank_change_points", Kind: kindNumber, Writable: true, Description: "change in a tank's level, in percentage points since the last run, that makes a finding (default 10)"},
 			{Name: "pressure_fall_hpa", Kind: kindNumber, Writable: true, Description: "fall in pressure over 3 hours, in hPa, that makes a finding (default 3)"},
+			{Name: "notify", Kind: kindStringList, Writable: true, Description: "where a report is sent: any of ntfy, smtp, webhook, webpush (SignalK is never offered); left out on a new watch it starts as every channel the boat has switched on; an empty list sends nothing"},
+			{Name: "send", Kind: kindString, Writable: true, Description: "\"findings\" to send a report only when it has a finding the last report sent did not (the default), or \"every\" to send every report"},
 			{Name: "schedule_sentence", Kind: kindString, Description: "the schedule in words"},
 			{Name: "last_run", Kind: kindString, Description: "when it last ran"},
 		},
@@ -58,6 +61,13 @@ func watchRecordType() *recordType {
 		Display:  displayWatchFields,
 		Href:     func(recordSnapshot) string { return "/watches" },
 	}
+}
+
+// newSavedWatchDefaults is what a new watch starts with: on, the default
+// thresholds, and a report sent only for a new finding to every channel the
+// boat has switched on (never SignalK).
+func newSavedWatchDefaults() savedWatch {
+	return savedWatch{Enabled: true, Thresholds: defaultWatchThresholds(), Notify: defaultWatchNotify(getAlarmTransports()), Send: watchSendFindings}
 }
 
 func savedWatchVersion(w savedWatch) string { return w.UpdatedAt.UTC().Format(time.RFC3339Nano) }
@@ -78,6 +88,7 @@ func watchSnapshot(w savedWatch) recordSnapshot {
 		ID: w.ID, Label: w.Name, Version: savedWatchVersion(w),
 		Fields: map[string]any{
 			"name": w.Name, "schedule": w.Schedule, "sections": w.Sections, "look_out_for": w.LookOutFor, "enabled": w.Enabled,
+			"notify": w.Notify, "send": w.Send,
 			"alarms_raised": w.Thresholds.AlarmsRaised, "instrument_issues": w.Thresholds.InstrumentIssues,
 			"tank_change_points": w.Thresholds.TankChangePoints, "pressure_fall_hpa": w.Thresholds.PressureFallHPa,
 			"schedule_sentence": watchSentenceOrCron(w), "last_run": lastRun,
@@ -154,6 +165,9 @@ func validateSavedWatch(w *savedWatch) error {
 	if w.Name == "" {
 		return fieldErr("name", "a watch needs a name")
 	}
+	if strings.IndexFunc(w.Name, unicode.IsControl) >= 0 {
+		return fieldErr("name", "can't contain control characters such as line breaks or tabs")
+	}
 	if utf8.RuneCountInString(w.Name) > maxWatchNameChars {
 		return fieldErr("name", "must be %d characters or fewer", maxWatchNameChars)
 	}
@@ -168,6 +182,12 @@ func validateSavedWatch(w *savedWatch) error {
 		return err
 	}
 	w.Sections = sections
+	if w.Notify, err = normalizeWatchNotify(w.Notify); err != nil {
+		return err
+	}
+	if err := validateWatchSend(w.Send); err != nil {
+		return err
+	}
 	return w.Thresholds.validate()
 }
 
@@ -202,6 +222,12 @@ func applyWatchFields(w savedWatch, given fieldSet) savedWatch {
 	if v, ok := given["enabled"]; ok {
 		w.Enabled, _ = v.(bool)
 	}
+	if v, ok := given["notify"]; ok {
+		w.Notify = watchFieldList(v)
+	}
+	if v, ok := given["send"]; ok {
+		w.Send = stringOf(v)
+	}
 	if v := intPtrOf(given["alarms_raised"]); v != nil {
 		w.Thresholds.AlarmsRaised = *v
 	}
@@ -221,6 +247,9 @@ func applyWatchFields(w savedWatch, given fieldSet) savedWatch {
 // route and the record type both call it.
 func createSavedWatchTx(x alarmSQLExecer, w savedWatch, now time.Time) (savedWatch, error) {
 	w.Kind = watchKindScheduled
+	if w.Send == "" {
+		w.Send = watchSendFindings
+	}
 	if err := validateSavedWatch(&w); err != nil {
 		return savedWatch{}, err
 	}
@@ -266,7 +295,7 @@ func createWatchRecord(env changeEnv, given fieldSet) (createdRecord, error) {
 			return createdRecord{}, fieldErr(n, "is required")
 		}
 	}
-	w := applyWatchFields(savedWatch{Enabled: true, Thresholds: defaultWatchThresholds()}, given)
+	w := applyWatchFields(newSavedWatchDefaults(), given)
 	created, err := createSavedWatchTx(env.tx, w, env.now)
 	if err != nil {
 		return createdRecord{}, err

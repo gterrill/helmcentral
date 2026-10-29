@@ -20,6 +20,8 @@ function record(overrides: Partial<WatchRecord> = {}): WatchRecord {
     thresholds: { alarms_raised: 2, instrument_issues: 1, tank_change_points: 10, pressure_fall_hpa: 3 },
     look_out_for: 'the fridge',
     enabled: true,
+    notify: ['ntfy'],
+    send: 'findings',
     updated_at: '2026-10-29T00:00:00Z',
     schedule_sentence: 'Every hour from 22:00 to 06:00',
     last_run: null,
@@ -56,6 +58,7 @@ function run(id: string, overrides: Partial<WatchRun> = {}): WatchRun {
     review_problem: null,
     cost_usd: 0.0123,
     cost_known: true,
+    notified: [],
     ...overrides,
   }
 }
@@ -76,18 +79,33 @@ let calls: Calls[]
 let detail: WatchDetail
 let preview: (schedule: string) => WatchSchedulePreview
 let olderRuns: WatchRun[]
+let channels: { offered: string[]; enabled: string[] }
+let channelsGate: Promise<void> | null
+let linkedRuns: Record<string, WatchRun>
 
 beforeEach(() => {
   calls = []
   detail = { watch: record(), runs: [run('r1')], has_older: false }
   preview = () => PREVIEW_OK
   olderRuns = []
+  channels = { offered: ['ntfy', 'smtp', 'webhook', 'webpush'], enabled: ['ntfy', 'webpush'] }
+  channelsGate = null
+  linkedRuns = {}
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = init?.method ?? 'GET'
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     calls.push({ method, url: String(url), body })
     const ok = (data: unknown, status = 200) => ({ ok: true, status, json: async () => data })
     if (String(url).includes('/schedule-preview')) return ok(preview((body as { schedule: string }).schedule))
+    if (method === 'GET' && String(url).endsWith('/api/watches/channels')) {
+      if (channelsGate) await channelsGate
+      return ok(channels)
+    }
+    if (method === 'GET' && String(url).match(/\/api\/watches\/[^/]+\/runs\/[^/?]+$/)) {
+      const id = String(url).split('/').pop()
+      const found = linkedRuns[id ?? '']
+      return found ? ok(found) : { ok: false, status: 404, json: async () => ({ error: 'no such run' }) }
+    }
     if (method === 'GET' && String(url).includes('before=')) return ok({ watch: detail.watch, runs: olderRuns, has_older: false })
     if (method === 'GET') return ok(detail)
     if (method === 'PATCH') return ok({ ...detail.watch, ...(body as object) })
@@ -431,5 +449,145 @@ describe('WatchDetailsPage changed elsewhere', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument())
     expect(screen.queryByText(/changed elsewhere/)).not.toBeInTheDocument()
     expect(screen.getByDisplayValue('Night watch')).toBeInTheDocument()
+  })
+})
+
+describe('WatchDetailsPage notifications', () => {
+  it('offers the channels alarms use, never SignalK, and says which are off in Settings', async () => {
+    renderPage()
+    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'Email' })).toHaveAttribute('aria-disabled', 'true'))
+    expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked()
+    expect(within(group).getByRole('checkbox', { name: 'Phone and browser push' })).not.toBeChecked()
+    expect(within(group).getByRole('checkbox', { name: 'Phone and browser push' })).not.toHaveAttribute('aria-disabled', 'true')
+    expect(within(group).queryByRole('checkbox', { name: /signalk/i })).not.toBeInTheDocument()
+    expect(within(group).getAllByText(/Turn it on in Settings under Alarms/)).toHaveLength(2)
+  })
+
+  it('learns which channels are on from the watches route, which a read-write user can open, and never from the alarm settings', async () => {
+    renderPage()
+    await screen.findByRole('group', { name: 'Send reports to' })
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/api/watches/channels'))).toBe(true))
+    expect(calls.some((c) => c.url.includes('/api/alarm-transports'))).toBe(false)
+  })
+
+  it('saves the channels and when to send with the rest of the watch', async () => {
+    renderPage()
+    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'Email' })).toHaveAttribute('aria-disabled', 'true'))
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'Phone and browser push' }))
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'ntfy' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(), { timeout: 3000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(sent('PATCH')).toHaveLength(1))
+    expect(sent('PATCH')[0].body).toMatchObject({ notify: ['webpush'], send: 'findings' })
+  })
+
+  it('keeps a channel that is off in Settings selected and explains that nothing goes there yet', async () => {
+    detail = { ...detail, watch: record({ notify: ['smtp'] }) }
+    renderPage()
+    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    await waitFor(() => expect(within(group).getByText(/Off in Settings, so nothing is sent here yet/)).toBeInTheDocument())
+    expect(within(group).getByRole('checkbox', { name: 'Email' })).toBeChecked()
+  })
+
+  it('shows who a run was sent to, what is still being retried, and why one was not sent', async () => {
+    detail = {
+      ...detail,
+      runs: [
+        run('r1', { started_at: '2026-10-28T18:00:00Z', notified: ['ntfy'], notify_pending: [{ channel: 'smtp', reason: 'connection refused' }] }),
+        run('r2', { not_sent: 'no channel is switched on for this watch (ntfy)' }),
+      ],
+    }
+    renderPage()
+    await waitFor(() => expect(screen.getAllByTestId('watch-run-notified')).toHaveLength(2))
+    const notes = screen.getAllByTestId('watch-run-notified')
+    expect(notes[0]).toHaveTextContent('Notified: ntfy')
+    expect(notes[0]).toHaveTextContent('Not delivered yet to Email: connection refused')
+    expect(notes[1]).toHaveTextContent('Not sent: no channel is switched on for this watch (ntfy)')
+  })
+})
+
+describe('a new watch', () => {
+  const newMode = { kind: 'new', template: null } as const
+
+  it('shows the channels that are switched on and sends only for findings', async () => {
+    renderPage({ mode: newMode })
+    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
+    expect(within(group).getByRole('checkbox', { name: 'Phone and browser push' })).toBeChecked()
+    expect(within(group).getByRole('checkbox', { name: 'Email' })).not.toBeChecked()
+  })
+
+  it('leaves the channels to the server unless the operator changed them', async () => {
+    renderPage({ mode: newMode })
+    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Dawn check' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled(), { timeout: 3000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Create watch' }))
+    await waitFor(() => expect(sent('POST').filter((c) => c.url.endsWith('/api/watches'))).toHaveLength(1))
+    const body = sent('POST').find((c) => c.url.endsWith('/api/watches'))?.body as Record<string, unknown>
+    expect('notify' in body).toBe(false)
+    expect(body.send).toBe('findings')
+  })
+
+  it('sends the channels once the operator has chosen them', async () => {
+    renderPage({ mode: newMode })
+    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
+    fireEvent.click(within(group).getByRole('checkbox', { name: 'ntfy' }))
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Dawn check' } })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled(), { timeout: 3000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Create watch' }))
+    await waitFor(() => expect(sent('POST').filter((c) => c.url.endsWith('/api/watches'))).toHaveLength(1))
+    expect(sent('POST').find((c) => c.url.endsWith('/api/watches'))?.body).toMatchObject({ notify: ['webpush'] })
+  })
+
+  it('a name typed before the channels arrive is kept, is not called a change made elsewhere, and the channels still fill in', async () => {
+    let release: () => void = () => {}
+    channelsGate = new Promise<void>((resolve) => { release = resolve })
+    renderPage({ mode: newMode })
+    fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Dawn check' } })
+    await act(async () => { release(); await Promise.resolve() })
+    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
+    expect(screen.queryByText(/changed elsewhere/i)).not.toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('Dawn check')
+  })
+})
+
+describe('a link to a run', () => {
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+
+  it('pins a run older than the first page at the top, labelled, scrolls to it and highlights it for a moment', async () => {
+    linkedRuns = { old: run('old', { boat_time: 'Mon 12 Oct 03:00 UTC+13' }) }
+    renderPage({ linkedRunId: 'old' })
+    const pinned = await screen.findByTestId('watch-linked-run')
+    expect(within(pinned).getByText('Linked run')).toBeInTheDocument()
+    expect(within(pinned).getByText('Mon 12 Oct 03:00 UTC+13')).toBeInTheDocument()
+    expect(calls.some((c) => c.url.endsWith('/api/watches/w1/runs/old'))).toBe(true)
+    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled())
+    const card = within(pinned).getByTestId('watch-run')
+    expect(card).toHaveAttribute('data-highlighted', 'true')
+    expect(card.id).toBe('run-old')
+    await waitFor(() => expect(card).toHaveAttribute('data-highlighted', 'false'), { timeout: 5000 })
+    expect(screen.getAllByTestId('watch-run')).toHaveLength(2)
+  })
+
+  it('shows a linked run once even when it is on the first page', async () => {
+    linkedRuns = { r1: run('r1') }
+    renderPage({ linkedRunId: 'r1' })
+    await screen.findByTestId('watch-linked-run')
+    await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(1))
+    expect(document.querySelectorAll('#run-r1')).toHaveLength(1)
+  })
+
+  it('says so when the linked run is gone', async () => {
+    renderPage({ linkedRunId: 'missing' })
+    expect(await screen.findByText(/linked run is no longer there/i)).toBeInTheDocument()
+    expect(screen.getAllByTestId('watch-run')).toHaveLength(1)
   })
 })

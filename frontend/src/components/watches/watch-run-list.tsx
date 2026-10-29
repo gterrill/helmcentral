@@ -6,6 +6,7 @@ import { ConfirmDelete } from '@/components/patterns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
+  channelLabel,
   runCostLabel,
   runTimeLabel,
   WATCH_SECTIONS,
@@ -91,19 +92,25 @@ function SectionsReport({ report }: { report: WatchSectionsReport }) {
 
 export interface WatchRunCardProps {
   run: WatchRun
+  /** Set on the run a link points at: whether it is marked right now. */
+  highlighted?: boolean
   canWrite: boolean
   onAskMate?: (run: WatchRun) => void
   onDelete: (run: WatchRun) => void
 }
 
-export function WatchRunCard({ run, canWrite, onAskMate, onDelete }: WatchRunCardProps) {
+export function WatchRunCard({ run, highlighted, canWrite, onAskMate, onDelete }: WatchRunCardProps) {
   const cost = run.outcome === 'ran' ? runCostLabel(run) : null
   const found = run.findings.length > 0
   return (
     <article
-      className="flex min-w-0 flex-col gap-3 rounded-md border border-border bg-background p-3"
+      className={`flex min-w-0 flex-col gap-3 rounded-md border bg-background p-3 transition-colors ${
+        highlighted ? 'border-primary ring-2 ring-primary/40' : 'border-border'
+      }`}
       data-testid="watch-run"
+      data-highlighted={highlighted === undefined ? undefined : String(highlighted)}
       aria-label={`Run ${runTimeLabel(run)}`}
+      id={`run-${run.id}`}
     >
       <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <h3 className="text-sm font-medium tabular-nums text-foreground">{runTimeLabel(run)}</h3>
@@ -143,6 +150,20 @@ export function WatchRunCard({ run, canWrite, onAskMate, onDelete }: WatchRunCar
           ) : (
             <p className="text-xs text-muted-foreground">{run.review_problem || 'Mate did not review this run.'}</p>
           )}
+        </div>
+      )}
+
+      {(run.notified.length > 0 || (run.notify_pending ?? []).length > 0 || run.not_sent) && (
+        <div className="flex flex-col gap-0.5" data-testid="watch-run-notified">
+          {run.not_sent && <p className="min-w-0 text-xs text-muted-foreground">Not sent: {run.not_sent}</p>}
+          {run.notified.length > 0 && (
+            <p className="text-xs text-muted-foreground">Notified: {run.notified.map(channelLabel).join(', ')}</p>
+          )}
+          {(run.notify_pending ?? []).map((p) => (
+            <p key={p.channel} className="min-w-0 text-xs text-destructive">
+              Not delivered yet to {channelLabel(p.channel)}: {p.reason}
+            </p>
+          ))}
         </div>
       )}
 

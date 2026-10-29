@@ -377,6 +377,7 @@ func TestWatchRoutesAreRegisteredWithTheRightTiers(t *testing.T) {
 		"GET /api/watches": tierRead, "POST /api/watches": tierWrite, "POST /api/watches/schedule-preview": tierRead,
 		"GET /api/watches/:id": tierRead, "PATCH /api/watches/:id": tierWrite, "DELETE /api/watches/:id": tierWrite,
 		"POST /api/watches/:id/run": tierWrite, "DELETE /api/watches/:id/runs/:runId": tierWrite,
+		"GET /api/watches/channels": tierRead, "GET /api/watches/:id/runs/:runId": tierRead,
 	}
 	for _, r := range watchRoutes() {
 		key := r.Method + " " + r.Path
