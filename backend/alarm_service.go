@@ -104,10 +104,7 @@ func evaluateAlarmsOnce(now time.Time) {
 	// it in this engine — a ghost. Re-reads the snapshot each tick for the
 	// same reason globalBusNotificationWatcher does above.
 	globalBusEchoReconciler.snapshot = globalSignalKSnapshot
-	liveEnginePaths := map[string]bool{}
-	for _, status := range globalAlarmEngine.active() {
-		liveEnginePaths[status.Path] = true
-	}
+	liveEnginePaths := liveAlarmPaths()
 	globalBusEchoReconciler.check(now, helmcentralOwnershipPredicateFor(rules), liveEnginePaths)
 }
 
@@ -172,6 +169,9 @@ func activeAlarms() []alarmStatus {
 	// Always a list, never null: the UI iterates this without a nil guard.
 	combined := make([]alarmStatus, 0)
 	combined = append(combined, withTankAlarmBodies(globalAlarmEngine.active())...)
+	// Helmcentral's own collision profile alarm lives in its syncer, not in the
+	// engine, and the bus copy is dropped as owned, so it is added here.
+	combined = append(combined, globalCollisionProfileSyncer.active()...)
 	combined = append(combined, attachLoggedOccurrenceTimes(signalKNotifications(globalSignalKSnapshot, helmcentralOwnershipPredicate(), time.Now().UTC()))...)
 
 	// The clock is read here rather than threaded through as a parameter
@@ -554,4 +554,18 @@ func alarmTransportRoutes() []apiRoute {
 		{http.MethodGet, "/api/alarm-transports/webpush/subscriptions", tierAdmin, listWebPushSubscriptionsHandler},
 		{http.MethodDelete, "/api/alarm-transports/webpush/subscriptions/:id", tierAdmin, deleteWebPushSubscriptionHandler},
 	}
+}
+
+// liveAlarmPaths is the path of every alarm Helmcentral itself holds live: the
+// engine's, and the collision profile refusal its syncer holds. The bus echo
+// reconciler clears any owned notification not in this set as a ghost.
+func liveAlarmPaths() map[string]bool {
+	paths := map[string]bool{}
+	for _, status := range globalAlarmEngine.active() {
+		paths[status.Path] = true
+	}
+	for _, status := range globalCollisionProfileSyncer.active() {
+		paths[status.Path] = true
+	}
+	return paths
 }

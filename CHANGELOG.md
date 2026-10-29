@@ -125,6 +125,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Watch reports are shorter and stick to the facts.** Repeated alarms are
+  grouped by title, with how many times, the first and last time, and "active
+  now" when the alarm is still going. Times say "yesterday" or the day when they
+  aren't today, and a first report says "in the last 24 hours". The count covers
+  every alarm in the period. Mate's review of a report is shorter, doesn't
+  repeat the report, and sticks to what the figures show. It no longer says an
+  alarm cleared when it didn't, or suggests changes the figures don't point to.
+- **Collision Profile Not Changed no longer opens a fresh entry each time
+  Helmcentral restarts.** The entry still open from before is picked up, kept
+  up to date and cleared when the profile changes.
+- **Collision Profile Not Changed now shows in the Alarms drawer while it
+  stands.** It was raised but never listed as active.
 - **The collision profile alarm no longer piles up.** When Helmcentral couldn't
   change SignalK's collision profile, it added a new entry to the alarm history
   every time the boat went from anchored to under way and back. One refusal now

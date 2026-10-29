@@ -235,6 +235,12 @@ func main() {
 		log.Fatalf("failed to open alarm log store: %v", err)
 	}
 	globalAlarmLogStore = als
+	// A refusal open in the log before this start is still standing.
+	if open, found, err := als.OpenOccurrence(collisionProfileRuleID); err != nil {
+		log.Fatalf("failed to read the open collision profile alarm: %v", err)
+	} else if found {
+		globalCollisionProfileSyncer.adoptOpenRefusal(open)
+	}
 
 	// The operator's two ignore lists (ignored sensors, ignored network
 	// alarms), in the same file.

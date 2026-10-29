@@ -228,11 +228,17 @@ func TestWatchReviewPrompt(t *testing.T) {
 		"Sea Biscuit", "Leopard 40", "power catamaran", "12.2 m", "Coral Cove", "Never anchor north of the reef.",
 		"Boat time: Thu 29 Oct 2026 06:00 AEST", "units are imperial",
 		"never remove", "can never remove", "Where you are unsure, say so and ask", "Never guess a cause", "do not raise it again",
-		"not an all clear", "02:00", "submit_watch_review", "The tools only read",
+		"not an all clear", "02:00",
+		"Lead with your judgement", "At most four short sentences", "up to three questions",
+		"Do not restate the report",
+		"Mention it only when it bears on something you flag", "Say an alarm is still going only when the report marks it active now; never say one cleared", "Never suggest a remedy or a setting change", "one sentence", "submit_watch_review", "The tools only read",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the prompt lacks %q:\n%s", want, prompt)
 		}
+	}
+	if strings.Contains(prompt, "Say nothing about what could not be checked") || strings.Contains(prompt, "still open has not cleared") {
+		t.Error("the rule that clashed with unavailable sections is gone")
 	}
 	if strings.Contains(prompt, "Web search") {
 		t.Error("web search is mentioned only when the operator turned it on")

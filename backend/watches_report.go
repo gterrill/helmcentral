@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -102,7 +103,7 @@ type watchReportInput struct {
 	StatusProblem string
 	// Raised are the alarms raised in [Since, Now]; RaisedProblem says why
 	// they could not be read.
-	Raised        []alarmLogEntry
+	Raised        []alarmRaisedGroup
 	RaisedProblem string
 	// Previous is the last run's report and PreviousAt its time.
 	Previous   *watchReport
@@ -305,23 +306,94 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 		}
 		s.Lines = append(s.Lines, fmt.Sprintf("%d active now: %s", in.Status.Alarms.ActiveCount, strings.Join(titles, ", ")))
 	}
-	var raised []string
-	for _, e := range in.Raised {
-		if e.RaisedAt.Before(in.Since) || e.RaisedAt.After(in.Now) {
-			continue
-		}
-		raised = append(raised, fmt.Sprintf("%s (%s)", e.Label, watchHM(e.RaisedAt, loc)))
+	window := "since " + watchDayTime(in.Since, in.Now, loc)
+	if in.FirstRun {
+		window = "in the last 24 hours"
 	}
-	if len(raised) == 0 {
-		s.Lines = append(s.Lines, "None raised since "+watchHM(in.Since, loc))
+	groups := append([]alarmRaisedGroup(nil), in.Raised...)
+	total := 0
+	for _, g := range groups {
+		total += g.Count
+	}
+	if total == 0 {
+		s.Lines = append(s.Lines, "None raised "+window)
 		return s, nil
 	}
-	text := fmt.Sprintf("%d %s raised since %s: %s", len(raised), watchPlural(len(raised), "alarm", "alarms"), watchHM(in.Since, loc), strings.Join(capList(raised, 8), ", "))
+	sort.SliceStable(groups, func(i, j int) bool {
+		if groups[i].Count != groups[j].Count {
+			return groups[i].Count > groups[j].Count
+		}
+		return groups[i].Last.After(groups[j].Last)
+	})
+	active := map[string]bool{}
+	if in.Status != nil {
+		for _, a := range in.Status.Alarms.Active {
+			active[a.Title] = true
+		}
+	}
+	var titles []map[string]any
+	var parts []string
+	shown := 0
+	for i, g := range groups {
+		if i >= watchAlarmTitleCap {
+			break
+		}
+		titles = append(titles, map[string]any{
+			"title": g.Title, "count": g.Count, "active_now": active[g.Title],
+			"first": g.First.UTC().Format(time.RFC3339), "last": g.Last.UTC().Format(time.RFC3339),
+		})
+		parts = append(parts, watchAlarmGroupText(g, active[g.Title], in.Now, loc))
+		shown += g.Count
+	}
+	others := total - shown
+	if others > 0 {
+		parts = append(parts, fmt.Sprintf("and %d more %s", others, watchPlural(others, "alarm", "alarms")))
+	}
+	s.Figures = map[string]any{"raised": total, "others_count": others, "titles": titles}
+	text := fmt.Sprintf("%d %s raised %s: %s", total, watchPlural(total, "alarm", "alarms"), window, strings.Join(parts, "; "))
 	s.Lines = append(s.Lines, text)
-	if len(raised) >= w.Thresholds.AlarmsRaised {
+	if total >= w.Thresholds.AlarmsRaised {
 		return s, []watchFinding{ruleFinding(watchSectionAlarms, "alarms_raised", text)}
 	}
 	return s, nil
+}
+
+// watchAlarmTitleCap is how many alarm titles a report names before it
+// counts the rest.
+const watchAlarmTitleCap = 5
+
+// watchDayTime is a time on the boat's clock that names its day when it is not
+// today: "15:42", "yesterday 15:42", "Tue 15:42" within the last week, and
+// "Wed 21 Oct 15:42" beyond it.
+func watchDayTime(t, now time.Time, loc *time.Location) string {
+	t, now = t.In(loc), now.In(loc)
+	day := func(x time.Time) time.Time { return time.Date(x.Year(), x.Month(), x.Day(), 12, 0, 0, 0, loc) }
+	switch days := int(day(now).Sub(day(t)).Hours()/24 + 0.5); {
+	case days <= 0:
+		return t.Format("15:04")
+	case days == 1:
+		return "yesterday " + t.Format("15:04")
+	case days < 7:
+		return t.Format("Mon 15:04")
+	default:
+		return t.Format("Mon 2 Jan 15:04")
+	}
+}
+
+// watchAlarmGroupText is one title's line. It says "active now" only when the
+// alarm is in the active list: the log's cleared times are not trusted to say
+// an alarm is over.
+func watchAlarmGroupText(g alarmRaisedGroup, activeNow bool, now time.Time, loc *time.Location) string {
+	var text string
+	if g.Count == 1 {
+		text = fmt.Sprintf("%s, once (%s)", g.Title, watchDayTime(g.First, now, loc))
+	} else {
+		text = fmt.Sprintf("%s, %d times (first %s, last %s)", g.Title, g.Count, watchDayTime(g.First, now, loc), watchDayTime(g.Last, now, loc))
+	}
+	if activeNow {
+		text += ", active now"
+	}
+	return text
 }
 
 func watchPlural(n int, one, many string) string {

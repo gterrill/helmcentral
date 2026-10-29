@@ -92,8 +92,11 @@ why when it can't.
   does.
 - **Anchor:** Whether the boat is inside the anchor watch radius, and how far it
   is from the anchor. With no anchor watch set, it says "No anchor watch set".
-- **Alarms:** The alarms active now, and which ones were raised since the last
-  report.
+- **Alarms:** The alarms active now, and the ones raised since the last report
+  (or in the last 24 hours on a first report). Repeats are grouped by title with
+  how many times, the first and last time, and "active now" when that alarm is
+  still going. Times say "yesterday" or the day when they aren't today. The
+  five most frequent titles are named and the rest are counted.
 - **Tanks:** Each tank's level, and how much it has moved since the last report.
 - **Weather:** Pressure, how it has moved over three hours, and the true wind.
   If you have a planned stay, it also shows the forecast wind there for your
