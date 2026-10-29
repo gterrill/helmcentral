@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -265,37 +266,75 @@ func respondJSONWithETag(c echo.Context, status int, etag string, payload any) e
 // datum, right now" and warned about it.
 const noTideExtremeHeightFt = -1.0
 
+// tideTodayError is a failure to build the tide, with the HTTP status the
+// handler reports it under. Mate's tile cards read the tide through the same
+// builder and surface the message (ADR 0227).
+type tideTodayError struct {
+	status  int
+	reason  tideFailure
+	message string
+}
+
+// tideFailure says in a word why the tide could not be built, so a caller can
+// tell the operator without passing the settings keys through.
+type tideFailure string
+
+const (
+	tideSettingsUnreadable tideFailure = "settings"
+	tideNotSetUp           tideFailure = "not_set_up"
+	tideUnreachable        tideFailure = "unreachable"
+)
+
+func (e *tideTodayError) Error() string { return e.message }
+
 func tideToday(c echo.Context) error {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
+	response, etagData, err := buildTideToday(settingsPath, time.Now().UTC())
+	if err != nil {
+		var te *tideTodayError
+		if errors.As(err, &te) {
+			return c.JSON(te.status, map[string]string{"error": te.message})
+		}
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	etag, err := weakETagForJSON(etagData)
+	if err != nil {
+		log.Printf("Failed to build tide ETag: %v", err)
+	}
+	return respondJSONWithETag(c, http.StatusOK, etag, response)
+}
+
+// buildTideToday is the /api/tide-today body at now: the configured provider
+// and station, the current height and the next high and low.
+func buildTideToday(settingsPath string, now time.Time) (tideTodayResponse, tideTodayETagData, error) {
 	settings, err := readSettings(settingsPath)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("failed to read settings: %v", err)})
+		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusInternalServerError, reason: tideSettingsUnreadable, message: fmt.Sprintf("failed to read settings: %v", err)}
 	}
 
 	uiMap, _ := settings["ui"].(map[string]any)
 
 	configuredProvider := strings.TrimSpace(coerceString(uiMap["tide_provider"]))
 	if configuredProvider == "" {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": "no tide provider configured — set ui.tide_provider in Settings (e.g. \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)"})
+		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: "no tide provider configured — set ui.tide_provider in Settings (e.g. \"bom\" for Australia, \"noaa\" for the US, or install another plugin; see README)"}
 	}
 
 	provider, ok := getTideProvider(configuredProvider)
 	if !ok {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("unknown tide provider configured: %q (is the plugin installed in plugins/tides?)", configuredProvider)})
+		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: fmt.Sprintf("unknown tide provider configured: %q (is the plugin installed in plugins/tides?)", configuredProvider)}
 	}
 
 	configuredStation := strings.TrimSpace(coerceString(uiMap["tide_station_id"]))
 	if configuredStation == "" {
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)})
+		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusBadGateway, reason: tideNotSetUp, message: fmt.Sprintf("no tide station configured for provider %q — select one in Settings", configuredProvider)}
 	}
 
 	result, fetchErr := provider.FetchTideChart(configuredStation)
 	if fetchErr != nil {
 		log.Printf("Tide provider %q error: %v", configuredProvider, fetchErr)
-		return c.JSON(http.StatusBadGateway, map[string]string{"error": fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)})
+		return tideTodayResponse{}, tideTodayETagData{}, &tideTodayError{status: http.StatusBadGateway, reason: tideUnreachable, message: fmt.Sprintf("tide provider %q unavailable: %v", configuredProvider, fetchErr)}
 	}
 
-	now := time.Now().UTC()
 	tidalPhase := classifyTidalPhase(result.Extremes, now)
 	doubleHigh, doubleLow := hasDoubleTide(result.Extremes, result.Station, now)
 	// HighTideTime/LowTideTime start at the zero time.Time, not `now` or some
@@ -354,11 +393,8 @@ func tideToday(c echo.Context) error {
 		lowTideTimeStr = state.LowTideTime.Format(time.RFC3339)
 	}
 	response := tideTodayResponse{Datetime: state.Datetime.Format(time.RFC3339), CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: highTideTimeStr, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: lowTideTimeStr, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
-	etag, err := weakETagForJSON(tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday})
-	if err != nil {
-		log.Printf("Failed to build tide ETag: %v", err)
-	}
-	return respondJSONWithETag(c, http.StatusOK, etag, response)
+	etagData := tideTodayETagData{CurrentTideHeightFt: state.CurrentTideHeightFt, TideDirection: state.TideDirection, HighTideTime: state.HighTideTime, HighTideHeightFt: state.HighTideHeightFt, LowTideTime: state.LowTideTime, LowTideHeightFt: state.LowTideHeightFt, StationName: result.Station.Name, Provider: configuredProvider, TidalPhase: state.TidalPhase, DoubleHighToday: state.DoubleHighToday, DoubleLowToday: state.DoubleLowToday}
+	return response, etagData, nil
 }
 
 // buildWindSummary formats a human-readable sentence describing a day's wind

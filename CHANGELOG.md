@@ -25,6 +25,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Mate can show you the Depth & Tide tile.** Ask "what's our depth?" or
+  "what's the tide doing?" and Mate answers in words, then puts the tile under
+  the answer. The newest answer shows the live tile. An older answer shows the
+  readings as they were when Mate answered, with the time, so the picture still
+  matches the words. A reading the boat doesn't have shows as a dash, and Mate
+  says which one is missing. More tiles will follow.
+
 - **Ask Mate about an alarm.** Every alarm card in the Alarms drawer, and every
   row in its History, has an **Ask Mate** button. It opens a new conversation
   with the question already asked, such as "Why did House Bank Low go off?".

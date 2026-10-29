@@ -1,9 +1,12 @@
+import type { DepthTrendData } from '@/hooks/use-depth-trend'
+import type { TideToday } from '@/hooks/use-tide-today'
+
 /**
  * Cards under a Mate reply (ADR 0191). Each kind is one member of this union,
  * keyed by `kind`. `error` is not a server kind: it is what the decoder makes
  * of an entry it cannot read, so the thread can say so for that message.
  */
-export type MateCard = PassageWindowCard | TelemetryChartCard | WindRoseCard | { kind: 'error'; reason: string; rawKind?: string }
+export type MateCard = PassageWindowCard | TelemetryChartCard | WindRoseCard | TileCard | { kind: 'error'; reason: string; rawKind?: string }
 
 export type PassageState = 'go' | 'marginal' | 'no_go' | 'no_data'
 export type PassageFactor = 'wind' | 'gust' | 'wave' | 'wind_against_tide' | 'daylight'
@@ -110,6 +113,28 @@ export interface WindRoseCard {
   meanSpeed: number | null
   strongest: { speed: number; at: string } | null
 }
+
+/**
+ * What the Depth & Tide tile reads, as the server read it when Mate answered:
+ * the vessel state's depth and navigation state, the tide service's body and
+ * the three hour depth trend. `null` is a reading that was missing then; the
+ * tile draws it as a dash, as it does on the dashboard.
+ */
+export interface DepthTideSnapshot {
+  /** Metres below the transducer. */
+  depth: number | null
+  depthLastUpdateAgeS: number | null
+  navigationState: string | null
+  tide: TideToday | null
+  depthTrend: DepthTrendData
+}
+
+/**
+ * A dashboard tile in a Mate reply (ADR 0227): the tile's id, when the server
+ * read it, and the figures it read. The newest reply draws the live tile; an
+ * older one draws the same tile on `snapshot`, so the picture matches the prose.
+ */
+export type TileCard = { kind: 'tile'; tile: 'depth-tide'; capturedAt: string; snapshot: DepthTideSnapshot }
 
 export const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
 const FACTORS: readonly string[] = ['wind', 'gust', 'wave', 'wind_against_tide', 'daylight']
@@ -358,6 +383,76 @@ function decodeWindRose(raw: unknown): WindRoseCard {
   }
 }
 
+function nullableNumber(v: unknown, path: string, min?: number): number | null {
+  if (v === null) return null
+  const n = finite(v, path)
+  if (min !== undefined && n < min) bad(path, `expected ${min} or more`)
+  return n
+}
+
+function decodeTide(raw: unknown): TideToday | null {
+  if (raw === null) return null
+  const o = obj(raw, 'snapshot.tide')
+  const optionalText = (v: unknown, path: string) => (v === undefined ? '' : str(v, path))
+  const time = (v: unknown, path: string) => {
+    const s = str(v, path)
+    return s === '' ? s : stamp(s, path)
+  }
+  return {
+    datetime: stamp(o.datetime, 'snapshot.tide.datetime'),
+    current_tide_height_ft: finite(o.current_tide_height_ft, 'snapshot.tide.current_tide_height_ft'),
+    tide_direction: str(o.tide_direction, 'snapshot.tide.tide_direction'),
+    high_tide_time: time(o.high_tide_time, 'snapshot.tide.high_tide_time'),
+    high_tide_height_ft: finite(o.high_tide_height_ft, 'snapshot.tide.high_tide_height_ft'),
+    low_tide_time: time(o.low_tide_time, 'snapshot.tide.low_tide_time'),
+    low_tide_height_ft: finite(o.low_tide_height_ft, 'snapshot.tide.low_tide_height_ft'),
+    station_name: optionalText(o.station_name, 'snapshot.tide.station_name'),
+    provider: optionalText(o.provider, 'snapshot.tide.provider'),
+  }
+}
+
+function decodeDepthTrend(raw: unknown): DepthTrendData {
+  const o = obj(raw, 'snapshot.depth_trend')
+  const points = arr(o.points, 'snapshot.depth_trend.points').map((p, i) => {
+    const po = obj(p, `snapshot.depth_trend.points[${i}]`)
+    return { time: stamp(po.time, `snapshot.depth_trend.points[${i}].time`), depth_m: finite(po.depth_m, `snapshot.depth_trend.points[${i}].depth_m`) }
+  })
+  const since = oneOf<DepthTrendData['since']>(o.since, ['tide', 'window'], 'snapshot.depth_trend.since')
+  const trend: DepthTrendData = { points, since }
+  if (o.tide_type !== undefined) trend.tideType = oneOf<NonNullable<DepthTrendData['tideType']>>(o.tide_type, ['high', 'low'], 'snapshot.depth_trend.tide_type')
+  if (o.tide_depth_m !== undefined) trend.tideDepthM = finite(o.tide_depth_m, 'snapshot.depth_trend.tide_depth_m')
+  return trend
+}
+
+function decodeDepthTideSnapshot(raw: unknown): DepthTideSnapshot {
+  const o = obj(raw, 'snapshot')
+  if (o.navigation_state !== null && typeof o.navigation_state !== 'string') bad('snapshot.navigation_state', 'expected a string or null')
+  return {
+    depth: nullableNumber(o.depth_m, 'snapshot.depth_m', 0),
+    depthLastUpdateAgeS: nullableNumber(o.depth_age_s, 'snapshot.depth_age_s', 0),
+    navigationState: o.navigation_state as string | null,
+    tide: decodeTide(o.tide),
+    depthTrend: decodeDepthTrend(o.depth_trend),
+  }
+}
+
+// One row per tile Mate can show. Each decoder reads the whole payload and
+// returns its own card, so a new tile is a new member of TileCard and a new row.
+const TILE_DECODERS: { [T in TileCard['tile']]: (p: Record<string, unknown>) => Extract<TileCard, { tile: T }> } = {
+  'depth-tide': (p) => ({
+    kind: 'tile',
+    tile: 'depth-tide',
+    capturedAt: stamp(p.captured_at, 'captured_at'),
+    snapshot: decodeDepthTideSnapshot(p.snapshot),
+  }),
+}
+
+function decodeTile(raw: unknown): TileCard {
+  const p = obj(raw, 'payload')
+  const tile = oneOf<TileCard['tile']>(p.tile, Object.keys(TILE_DECODERS), 'tile')
+  return TILE_DECODERS[tile](p)
+}
+
 // `entry` is the whole stored card: a passage window also reads the `id` and
 // `decision` that sit beside its payload (ADR 0211). Both are optional.
 const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>) => MateCard> = {
@@ -379,6 +474,7 @@ const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>
   },
   telemetry_chart: (payload) => decodeTelemetryChart(payload),
   wind_rose: (payload) => decodeWindRose(payload),
+  tile: (payload) => decodeTile(payload),
 }
 
 /**

@@ -1187,6 +1187,21 @@ func TestBuildAssistantSystemPrompt_WindTrendsUseSeparatePanelsOrARose(t *testin
 	}
 }
 
+// ADR 0227: a tile card follows an answer in words, and is not the answer to
+// a question about whether a sensor works.
+func TestBuildAssistantSystemPrompt_TilesFollowTheWords(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"show_tile",
+		"answer in words first",
+		"is the sounder working",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the tile rule to contain %q, got:\n%s", want, prompt)
+		}
+	}
+}
+
 // ADR 0167: on a document's Details page the screen context names the
 // document, so "what period does this cover?" is read as a question about it.
 func TestAssistantScreenSentence_NamesTheDocumentBeingViewed(t *testing.T) {
