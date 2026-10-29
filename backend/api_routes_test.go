@@ -78,7 +78,8 @@ func TestBuildAPIRoutes_AdminPrefixesAreAdminTier(t *testing.T) {
 		admin := r.Path == "/api/settings" ||
 			strings.HasPrefix(r.Path, "/api/settings/") ||
 			strings.HasPrefix(r.Path, "/api/plugins/") ||
-			strings.HasPrefix(r.Path, "/api/alarm-transports")
+			strings.HasPrefix(r.Path, "/api/alarm-transports") ||
+			strings.HasPrefix(r.Path, "/api/outside-assistants")
 		if !admin {
 			continue
 		}

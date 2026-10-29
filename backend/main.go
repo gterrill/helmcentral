@@ -267,6 +267,15 @@ func main() {
 		log.Fatalf("failed to open assistant store: %v", err)
 	}
 	globalAssistantStore = as
+
+	// Outside assistants (ADR 0231): the per-client tokens, tool lists and
+	// activity log behind /mcp, in the same file. Fail fast on open error,
+	// same reasoning as the stores above.
+	oas, err := newOutsideAssistantStore(helmcentralDBPath())
+	if err != nil {
+		log.Fatalf("failed to open outside assistant store: %v", err)
+	}
+	globalOutsideAssistantStore = oas
 	// Passage decisions (ADR 0211) read both the passage log and the
 	// assistant store, so the worker starts once both are open.
 	startPassageDecisions(globalPassageStore)
@@ -443,6 +452,12 @@ func main() {
 	// buildAPIRoutes below for the full table and its tier assignments.
 	registerAPIRoutes(e, sessions, buildAPIRoutes(sessions, tileFetchClient))
 
+	// The MCP endpoint (ADR 0231). Not an /api route: its only credential is a
+	// per-client bearer token, never a user session.
+	e.Any("/mcp", newMCPService(globalOutsideAssistantStore, func() assistantToolDeps {
+		return assistantProductionToolDeps(settingsPath)
+	}).Handle)
+
 	// Off unless HELMCENTRAL_PPROF=1 (pprof.go); see registerPprofRoutes's
 	// doc comment for why it defaults off.
 	registerPprofRoutes(e)
@@ -598,6 +613,7 @@ func main() {
 	// a shared 30s ticker instead; the builders just read the cache.
 	go startTelemetryInfluxTicker(streamCtx)
 	go runAssistantToolCallPruner(streamCtx, globalAssistantStore)
+	go runMCPActivityPruner(streamCtx, globalOutsideAssistantStore)
 
 	go startTrackPoller(streamCtx, trackPollInterval)
 	go startTideAutoUpdater(streamCtx, 30*time.Minute)
@@ -667,6 +683,7 @@ func buildAPIRoutes(sessions *sessionStore, tileFetchClient *http.Client) []apiR
 	routes = append(routes, autopilotRoutes()...)
 	routes = append(routes, mapRoutes(tileFetchClient)...)
 	routes = append(routes, assistantRoutes()...)
+	routes = append(routes, outsideAssistantRoutes()...)
 	routes = append(routes, watchRoutes()...)
 	routes = append(routes, passageDecisionRoutes()...)
 	routes = append(routes, helpRoutes()...)
