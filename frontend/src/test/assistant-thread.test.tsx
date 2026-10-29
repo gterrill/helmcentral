@@ -31,7 +31,7 @@ vi.mock('@/components/ui/message-scroller', async (importOriginal) => {
     },
   }
 })
-// The thread only decides which tile card is live (ADR 0227); what a tile card
+// The thread only decides which tile card is live (ADR 0229); what a tile card
 // draws is assistant-tile-card.test.tsx.
 vi.mock('@/components/assistant-tile-card', () => ({
   AssistantTileCard: ({ live }: { live: boolean }) => <div data-testid="tile-card">{live ? 'live' : 'frozen'}</div>,
@@ -1238,7 +1238,7 @@ describe('cards under a reply (ADR 0191)', () => {
     expect(await screen.findByText('Passage window')).toBeInTheDocument()
   })
 
-  it('makes a tile card live only on the newest assistant reply (ADR 0227)', async () => {
+  it('makes a tile card live only on the newest assistant reply (ADR 0229)', async () => {
     const { tileCard } = await import('./helpers/tile-card-fixture')
     const session = fakeMateSession({
       messages: [

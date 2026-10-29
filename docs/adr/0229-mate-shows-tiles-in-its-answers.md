@@ -1,4 +1,4 @@
-# ADR 0227: Mate shows tiles in its answers
+# ADR 0229: Mate shows tiles in its answers
 
 ## Status
 

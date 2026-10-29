@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// show_tile (ADR 0227): a dashboard tile in Mate's answer. The tool reads the
+// show_tile (ADR 0229): a dashboard tile in Mate's answer. The tool reads the
 // same figures the tile reads from its live stores, hands them to the model as
 // text, and attaches them as a card. The card is the live tile while its reply
 // is the newest and the tile frozen on this snapshot afterwards, so the

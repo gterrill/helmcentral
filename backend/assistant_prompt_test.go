@@ -1187,7 +1187,7 @@ func TestBuildAssistantSystemPrompt_WindTrendsUseSeparatePanelsOrARose(t *testin
 	}
 }
 
-// ADR 0227: a tile card follows an answer in words, and is not the answer to
+// ADR 0229: a tile card follows an answer in words, and is not the answer to
 // a question about whether a sensor works.
 func TestBuildAssistantSystemPrompt_TilesFollowTheWords(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(basePromptContext())

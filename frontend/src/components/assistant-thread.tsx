@@ -492,7 +492,7 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
       : null
   const hasContentOrAttachment = content.trim() !== '' || uploads.items.length > 0
   const hasAssistantReply = session.messages.some((m) => m.role === 'assistant')
-  // A tile card is live only on the newest reply; older ones keep what Mate saw (ADR 0227).
+  // A tile card is live only on the newest reply; older ones keep what Mate saw (ADR 0229).
   // A newer turn ends it as soon as it starts: a question after it, or a reply
   // being worked on, so the tile never moves under words that no longer describe it.
   const lastAssistantIdx = session.messages.map((m) => m.role).lastIndexOf('assistant')

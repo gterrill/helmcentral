@@ -268,7 +268,7 @@ const noTideExtremeHeightFt = -1.0
 
 // tideTodayError is a failure to build the tide, with the HTTP status the
 // handler reports it under. Mate's tile cards read the tide through the same
-// builder and surface the message (ADR 0227).
+// builder and surface the message (ADR 0229).
 type tideTodayError struct {
 	status  int
 	reason  tideFailure

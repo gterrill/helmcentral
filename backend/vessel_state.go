@@ -116,7 +116,7 @@ func depthTrend(c echo.Context) error {
 }
 
 // buildDepthTrend is the /api/depth-trend body for a window. Mate's Depth and
-// Tide tile card reads the trend through it (ADR 0227).
+// Tide tile card reads the trend through it (ADR 0229).
 func buildDepthTrend(window string) depthTrendResponse {
 	points := inMemoryDepthTrend(window)
 	if influxTelemetryConfigured() {
