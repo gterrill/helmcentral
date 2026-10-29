@@ -6,8 +6,8 @@ Accepted (2026-10-28). Builds on
 [ADR 0224](0224-alarm-rules-live-in-the-database.md), which moved the rules into
 the record store, and on [ADR 0158](0158-mate-changes-records-through-changesets.md)
 (changesets) and [ADR 0172](0172-mate-tools-are-one-record-each.md) (the tool
-registry). It is cycle 4b of the agent-first plan: items 1, 4 and 9 of
-`docs/research/agent-first-helmcentral.md` section 6.
+registry). It is cycle 4b of the agent-first plan, covering its items 1, 4
+and 9.
 
 ## Context
 

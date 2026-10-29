@@ -10,7 +10,7 @@ transactions).
 
 An operator wants to ask the boat questions from tools they already use, such
 as Claude Code on a laptop aboard, without opening Mate. Two directions were
-on the table (`docs/research/signalk-influxdb-mcp.md`):
+on the table:
 
 1. Helmcentral is the MCP server, and an outside assistant connects to it.
 2. Mate consumes upstream SignalK and InfluxDB MCP servers.
