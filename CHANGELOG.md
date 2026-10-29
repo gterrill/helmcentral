@@ -42,6 +42,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   timed watch Mate starts on a reading now appears here too, as a one-off watch,
   and it carries on if Helmcentral restarts. Findings stay in the app for now and
   nothing is sent to your phone.
+- **Mate can show you the Depth & Tide tile.** Ask "what's our depth?" or
+  "what's the tide doing?" and Mate answers in words, then puts the tile under
+  the answer. The newest answer shows the live tile. An older answer shows the
+  readings as they were when Mate answered, with the time, so the picture still
+  matches the words. A reading the boat doesn't have shows as a dash, and Mate
+  says which one is missing. More tiles will follow.
 
 - **Ask Mate about an alarm.** Every alarm card in the Alarms drawer, and every
   row in its History, has an **Ask Mate** button. It opens a new conversation
@@ -78,6 +84,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The Tanks tile lists tanks by name.** Within each tank type the tanks are
+  sorted by name, so Fuel Port Aft and Fuel Port Fwd sit together. A faint
+  line separates one tank type from the next.
 - **Mate can set a tank's alarm levels.** When you ask it to change an item's
   tank warn level, alarm level, or to switch a tank's alarms off, it can now
   propose that, and the same checks apply as on the item page. The alarm level

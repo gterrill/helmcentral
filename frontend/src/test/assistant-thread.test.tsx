@@ -31,6 +31,11 @@ vi.mock('@/components/ui/message-scroller', async (importOriginal) => {
     },
   }
 })
+// The thread only decides which tile card is live (ADR 0227); what a tile card
+// draws is assistant-tile-card.test.tsx.
+vi.mock('@/components/assistant-tile-card', () => ({
+  AssistantTileCard: ({ live }: { live: boolean }) => <div data-testid="tile-card">{live ? 'live' : 'frozen'}</div>,
+}))
 const mockedUseNotes = vi.mocked(useNotes)
 type NotesMock = ReturnType<typeof useNotes>
 function makeNotesMock(overrides: Partial<NotesMock> = {}): NotesMock {
@@ -1231,6 +1236,45 @@ describe('cards under a reply (ADR 0191)', () => {
     const session = fakeMateSession({ messages: [assistantMessage({ content: 'Here you go', cards: [passageWindowCard()] })] })
     render(<AssistantThread canWrite session={session} />)
     expect(await screen.findByText('Passage window')).toBeInTheDocument()
+  })
+
+  it('makes a tile card live only on the newest assistant reply (ADR 0227)', async () => {
+    const { tileCard } = await import('./helpers/tile-card-fixture')
+    const session = fakeMateSession({
+      messages: [
+        assistantMessage({ id: 'a1', seq: 1, cards: [tileCard()] }),
+        assistantMessage({ id: 'u2', seq: 2, role: 'user', content: 'and now?' }),
+        assistantMessage({ id: 'a2', seq: 3, cards: [tileCard()] }),
+      ],
+    })
+    session.liveAnswerIds = new Set(['a2'])
+    render(<AssistantThread canWrite session={session} />)
+    const cards = await screen.findAllByTestId('tile-card')
+    expect(cards.map((c) => c.textContent)).toEqual(['frozen', 'live'])
+  })
+
+  it('shows a reopened or reloaded conversation frozen: only a reply delivered in this viewing is live', async () => {
+    const { tileCard } = await import('./helpers/tile-card-fixture')
+    // Read back from the server, so the session never saw it arrive live.
+    const session = fakeMateSession({ messages: [assistantMessage({ id: 'a1', seq: 1, cards: [tileCard()] })] })
+    expect(session.liveAnswerIds.size).toBe(0)
+    render(<AssistantThread canWrite session={session} />)
+    expect((await screen.findAllByTestId('tile-card')).map((c) => c.textContent)).toEqual(['frozen'])
+  })
+
+  it('freezes the previous tile as soon as a newer turn starts, before its reply lands', async () => {
+    const { tileCard } = await import('./helpers/tile-card-fixture')
+    const answered = assistantMessage({ id: 'a1', seq: 1, cards: [tileCard()] })
+    const asked = assistantMessage({ id: 'u2', seq: 2, role: 'user', content: 'and the wind?' })
+    // The question is sent and the draft is streaming: the reply is not stored yet.
+    const streaming = fakeMateSession({ messages: [answered, asked], status: { sending: true, draft: 'Wind is', draftKey: 'k' } })
+    const { unmount } = render(<AssistantThread canWrite session={streaming} />)
+    expect((await screen.findAllByTestId('tile-card')).map((c) => c.textContent)).toEqual(['frozen'])
+    unmount()
+    // Sending with no text yet (tools running) is a newer turn too.
+    const working = fakeMateSession({ messages: [answered], status: { sending: true } })
+    render(<AssistantThread canWrite session={working} />)
+    expect((await screen.findAllByTestId('tile-card')).map((c) => c.textContent)).toEqual(['frozen'])
   })
 
   it('renders a message without cards as before', () => {

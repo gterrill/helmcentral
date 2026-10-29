@@ -112,6 +112,12 @@ func depthTrend(c echo.Context) error {
 	if window == "" {
 		window = "3h"
 	}
+	return c.JSON(http.StatusOK, buildDepthTrend(window))
+}
+
+// buildDepthTrend is the /api/depth-trend body for a window. Mate's Depth and
+// Tide tile card reads the trend through it (ADR 0227).
+func buildDepthTrend(window string) depthTrendResponse {
 	points := inMemoryDepthTrend(window)
 	if influxTelemetryConfigured() {
 		points = queryInfluxDepthTrend(window)
@@ -125,10 +131,10 @@ func depthTrend(c echo.Context) error {
 		if turn.IsHigh {
 			tideType = "high"
 		}
-		return c.JSON(http.StatusOK, depthTrendResponse{Points: points, Since: "tide", TideType: tideType, TideDepthM: turn.DepthM})
+		return depthTrendResponse{Points: points, Since: "tide", TideType: tideType, TideDepthM: turn.DepthM}
 	}
 
-	return c.JSON(http.StatusOK, depthTrendResponse{Points: points, Since: "window"})
+	return depthTrendResponse{Points: points, Since: "window"}
 }
 
 // computeMaxGustKtsFor picks exactly one source for the gust ladder per
