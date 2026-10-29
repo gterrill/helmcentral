@@ -624,6 +624,29 @@ never logged in the dates you give, Mate says so. If two devices logged it, Mate
 asks which one you mean. The card is a snapshot of that answer, so changing the
 dates means asking Mate again.
 
+## Showing a tile
+
+Ask "what's our depth?" or "what's the tide doing?" and Mate answers in words
+first, with the key figure, then puts the Depth & Tide tile under the answer. It's
+the same tile you have on the dashboard, in the same units.
+
+- **The newest answer:** While you have the chat open and Mate has just answered,
+  the tile is live and marked **Live**, so it keeps up with the boat. It stays live
+  until you ask something else.
+- **Older answers:** Once you ask again, or when you reopen a chat from the Chats
+  list or reload the page, the tile shows the readings as they were when Mate answered, with the time they were
+  taken, for example 14:03. That way the picture still matches the words beside
+  it.
+- **Missing readings:** If the sounder has no depth, or no tide station is set up,
+  the tile shows a dash where it would on the dashboard, and Mate says which
+  reading is missing. It doesn't fill the gap from an earlier reading.
+- **Read only:** You can look at the tile but not tap through or change anything
+  on it.
+
+Mate leaves the tile out when it wouldn't add anything. If you ask "is the sounder
+working?", it checks the readings and tells you. Depth & Tide is the only tile Mate
+can show for now.
+
 ## Watching a reading
 
 A watch follows up to six live readings once a second for between one and

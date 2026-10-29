@@ -492,6 +492,15 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
       : null
   const hasContentOrAttachment = content.trim() !== '' || uploads.items.length > 0
   const hasAssistantReply = session.messages.some((m) => m.role === 'assistant')
+  // A tile card is live only on the newest reply; older ones keep what Mate saw (ADR 0227).
+  // A newer turn ends it as soon as it starts: a question after it, or a reply
+  // being worked on, so the tile never moves under words that no longer describe it.
+  const lastAssistantIdx = session.messages.map((m) => m.role).lastIndexOf('assistant')
+  const turnStartedAfter = status.sending || session.messages.slice(lastAssistantIdx + 1).some((m) => m.role === 'user')
+  const newestId = lastAssistantIdx >= 0 && !turnStartedAfter ? session.messages[lastAssistantIdx].id : undefined
+  // And only a reply that arrived during this viewing: one read back from the
+  // server (a reopened chat, a reload) is history and shows what Mate saw.
+  const newestAssistantId = newestId !== undefined && session.liveAnswerIds.has(newestId) ? newestId : undefined
   const summaryLabel = session.summaryNoteId !== null && !session.conversationLoading ? 'Update note' : 'Summarise to note'
   const sendDisabled = status.sending || !canWrite || !hasContentOrAttachment || attachmentsNotReady
 
@@ -591,7 +600,13 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                             ))}
                             {/* ADR 0191: cards built from tool results. */}
                             {message.cards?.map((card, i) => (
-                              <AssistantCard key={i} card={card} canWrite={canWrite} onDecisionChange={session.updatePassageDecision} />
+                              <AssistantCard
+                                key={i}
+                                card={card}
+                                canWrite={canWrite}
+                                onDecisionChange={session.updatePassageDecision}
+                                liveTile={message.id === newestAssistantId}
+                              />
                             ))}
                             <div className="flex items-center gap-2">
                               <MessageFooter

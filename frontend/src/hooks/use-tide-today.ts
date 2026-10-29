@@ -17,7 +17,7 @@ export interface TideToday {
 // what a genuinely missing extreme reads as once fetched (see the fetch
 // handler below), rather than a fabricated "now" a renderer could mistake
 // for a real time.
-const defaultTide: TideToday = {
+export const defaultTide: TideToday = {
   datetime: new Date().toISOString(),
   current_tide_height_ft: -1,
   tide_direction: '—',

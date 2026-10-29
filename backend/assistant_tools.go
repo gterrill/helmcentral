@@ -272,6 +272,11 @@ type assistantToolDeps struct {
 	// overnight is the house bank's recent nights (electrical_overnight.go).
 	// It returns a reason when the nights cannot be looked at at all.
 	overnight func(now time.Time) (overnightResult, string)
+	// tileTide is the tide the Depth and Tide tile shows: the configured
+	// station's /api/tide-today body (ADR 0227).
+	tileTide func(ctx context.Context, now time.Time) (tideTodayResponse, error)
+	// tileDepthTrend is the tile's depth trend, the /api/depth-trend body.
+	tileDepthTrend func(ctx context.Context, window string) depthTrendResponse
 }
 
 // assistantCardSink carries a card from the tool that built it to the run,
@@ -367,21 +372,33 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		passageLimits:              passageLimitsFromSettingsFile(settingsPath),
 		vesselView:                 func() (vesselView, error) { return loadVesselView(settingsPath) },
 		displayUnits:               displayUnitsFromSettingsFile(settingsPath),
-		siUnit:                     func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) },
-		influxPathSources:          queryInfluxPathSources,
-		passageLog:                 func() *passageStore { return globalPassageStore },
-		cards:                      newAssistantCardSink(),
-		telemetry:                  liveOwnShipTelemetry,
-		sourceItems:                listSourceItems,
-		tankDefaults:               currentTankAlarmDefaults,
-		derivedPaths:               computeDerivedPaths,
-		trueWindGustKts:            recentTrueWindGustKts,
-		barometerWindow:            func(now time.Time) []telemetryPoint { return barometerHistory.since(now.Add(-pressureTrendWindow)) },
-		engineStates:               func(now time.Time) map[string]engineStateInfo { return engineStatesFor(globalSignalKSnapshot, now) },
-		ignoredAlarms:              ignoredAlarmTitles,
-		anomalyReading:             globalAnomalySlot.get,
-		anchorWatch:                currentAnchorWatch,
-		overnight:                  overnightForStatus,
+		tileTide: func(ctx context.Context, now time.Time) (tideTodayResponse, error) {
+			// The tide service takes no context, so a cancelled turn is
+			// caught before the read and not during it.
+			if err := ctx.Err(); err != nil {
+				return tideTodayResponse{}, err
+			}
+			resp, _, err := buildTideToday(settingsPath, now)
+			return resp, err
+		},
+		tileDepthTrend: func(ctx context.Context, window string) depthTrendResponse {
+			return buildDepthTrend(window)
+		},
+		siUnit:            func(path string) string { return unitForAlarmPath(globalSignalKSnapshot, path) },
+		influxPathSources: queryInfluxPathSources,
+		passageLog:        func() *passageStore { return globalPassageStore },
+		cards:             newAssistantCardSink(),
+		telemetry:         liveOwnShipTelemetry,
+		sourceItems:       listSourceItems,
+		tankDefaults:      currentTankAlarmDefaults,
+		derivedPaths:      computeDerivedPaths,
+		trueWindGustKts:   recentTrueWindGustKts,
+		barometerWindow:   func(now time.Time) []telemetryPoint { return barometerHistory.since(now.Add(-pressureTrendWindow)) },
+		engineStates:      func(now time.Time) map[string]engineStateInfo { return engineStatesFor(globalSignalKSnapshot, now) },
+		ignoredAlarms:     ignoredAlarmTitles,
+		anomalyReading:    globalAnomalySlot.get,
+		anchorWatch:       currentAnchorWatch,
+		overnight:         overnightForStatus,
 	}
 }
 
@@ -477,6 +494,7 @@ var mateTools = []mateTool{
 	mateToolGetPathHistory,
 	mateToolShowTelemetryChart,
 	mateToolShowWindRose,
+	mateToolShowTile,
 	mateToolListPassages,
 	mateToolGetCruiseSummary,
 	mateToolFindEquipment,
