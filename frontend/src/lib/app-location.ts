@@ -14,7 +14,7 @@ import { parseDisplayOptions, type DisplayOptions } from '@/lib/displays'
 // its own carries a `route`, a single union of that panel's views, so going
 // to a view replaces the whole slice and no sibling field is ever left
 // behind to clear.
-export const PANEL_IDS = ['forecast', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'passages'] as const
+export const PANEL_IDS = ['forecast', 'radar', 'anchor-watch', 'alarms', 'assistant', 'settings', 'display', 'documents', 'inventory', 'wall-displays', 'passages', 'watches'] as const
 export type PanelId = (typeof PANEL_IDS)[number]
 
 /** The panels with a single view and nothing to remember beyond being open. */
@@ -86,6 +86,20 @@ export type PassagesRoute =
   | { view: 'cruise'; id: string }
   | { view: 'combined'; ids: string[]; filter: PassagesFilter }
 
+/** The starting points the Watches page offers on an empty list. */
+export type WatchTemplateId = 'morning' | 'overnight' | 'anchor'
+
+/**
+ * `/watches` is the index and `/watches/<id>` one watch with its run history.
+ * `new` is the draft of a watch not saved yet, optionally started from a
+ * template. A draft has no id and so no URL of its own: it formats to the
+ * index, the same as a New equipment item.
+ */
+export type WatchesRoute =
+  | { view: 'index' }
+  | { view: 'details'; id: string }
+  | { view: 'new'; template: WatchTemplateId | null }
+
 export type AppLocation =
   | { panel: null; pageId: string | null }
   | { panel: PlainPanelId }
@@ -95,6 +109,7 @@ export type AppLocation =
   | { panel: 'inventory'; route: InventoryRoute }
   | { panel: 'wall-displays'; route: WallDisplaysRoute }
   | { panel: 'passages'; route: PassagesRoute }
+  | { panel: 'watches'; route: WatchesRoute }
   /** ADR 0110: the wall display at `/display/<slug>`. `slug` is null on a bare
    * `/display`. Never validated against the configured displays here: an
    * unknown or absent slug is a distinct, explicit shape the wall shell
@@ -226,6 +241,12 @@ export function parseAppLocation(pathname: string): AppLocation {
     }
     const id = decodeSegment(second)
     return id ? { panel: 'passages', route: { view: 'passage', id, filter } } : indexRoute
+  }
+
+  // ADR 0227: the Watches pages. An unusable id falls back to the index.
+  if (first === 'watches') {
+    const id = second !== undefined ? decodeSegment(second) : null
+    return { panel: 'watches', route: id ? { view: 'details', id } : { view: 'index' } }
   }
 
   // ADR 0110: the wall display route. Kept ahead of the generic PANEL_ID_SET
@@ -450,6 +471,11 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
       if (route.view === 'cruise') base = `/passages/cruises/${encodeURIComponent(route.id)}`
       if (route.view === 'combined') base = '/passages/combined'
       return qs ? `${base}?${qs}` : base
+    }
+
+    case 'watches': {
+      if (loc.route.view === 'details') return `/watches/${encodeURIComponent(loc.route.id)}`
+      return '/watches'
     }
 
     case 'wall-displays': {

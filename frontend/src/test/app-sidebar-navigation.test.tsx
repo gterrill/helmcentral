@@ -381,6 +381,7 @@ describe('App sidebar navigation', () => {
       'Forecast',
       'Radar',
       'Passages',
+      'Watches',
       'Documents',
       'Inventory',
       'Mate',

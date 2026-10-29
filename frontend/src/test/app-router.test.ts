@@ -231,6 +231,19 @@ describe('resume', () => {
     expect(router.resume('assistant')).toEqual({ panel: 'assistant', conversationId: null })
   })
 
+  it('remembers a watch across a visit elsewhere but never an unsaved draft of one', () => {
+    const { router } = setup('/')
+    router.navigate({ panel: 'watches', route: { view: 'details', id: 'w-1' } })
+    router.navigate({ panel: 'watches', route: { view: 'new', template: 'morning' } })
+    router.navigate(forecast)
+    expect(router.resume('watches')).toEqual({ panel: 'watches', route: { view: 'details', id: 'w-1' } })
+  })
+
+  it('starts Watches at its index', () => {
+    const { router } = setup('/')
+    expect(router.resume('watches')).toEqual({ panel: 'watches', route: { view: 'index' } })
+  })
+
   it('remembers the Details page of Documents across a visit elsewhere', () => {
     const { router } = setup('/documents/doc-1?folder=f1')
     router.navigate(forecast)

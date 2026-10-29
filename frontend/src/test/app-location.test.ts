@@ -105,6 +105,22 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/wall-displays/%E0%A4%A')).toEqual({ panel: 'wall-displays', route: { view: 'index' } })
   })
 
+  // ADR 0227: the Watches pages.
+  it('parses /watches as the index and /watches/<id> as one watch', () => {
+    expect(parseAppLocation('/watches')).toEqual({ panel: 'watches', route: { view: 'index' } })
+    expect(parseAppLocation('/watches/w-1')).toEqual({ panel: 'watches', route: { view: 'details', id: 'w-1' } })
+  })
+
+  it('treats a malformed percent-escape in a watch id as the index rather than throwing', () => {
+    expect(parseAppLocation('/watches/%E0%A4%A')).toEqual({ panel: 'watches', route: { view: 'index' } })
+  })
+
+  it('writes a watch, its index and an unsaved draft as paths', () => {
+    expect(formatAppLocation({ panel: 'watches', route: { view: 'details', id: 'w 1' } }, ctx)).toBe('/watches/w%201')
+    expect(formatAppLocation({ panel: 'watches', route: { view: 'index' } }, ctx)).toBe('/watches')
+    expect(formatAppLocation({ panel: 'watches', route: { view: 'new', template: 'morning' } }, ctx)).toBe('/watches')
+  })
+
   // ADR 0171: the wall's own query string rides on the location, parsed
   // once, and is never part of what formatAppLocation writes.
   it('parses the wall display\'s query string into its options', () => {

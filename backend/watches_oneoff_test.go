@@ -45,7 +45,7 @@ func (f *oneOffFixture) runs(t *testing.T, id string) []watchRun {
 	var runs []watchRun
 	if err := f.docs.Read(func(q sqlQueryer) error {
 		var err error
-		runs, err = watchRunsQ(q, id, 10, 0)
+		runs, err = watchRunsQ(q, id, 10, nil)
 		return err
 	}); err != nil {
 		t.Fatal(err)

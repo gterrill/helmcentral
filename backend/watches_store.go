@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -128,6 +129,12 @@ type watchRun struct {
 	CostUSD       *float64 `json:"cost_usd"`
 	CostKnown     bool     `json:"cost_known"`
 	Model         string   `json:"model,omitempty"`
+	// BoatTime is when the run started on the boat's clock as it was then, and
+	// Timezone is that clock's offset ("UTC+12"). With no boat position they
+	// are the UTC time, said to be UTC, and "": the page never shows a time on
+	// the device it is read on.
+	BoatTime string `json:"boat_time"`
+	Timezone string `json:"timezone"`
 }
 
 func dropLegacyRoutineTables(db *sql.DB) error {
@@ -142,15 +149,19 @@ func dropLegacyRoutineTables(db *sql.DB) error {
 // addWatchColumnIfMissing brings a watches table made by an earlier build of
 // this branch up to date.
 func addWatchColumnIfMissing(db *sql.DB, column, decl string) error {
+	return addColumnIfMissing(db, "watches", column, decl)
+}
+
+func addColumnIfMissing(db *sql.DB, table, column, decl string) error {
 	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('watches') WHERE name = ?`, column).Scan(&n); err != nil {
-		return fmt.Errorf("read the watches columns: %w", err)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('`+table+`') WHERE name = ?`, column).Scan(&n); err != nil {
+		return fmt.Errorf("read the %s columns: %w", table, err)
 	}
 	if n > 0 {
 		return nil
 	}
-	if _, err := db.Exec(`ALTER TABLE watches ADD COLUMN ` + column + ` ` + decl); err != nil {
-		return fmt.Errorf("add %s to watches: %w", column, err)
+	if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + decl); err != nil {
+		return fmt.Errorf("add %s to %s: %w", column, table, err)
 	}
 	return nil
 }
@@ -215,9 +226,16 @@ func createWatchesSchema(db *sql.DB) error {
 			review_problem TEXT,
 			cost_usd      REAL,
 			cost_known    INTEGER NOT NULL DEFAULT 0,
-			model         TEXT NOT NULL DEFAULT ''
+			model         TEXT NOT NULL DEFAULT '',
+			boat_time     TEXT NOT NULL DEFAULT '',
+			timezone      TEXT NOT NULL DEFAULT ''
 		)`); err != nil {
 		return fmt.Errorf("create watch_runs table: %w", err)
+	}
+	for _, col := range []string{"boat_time", "timezone"} {
+		if err := addColumnIfMissing(db, "watch_runs", col, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
 	}
 	for _, idx := range []string{
 		`CREATE INDEX IF NOT EXISTS watch_runs_watch ON watch_runs (watch_id, started_at)`,
@@ -398,7 +416,7 @@ func countScheduledWatchesQ(q sqlQueryer) (int, error) {
 // ── runs ────────────────────────────────────────────────────────────────
 
 const watchRunColumns = `id, watch_id, started_at, finished_at, outcome, skip_reason, report_kind, report, findings,
-	review, review_problem, cost_usd, cost_known, model`
+	review, review_problem, cost_usd, cost_known, model, boat_time, timezone`
 
 func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 	var (
@@ -410,7 +428,7 @@ func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 		known                 int
 	)
 	if err := row.Scan(&r.ID, &r.WatchID, &started, &finished, &r.Outcome, &r.SkipReason, &r.ReportKind, &report, &findings,
-		&review, &reviewProblem, &cost, &known, &r.Model); err != nil {
+		&review, &reviewProblem, &cost, &known, &r.Model, &r.BoatTime, &r.Timezone); err != nil {
 		return watchRun{}, err
 	}
 	r.StartedAt, r.FinishedAt = watchFromStoreTime(started), watchFromStoreTime(finished)
@@ -433,6 +451,10 @@ func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 		r.CostUSD = &cost.Float64
 	}
 	r.CostKnown = known != 0
+	if r.BoatTime == "" {
+		// A run saved with no zone: say it is UTC rather than leave it blank.
+		r.BoatTime = watchBoatClock(r.StartedAt, nil)
+	}
 	return r, nil
 }
 
@@ -446,15 +468,18 @@ func insertWatchRunTx(x alarmSQLExecer, r watchRun, countsAsRun bool) error {
 	if r.ReportKind == "" {
 		r.ReportKind = watchReportKindSections
 	}
+	if r.BoatTime == "" {
+		r.BoatTime = watchBoatClock(r.StartedAt, nil)
+	}
 	findings, err := json.Marshal(nonNilFindings(r.Findings))
 	if err != nil {
 		return err
 	}
 	if _, err := x.Exec(`INSERT INTO watch_runs (id, watch_id, started_at, finished_at, outcome, skip_reason, report_kind, report,
-		findings, has_finding, review, review_problem, cost_usd, cost_known, model)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		findings, has_finding, review, review_problem, cost_usd, cost_known, model, boat_time, timezone)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.WatchID, watchStoreTime(r.StartedAt), watchStoreTime(r.FinishedAt), r.Outcome, r.SkipReason, r.ReportKind, string(r.Report),
-		string(findings), boolToInt(len(r.Findings) > 0), r.Review, r.ReviewProblem, r.CostUSD, boolToInt(r.CostKnown), r.Model); err != nil {
+		string(findings), boolToInt(len(r.Findings) > 0), r.Review, r.ReviewProblem, r.CostUSD, boolToInt(r.CostKnown), r.Model, r.BoatTime, r.Timezone); err != nil {
 		return fmt.Errorf("record watch run: %w", err)
 	}
 	column := "last_skip_at"
@@ -479,9 +504,41 @@ func nonNilFindings(f []watchFinding) []watchFinding {
 }
 
 // watchRunsQ pages a watch's runs, newest first.
-func watchRunsQ(q sqlQueryer, watchID string, limit, offset int) ([]watchRun, error) {
-	rows, err := q.Query(`SELECT `+watchRunColumns+` FROM watch_runs WHERE watch_id = ? ORDER BY started_at DESC, id DESC LIMIT ? OFFSET ?`,
-		watchID, limit, offset)
+// watchRunCursor is where the next page of runs starts: the runs older than
+// this one. A page is found by what it follows, never by how many came before
+// it, so a run made between two page loads does not repeat or drop one.
+type watchRunCursor struct {
+	StartedAt time.Time
+	ID        string
+}
+
+// parseWatchRunCursor reads "<started_at RFC 3339>,<run id>", the last run of
+// the page already shown.
+func parseWatchRunCursor(v string) (*watchRunCursor, error) {
+	at, id, ok := strings.Cut(v, ",")
+	if !ok || id == "" {
+		return nil, fieldErr("before", "send the started_at and id of the last run shown, as started_at,id")
+	}
+	t, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return nil, fieldErr("before", "send the started_at and id of the last run shown, as started_at,id")
+	}
+	return &watchRunCursor{StartedAt: t, ID: id}, nil
+}
+
+// watchRunsQ pages a watch's runs, newest first, those older than before (all
+// of them when it is nil).
+func watchRunsQ(q sqlQueryer, watchID string, limit int, before *watchRunCursor) ([]watchRun, error) {
+	query := `SELECT ` + watchRunColumns + ` FROM watch_runs WHERE watch_id = ?`
+	args := []any{watchID}
+	if before != nil {
+		ns := watchStoreTime(before.StartedAt)
+		query += ` AND (started_at < ? OR (started_at = ? AND id < ?))`
+		args = append(args, ns, ns, before.ID)
+	}
+	query += ` ORDER BY started_at DESC, id DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := q.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("read watch runs: %w", err)
 	}

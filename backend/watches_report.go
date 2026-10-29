@@ -494,3 +494,23 @@ func watchInstrumentsSection(w savedWatch, in watchReportInput) (watchReportSect
 	}
 	return s, nil
 }
+
+// watchBoatClock is a time as the Watches page shows it: on the boat's clock
+// when its zone is known, else the UTC time said to be UTC. A nil loc, or UTC
+// itself, means the zone is not known (a known zone is a fixed offset such as
+// UTC+0, never plain UTC).
+func watchBoatClock(t time.Time, loc *time.Location) string {
+	if loc == nil || loc == time.UTC || loc.String() == "UTC" {
+		return t.UTC().Format("Mon 2 Jan 15:04") + " UTC (boat time not known)"
+	}
+	return watchClock(t, loc)
+}
+
+// watchBoatZone is the boat clock's offset label, "" when it is not known.
+func watchBoatZone(t time.Time, loc *time.Location) string {
+	if loc == nil || loc == time.UTC || loc.String() == "UTC" {
+		return ""
+	}
+	name, _ := t.In(loc).Zone()
+	return name
+}

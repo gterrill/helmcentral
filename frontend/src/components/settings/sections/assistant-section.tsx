@@ -240,7 +240,8 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
                 Every question sends your position, the question itself, and forecast and tide excerpts to OpenRouter and
                 whichever model provider you choose. Mate also reads your documents and notes to answer questions, and once
                 it&apos;s on it summarises and indexes them for search on its own, no separate prompt per item. All of that
-                text goes to OpenRouter too, billed to your key. Every reply shows its cost.
+                text goes to OpenRouter too, billed to your key. Every reply shows its cost. Mate also reviews every watch
+                report, so each run uses your OpenRouter key.
               </FieldDescription>
             </FieldContent>
           </Field>

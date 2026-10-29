@@ -36,6 +36,11 @@ type watchListEntry struct {
 	HasFinding bool `json:"has_finding"`
 	// Running is true for a one-off watch still sampling.
 	Running bool `json:"running,omitempty"`
+	// StartedBoatTime and EndsBoatTime are a one-off watch's start and end on
+	// the boat's clock as it was when the watch began, or the UTC time said to
+	// be UTC when the boat's zone was not known then.
+	StartedBoatTime string `json:"started_boat_time,omitempty"`
+	EndsBoatTime    string `json:"ends_boat_time,omitempty"`
 }
 
 type watchListResponse struct {
@@ -69,6 +74,16 @@ func watchError(c echo.Context, err error) error {
 	return c.JSON(watchErrorStatus(err), map[string]string{"error": err.Error()})
 }
 
+// watchOneOffLocation is the boat's clock a one-off watch began on, nil when
+// its zone was not known then.
+func watchOneOffLocation(w savedWatch) *time.Location {
+	var cfg watchOneOffConfig
+	if len(w.Config) == 0 || json.Unmarshal(w.Config, &cfg) != nil || cfg.ZoneName == "" || cfg.ZoneName == "UTC" {
+		return nil
+	}
+	return time.FixedZone(cfg.ZoneName, cfg.OffsetSeconds)
+}
+
 func watchScheduleLabel(w savedWatch) string {
 	if w.Kind == watchKindOneOff {
 		return "One-off · " + strconv.Itoa(w.DurationMinutes) + " " + watchPlural(w.DurationMinutes, "minute", "minutes")
@@ -84,6 +99,15 @@ func watchEntryFor(q sqlQueryer, w savedWatch, now time.Time) (watchListEntry, e
 	e := watchListEntry{savedWatch: w, ScheduleSentence: watchScheduleLabel(w), LastRun: last}
 	e.HasFinding = last != nil && last.FindingCount > 0
 	e.Running = w.Kind == watchKindOneOff && w.Enabled && w.EndsAt != nil && w.EndsAt.After(now)
+	if w.Kind == watchKindOneOff {
+		loc := watchOneOffLocation(w)
+		if w.StartedAt != nil {
+			e.StartedBoatTime = watchBoatClock(*w.StartedAt, loc)
+		}
+		if w.EndsAt != nil {
+			e.EndsBoatTime = watchBoatClock(*w.EndsAt, loc)
+		}
+	}
 	return e, nil
 }
 
@@ -122,27 +146,34 @@ func listWatchesHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, resp)
 }
 
-// GET /api/watches/:id?limit=&offset= pages the runs, newest first.
+// GET /api/watches/:id?limit=&before= pages the runs, newest first. before is
+// started_at,id of the last run already shown.
 func getWatchHandler(c echo.Context) error {
 	docs, err := watchStore()
 	if err != nil {
 		return watchError(c, err)
 	}
-	limit, offset := 20, 0
+	limit := 20
 	if v := c.QueryParam("limit"); v != "" {
 		if limit, err = strconv.Atoi(v); err != nil || limit < 1 || limit > 100 {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": "limit must be a whole number from 1 to 100"})
 		}
 	}
-	if v := c.QueryParam("offset"); v != "" {
-		if offset, err = strconv.Atoi(v); err != nil || offset < 0 {
-			return c.JSON(http.StatusBadRequest, map[string]string{"error": "offset must be a whole number, 0 or more"})
+	if _, has := c.QueryParams()["offset"]; has {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "pass before (started_at,id of the last run shown) instead of offset"})
+	}
+	var before *watchRunCursor
+	if v := c.QueryParam("before"); v != "" {
+		if before, err = parseWatchRunCursor(v); err != nil {
+			return watchError(c, err)
 		}
 	}
 	var resp struct {
 		Watch     watchListEntry `json:"watch"`
 		Runs      []watchRun     `json:"runs"`
 		TotalRuns int            `json:"total_runs"`
+		// HasOlder says there are runs older than the last one returned.
+		HasOlder bool `json:"has_older"`
 	}
 	err = docs.Read(func(q sqlQueryer) error {
 		w, err := savedWatchByIDQ(q, c.Param("id"))
@@ -152,8 +183,11 @@ func getWatchHandler(c echo.Context) error {
 		if resp.Watch, err = watchEntryFor(q, w, time.Now()); err != nil {
 			return err
 		}
-		if resp.Runs, err = watchRunsQ(q, w.ID, limit, offset); err != nil {
+		if resp.Runs, err = watchRunsQ(q, w.ID, limit+1, before); err != nil {
 			return err
+		}
+		if len(resp.Runs) > limit {
+			resp.Runs, resp.HasOlder = resp.Runs[:limit], true
 		}
 		return q.QueryRow(`SELECT COUNT(*) FROM watch_runs WHERE watch_id = ?`, w.ID).Scan(&resp.TotalRuns)
 	})

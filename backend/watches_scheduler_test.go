@@ -103,7 +103,7 @@ func (f *watchHostFixture) runsOf(id string) []watchRun {
 	var runs []watchRun
 	if err := f.docs.Read(func(q sqlQueryer) error {
 		var err error
-		runs, err = watchRunsQ(q, id, 50, 0)
+		runs, err = watchRunsQ(q, id, 50, nil)
 		return err
 	}); err != nil {
 		f.t.Fatal(err)

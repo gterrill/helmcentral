@@ -48,19 +48,25 @@ You can have up to 20 scheduled watches.
 You pick a preset, and Helmcentral shows what it means in words and the next
 three times it will run.
 
-- **Hourly:** On the hour, every hour.
-- **Every 2, 3, 4, 6 or 12 hours:** On the hour.
+- **Every hour:** On the hour, every hour.
+- **Every few hours:** Every 2, 3, 4, 6 or 12 hours, on the hour.
 - **Daily at a time:** For example "Every day at 06:00 boat time".
-- **Chosen days at a time:** For example "Mondays, Wednesdays and Fridays at
+- **Chosen weekdays at a time:** For example "Mondays, Wednesdays and Fridays at
   07:30".
-- **An hours window:** For example "Every hour from 22:00 to 06:00".
-- **Custom:** Five cron fields (minute, hour, day of month, month, day of week)
-  for anything else. The page shows "Custom" and the fields you typed.
+- **Hours between two times:** For example "Every hour from 22:00 to 06:00".
+- **Custom (cron):** Five cron fields (minute, hour, day of month, month, day of
+  week) for anything else. When you open a watch whose schedule none of the
+  presets can write, the page shows Custom with the fields as they are saved.
+
+If the schedule can't run, for example because it's more often than every
+15 minutes, the page says why and **Save** stays off until you fix it.
 
 Here's how a schedule behaves:
 
 - **Boat time:** Times are on the boat's clock, worked out from its position.
-  They're never read as UTC.
+  They're never read as UTC. Every time on the Watches page is on that clock, not
+  the clock of the phone or screen you're looking at. When the boat's time wasn't
+  known, a run shows its time as UTC and says "boat time not known".
 - **No position:** If the boat has no position, Helmcentral doesn't know what
   time it is on board, so it doesn't run the watch. It records a skipped run that
   says "No boat position, so the boat's time is not known", once for each missed
@@ -176,6 +182,8 @@ as "One-off · 10 minutes" while it runs, and then in the history.
   where it left off. The time it was down shows as a gap in the report. If the
   watch ran out of time while Helmcentral was off, you get the report from the
   samples it had, and the report says so.
+- **Settings:** A one-off watch's settings can't be changed. You can open it to
+  read its report, and you can delete it.
 - **Stop:** Stopping it from the chat ends it with no report. The history shows
   that it was stopped. Deleting it from the Watches page while it runs stops it
   too, and nothing goes to the chat.

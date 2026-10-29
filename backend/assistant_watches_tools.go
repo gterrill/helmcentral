@@ -153,7 +153,7 @@ func (d assistantToolDeps) executeGetWatchRuns(ctx context.Context, raw json.Raw
 			return err
 		}
 		result.Watch = w.Name
-		result.Runs, err = watchRunsQ(q, w.ID, limit, 0)
+		result.Runs, err = watchRunsQ(q, w.ID, limit, nil)
 		return err
 	})
 	if errors.Is(err, errWatchNotFound) || errors.Is(err, errWatchRunNotFound) {

@@ -176,6 +176,7 @@ func (s *watchOneOffStore) finish(info assistantWatchInfo, run watchRun, countsA
 		return
 	}
 	run.WatchID, run.Findings, run.CostKnown = info.ID, []watchFinding{}, true
+	run.BoatTime, run.Timezone = watchBoatClock(run.StartedAt, info.Location), watchBoatZone(run.StartedAt, info.Location)
 	mark := func(tx *sql.Tx, now time.Time) error {
 		_, err := tx.Exec(`UPDATE watches SET enabled = 0, reported_at = ? WHERE id = ?`, nullableReported(now, reported), info.ID)
 		return err

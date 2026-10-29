@@ -229,6 +229,7 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 		WatchID: w.ID, StartedAt: now, FinishedAt: h.now(), Outcome: watchOutcomeRan,
 		ReportKind: watchReportKindSections, Report: raw, Findings: all,
 		CostKnown: review.CostKnown, Model: review.Model,
+		BoatTime: watchBoatClock(now, loc), Timezone: watchBoatZone(now, loc),
 	}
 	if review.Reached {
 		cost := review.CostUSD
