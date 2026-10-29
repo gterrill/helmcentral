@@ -1,5 +1,6 @@
 import { Check, Loader2, Wrench } from 'lucide-react'
 import { useCallback, useState } from 'react'
+import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-proposal-views'
@@ -32,6 +33,7 @@ interface AssistantProposalCardProps {
  * leaves Apply available to retry.
  */
 export function AssistantProposalCard({ proposal, canWrite, onChange }: AssistantProposalCardProps) {
+  const changeCount = proposal.ops.length
   const [busy, setBusy] = useState<'apply' | 'dismiss' | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -43,6 +45,7 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         const updated =
           kind === 'apply' ? await applyAssistantProposal(proposal.id) : await dismissAssistantProposal(proposal.id)
         onChange(updated)
+        if (kind === 'apply') toast.success(`Applied ${changeCount} ${changeCount === 1 ? 'change' : 'changes'}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         // A 409 from Apply names the stored status it refused for. Stale
@@ -64,14 +67,13 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         setBusy(null)
       }
     },
-    [proposal, onChange],
+    [proposal, onChange, changeCount],
   )
 
   const applied = proposal.status === 'applied'
   const dismissed = proposal.status === 'dismissed'
   const stale = proposal.status === 'stale'
   const pending = proposal.status === 'pending'
-  const changeCount = proposal.ops.length
 
   return (
     <section

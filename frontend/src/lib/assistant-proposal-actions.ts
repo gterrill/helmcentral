@@ -1,9 +1,43 @@
 import { ApiError, apiRequest, invalidateQueries } from '@/lib/api-query'
-import { mapProposal, type AssistantProposal, type ProposalApi } from '@/hooks/use-assistant-conversations'
+import { mapProposal, type AssistantProposal, type AssistantProposalOp, type ProposalApi } from '@/hooks/use-assistant-conversations'
 import { todayISO } from '@/lib/local-date'
 import { PLANNED_STAY_PATH } from '@/hooks/use-planned-stay'
 import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
-import { invalidateWatches } from '@/hooks/use-watches'
+import { WATCHES_PATH } from '@/hooks/use-watches'
+import { decksRecordApplied, equipmentRecordApplied, zonesRecordApplied } from '@/hooks/use-inventory'
+import { maintenanceLogRecordApplied, maintenanceRulesRecordApplied } from '@/hooks/use-maintenance'
+import { vesselParticularsRecordApplied } from '@/hooks/use-vessel-particulars'
+
+const reads = (path: string) => () => void invalidateQueries([path])
+
+/**
+ * What to read again after Apply, by op type. Apply writes the records, and any
+ * open page that shows them asks again. Inventory and maintenance types call
+ * the same refresh their own pages run after a direct write, so a delete skips
+ * the keys that would answer 404 and an update reaches the details page. Every
+ * record type the backend registers needs a line here (a backend test checks),
+ * so a new type cannot leave its page stale after Apply.
+ */
+export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void> = {
+  planned_stay: reads(PLANNED_STAY_PATH),
+  alarm_rule: reads(ALARM_RULES_PATH),
+  watch: reads(WATCHES_PATH),
+  equipment: (op) => equipmentRecordApplied(op.action, op.id),
+  location: zonesRecordApplied,
+  bin: zonesRecordApplied,
+  deck: decksRecordApplied,
+  maintenance_rule: maintenanceRulesRecordApplied,
+  maintenance_log: maintenanceLogRecordApplied,
+  vessel_particulars: vesselParticularsRecordApplied,
+}
+
+function refreshPagesFor(proposal: AssistantProposal | undefined): void {
+  for (const op of proposal?.ops ?? []) {
+    const refresh = PROPOSAL_REFRESH[op.type]
+    if (refresh) refresh(op)
+    else console.error(`Apply changed a "${op.type}" record but no pages are listed to refresh for it`)
+  }
+}
 
 /**
  * Apply and Dismiss on a maintenance proposal card (ADR 0146). Apply is the
@@ -45,19 +79,10 @@ export async function applyAssistantProposal(id: string): Promise<AssistantPropo
   try {
     applied = await post(`/api/assistant/proposals/${encodeURIComponent(id)}/apply?today=${encodeURIComponent(todayISO())}`)
   } catch (err) {
-    const saved = appliedProposalOf(err)
-    if (saved?.ops.some((op) => op.type === 'alarm_rule')) void invalidateQueries([ALARM_RULES_PATH])
-    if (saved?.ops.some((op) => op.type === 'watch')) void invalidateWatches()
+    refreshPagesFor(appliedProposalOf(err))
     throw err
   }
-  // A planned stay Mate proposed is on the Forecast page the moment the
-  // operator applies the card; any open page reads it again.
-  if (applied.ops.some((op) => op.type === 'planned_stay')) void invalidateQueries([PLANNED_STAY_PATH])
-  // An alarm rule Mate proposed is live the moment it is applied, so the
-  // Alarms page and the battery tile's bands read the rules again.
-  if (applied.ops.some((op) => op.type === 'alarm_rule')) void invalidateQueries([ALARM_RULES_PATH])
-  // A watch Mate proposed is on the Watches page the moment it is applied.
-  if (applied.ops.some((op) => op.type === 'watch')) void invalidateWatches()
+  refreshPagesFor(applied)
   return applied
 }
 

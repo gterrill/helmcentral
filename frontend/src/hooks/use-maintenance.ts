@@ -404,6 +404,17 @@ export async function previewProfileChange(equipmentId: string, profileId: strin
   return { kept: data.kept ?? [], leaving: data.leaving ?? [], new: data.new ?? [] }
 }
 
+/** Mate's Apply wrote maintenance rules. */
+export function maintenanceRulesRecordApplied(): void {
+  invalidateQueries([RULES])
+}
+
+/** Mate's Apply wrote log entries; a completed job also moves its rule. */
+export function maintenanceLogRecordApplied(): void {
+  invalidateQueries([LOG])
+  invalidateQueries([RULES])
+}
+
 function equipmentMaintenance(equipmentId: string): string {
   return `/api/inventory/equipment/${encodeURIComponent(equipmentId)}/maintenance`
 }

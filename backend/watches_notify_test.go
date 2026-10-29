@@ -279,7 +279,7 @@ func TestWatchRun_NoChannelsOrNoPositionNeverNotifies(t *testing.T) {
 
 	f.notifyOn("id-Hourly", []string{transportNtfy}, watchSendEvery)
 	f.host.dispatchReport = c.dispatch
-	f.lonErr = errNoPositionForTest
+	f.zoneErr = errNoPositionForTest
 	f.nextHour()
 	if len(c.reports) != 0 {
 		t.Fatalf("a skipped run never notifies: %+v", c.reports)

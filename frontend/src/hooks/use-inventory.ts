@@ -553,6 +553,34 @@ export async function deleteEquipment(id: string, deletePhotos = false): Promise
   await equipmentDeleted(id)
 }
 
+/**
+ * Mate's Apply wrote equipment records, so the pages that read them read again,
+ * as the direct write would. A delete leaves the removed item's own keys alone
+ * (a read of them would answer 404); an update also reaches the item's details
+ * page. A create has no id to name yet, so only the lists move.
+ */
+export function equipmentRecordApplied(action: string, id?: string): void {
+  if (action === 'delete' && id) {
+    void equipmentDeleted(id)
+    return
+  }
+  if (id) invalidateQueries([itemPath(id)])
+  equipmentChanged()
+}
+
+/** Mate's Apply wrote locations or bins: the zone list (bins are nested in it)
+ * and the equipment rows that show their names read again. */
+export function zonesRecordApplied(): void {
+  invalidateQueries([ZONES])
+  equipmentListsChanged()
+}
+
+/** Mate's Apply wrote decks. A deck delete clears its zones' outlines. */
+export function decksRecordApplied(): void {
+  invalidateQueries([DECKS])
+  invalidateQueries([ZONES])
+}
+
 // ── equipment photos (ADR 0127) ─────────────────────────────────────────
 // Three plain functions, not a hook: the photo row works identically for a
 // saved item (each action calls its route immediately) and, before Save, for

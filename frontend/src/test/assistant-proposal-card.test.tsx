@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
+import { toast } from 'sonner'
+
 import { AssistantProposalCard } from '@/components/assistant-proposal-card'
 import { mapProposal, type AssistantProposal, type ProposalApi } from '@/hooks/use-assistant-conversations'
+
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 
 // ADR 0146, ADR 0158: the card under a Mate reply that proposes changes to
 // records. It renders from the stored status, so every state
@@ -34,6 +38,7 @@ describe('AssistantProposalCard', () => {
   })
 
   afterEach(() => {
+    vi.mocked(toast.success).mockClear()
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
@@ -62,6 +67,38 @@ describe('AssistantProposalCard', () => {
 
     await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: 'p1', status: 'applied' })))
     expect(fetchMock).toHaveBeenCalledWith('/api/assistant/proposals/p1/apply?today=2026-09-30', expect.objectContaining({ method: 'POST' }))
+  })
+
+  it('Apply confirms with a toast that counts the changes', async () => {
+    vi.stubGlobal('fetch', respond(200, { proposal: { id: 'p1', message_id: 'm1', status: 'applied', ops: proposal().ops } }))
+    render(<AssistantProposalCard proposal={proposal()} canWrite onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Applied 2 changes'))
+  })
+
+  it('Apply confirms a single change in the singular', async () => {
+    const one = proposal({ ops: proposal().ops.slice(0, 1) })
+    vi.stubGlobal('fetch', respond(200, { proposal: { id: 'p1', message_id: 'm1', status: 'applied', ops: one.ops } }))
+    render(<AssistantProposalCard proposal={one} canWrite onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Applied 1 change'))
+  })
+
+  it('Dismiss does not toast', async () => {
+    vi.stubGlobal('fetch', respond(200, { proposal: { id: 'p1', message_id: 'm1', status: 'dismissed', ops: proposal().ops } }))
+    const onChange = vi.fn()
+    render(<AssistantProposalCard proposal={proposal()} canWrite onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    await waitFor(() => expect(onChange).toHaveBeenCalled())
+    expect(toast.success).not.toHaveBeenCalled()
+  })
+
+  it('Apply saved with an error shows no success toast', async () => {
+    vi.stubGlobal('fetch', respond(500, { error: 'rules did not reload', proposal: { id: 'p1', message_id: 'm1', status: 'applied', ops: proposal().ops } }))
+    render(<AssistantProposalCard proposal={proposal()} canWrite onChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await screen.findByText(/rules did not reload/)
+    expect(toast.success).not.toHaveBeenCalled()
   })
 
   it('Dismiss posts and hands the answer up', async () => {
