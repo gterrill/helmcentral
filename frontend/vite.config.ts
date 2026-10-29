@@ -95,7 +95,13 @@ export default defineConfig(({ mode }) => ({
         // serves the frontend itself and no proxy sits in between, which is
         // what makes the gap easy to miss until someone tries it in dev.
         ws: true,
-      }
+      },
+      // Outside assistants (ADR 0231) connect to /mcp on the backend's own
+      // port; this lets the address Settings shows work in dev too.
+      '/mcp': {
+        target: apiProxyTarget,
+        changeOrigin: false,
+      },
     }
   },
   build: {

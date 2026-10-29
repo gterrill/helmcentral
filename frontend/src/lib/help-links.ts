@@ -78,6 +78,7 @@ export const SETTINGS_HELP_TARGETS: Record<SettingsSectionId, HelpTarget> = {
   alarms: { page: 'features/alarms', heading: 'Getting told' },
   assistant: { page: 'how-to/set-up-the-assistant', heading: '2. Configure it in Helmcentral' },
   'offline-coastline': { page: 'features/offline-coastline' },
+  'outside-assistants': { page: 'features/outside-assistants' },
   plugins: { page: 'reference/plugins' },
   security: { page: 'reference/configuration', heading: 'Security' },
   logs: HELP_INDEX,

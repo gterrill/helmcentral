@@ -125,3 +125,21 @@ these three so the clear took effect immediately. The ADR 0023 amendment
 and `loadInfluxSettings` now read `globalSecretsStore` directly at point of
 use, so there is no cached process-environment copy left for
 `clearBoundSecret` to unset, and it no longer tries.
+
+## Addendum (2026-10-30): outside assistant tokens
+
+ADR 0231 adds a third credential type beside user logins (ADR 0040) and the
+unauthenticated `auth.mode: none` default: a per-client bearer token for the
+MCP endpoint at `/mcp`.
+
+- It is not a login. It does not use sessions, roles or the tier table, and it
+  never opens an `/api` route. A session never opens `/mcp`.
+- It is read tier only, shown once when created and stored as a SHA-256 hash.
+- It holds regardless of `auth.mode`. With no tokens, or a revoked or unknown
+  one, `/mcp` answers 401, so a boat on `auth.mode: none` does not open its
+  data to MCP clients by default.
+- `Origin` is checked, so a web page in a browser on the LAN can't use a token
+  it somehow holds from another site.
+- Creating and revoking tokens is admin tier.
+- The trusted-LAN model is unchanged. Reaching `/mcp` from outside the LAN or
+  Tailscale needs a public tunnel, which this model doesn't cover.

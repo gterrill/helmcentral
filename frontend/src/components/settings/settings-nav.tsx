@@ -15,6 +15,7 @@ export type SettingsSectionId =
   | 'alarms'
   | 'assistant'
   | 'offline-coastline'
+  | 'outside-assistants'
   | 'security'
   | 'logs'
   | 'import'
@@ -48,6 +49,7 @@ export const SETTINGS_SECTION_GROUPS: Array<SectionNavGroup<SettingsSectionId>> 
       { id: 'alarms', label: 'Alarms' },
       { id: 'assistant', label: 'Mate' },
       { id: 'offline-coastline', label: 'Offline coastline' },
+      { id: 'outside-assistants', label: 'Outside assistants' },
     ],
   },
   {

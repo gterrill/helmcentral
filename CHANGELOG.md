@@ -25,6 +25,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Outside assistants can read the boat.** A program on your own computer, such
+  as Claude Code or Claude Desktop, can now connect to Helmcentral over MCP and
+  ask about the house bank, the active alarms, the alarm log, how a reading has
+  behaved, your passages and the maintenance schedule. It gets figures in your
+  units and a description of your boat written fresh from your equipment and
+  roles. It can only read, it doesn't use Mate or your OpenRouter key, and it
+  never gets Mate's conversations or your contact details. Open **Settings,
+  Outside assistants** to make a token for each program. The token is shown once,
+  you can switch each tool on or off for it, and you can revoke it on its own.
+  Until you make a token, every request is refused. It works on your boat's
+  network and on Tailscale. Claude on the phone and the web can't connect yet.
 - **Watch reports can show a chart.** A finding about a trend now comes with a
   chart: pressure over 12 hours when it falls, the house bank's charge and current
   over the night it measured, and a tank's level since the last report. Mate can
