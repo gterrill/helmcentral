@@ -160,6 +160,73 @@ not known". Nothing is paused or skipped because of a cost.
 You can tap **Ask Mate about this run** on any run. It opens a conversation with
 that run already in front of Mate.
 
+## Notifications
+
+A watch can send its report to your phone or your inbox, so you don't have to
+open the page to find out what it saw. A report is not an alarm, so it travels
+as its own kind of message. It never appears in the Alarms drawer or as an alarm
+banner. It is also never published to SignalK, where it would look like an alarm
+to every other device on the network.
+
+Each watch has a **Notifications** section with two choices:
+
+- **Channels:** Any of ntfy, Email, Webhook and Phone and browser push. They are
+  the same channels your alarms use, switched on in **Settings** under
+  **Alarms**. A new watch starts with every channel that is on. A channel that is
+  off shows as off, with a reminder where to turn it on, and nothing is sent to it
+  until you do. The SignalK channel isn't offered.
+- **Send:** **Only when it finds something** is the default. **Every report**
+  sends each report, including the ones with nothing to report.
+
+Here is how **Only when it finds something** decides. A report goes out when it
+has a finding that the report before it did not have. It also goes out when you
+never got that finding, because the report before it didn't reach you.
+
+- **A standing problem:** A bank that stays low all night tells you once, not
+  every hour.
+- **A problem that clears and comes back:** It tells you again.
+- **A report nobody received:** If every channel was off or failed, the finding
+  still counts as new, so the next run tries again. The run says "Not sent" and
+  why.
+- **What counts as the same finding:** A finding from a rule is the same one
+  whatever its figures. A finding that Mate added is the same one when Mate says
+  it's the same issue, whatever its wording.
+- **Nothing to report:** A report with no findings sends nothing. A run that was
+  skipped, for example because the boat had no position, never sends anything.
+
+What you receive depends on the channel:
+
+- **The title:** The watch name, then "3 findings", "1 finding" or "nothing to
+  report", for example "Overnight check: 2 findings".
+- **ntfy and phone push:** The title, then up to three findings and the opening
+  sentence of Mate's review. Tapping a phone push opens that run on the Watches
+  page. They arrive at normal priority, so they don't break through
+  do-not-disturb the way an alarm can.
+- **Email:** The title is the subject, and the body is the whole report: every
+  finding, Mate's review and every section's lines.
+- **Webhook:** The report as data. See [Watch report webhook](../reference/webhook-payloads.md).
+
+A link to the run needs to know the address you reach Helmcentral on from off the
+boat, and Helmcentral can't tell. Set it in **Settings** under **Alarms**, in the
+**Notifications** panel, as **Address for links**, for example
+`http://boat.local:9091`. It's empty until you set it. With it set, ntfy opens
+the run when you tap the message, and the email and the webhook carry the link.
+Without it they carry none. The link opens the Watches page with that run at the
+top, marked for a moment, even when it's an old run.
+
+Each run on the Watches page says which channels it reached, for example
+"Notified: ntfy, Email". If a channel can't be reached, the run says "Not
+delivered yet to Email" and why. Helmcentral keeps trying, the same as for an
+alarm, for up to 24 hours, and says so in its log each time it fails. A newer
+report from the same watch replaces an older one still waiting, so you don't get
+a stale report after a fresh one.
+
+Two things to know:
+
+- **One-off watches** don't send notifications. Their report already comes to
+  the chat that asked for it.
+- **Watches you made before this** send nothing until you pick channels on them.
+
 ## History
 
 Every run is kept, newest first, with its report, its findings, Mate's review,
@@ -201,6 +268,6 @@ contains and its limits.
 - A watch reads the boat and never changes anything.
 - A watch doesn't replace an alarm. A finding is something to look at when you
   next look, and an alarm is what wakes you.
-- Findings stay in the app for now. Nothing is sent to your phone.
+- A notification is a convenience. It can be late if a channel is down, and it doesn't wake you the way an alarm does.
 - If Helmcentral can't save the history of a run, it stops all watches until you
   restart it. The Watches page says "Watches stopped" and why.

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 import type { AssistantProposalOp } from '@/hooks/use-assistant-conversations'
 import { documentContentUrl } from '@/lib/document-download'
+import { channelLabel, WATCH_SEND_LABELS } from '@/lib/watches'
 
 // How a changeset operation's fields read on the card (ADR 0158). The default
 // is a plain before and after; a type may supply its own view where a diff is
@@ -25,6 +26,8 @@ const TYPE_FIELD_LABELS: Record<string, Record<string, string>> = {
     schedule: 'Runs',
     sections: 'Reports on',
     look_out_for: 'Looks out for',
+    notify: 'Sends to',
+    send: 'Sends',
     alarms_raised: 'Alarms that count',
     instrument_issues: 'Sensor problems that count',
     tank_change_points: 'Tank change that counts (points)',
@@ -49,7 +52,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /** A plain value as text. `ops` lets a local reference ("$1", the record the
  * first change creates) read as that change's name. */
-export function formatFieldValue(value: unknown, ops: AssistantProposalOp[]): string {
+export function formatFieldValue(value: unknown, ops: AssistantProposalOp[], type?: string, field?: string): string {
+  if (type === 'watch' && field === 'send' && (value === 'findings' || value === 'every')) return WATCH_SEND_LABELS[value]
+  if (type === 'watch' && field === 'notify' && Array.isArray(value) && value.length > 0) return value.map((c) => channelLabel(String(c))).join(', ')
   if (value === null || value === undefined || value === '') return '--'
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
   if (typeof value === 'number') return String(value)

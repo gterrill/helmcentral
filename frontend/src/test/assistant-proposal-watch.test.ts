@@ -1,7 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { fieldLabel } from '@/components/assistant-proposal-views'
+import { fieldLabel, formatFieldValue } from '@/components/assistant-proposal-views'
 import { useWatchList } from '@/hooks/use-watches'
 import { applyAssistantProposal } from '@/lib/assistant-proposal-actions'
 import { resetQueryStore } from '@/lib/api-query'
@@ -13,8 +13,22 @@ describe('watch proposal field labels', () => {
     expect(fieldLabel('schedule', 'watch')).toBe('Runs')
     expect(fieldLabel('sections', 'watch')).toBe('Reports on')
     expect(fieldLabel('look_out_for', 'watch')).toBe('Looks out for')
+    expect(fieldLabel('notify', 'watch')).toBe('Sends to')
+    expect(fieldLabel('send', 'watch')).toBe('Sends')
     expect(fieldLabel('tank_change_points', 'watch')).toBe('Tank change that counts (points)')
     expect(fieldLabel('pressure_fall_hpa', 'watch')).toBe('Pressure fall that counts (hPa)')
+  })
+
+  it('reads send and notify as the page does, not as stored', () => {
+    expect(formatFieldValue('findings', [], 'watch', 'send')).toBe('Only when it finds something')
+    expect(formatFieldValue('every', [], 'watch', 'send')).toBe('Every report')
+    expect(formatFieldValue(['ntfy', 'smtp', 'webpush'], [], 'watch', 'notify')).toBe('ntfy, Email, Phone and browser push')
+    expect(formatFieldValue([], [], 'watch', 'notify')).toBe('--')
+  })
+
+  it('leaves the same words alone on other types', () => {
+    expect(formatFieldValue('findings', [], 'location', 'send')).toBe('findings')
+    expect(formatFieldValue(['ntfy'], [], undefined, undefined)).toBe('ntfy')
   })
 
   it('leaves other types alone', () => {

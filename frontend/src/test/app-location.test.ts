@@ -111,6 +111,13 @@ describe('parseAppLocation', () => {
     expect(parseAppLocation('/watches/w-1')).toEqual({ panel: 'watches', route: { view: 'details', id: 'w-1' } })
   })
 
+  it('carries the run a link points at as ?run=', () => {
+    expect(parseAppLocation('/watches/w-1?run=r-9')).toEqual({ panel: 'watches', route: { view: 'details', id: 'w-1', run: 'r-9' } })
+    expect(parseAppLocation('/watches/w-1?run=')).toEqual({ panel: 'watches', route: { view: 'details', id: 'w-1' } })
+    expect(formatAppLocation({ panel: 'watches', route: { view: 'details', id: 'w 1', run: 'r 9' } }, ctx)).toBe('/watches/w%201?run=r+9')
+    expect(formatAppLocation({ panel: 'watches', route: { view: 'details', id: 'w-1' } }, ctx)).toBe('/watches/w-1')
+  })
+
   it('treats a malformed percent-escape in a watch id as the index rather than throwing', () => {
     expect(parseAppLocation('/watches/%E0%A4%A')).toEqual({ panel: 'watches', route: { view: 'index' } })
   })

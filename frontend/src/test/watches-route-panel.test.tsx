@@ -9,7 +9,7 @@ import { testRouter } from './helpers/router'
 const watch = {
   id: 'w1', name: 'Overnight check', kind: 'scheduled', schedule: '0 6 * * *', sections: ['power'],
   thresholds: { alarms_raised: 1, instrument_issues: 1, tank_change_points: 10, pressure_fall_hpa: 3 },
-  look_out_for: '', enabled: true, updated_at: '', schedule_sentence: 'Every day at 06:00 boat time', last_run: null, has_finding: false,
+  look_out_for: '', enabled: true, notify: [], send: 'findings', updated_at: '', schedule_sentence: 'Every day at 06:00 boat time', last_run: null, has_finding: false,
 }
 
 function stubFetch() {
@@ -18,6 +18,7 @@ function stubFetch() {
     urls.push(String(url))
     const u = String(url)
     const ok = (data: unknown) => ({ ok: true, status: 200, json: async () => data })
+    if (u.endsWith('/api/watches/channels')) return ok({ offered: ['ntfy', 'smtp', 'webhook', 'webpush'], enabled: [] })
     if (u.includes('/schedule-preview')) return ok({ valid: true, sentence: 'Every day at 06:00 boat time', boat_time_known: true, next: [] })
     if (u.includes('/api/watches/w1')) return ok({ watch, runs: [], has_older: false })
     return ok({ watches: [watch], max: 20, cost_24h: { usd: 0, unknown_runs: 0 }, storage_bytes: 10 })

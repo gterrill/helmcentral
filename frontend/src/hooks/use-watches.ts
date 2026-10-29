@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { apiRequest, declareQuery, invalidateQueries, useApiQuery } from '@/lib/api-query'
+import { ApiError, apiRequest, declareQuery, invalidateQueries, useApiQuery } from '@/lib/api-query'
 import type {
   WatchDetail,
   WatchDraft,
@@ -9,6 +9,7 @@ import type {
   WatchRun,
   WatchSchedulePreview,
 } from '@/lib/watches'
+import { draftBody } from '@/lib/watches'
 
 // The Watches pages' data (ADR 0227). One module-level prefix, so a change to
 // a watch, a run now, or Mate's applied proposal refreshes the index and every
@@ -45,6 +46,40 @@ export function useWatchList(enabled = true) {
     loading: query.isLoading,
     error: query.error?.message ?? null,
     refresh: query.refetch,
+  }
+}
+
+/**
+ * Which notification channels a watch can use and which are switched on in
+ * Settings, from the watches' own read route so anyone who can open the page can
+ * pick channels. It says nothing about the channels' settings. `loaded` is false
+ * until the answer is in, so no channel is called off before then.
+ */
+export function useEnabledNotifyChannels(): { on: string[]; loaded: boolean; error: string | null } {
+  const query = useApiQuery<{ offered: string[]; enabled: string[] }>({
+    queryKey: [WATCHES_PATH, 'channels'],
+    path: `${WATCHES_PATH}/channels`,
+  })
+  const data = query.data
+  return { on: data ? data.enabled : NO_CHANNELS, loaded: data !== undefined, error: query.error?.message ?? null }
+}
+
+const NO_CHANNELS: string[] = []
+
+/** One run a link points at, whatever page of the history it is on. */
+export function useLinkedWatchRun(watchId: string | null, runId: string | null) {
+  const query = useApiQuery<WatchRun>({
+    queryKey: [WATCHES_PATH, watchId, 'run', runId],
+    path: `${WATCHES_PATH}/${encodeURIComponent(watchId ?? '')}/runs/${encodeURIComponent(runId ?? '')}`,
+    enabled: watchId !== null && runId !== null,
+  })
+  const error = query.error
+  return {
+    run: query.data ?? null,
+    loading: query.isLoading,
+    /** The run was deleted, or never existed. */
+    gone: error instanceof ApiError && error.status === 404,
+    error: error && !(error instanceof ApiError && error.status === 404) ? error.message : null,
   }
 }
 
@@ -154,7 +189,7 @@ export function useWatchDetail(id: string | null) {
 /** The writes. Each refreshes the watches before it resolves; the server's own message is what a refusal says. */
 export const watchesApi = {
   async create(draft: WatchDraft): Promise<WatchRecord> {
-    const created = await apiRequest<WatchRecord>(WATCHES_PATH, { method: 'POST', json: draft })
+    const created = await apiRequest<WatchRecord>(WATCHES_PATH, { method: 'POST', json: draftBody(draft) })
     await invalidateWatches()
     return created
   },
@@ -162,7 +197,7 @@ export const watchesApi = {
   async change(id: string, draft: WatchDraft): Promise<WatchRecord> {
     const changed = await apiRequest<WatchRecord>(`${WATCHES_PATH}/${encodeURIComponent(id)}`, {
       method: 'PATCH',
-      json: draft,
+      json: draftBody(draft),
     })
     await invalidateWatches()
     return changed

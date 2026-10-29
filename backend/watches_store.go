@@ -100,6 +100,13 @@ type savedWatch struct {
 	// Config belongs to a one-off watch: what it samples. The samples taken so
 	// far are kept apart (watch_samples), saved so a restart can resume it.
 	Config json.RawMessage `json:"-"`
+
+	// Notify lists the channels a report is sent to (ntfy, smtp, webhook,
+	// webpush; never signalk) and Send says when: watchSendFindings or
+	// watchSendEvery.
+	Notify []string `json:"notify"`
+	Send   string   `json:"send"`
+
 	// ReportedAt is when a one-off watch's end was recorded, just before its
 	// report went to the chat. A watch with one is never reported again.
 	ReportedAt *time.Time `json:"-"`
@@ -110,6 +117,10 @@ type watchFinding struct {
 	Rule    string `json:"rule"`
 	Text    string `json:"text"`
 	By      string `json:"by"`
+	// Key names the issue a finding Mate added is about, in a few lower_snake
+	// words, so the same issue is the same finding from one run to the next
+	// whatever Mate's wording. Empty on a finding the rules reached.
+	Key string `json:"key,omitempty"`
 }
 
 type watchRun struct {
@@ -135,6 +146,19 @@ type watchRun struct {
 	// the device it is read on.
 	BoatTime string `json:"boat_time"`
 	Timezone string `json:"timezone"`
+	// Notified lists the channels a notification of this run reached.
+	// NotifyPending lists the ones still being retried, with the reason the
+	// last attempt failed. Neither is stored in the run: the first is a
+	// column of its own, the second is read from the retry queue.
+	Notified      []string             `json:"notified"`
+	NotifyPending []watchPendingNotice `json:"notify_pending,omitempty"`
+	// NotSent says why a report that was due went nowhere, such as no channel
+	// being switched on. Empty when it was handed to a channel.
+	NotSent string `json:"not_sent,omitempty"`
+	// ToldKeys are the keys of this run's findings the operator is known to
+	// have been told about: those the previous run had already told them, and
+	// all of them once a channel accepts this run's report.
+	ToldKeys []string `json:"-"`
 }
 
 func dropLegacyRoutineTables(db *sql.DB) error {
@@ -192,12 +216,20 @@ func createWatchesSchema(db *sql.DB) error {
 			last_run_at         INTEGER,
 			last_skip_at        INTEGER,
 			config              TEXT NOT NULL DEFAULT '',
-			reported_at         INTEGER
+			reported_at         INTEGER,
+			notify              TEXT NOT NULL DEFAULT '[]',
+			send                TEXT NOT NULL DEFAULT 'findings'
 		)`); err != nil {
 		return fmt.Errorf("create watches table: %w", err)
 	}
-	if err := addWatchColumnIfMissing(db, "reported_at", "INTEGER"); err != nil {
-		return err
+	for col, decl := range map[string]string{
+		"reported_at": "INTEGER",
+		"notify":      "TEXT NOT NULL DEFAULT '[]'",
+		"send":        "TEXT NOT NULL DEFAULT 'findings'",
+	} {
+		if err := addWatchColumnIfMissing(db, col, decl); err != nil {
+			return err
+		}
 	}
 	// The samples of a running one-off watch, appended in chunks so a save
 	// writes only what is new.
@@ -228,12 +260,24 @@ func createWatchesSchema(db *sql.DB) error {
 			cost_known    INTEGER NOT NULL DEFAULT 0,
 			model         TEXT NOT NULL DEFAULT '',
 			boat_time     TEXT NOT NULL DEFAULT '',
-			timezone      TEXT NOT NULL DEFAULT ''
+			timezone      TEXT NOT NULL DEFAULT '',
+			notified      TEXT NOT NULL DEFAULT '[]',
+			told_keys     TEXT NOT NULL DEFAULT '[]',
+			not_sent      TEXT NOT NULL DEFAULT ''
 		)`); err != nil {
 		return fmt.Errorf("create watch_runs table: %w", err)
 	}
 	for _, col := range []string{"boat_time", "timezone"} {
 		if err := addColumnIfMissing(db, "watch_runs", col, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	for col, decl := range map[string]string{
+		"notified":  "TEXT NOT NULL DEFAULT '[]'",
+		"told_keys": "TEXT NOT NULL DEFAULT '[]'",
+		"not_sent":  "TEXT NOT NULL DEFAULT ''",
+	} {
+		if err := addColumnIfMissing(db, "watch_runs", col, decl); err != nil {
 			return err
 		}
 	}
@@ -268,7 +312,8 @@ func nullableWatchTime(t *time.Time) any {
 }
 
 const savedWatchColumns = `id, name, kind, schedule, duration_minutes, started_at, ends_at, conversation_id, sections,
-	thresholds, look_out_for, enabled, created_at, updated_at, schedule_changed_at, last_run_at, last_skip_at, config, reported_at`
+	thresholds, look_out_for, enabled, created_at, updated_at, schedule_changed_at, last_run_at, last_skip_at, config, reported_at,
+	notify, send`
 
 func scanSavedWatch(row interface{ Scan(...any) error }) (savedWatch, error) {
 	var (
@@ -278,12 +323,20 @@ func scanSavedWatch(row interface{ Scan(...any) error }) (savedWatch, error) {
 		sections, thresholds       string
 		config                     string
 		reported                   sql.NullInt64
+		notify                     string
 		enabled                    int
 		created, updated, schedule int64
 	)
 	if err := row.Scan(&w.ID, &w.Name, &w.Kind, &w.Schedule, &w.DurationMinutes, &started, &ends, &w.ConversationID,
-		&sections, &thresholds, &w.LookOutFor, &enabled, &created, &updated, &schedule, &lastRun, &lastSkip, &config, &reported); err != nil {
+		&sections, &thresholds, &w.LookOutFor, &enabled, &created, &updated, &schedule, &lastRun, &lastSkip, &config, &reported,
+		&notify, &w.Send); err != nil {
 		return savedWatch{}, err
+	}
+	if err := json.Unmarshal([]byte(notify), &w.Notify); err != nil {
+		return savedWatch{}, fmt.Errorf("watch %q: the saved notification channels are unreadable: %w", w.Name, err)
+	}
+	if w.Notify == nil {
+		w.Notify = []string{}
 	}
 	if err := json.Unmarshal([]byte(sections), &w.Sections); err != nil {
 		return savedWatch{}, fmt.Errorf("watch %q: the saved sections are unreadable: %w", w.Name, err)
@@ -317,11 +370,19 @@ func insertSavedWatchTx(x alarmSQLExecer, w savedWatch) error {
 	if err != nil {
 		return err
 	}
-	if _, err := x.Exec(`INSERT INTO watches (`+savedWatchColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	notify, err := json.Marshal(nonNilStrings(w.Notify))
+	if err != nil {
+		return err
+	}
+	if w.Send == "" {
+		w.Send = watchSendFindings
+	}
+	if _, err := x.Exec(`INSERT INTO watches (`+savedWatchColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.Name, w.Kind, w.Schedule, w.DurationMinutes, nullableWatchTime(w.StartedAt), nullableWatchTime(w.EndsAt), w.ConversationID,
 		string(sections), string(thresholds), w.LookOutFor, boolToInt(w.Enabled),
 		watchStoreTime(w.CreatedAt), watchStoreTime(w.UpdatedAt), watchStoreTime(w.ScheduleChangedAt),
-		nullableWatchTime(w.LastRunAt), nullableWatchTime(w.LastSkipAt), string(w.Config), nullableWatchTime(w.ReportedAt)); err != nil {
+		nullableWatchTime(w.LastRunAt), nullableWatchTime(w.LastSkipAt), string(w.Config), nullableWatchTime(w.ReportedAt),
+		string(notify), w.Send); err != nil {
 		return fmt.Errorf("insert watch %q: %w", w.Name, err)
 	}
 	return nil
@@ -338,10 +399,14 @@ func updateSavedWatchTx(x alarmSQLExecer, w savedWatch) error {
 	if err != nil {
 		return err
 	}
+	notify, err := json.Marshal(nonNilStrings(w.Notify))
+	if err != nil {
+		return err
+	}
 	res, err := x.Exec(`UPDATE watches SET name = ?, schedule = ?, sections = ?, thresholds = ?, look_out_for = ?, enabled = ?,
-		updated_at = ?, schedule_changed_at = ? WHERE id = ?`,
+		notify = ?, send = ?, updated_at = ?, schedule_changed_at = ? WHERE id = ?`,
 		w.Name, w.Schedule, string(sections), string(thresholds), w.LookOutFor, boolToInt(w.Enabled),
-		watchStoreTime(w.UpdatedAt), watchStoreTime(w.ScheduleChangedAt), w.ID)
+		string(notify), w.Send, watchStoreTime(w.UpdatedAt), watchStoreTime(w.ScheduleChangedAt), w.ID)
 	if err != nil {
 		return fmt.Errorf("update watch %q: %w", w.Name, err)
 	}
@@ -416,7 +481,7 @@ func countScheduledWatchesQ(q sqlQueryer) (int, error) {
 // ── runs ────────────────────────────────────────────────────────────────
 
 const watchRunColumns = `id, watch_id, started_at, finished_at, outcome, skip_reason, report_kind, report, findings,
-	review, review_problem, cost_usd, cost_known, model, boat_time, timezone`
+	review, review_problem, cost_usd, cost_known, model, boat_time, timezone, notified, told_keys, not_sent`
 
 func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 	var (
@@ -426,10 +491,20 @@ func scanWatchRun(row interface{ Scan(...any) error }) (watchRun, error) {
 		review, reviewProblem sql.NullString
 		cost                  sql.NullFloat64
 		known                 int
+		notified, told        string
 	)
 	if err := row.Scan(&r.ID, &r.WatchID, &started, &finished, &r.Outcome, &r.SkipReason, &r.ReportKind, &report, &findings,
-		&review, &reviewProblem, &cost, &known, &r.Model, &r.BoatTime, &r.Timezone); err != nil {
+		&review, &reviewProblem, &cost, &known, &r.Model, &r.BoatTime, &r.Timezone, &notified, &told, &r.NotSent); err != nil {
 		return watchRun{}, err
+	}
+	if err := json.Unmarshal([]byte(notified), &r.Notified); err != nil {
+		return watchRun{}, fmt.Errorf("run %s: the saved notifications are unreadable: %w", r.ID, err)
+	}
+	if r.Notified == nil {
+		r.Notified = []string{}
+	}
+	if err := json.Unmarshal([]byte(told), &r.ToldKeys); err != nil {
+		return watchRun{}, fmt.Errorf("run %s: the saved told findings are unreadable: %w", r.ID, err)
 	}
 	r.StartedAt, r.FinishedAt = watchFromStoreTime(started), watchFromStoreTime(finished)
 	if report != "" {
@@ -688,4 +763,82 @@ func pruneWatchRunsTx(x alarmSQLExecer, cutoff time.Time) (int64, error) {
 		return n, fmt.Errorf("prune one-off watches: %w", err)
 	}
 	return n, nil
+}
+
+// addWatchRunNotifiedTx records that a channel accepted a run's report. The
+// operator is then known to have been told every finding the run carries, so
+// those are marked told, and any earlier "not sent" note no longer applies.
+func addWatchRunNotifiedTx(x alarmSQLExecer, watchID, runID, channel string) error {
+	var raw, findingsRaw string
+	if err := x.QueryRow(`SELECT notified, findings FROM watch_runs WHERE watch_id = ? AND id = ?`, watchID, runID).Scan(&raw, &findingsRaw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errWatchRunNotFound
+		}
+		return fmt.Errorf("read notified channels: %w", err)
+	}
+	var list []string
+	if err := json.Unmarshal([]byte(raw), &list); err != nil {
+		return fmt.Errorf("the saved notifications of run %s are unreadable: %w", runID, err)
+	}
+	var findings []watchFinding
+	if err := json.Unmarshal([]byte(findingsRaw), &findings); err != nil {
+		return fmt.Errorf("the saved findings of run %s are unreadable: %w", runID, err)
+	}
+	if !containsString(list, channel) {
+		list = append(list, channel)
+	}
+	out, err := json.Marshal(list)
+	if err != nil {
+		return err
+	}
+	told, err := json.Marshal(watchFindingKeys(findings))
+	if err != nil {
+		return err
+	}
+	if _, err := x.Exec(`UPDATE watch_runs SET notified = ?, told_keys = ?, not_sent = '' WHERE watch_id = ? AND id = ?`,
+		string(out), string(told), watchID, runID); err != nil {
+		return fmt.Errorf("record notified channel: %w", err)
+	}
+	return nil
+}
+
+// setWatchRunToldTx sets the keys of a run's findings the operator is known to
+// have been told about.
+func setWatchRunToldTx(x alarmSQLExecer, watchID, runID string, keys []string) error {
+	raw, err := json.Marshal(nonNilStrings(keys))
+	if err != nil {
+		return err
+	}
+	if _, err := x.Exec(`UPDATE watch_runs SET told_keys = ? WHERE watch_id = ? AND id = ?`, string(raw), watchID, runID); err != nil {
+		return fmt.Errorf("remember told findings: %w", err)
+	}
+	return nil
+}
+
+// setWatchRunNotSentTx notes why a report that was due went to no channel.
+func setWatchRunNotSentTx(x alarmSQLExecer, watchID, runID, reason string) error {
+	res, err := x.Exec(`UPDATE watch_runs SET not_sent = ? WHERE watch_id = ? AND id = ?`, reason, watchID, runID)
+	if err != nil {
+		return fmt.Errorf("record why a report was not sent: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return errWatchRunNotFound
+	}
+	return nil
+}
+
+// lastRanRunBeforeQ is the run of a watch that produced a report just before
+// the given one, the one a new report is compared with.
+func lastRanRunBeforeQ(q sqlQueryer, watchID string, startedAt time.Time, runID string) (watchRun, bool, error) {
+	ns := watchStoreTime(startedAt)
+	r, err := scanWatchRun(q.QueryRow(`SELECT `+watchRunColumns+` FROM watch_runs WHERE watch_id = ? AND outcome = ?
+		AND (started_at < ? OR (started_at = ? AND id < ?)) ORDER BY started_at DESC, id DESC LIMIT 1`,
+		watchID, watchOutcomeRan, ns, ns, runID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return watchRun{}, false, nil
+	}
+	if err != nil {
+		return watchRun{}, false, err
+	}
+	return r, true, nil
 }

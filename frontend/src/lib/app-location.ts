@@ -97,7 +97,7 @@ export type WatchTemplateId = 'morning' | 'overnight' | 'anchor'
  */
 export type WatchesRoute =
   | { view: 'index' }
-  | { view: 'details'; id: string }
+  | { view: 'details'; id: string; /** A run a link points at: shown at the top and scrolled to. */ run?: string }
   | { view: 'new'; template: WatchTemplateId | null }
 
 export type AppLocation =
@@ -246,7 +246,9 @@ export function parseAppLocation(pathname: string): AppLocation {
   // ADR 0227: the Watches pages. An unusable id falls back to the index.
   if (first === 'watches') {
     const id = second !== undefined ? decodeSegment(second) : null
-    return { panel: 'watches', route: id ? { view: 'details', id } : { view: 'index' } }
+    if (!id) return { panel: 'watches', route: { view: 'index' } }
+    const run = new URLSearchParams(search).get('run')
+    return { panel: 'watches', route: run ? { view: 'details', id, run } : { view: 'details', id } }
   }
 
   // ADR 0110: the wall display route. Kept ahead of the generic PANEL_ID_SET
@@ -474,7 +476,10 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
     }
 
     case 'watches': {
-      if (loc.route.view === 'details') return `/watches/${encodeURIComponent(loc.route.id)}`
+      if (loc.route.view === 'details') {
+        const base = `/watches/${encodeURIComponent(loc.route.id)}`
+        return loc.route.run ? `${base}?${new URLSearchParams({ run: loc.route.run }).toString()}` : base
+      }
       return '/watches'
     }
 

@@ -1,7 +1,8 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Play, Trash2 } from 'lucide-react'
 
-import { WatchRunList } from '@/components/watches/watch-run-list'
+import { WatchNotifySection } from '@/components/watches/watch-notify-section'
+import { WatchRunCard, WatchRunList } from '@/components/watches/watch-run-list'
 import { schedulePreviewBlocksSave, WatchSchedulePicker } from '@/components/watches/watch-schedule-picker'
 import { ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar } from '@/components/patterns'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
@@ -12,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
-import { useSchedulePreview, useWatchDetail, watchesApi } from '@/hooks/use-watches'
+import { useEnabledNotifyChannels, useLinkedWatchRun, useSchedulePreview, useWatchDetail, watchesApi } from '@/hooks/use-watches'
 import type { AppLocation } from '@/lib/app-location'
 import {
   draftOf,
@@ -37,6 +38,9 @@ import {
 // the run history sits beneath them. A scheduled watch is edited here, a
 // one-off watch (started from a Mate chat) is read-only and can be deleted.
 
+/** How long a run a link points at stays marked. */
+export const LINKED_RUN_HIGHLIGHT_MS = 2500
+
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export type WatchEditorMode =
@@ -45,6 +49,8 @@ export type WatchEditorMode =
 
 export interface WatchDetailsPageProps {
   mode: WatchEditorMode
+  /** A run a link points at: shown at the top of the history, scrolled to and highlighted for a moment. */
+  linkedRunId?: string | null
   canWrite: boolean
   /** The breadcrumb's Watches: up to the index. */
   onOpenIndex: () => void
@@ -132,12 +138,17 @@ function oneOffStatus(w: WatchRecord): string {
   return w.ends_at ? `Ended ${oneOffTimeLabel(w, 'ends')}` : 'Finished'
 }
 
-export function WatchDetailsPage({ mode, canWrite, onOpenIndex, onCreated, onDeleted, onAskMate }: WatchDetailsPageProps) {
+export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, onOpenIndex, onCreated, onDeleted, onAskMate }: WatchDetailsPageProps) {
   const id = mode.kind === 'existing' ? mode.id : null
   const detail = useWatchDetail(id)
   const record = detail.watch
   const oneOff = record?.kind === 'one_off'
+  const channels = useEnabledNotifyChannels()
 
+  // A new watch has no channels chosen (notify is null) until the operator picks
+  // some: the picker shows the channels that are on, and the request leaves the
+  // field out so the server's default applies. The channels arriving later
+  // therefore never change the baseline, and never look like an edit.
   const baseline: WatchDraft | null = mode.kind === 'new' ? newWatchDraft(mode.template) : record ? draftOf(record) : null
   const baselineKey = JSON.stringify(baseline)
   const [seenKey, setSeenKey] = useState(baselineKey)
@@ -157,6 +168,19 @@ export function WatchDetailsPage({ mode, canWrite, onOpenIndex, onCreated, onDel
       else setDraft(baseline)
     }
   }
+
+  const linked = useLinkedWatchRun(mode.kind === 'existing' ? mode.id : null, mode.kind === 'existing' ? linkedRunId : null)
+  const [highlighted, setHighlighted] = useState(false)
+  const linkedRef = useRef<HTMLDivElement | null>(null)
+  const linkedId = linked.run?.id ?? null
+  // Once the linked run is on screen: bring it into view and mark it for a moment.
+  useEffect(() => {
+    if (linkedId === null) return
+    linkedRef.current?.scrollIntoView?.({ block: 'center' })
+    setHighlighted(true)
+    const timer = window.setTimeout(() => setHighlighted(false), LINKED_RUN_HIGHLIGHT_MS)
+    return () => window.clearTimeout(timer)
+  }, [linkedId])
 
   const [nameTouched, setNameTouched] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -411,6 +435,17 @@ export function WatchDetailsPage({ mode, canWrite, onOpenIndex, onCreated, onDel
                 </div>
               </FormSection>
 
+              <WatchNotifySection
+                notify={draft.notify ?? channels.on}
+                send={draft.send}
+                channelsOn={channels.on}
+                channelsLoaded={channels.loaded}
+                channelsError={channels.error}
+                disabled={readOnly}
+                onNotifyChange={(notify) => update({ notify })}
+                onSendChange={(send) => update({ send })}
+              />
+
               <FormSection title="What to look out for">
                 <Field>
                   <FieldLabel htmlFor="watch-look-out-for" className="sr-only">What to look out for</FieldLabel>
@@ -457,8 +492,30 @@ export function WatchDetailsPage({ mode, canWrite, onOpenIndex, onCreated, onDel
             >
               {running && <p role="status" className="text-xs text-muted-foreground">Building the report. Mate&apos;s review can take a minute.</p>}
               {runError && <p role="alert" className="text-sm text-destructive">{runError}</p>}
+              {linkedRunId && (
+                <div ref={linkedRef} data-testid="watch-linked-run" className="flex flex-col gap-1">
+                  {linked.run ? (
+                    <>
+                      <p className="text-[10px] font-normal uppercase tracking-[0.16em] text-muted-foreground">Linked run</p>
+                      <WatchRunCard
+                        run={linked.run}
+                        canWrite={false}
+                        highlighted={highlighted}
+                        onAskMate={askMate}
+                        onDelete={() => {}}
+                      />
+                    </>
+                  ) : linked.gone ? (
+                    <p className="text-sm text-muted-foreground">The linked run is no longer there. It may have been deleted.</p>
+                  ) : linked.error ? (
+                    <p role="alert" className="text-sm text-destructive">Could not read the linked run: {linked.error}</p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Loading the linked run...</p>
+                  )}
+                </div>
+              )}
               <WatchRunList
-                runs={detail.runs}
+                runs={linkedRunId ? detail.runs.filter((r) => r.id !== linkedRunId) : detail.runs}
                 hasOlder={detail.hasOlder}
                 canWrite={canWrite}
                 loadingOlder={detail.loadingOlder}

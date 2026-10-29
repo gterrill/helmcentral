@@ -22,9 +22,13 @@ type assistantWatchEntry struct {
 	Thresholds       watchThresholds `json:"thresholds"`
 	LookOutFor       string          `json:"look_out_for"`
 	Enabled          bool            `json:"enabled"`
-	LastRun          string          `json:"last_run,omitempty"`
-	LastRunFindings  *int            `json:"last_run_findings,omitempty"`
-	Version          string          `json:"version"`
+	// Notify is where each report is sent and Send is when: "findings" for a
+	// report only when it has a finding the last one sent did not, or "every".
+	Notify          []string `json:"notify"`
+	Send            string   `json:"send"`
+	LastRun         string   `json:"last_run,omitempty"`
+	LastRunFindings *int     `json:"last_run_findings,omitempty"`
+	Version         string   `json:"version"`
 }
 
 type assistantListWatchesResult struct {
@@ -54,7 +58,7 @@ func (d assistantToolDeps) executeListWatches(ctx context.Context, _ json.RawMes
 			}
 			e := assistantWatchEntry{
 				ID: w.ID, Name: w.Name, Schedule: w.Schedule, ScheduleSentence: watchSentenceOrCron(w), Sections: w.Sections,
-				Thresholds: w.Thresholds, LookOutFor: w.LookOutFor, Enabled: w.Enabled, Version: savedWatchVersion(w),
+				Thresholds: w.Thresholds, LookOutFor: w.LookOutFor, Enabled: w.Enabled, Notify: w.Notify, Send: w.Send, Version: savedWatchVersion(w),
 			}
 			if w.LastRunAt != nil {
 				e.LastRun = w.LastRunAt.UTC().Format(time.RFC3339)
@@ -82,7 +86,7 @@ var mateToolListWatches = mateTool{
 	name: "list_watches",
 	function: openRouterFunctionDef{
 		Description: "List the scheduled watches the boat has: id, name, schedule (cron, with its sentence), report sections, " +
-			"thresholds, what to look out for, enabled, when it last ran and how many findings that run had. Call it before proposing a watch, " +
+			"thresholds, what to look out for, enabled, where its reports are sent (notify) and when (send), when it last ran and how many findings that run had. Call it before proposing a watch, " +
 			"so you change the one that already does the job instead of adding a second, and when the operator asks what is being checked regularly. " +
 			"At most 20 scheduled watches can exist.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
@@ -176,7 +180,7 @@ var mateToolGetWatchRuns = mateTool{
 	name: "get_watch_runs",
 	function: openRouterFunctionDef{
 		Description: "Read a watch's latest runs, newest first: when each ran, the report (figures by section), the findings the rules " +
-			"reached and Mate's own review, whether it was skipped and why, and what the review cost. Give watch_id for the latest runs " +
+			"reached and Mate's own review, whether it was skipped and why, what the review cost, and which channels the run was sent to (notified). Give watch_id for the latest runs " +
 			"(limit 1 to 10, default 3), or run_id to read that one run, as when the operator asks about the run on their screen.",
 		Parameters: json.RawMessage(`{
 			"type": "object",

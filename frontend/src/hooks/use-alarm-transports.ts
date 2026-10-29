@@ -13,6 +13,8 @@ export interface AlarmTransportConfig {
   signalk: { enabled: boolean }
   webpush: { enabled: boolean }
   watchdog: { stream_silence_seconds: number; heartbeat_minutes: number }
+  /** Where Helmcentral is reached from off the boat; notifications about a watch link to it. Empty means no link. */
+  link_address: string
 }
 
 export function emptyTransportConfig(): AlarmTransportConfig {
@@ -23,6 +25,7 @@ export function emptyTransportConfig(): AlarmTransportConfig {
     signalk: { enabled: false },
     webpush: { enabled: false },
     watchdog: { stream_silence_seconds: 0, heartbeat_minutes: 0 },
+    link_address: '',
   }
 }
 
@@ -50,6 +53,7 @@ export function transportConfigsEqual(a: AlarmTransportConfig, b: AlarmTransport
   if (a.webpush.enabled !== b.webpush.enabled) return false
   if (a.watchdog.stream_silence_seconds !== b.watchdog.stream_silence_seconds) return false
   if (a.watchdog.heartbeat_minutes !== b.watchdog.heartbeat_minutes) return false
+  if (a.link_address !== b.link_address) return false
   return true
 }
 

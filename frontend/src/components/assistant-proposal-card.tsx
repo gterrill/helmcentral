@@ -151,7 +151,7 @@ function OpFields({ op, ops }: { op: AssistantProposalOp; ops: AssistantProposal
   const names = Array.from(new Set([...Object.keys(op.before ?? {}), ...Object.keys(op.after ?? {})]))
   if (names.length === 0) return null
   const value = (data: Record<string, unknown> | undefined, name: string) =>
-    fieldView(op.type, name, data?.[name]) ?? <span className="min-w-0 break-words">{formatFieldValue(data?.[name], ops)}</span>
+    fieldView(op.type, name, data?.[name]) ?? <span className="min-w-0 break-words">{formatFieldValue(data?.[name], ops, op.type, name)}</span>
   return (
     <dl className="flex min-w-0 flex-col gap-1 rounded-sm bg-muted/40 p-2 text-xs">
       {names.map((name) => (

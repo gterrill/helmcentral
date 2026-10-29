@@ -77,6 +77,10 @@ type alarmTransportConfig struct {
 	SignalK  signalKNotifyConfig `json:"signalk"`
 	WebPush  webPushConfig       `json:"webpush"`
 	Watchdog watchdogConfig      `json:"watchdog"`
+	// LinkAddress is where Helmcentral is reached from off the boat, such as
+	// http://boat.local:9091. Notifications that can carry a link build it
+	// from this. Empty means they carry none.
+	LinkAddress string `json:"link_address"`
 }
 
 var (
@@ -218,6 +222,12 @@ func validateAlarmTransports(config *alarmTransportConfig) error {
 		return fmt.Errorf("heartbeat minutes cannot be negative")
 	}
 
+	address, err := validateLinkAddress(config.LinkAddress)
+	if err != nil {
+		return err
+	}
+	config.LinkAddress = address
+
 	config.Webhook.URL = strings.TrimSpace(config.Webhook.URL)
 	if config.Webhook.Enabled {
 		if config.Webhook.URL == "" {
@@ -319,4 +329,21 @@ func validateWebhookURL(rawURL string) error {
 		}
 	}
 	return nil
+}
+
+// validateLinkAddress checks the address for links: empty, or an http or https
+// address with a host and nothing after the path. It returns it trimmed and
+// without a trailing slash.
+func validateLinkAddress(raw string) (string, error) {
+	raw = strings.TrimRight(strings.TrimSpace(raw), "/")
+	if raw == "" {
+		return "", nil
+	}
+	refuse := fmt.Errorf("the address for links must be an http or https address with a host, such as http://boat.local:9091")
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" ||
+		parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(raw, " \t\r\n") {
+		return "", refuse
+	}
+	return raw, nil
 }

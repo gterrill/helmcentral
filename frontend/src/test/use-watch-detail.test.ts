@@ -12,7 +12,7 @@ const watch = { id: 'w1', name: 'W', kind: 'scheduled', sections: [], thresholds
 
 function run(n: number): WatchRun {
   const at = new Date(Date.UTC(2026, 9, 29, n, 0, 0)).toISOString()
-  return { id: `r${n}`, watch_id: 'w1', started_at: at, finished_at: at, outcome: 'ran', report_kind: 'sections', findings: [], review: null, review_problem: null, cost_usd: 0, cost_known: true, boat_time: `n${n}`, timezone: '' }
+  return { id: `r${n}`, watch_id: 'w1', started_at: at, finished_at: at, outcome: 'ran', report_kind: 'sections', findings: [], review: null, review_problem: null, cost_usd: 0, cost_known: true, boat_time: `n${n}`, timezone: '', notified: [] }
 }
 
 // The server's runs, newest first.

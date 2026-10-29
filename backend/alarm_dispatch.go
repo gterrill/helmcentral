@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"math"
+	"strings"
 	"sync"
 	"time"
 )
@@ -35,6 +36,11 @@ const (
 type queuedAlarmDispatch struct {
 	event  alarmEvent
 	vessel string
+	// watch, when set, makes this a watch report for channels rather than an
+	// alarm transition. Reports share the queue so they are delivered in order
+	// and never hold up the evaluator.
+	watch    *watchReportMessage
+	channels []string
 }
 
 // alarmDispatcher sends alarm transitions to the configured transports, queuing
@@ -43,6 +49,12 @@ type alarmDispatcher struct {
 	transports func() []notificationTransport
 	store      *alarmLogStore
 	now        func() time.Time
+
+	// watchDelivered is told when a watch report reaches a channel, so the
+	// run can show it was notified. Nil in a dispatcher that records nothing.
+	watchDelivered func(watchID, runID, channel string)
+	// watchNotSent is told when a report that was due went to no channel at all.
+	watchNotSent func(watchID, runID, reason string)
 
 	// queueMu guards queue below. Separate from any lock store or transports
 	// use, since enqueue must never wait on whatever run/dispatch happen to be
@@ -61,6 +73,10 @@ func newAlarmDispatcher() *alarmDispatcher {
 		store:      globalAlarmLogStore,
 		now:        func() time.Time { return time.Now().UTC() },
 		wake:       make(chan struct{}, 1),
+		// A delivered watch report is noted on its run, so the Watches page
+		// can say who was told.
+		watchDelivered: func(watchID, runID, channel string) { recordWatchDelivery(watchID, runID, channel) },
+		watchNotSent:   func(watchID, runID, reason string) { recordWatchNotSent(watchID, runID, reason) },
 	}
 }
 
@@ -143,6 +159,10 @@ func (d *alarmDispatcher) run(ctx context.Context) {
 			continue
 		}
 
+		if item.watch != nil {
+			d.dispatchWatchReport(*item.watch, item.channels)
+			continue
+		}
 		d.dispatch(item.event, item.vessel)
 	}
 }
@@ -256,6 +276,13 @@ func (d *alarmDispatcher) drain(ctx context.Context) {
 			continue
 		}
 
+		if msg.isWatchReport() && transport.ID() == transportSignalK {
+			// Never delivered, even if a report was somehow queued for it.
+			log.Printf("watch report: discarding a queued %s delivery of %q: a watch report is never published to SignalK", transport.ID(), msg.Label)
+			d.store.DeleteQueued(item.ID)
+			continue
+		}
+
 		if err := transport.Send(ctx, msg); err != nil {
 			attempts := item.Attempts + 1
 			next := now.Add(notifyBackoffFor(attempts))
@@ -267,6 +294,9 @@ func (d *alarmDispatcher) drain(ctx context.Context) {
 
 		log.Printf("alarm notify: %s delivered %q from queue after %d attempt(s)", item.Transport, msg.Label, item.Attempts+1)
 		d.store.DeleteQueued(item.ID)
+		if msg.isWatchReport() && msg.Watch != nil {
+			d.noteWatchDelivered(*msg.Watch, item.Transport)
+		}
 	}
 }
 
@@ -296,5 +326,121 @@ func startNotificationDrainer(ctx context.Context, interval time.Duration) {
 				globalAlarmDispatcher.drain(ctx)
 			}
 		}
+	}
+}
+
+// enqueueWatchReport hands a watch report to run for delivery to channels and
+// returns at once.
+func (d *alarmDispatcher) enqueueWatchReport(report watchReportMessage, channels []string) {
+	d.queueMu.Lock()
+	d.queue = append(d.queue, queuedAlarmDispatch{watch: &report, channels: channels})
+	depth := len(d.queue)
+	d.queueMu.Unlock()
+
+	select {
+	case d.wake <- struct{}{}:
+	default:
+	}
+	if depth > alarmDispatchQueueWarnDepth {
+		log.Printf("alarm dispatch: queue depth %d and still climbing -- delivery is not keeping up", depth)
+	}
+}
+
+func (d *alarmDispatcher) noteWatchNotSent(report watchReportMessage, reason string) {
+	if d.watchNotSent != nil {
+		d.watchNotSent(report.Watch.ID, report.Run.ID, reason)
+	}
+}
+
+// supersedeQueuedReports drops the reports of the same watch still queued for a
+// transport that the newer one says everything of. A queued report that
+// mentions a finding the newer one leaves out stays, and is delivered in order:
+// a bilge alarm at 02:00 is not made untrue by a quiet report at 03:00.
+func (d *alarmDispatcher) supersedeQueuedReports(transportID, key string, newer watchReportMessage) {
+	queued, err := d.store.QueuedForKey(key)
+	if err != nil {
+		log.Printf("watch report: could not read the queued reports of %q, so none was superseded: %v", newer.Watch.Name, err)
+		return
+	}
+	have := map[string]bool{}
+	for _, k := range watchFindingKeys(newer.Findings) {
+		have[k] = true
+	}
+	for _, item := range queued {
+		if item.Transport != transportID {
+			continue
+		}
+		var old notificationMessage
+		if err := json.Unmarshal(item.Payload, &old); err != nil || old.Watch == nil {
+			log.Printf("watch report: a queued %s report of %q is unreadable and was kept: %v", transportID, newer.Watch.Name, err)
+			continue
+		}
+		covered := true
+		for _, k := range watchFindingKeys(old.Watch.Findings) {
+			if !have[k] {
+				covered = false
+				break
+			}
+		}
+		if !covered {
+			continue
+		}
+		if err := d.store.DeleteQueued(item.ID); err != nil {
+			log.Printf("watch report: could not drop the superseded %s report of %q: %v", transportID, newer.Watch.Name, err)
+			continue
+		}
+		log.Printf("watch report: dropped a queued %s report of %q, superseded by a newer one that says all of it", transportID, newer.Watch.Name)
+	}
+}
+
+func (d *alarmDispatcher) noteWatchDelivered(report watchReportMessage, channel string) {
+	if d.watchDelivered != nil {
+		d.watchDelivered(report.Watch.ID, report.Run.ID, channel)
+	}
+}
+
+// dispatchWatchReport sends a watch report to the channels the watch chose that
+// are switched on, and queues each failure for retry. It does not fall back to
+// every transport when none matches, and it never uses SignalK. A newer report
+// of the same watch supersedes an older one still queued.
+func (d *alarmDispatcher) dispatchWatchReport(report watchReportMessage, channels []string) {
+	if len(channels) == 0 {
+		d.noteWatchNotSent(report, "this watch sends to no channel")
+		return
+	}
+	var selected []notificationTransport
+	for _, transport := range selectTransports(d.transports(), channels) {
+		if transport.ID() != transportSignalK {
+			selected = append(selected, transport)
+		}
+	}
+	if len(selected) == 0 {
+		log.Printf("watch report: %q was not sent: none of its channels (%s) is switched on in Settings", report.Title, strings.Join(channels, ", "))
+		d.noteWatchNotSent(report, "no channel is switched on for this watch ("+strings.Join(channels, ", ")+")")
+		return
+	}
+
+	msg := notificationMessage{Kind: notificationKindWatchReport, RuleID: watchQueueKey(report.Watch.ID), Label: report.Title,
+		Message: report.Summary, Vessel: report.Vessel, At: d.now(), Watch: &report}
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		log.Printf("watch report: cannot encode %q: %v", report.Title, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	key := watchQueueKey(report.Watch.ID)
+	for _, transport := range selected {
+		d.supersedeQueuedReports(transport.ID(), key, report)
+		if err := transport.Send(ctx, msg); err != nil {
+			log.Printf("watch report: %s failed for %q, queued for retry: %v", transport.ID(), report.Title, err)
+			if queueErr := d.store.Enqueue(transport.ID(), key, payload, d.now().Add(notifyMinBackoff)); queueErr != nil {
+				log.Printf("watch report: could not queue %s: %v", transport.ID(), queueErr)
+			}
+			continue
+		}
+		log.Printf("watch report: %s delivered %q", transport.ID(), report.Title)
+		d.noteWatchDelivered(report, transport.ID())
 	}
 }

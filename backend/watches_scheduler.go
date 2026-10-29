@@ -9,6 +9,8 @@ import (
 	"log"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 /*
@@ -41,6 +43,12 @@ type watchHost struct {
 	report func(ctx context.Context, w savedWatch, now time.Time, loc *time.Location) (watchReport, []watchFinding, error)
 	// review has Mate read it.
 	review func(ctx context.Context, cfg watchConfig, w savedWatch, rep watchReport, findings []watchFinding, now time.Time, loc *time.Location) watchReviewOutcome
+
+	// dispatchReport hands a watch report to the notification dispatcher, to go
+	// to channels. vesselName is the boat's name on it. Nil in a host that
+	// notifies no one.
+	dispatchReport func(report watchReportMessage, channels []string)
+	vesselName     func() string
 
 	// runMu serialises runs: the scheduler's, and "run now".
 	runMu   sync.Mutex
@@ -222,7 +230,19 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 		log.Printf("watches: %q: could not encode the report: %v", w.Name, err)
 		return nil
 	}
-	review := h.review(ctx, cfg, w, report, findings, now, loc)
+	reviewCtx := ctx
+	var previous watchRun
+	var hadPrevious bool
+	if err := h.store().Read(func(q sqlQueryer) error {
+		var err error
+		previous, hadPrevious, err = lastRanRunQ(q, w.ID)
+		return err
+	}); err != nil {
+		log.Printf("watches: %q: could not read the previous run, so Mate is not told which issues it already raised and may word one differently: %v", w.Name, err)
+	} else if hadPrevious {
+		reviewCtx = withWatchPreviousMate(ctx, previous.Findings)
+	}
+	review := h.review(reviewCtx, cfg, w, report, findings, now, loc)
 	all := append(append([]watchFinding{}, findings...), review.Added...)
 
 	run := watchRun{
@@ -245,10 +265,12 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 		}
 		run.ReviewProblem = &problem
 	}
+	run.ID = uuid.NewString()
 	if !h.save(run, true) {
 		return nil
 	}
 	log.Printf("watches: %q ran: %d findings, review: %v", w.Name, len(all), review.Review != "")
+	h.afterRun(run)
 	return &run
 }
 
@@ -314,6 +336,14 @@ func newProductionWatchHost(settingsPath string) *watchHost {
 			return productionWatchReport(settingsPath, w, now, loc)
 		},
 		review: runWatchReview,
+		dispatchReport: func(report watchReportMessage, channels []string) {
+			if globalAlarmDispatcher == nil {
+				log.Printf("watches: %q was not sent: the notification dispatcher is not running", report.Title)
+				return
+			}
+			globalAlarmDispatcher.enqueueWatchReport(report, channels)
+		},
+		vesselName: vesselNameForNotifications,
 	}
 }
 

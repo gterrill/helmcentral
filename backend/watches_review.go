@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -29,6 +30,9 @@ Mate being on is the consent to send the report to the model (ADR 0120).
 There is no per-watch switch and no spending limit. What a review cost is
 read from OpenRouter and shown on the run.
 */
+
+// watchFindingKeyFormat is the shape of the key Mate gives an issue it adds.
+var watchFindingKeyFormat = regexp.MustCompile(`^[a-z][a-z0-9_]{2,39}$`)
 
 const (
 	watchReviewToolName = "submit_watch_review"
@@ -63,6 +67,7 @@ type watchReviewSubmission struct {
 	Review string `json:"review"`
 	Added  []struct {
 		Section string `json:"section"`
+		Key     string `json:"key"`
 		Text    string `json:"text"`
 	} `json:"added_findings"`
 }
@@ -83,9 +88,10 @@ var watchReviewToolDef = openRouterFunctionDef{
 					"type": "object",
 					"properties": {
 						"section": {"type": "string", "enum": ["power", "anchor", "alarms", "tanks", "weather", "instruments"]},
+						"key": {"type": "string", "description": "A short lower_snake name for the issue, 3 to 40 characters such as port_alternator_output. Name the issue, not the figures. If it is the same issue as one in previous_findings_you_added, use that key exactly."},
 						"text": {"type": "string", "description": "One plain sentence with its figures in the operator's units, at most 300 characters. No question marks, no exclamation marks, no cause you cannot see."}
 					},
-					"required": ["section", "text"]
+					"required": ["section", "key", "text"]
 				}
 			}
 		},
@@ -138,6 +144,10 @@ func (t *watchReviewTools) submit(args json.RawMessage) (string, error) {
 	}
 	for i := range s.Added {
 		s.Added[i].Text = strings.TrimSpace(s.Added[i].Text)
+		s.Added[i].Key = strings.TrimSpace(s.Added[i].Key)
+		if !watchFindingKeyFormat.MatchString(s.Added[i].Key) {
+			return "", fmt.Errorf("%s: added_findings[%d].key must be a short lower_snake name for the issue, 3 to 40 characters starting with a letter, such as port_alternator_output", watchReviewToolName, i)
+		}
 		if !containsString(watchSectionOrder, s.Added[i].Section) {
 			return "", fmt.Errorf("%s: added_findings[%d].section must be one of %s", watchReviewToolName, i, strings.Join(watchSectionOrder, ", "))
 		}
@@ -234,7 +244,7 @@ func runWatchReview(ctx context.Context, cfg watchConfig, w savedWatch, report w
 	}
 	pc := collectAssistantPromptContext(cfg.SettingsPath, now)
 	system := buildWatchReviewPrompt(pc, units, now, loc, mateToolAvailable(deps, "search_web"))
-	message, err := watchReviewMessage(w, report, findings)
+	message, err := watchReviewMessage(w, report, findings, watchPreviousMateFrom(ctx))
 	if err != nil {
 		return watchReviewOutcome{Problem: "the report could not be given to Mate: " + firstErrorLine(err), CostKnown: true}
 	}
@@ -281,18 +291,31 @@ func runWatchReview(ctx context.Context, cfg watchConfig, w savedWatch, report w
 	}
 	out.Review = sub.Review
 	for _, a := range sub.Added {
-		out.Added = append(out.Added, watchFinding{Section: a.Section, Rule: "mate_review", Text: a.Text, By: watchByMate})
+		out.Added = append(out.Added, watchFinding{Section: a.Section, Rule: "mate_review", Text: a.Text, By: watchByMate, Key: a.Key})
 	}
 	return out
 }
 
-func watchReviewMessage(w savedWatch, report watchReport, findings []watchFinding) (string, error) {
+type watchPreviousMateFinding struct {
+	Section string `json:"section"`
+	Key     string `json:"key"`
+	Text    string `json:"text"`
+}
+
+func watchReviewMessage(w savedWatch, report watchReport, findings, previousMate []watchFinding) (string, error) {
+	var previous []watchPreviousMateFinding
+	for _, f := range previousMate {
+		if f.By == watchByMate && f.Key != "" {
+			previous = append(previous, watchPreviousMateFinding{Section: f.Section, Key: f.Key, Text: f.Text})
+		}
+	}
 	body := struct {
-		Watch      string         `json:"watch"`
-		LookOutFor string         `json:"look_out_for,omitempty"`
-		Report     watchReport    `json:"report"`
-		Findings   []watchFinding `json:"findings_by_the_rules"`
-	}{Watch: w.Name, LookOutFor: w.LookOutFor, Report: report, Findings: nonNilFindings(findings)}
+		Watch      string                     `json:"watch"`
+		LookOutFor string                     `json:"look_out_for,omitempty"`
+		Report     watchReport                `json:"report"`
+		Findings   []watchFinding             `json:"findings_by_the_rules"`
+		Previous   []watchPreviousMateFinding `json:"previous_findings_you_added,omitempty"`
+	}{Watch: w.Name, LookOutFor: w.LookOutFor, Report: report, Findings: nonNilFindings(findings), Previous: previous}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return "", err
@@ -332,6 +355,7 @@ func buildWatchReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 	b.WriteString("\nRules:\n" +
 		"- The report is the evidence. Judge it in context, as a watchkeeper would: what changed, what matters, what does not.\n" +
 		"- You may add findings the rules missed. You can never remove or soften one the rules reached.\n" +
+		"- Give each finding you add a key: a short lower_snake name for the issue, such as port_alternator_output. If it is the same issue as one in previous_findings_you_added, reuse its key exactly, so the skipper is not told the same thing twice. A new issue gets a new key that names the issue, not the figures.\n" +
 		"- Where you are unsure, say so and ask the skipper in the review. Never guess a cause you cannot see in the figures.\n" +
 		"- You do not stand in for an alarm. If an alarm is active, say it is active; do not raise it again.\n" +
 		"- A section marked unavailable is not an all clear. Mention it only when it bears on something you flag.\n" +

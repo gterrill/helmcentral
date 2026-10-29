@@ -850,8 +850,11 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"watch has examples), the report sections that matter (power, anchor, alarms, tanks, weather, instruments) and, in the " +
 		"operator's words, what to look out for. Propose a change to an existing watch rather than a second one. " +
 		"Say that each run builds a report, that Helmcentral's rules decide the findings and that Mate reviews every report, " +
-		"that the findings and the review appear on the Watches page, that nothing is sent to their phone yet, and that a watch does not " +
-		"replace an alarm. A watch proposal changes nothing until the operator taps Apply. To show a watch's latest report use " +
+		"that the findings and the review appear on the Watches page, and that a watch does not " +
+		"replace an alarm. A watch can also notify: notify lists the channels (ntfy, smtp, webhook, webpush; never SignalK, " +
+		"because a report is not an alarm) and a new watch starts with every channel the boat has switched on, and send is " +
+		"\"findings\" (only when it finds something it has not already told them about, the default) or \"every\" (every report). " +
+		"Ask which they want only when they mention being told; otherwise leave both alone and say what a new watch will do. A watch proposal changes nothing until the operator taps Apply. To show a watch's latest report use " +
 		"get_watch_runs, and run_watch_now to run one straight away. When the screen context names a watch run, read it with " +
 		"get_watch_runs before you answer.\n\n")
 
