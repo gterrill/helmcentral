@@ -153,7 +153,7 @@ type assistantVesselNotInRange struct {
 type assistantGetNearbyVesselsResult struct {
 	Vessels    []assistantNearbyVesselOut  `json:"vessels"`
 	NotInRange []assistantVesselNotInRange `json:"not_in_range,omitempty"`
-	Note       string                      `json:"note"`
+	Note       string                      `json:"note,omitempty"`
 	Truncated  bool                        `json:"truncated,omitempty"`
 }
 
@@ -334,10 +334,6 @@ func (d assistantToolDeps) executeGetNearbyVessels(ctx context.Context, raw json
 
 	result := assistantGetNearbyVesselsResult{
 		Vessels: vessels,
-		Note: "in_range_since is when a vessel first came within 5km of us, a lower bound on how long it has " +
-			"actually been there - it may have arrived earlier and simply not been noticed until then. " +
-			"stationary_since, when present, comes from that vessel's own logged position history and is a " +
-			"separate, usually more precise figure.",
 	}
 	// includeHistory's position-history half (stationary_since) only ever
 	// runs with a name filter (see the gate above) - a model that explicitly
@@ -345,7 +341,7 @@ func (d assistantToolDeps) executeGetNearbyVessels(ctx context.Context, raw json
 	// rather than a silently absent field that looks identical to "checked,
 	// nothing found" (code-review finding, 2026-09-25).
 	if includeHistory && nameQuery == "" {
-		result.Note += " position history (stationary_since) only runs for a specific vessel - give name to also see how long it has been sitting at its current position."
+		result.Note = strings.TrimSpace(result.Note + " position history (stationary_since) only runs for a specific vessel - give name to also see how long it has been sitting at its current position.")
 	}
 
 	// matchedCount > maxResults means the max_results cap (not the earlier
@@ -354,7 +350,7 @@ func (d assistantToolDeps) executeGetNearbyVessels(ctx context.Context, raw json
 	// range" (a code-review finding, 2026-09-25).
 	if matchedCount > maxResults {
 		result.Truncated = true
-		result.Note += fmt.Sprintf(" %d vessels matched; showing the nearest %d. Raise max_results (up to %d) to see more.", matchedCount, maxResults, assistantNearbyVesselsMaxMaxResults)
+		result.Note = strings.TrimSpace(result.Note + fmt.Sprintf(" %d vessels matched; showing the nearest %d. Raise max_results (up to %d) to see more.", matchedCount, maxResults, assistantNearbyVesselsMaxMaxResults))
 	}
 
 	if nameQuery != "" && len(vessels) == 0 {
@@ -660,7 +656,7 @@ var mateToolGetNearbyVessels = mateTool{
 			"one was last seen. Use this for any question about other boats: who is nearby, how close, " +
 			"neighbours at anchor or in a marina, collision risk, or how long a boat has been sitting on " +
 			"a mooring. Filter by name (or MMSI) to answer about one vessel specifically, including a " +
-			"boat that is no longer in range.",
+			"boat that is no longer in range. " + ruleNearbyVessels,
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

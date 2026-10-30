@@ -13,6 +13,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Outside assistants can read the forecast, tides, routes and nearby boats.**
+  Claude, ChatGPT and other programs can now look up the wind and wave forecast,
+  the tides, the distance by water between two places, anchorage shelter, place
+  names, nearby vessels, your planned stay and the Helmcentral help pages. Each
+  tool carries the notes Mate uses to read it, such as "this is a forecast, not
+  an observation" and "this shelter is an estimate". Passage estimate, tidal
+  departure and passage window are there too, but they start switched off for
+  every token. New tokens start with the first group switched on. A token you
+  made earlier keeps the tools it has, so switch the new ones on for it in
+  **Settings, Outside assistants** if you want them.
+
 - **ChatGPT can now read the boat.** ChatGPT can't send the header that Claude's
   connector uses, so it signs in instead. It opens a Helmcentral page, you paste
   an outside assistant token and select **Allow**, and that token is used for

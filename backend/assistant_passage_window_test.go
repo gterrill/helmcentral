@@ -895,7 +895,7 @@ func TestPassageModelResult_ShrinksDetailBeforeVerdicts(t *testing.T) {
 		}
 		p.Rows = append(p.Rows, row)
 	}
-	res := newPassageModelResult(p)
+	res := newPassageModelResult(p, true)
 	out, err := capToolResultJSON(res, res.shrink)
 	if err != nil {
 		t.Fatal(err)

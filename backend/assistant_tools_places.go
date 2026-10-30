@@ -21,7 +21,10 @@ var mateToolFindPlaces = mateTool{
 			"current position unless near_lat/near_lon are given. Call this before any forecast or tide " +
 			"tool for a place you only know by name. Pass the bare feature name (e.g. \"Bona Bay\", not " +
 			"\"Bona Bay, Gloucester Island\"). For a place well away from the vessel, or when a lookup " +
-			"returns nothing, pass near_lat/near_lon of a resolved nearby feature and retry.",
+			"returns nothing, pass near_lat/near_lon of a resolved nearby feature and retry. If a name still will not resolve, " +
+			"say so and use the nearest resolved feature's position, telling the operator that is what you did. " +
+			"When several candidates come back, say which candidate you chose and why. A result is a charted feature, " +
+			"not a recommendation. straight_line_bearing_deg is the bearing along that same straight line: never a course.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

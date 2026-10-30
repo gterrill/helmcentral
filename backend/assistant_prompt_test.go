@@ -231,8 +231,6 @@ func TestBuildAssistantSystemPrompt_ToolGuidancePresent(t *testing.T) {
 		"rel_wind",
 		"plan_tidal_departure",
 		"flood_set_source",
-		"tidal stream atlas",
-		"wind against tide",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("expected the tool guidance to mention %q, got:\n%s", want, prompt)
@@ -1313,16 +1311,25 @@ func TestBuildAssistantSystemPrompt_PassageDistanceIsRoutedNeverStraight(t *test
 	prompt := buildAssistantSystemPrompt(basePromptContext())
 	for _, want := range []string{
 		"route_distance",
-		"routes the run over water",
-		"straight_line_nm",
-		"never work out a distance yourself",
 		"cannot give a passage distance",
-		"do not substitute the straight line",
 		"estimate_passage's course_deg",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("expected the prompt to say %q, got:\n%s", want, prompt)
 		}
+	}
+	// The rule itself travels with the tools, so Mate and an outside
+	// assistant read the same words (ADR 0236).
+	for name, want := range map[string]string{
+		"route_distance":   "never substitute a straight line",
+		"estimate_passage": "never a straight-line distance",
+	} {
+		if !strings.Contains(lookupMateTool(name).function.Description, want) {
+			t.Errorf("%s no longer says %q", name, want)
+		}
+	}
+	if !strings.Contains(lookupMateTool("route_distance").function.Description, "never a passage distance") {
+		t.Errorf("route_distance lost the straight-line rule")
 	}
 	for _, notWant := range []string{
 		"take the distance_nm and bearing_deg that find_places returns",

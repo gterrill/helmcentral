@@ -88,6 +88,7 @@ type assistantTidalDepartureResult struct {
 	Worst          assistantTidalCandidate   `json:"worst"`
 	Note           string                    `json:"note,omitempty"`
 	Basis          string                    `json:"basis"`
+	Reading        string                    `json:"reading"`
 }
 
 // tidalHalfCycle is one flood or ebb, after the slack offset is applied.
@@ -286,6 +287,7 @@ func (d assistantToolDeps) executePlanTidalDeparture(ctx context.Context, raw js
 		Best:           make([]assistantTidalCandidate, 0, len(chosen)),
 		Worst:          build(worst),
 		Basis:          assistantTidalBasis,
+		Reading:        readingTidalDeparture,
 	}
 	for _, c := range chosen {
 		result.Best = append(result.Best, build(c))
@@ -362,7 +364,9 @@ var mateToolPlanTidalDeparture = mateTool{
 			"for the flood stream's set; stream rate is not modelled. Call it after estimate_passage, with " +
 			"estimate_passage's course_deg as course_deg and the estimated hours as passage_hours. Take " +
 			"flood_set_deg from the operator's standing notes first, else general knowledge, and say which in " +
-			"flood_set_source. If you do not know which way the flood sets in that water, do not call it.",
+			"flood_set_source. If you do not know which way the flood sets in that water, do not call it. " + ruleTidalDeparture +
+			" Do not use it for a trip that starts later than the forecast covers or somewhere other than here. " +
+			"The result's reading says how to read the stream against the wind.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
