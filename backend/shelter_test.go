@@ -290,6 +290,9 @@ func TestAnchorageShelterTool_StonehavenFromStoredSquaresMatchesTheDirectEstimat
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	if !strings.Contains(raw, `"reading":"From the Offline coastline downloaded `) {
+		t.Errorf("anchorage_shelter should say how old the shoreline is, got %s", raw)
+	}
 	var out struct {
 		Summary             string           `json:"summary"`
 		Source              string           `json:"source"`

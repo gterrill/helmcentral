@@ -74,6 +74,9 @@ func TestPlanTidalDeparture_FloodSettingWithCourseRanksLowWaterBestHighWaterWors
 	if len(res.Best) == 0 {
 		t.Fatalf("expected best candidates")
 	}
+	if !strings.Contains(res.Reading, "wind against tide") || !strings.Contains(res.Reading, "say so and say when") {
+		t.Errorf("plan_tidal_departure should say what to do about wind against tide, got %q", res.Reading)
+	}
 	if got := isoAt(t, res.Best[0].DepartureISO); !got.Equal(tidalFixtureLW0) {
 		t.Errorf("expected best departure at LW %s, got %s", tidalFixtureLW0, got)
 	}

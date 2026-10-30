@@ -16,7 +16,7 @@ var mateToolAnchorageShelter = mateTool{
 			"the wind comes FROM. This is an estimate from shoreline geometry only: it does not account for " +
 			"wind bending round headlands, gusts funnelling down valleys, or swell wrapping round a point " +
 			"or over a reef, so always compare its sheltered arcs with the forecast wind direction for the " +
-			"stay (get_wind_forecast) and say it is an estimate. If the position is inside a reef, shelter " +
+			"stay (get_wind_forecast). " + ruleShelter + " If the position is inside a reef, shelter " +
 			"depends on the tide. Resolve a place name with find_places first and pass its lat/lon. It works only " +
 			"where the Offline coastline has been downloaded; if it returns an error, tell the operator what " +
 			"it says (turned off, outside coverage, still downloading) rather than guessing the shelter.",
@@ -53,6 +53,8 @@ type assistantAnchorageShelterResult struct {
 	// CoastlineDownloaded is the date of the oldest coverage square the
 	// estimate used, so Mate can say how old the shoreline is.
 	CoastlineDownloaded string `json:"coastline_downloaded"`
+	// Reading says how old the shoreline is.
+	Reading string `json:"reading"`
 	shelterEstimate
 }
 
@@ -84,5 +86,6 @@ func (d assistantToolDeps) executeAnchorageShelter(ctx context.Context, raw json
 		CoastlineDownloaded: set.Oldest.UTC().Format("2006-01-02"),
 		shelterEstimate:     estimateShelter(*args.Lat, *args.Lon, set.Lines),
 	}
+	result.Reading = readingShelter(result.CoastlineDownloaded)
 	return capToolResultJSON(&result, nil)
 }

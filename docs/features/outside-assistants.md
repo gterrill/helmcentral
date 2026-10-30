@@ -17,6 +17,14 @@ so it works when Mate is switched off.
   behaved over time, your passages and cruise totals, the maintenance schedule
   and log, the equipment list and the boat's particulars. Figures come in your
   units. A reading the boat can't give is marked as missing instead of guessed.
+- **The sea, the tides and the neighbours:** The assistant can also look up the
+  wind and wave forecast, the tides and the distance by water between two
+  places. It can ask how much shelter an anchorage has, look up place names, see
+  the nearby vessels and read the stay you've planned. It can read Helmcentral's
+  own help pages too. Each tool tells the assistant how to read what it returns. A forecast
+  says it's a model and not an observation. A tide says which station it came
+  from and how far away that is. A shelter figure says it's an estimate from
+  the charted coastline and not a survey. Mate reads the same words.
 - **A description of your boat:** The assistant is also given a boat context.
   Helmcentral writes this page fresh every time. It draws on your equipment and
   your roles, such as which battery is the house bank and which engines you
@@ -44,9 +52,19 @@ A new token can use these:
 - Passages and the cruise summary.
 - Maintenance, and the equipment list.
 - The boat's particulars and the boat context.
+- Wind and wave forecast, tides, and the distance by water between two places.
+- Anchorage shelter, place names and nearby vessels.
+- The planned stay, and Helmcentral's help pages.
 
-Live SignalK paths and the list of alarm thresholds are there too, but they
-start switched off.
+These start switched off, and you switch them on for a token when you want them:
+
+- Live SignalK paths and the list of alarm thresholds.
+- Passage estimate, tidal departure and passage window. These help decide when
+  and whether to go, so you choose which programs get them.
+
+A token keeps the tools it was made with. Tokens you made before this change
+don't gain the new ones, and you switch them on yourself in **Settings, Outside
+assistants**. Only a token you make from now on starts with them.
 
 ## What it never offers
 
@@ -75,9 +93,13 @@ Some things are never offered, whatever you switch on:
   config file connect from your own computer. They don't need Funnel.
 - **No token, no access:** There is no switch to turn this on. Until you make a
   token, every request is refused. A token that is revoked stops working at once.
-- **Not everything Mate can do:** Forecasts, tides, places, routing, passage
-  estimates and nearby vessels are Mate's, because they need Mate's own
-  instructions to read correctly. They aren't offered yet.
+- **Not everything Mate can do:** Mate can search the web and your documents,
+  and those spend your OpenRouter key, so they aren't offered. Mate's briefings
+  and the advice to go or wait are Mate's own. An outside assistant gets the
+  figures and how to read them, and writes its own answer.
+- **Passage figures are not a go-ahead:** The passage window only checks the
+  limits you set in Mate's passage limits. A go means none of them is reached.
+  It doesn't mean the conditions are safe.
 
 To connect a program on your computer, follow [Connect an outside
 assistant](../how-to/connect-an-outside-assistant.md). For Claude on your phone

@@ -488,8 +488,7 @@ func (d assistantToolDeps) executeGetPlannedStay(ctx context.Context, _ json.Raw
 			return "", fmt.Errorf("get_planned_stay: the stay's time zone is not known: %w", zerr)
 		}
 		res.Stay = &withZone
-		res.Note = "The operator set this stay on the Forecast page. Its dates are local to the place. " +
-			"get_wind_forecast and get_tides take its lat and lon."
+		res.Note = "The operator set this stay on the Forecast page."
 	}
 	return capToolResultJSON(&res, nil)
 }
@@ -500,7 +499,7 @@ var mateToolGetPlannedStay = mateTool{
 		Description: "Read the stay the operator has planned: a place (name, lat, lon) and the dates they arrive and depart, " +
 			"which the Forecast page shows the weather for. Returns no stay when none is planned or it has ended. " +
 			"Use it when the operator talks about \"the marina\" or \"our stay\" or asks about weather or tides there; " +
-			"pass its lat and lon to get_wind_forecast and get_tides.",
+			"pass its lat and lon to get_wind_forecast and get_tides. " + rulePlannedStay,
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
 	execute: assistantToolDeps.executeGetPlannedStay,
