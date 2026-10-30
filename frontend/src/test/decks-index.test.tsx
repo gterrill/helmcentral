@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { DecksIndex } from '@/components/inventory/decks-index'
+import { DecksIndex as BareDecksIndex } from '@/components/inventory/decks-index'
+import { withListState } from './helpers/list-state'
 import type { InventoryDeck, InventoryZone } from '@/hooks/use-inventory'
+
+const DecksIndex = withListState(BareDecksIndex, {})
 
 let decks: InventoryDeck[]
 let zones: InventoryZone[]
@@ -100,4 +103,13 @@ describe('DecksIndex', () => {
     await screen.findByText('Main deck')
     expect(screen.queryByRole('button', { name: 'New deck' })).not.toBeInTheDocument()
   })
+
+  it('draws the rows in the order of the sort in the address', async () => {
+    render(<DecksIndex onOpenDeck={vi.fn()} onOpenLocations={vi.fn()} initial={{ sort: { id: 'name', desc: false } }} />)
+    await screen.findByText('Flybridge')
+    const rows = screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '')
+    expect(rows[0]).toContain('Flybridge')
+    expect(rows[1]).toContain('Main deck')
+  })
+
 })

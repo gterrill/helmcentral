@@ -1765,19 +1765,28 @@ function AppShell() {
         if (wallDisplaysRoute.view === 'editor') {
           return (
             <DisplayEditorPanel
+              // A different display is a different page: nothing typed into
+              // one carries over to the next.
+              key={editing?.id ?? wallDisplaysRoute.slug}
               display={editing}
               pages={pages}
               displays={displays}
               onBack={() => navigate({ panel: 'wall-displays', route: { view: 'index' } })}
+              onOpenDisplay={(slug) => { navigate({ panel: 'wall-displays', route: { view: 'editor', slug } }) }}
               onUpdate={async (id, patch) => {
                 const updated = await updateDisplay(id, patch)
                 // The route names the display by slug, and the slug is one
                 // of the fields this panel edits: without following it, a
                 // rename resolves to nothing and the editor flips to "could
                 // not be found" on a display that is fine.
-                // Only while the editor is still what is on screen: the save
-                // is async, and the operator may have moved on meanwhile.
-                if (updated && updated.id === editing?.id && router.getSnapshot().location.panel === 'wall-displays') {
+                // Only while this display's editor is still what is on screen:
+                // the save is async, and the operator may have moved on
+                // meanwhile, to another display with the arrows or to the index.
+                const now = router.getSnapshot().location
+                if (
+                  updated && updated.id === editing?.id &&
+                  now.panel === 'wall-displays' && now.route.view === 'editor' && now.route.slug === editing.slug
+                ) {
                   navigate({ panel: 'wall-displays', route: { view: 'editor', slug: updated.slug } }, { replace: true })
                 }
                 return updated

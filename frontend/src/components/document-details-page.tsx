@@ -13,7 +13,7 @@ import {
 import { MoveToFolderDialog } from '@/components/documents/move-to-folder-dialog'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
-import { DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar } from '@/components/patterns'
+import { DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar, type PagerProps } from '@/components/patterns'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { useFollowingDraft } from '@/hooks/use-following-draft'
@@ -53,6 +53,8 @@ export interface DocumentDetailsPageProps {
    * DocumentsRoutePanel registers the navigation guard from it, and the
    * guard goes with the page when it is no longer what's rendered. */
   onDirtyChange?: (dirty: boolean) => void
+  /** The documents before and after this one in the list it was opened from. */
+  pager?: PagerProps
 }
 
 export interface DocumentDetailsPageHandle {
@@ -129,7 +131,7 @@ function readByLabel(doc: DocumentRecord): string {
 }
 
 export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, DocumentDetailsPageProps>(function DocumentDetailsPage(
-  { documentId, onOpenFolder, onBack, onFolderContextChange, onTitleChange, onDirtyChange },
+  { documentId, onOpenFolder, onBack, onFolderContextChange, onTitleChange, onDirtyChange, pager },
   ref,
 ) {
   const { document, loading, error, patch, move } = useDocument(documentId)
@@ -407,6 +409,7 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
     <Page
       title={documentDisplayName(document)}
       breadcrumb={breadcrumb}
+      pager={pager}
       className={pageClassName}
       primaryAction={{ label: 'Move', icon: <FolderInput className="h-4 w-4" aria-hidden="true" />, onClick: () => setMoveOpen(true) }}
     >

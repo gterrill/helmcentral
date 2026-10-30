@@ -10,6 +10,8 @@ import { DeckPlan } from '@/components/inventory/deck-plan'
 import { DeckPlanEditor } from '@/components/inventory/deck-plan-editor'
 import { deckPlanUrl, useInventoryDecks, useInventoryZones } from '@/hooks/use-inventory'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
+import { useDeckPager } from '@/hooks/use-inventory-pagers'
+import type { InventoryList } from '@/lib/app-location'
 import { inventoryEditorClosedBy } from '@/lib/inventory-navigation-guard'
 import { layoutFromZones, layoutToPayload, sameLayout } from '@/lib/deck-layout'
 import { downscaleImage, PLAN_MAX_DIMENSION, photoFilename } from '@/lib/image-downscale'
@@ -31,6 +33,10 @@ interface DeckEditorProps {
   /** A delete that already succeeded - the page no longer has a record. */
   onDeleted: () => void
   canWrite?: boolean
+  /** The Decks table's sort this deck was opened from. Its arrows step through that list. */
+  list?: InventoryList
+  /** Opens a neighbouring deck from the arrows. Without it the page has no arrows. */
+  onOpenNeighbour?: (id: string) => void
 }
 
 /** How far the new plan's width-to-height ratio may differ from the old one's before we warn. */
@@ -39,11 +45,12 @@ const ASPECT_TOLERANCE = 0.02
 const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export function DeckEditor(
-  { id, onOpenLocations, onOpenDecks, onDeleted, canWrite = true }: DeckEditorProps,
+  { id, onOpenLocations, onOpenDecks, onDeleted, canWrite = true, list, onOpenNeighbour }: DeckEditorProps,
 ) {
   const { decks, loading, error, refresh, renameDeck, deleteDeck, uploadPlan, saveLayout } = useInventoryDecks()
   const { zones, loading: zonesLoading, error: zonesError, refresh: refreshZones } = useInventoryZones()
   const deck = decks.find((d) => d.id === id) ?? null
+  const pager = useDeckPager(id, list, onOpenNeighbour)
   const { size: planSize } = useImageSize(deck ? deckPlanUrl(deck) : null)
 
   const [name, setName] = useState(deck?.name ?? '')
@@ -236,6 +243,7 @@ export function DeckEditor(
     <Page
       title={deck.name}
       breadcrumb={breadcrumb}
+      pager={pager}
       secondaryActions={
         canWrite && zonesKnown
           ? [

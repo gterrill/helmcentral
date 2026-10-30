@@ -14,6 +14,8 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/c
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
+import { useEquipmentPager } from '@/hooks/use-inventory-pagers'
+import type { InventoryList } from '@/lib/app-location'
 import { inventoryEditorClosedBy } from '@/lib/inventory-navigation-guard'
 import { DocumentLinkPicker, type DocumentLinkPickerResult } from '@/components/inventory/document-link-picker'
 import { EquipmentSparesFields } from '@/components/inventory/equipment-spares-fields'
@@ -198,6 +200,11 @@ interface EquipmentEditorProps {
    * declined to keep the changes). */
   onDiscarded: () => void
   canWrite?: boolean
+  /** The Equipment index's filter, search and sort this record was opened
+   * from. Its arrows step through that list. */
+  list?: InventoryList
+  /** Opens a neighbouring record from the arrows. Without it the page has no arrows. */
+  onOpenNeighbour?: (id: string) => void
   /** ADR 0127: the bin page's "Full item" action pre-sets a brand new
    * draft's location - read only once, when a NEW draft (id === null)
    * first mounts (the same "re-seed only on a different record" effect
@@ -223,10 +230,11 @@ class ProfileChangeDeclined extends Error {
 }
 
 export function EquipmentEditor(
-  { id, onBack, onCreated, onDeleted, onDiscarded, canWrite = true, initialZoneId = null, initialBinId = null }: EquipmentEditorProps,
+  { id, onBack, onCreated, onDeleted, onDiscarded, canWrite = true, initialZoneId = null, initialBinId = null, list, onOpenNeighbour }: EquipmentEditorProps,
 ) {
   const { item, documents, loading, error, refresh, update, remove, patchLinkedDocuments, setItem, refreshDocuments } = useEquipmentItem(id)
   const { zones } = useInventoryZones()
+  const pager = useEquipmentPager(id, list, onOpenNeighbour)
   const { profiles } = useEquipmentProfiles(true)
   const { discovery } = useVesselDiscovery()
   // Code-review finding: the delete confirmation only ever said "This
@@ -1021,6 +1029,7 @@ export function EquipmentEditor(
     <Page
       title={id === null ? 'New item' : (item?.name ?? 'Equipment')}
       onBack={onBack}
+      pager={pager}
       secondaryActions={
         id !== null
           ? [

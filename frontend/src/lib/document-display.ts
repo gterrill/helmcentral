@@ -1,5 +1,3 @@
-import type { DocumentRecord } from '@/hooks/use-documents'
-
 // ADR 0106 F1 / ADR 0115: small display helpers the Documents panel and the
 // Details page both need. The first three were moved out of
 // documents-panel.tsx verbatim rather than duplicated - the Details page
@@ -16,7 +14,7 @@ export function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export function documentDisplayName(doc: DocumentRecord): string {
+export function documentDisplayName(doc: { title: string; filename: string }): string {
   return doc.title.trim() !== '' ? doc.title : doc.filename
 }
 

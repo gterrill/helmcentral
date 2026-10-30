@@ -1,6 +1,7 @@
 import { SETTINGS_SECTIONS, type SettingsSectionId } from '@/components/settings/settings-nav'
 import type { InventorySectionId } from '@/components/inventory/inventory-nav'
 import { parseDisplayOptions, type DisplayOptions } from '@/lib/displays'
+import { formatListSort, parseListSort, type ListSort } from '@/lib/list-order'
 
 // ADR 0074: path URLs, hand-rolled (no router library). This module is the
 // only place that knows how a URL string maps to an app location. The
@@ -39,10 +40,14 @@ export type SettingsRoute =
  * the folder it was opened from so Back lands the listing there. `sectionId`
  * rides along for the same reason but has no URL of its own, so a reload of
  * the details page loses it.
+ *
+ * `tag` is the tag filter on the listing and `unfiled` the Unfiled notes
+ * view. Both are absent in their default state, and both ride on the details
+ * route so its arrows step through the list the operator was looking at.
  */
 export type DocumentsRoute =
-  | { view: 'browse'; folderId: string | null; sectionId: string | null; documentId: string | null }
-  | { view: 'details'; id: string; folderId: string | null; sectionId: string | null }
+  | { view: 'browse'; folderId: string | null; sectionId: string | null; documentId: string | null; tag?: string; unfiled?: true }
+  | { view: 'details'; id: string; folderId: string | null; sectionId: string | null; tag?: string; unfiled?: true }
 
 /**
  * `/wall-displays` is the management index, `/wall-displays/<slug>` the
@@ -60,14 +65,29 @@ export type WallDisplaysRoute = { view: 'index' } | { view: 'editor'; slug: stri
  * `plan`, `bin`, `location`, `decks` and `deck` under Locations.
  */
 export type InventoryRoute =
-  | { view: 'index'; section: InventorySectionId }
-  | { view: 'equipment'; id: string }
+  | { view: 'index'; section: InventorySectionId; list?: InventoryList }
+  | { view: 'equipment'; id: string; list?: InventoryList }
   | { view: 'equipment-new'; preset: { zoneId?: string; binId?: string } | null }
-  | { view: 'plan'; deckId: string | null }
+  | { view: 'plan'; deckId: string | null; list?: InventoryList }
   | { view: 'bin'; code: string }
-  | { view: 'location'; id: string }
-  | { view: 'decks' }
-  | { view: 'deck'; id: string }
+  | { view: 'location'; id: string; list?: InventoryList }
+  | { view: 'decks'; list?: InventoryList }
+  | { view: 'deck'; id: string; list?: InventoryList }
+
+/**
+ * How an Inventory index was filtered, searched and sorted. The Equipment
+ * index uses all of it, the Locations index the search and sort, and the Decks
+ * index the sort. It is empty in the default state, and then it is not in the
+ * address at all. A record opened from the index carries it, so Back returns
+ * to the same view and the record's arrows step through the same list.
+ */
+export interface InventoryList {
+  system?: string
+  status?: string
+  zone?: string
+  q?: string
+  sort?: ListSort
+}
 
 /**
  * Which passages the Passages index lists: all, those in no Cruise, or one
@@ -96,8 +116,8 @@ export type WatchTemplateId = 'morning' | 'overnight' | 'anchor'
  * index, the same as a New equipment item.
  */
 export type WatchesRoute =
-  | { view: 'index' }
-  | { view: 'details'; id: string; /** A run a link points at: shown at the top and scrolled to. */ run?: string }
+  | { view: 'index'; sort?: ListSort }
+  | { view: 'details'; id: string; /** A run a link points at: shown at the top and scrolled to. */ run?: string; sort?: ListSort }
   | { view: 'new'; template: WatchTemplateId | null }
 
 export type AppLocation =
@@ -160,6 +180,52 @@ function decodeSegment(segment: string): string | null {
   }
 }
 
+type InventoryListKey = keyof InventoryList
+const EQUIPMENT_LIST_KEYS: readonly InventoryListKey[] = ['system', 'status', 'zone', 'q', 'sort']
+
+/** What an Inventory address says about its index, limited to what that index
+ * has. Empty when it says nothing. */
+function parseInventoryList(params: URLSearchParams, keys: readonly InventoryListKey[]): InventoryList {
+  const list: InventoryList = {}
+  for (const key of keys) {
+    const value = params.get(key)
+    if (!value) continue
+    if (key === 'sort') {
+      const sort = parseListSort(value)
+      if (sort) list.sort = sort
+    } else {
+      list[key] = value
+    }
+  }
+  return list
+}
+
+function withList(list: InventoryList): { list?: InventoryList } {
+  return Object.keys(list).length > 0 ? { list } : {}
+}
+
+/** The list state, or undefined when it is empty, so a default view stays out of the address. */
+export function compactInventoryList(list: InventoryList): InventoryList | undefined {
+  return withList(list).list
+}
+
+/** The list state as query parameters, in one fixed order, nothing for what is unset. */
+function formatInventoryList(list: InventoryList | undefined, params: URLSearchParams): void {
+  if (!list) return
+  for (const key of EQUIPMENT_LIST_KEYS) {
+    if (key === 'sort') {
+      if (list.sort) params.set('sort', formatListSort(list.sort))
+    } else if (list[key]) {
+      params.set(key, list[key])
+    }
+  }
+}
+
+function withQuery(base: string, params: URLSearchParams): string {
+  const qs = params.toString()
+  return qs ? `${base}?${qs}` : base
+}
+
 // Never throws: an unrecognised shape always resolves to the closest valid
 // ancestor (the dashboard, first page) rather than surfacing a parse error —
 // a mistyped or stale link should degrade gracefully, not break the app.
@@ -210,15 +276,17 @@ export function parseAppLocation(pathname: string): AppLocation {
   if (first === 'documents') {
     const params = new URLSearchParams(search)
     const folderId = params.get('folder')
+    const tag = params.get('tag')
+    const listing = { ...(tag ? { tag } : {}), ...(params.get('view') === 'unfiled' ? { unfiled: true as const } : {}) }
     if (second !== undefined) {
       const id = decodeSegment(second)
       if (id !== null && id !== '') {
-        return { panel: 'documents', route: { view: 'details', id, folderId, sectionId: null } }
+        return { panel: 'documents', route: { view: 'details', id, folderId, sectionId: null, ...listing } }
       }
     }
     return {
       panel: 'documents',
-      route: { view: 'browse', folderId, sectionId: params.get('section'), documentId: params.get('document') },
+      route: { view: 'browse', folderId, sectionId: params.get('section'), documentId: params.get('document'), ...listing },
     }
   }
 
@@ -246,9 +314,11 @@ export function parseAppLocation(pathname: string): AppLocation {
   // ADR 0227: the Watches pages. An unusable id falls back to the index.
   if (first === 'watches') {
     const id = second !== undefined ? decodeSegment(second) : null
-    if (!id) return { panel: 'watches', route: { view: 'index' } }
-    const run = new URLSearchParams(search).get('run')
-    return { panel: 'watches', route: run ? { view: 'details', id, run } : { view: 'details', id } }
+    const params = new URLSearchParams(search)
+    const sort = parseListSort(params.get('sort'))
+    if (!id) return { panel: 'watches', route: { view: 'index', ...(sort ? { sort } : {}) } }
+    const run = params.get('run')
+    return { panel: 'watches', route: { view: 'details', id, ...(run ? { run } : {}), ...(sort ? { sort } : {}) } }
   }
 
   // ADR 0110: the wall display route. Kept ahead of the generic PANEL_ID_SET
@@ -279,6 +349,7 @@ export function parseAppLocation(pathname: string): AppLocation {
     // to a codeless bin route, and a plain `/inventory/locations` is the
     // correct place to land on one anyway (the router then replaces the bar
     // with it).
+    const params = new URLSearchParams(search)
     if (second === 'bins') {
       const codeSegment = segments[2]
       const code = codeSegment !== undefined ? decodeSegment(codeSegment) : null
@@ -290,18 +361,19 @@ export function parseAppLocation(pathname: string): AppLocation {
     if (second === 'decks') {
       const idSegment = segments[2]
       const id = idSegment !== undefined ? decodeSegment(idSegment) : null
-      if (id) return { panel: 'inventory', route: { view: 'deck', id } }
-      return { panel: 'inventory', route: { view: 'decks' } }
+      const list = parseInventoryList(params, ['sort'])
+      if (id) return { panel: 'inventory', route: { view: 'deck', id, ...withList(list) } }
+      return { panel: 'inventory', route: { view: 'decks', ...withList(list) } }
     }
     if (second === 'locations') {
       const idSegment = segments[2]
       const id = idSegment !== undefined ? decodeSegment(idSegment) : null
-      if (id) return { panel: 'inventory', route: { view: 'location', id } }
-      const params = new URLSearchParams(search)
+      const list = parseInventoryList(params, ['q', 'sort'])
+      if (id) return { panel: 'inventory', route: { view: 'location', id, ...withList(list) } }
       if (params.get('view') === 'plan') {
-        return { panel: 'inventory', route: { view: 'plan', deckId: params.get('deck') || null } }
+        return { panel: 'inventory', route: { view: 'plan', deckId: params.get('deck') || null, ...withList(list) } }
       }
-      return { panel: 'inventory', route: { view: 'index', section: 'locations' } }
+      return { panel: 'inventory', route: { view: 'index', section: 'locations', ...withList(list) } }
     }
     if (second === 'maintenance' || second === 'profiles' || second === 'stocktake') {
       return { panel: 'inventory', route: { view: 'index', section: second } }
@@ -309,9 +381,9 @@ export function parseAppLocation(pathname: string): AppLocation {
     if (second === 'equipment') {
       const idSegment = segments[2]
       const id = idSegment !== undefined ? decodeSegment(idSegment) : null
-      if (id) return { panel: 'inventory', route: { view: 'equipment', id } }
+      if (id) return { panel: 'inventory', route: { view: 'equipment', id, ...withList(parseInventoryList(params, EQUIPMENT_LIST_KEYS)) } }
     }
-    return { panel: 'inventory', route: { view: 'index', section: 'equipment' } }
+    return { panel: 'inventory', route: { view: 'index', section: 'equipment', ...withList(parseInventoryList(params, EQUIPMENT_LIST_KEYS)) } }
   }
 
   if (PANEL_ID_SET.has(first)) {
@@ -420,35 +492,46 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
         // viewer deep link is never serialized alongside a Details page:
         // the two are mutually exclusive destinations.
         if (route.folderId) params.set('folder', route.folderId)
-        const qs = params.toString()
-        const base = `/documents/${encodeURIComponent(route.id)}`
-        return qs ? `${base}?${qs}` : base
+        if (route.tag) params.set('tag', route.tag)
+        if (route.unfiled) params.set('view', 'unfiled')
+        return withQuery(`/documents/${encodeURIComponent(route.id)}`, params)
       }
       if (route.folderId) params.set('folder', route.folderId)
       if (route.documentId) params.set('document', route.documentId)
       // A section is meaningless without its folder (a manual IS a folder),
       // so it is never emitted on its own.
       if (route.folderId && route.sectionId) params.set('section', route.sectionId)
-      const qs = params.toString()
-      return qs ? `/documents?${qs}` : '/documents'
+      if (route.tag) params.set('tag', route.tag)
+      if (route.unfiled) params.set('view', 'unfiled')
+      return withQuery('/documents', params)
     }
 
     case 'inventory': {
       const { route } = loc
+      const listParams = new URLSearchParams()
+      if (route.view === 'index' || route.view === 'equipment' || route.view === 'location' || route.view === 'decks' || route.view === 'deck') {
+        // Only the sections whose index has the state emit it: Maintenance,
+        // Profiles and Stocktake have none to carry.
+        if (route.view !== 'index' || route.section === 'equipment' || route.section === 'locations') {
+          formatInventoryList(route.list, listParams)
+        }
+      }
       switch (route.view) {
-        case 'index': return route.section === 'equipment' ? '/inventory' : `/inventory/${route.section}`
-        case 'equipment': return `/inventory/equipment/${encodeURIComponent(route.id)}`
+        case 'index': return withQuery(route.section === 'equipment' ? '/inventory' : `/inventory/${route.section}`, listParams)
+        case 'equipment': return withQuery(`/inventory/equipment/${encodeURIComponent(route.id)}`, listParams)
         // A New item draft has no id and so no URL of its own.
         case 'equipment-new': return '/inventory'
         case 'plan': {
           const params = new URLSearchParams({ view: 'plan' })
           if (route.deckId) params.set('deck', route.deckId)
+          // The table's search and sort ride along, so switching back finds them.
+          formatInventoryList(route.list, params)
           return `/inventory/locations?${params.toString()}`
         }
         case 'bin': return `/inventory/bins/${encodeURIComponent(route.code)}`
-        case 'location': return `/inventory/locations/${encodeURIComponent(route.id)}`
-        case 'decks': return '/inventory/decks'
-        case 'deck': return `/inventory/decks/${encodeURIComponent(route.id)}`
+        case 'location': return withQuery(`/inventory/locations/${encodeURIComponent(route.id)}`, listParams)
+        case 'decks': return withQuery('/inventory/decks', listParams)
+        case 'deck': return withQuery(`/inventory/decks/${encodeURIComponent(route.id)}`, listParams)
       }
       break
     }
@@ -476,11 +559,11 @@ export function formatAppLocation(loc: AppLocation, ctx: Pick<LocationContext, '
     }
 
     case 'watches': {
-      if (loc.route.view === 'details') {
-        const base = `/watches/${encodeURIComponent(loc.route.id)}`
-        return loc.route.run ? `${base}?${new URLSearchParams({ run: loc.route.run }).toString()}` : base
-      }
-      return '/watches'
+      const params = new URLSearchParams()
+      if (loc.route.view === 'details' && loc.route.run) params.set('run', loc.route.run)
+      if (loc.route.view !== 'new' && loc.route.sort) params.set('sort', formatListSort(loc.route.sort))
+      if (loc.route.view === 'details') return withQuery(`/watches/${encodeURIComponent(loc.route.id)}`, params)
+      return withQuery('/watches', params)
     }
 
     case 'wall-displays': {

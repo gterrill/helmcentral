@@ -91,7 +91,7 @@ describe('BinPage Back', () => {
   it('is labelled with the bin\'s location and goes up to it by id', async () => {
     const onClose = vi.fn()
     render(<BinPage code="LAZ-02" onClose={onClose} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
-    const back = await screen.findByRole('button', { name: 'Lazarette' })
+    const back = await screen.findByRole('button', { name: 'Back to Lazarette' })
     fireEvent.click(back)
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(onClose).toHaveBeenCalledWith('z1')
@@ -343,4 +343,39 @@ describe('BinPage on the plan (ADR 0156)', () => {
     await screen.findByText('LAZ-03')
     expect(screen.queryByRole('group', { name: 'Main deck plan' })).not.toBeInTheDocument()
   })
+  describe('the arrows', () => {
+    beforeEach(() => {
+      zones = [{
+        id: 'z1', name: 'Lazarette', sort_index: 0,
+        bins: [
+          { id: 'b1', zone_id: 'z1', code: 'LAZ-01', name: '', sort_index: 0 },
+          { id: 'b2', zone_id: 'z1', code: 'LAZ-02', name: 'Adhesives', sort_index: 1 },
+          { id: 'b3', zone_id: 'z1', code: 'LAZ-03', name: '', sort_index: 2 },
+        ],
+      }]
+    })
+
+    it('step through the other bins in the location, by code', async () => {
+      const onOpenBin = vi.fn()
+      render(<BinPage code="LAZ-02" onClose={vi.fn()} onOpenBin={onOpenBin} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Next: LAZ-03' }))
+      expect(onOpenBin).toHaveBeenLastCalledWith('LAZ-03')
+      fireEvent.click(screen.getByRole('button', { name: 'Previous: LAZ-01' }))
+      expect(onOpenBin).toHaveBeenLastCalledWith('LAZ-01')
+    })
+
+    it('stop at the ends of the location', async () => {
+      render(<BinPage code="LAZ-03" onClose={vi.fn()} onOpenBin={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+      await screen.findByRole('button', { name: 'Previous: LAZ-02' })
+      expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+    })
+
+    it('still go back to the location', async () => {
+      const onClose = vi.fn()
+      render(<BinPage code="LAZ-02" onClose={onClose} onOpenBin={vi.fn()} onOpenEquipment={vi.fn()} onNewEquipment={vi.fn()} />)
+      fireEvent.click(await screen.findByRole('button', { name: 'Back to Lazarette' }))
+      expect(onClose).toHaveBeenCalledWith('z1')
+    })
+  })
+
 })

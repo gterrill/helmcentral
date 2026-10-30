@@ -6,6 +6,8 @@ import { EmptyState, IndexTable, Page } from '@/components/patterns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatBytes } from '@/lib/document-display'
+import { orderWatches, WATCHES_DEFAULT_SORT } from '@/lib/index-order'
+import type { ListSort } from '@/lib/list-order'
 import {
   formatCost,
   relativeTime,
@@ -21,6 +23,10 @@ import {
 
 export interface WatchesIndexProps {
   watches: WatchRecord[]
+  /** The sort the operator picked, null for the default (name). It lives in
+   * the address, so a watch's page can step through the same list. */
+  sort: ListSort | null
+  onSortChange: (sort: ListSort) => void
   /** The most scheduled watches allowed; null until the server has said. */
   max: number | null
   cost24h: WatchList['cost_24h'] | null
@@ -61,6 +67,8 @@ export function watchesFooter(storageBytes: number | null, cost: WatchList['cost
 
 export function WatchesIndex({
   watches,
+  sort,
+  onSortChange,
   max,
   cost24h,
   storageBytes,
@@ -72,6 +80,7 @@ export function WatchesIndex({
   onOpen,
   onNew,
 }: WatchesIndexProps) {
+  const orderedWatches = useMemo(() => orderWatches(watches, sort), [watches, sort])
   const scheduledCount = watches.filter((w) => w.kind === 'scheduled').length
   const atLimit = max !== null && scheduledCount >= max
 
@@ -172,7 +181,12 @@ export function WatchesIndex({
         )}
         <IndexTable
           columns={columns}
-          rows={watches}
+          // The same function the watch's page steps through the list with.
+          rows={orderedWatches}
+          manualSorting
+          sorting={[sort ?? WATCHES_DEFAULT_SORT]}
+          twoStateSort
+          onSortingChange={(sorting) => { if (sorting[0]) onSortChange(sorting[0]) }}
           getRowId={(w) => w.id}
           rowActionsLabel={(w) => `Actions for ${w.name}`}
           onOpen={(w) => onOpen(w.id)}
@@ -180,7 +194,6 @@ export function WatchesIndex({
           error={error}
           onRetry={onRetry}
           empty={templates}
-          initialSorting={[{ id: 'name', desc: false }]}
         />
         {!loading && (
           <div className="flex flex-col gap-0.5 text-xs text-muted-foreground" data-testid="watches-footer">

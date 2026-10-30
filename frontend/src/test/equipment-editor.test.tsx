@@ -134,6 +134,8 @@ const discoveryBody = {
 }
 
 let currentItem: EquipmentItem
+/** What the Equipment index's list answers, for the arrows. */
+let listItems: EquipmentItem[]
 /** What GET .../dependants answers: by default nothing uses the item. */
 const NO_DEPENDANTS: EquipmentDependants = { item_id: 'eq-1', tiles: [], roles: [], alarm_rules: [], features: [] }
 let dependantsBody: EquipmentDependants
@@ -171,6 +173,9 @@ function stubFetch() {
     const u = String(url)
     const method = init?.method ?? 'GET'
 
+    if (u.match(/\/api\/inventory\/equipment(\?|$)/) && method === 'GET') {
+      return Promise.resolve({ ok: true, json: async () => ({ items: listItems }) })
+    }
     if (u.includes('/api/inventory/zones')) {
       return Promise.resolve({ ok: true, json: async () => ({ zones }) })
     }
@@ -319,6 +324,7 @@ beforeEach(() => {
 
   fetchMock.mockReset()
   currentItem = makeItem()
+  listItems = []
   currentDocuments = []
   failItemGetsWith = null
   uploadedPhotoOrder = []
@@ -2462,6 +2468,41 @@ describe('EquipmentEditor', () => {
       const list = await screen.findByRole('list', { name: 'Documents' })
       expect(within(list).getByText('NOTE')).toBeInTheDocument()
       expect(within(list).queryByText('MD')).not.toBeInTheDocument()
+    })
+  })
+
+  // The arrows step through the list the Equipment index showed: the same
+  // filter, search and sort, then the index's own grouping.
+  describe('the arrows', () => {
+    beforeEach(() => {
+      listItems = [
+        makeItem({ id: 'eq-3', name: 'Charger' }),
+        makeItem({ id: 'eq-1', name: 'Generator' }),
+        makeItem({ id: 'eq-2', name: 'Alternator' }),
+      ]
+    })
+
+    it('name the neighbours in the list as the index sorted it, and open them', async () => {
+      const open = vi.fn()
+      render(
+        <EquipmentEditor
+          id="eq-1" list={{ q: 'o', sort: { id: 'name', desc: false } }} onOpenNeighbour={open}
+          onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()}
+        />,
+      )
+      await waitForLoaded()
+      // Alternator, Charger, Generator: Generator is last.
+      fireEvent.click(await screen.findByRole('button', { name: 'Previous: Charger' }))
+      expect(open).toHaveBeenLastCalledWith('eq-3')
+      expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+      // The search went to the server with the filter the index used.
+      expect(fetchMock.mock.calls.some(([u]) => String(u).includes('/api/inventory/equipment?q=o'))).toBe(true)
+    })
+
+    it('are absent on a new item', async () => {
+      render(<EquipmentEditor id={null} onOpenNeighbour={vi.fn()} onBack={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onDiscarded={vi.fn()} />)
+      await screen.findByLabelText('Name')
+      expect(screen.queryByRole('button', { name: /^Previous/ })).not.toBeInTheDocument()
     })
   })
 
