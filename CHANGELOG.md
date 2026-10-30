@@ -31,6 +31,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate checks the wind against your course before it judges it.** Asked which
+  day to leave on a southbound leg with a northerly forecast, Mate called a
+  following wind a head sea, and told you to set passage limits you had already
+  set. If an answer talks about wind or sea relative to your course, or about
+  your passage limits, and Mate hasn't run the go/no-go check, Mate now runs the
+  check and answers again. It also reads your passage limits fresh on every
+  question, so it no longer says they're unset when they are set.
+
 - **A collision profile you pick by hand now stays picked after Helmcentral
   restarts.** Helmcentral changes the AIS collision profile when the boat
   anchors, moors or gets under way. It used to treat every restart as one of

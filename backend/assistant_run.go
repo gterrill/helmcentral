@@ -366,6 +366,14 @@ type assistantCardSource interface {
 	takeCards(result string) []mateCard
 }
 
+// assistantDraftChecker is implemented by a tool executor that can judge a
+// final answer against the tool calls made this run (every round so far). A
+// non-empty trigger sends the draft back once with instruction as a user turn
+// labelled as Helmcentral's own check.
+type assistantDraftChecker interface {
+	checkDraft(draft string, calls []openRouterToolCall) (trigger, instruction string)
+}
+
 // assistantRunner drives one assistant reply's agentic tool loop.
 type assistantRunner struct {
 	doer       openRouterDoer
@@ -819,6 +827,11 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 
 	var reply assistantReply
 
+	// runCalls is every tool call made this run, for the draft check
+	// (ADR 0234); draftSentBack makes the correction a one-time thing.
+	var runCalls []openRouterToolCall
+	draftSentBack := false
+
 	for round := 0; ; round++ {
 		// Nothing is sent on a run that has already been stopped.
 		if err := ctx.Err(); err != nil {
@@ -947,6 +960,30 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			if forcedFinal && strings.TrimSpace(content) == "" {
 				return assistantReply{}, fmt.Errorf("the assistant did not produce an answer within %d tool rounds (forced final round returned no text)", assistantMaxToolRounds)
 			}
+			trigger, instruction := "", ""
+			if checker, ok := r.tools.(assistantDraftChecker); ok && !forcedFinal {
+				trigger, instruction = checker.checkDraft(content, runCalls)
+			}
+			switch {
+			case trigger == "":
+			case draftSentBack:
+				// The correction was sent and the draft still fails the
+				// check. Accept the answer, but say so in the log.
+				log.Printf("assistant: draft check: answer still has a %s; accepted as is", trigger)
+			case round+1 < assistantMaxToolRounds:
+				draftSentBack = true
+				log.Printf("assistant: draft check: draft has a %s; sending it back once", trigger)
+				// The draft already streamed in part is withdrawn the same
+				// way a tool round's thinking aloud is.
+				if deltaEmitted {
+					r.emit(mateRetractEvent{})
+				}
+				messages = append(messages, choice, openRouterMessage{Role: "user", Content: openRouterContent(instruction)})
+				continue
+			default:
+				// No round left to send it back in.
+				log.Printf("assistant: draft check: draft has a %s; accepted as is (round cap reached)", trigger)
+			}
 			// The round ended clean: flush whatever the hold-back window
 			// was still withholding, so the operator sees the reply in
 			// full rather than missing its last few bytes.
@@ -962,6 +999,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		}
 
 		messages = append(messages, choice)
+		runCalls = append(runCalls, choice.ToolCalls...)
 
 		// This round's text (if any reached the operator at all) was never
 		// going to be the final answer - it ended in tool calls, so
