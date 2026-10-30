@@ -1,0 +1,8 @@
+[
+  {
+    "key": "use_blend_fallback",
+    "label": "Use Open-Meteo's blend where GFS-Wave has no data",
+    "type": "boolean",
+    "help": "The wave forecast comes from NOAA's GFS-Wave model, which has no figures for a spot close to land, such as a bay or an anchorage inside a reef. With this off, Helmcentral says the wave model has no data there. With it on, Helmcentral asks Open-Meteo's own blend of models for that spot instead and shows in the forecast that the figures come from the blend."
+  }
+]

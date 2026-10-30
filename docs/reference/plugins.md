@@ -64,7 +64,10 @@ hosts and allowed secrets. Changes to those take effect after a restart.
 Some plugins expose one or two of their own settings for you to edit from
 Settings. You don't need an environment variable, a file to edit, or a restart. The
 `osm-overpass` points-of-interest plugin's Overpass server address is the
-first example. See [Configuration → Overpass](configuration.md#overpass).
+first example. See [Configuration → Overpass](configuration.md#overpass). The
+`open-meteo-marine` wave plugin has a switch, **Use Open-Meteo's blend where
+GFS-Wave has no data**, which is off by default. See
+[the forecast page](../features/forecast.md#use-the-blend-where-gfs-wave-has-no-data).
 Open the gear icon on a provider's card in Settings to reach settings like
 this. Leaving one blank reverts to the plugin's own default. A change takes
 effect on the plugin's very next call.

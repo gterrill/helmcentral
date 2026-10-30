@@ -6,14 +6,19 @@
 // Helmcentral installs because it needs no API key.
 //
 // The Marine API is queried with two separate HTTP calls:
-//   1. Wave data (REQUIRED): Pinned to NOAA's GFS-Wave (WaveWatch III) model
-//      so swell height, period and direction line up with other WaveWatch
-//      III-based swell forecasts for a given coastline; Open-Meteo's default
-//      "best_match" model blend runs noticeably lower/different.
-//   2. Sea surface temperature (OPTIONAL): Deliberately does not pin a
-//      models= param (unlike the wave-data fetch) - the wave-specific NOAA
-//      GFS-Wave model does not carry sea surface temperature at all (returns
-//      null/"undefined" units); only Open-Meteo's default model blend does.
+//  1. Wave data (REQUIRED): Pinned to NOAA's GFS-Wave (WaveWatch III) model
+//     so swell height, period and direction line up with other WaveWatch
+//     III-based swell forecasts for a given coastline; Open-Meteo's default
+//     "best_match" model blend runs noticeably lower/different.
+//  2. Sea surface temperature (OPTIONAL): Deliberately does not pin a
+//     models= param (unlike the wave-data fetch) - the wave-specific NOAA
+//     GFS-Wave model does not carry sea surface temperature at all (returns
+//     null/"undefined" units); only Open-Meteo's default model blend does.
+//
+// Where GFS-Wave has no data (a land-masked cell returns every field as 0),
+// and the operator has turned on the use_blend_fallback config field, the wave
+// fetch is repeated without models= and the output carries model="best_match"
+// and fallback_used=true. Off by default; see README.md.
 //
 // If the wave-data fetch fails (non-2xx status or unparseable JSON), that is
 // a hard error: pdk.SetErrorString(...) + return -1. If the sea-temperature
@@ -44,7 +49,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 
 	"github.com/extism/go-pdk"
@@ -94,32 +98,29 @@ func fetchWaves() int32 {
 	days := clampForecastDays(input.Days)
 
 	// Fetch wave data (REQUIRED)
-	waveURL := fmt.Sprintf(marineWaveURLFmt, input.Lat, input.Lon, days)
-	waveReq := pdk.NewHTTPRequest(pdk.MethodGet, waveURL)
-	waveRes := waveReq.Send()
-	if waveRes.Status() < 200 || waveRes.Status() >= 300 {
-		pdk.SetErrorString(fmt.Sprintf("open-meteo marine wave API returned %d", waveRes.Status()))
-		return -1
+	fetch := func(fallback bool) ([]waveHourOutput, error) {
+		res := pdk.NewHTTPRequest(pdk.MethodGet, waveURL(input.Lat, input.Lon, days, fallback)).Send()
+		if res.Status() < 200 || res.Status() >= 300 {
+			return nil, fmt.Errorf("open-meteo marine wave API returned %d", res.Status())
+		}
+		return parseWaveBody(res.Body())
 	}
 
-	waveBytes := waveRes.Body()
-
-	// Extract UTC offset from wave response (needed for local-time conversion)
-	var waveRawResult map[string]any
-	if err := json.Unmarshal(waveBytes, &waveRawResult); err != nil {
-		pdk.SetErrorString(fmt.Sprintf("failed to parse wave response: %v", err))
-		return -1
-	}
-
-	utcOffsetSeconds := 0
-	if offset, ok := waveRawResult["utc_offset_seconds"].(float64); ok {
-		utcOffsetSeconds = int(offset)
-	}
-
-	// Parse wave data
-	hourlyData, err := parseOpenMeteoWaveResponse(waveBytes, utcOffsetSeconds)
+	primary, err := fetch(false)
 	if err != nil {
-		pdk.SetErrorString(fmt.Sprintf("failed to parse wave response: %v", err))
+		pdk.SetErrorString(err.Error())
+		return -1
+	}
+
+	// Optional: where GFS-Wave has no data (a land-masked cell), use
+	// Open-Meteo's default blend if the operator turned that on.
+	blendSetting, _ := pdk.GetConfig("use_blend_fallback")
+	useBlend := fallbackEnabled(blendSetting)
+	hourlyData, model, fellBack, err := chooseWaveSeries(primary, useBlend, func() ([]waveHourOutput, error) {
+		return fetch(true)
+	})
+	if err != nil {
+		pdk.SetErrorString(fmt.Sprintf("GFS-Wave has no data here and the blend fallback failed: %v", err))
 		return -1
 	}
 
@@ -138,6 +139,8 @@ func fetchWaves() int32 {
 	output := fetchWavesOutput{
 		Hourly:                 hourlyData,
 		SeaSurfaceTemperatureC: seaTemp,
+		Model:                  model,
+		FallbackUsed:           fellBack,
 	}
 
 	if err := pdk.OutputJSON(output); err != nil {

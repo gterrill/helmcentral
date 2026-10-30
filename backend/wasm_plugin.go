@@ -371,7 +371,8 @@ func wasmPluginConfigFields(wasmPath string) (map[string]string, error) {
 // general mechanism any plugin can use for the same purpose). Type is
 // either "url" (validated as an absolute http(s) URL by
 // postPluginConfigHandler, plugin_overrides_handlers.go) or "text" (no
-// format validation beyond non-blank-ness). Help and Placeholder are purely
+// format validation beyond non-blank-ness) or "boolean" (stored as "true"
+// or "false", rendered as a switch; blank is off). Help and Placeholder are purely
 // cosmetic, shown by the frontend's provider settings modal.
 type pluginConfigFieldSpec struct {
 	Key         string `json:"key"`
@@ -384,7 +385,7 @@ type pluginConfigFieldSpec struct {
 // validPluginConfigFieldTypes is the closed set of config_fields.json "type"
 // values. An unrecognized type is an authoring mistake, not a forward-compat
 // signal to ignore - see pluginConfigFieldsForWasmPlugin.
-var validPluginConfigFieldTypes = map[string]bool{"url": true, "text": true}
+var validPluginConfigFieldTypes = map[string]bool{"url": true, "text": true, "boolean": true}
 
 // pluginConfigFieldsForWasmPlugin reads and validates the companion
 // <name>.config_fields.json file next to wasmPath: a JSON array of
@@ -791,6 +792,14 @@ func (c *wasmPluginCache[T]) set(key string, value T) {
 	c.mu.Lock()
 	c.data[key] = wasmCacheEntry[T]{Value: value, CachedAt: time.Now().UTC()}
 	c.pruneLocked()
+	c.mu.Unlock()
+	c.persistToDisk()
+}
+
+// clear drops every entry, in memory and on disk.
+func (c *wasmPluginCache[T]) clear() {
+	c.mu.Lock()
+	c.data = make(map[string]wasmCacheEntry[T])
 	c.mu.Unlock()
 	c.persistToDisk()
 }

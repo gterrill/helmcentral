@@ -25,6 +25,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Use the blend where the wave model has no data.** Near a coast the wave model
+  Helmcentral uses, NOAA's GFS-Wave, has no figures for the cell your boat is
+  in. A new switch, **Use Open-Meteo's blend where GFS-Wave has no data**, asks
+  Open-Meteo's own blend of models for that spot instead. It's off until you
+  turn it on. To turn it on, open Settings, find the Open-Meteo Marine wave
+  provider, tap its gear icon, switch it on and tap **Save**. When the blend
+  supplies the figures, the Wave card says so in its footer, and Mate says so
+  when it quotes them.
+
 - **Previous and next on every details page.** Equipment, locations, decks,
   bins, watches, documents and wall displays now have the two arrows at the
   right of the title that passages already had, and the **[** and **]** keys do
@@ -185,6 +194,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   ends. If the Passages page has nothing to read, Mate says so.
 
 ### Fixed
+
+- **No more flat calm where the wave model has no data.** Over a bay or anchorage
+  close to land, the wave model could report every figure as zero, and the Wave
+  card showed "0.0 m from the N" with a flat line, as though the sea were
+  glassy. A wave with no period isn't a wave, so Helmcentral now treats those
+  hours as having no data. At the boat's own position the Wave card and the
+  Forecast Conditions tile now say in quiet grey text "The wave model has no
+  data at this position", with no Retry button, and the sea temperature still
+  shows. For a place you have searched for, the card says there is no wave
+  forecast for that spot, as before. Mate tells you the same when you ask.
 
 - **Applying Mate's changes now updates the page you are on.** If you had
   Decks, Equipment, Maintenance or the vessel details open beside Mate and

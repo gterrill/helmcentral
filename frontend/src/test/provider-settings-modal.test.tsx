@@ -378,3 +378,67 @@ describe('ProviderSettingsModal config fields', () => {
     })
   })
 })
+
+describe('ProviderSettingsModal boolean config fields', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const waveInfo = (value: string) => ({
+    type: 'wave',
+    id: 'open-meteo-marine',
+    name: 'Open-Meteo Marine',
+    description: 'Free marine forecasts',
+    sandboxed: true,
+    allowed_hosts: ['marine-api.open-meteo.com'],
+    allowed_hosts_overridden: false,
+    allowed_secrets: [],
+    allowed_secrets_overridden: false,
+    config_fields: [
+      {
+        key: 'use_blend_fallback',
+        label: "Use Open-Meteo's blend where GFS-Wave has no data",
+        type: 'boolean',
+        help: 'Asks the blend for spots GFS-Wave cannot answer.',
+        placeholder: '',
+        value,
+      },
+    ],
+  })
+
+  it('shows a switch, and Save posts "true" once it is turned on', async () => {
+    const fetchMock = vi.fn(async (url: string, options?: { method?: string; body?: string }) => {
+      if (url.includes('/api/plugins/wave/open-meteo-marine/config') && options?.method === 'POST') {
+        expect(JSON.parse(options.body!).values).toEqual({ use_blend_fallback: 'true' })
+        return { ok: true, json: async () => waveInfo('true') }
+      }
+      if (url.includes('/api/plugins/wave/open-meteo-marine/overrides') && options?.method === 'POST') {
+        return { ok: true, json: async () => waveInfo('true') }
+      }
+      if (url.includes('/api/plugins/wave/open-meteo-marine')) {
+        return { ok: true, json: async () => waveInfo('') }
+      }
+      if (url.includes('/api/settings/secrets')) {
+        return { ok: true, json: async () => secretsGetResponse }
+      }
+      return { ok: false, json: async () => ({}) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderModal('wave', 'open-meteo-marine')
+
+    const toggle = await screen.findByRole('switch', { name: "Use Open-Meteo's blend where GFS-Wave has no data" })
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByText('Asks the blend for spots GFS-Wave cannot answer.')).toBeTruthy()
+
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/plugins/wave/open-meteo-marine/config',
+        expect.objectContaining({ method: 'POST' }),
+      )
+    })
+  })
+})

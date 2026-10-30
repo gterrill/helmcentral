@@ -560,6 +560,25 @@ func TestPostPluginConfigHandler_BadURLReturns400(t *testing.T) {
 	}
 }
 
+func TestPostPluginConfigHandler_BooleanFieldTakesTrueOrFalse(t *testing.T) {
+	withCleanTideProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	provider := newTestWasmTideProviderWithConfigFields(t, `[{"key":"flag","label":"A Flag","type":"boolean"}]`)
+	registerTideProvider(provider)
+
+	for value, want := range map[string]int{"true": http.StatusOK, "false": http.StatusOK, "": http.StatusOK, "yes": http.StatusBadRequest} {
+		body := `{"values":{"flag":"` + value + `"}}`
+		c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/tide/valid-fixture/config", body, "tide", "valid-fixture")
+		if err := postPluginConfigHandler(c); err != nil {
+			t.Fatalf("handler returned error: %v", err)
+		}
+		if rec.Code != want {
+			t.Errorf("value %q: expected %d, got %d: %s", value, want, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestPostPluginConfigHandler_SavesAndGetReflectsValue(t *testing.T) {
 	withCleanTideProviderRegistry(t)
 	withTestPluginOverridesStore(t)

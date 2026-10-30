@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { SecretFieldGroup, type SecretFieldSpec } from '@/components/settings/secret-field-group'
 import { useSecretsStatusContext } from '@/components/settings/secrets-status-context'
 import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
@@ -23,7 +24,7 @@ export type ProviderDomain = 'tide' | 'weather' | 'wave' | 'poi' | 'forecast-war
 interface PluginConfigField {
   key: string
   label: string
-  type: 'url' | 'text'
+  type: 'url' | 'text' | 'boolean'
   help: string
   placeholder: string
   value: string
@@ -240,6 +241,22 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
         {hasConfigFields && (
           <div className="space-y-2">
             {configFields.map((field) => (
+              field.type === 'boolean' ? (
+                <Field key={field.key}>
+                  <div className="flex items-center justify-between gap-3">
+                    <FieldLabel htmlFor={`config-field-${field.key}`}>{field.label}</FieldLabel>
+                    <Switch
+                      id={`config-field-${field.key}`}
+                      checked={configValues[field.key] === 'true'}
+                      onCheckedChange={(checked) =>
+                        setConfigValues((previous) => ({ ...previous, [field.key]: checked ? 'true' : 'false' }))
+                      }
+                      aria-label={field.label}
+                    />
+                  </div>
+                  {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
+                </Field>
+              ) : (
               <Field key={field.key}>
                 <FieldLabel htmlFor={`config-field-${field.key}`}>{field.label}</FieldLabel>
                 <Input
@@ -251,6 +268,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                 />
                 {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
               </Field>
+              )
             ))}
             <p className="text-xs text-muted-foreground">
               Applies on the next call — no restart needed.
