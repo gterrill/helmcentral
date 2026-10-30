@@ -13,7 +13,8 @@ import (
 
 // Tailscale Funnel adds Tailscale-Funnel-Request to everything it forwards and
 // deletes any value a visitor sends, so the header cannot be forged or
-// stripped from outside. The guard (funnel_guard.go) lets only /mcp through.
+// stripped from outside. The guard (funnel_guard.go) lets only /mcp and the
+// OAuth sign-in paths through.
 
 type funnelGuardEnv struct {
 	e     *echo.Echo
@@ -77,6 +78,40 @@ func TestFunnelGuard_OnlyMCPPassesThroughFunnel(t *testing.T) {
 		}
 		if body := rec.Body.String(); body != "404 page not found\n" {
 			t.Fatalf("%s: the refusal should look like Tailscale's own 404, got %q", p, body)
+		}
+	}
+}
+
+// The sign-in flow for clients that cannot send a fixed header (ADR 0233) adds
+// exactly these paths, matched whole.
+func TestFunnelGuard_TheOAuthPathsPassThroughFunnelAndNothingNearThemDoes(t *testing.T) {
+	env := newFunnelGuardEnv()
+	for _, p := range []string{
+		"/mcp/oauth/authorize", "/mcp/oauth/token", "/mcp/oauth/register",
+		"/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp",
+		"/.well-known/oauth-authorization-server",
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			// The fallback route here is GET only, so a POST that gets past
+			// the guard is a 405; the guard's own refusal is the 404.
+			if rec := env.do(method, p, true); rec.Code == http.StatusNotFound {
+				t.Fatalf("%s %s through Funnel: %d", method, p, rec.Code)
+			}
+		}
+	}
+	if rec := env.do(http.MethodGet, "/mcp/oauth/authorize?client_id=x&state=%2F", true); rec.Code != http.StatusOK {
+		t.Fatalf("a query string does not change the path: %d", rec.Code)
+	}
+	for _, p := range []string{
+		"/mcp/oauth/authorize/", "/mcp/oauth/token/", "/mcp/oauth", "/mcp/oauth/", "/mcp/oauth/%61uthorize",
+		"/mcp/oauth/authorize/x", "/mcp/oauth/other", "/MCP/oauth/authorize",
+		"/.well-known/", "/.well-known", "/.well-known/openid-configuration",
+		"/.well-known/oauth-protected-resource/", "/.well-known/oauth-protected-resource/api",
+		"/.well-known/oauth-authorization-server/mcp", "/.well-known/oauth-authorization-server/",
+		"/api/mcp/oauth/authorize",
+	} {
+		if rec := env.do(http.MethodGet, p, true); rec.Code != http.StatusNotFound {
+			t.Fatalf("%s through Funnel: want 404, got %d", p, rec.Code)
 		}
 	}
 }

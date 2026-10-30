@@ -179,6 +179,14 @@ func createOutsideAssistantSchema(db *sql.DB) error {
 			duration_ms INTEGER NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS mcp_activity_at ON mcp_activity (at DESC)`,
+		`CREATE TABLE IF NOT EXISTS mcp_oauth_clients (
+			client_id     TEXT PRIMARY KEY,
+			name          TEXT NOT NULL,
+			redirect_uris TEXT NOT NULL,
+			created_at    INTEGER NOT NULL,
+			authorized_at INTEGER,
+			token_id      TEXT
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {

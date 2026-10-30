@@ -23,8 +23,8 @@ import (
 // SDK negotiates the protocol revision (2025-11-25 and 2026-07-28) with the
 // client. It calls no model and works with Mate off.
 
-// mcpPath is where the endpoint is mounted, and the one path the Funnel guard
-// (funnel_guard.go) lets through.
+// mcpPath is where the endpoint is mounted. It is one of the few paths the
+// Funnel guard (funnel_guard.go) lets through.
 const mcpPath = "/mcp"
 
 type mcpCallKey struct{}
@@ -80,8 +80,11 @@ func (m *mcpService) Handle(c echo.Context) error {
 	return nil
 }
 
+// mcpUnauthorized answers 401 and points the client at the resource metadata,
+// which is how an OAuth client learns where to sign in (mcp_oauth.go).
 func mcpUnauthorized(c echo.Context) error {
-	c.Response().Header().Set("WWW-Authenticate", `Bearer realm="helmcentral"`)
+	meta := oauthBaseURL(c.Request()) + oauthProtectedResourceMCPPath
+	c.Response().Header().Set("WWW-Authenticate", `Bearer realm="helmcentral", resource_metadata="`+meta+`"`)
 	return c.JSON(http.StatusUnauthorized, map[string]string{"error": "a valid outside assistant token is required"})
 }
 
