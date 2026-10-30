@@ -20,6 +20,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   `/mcp`, so add it by following **Give outside assistants a public address**.
   Claude's connector keeps working as it did.
 
+### Changed
+
+- **Watch reports say which vessels a repeated Collision Risk came from.** The
+  Alarms line used to say only "Collision Risk, 111 times". It now says how many
+  vessels raised it and names the three that raised it most, for example "from 31
+  vessels, AIS closest approach (most: Bella Breeza 4, Encore 4, Whitsunday
+  Bullet 4)". A vessel with no name is counted but not listed. Mate's review
+  reads the same figures, so it no longer guesses a cause for them.
+
 ### Fixed
 
 - **A collision profile you pick by hand now stays picked after Helmcentral

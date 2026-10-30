@@ -340,10 +340,20 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 		if i >= watchAlarmTitleCap {
 			break
 		}
-		titles = append(titles, map[string]any{
+		entry := map[string]any{
 			"title": g.Title, "count": g.Count, "active_now": active[g.Title],
 			"first": g.First.UTC().Format(time.RFC3339), "last": g.Last.UTC().Format(time.RFC3339),
-		})
+		}
+		if g.Sources > 0 {
+			entry["sources"] = g.Sources
+			if g.SourceKind != "" {
+				entry["source_kind"] = g.SourceKind.Label()
+			}
+			if len(g.TopSources) > 0 {
+				entry["top_sources"] = g.TopSources
+			}
+		}
+		titles = append(titles, entry)
 		parts = append(parts, watchAlarmGroupText(g, active[g.Title], in.Now, loc))
 		shown += g.Count
 	}
@@ -386,14 +396,51 @@ func watchDayTime(t, now time.Time, loc *time.Location) string {
 // alarm is in the active list: the log's cleared times are not trusted to say
 // an alarm is over.
 func watchAlarmGroupText(g alarmRaisedGroup, activeNow bool, now time.Time, loc *time.Location) string {
+	from := watchAlarmSourcesText(g)
+	if from != "" {
+		from = " " + from
+	}
 	var text string
 	if g.Count == 1 {
-		text = fmt.Sprintf("%s, once (%s)", g.Title, watchDayTime(g.First, now, loc))
+		text = fmt.Sprintf("%s, once%s (%s)", g.Title, from, watchDayTime(g.First, now, loc))
 	} else {
-		text = fmt.Sprintf("%s, %d times (first %s, last %s)", g.Title, g.Count, watchDayTime(g.First, now, loc), watchDayTime(g.Last, now, loc))
+		times := fmt.Sprintf("first %s, last %s", watchDayTime(g.First, now, loc), watchDayTime(g.Last, now, loc))
+		if len(g.TopSources) > 0 && g.Sources > 1 {
+			top := make([]string, len(g.TopSources))
+			for i, s := range g.TopSources {
+				top[i] = fmt.Sprintf("%s %d", s.Name, s.Count)
+			}
+			times += "; most: " + strings.Join(top, ", ")
+		}
+		text = fmt.Sprintf("%s, %d times%s (%s)", g.Title, g.Count, from, times)
 	}
 	if activeNow {
 		text += ", active now"
+	}
+	return text
+}
+
+// watchAlarmSourcesText says what raised a repeated alarm: "from 31 vessels,
+// AIS closest approach", or "from Encore, AIS closest approach" when one named
+// vessel raised it. A lone source adds nothing to an alarm that is not a
+// vessel's, so it is left out. It reads the same fields the report's figures
+// carry, so the line and Mate's figures agree.
+func watchAlarmSourcesText(g alarmRaisedGroup) string {
+	vessels := g.SourceKind == alarmSourceAISClosestApproach
+	if g.Sources < 1 || (g.Sources < 2 && !vessels) {
+		return ""
+	}
+	var text string
+	switch {
+	case g.Sources == 1 && len(g.TopSources) == 1:
+		text = "from " + g.TopSources[0].Name
+	case vessels:
+		text = fmt.Sprintf("from %d %s", g.Sources, watchPlural(g.Sources, "vessel", "vessels"))
+	default:
+		text = fmt.Sprintf("from %d sources", g.Sources)
+	}
+	if label := g.SourceKind.Label(); label != "" {
+		text += ", " + label
 	}
 	return text
 }

@@ -163,3 +163,21 @@ func TestNeedsRadarTargets(t *testing.T) {
 		t.Fatal("guard zone live, should read the radar store")
 	}
 }
+
+func TestCollisionTargetName_ParsesWhatPresentCollisionWrites(t *testing.T) {
+	_, body := presentCollision("WHITSUNDAY BULLET - CPA WARNING")
+	if name, ok := collisionTargetName(body); !ok || name != "Whitsunday Bullet" {
+		t.Errorf("%q parsed as %q, %v", body, name, ok)
+	}
+	_, body = presentCollision("<319123600> - CPA ALARM")
+	if name, ok := collisionTargetName(body); ok {
+		t.Errorf("%q is unnamed but parsed as %q", body, name)
+	}
+}
+
+func TestCollisionTargetName_TitleCaseIsRuneSafe(t *testing.T) {
+	_, body := presentCollision("ÉTOILE DU NORD - CPA WARNING")
+	if name, ok := collisionTargetName(body); !ok || name != "Étoile Du Nord" {
+		t.Errorf("got %q, %v", name, ok)
+	}
+}

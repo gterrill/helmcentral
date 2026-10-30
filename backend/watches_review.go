@@ -391,7 +391,7 @@ func buildWatchReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 		"- The report is the evidence. Judge it in context, as a watchkeeper would: what changed, what matters, what does not.\n" +
 		"- You may add findings the rules missed. You can never remove or soften one the rules reached.\n" +
 		"- Give each finding you add a key: a short lower_snake name for the issue, such as port_alternator_output. If it is the same issue as one in previous_findings_you_added, reuse its key exactly, so the skipper is not told the same thing twice. A new issue gets a new key that names the issue, not the figures.\n" +
-		"- Where you are unsure, say so and ask the skipper in the review. Never guess a cause you cannot see in the figures.\n" +
+		"- Where you are unsure, say so and ask the skipper in the review. Never guess a cause you cannot see in the figures. When the report names an alarm's source, use it; don't offer another cause.\n" +
 		"- You do not stand in for an alarm. If an alarm is active, say it is active; do not raise it again.\n" +
 		"- A section marked unavailable is not an all clear. Mention it only when it bears on something you flag.\n" +
 		"- Write for someone reading at 02:00: the event in a few words, then where, how close, which way it is going, with the figures in the operator's units. " +

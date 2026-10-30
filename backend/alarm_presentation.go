@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // alarmRadarTarget is the live radar figures for the target behind a
@@ -101,7 +102,7 @@ func radarsForPresentation(snapshot *signalKSnapshot, path string, now time.Time
 func presentCollision(message string) (title, body string) {
 	message = strings.TrimSpace(message)
 	if m := collisionTargetMessage.FindStringSubmatch(message); m != nil {
-		return "Collision Risk", m[1] + " inside the CPA limit."
+		return "Collision Risk", m[1] + collisionBodySuffix
 	}
 	return "Collision Risk", sentence(message, "navigation.closestApproach")
 }
@@ -172,4 +173,65 @@ func presentNotificationStatus(status alarmStatus, targets []radarTarget, radars
 	status.RadarTarget = radarFiguresFor(path, status.Message, targets)
 	status.Label, status.Message = presentNotification(path, status.Message, radars)
 	return status
+}
+
+// collisionBodySuffix ends the sentence presentCollision writes for a named
+// target. collisionTargetName reads it back, so the two share this constant.
+const collisionBodySuffix = " inside the CPA limit."
+
+// alarmSourceKind says what kind of thing raises the alarms under one rule id.
+type alarmSourceKind string
+
+// alarmSourceAISClosestApproach is an AIS target's collision alarm.
+const alarmSourceAISClosestApproach alarmSourceKind = "ais_closest_approach"
+
+// Label is the kind in the operator's words.
+func (k alarmSourceKind) Label() string {
+	if k == alarmSourceAISClosestApproach {
+		return "AIS closest approach"
+	}
+	return ""
+}
+
+// alarmSourceKindOf reads the kind from a rule id, "" when it has none. A
+// vessel's collision alarm is the notifications: prefix, the collision branch,
+// the vessel separator and the target's urn.
+func alarmSourceKindOf(ruleID string) alarmSourceKind {
+	branch, vesselID := splitNotificationVessel(ruleID)
+	if vesselID != "" && branch == "notifications:"+strings.Join(collisionNotificationBranch, ".") {
+		return alarmSourceAISClosestApproach
+	}
+	return ""
+}
+
+var collisionUnnamedTarget = regexp.MustCompile(`^<?\d+>?$`)
+
+// collisionTargetName is the vessel a presented collision message names, in
+// title case when the AIS name was all capitals. ok is false for a message that
+// names nobody: a bare or bracketed MMSI is not a name.
+func collisionTargetName(message string) (name string, ok bool) {
+	name, found := strings.CutSuffix(strings.TrimSpace(message), collisionBodySuffix)
+	name = strings.TrimSpace(name)
+	if !found || name == "" || collisionUnnamedTarget.MatchString(name) {
+		return "", false
+	}
+	if name == strings.ToUpper(name) {
+		words := strings.Fields(strings.ToLower(name))
+		for i, w := range words {
+			words[i] = upperFirstLetter(w)
+		}
+		name = strings.Join(words, " ")
+	}
+	return name, true
+}
+
+// upperFirstLetter capitalises the first letter of a word, skipping any digits
+// or punctuation before it.
+func upperFirstLetter(w string) string {
+	for i, r := range w {
+		if unicode.IsLetter(r) {
+			return w[:i] + string(unicode.ToUpper(r)) + w[i+utf8.RuneLen(r):]
+		}
+	}
+	return w
 }

@@ -402,3 +402,85 @@ func TestWatchReport_AlarmTimesCarryTheirDayAndTheListIsCapped(t *testing.T) {
 		t.Errorf("figures cap at five titles and count the rest: %s", raw)
 	}
 }
+
+func TestWatchReport_RepeatedCollisionRiskSaysHowManyVessels(t *testing.T) {
+	in := baseInput()
+	in.FirstRun = true
+	in.Since = in.Now.Add(-24 * time.Hour)
+	first := time.Date(2026, 10, 28, 6, 45, 0, 0, in.Now.Location())
+	last := time.Date(2026, 10, 29, 5, 10, 0, 0, in.Now.Location())
+	in.Raised = []alarmRaisedGroup{
+		{Title: "Collision Risk", Count: 111, First: first, Last: last, Sources: 31, SourceKind: alarmSourceAISClosestApproach,
+			TopSources: []alarmSourceCount{{"Bella Breeza", 4}, {"Encore", 4}, {"Whitsunday Bullet", 4}}},
+		{Title: "Tide Alarm", Count: 6, First: first, Last: last, Sources: 3},
+		{Title: "House Bank Low", Count: 1, First: first, Last: first, Sources: 1},
+	}
+	before := watchFindingKey(watchFinding{Section: "alarms", Rule: "alarms_raised", By: watchByRules})
+	report, findings := buildWatchReport(baseWatch(), in)
+	text := strings.Join(sectionOf(t, report, "alarms").Lines, "|")
+	for _, want := range []string{
+		"Collision Risk, 111 times from 31 vessels, AIS closest approach (first yesterday 06:45, last 05:10; most: Bella Breeza 4, Encore 4, Whitsunday Bullet 4)",
+		"Tide Alarm, 6 times from 3 sources (first",
+		"House Bank Low, once (",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("lacks %q in %q", want, text)
+		}
+	}
+	if strings.Contains(text, "mmsi") || strings.Contains(text, "<") {
+		t.Errorf("no identifiers: %q", text)
+	}
+	raw, _ := json.Marshal(sectionOf(t, report, "alarms").Figures)
+	for _, want := range []string{`"sources":31`, `"source_kind":"AIS closest approach"`, `"top_sources":[{"name":"Bella Breeza","count":4}`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("figures lack %s: %s", want, raw)
+		}
+	}
+	got := findingsFor(findings, "alarms")
+	if len(got) != 1 || !strings.Contains(got[0].Text, "from 31 vessels") || watchFindingKey(got[0]) != before {
+		t.Errorf("finding %+v key %q want %q", got, watchFindingKey(got[0]), before)
+	}
+}
+
+func TestWatchReport_AnUnnamedVesselCountsButIsNeverListed(t *testing.T) {
+	in := baseInput()
+	in.Raised = []alarmRaisedGroup{{Title: "Collision Risk", Count: 7, First: in.Now, Last: in.Now, Sources: 2, SourceKind: alarmSourceAISClosestApproach,
+		TopSources: []alarmSourceCount{{"Encore", 2}}}}
+	report, _ := buildWatchReport(baseWatch(), in)
+	text := strings.Join(sectionOf(t, report, "alarms").Lines, "|")
+	if !strings.Contains(text, "from 2 vessels") || !strings.Contains(text, "most: Encore 2)") || strings.Contains(text, "319123600") {
+		t.Errorf("%q", text)
+	}
+}
+
+func TestWatchReport_ASingleCollisionRiskNamesItsVesselAndTheFiguresAgree(t *testing.T) {
+	in := baseInput()
+	at := time.Date(2026, 10, 29, 5, 10, 0, 0, in.Now.Location())
+	in.Raised = []alarmRaisedGroup{{Title: "Collision Risk", Count: 1, First: at, Last: at, Sources: 1, SourceKind: alarmSourceAISClosestApproach,
+		TopSources: []alarmSourceCount{{"Encore", 1}}}}
+	report, _ := buildWatchReport(baseWatch(), in)
+	s := sectionOf(t, report, "alarms")
+	text := strings.Join(s.Lines, "|")
+	if !strings.Contains(text, "Collision Risk, once from Encore, AIS closest approach (05:10)") {
+		t.Errorf("%q", text)
+	}
+	raw, _ := json.Marshal(s.Figures)
+	if !strings.Contains(string(raw), `"top_sources":[{"name":"Encore","count":1}]`) || !strings.Contains(string(raw), `"sources":1`) {
+		t.Errorf("figures %s", raw)
+	}
+	in.Raised[0].Count, in.Raised[0].TopSources[0].Count = 3, 3
+	in.Raised[0].Last = at.Add(time.Hour)
+	report, _ = buildWatchReport(baseWatch(), in)
+	if got := strings.Join(sectionOf(t, report, "alarms").Lines, "|"); !strings.Contains(got, "Collision Risk, 3 times from Encore, AIS closest approach (first") || strings.Contains(got, "most:") {
+		t.Errorf("%q", got)
+	}
+}
+
+func TestWatchReport_AnUnnamedSingleVesselIsOneVessel(t *testing.T) {
+	in := baseInput()
+	in.Raised = []alarmRaisedGroup{{Title: "Collision Risk", Count: 1, First: in.Now, Last: in.Now, Sources: 1, SourceKind: alarmSourceAISClosestApproach}}
+	report, _ := buildWatchReport(baseWatch(), in)
+	if text := strings.Join(sectionOf(t, report, "alarms").Lines, "|"); !strings.Contains(text, "Collision Risk, once from 1 vessel, AIS closest approach (") {
+		t.Errorf("%q", text)
+	}
+}
