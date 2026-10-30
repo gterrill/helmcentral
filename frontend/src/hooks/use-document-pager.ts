@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 
 import type { PagerProps } from '@/components/patterns'
 import { useDocument, useDocumentListing } from '@/hooks/use-documents'
@@ -40,7 +40,9 @@ export function useDocumentPager(
   const listing = useDocumentListing(list.folderId, list.tag, !list.unfiled && !inManual)
   const { notes, loading: notesLoading } = useNotes({ unfiledOnly: true, enabled: list.unfiled })
 
-  const sort = loadDocumentsSort()
+  // Read once: the sort is saved from the Documents list, which is not on screen
+  // while this page is, and a fresh object each render would defeat the memos.
+  const [sort] = useState(loadDocumentsSort)
   const primary = useMemo<{ entries: Entry[]; loaded: boolean }>(() => {
     if (list.unfiled) return { entries: toEntries(notes), loaded: !notesLoading }
     if (inManual) return { entries: (manual ?? []).map((n) => ({ id: n.id, label: n.name })), loaded: manual !== null }

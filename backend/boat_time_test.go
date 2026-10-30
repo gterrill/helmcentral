@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -260,5 +262,61 @@ func TestLabelSpan_NamesBothSidesOfTheClocksChanging(t *testing.T) {
 	}
 	if got := syd.LabelSpan(after, after.Add(time.Hour)); got != "AEDT (UTC+11)" {
 		t.Errorf("one side: %q", got)
+	}
+}
+
+// useZoneIndexStillLoading makes boatTimeAt see an index that is not ready
+// yet. The index is built first, so the background build the call starts has
+// nothing left to do and cannot flip the flag mid-test.
+func useZoneIndexStillLoading(t *testing.T) {
+	t.Helper()
+	if _, err := zoneFinder(); err != nil {
+		t.Fatal(err)
+	}
+	finderReady.Store(false)
+	t.Cleanup(func() { finderReady.Store(true) })
+}
+
+func captureBoatTimeLog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+	return &buf
+}
+
+func TestStartZoneFinder_StartsTheBuildOnceNotPerCall(t *testing.T) {
+	finderStarted.Store(false)
+	t.Cleanup(func() { finderStarted.Store(true) })
+	if !startZoneFinder() {
+		t.Fatal("the first call starts the build")
+	}
+	if startZoneFinder() {
+		t.Fatal("a second call must not start another goroutine")
+	}
+}
+
+func TestBoatTimeAt_AGoodFixWhileTheIndexLoadsDoesNotBlameTheFix(t *testing.T) {
+	useFreshBoatZone(t)
+	boatTimeAt(-33.87, 151.21, true) // remembers Australia/Sydney
+	useZoneIndexStillLoading(t)
+	logs := captureBoatTimeLog(t)
+
+	bt := boatTimeAt(-20.29, 148.78, true) // a good fix, but the index is not ready
+	if bt.Name != "Australia/Sydney" || !bt.LastFix {
+		t.Fatalf("the remembered zone applies until the index is ready: %+v", bt)
+	}
+	if strings.Contains(logs.String(), "no usable position fix") {
+		t.Errorf("the fix was fine, the log should not say it was not: %q", logs.String())
+	}
+	if !strings.Contains(logs.String(), "still loading") {
+		t.Errorf("the log should say the zone index is loading: %q", logs.String())
+	}
+
+	// The wait does not use up the once-only line for a real loss of fix.
+	logs.Reset()
+	boatTimeAt(-1, -1, false)
+	if !strings.Contains(logs.String(), "no usable position fix") {
+		t.Errorf("a genuine no-fix still logs once: %q", logs.String())
 	}
 }

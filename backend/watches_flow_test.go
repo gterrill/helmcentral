@@ -288,9 +288,9 @@ func TestWatchREST_CreateListGetPatchDelete(t *testing.T) {
 
 func TestWatchREST_ListReportsAStoppedScheduler(t *testing.T) {
 	newProposalEnv(t)
-	prev := activeWatchHost
-	activeWatchHost = &watchHost{stopped: "Watches stopped: the run history could not be saved (disk full). Restart Helmcentral after fixing it."}
-	t.Cleanup(func() { activeWatchHost = prev })
+	prev := activeWatchHost.Load()
+	activeWatchHost.Store(&watchHost{stopped: "Watches stopped: the run history could not be saved (disk full). Restart Helmcentral after fixing it."})
+	t.Cleanup(func() { activeWatchHost.Store(prev) })
 	c, rec := watchRequestTo(http.MethodGet, "/api/watches", "")
 	if err := listWatchesHandler(c); err != nil {
 		t.Fatal(err)
@@ -308,9 +308,9 @@ func TestWatchREST_ListReportsAStoppedScheduler(t *testing.T) {
 func TestWatchREST_RunNow(t *testing.T) {
 	f := newWatchHostFixture(t)
 	f.add("Morning", "0 6 * * *")
-	prev := activeWatchHost
-	activeWatchHost = f.host
-	t.Cleanup(func() { activeWatchHost = prev })
+	prev := activeWatchHost.Load()
+	activeWatchHost.Store(f.host)
+	t.Cleanup(func() { activeWatchHost.Store(prev) })
 	c, rec := watchRequestTo(http.MethodPost, "/api/watches/id-Morning/run", "", "id", "id-Morning")
 	if err := runWatchHandler(c); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("run: %v %d %s", err, rec.Code, rec.Body)
@@ -445,9 +445,9 @@ func TestMateWatchTools_ListReadAndRun(t *testing.T) {
 	f := newWatchHostFixture(t)
 	f.docs = env.docs
 	f.clock = env.clock
-	prev := activeWatchHost
-	activeWatchHost = f.host
-	t.Cleanup(func() { activeWatchHost = prev })
+	prev := activeWatchHost.Load()
+	activeWatchHost.Store(f.host)
+	t.Cleanup(func() { activeWatchHost.Store(prev) })
 	out, err = env.deps.executeRunWatchNow(context.Background(), json.RawMessage(`{"watch_id":"`+w.ID+`"}`))
 	if err != nil || !strings.Contains(out, `"outcome":"ran"`) || len(f.reports) != 1 {
 		t.Fatalf("run now: %s %v reports %v", out, err, f.reports)
@@ -455,7 +455,7 @@ func TestMateWatchTools_ListReadAndRun(t *testing.T) {
 	if _, err := env.deps.executeRunWatchNow(context.Background(), json.RawMessage(`{"watch_id":"nope"}`)); err == nil {
 		t.Error("an unknown watch fails plainly")
 	}
-	activeWatchHost = nil
+	activeWatchHost.Store(nil)
 	if _, err := env.deps.executeRunWatchNow(context.Background(), json.RawMessage(`{"watch_id":"`+w.ID+`"}`)); err == nil {
 		t.Error("without a scheduler it fails plainly")
 	}

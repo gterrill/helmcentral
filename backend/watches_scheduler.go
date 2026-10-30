@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,7 +68,7 @@ type watchHost struct {
 
 // activeWatchHost is the running scheduler, for the REST routes and Mate's
 // run_watch_now.
-var activeWatchHost *watchHost
+var activeWatchHost atomic.Pointer[watchHost]
 
 // halt stops every watch run until Helmcentral is restarted.
 func (h *watchHost) halt(err error) {
@@ -422,7 +423,7 @@ func productionWatchReport(settingsPath string, w savedWatch, now time.Time, loc
 // Helmcentral stopped.
 func startWatches(ctx context.Context, settingsPath string, interval time.Duration) {
 	host := newProductionWatchHost(settingsPath)
-	activeWatchHost = host
+	activeWatchHost.Store(host)
 	if store := host.store(); store != nil {
 		resumed, ended, err := resumeOneOffWatches(globalAssistantWatches, store, host.now())
 		if err != nil {

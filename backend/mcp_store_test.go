@@ -2,8 +2,10 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -184,6 +186,59 @@ func TestMCPStore_QueuedActivityIsWrittenOffTheCallersPath(t *testing.T) {
 	if s.DroppedActivity() != 0 {
 		t.Fatalf("dropped %d", s.DroppedActivity())
 	}
+}
+
+func TestMCPStore_ListActivityDoesNotWaitOnLaterTraffic(t *testing.T) {
+	s := newTestMCPStore(t)
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if len(s.queue) < mcpActivityBuffer/2 { // steady traffic, short of the drop point
+					s.QueueActivity(mcpActivity{At: s.now(), Client: "busy", Kind: "tool", Name: "n", Outcome: "ok"})
+				}
+			}
+		}()
+	}
+	done := make(chan error, 1)
+	go func() {
+		for i := 0; i < 20; i++ {
+			name := fmt.Sprintf("mine-%d", i)
+			s.QueueActivity(mcpActivity{At: s.now(), Client: "me", Kind: "tool", Name: name, Outcome: "ok"})
+			got, err := s.ListActivity(1 << 20)
+			if err != nil {
+				done <- err
+				return
+			}
+			found := false
+			for _, e := range got {
+				found = found || e.Name == name
+			}
+			if !found {
+				done <- fmt.Errorf("%s was queued before ListActivity and is not in its result", name)
+				return
+			}
+		}
+		done <- nil
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Error(err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Error("ListActivity did not return under steady traffic")
+	}
+	close(stop)
+	wg.Wait()
 }
 
 func TestMCPStore_FullActivityBufferCountsTheDrop(t *testing.T) {
