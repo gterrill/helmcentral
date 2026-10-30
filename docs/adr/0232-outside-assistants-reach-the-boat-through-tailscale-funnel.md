@@ -41,7 +41,7 @@ shape the decision:
   "Trim the mount point from the URL path before proxying. (#6571)"). A request
   to exactly the mount point goes to the target URL's own path. So the correct
   command puts `/mcp` in the target too:
-  `tailscale funnel --bg --https=8443 --set-path=/mcp http://127.0.0.1:<port>/mcp`.
+  `tailscale funnel --bg --set-path=/mcp http://127.0.0.1:<port>/mcp`.
 - A path with no mount gets `http.NotFound`. With only `/mcp` mounted, `/api` and
   `/` are 404 from outside.
 - Every request is forwarded with `Tailscale-Funnel-Request: ?1`, and Tailscale
@@ -68,18 +68,23 @@ message the bot.
 
 ### Funnel is the documented route, for `/mcp` only
 
-The help pages tell the operator to run, on the machine that runs Helmcentral
-or one that can reach it:
+Funnel runs on port 443, because Claude's connectors reach no other port (see
+the addendum). The help pages give two ways, chosen by what the machine already
+has on 443:
 
-```
-tailscale funnel --bg --https=8443 --set-path=/mcp http://127.0.0.1:<port>/mcp
-```
+- **Nothing on 443:** on the machine that runs Helmcentral or one that can
+  reach it, `tailscale funnel --bg --set-path=/mcp http://127.0.0.1:<port>/mcp`.
+- **443 already serves something,** typically the dashboard over the tailnet
+  through `tailscale serve`: a second Tailscale machine in a Docker container,
+  `tailscale/tailscale` in userspace mode, whose `TS_SERVE_CONFIG` mounts only
+  `/mcp` on its 443 with `AllowFunnel`, proxying to
+  `http://host.docker.internal:<port>/mcp`. It has its own `ts.net` name, so
+  the first machine's Serve, and the dashboard's address, are untouched.
 
-Port 8443 keeps Funnel off 443, where an existing Serve setup for the
-dashboard would otherwise turn public with it. The connector's address carries
-`:8443`. The operator is told to check it with `tailscale funnel status`, a browser request to the root
-(404), and a browser request to `/mcp` (the 401 message). Turning it off is the
-same flags with `off`. The connector is added in Claude with the "No sign in"
+The connector's address is `https://<machine>.<tailnet>.ts.net/mcp` with no
+port. The operator is told to check it with `tailscale funnel status` and a
+browser request to `/mcp` (the 401 message). Turning it off is the same flags
+with `off`, or `docker compose down` for the second machine. The connector is added in Claude with the "No sign in"
 option and an `Authorization: Bearer <token>` request header. The page tells the
 operator to make a token for it alone, so it can be revoked alone.
 
@@ -148,11 +153,43 @@ named mistake, not a general firewall.
 - Funnel's bandwidth limits apply and can't be changed. MCP traffic is small.
 - It works only where the Tailscale CLI runs. Whether the box's install offers
   the CLI and Funnel is checked on the boat, not assumed here.
-- Which of Claude's clients send an `Origin` header, or probe
-  `/.well-known/oauth-protected-resource`, is not settled here. An `Origin` would
-  be refused with 403. The guard answers 404 to the probe, as Funnel does with
-  no mount, which an OAuth-optional client is expected to treat as "no OAuth".
-  Both are checked against a real connector before this is relied on.
+- Whether Claude's clients send an `Origin` header, or probe
+  `/.well-known/oauth-protected-resource`, was open when this was accepted. The
+  addendum records the answer: neither, in the test made.
 - A Funnel left running with no tokens exposes nothing but 401s.
 - ADR 0111's model gains a second reach. The LAN and Tailscale are still
   trusted. One path, `/mcp`, is also public, behind a token.
+
+## Addendum (2026-10-30): port 443 only, and a machine of its own
+
+The decision first documented Funnel on 8443, so a tailnet Serve of the
+dashboard on 443 could stay private. Tried on Pikorua's box with v0.57.0, it
+failed:
+
+- **Claude doesn't connect to 8443 or 10000.** The connector's check and
+  "Continue anyway" both said the address couldn't be reached, and no request
+  reached Helmcentral on either port. The same addresses answered 401 to `curl`
+  from the public internet, so Funnel was working. Claude's connector egress
+  evidently allows 443 only. Anthropic's page doesn't say so.
+- **8443 was also taken on that box.** Pi-hole published its web interface on
+  host port 8443, and the host-networked Tailscale container logged "address
+  already in use" for its tailnet listener on 8443. A fixed alternative port is
+  a guess about what else the box runs.
+- **A second Tailscale machine on 443 worked.** A `tailscale/tailscale`
+  container in userspace mode on Docker's bridge network, signed in as
+  `helmcentral-mcp` with `TS_SERVE_CONFIG` mounting only `/mcp` and
+  `AllowFunnel` on 443, reached Helmcentral at `host.docker.internal:9091`.
+  From the internet `/mcp` answered 401 and `/`, `/api/health`, `/mc%70` and
+  `/mcp/x` answered 404. The claude.ai connector, used from the phone app,
+  answered a house bank question. Going through the host's published port
+  rather than Helmcentral's compose network means a Helmcentral redeploy can't
+  detach it.
+- **The connector test settled the open questions.** The connector's check
+  (`python-httpx`) sent one POST without the bearer header and took the 401 as
+  a live server. The chat's calls came as `Claude-User` from Anthropic
+  addresses, all answered 200. None carried an `Origin`, and nothing probed
+  `/.well-known/oauth-protected-resource`, so the guard refused nothing.
+
+The decision above is amended to port 443, with the second machine as the
+documented way when 443 is already in use. The guard is unchanged: the second
+machine's Funnel marks requests with `Tailscale-Funnel-Request` like any other.
