@@ -509,6 +509,7 @@ var mateTools = []mateTool{
 	mateToolListRecords,
 	mateToolGetRecord,
 	mateToolProposeChanges,
+	mateToolSavePlace,
 	mateToolStartWatch,
 	mateToolGetVesselParticulars,
 	mateToolGetPlannedStay,

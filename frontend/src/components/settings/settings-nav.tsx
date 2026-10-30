@@ -15,6 +15,7 @@ export type SettingsSectionId =
   | 'alarms'
   | 'assistant'
   | 'offline-coastline'
+  | 'saved-places'
   | 'outside-assistants'
   | 'security'
   | 'logs'
@@ -48,6 +49,7 @@ export const SETTINGS_SECTION_GROUPS: Array<SectionNavGroup<SettingsSectionId>> 
       { id: 'anchor-watch', label: 'Anchor Watch' },
       { id: 'alarms', label: 'Alarms' },
       { id: 'assistant', label: 'Mate' },
+      { id: 'saved-places', label: 'Saved places' },
       { id: 'offline-coastline', label: 'Offline coastline' },
       { id: 'outside-assistants', label: 'Outside assistants' },
     ],

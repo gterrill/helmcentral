@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/errors'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -16,10 +17,6 @@ import {
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { copyTextFrom } from '@/lib/copy-text'
 import { formatDayTimeIn, selectTimeZone } from '@/lib/vessel-time'
-
-function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
 
 function endpointUrl(): string {
   return `${window.location.origin}/mcp`

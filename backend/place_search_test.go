@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -32,11 +33,11 @@ func TestPlaceSearch_ReturnsCandidatesWithDistanceAndBearing(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Results) != 2 || res.Results[0].Name != "Coral Coast Marina" || res.Results[0].StraightLineNm <= 0 {
+	if len(res.Results) != 2 || res.Results[0].Name != "Coral Coast Marina" || *res.Results[0].StraightLineNm <= 0 {
 		t.Fatalf("expected nearest-first candidates with distance, got %+v", res.Results)
 	}
-	if res.Results[0].StraightLineBearingDeg != 0 && res.Results[0].StraightLineBearingDeg != 360 {
-		t.Fatalf("the nearer marina is due north, got bearing %d", res.Results[0].StraightLineBearingDeg)
+	if *res.Results[0].StraightLineBearingDeg != 0 && *res.Results[0].StraightLineBearingDeg != 360 {
+		t.Fatalf("the nearer marina is due north, got bearing %d", *res.Results[0].StraightLineBearingDeg)
 	}
 	if provider.lastCall().Query != "Coral Coast Marina" {
 		t.Fatalf("provider asked for %q", provider.lastCall().Query)
@@ -87,5 +88,23 @@ func TestPlaceSearch_UnknownBoatPositionIs503(t *testing.T) {
 	}
 	if provider.callCount() != 0 {
 		t.Fatal("no position, no provider call")
+	}
+}
+
+func TestPlaceSearch_IsWiredToTheRecordStoreSoItFindsSavedPlaces(t *testing.T) {
+	env := newProposalEnv(t)
+	createTestSavedPlace(t, env, "Thomas Island South", -20.5446, 149.118933)
+	deps := placeSearchDeps() // the production wiring, not a test double
+	if deps.documents == nil || deps.documents() != env.docs {
+		t.Fatal("the operator's place search must read the record store")
+	}
+	provider := &fakeSearchPlacesProvider{id: "fake-places"}
+	deps.vesselState = func() (vesselStateData, error) { return vesselStateData{Latitude: -20.1, Longitude: 149.1}, nil }
+	deps.placeNames = func() (placeNameProvider, string, error) { return provider, provider.ID(), nil }
+	withPlaceSearchDeps(t, deps)
+
+	rec := serveForecastPoint(t, placeSearchHandler, "?q="+url.QueryEscape("Thomas Is. South"))
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Thomas Island South") || provider.callCount() != 0 {
+		t.Fatalf("expected the saved place without asking the provider: %d %s", rec.Code, rec.Body)
 	}
 }

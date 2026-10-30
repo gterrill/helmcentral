@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/errors'
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { ImageUp, Trash2 } from 'lucide-react'
 
@@ -41,8 +42,6 @@ interface DeckEditorProps {
 
 /** How far the new plan's width-to-height ratio may differ from the old one's before we warn. */
 const ASPECT_TOLERANCE = 0.02
-
-const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export function DeckEditor(
   { id, onOpenLocations, onOpenDecks, onDeleted, canWrite = true, list, onOpenNeighbour }: DeckEditorProps,

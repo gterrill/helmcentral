@@ -22,6 +22,7 @@ import { GeneralSection } from '@/components/settings/sections/general-section'
 import { SecuritySection } from '@/components/settings/sections/security-section'
 import { InfluxdbSection } from '@/components/settings/sections/influxdb-section'
 import { LogsSection } from '@/components/settings/sections/logs-section'
+import { SavedPlacesSection } from '@/components/settings/sections/saved-places-section'
 import { OutsideAssistantsSection } from '@/components/settings/sections/outside-assistants-section'
 import { MayaraSection } from '@/components/settings/sections/mayara-section'
 import { OfflineCoastlineSection } from '@/components/settings/sections/offline-coastline-section'
@@ -284,6 +285,8 @@ const SettingsPageContent = forwardRef<SettingsPageHandle, SettingsPageProps>(fu
         return <AssistantSection draft={draft} onChange={handleDraftChange} />
       case 'offline-coastline':
         return <OfflineCoastlineSection draft={draft} onChange={handleDraftChange} onOpenHelp={onOpenHelp} />
+      case 'saved-places':
+        return <SavedPlacesSection />
       case 'outside-assistants':
         return <OutsideAssistantsSection />
       case 'security':

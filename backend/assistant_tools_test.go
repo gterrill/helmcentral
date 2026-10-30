@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -92,10 +93,32 @@ func (f *fakeSearchPlacesProvider) lastCall() placeSearchInput {
 // findPlacesDeps builds the minimal assistantToolDeps find_places needs: a
 // fixed vessel position, the given fake provider wired as the configured
 // place-names provider.
+var (
+	emptyRecordStoreOnce sync.Once
+	emptyRecordStore     *documentStore
+)
+
+// sharedEmptyRecordStore is a record store with nothing saved in it, for
+// find_places tests that are not about saved places. find_places reads the
+// store before it asks the provider, and a missing store is an error.
+func sharedEmptyRecordStore() *documentStore {
+	emptyRecordStoreOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "find-places-store")
+		if err != nil {
+			panic(err)
+		}
+		if emptyRecordStore, err = newDocumentStore(filepath.Join(dir, "helmcentral.sqlite")); err != nil {
+			panic(err)
+		}
+	})
+	return emptyRecordStore
+}
+
 func findPlacesDeps(vesselLat, vesselLon float64, provider placeNameProvider) assistantToolDeps {
 	// The result cache is package-level; start every test cold.
 	placeSearchCache.reset()
 	return assistantToolDeps{
+		documents: sharedEmptyRecordStore,
 		vesselState: func() (vesselStateData, error) {
 			return vesselStateData{Latitude: vesselLat, Longitude: vesselLon}, nil
 		},
@@ -279,6 +302,7 @@ func TestExecuteFindPlaces_OrdinaryCompoundQueryStillAccepted(t *testing.T) {
 // result (AGENTS.md's fail-fast / no-masking-fallback policy).
 func TestExecuteFindPlaces_ProviderResolutionErrorSurfaces(t *testing.T) {
 	deps := assistantToolDeps{
+		documents:   sharedEmptyRecordStore,
 		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -20.1, Longitude: 149.1}, nil },
 		placeNames: func() (placeNameProvider, string, error) {
 			return nil, "", fmt.Errorf("unknown place-names provider configured: %q", "no-such-plugin")
@@ -345,6 +369,7 @@ func TestExecuteFindPlaces_NoCentredOnKeepsVesselCentre(t *testing.T) {
 func TestExecuteFindPlaces_NoFixAndNoNearArgsReturnsNoteNotError(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places"}
 	deps := assistantToolDeps{
+		documents:   sharedEmptyRecordStore,
 		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -1, Longitude: -1}, nil },
 		placeNames:  func() (placeNameProvider, string, error) { return provider, provider.ID(), nil },
 	}

@@ -103,6 +103,8 @@ Step-by-step instructions for specific jobs.
   filling it, keeping it current and clearing it.
 - [Run your own Overpass server](how-to/run-your-own-overpass-server.md): a
   place-names server aboard that answers quickly and works offline.
+- [Manage the places you've given Mate](how-to/manage-saved-places.md): saving,
+  moving, renaming and deleting a named position.
 - [Set up your vessel](how-to/set-up-your-vessel.md): choose which engines and
   house bank anomaly detection watches, and enter owner and insurance details.
 - [Show equipment on a tile](how-to/show-equipment-on-a-tile.md)

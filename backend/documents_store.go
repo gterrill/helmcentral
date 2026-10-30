@@ -248,6 +248,16 @@ var (
 // globalAssistantStore (assistant_store.go).
 var globalDocumentStore *documentStore
 
+// requireDocumentStore is globalDocumentStore for a caller that cannot go on
+// without it. A missing store is a boot ordering bug, so it is reported, named
+// for what asked, rather than worked around.
+func requireDocumentStore(what string) (*documentStore, error) {
+	if globalDocumentStore == nil {
+		return nil, fmt.Errorf("%s: the record store is not open", what)
+	}
+	return globalDocumentStore, nil
+}
+
 func documentsDirPath() string {
 	return cacheFilePath("DOCUMENTS_DIR", "data/documents")
 }
@@ -316,7 +326,11 @@ func createDocumentsSchema(db *sql.DB) error {
 		return err
 	}
 
-	return createWatchesSchema(db)
+	if err := createWatchesSchema(db); err != nil {
+		return err
+	}
+
+	return createSavedPlacesSchema(db)
 }
 
 // newDocumentStore opens (creating if necessary) the SQLite database at

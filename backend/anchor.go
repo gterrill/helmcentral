@@ -266,7 +266,7 @@ func setAnchorWatch(c echo.Context) error {
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if body.Lat < -90 || body.Lat > 90 || body.Lon < -180 || body.Lon > 180 {
+	if !validLatLon(body.Lat, body.Lon) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat/lon out of range"})
 	}
 	if body.PlanningDepthM != nil && *body.PlanningDepthM != -1 && *body.PlanningDepthM <= 0 {
@@ -611,7 +611,7 @@ func patchAnchorWatch(c echo.Context) error {
 	if (body.Lat == nil) != (body.Lon == nil) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat and lon must be provided together"})
 	}
-	if body.Lat != nil && (*body.Lat < -90 || *body.Lat > 90 || *body.Lon < -180 || *body.Lon > 180) {
+	if body.Lat != nil && !validLatLon(*body.Lat, *body.Lon) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat/lon out of range"})
 	}
 	if body.RadiusMeters != nil && *body.RadiusMeters <= 0 {
