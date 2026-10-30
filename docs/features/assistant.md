@@ -490,6 +490,13 @@ knots can be a go on a downwind leg and a no-go on a beat.
 When you ask whether or when to go, Mate runs this check alongside its usual
 briefing and shows the card without repeating the grid as a table.
 
+When Mate says how the wind or sea sits against your course, it should take
+that from this check or from the forecast along your course. It shouldn't work
+the angle out itself. Whether your passage limits are set comes from your
+settings as they are now, not from an earlier answer. If a draft answer gets
+either of these wrong in a way Helmcentral can spot, Mate checks and answers
+again, so you may see an answer withdrawn and replaced.
+
 The card doesn't fill gaps. A leg past the end of the forecast is **NO DATA**,
 not go. Anything it couldn't check is listed under the grid ("Not checked: wave
 height, wind against tide"). That happens, for example, when no wave forecast is

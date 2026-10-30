@@ -247,7 +247,22 @@ func (l passageLimits) sector(name string) passageSectorLimits {
 }
 
 func (l passageLimits) anyWindNoGo() bool {
-	return l.Ahead.WindKnNoGo != nil || l.Abeam.WindKnNoGo != nil || l.Astern.WindKnNoGo != nil
+	return len(l.noGoSectors()) > 0
+}
+
+// noGoSectors names the sectors with a wind no-go, in ahead, abeam, astern
+// order.
+func (l passageLimits) noGoSectors() []string {
+	var out []string
+	for _, sec := range []struct {
+		name string
+		l    passageSectorLimits
+	}{{"ahead", l.Ahead}, {"abeam", l.Abeam}, {"astern", l.Astern}} {
+		if sec.l.WindKnNoGo != nil {
+			out = append(out, sec.name)
+		}
+	}
+	return out
 }
 
 // passageSector is the true wind angle's sector: ahead under 60 degrees,
@@ -1199,7 +1214,13 @@ func passageLimitsFromSettingsFile(settingsPath string) func() (passageLimits, e
 		if err != nil {
 			return passageLimits{}, fmt.Errorf("settings are unreadable: %w", err)
 		}
-		am, _ := settings["assistant"].(map[string]any)
-		return passageLimitsFromSettings(am["passage_limits"])
+		return passageLimitsFromSettingsMap(settings)
 	}
+}
+
+// passageLimitsFromSettingsMap finds assistant.passage_limits in a decoded
+// settings file and decodes it.
+func passageLimitsFromSettingsMap(settings map[string]any) (passageLimits, error) {
+	am, _ := settings["assistant"].(map[string]any)
+	return passageLimitsFromSettings(am["passage_limits"])
 }

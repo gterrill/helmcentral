@@ -1422,3 +1422,12 @@ func TestAssessPassageWindowTool_FallbackWaveModelIsReported(t *testing.T) {
 		t.Fatalf("Mate's text must name the fallback model: %s", result)
 	}
 }
+
+func TestPassageLimitsFromSettingsMap(t *testing.T) {
+	if l, err := passageLimitsFromSettingsMap(map[string]any{}); err != nil || l.anyWindNoGo() {
+		t.Fatalf("empty settings: %v %v", l, err)
+	}
+	if l, err := passageLimitsFromSettingsMap(map[string]any{"assistant": map[string]any{"passage_limits": "junk"}}); err == nil {
+		t.Fatalf("junk block must be an error, got %v", l)
+	}
+}

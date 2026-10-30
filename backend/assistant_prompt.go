@@ -126,6 +126,12 @@ type assistantPromptContext struct {
 	PinnedNotesTotal int
 	ManualSections   []assistantManual
 
+	// PassageLimits is the one-line status of the operator's passage limits
+	// (assistant.passage_limits), read fresh each turn by
+	// passageLimitsStatusLine and rendered in the live part. Empty means the
+	// context was not collected from settings, and the line is left out.
+	PassageLimits string
+
 	// Spoken and Screen are turn-scoped: postAssistantMessageHandler sets
 	// them straight from that one POST's body, after calling
 	// collectAssistantPromptContext, rather than reading them from settings
@@ -443,7 +449,10 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 		WindAngleApparentDeg: -1,
 	}
 
-	if settings, err := readSettings(settingsPath); err == nil {
+	if settings, err := readSettings(settingsPath); err != nil {
+		pc.PassageLimits = passageLimitsStatusLine(passageLimits{}, fmt.Errorf("settings are unreadable: %w", err))
+	} else {
+		pc.PassageLimits = passageLimitsStatusLine(passageLimitsFromSettingsMap(settings))
 		payload := buildSettingsPayload(settings)
 		pc.BoatModel = payload.Boat.Model
 		pc.LOAM = payload.Anchor.LOAM
@@ -1120,6 +1129,21 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"tool says the passage limits are not set, tell the operator to set them in Settings → Mate → Passage " +
 		"limits, and carry on with the briefing without the card.\n\n" +
 
+		// Honest passage claims: on the boat, a southbound question with a
+		// northerly forecast got "bow-quarter" and "head sea" for a wind
+		// astern, "set passage limits" when they were set (copied from an
+		// earlier turn), and a "find_places hit agrees" from a turn that
+		// made no tool call. The run loop now sends such an answer back
+		// (ADR 0234); these rules say what the loop is looking for.
+		"Say whether the passage limits are set only from the Passage limits line in this prompt or from " +
+		"assess_passage_window in this turn, never from an earlier turn's answer. Never " +
+		"describe wind or sea as ahead, on the bow, abeam, on the beam, on the quarter, astern, a head sea " +
+		"or a following sea unless that sector came from assess_passage_window in this turn, or from " +
+		"get_wind_forecast's rel_wind or rel_wave labels, called with course_deg, in this turn; the angle " +
+		"between the wind and the course is not arithmetic to do in your head. Never cite or imply a result " +
+		"from a tool you did not call in this turn (find_places, routes, distances, forecasts): label " +
+		"figures from earlier turns as from earlier, or fetch them again.\n\n" +
+
 		// Open-plan continuity: the operator asked about an outer-reef window,
 		// got "no window through Thursday, Friday possible"; moved anchorage
 		// and asked only "what do the conditions look like now?"; Mate ran a
@@ -1266,6 +1290,14 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		}
 	}
 
+	// 4d. Passage limits: Mate told the operator to set limits that were
+	// already set, repeating an earlier turn. A fresh statement each turn
+	// gives it something true to read instead. Live, not stable: the
+	// operator can change the limits between two questions.
+	if pc.PassageLimits != "" {
+		lb.WriteString(pc.PassageLimits + "\n\n")
+	}
+
 	// 5a. Screen context: only present when the POST for this turn carried a
 	// non-empty screen field (postAssistantMessageHandler), so a
 	// text-composer question - the overwhelming majority - renders exactly
@@ -1294,6 +1326,19 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	live = lb.String()
 
 	return stable, live
+}
+
+// passageLimitsStatusLine states whether the passage limits are set. An
+// unreadable settings block is said plainly, never read as unset.
+func passageLimitsStatusLine(l passageLimits, err error) string {
+	if err != nil {
+		return fmt.Sprintf("Passage limits: could not be read (%v). Do not say whether they are set.", err)
+	}
+	sectors := l.noGoSectors()
+	if len(sectors) == 0 {
+		return "Passage limits: not set"
+	}
+	return "Passage limits: set (" + strings.Join(sectors, ", ") + " have a no-go wind)"
 }
 
 // buildAssistantSystemPrompt renders pc into the assistant's system prompt

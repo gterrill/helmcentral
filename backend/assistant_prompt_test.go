@@ -1278,6 +1278,21 @@ func TestBuildAssistantSystemPrompt_PassageWindowRule(t *testing.T) {
 	}
 }
 
+// The southbound-northerly incident: wind called a head sea when it was
+// astern, limits called unset when set, a tool result cited from no call.
+func TestBuildAssistantSystemPrompt_HonestPassageClaimsRule(t *testing.T) {
+	stable, _ := assistantSystemPromptParts(basePromptContext())
+	for _, want := range []string{
+		"Say whether the passage limits are set only from the Passage limits line in this prompt or from assess_passage_window in this turn, never from an earlier turn's answer",
+		"unless that sector came from assess_passage_window in this turn",
+		"Never cite or imply a result from a tool you did not call in this turn",
+	} {
+		if !strings.Contains(stable, want) {
+			t.Errorf("expected the stable prompt to contain %q", want)
+		}
+	}
+}
+
 func TestBuildAssistantSystemPrompt_AnchorageShelterRule(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(basePromptContext())
 	for _, want := range []string{
