@@ -11,6 +11,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -105,6 +106,18 @@ func (c *chartCanvas) textWidth(s string, size int) int {
 	return (&font.Drawer{Face: c.faces[size]}).MeasureString(s).Ceil()
 }
 
+// fitText is s, cut short with an ellipsis if it is wider than max pixels.
+func (c *chartCanvas) fitText(s string, max, size int) string {
+	if c.textWidth(s, size) <= max {
+		return s
+	}
+	runes := []rune(s)
+	for len(runes) > 0 && c.textWidth(string(runes)+"…", size) > max {
+		runes = runes[:len(runes)-1]
+	}
+	return strings.TrimSpace(string(runes)) + "…"
+}
+
 // chartPanel is the series that share one unit and one y axis.
 type chartPanel struct {
 	unit   string
@@ -156,33 +169,58 @@ func renderWatchChartPNG(c watchChart) ([]byte, error) {
 	cv := &chartCanvas{img: image.NewRGBA(image.Rect(0, 0, chartPNGWidth, chartPNGHeight)), faces: faces}
 	cv.rect(0, 0, chartPNGWidth, chartPNGHeight, chartWhite)
 
+	thresholds := c.thresholds()
 	title := c.Title
 	if c.Timezone != "" {
 		title += "  (" + c.Timezone + ")"
 	}
 	cv.text(title, 16, 28, chartTitleSize, chartInk)
 
-	// Legend under the title, one entry a series.
-	lx := 16
+	// Legend under the title, one entry a series and one a dashed line. An entry
+	// that would pass the right edge starts a new row, and a label too long even
+	// for a row of its own is cut short with an ellipsis.
+	const (
+		legendLeft, legendRight, legendRowH    = 16, chartPNGWidth - 16, 16
+		legendSwatch, legendLineKey, legendGap = 20, 28, 24
+	)
+	type legendEntry struct {
+		label string
+		key   int // the width the swatch takes before the label
+		draw  func(x, y int)
+	}
+	var entries []legendEntry
 	for i, s := range c.Series {
-		cv.rect(lx, 40, lx+14, 52, watchChartColours[i])
 		label := s.Label
 		if s.Unit != "" {
 			label += " (" + s.Unit + ")"
 		}
-		cv.text(label, lx+20, 51, chartTextSize, chartInk)
-		lx += 20 + cv.textWidth(label, chartTextSize) + 24
+		colour := watchChartColours[i]
+		entries = append(entries, legendEntry{label, legendSwatch, func(x, y int) { cv.rect(x, y, x+14, y+12, colour) }})
 	}
-	if c.Threshold != nil {
-		cv.line(float64(lx), 46, float64(lx+22), 46, 2, watchChartThresholdColour, 5)
-		cv.text(c.Threshold.Label, lx+28, 51, chartTextSize, chartInk)
+	for _, th := range thresholds {
+		entries = append(entries, legendEntry{th.Label, legendLineKey, func(x, y int) {
+			cv.line(float64(x), float64(y+6), float64(x+22), float64(y+6), 2, watchChartThresholdColour, 5)
+		}})
+	}
+	lx, row := legendLeft, 0
+	for _, e := range entries {
+		label := cv.fitText(e.label, legendRight-legendLeft-e.key, chartTextSize)
+		width := e.key + cv.textWidth(label, chartTextSize)
+		if lx > legendLeft && lx+width > legendRight {
+			lx, row = legendLeft, row+1
+		}
+		y := 40 + row*legendRowH
+		e.draw(lx, y)
+		cv.text(label, lx+e.key, y+11, chartTextSize, chartInk)
+		lx += width + legendGap
 	}
 
 	const (
 		left, right = 100, 24
-		top, bottom = 66, 34
+		bottom      = 34
 		gap         = 28
 	)
+	top := 66 + row*legendRowH
 	panels := chartPanels(c)
 	plotL, plotR := left, chartPNGWidth-right
 	area := chartPNGHeight - top - bottom - gap*(len(panels)-1)
@@ -198,8 +236,10 @@ func renderWatchChartPNG(c watchChart) ([]byte, error) {
 				lo, hi = math.Min(lo, pt[1]), math.Max(hi, pt[1])
 			}
 		}
-		if c.Threshold != nil && pi == 0 {
-			lo, hi = math.Min(lo, c.Threshold.Value), math.Max(hi, c.Threshold.Value)
+		if pi == 0 {
+			for _, th := range thresholds {
+				lo, hi = math.Min(lo, th.Value), math.Max(hi, th.Value)
+			}
 		}
 		ticks := chartNiceTicks(lo, hi, 5)
 		lo, hi = ticks[0], ticks[len(ticks)-1]
@@ -228,9 +268,11 @@ func renderWatchChartPNG(c watchChart) ([]byte, error) {
 			}
 		}
 
-		if c.Threshold != nil && pi == 0 {
-			y := yOf(c.Threshold.Value)
-			cv.line(float64(plotL), y, float64(plotR), y, 2, watchChartThresholdColour, 6)
+		if pi == 0 {
+			for _, th := range thresholds {
+				y := yOf(th.Value)
+				cv.line(float64(plotL), y, float64(plotR), y, 2, watchChartThresholdColour, 6)
+			}
 		}
 		for _, si := range p.series {
 			pts := c.Series[si].Points

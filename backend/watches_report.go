@@ -661,6 +661,18 @@ func pressureChartSpec(sur vesselStatusSurroundings, fallHPa float64, now time.T
 	return spec
 }
 
+// The dashed lines on a tank's chart, in a watch report and on an alarm.
+const (
+	tankWarnLevelLabel  = "Warning level"
+	tankAlarmLevelLabel = "Alarm level"
+)
+
+// tankPercentSeries is a tank's level as a percent of full, read the way the
+// Tanks tile reads it.
+func tankPercentSeries(name, path string) watchChartSeriesSpec {
+	return watchChartSeriesSpec{Label: name, Unit: "%", Path: path, Convert: "percent"}
+}
+
 func tankChartSpec(tank vesselStatusTank, in watchReportInput) *watchChartSpec {
 	from := in.PreviousAt
 	if latest := in.Now.Add(-time.Hour); from.After(latest) {
@@ -671,9 +683,9 @@ func tankChartSpec(tank vesselStatusTank, in watchReportInput) *watchChartSpec {
 		spec.Problem = "the tank's SignalK path is not known"
 		return spec
 	}
-	spec.Series = []watchChartSeriesSpec{{Label: tank.Name, Unit: "%", Path: tank.levelPath, Convert: "percent"}}
+	spec.Series = []watchChartSeriesSpec{tankPercentSeries(tank.Name, tank.levelPath)}
 	if tank.WarnPercent > 0 && tank.AlarmsNotRunning == "" && !tank.AlarmsOff {
-		spec.Threshold = &watchChartThreshold{Label: "Warning level", Value: tank.WarnPercent}
+		spec.Threshold = &watchChartThreshold{Label: tankWarnLevelLabel, Value: tank.WarnPercent}
 	}
 	return spec
 }

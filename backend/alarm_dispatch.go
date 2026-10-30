@@ -41,6 +41,9 @@ type queuedAlarmDispatch struct {
 	// and never hold up the evaluator.
 	watch    *watchReportMessage
 	channels []string
+	// chartBy is when the alarm's chart read must be over: alarmChartDeadline
+	// after the alarm was queued, on the real clock (ADR 0235).
+	chartBy time.Time
 }
 
 // alarmDispatcher sends alarm transitions to the configured transports, queuing
@@ -59,6 +62,12 @@ type alarmDispatcher struct {
 	// message sent without its chart.
 	watchNote func(watchID, runID, note string)
 
+	// chartSources reads the history behind an alarm's chart, boatLocation is
+	// the boat's clock for its time axis. Unset, an alarm goes out saying its
+	// chart was left out.
+	chartSources watchChartSources
+	boatLocation func() (*time.Location, error)
+
 	// queueMu guards queue below. Separate from any lock store or transports
 	// use, since enqueue must never wait on whatever run/dispatch happen to be
 	// doing right now -- that would defeat the point of queueing at all.
@@ -72,10 +81,11 @@ type alarmDispatcher struct {
 
 func newAlarmDispatcher() *alarmDispatcher {
 	return &alarmDispatcher{
-		transports: func() []notificationTransport { return buildTransports(getAlarmTransports()) },
-		store:      globalAlarmLogStore,
-		now:        func() time.Time { return time.Now().UTC() },
-		wake:       make(chan struct{}, 1),
+		transports:   func() []notificationTransport { return buildTransports(getAlarmTransports()) },
+		store:        globalAlarmLogStore,
+		now:          func() time.Time { return time.Now().UTC() },
+		wake:         make(chan struct{}, 1),
+		boatLocation: func() (*time.Location, error) { return watchBoatLocation() },
 		// A delivered watch report is noted on its run, so the Watches page
 		// can say who was told.
 		watchDelivered: func(watchID, runID, channel string) { recordWatchDelivery(watchID, runID, channel) },
@@ -96,7 +106,7 @@ var globalAlarmDispatcher *alarmDispatcher
 // same tick (evaluateAlarmsOnce, alarm_service.go).
 func (d *alarmDispatcher) enqueue(event alarmEvent, vessel string) {
 	d.queueMu.Lock()
-	d.queue = append(d.queue, queuedAlarmDispatch{event: event, vessel: vessel})
+	d.queue = append(d.queue, queuedAlarmDispatch{event: event, vessel: vessel, chartBy: time.Now().Add(alarmChartDeadline)})
 	depth := len(d.queue)
 	d.queueMu.Unlock()
 
@@ -167,13 +177,15 @@ func (d *alarmDispatcher) run(ctx context.Context) {
 			d.dispatchWatchReport(*item.watch, item.channels)
 			continue
 		}
-		d.dispatch(item.event, item.vessel)
+		d.dispatch(item.event, item.vessel, item.chartBy)
 	}
 }
 
 // dispatch attempts immediate delivery and queues each failure for retry.
-// Escalations are notified too — that is the point of escalating.
-func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string) {
+// Escalations are notified too — that is the point of escalating. chartBy is
+// the time the alarm's chart read must be over by, fixed when it was queued
+// (ADR 0235).
+func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string, chartBy time.Time) {
 	all := d.transports()
 	selected := selectTransports(all, event.Rule.Notify)
 
@@ -199,7 +211,40 @@ func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string) {
 		return
 	}
 
+	// The channels that cannot show a chart go first, so reading history for the
+	// others never makes them wait.
+	var plain, charted []notificationTransport
+	for _, transport := range selected {
+		if alarmChartChannels[transport.ID()] {
+			charted = append(charted, transport)
+		} else {
+			plain = append(plain, transport)
+		}
+	}
 	msg := notificationFor(event, vessel, d.now())
+	// The history is read while the plain channels are sent, so it gets its
+	// whole time however long they take.
+	var waitChart func() []watchChart
+	if len(charted) > 0 {
+		waitChart = d.startChart(event, chartBy)
+	}
+	d.deliver(event, msg, plain)
+	if len(charted) == 0 {
+		return
+	}
+	// The picture is drawn once here for all three channels. A retry from the
+	// queue draws it again from the stored data.
+	if msg.Charts = waitChart(); len(msg.Charts) > 0 {
+		msg.Charts, msg.pngs = renderChartsForSend(msg.Charts, "alarm notification", nil)
+	}
+	d.deliver(event, msg, charted)
+}
+
+// deliver sends msg to each transport and queues each failure for retry.
+func (d *alarmDispatcher) deliver(event alarmEvent, msg notificationMessage, transports []notificationTransport) {
+	if len(transports) == 0 {
+		return
+	}
 	payload, err := json.Marshal(msg)
 	if err != nil {
 		log.Printf("alarm notify: cannot encode %s: %v", event.Rule.Label, err)
@@ -209,7 +254,7 @@ func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	for _, transport := range selected {
+	for _, transport := range transports {
 		// This transition supersedes anything still queued for the same rule.
 		// Dropping first means a failure below re-queues only the newest one.
 		if dropped, err := d.store.DropQueuedForRule(transport.ID(), event.Rule.ID); err != nil {

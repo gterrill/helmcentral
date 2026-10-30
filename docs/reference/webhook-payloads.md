@@ -1,17 +1,53 @@
-# Watch report webhook
+# Webhook payloads
 
-When a watch sends to the **Webhook** channel, Helmcentral posts one JSON object
-to the URL you set under **Settings** in **Alarms**. It's a different shape from
-the one used for alarms, so a receiver can tell them apart by the `kind` field.
-An alarm has a `kind` of `raised` or `cleared`. A watch report always has
-`"kind": "watch_report"`. See [Watches](../features/watches.md#notifications)
-for when a report is sent.
+The **Webhook** channel posts one JSON object to the URL you set under
+**Settings** in **Alarms**. An alarm and a watch report have different shapes,
+so a receiver can tell them apart by the `kind` field. An alarm has a `kind` of
+`raised`, `changed`, `escalated` or `cleared`. A watch report always has
+`"kind": "watch_report"`.
+
+## Alarm
+
+| Field | Type | What it is |
+| --- | --- | --- |
+| `kind` | string | `raised`, `changed`, `escalated` or `cleared`. |
+| `rule_id` | string | The alarm's id. |
+| `label` | string | The alarm's title, such as `House Bank Low`. |
+| `path` | string | The instrument reading the alarm watches. |
+| `state` | string | `warn`, `alarm` or `emergency`, or `normal` for a clear. |
+| `message` | string | What the alarm says. |
+| `value` | number | The reading when the alarm changed, in SI units. |
+| `unit` | string | The SI unit of `value`, left out when it isn't known. |
+| `vessel` | string | The boat's name. |
+| `at` | string | When it happened, as a UTC time. |
+| `charts` | array | Only on a raised alarm that has a chart, or says why it hasn't. See [Alarm chart](#alarm-chart). |
+
+### Alarm chart
+
+A raised alarm about a reading Helmcentral keeps has one entry in `charts`. An
+alarm with no chart to give, such as a clear or an anchor alarm, has no `charts`
+field at all. The entry has the same fields as a watch report chart, listed
+under [Charts](#charts), with these differences:
+
+- `title`: The alarm's title and the window, such as `Engine Room Hot, last 6 hours`.
+- `finding_index`: Always 0, and not meaningful.
+- `window`: The last 6 hours up to the moment the alarm was raised.
+- `threshold`: The alarm's limit, in the series' unit. On a tank alarm this is
+  the warning level.
+- `alarm_threshold`: Only on a tank alarm: the alarm level, a second dashed line.
+- `problem`: When the history could not be read in time, or there is none, this
+  entry has `title` and `problem` only, with no `series` and no `png_base64`.
+  The alarm is still sent on time.
+
+## Watch report
+
+See [Watches](../features/watches.md#notifications) for when a report is sent.
 
 A report is posted once for each run that qualifies. If your receiver doesn't
 answer with a success status, Helmcentral tries again for up to 24 hours. A
 newer report from the same watch replaces an older one that's still waiting.
 
-## Fields
+### Fields
 
 | Field | Type | What it is |
 | --- | --- | --- |
@@ -36,7 +72,7 @@ Each finding can also have a `chart_problem` string, which says why a chart that
 was asked for could not be drawn, for example `No history to chart: the barometer
 history is empty`.
 
-## Charts
+### Charts
 
 A run has at most two charts. Each is an object with these fields:
 
@@ -58,7 +94,7 @@ you reach it on from outside the boat. Set **Address for links** in **Settings**
 under **Alarms** and `link` is filled in. Without it, put your own address in
 front of `path`.
 
-## Example
+### Example
 
 ```json
 {

@@ -27,10 +27,38 @@ type watchChart struct {
 	Window           watchChartWindow     `json:"window"`
 	Series           []watchChartSeries   `json:"series"`
 	Threshold        *watchChartThreshold `json:"threshold,omitempty"`
+	// AlarmThreshold is a second dashed line, for a tank whose warn and alarm
+	// levels are both drawn (ADR 0235). Threshold is the warn level.
+	AlarmThreshold *watchChartThreshold `json:"alarm_threshold,omitempty"`
 	// PNGBase64 and Problem are set only in what is sent: a webhook payload
 	// carries the picture, or says why the chart was left out.
 	PNGBase64 string `json:"png_base64,omitempty"`
 	Problem   string `json:"problem,omitempty"`
+}
+
+// MarshalJSON writes a chart that was left out before it was ever read (an
+// alarm's, ADR 0235: no series) as its title and problem alone, since the empty
+// window, unit and zone would only suggest there is something to draw.
+func (c watchChart) MarshalJSON() ([]byte, error) {
+	if len(c.Series) == 0 && c.Problem != "" {
+		return json.Marshal(struct {
+			Title   string `json:"title"`
+			Problem string `json:"problem"`
+		}{c.Title, c.Problem})
+	}
+	type plain watchChart // no methods, so no recursion
+	return json.Marshal(plain(c))
+}
+
+// thresholds are the dashed lines the chart draws, warn first.
+func (c watchChart) thresholds() []watchChartThreshold {
+	var out []watchChartThreshold
+	for _, t := range []*watchChartThreshold{c.Threshold, c.AlarmThreshold} {
+		if t != nil {
+			out = append(out, *t)
+		}
+	}
+	return out
 }
 
 type watchChartWindow struct {
@@ -62,11 +90,16 @@ type watchChartSpec struct {
 	From, To  time.Time
 	Series    []watchChartSeriesSpec
 	Threshold *watchChartThreshold
-	Problem   string
+	// AlarmThreshold is drawn beside Threshold; see watchChart.
+	AlarmThreshold *watchChartThreshold
+	Problem        string
 }
 type watchChartSeriesSpec struct {
 	Label, Unit, Path, Convert string
 	Barometer                  bool
+	// Role is a path-role rule's role: it names the unit the figures are in
+	// when the path alone does not (ADR 0187).
+	Role string
 	// SIUnit is the unit a barometer series is stored in. It is converted to
 	// the operator's unit with the same table alarms use.
 	SIUnit string
@@ -138,7 +171,7 @@ func resolveWatchChart(ctx context.Context, spec *watchChartSpec, src watchChart
 	}
 	_, off := now.In(loc).Zone()
 	c := watchChart{
-		Title: spec.Title, Timezone: zone, UTCOffsetSeconds: off, Threshold: spec.Threshold,
+		Title: spec.Title, Timezone: zone, UTCOffsetSeconds: off, Threshold: spec.Threshold, AlarmThreshold: spec.AlarmThreshold,
 		Window: watchChartWindow{From: spec.From.UTC().Format(time.RFC3339), To: spec.To.UTC().Format(time.RFC3339)},
 	}
 	for _, ss := range spec.Series {
@@ -174,7 +207,7 @@ func resolveWatchChart(ctx context.Context, spec *watchChartSpec, src watchChart
 			}
 			ss.Convert = chartConvertFor(ss, already != "")
 			if ss.Convert == "display" {
-				disp, known := alarmDisplayFor(ss.Path, "")
+				disp, known := alarmDisplayFor(ss.Path, ss.Role)
 				if !known {
 					return watchChart{}, chartProblem("no display unit for this reading")
 				}
@@ -217,7 +250,7 @@ func resolveWatchChart(ctx context.Context, spec *watchChartSpec, src watchChart
 				}
 				v = percent
 			case ss.Convert == "display":
-				if disp, known := alarmDisplayFor(ss.Path, ""); known {
+				if disp, known := alarmDisplayFor(ss.Path, ss.Role); known {
 					v = disp.toShown(v)
 				}
 			}
@@ -323,6 +356,12 @@ func renderChartsForSend(charts []watchChart, channel string, note func(string))
 	out := make([]watchChart, len(charts))
 	pngs := make([][]byte, len(charts))
 	for i, c := range charts {
+		if c.Problem != "" {
+			// Left out before it was queued (an alarm's chart, ADR 0235): there is
+			// nothing to draw and the reason is already on it.
+			out[i] = c
+			continue
+		}
 		data, err := renderWatchChartPNG(c)
 		if err != nil {
 			c.Problem = fmt.Sprintf("the chart %q could not be drawn: %s", c.Title, firstErrorLine(err))
