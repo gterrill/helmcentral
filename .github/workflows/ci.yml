@@ -84,12 +84,12 @@ jobs:
   # splits cleanly across runners; on one 4-core runner it was the slowest
   # job. Lint and build run in the Frontend job alongside the shards.
   frontend-test:
-    name: Frontend tests (${{ matrix.shard }}/3)
+    name: Frontend tests (${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@v7
 
@@ -105,7 +105,7 @@ jobs:
 
       - name: Test
         working-directory: frontend
-        run: npm test -- --shard=${{ matrix.shard }}/3
+        run: npm test -- --shard=${{ matrix.shard }}/5
 
   frontend:
     name: Frontend
