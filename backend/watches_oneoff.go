@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -283,6 +284,21 @@ func fillWatchDowntime(series [][]assistantWatchSample, from, until time.Time) {
 	}
 }
 
+// location is the boat's clock the watch began on, loaded by the zone's IANA
+// name so a label reads "AEDT" and a daylight change mid-watch is followed.
+// A name the zone database does not know is an error: guessing a fixed offset
+// would put the wrong zone name on the watch's report.
+func (cfg watchOneOffConfig) location() (*time.Location, error) {
+	if cfg.ZoneName == "" {
+		return nil, errors.New("the saved boat time zone is missing")
+	}
+	z, err := zoneAtName(cfg.ZoneName)
+	if err != nil {
+		return nil, fmt.Errorf("the saved boat time zone is unreadable: %w", err)
+	}
+	return z.Loc, nil
+}
+
 func oneOffInfo(w savedWatch, cfg watchOneOffConfig) (assistantWatchInfo, error) {
 	if w.StartedAt == nil || w.EndsAt == nil {
 		return assistantWatchInfo{}, fmt.Errorf("watch %s has no start or end time", w.ID)
@@ -291,7 +307,10 @@ func oneOffInfo(w savedWatch, cfg watchOneOffConfig) (assistantWatchInfo, error)
 	if err != nil {
 		return assistantWatchInfo{}, fmt.Errorf("watch %s: the saved date is unreadable: %w", w.ID, err)
 	}
-	loc := time.FixedZone(cfg.ZoneName, cfg.OffsetSeconds)
+	loc, err := cfg.location()
+	if err != nil {
+		return assistantWatchInfo{}, fmt.Errorf("watch %s: %w", w.ID, err)
+	}
 	labels := make([]string, len(cfg.Paths))
 	for i, p := range cfg.Paths {
 		labels[i] = p.Label

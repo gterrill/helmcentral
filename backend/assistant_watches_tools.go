@@ -204,7 +204,7 @@ func (d assistantToolDeps) executeRunWatchNow(ctx context.Context, raw json.RawM
 	if d.documents == nil || d.documents() == nil {
 		return "", errors.New("run_watch_now: the watches are not available")
 	}
-	host := activeWatchHost
+	host := activeWatchHost.Load()
 	if host == nil {
 		return "", errors.New("run_watch_now: the watch scheduler is not running")
 	}

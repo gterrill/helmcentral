@@ -74,8 +74,8 @@ func TestOneOffWatch_ListEntryGivesStartAndEndOnTheBoatClock(t *testing.T) {
 	if e.StartedBoatTime == "" || e.EndsBoatTime == "" {
 		t.Fatalf("entry %+v", e)
 	}
-	// The registry's test harness starts the watch on a UTC+10 boat.
-	if !strings.HasSuffix(e.StartedBoatTime, "UTC+10") || !strings.HasSuffix(e.EndsBoatTime, "UTC+10") {
+	// The registry harness starts the watch on a Brisbane boat (UTC+10, AEST).
+	if !strings.HasSuffix(e.StartedBoatTime, "AEST") || !strings.HasSuffix(e.EndsBoatTime, "AEST") {
 		t.Fatalf("started %q ends %q", e.StartedBoatTime, e.EndsBoatTime)
 	}
 	w.Config = json.RawMessage(`{"zone_name":"UTC","offset_seconds":0}`)
@@ -148,5 +148,56 @@ func TestWatchRuns_PageByCursorNotOffset(t *testing.T) {
 	_ = getWatchHandler(c)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("offset is gone: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The saved config keeps the zone's IANA name, and the clock is rebuilt from
+// that name, so a label reads "AEDT" and never "Australia/Sydney".
+func TestOneOffWatch_ARebuiltClockCarriesTheZonesOwnAbbreviation(t *testing.T) {
+	summer := time.Date(2026, 1, 15, 2, 0, 0, 0, time.UTC)
+	winter := time.Date(2026, 7, 15, 2, 0, 0, 0, time.UTC)
+	cases := []struct {
+		zone   string
+		at     time.Time
+		suffix string
+	}{
+		{"Australia/Sydney", summer, "AEDT"},
+		{"Australia/Sydney", winter, "AEST"},
+		{"Etc/GMT-10", summer, "UTC+10"}, // tzdata names this zone "+10"
+	}
+	for _, c := range cases {
+		w := savedWatch{Config: json.RawMessage(`{"zone_name":"` + c.zone + `","offset_seconds":36000}`)}
+		loc := watchOneOffLocation(w)
+		if loc == nil {
+			t.Fatalf("%s: no clock", c.zone)
+		}
+		if got := watchBoatClock(c.at, loc); !strings.HasSuffix(got, " "+c.suffix) {
+			t.Errorf("%s at %s: boat clock %q, want suffix %q", c.zone, c.at.Format("Jan"), got, c.suffix)
+		}
+		if got := watchBoatZone(c.at, loc); got != c.suffix {
+			t.Errorf("%s at %s: zone %q, want %q", c.zone, c.at.Format("Jan"), got, c.suffix)
+		}
+		started, ends := c.at, c.at.Add(time.Hour)
+		info, err := oneOffInfo(savedWatch{ID: "w1", StartedAt: &started, EndsAt: &ends},
+			watchOneOffConfig{Today: "2026-01-15", ZoneName: c.zone, OffsetSeconds: 36000})
+		if err != nil {
+			t.Fatalf("%s: %v", c.zone, err)
+		}
+		if got := zoneAbbreviation(c.at, info.Location); got != c.suffix {
+			t.Errorf("%s at %s: resumed watch abbreviates its zone as %q, want %q", c.zone, c.at.Format("Jan"), got, c.suffix)
+		}
+	}
+}
+
+func TestOneOffWatch_AZoneThatCannotBeLoadedIsAnErrorNotAGuessedLabel(t *testing.T) {
+	started, ends := time.Date(2026, 1, 15, 2, 0, 0, 0, time.UTC), time.Date(2026, 1, 15, 3, 0, 0, 0, time.UTC)
+	_, err := oneOffInfo(savedWatch{ID: "w1", StartedAt: &started, EndsAt: &ends},
+		watchOneOffConfig{Today: "2026-01-15", ZoneName: "Mars/Olympus", OffsetSeconds: 36000})
+	if err == nil || !strings.Contains(err.Error(), "Mars/Olympus") {
+		t.Fatalf("an unreadable zone must fail the resume and name the zone: %v", err)
+	}
+	w := savedWatch{Config: json.RawMessage(`{"zone_name":"Mars/Olympus","offset_seconds":36000}`)}
+	if loc := watchOneOffLocation(w); loc != nil {
+		t.Fatalf("an unreadable zone leaves the boat time unknown, got %v", loc)
 	}
 }

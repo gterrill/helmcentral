@@ -124,7 +124,7 @@ func watchRequest(conversationID string, raw string) assistantWatchRequest {
 		ConversationID: conversationID,
 		Args:           args,
 		Today:          time.Date(2026, 10, 4, 0, 0, 0, 0, time.UTC),
-		Location:       time.FixedZone("UTC+10", 10*3600),
+		Location:       mustZoneAt(-27.5, 153).Loc, // Australia/Brisbane, UTC+10 all year
 		TimezoneLabel:  "UTC+10",
 	}
 }

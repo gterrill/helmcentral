@@ -78,13 +78,20 @@ func watchError(c echo.Context, err error) error {
 }
 
 // watchOneOffLocation is the boat's clock a one-off watch began on, nil when
-// its zone was not known then.
+// its zone was not known then. A saved zone that cannot be loaded is logged
+// and also leaves the clock nil, so the list says "boat time not known" and
+// does not label the time with a zone it cannot name.
 func watchOneOffLocation(w savedWatch) *time.Location {
 	var cfg watchOneOffConfig
 	if len(w.Config) == 0 || json.Unmarshal(w.Config, &cfg) != nil || cfg.ZoneName == "" || cfg.ZoneName == "UTC" {
 		return nil
 	}
-	return time.FixedZone(cfg.ZoneName, cfg.OffsetSeconds)
+	loc, err := cfg.location()
+	if err != nil {
+		log.Printf("watches: watch %s: %v", w.ID, err)
+		return nil
+	}
+	return loc
 }
 
 func watchScheduleLabel(w savedWatch) string {
@@ -143,7 +150,7 @@ func listWatchesHandler(c echo.Context) error {
 	if err != nil {
 		return watchError(c, err)
 	}
-	if host := activeWatchHost; host != nil {
+	if host := activeWatchHost.Load(); host != nil {
 		resp.Problem = host.stopReason()
 	}
 	return c.JSON(http.StatusOK, resp)
@@ -394,7 +401,7 @@ func runWatchHandler(c echo.Context) error {
 	if err != nil {
 		return watchError(c, err)
 	}
-	host := activeWatchHost
+	host := activeWatchHost.Load()
 	if host == nil {
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "the watch scheduler is not running"})
 	}

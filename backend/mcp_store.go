@@ -68,11 +68,17 @@ type outsideAssistantStore struct {
 	lastStamp map[string]time.Time
 
 	// Activity is written by one goroutine, off the request path.
-	queue   chan mcpActivity
-	pending sync.WaitGroup
-	done    chan struct{}
-	dropped atomic.Int64
-	closed  sync.Once
+	// queued and written count entries enqueued and entries written, under
+	// activityMu, so a listing can wait for exactly what was queued before it
+	// asked and not for traffic that arrives while it waits.
+	queue      chan mcpActivity
+	activityMu sync.Mutex
+	settled    *sync.Cond
+	queued     int64
+	written    int64
+	done       chan struct{}
+	dropped    atomic.Int64
+	closed     sync.Once
 }
 
 var globalOutsideAssistantStore *outsideAssistantStore
@@ -102,6 +108,7 @@ func newOutsideAssistantStoreSized(dbPath string, buffer int) (*outsideAssistant
 		queue:     make(chan mcpActivity, buffer),
 		done:      make(chan struct{}),
 	}
+	s.settled = sync.NewCond(&s.activityMu)
 	go s.writeActivity()
 	return s, nil
 }
@@ -113,20 +120,35 @@ func (s *outsideAssistantStore) writeActivity() {
 		if err := s.RecordActivity(e); err != nil {
 			log.Printf("outside assistants: could not log %s %s for %s: %v", e.Kind, e.Name, e.Client, err)
 		}
-		s.pending.Done()
+		s.activityMu.Lock()
+		s.written++
+		s.activityMu.Unlock()
+		s.settled.Broadcast()
 	}
 }
 
 // QueueActivity hands an entry to the writer. It never blocks the request. A
 // full buffer is logged and counted, never dropped quietly.
 func (s *outsideAssistantStore) QueueActivity(e mcpActivity) {
-	s.pending.Add(1)
+	s.activityMu.Lock()
 	select {
 	case s.queue <- e:
+		s.queued++
+		s.activityMu.Unlock()
 	default:
-		s.pending.Done()
+		s.activityMu.Unlock()
 		n := s.dropped.Add(1)
 		log.Printf("outside assistants: ACTIVITY BUFFER FULL, dropped %s %s for %s (%d dropped since start)", e.Kind, e.Name, e.Client, n)
+	}
+}
+
+// waitForQueued blocks until everything queued before the call is written.
+func (s *outsideAssistantStore) waitForQueued() {
+	s.activityMu.Lock()
+	defer s.activityMu.Unlock()
+	want := s.queued
+	for s.written < want {
+		s.settled.Wait()
 	}
 }
 
@@ -442,7 +464,7 @@ func (s *outsideAssistantStore) ListActivity(limit int) ([]mcpActivity, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	s.pending.Wait() // what is queued is written first
+	s.waitForQueued() // what is queued is written first
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rows, err := s.db.Query(`SELECT at, client, kind, name, outcome, duration_ms FROM mcp_activity ORDER BY at DESC, id DESC LIMIT ?`, limit)

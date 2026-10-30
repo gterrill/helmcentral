@@ -187,6 +187,7 @@ var boatZoneMemory struct {
 	zone        string // IANA name of the last trusted fix's zone
 	loadErr     error
 	loggedFall  bool
+	loggedWait  bool // the zone index was still loading when a good fix came in
 	loggedError string
 	loggedWrite string
 }
@@ -198,6 +199,7 @@ func resetBoatZoneState() {
 	boatZoneMemory.zone = ""
 	boatZoneMemory.loadErr = nil
 	boatZoneMemory.loggedFall = false
+	boatZoneMemory.loggedWait = false
 	boatZoneMemory.loggedError = ""
 	boatZoneMemory.loggedWrite = ""
 	zoneCells.mu.Lock()
@@ -252,6 +254,20 @@ var zoneCells struct {
 // finderReady is set once the zone index has been built.
 var finderReady atomic.Bool
 
+// finderStarted is set when a background build of the zone index has been
+// started, so a busy caller starts it once and not on every call.
+var finderStarted atomic.Bool
+
+// startZoneFinder builds the zone index in the background, once. It reports
+// whether this call started the build.
+func startZoneFinder() bool {
+	if !finderStarted.CompareAndSwap(false, true) {
+		return false
+	}
+	go zoneFinder()
+	return true
+}
+
 func zoneAtCached(lat, lon float64) (placeZone, error) {
 	key := zoneCellKey{int(math.Round(lat * 100)), int(math.Round(lon * 100))}
 	zoneCells.mu.RLock()
@@ -293,8 +309,8 @@ func boatTimeAt(lat, lon float64, fixOK bool) boatTime {
 	if fixOK {
 		if !finderReady.Load() {
 			if zone, _ := rememberedZone(); zone != "" {
-				go zoneFinder()
-				return boatTimeAtFallback()
+				startZoneFinder()
+				return boatTimeLastFix(true)
 			}
 		}
 		z, err := zoneAtCached(lat, lon)
@@ -308,7 +324,7 @@ func boatTimeAt(lat, lon float64, fixOK bool) boatTime {
 		logBoatZoneErrorLocked(err)
 		boatZoneMemory.mu.Unlock()
 	}
-	return boatTimeAtFallback()
+	return boatTimeLastFix(false)
 }
 
 // rememberBoatZone records a live fix's zone. A failed write still updates the
@@ -334,9 +350,11 @@ func rememberBoatZone(name string) {
 	boatZoneMemory.loggedWrite = ""
 }
 
-// boatTimeAtFallback is the last-fix rule: the remembered zone, or UTC when no
-// fix has ever been seen.
-func boatTimeAtFallback() boatTime {
+// boatTimeLastFix is the last-fix rule: the remembered zone, or UTC when no
+// fix has ever been seen. indexLoading says the position is good and the
+// remembered zone is used only while the zone index builds, so the log does
+// not blame the fix.
+func boatTimeLastFix(indexLoading bool) boatTime {
 	boatZoneMemory.mu.Lock()
 	defer boatZoneMemory.mu.Unlock()
 	loadBoatZoneLocked()
@@ -357,7 +375,13 @@ func boatTimeAtFallback() boatTime {
 		logBoatZoneErrorLocked(err)
 		return boatTime{placeZone: utcZone, NoFix: true, Err: err}
 	}
-	if !boatZoneMemory.loggedFall {
+	switch {
+	case indexLoading:
+		if !boatZoneMemory.loggedWait {
+			boatZoneMemory.loggedWait = true
+			log.Printf("boat time: the time zone index is still loading, so times stay in %s, the zone of the last fix", z.Name)
+		}
+	case !boatZoneMemory.loggedFall:
 		boatZoneMemory.loggedFall = true
 		log.Printf("boat time: no usable position fix, so times stay in %s, the zone of the last fix", z.Name)
 	}
