@@ -114,6 +114,12 @@ type collisionProfileSyncer struct {
 	// what lets a manual override stick: under way the mapping says coastal, so
 	// correcting every disagreement would stomp a deliberate switch to offshore
 	// on the next tick and the setting would appear to refuse to hold.
+	//
+	// It is persisted (persistState) and restored at startup. Held in memory
+	// alone, every restart would see the first state as a transition and
+	// overwrite the operator's manual choice, on every deploy. It is persisted
+	// only once a transition is settled, never when refused, so a restart
+	// retries a refusal.
 	lastState string
 
 	// refused is the profile a previous transition declined to select, held so
@@ -140,6 +146,10 @@ type collisionProfileSyncer struct {
 
 	load func() (string, map[string]collisionProfile, error)
 	save func(profile string) error
+
+	// persistState stores lastState so a restart is not a transition. Nil in
+	// tests that do not need it.
+	persistState func(state string) error
 }
 
 func newCollisionProfileSyncer(snapshot *signalKSnapshot) *collisionProfileSyncer {
@@ -166,6 +176,32 @@ func (s *collisionProfileSyncer) adoptOpenRefusal(open alarmLogEntry) {
 	s.standing, s.refusedMessage, s.refusedAt = true, open.Message, open.RaisedAt
 }
 
+// attachStateStore restores lastState from the store and persists it from
+// then on, so the state the boat is still in after a restart is not acted on
+// a second time.
+func (s *collisionProfileSyncer) attachStateStore(load func() (string, error), save func(string) error) error {
+	state, err := load()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastState, s.persistState = state, save
+	return nil
+}
+
+// remember stores the state once it has been acted on. A failed write is
+// logged and not fatal: it must not stop the profile switch, and the cost is
+// that a restart may treat this state as a transition again.
+func (s *collisionProfileSyncer) remember(state string) {
+	if s.persistState == nil {
+		return
+	}
+	if err := s.persistState(state); err != nil {
+		log.Printf("collision profile: could not remember navigation state %q: %v", state, err)
+	}
+}
+
 // active is the standing refusal as an active alarm, empty when none stands.
 func (s *collisionProfileSyncer) active() []alarmStatus {
 	s.mu.Lock()
@@ -190,6 +226,7 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 
 	want, mapped := vesselStateProfiles[state]
 	if !mapped {
+		s.remember(state)
 		return nil
 	}
 
@@ -204,6 +241,7 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 			"Helmcentral could not read the collision profiles from SignalK, so the boat is %s on the old profile.", state))
 	}
 	if current == want {
+		s.remember(state)
 		return s.resolve()
 	}
 
@@ -227,6 +265,7 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 	}
 
 	log.Printf("collision profile: vessel is %s, selected %q", state, want)
+	s.remember(state)
 	return s.resolve()
 }
 

@@ -194,7 +194,10 @@ network. When a target crosses the thresholds of the profile in force, it raises
 a warning for that target. It keeps four profiles (anchored, harbor, coastal and
 offshore), each with its own warning and alarm tiers. Helmcentral picks the
 profile from the vessel's navigation state (anchored, moored, under way) and
-never edits the numbers in it.
+never edits the numbers in it. It only switches when that state changes. If you pick
+a different profile yourself, it stays in force until the state next changes,
+even across a Helmcentral restart or update. Going from sailing to motoring
+counts as a change, so starting the engine puts you back on coastal.
 
 Those numbers are yours, and the shipped harbor profile needs attention before a
 marina. It warns on any target closer than half a mile with a reported speed over

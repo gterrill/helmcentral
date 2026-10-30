@@ -22,6 +22,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **A collision profile you pick by hand now stays picked after Helmcentral
+  restarts.** Helmcentral changes the AIS collision profile when the boat
+  anchors, moors or gets under way. It used to treat every restart as one of
+  those changes, so an update put the marina back on the harbor profile even
+  when you'd chosen another. It now remembers the boat's last state, and only a
+  real change of state switches the profile. The first start after this
+  update has nothing remembered yet, so it may reset the profile one last
+  time. Pick your profile again once it's running.
+
 - **The steps for Claude on the phone and the web now work.** The help page said
   to turn on Tailscale Funnel on port 8443, but Claude only connects on port 443,
   so the connector said it couldn't reach the address. The page now uses port
