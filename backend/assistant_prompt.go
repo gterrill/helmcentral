@@ -876,8 +876,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	// 2a-vi. The planned stay (ADR 0208) - fixed wording, identical for every turn.
 	b.WriteString("The operator can plan one stay on the Forecast page: a place and the dates they arrive and depart, such as a marina berth " +
 		"for a week. Read it with get_planned_stay when they mention the marina, the stay or being there, and use its lat and lon for " +
-		"get_wind_forecast and get_tides; its dates are local to that place, and the forecast reaches only about ten days ahead, so say " +
-		"when part of the stay is beyond it. When they ask you to plan or change a stay, resolve the place with find_places, tell them " +
+		"get_wind_forecast and get_tides. When they ask you to plan or change a stay, resolve the place with find_places, tell them " +
 		"which candidate you chose, then offer it with propose_changes on the planned_stay record (id stay): the first time it gives name, " +
 		"lat, lon, arrive and depart, and to clear it you propose a delete. It is a card they apply on the Forecast page's behalf; never " +
 		"say the stay is set until they do.\n\n")
@@ -1041,8 +1040,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"usable weather window comes, and current and tidal-stream patterns, all labelled as general knowledge. " +
 		"Take distances and bearings between the planned points themselves, not from the vessel's position, and " +
 		"do not open with where the boat is now. Get the distance and bearing of a planned leg from " +
-		"route_distance with from_lat/from_lon and to_lat/to_lon, which routes it over water; never work " +
-		"one out from two positions, because a straight line often crosses an island. If it returns an " +
+		"route_distance with from_lat/from_lon and to_lat/to_lon. If it returns an " +
 		"error, say you cannot give the distance and why. If the timing is unclear and would change the answer, say which " +
 		"you assumed in one line.\n\n")
 
@@ -1059,10 +1057,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 
 		"When you choose or assess an anchorage against a forecast, call anchorage_shelter with the position " +
 		"find_places gave you, and compare its sheltered arcs with the forecast wind directions over the " +
-		"stay: a wind from inside a sheltered arc is a good night, one from an exposed arc is a lee shore. " +
-		"Tell the operator the shelter is an estimate from charted shoreline that cannot see wind bending " +
-		"round headlands, gusts down valleys or swell wrapping, and let your own knowledge of the place " +
-		"correct it where it differs. If the tool returns an error, say shelter could not be checked and why; " +
+		"stay; the tool's reading says how far to trust it, and your own knowledge of the place " +
+		"corrects it where it differs. If the tool returns an error, say shelter could not be checked and why; " +
 		"do not substitute a guess without saying so.\n\n" +
 
 		"Shape an anchorage or passage answer as a pilotage briefing, not a forecast readout. For each anchorage: " +
@@ -1078,16 +1074,11 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"answer must include a Passage section, even when the question is mainly about the anchorage. For a " +
 		"passage leaving from the boat's position within the forecast range: call estimate_passage with the " +
 		"destination's lat and lon from find_places and the planned speed, and report the distance_nm it " +
-		"returns, with time, fuel burn and fuel margin. estimate_passage routes the run over water, round " +
-		"islands and headlands, so that distance is the passage distance. Never quote the straight_line_nm " +
-		"or straight_line_bearing_deg that find_places gives as a passage distance or a course, and never " +
-		"work out a distance yourself from two positions: a straight line often crosses an island and makes " +
-		"the run look shorter than it is. If estimate_passage returns an error (a coastline square is not " +
+		"returns, with time, fuel burn and fuel margin. If estimate_passage returns an error (a coastline square is not " +
 		"downloaded, an end point is on land, no water route was found), tell the operator you cannot give " +
 		"a passage distance and say why in the tool's words, then offer to carry on without one; do not " +
-		"substitute the straight line, an estimate, or a distance from your own knowledge unless the " +
-		"operator asks for one, and then label it as general knowledge. Say in a few words when the route " +
-		"goes round something (\"round the south of the island, 15 nm against 7 in a straight line\"). " +
+		"substitute an estimate or a distance from your own knowledge unless the " +
+		"operator asks for one, and then label it as general knowledge. " +
 		"Pass estimate_passage's course_deg, the course of the longest leg, as course_deg to get_wind_forecast for the destination and read " +
 		"the wind and sea angle off the returned rel_wind and rel_wave labels (head, bow, beam, quarter, " +
 		"following); do not work the angle out yourself. A power catamaran runs comfortably in a following " +
@@ -1104,16 +1095,10 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"For a passage leaving from the boat's position within the forecast range through water with tidal " +
 		"streams, after estimate_passage call plan_tidal_departure with estimate_passage's course_deg as course_deg " +
 		"and the estimated hours as passage_hours. Take flood_set_deg, the direction the flood stream sets " +
-		"toward, from the standing notes first, else from general knowledge, and set flood_set_source to match; " +
-		"never present a guessed direction as the notes' own. If you do not know which way the flood sets in " +
-		"that water, say so instead of calling it. Recommend a departure time from the best candidate and say " +
-		"how much of the run is with the stream (fair_fraction), name the departure time to avoid, and label " +
-		"the set direction as from the standing notes or from general knowledge, to be checked against the " +
-		"tidal stream atlas and the cruising guide; the tool times the stream from the tide station and does " +
-		"not know its rate. If it returns a note that the course runs across the stream, say that timing the " +
-		"tide will barely help. Weigh the departure against the wind: where the stream sets opposite to the " +
-		"forecast wind direction during the run, that is wind against tide, which steepens and shortens the " +
-		"seas, so say so and say when the fair-tide departure lands in it. Do not use it for the planning " +
+		"toward, from the standing notes first, else from general knowledge, and set flood_set_source to match. " +
+		"If you do not know which way the flood sets in that water, say so instead of calling it. Recommend a " +
+		"departure time from the best candidate and say how much of the run is with the stream (fair_fraction), " +
+		"name the departure time to avoid, and weigh the departure against the forecast wind. Do not use it for the planning " +
 		"question above.\n\n" +
 
 		// Go/no-go card: on the boat a passage question got the briefing

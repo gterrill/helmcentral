@@ -13,7 +13,9 @@ var mateToolReadHelp = mateTool{
 	function: openRouterFunctionDef{
 		Description: "Read one page of Helmcentral's own in-app help, or one section of it by " +
 			"heading. Use it before answering any question about how Helmcentral itself works, what a " +
-			"panel or tile shows, or how to set something up; quote the help rather than guessing.",
+			"panel or tile shows, or how to set something up; quote the help rather than guessing. " +
+			"Pages describe Helmcentral's own screens and settings, not the state of this boat. A page has no link: name it in plain words. " +
+			"A page id that is not known returns the list of valid page ids.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

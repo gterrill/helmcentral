@@ -164,6 +164,9 @@ switched on per token. "Never" tools cannot be offered. Tanks have no tool of
 their own: their levels and alarm levels are in `get_vessel_status` and the boat
 context.
 
+ADR 0236 later moved the eleven forecast, tide, routing, passage and nearby-vessel
+tools out of "never" (their rows below are the original decisions).
+
 | Tool | Offered | Why |
 | --- | --- | --- |
 | `get_vessel_status` | default on | One snapshot built from the operator's roles and items. Its result carries units and missing reasons itself. |

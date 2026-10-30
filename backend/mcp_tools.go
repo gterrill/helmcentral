@@ -38,6 +38,9 @@ type mcpToolPolicy struct {
 	Extra       string
 }
 
+// mcpPassageDecision is why the passage tools are offered but start off.
+const mcpPassageDecision = "Helps decide a passage, so it starts off and the operator opts in per token."
+
 const (
 	extraReadFigures = "Figures are in the operator's units: quote the display value and display_unit as given. "
 )
@@ -100,6 +103,22 @@ var mcpToolPolicies = []mcpToolPolicy{
 			"which engines and tanks there are), the units the operator reads and the units the boat reports in, the boat's particulars " +
 			"(no contact details), the alarm rules, the tank warn and alarm levels and the boat's time zone. Call it first when you are unsure " +
 			"which item a question means."},
+	{Name: "get_wind_forecast", Plain: "Wind and wave forecast", Status: mcpDefaultOn,
+		Reason: "Read-only forecast data, useful on its own. On by default."},
+	{Name: "get_tides", Plain: "Tides", Status: mcpDefaultOn,
+		Reason: "Read-only tide predictions, useful on its own. On by default."},
+	{Name: "get_nearby_vessels", Plain: "Nearby vessels", Status: mcpDefaultOn,
+		Reason: "Read-only view of AIS targets from the boat's own receiver. On by default."},
+	{Name: "get_planned_stay", Plain: "Planned stay", Status: mcpDefaultOn,
+		Reason: "Read-only: the stay the operator set on the Forecast page. On by default."},
+	{Name: "route_distance", Plain: "Distance by water", Status: mcpDefaultOn,
+		Reason: "Read-only routing over the offline coastline. On by default."},
+	{Name: "anchorage_shelter", Plain: "Anchorage shelter", Status: mcpDefaultOn,
+		Reason: "Read-only shelter estimate from the offline coastline. On by default."},
+	{Name: "find_places", Plain: "Place names", Status: mcpDefaultOn,
+		Reason: "Read-only place-name lookup. On by default."},
+	{Name: "read_help", Plain: "Helmcentral help", Status: mcpDefaultOn,
+		Reason: "Read-only help pages built into Helmcentral. On by default."},
 
 	// Offered, off until the operator switches them on.
 	{Name: "check_signalk_paths", Plain: "Live SignalK paths", Status: mcpOfferedOff,
@@ -110,6 +129,12 @@ var mcpToolPolicies = []mcpToolPolicy{
 		Description: "List every alarm rule the boat is watching: id, label, path, op (above, below, equal, notEqual, stale), value and clear_value " +
 			"in the operator's unit (display_unit), severity (state), dwell_seconds, enabled, and origin (own, built-in, or derived from tank " +
 			"levels or a gauge zone). Use it to say what the boat monitors. It is read-only: you cannot change a rule."},
+	{Name: "estimate_passage", Plain: "Passage estimate", Status: mcpOfferedOff,
+		Reason: mcpPassageDecision},
+	{Name: "plan_tidal_departure", Plain: "Tidal departure", Status: mcpOfferedOff,
+		Reason: mcpPassageDecision},
+	{Name: "assess_passage_window", Plain: "Passage window", Status: mcpOfferedOff,
+		Reason: mcpPassageDecision},
 
 	// Never offered.
 	{Name: "search_conversations", Plain: "", Status: mcpNever, Reason: "Mate's chat history is the operator's, not an outside assistant's."},
@@ -130,17 +155,6 @@ var mcpToolPolicies = []mcpToolPolicy{
 	{Name: "show_tile", Plain: "", Status: mcpNever, Reason: "Draws a card in Mate's chat; the result is a picture an outside assistant cannot show."},
 	{Name: "show_telemetry_chart", Plain: "", Status: mcpNever, Reason: "Draws a card in Mate's chat; use get_path_history for the figures."},
 	{Name: "show_wind_rose", Plain: "", Status: mcpNever, Reason: "Draws a card in Mate's chat."},
-	{Name: "read_help", Plain: "", Status: mcpNever, Reason: "Help pages are written for Mate's prompt rules (page ids, no links); not audited this cycle."},
-	{Name: "find_places", Plain: "", Status: mcpNever, Reason: "Needs Mate's rules on choosing and naming a candidate; not moved into the result yet."},
-	{Name: "anchorage_shelter", Plain: "", Status: mcpNever, Reason: "Estimate wording lives in Mate's prompt; not moved into the result yet."},
-	{Name: "get_wind_forecast", Plain: "", Status: mcpNever, Reason: "Dates are local to the place and the forecast horizon is a prompt rule; not moved into the result yet."},
-	{Name: "get_tides", Plain: "", Status: mcpNever, Reason: "Dates are local to the place; not moved into the result yet."},
-	{Name: "estimate_passage", Plain: "", Status: mcpNever, Reason: "Reading a passage estimate depends on Mate's routing and fuel rules; not moved into the result yet."},
-	{Name: "route_distance", Plain: "", Status: mcpNever, Reason: "Routing wording lives in Mate's prompt; not moved into the result yet."},
-	{Name: "plan_tidal_departure", Plain: "", Status: mcpNever, Reason: "Depends on estimate_passage's course in Mate's prompt; not moved into the result yet."},
-	{Name: "assess_passage_window", Plain: "", Status: mcpNever, Reason: "Go and no-go reading (limits set to no-go only) is a Mate prompt rule; not moved into the result yet."},
-	{Name: "get_nearby_vessels", Plain: "", Status: mcpNever, Reason: "Collision and mooring wording lives in Mate's prompt; not moved into the result yet."},
-	{Name: "get_planned_stay", Plain: "", Status: mcpNever, Reason: "Read with Mate's forecast rules; not moved into the result yet."},
 }
 
 func mcpPolicyFor(name string) (mcpToolPolicy, bool) {

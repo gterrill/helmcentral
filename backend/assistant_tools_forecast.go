@@ -16,7 +16,7 @@ var mateToolGetWindForecast = mateTool{
 			"per-day summary plus a three-hourly breakdown. Use find_places first to resolve a place name " +
 			"to coordinates. If waves_no_data is true the wave model has no figures at that point, so say there is " +
 			"no wave forecast there. If wave_fallback_model is set the wave figures come from that fallback model, " +
-			"because the usual one has no data here, so say so.",
+			"because the usual one has no data here, so say so. " + ruleWindForecast,
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -44,7 +44,7 @@ var mateToolGetWindForecast = mateTool{
 var mateToolGetTides = mateTool{
 	name: "get_tides",
 	function: openRouterFunctionDef{
-		Description: "Fetch tide predictions (high/low times and heights) for the tide station nearest a position. Use find_places first to resolve a place name to coordinates.",
+		Description: "Fetch tide predictions (high/low times and heights) for the tide station nearest a position. Use find_places first to resolve a place name to coordinates. " + ruleTides,
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -272,6 +272,9 @@ type assistantTideExtreme struct {
 }
 
 type assistantGetTidesResult struct {
+	// Reading names the station, its distance and bearing from the place asked
+	// about, and its time zone.
+	Reading   string                 `json:"reading"`
 	Station   assistantStationInfo   `json:"station"`
 	Provider  string                 `json:"provider"`
 	Now       assistantTideNow       `json:"now"`
@@ -341,6 +344,7 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 	}
 
 	result := assistantGetTidesResult{
+		Reading:  readingTides(stationInfo, timeBasis),
 		Station:  stationInfo,
 		Provider: providerID,
 		Now: assistantTideNow{

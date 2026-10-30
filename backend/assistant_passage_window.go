@@ -913,10 +913,11 @@ func ignoredSpeedNotes(a passageWindowArgs) []string {
 // times), not the card's payload. The card carries the full figures and goes
 // out of band (assistantCardSink), so the chat result cap never cuts it.
 type passageModelResult struct {
-	Legs        []string          `json:"legs"`
-	Rows        []passageModelRow `json:"rows"`
-	Instruction string            `json:"instruction"`
-	Notes       []string          `json:"notes,omitempty"`
+	Legs []string          `json:"legs"`
+	Rows []passageModelRow `json:"rows"`
+	// Instruction is present only when Helmcentral shows the grid as a card.
+	Instruction string   `json:"instruction,omitempty"`
+	Notes       []string `json:"notes,omitempty"`
 
 	level, next int
 }
@@ -934,8 +935,11 @@ type passageModelCell struct {
 	Times string `json:"times,omitempty"`
 }
 
-func newPassageModelResult(p passageWindowPayload) *passageModelResult {
-	m := &passageModelResult{Instruction: passageWindowInstruction, Legs: make([]string, len(p.Legs)), Rows: make([]passageModelRow, len(p.Rows))}
+func newPassageModelResult(p passageWindowPayload, withCard bool) *passageModelResult {
+	m := &passageModelResult{Legs: make([]string, len(p.Legs)), Rows: make([]passageModelRow, len(p.Rows))}
+	if withCard {
+		m.Instruction = passageWindowInstruction
+	}
 	for i, l := range p.Legs {
 		m.Legs[i] = l.Name
 	}
@@ -1015,9 +1019,6 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 	}
 	if d.passageLimits == nil {
 		return "", fmt.Errorf("assess_passage_window: passage limits are not available")
-	}
-	if d.cards == nil {
-		return "", fmt.Errorf("assess_passage_window: cards are not available")
 	}
 	limits, err := d.passageLimits()
 	if err != nil {
@@ -1121,11 +1122,15 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 	if err != nil {
 		return "", err
 	}
-	card, err := json.Marshal(payload)
-	if err != nil {
-		return "", fmt.Errorf("assess_passage_window card: %w", err)
+	// A card is built only where a run takes it (Mate's chat). An outside
+	// assistant has no card sink, so it gets the grid figures and no card.
+	var card json.RawMessage
+	if d.cards != nil {
+		if card, err = json.Marshal(payload); err != nil {
+			return "", fmt.Errorf("assess_passage_window card: %w", err)
+		}
 	}
-	model := newPassageModelResult(payload)
+	model := newPassageModelResult(payload, d.cards != nil)
 	model.Notes = ignoredSpeedNotes(args)
 	if fallbackModel != "" {
 		model.Notes = append(model.Notes, fmt.Sprintf("Wave figures at some points come from the fallback model %s, because the usual wave model has no data there. Say so when you give wave figures.", fallbackModel))
@@ -1134,14 +1139,16 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 	if err != nil {
 		return "", err
 	}
-	d.cards.put(text, mateCard{Kind: passageWindowCardKind, Payload: card, routes: legRoutes(args), created: now})
+	if d.cards != nil {
+		d.cards.put(text, mateCard{Kind: passageWindowCardKind, Payload: card, routes: legRoutes(args), created: now})
+	}
 	return text, nil
 }
 
 var mateToolAssessPassageWindow = mateTool{
 	name: "assess_passage_window",
 	function: openRouterFunctionDef{
-		Description: "Judge an itinerary against the operator's own passage limits and show it as a grid card: one " +
+		Description: "Judge an itinerary against the operator's own passage limits as a grid: one " +
 			"row per candidate departure date, one cell per leg on the date it would be sailed, each go, marginal, " +
 			"no_go or no_data with the limiting factor. Use it for \"which day should I leave\" and multi-leg trips " +
 			"with stays (leave Thursday, two nights at Cape Upstart, then Bowen). The limits come from the " +
@@ -1150,11 +1157,9 @@ var mateToolAssessPassageWindow = mateTool{
 			"bends as via points: call route_distance (or read the route waypoints in estimate_passage) for each leg and use its " +
 			"waypoints, never headlands you guess. Get place coordinates from find_places. For each leg give " +
 			"passage_hours (from estimate_passage) or speed_kn; if both are given the hours are used. Give flood_set_deg only from the operator's " +
-			"standing notes or after asking them; never guess it. Dates beyond the forecast show no_data. A card " +
-			"is attached to your reply, so do not repeat the grid as a table. " +
-			fmt.Sprintf("The operator sets only a no-go wind (required) and no-go wave (optional) per sector, plus an optional wind against tide reduction. "+
-				"Marginal is worked out as %.0f%% of no-go and gusts are judged against the no-go wind plus %g kn, "+
-				"so never ask the operator to set marginal or gust limits.", passageMarginalFraction*100, passageGustAboveWindKn),
+			"standing notes or after asking them; never guess it. Dates beyond the forecast show no_data. " +
+			"The operator sets only a no-go wind (required) and no-go wave (optional) per sector, plus an optional wind against tide reduction. " +
+			passageLimitsSentence + " " + rulePassageWindow,
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

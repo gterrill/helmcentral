@@ -720,6 +720,9 @@ func TestExecuteGetTides_NearestStationWindowedExtremesAustraliaBrisbane(t *test
 	if len(result.Extremes) != 1 {
 		t.Fatalf("expected exactly 1 extreme inside the 2-day window, got %d: %+v", len(result.Extremes), result.Extremes)
 	}
+	if !strings.Contains(result.Reading, result.Station.Name) || !strings.Contains(result.Reading, "°T") {
+		t.Errorf("tides should name the station and give its true bearing, got %q", result.Reading)
+	}
 	if result.Extremes[0].Type != "high" {
 		t.Errorf("expected the kept extreme to be a high, got %q", result.Extremes[0].Type)
 	}
@@ -1240,12 +1243,6 @@ func TestExecuteGetNearbyVessels_ListsLiveVesselWithRangeBearingAndSpeed(t *test
 	}
 	if v.PositionAgeS != 12 {
 		t.Errorf("expected position_age_s=12, got %d", v.PositionAgeS)
-	}
-	if result.Note == "" {
-		t.Errorf("expected a top-level note explaining in_range_since")
-	}
-	if !strings.Contains(result.Note, "lower bound") {
-		t.Errorf("expected the note to call in_range_since a lower bound, got %q", result.Note)
 	}
 }
 
