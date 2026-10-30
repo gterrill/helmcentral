@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.57.0] - 2026-10-30
+
 ### Breaking
 
 - **Your alarm rules are now kept in the database.** They used to be in
@@ -149,6 +151,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   overnight than it usually does, put as a question and never as an alarm. A
   reading it can't get is left out with the reason, never filled in. Figures
   are rounded the way an instrument shows them, such as 761 W and 11.3 kn.
+- **Mate can draw a wind rose.** Ask "where has the wind been coming from?" and
+  Mate shows petals for each compass direction, split by wind speed in your
+  units, with calm and gusts noted.
+- **Fix two items' sources the wrong way round in one save.** On an item's
+  **Source** list, a source that another item has now shows its reading and who
+  has it. Pick it and the Save button becomes **Swap sources**, or **Move
+  source** when the item has nothing of that kind to hand back. Before, you had
+  to clear one item, change the other and go back.
+- **Mate can summarise your passages for any dates.** Ask "how far did we go in
+  August?" or "where did we stay longest?" and it adds up the passages in those
+  dates, with the stays worked out from the gaps between them.
 
 ### Changed
 
@@ -273,21 +286,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   equipment isn't sending the reading the part needs, the field says so and lists
   what it does send. Helmcentral won't save a footer part with equipment and no
   reading. Open the tile's settings and check any footer part that stayed blank.
-
-### Added
-
-- **Mate can draw a wind rose.** Ask "where has the wind been coming from?" and
-  Mate shows petals for each compass direction, split by wind speed in your
-  units, with calm and gusts noted.
-- **Fix two items' sources the wrong way round in one save.** On an item's
-  **Source** list, a source that another item has now shows its reading and who
-  has it. Pick it and the Save button becomes **Swap sources**, or **Move
-  source** when the item has nothing of that kind to hand back. Before, you had
-  to clear one item, change the other and go back.
-
-- **Mate can summarise your passages for any dates.** Ask "how far did we go in
-  August?" or "where did we stay longest?" and it adds up the passages in those
-  dates, with the stays worked out from the gaps between them.
 
 ## [0.56.0] - 2026-10-28
 
@@ -2257,7 +2255,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.56.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.57.0...HEAD
+[0.57.0]: https://github.com/gterrill/helmcentral/compare/v0.56.0...v0.57.0
 [0.56.0]: https://github.com/gterrill/helmcentral/compare/v0.55.0...v0.56.0
 [0.55.0]: https://github.com/gterrill/helmcentral/compare/v0.54.0...v0.55.0
 [0.54.0]: https://github.com/gterrill/helmcentral/compare/v0.53.0...v0.54.0
