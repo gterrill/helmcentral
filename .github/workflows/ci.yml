@@ -34,13 +34,30 @@ jobs:
         working-directory: backend
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-      # -short skips the live BOM FTP round-trips in wasm_ftp_*_test.go. Those
-      # assert against a third-party server whose files rotate, so they fail for
-      # reasons that have nothing to do with a change under review; run them
-      # locally when touching the FTP fetch path.
+  # ~5,000 tests in one package, mostly run one after another, so one runner
+  # is bound by count; scripts/go-test-shard.sh deals them across three.
+  backend-test:
+    name: Backend tests (${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      # -short (inside the script) skips the live BOM FTP round-trips in
+      # wasm_ftp_*_test.go. Those assert against a third-party server whose
+      # files rotate, so they fail for reasons that have nothing to do with a
+      # change under review; run them locally when touching the FTP fetch path.
       - name: Test
         working-directory: backend
-        run: go test -short ./...
+        run: sh ../scripts/go-test-shard.sh ${{ matrix.shard }} 3
 
   # The boat's time zone comes from a position lookup whose index is built the
   # first time anything needs a zone (backend/boat_time.go). The boat runs on a
