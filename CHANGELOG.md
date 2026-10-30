@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **The steps for Claude on the phone and the web now work.** The help page said
+  to turn on Tailscale Funnel on port 8443, but Claude only connects on port 443,
+  so the connector said it couldn't reach the address. The page now uses port
+  443. If your Tailscale machine already uses 443 to open the dashboard, it shows
+  how to run a second, small Tailscale machine just for Claude, so the dashboard
+  stays on your tailnet. If you turned on Funnel on 8443, turn it off and follow
+  **Connect Claude on your phone or the web** again.
+
 ## [0.57.0] - 2026-10-30
 
 ### Breaking
