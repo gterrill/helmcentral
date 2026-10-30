@@ -130,6 +130,37 @@ The plotter's two route alarms are worded for the watch:
 The plotter doesn't send the waypoint's name or a distance with them, so the
 card doesn't invent one.
 
+### A chart with the alarm
+
+When an alarm is about a reading Helmcentral keeps, the notification carries a
+chart of that reading, so you can see on your phone how it got there. Here is
+what that covers:
+
+- Which alarms: Your own alarm rules on a numeric reading, including the house
+  bank rule, and the tank level alarms. A chart shows the last 6 hours in your
+  units, with the alarm's limit as a dashed line. A tank chart has two dashed
+  lines, one for the warning level and one for the alarm level.
+- Which alarms don't: Anchor dragging, the lost instrument connection, collision
+  risk, and alarms raised by other devices on the network. Those aren't a reading
+  that Helmcentral records, so there is nothing to draw. A "no data for a while"
+  rule gets no chart either, because a silent reading has no curve.
+- When it's raised or gets worse: A chart goes with the first message. It also
+  goes with the message when a live alarm gets worse, such as a tank going from
+  warning to alarm. There's no chart when an alarm clears or eases back. There's
+  none on the reminder that nobody has acknowledged it, either.
+- Where it appears: In an email the chart sits under the message. On ntfy it's
+  an attachment. A webhook receives it as a picture and as the numbers behind it.
+  Web push and Publish to SignalK stay as they were, and the alarm card in the
+  app is unchanged.
+
+The chart never holds an alarm back. Helmcentral gives the history 3 seconds,
+counted from when the alarm was raised. If it hasn't answered by then, or
+InfluxDB isn't set up and there's no history to read, the alarm goes out on time
+without a chart. It ends with a line saying why, such as "Chart left out: the
+history did not answer in time". Helmcentral never fills in a line it doesn't
+have. If a notification has to be retried, the retry carries the same
+chart as the first try.
+
 ## Stopping an alarm you can't act on
 
 Some alarms raised by other devices stay true for a whole leg and ask nothing of

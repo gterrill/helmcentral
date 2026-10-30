@@ -13,6 +13,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Alarms on your phone and in your email now come with a chart.** When one of
+  your alarm rules, the house bank rule or a tank level alarm goes off, the
+  notification carries the last 6 hours of that reading, with the alarm's limit
+  drawn as a dashed line. A tank chart shows both the warning and the alarm
+  level. It appears under the message in an email, as an attachment on ntfy, and
+  as a picture and the numbers behind it in a webhook. Alarms about anchor
+  dragging, a lost instrument connection, collisions and anything raised by
+  another device have no chart, and neither do clears. The chart never holds an
+  alarm back. If the history takes longer than 3 seconds, or InfluxDB isn't set
+  up, the alarm goes out on time with a line saying "Chart left out" and why.
+  A tank alarm that gets worse, such as warning to alarm, carries a chart too.
+  The alarm email no longer has a "Path:" line with the instrument's internal
+  name. It shows the message, state, value and time.
+
 - **ChatGPT can now read the boat.** ChatGPT can't send the header that Claude's
   connector uses, so it signs in instead. It opens a Helmcentral page, you paste
   an outside assistant token and select **Allow**, and that token is used for

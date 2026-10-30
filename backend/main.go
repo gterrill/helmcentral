@@ -450,6 +450,9 @@ func main() {
 		log.Fatalf("failed to load alarm transports: %v", err)
 	}
 	globalAlarmDispatcher = newAlarmDispatcher()
+	// Built once: every reader in it looks at settings and stores when it is
+	// called, so nothing here goes stale.
+	globalAlarmDispatcher.chartSources = productionWatchChartSources(settingsPath)
 
 	// Shared HTTP client for tile/basemap-asset fetches (with timeout to
 	// prevent hangs), used both by the Esri World Imagery proxy and the
