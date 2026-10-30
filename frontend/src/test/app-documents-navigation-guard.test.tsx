@@ -308,7 +308,7 @@ async function navigateToDirtyDocumentDetails() {
   // The panel is a lazy chunk (now carrying the pattern library and TanStack
   // Table), so a cold first load can outlast findBy's default 1s.
   fireEvent.click(await screen.findByRole('button', { name: /actions for receipt\.pdf/i }, { timeout: 5000 }))
-  fireEvent.click(await screen.findByRole('menuitem', { name: /details/i }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: /details/i }, { timeout: 5000 }))
   await screen.findByLabelText('Title', {}, { timeout: 5000 })
   fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
 }
