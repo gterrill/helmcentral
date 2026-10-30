@@ -38,6 +38,9 @@ type notificationMessage struct {
 	// data, or one entry with Problem set and no series when it was left out.
 	// It is never set on a watch report, whose charts are on Watch.
 	Charts []watchChart `json:"charts,omitempty"`
+	// Link is where a phone opens from the notification: Mate's review of an
+	// alarm, or a watch report's run. Set when the Address for links is set.
+	Link string `json:"link,omitempty"`
 
 	// note, when set, is told where a delivery was not as meant (a phone
 	// message sent without its chart). It is the dispatcher's, never queued.
@@ -76,16 +79,8 @@ func (m notificationMessage) chartList() []watchChart {
 	return m.Charts
 }
 
-// clickLink is the link a phone opens from the notification, if there is one.
-func (m notificationMessage) clickLink() string {
-	if m.isWatchReport() && m.Watch != nil {
-		return m.Watch.Link
-	}
-	return ""
-}
-
 func (m notificationMessage) title() string {
-	if m.isWatchReport() {
+	if m.isReport() {
 		return m.Label
 	}
 	prefix := strings.ToUpper(m.State)
@@ -161,12 +156,12 @@ func (t ntfyTransport) sendText(ctx context.Context, msg notificationMessage) er
 	if err != nil {
 		return err
 	}
-	if msg.isWatchReport() {
+	if msg.isReport() {
 		// A watch's name is typed by the operator: control characters would end
 		// the header line, and anything not ASCII needs RFC 2047.
 		request.Header.Set("Title", watchEncodedHeaderText(msg.title()))
-		if msg.Watch != nil && msg.Watch.Link != "" {
-			request.Header.Set("Click", msg.Watch.Link)
+		if msg.Link != "" {
+			request.Header.Set("Click", msg.Link)
 		}
 	} else {
 		request.Header.Set("Title", msg.title())
@@ -221,8 +216,8 @@ func (t ntfyTransport) sendWithChart(ctx context.Context, msg notificationMessag
 	request.Header.Set("Filename", watchChartFilename(chart.Title))
 	request.Header.Set("Message", watchEncodedHeaderText(truncateRunes(watchHeaderText(msg.Message), watchNtfyMessageChars)))
 	request.Header.Set("Title", watchEncodedHeaderText(msg.title()))
-	if link := msg.clickLink(); link != "" {
-		request.Header.Set("Click", link)
+	if msg.Link != "" {
+		request.Header.Set("Click", msg.Link)
 	}
 	request.Header.Set("Priority", ntfyPriorityFor(msg))
 	request.Header.Set("Tags", ntfyTagsFor(msg))
@@ -276,7 +271,7 @@ func watchChartFilename(title string) string {
 // ntfyPriorityFor maps SignalK severities onto ntfy's 1-5 scale. An emergency
 // gets max priority so it bypasses the phone's do-not-disturb.
 func ntfyPriorityFor(msg notificationMessage) string {
-	if msg.isWatchReport() {
+	if msg.isReport() {
 		// A report is never urgent: it waits for the operator, an alarm does not.
 		return "3"
 	}
@@ -298,6 +293,9 @@ func ntfyPriorityFor(msg notificationMessage) string {
 func ntfyTagsFor(msg notificationMessage) string {
 	if msg.isWatchReport() {
 		return "clipboard"
+	}
+	if msg.isAlarmReview() {
+		return "speech_balloon"
 	}
 	if msg.Kind == alarmEventCleared {
 		return "white_check_mark"
@@ -418,8 +416,8 @@ type signalKNotifyTransport struct {
 func (t signalKNotifyTransport) ID() string { return transportSignalK }
 
 func (t signalKNotifyTransport) Send(_ context.Context, msg notificationMessage) error {
-	if msg.isWatchReport() {
-		return fmt.Errorf("a watch report is never published to SignalK: it would appear on the bus as an alarm")
+	if msg.isReport() {
+		return fmt.Errorf("a watch report or an alarm review is never published to SignalK: it would appear on the bus as an alarm")
 	}
 	path := notificationsRoot + "." + strings.TrimPrefix(msg.Path, notificationsRoot+".")
 

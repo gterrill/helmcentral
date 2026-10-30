@@ -26,6 +26,8 @@ export interface AlarmRule {
   methods: string[]
   notify: string[] | null
   escalate_after_seconds: number
+  /** Whether Mate reviews the alarm when it raises. Off unless the operator turns it on. */
+  mate_reviews?: boolean
   /**
    * True for a rule derived from a gauge zone (ADR 0050) or a tank's levels (ADR 0214). It has no stored
    * counterpart, so it cannot be edited or deleted here — the threshold lives
@@ -54,6 +56,7 @@ export function newAlarmRuleDraft(): AlarmRuleDraft {
     methods: ['visual', 'sound'],
     notify: null,
     escalate_after_seconds: 0,
+    mate_reviews: false,
   }
 }
 

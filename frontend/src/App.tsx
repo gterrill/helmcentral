@@ -1739,7 +1739,10 @@ function AppShell() {
         )
       case 'alarms':
         return (
-          <LiveAlarmsDrawer onAskMate={openMate} />
+          <LiveAlarmsDrawer
+            onAskMate={openMate}
+            onOpenMateReview={(conversationId) => navigate({ panel: 'assistant', conversationId })}
+          />
         )
       case 'radar':
         return <LiveRadarDrawer />

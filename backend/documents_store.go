@@ -312,6 +312,10 @@ func createDocumentsSchema(db *sql.DB) error {
 		return err
 	}
 
+	if err := createAlarmReviewsSchema(db); err != nil {
+		return err
+	}
+
 	return createWatchesSchema(db)
 }
 

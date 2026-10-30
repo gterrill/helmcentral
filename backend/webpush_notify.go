@@ -80,7 +80,7 @@ func webPushTopicFor(msg notificationMessage) string {
 // webPushUrgencyFor mirrors ntfyPriorityFor: severity decides how hard the push
 // service should work to wake a dozing phone.
 func webPushUrgencyFor(msg notificationMessage) (urgency webpush.Urgency, ttl int) {
-	if msg.isWatchReport() {
+	if msg.isReport() {
 		return webpush.UrgencyNormal, webPushTTLLive
 	}
 	if msg.Kind == alarmEventCleared {
@@ -99,6 +99,9 @@ func webPushPayloadFor(msg notificationMessage) webPushPayload {
 		// The short message: up to three findings and Mate's opening sentence.
 		return webPushPayload{Title: msg.title(), Body: truncateRunes(msg.Message, webPushBodyLimit), Tag: watchQueueKey(msg.Watch.Watch.ID),
 			Kind: msg.Kind, URL: msg.Watch.Path}
+	}
+	if msg.isAlarmReview() {
+		return webPushPayload{Title: msg.title(), Body: truncateRunes(msg.Message, webPushBodyLimit), Tag: msg.RuleID, Kind: msg.Kind, URL: msg.Path}
 	}
 	body := msg.Message
 	if len([]rune(body)) > webPushBodyLimit {

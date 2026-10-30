@@ -34,6 +34,20 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   `/mcp`, so add it by following **Give outside assistants a public address**.
   Claude's connector keeps working as it did.
 
+- **Mate can review an alarm the moment it goes off.** Each alarm rule has a new
+  switch, **Mate reviews it**, off until you turn it on. You can turn it on in the
+  rule editor while Mate is on, and you can ask Mate to set it for you. With
+  Mate off, no alarm is reviewed. When a rule
+  with the switch on raises its alarm, Mate looks at the reading and what else
+  was going on, then writes a short review in a conversation named after the
+  alarm. The alarm card says **Mate reviewed this**, shows the first sentence and
+  what the review cost, and links to the conversation. A second message, "Mate on
+  House Bank Low", goes to the same channels as the alarm, after it, with a link
+  if you've set the Address for links. If the alarm clears before Mate is done,
+  nothing is sent. The same alarm is reviewed at most once an hour. If a review
+  fails, the card says why. Alarms from the boat's network, tank levels, gauge
+  bands and Helmcentral's own checks can't be reviewed yet.
+
 ### Changed
 
 - **Watch reports say which vessels a repeated Collision Risk came from.** The

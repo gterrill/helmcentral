@@ -76,11 +76,15 @@ func createAlarmRulesSchema(db *sql.DB) error {
 			methods_json           TEXT,
 			notify_json            TEXT,
 			escalate_after_seconds INTEGER NOT NULL DEFAULT 0,
+			mate_reviews           INTEGER NOT NULL DEFAULT 0,
 			seeded_by              TEXT,
 			created_at             INTEGER NOT NULL,
 			updated_at             INTEGER NOT NULL
 		)`); err != nil {
 		return fmt.Errorf("create alarm_rules table: %w", err)
+	}
+	if err := addColumnIfMissing(db, "alarm_rules", "mate_reviews", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
 	}
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS alarm_rule_seeded_sets (
@@ -94,7 +98,7 @@ func createAlarmRulesSchema(db *sql.DB) error {
 
 const alarmRuleColumns = `id, enabled, path, label, path_role, op, value, hysteresis,
 	dwell_seconds, stale_after_seconds, alarm_level_value, capacity_path, state,
-	methods_json, notify_json, escalate_after_seconds, seeded_by, created_at, updated_at`
+	methods_json, notify_json, escalate_after_seconds, mate_reviews, seeded_by, created_at, updated_at`
 
 func alarmRuleStoreTime(t time.Time) int64 { return t.UTC().UnixNano() }
 
@@ -127,7 +131,7 @@ func parseAlarmJSONList(id, field string, raw sql.NullString) ([]string, error) 
 func scanAlarmRule(row interface{ Scan(...any) error }) (alarmRule, error) {
 	var (
 		r                          alarmRule
-		enabled                    int
+		enabled, mateReviews       int
 		level                      sql.NullFloat64
 		seeded                     sql.NullString
 		methods, notify            sql.NullString
@@ -135,10 +139,11 @@ func scanAlarmRule(row interface{ Scan(...any) error }) (alarmRule, error) {
 	)
 	if err := row.Scan(&r.ID, &enabled, &r.Path, &r.Label, &r.PathRole, &r.Op, &r.Value, &r.Hysteresis,
 		&r.DwellSeconds, &r.StaleAfterSeconds, &level, &r.CapacityPath, &r.State,
-		&methods, &notify, &r.EscalateAfterSeconds, &seeded, &createdNanos, &updatedNanos); err != nil {
+		&methods, &notify, &r.EscalateAfterSeconds, &mateReviews, &seeded, &createdNanos, &updatedNanos); err != nil {
 		return alarmRule{}, err
 	}
 	r.Enabled = enabled != 0
+	r.MateReviews = mateReviews != 0
 	if level.Valid {
 		v := level.Float64
 		r.AlarmLevelValue = &v
@@ -176,7 +181,7 @@ func alarmRuleArgs(r alarmRule) ([]any, error) {
 	}
 	return []any{r.ID, boolToInt(r.Enabled), r.Path, r.Label, r.PathRole, r.Op, r.Value, r.Hysteresis,
 		r.DwellSeconds, r.StaleAfterSeconds, level, r.CapacityPath, r.State,
-		methods, notify, r.EscalateAfterSeconds, seeded,
+		methods, notify, r.EscalateAfterSeconds, boolToInt(r.MateReviews), seeded,
 		alarmRuleStoreTime(r.CreatedAt), alarmRuleStoreTime(r.UpdatedAt)}, nil
 }
 
@@ -188,7 +193,7 @@ func insertAlarmRuleTx(x alarmSQLExecer, r alarmRule) error {
 		return err
 	}
 	if _, err := x.Exec(`INSERT INTO alarm_rules (`+alarmRuleColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...); err != nil {
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, args...); err != nil {
 		return fmt.Errorf("insert alarm rule %q: %w", r.Label, err)
 	}
 	return nil
@@ -205,7 +210,7 @@ func updateAlarmRuleTx(x alarmSQLExecer, r alarmRule) error {
 	res, err := x.Exec(`UPDATE alarm_rules SET enabled = ?, path = ?, label = ?, path_role = ?, op = ?,
 		value = ?, hysteresis = ?, dwell_seconds = ?, stale_after_seconds = ?, alarm_level_value = ?,
 		capacity_path = ?, state = ?, methods_json = ?, notify_json = ?, escalate_after_seconds = ?,
-		seeded_by = ?, created_at = ?, updated_at = ? WHERE id = ?`, append(args[1:], r.ID)...)
+		mate_reviews = ?, seeded_by = ?, created_at = ?, updated_at = ? WHERE id = ?`, append(args[1:], r.ID)...)
 	if err != nil {
 		return fmt.Errorf("update alarm rule %q: %w", r.Label, err)
 	}

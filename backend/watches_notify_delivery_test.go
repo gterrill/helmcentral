@@ -25,7 +25,7 @@ func testWatchMessage(t *testing.T) notificationMessage {
 		Findings: []watchFinding{notifyRuleFinding("power", "overnight_draw", "Drew a lot.")}}
 	m := buildWatchReportMessage(w, run, "Pikorua", testLinkAddress)
 	return notificationMessage{Kind: notificationKindWatchReport, RuleID: watchQueueKey("w1"), Label: m.Title, Message: m.Summary,
-		Vessel: "Pikorua", At: alarmNow, Watch: &m}
+		Vessel: "Pikorua", At: alarmNow, Link: m.Link, Watch: &m}
 }
 
 func TestWatchReport_NtfyIsNormalPriorityWithAReportTag(t *testing.T) {
@@ -52,7 +52,7 @@ func TestWatchReport_NtfyIsNormalPriorityWithAReportTag(t *testing.T) {
 func TestWatchReport_NtfyHasNoClickWithoutAnAddress(t *testing.T) {
 	server, requests := capturingServer(t, http.StatusOK)
 	msg := testWatchMessage(t)
-	msg.Watch.Link = ""
+	msg.Link = ""
 	if err := (ntfyTransport{config: ntfyConfig{Server: server.URL, Topic: "boat"}}).Send(context.Background(), msg); err != nil {
 		t.Fatal(err)
 	}

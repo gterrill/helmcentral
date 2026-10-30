@@ -124,6 +124,21 @@ export interface ActiveAlarm {
    * action from this alone.
    */
   ignorable?: boolean
+
+  /** Mate's review of this raise, when the rule asks for one. */
+  mate_review?: AlarmMateReview
+}
+
+/** What the card shows of Mate's review of an alarm. `conversation_id` is the Mate conversation that holds it. */
+export interface AlarmMateReview {
+  state: 'running' | 'done' | 'failed'
+  conversation_id?: string
+  /** The review's first sentence. */
+  summary?: string
+  /** Why a failed review failed. */
+  problem?: string
+  cost_usd?: number
+  cost_known: boolean
 }
 
 interface AlarmsPayload {
