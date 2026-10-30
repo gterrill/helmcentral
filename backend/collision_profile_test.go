@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -489,5 +490,138 @@ func TestCollisionProfileAdoptedRefusalShowsAsActiveWithItsRaisedTime(t *testing
 	got := collisionProfileActive()
 	if len(got) != 1 || !got[0].RaisedAt.Equal(raised) || got[0].Message != "old words" {
 		t.Fatalf("adopted: %+v", got)
+	}
+}
+
+// A restart must not count as a transition: the state restored from the store
+// is already acted on, so the operator's manual profile survives a deploy.
+func TestCollisionProfileSyncerIgnoresARestartOnTheSameState(t *testing.T) {
+	syncer, saved := syncerFor(t, "moored", collisionProfilesJSON)
+	attachStored(t, syncer, "moored")
+
+	if events := syncer.check(alarmNow); len(events) != 0 {
+		t.Fatalf("a restart on the same state raises nothing, got %+v", events)
+	}
+	if len(*saved) != 0 {
+		t.Fatalf("a restart on the same state must not reselect the profile, saved %v", *saved)
+	}
+}
+
+// If the boat changed state while Helmcentral was down, that is a transition.
+func TestCollisionProfileSyncerActsOnAStateChangedWhileDown(t *testing.T) {
+	syncer, saved := syncerFor(t, "sailing", collisionProfilesJSON)
+	attachStored(t, syncer, "moored")
+
+	syncer.check(alarmNow)
+	if len(*saved) != 1 || (*saved)[0] != "coastal" {
+		t.Fatalf("saved: got %v, want [coastal]", *saved)
+	}
+}
+
+// The state is persisted when acted on, and only then.
+func TestCollisionProfileSyncerPersistsTheActedOnState(t *testing.T) {
+	syncer, _ := syncerFor(t, "moored", collisionProfilesJSON)
+	persisted := []string{}
+	syncer.persistState = func(state string) error {
+		persisted = append(persisted, state)
+		return nil
+	}
+
+	syncer.check(alarmNow)
+	syncer.check(alarmNow.Add(time.Minute))
+	if len(persisted) != 1 || persisted[0] != "moored" {
+		t.Fatalf("persisted: got %v, want [moored]", persisted)
+	}
+}
+
+// A failed write is logged but must not stop the profile switch.
+func TestCollisionProfileSyncerSwitchesWhenPersistingFails(t *testing.T) {
+	syncer, saved := syncerFor(t, "moored", collisionProfilesJSON)
+	syncer.persistState = func(string) error { return errors.New("disk full") }
+
+	syncer.check(alarmNow)
+	if len(*saved) != 1 || (*saved)[0] != "harbor" {
+		t.Fatalf("saved: got %v, want [harbor]", *saved)
+	}
+}
+
+func TestCollisionProfileStateSurvivesReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "helmcentral.sqlite")
+	store, err := newAlarmLogStore(path)
+	if err != nil {
+		t.Fatalf("newAlarmLogStore: %v", err)
+	}
+	if state, err := store.LoadCollisionProfileState(); err != nil || state != "" {
+		t.Fatalf("empty store: got %q, %v", state, err)
+	}
+	if err := store.SaveCollisionProfileState("anchored"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCollisionProfileState("moored"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	store, err = newAlarmLogStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if state, err := store.LoadCollisionProfileState(); err != nil || state != "moored" {
+		t.Fatalf("reopened: got %q, %v, want moored", state, err)
+	}
+}
+
+// attachStored wires a syncer to a store that already holds state.
+func attachStored(t *testing.T, syncer *collisionProfileSyncer, state string) {
+	t.Helper()
+	err := syncer.attachStateStore(
+		func() (string, error) { return state, nil },
+		func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("attachStateStore: %v", err)
+	}
+}
+
+// A refused transition is not settled, so it is not remembered.
+func TestCollisionProfileSyncerDoesNotPersistARefusedTransition(t *testing.T) {
+	syncer := failingProfileSyncer()
+	persisted := []string{}
+	syncer.persistState = func(state string) error {
+		persisted = append(persisted, state)
+		return nil
+	}
+
+	if events := syncer.check(alarmNow); len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("expected a raised refusal, got %+v", events)
+	}
+	if len(persisted) != 0 {
+		t.Fatalf("a refused transition must not be persisted, got %v", persisted)
+	}
+}
+
+// After a refusal, a restart on the same state retries, selects the profile
+// and clears the adopted refusal.
+func TestCollisionProfileSyncerRetriesARefusalAfterRestart(t *testing.T) {
+	stored := ""
+	first := failingProfileSyncer()
+	first.snapshot = snapshotInState("moored")
+	first.persistState = func(state string) error { stored = state; return nil }
+	events := first.check(alarmNow)
+	if len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("expected a raised refusal, got %+v", events)
+	}
+
+	// SignalK is fixed and Helmcentral restarts with the refusal still open.
+	second, saved := syncerFor(t, "moored", collisionProfilesJSON)
+	attachStored(t, second, stored)
+	second.adoptOpenRefusal(alarmLogEntry{RuleID: collisionProfileRuleID, Message: events[0].Status.Message, RaisedAt: alarmNow})
+
+	cleared := second.check(alarmNow.Add(time.Hour))
+	if len(*saved) != 1 {
+		t.Fatalf("the restart must retry and select the profile, saved %v", *saved)
+	}
+	if len(cleared) != 1 || cleared[0].Kind != alarmEventCleared {
+		t.Fatalf("the adopted refusal must clear, got %+v", cleared)
 	}
 }

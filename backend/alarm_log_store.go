@@ -97,6 +97,49 @@ func createAlarmLogSchema(db *sql.DB) error {
 		!strings.Contains(err.Error(), "duplicate column name") {
 		return fmt.Errorf("create notification queue table: %w", err)
 	}
+
+	// The navigation.state the collision profile syncer last acted on: one
+	// row, kept here beside the refusal rows it settles.
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS collision_profile_state (
+			id    INTEGER PRIMARY KEY CHECK (id = 1),
+			state TEXT NOT NULL
+		)`); err != nil {
+		return fmt.Errorf("create collision profile state table: %w", err)
+	}
+	return nil
+}
+
+// LoadCollisionProfileState returns the navigation state the collision
+// profile syncer last acted on, empty when none has been stored yet.
+func (s *alarmLogStore) LoadCollisionProfileState() (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("alarm log is not available")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var state string
+	err := s.db.QueryRow(`SELECT state FROM collision_profile_state WHERE id = 1`).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read collision profile state: %w", err)
+	}
+	return state, nil
+}
+
+func (s *alarmLogStore) SaveCollisionProfileState(state string) error {
+	if s == nil {
+		return fmt.Errorf("alarm log is not available")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.db.Exec(
+		`INSERT INTO collision_profile_state (id, state) VALUES (1, ?)
+		 ON CONFLICT(id) DO UPDATE SET state = excluded.state`, state); err != nil {
+		return fmt.Errorf("save collision profile state: %w", err)
+	}
 	return nil
 }
 

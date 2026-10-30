@@ -245,6 +245,12 @@ func main() {
 	} else if found {
 		globalCollisionProfileSyncer.adoptOpenRefusal(open)
 	}
+	// The navigation state the collision profile last followed, so a restart
+	// does not overwrite the operator's manual profile choice.
+	if err := globalCollisionProfileSyncer.attachStateStore(
+		als.LoadCollisionProfileState, als.SaveCollisionProfileState); err != nil {
+		log.Fatalf("failed to read the collision profile navigation state: %v", err)
+	}
 
 	// The operator's two ignore lists (ignored sensors, ignored network
 	// alarms), in the same file.
