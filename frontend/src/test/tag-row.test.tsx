@@ -10,8 +10,13 @@ beforeEach(() => {
   })
 })
 
+const execCommand = Object.getOwnPropertyDescriptor(document, 'execCommand')
+
 afterEach(() => {
   vi.unstubAllGlobals()
+  if (execCommand) Object.defineProperty(document, 'execCommand', execCommand)
+  else delete (document as { execCommand?: unknown }).execCommand
+  window.getSelection()?.removeAllRanges()
 })
 
 describe('TagRow', () => {
@@ -49,6 +54,38 @@ describe('TagRow', () => {
 
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(`${window.location.origin}/inventory/bins/LAZ-02`))
     await screen.findByRole('button', { name: /copied/i })
+  })
+
+  it('copies through the clipboard API without selecting the URL or moving focus off the button', async () => {
+    render(<TagRow path="/inventory/bins/LAZ-02" />)
+    const button = screen.getByRole('button', { name: /copy/i })
+    button.focus()
+    fireEvent.click(button)
+
+    await screen.findByRole('button', { name: /copied/i })
+    expect(String(window.getSelection())).toBe('')
+    expect(document.activeElement).toBe(button)
+  })
+
+  it('claims nothing when neither copy route works, and leaves the URL selected', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    Object.defineProperty(document, 'execCommand', { value: () => false, configurable: true, writable: true })
+    render(<TagRow path="/inventory/bins/LAZ-02" />)
+    fireEvent.click(screen.getByRole('button', { name: /copy/i }))
+
+    await waitFor(() => expect(String(window.getSelection())).toBe(`${window.location.origin}/inventory/bins/LAZ-02`))
+    expect(screen.queryByRole('button', { name: /copied/i })).not.toBeInTheDocument()
+  })
+
+  it('copies the URL over plain http, where the browser offers no clipboard API', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    const exec = vi.fn((cmd: string) => cmd === 'copy' && String(window.getSelection()) === `${window.location.origin}/inventory/bins/LAZ-02`)
+    Object.defineProperty(document, 'execCommand', { value: exec, configurable: true, writable: true })
+    render(<TagRow path="/inventory/bins/LAZ-02" />)
+    fireEvent.click(screen.getByRole('button', { name: /copy/i }))
+
+    await screen.findByRole('button', { name: /copied/i })
+    expect(exec).toHaveBeenCalledWith('copy')
   })
 
   it('shows the Chrome-on-Android message and no Write tag button when NFC is unsupported', () => {

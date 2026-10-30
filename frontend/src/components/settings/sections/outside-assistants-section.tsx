@@ -14,6 +14,7 @@ import {
   type OutsideAssistantTool,
 } from '@/hooks/use-outside-assistants'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
+import { copyTextFrom } from '@/lib/copy-text'
 import { formatDayTimeIn, selectTimeZone } from '@/lib/vessel-time'
 
 function errorMessage(err: unknown): string {
@@ -47,12 +48,11 @@ function claudeDesktopJson(secret: string): string {
   )
 }
 
-async function copy(text: string, what: string) {
-  try {
-    await navigator.clipboard.writeText(text)
+async function copy(source: HTMLElement | null, what: string) {
+  if (await copyTextFrom(source)) {
     toast.success(`${what} copied`)
-  } catch (err) {
-    toast.error(`Could not copy the ${what.toLowerCase()}`, { description: errorMessage(err) })
+  } else {
+    toast.error(`Could not copy the ${what.toLowerCase()}`, { description: 'Select it and copy it by hand.' })
   }
 }
 
@@ -73,6 +73,9 @@ function SecretDialog({ created, onClose }: { created: CreatedOutsideAssistantTo
   const secret = created?.secret ?? ''
   const command = claudeCodeCommand(secret)
   const desktop = claudeDesktopJson(secret)
+  const secretField = useRef<HTMLInputElement>(null)
+  const commandBlock = useRef<HTMLPreElement>(null)
+  const desktopBlock = useRef<HTMLPreElement>(null)
   return (
     <Dialog open={created !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
@@ -84,16 +87,16 @@ function SecretDialog({ created, onClose }: { created: CreatedOutsideAssistantTo
         </DialogHeader>
         <div className="flex min-w-0 flex-col gap-4">
           <div className="flex min-w-0 items-center gap-2">
-            <Input readOnly value={secret} aria-label="Token" className="min-w-0 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
-            <Button type="button" variant="outline" onClick={() => void copy(secret, 'Token')} aria-label="Copy token">
+            <Input ref={secretField} readOnly value={secret} aria-label="Token" className="min-w-0 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+            <Button type="button" variant="outline" onClick={() => void copy(secretField.current, 'Token')} aria-label="Copy token">
               Copy
             </Button>
           </div>
           <div className="flex min-w-0 flex-col gap-1.5">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Claude Code</p>
-            <pre className="overflow-x-auto rounded-md border bg-card p-2 font-mono text-xs whitespace-pre-wrap break-all">{command}</pre>
+            <pre ref={commandBlock} className="overflow-x-auto rounded-md border bg-card p-2 font-mono text-xs whitespace-pre-wrap break-all">{command}</pre>
             <div>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copy(command, 'Command')} aria-label="Copy Claude Code command">
+              <Button type="button" size="sm" variant="outline" onClick={() => void copy(commandBlock.current, 'Command')} aria-label="Copy Claude Code command">
                 Copy command
               </Button>
             </div>
@@ -103,9 +106,9 @@ function SecretDialog({ created, onClose }: { created: CreatedOutsideAssistantTo
             <p className="text-xs text-muted-foreground">
               Add this to claude_desktop_config.json. It needs Node.js on the computer, for the npx command.
             </p>
-            <pre className="overflow-x-auto rounded-md border bg-card p-2 font-mono text-xs">{desktop}</pre>
+            <pre ref={desktopBlock} className="overflow-x-auto rounded-md border bg-card p-2 font-mono text-xs">{desktop}</pre>
             <div>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copy(desktop, 'Snippet')} aria-label="Copy Claude Desktop snippet">
+              <Button type="button" size="sm" variant="outline" onClick={() => void copy(desktopBlock.current, 'Snippet')} aria-label="Copy Claude Desktop snippet">
                 Copy snippet
               </Button>
             </div>

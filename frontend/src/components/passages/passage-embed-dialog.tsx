@@ -35,7 +35,7 @@ function EmbedBody({ embed, onClose }: { embed: string; onClose: () => void }) {
 
   const copy = async () => {
     if (!area.current) return
-    const ok = await copyTextFrom(area.current, embed)
+    const ok = await copyTextFrom(area.current)
     setState(ok ? 'copied' : 'manual')
     if (ok) toast.success('Blog embed copied', { description: 'Paste it into a Ghost HTML card.' })
   }

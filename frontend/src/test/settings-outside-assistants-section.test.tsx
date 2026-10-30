@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { OutsideAssistantsSection } from '@/components/settings/sections/outside-assistants-section'
 import { SETTINGS_SECTIONS } from '@/components/settings/settings-nav'
@@ -56,6 +56,13 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'clipboard', { value: { writeText: vi.fn().mockResolvedValue(undefined) }, configurable: true })
 })
 
+const execCommand = Object.getOwnPropertyDescriptor(document, 'execCommand')
+
+afterEach(() => {
+  if (execCommand) Object.defineProperty(document, 'execCommand', execCommand)
+  else delete (document as { execCommand?: unknown }).execCommand
+})
+
 describe('Outside assistants section', () => {
   it('is a settings section with a help target, worded for the operator', () => {
     expect(SETTINGS_SECTIONS.find((s) => s.id === 'outside-assistants')?.label).toBe('Outside assistants')
@@ -84,6 +91,33 @@ describe('Outside assistants section', () => {
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith('hcmcp_SECRETVALUE'))
     fireEvent.click(within(dialog).getByRole('button', { name: 'Copy Claude Code command' }))
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(command))
+  })
+
+  it('copies over plain http, where the browser offers no clipboard API', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+    const copied: string[] = []
+    const exec = vi.fn((cmd: string) => {
+      const active = document.activeElement
+      const selected = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
+        ? active.value.slice(active.selectionStart ?? 0, active.selectionEnd ?? 0)
+        : String(window.getSelection())
+      copied.push(selected)
+      return cmd === 'copy'
+    })
+    Object.defineProperty(document, 'execCommand', { value: exec, configurable: true, writable: true })
+    render(<OutsideAssistantsSection />)
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Laptop' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create token' }))
+    const dialog = await screen.findByRole('dialog')
+    const command = `claude mcp add --transport http helmcentral ${window.location.origin}/mcp --header "Authorization: Bearer hcmcp_SECRETVALUE"`
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Copy token' }))
+    await waitFor(() => expect(copied).toEqual(['hcmcp_SECRETVALUE']))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Copy Claude Code command' }))
+    await waitFor(() => expect(copied).toEqual(['hcmcp_SECRETVALUE', command]))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Copy Claude Desktop snippet' }))
+    await waitFor(() => expect(copied[2]).toContain('"mcpServers"'))
+    expect(exec).toHaveBeenCalledWith('copy')
   })
 
   it('will not create a token without a name', () => {
