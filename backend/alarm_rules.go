@@ -101,6 +101,10 @@ type alarmRule struct {
 
 	EscalateAfterSeconds int `json:"escalate_after_seconds"`
 
+	// MateReviews asks Mate to review the alarm when it raises (ADR 0237). Off
+	// unless the operator turns it on, and turning it on is the consent.
+	MateReviews bool `json:"mate_reviews"`
+
 	// SeededBy is the marker of the built-in set that created the rule, empty
 	// for a rule the operator made. It is stored, never sent over the API.
 	SeededBy string `json:"-"`

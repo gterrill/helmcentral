@@ -2,6 +2,7 @@ import { lazy, memo, useCallback, useMemo, type ComponentProps } from 'react'
 
 import { FORECAST_REFRESH_SECONDS, TRAIL_POLL_MS } from '@/config/app-config'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
+import { useAssistantStatus } from '@/hooks/use-assistant-status'
 import { acknowledgeAlarm, silenceAlarm, useAisCollisionAlarms, useKnownAlarmList } from '@/hooks/use-alarms'
 import { setAnchorHere, useAnchorWatch } from '@/hooks/use-anchor-watch'
 import { useAnchorTrail } from '@/hooks/use-anchor-trail'
@@ -49,8 +50,10 @@ const selectCollisionTuningUrl = (settings: { signalk?: { address?: string; port
  */
 export const LiveAlarmsDrawer = memo(function LiveAlarmsDrawer(props: Omit<AlarmsDrawerProps,
   'alarms' | 'onAcknowledge' | 'onSilence' | 'rules' | 'loading' | 'error' | 'createRule' | 'updateRule' | 'deleteRule'
-  | 'collisionTuningUrl' | 'forecastWarnings'>) {
+  | 'collisionTuningUrl' | 'forecastWarnings' | 'mateOn'>) {
   const alarms = useKnownAlarmList()
+  // The "Mate reviews it" switch shows while Mate is on (ADR 0120).
+  const mateOn = useAssistantStatus().status?.enabled === true
   const { rules, loading, error, createRule, updateRule, deleteRule } = useAlarmRules()
   const { activeWarning } = useForecastWarnings(FORECAST_REFRESH_SECONDS)
   const collisionTuningUrl = useApiQuerySelector({ queryKey: ['/api/settings'], path: '/api/settings' }, selectCollisionTuningUrl)
@@ -68,6 +71,7 @@ export const LiveAlarmsDrawer = memo(function LiveAlarmsDrawer(props: Omit<Alarm
       deleteRule={deleteRule}
       collisionTuningUrl={collisionTuningUrl}
       forecastWarnings={activeWarning}
+      mateOn={mateOn}
     />
   )
 })

@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"regexp"
-	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -255,69 +253,29 @@ const watchCostLookupTimeout = 30 * time.Second
 // review that could not happen is an outcome with a Problem, recorded on the
 // run beside the report.
 func runWatchReview(ctx context.Context, cfg watchConfig, w savedWatch, report watchReport, findings []watchFinding, now time.Time, loc *time.Location) watchReviewOutcome {
-	if cfg.NotReady != "" {
-		return watchReviewOutcome{Problem: "Mate is not ready (" + strings.TrimRight(cfg.NotReady, ".") + ")", CostKnown: true}
-	}
-	params, err := assistantTurnParamsFromSettings(cfg.SettingsPath, cfg.Readiness, cfg.APIKey)
-	if err != nil {
-		return watchReviewOutcome{Problem: "Mate's settings could not be read: " + firstErrorLine(err), CostKnown: true}
-	}
-	local := now.In(loc)
-	today := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, time.UTC)
-	deps := assistantTurnToolDeps(cfg.APIKey, cfg.SettingsPath, params.webSearch, today)
-	tools := &watchReviewTools{assistantToolDeps: deps}
-
-	units := "metric"
-	if u, err := deps.displayUnits(); err == nil {
-		units = u
-	}
-	pc := collectAssistantPromptContext(cfg.SettingsPath, now)
-	system := buildWatchReviewPrompt(pc, units, now, loc, mateToolAvailable(deps, "search_web"))
-	message, err := watchReviewMessage(w, report, findings, watchPreviousMateFrom(ctx))
-	if err != nil {
-		return watchReviewOutcome{Problem: "the report could not be given to Mate: " + firstErrorLine(err), CostKnown: true}
-	}
-
-	meter := &assistantCostMeter{}
-	runCtx := withAssistantConversationID(withAssistantCostMeter(ctx, meter), "watch-"+w.ID)
-	runner := watchReviewRunnerFor(cfg.APIKey, cfg.Readiness.Model, tools, params.autoRouter)
-	reply, runErr := func() (reply assistantReply, err error) {
-		// The scheduler's goroutine must outlive a bug in one review.
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("watches: the review of %q panicked: %v\n%s", w.Name, r, debug.Stack())
-				meter.markUnknown()
-				err = fmt.Errorf("the review crashed: %v", r)
+	var tools *watchReviewTools
+	turn := runUnattendedReview(ctx, unattendedTurn{
+		Cfg: cfg, Now: now, Loc: loc, WebSearch: true,
+		ConversationID: "watch-" + w.ID, LogPrefix: "watches", Name: w.Name,
+		Build: func(ctx context.Context, deps assistantToolDeps, units string, pc assistantPromptContext) (unattendedInput, string) {
+			tools = &watchReviewTools{assistantToolDeps: deps}
+			message, err := watchReviewMessage(w, report, findings, watchPreviousMateFrom(ctx))
+			if err != nil {
+				return unattendedInput{}, "the report could not be given to Mate: " + firstErrorLine(err)
 			}
-		}()
-		return runner.run(runCtx, system, "", []openRouterMessage{{Role: "user", Content: openRouterContent(message)}})
-	}()
-
-	out := watchReviewOutcome{Reached: true, Model: reply.Model}
-	if out.Model == "" {
-		out.Model = cfg.Readiness.Model
-	}
-	// Whatever the run spent counts, finished or not. A generation that was
-	// cut off is priced from OpenRouter; a cost that cannot be read is shown
-	// as not known.
-	// The lookup has its own time, so a review that ran out of its own does
-	// not lose the cost of what it spent.
-	costCtx, cancelCost := context.WithTimeout(context.WithoutCancel(ctx), watchCostLookupTimeout)
-	defer cancelCost()
-	out.CostUSD, out.CostKnown = meter.resolve(costCtx, func(c context.Context, id string) (float64, error) {
-		return generationCostLookup(c, cfg.APIKey, id)
+			return unattendedInput{
+				System:    buildWatchReviewPrompt(pc, units, now, loc, mateToolAvailable(deps, "search_web")),
+				Message:   message,
+				Tools:     tools,
+				Submitted: func() bool { return tools.submission() != nil },
+			}, ""
+		},
 	})
-	if runErr != nil {
-		log.Printf("watches: Mate's review of %q failed: %v", w.Name, runErr)
-		out.Problem = "Mate's review failed: " + firstErrorLine(runErr)
+	out := watchReviewOutcome{Problem: turn.Problem, Reached: turn.Reached, CostUSD: turn.CostUSD, CostKnown: turn.CostKnown, Model: turn.Model}
+	if out.Problem != "" {
 		return out
 	}
 	sub := tools.submission()
-	if sub == nil {
-		log.Printf("watches: Mate answered the review of %q without submitting it", w.Name)
-		out.Problem = "Mate finished without submitting a review"
-		return out
-	}
 	out.Review = sub.Review
 	for _, a := range sub.Added {
 		f := watchFinding{Section: a.Section, Rule: "mate_review", Text: a.Text, By: watchByMate, Key: a.Key}

@@ -39,7 +39,9 @@ type queuedAlarmDispatch struct {
 	// watch, when set, makes this a watch report for channels rather than an
 	// alarm transition. Reports share the queue so they are delivered in order
 	// and never hold up the evaluator.
-	watch    *watchReportMessage
+	watch *watchReportMessage
+	// message, when set, is the follow-up to Mate's review of an alarm.
+	message  *notificationMessage
 	channels []string
 	// chartBy is when the alarm's chart read must be over: alarmChartDeadline
 	// after the alarm was queued, on the real clock (ADR 0235).
@@ -177,6 +179,10 @@ func (d *alarmDispatcher) run(ctx context.Context) {
 			d.dispatchWatchReport(*item.watch, item.channels)
 			continue
 		}
+		if item.message != nil {
+			d.dispatchAlarmReview(*item.message, item.channels)
+			continue
+		}
 		d.dispatch(item.event, item.vessel, item.chartBy)
 	}
 }
@@ -186,8 +192,7 @@ func (d *alarmDispatcher) run(ctx context.Context) {
 // the time the alarm's chart read must be over by, fixed when it was queued
 // (ADR 0235).
 func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string, chartBy time.Time) {
-	all := d.transports()
-	selected := selectTransports(all, event.Rule.Notify)
+	selected := selectTransports(d.transports(), event.Rule.Notify)
 
 	// A bus-sourced event's path is owned by whatever producer raised it, not
 	// by Helmcentral. signalKNotifyTransport.Send writes to msg.Path
@@ -197,14 +202,7 @@ func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string, chartBy time
 	// heartbeatSender.send skips the same transport for the mirror-image
 	// reason (alarm_watchdog.go).
 	if event.Source == alarmSourceSignalK {
-		filtered := selected[:0:0]
-		for _, transport := range selected {
-			if transport.ID() == transportSignalK {
-				continue
-			}
-			filtered = append(filtered, transport)
-		}
-		selected = filtered
+		selected = withoutSignalK(selected)
 	}
 
 	if len(selected) == 0 {
@@ -228,7 +226,17 @@ func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string, chartBy time
 	if len(charted) > 0 {
 		waitChart = d.startChart(event, chartBy)
 	}
-	d.deliver(event, msg, plain)
+	// Each transition supersedes anything still queued for the same rule.
+	// Dropping first means a failure re-queues only the newest one.
+	supersede := func(transport notificationTransport) {
+		if dropped, err := d.store.DropQueuedForRule(transport.ID(), event.Rule.ID); err != nil {
+			log.Printf("alarm notify: could not drop superseded %s deliveries for %q: %v", transport.ID(), event.Rule.Label, err)
+		} else if dropped > 0 {
+			log.Printf("alarm notify: dropped %d queued %s delivery(s) for %q, superseded by this %s",
+				dropped, transport.ID(), event.Rule.Label, event.Kind)
+		}
+	}
+	d.sendAll(plain, msg, "alarm notify", supersede, nil)
 	if len(charted) == 0 {
 		return
 	}
@@ -237,43 +245,57 @@ func (d *alarmDispatcher) dispatch(event alarmEvent, vessel string, chartBy time
 	if msg.Charts = waitChart(); len(msg.Charts) > 0 {
 		msg.Charts, msg.pngs = renderChartsForSend(msg.Charts, "alarm notification", nil)
 	}
-	d.deliver(event, msg, charted)
+	d.sendAll(charted, msg, "alarm notify", supersede, nil)
 }
 
-// deliver sends msg to each transport and queues each failure for retry.
-func (d *alarmDispatcher) deliver(event alarmEvent, msg notificationMessage, transports []notificationTransport) {
-	if len(transports) == 0 {
+// withoutSignalK drops the SignalK transport from a selection.
+func withoutSignalK(in []notificationTransport) []notificationTransport {
+	var out []notificationTransport
+	for _, transport := range in {
+		if transport.ID() != transportSignalK {
+			out = append(out, transport)
+		}
+	}
+	return out
+}
+
+// nonBusTransports are the switched-on transports for channels, never SignalK.
+// Channels are chosen as an alarm's rule chooses them, so none named means
+// every switched-on transport, and a report goes where its alarm went.
+func (d *alarmDispatcher) nonBusTransports(channels []string) []notificationTransport {
+	return withoutSignalK(selectTransports(d.transports(), channels))
+}
+
+// sendAll sends msg on each transport and queues each failure for retry under
+// msg.RuleID, logging both loudly (a retry that happens silently is
+// indistinguishable from one that never happened). before runs ahead of each
+// send and delivered after each success; either may be nil.
+func (d *alarmDispatcher) sendAll(selected []notificationTransport, msg notificationMessage, what string, before, delivered func(notificationTransport)) {
+	if len(selected) == 0 {
 		return
 	}
 	payload, err := json.Marshal(msg)
 	if err != nil {
-		log.Printf("alarm notify: cannot encode %s: %v", event.Rule.Label, err)
+		log.Printf("%s: cannot encode %q: %v", what, msg.Label, err)
 		return
 	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-
-	for _, transport := range transports {
-		// This transition supersedes anything still queued for the same rule.
-		// Dropping first means a failure below re-queues only the newest one.
-		if dropped, err := d.store.DropQueuedForRule(transport.ID(), event.Rule.ID); err != nil {
-			log.Printf("alarm notify: could not drop superseded %s deliveries for %q: %v", transport.ID(), event.Rule.Label, err)
-		} else if dropped > 0 {
-			log.Printf("alarm notify: dropped %d queued %s delivery(s) for %q, superseded by this %s",
-				dropped, transport.ID(), event.Rule.Label, event.Kind)
+	for _, transport := range selected {
+		if before != nil {
+			before(transport)
 		}
-
 		if err := transport.Send(ctx, msg); err != nil {
-			// Loud, per the fallback policy: a retry that happens silently is
-			// indistinguishable from one that never happened.
-			log.Printf("alarm notify: %s failed for %q, queued for retry: %v", transport.ID(), event.Rule.Label, err)
-			if queueErr := d.store.Enqueue(transport.ID(), event.Rule.ID, payload, d.now().Add(notifyMinBackoff)); queueErr != nil {
-				log.Printf("alarm notify: could not queue %s: %v", transport.ID(), queueErr)
+			log.Printf("%s: %s failed for %q, queued for retry: %v", what, transport.ID(), msg.Label, err)
+			if queueErr := d.store.Enqueue(transport.ID(), msg.RuleID, payload, d.now().Add(notifyMinBackoff)); queueErr != nil {
+				log.Printf("%s: could not queue %s: %v", what, transport.ID(), queueErr)
 			}
 			continue
 		}
-		log.Printf("alarm notify: %s delivered %q", transport.ID(), event.Rule.Label)
+		log.Printf("%s: %s delivered %q", what, transport.ID(), msg.Label)
+		if delivered != nil {
+			delivered(transport)
+		}
 	}
 }
 
@@ -325,9 +347,13 @@ func (d *alarmDispatcher) drain(ctx context.Context) {
 			continue
 		}
 
-		if msg.isWatchReport() && transport.ID() == transportSignalK {
+		if msg.isReport() && transport.ID() == transportSignalK {
 			// Never delivered, even if a report was somehow queued for it.
-			log.Printf("watch report: discarding a queued %s delivery of %q: a watch report is never published to SignalK", transport.ID(), msg.Label)
+			what := "watch report"
+			if msg.isAlarmReview() {
+				what = "alarm review"
+			}
+			log.Printf("%s: discarding a queued %s delivery of %q: a %s is never published to SignalK", what, transport.ID(), msg.Label, what)
 			d.store.DeleteQueued(item.ID)
 			continue
 		}
@@ -382,8 +408,14 @@ func startNotificationDrainer(ctx context.Context, interval time.Duration) {
 // enqueueWatchReport hands a watch report to run for delivery to channels and
 // returns at once.
 func (d *alarmDispatcher) enqueueWatchReport(report watchReportMessage, channels []string) {
+	d.enqueueItem(queuedAlarmDispatch{watch: &report, channels: channels})
+}
+
+// enqueueItem queues a report for run, nudges it, and warns when delivery is
+// falling behind.
+func (d *alarmDispatcher) enqueueItem(item queuedAlarmDispatch) {
 	d.queueMu.Lock()
-	d.queue = append(d.queue, queuedAlarmDispatch{watch: &report, channels: channels})
+	d.queue = append(d.queue, item)
 	depth := len(d.queue)
 	d.queueMu.Unlock()
 
@@ -467,12 +499,7 @@ func (d *alarmDispatcher) dispatchWatchReport(report watchReportMessage, channel
 		d.noteWatchNotSent(report, "this watch sends to no channel")
 		return
 	}
-	var selected []notificationTransport
-	for _, transport := range selectTransports(d.transports(), channels) {
-		if transport.ID() != transportSignalK {
-			selected = append(selected, transport)
-		}
-	}
+	selected := d.nonBusTransports(channels)
 	if len(selected) == 0 {
 		log.Printf("watch report: %q was not sent: none of its channels (%s) is switched on in Settings", report.Title, strings.Join(channels, ", "))
 		d.noteWatchNotSent(report, "no channel is switched on for this watch ("+strings.Join(channels, ", ")+")")
@@ -480,27 +507,9 @@ func (d *alarmDispatcher) dispatchWatchReport(report watchReportMessage, channel
 	}
 
 	msg := notificationMessage{Kind: notificationKindWatchReport, RuleID: watchQueueKey(report.Watch.ID), Label: report.Title,
-		Message: report.Summary, Vessel: report.Vessel, At: d.now(), Watch: &report}
-	payload, err := json.Marshal(msg)
-	if err != nil {
-		log.Printf("watch report: cannot encode %q: %v", report.Title, err)
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	key := watchQueueKey(report.Watch.ID)
-	for _, transport := range selected {
-		d.supersedeQueuedReports(transport.ID(), key, report)
-		d.attachWatchNote(&msg)
-		if err := transport.Send(ctx, msg); err != nil {
-			log.Printf("watch report: %s failed for %q, queued for retry: %v", transport.ID(), report.Title, err)
-			if queueErr := d.store.Enqueue(transport.ID(), key, payload, d.now().Add(notifyMinBackoff)); queueErr != nil {
-				log.Printf("watch report: could not queue %s: %v", transport.ID(), queueErr)
-			}
-			continue
-		}
-		log.Printf("watch report: %s delivered %q", transport.ID(), report.Title)
-		d.noteWatchDelivered(report, transport.ID())
-	}
+		Message: report.Summary, Vessel: report.Vessel, At: d.now(), Link: report.Link, Watch: &report}
+	d.attachWatchNote(&msg)
+	d.sendAll(selected, msg, "watch report",
+		func(transport notificationTransport) { d.supersedeQueuedReports(transport.ID(), msg.RuleID, report) },
+		func(transport notificationTransport) { d.noteWatchDelivered(report, transport.ID()) })
 }

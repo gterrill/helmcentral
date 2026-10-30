@@ -155,6 +155,11 @@ func recordAlarmEvent(event alarmEvent, now time.Time) {
 	if globalAlarmDispatcher != nil {
 		globalAlarmDispatcher.enqueue(event, vesselNameForNotifications())
 	}
+	// After the alarm's own notification is queued, so a review can only ever
+	// follow it (ADR 0237).
+	if globalAlarmReviewer != nil {
+		globalAlarmReviewer.onRaise(event, now)
+	}
 }
 
 // vesselNameForNotifications labels off-boat notifications, which is the whole
@@ -185,6 +190,7 @@ func activeAlarms() []alarmStatus {
 	// so this matches the existing pattern rather than inventing a new one.
 	combined = append(combined, signalKCollisionNotifications(globalSignalKSnapshot, time.Now().UTC())...)
 	combined = withLiveSensorEvidence(combined, time.Now().UTC())
+	combined = withAlarmReviews(combined)
 
 	sort.Slice(combined, func(i, j int) bool {
 		if alarmStateRank[combined[i].State] != alarmStateRank[combined[j].State] {
