@@ -44,8 +44,13 @@ your other programs.
    Helmcentral on:
 
    ```
-   tailscale funnel --bg --set-path=/mcp http://127.0.0.1:<port>/mcp
+   tailscale funnel --bg --https=8443 --set-path=/mcp http://127.0.0.1:<port>/mcp
    ```
+
+   Keep the `--https=8443`. Funnel makes a whole port public, not one path. If
+   you already use `tailscale serve` to open Helmcentral over Tailscale, that
+   is on port 443, and Funnel on 443 would put the dashboard on the internet
+   too. Port 8443 keeps the two apart.
 
    If Helmcentral runs on a different machine, use that machine's Tailscale
    address instead of `127.0.0.1`. The `/mcp` at the end of the address is
@@ -53,12 +58,13 @@ your other programs.
    so the second one puts it back.
 
 2. Run `tailscale funnel status`. It should show an address like
-   `https://<machine>.<tailnet>.ts.net` with only `/mcp` listed under it. This
+   `https://<machine>.<tailnet>.ts.net:8443 (Funnel on)` with only `/mcp`
+   listed under it. Anything on port 443 should still say "tailnet only". This
    is the check that matters. If it lists `/` or anything besides `/mcp`, turn
    Funnel off (see below) and run the command again. Helmcentral refuses
    everything but `/mcp` that comes through Funnel, so a browser shows "404
    page not found" either way and can't tell you this.
-3. Open `https://<machine>.<tailnet>.ts.net/mcp` in a browser. You should see a
+3. Open `https://<machine>.<tailnet>.ts.net:8443/mcp` in a browser. You should see a
    short message saying that a valid outside assistant token is required.
 
 ## Add the connector in Claude
@@ -67,7 +73,7 @@ your other programs.
    custom connector. Anthropic's page on [custom
    connectors](https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp)
    shows where this is on each app.
-2. For the address, type `https://<machine>.<tailnet>.ts.net/mcp`.
+2. For the address, type `https://<machine>.<tailnet>.ts.net:8443/mcp`.
 3. Under authentication, choose **No sign in**.
 4. In the **Request headers** setting, add a header named `Authorization` with
    the value `Bearer ` followed by the token, for example `Bearer hcmcp_...`.
@@ -80,10 +86,10 @@ A connector you add on the web shows up in the phone apps too.
 1. On the same machine, run the same command with `off` on the end:
 
    ```
-   tailscale funnel --https=443 --set-path=/mcp off
+   tailscale funnel --https=8443 --set-path=/mcp off
    ```
 
-2. Run `tailscale funnel status` to check that nothing is listed.
+2. Run `tailscale funnel status` to check that nothing says "Funnel on".
 
 To cut off only the Claude connector and leave Funnel running, revoke its token
 in **Settings, Outside assistants**. It stops working from its next request.

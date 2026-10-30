@@ -41,13 +41,18 @@ shape the decision:
   "Trim the mount point from the URL path before proxying. (#6571)"). A request
   to exactly the mount point goes to the target URL's own path. So the correct
   command puts `/mcp` in the target too:
-  `tailscale funnel --bg --set-path=/mcp http://127.0.0.1:<port>/mcp`.
+  `tailscale funnel --bg --https=8443 --set-path=/mcp http://127.0.0.1:<port>/mcp`.
 - A path with no mount gets `http.NotFound`. With only `/mcp` mounted, `/api` and
   `/` are 404 from outside.
 - Every request is forwarded with `Tailscale-Funnel-Request: ?1`, and Tailscale
   deletes any incoming value of that header first, so an outside client can
   neither forge nor strip it. Funnel also sets `X-Forwarded-For` to the public
   source address and `X-Forwarded-Proto: https`.
+- Funnel is switched on per host and port (`AllowFunnel map[HostPort]bool`),
+  not per path. Serve and Funnel share one set of mounts on a port. A boat that
+  already uses `tailscale serve` on 443 to reach the dashboard over the tailnet
+  would make every mount on 443 public, `/` included, by running Funnel on
+  443. Pikorua's box is set up exactly that way.
 
 Mounting only `/mcp` is a command the operator types. A mistyped one, such as a
 Funnel on the whole port, would publish the dashboard and the `/api` routes on
@@ -67,10 +72,12 @@ The help pages tell the operator to run, on the machine that runs Helmcentral
 or one that can reach it:
 
 ```
-tailscale funnel --bg --set-path=/mcp http://127.0.0.1:<port>/mcp
+tailscale funnel --bg --https=8443 --set-path=/mcp http://127.0.0.1:<port>/mcp
 ```
 
-and to check it with `tailscale funnel status`, a browser request to the root
+Port 8443 keeps Funnel off 443, where an existing Serve setup for the
+dashboard would otherwise turn public with it. The connector's address carries
+`:8443`. The operator is told to check it with `tailscale funnel status`, a browser request to the root
 (404), and a browser request to `/mcp` (the 401 message). Turning it off is the
 same flags with `off`. The connector is added in Claude with the "No sign in"
 option and an `Authorization: Bearer <token>` request header. The page tells the
