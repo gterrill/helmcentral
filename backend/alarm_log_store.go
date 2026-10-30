@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -455,7 +456,25 @@ type alarmRaisedGroup struct {
 	Title       string
 	Count       int
 	First, Last time.Time
+	// Sources is how many distinct sources raised it, read from the "@context"
+	// on the rule id; 0 when the alarm has no such context. SourceKind says
+	// what they are when that is known, and TopSources names the busiest named
+	// ones, one entry per source. A source with no name is counted but never
+	// listed. All three stay empty when any row of the title has no context,
+	// because "from N" would then undercount.
+	Sources    int
+	SourceKind alarmSourceKind
+	TopSources []alarmSourceCount
 }
+
+// alarmSourceCount is one named source and how often it raised the alarm.
+type alarmSourceCount struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// alarmTopSourcesCap is how many named sources a group lists.
+const alarmTopSourcesCap = 3
 
 // RaisedSummary counts the alarms raised within [from, to] by title, most
 // often raised first and then most recent. The counting is done in SQL, so a
@@ -484,7 +503,95 @@ func (s *alarmLogStore) RaisedSummary(from, to time.Time) ([]alarmRaisedGroup, e
 		g.First, g.Last = time.Unix(first, 0).UTC(), time.Unix(last, 0).UTC()
 		out = append(out, g)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.addRaisedSources(out, from, to); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// addRaisedSources fills Sources, SourceKind and TopSources for the groups whose
+// every row has a rule id carrying a "@context". One SQL row comes back per
+// distinct rule id and message, so the read is bounded by the sources and the
+// wordings in the window, never by the alarms. A source is a rule id: two
+// vessels with one name stay two. The caller holds s.mu.
+func (s *alarmLogStore) addRaisedSources(groups []alarmRaisedGroup, from, to time.Time) error {
+	rows, err := s.db.Query(`SELECT label, rule_id, message, COUNT(*) FROM alarm_log
+		WHERE raised_at BETWEEN ? AND ? AND instr(rule_id, ?) > 0
+		GROUP BY label, rule_id, message`, from.UTC().Unix(), to.UTC().Unix(), notificationVesselSeparator)
+	if err != nil {
+		return fmt.Errorf("summarise alarm sources: %w", err)
+	}
+	defer rows.Close()
+	index := map[string]int{}
+	for i, g := range groups {
+		index[g.Title] = i
+	}
+	type source struct {
+		count int
+		names map[string]int // named wordings and how often each was raised
+	}
+	sources := map[string]map[string]*source{} // label, then rule id
+	kinds := map[string]alarmSourceKind{}
+	covered := map[string]int{} // alarms per label whose rule id has a context
+	for rows.Next() {
+		var label, ruleID, message string
+		var n int
+		if err := rows.Scan(&label, &ruleID, &message, &n); err != nil {
+			return fmt.Errorf("scan alarm sources: %w", err)
+		}
+		if _, ok := index[label]; !ok {
+			continue
+		}
+		if sources[label] == nil {
+			sources[label] = map[string]*source{}
+			kinds[label] = alarmSourceKindOf(ruleID)
+		}
+		src := sources[label][ruleID]
+		if src == nil {
+			src = &source{names: map[string]int{}}
+			sources[label][ruleID] = src
+		}
+		src.count += n
+		covered[label] += n
+		if name, ok := collisionTargetName(message); ok {
+			src.names[name] += n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for label, bySource := range sources {
+		g := &groups[index[label]]
+		if covered[label] != g.Count {
+			continue
+		}
+		g.Sources, g.SourceKind = len(bySource), kinds[label]
+		for _, src := range bySource {
+			name, best := "", 0
+			for candidate, n := range src.names {
+				if n > best || (n == best && candidate < name) {
+					name, best = candidate, n
+				}
+			}
+			if name != "" {
+				g.TopSources = append(g.TopSources, alarmSourceCount{name, src.count})
+			}
+		}
+		sort.Slice(g.TopSources, func(a, b int) bool {
+			x, y := g.TopSources[a], g.TopSources[b]
+			if x.Count != y.Count {
+				return x.Count > y.Count
+			}
+			return x.Name < y.Name
+		})
+		if len(g.TopSources) > alarmTopSourcesCap {
+			g.TopSources = g.TopSources[:alarmTopSourcesCap]
+		}
+	}
+	return nil
 }
 
 // alarmLogRetention bounds how long an alarm_log row is kept. Unlike

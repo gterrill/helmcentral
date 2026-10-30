@@ -231,6 +231,7 @@ func TestWatchReviewPrompt(t *testing.T) {
 		"not an all clear", "02:00",
 		"Lead with your judgement", "At most four short sentences", "up to three questions",
 		"Do not restate the report",
+		"When the report names an alarm's source, use it; don't offer another cause.",
 		"Mention it only when it bears on something you flag", "Say an alarm is still going only when the report marks it active now; never say one cleared", "Never suggest a remedy or a setting change", "one sentence", "submit_watch_review", "The tools only read",
 	} {
 		if !strings.Contains(prompt, want) {
