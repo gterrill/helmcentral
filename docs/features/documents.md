@@ -137,6 +137,19 @@ show as your own. The ones Mate suggested sit beneath them under **Suggested by
 Mate**, each with a **Keep** that adopts it as yours. **Rename** on the row
 menu is still there for when the title is all you want to change.
 
+The two arrows at the right of the document's title take you to the next
+document in the list you opened it from and the one before it. They follow the
+list as you saw it: the folder you were browsing, narrowed to the tag you had
+chosen, in the order you had it sorted. If you opened the document from
+**Unfiled notes**, they walk the unfiled notes. If you opened it from a section
+of a manual, they walk the manual in the order it reads.
+
+A search is a window over the list rather than a list of its own. So if you
+reached a document from a search result, the arrows walk the folder the document
+is in. The same goes for any document that isn't in the list you came from, such
+as one from another folder or one without the tag you had chosen. The arrows grey out at the first and last document. The **[** and **]**
+keys do the same, as long as you aren't typing in a field.
+
 Nothing is written until you press **Save**. As soon as you change anything, a
 save bar appears at the top of the screen with **Save** and **Discard**.
 **Discard** puts the page back the way you found it. If you have unsaved edits,
@@ -237,6 +250,8 @@ this year and "3 Jan 2025" for earlier ones. Click **Name**, **Added** or
 **Size** to sort by it, and click again to reverse. The list opens newest
 first, and Helmcentral remembers your choice on that device. A row shows its
 first three tags with a "+2" style count for the rest. Hover to see them all.
+The tag you've filtered by and the **Unfiled notes** view are kept in the web
+address. Going back from a document returns you to the same list.
 
 ## Status and Reindex
 

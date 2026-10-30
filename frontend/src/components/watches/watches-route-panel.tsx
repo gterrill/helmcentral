@@ -1,9 +1,12 @@
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 
 import { WatchDetailsPage } from '@/components/watches/watch-details-page'
 import { WatchesIndex } from '@/components/watches/watches-index'
 import { useWatchList } from '@/hooks/use-watches'
 import { useWatchesRoute } from '@/hooks/use-watches-route'
+import { orderWatches, WATCHES_DEFAULT_SORT } from '@/lib/index-order'
+import { sameListSort } from '@/lib/list-order'
+import { recordPager } from '@/lib/record-pager'
 import { WATCH_TEMPLATES } from '@/lib/watches'
 import type { MateWatchRunContext } from '@/lib/mate-screen'
 
@@ -16,14 +19,23 @@ export interface WatchesRoutePanelProps {
 // (or a new, unsaved one) are one panel; which renders is the route's view.
 // AppShell re-renders on every live delta; memo keeps this page out of it.
 export const WatchesRoutePanel = memo(function WatchesRoutePanel({ canWrite, onAskMate }: WatchesRoutePanelProps) {
-  const { route, openIndex, openWatch, openNew } = useWatchesRoute()
-  // The list is the index's: a details page reads only its own watch.
-  const list = useWatchList(route.view === 'index')
+  const { route, openIndex, openWatch, openNew, setSort } = useWatchesRoute()
+  // A watch's page reads the list too, for its arrows: the index's watches in
+  // the index's order, from the same query.
+  const list = useWatchList(route.view !== 'new', route.view === 'index')
+  const sort = route.view === 'new' ? undefined : route.sort
+  const detailsId = route.view === 'details' ? route.id : null
+  const pager = useMemo(
+    () => (detailsId === null ? undefined : recordPager(orderWatches(list.watches, sort), detailsId, (w) => w.id, (w) => w.name, openWatch)),
+    [detailsId, list.watches, sort, openWatch],
+  )
 
   if (route.view === 'index') {
     return (
       <WatchesIndex
         watches={list.watches}
+        sort={route.sort ?? null}
+        onSortChange={(next) => { setSort(sameListSort(next, WATCHES_DEFAULT_SORT) ? null : next) }}
         max={list.max}
         cost24h={list.cost24h}
         storageBytes={list.storageBytes}
@@ -47,6 +59,7 @@ export const WatchesRoutePanel = memo(function WatchesRoutePanel({ canWrite, onA
       // A different watch is a different draft: remount rather than carry one's edits to another.
       key={route.view === 'details' ? route.id : `new:${route.template ?? ''}`}
       mode={mode}
+      pager={pager}
       linkedRunId={route.view === 'details' ? route.run ?? null : null}
       canWrite={canWrite}
       onOpenIndex={() => { openIndex() }}

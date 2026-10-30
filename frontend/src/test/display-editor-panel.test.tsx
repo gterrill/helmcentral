@@ -31,6 +31,7 @@ function baseProps(overrides: Partial<DisplayEditorPanelProps> = {}): DisplayEdi
     pages: [],
     displays: [makeDisplay()],
     onBack: vi.fn(),
+    onOpenDisplay: vi.fn(),
     onUpdate: vi.fn().mockResolvedValue(makeDisplay()),
     onDelete: vi.fn().mockResolvedValue([]),
     onDisplayPatch: vi.fn(),
@@ -49,16 +50,64 @@ describe('DisplayEditorPanel', () => {
     const onBack = vi.fn()
     render(<DisplayEditorPanel {...baseProps({ display: null, onBack })} />)
     expect(screen.getByText(/could not be found/i)).toBeInTheDocument()
-    screen.getByRole('link', { name: 'Wall displays' }).click()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to wall displays' }))
     expect(onBack).toHaveBeenCalled()
   })
 
-  it('breadcrumb shows "Wall displays / <name>" and the first segment navigates back', () => {
+  it('titles the page with the display and its back arrow returns to Wall displays', () => {
     const onBack = vi.fn()
     render(<DisplayEditorPanel {...baseProps({ onBack })} />)
-    expect(screen.getByText('Flybridge')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('link', { name: 'Wall displays' }))
+    expect(screen.getByRole('heading', { name: 'Flybridge' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Back to wall displays' }))
     expect(onBack).toHaveBeenCalled()
+  })
+
+  describe('the arrows', () => {
+    const three = [
+      makeDisplay({ id: 'd1', name: 'Flybridge', slug: 'flybridge' }),
+      makeDisplay({ id: 'd2', name: 'Saloon', slug: 'saloon' }),
+      makeDisplay({ id: 'd3', name: 'Cockpit', slug: 'cockpit' }),
+    ]
+
+    it('step through the displays in the order the index lists them, opening each by its address', () => {
+      const onOpenDisplay = vi.fn()
+      render(<DisplayEditorPanel {...baseProps({ display: three[1], displays: three, onOpenDisplay })} />)
+      fireEvent.click(screen.getByRole('button', { name: 'Next: Cockpit' }))
+      expect(onOpenDisplay).toHaveBeenLastCalledWith('cockpit')
+      fireEvent.click(screen.getByRole('button', { name: 'Previous: Flybridge' }))
+      expect(onOpenDisplay).toHaveBeenLastCalledWith('flybridge')
+    })
+
+    it('stop at the ends of the list', () => {
+      render(<DisplayEditorPanel {...baseProps({ display: three[0], displays: three })} />)
+      expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
+      expect(screen.getByRole('button', { name: 'Next: Saloon' })).toBeEnabled()
+    })
+
+    it('save a name being typed before the page moves on, because leaving the field commits it', () => {
+      const calls: string[] = []
+      const onUpdate = vi.fn().mockImplementation(async () => { calls.push('update'); return three[1] })
+      const onOpenDisplay = vi.fn().mockImplementation(() => { calls.push('open') })
+      render(<DisplayEditorPanel {...baseProps({ display: three[1], displays: three, onUpdate, onOpenDisplay })} />)
+      const name = screen.getByLabelText('Name')
+      name.focus()
+      fireEvent.change(name, { target: { value: 'Saloon aft' } })
+      // Pressing the arrow takes focus from the field, which blurs it; then the click lands.
+      const next = screen.getByRole('button', { name: 'Next: Cockpit' })
+      next.focus()
+      fireEvent.click(next)
+      expect(onUpdate).toHaveBeenCalledWith('d2', { name: 'Saloon aft' })
+      expect(calls).toEqual(['update', 'open'])
+    })
+
+    it('leave the [ and ] keys to the field while a name is being typed', () => {
+      const onOpenDisplay = vi.fn()
+      render(<DisplayEditorPanel {...baseProps({ display: three[1], displays: three, onOpenDisplay })} />)
+      const name = screen.getByLabelText('Name')
+      name.focus()
+      fireEvent.keyDown(name, { key: ']' })
+      expect(onOpenDisplay).not.toHaveBeenCalled()
+    })
   })
 
   describe('toolbar validation (harvested bounds)', () => {

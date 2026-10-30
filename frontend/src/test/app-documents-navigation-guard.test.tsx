@@ -15,7 +15,7 @@ import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { App } from '../App'
-import { useDocument, useDocuments, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
+import { useDocument, useDocumentListing, useDocuments, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { useDocumentUploads } from '@/hooks/use-document-uploads'
 
 // This test renders the dashboard, not the auth gate. State the precondition
@@ -37,6 +37,8 @@ vi.mock('@/hooks/use-auth', () => ({
 // ── stub fetch so components that call it don't throw ─────────────────────────
 beforeEach(() => {
   mockedUseFolderPath.mockReturnValue({ path: [], error: null })
+  // The Details page's arrows read the listing it was opened from.
+  vi.mocked(useDocumentListing).mockReturnValue({ documents: [], loaded: true })
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (typeof url !== 'string') return { ok: false, json: async () => ({}) }
     if (url.endsWith('/api/health')) {

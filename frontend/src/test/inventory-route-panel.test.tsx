@@ -44,6 +44,8 @@ type StubProps = {
   onCloseDeck: () => void
   onLocationDeleted: () => void
   onDeckDeleted: () => void
+  list: unknown
+  onListChange: (list: { q?: string; sort?: { id: string; desc: boolean } }) => void
 }
 
 vi.mock('@/components/inventory/inventory-panel', () => ({
@@ -57,6 +59,10 @@ vi.mock('@/components/inventory/inventory-panel', () => ({
           {[props.activeSectionId, props.equipmentEditId ?? '-', props.creatingEquipment ? 'creating' : '-', props.binCode ?? '-',
             props.locationEditId ?? '-', props.decksOpen ? 'decks' : '-', props.deckEditId ?? '-', props.locationsView, props.planDeckId ?? '-'].join(' ')}
         </p>
+        <p data-testid="list">{JSON.stringify(props.list)}</p>
+        <button type="button" onClick={() => props.onListChange({ q: 'pump', sort: { id: 'name', desc: true } })}>set-list</button>
+        <button type="button" onClick={() => props.onListChange({})}>clear-list</button>
+        <button type="button" onClick={() => props.onOpenLocation('z2')}>open-location-z2</button>
         <button type="button" onClick={() => setDirty(true)}>dirty</button>
         <button type="button" onClick={() => props.onOpenEquipment('eq-2')}>open-eq-2</button>
         <button type="button" onClick={() => props.onNewEquipment({ zoneId: 'z1', binId: 'b1' })}>new-item</button>
@@ -199,4 +205,64 @@ describe('InventoryRoutePanel: a move that already settled', () => {
     expect(router.getSnapshot().pending).toBeNull()
     expect(shape()).toBe('locations - - - - decks - table -')
   })
+
+  describe('the index state (filter, search, sort)', () => {
+    it('is in the address of an index, replacing the entry rather than adding one', () => {
+      const { history } = mount('/inventory')
+      fireEvent.click(screen.getByText('set-list'))
+      expect(history.path()).toBe('/inventory?q=pump&sort=-name')
+      expect(history.entries).toHaveLength(1)
+      fireEvent.click(screen.getByText('clear-list'))
+      expect(history.path()).toBe('/inventory')
+    })
+
+    it('rides on an Equipment record and comes back with Back', () => {
+      const { history } = mount('/inventory?system=bilge&sort=-name')
+      expect(screen.getByTestId('list').textContent).toBe('{"system":"bilge","sort":{"id":"name","desc":true}}')
+      fireEvent.click(screen.getByText('open-eq-2'))
+      expect(history.path()).toBe('/inventory/equipment/eq-2?system=bilge&sort=-name')
+      expect(screen.getByTestId('list').textContent).toBe('{"system":"bilge","sort":{"id":"name","desc":true}}')
+      fireEvent.click(screen.getByText('back'))
+      expect(history.path()).toBe('/inventory?system=bilge&sort=-name')
+    })
+
+    it('rides on a location the same way', () => {
+      const { history } = mount('/inventory/locations?q=la')
+      fireEvent.click(screen.getByText('open-location-z2'))
+      expect(history.path()).toBe('/inventory/locations/z2?q=la')
+      fireEvent.click(screen.getByText('back'))
+      expect(history.path()).toBe('/inventory/locations?q=la')
+    })
+
+    it('survives a switch between Table and Plan', () => {
+      const { history } = mount('/inventory/locations?q=la&sort=-name')
+      fireEvent.click(screen.getByText('view-plan'))
+      expect(history.path()).toBe('/inventory/locations?view=plan&q=la&sort=-name')
+      expect(screen.getByTestId('list').textContent).toBe('{"q":"la","sort":{"id":"name","desc":true}}')
+    })
+
+    it('rides on a deck the same way', () => {
+      const { history } = mount('/inventory/decks?sort=-name')
+      fireEvent.click(screen.getByText('open-deck-d1'))
+      expect(history.path()).toBe('/inventory/decks/d1?sort=-name')
+      fireEvent.click(screen.getByText('close-deck'))
+      expect(history.path()).toBe('/inventory/decks?sort=-name')
+    })
+
+    it('sends Back from an item opened out of a bin to the Equipment index, which its arrows then follow', () => {
+      const { history } = mount('/inventory/bins/LAZ-02')
+      fireEvent.click(screen.getByText('open-eq-2'))
+      expect(history.path()).toBe('/inventory/equipment/eq-2')
+      expect(screen.getByTestId('list').textContent).toBe('{}')
+      fireEvent.click(screen.getByText('back'))
+      expect(history.path()).toBe('/inventory')
+    })
+
+    it('is not carried to a record of another kind', () => {
+      const { history } = mount('/inventory?q=pump')
+      fireEvent.click(screen.getByText('open-bin'))
+      expect(history.path()).toBe('/inventory/bins/LAZ-02')
+    })
+  })
+
 })

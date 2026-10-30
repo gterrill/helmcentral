@@ -43,6 +43,13 @@ set until you tap **Apply**.
 
 You can have up to 20 scheduled watches.
 
+A watch's page has two arrows at the right of its title. They take you to the
+next watch in the list and the one before it. The order is the one the Watches
+page showed, which is by name unless you sorted by another column. The **[** and
+**]** keys do the same, as long as you aren't typing in a field. The arrows grey
+out at the first and last watch. They ask what to do with unsaved edits, as the
+back arrow does. A watch you haven't saved yet has no arrows.
+
 ## The schedule
 
 You pick a preset, and Helmcentral shows what it means in words and the next

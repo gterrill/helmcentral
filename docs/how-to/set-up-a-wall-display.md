@@ -78,6 +78,12 @@ display** and it opens the new screen's own page. Fill in:
   burn in.
 - **Keep awake**, to ask the screen not to sleep.
 
+A display's page has a back arrow, which returns to the list of wall displays,
+and two arrows at the right of its title. They take you to the next display and
+the one before it, in the order the list shows them. The **[** and **]** keys do
+the same, as long as you aren't typing in a field. If you've just typed a name or
+address and press an arrow, that change is saved first.
+
 ### The rule: canvas times magnification has to fit the screen
 
 The canvas, multiplied by the magnification, has to fit inside the size the

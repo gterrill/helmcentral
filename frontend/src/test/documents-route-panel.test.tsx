@@ -3,10 +3,12 @@
  * with the listing and the page stubbed.
  */
 import { forwardRef, useImperativeHandle } from 'react'
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { DocumentsRoutePanel } from '@/components/documents-route-panel'
+import { resetQueryStore } from '@/lib/api-query'
 import { testRouter } from './helpers/router'
+import { stubApi } from './helpers/stub-api'
 
 const save = vi.fn().mockResolvedValue(undefined)
 const detailsRef = vi.hoisted(() => ({ detach: false }))
@@ -19,9 +21,16 @@ vi.mock('@/components/documents-panel', () => ({
     onSectionChange?: (id: string | null) => void
     onEditDocument?: (id: string) => void
     initialDocumentId?: string | null
+    initialTag?: string | null
+    onTagChange?: (tag: string | null) => void
+    initialUnfiled?: boolean
+    onUnfiledChange?: (unfiled: boolean) => void
   }) => (
     <div>
-      <p data-testid="listing">{`folder=${props.initialFolderId ?? '-'} section=${props.initialSectionId ?? '-'} viewer=${props.initialDocumentId ?? '-'}`}</p>
+      <p data-testid="listing">{`folder=${props.initialFolderId ?? '-'} section=${props.initialSectionId ?? '-'} viewer=${props.initialDocumentId ?? '-'} tag=${props.initialTag ?? '-'} unfiled=${props.initialUnfiled ? 'yes' : 'no'}`}</p>
+      <button type="button" onClick={() => props.onTagChange?.('engine')}>tag-engine</button>
+      <button type="button" onClick={() => props.onTagChange?.(null)}>tag-none</button>
+      <button type="button" onClick={() => props.onUnfiledChange?.(true)}>show-unfiled</button>
       <button type="button" onClick={() => props.onFolderChange?.('f2')}>open-f2</button>
       <button type="button" onClick={() => props.onSectionChange?.('s3')}>open-s3</button>
       <button type="button" onClick={() => props.onEditDocument?.('doc-9')}>details-doc-9</button>
@@ -55,6 +64,16 @@ vi.mock('@/components/document-details-page', () => ({
   }),
 }))
 
+// The Details page's arrows read the listing it was opened from.
+beforeEach(() => {
+  stubApi({
+    'GET /api/document-folders': { path: [], folders: [], documents: [] },
+    'GET /api/documents': { documents: [] },
+    'GET /api/notes': { notes: [] },
+  })
+})
+afterEach(() => { resetQueryStore() })
+
 function mount(path: string, overrides: Partial<Parameters<typeof DocumentsRoutePanel>[0]> = {}) {
   const harness = testRouter(path)
   const onDetailsTitleChange = vi.fn()
@@ -75,7 +94,34 @@ function mount(path: string, overrides: Partial<Parameters<typeof DocumentsRoute
 describe('DocumentsRoutePanel listing', () => {
   it('seeds the listing from the location and the viewer deep link from App', () => {
     mount('/documents?folder=f1&section=s1', { initialDocumentId: 'd1' })
-    expect(screen.getByTestId('listing')).toHaveTextContent('folder=f1 section=s1 viewer=d1')
+    expect(screen.getByTestId('listing')).toHaveTextContent('folder=f1 section=s1 viewer=d1 tag=- unfiled=no')
+  })
+
+  it('keeps the tag filter and the Unfiled notes view in the address, and carries them to a Details page', () => {
+    const { history } = mount('/documents?folder=f1')
+    fireEvent.click(screen.getByText('tag-engine'))
+    expect(history.path()).toBe('/documents?folder=f1&tag=engine')
+    expect(history.entries).toHaveLength(1) // a filter replaces the entry
+    expect(screen.getByTestId('listing')).toHaveTextContent('tag=engine')
+    fireEvent.click(screen.getByText('details-doc-9'))
+    expect(history.path()).toBe('/documents/doc-9?folder=f1&tag=engine')
+    fireEvent.click(screen.getByText('crumb-back'))
+    expect(history.path()).toBe('/documents?folder=f1&tag=engine')
+    fireEvent.click(screen.getByText('tag-none'))
+    expect(history.path()).toBe('/documents?folder=f1')
+  })
+
+  it('carries the Unfiled notes view to a Details page and back, and a folder leaves it', () => {
+    const { history } = mount('/documents')
+    fireEvent.click(screen.getByText('show-unfiled'))
+    expect(history.path()).toBe('/documents?view=unfiled')
+    expect(screen.getByTestId('listing')).toHaveTextContent('unfiled=yes')
+    fireEvent.click(screen.getByText('details-doc-9'))
+    expect(history.path()).toBe('/documents/doc-9?view=unfiled')
+    fireEvent.click(screen.getByText('crumb-back'))
+    expect(history.path()).toBe('/documents?view=unfiled')
+    fireEvent.click(screen.getByText('open-f2'))
+    expect(history.path()).toBe('/documents?folder=f2')
   })
 
   it('opens a folder, section and Details page through the location', () => {
@@ -122,6 +168,12 @@ describe('DocumentsRoutePanel Details page guard', () => {
     fireEvent.click(screen.getByText('moved-to-f7'))
     expect(router.getSnapshot().pending).toBeNull()
     expect(history.entries).toEqual(['/documents/doc-1?folder=f7'])
+  })
+
+  it('leaves the Unfiled notes view when a note is moved into a folder', () => {
+    const { history } = mount('/documents/doc-1?view=unfiled&tag=engine')
+    fireEvent.click(screen.getByText('moved-to-f7'))
+    expect(history.path()).toBe('/documents/doc-1?folder=f7&tag=engine')
   })
 
   it('Save and Continue saves through the page\'s own handle', async () => {

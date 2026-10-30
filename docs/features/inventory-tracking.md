@@ -65,6 +65,20 @@ again to reverse the order. Each row's own menu opens the record or removes it.
 Those are the same choices as opening the record and using Delete there. On a
 phone, the list shows as a stack of cards instead of a table.
 
+Which system, status or zone you filtered by, what you typed in the search box
+and the column you sorted by all stay in the web address. When you open an item
+and press back, the list is as you left it.
+
+Two arrows sit at the right of the item's title. They take you to the next item
+in that list and the one before it, in the order you saw them. So a filtered and
+sorted list is the one you walk through. When you reach the first or last item,
+the arrow greys out instead of starting over.
+
+The **[** and **]** keys do the same as the two arrows, as long as you aren't
+typing in a field. If you have unsaved edits, the arrows ask what to do with
+them, just as the back arrow does. A new item has no arrows, because it isn't in
+the list yet.
+
 ### Documents
 
 An equipment record links to anything already in the document library. That
@@ -128,6 +142,18 @@ refusal tells you how many there are.
 
 Tap a bin's code to open its own page: everything filed in it, with a photo of
 each thing underneath. See Tags and photos.
+
+A location's page, a deck's page and a bin's page all have the same two arrows
+at the right of the title. The **[** and **]** keys do the same. Where they go
+depends on the page:
+
+- Location: Through the Locations list, as you searched and sorted it.
+- Deck: Through the Decks list, in the order it was sorted.
+- Bin: Through the other bins in the same location, in the order that
+  location's page lists them.
+
+The arrows grey out at the ends of the list. They ask what to do with unsaved
+edits, as the back arrow does.
 
 ### Deck plans
 

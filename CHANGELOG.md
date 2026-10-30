@@ -25,6 +25,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Previous and next on every details page.** Equipment, locations, decks,
+  bins, watches, documents and wall displays now have the two arrows at the
+  right of the title that passages already had, and the **[** and **]** keys do
+  the same. They step through the list in the order you saw it, with the same
+  filter, search and sort. The filter, search and sort now stay in the page's web
+  address, so going back from a record returns you to the list as you left it. A
+  bin steps through the other bins in its location, and a wall display saves a
+  name or address you were typing before it moves on. Unsaved edits are held, as
+  they are with the back arrow. The wall display page also gets a back arrow in
+  place of its trail.
 - **Outside assistants can read the boat.** A program on your own computer, such
   as Claude Code or Claude Desktop, can now connect to Helmcentral over MCP and
   ask about the house bank, the active alarms, the alarm log, how a reading has

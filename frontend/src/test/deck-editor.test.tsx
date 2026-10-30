@@ -365,4 +365,23 @@ describe('DeckEditor delete', () => {
     expect(screen.getByRole('link', { name: 'Decks' })).toBeInTheDocument()
     expect(screen.getByText('Deck', { selector: '[aria-current="page"]' })).toBeInTheDocument()
   })
+  describe('the arrows', () => {
+    it('step through the Decks table in the order it showed', async () => {
+      const open = vi.fn()
+      renderEditor({ id: 'd1', onOpenNeighbour: open })
+      fireEvent.click(await screen.findByRole('button', { name: 'Next: Flybridge' }))
+      expect(open).toHaveBeenLastCalledWith('d2')
+      expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
+    })
+
+    it('follow the sort the table was opened with', async () => {
+      const open = vi.fn()
+      renderEditor({ id: 'd1', onOpenNeighbour: open, list: { sort: { id: 'name', desc: false } } })
+      // Flybridge, Main deck: Main deck is last.
+      fireEvent.click(await screen.findByRole('button', { name: 'Previous: Flybridge' }))
+      expect(open).toHaveBeenLastCalledWith('d2')
+      expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+    })
+  })
+
 })

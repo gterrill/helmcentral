@@ -1,7 +1,17 @@
+import { useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { EquipmentIndex } from '@/components/inventory/equipment-index'
 import type { EquipmentItem, InventoryZone } from '@/hooks/use-inventory'
+import type { InventoryList } from '@/lib/app-location'
+
+// The index's filter, search and sort live in the address; this holds them the
+// way the route does, so the tests drive the real index.
+function Harness(props: Omit<React.ComponentProps<typeof EquipmentIndex>, 'list' | 'onListChange'> & { initial?: InventoryList }) {
+  const { initial, ...rest } = props
+  const [list, setList] = useState<InventoryList>(initial ?? {})
+  return <EquipmentIndex {...rest} list={list} onListChange={setList} />
+}
 
 function makeItem(overrides: Partial<EquipmentItem>): EquipmentItem {
   return {
@@ -77,7 +87,7 @@ describe('EquipmentIndex', () => {
       return Promise.resolve({ ok: false, json: async () => ({}) })
     })
 
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
 
     await screen.findByText('Generator')
 
@@ -88,7 +98,7 @@ describe('EquipmentIndex', () => {
   })
 
   it('shows an empty state inviting New item when there are no results', async () => {
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
 
     await waitFor(() => expect(screen.getByText(/no equipment/i)).toBeInTheDocument())
     expect(screen.getAllByRole('button', { name: 'New item' }).length).toBeGreaterThan(0)
@@ -103,7 +113,7 @@ describe('EquipmentIndex', () => {
       return Promise.resolve({ ok: false, json: async () => ({}) })
     })
     const onOpenItem = vi.fn()
-    render(<EquipmentIndex onOpenItem={onOpenItem} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={onOpenItem} onNewItem={vi.fn()} />)
 
     fireEvent.click(await screen.findByText('Generator'))
     expect(onOpenItem).toHaveBeenCalledWith('eq-1')
@@ -118,7 +128,7 @@ describe('EquipmentIndex', () => {
       return Promise.resolve({ ok: false, json: async () => ({}) })
     })
     const onOpenItem = vi.fn()
-    render(<EquipmentIndex onOpenItem={onOpenItem} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={onOpenItem} onNewItem={vi.fn()} />)
 
     await screen.findByText('Generator')
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Generator' }))
@@ -148,7 +158,7 @@ describe('EquipmentIndex', () => {
       }
       return { ok: false, json: async () => ({}) }
     })
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
 
     await screen.findByText('Generator')
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Generator' }))
@@ -190,7 +200,7 @@ describe('EquipmentIndex', () => {
       if (String(url).includes('/api/inventory/equipment')) return { ok: true, json: async () => ({ items: [makeItem({})] }) }
       return { ok: false, json: async () => ({}) }
     })
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
 
     await screen.findByText('Generator')
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Generator' }))
@@ -208,7 +218,7 @@ describe('EquipmentIndex', () => {
       if (String(url).includes('/api/inventory/equipment')) return { ok: true, json: async () => ({ items: [makeItem({})] }) }
       return { ok: false, json: async () => ({}) }
     })
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
 
     await screen.findByText('Generator')
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Generator' }))
@@ -220,7 +230,7 @@ describe('EquipmentIndex', () => {
 
   it('calls onNewItem from the toolbar button', async () => {
     const onNewItem = vi.fn()
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={onNewItem} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={onNewItem} />)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     fireEvent.click(screen.getAllByRole('button', { name: 'New item' })[0])
@@ -240,7 +250,7 @@ describe('EquipmentIndex', () => {
       }
       return Promise.resolve({ ok: false, json: async () => ({}) })
     })
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
 
     await screen.findByText('Generator')
     expect(screen.getByText('Lazarette / LAZ-01')).toBeInTheDocument()
@@ -248,7 +258,7 @@ describe('EquipmentIndex', () => {
   })
 
   it('sends the search box text as the q query parameter', async () => {
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     fetchMock.mockClear()
 
@@ -274,7 +284,7 @@ describe('EquipmentIndex', () => {
       }
       return Promise.resolve({ ok: false, json: async () => ({}) })
     })
-    render(<EquipmentIndex onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+    render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
     await screen.findByText('Generator')
 
     expect(screen.queryByRole('columnheader', { name: /serviced by|category/i })).not.toBeInTheDocument()
@@ -283,4 +293,40 @@ describe('EquipmentIndex', () => {
     expect(screen.queryByText('Calendar')).not.toBeInTheDocument()
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('category='))).toBe(false)
   })
+
+  describe('the sort in the address', () => {
+    function twoItems() {
+      fetchMock.mockImplementation((url: string) => {
+        if (String(url).includes('/api/inventory/zones')) return Promise.resolve({ ok: true, json: async () => ({ zones }) })
+        if (String(url).includes('/api/inventory/equipment')) {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({ items: [makeItem({ id: 'a', name: 'Alternator' }), makeItem({ id: 'g', name: 'Generator' })] }),
+          })
+        }
+        return Promise.resolve({ ok: false, json: async () => ({}) })
+      })
+    }
+    const names = () => screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '').filter((t) => /Alternator|Generator/.test(t))
+
+    it('draws the rows in the order of the sort it is given', async () => {
+      twoItems()
+      render(<Harness onOpenItem={vi.fn()} onNewItem={vi.fn()} initial={{ sort: { id: 'name', desc: true } }} />)
+      await screen.findByText('Generator')
+      expect(names()[0]).toContain('Generator')
+      expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'descending')
+    })
+
+    it('hands a header click up as a new sort, and a typed search as a new list', async () => {
+      twoItems()
+      const onListChange = vi.fn()
+      render(<EquipmentIndex list={{ q: 'a' }} onListChange={onListChange} onOpenItem={vi.fn()} onNewItem={vi.fn()} />)
+      await screen.findByText('Generator')
+      fireEvent.click(within(screen.getByRole('columnheader', { name: 'Name' })).getByRole('button'))
+      expect(onListChange).toHaveBeenLastCalledWith({ q: 'a', sort: { id: 'name', desc: false } })
+      fireEvent.change(screen.getByLabelText('Search equipment'), { target: { value: '' } })
+      expect(onListChange).toHaveBeenLastCalledWith({})
+    })
+  })
+
 })
