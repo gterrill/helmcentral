@@ -451,9 +451,6 @@ func postPluginConfigHandler(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": "failed to save plugin config"})
 	}
 	placeSearchCache.clear()
-	if cc, ok := provider.(interface{ clearCache() }); ok {
-		cc.clearCache()
-	}
 
 	resp, err := buildPluginInfoResponse(providerType, provider)
 	if err != nil {

@@ -338,6 +338,7 @@ describe("ForecastDrawer stay view", () => {
       <ForecastDrawer
         forecast={tenDays()}
         waveDays={[]}
+        waveNoData
         loading={false}
         error={null}
         unit="metric"

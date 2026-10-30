@@ -77,11 +77,12 @@ func parseWaveBody(body []byte) ([]waveHourOutput, error) {
 }
 
 // hoursHaveNoWaves reports a series with no real wave reading: every hour's
-// period is missing or 0. A land-masked GFS-Wave cell returns zeros for every
-// field, and a wave with no period is not a wave.
+// period is absent. parseOpenMeteoWaveResponse already leaves the combined
+// figures out of an hour whose period is 0, which is what a land-masked
+// GFS-Wave cell returns.
 func hoursHaveNoWaves(hours []waveHourOutput) bool {
 	for _, h := range hours {
-		if h.WavePeriodS != nil && *h.WavePeriodS > 0 {
+		if h.WavePeriodS != nil {
 			return false
 		}
 	}
@@ -220,6 +221,12 @@ func parseOpenMeteoWaveResponse(raw []byte, utcOffsetSeconds int) ([]waveHourOut
 			if p, ok := swellWavePeriods[i].(float64); ok {
 				point.SwellWavePeriodS = p
 			}
+		}
+		// A wave with no period is not a wave: a land-masked cell reports
+		// every figure as 0, so the combined figures are left out, which the
+		// host reads as absent (the same rule it applies itself).
+		if point.WavePeriodS != nil && *point.WavePeriodS == 0 {
+			point.WaveHeightM, point.WavePeriodS, point.WaveDirectionDeg = nil, nil, nil
 		}
 
 		hourly_out = append(hourly_out, point)

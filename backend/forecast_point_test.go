@@ -216,7 +216,7 @@ func TestWaveForecast_OwnShipWithNoValuesIsNoData(t *testing.T) {
 	now := time.Now().UTC()
 	hourly := []waveHourPoint{{Time: now}, {Time: now.Add(time.Hour)}}
 	sea := 26.0
-	registerWaveProvider(&stubWaveProvider{id: "w", name: "W", ttl: 60, bundle: waveForecastBundle{Hourly: hourly, CachedAt: now, SeaTempC: &sea, Model: "ncep_gfswave025"}})
+	registerWaveProvider(&stubWaveProvider{id: "w", name: "W", ttl: 60, bundle: waveForecastBundle{Hourly: hourly, CachedAt: now, SeaTempC: &sea}})
 	server := trustedSignalKPayloadServer(t, -27.4, 153.0)
 	defer server.Close()
 	t.Setenv("SETTINGS_FILE", writeWaveSettings(t, "w", server.URL))
@@ -231,7 +231,7 @@ func TestWaveForecast_OwnShipWithNoValuesIsNoData(t *testing.T) {
 	if !body.NoData || body.Days == nil || len(body.Days) != 0 {
 		t.Fatalf("expected no_data with empty days: %+v", body)
 	}
-	if body.SeaTemperatureF == nil || body.Model != "ncep_gfswave025" {
+	if body.SeaTemperatureF == nil {
 		t.Fatalf("sea temperature and model must survive: %+v", body)
 	}
 }
@@ -241,20 +241,19 @@ func TestWaveForecast_ResponseCarriesFallbackModel(t *testing.T) {
 	withCleanWaveProviderRegistry(t)
 	now := time.Now().UTC()
 	hourly := []waveHourPoint{{Time: now, WaveHeightM: pwF(0.2), WavePeriodS: pwF(3)}}
-	registerWaveProvider(&stubWaveProvider{id: "w", name: "W", ttl: 60, bundle: waveForecastBundle{Hourly: hourly, CachedAt: now, Model: "best_match", FallbackUsed: true}})
+	registerWaveProvider(&stubWaveProvider{id: "w", name: "W", ttl: 60, bundle: waveForecastBundle{Hourly: hourly, CachedAt: now, FallbackModel: "best_match"}})
 	t.Setenv("SETTINGS_FILE", writeWaveSettings(t, "w", "http://127.0.0.1:1"))
 	rec := serveForecastPoint(t, waveForecast, "?lat=-20.2666&lon=148.7099")
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
 	var body struct {
-		Model        string `json:"model"`
-		FallbackUsed bool   `json:"fallback_used"`
+		FallbackModel string `json:"fallback_model"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Model != "best_match" || !body.FallbackUsed {
+	if body.FallbackModel != "best_match" {
 		t.Fatalf("got %+v", body)
 	}
 }

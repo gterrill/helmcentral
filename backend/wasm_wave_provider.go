@@ -188,8 +188,9 @@ func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, erro
 	}
 
 	bundle.SeaTempC = out.SeaSurfaceTemperatureC
-	bundle.Model = out.Model
-	bundle.FallbackUsed = out.FallbackUsed
+	if out.FallbackUsed {
+		bundle.FallbackModel = out.Model
+	}
 
 	return bundle, nil
 }
@@ -229,7 +230,7 @@ func (p *wasmWaveProvider) FetchWaves(lat, lon float64, days int) (bundle waveFo
 		}
 	}()
 
-	key := waveWasmCacheKey(lat, lon, days)
+	key := p.saltedCacheKey(waveWasmCacheKey(lat, lon, days))
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true
@@ -274,8 +275,8 @@ func (p *wasmWaveProvider) fetchFromPlugin(lat, lon float64, days int) (waveFore
 	if err != nil {
 		return waveForecastBundle{}, err
 	}
-	if bundle.FallbackUsed {
-		log.Printf("wave provider %q: the usual model has no data at %.4f, %.4f; using the fallback model %q (operator setting)", p.id, lat, lon, bundle.Model)
+	if bundle.FallbackModel != "" {
+		log.Printf("wave provider %q: the usual model has no data at %.4f, %.4f; using the fallback model %q (operator setting)", p.id, lat, lon, bundle.FallbackModel)
 	}
 	return bundle, nil
 }
@@ -297,10 +298,4 @@ func loadWasmWaveProviders(dir string) {
 			return nil
 		},
 	)
-}
-
-// clearCache drops every cached forecast, so a changed plugin setting applies
-// on the next call instead of when the old answer expires.
-func (p *wasmWaveProvider) clearCache() {
-	p.cache.clear()
 }

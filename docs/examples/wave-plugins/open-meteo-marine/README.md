@@ -43,8 +43,8 @@ Open-Meteo returns height, period, direction and every component as `0.0`.
 Read as figures, that is a flat calm from due north. A wave with no period is
 not a wave, so the host (`backend/wasm_wave_provider.go`) treats an hour whose
 combined `wave_period_s` is `0` as absent, and a wind-wave or swell component
-with period `0` as no train. The plugin still passes Open-Meteo's values
-through unchanged.
+with period `0` as no train. The plugin applies the same rule to the
+combined figures, so it leaves them out of such an hour.
 
 The plugin also has an operator setting, declared in
 `open-meteo-marine.config_fields.json`:
@@ -209,5 +209,6 @@ The per-component fields above keep their zero encoding, because that is how
 Open-Meteo itself marks an absent component.
 
 A combined period of `0` is the exception to "a real zero is kept": a wave with
-no period is not a wave, so the host drops the whole hour. See "Land cells and
+no period is not a wave, so the plugin leaves the whole hour's combined figures
+out, and the host applies the same rule to any plugin. See "Land cells and
 the blend fallback".

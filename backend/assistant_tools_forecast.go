@@ -15,8 +15,8 @@ var mateToolGetWindForecast = mateTool{
 		Description: "Fetch the wind forecast (and wave forecast, where available) for a position, as a " +
 			"per-day summary plus a three-hourly breakdown. Use find_places first to resolve a place name " +
 			"to coordinates. If waves_no_data is true the wave model has no figures at that point, so say there is " +
-			"no wave forecast there. If wave_fallback_used is true the wave figures come from the fallback model named " +
-			"in wave_model, so say so.",
+			"no wave forecast there. If wave_fallback_model is set the wave figures come from that fallback model, " +
+			"because the usual one has no data here, so say so.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -167,16 +167,14 @@ type assistantWindForecastResult struct {
 	// WavesNoData is set when the wave model has no values at this point.
 	// It is an answer, not a failure: say there is no wave forecast here.
 	WavesNoData bool `json:"waves_no_data,omitempty"`
-	// WaveModel and WaveFallbackUsed say which model the wave figures came
-	// from when the provider reports it, and whether that was a fallback
-	// because the usual model has no data here.
-	WaveModel        string                `json:"wave_model,omitempty"`
-	WaveFallbackUsed bool                  `json:"wave_fallback_used,omitempty"`
-	Cached           bool                  `json:"cached"`
-	CachedAt         *string               `json:"cached_at"`
-	Days             []assistantDaySummary `json:"days"`
-	Hourly           []assistantWindHour   `json:"hourly"`
-	Truncated        bool                  `json:"truncated,omitempty"`
+	// WaveFallbackModel names the model the wave figures came from when the
+	// usual one has no data here.
+	WaveFallbackModel string                `json:"wave_fallback_model,omitempty"`
+	Cached            bool                  `json:"cached"`
+	CachedAt          *string               `json:"cached_at"`
+	Days              []assistantDaySummary `json:"days"`
+	Hourly            []assistantWindHour   `json:"hourly"`
+	Truncated         bool                  `json:"truncated,omitempty"`
 }
 
 // assistantDayAggregate accumulates one local day's min/max wind, max gust
@@ -459,8 +457,8 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		return "", err
 	}
 
-	var waveProviderID, wavesError, waveModel string
-	var wavesNoData, waveFallbackUsed bool
+	var waveProviderID, wavesError, waveFallbackModel string
+	var wavesNoData bool
 	waveByUnix := map[int64]waveHourPoint{}
 	if waveProvider, wpID, werr := d.waves(); werr != nil {
 		waveProviderID = wpID
@@ -471,7 +469,7 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		if ferr != nil {
 			wavesError = firstErrorLine(ferr)
 		} else {
-			waveModel, waveFallbackUsed = waveBundle.Model, waveBundle.FallbackUsed
+			waveFallbackModel = waveBundle.FallbackModel
 			wavesNoData = waveSeriesHasNoValues(waveBundle.Hourly)
 			for _, whp := range waveBundle.Hourly {
 				waveByUnix[whp.Time.Unix()] = whp
@@ -591,21 +589,20 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 	}
 
 	result := assistantWindForecastResult{
-		Name:             strings.TrimSpace(args.Name),
-		Lat:              args.Lat,
-		Lon:              args.Lon,
-		CourseDeg:        args.CourseDeg,
-		Timezone:         place.Name,
-		WeatherProvider:  providerID,
-		WaveProvider:     waveProviderID,
-		WavesError:       wavesError,
-		WavesNoData:      wavesNoData,
-		WaveModel:        waveModel,
-		WaveFallbackUsed: waveFallbackUsed,
-		Cached:           bundle.Cached,
-		CachedAt:         cachedAt,
-		Days:             days2,
-		Hourly:           hourly,
+		Name:              strings.TrimSpace(args.Name),
+		Lat:               args.Lat,
+		Lon:               args.Lon,
+		CourseDeg:         args.CourseDeg,
+		Timezone:          place.Name,
+		WeatherProvider:   providerID,
+		WaveProvider:      waveProviderID,
+		WavesError:        wavesError,
+		WavesNoData:       wavesNoData,
+		WaveFallbackModel: waveFallbackModel,
+		Cached:            bundle.Cached,
+		CachedAt:          cachedAt,
+		Days:              days2,
+		Hourly:            hourly,
 	}
 
 	shrink := func() bool {

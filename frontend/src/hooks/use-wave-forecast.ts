@@ -89,8 +89,7 @@ interface WaveForecastDayApi {
 
 interface WaveForecastEnvelopeApi {
   provider?: string;
-  model?: string;
-  fallback_used?: boolean;
+  fallback_model?: string;
   no_data?: boolean;
   days?: WaveForecastDayApi[];
   sea_temperature_f?: number | null;
@@ -103,10 +102,8 @@ interface MappedWaveForecast {
   days: WaveForecastDay[];
   seaTemperatureF: number | null;
   provider: string | null;
-  /** True when the figures came from the fallback model blend, not the usual model. */
-  fallbackUsed: boolean;
-  /** The forecast model the figures came from, when the server says. */
-  model: string | null;
+  /** The model the figures came from when the usual one had no data here, else null. */
+  fallbackModel: string | null;
   /** The wave model has no values at this point. A quiet answer, not a fault. */
   noData: boolean;
   isCached: boolean;
@@ -154,8 +151,7 @@ function mapWavePayload(payload: WaveForecastEnvelopeApi): MappedWaveForecast {
     days: mappedDays,
     seaTemperatureF: typeof payload.sea_temperature_f === 'number' ? payload.sea_temperature_f : null,
     provider: typeof payload.provider === 'string' && payload.provider !== '' ? payload.provider : null,
-    fallbackUsed: Boolean(payload.fallback_used),
-    model: typeof payload.model === 'string' && payload.model !== '' ? payload.model : null,
+    fallbackModel: typeof payload.fallback_model === 'string' && payload.fallback_model !== '' ? payload.fallback_model : null,
     noData: Boolean(payload.no_data),
     isCached: Boolean(payload.cached),
     updatedAt: typeof payload.updated_at === 'string' ? payload.updated_at : null,
@@ -167,8 +163,7 @@ const EMPTY_WAVES: MappedWaveForecast = {
   days: [],
   seaTemperatureF: null,
   provider: null,
-  fallbackUsed: false,
-  model: null,
+  fallbackModel: null,
   noData: false,
   isCached: false,
   updatedAt: null,
@@ -192,13 +187,12 @@ export function useWaveForecast(refreshIntervalSeconds = 3600, options: Forecast
   // One object while the answer, the error and the loading state hold, so a
   // reader that memoizes on it (the Forecast page's props) holds too.
   return useMemo(() => {
-    const { days, seaTemperatureF, provider, fallbackUsed, model, noData, isCached, updatedAt, ttlSeconds } = data ?? EMPTY_WAVES;
+    const { days, seaTemperatureF, provider, fallbackModel, noData, isCached, updatedAt, ttlSeconds } = data ?? EMPTY_WAVES;
     return {
       days,
       seaTemperatureF,
       provider,
-      fallbackUsed,
-      model,
+      fallbackModel,
       noData,
       loading: isLoading,
       error: error ? error.message || 'Failed to load wave forecast data' : null,

@@ -355,7 +355,7 @@ func (p *wasmWeatherProvider) FetchForecast(lat, lon float64, days int, timezone
 		}
 	}()
 
-	key := weatherWasmCacheKey(lat, lon, weatherFetchMaxDays, timezone)
+	key := p.saltedCacheKey(weatherWasmCacheKey(lat, lon, weatherFetchMaxDays, timezone))
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true
