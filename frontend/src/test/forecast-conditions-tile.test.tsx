@@ -204,6 +204,14 @@ describe('ForecastConditionsTile', () => {
     expect(document.querySelector('svg.recharts-surface')).not.toBeInTheDocument()
   })
 
+  test('says quietly that the wave model has no data here, without a chart or alarm box', () => {
+    render(<ForecastConditionsTile {...defaultProps} forecast={[day('2026-06-14')]} waveNoData />)
+
+    expect(screen.getByTestId('forecast-wave-none')).toHaveTextContent('The wave model has no data at this position')
+    expect(screen.queryByTestId('forecast-wave-error')).not.toBeInTheDocument()
+    expect(document.querySelector('svg.recharts-surface')).not.toBeInTheDocument()
+  })
+
   test('renders without crashing when the wave feed has not answered yet', () => {
     render(<ForecastConditionsTile {...defaultProps} forecast={[day('2026-06-14')]} waveLoading />)
 

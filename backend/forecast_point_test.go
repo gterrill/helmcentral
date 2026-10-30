@@ -178,8 +178,8 @@ func TestWaveForecast_ExplicitPointWithNullSeriesIsAnEmptyAnswer(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Days == nil || len(body.Days) != 0 {
-		t.Fatalf("expected an empty days array, got %#v", body.Days)
+	if body.Days == nil || len(body.Days) != 0 || !body.NoData {
+		t.Fatalf("expected an empty days array with no_data, got %#v %v", body.Days, body.NoData)
 	}
 	if p.lat != -27.4 || p.lon != 153 {
 		t.Fatalf("provider asked for (%v,%v)", p.lat, p.lon)
@@ -205,6 +205,57 @@ func TestWaveForecast_ExplicitPointWithOnlyPastDaysIsAFault(t *testing.T) {
 	rec := serveForecastPoint(t, waveForecast, "?lat=-27.4&lon=153")
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("no days on or after today is a fault, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// The boat's own position must never show a calm the model did not forecast.
+// It answers 200 with no days and no_data set, and keeps the sea temperature
+// the blend gave for that cell.
+func TestWaveForecast_OwnShipWithNoValuesIsNoData(t *testing.T) {
+	withCleanWaveProviderRegistry(t)
+	now := time.Now().UTC()
+	hourly := []waveHourPoint{{Time: now}, {Time: now.Add(time.Hour)}}
+	sea := 26.0
+	registerWaveProvider(&stubWaveProvider{id: "w", name: "W", ttl: 60, bundle: waveForecastBundle{Hourly: hourly, CachedAt: now, SeaTempC: &sea, Model: "ncep_gfswave025"}})
+	server := trustedSignalKPayloadServer(t, -27.4, 153.0)
+	defer server.Close()
+	t.Setenv("SETTINGS_FILE", writeWaveSettings(t, "w", server.URL))
+	rec := serveForecastPoint(t, waveForecast, "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body waveForecastResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.NoData || body.Days == nil || len(body.Days) != 0 {
+		t.Fatalf("expected no_data with empty days: %+v", body)
+	}
+	if body.SeaTemperatureF == nil || body.Model != "ncep_gfswave025" {
+		t.Fatalf("sea temperature and model must survive: %+v", body)
+	}
+}
+
+// The response names the model and says when the fallback blend supplied it.
+func TestWaveForecast_ResponseCarriesFallbackModel(t *testing.T) {
+	withCleanWaveProviderRegistry(t)
+	now := time.Now().UTC()
+	hourly := []waveHourPoint{{Time: now, WaveHeightM: pwF(0.2), WavePeriodS: pwF(3)}}
+	registerWaveProvider(&stubWaveProvider{id: "w", name: "W", ttl: 60, bundle: waveForecastBundle{Hourly: hourly, CachedAt: now, Model: "best_match", FallbackUsed: true}})
+	t.Setenv("SETTINGS_FILE", writeWaveSettings(t, "w", "http://127.0.0.1:1"))
+	rec := serveForecastPoint(t, waveForecast, "?lat=-20.2666&lon=148.7099")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Model        string `json:"model"`
+		FallbackUsed bool   `json:"fallback_used"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Model != "best_match" || !body.FallbackUsed {
+		t.Fatalf("got %+v", body)
 	}
 }
 

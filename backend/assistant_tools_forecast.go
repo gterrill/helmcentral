@@ -14,7 +14,9 @@ var mateToolGetWindForecast = mateTool{
 	function: openRouterFunctionDef{
 		Description: "Fetch the wind forecast (and wave forecast, where available) for a position, as a " +
 			"per-day summary plus a three-hourly breakdown. Use find_places first to resolve a place name " +
-			"to coordinates.",
+			"to coordinates. If waves_no_data is true the wave model has no figures at that point, so say there is " +
+			"no wave forecast there. If wave_fallback_used is true the wave figures come from the fallback model named " +
+			"in wave_model, so say so.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -157,16 +159,24 @@ type assistantWindForecastResult struct {
 	// CourseDeg echoes the model's course_deg argument back, present only
 	// when it was given - the signal to the model that rel_wind/rel_wave
 	// are populated below rather than silently absent.
-	CourseDeg       *float64              `json:"course_deg,omitempty"`
-	Timezone        string                `json:"timezone"`
-	WeatherProvider string                `json:"weather_provider"`
-	WaveProvider    string                `json:"wave_provider"`
-	WavesError      string                `json:"waves_error,omitempty"`
-	Cached          bool                  `json:"cached"`
-	CachedAt        *string               `json:"cached_at"`
-	Days            []assistantDaySummary `json:"days"`
-	Hourly          []assistantWindHour   `json:"hourly"`
-	Truncated       bool                  `json:"truncated,omitempty"`
+	CourseDeg       *float64 `json:"course_deg,omitempty"`
+	Timezone        string   `json:"timezone"`
+	WeatherProvider string   `json:"weather_provider"`
+	WaveProvider    string   `json:"wave_provider"`
+	WavesError      string   `json:"waves_error,omitempty"`
+	// WavesNoData is set when the wave model has no values at this point.
+	// It is an answer, not a failure: say there is no wave forecast here.
+	WavesNoData bool `json:"waves_no_data,omitempty"`
+	// WaveModel and WaveFallbackUsed say which model the wave figures came
+	// from when the provider reports it, and whether that was a fallback
+	// because the usual model has no data here.
+	WaveModel        string                `json:"wave_model,omitempty"`
+	WaveFallbackUsed bool                  `json:"wave_fallback_used,omitempty"`
+	Cached           bool                  `json:"cached"`
+	CachedAt         *string               `json:"cached_at"`
+	Days             []assistantDaySummary `json:"days"`
+	Hourly           []assistantWindHour   `json:"hourly"`
+	Truncated        bool                  `json:"truncated,omitempty"`
 }
 
 // assistantDayAggregate accumulates one local day's min/max wind, max gust
@@ -449,7 +459,8 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		return "", err
 	}
 
-	var waveProviderID, wavesError string
+	var waveProviderID, wavesError, waveModel string
+	var wavesNoData, waveFallbackUsed bool
 	waveByUnix := map[int64]waveHourPoint{}
 	if waveProvider, wpID, werr := d.waves(); werr != nil {
 		waveProviderID = wpID
@@ -460,6 +471,8 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		if ferr != nil {
 			wavesError = firstErrorLine(ferr)
 		} else {
+			waveModel, waveFallbackUsed = waveBundle.Model, waveBundle.FallbackUsed
+			wavesNoData = waveSeriesHasNoValues(waveBundle.Hourly)
 			for _, whp := range waveBundle.Hourly {
 				waveByUnix[whp.Time.Unix()] = whp
 			}
@@ -578,18 +591,21 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 	}
 
 	result := assistantWindForecastResult{
-		Name:            strings.TrimSpace(args.Name),
-		Lat:             args.Lat,
-		Lon:             args.Lon,
-		CourseDeg:       args.CourseDeg,
-		Timezone:        place.Name,
-		WeatherProvider: providerID,
-		WaveProvider:    waveProviderID,
-		WavesError:      wavesError,
-		Cached:          bundle.Cached,
-		CachedAt:        cachedAt,
-		Days:            days2,
-		Hourly:          hourly,
+		Name:             strings.TrimSpace(args.Name),
+		Lat:              args.Lat,
+		Lon:              args.Lon,
+		CourseDeg:        args.CourseDeg,
+		Timezone:         place.Name,
+		WeatherProvider:  providerID,
+		WaveProvider:     waveProviderID,
+		WavesError:       wavesError,
+		WavesNoData:      wavesNoData,
+		WaveModel:        waveModel,
+		WaveFallbackUsed: waveFallbackUsed,
+		Cached:           bundle.Cached,
+		CachedAt:         cachedAt,
+		Days:             days2,
+		Hourly:           hourly,
 	}
 
 	shrink := func() bool {

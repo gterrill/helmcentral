@@ -15,6 +15,8 @@ export interface ForecastConditionsTileProps {
   waveForecastDays: WaveForecastDay[]
   waveLoading: boolean
   waveError: string | null
+  /** The wave model has no values at this position. */
+  waveNoData?: boolean
   units: DistanceUnits
 }
 
@@ -123,6 +125,7 @@ export const ForecastConditionsTile = memo(function ForecastConditionsTile({
   waveForecastDays,
   waveLoading,
   waveError,
+  waveNoData = false,
   units,
 }: ForecastConditionsTileProps) {
   const [ref, box] = useMeasuredBox()
@@ -181,6 +184,12 @@ export const ForecastConditionsTile = memo(function ForecastConditionsTile({
         <div ref={ref} className="relative mt-2 min-h-[120px] w-full lg:min-h-0 lg:flex-1">
           {waveError ? (
             <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" />
+          ) : waveNoData ? (
+            <ChartUnavailableMessage
+              testId="forecast-wave-none"
+              message="The wave model has no data at this position"
+              tone="quiet"
+            />
           ) : (
             <div className="absolute inset-0">
               {/* Fallback sized to fill the same absolutely-positioned slot
@@ -203,6 +212,6 @@ export const ForecastConditionsTile = memo(function ForecastConditionsTile({
 /** Forecast Conditions: the coming days from the weather and wave forecasts. */
 export const LiveForecastConditionsTile = memo(function LiveForecastConditionsTile(props: Pick<ComponentProps<typeof ForecastConditionsTile>, 'units'>) {
   const { forecast } = useWeatherForecast(FORECAST_REFRESH_SECONDS)
-  const { days, loading, error } = useWaveForecast(FORECAST_REFRESH_SECONDS)
-  return <ForecastConditionsTile {...props} forecast={forecast} waveForecastDays={days} waveLoading={loading} waveError={error} />
+  const { days, loading, error, noData } = useWaveForecast(FORECAST_REFRESH_SECONDS)
+  return <ForecastConditionsTile {...props} forecast={forecast} waveForecastDays={days} waveLoading={loading} waveError={error} waveNoData={noData} />
 })

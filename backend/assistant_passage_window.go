@@ -71,10 +71,13 @@ type passageWindowLeg struct {
 }
 
 type passageWindowPayload struct {
-	Timezone          string             `json:"timezone"`
-	ForecastFetchedAt string             `json:"forecast_fetched_at"`
-	Provider          string             `json:"provider"`
-	WaveProvider      string             `json:"wave_provider"`
+	Timezone          string `json:"timezone"`
+	ForecastFetchedAt string `json:"forecast_fetched_at"`
+	Provider          string `json:"provider"`
+	WaveProvider      string `json:"wave_provider"`
+	// WaveFallbackModel names the fallback model that supplied the wave
+	// figures at one or more points, where the usual model had no data.
+	WaveFallbackModel string             `json:"wave_fallback_model,omitempty"`
 	Legs              []passageWindowLeg `json:"legs"`
 	Rows              []passageWindowRow `json:"rows"`
 }
@@ -94,6 +97,9 @@ type passageHour struct {
 type passageForecast struct {
 	Hours     map[int64]passageHour
 	FetchedAt time.Time
+	// WaveFallbackModel is set when this point's wave figures came from a
+	// fallback model.
+	WaveFallbackModel string
 }
 
 // forecastSource yields hourly forecasts.
@@ -429,6 +435,8 @@ type passageAssessor struct {
 	// after. fetchedAt is the oldest source time among them.
 	cache     map[string]map[int64]passageHour
 	fetchedAt time.Time
+	// waveFallbackModel is the fallback wave model used at any point.
+	waveFallbackModel string
 	// tideCache holds what each tide start point's one fetch returned. A
 	// provider returns the station's own predicted window, not a span asked for.
 	tideCache map[string]passageTideResult
@@ -488,6 +496,9 @@ launch:
 			return r.err
 		}
 		as.cache[passagePointKey(pts[i])] = r.f.Hours
+		if r.f.WaveFallbackModel != "" {
+			as.waveFallbackModel = r.f.WaveFallbackModel
+		}
 		if !r.f.FetchedAt.IsZero() && (as.fetchedAt.IsZero() || r.f.FetchedAt.Before(as.fetchedAt)) {
 			as.fetchedAt = r.f.FetchedAt
 		}
@@ -847,6 +858,7 @@ func assessItinerary(ctx context.Context, args passageWindowArgs, limits passage
 		row.Verdict = passageRowVerdict(states)
 		out.Rows = append(out.Rows, row)
 	}
+	out.WaveFallbackModel = as.waveFallbackModel
 	return out, nil
 }
 
@@ -1064,6 +1076,7 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 			fetchedAt = wb.CachedAt
 		}
 		var vb *waveForecastBundle
+		var waveFallbackModel string
 		if wv != nil {
 			if err := ctx.Err(); err != nil {
 				return passageForecast{}, err
@@ -1072,12 +1085,15 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 				logOnce("wavefetch:"+wvID+":"+werr.Error(), "wave provider %q failed at %.2f, %.2f, waves not checked: %v", wvID, lat, lon, werr)
 			} else {
 				vb = &b
+				if b.FallbackUsed {
+					waveFallbackModel = b.Model
+				}
 				if b.Cached && !b.CachedAt.IsZero() && b.CachedAt.Before(fetchedAt) {
 					fetchedAt = b.CachedAt
 				}
 			}
 		}
-		return passageForecast{Hours: passageHoursFromBundles(wb, vb), FetchedAt: fetchedAt}, nil
+		return passageForecast{Hours: passageHoursFromBundles(wb, vb), FetchedAt: fetchedAt, WaveFallbackModel: waveFallbackModel}, nil
 	}}
 	tides := func(ctx context.Context, lat, lon float64) ([]tideExtremePoint, error) {
 		if err := ctx.Err(); err != nil {
@@ -1104,6 +1120,9 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 	}
 	model := newPassageModelResult(payload)
 	model.Notes = ignoredSpeedNotes(args)
+	if payload.WaveFallbackModel != "" {
+		model.Notes = append(model.Notes, fmt.Sprintf("Wave figures at some points come from the fallback model %s, because the usual wave model has no data there. Say so when you give wave figures.", payload.WaveFallbackModel))
+	}
 	text, err := capToolResultJSON(model, model.shrink)
 	if err != nil {
 		return "", err

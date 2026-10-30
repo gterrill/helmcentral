@@ -278,9 +278,37 @@ page at once. See [The dashboard](dashboard.md#instrument-tiles).
 ## Where it stops
 
 The forecast is only as good as the models behind it, and the wave model in
-particular has poor coverage close inshore. If you query it from a berth, you
-may get zeros, because the grid cell is land. For a planned stay, the page says
-there is no wave forecast for that spot.
+particular has poor coverage close inshore. The default wave model, NOAA's
+GFS-Wave, works on a grid of cells about 25 kilometres wide, and a cell that
+touches land has no figures. Here is what you see when that happens:
+
+- **At the boat:** The Wave card, and the Forecast Conditions tile, say in quiet
+  grey text "The wave model has no data at this position". They don't draw a
+  flat line, because that would look like a calm sea that nobody forecast.
+  There's no Retry button, because trying again won't change the answer. The
+  sea temperature still shows when the weather source has it.
+- **For a planned stay:** The page says there is no wave forecast for that spot.
+- **With the blend switched on:** Helmcentral asks Open-Meteo's own blend of
+  models for the spot instead. The card's footer then says "fallback model:
+  best_match", which is Open-Meteo's name for that blend. Steps are under
+  [Use the blend where GFS-Wave has no data](#use-the-blend-where-gfs-wave-has-no-data).
+
+An hour with no wave period counts as no data. Hours like that show as gaps in
+the graph and are left out of the summary.
+
+### Use the blend where GFS-Wave has no data
+
+The blend is Open-Meteo's own mix of wave models, on a finer grid, so it often
+has figures for a spot that GFS-Wave leaves blank. It can read lower than
+GFS-Wave, so Helmcentral leaves it off until you ask for it. To turn it on:
+
+1. Open **Settings** and find the **Open-Meteo Marine** wave provider.
+2. Tap the gear icon on its card.
+3. Switch on **Use Open-Meteo's blend where GFS-Wave has no data**, then tap
+   **Save**.
+
+The change applies from the next forecast fetch. The blend is used only for a spot where GFS-Wave has no figures at all.
+Everywhere else you still get GFS-Wave.
 
 None of the indicators here are predictions of severe weather. They are the
 warning signs a seamanship text says to watch for, evaluated automatically so

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -240,8 +241,8 @@ func TestMapWasmFetchWavesOutput_OmittedCombinedFiguresMapToAbsent(t *testing.T)
 	if a.WaveHeightM == nil || *a.WaveHeightM != 1.2 || a.WavePeriodS != nil || a.WaveDirectionDeg != nil {
 		t.Errorf("height only: %+v", a)
 	}
-	if b.WaveHeightM == nil || b.WavePeriodS == nil || b.WaveDirectionDeg == nil {
-		t.Errorf("explicit zeros are figures, not absence: %+v", b)
+	if b.WaveHeightM != nil || b.WavePeriodS != nil || b.WaveDirectionDeg != nil {
+		t.Errorf("a zero period is no reading, so the whole hour is absent: %+v", b)
 	}
 	if c.WaveHeightM != nil || c.WavePeriodS != nil || c.WaveDirectionDeg != nil {
 		t.Errorf("no keys must be absent: %+v", c)
@@ -303,5 +304,99 @@ func TestWasmWaveProvider_OldFormatCacheFileIsNotServed(t *testing.T) {
 	}
 	if _, ok := p.cache.getStale("30.0,40.0,2,"); ok {
 		t.Fatal("an old-format wave cache entry must not be served, not even as stale")
+	}
+}
+
+// A provider that cannot place a point in the model (a land-masked cell)
+// reports every figure as 0 rather than null. A wave with no period is not a
+// wave, so the host reads the hour as absent instead of a flat calm from due
+// north.
+func TestMapWasmFetchWavesOutput_ZeroPeriodHourIsAbsent(t *testing.T) {
+	raw := `{"hourly":[
+		{"time":"2026-07-19T05:00:00Z","wave_height_m":0,"wave_period_s":0,"wave_direction_deg":0,
+		 "wind_wave_height_m":0,"wind_wave_period_s":0,"wind_wave_direction_deg":0,
+		 "swell_wave_height_m":0,"swell_wave_period_s":0,"swell_wave_direction_deg":0},
+		{"time":"2026-07-19T06:00:00Z","wave_height_m":0.6,"wave_period_s":7.4,"wave_direction_deg":79,
+		 "wind_wave_height_m":0.6,"wind_wave_period_s":7.4,"wind_wave_direction_deg":79,
+		 "swell_wave_height_m":0.3,"swell_wave_period_s":0,"swell_wave_direction_deg":65}]}`
+	var parsed wasmFetchWavesOutput
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := mapWasmFetchWavesOutput(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	land, ok := bundle.Hourly[0], bundle.Hourly[1]
+	if land.WaveHeightM != nil || land.WavePeriodS != nil || land.WaveDirectionDeg != nil {
+		t.Errorf("zero-period hour must be absent: %+v", land)
+	}
+	if !waveSeriesHasNoValues(bundle.Hourly[:1]) {
+		t.Errorf("an all-zero hour is a series with no values")
+	}
+	if ok.WaveHeightM == nil || *ok.WaveHeightM != 0.6 {
+		t.Errorf("a real hour is kept: %+v", ok)
+	}
+	// The swell component has no period, so it is no train: not 0.3 m from 65.
+	if ok.SwellWaveHeightM != 0 || ok.SwellWaveDirectionDeg != 0 || ok.SwellWavePeriodS != 0 {
+		t.Errorf("a component with no period is absent: %+v", ok)
+	}
+	if ok.WindWaveHeightM != 0.6 || ok.WindWavePeriodS != 7.4 {
+		t.Errorf("a component with a period is kept: %+v", ok)
+	}
+}
+
+func TestMapWasmFetchWavesOutput_CarriesTheModelAndFallbackFlag(t *testing.T) {
+	var parsed wasmFetchWavesOutput
+	raw := `{"hourly":[{"time":"2026-07-19T05:00:00Z","wave_height_m":0.2,"wave_period_s":3}],"model":"best_match","fallback_used":true}`
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := mapWasmFetchWavesOutput(parsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Model != "best_match" || !bundle.FallbackUsed {
+		t.Errorf("model %q fallback %v", bundle.Model, bundle.FallbackUsed)
+	}
+}
+
+// Saving the plugin's settings must drop its cached forecasts, or a switch
+// turned on would not apply until the old answer expired.
+func TestPostPluginConfigHandler_ClearsTheWaveCache(t *testing.T) {
+	withCleanWaveProviderRegistry(t)
+	withTestPluginOverridesStore(t)
+
+	dir := t.TempDir()
+	wasmPath := filepath.Join(dir, "plugin.wasm")
+	raw, err := os.ReadFile(waveValidFixtureWasm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(wasmPath, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "plugin.config_fields.json"), []byte(`[{"key":"flag","label":"Flag","type":"boolean"}]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WAVE_WASM_CACHE_FILE_WAVE_VALID_FIXTURE", filepath.Join(dir, "cache.json"))
+	provider, err := newWasmWaveProvider(wasmPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registerWaveProvider(provider)
+	if _, err := provider.FetchWaves(30, 40, 2); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := provider.cache.getStale("30.0,40.0,2,"); !ok {
+		t.Fatal("expected a cached entry before the save")
+	}
+
+	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/wave/"+provider.ID()+"/config", `{"values":{"flag":"true"}}`, "wave", provider.ID())
+	if err := postPluginConfigHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("save: %v %d %s", err, rec.Code, rec.Body.String())
+	}
+	if _, ok := provider.cache.getStale("30.0,40.0,2,"); ok {
+		t.Fatal("the save must clear the wave cache")
 	}
 }
