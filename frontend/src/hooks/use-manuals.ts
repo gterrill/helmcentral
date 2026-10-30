@@ -75,6 +75,22 @@ export function findManualTreeNode(tree: ManualTreeNode, nodeId: string): Manual
   return null
 }
 
+/** A manual's documents in reading order: the server's order, depth first, folders left out. */
+export function flattenManualDocuments(tree: ManualTreeNode): ManualTreeNode[] {
+  return (tree.children ?? []).flatMap((child) => (child.type === 'document' ? [child] : flattenManualDocuments(child)))
+}
+
+function manualTreePath(manualId: string | null): string {
+  return `${MANUALS}/${encodeURIComponent(manualId ?? '')}/tree`
+}
+
+/** The documents of one manual in the order the Documents page reads it, from the same query. Null until loaded. */
+export function useManualDocuments(manualId: string | null): ManualTreeNode[] | null {
+  const path = manualTreePath(manualId)
+  const query = useApiQuery<ManualTreeNode | null>({ queryKey: [path], path, enabled: manualId !== null && manualId !== '' })
+  return query.data ? flattenManualDocuments(query.data) : null
+}
+
 /**
  * `manualId`: the manual currently open in the reading view, null when none
  * is (the "several, nothing picked yet" state, or "none exist at all").
@@ -96,7 +112,7 @@ export function useManuals(manualId: string | null = null) {
   // ── the currently open manual's own ordered subtree (GET .../tree) ─────
   // Nothing open is not an error, just the ordinary "no manual selected"
   // state (none exist yet, or the several-manuals list has none picked).
-  const treePath = `${MANUALS}/${encodeURIComponent(manualId ?? '')}/tree`
+  const treePath = manualTreePath(manualId)
   const treeQuery = useApiQuery<ManualTreeNode | null>({
     queryKey: [treePath],
     path: treePath,

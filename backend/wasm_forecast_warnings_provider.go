@@ -163,7 +163,7 @@ func (p *wasmForecastWarningsProvider) FetchWarnings(lat, lon float64) (bundle f
 		}
 	}()
 
-	key := forecastWarningsWasmCacheKey(lat, lon)
+	key := p.saltedCacheKey(forecastWarningsWasmCacheKey(lat, lon))
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true

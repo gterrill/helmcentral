@@ -1040,6 +1040,9 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 	}
 	const days = assistantMaxForecastDays
 	now := d.now()
+	// Fetch runs for several points at once.
+	var fallbackMu sync.Mutex
+	var fallbackModel string
 	fc := forecastSource{Provider: wxID, WaveProvider: wvID, Fetch: func(ctx context.Context, lat, lon float64) (passageForecast, error) {
 		if err := ctx.Err(); err != nil {
 			return passageForecast{}, err
@@ -1072,6 +1075,11 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 				logOnce("wavefetch:"+wvID+":"+werr.Error(), "wave provider %q failed at %.2f, %.2f, waves not checked: %v", wvID, lat, lon, werr)
 			} else {
 				vb = &b
+				if b.FallbackModel != "" {
+					fallbackMu.Lock()
+					fallbackModel = b.FallbackModel
+					fallbackMu.Unlock()
+				}
 				if b.Cached && !b.CachedAt.IsZero() && b.CachedAt.Before(fetchedAt) {
 					fetchedAt = b.CachedAt
 				}
@@ -1104,6 +1112,9 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 	}
 	model := newPassageModelResult(payload)
 	model.Notes = ignoredSpeedNotes(args)
+	if fallbackModel != "" {
+		model.Notes = append(model.Notes, fmt.Sprintf("Wave figures at some points come from the fallback model %s, because the usual wave model has no data there. Say so when you give wave figures.", fallbackModel))
+	}
 	text, err := capToolResultJSON(model, model.shrink)
 	if err != nil {
 		return "", err

@@ -97,6 +97,10 @@ export interface ForecastDrawerProps {
   waveLoading?: boolean
   waveError?: string | null
   waveProvider?: string | null
+  /** The model the wave figures came from when the usual one has no data here. */
+  waveFallbackModel?: string | null
+  /** The wave model has no values at this point. */
+  waveNoData?: boolean
   waveIsCached?: boolean
   waveUpdatedAt?: string | null
   waveTtlSeconds?: number | null
@@ -590,6 +594,8 @@ export function ForecastDrawer({
   waveLoading = false,
   waveError = null,
   waveProvider = null,
+  waveFallbackModel = null,
+  waveNoData = false,
   waveIsCached = false,
   waveUpdatedAt = null,
   waveTtlSeconds = null,
@@ -1346,6 +1352,7 @@ export function ForecastDrawer({
   const waveRefreshMeta = (waveIsCached || waveUpdatedAt) ? (
     <p data-testid="forecast-wave-refresh-meta" className="text-sm text-muted-foreground">
       {waveProvider ? `Data: ${waveProvider} · ` : ''}
+      {waveFallbackModel ? `fallback model: ${waveFallbackModel} · ` : ''}
       {waveIsCached ? 'cached' : 'live'} · updated {formatRefreshAge(waveUpdatedAt, Date.now())}
       {waveTtlSeconds ? ` · refreshes every ${Math.round(waveTtlSeconds / 3600)}h` : ''}
     </p>
@@ -1994,6 +2001,15 @@ export function ForecastDrawer({
                     <ChartUnavailableMessage testId="forecast-wave-error" message="Wave data unavailable" onRetry={onWaveRetry} />
                     {waveRefreshMeta && <div className="mt-1 flex justify-end">{waveRefreshMeta}</div>}
                   </>
+                ) : waveNoData ? (
+                  <>
+                    <ChartUnavailableMessage
+                      testId="forecast-wave-none"
+                      message={stay ? 'No wave forecast for this spot' : 'The wave model has no data at this position'}
+                      tone="quiet"
+                    />
+                    {waveRefreshMeta && <div className="mt-1 flex justify-end">{waveRefreshMeta}</div>}
+                  </>
                 ) : waveHourly.length > 0 ? (
                   <>
                     {(() => {
@@ -2211,10 +2227,6 @@ export function ForecastDrawer({
                       {waveRefreshMeta}
                     </div>
                   </>
-                ) : stay && waveDays.length === 0 ? (
-                  // The model has no values at this point (a berth up a river,
-                  // a lake). Said plainly; never filled from the nearest sea.
-                  <ChartUnavailableMessage testId="forecast-wave-none" message="No wave forecast for this spot" tone="quiet" />
                 ) : (
                   <>
                     <ChartUnavailableMessage testId="forecast-wave-unavailable" message="Wave forecast unavailable for this day" />

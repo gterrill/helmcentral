@@ -50,6 +50,8 @@ export function buildForecastDrawerProps({
     waveLoading: waves.loading,
     waveError: waves.error,
     waveProvider: waves.provider,
+    waveFallbackModel: waves.fallbackModel,
+    waveNoData: waves.noData,
     waveIsCached: waves.isCached,
     waveUpdatedAt: waves.updatedAt,
     waveTtlSeconds: waves.ttlSeconds,

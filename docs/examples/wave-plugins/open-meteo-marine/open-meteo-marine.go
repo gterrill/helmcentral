@@ -11,15 +11,26 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
 const (
-	// Marine wave data endpoint - Pinned to NOAA's GFS-Wave (WaveWatch III)
-	// model so swell height, period and direction line up with other WaveWatch
-	// III-based swell forecasts for a given coastline; Open-Meteo's default
-	// "best_match" model blend runs noticeably lower/different here.
-	marineWaveURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto&forecast_days=%d&models=ncep_gfswave025"
+	// Marine wave data endpoint - pinned to NOAA's GFS-Wave (WaveWatch III)
+	// model (modelGFSWave, appended by waveURL) so swell height, period and
+	// direction line up with other WaveWatch III-based swell forecasts for a
+	// given coastline; Open-Meteo's default "best_match" model blend runs
+	// noticeably lower/different here.
+	marineWaveURLFmt = "https://marine-api.open-meteo.com/v1/marine?latitude=%.4f&longitude=%.4f&hourly=wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto&forecast_days=%d"
+
+	// modelGFSWave is the model the wave fetch is pinned to. Its 0.25 degree
+	// grid has land-masked cells, and over one Open-Meteo returns every wave
+	// field as 0, not null.
+	modelGFSWave = "ncep_gfswave025"
+
+	// modelBlend names Open-Meteo's default model blend (no models= param),
+	// which has a finer grid and real values over cells GFS-Wave masks.
+	modelBlend = "best_match"
 
 	// Marine sea temperature endpoint - Deliberately does not pin a models=
 	// param (unlike fetchWaveData) - the wave-specific NOAA GFS-Wave model
@@ -34,6 +45,64 @@ const (
 	// maxForecastDays is Open-Meteo Marine API's documented maximum.
 	maxForecastDays = 16
 )
+
+// waveURL builds the wave-data request. fallback leaves out models= so
+// Open-Meteo answers with its default blend.
+func waveURL(lat, lon float64, days int, fallback bool) string {
+	u := fmt.Sprintf(marineWaveURLFmt, lat, lon, days)
+	if !fallback {
+		u += "&models=" + modelGFSWave
+	}
+	return u
+}
+
+// fallbackEnabled reads the use_blend_fallback config value. Anything but
+// "true" is off.
+func fallbackEnabled(v string) bool {
+	return strings.EqualFold(strings.TrimSpace(v), "true")
+}
+
+// parseWaveBody takes the UTC offset from a wave response and parses its
+// hourly series.
+func parseWaveBody(body []byte) ([]waveHourOutput, error) {
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("failed to parse wave response: %w", err)
+	}
+	offset := 0
+	if o, ok := raw["utc_offset_seconds"].(float64); ok {
+		offset = int(o)
+	}
+	return parseOpenMeteoWaveResponse(body, offset)
+}
+
+// hoursHaveNoWaves reports a series with no real wave reading: every hour's
+// period is absent. parseOpenMeteoWaveResponse already leaves the combined
+// figures out of an hour whose period is 0, which is what a land-masked
+// GFS-Wave cell returns.
+func hoursHaveNoWaves(hours []waveHourOutput) bool {
+	for _, h := range hours {
+		if h.WavePeriodS != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// chooseWaveSeries keeps the GFS-Wave series unless it holds no waves and the
+// operator turned the fallback on, in which case fetchBlend supplies the
+// default-blend series. A failed blend fetch is an error: it does not drop
+// back to the land cell as though the model had answered.
+func chooseWaveSeries(primary []waveHourOutput, fallback bool, fetchBlend func() ([]waveHourOutput, error)) ([]waveHourOutput, string, bool, error) {
+	if !fallback || !hoursHaveNoWaves(primary) {
+		return primary, modelGFSWave, false, nil
+	}
+	blend, err := fetchBlend()
+	if err != nil {
+		return nil, "", false, err
+	}
+	return blend, modelBlend, true, nil
+}
 
 // parseOpenMeteoWaveResponse parses the raw JSON wave-data response from
 // Open-Meteo Marine API into a flat chronological list of hourly wave
@@ -153,6 +222,12 @@ func parseOpenMeteoWaveResponse(raw []byte, utcOffsetSeconds int) ([]waveHourOut
 				point.SwellWavePeriodS = p
 			}
 		}
+		// A wave with no period is not a wave: a land-masked cell reports
+		// every figure as 0, so the combined figures are left out, which the
+		// host reads as absent (the same rule it applies itself).
+		if point.WavePeriodS != nil && *point.WavePeriodS == 0 {
+			point.WaveHeightM, point.WavePeriodS, point.WaveDirectionDeg = nil, nil, nil
+		}
 
 		hourly_out = append(hourly_out, point)
 	}
@@ -243,6 +318,8 @@ type waveHourOutput struct {
 type fetchWavesOutput struct {
 	Hourly                 []waveHourOutput `json:"hourly"`
 	SeaSurfaceTemperatureC *float64         `json:"sea_surface_temperature_c,omitempty"`
+	Model                  string           `json:"model,omitempty"`
+	FallbackUsed           bool             `json:"fallback_used,omitempty"`
 }
 
 // clampForecastDays returns a clamped forecast_days value: default to 10 if

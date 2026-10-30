@@ -115,7 +115,7 @@ func (p *wasmUpperAirProvider) FetchUpperAir(lat, lon float64, days int) (bundle
 		}
 	}()
 
-	key := upperAirWasmCacheKey(lat, lon, days)
+	key := p.saltedCacheKey(upperAirWasmCacheKey(lat, lon, days))
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true

@@ -1406,3 +1406,19 @@ func TestAssessPassageWindowTool_CardCarriesTheLegRoutesToTheSink(t *testing.T) 
 		t.Fatalf("route points are not part of the card payload: %s", cards[0].Payload)
 	}
 }
+
+// When a wave point was filled from the fallback model, the text Mate reads says so, so Mate can tell the skipper the figures are from
+// another model.
+func TestAssessPassageWindowTool_FallbackWaveModelIsReported(t *testing.T) {
+	d := pwToolDeps(pwLimitsAll())
+	d.waves = func() (waveProvider, string, error) {
+		return &stubWaveProvider{id: "wv", bundle: waveForecastBundle{FallbackModel: "best_match"}}, "wv", nil
+	}
+	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "best_match") {
+		t.Fatalf("Mate's text must name the fallback model: %s", result)
+	}
+}

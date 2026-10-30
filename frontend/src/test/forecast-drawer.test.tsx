@@ -812,6 +812,44 @@ describe('ForecastDrawer refresh age', () => {
     expect(meta.className).toContain('text-sm')
   })
 
+  it('names the fallback model in the wave footer', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[buildWaveDay()]}
+        loading={false}
+        error={null}
+        unit="metric"
+        waveProvider="open-meteo-marine"
+        waveFallbackModel="best_match"
+        waveIsCached={false}
+        waveUpdatedAt="2026-06-14T10:00:00Z"
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-wave-refresh-meta')).toHaveTextContent(
+      'Data: open-meteo-marine · fallback model: best_match · live',
+    )
+  })
+
+  it('says quietly that the wave model has no data here, with no alarm box and no Retry', () => {
+    render(
+      <ForecastDrawer
+        forecast={[buildDay()]}
+        waveDays={[]}
+        loading={false}
+        error={null}
+        unit="metric"
+        waveNoData
+        onWaveRetry={() => {}}
+      />,
+    )
+
+    expect(screen.getByTestId('forecast-wave-none')).toHaveTextContent('The wave model has no data at this position')
+    expect(screen.queryByTestId('forecast-wave-error')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument()
+  })
+
   it('uses 6-hour-block labels on the wave chart', () => {
     render(<ForecastDrawer forecast={[buildDay()]} waveDays={[buildWaveDay()]} loading={false} error={null} unit="metric" />)
 

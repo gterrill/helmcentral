@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 
-import { RefreshFailedNote } from '@/components/patterns'
+import { Page, RefreshFailedNote } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -12,6 +12,7 @@ import { PrintLabelButton } from '@/components/inventory/label-print'
 import { TagRow } from '@/components/inventory/tag-row'
 import { apiBaseUrl } from '@/config/api'
 import { findBinByCode, useEquipment, useInventoryDecks, useInventoryZones, type EquipmentItem, type InventoryBin, type InventoryZone } from '@/hooks/use-inventory'
+import { recordPager } from '@/lib/record-pager'
 import { binTagPath } from '@/lib/tag-url'
 
 // ADR 0127 (the plan's A4): the screen a scan lands on. Resolves `code`
@@ -33,9 +34,11 @@ interface BinPageProps {
   canWrite?: boolean
   /** ADR 0156: opens a deck's page, from the missing-plan-image notice. */
   onOpenDeck?: (deckId: string) => void
+  /** Opens another bin by its code, from the arrows. Without it the page has no arrows. */
+  onOpenBin?: (code: string) => void
 }
 
-export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onOpenDeck = () => {} }: BinPageProps) {
+export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWrite = true, onOpenDeck = () => {}, onOpenBin }: BinPageProps) {
   // ONE useInventoryZones() instance for the whole page (there is no shared
   // store between separate calls - the hook's own header comment), so that
   // when BinNotFound's Create bin below calls createBin/createZone, THIS
@@ -52,6 +55,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
       <>
         {zonesError && <RefreshFailedNote reason={zonesError} className="mb-2" />}
         <BinContents
+          key={match.bin.id}
           zone={match.zone}
           zones={zones}
           bin={match.bin}
@@ -60,6 +64,7 @@ export function BinPage({ code, onClose, onOpenEquipment, onNewEquipment, canWri
           onNewEquipment={onNewEquipment}
           canWrite={canWrite}
           onOpenDeck={onOpenDeck}
+          onOpenBin={onOpenBin}
         />
       </>
     )
@@ -342,7 +347,7 @@ function BinOnPlan({
 }
 
 function BinContents({
-  zone, zones, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onOpenDeck,
+  zone, zones, bin, onClose, onOpenEquipment, onNewEquipment, canWrite, onOpenDeck, onOpenBin,
 }: {
   zone: InventoryZone
   zones: InventoryZone[]
@@ -352,26 +357,27 @@ function BinContents({
   onNewEquipment: (preset?: { zoneId?: string; binId?: string }) => void
   canWrite: boolean
   onOpenDeck: (deckId: string) => void
+  onOpenBin?: (code: string) => void
 }) {
   const { items, loading, error } = useEquipment({ bin: bin.id })
+  // The arrows step through this location's bins in the order its page lists them.
+  const pager = onOpenBin ? recordPager(zone.bins, bin.code, (b) => b.code, (b) => b.code, onOpenBin) : undefined
 
   const scrollToPhoto = (itemId: string) => {
     document.getElementById(photoBlockId(itemId))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
   return (
-    <div className="mx-auto flex max-w-4xl flex-col gap-4">
-      <Button type="button" variant="ghost" size="sm" className="w-fit gap-1.5" onClick={() => onClose(zone.id)}>
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-        {zone.name}
-      </Button>
-
+    <Page
+      className="mx-auto max-w-4xl"
+      title={<span className="font-mono">{bin.code}</span>}
+      onBack={() => onClose(zone.id)}
+      backLabel={`Back to ${zone.name}`}
+      pager={pager}
+    >
       <div className="flex flex-col gap-1 rounded-md border border-border bg-card p-4">
         <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{zone.name}</p>
-        <div className="flex items-baseline gap-2">
-          <h2 className="font-mono text-lg font-semibold">{bin.code}</h2>
-          {bin.name && <span className="text-sm text-muted-foreground">{bin.name}</span>}
-        </div>
+        {bin.name && <p className="text-sm text-foreground">{bin.name}</p>}
         <p className="text-xs text-muted-foreground">{items.length} item{items.length === 1 ? '' : 's'}</p>
       </div>
 
@@ -428,6 +434,6 @@ function BinContents({
           the same way. */}
       <TagRow path={binTagPath(bin.code)} />
       <PrintLabelButton path={binTagPath(bin.code)} code={bin.code} caption={zone.name} />
-    </div>
+    </Page>
   )
 }

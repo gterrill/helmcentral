@@ -30,6 +30,8 @@ function renderIndex(props: Partial<WatchesIndexProps> = {}) {
   render(
     <WatchesIndex
       watches={[]}
+      sort={null}
+      onSortChange={() => {}}
       max={20}
       cost24h={{ usd: 0, unknown_runs: 0 }}
       storageBytes={2048}
@@ -144,4 +146,34 @@ describe('watchesFooter', () => {
     expect(watchesFooter(10, { usd: 0, unknown_runs: 2 })[1]).toBe('Watch cost in the last 24 hours: cost not known.')
     expect(watchesFooter(10, { usd: 0.5, unknown_runs: 1 })[1]).toContain('Cost not known for 1 run.')
   })
+
+  describe('the sort', () => {
+    const three = () => [
+      watch({ id: 'w1', name: 'Overnight check', schedule_sentence: 'Every night' }),
+      watch({ id: 'w2', name: 'Anchor', schedule_sentence: 'Hourly' }),
+      watch({ id: 'w3', name: 'Morning report', schedule_sentence: 'Daily' }),
+    ]
+    const order = () => screen.getAllByRole('row').slice(1).map((r) => r.textContent ?? '')
+
+    it('is by name until another is given', () => {
+      renderIndex({ watches: three() })
+      expect(order()[0]).toContain('Anchor')
+      expect(order()[2]).toContain('Overnight check')
+      expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute('aria-sort', 'ascending')
+    })
+
+    it('follows the sort it is given', () => {
+      renderIndex({ watches: three(), sort: { id: 'schedule', desc: true } })
+      expect(order()[0]).toContain('Hourly')
+      expect(screen.getByRole('columnheader', { name: 'Runs' })).toHaveAttribute('aria-sort', 'descending')
+    })
+
+    it('hands a header click up, toggling between ascending and descending only', () => {
+      const onSortChange = vi.fn()
+      renderIndex({ watches: three(), onSortChange })
+      fireEvent.click(within(screen.getByRole('columnheader', { name: 'Name' })).getByRole('button'))
+      expect(onSortChange).toHaveBeenLastCalledWith({ id: 'name', desc: true })
+    })
+  })
+
 })

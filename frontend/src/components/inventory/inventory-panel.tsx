@@ -1,4 +1,6 @@
 
+import { useState } from 'react'
+
 import { BinPage } from '@/components/inventory/bin-page'
 import { DeckEditor } from '@/components/inventory/deck-editor'
 import { DecksIndex } from '@/components/inventory/decks-index'
@@ -10,6 +12,7 @@ import { LocationsIndex, type LocationsView } from '@/components/inventory/locat
 import { MaintenanceSection } from '@/components/inventory/maintenance-section'
 import { ProfilesSection } from '@/components/inventory/profiles-section'
 import { StocktakeSection } from '@/components/inventory/stocktake-section'
+import type { InventoryList } from '@/lib/app-location'
 
 // ADR 0123: InventoryNav plus whichever section is active - the Settings
 // page shape (settings-page.tsx) exactly: the app location (ADR 0171) owns
@@ -72,6 +75,11 @@ interface InventoryPanelProps {
    * delete that already succeeded. */
   onEquipmentDiscarded: () => void
   canWrite?: boolean
+  /** The filter, search and sort of the Equipment, Locations or Decks index on
+   * screen, or of the one a record was opened from. A record's arrows step
+   * through the same list. */
+  list: InventoryList
+  onListChange: (list: InventoryList) => void
   /** ADR 0127: the Locations section's bin page - `/inventory/bins/<code>`.
    * null is the ordinary Locations index; a non-null code shows that bin's
    * contents instead, the same index/page split Equipment already has for
@@ -133,6 +141,8 @@ export function InventoryPanel({
     onEquipmentDeleted,
     onEquipmentDiscarded,
     canWrite = true,
+    list,
+    onListChange,
     binCode,
     onOpenBin,
     onCloseBin,
@@ -153,6 +163,19 @@ export function InventoryPanel({
     onDeckDeleted,
     newEquipmentPreset,
 }: InventoryPanelProps) {
+  // A different record is a different page: nothing typed or staged on one
+  // carries over to the next. But the draft becoming the record it just
+  // created is the same editor, still saving (photo uploads, the photo-work
+  // guard), so that one change keeps its key.
+  const [createdId, setCreatedId] = useState<string | null>(null)
+  const [editorKey, setEditorKey] = useState({ id: equipmentEditId, key: equipmentEditId ?? 'new' })
+  if (editorKey.id !== equipmentEditId) {
+    setEditorKey({
+      id: equipmentEditId,
+      key: equipmentEditId !== null && equipmentEditId === createdId ? editorKey.key : (equipmentEditId ?? 'new'),
+    })
+  }
+
   const showEquipmentEditor = activeSectionId === 'equipment' && (equipmentEditId !== null || creatingEquipment)
 
   const activeSection = (() => {
@@ -160,9 +183,12 @@ export function InventoryPanel({
       if (showEquipmentEditor) {
         return (
           <EquipmentEditor
+            key={editorKey.key}
             id={equipmentEditId}
+            list={list}
+            onOpenNeighbour={equipmentEditId === null ? undefined : onOpenEquipment}
             onBack={onCloseEditor}
-            onCreated={onEquipmentCreated}
+            onCreated={(id) => { setCreatedId(id); onEquipmentCreated(id) }}
             onDeleted={onEquipmentDeleted}
             onDiscarded={onEquipmentDiscarded}
             canWrite={canWrite}
@@ -173,6 +199,8 @@ export function InventoryPanel({
       }
       return (
         <EquipmentIndex
+          list={list}
+          onListChange={onListChange}
           onOpenItem={onOpenEquipment}
           onNewItem={onNewEquipment}
           canWrite={canWrite}
@@ -196,13 +224,17 @@ export function InventoryPanel({
             onNewEquipment={onNewEquipment}
             canWrite={canWrite}
             onOpenDeck={onOpenDeck}
+            onOpenBin={onOpenBin}
           />
         )
       }
       if (locationEditId !== null) {
         return (
           <LocationEditor
+            key={locationEditId}
             id={locationEditId}
+            list={list}
+            onOpenNeighbour={onOpenLocation}
             onBack={onCloseLocation}
             onDeleted={onLocationDeleted}
             onOpenBin={onOpenBin}
@@ -216,7 +248,10 @@ export function InventoryPanel({
         if (deckEditId !== null) {
           return (
             <DeckEditor
+              key={deckEditId}
               id={deckEditId}
+              list={list}
+              onOpenNeighbour={onOpenDeck}
               onOpenLocations={onCloseDecks}
               onOpenDecks={onCloseDeck}
               onDeleted={onDeckDeleted}
@@ -224,10 +259,12 @@ export function InventoryPanel({
             />
           )
         }
-        return <DecksIndex onOpenDeck={onOpenDeck} onOpenLocations={onCloseDecks} canWrite={canWrite} />
+        return <DecksIndex list={list} onListChange={onListChange} onOpenDeck={onOpenDeck} onOpenLocations={onCloseDecks} canWrite={canWrite} />
       }
       return (
         <LocationsIndex
+          list={list}
+          onListChange={onListChange}
           onOpenLocation={onOpenLocation}
           onOpenBin={onOpenBin}
           view={locationsView}

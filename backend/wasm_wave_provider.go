@@ -116,6 +116,12 @@ type wasmWaveHourOutput struct {
 type wasmFetchWavesOutput struct {
 	Hourly                 []wasmWaveHourOutput `json:"hourly"`
 	SeaSurfaceTemperatureC *float64             `json:"sea_surface_temperature_c"`
+
+	// Model names the forecast model the figures came from, and FallbackUsed
+	// is true when the plugin replaced a model that had no data at the point
+	// with its fallback (an operator setting). Both are optional.
+	Model        string `json:"model"`
+	FallbackUsed bool   `json:"fallback_used"`
 }
 
 // validateWaveFigures rejects a combined figure no sea can have. A plugin that
@@ -133,6 +139,25 @@ func validateWaveFigures(i int, h wasmWaveHourOutput) error {
 	return nil
 }
 
+// dropWavesWithoutPeriod applies the rule that a wave with no period is not a
+// wave. A model cell it cannot place (a land mask) reports height, period and
+// direction all as 0 rather than null, and read at face value that is a calm
+// sea from due north. A combined period of exactly 0 makes the whole hour
+// absent, and a wind-wave or swell component with period 0 is no train, so
+// its height and direction are cleared with it. An absent period (nil) is
+// left alone: that is a plugin leaving a figure out, handled as before.
+func dropWavesWithoutPeriod(h *waveHourPoint) {
+	if h.WavePeriodS != nil && *h.WavePeriodS == 0 {
+		h.WaveHeightM, h.WavePeriodS, h.WaveDirectionDeg = nil, nil, nil
+	}
+	if h.WindWavePeriodS <= 0 {
+		h.WindWaveHeightM, h.WindWavePeriodS, h.WindWaveDirectionDeg = 0, 0, 0
+	}
+	if h.SwellWavePeriodS <= 0 {
+		h.SwellWaveHeightM, h.SwellWavePeriodS, h.SwellWaveDirectionDeg = 0, 0, 0
+	}
+}
+
 func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, error) {
 	var bundle waveForecastBundle
 
@@ -145,7 +170,7 @@ func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, erro
 		if err := validateWaveFigures(i, h); err != nil {
 			return waveForecastBundle{}, err
 		}
-		bundle.Hourly = append(bundle.Hourly, waveHourPoint{
+		point := waveHourPoint{
 			Time:             hourTime,
 			WaveHeightM:      h.WaveHeightM,
 			WavePeriodS:      h.WavePeriodS,
@@ -157,10 +182,15 @@ func mapWasmFetchWavesOutput(out wasmFetchWavesOutput) (waveForecastBundle, erro
 			WindWavePeriodS:       h.WindWavePeriodS,
 			SwellWaveDirectionDeg: h.SwellWaveDirectionDeg,
 			SwellWavePeriodS:      h.SwellWavePeriodS,
-		})
+		}
+		dropWavesWithoutPeriod(&point)
+		bundle.Hourly = append(bundle.Hourly, point)
 	}
 
 	bundle.SeaTempC = out.SeaSurfaceTemperatureC
+	if out.FallbackUsed {
+		bundle.FallbackModel = out.Model
+	}
 
 	return bundle, nil
 }
@@ -200,7 +230,7 @@ func (p *wasmWaveProvider) FetchWaves(lat, lon float64, days int) (bundle waveFo
 		}
 	}()
 
-	key := waveWasmCacheKey(lat, lon, days)
+	key := p.saltedCacheKey(waveWasmCacheKey(lat, lon, days))
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true
@@ -241,7 +271,14 @@ func (p *wasmWaveProvider) fetchFromPlugin(lat, lon float64, days int) (waveFore
 		return waveForecastBundle{}, fmt.Errorf("plugin %q: unparseable fetch_waves JSON: %w", p.id, err)
 	}
 
-	return mapWasmFetchWavesOutput(parsed)
+	bundle, err := mapWasmFetchWavesOutput(parsed)
+	if err != nil {
+		return waveForecastBundle{}, err
+	}
+	if bundle.FallbackModel != "" {
+		log.Printf("wave provider %q: the usual model has no data at %.4f, %.4f; using the fallback model %q (operator setting)", p.id, lat, lon, bundle.FallbackModel)
+	}
+	return bundle, nil
 }
 
 // loadWasmWaveProviders scans dir once at startup for .wasm plugins, via the

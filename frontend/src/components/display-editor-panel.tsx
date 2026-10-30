@@ -13,14 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb'
+import { Page } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -37,6 +30,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import type { DisplayFields } from '@/hooks/use-displays'
 import { DEFAULT_DWELL_SECONDS, type Display } from '@/lib/displays'
 import { moveWithinDisplay } from '@/lib/page-order'
+import { recordPager } from '@/lib/record-pager'
 import { cn } from '@/lib/utils'
 
 // ADR 0112: the per-display editor. Same "no state, no requests" stance as
@@ -152,8 +146,11 @@ export interface DisplayEditorPanelProps {
   /** Every configured display, this one included - filtered internally to
    * "every other one" for the Duplicate menu's target list. */
   displays: Display[]
-  /** The breadcrumb's first segment ("Wall displays") calls this. */
+  /** The back arrow: up to the Wall displays index. */
   onBack: () => void
+  /** Opens another display's editor by its slug, from the arrows. They step
+   * through `displays` in the order the index lists them. */
+  onOpenDisplay: (slug: string) => void
   onUpdate: (id: string, patch: DisplayFields) => Promise<Display | null>
   /**
    * Resolves to the released page ids on success (the exact shape
@@ -352,6 +349,7 @@ export function DisplayEditorPanel({
   pages,
   displays,
   onBack,
+  onOpenDisplay,
   onUpdate,
   onDelete,
   onDisplayPatch,
@@ -369,34 +367,14 @@ export function DisplayEditorPanel({
   const [addPageValue, setAddPageValue] = useState('')
   const [creating, setCreating] = useState(false)
 
-  const breadcrumb = (
-    <Breadcrumb>
-      <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink href="#" onClick={(e) => { e.preventDefault(); onBack() }}>
-            Wall displays
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        {display && (
-          <>
-            <BreadcrumbSeparator />
-            <BreadcrumbItem>
-              <BreadcrumbPage>{display.name}</BreadcrumbPage>
-            </BreadcrumbItem>
-          </>
-        )}
-      </BreadcrumbList>
-    </Breadcrumb>
-  )
-
   if (!display) {
     return (
       <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-        {breadcrumb}
-
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-          This display could not be found.
-        </div>
+        <Page title="Wall display" onBack={onBack} backLabel="Back to wall displays">
+          <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+            This display could not be found.
+          </div>
+        </Page>
       </div>
     )
   }
@@ -466,9 +444,14 @@ export function DisplayEditorPanel({
     if (released !== null) onBack()
   }
 
+  // The arrows step through the displays in the order the index lists them.
+  // A name or address being typed commits on blur, which comes before the
+  // click on an arrow, so the edit is saved before the page moves on.
+  const pager = recordPager(displays, display.slug, (d) => d.slug, (d) => d.name, onOpenDisplay)
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-4 overflow-y-auto p-4">
-      {breadcrumb}
+      <Page title={display.name} onBack={onBack} backLabel="Back to wall displays" pager={pager}>
 
       {/* The page's own toolbar, in layout-toolbar.tsx's vocabulary: these
           act on the display as a whole, not on any one field below, so they
@@ -776,6 +759,7 @@ export function DisplayEditorPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      </Page>
     </div>
   )
 }

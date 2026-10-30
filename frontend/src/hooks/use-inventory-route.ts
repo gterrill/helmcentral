@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
 
 import { useAppLocation, useAppRouter, useNavigate } from '@/hooks/use-app-location'
-import type { InventoryRoute } from '@/lib/app-location'
+import type { InventoryList, InventoryRoute } from '@/lib/app-location'
 import type { AppRouter, NavigateOptions } from '@/lib/app-router'
 import type { InventorySectionId } from '@/components/inventory/inventory-nav'
 
@@ -17,8 +17,9 @@ export interface InventoryRouteApi {
    * Plan was last showing. */
   goSection: (section: InventorySectionId, options?: NavigateOptions) => boolean
   /** The Locations index as the operator last had it, Table or Plan; `plan`
-   * forces one of the two (the deck tab is still the last one used). */
-  locationsHome: (plan?: boolean) => InventoryRoute
+   * forces one of the two (the deck tab is still the last one used). `list`
+   * is the table's search and sort, which the Plan view has none of. */
+  locationsHome: (plan?: boolean, list?: InventoryList) => InventoryRoute
 }
 
 function liveRoute(router: AppRouter): InventoryRoute {
@@ -51,10 +52,10 @@ export function useInventoryRoute(): InventoryRouteApi {
     (view: InventoryRoute, options?: NavigateOptions) => navigate({ panel: 'inventory', route: view }, options),
     [navigate],
   )
-  const locationsHome = useCallback((plan: boolean = locationsIndex.current.plan): InventoryRoute => (
+  const locationsHome = useCallback((plan: boolean = locationsIndex.current.plan, list?: InventoryList): InventoryRoute => (
     plan
-      ? { view: 'plan', deckId: locationsIndex.current.deckId }
-      : { view: 'index', section: 'locations' }
+      ? { view: 'plan', deckId: locationsIndex.current.deckId, ...(list ? { list } : {}) }
+      : { view: 'index', section: 'locations', ...(list ? { list } : {}) }
   ), [])
   const goSection = useCallback((section: InventorySectionId, options?: NavigateOptions) => go(
     section === 'locations' ? locationsHome() : { view: 'index', section },
@@ -63,15 +64,19 @@ export function useInventoryRoute(): InventoryRouteApi {
   const close = useCallback((options?: NavigateOptions) => {
     const current = liveRoute(router)
     switch (current.view) {
+      // Back from a record returns to the index with the filter, search and
+      // sort the record was opened from.
       case 'equipment':
+        return go({ view: 'index', section: 'equipment', ...(current.list ? { list: current.list } : {}) }, options)
       case 'equipment-new':
         return go({ view: 'index', section: 'equipment' }, options)
-      case 'bin':
       case 'location':
+        return go(locationsHome(undefined, current.list), options)
+      case 'bin':
       case 'decks':
         return go(locationsHome(), options)
       case 'deck':
-        return go({ view: 'decks' }, options)
+        return go({ view: 'decks', ...(current.list ? { list: current.list } : {}) }, options)
       default:
         return true
     }

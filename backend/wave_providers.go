@@ -99,6 +99,10 @@ type waveForecastBundle struct {
 	SeaTempC *float64
 	Cached   bool
 	CachedAt time.Time
+
+	// FallbackModel names the model the provider swapped to because the usual
+	// one had no data at the point. Empty when the usual model answered.
+	FallbackModel string
 }
 
 // waveProvider is the interface implemented by each pluggable wave data
@@ -648,7 +652,12 @@ type waveDayResponse struct {
 }
 
 type waveForecastResponse struct {
-	Provider        string            `json:"provider"`
+	Provider string `json:"provider"`
+	// FallbackModel names the model the figures came from when the usual one
+	// had no data at this point. Left out when the usual model answered.
+	FallbackModel string `json:"fallback_model,omitempty"`
+	// NoData is true when the model has no wave values at this point.
+	NoData          bool              `json:"no_data,omitempty"`
 	Days            []waveDayResponse `json:"days"`
 	SeaTemperatureF *float64          `json:"sea_temperature_f"`
 	Cached          bool              `json:"cached"`
@@ -710,20 +719,34 @@ func waveForecast(c echo.Context) error {
 	if len(bundle.Hourly) == 0 {
 		return c.JSON(http.StatusBadGateway, map[string]string{"error": "wave forecast response was empty"})
 	}
-	// A named place the model has no values for (a marina up a river, a lake)
-	// is an answer, not a fault: the wave plugin returns the hourly series for
-	// the point with every wave value null, which reaches the host as zeros.
-	// Only that case, for an explicit place, is a 200 with no days; an empty
-	// response or one with no days on or after today stays a 502 as for the
-	// boat's own position.
-	if point.Explicit && waveSeriesHasNoValues(bundle.Hourly) {
-		return c.JSON(http.StatusOK, waveForecastResponse{
-			Provider:   configuredProvider,
-			Days:       []waveDayResponse{},
-			Cached:     bundle.Cached,
-			UpdatedAt:  bundle.CachedAt.UTC().Format(time.RFC3339),
-			TTLSeconds: provider.TTLSeconds(),
-		})
+	var seaTemperatureF *float64
+	if bundle.SeaTempC != nil {
+		f := *bundle.SeaTempC*9/5 + 32
+		seaTemperatureF = &f
+	}
+
+	// A point the model has no values for (a marina up a river, a lake, or a
+	// land-masked cell at the boat's own position) is an answer, not a fault:
+	// the series is there with every wave value absent. It is a 200 with no
+	// days and no_data set, so the card can say so quietly rather than draw a
+	// calm nobody forecast. The sea temperature is kept, since it can come
+	// from a different model than the waves. An empty response or one with no
+	// days on or after today stays a 502.
+	response := waveForecastResponse{
+		Provider:        configuredProvider,
+		FallbackModel:   bundle.FallbackModel,
+		Days:            []waveDayResponse{},
+		SeaTemperatureF: seaTemperatureF,
+		Cached:          bundle.Cached,
+		UpdatedAt:       bundle.CachedAt.UTC().Format(time.RFC3339),
+		TTLSeconds:      provider.TTLSeconds(),
+	}
+	if waveSeriesHasNoValues(bundle.Hourly) {
+		if !point.Explicit {
+			log.Printf("wave provider %q has no data at the boat's position (%.4f, %.4f)", configuredProvider, point.Lat, point.Lon)
+		}
+		response.NoData = true
+		return c.JSON(http.StatusOK, response)
 	}
 
 	localLocation := point.Zone.Loc
@@ -762,20 +785,7 @@ func waveForecast(c echo.Context) error {
 		})
 	}
 
-	var seaTemperatureF *float64
-	if bundle.SeaTempC != nil {
-		f := *bundle.SeaTempC*9/5 + 32
-		seaTemperatureF = &f
-	}
-
-	response := waveForecastResponse{
-		Provider:        configuredProvider,
-		Days:            dayResponses,
-		SeaTemperatureF: seaTemperatureF,
-		Cached:          bundle.Cached,
-		UpdatedAt:       bundle.CachedAt.UTC().Format(time.RFC3339),
-		TTLSeconds:      provider.TTLSeconds(),
-	}
+	response.Days = dayResponses
 
 	etag, etagErr := weakETagForJSON(response)
 	if etagErr != nil {

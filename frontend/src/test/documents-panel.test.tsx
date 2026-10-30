@@ -576,6 +576,48 @@ describe('DocumentsPanel', () => {
     expect(setSelectedTag).toHaveBeenCalledWith(null)
   })
 
+  describe('the tag filter and the Unfiled notes view in the address', () => {
+    it('start from the tag the address names', () => {
+      render(<DocumentsPanel initialTag="engine" />)
+      expect(mockedUseDocuments).toHaveBeenLastCalledWith(null, 'engine')
+    })
+
+    it('report a tag the operator picks or clears', () => {
+      const setSelectedTag = vi.fn()
+      const onTagChange = vi.fn()
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ selectedTag: 'engine', setSelectedTag, tags: [{ tag: 'engine', count: 3 }] }))
+      render(<DocumentsPanel initialTag="engine" onTagChange={onTagChange} />)
+      openSearchOverlay()
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /clear tag filter engine/i }))
+      expect(setSelectedTag).toHaveBeenCalledWith(null)
+      expect(onTagChange).toHaveBeenCalledWith(null)
+    })
+
+    it('follow a tag the address changes to (Back and Forward)', () => {
+      const setSelectedTag = vi.fn()
+      mockedUseDocuments.mockReturnValue(makeDocumentsMock({ setSelectedTag }))
+      const { rerender } = render(<DocumentsPanel initialTag={null} />)
+      expect(setSelectedTag).not.toHaveBeenCalled()
+      rerender(<DocumentsPanel initialTag="engine" />)
+      expect(setSelectedTag).toHaveBeenCalledWith('engine')
+    })
+
+    it('open on the Unfiled notes view when the address says so, and follow it back to the listing', () => {
+      mockedUseNotes.mockReturnValue(makeNotesMock({ notes: [note({ id: 'note-1', title: 'Ring Dave' })] }))
+      const { rerender } = render(<DocumentsPanel initialUnfiled />)
+      expect(screen.getByText('Ring Dave')).toBeInTheDocument()
+      rerender(<DocumentsPanel initialUnfiled={false} />)
+      expect(screen.queryByText('Ring Dave')).not.toBeInTheDocument()
+    })
+
+    it('report the Unfiled notes view when the operator opens it', () => {
+      const onUnfiledChange = vi.fn()
+      render(<DocumentsPanel onUnfiledChange={onUnfiledChange} />)
+      fireEvent.click(screen.getByRole('treeitem', { name: /unfiled notes/i }))
+      expect(onUnfiledChange).toHaveBeenCalledWith(true)
+    })
+  })
+
   it('shows Searching… rather than the empty-state suggestions while a typed query has no results yet', () => {
     mockedUseDocuments.mockReturnValue(makeDocumentsMock({
       searching: true,
@@ -670,7 +712,7 @@ describe('DocumentsPanel', () => {
 
     fireEvent.click(screen.getByRole('treeitem', { name: /Manuals/ }))
     expect(onFolderChange).toHaveBeenCalledWith('f1')
-    expect(mockedUseDocuments).toHaveBeenLastCalledWith('f1')
+    expect(mockedUseDocuments).toHaveBeenLastCalledWith('f1', null)
     expect(screen.getByRole('heading', { name: 'Manuals' })).toBeInTheDocument()
 
     // App.tsx's onFolderChange handler mirrors the new folder into its own
@@ -682,13 +724,13 @@ describe('DocumentsPanel', () => {
     // Back: App.tsx's popstate handler re-seeds documentsFolderId from the
     // URL and hands it back down as a prop, without remounting the panel.
     rerender(<DocumentsPanel initialFolderId={null} onFolderChange={onFolderChange} />)
-    expect(mockedUseDocuments).toHaveBeenLastCalledWith(null)
+    expect(mockedUseDocuments).toHaveBeenLastCalledWith(null, null)
     expect(screen.getByRole('heading', { name: 'Documents' })).toBeInTheDocument()
     expect(screen.getByRole('treeitem', { name: 'Documents' })).toHaveAttribute('aria-selected', 'true')
 
     // Forward: back to f1.
     rerender(<DocumentsPanel initialFolderId="f1" onFolderChange={onFolderChange} />)
-    expect(mockedUseDocuments).toHaveBeenLastCalledWith('f1')
+    expect(mockedUseDocuments).toHaveBeenLastCalledWith('f1', null)
     expect(screen.getByRole('heading', { name: 'Manuals' })).toBeInTheDocument()
     expect(screen.getByRole('treeitem', { name: /Manuals/ })).toHaveAttribute('aria-selected', 'true')
   })
@@ -2340,7 +2382,7 @@ describe('DocumentsPanel folder pane', () => {
     expect(onFolderChange).toHaveBeenLastCalledWith('m1')
     fireEvent.click(screen.getByRole('treeitem', { name: 'Documents' }))
     expect(onFolderChange).toHaveBeenLastCalledWith(null)
-    expect(mockedUseDocuments).toHaveBeenLastCalledWith(null)
+    expect(mockedUseDocuments).toHaveBeenLastCalledWith(null, null)
   })
 
   it('the Unfiled notes node switches the view without touching the folder', () => {

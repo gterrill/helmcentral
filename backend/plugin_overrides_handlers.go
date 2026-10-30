@@ -442,6 +442,9 @@ func postPluginConfigHandler(c echo.Context) error {
 		if field.Type == "url" && strings.TrimSpace(value) != "" && !isAbsoluteHTTPURL(value) {
 			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("%s must be an absolute http(s) URL", field.Label)})
 		}
+		if field.Type == "boolean" && value != "" && value != "true" && value != "false" {
+			return c.JSON(http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("%s must be on or off", field.Label)})
+		}
 	}
 
 	if err := globalPluginOverridesStore.SetConfigValues(pp.Path(), req.Values); err != nil {

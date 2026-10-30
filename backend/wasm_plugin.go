@@ -25,6 +25,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -226,6 +227,33 @@ func (b *wasmPluginBase) applyConfigValues(instance *extism.Plugin) error {
 	return nil
 }
 
+// saltedCacheKey folds the plugin's saved config values into a cache key, so
+// saving a setting makes the next call a miss and fetch afresh instead of
+// serving an answer made under the old setting. With nothing saved the key is
+// unchanged. A store read error is treated as nothing saved: the call itself
+// (applyConfigValues) fails loudly on the same error.
+func (b *wasmPluginBase) saltedCacheKey(key string) string {
+	if globalPluginOverridesStore == nil || len(b.configFieldKeys) == 0 {
+		return key
+	}
+	values, err := globalPluginOverridesStore.GetConfigValues(b.path)
+	if err != nil {
+		return key
+	}
+	h := sha256.New()
+	n := 0
+	for _, k := range b.configFieldKeys {
+		if v, ok := values[k]; ok {
+			fmt.Fprintf(h, "%s=%s\n", k, v)
+			n++
+		}
+	}
+	if n == 0 {
+		return key
+	}
+	return fmt.Sprintf("%s|cfg:%x", key, h.Sum(nil)[:6])
+}
+
 // firstErrorLine returns only the first line of err's message. A
 // wazero-recovered plugin panic (see call above) can put a multi-kilobyte
 // wasm stack trace into the error text - observed live: a 6 KB JSON error
@@ -371,7 +399,8 @@ func wasmPluginConfigFields(wasmPath string) (map[string]string, error) {
 // general mechanism any plugin can use for the same purpose). Type is
 // either "url" (validated as an absolute http(s) URL by
 // postPluginConfigHandler, plugin_overrides_handlers.go) or "text" (no
-// format validation beyond non-blank-ness). Help and Placeholder are purely
+// format validation beyond non-blank-ness) or "boolean" (stored as "true"
+// or "false", rendered as a switch; blank is off). Help and Placeholder are purely
 // cosmetic, shown by the frontend's provider settings modal.
 type pluginConfigFieldSpec struct {
 	Key         string `json:"key"`
@@ -384,7 +413,7 @@ type pluginConfigFieldSpec struct {
 // validPluginConfigFieldTypes is the closed set of config_fields.json "type"
 // values. An unrecognized type is an authoring mistake, not a forward-compat
 // signal to ignore - see pluginConfigFieldsForWasmPlugin.
-var validPluginConfigFieldTypes = map[string]bool{"url": true, "text": true}
+var validPluginConfigFieldTypes = map[string]bool{"url": true, "text": true, "boolean": true}
 
 // pluginConfigFieldsForWasmPlugin reads and validates the companion
 // <name>.config_fields.json file next to wasmPath: a JSON array of

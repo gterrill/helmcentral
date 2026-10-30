@@ -8,16 +8,15 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { prefetchDeckPlanEditor } from '@/components/inventory/deck-plan-editor'
 import { EmptyState, IndexTable, Page } from '@/components/patterns'
-import { useInventoryDecks, useInventoryZones, type InventoryDeck } from '@/hooks/use-inventory'
+import { useInventoryDecks, useInventoryZones } from '@/hooks/use-inventory'
+import type { InventoryList } from '@/lib/app-location'
+import { deckRows, orderDecks, type DeckRow } from '@/lib/index-order'
+import { patchList } from '@/lib/list-order'
 
 // ADR 0156: the Decks list under Locations - one row per deck plan, built on
 // the pattern library like LocationsIndex. A deck is a plan image the
 // locations are outlined on. "New deck" asks for a name in a small dialog and
 // opens the deck's page, where the plan image is added.
-
-interface DeckRow extends InventoryDeck {
-  zoneCount: number
-}
 
 const columns: ColumnDef<DeckRow, unknown>[] = [
   {
@@ -39,13 +38,16 @@ const columns: ColumnDef<DeckRow, unknown>[] = [
 ]
 
 interface DecksIndexProps {
+  /** The table's sort. It lives in the address, so a deck's page can step through the same list. */
+  list: InventoryList
+  onListChange: (list: InventoryList) => void
   onOpenDeck: (id: string) => void
   /** The breadcrumb's Locations: up to the Locations index. */
   onOpenLocations: () => void
   canWrite?: boolean
 }
 
-export function DecksIndex({ onOpenDeck, onOpenLocations, canWrite = true }: DecksIndexProps) {
+export function DecksIndex({ list, onListChange, onOpenDeck, onOpenLocations, canWrite = true }: DecksIndexProps) {
   const { decks, loading, error, refresh, createDeck } = useInventoryDecks()
   const { zones } = useInventoryZones()
   const [creating, setCreating] = useState(false)
@@ -56,10 +58,8 @@ export function DecksIndex({ onOpenDeck, onOpenLocations, canWrite = true }: Dec
   // Every route to a deck page starts here, so warm the drawing surface now.
   useEffect(() => { prefetchDeckPlanEditor() }, [])
 
-  const rows = useMemo<DeckRow[]>(
-    () => decks.map((d) => ({ ...d, zoneCount: zones.filter((z) => z.deck_id === d.id).length })),
-    [decks, zones],
-  )
+  // The same function the deck's page steps through the list with.
+  const rows = useMemo(() => orderDecks(deckRows(decks, zones), list), [decks, zones, list])
 
   const openCreate = () => {
     setNewName('')
@@ -109,6 +109,9 @@ export function DecksIndex({ onOpenDeck, onOpenLocations, canWrite = true }: Dec
       <IndexTable
         columns={columns}
         rows={rows}
+        manualSorting
+        sorting={list.sort ? [list.sort] : []}
+        onSortingChange={(sorting) => onListChange(patchList(list, { sort: sorting[0] }))}
         getRowId={(deck) => deck.id}
         onOpen={(deck) => onOpenDeck(deck.id)}
         loading={loading && decks.length === 0}

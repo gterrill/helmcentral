@@ -708,3 +708,73 @@ describe('Passages panel (ADR 0171 panel route)', () => {
     expect(isCanonicalAppPath('/passages/cruises/c1', c)).toBe(true)
   })
 })
+
+describe('the order an index showed (details pages step through it)', () => {
+  const inv = (route: InventoryRoute): AppLocation => ({ panel: 'inventory', route })
+  const roundTrips = (loc: AppLocation, path: string) => {
+    expect(formatAppLocation(loc, ctx)).toBe(path)
+    expect(parseAppLocation(path)).toEqual(loc)
+    expect(isCanonicalAppPath(path, { firstPageId: 'p1', knownPageIds: null, canAdmin: true })).toBe(true)
+  }
+
+  it('gives an index in its default state a clean path', () => {
+    roundTrips(inv({ view: 'index', section: 'equipment' }), '/inventory')
+    roundTrips(inv({ view: 'index', section: 'locations' }), '/inventory/locations')
+    roundTrips(inv({ view: 'decks' }), '/inventory/decks')
+    roundTrips({ panel: 'watches', route: { view: 'index' } }, '/watches')
+    expect(formatAppLocation(inv({ view: 'index', section: 'equipment', list: {} }), ctx)).toBe('/inventory')
+  })
+
+  it('carries the Equipment filter, search and sort on the index and on a record', () => {
+    const list = { system: 'electrical', status: 'stored', zone: 'z 1', q: 'pump', sort: { id: 'name', desc: true } }
+    const query = '?system=electrical&status=stored&zone=z+1&q=pump&sort=-name'
+    roundTrips(inv({ view: 'index', section: 'equipment', list }), `/inventory${query}`)
+    roundTrips(inv({ view: 'equipment', id: 'eq 1', list }), `/inventory/equipment/eq%201${query}`)
+  })
+
+  it('carries the Locations search and sort, and the Decks sort', () => {
+    const list = { q: 'lazar', sort: { id: 'bins', desc: false } }
+    roundTrips(inv({ view: 'index', section: 'locations', list }), '/inventory/locations?q=lazar&sort=bins')
+    roundTrips(inv({ view: 'location', id: 'z1', list }), '/inventory/locations/z1?q=lazar&sort=bins')
+    const decks = { sort: { id: 'name', desc: true } }
+    roundTrips(inv({ view: 'decks', list: decks }), '/inventory/decks?sort=-name')
+    roundTrips(inv({ view: 'deck', id: 'd1', list: decks }), '/inventory/decks/d1?sort=-name')
+  })
+
+  it('ignores filter parameters on a section that has none, and drops what it does not know', () => {
+    expect(parseAppLocation('/inventory/profiles?q=x')).toEqual(inv({ view: 'index', section: 'profiles' }))
+    expect(parseAppLocation('/inventory?bogus=1')).toEqual(inv({ view: 'index', section: 'equipment' }))
+    expect(isCanonicalAppPath('/inventory?bogus=1', { firstPageId: 'p1', knownPageIds: null, canAdmin: true })).toBe(false)
+  })
+
+  it('carries the Locations search and sort through the plan view, and keeps a bin page free of list state', () => {
+    roundTrips(inv({ view: 'plan', deckId: 'd1' }), '/inventory/locations?view=plan&deck=d1')
+    roundTrips(
+      inv({ view: 'plan', deckId: 'd1', list: { q: 'laz', sort: { id: 'name', desc: true } } }),
+      '/inventory/locations?view=plan&deck=d1&q=laz&sort=-name',
+    )
+    roundTrips(inv({ view: 'bin', code: 'LAZ-01' }), '/inventory/bins/LAZ-01')
+  })
+
+  it('carries the Watches sort on the index and on a watch', () => {
+    const sort = { id: 'name', desc: true }
+    roundTrips({ panel: 'watches', route: { view: 'index', sort } }, '/watches?sort=-name')
+    roundTrips({ panel: 'watches', route: { view: 'details', id: 'w1', sort } }, '/watches/w1?sort=-name')
+    roundTrips({ panel: 'watches', route: { view: 'details', id: 'w1', run: 'r1', sort } }, '/watches/w1?run=r1&sort=-name')
+  })
+
+  it('carries the Documents tag and the Unfiled notes view on the listing and on a document', () => {
+    roundTrips(
+      { panel: 'documents', route: { view: 'browse', folderId: 'f1', sectionId: null, documentId: null, tag: 'engine' } },
+      '/documents?folder=f1&tag=engine',
+    )
+    roundTrips(
+      { panel: 'documents', route: { view: 'browse', folderId: null, sectionId: null, documentId: null, unfiled: true } },
+      '/documents?view=unfiled',
+    )
+    roundTrips(
+      { panel: 'documents', route: { view: 'details', id: 'd1', folderId: 'f1', sectionId: null, tag: 'engine', unfiled: true } },
+      '/documents/d1?folder=f1&tag=engine&view=unfiled',
+    )
+  })
+})

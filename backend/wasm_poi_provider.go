@@ -165,7 +165,7 @@ func (p *wasmPOIProvider) FetchPOI(lat, lon float64, radiusM int, categories []s
 		}
 	}()
 
-	key := poiWasmCacheKey(lat, lon, radiusM, categories, limit)
+	key := p.saltedCacheKey(poiWasmCacheKey(lat, lon, radiusM, categories, limit))
 
 	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true

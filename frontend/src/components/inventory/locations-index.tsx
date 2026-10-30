@@ -8,7 +8,11 @@ import { Input } from '@/components/ui/input'
 import { DeckPlan } from '@/components/inventory/deck-plan'
 import { PrintBinLabelsDialog } from '@/components/inventory/label-print'
 import { EmptyState, IndexFilters, IndexTable, Page, RefreshFailedNote } from '@/components/patterns'
-import { useInventoryDecks, useInventoryZones, type InventoryDeck, type InventoryZone } from '@/hooks/use-inventory'
+import { useInventoryDecks, useInventoryZones, type InventoryZone } from '@/hooks/use-inventory'
+import type { InventoryList } from '@/lib/app-location'
+import { orderLocations } from '@/lib/index-order'
+import { useLocationDeckLabel } from '@/hooks/use-location-deck-label'
+import { patchList } from '@/lib/list-order'
 
 // ADR 0142: the Locations index - a name, deck and bin count per location, built
 // on the pattern library like EquipmentIndex. A location is an area of the
@@ -24,8 +28,7 @@ import { useInventoryDecks, useInventoryZones, type InventoryDeck, type Inventor
 // the columns are built from the loaded decks rather than declared once. When
 // that request failed and no deck has ever loaded, a located zone shows `?`:
 // a dash would read as "on no deck".
-function buildColumns(decks: InventoryDeck[], decksUnavailable: boolean): ColumnDef<InventoryZone, unknown>[] {
-  const deckNames = new Map(decks.map((d) => [d.id, d.name]))
+function buildColumns(deckLabel: (zone: InventoryZone) => string): ColumnDef<InventoryZone, unknown>[] {
   return [
     {
       accessorKey: 'name',
@@ -34,7 +37,7 @@ function buildColumns(decks: InventoryDeck[], decksUnavailable: boolean): Column
     },
     {
       id: 'deck',
-      accessorFn: (zone) => (zone.deck_id ? deckNames.get(zone.deck_id) ?? (decksUnavailable ? '?' : '') : ''),
+      accessorFn: deckLabel,
       header: 'Deck',
       cell: ({ getValue }) => <span className="truncate text-muted-foreground">{getValue<string>() || '--'}</span>,
     },
@@ -50,6 +53,10 @@ function buildColumns(decks: InventoryDeck[], decksUnavailable: boolean): Column
 export type LocationsView = 'table' | 'plan'
 
 interface LocationsIndexProps {
+  /** The table's search and sort. They live in the address, so a location's
+   * page can step through the same list. */
+  list: InventoryList
+  onListChange: (list: InventoryList) => void
   onOpenLocation: (id: string) => void
   canWrite?: boolean
   /** ADR 0156: Table (the list) or Plan (the deck plans). The caller keeps it
@@ -160,6 +167,8 @@ function PlanView({
 }
 
 export function LocationsIndex({
+  list,
+  onListChange,
   onOpenLocation,
   canWrite = true,
   view = 'table',
@@ -171,22 +180,17 @@ export function LocationsIndex({
   onOpenDeck = () => {},
 }: LocationsIndexProps) {
   const { zones, loading, error, refresh, createZone } = useInventoryZones()
-  const decksState = useInventoryDecks()
-  const columns = useMemo(
-    () => buildColumns(decksState.decks, decksState.error !== null && decksState.decks.length === 0),
-    [decksState.decks, decksState.error],
-  )
-  const [query, setQuery] = useState('')
+  const { decksState, deckLabel } = useLocationDeckLabel()
+  const columns = useMemo(() => buildColumns(deckLabel), [deckLabel])
+  const query = list.q ?? ''
   const [creating, setCreating] = useState(false)
   const [printingLabels, setPrintingLabels] = useState(false)
   const [newName, setNewName] = useState('')
   const [saving, setSaving] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
-  const rows = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    return q === '' ? zones : zones.filter((z) => z.name.toLowerCase().includes(q))
-  }, [zones, query])
+  // The same function the location's page steps through the list with.
+  const rows = useMemo(() => orderLocations(zones, list, deckLabel), [zones, list, deckLabel])
 
   const openCreate = () => {
     setNewName('')
@@ -235,7 +239,7 @@ export function LocationsIndex({
             <div className="min-w-0 flex-1">
               <IndexFilters
                 searchValue={query}
-                onSearchChange={setQuery}
+                onSearchChange={(value) => onListChange(patchList(list, { q: value }))}
                 searchLabel="Search locations"
                 searchPlaceholder="Name..."
               />
@@ -259,6 +263,9 @@ export function LocationsIndex({
         <IndexTable
           columns={columns}
           rows={rows}
+          manualSorting
+          sorting={list.sort ? [list.sort] : []}
+          onSortingChange={(sorting) => onListChange(patchList(list, { sort: sorting[0] }))}
           loadedCount={zones.length}
           getRowId={(zone) => zone.id}
           onOpen={(zone) => onOpenLocation(zone.id)}

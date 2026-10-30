@@ -25,16 +25,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
-- **Claude on the phone and the web can reach outside assistants through
-  Tailscale Funnel.** Claude's phone apps, claude.ai and connectors added in
-  Claude Desktop connect from Anthropic's servers, so they couldn't reach an
-  address on your own network. You can now turn on Tailscale Funnel for `/mcp`
-  alone, which gives it a public HTTPS address, and add that address as a
-  custom connector with its own token. Funnel makes the address public, so the
-  token is the only thing that stops a stranger who finds it. If a Funnel
-  command is mistyped and shares more than `/mcp`, Helmcentral refuses
-  everything else that arrives through Funnel and says so in the log. See
-  **Connect Claude on your phone or the web** in the help pages for the steps.
+- **Use the blend where the wave model has no data.** Near a coast the wave model
+  Helmcentral uses, NOAA's GFS-Wave, has no figures for the cell your boat is
+  in. A new switch, **Use Open-Meteo's blend where GFS-Wave has no data**, asks
+  Open-Meteo's own blend of models for that spot instead. It's off until you
+  turn it on. To turn it on, open Settings, find the Open-Meteo Marine wave
+  provider, tap its gear icon, switch it on and tap **Save**. When the blend
+  supplies the figures, the Wave card says so in its footer, and Mate says so
+  when it quotes them.
+
+- **Previous and next on every details page.** Equipment, locations, decks,
+  bins, watches, documents and wall displays now have the two arrows at the
+  right of the title that passages already had, and the **[** and **]** keys do
+  the same. They step through the list in the order you saw it, with the same
+  filter, search and sort. The filter, search and sort now stay in the page's web
+  address, so going back from a record returns you to the list as you left it. A
+  bin steps through the other bins in its location, and a wall display saves a
+  name or address you were typing before it moves on. Unsaved edits are held, as
+  they are with the back arrow. The wall display page also gets a back arrow in
+  place of its trail.
 - **Outside assistants can read the boat.** A program on your own computer, such
   as Claude Code or Claude Desktop, can now connect to Helmcentral over MCP and
   ask about the house bank, the active alarms, the alarm log, how a reading has
@@ -47,6 +56,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   Until you make a token, every request is refused. It works on your boat's
   network and on Tailscale. Claude on the phone and the web reach it through
   Tailscale Funnel, below.
+- **Claude on the phone and the web can reach outside assistants through
+  Tailscale Funnel.** Claude's phone apps, claude.ai and connectors added in
+  Claude Desktop connect from Anthropic's servers, so they couldn't reach an
+  address on your own network. You can now turn on Tailscale Funnel for `/mcp`
+  alone, which gives it a public HTTPS address, and add that address as a
+  custom connector with its own token. Funnel makes the address public, so the
+  token is the only thing that stops a stranger who finds it. If a Funnel
+  command is mistyped and shares more than `/mcp`, Helmcentral refuses
+  everything else that arrives through Funnel and says so in the log. See
+  **Connect Claude on your phone or the web** in the help pages for the steps.
 - **Watch reports can show a chart.** A finding about a trend now comes with a
   chart: pressure over 12 hours when it falls, the house bank's charge and current
   over the night it measured, and a tank's level since the last report. Mate can
@@ -186,6 +205,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   ends. If the Passages page has nothing to read, Mate says so.
 
 ### Fixed
+
+- **No more flat calm where the wave model has no data.** Over a bay or anchorage
+  close to land, the wave model could report every figure as zero, and the Wave
+  card showed "0.0 m from the N" with a flat line, as though the sea were
+  glassy. A wave with no period isn't a wave, so Helmcentral now treats those
+  hours as having no data. At the boat's own position the Wave card and the
+  Forecast Conditions tile now say in quiet grey text "The wave model has no
+  data at this position", with no Retry button, and the sea temperature still
+  shows. For a place you have searched for, the card says there is no wave
+  forecast for that spot, as before. Mate tells you the same when you ask.
 
 - **Applying Mate's changes now updates the page you are on.** If you had
   Decks, Equipment, Maintenance or the vessel details open beside Mate and

@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -279,8 +281,8 @@ func TestParseOpenMeteoWaveResponse_NullCombinedFiguresAreOmitted(t *testing.T) 
 	if points[0].WaveHeightM != nil || points[0].WavePeriodS != nil || points[0].WaveDirectionDeg != nil {
 		t.Errorf("null entries must be absent: %+v", points[0])
 	}
-	if points[1].WaveHeightM == nil || points[1].WavePeriodS == nil || points[1].WaveDirectionDeg == nil {
-		t.Errorf("a reported zero is a figure and must be kept: %+v", points[1])
+	if points[1].WaveHeightM != nil || points[1].WavePeriodS != nil || points[1].WaveDirectionDeg != nil {
+		t.Errorf("a zero period is no wave, so the hour is left out: %+v", points[1])
 	}
 	if points[2].WaveHeightM == nil || *points[2].WaveHeightM != 1.4 || points[2].WavePeriodS != nil || points[2].WaveDirectionDeg != nil {
 		t.Errorf("height only: %+v", points[2])
@@ -300,8 +302,98 @@ func TestParseOpenMeteoWaveResponse_NullCombinedFiguresAreOmitted(t *testing.T) 
 		if _, ok := back.Hourly[0][key]; ok {
 			t.Errorf("hour 0 must not carry %s", key)
 		}
-		if _, ok := back.Hourly[1][key]; !ok {
-			t.Errorf("hour 1 must carry %s", key)
+		if _, ok := back.Hourly[1][key]; ok {
+			t.Errorf("hour 1 must not carry %s", key)
 		}
+	}
+}
+
+func TestWaveURL_PinsGFSWaveUnlessFallingBack(t *testing.T) {
+	pinned := waveURL(-20.2666, 148.7099, 10, false)
+	if !strings.Contains(pinned, "models=ncep_gfswave025") {
+		t.Errorf("default fetch must pin GFS-Wave: %s", pinned)
+	}
+	blend := waveURL(-20.2666, 148.7099, 10, true)
+	if strings.Contains(blend, "models=") {
+		t.Errorf("fallback fetch must leave the model to Open-Meteo's blend: %s", blend)
+	}
+	if !strings.Contains(blend, "latitude=-20.2666") || !strings.Contains(blend, "forecast_days=10") {
+		t.Errorf("fallback fetch must keep the point and window: %s", blend)
+	}
+}
+
+func f64(v float64) *float64 { return &v }
+
+func TestHoursHaveNoWaves(t *testing.T) {
+	land := []waveHourOutput{{Time: "a"}, {Time: "b"}}
+	if !hoursHaveNoWaves(land) {
+		t.Error("no period throughout is a land cell")
+	}
+	if hoursHaveNoWaves(append(land, waveHourOutput{Time: "c", WavePeriodS: f64(3)})) {
+		t.Error("one real hour means the model has data here")
+	}
+	if !hoursHaveNoWaves(nil) {
+		t.Error("an empty series has no waves")
+	}
+}
+
+func TestChooseWaveSeries(t *testing.T) {
+	land := []waveHourOutput{{Time: "a"}}
+	blend := []waveHourOutput{{Time: "a", WaveHeightM: f64(0.16), WavePeriodS: f64(3)}}
+	real := []waveHourOutput{{Time: "a", WaveHeightM: f64(0.66), WavePeriodS: f64(5)}}
+	never := func() ([]waveHourOutput, error) { t.Fatal("fallback fetched when it should not be"); return nil, nil }
+
+	hours, model, used, err := chooseWaveSeries(real, true, never)
+	if err != nil || used || model != modelGFSWave || len(hours) != 1 || *hours[0].WaveHeightM != 0.66 {
+		t.Errorf("real data is kept: %v %v %v %v", hours, model, used, err)
+	}
+
+	hours, model, used, err = chooseWaveSeries(land, false, never)
+	if err != nil || used || model != modelGFSWave || hours[0].WavePeriodS != nil {
+		t.Errorf("flag off leaves the land cell for the host to report: %v %v %v %v", hours, model, used, err)
+	}
+
+	hours, model, used, err = chooseWaveSeries(land, true, func() ([]waveHourOutput, error) { return blend, nil })
+	if err != nil || !used || model != modelBlend || *hours[0].WaveHeightM != 0.16 {
+		t.Errorf("flag on swaps to the blend: %v %v %v %v", hours, model, used, err)
+	}
+
+	_, _, _, err = chooseWaveSeries(land, true, func() ([]waveHourOutput, error) { return nil, errors.New("boom") })
+	if err == nil {
+		t.Error("a failed fallback fetch must surface, not fall back to the land cell")
+	}
+}
+
+func TestParseWaveBody_TakesTheOffsetFromTheResponse(t *testing.T) {
+	body := []byte(`{"utc_offset_seconds":36000,"hourly":{"time":["2026-06-15T00:00"],"wave_height":[1.5],"wave_period":[7]}}`)
+	hours, err := parseWaveBody(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hours[0].Time != "2026-06-14T14:00:00Z" {
+		t.Errorf("got %s", hours[0].Time)
+	}
+}
+
+func TestFallbackEnabled(t *testing.T) {
+	for in, want := range map[string]bool{"true": true, "TRUE": true, "false": false, "": false, "yes": false} {
+		if got := fallbackEnabled(in); got != want {
+			t.Errorf("%q: got %v want %v", in, got, want)
+		}
+	}
+}
+
+func TestParseOpenMeteoWaveResponse_ZeroPeriodHourIsLeftOut(t *testing.T) {
+	raw := []byte(`{"hourly":{"time":["2026-06-15T00:00","2026-06-15T01:00"],
+		"wave_height":[0,0.6],"wave_period":[0,7.4],"wave_direction":[0,79]}}`)
+	hours, err := parseOpenMeteoWaveResponse(raw, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hours[0].WaveHeightM != nil || hours[0].WavePeriodS != nil || hours[0].WaveDirectionDeg != nil {
+		t.Errorf("a zero-period hour has no combined figures: %+v", hours[0])
+	}
+	if hours[1].WavePeriodS == nil || *hours[1].WavePeriodS != 7.4 {
+		t.Errorf("a real hour is kept: %+v", hours[1])
 	}
 }

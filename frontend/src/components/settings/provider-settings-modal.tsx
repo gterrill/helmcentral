@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { SecretFieldGroup, type SecretFieldSpec } from '@/components/settings/secret-field-group'
 import { useSecretsStatusContext } from '@/components/settings/secrets-status-context'
 import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
@@ -23,7 +24,7 @@ export type ProviderDomain = 'tide' | 'weather' | 'wave' | 'poi' | 'forecast-war
 interface PluginConfigField {
   key: string
   label: string
-  type: 'url' | 'text'
+  type: 'url' | 'text' | 'boolean'
   help: string
   placeholder: string
   value: string
@@ -240,17 +241,32 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
         {hasConfigFields && (
           <div className="space-y-2">
             {configFields.map((field) => (
-              <Field key={field.key}>
-                <FieldLabel htmlFor={`config-field-${field.key}`}>{field.label}</FieldLabel>
-                <Input
-                  id={`config-field-${field.key}`}
-                  value={configValues[field.key] ?? ''}
-                  onChange={(e) => setConfigValues((previous) => ({ ...previous, [field.key]: e.target.value }))}
-                  placeholder={field.placeholder}
-                  aria-label={field.label}
-                />
+              <div key={field.key} className="space-y-1">
+                {field.type === 'boolean' ? (
+                  <Field orientation="horizontal">
+                    <Switch
+                      id={`config-field-${field.key}`}
+                      checked={configValues[field.key] === 'true'}
+                      onCheckedChange={(checked) =>
+                        setConfigValues((previous) => ({ ...previous, [field.key]: checked ? 'true' : 'false' }))
+                      }
+                    />
+                    <FieldLabel htmlFor={`config-field-${field.key}`}>{field.label}</FieldLabel>
+                  </Field>
+                ) : (
+                  <Field>
+                    <FieldLabel htmlFor={`config-field-${field.key}`}>{field.label}</FieldLabel>
+                    <Input
+                      id={`config-field-${field.key}`}
+                      value={configValues[field.key] ?? ''}
+                      onChange={(e) => setConfigValues((previous) => ({ ...previous, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                      aria-label={field.label}
+                    />
+                  </Field>
+                )}
                 {field.help && <p className="text-xs text-muted-foreground">{field.help}</p>}
-              </Field>
+              </div>
             ))}
             <p className="text-xs text-muted-foreground">
               Applies on the next call — no restart needed.

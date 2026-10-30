@@ -3083,3 +3083,44 @@ func TestGetWindForecast_AbsentWaveFiguresAreOmitted(t *testing.T) {
 		t.Errorf("a height with no period or direction gives the height alone: %+v", second)
 	}
 }
+
+func windForecastWithWaves(t *testing.T, bundle waveForecastBundle) assistantWindForecastResult {
+	t.Helper()
+	now := time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)
+	weatherStub := &capturingWeatherProvider{bundle: weatherForecastBundle{
+		Hourly:   []weatherHourPoint{{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WindSpeedMS: 5, WindDirectionDeg: 135}},
+		CachedAt: now,
+	}}
+	waveStub := &stubWaveProvider{id: "w", bundle: bundle}
+	deps := assistantToolDeps{
+		now:     func() time.Time { return now },
+		weather: func() (weatherProvider, string, error) { return weatherStub, "wx", nil },
+		waves:   func() (waveProvider, string, error) { return waveStub, "w", nil },
+	}
+	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-20.1,"lon":149.1,"days":2}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result assistantWindForecastResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func TestGetWindForecast_NamesTheFallbackWaveModel(t *testing.T) {
+	r := windForecastWithWaves(t, waveForecastBundle{
+		Hourly:        []waveHourPoint{{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WaveHeightM: pwF(0.2), WavePeriodS: pwF(3)}},
+		FallbackModel: "best_match",
+	})
+	if r.WaveFallbackModel != "best_match" || r.WavesNoData {
+		t.Errorf("got %+v", r)
+	}
+}
+
+func TestGetWindForecast_NoWaveDataIsSaidPlainlyNotAsAnError(t *testing.T) {
+	r := windForecastWithWaves(t, waveForecastBundle{Hourly: []waveHourPoint{{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC)}}})
+	if !r.WavesNoData || r.WavesError != "" {
+		t.Errorf("got %+v", r)
+	}
+}

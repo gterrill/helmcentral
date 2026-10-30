@@ -412,4 +412,38 @@ describe('LocationEditor "On the plan" (ADR 0156)', () => {
     await screen.findByRole('group', { name: 'Main deck plan' })
     expect(screen.queryByRole('button', { name: 'Edit on plan' })).not.toBeInTheDocument()
   })
+  describe('the arrows', () => {
+    beforeEach(() => {
+      zones = [
+        { id: 'z1', name: 'Salon', sort_index: 0, bins: [] },
+        { id: 'z2', name: 'Lazarette', sort_index: 1, bins: [] },
+        { id: 'z3', name: 'Engine room', sort_index: 2, bins: [] },
+      ]
+    })
+
+    it('step through the table in the server order when it was not searched or sorted', async () => {
+      const open = vi.fn()
+      renderEditor({ id: 'z2', onOpenNeighbour: open })
+      fireEvent.click(await screen.findByRole('button', { name: 'Next: Engine room' }))
+      expect(open).toHaveBeenLastCalledWith('z3')
+      fireEvent.click(screen.getByRole('button', { name: 'Previous: Salon' }))
+      expect(open).toHaveBeenLastCalledWith('z1')
+    })
+
+    it('step through the table as it was searched and sorted', async () => {
+      const open = vi.fn()
+      renderEditor({ id: 'z2', onOpenNeighbour: open, list: { q: 'e', sort: { id: 'name', desc: false } } })
+      // Salon has no "e"? It has not: Lazarette and Engine room match, name order is Engine room, Lazarette.
+      fireEvent.click(await screen.findByRole('button', { name: 'Previous: Engine room' }))
+      expect(open).toHaveBeenLastCalledWith('z3')
+      expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled()
+    })
+
+    it('are absent without a way to open a neighbour', async () => {
+      renderEditor({ id: 'z2' })
+      await screen.findByDisplayValue('Lazarette')
+      expect(screen.queryByRole('button', { name: /^Next/ })).not.toBeInTheDocument()
+    })
+  })
+
 })

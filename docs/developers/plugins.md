@@ -117,7 +117,9 @@ a `<name>.config_fields.json` sidecar:
 
 Each entry needs a unique, non-empty `key` (matching a name your plugin
 reads via its PDK's config accessor, e.g. `pdk.GetConfig("overpass_url")`
-in TinyGo) and a `type` of `"url"` or `"text"`. A malformed sidecar - bad
+in TinyGo) and a `type` of `"url"`, `"text"` or `"boolean"`. A boolean is stored as `"true"` or
+`"false"` and shown as a switch; blank is off. Read it with `pdk.GetConfig` and
+treat anything but `"true"` as off. A malformed sidecar - bad
 JSON, an empty or duplicate key, or an unrecognised type - fails plugin load
 outright, the same as a malformed `allowed_hosts.json`.
 

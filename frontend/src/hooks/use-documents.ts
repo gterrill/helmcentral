@@ -163,6 +163,20 @@ function folderListingPath(parent: string | null): string {
   return `${FOLDERS_PATH}?${new URLSearchParams({ parent }).toString()}`
 }
 
+function folderListingKey(parent: string | null) {
+  return [FOLDERS_PATH, { parent }]
+}
+
+// The flat, tag-filtered listing of one folder's own documents. Not recursive:
+// search is the one place descendants are pulled in.
+function taggedListingKey(tag: string | null, folderId: string | null) {
+  return [DOCUMENTS_PATH, { tag, folder: folderId }]
+}
+
+function taggedListingPath(tag: string, folderId: string | null): string {
+  return `${DOCUMENTS_PATH}?${new URLSearchParams({ tag, folder: folderId ?? ROOT_FOLDER_PARAM }).toString()}`
+}
+
 function documentPath(id: string): string {
   return `${DOCUMENTS_PATH}/${encodeURIComponent(id)}`
 }
@@ -183,12 +197,35 @@ export function invalidateDocumentLists(opts: { counts: boolean }) {
 }
 
 /**
+ * The documents the Documents listing shows for a folder, as the server
+ * returned them: the folder's own, or those carrying `tag` when one is
+ * filtered on. The same queries the listing reads, so a Details page opened
+ * from it hits the cache. `enabled` false fetches nothing.
+ */
+export function useDocumentListing(folderId: string | null, tag: string | null, enabled = true) {
+  const folder = useApiQuery({
+    queryKey: folderListingKey(folderId),
+    path: folderListingPath(folderId),
+    enabled: enabled && tag === null,
+    select: (raw: FolderListingResponse) => raw.documents ?? NO_DOCUMENTS,
+  })
+  const tagged = useApiQuery({
+    queryKey: taggedListingKey(tag, folderId),
+    path: taggedListingPath(tag ?? '', folderId),
+    enabled: enabled && tag !== null,
+    select: (raw: { documents?: DocumentRecord[] }) => raw.documents ?? NO_DOCUMENTS,
+  })
+  const data = tag === null ? folder.data : tagged.data
+  return { documents: data ?? NO_DOCUMENTS, loaded: data !== undefined }
+}
+
+/**
  * `folderId`: the folder currently being browsed, null for the root. Owned
  * by the caller (DocumentsPanel), not this hook - see app-location.ts's
  * documentFolderId, which is what the panel actually seeds it from.
  */
-export function useDocuments(folderId: string | null) {
-  const [selectedTag, setSelectedTag] = useState<string | null>(null)
+export function useDocuments(folderId: string | null, initialTag: string | null = null) {
+  const [selectedTag, setSelectedTag] = useState<string | null>(initialTag)
 
   const [searchResults, setSearchResults] = useState<DocumentSearchResult[] | null>(null)
   const [searching, setSearching] = useState(false)
@@ -212,9 +249,8 @@ export function useDocuments(folderId: string | null) {
   // filtered. recursive stays false here on purpose: search (below) is the
   // one place descendants are pulled in, matching the plan's "search within
   // the current folder, recursive" vs. plain browsing being one level.
-  const listingKey = [FOLDERS_PATH, { parent: folderId }]
-  const tagParams = new URLSearchParams({ tag: selectedTag ?? '', folder: folderId ?? ROOT_FOLDER_PARAM })
-  const tagKey = [DOCUMENTS_PATH, { tag: selectedTag, folder: folderId }]
+  const listingKey = folderListingKey(folderId)
+  const tagKey = taggedListingKey(selectedTag, folderId)
 
   // Polls the whole folder view every 3s while any document currently shown
   // is `pending`, and stops the instant none are. The same interval covers
@@ -255,7 +291,7 @@ export function useDocuments(folderId: string | null) {
   })
   const tagged = useApiQuery({
     queryKey: tagKey,
-    path: `${DOCUMENTS_PATH}?${tagParams.toString()}`,
+    path: taggedListingPath(selectedTag ?? '', folderId),
     enabled: selectedTag !== null,
     refetchInterval: pendingPoll,
     select: (raw: { documents?: DocumentRecord[] }) => raw.documents ?? NO_DOCUMENTS,

@@ -147,17 +147,18 @@ func (p *wasmTideProvider) FetchTideChart(stationID string) (result tideChartRes
 		}
 	}()
 
-	if cached, ok := p.cache.get(stationID, p.ttlDuration()); ok {
+	key := p.saltedCacheKey(stationID)
+	if cached, ok := p.cache.get(key, p.ttlDuration()); ok {
 		cached.Cached = true
 		cached.CurrentHeightM, cached.Direction = interpolateTideNow(cached.Extremes, time.Now().UTC())
 		return cached, nil
 	}
 
-	fetched, ferr := p.cache.singleflightFetch(stationID, func() (tideChartResult, error) {
+	fetched, ferr := p.cache.singleflightFetch(key, func() (tideChartResult, error) {
 		return p.fetchFromPlugin(stationID)
 	})
 	if ferr != nil {
-		if stale, ok := p.cache.getStale(stationID); ok {
+		if stale, ok := p.cache.getStale(key); ok {
 			stale.Cached = true
 			stale.CurrentHeightM, stale.Direction = interpolateTideNow(stale.Extremes, time.Now().UTC())
 			return stale, nil
@@ -167,7 +168,7 @@ func (p *wasmTideProvider) FetchTideChart(stationID string) (result tideChartRes
 
 	fetched.CachedAt = time.Now().UTC()
 	fetched.Cached = false
-	p.cache.set(stationID, fetched)
+	p.cache.set(key, fetched)
 
 	return fetched, nil
 }

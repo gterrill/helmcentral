@@ -100,13 +100,15 @@ export interface UseNotesOptions {
   unfiledOnly?: boolean
   type?: string | null
   tag?: string | null
+  /** False fetches nothing: a caller that only sometimes shows the list. */
+  enabled?: boolean
 }
 
 const NOTES = '/api/notes'
 const NO_NOTES: NoteRecord[] = []
 
 export function useNotes(options: UseNotesOptions = {}) {
-  const { unfiledOnly = false, type = null, tag = null } = options
+  const { unfiledOnly = false, type = null, tag = null, enabled = true } = options
 
   const params = new URLSearchParams()
   if (unfiledOnly) params.set('filed', '0')
@@ -117,6 +119,7 @@ export function useNotes(options: UseNotesOptions = {}) {
   const { data, error, isLoading, refetch } = useApiQuery<NoteRecord[]>({
     queryKey: [NOTES, { unfiledOnly, type, tag }],
     path: `${NOTES}${qs ? `?${qs}` : ''}`,
+    enabled,
     select: (raw: { notes?: NoteRecord[] }) => raw.notes ?? [],
   })
 

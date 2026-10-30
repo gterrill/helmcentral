@@ -22,7 +22,9 @@ The plugin makes two separate HTTP calls to the Marine API:
    GFS-Wave (WaveWatch III) model via `models=ncep_gfswave025` so swell height,
    period and direction line up with other WaveWatch III-based swell forecasts
    for a given coastline. Open-Meteo's default "best_match" model blend runs
-   noticeably lower/different here.
+   noticeably lower/different here. GFS-Wave's 0.25 degree grid is land-masked,
+   and over a masked cell Open-Meteo returns every wave field as `0`, not
+   null. See "Land cells and the blend fallback" below.
 
 2. **Sea surface temperature (OPTIONAL)**: Fetches current sea surface
    temperature. This call does not pin a `models=` param (unlike the wave-data
@@ -33,6 +35,33 @@ The plugin makes two separate HTTP calls to the Marine API:
    sea_surface_temperature:null), the fetch_waves call still succeeds.
    sea_surface_temperature_c is omitted from the output JSON rather than
    replaced with zero.
+
+## Land cells and the blend fallback
+
+At -20.2666, 148.7099 (Whitsundays) the nearest GFS-Wave cell is land, and
+Open-Meteo returns height, period, direction and every component as `0.0`.
+Read as figures, that is a flat calm from due north. A wave with no period is
+not a wave, so the host (`backend/wasm_wave_provider.go`) treats an hour whose
+combined `wave_period_s` is `0` as absent, and a wind-wave or swell component
+with period `0` as no train. The plugin applies the same rule to the
+combined figures, so it leaves them out of such an hour.
+
+The plugin also has an operator setting, declared in
+`open-meteo-marine.config_fields.json`:
+
+| Key                  | Type    | Default | Effect |
+| -------------------- | ------- | ------- | ------ |
+| `use_blend_fallback` | boolean | off     | When every hour of the GFS-Wave series has a missing or zero period, fetch the same point again without `models=` (Open-Meteo's default blend, finer grid) and use that series. |
+
+The fallback runs only on a series with no waves at all, never per hour. The
+output then carries `"model": "best_match"` and `"fallback_used": true`
+(otherwise `"model": "ncep_gfswave025"`), and the host logs the fallback (the plugin does not log it, so it appears once) and
+shows the model in the Wave card's footer. If the blend fetch fails, `fetch_waves`
+fails; it does not fall back to the land cell. Both requests go to
+`marine-api.open-meteo.com`, so the allowed hosts file is unchanged.
+
+Install `open-meteo-marine.config_fields.json` next to the `.wasm` file so
+Settings can show the switch.
 
 ## Why this plugin is two files
 
@@ -122,6 +151,9 @@ cd docs/examples/wave-plugins/open-meteo-marine && go mod tidy && go vet ./... &
 
 1. Wave data: `GET https://marine-api.open-meteo.com/v1/marine?latitude=<lat>&longitude=<lon>&hourly=wave_height,wave_direction,wave_period,wind_wave_height,wind_wave_direction,wind_wave_period,swell_wave_height,swell_wave_direction,swell_wave_period&timezone=auto&forecast_days=<days>&models=ncep_gfswave025`
 
+   With the blend fallback on and a land cell, the same request is repeated
+   without `&models=ncep_gfswave025`.
+
    Response includes `utc_offset_seconds` (how many seconds local time is ahead
    of UTC), hourly time arrays in naive local-time format
    ("2026-07-19T00:00"), and parallel arrays of wave measurements.
@@ -175,3 +207,8 @@ figure. Only null and non-numeric entries are dropped.
 
 The per-component fields above keep their zero encoding, because that is how
 Open-Meteo itself marks an absent component.
+
+A combined period of `0` is the exception to "a real zero is kept": a wave with
+no period is not a wave, so the plugin leaves the whole hour's combined figures
+out, and the host applies the same rule to any plugin. See "Land cells and
+the blend fallback".
