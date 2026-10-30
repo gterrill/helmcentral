@@ -254,7 +254,7 @@ What you receive depends on the channel:
   text on its own so the report isn't lost. The run then says "ntfy: sent without
   the chart" and why. That is the one place a report is sent in a lesser form.
 - **Webhook:** The report as data, with each chart's points and a picture of it.
-  See [Watch report webhook](../reference/webhook-payloads.md).
+  See [Webhook payloads](../reference/webhook-payloads.md#watch-report).
 - **Phone push:** No picture. Tapping it opens the run, where the chart is.
 
 A link to the run needs to know the address you reach Helmcentral on from off the

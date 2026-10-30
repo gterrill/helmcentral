@@ -149,8 +149,8 @@ Details to look up: settings, file formats and where things are stored.
   extra values a rule or gauge can watch.
 - [What Mate can look up](reference/mate-tools.md): each lookup Mate can make
   and the provider it draws on.
-- [Watch report webhook](reference/webhook-payloads.md): the JSON a watch posts
-  to a webhook, and how to tell it from an alarm.
+- [Webhook payloads](reference/webhook-payloads.md): the JSON an alarm or a
+  watch report posts to a webhook, and how to tell them apart.
 - [Equipment profiles](reference/equipment-profiles.md): the profile file
   format for engines, alternators and generators.
 - [Provider plugins](reference/plugins.md): how plugins are kept apart from

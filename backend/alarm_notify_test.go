@@ -144,10 +144,13 @@ func TestSMTPTransportBuildsAddressedMessage(t *testing.T) {
 	if gotFrom != "boat@example.com" || len(gotTo) != 1 || gotTo[0] != "skipper@example.com" {
 		t.Fatalf("envelope: from %q to %v", gotFrom, gotTo)
 	}
-	for _, want := range []string{"Subject: ", "Pikorua", "House bank low", "electrical.batteries.house.voltage"} {
+	for _, want := range []string{"Subject: ", "Pikorua", "House bank low"} {
 		if !strings.Contains(gotBody, want) {
 			t.Fatalf("message missing %q:\n%s", want, gotBody)
 		}
+	}
+	if strings.Contains(gotBody, "electrical.batteries.house.voltage") {
+		t.Fatalf("an instrument path reached the email:\n%s", gotBody)
 	}
 }
 
@@ -401,7 +404,7 @@ func TestDispatcherDeliversImmediatelyAndQueuesNothing(t *testing.T) {
 	transport := &stubTransport{id: transportWebhook}
 	dispatcher, store := testDispatcher(t, transport)
 
-	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	dispatcher.dispatch(raisedEvent(), "Pikorua", freshChartDeadline())
 
 	if transport.count() != 1 {
 		t.Fatalf("expected one delivery, got %d", transport.count())
@@ -416,7 +419,7 @@ func TestDispatcherQueuesFailedDeliveryAndDrainsItLater(t *testing.T) {
 	transport := &stubTransport{id: transportWebhook, fail: true}
 	dispatcher, store := testDispatcher(t, transport)
 
-	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	dispatcher.dispatch(raisedEvent(), "Pikorua", freshChartDeadline())
 
 	depth, _ := store.QueueDepth()
 	if depth != 1 {
@@ -440,7 +443,7 @@ func TestDispatcherDoesNotRetryBeforeBackoffElapses(t *testing.T) {
 	transport := &stubTransport{id: transportWebhook, fail: true}
 	dispatcher, _ := testDispatcher(t, transport)
 
-	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	dispatcher.dispatch(raisedEvent(), "Pikorua", freshChartDeadline())
 	transport.setFail(false)
 
 	// Same instant: the first retry is not due yet.
@@ -457,7 +460,7 @@ func TestDispatcherDiscardsDeliveriesOlderThanTheMaxAge(t *testing.T) {
 	transport := &stubTransport{id: transportWebhook, fail: true}
 	dispatcher, store := testDispatcher(t, transport)
 
-	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	dispatcher.dispatch(raisedEvent(), "Pikorua", freshChartDeadline())
 	if depth, _ := store.QueueDepth(); depth != 1 {
 		t.Fatalf("expected the failure to queue")
 	}
@@ -486,7 +489,7 @@ func TestDispatcherSkipsSignalKTransportForBusSourcedEvents(t *testing.T) {
 
 	event := raisedEvent()
 	event.Source = alarmSourceSignalK
-	dispatcher.dispatch(event, "Pikorua")
+	dispatcher.dispatch(event, "Pikorua", freshChartDeadline())
 
 	if signalk.count() != 0 {
 		t.Fatalf("a bus-sourced event must never reach the SignalK transport, got %d sends", signalk.count())
@@ -503,7 +506,7 @@ func TestDispatcherStillSendsRuleSourcedEventsToSignalKTransport(t *testing.T) {
 	signalk := &stubTransport{id: transportSignalK}
 	dispatcher, _ := testDispatcher(t, signalk)
 
-	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	dispatcher.dispatch(raisedEvent(), "Pikorua", freshChartDeadline())
 
 	if signalk.count() != 1 {
 		t.Fatalf("a rule-sourced event must still reach the SignalK transport, got %d sends", signalk.count())
@@ -516,7 +519,7 @@ func TestDispatcherKeepsQueuedItemsForADisabledTransport(t *testing.T) {
 	transport := &stubTransport{id: transportWebhook, fail: true}
 	dispatcher, store := testDispatcher(t, transport)
 
-	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	dispatcher.dispatch(raisedEvent(), "Pikorua", freshChartDeadline())
 
 	dispatcher.transports = func() []notificationTransport { return nil }
 	dispatcher.now = func() time.Time { return alarmNow.Add(notifyMinBackoff + time.Second) }
@@ -572,14 +575,14 @@ func TestDispatcherDropsAQueuedTransitionSupersededByANewerOne(t *testing.T) {
 	transport := &stubTransport{id: transportSignalK, fail: true}
 	dispatcher, store := testDispatcher(t, transport)
 
-	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	dispatcher.dispatch(raisedEvent(), "Pikorua", freshChartDeadline())
 	if depth, _ := store.QueueDepth(); depth != 1 {
 		t.Fatalf("a failed raise must be queued, depth %d", depth)
 	}
 
 	// The stream recovers and the clear is delivered.
 	transport.setFail(false)
-	dispatcher.dispatch(clearedEvent(), "Pikorua")
+	dispatcher.dispatch(clearedEvent(), "Pikorua", freshChartDeadline())
 
 	if depth, _ := store.QueueDepth(); depth != 0 {
 		t.Fatalf("the clear supersedes the queued raise, depth %d", depth)
@@ -600,12 +603,12 @@ func TestDispatcherLeavesQueuedTransitionsForOtherRulesAlone(t *testing.T) {
 	transport := &stubTransport{id: transportWebhook, fail: true}
 	dispatcher, store := testDispatcher(t, transport)
 
-	dispatcher.dispatch(raisedEvent(), "Pikorua")
+	dispatcher.dispatch(raisedEvent(), "Pikorua", freshChartDeadline())
 
 	other := raisedEvent()
 	other.Rule.ID = "rule-2"
 	other.Status.RuleID = "rule-2"
-	dispatcher.dispatch(other, "Pikorua")
+	dispatcher.dispatch(other, "Pikorua", freshChartDeadline())
 
 	if depth, _ := store.QueueDepth(); depth != 2 {
 		t.Fatalf("two rules must hold two queued deliveries, depth %d", depth)
@@ -712,9 +715,9 @@ type blockingUntilReleasedTransport struct {
 	id      string
 	release chan struct{}
 
-	mu      sync.Mutex
-	begun   bool
-	sentN   int
+	mu    sync.Mutex
+	begun bool
+	sentN int
 }
 
 func (b *blockingUntilReleasedTransport) ID() string { return b.id }

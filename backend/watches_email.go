@@ -22,7 +22,6 @@ func chartCID(i int) string { return fmt.Sprintf("watch-chart-%d@helmcentral", i
 func watchEmailHTML(m watchReportMessage) string {
 	e := html.EscapeString
 	var b strings.Builder
-	b.WriteString(`<!doctype html><html><body style="font-family:sans-serif;color:#212529;max-width:820px">`)
 	b.WriteString("<h2>" + e(m.Title) + "</h2>")
 	if m.Run.BoatTime != "" {
 		b.WriteString("<p>Report from " + e(m.Run.BoatTime) + "</p>")
@@ -36,9 +35,9 @@ func watchEmailHTML(m watchReportMessage) string {
 			b.WriteString("<li><p>" + e(f.Text) + "</p>")
 			for ci, c := range m.Charts {
 				if c.FindingIndex == i && c.Problem != "" {
-					b.WriteString(`<p style="color:#5a626b">Chart left out: ` + e(c.Problem) + "</p>")
+					b.WriteString(chartProblemHTML(c.Problem))
 				} else if c.FindingIndex == i {
-					b.WriteString(`<p><img src="cid:` + chartCID(ci) + `" alt="` + e(c.Title) + `" width="800" style="max-width:100%;height:auto"></p>`)
+					b.WriteString(chartImgHTML(ci, c))
 				}
 			}
 			if f.ChartProblem != "" {
@@ -62,8 +61,7 @@ func watchEmailHTML(m watchReportMessage) string {
 			}
 		}
 	}
-	b.WriteString("</body></html>")
-	return b.String()
+	return emailHTMLShell(b.String())
 }
 
 func writeQPPart(w *multipart.Writer, contentType, body string) error {
@@ -97,44 +95,85 @@ func wrapBase64(data []byte) string {
 // drawn is left out and the message says so. With none drawn, the message is
 // the plain one with those lines.
 func buildWatchEmailWithCharts(config smtpConfig, msg notificationMessage) []byte {
-	m := *msg.Watch
-	var pngs [][]byte
-	m.Charts, pngs = renderChartsForSend(m.Charts, "email", msg.note)
-	drawn := 0
+	return buildChartEmail(config, msg, func(charts []watchChart) (string, string) {
+		m := *msg.Watch
+		m.Charts = charts
+		return watchEmailText(m), watchEmailHTML(m)
+	})
+}
+
+// buildChartEmail is a message with charts, for a watch report or an alarm:
+// body gives the plain and HTML parts for the charts as they stand. A chart that
+// cannot be drawn is left out and the message says so. If the message cannot be
+// put together, or none was drawn, it goes as text, with the reason on each
+// chart and a note on the run.
+func buildChartEmail(config smtpConfig, msg notificationMessage, body func(charts []watchChart) (text, htmlBody string)) []byte {
+	charts, pngs := msg.renderedCharts("email", 0)
+	drawn := false
 	for _, p := range pngs {
-		if p != nil {
-			drawn++
-		}
+		drawn = drawn || p != nil
 	}
-	if drawn > 0 {
-		raw, err := assembleWatchEmail(config, msg, m, pngs)
+	if drawn {
+		text, htmlBody := body(charts)
+		raw, err := assembleChartEmail(config, msg.title(), text, htmlBody, charts, pngs)
 		if err == nil {
 			return raw
 		}
-		// Building the message in memory failed: the report still goes, as text.
-		log.Printf("watch report: the charts of %q could not be put in the email, so it is sent as text: %v", msg.Label, err)
+		reason := "the chart could not be put in the email: " + firstErrorLine(err)
+		log.Printf("notify: the charts of %q could not be put in the email, so it is sent as text: %v", msg.Label, err)
 		if msg.note != nil {
 			msg.note("email: sent without the charts (" + firstErrorLine(err) + ")")
 		}
+		charts = append([]watchChart(nil), charts...)
+		for i := range charts {
+			if pngs[i] != nil {
+				charts[i].Problem = reason
+			}
+		}
 	}
+	text, _ := body(charts)
+	return plainTextEmail(config, msg.title(), text)
+}
+
+// plainTextEmail is a text-only message. The subject goes through the header
+// encoder, since a title can hold what the operator typed.
+func plainTextEmail(config smtpConfig, subject, text string) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", config.From)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(config.To, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", watchEncodedHeaderText(msg.title()))
+	fmt.Fprintf(&b, "Subject: %s\r\n", watchEncodedHeaderText(subject))
 	b.WriteString("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n")
-	b.WriteString(strings.ReplaceAll(watchEmailText(m), "\n", "\r\n"))
+	b.WriteString(strings.ReplaceAll(text, "\n", "\r\n"))
 	return []byte(b.String())
 }
 
-func assembleWatchEmail(config smtpConfig, msg notificationMessage, m watchReportMessage, pngs [][]byte) ([]byte, error) {
+// emailHTMLShell wraps a body in the page both kinds of message use.
+func emailHTMLShell(body string) string {
+	return `<!doctype html><html><body style="font-family:sans-serif;color:#212529;max-width:820px">` + body + "</body></html>"
+}
+
+// chartImgHTML is chart i as an inline image, by Content-ID.
+func chartImgHTML(i int, c watchChart) string {
+	return `<p><img src="cid:` + chartCID(i) + `" alt="` + html.EscapeString(c.Title) + `" width="800" style="max-width:100%;height:auto"></p>`
+}
+
+// chartProblemHTML is the line saying a chart was left out.
+func chartProblemHTML(problem string) string {
+	return `<p style="color:#5a626b">Chart left out: ` + html.EscapeString(problem) + "</p>"
+}
+
+// assembleChartEmail is a message with a plain and an HTML body and each drawn
+// chart as an inline PNG, shared by watch reports and alarms. A nil entry in
+// pngs is a chart left out and is not attached.
+func assembleChartEmail(config smtpConfig, subject, text, htmlBody string, charts []watchChart, pngs [][]byte) ([]byte, error) {
 	var body bytes.Buffer
 	related := multipart.NewWriter(&body)
 	var alt bytes.Buffer
 	altW := multipart.NewWriter(&alt)
-	if err := writeQPPart(altW, "text/plain", watchEmailText(m)); err != nil {
+	if err := writeQPPart(altW, "text/plain", text); err != nil {
 		return nil, err
 	}
-	if err := writeQPPart(altW, "text/html", watchEmailHTML(m)); err != nil {
+	if err := writeQPPart(altW, "text/html", htmlBody); err != nil {
 		return nil, err
 	}
 	if err := altW.Close(); err != nil {
@@ -147,7 +186,7 @@ func assembleWatchEmail(config smtpConfig, msg notificationMessage, m watchRepor
 	if _, err := part.Write(alt.Bytes()); err != nil {
 		return nil, err
 	}
-	for i, c := range m.Charts {
+	for i, c := range charts {
 		if pngs[i] == nil {
 			continue
 		}
@@ -171,7 +210,7 @@ func assembleWatchEmail(config smtpConfig, msg notificationMessage, m watchRepor
 	var head strings.Builder
 	fmt.Fprintf(&head, "From: %s\r\n", config.From)
 	fmt.Fprintf(&head, "To: %s\r\n", strings.Join(config.To, ", "))
-	fmt.Fprintf(&head, "Subject: %s\r\n", watchEncodedHeaderText(msg.title()))
+	fmt.Fprintf(&head, "Subject: %s\r\n", watchEncodedHeaderText(subject))
 	head.WriteString("MIME-Version: 1.0\r\n")
 	fmt.Fprintf(&head, "Content-Type: multipart/related; type=\"multipart/alternative\"; boundary=\"%s\"\r\n\r\n", related.Boundary())
 	return append([]byte(head.String()), body.Bytes()...), nil

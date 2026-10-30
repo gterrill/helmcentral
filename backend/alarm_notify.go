@@ -34,13 +34,55 @@ type notificationMessage struct {
 	// Watch is the report of a watch_report message (watches_notify.go). It
 	// is nil on every alarm notification.
 	Watch *watchReportMessage `json:"watch,omitempty"`
+	// Charts is the chart of the reading that raised an alarm (ADR 0235), as
+	// data, or one entry with Problem set and no series when it was left out.
+	// It is never set on a watch report, whose charts are on Watch.
+	Charts []watchChart `json:"charts,omitempty"`
 
 	// note, when set, is told where a delivery was not as meant (a phone
 	// message sent without its chart). It is the dispatcher's, never queued.
 	note func(string)
+	// pngs are the pictures of Charts, drawn once by the dispatcher for the
+	// channels that send one (ADR 0235). Unset on a message read back from the
+	// queue and on a watch report, which draw their own.
+	pngs [][]byte
+}
+
+// renderedCharts is the message's charts with a picture for each that could be
+// drawn (nil for one that could not), drawing them unless the dispatcher has.
+// A channel that sends only the first chart asks for limit 1, so a chart it
+// never sends cannot put a note on the run. Limit 0 means all of them.
+func (m notificationMessage) renderedCharts(channel string, limit int) ([]watchChart, [][]byte) {
+	charts, pngs := m.chartList(), m.pngs
+	if limit > 0 && len(charts) > limit {
+		charts = charts[:limit]
+	}
+	if pngs != nil {
+		return charts, pngs[:len(charts)]
+	}
+	return renderChartsForSend(charts, channel, m.note)
 }
 
 func (m notificationMessage) isWatchReport() bool { return m.Kind == notificationKindWatchReport }
+
+// chartList is the charts this message carries: a report's, or an alarm's.
+func (m notificationMessage) chartList() []watchChart {
+	if m.isWatchReport() {
+		if m.Watch == nil {
+			return nil
+		}
+		return m.Watch.Charts
+	}
+	return m.Charts
+}
+
+// clickLink is the link a phone opens from the notification, if there is one.
+func (m notificationMessage) clickLink() string {
+	if m.isWatchReport() && m.Watch != nil {
+		return m.Watch.Link
+	}
+	return ""
+}
 
 func (m notificationMessage) title() string {
 	if m.isWatchReport() {
@@ -95,16 +137,16 @@ type ntfyTransport struct {
 func (t ntfyTransport) ID() string { return transportNtfy }
 
 func (t ntfyTransport) Send(ctx context.Context, msg notificationMessage) error {
-	if msg.isWatchReport() && msg.Watch != nil && len(msg.Watch.Charts) > 0 {
+	if len(msg.chartList()) > 0 {
 		err := t.sendWithChart(ctx, msg)
 		var refused *ntfyAttachmentRefused
 		if !errors.As(err, &refused) {
 			return err
 		}
 		// A delivery choice (ADR 0228): the server will not take the picture,
-		// so the report goes as text rather than not at all. It is logged
+		// so the message goes as text rather than not at all. It is logged
 		// and noted on the run, never silent.
-		log.Printf("watch report: ntfy refused the chart of %q, so it is sent as text only: %s", msg.Label, refused.reason)
+		log.Printf("notify: ntfy refused the chart of %q, so it is sent as text only: %s", msg.Label, refused.reason)
 		if msg.note != nil {
 			msg.note("ntfy: sent without the chart (" + refused.reason + ")")
 		}
@@ -166,7 +208,7 @@ const watchNtfyMessageChars = 500
 // sendWithChart sends a watch report with its first chart as an attachment:
 // ntfy's PUT API takes the file as the body and the text in the Message header.
 func (t ntfyTransport) sendWithChart(ctx context.Context, msg notificationMessage) error {
-	charts, pngs := renderChartsForSend(msg.Watch.Charts[:1], "ntfy", msg.note)
+	charts, pngs := msg.renderedCharts("ntfy", 1)
 	chart, data := charts[0], pngs[0]
 	if data == nil {
 		// Left out, and the message says so: it goes as text with the line.
@@ -179,8 +221,8 @@ func (t ntfyTransport) sendWithChart(ctx context.Context, msg notificationMessag
 	request.Header.Set("Filename", watchChartFilename(chart.Title))
 	request.Header.Set("Message", watchEncodedHeaderText(truncateRunes(watchHeaderText(msg.Message), watchNtfyMessageChars)))
 	request.Header.Set("Title", watchEncodedHeaderText(msg.title()))
-	if msg.Watch.Link != "" {
-		request.Header.Set("Click", msg.Watch.Link)
+	if link := msg.clickLink(); link != "" {
+		request.Header.Set("Click", link)
 	}
 	request.Header.Set("Priority", ntfyPriorityFor(msg))
 	request.Header.Set("Tags", ntfyTagsFor(msg))
@@ -285,14 +327,12 @@ func (t webhookTransport) Send(ctx context.Context, msg notificationMessage) err
 			return fmt.Errorf("watch report has no report to send")
 		}
 		withPNGs := *msg.Watch
-		charts, pngs := renderChartsForSend(msg.Watch.Charts, "webhook", msg.note)
-		for i := range charts {
-			if pngs[i] != nil {
-				charts[i].PNGBase64 = base64.StdEncoding.EncodeToString(pngs[i])
-			}
-		}
-		withPNGs.Charts = charts
+		withPNGs.Charts = webhookCharts(msg)
 		payload = &withPNGs
+	} else if len(msg.Charts) > 0 {
+		withPNGs := msg
+		withPNGs.Charts = webhookCharts(msg)
+		payload = withPNGs
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -315,6 +355,19 @@ func (t webhookTransport) Send(ctx context.Context, msg notificationMessage) err
 		return fmt.Errorf("webhook returned status %d", response.StatusCode)
 	}
 	return nil
+}
+
+// webhookCharts is the message's charts with each picture drawn and encoded, or
+// its problem when it could not be.
+func webhookCharts(msg notificationMessage) []watchChart {
+	rendered, pngs := msg.renderedCharts("webhook", 0)
+	charts := append([]watchChart(nil), rendered...)
+	for i := range charts {
+		if pngs[i] != nil {
+			charts[i].PNGBase64 = base64.StdEncoding.EncodeToString(pngs[i])
+		}
+	}
+	return charts
 }
 
 // ── smtp ──────────────────────────────────────────────────────────────────────
@@ -346,38 +399,11 @@ func (t smtpTransport) Send(_ context.Context, msg notificationMessage) error {
 	return sender(addr, auth, t.config.From, t.config.To, body)
 }
 
-func buildAlarmEmail(config smtpConfig, msg notificationMessage) []byte {
-	if msg.isWatchReport() && msg.Watch != nil {
-		return buildWatchEmail(config, msg)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", config.From)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(config.To, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", msg.title())
-	b.WriteString("MIME-Version: 1.0\r\n")
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	b.WriteString("\r\n")
-	fmt.Fprintf(&b, "%s\r\n\r\n", msg.Message)
-	fmt.Fprintf(&b, "Path:  %s\r\n", msg.Path)
-	fmt.Fprintf(&b, "State: %s\r\n", msg.State)
-	fmt.Fprintf(&b, "Value: %s\r\n", formatAlarmReading(msg.Value, msg.Unit))
-	fmt.Fprintf(&b, "Time:  %s\r\n", msg.At.UTC().Format(time.RFC3339))
-	return []byte(b.String())
-}
-
 func buildWatchEmail(config smtpConfig, msg notificationMessage) []byte {
 	if len(msg.Watch.Charts) > 0 {
 		return buildWatchEmailWithCharts(config, msg)
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", config.From)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(config.To, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", watchEncodedHeaderText(msg.title()))
-	b.WriteString("MIME-Version: 1.0\r\n")
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	b.WriteString("\r\n")
-	b.WriteString(strings.ReplaceAll(watchEmailText(*msg.Watch), "\n", "\r\n"))
-	return []byte(b.String())
+	return plainTextEmail(config, msg.title(), watchEmailText(*msg.Watch))
 }
 
 // ── signalk notifications ─────────────────────────────────────────────────────
