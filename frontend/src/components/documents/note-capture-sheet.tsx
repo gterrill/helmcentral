@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { useNotes, type NoteType } from '@/hooks/use-notes'
 import { NOTE_TYPE_META, NOTE_TYPE_ORDER } from '@/lib/note-type-meta'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0121: the one capture sheet, reached only through Documents' New →
 // Note menu (documents-panel.tsx) - no separate global header action or
@@ -180,7 +181,7 @@ export function NoteCaptureSheet({ open, onOpenChange, onCaptured, initialType }
       // AGENTS.md fallback policy: the server's own message surfaces
       // verbatim, and the body stays in the editor so nothing dictated or
       // typed is lost.
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setCapturing(false)
     }

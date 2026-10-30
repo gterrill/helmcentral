@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { uploadEquipmentPhoto, type EquipmentItem } from '@/hooks/use-inventory'
 import { downscaleAll, photoFilename } from '@/lib/image-downscale'
+import { errorMessage } from '@/lib/errors'
 
 // photoFilename now lives in lib/image-downscale.ts (note-editor-impl.tsx's
 // ImageButton needs the exact same JPEG-rename rule and has no reason to
@@ -144,7 +145,7 @@ export function usePhotoStaging(options: UsePhotoStagingOptions = {}) {
         setItem?.(updated, opts)
       } catch (err) {
         if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl)
-        failures.push({ blob: photo.blob, filename: photo.filename, error: err instanceof Error ? err.message : String(err) })
+        failures.push({ blob: photo.blob, filename: photo.filename, error: errorMessage(err) })
       }
     }
     return { failures }

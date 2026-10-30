@@ -7,6 +7,7 @@ import {
   type AssistantMessage,
   type AssistantMessageAttachment,
 } from '@/hooks/use-assistant-conversations'
+import { errorMessage } from '@/lib/errors'
 
 /**
  * One Mate surface's conversation (ADR 0183): which conversation is open,
@@ -116,7 +117,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
       return null
     } catch (err) {
       settle(false)
-      return err instanceof Error ? err.message : String(err)
+      return errorMessage(err)
     }
   }, [updateFeedback, holdFeedback])
 

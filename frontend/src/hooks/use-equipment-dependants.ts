@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 
 import { fetchEquipmentDependants } from '@/hooks/use-inventory'
 import type { EquipmentDependants } from '@/lib/equipment-dependants'
+import { errorMessage } from '@/lib/errors'
 
 export type DependantsState =
   | { status: 'idle' }
@@ -33,7 +34,7 @@ export function useEquipmentDependants(id: string | null): DependantsState {
     fetchEquipmentDependants(id).then(
       (dependants) => { if (!cancelled) setResult({ id, state: { status: 'ready', dependants } }) },
       (err: unknown) => {
-        if (!cancelled) setResult({ id, state: { status: 'error', message: err instanceof Error ? err.message : String(err) } })
+        if (!cancelled) setResult({ id, state: { status: 'error', message: errorMessage(err) } })
       },
     )
     return () => { cancelled = true }

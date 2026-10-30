@@ -5,6 +5,7 @@ import { todayISO } from '@/lib/local-date'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 import { mapMessage, type AssistantConversation, type AssistantMessage } from '@/hooks/use-assistant-conversations'
 import type { ConversationApi } from '@/lib/mate-api'
+import { errorMessage } from '@/lib/errors'
 
 /** What the operator reads when the stream fails; a malformed frame is logged in full and shown plainly. */
 function streamErrorText(err: unknown): string {
@@ -244,7 +245,7 @@ export function useAssistantChat() {
       )
       if (!response.ok) setError(await readErrorMessage(response))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       // A send()/attach() started while the cancel was in flight owns
       // `sending` now; leave it alone.

@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { searchPlaces, type PlaceCandidate } from "@/hooks/use-place-search";
 import { todayISO } from "@/lib/local-date";
 import type { PlannedStay, PlannedStayInput } from "@/lib/stay";
+import { errorMessage } from '@/lib/errors';
 
 interface ForecastStaySheetProps {
   open: boolean;
@@ -119,7 +120,7 @@ export function ForecastStaySheet({
       );
     } catch (err) {
       setCandidates(null);
-      setSearchError(err instanceof Error ? err.message : String(err));
+      setSearchError(errorMessage(err));
     } finally {
       setSearching(false);
     }
@@ -155,7 +156,7 @@ export function ForecastStaySheet({
       });
       onOpenChange(false);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(errorMessage(err));
     } finally {
       setSaving(false);
     }
@@ -168,7 +169,7 @@ export function ForecastStaySheet({
       await onClear();
       onOpenChange(false);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err));
+      setSaveError(errorMessage(err));
     } finally {
       setSaving(false);
     }

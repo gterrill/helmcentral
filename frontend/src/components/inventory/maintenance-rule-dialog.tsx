@@ -33,6 +33,7 @@ import {
   type MaintenanceRule,
   type MaintenanceRuleInput,
 } from '@/hooks/use-maintenance'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0138: create or edit a rule's own core fields (spec §1). A rule
 // belongs to one item, optionally none (a calendar-only certificate/expiry
@@ -111,7 +112,7 @@ function HandRuleDialog({ rule, presetEquipmentId, open, onCancel, onSave, onDel
     try {
       await onSave(draft)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setSaving(false)
     }

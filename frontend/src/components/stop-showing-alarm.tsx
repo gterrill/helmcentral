@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { useIgnoredAlarms } from '@/hooks/use-ignored-alarms'
+import { errorMessage } from '@/lib/errors'
 
 interface StopShowingAlarmProps {
   /** The alarm's kind: its bus path without the "notifications." prefix. */
@@ -34,7 +35,7 @@ export function StopShowingAlarm({ kind, title }: StopShowingAlarmProps) {
     try {
       await ignore(kind)
     } catch (err) {
-      toast.error('Could not stop showing this alarm', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not stop showing this alarm', { description: errorMessage(err) })
     }
   }
 

@@ -24,6 +24,7 @@ import { AskMateSelection } from '../ask-mate-selection'
 import { ChecklistRunner } from './checklist-runner'
 import { NoteEditor } from '../note-editor'
 import { NoteMarkdown } from '../note-markdown'
+import { errorMessage } from '@/lib/errors'
 
 // Revision "one panel, not three" (2026-09-20): a Manual-kind folder's own
 // rendering (ordering, Arrange, front-to-back reading), moved out of the
@@ -134,7 +135,7 @@ export function ManualFolderView({ folderId, sectionId, onSectionChange, onDemot
         setSectionBodyError(null)
         setSectionHasChecklist((detail.checklist?.length ?? 0) > 0)
       })
-      .catch((err) => { if (!cancelled) setSectionBodyError(err instanceof Error ? err.message : String(err)) })
+      .catch((err) => { if (!cancelled) setSectionBodyError(errorMessage(err)) })
       .finally(() => { if (!cancelled) setSectionBodyLoading(false) })
     return () => { cancelled = true }
   }, [selectedNode, getNote])
@@ -430,7 +431,7 @@ function ManualReadingPane({
       setSaveError(null)
       setEditing(false)
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
+      setSaveError(errorMessage(err))
       throw err // NoteEditor keeps its dirty flag on a failed save
     }
   }, [onSave])

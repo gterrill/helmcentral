@@ -6,6 +6,7 @@ import {
   setQueryData,
   useApiQuery,
 } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0106 F1: the Documents panel's data layer - folder browsing, search,
 // tags, and every document/folder write. Reads sit on the shared query store
@@ -377,7 +378,7 @@ export function useDocuments(folderId: string | null, initialTag: string | null 
       setSemanticProblem(data.semantic_problem ?? null)
     } catch (err) {
       if (seq !== searchSeq.current) return
-      setSearchError(err instanceof Error ? err.message : String(err))
+      setSearchError(errorMessage(err))
       setSemanticProblem(null)
     } finally {
       if (seq === searchSeq.current) setSearching(false)

@@ -11,6 +11,7 @@ import {
 } from '@/lib/passages-api'
 import { decodePassageDetailExtras } from '@/lib/passage-plans'
 import type { CruiseRecord, PassageDetail, PassageSummary, PassageView } from '@/lib/passages'
+import { errorMessage } from '@/lib/errors'
 
 const NO_PASSAGES: PassageSummary[] = []
 const NO_CRUISES: CruiseRecord[] = []
@@ -78,7 +79,7 @@ export function usePassageDetails(ids: string[]) {
     Promise.all(key ? key.split(',').map((id) => passagesApi.getPassage(id)) : [])
       .then((passages) => { if (!cancelled) setState({ key, passages, error: null }) })
       .catch((err) => {
-        if (!cancelled) setState({ key, passages: [], error: err instanceof Error ? err.message : String(err) })
+        if (!cancelled) setState({ key, passages: [], error: errorMessage(err) })
       })
     return () => { cancelled = true }
   }, [key])

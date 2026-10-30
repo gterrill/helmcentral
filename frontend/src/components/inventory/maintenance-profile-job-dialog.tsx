@@ -23,6 +23,7 @@ import {
   type MaintenanceOverridesInput,
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0148: a profile job's description and intervals belong to the profile.
 // This dialog shows the profile's own value under each one; typing a
@@ -107,7 +108,7 @@ export function MaintenanceProfileJobDialog({ rule, open, onCancel, onChanged }:
       onChanged(updated)
       onCancel()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -123,7 +124,7 @@ export function MaintenanceProfileJobDialog({ rule, open, onCancel, onChanged }:
       setDraft((prev) => ({ ...prev, [field]: fresh[field] }))
       onChanged(updated)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     }
   }
 

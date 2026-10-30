@@ -7,6 +7,7 @@ import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-
 import type { AssistantProposal, AssistantProposalOp } from '@/hooks/use-assistant-conversations'
 import { appliedProposalOf, applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus } from '@/lib/assistant-proposal-actions'
 import { cn } from '@/lib/utils'
+import { errorMessage } from '@/lib/errors'
 
 interface AssistantProposalCardProps {
   proposal: AssistantProposal
@@ -47,7 +48,7 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         onChange(updated)
         if (kind === 'apply') toast.success(`Applied ${changeCount} ${changeCount === 1 ? 'change' : 'changes'}`)
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
+        const message = errorMessage(err)
         // A 409 from Apply names the stored status it refused for. Stale
         // carries its reason; a dismissed proposal (dismissed in another tab)
         // shows as dismissed. The thread holds the same, so a reload agrees.

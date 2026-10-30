@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 
 import { apiRequest, useApiQuery } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 /** Secrets the transports need. Stored encrypted server-side, never echoed back. */
 export const TRANSPORT_SECRET_KEYS = ['NTFY_TOKEN', 'SMTP_PASSWORD'] as const
@@ -110,7 +111,7 @@ export function useAlarmTransports() {
       const payload = await apiRequest<{ results?: Record<string, string> }>(`${CONFIG_PATH}/test`, { method: 'POST' })
       setTestResults(payload.results ?? {})
     } catch (err) {
-      setTestResults({ error: err instanceof Error ? err.message : String(err) })
+      setTestResults({ error: errorMessage(err) })
     } finally {
       setTesting(false)
     }

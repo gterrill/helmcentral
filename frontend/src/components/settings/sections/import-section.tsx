@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { FormSection, SettingsLayout } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { fetchImportRun, ImportApiError, recalledDraftRun, rememberDraftRun, type ImportRun } from '@/lib/import-run'
+import { errorMessage } from '@/lib/errors'
 
 // Settings -> System -> Import: where bringing records across from another
 // boat app starts. YachtWave is the only source so far.
@@ -31,7 +32,7 @@ export function ImportSection({ onOpenImport }: ImportSectionProps) {
         // A run the server no longer knows is simply gone; anything else is
         // shown as it came.
         if (err instanceof ImportApiError && err.status === 404) rememberDraftRun(null)
-        else setError(err instanceof Error ? err.message : String(err))
+        else setError(errorMessage(err))
       },
     )
     return () => { cancelled = true }

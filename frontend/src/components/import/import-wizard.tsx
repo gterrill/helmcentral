@@ -21,6 +21,7 @@ import { ImportNotesStep } from '@/components/import/import-notes-step'
 import { ImportReviewStep } from '@/components/import/import-review-step'
 import { ImportUploadStep } from '@/components/import/import-upload-step'
 import { ImportVesselStep } from '@/components/import/import-vessel-step'
+import { errorMessage } from '@/lib/errors'
 
 // The import wizard: full-page, stepped, with the draft kept on the server.
 // `runId` of "new" is the upload page; once the export is read the URL moves
@@ -183,7 +184,7 @@ function RunWizard({ runId, onExit }: { runId: string; onExit: () => void }) {
     try {
       await flush()
     } catch (err) {
-      setStepError(err instanceof Error ? err.message : String(err))
+      setStepError(errorMessage(err))
       return
     }
     setCommitError(null)
@@ -198,7 +199,7 @@ function RunWizard({ runId, onExit }: { runId: string; onExit: () => void }) {
   const back = () => {
     if (stepIndex === 0) {
       // Saving first so a half-made choice is not lost on the way out.
-      void flush().then(onExit, (err: unknown) => setStepError(err instanceof Error ? err.message : String(err)))
+      void flush().then(onExit, (err: unknown) => setStepError(errorMessage(err)))
       return
     }
     void goTo(stepIndex - 1)
@@ -215,7 +216,7 @@ function RunWizard({ runId, onExit }: { runId: string; onExit: () => void }) {
       adoptRun(result.run)
       setSummary(result.summary)
     } catch (err) {
-      setCommitError(err instanceof Error ? err.message : String(err))
+      setCommitError(errorMessage(err))
     } finally {
       setCommitting(false)
     }
@@ -230,7 +231,7 @@ function RunWizard({ runId, onExit }: { runId: string; onExit: () => void }) {
       setConfirmAbandon(false)
       onExit()
     } catch (err) {
-      setAbandonError(err instanceof Error ? err.message : String(err))
+      setAbandonError(errorMessage(err))
     } finally {
       setAbandoning(false)
     }

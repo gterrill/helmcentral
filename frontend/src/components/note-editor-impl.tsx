@@ -56,6 +56,7 @@ import { resolveNoteHref } from '@/lib/note-links'
 import { cn } from '@/lib/utils'
 
 import type { NoteEditorProps } from './note-editor'
+import { errorMessage } from '@/lib/errors'
 
 // Plan "Notes and the Boat's Manual" §7 (Phase 2b) / ADR 0117: the actual
 // Plate editor. Everything Plate/Slate-shaped lives in this file and
@@ -528,7 +529,7 @@ export default function NoteEditorImpl({ value, onSave, saving = false }: NoteEd
       // AGENTS.md fallback policy: surface the caller's own message rather
       // than a generic failure, and leave `dirty` alone - a failed save
       // must not look, to the operator, like a successful one.
-      setSaveError(err instanceof Error ? err.message : String(err))
+      setSaveError(errorMessage(err))
     }
   }, [onSave])
 
@@ -828,7 +829,7 @@ function ImageButton({ editor }: { editor: PlateEditor }) {
           const doc = await uploadDocument(result.blob, photoFilename(file.name), ['photo'])
           uploaded.push({ id: doc.id, name: file.name })
         } catch (err) {
-          failures.push({ name: file.name, message: err instanceof Error ? err.message : String(err) })
+          failures.push({ name: file.name, message: errorMessage(err) })
         }
       }
 

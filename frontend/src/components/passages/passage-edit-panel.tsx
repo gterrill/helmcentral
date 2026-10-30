@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea'
 import type { PassageRating } from '@/lib/passage-plans'
 import { passagesApi } from '@/lib/passages-api'
 import { passageHeading, type CruiseRecord, type PassageRecord, type PassageView } from '@/lib/passages'
+import { errorMessage } from '@/lib/errors'
 
 const RATINGS: { value: Exclude<PassageRating, ''>; label: string }[] = [
   { value: 'comfortable', label: 'Comfortable' },
@@ -23,7 +24,7 @@ const RATINGS: { value: Exclude<PassageRating, ''>; label: string }[] = [
 ]
 
 function failure(action: string, err: unknown) {
-  toast.error(`Could not ${action}`, { description: err instanceof Error ? err.message : String(err) })
+  toast.error(`Could not ${action}`, { description: errorMessage(err) })
 }
 
 export interface PassageEditPanelProps {

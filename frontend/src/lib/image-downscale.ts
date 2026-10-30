@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/errors'
 // ADR 0127: photos are downscaled on the phone before they ever leave it,
 // so a bin of twenty items uploads over a boat's tailscale connection in a
 // reasonable time rather than choking on full-resolution phone camera
@@ -179,7 +180,7 @@ export async function downscaleAll(
         const blob = await downscale(file)
         outcomes[i] = { file, result: { ok: true, blob } }
       } catch (err) {
-        outcomes[i] = { file, result: { ok: false, error: err instanceof Error ? err.message : String(err) } }
+        outcomes[i] = { file, result: { ok: false, error: errorMessage(err) } }
       }
     }
   }

@@ -4,6 +4,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import type { DocumentSearchResult } from '@/hooks/use-documents'
 import { apiRequest, useApiQuery } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0123: "Add document" on the Equipment editor. Deliberately its own
 // small read, not a second consumer of use-documents.ts's useDocuments
@@ -108,7 +109,7 @@ export function DocumentLinkPicker({ open, onOpenChange, onPick, excludeIds = []
       if (seq !== pickSeq.current) return
       // Fail loud: linking a document whose record cannot be read would put
       // a row with a guessed type in the list.
-      setPickError(err instanceof Error ? err.message : String(err))
+      setPickError(errorMessage(err))
     } finally {
       if (seq === pickSeq.current) setPickingId(null)
     }

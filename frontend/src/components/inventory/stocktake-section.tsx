@@ -20,6 +20,7 @@ import {
   type InventoryBin,
   type InventoryZone,
 } from '@/hooks/use-inventory'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0127 (the plan's Phase B): ADR 0065 §3's rule holds unchanged here -
 // "a scan never moves, marks missing or deletes anything." Every write this
@@ -201,7 +202,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
           pushEvent({ id: crypto.randomUUID(), kind: 'unrecognised', text })
           return
         }
-        setScanError(err instanceof Error ? err.message : String(err))
+        setScanError(errorMessage(err))
         return
       }
 
@@ -227,7 +228,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
             // the scanned copy can be stale.
             await updateEquipment(item.id, { ...toEquipmentInput(item), verified_aboard: true })
           } catch (err) {
-            setScanError(err instanceof Error ? err.message : String(err))
+            setScanError(errorMessage(err))
           }
         }
         return
@@ -260,7 +261,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
       const updated = await updateEquipment(item.id, { ...toEquipmentInput(fresh), bin_id: targetBin.bin.id, zone_id: targetBin.zone.id })
       setEvents((prev) => prev.map((e) => (e.id === eventId ? { id: e.id, kind: 'confirmed', item: updated } : e)))
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : String(err))
+      setScanError(errorMessage(err))
     } finally {
       setMovingId(null)
     }
@@ -304,7 +305,7 @@ export function StocktakeSection({ onOpenEquipment = () => {}, canWrite = true }
     try {
       await scanTags((url) => { void handleScanRef.current(url) }, controller.signal)
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : String(err))
+      setScanError(errorMessage(err))
       setScanning(false)
     }
   }

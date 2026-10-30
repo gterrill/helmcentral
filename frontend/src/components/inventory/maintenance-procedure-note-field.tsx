@@ -9,6 +9,7 @@ import {
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
 import { documentViewerHref } from '@/lib/document-citation'
+import { errorMessage } from '@/lib/errors'
 
 // The Procedure note link shared by the hand-rule dialog and the profile-job
 // dialog (spec §8): open the linked note, remove the link, or create a fresh
@@ -29,7 +30,7 @@ export function ProcedureNoteField({ rule, onChanged, onError }: ProcedureNoteFi
     try {
       onChanged(await action())
     } catch (err) {
-      onError(err instanceof Error ? err.message : String(err))
+      onError(errorMessage(err))
     } finally {
       setBusy(false)
     }

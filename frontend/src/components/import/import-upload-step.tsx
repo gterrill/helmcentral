@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { createImportRun, type ImportRun } from '@/lib/import-run'
 import { StepHeading } from '@/components/import/import-shared'
 import { cn } from '@/lib/utils'
+import { errorMessage } from '@/lib/errors'
 
 // Step 1: hand over the YachtWave "Vessel Export" page. The server decides
 // whether it is one; its refusal is shown word for word.
@@ -38,7 +39,7 @@ export function ImportUploadStep({ onCreated }: ImportUploadStepProps) {
     try {
       onCreated(await createImportRun('yachtwave', file))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setUploading(false)
     }

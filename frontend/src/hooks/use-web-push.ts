@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { ApiError, apiRequest } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 /**
  * Web push registration for this browser (ADR 0038, ADR 0045).
@@ -109,7 +110,7 @@ export function useWebPush() {
         setSubscribed((await registration.pushManager.getSubscription()) !== null)
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     }
   }, [])
 
@@ -152,7 +153,7 @@ export function useWebPush() {
       setSubscribed(true)
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setBusy(false)
     }
@@ -178,7 +179,7 @@ export function useWebPush() {
       setSubscribed(false)
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setBusy(false)
     }
