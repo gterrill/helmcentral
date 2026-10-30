@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Copy } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import { copyTextFrom } from '@/lib/copy-text'
 import { nfcSupported, writeUrlTag } from '@/lib/nfc'
 import { tagUrl } from '@/lib/tag-url'
 import { cn } from '@/lib/utils'
@@ -40,20 +41,17 @@ export function TagRow({ path, layout = 'inline' }: TagRowProps) {
   // AbortController per write, aborted by the Cancel button and, so a write
   // never outlives the row that started it, on unmount too.
   const abortRef = useRef<AbortController | null>(null)
+  const urlRef = useRef<HTMLSpanElement>(null)
 
   useEffect(() => () => { abortRef.current?.abort() }, [])
 
   const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(url)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // A clipboard write can fail (denied permission, no clipboard API in
-      // this context) - AGENTS.md fallback policy: say nothing claiming
-      // success rather than a copy that silently didn't happen. The URL is
-      // already on screen in full for the operator to select by hand.
-    }
+    // A copy that fails (denied permission, no way to copy in this browser)
+    // claims nothing: the URL is left selected for the operator to copy by
+    // hand. AGENTS.md fallback policy.
+    if (!(await copyTextFrom(urlRef.current))) return
+    setCopied(true)
+    window.setTimeout(() => setCopied(false), 2000)
   }
 
   const handleWrite = async () => {
@@ -105,6 +103,7 @@ export function TagRow({ path, layout = 'inline' }: TagRowProps) {
     <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
       <div className={cn('flex min-w-0 gap-2', stacked ? 'flex-col' : 'items-center')}>
         <span
+          ref={urlRef}
           className={cn('min-w-0 truncate font-mono text-sm', !stacked && 'flex-1')}
           title={url}
         >
