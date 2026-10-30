@@ -236,6 +236,7 @@ context.
 - The activity log is in the same database as everything else, so back up
   `helmcentral.sqlite` as before. Tokens are in it, as hashes.
 - The go-sdk is a new dependency.
-- Phone and web Claude clients cannot connect until a tunnel is decided.
+- Phone and web Claude clients cannot connect over the LAN or Tailscale alone.
+  The tunnel decision is made in ADR 0232 (Tailscale Funnel, `/mcp` only).
 - Proposal tools, if ever offered, will need their own ADR and a token tier
   above read.

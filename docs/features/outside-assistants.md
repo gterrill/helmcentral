@@ -57,19 +57,23 @@ Some things are never offered, whatever you switch on:
 
 ## Where it stops
 
-- **Only on your network:** An outside assistant connects to Helmcentral over
-  your boat's network or over Tailscale. It doesn't make Helmcentral reachable
-  from the internet.
-- **Phone and web Claude can't connect yet:** Claude on the phone, on the web and
-  the Claude Desktop connectors page all connect from Anthropic's servers. They
-  would need Helmcentral to be open to the internet, so they don't work.
-  Claude Code and Claude Desktop with its config file do work, because they
-  connect from your own computer.
+- **Your network, unless you open one address:** An outside assistant connects
+  to Helmcentral over your boat's network or over Tailscale. Helmcentral isn't
+  reachable from the internet unless you turn on Tailscale Funnel for it.
+- **Phone and web Claude need Funnel:** Claude on the phone, on the web and the
+  Claude Desktop connectors page all connect from Anthropic's servers. They
+  can't reach an address that only works on your network. Tailscale Funnel gives
+  `/mcp`, and nothing else, a public address. The token is then the only thing
+  that stops a stranger who finds it. Helmcentral refuses everything else that
+  arrives through Funnel. Claude Code and Claude Desktop with its config file
+  connect from your own computer. They don't need Funnel.
 - **No token, no access:** There is no switch to turn this on. Until you make a
   token, every request is refused. A token that is revoked stops working at once.
 - **Not everything Mate can do:** Forecasts, tides, places, routing, passage
   estimates and nearby vessels are Mate's, because they need Mate's own
   instructions to read correctly. They aren't offered yet.
 
-To connect a program, follow [Connect an outside
-assistant](../how-to/connect-an-outside-assistant.md).
+To connect a program on your computer, follow [Connect an outside
+assistant](../how-to/connect-an-outside-assistant.md). For Claude on your phone
+or the web, follow [Connect Claude on your phone or the
+web](../how-to/connect-claude-on-the-phone-or-web.md).

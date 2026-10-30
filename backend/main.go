@@ -98,6 +98,9 @@ func main() {
 		Output: accessLogSkipWriter{underlying: logWriter},
 	}))
 	e.Use(middleware.Recover())
+	// Through Tailscale Funnel only /mcp may be reached (funnel_guard.go,
+	// ADR 0232). Pre, so it runs ahead of routing and covers every path.
+	e.Pre(newFunnelGuard().middleware())
 	// corsMiddleware (cors.go) replaces AllowOrigins: []string{"*"}: that
 	// combined with credentials is rejected by every browser anyway, and was
 	// half the README's security warning (docs/adr/0040).
@@ -454,7 +457,7 @@ func main() {
 
 	// The MCP endpoint (ADR 0231). Not an /api route: its only credential is a
 	// per-client bearer token, never a user session.
-	e.Any("/mcp", newMCPService(globalOutsideAssistantStore, func() assistantToolDeps {
+	e.Any(mcpPath, newMCPService(globalOutsideAssistantStore, func() assistantToolDeps {
 		return assistantProductionToolDeps(settingsPath)
 	}).Handle)
 

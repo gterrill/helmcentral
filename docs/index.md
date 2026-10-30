@@ -51,7 +51,8 @@ Helmcentral suits your boat.
   on the calendar, or both, and the service log you sign them off in.
 - [Outside assistants](features/outside-assistants.md): let Claude Code or
   Claude Desktop on your own computer read the boat's status, alarms and logs.
-  It can only read, and only on your network.
+  It can only read, and only on your network or through one Tailscale Funnel
+  address.
 - [Import](features/import.md): bring equipment, spares, the service log, notes
   and documents across from YachtWave.
 
@@ -79,6 +80,9 @@ Step-by-step instructions for specific jobs.
 - [Add a Nearby map](how-to/add-a-nearby-map.md)
 - [Connect an outside assistant](how-to/connect-an-outside-assistant.md): make a
   token and add the boat to Claude Code or Claude Desktop.
+- [Connect Claude on your phone or the web](how-to/connect-claude-on-the-phone-or-web.md):
+  give Claude's connectors a public address for the outside assistant, and
+  nothing else, with Tailscale Funnel.
 - [Set up Mate](how-to/set-up-the-assistant.md)
 - [Talk to Mate](how-to/talk-to-mate.md)
 - [Keep what a Mate conversation worked out](how-to/keep-what-a-mate-conversation-worked-out.md)

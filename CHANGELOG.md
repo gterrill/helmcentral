@@ -54,7 +54,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   Outside assistants** to make a token for each program. The token is shown once,
   you can switch each tool on or off for it, and you can revoke it on its own.
   Until you make a token, every request is refused. It works on your boat's
-  network and on Tailscale. Claude on the phone and the web can't connect yet.
+  network and on Tailscale. Claude on the phone and the web reach it through
+  Tailscale Funnel, below.
+- **Claude on the phone and the web can reach outside assistants through
+  Tailscale Funnel.** Claude's phone apps, claude.ai and connectors added in
+  Claude Desktop connect from Anthropic's servers, so they couldn't reach an
+  address on your own network. You can now turn on Tailscale Funnel for `/mcp`
+  alone, which gives it a public HTTPS address, and add that address as a
+  custom connector with its own token. Funnel makes the address public, so the
+  token is the only thing that stops a stranger who finds it. If a Funnel
+  command is mistyped and shares more than `/mcp`, Helmcentral refuses
+  everything else that arrives through Funnel and says so in the log. See
+  **Connect Claude on your phone or the web** in the help pages for the steps.
 - **Watch reports can show a chart.** A finding about a trend now comes with a
   chart: pressure over 12 hours when it falls, the house bank's charge and current
   over the night it measured, and a tank's level since the last report. Mate can
