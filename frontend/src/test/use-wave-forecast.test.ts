@@ -42,7 +42,7 @@ describe('useWaveForecast', () => {
   it('carries the fallback flag when the blend supplied the figures', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ provider: 'open-meteo-marine', model: 'best_match', fallback_used: true, no_data: true, days: [] }),
+      json: async () => ({ provider: 'open-meteo-marine', fallback_model: 'best_match', no_data: true, days: [] }),
     })
     vi.stubGlobal('fetch', fetchMock)
 
@@ -51,8 +51,7 @@ describe('useWaveForecast', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(result.current.fallbackUsed).toBe(true)
-    expect(result.current.model).toBe('best_match')
+    expect(result.current.fallbackModel).toBe('best_match')
     expect(result.current.noData).toBe(true)
   })
 

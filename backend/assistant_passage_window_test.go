@@ -1407,13 +1407,12 @@ func TestAssessPassageWindowTool_CardCarriesTheLegRoutesToTheSink(t *testing.T) 
 	}
 }
 
-// When a wave point was filled from the fallback model, both the card and the
-// text Mate reads say so, so Mate can tell the skipper the figures are from
+// When a wave point was filled from the fallback model, the text Mate reads says so, so Mate can tell the skipper the figures are from
 // another model.
 func TestAssessPassageWindowTool_FallbackWaveModelIsReported(t *testing.T) {
 	d := pwToolDeps(pwLimitsAll())
 	d.waves = func() (waveProvider, string, error) {
-		return &stubWaveProvider{id: "wv", bundle: waveForecastBundle{Model: "best_match", FallbackUsed: true}}, "wv", nil
+		return &stubWaveProvider{id: "wv", bundle: waveForecastBundle{FallbackModel: "best_match"}}, "wv", nil
 	}
 	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
@@ -1421,11 +1420,5 @@ func TestAssessPassageWindowTool_FallbackWaveModelIsReported(t *testing.T) {
 	}
 	if !strings.Contains(result, "best_match") {
 		t.Fatalf("Mate's text must name the fallback model: %s", result)
-	}
-	cards := d.takeCards(result)
-	var payload passageWindowPayload
-	_ = json.Unmarshal(cards[0].Payload, &payload)
-	if payload.WaveFallbackModel != "best_match" {
-		t.Fatalf("payload = %+v", payload)
 	}
 }

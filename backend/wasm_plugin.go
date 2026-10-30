@@ -25,6 +25,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -224,6 +225,33 @@ func (b *wasmPluginBase) applyConfigValues(instance *extism.Plugin) error {
 	}
 	instance.Config = cloned
 	return nil
+}
+
+// saltedCacheKey folds the plugin's saved config values into a cache key, so
+// saving a setting makes the next call a miss and fetch afresh instead of
+// serving an answer made under the old setting. With nothing saved the key is
+// unchanged. A store read error is treated as nothing saved: the call itself
+// (applyConfigValues) fails loudly on the same error.
+func (b *wasmPluginBase) saltedCacheKey(key string) string {
+	if globalPluginOverridesStore == nil || len(b.configFieldKeys) == 0 {
+		return key
+	}
+	values, err := globalPluginOverridesStore.GetConfigValues(b.path)
+	if err != nil {
+		return key
+	}
+	h := sha256.New()
+	n := 0
+	for _, k := range b.configFieldKeys {
+		if v, ok := values[k]; ok {
+			fmt.Fprintf(h, "%s=%s\n", k, v)
+			n++
+		}
+	}
+	if n == 0 {
+		return key
+	}
+	return fmt.Sprintf("%s|cfg:%x", key, h.Sum(nil)[:6])
 }
 
 // firstErrorLine returns only the first line of err's message. A
@@ -792,14 +820,6 @@ func (c *wasmPluginCache[T]) set(key string, value T) {
 	c.mu.Lock()
 	c.data[key] = wasmCacheEntry[T]{Value: value, CachedAt: time.Now().UTC()}
 	c.pruneLocked()
-	c.mu.Unlock()
-	c.persistToDisk()
-}
-
-// clear drops every entry, in memory and on disk.
-func (c *wasmPluginCache[T]) clear() {
-	c.mu.Lock()
-	c.data = make(map[string]wasmCacheEntry[T])
 	c.mu.Unlock()
 	c.persistToDisk()
 }

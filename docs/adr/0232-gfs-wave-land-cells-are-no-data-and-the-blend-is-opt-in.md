@@ -49,14 +49,15 @@ grid) returns 0.16 m, 3 s for that spot, and GFS-Wave 30 nm offshore returns
    repeats the request without `models=`. The series is replaced as a whole,
    never hour by hour. If the second request fails, the fetch fails.
 4. **The fallback is visible, and logged once.** The plugin output gains
-   `model` and `fallback_used`. The host logs each fetch that used the
-   fallback (the plugin does not also log it), and `/api/wave-forecast` returns
-   `model` and `fallback_used`, on the no-data answer too. The Wave card
+   `model` and `fallback_used`, which the host folds into one field, the
+   fallback model's name, empty when the usual model answered. The host logs
+   each fetch that used the fallback (the plugin does not also log it), and
+   `/api/wave-forecast` returns it as `fallback_model`, on the no-data answer
+   too. The Wave card
    footer names the model without assuming which provider it is: "Data:
    open-meteo-marine · fallback model: best_match · ...". Mate's
-   `get_wind_forecast` carries `wave_model`, `wave_fallback_used` and
-   `waves_no_data`, and `assess_passage_window` carries `wave_fallback_model`
-   on its card and a note in the text Mate reads, so Mate can say the figures
+   `get_wind_forecast` carries `wave_fallback_model` and `waves_no_data`,
+   and `assess_passage_window` adds a note to the text Mate reads, so Mate can say the figures
    come from another model, or that there is no wave forecast, rather than
    reporting an error.
 5. **Config fields gain a `boolean` type.** It is stored as "true" or "false"
@@ -68,8 +69,8 @@ grid) returns 0.16 m, 3 s for that spot, and GFS-Wave 30 nm offshore returns
 - A land cell is never again a calm sea. With the setting off the operator sees
   a quiet no-data line, and with it on they see the blend's figures labelled as
   such.
-- Saving a plugin's settings clears that plugin's forecast cache, so a switch
-  applies on the next call.
+- A plugin's saved settings are part of its forecast cache key, so saving a
+  setting makes the next call fetch afresh and a switch applies at once.
 - The plugin must be rebuilt and installed with its new
   `open-meteo-marine.config_fields.json` for the switch to appear. A plugin
   without it behaves as before, except for the host-side zero-period rule.

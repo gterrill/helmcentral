@@ -3088,7 +3088,7 @@ func windForecastWithWaves(t *testing.T, bundle waveForecastBundle) assistantWin
 	t.Helper()
 	now := time.Date(2026, 9, 12, 0, 0, 0, 0, time.UTC)
 	weatherStub := &capturingWeatherProvider{bundle: weatherForecastBundle{
-		Hourly: []weatherHourPoint{{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WindSpeedMS: 5, WindDirectionDeg: 135}},
+		Hourly:   []weatherHourPoint{{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WindSpeedMS: 5, WindDirectionDeg: 135}},
 		CachedAt: now,
 	}}
 	waveStub := &stubWaveProvider{id: "w", bundle: bundle}
@@ -3110,10 +3110,10 @@ func windForecastWithWaves(t *testing.T, bundle waveForecastBundle) assistantWin
 
 func TestGetWindForecast_NamesTheFallbackWaveModel(t *testing.T) {
 	r := windForecastWithWaves(t, waveForecastBundle{
-		Hourly: []waveHourPoint{{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WaveHeightM: pwF(0.2), WavePeriodS: pwF(3)}},
-		Model:  "best_match", FallbackUsed: true,
+		Hourly:        []waveHourPoint{{Time: time.Date(2026, 9, 12, 5, 0, 0, 0, time.UTC), WaveHeightM: pwF(0.2), WavePeriodS: pwF(3)}},
+		FallbackModel: "best_match",
 	})
-	if !r.WaveFallbackUsed || r.WaveModel != "best_match" || r.WavesNoData {
+	if r.WaveFallbackModel != "best_match" || r.WavesNoData {
 		t.Errorf("got %+v", r)
 	}
 }

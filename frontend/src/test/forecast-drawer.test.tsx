@@ -821,8 +821,7 @@ describe('ForecastDrawer refresh age', () => {
         error={null}
         unit="metric"
         waveProvider="open-meteo-marine"
-        waveFallbackUsed
-        waveModel="best_match"
+        waveFallbackModel="best_match"
         waveIsCached={false}
         waveUpdatedAt="2026-06-14T10:00:00Z"
       />,

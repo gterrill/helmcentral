@@ -356,14 +356,14 @@ func TestMapWasmFetchWavesOutput_CarriesTheModelAndFallbackFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bundle.Model != "best_match" || !bundle.FallbackUsed {
-		t.Errorf("model %q fallback %v", bundle.Model, bundle.FallbackUsed)
+	if bundle.FallbackModel != "best_match" {
+		t.Errorf("fallback model %q", bundle.FallbackModel)
 	}
 }
 
-// Saving the plugin's settings must drop its cached forecasts, or a switch
-// turned on would not apply until the old answer expired.
-func TestPostPluginConfigHandler_ClearsTheWaveCache(t *testing.T) {
+// Saving a plugin's settings must make the next call fetch afresh, or a
+// switch turned on would not apply until the old answer expired.
+func TestPostPluginConfigHandler_ConfigChangeYieldsAFreshFetch(t *testing.T) {
 	withCleanWaveProviderRegistry(t)
 	withTestPluginOverridesStore(t)
 
@@ -388,15 +388,20 @@ func TestPostPluginConfigHandler_ClearsTheWaveCache(t *testing.T) {
 	if _, err := provider.FetchWaves(30, 40, 2); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := provider.cache.getStale("30.0,40.0,2,"); !ok {
-		t.Fatal("expected a cached entry before the save")
+	again, err := provider.FetchWaves(30, 40, 2)
+	if err != nil || !again.Cached {
+		t.Fatalf("expected a cache hit before the save: %v cached=%v", err, again.Cached)
 	}
 
 	c, rec := newPluginTestEchoContext(http.MethodPost, "/api/plugins/wave/"+provider.ID()+"/config", `{"values":{"flag":"true"}}`, "wave", provider.ID())
 	if err := postPluginConfigHandler(c); err != nil || rec.Code != http.StatusOK {
 		t.Fatalf("save: %v %d %s", err, rec.Code, rec.Body.String())
 	}
-	if _, ok := provider.cache.getStale("30.0,40.0,2,"); ok {
-		t.Fatal("the save must clear the wave cache")
+	fresh, err := provider.FetchWaves(30, 40, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Cached {
+		t.Fatal("a config change must yield a fresh fetch, not the cached answer")
 	}
 }
