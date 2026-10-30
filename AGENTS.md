@@ -24,6 +24,10 @@
 
 ## Checks Before Commit And Release
 
+- Before `/code-review medium`, run `/simplify` on batches larger than a small
+  edit, then re-run the tests. It applies its fixes, so run it only in your own
+  worktree or a tree holding nothing but your changes. Its edits are refactors:
+  no test-first, no CHANGELOG entry.
 - Run `/code-review medium` on the working tree before committing a batch of changes.
 - Run `/code-review high` on the commits since the last tag before creating a release tag. For large migrations (framework or major dependency upgrades), use `/code-review ultra` instead.
 - Run `/security-review` once the changes are committed, before merging a branch or creating a release tag. It diffs `origin/HEAD...`, so it sees committed work only, and reports nothing on an uncommitted working tree.
