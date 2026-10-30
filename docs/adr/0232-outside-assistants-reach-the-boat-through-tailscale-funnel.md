@@ -136,7 +136,8 @@ named mistake, not a general firewall.
   and a certificate to renew, to get what Tailscale already provides.
 - **OAuth now.** Claude's connectors accept a fixed bearer header. OAuth would
   add an authorisation server for one operator. It can come later if a client
-  needs it.
+  needs it. ChatGPT did: ADR 0233 adds it, with the outside-assistant token as
+  the access token.
 - **An IP allowlist of Anthropic's ranges.** Funnel cannot filter by source, and
   the ranges change.
 - **Rate limiting bad tokens.** Not added. A token is 256 random bits, and an

@@ -98,8 +98,9 @@ func main() {
 		Output: accessLogSkipWriter{underlying: logWriter},
 	}))
 	e.Use(middleware.Recover())
-	// Through Tailscale Funnel only /mcp may be reached (funnel_guard.go,
-	// ADR 0232). Pre, so it runs ahead of routing and covers every path.
+	// Through Tailscale Funnel only /mcp and its sign-in paths may be reached
+	// (funnel_guard.go, ADRs 0232 and 0233). Pre, so it runs ahead of routing
+	// and covers every path.
 	e.Pre(newFunnelGuard().middleware())
 	// corsMiddleware (cors.go) replaces AllowOrigins: []string{"*"}: that
 	// combined with credentials is rejected by every browser anyway, and was
@@ -460,6 +461,9 @@ func main() {
 	e.Any(mcpPath, newMCPService(globalOutsideAssistantStore, func() assistantToolDeps {
 		return assistantProductionToolDeps(settingsPath)
 	}).Handle)
+	// Sign-in for clients that can only use OAuth (ADR 0233), with the
+	// metadata documents they look for. Also outside /api.
+	newMCPOAuth(globalOutsideAssistantStore).register(e)
 
 	// Off unless HELMCENTRAL_PPROF=1 (pprof.go); see registerPprofRoutes's
 	// doc comment for why it defaults off.

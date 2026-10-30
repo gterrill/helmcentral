@@ -11,6 +11,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **ChatGPT can now read the boat.** ChatGPT can't send the header that Claude's
+  connector uses, so it signs in instead. It opens a Helmcentral page, you paste
+  an outside assistant token and select **Allow**, and that token is used for
+  every request after. Tailscale Funnel needs `/.well-known` passed on as well as
+  `/mcp`, so add it by following **Give outside assistants a public address**.
+  Claude's connector keeps working as it did.
+
 ### Fixed
 
 - **The steps for Claude on the phone and the web now work.** The help page said
