@@ -458,6 +458,23 @@ what the other sensors on the same item did unless you ask it to check them.
 The button isn't on the banner across the top. Tap **View** there and the
 buttons are on the cards.
 
+### Reviewing an alarm when it goes off
+
+You don't have to ask. Any alarm rule you've given the **Mate reviews it**
+switch gets a review the moment it goes off, while you may still be pulling on a
+jersey. Mate reads the same things as when you tap **Ask Mate**. It writes a
+short review in a new conversation named after the alarm. Then it sends the
+first sentence to your phone as a message that begins "Mate on". That message
+has a link when you've set an Address for links in Settings. The alarm card
+links to the conversation too.
+
+Mate says what the reading is doing and whether you're needed now, uses the name
+of the instrument when it has one and doesn't guess at a cause. It can suggest
+one change to the rule, in words, but it can't make the change. Open the
+conversation to ask more, or ask Mate to turn the review on or off for an alarm.
+See [Alarms](alarms.md#having-mate-review-an-alarm-when-it-goes-off) for how it
+works and what it costs.
+
 ## Waiting for a weather window
 
 When you're waiting to make a run in stages, ask Mate which days work:

@@ -20,7 +20,9 @@ import {
   type AlarmRule,
   type AlarmRuleDraft,
 } from '@/hooks/use-alarm-rules'
-import { COLLISION_ALARM_RULE_PREFIX, type ActiveAlarm } from '@/hooks/use-alarms'
+import { COLLISION_ALARM_RULE_PREFIX, type ActiveAlarm, type AlarmMateReview } from '@/hooks/use-alarms'
+import { formatAppLocation } from '@/lib/app-location'
+import { runCostLabel } from '@/lib/watches'
 import { forecastWarningDetailsUrl, type ForecastWarnings } from '@/hooks/use-forecast-warnings'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import type { MateAlarmContext } from '@/lib/mate-screen'
@@ -50,6 +52,13 @@ interface AlarmsDrawerProps {
    * Ask Mate buttons are not drawn.
    */
   onAskMate?: AskMateAboutAlarm
+  /**
+   * Whether Mate is switched on. The "Mate reviews it" switch in the rule
+   * editor is drawn only then (turning Mate on is the consent, ADR 0120).
+   */
+  mateOn?: boolean
+  /** Opens the Mate conversation that holds a review. Absent, the link is a plain address. */
+  onOpenMateReview?: (conversationId: string) => void
   /** Null until the first alarms event: not known yet, so not "All clear". */
   alarms: ActiveAlarm[] | null
   onAcknowledge: (ruleId: string) => Promise<void>
@@ -89,6 +98,8 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
   collisionTuningUrl,
   forecastWarnings,
   onAskMate,
+  mateOn = false,
+  onOpenMateReview,
 }: AlarmsDrawerProps) {
   const alarms = knownAlarms ?? NO_ALARMS
   const timeZone = useVesselStateSelector(selectTimeZone)
@@ -160,6 +171,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
       methods: rule.methods,
       notify: rule.notify,
       escalate_after_seconds: rule.escalate_after_seconds,
+      mate_reviews: rule.mate_reviews ?? false,
     })
   }, [])
 
@@ -312,6 +324,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
                           ))}
                         </div>
                       )}
+                      {alarm.mate_review && <MateReviewLine review={alarm.mate_review} onOpen={onOpenMateReview} />}
                       {hasMeta && (
                         <p className="mt-1 truncate text-xs text-muted-foreground">
                           {timeParts.join(' · ')}
@@ -448,6 +461,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
             error={formError}
             isEditing={editingId !== null}
             unitsByPath={unitsByPath}
+            mateOn={mateOn}
             onChange={setDraft}
             onCancel={() => { setDraft(null); setEditingId(null); setFormError(null) }}
             onSave={() => void save()}
@@ -607,17 +621,47 @@ function RuleRow({ rule, unit, firing, onEdit, onDelete }: RuleRowProps) {
   )
 }
 
+/** What Mate made of an alarm: a link to the review with its first sentence, or why there is none. */
+function MateReviewLine({ review, onOpen }: { review: AlarmMateReview; onOpen?: (conversationId: string) => void }) {
+  if (review.state === 'running') {
+    return <p className="mt-1.5 text-xs text-muted-foreground">Mate is reviewing this</p>
+  }
+  if (review.state === 'failed') {
+    return <p className="mt-1.5 text-xs text-muted-foreground">Mate's review failed: {review.problem}</p>
+  }
+  const cost = runCostLabel({ cost_usd: review.cost_usd ?? null, cost_known: review.cost_known })
+  return (
+    <p className="mt-1.5 text-sm text-foreground/90">
+      <a
+        href={formatAppLocation({ panel: 'assistant', conversationId: review.conversation_id ?? null }, { firstPageId: null })}
+        className="inline-flex items-center gap-1 underline underline-offset-2 hover:opacity-80"
+        onClick={(e) => {
+          if (!onOpen || !review.conversation_id) return
+          e.preventDefault()
+          onOpen(review.conversation_id)
+        }}
+      >
+        <Sparkles className="h-3.5 w-3.5" aria-hidden />
+        Mate reviewed this
+      </a>
+      {review.summary && <> · {review.summary}</>}
+      {cost && <span className="ml-1 text-xs text-muted-foreground">{cost}</span>}
+    </p>
+  )
+}
+
 interface RuleFormProps {
   draft: AlarmRuleDraft
   error: string | null
   isEditing: boolean
   unitsByPath: Map<string, string | undefined>
+  mateOn: boolean
   onChange: (draft: AlarmRuleDraft) => void
   onCancel: () => void
   onSave: () => void
 }
 
-function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, onSave }: RuleFormProps) {
+function RuleForm({ draft, error, isEditing, unitsByPath, mateOn, onChange, onCancel, onSave }: RuleFormProps) {
   const set = <K extends keyof AlarmRuleDraft>(key: K, value: AlarmRuleDraft[K]) =>
     onChange({ ...draft, [key]: value })
 
@@ -757,6 +801,28 @@ function RuleForm({ draft, error, isEditing, unitsByPath, onChange, onCancel, on
         <input type="checkbox" checked={draft.enabled} onChange={(e) => set('enabled', e.target.checked)} />
         Enabled
       </label>
+
+      <div className="mt-3">
+        <label htmlFor="alarm-mate-reviews" className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
+          {/* With Mate off the switch can only be turned off: the setting stays visible, and nothing can be switched on that would not run. */}
+          <input
+            id="alarm-mate-reviews"
+            type="checkbox"
+            checked={draft.mate_reviews ?? false}
+            disabled={!mateOn && !draft.mate_reviews}
+            onChange={(e) => set('mate_reviews', e.target.checked)}
+          />
+          Mate reviews it
+        </label>
+        {mateOn ? (
+          <p className="mt-1 text-xs text-muted-foreground">
+            When this alarm goes off, Mate reads what the reading has been doing, writes a short review and sends the first sentence to this alarm's channels. Each review is billed by your model provider, and this alarm is reviewed at most once an hour.
+          </p>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">Mate is off, so it won't review this</p>
+        )}
+      </div>
+
 
       {error && <FieldError className="mt-2">{error}</FieldError>}
 

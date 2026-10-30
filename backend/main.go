@@ -453,6 +453,11 @@ func main() {
 	// Built once: every reader in it looks at settings and stores when it is
 	// called, so nothing here goes stale.
 	globalAlarmDispatcher.chartSources = productionWatchChartSources(settingsPath)
+	globalAlarmReviewer = newAlarmReviewer(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	// Reviews the last run left unfinished are marked failed, loudly.
+	if err := globalAlarmReviewer.start(); err != nil {
+		log.Printf("alarm review: could not settle the reviews left from the last run; alarm cards show no review and no alarm is reviewed until this is fixed: %v", err)
+	}
 
 	// Shared HTTP client for tile/basemap-asset fetches (with timeout to
 	// prevent hangs), used both by the Esri World Imagery proxy and the
@@ -650,6 +655,9 @@ func main() {
 	if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("error starting server: %v", err)
 	}
+	// The server has stopped: end any alarm review under way and let it record
+	// that, for a short while.
+	globalAlarmReviewer.stop(alarmReviewShutdownWait)
 }
 
 // buildAPIRoutes composes the /api route table from the per-feature route

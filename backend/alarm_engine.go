@@ -192,6 +192,10 @@ type alarmStatus struct {
 	CanSilence     bool `json:"can_silence"`
 	CanAcknowledge bool `json:"can_acknowledge"`
 
+	// MateReview is Mate's review of this raise (ADR 0237), set by activeAlarms
+	// for a rule whose "Mate reviews it" switch is on.
+	MateReview *alarmReview `json:"mate_review,omitempty"`
+
 	SinceTrue time.Time `json:"-"`
 	RaisedAt  time.Time `json:"-"`
 	AckedAt   time.Time `json:"-"`

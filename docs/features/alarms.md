@@ -285,6 +285,53 @@ alarm keeps going off it says so, and if the cause points to something you can
 check, it ends with what to check. The card itself isn't changed. See
 [Mate](assistant.md) for what it can and can't tell you.
 
+## Having Mate review an alarm when it goes off
+
+If you'd rather not open Mate and ask every time, you can have Mate look at an
+alarm for you the moment it goes off. It's a switch on each alarm rule, and it's
+off until you turn it on. Turning it on is your say-so for that alarm, so Mate
+never reviews one you haven't chosen.
+
+To turn it on, open the Alarms drawer, tap the pencil on a rule, tick **Mate
+reviews it** and tap **Save Rule**. While Mate is off, the switch is greyed
+out, with a note saying Mate won't review the alarm. You can still see the
+setting and turn it off. You can also ask Mate to turn it on for an alarm, and
+it's a card you tap **Apply** on like any other change.
+
+Here is what happens once it's on:
+
+- When it starts: The review starts when the alarm goes off, after the alarm's
+  own notification has gone out. If the same alarm goes off again within an
+  hour of the last review, it isn't reviewed again.
+- What Mate looks at: The same things as when you tap **Ask Mate**. That's the
+  level, the reading and how it moved. It also covers what else went off nearby
+  in time, and how often it has happened. Mate only reads. It can't change a rule, search
+  the web or fill in a form.
+- What you get: A short review in a Mate conversation named after the alarm.
+  The first sentence says what the reading is doing and whether it needs you
+  now. If Mate thinks the rule itself is wrong, it says so in words, once, and
+  leaves the change to you.
+- On the card: The alarm card says **Mate reviewed this**, shows the first
+  sentence and what the review cost, and links to the conversation. While Mate
+  is working it says **Mate is reviewing this**.
+- On your phone: A second message, "Mate on House Bank Low", goes to the same
+  channels the alarm uses, with the first sentence. If you've set the **Address
+  for links** in Settings, it includes a link that opens the conversation. It
+  comes after the alarm and never delays it. If the alarm has cleared by the
+  time Mate finishes, nothing is sent.
+
+If Mate is turned off, a rule with the switch on gets no review, and nothing is
+recorded. If a review fails, the card says so and says why. For example, Mate
+isn't set up, it took longer than three minutes, or Helmcentral restarted. A
+review cut short by a restart doesn't count towards the once-an-hour limit. Helmcentral doesn't try again and
+doesn't put anything in its place. The alarm itself is never changed, and the
+card keeps its own title and message.
+
+Each review is billed by your model provider like any other Mate answer, and
+there's no spending limit beyond the once-an-hour rule. Alarms that come from
+the boat's network, tank level alarms, gauge bands and the checks that came with
+Helmcentral can't be reviewed yet.
+
 ## Gauge bands are alarm rules
 
 A coloured band on a gauge set to an alarm severity defines an alarm rule. Drag

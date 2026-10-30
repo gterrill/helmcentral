@@ -15,6 +15,8 @@ func buildAlarmEmail(config smtpConfig, msg notificationMessage) []byte {
 	switch {
 	case msg.isWatchReport() && msg.Watch != nil:
 		return buildWatchEmail(config, msg)
+	case msg.isAlarmReview():
+		return plainTextEmail(config, msg.title(), msg.Message)
 	case len(msg.Charts) > 0:
 		return buildChartEmail(config, msg, func(charts []watchChart) (string, string) {
 			m := msg

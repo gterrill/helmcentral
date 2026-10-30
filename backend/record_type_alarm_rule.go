@@ -101,6 +101,7 @@ func alarmRuleRecordType() *recordType {
 			{Name: "dwell_seconds", Kind: kindInteger, Writable: true, Description: "how long the condition must hold before it fires"},
 			{Name: "stale_after_seconds", Kind: kindInteger, Writable: true, Description: "for a stale alarm, how many seconds of silence fire it"},
 			{Name: "enabled", Kind: kindBoolean, Writable: true, Description: "whether the alarm is watching"},
+			{Name: "mate_reviews", Kind: kindBoolean, Writable: true, Description: "whether Mate reviews the alarm when it goes off and sends the review to the alarm's channels; the operator's switch, off unless they ask for it"},
 			{Name: "unit", Kind: kindString, Description: "the unit value and clear_value are in; empty when the boat has not declared one for the path"},
 			{Name: "built_in", Kind: kindBoolean, Description: "true for a rule that came with Helmcentral"},
 			{Name: "path_role", Kind: kindString, Description: "house_bank_soc when the rule follows the house bank"},
@@ -146,7 +147,7 @@ func alarmRuleSnapshot(r alarmRule) recordSnapshot {
 		Fields: map[string]any{
 			"label": r.Label, "path": r.Path, "op": r.Op, "value": d.toShown(r.Value), "clear_value": clear,
 			"state": r.State, "dwell_seconds": r.DwellSeconds, "stale_after_seconds": r.StaleAfterSeconds,
-			"enabled": r.Enabled, "unit": d.label, "built_in": r.SeededBy != "", "path_role": r.PathRole,
+			"enabled": r.Enabled, "mate_reviews": r.MateReviews, "unit": d.label, "built_in": r.SeededBy != "", "path_role": r.PathRole,
 		},
 	}
 }
@@ -237,6 +238,9 @@ func applyAlarmFields(r alarmRule, given fieldSet) (alarmRule, error) {
 	}
 	if v, ok := given["enabled"]; ok {
 		r.Enabled, _ = v.(bool)
+	}
+	if v, ok := given["mate_reviews"]; ok {
+		r.MateReviews, _ = v.(bool)
 	}
 	if v := intPtrOf(given["dwell_seconds"]); v != nil {
 		r.DwellSeconds = *v
@@ -434,6 +438,14 @@ func describeAlarmRule(d describeInput) string {
 			return "Switch off alarm " + label
 		}
 	}
+	if len(given) == 1 {
+		if on, ok := given["mate_reviews"].(bool); ok {
+			if on {
+				return "Have Mate review alarm " + label + " when it goes off"
+			}
+			return "Stop Mate reviewing alarm " + label
+		}
+	}
 	out := "Change alarm " + label + ": "
 	if l := stringOf(given["label"]); l != "" && l != d.Before.Label {
 		out += fmt.Sprintf("rename to %s, ", l)
@@ -444,6 +456,13 @@ func describeAlarmRule(d describeInput) string {
 			out += ", switched on"
 		} else {
 			out += ", switched off"
+		}
+	}
+	if on, ok := given["mate_reviews"].(bool); ok {
+		if on {
+			out += ", reviewed by Mate when it goes off"
+		} else {
+			out += ", no longer reviewed by Mate"
 		}
 	}
 	return out
