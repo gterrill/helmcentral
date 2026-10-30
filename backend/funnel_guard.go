@@ -23,7 +23,6 @@ import (
 
 const (
 	funnelRequestHeader = "Tailscale-Funnel-Request"
-	funnelAllowedPath   = "/mcp"
 	funnelLogInterval   = time.Minute
 )
 
@@ -49,7 +48,7 @@ func (g *funnelGuard) middleware() echo.MiddlewareFunc {
 			// The constant is already in canonical form, so the map is read
 			// directly. The path compared is the one Echo routes on: the raw,
 			// still-encoded path when there is one, so /mc%70 is not /mcp.
-			if _, viaFunnel := req.Header[funnelRequestHeader]; !viaFunnel || echo.GetPath(req) == funnelAllowedPath {
+			if _, viaFunnel := req.Header[funnelRequestHeader]; !viaFunnel || echo.GetPath(req) == mcpPath {
 				return next(c)
 			}
 			g.logRefusal(req)
@@ -75,9 +74,10 @@ func (g *funnelGuard) logRefusal(req *http.Request) {
 	g.lastLog, g.suppressed = now, 0
 	g.mu.Unlock()
 	msg := "funnel guard: refused %s %q from %q: only /mcp is served through Tailscale Funnel; if refused paths fall outside /mcp, `tailscale funnel status` shows more than /mcp is shared"
+	args := []any{req.Method, req.URL.Path, req.Header.Get("X-Forwarded-For")}
 	if left > 0 {
-		g.logf(msg+" (%d more refused since the last line)", req.Method, req.URL.Path, req.Header.Get("X-Forwarded-For"), left)
-		return
+		msg += " (%d more refused since the last line)"
+		args = append(args, left)
 	}
-	g.logf(msg, req.Method, req.URL.Path, req.Header.Get("X-Forwarded-For"))
+	g.logf(msg, args...)
 }

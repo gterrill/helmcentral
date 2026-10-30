@@ -30,11 +30,7 @@ func newFunnelGuardEnv() *funnelGuardEnv {
 	env.e = echo.New()
 	env.e.Pre(g.middleware())
 	reached := func(c echo.Context) error { return c.String(http.StatusOK, "reached "+c.Request().URL.Path) }
-	env.e.Any("/mcp", reached)
-	env.e.Any("/mcp/", reached)
-	env.e.GET("/api/stream", reached)
-	env.e.GET("/", reached)
-	env.e.GET("/mcpx", reached)
+	env.e.Any(mcpPath, reached)
 	// The single-page app's fallback, as in main.go.
 	env.e.GET("/*", reached)
 	return env

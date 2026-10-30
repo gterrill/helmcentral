@@ -23,6 +23,10 @@ import (
 // SDK negotiates the protocol revision (2025-11-25 and 2026-07-28) with the
 // client. It calls no model and works with Mate off.
 
+// mcpPath is where the endpoint is mounted, and the one path the Funnel guard
+// (funnel_guard.go) lets through.
+const mcpPath = "/mcp"
+
 type mcpCallKey struct{}
 
 // mcpCall is what one authenticated request carries to the SDK's per-request

@@ -457,7 +457,7 @@ func main() {
 
 	// The MCP endpoint (ADR 0231). Not an /api route: its only credential is a
 	// per-client bearer token, never a user session.
-	e.Any("/mcp", newMCPService(globalOutsideAssistantStore, func() assistantToolDeps {
+	e.Any(mcpPath, newMCPService(globalOutsideAssistantStore, func() assistantToolDeps {
 		return assistantProductionToolDeps(settingsPath)
 	}).Handle)
 
