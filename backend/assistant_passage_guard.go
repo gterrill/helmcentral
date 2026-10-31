@@ -28,10 +28,12 @@ import (
 // loop puts a system message mid-conversation, and some providers reject one
 // after an assistant turn or hoist it to the top. Only the limits claim may
 // say the limits are set, because that trigger fires only when they are.
+const assistantCheckLabel = "[Helmcentral check, not from the operator] "
+
 const (
-	assistantPassageLimitsClaimInstruction  = "[Helmcentral check, not from the operator] This answer talks about passage limits without the check having run. The operator's passage limits are set. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base the answer on its result. Otherwise remove the statements about the limits."
-	assistantAnchorageShelterInstruction    = "[Helmcentral check, not from the operator] This answer judges an anchorage's shelter or exposure without the shoreline check having run. Call anchorage_shelter with the position from find_places and base the shelter judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
-	assistantPassageRelativeWindInstruction = "[Helmcentral check, not from the operator] This answer judges the wind or sea against the course without the check having run. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base any ahead, abeam or astern judgement on its sectors. Otherwise take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
+	assistantPassageLimitsClaimInstruction  = "This answer talks about passage limits without the check having run. The operator's passage limits are set. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base the answer on its result. Otherwise remove the statements about the limits."
+	assistantPassageRelativeWindInstruction = "This answer judges the wind or sea against the course without the check having run. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base any ahead, abeam or astern judgement on its sectors. Otherwise take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
+	assistantAnchorageShelterInstruction    = "This answer judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_shelter with its position (from find_places, or the boat's position if it is where you are now) and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
 )
 
 var (
@@ -51,38 +53,39 @@ var (
 	// anchorageShelterRE matches a shelter or exposure judgement. Bare
 	// "sheltered" is left out: "the sheltered marina" is a description, not a
 	// judgement against a wind.
-	anchorageShelterRE = regexp.MustCompile(`(?i)(\bexposed\b|\bexposure to\b|\bsheltered from\b|\bshelter from\b|\bshelter against\b|\bprotected from\b|\bprotection from\b|\blee shore\b|\broadstead\b|\b(well|poorly|badly|fully|partly) (sheltered|protected)\b|\bunsheltered\b)`)
+	anchorageShelterRE = regexp.MustCompile(`(?i)(\bexposed (to|in)\b|\bexposure to\b|\bopen to\b|\b(in|into|under) the lee of\b|\bsheltered from\b|\bshelter from\b|\bshelter against\b|\bprotected from\b|\bprotection from\b|\blee shore\b|\broadstead\b|\b(well|poorly|badly|fully|partly)[- ](sheltered|protected)\b|\bunsheltered\b)`)
 
 	// anchorageDirectionRE matches a compass point or wind named in words, so
 	// a sentence counts only when the shelter word is set against a wind or a
 	// direction. The abbreviations are case-sensitive.
-	anchorageDirectionRE = regexp.MustCompile(`(?i:\b(north|south|east|west)\w*|\bwind|\bbreeze|\btrades?\b|\bswell|\bblow|nor'?easter|sou'?wester)|\b(N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW)\b`)
+	anchorageDirectionRE = regexp.MustCompile(`(?i:\b(north|south|east|west)\w*|\bwinds?\b|\bbreezes?\b|\btrades?\b|\bswells?\b|\bblow(s|ing|n)?\b|nor'?easter|sou'?wester)|\b(N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW)\b`)
 
 	// passageSentenceSplitRE splits a draft at sentence ends and newlines,
 	// leaving decimals such as "1.4 m" whole.
 	passageSentenceSplitRE = regexp.MustCompile(`[.!?]+(\s|$)|\n`)
 )
 
-// judgesRelativeWind reports whether any sentence of the draft both describes
-// something relative to the boat and names wind or sea.
-func judgesRelativeWind(draft string) bool {
+// anySentenceMatchesBoth reports whether any sentence of the draft matches
+// both expressions.
+func anySentenceMatchesBoth(draft string, a, b *regexp.Regexp) bool {
 	for _, sentence := range passageSentenceSplitRE.Split(draft, -1) {
-		if passageRelativeWindRE.MatchString(sentence) && passageWindOrSeaRE.MatchString(sentence) {
+		if a.MatchString(sentence) && b.MatchString(sentence) {
 			return true
 		}
 	}
 	return false
 }
 
+// judgesRelativeWind reports whether any sentence of the draft both describes
+// something relative to the boat and names wind or sea.
+func judgesRelativeWind(draft string) bool {
+	return anySentenceMatchesBoth(draft, passageRelativeWindRE, passageWindOrSeaRE)
+}
+
 // judgesAnchorageShelter reports whether any sentence of the draft both
 // judges shelter or exposure and names a wind or a direction.
 func judgesAnchorageShelter(draft string) bool {
-	for _, sentence := range passageSentenceSplitRE.Split(draft, -1) {
-		if anchorageShelterRE.MatchString(sentence) && anchorageDirectionRE.MatchString(sentence) {
-			return true
-		}
-	}
-	return false
+	return anySentenceMatchesBoth(draft, anchorageShelterRE, anchorageDirectionRE)
 }
 
 // checkDraft makes assistantToolDeps an assistantDraftChecker. It names what
@@ -103,8 +106,9 @@ func judgesAnchorageShelter(draft string) bool {
 //
 //   - "anchorage shelter": the draft judges an anchorage's shelter or exposure
 //     against a wind or direction, and anchorage_shelter was not called this
-//     run. It is on whenever anchorage_shelter is on offer, whether or not
-//     assess_passage_window ran.
+//     run. It is on when the tool could run here (the install has an Offline
+//     coastline reader; whether the coastline is switched on is not read per
+//     draft), whether or not assess_passage_window ran.
 //
 // A draft that hits more than one trigger gets one message carrying each
 // correction, since the run loop sends a draft back only once.
@@ -120,19 +124,14 @@ func (d assistantToolDeps) checkDraft(draft string, calls []openRouterToolCall) 
 		return "", ""
 	}
 	if len(triggers) == 1 {
-		return triggers[0], instructions[0]
+		return triggers[0], assistantCheckLabel + instructions[0]
 	}
-	// One message: the first keeps its label, later ones drop theirs.
-	const label = "[Helmcentral check, not from the operator] "
-	for i := 1; i < len(instructions); i++ {
-		instructions[i] = strings.TrimPrefix(instructions[i], label)
-	}
-	return strings.Join(triggers, " and "), strings.Join(instructions, " Also: ")
+	return strings.Join(triggers, " and "), assistantCheckLabel + strings.Join(instructions, " Also: ")
 }
 
 // checkShelterDraft is the "anchorage shelter" trigger.
 func (d assistantToolDeps) checkShelterDraft(draft string, calls []openRouterToolCall) (trigger, instruction string) {
-	if !mateToolAvailable(d, mateToolAnchorageShelter.name) {
+	if !mateToolAvailable(d, mateToolAnchorageShelter.name) || d.offlineCoastline == nil {
 		return "", ""
 	}
 	for _, c := range calls {

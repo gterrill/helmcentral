@@ -35,8 +35,10 @@ wind, or to remove the statements.
   count, so "the sheltered marina" passes.
 - **What counts as a direction:** a compass point in words or capitals (NE, north,
   northerly), or a word like wind, breeze, trades or swell, in the same sentence.
-- **Independent of the passage triggers:** it depends only on `anchorage_shelter`
-  being on offer. It still fires when `assess_passage_window` is absent or was
+- **Independent of the passage triggers:** it is gated on the install having an
+  Offline coastline reader, which is the one condition `anchorage_shelter` has
+  for being offered. It does not read the coastline store or the on/off setting
+  per draft. If the coastline is off, the tool errors and Mate says so. It still fires when `assess_passage_window` is absent or was
   called, since that tool says nothing about an anchorage.
 - **Sent back once per run, not once per trigger:** the run loop allows a single
   send-back. A draft that hits more than one trigger gets one message carrying
@@ -59,5 +61,10 @@ wind, or to remove the statements.
   wasn't called. Marina descriptions that name a wind in the same sentence as
   "protected from" are sent back too, and the tool answers them from the
   chart, so the cost is one round.
+- Any `anchorage_shelter` call in the run satisfies the guard, even one that
+  errored or was for another place. The guard checks that the tool ran, not that
+  it ran for the anchorage under discussion.
+- The correction covers both an anchorage and the boat's own position, and
+  tells the model to drop the statements when they are about open water.
 - The phrase list will miss some wordings. It does not check that the final
   answer agrees with the tool, only that the tool ran.

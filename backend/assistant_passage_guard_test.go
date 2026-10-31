@@ -79,7 +79,7 @@ func TestPassageGuardTrigger(t *testing.T) {
 // assess_passage_window.
 func guardRun(t *testing.T, limits passageLimits, rounds ...string) (assistantReply, *queuedChatDoer, *[]recordedEvent) {
 	t.Helper()
-	d := pwToolDeps(limits)
+	d := pwToolDepsWithCoastline(limits)
 	doer := &queuedChatDoer{}
 	for _, r := range rounds {
 		switch r {
@@ -288,6 +288,20 @@ func TestPassageGuard_BudgetAcceptanceIsLogged(t *testing.T) {
 // the bay in fact facing south, and never called anchorage_shelter.
 const thomasIslandAnswer = "Thomas Island South (the southern tip) is exposed to the NE-N that's forecast tonight and tomorrow. If anchoring, look for a nook on the north side of Thomas Island rather than the south tip, or be ready for an open roadstead to the north wind. This is general knowledge of the coastline - check the chart before committing."
 
+// shelterDeps is the passage fixture with an Offline coastline wired in, the
+// gate the shelter check needs. The reader is never called by a draft check.
+func shelterDeps() assistantToolDeps {
+	d := pwToolDeps(pwLimitsAll())
+	d.offlineCoastline = func() *offlineCoastlineReader { return nil }
+	return d
+}
+
+func pwToolDepsWithCoastline(l passageLimits) assistantToolDeps {
+	d := pwToolDeps(l)
+	d.offlineCoastline = func() *offlineCoastlineReader { return nil }
+	return d
+}
+
 func shelterCall(t *testing.T) []openRouterToolCall {
 	t.Helper()
 	var c openRouterToolCall
@@ -322,10 +336,17 @@ func TestShelterGuardTrigger(t *testing.T) {
 		{"sheltered marina, no direction", "Hamilton Island is a sheltered marina with fuel.", nil, ""},
 		{"head north to marina", "Head north to the sheltered marina and take a berth.", nil, ""},
 		{"exposed, no wind or direction", "The pontoon is exposed to the weather.", nil, ""},
+		{"open to", "The bay is open to the north.", nil, "anchorage shelter"},
+		{"in the lee of", "Tuck into the lee of the island in a northerly.", nil, "anchorage shelter"},
+		{"hyphenated well-sheltered", "Well-sheltered in a southeasterly.", nil, "anchorage shelter"},
+		{"exposed in", "The north side is exposed in a blow.", nil, "anchorage shelter"},
+		{"reef exposed at low water", "The reef north of the anchorage is exposed at low water.", nil, ""},
+		{"chain locker exposed", "Keep the windlass clear, the chain locker is exposed.", nil, ""},
+		{"open to the public", "The marina is open to the public.", nil, ""},
 		{"forecast only", "A northerly of 15 kn tonight, easing tomorrow.", nil, ""},
 	}
 	for _, tc := range cases {
-		if got, _ := pwToolDeps(pwLimitsAll()).checkDraft(tc.text, tc.calls); got != tc.want {
+		if got, _ := shelterDeps().checkDraft(tc.text, tc.calls); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -333,7 +354,7 @@ func TestShelterGuardTrigger(t *testing.T) {
 
 func TestShelterGuard_TwoTriggersSentTogether(t *testing.T) {
 	text := "A northerly gives you a head sea, and the bay is sheltered from the north."
-	trig, ins := pwToolDeps(passageLimits{}).checkDraft(text, nil)
+	trig, ins := pwToolDepsWithCoastline(passageLimits{}).checkDraft(text, nil)
 	if !strings.Contains(trig, "relative wind") || !strings.Contains(trig, "anchorage shelter") {
 		t.Fatalf("trigger = %q", trig)
 	}
@@ -346,5 +367,22 @@ func TestShelterGuard_SentBackOnceAndSecondAnswerWins(t *testing.T) {
 	reply, doer, _ := guardRun(t, pwLimitsAll(), thomasIslandAnswer, guardGood)
 	if len(doer.requests) != 2 || reply.Content != guardGood {
 		t.Fatalf("requests = %d, content = %q", len(doer.requests), reply.Content)
+	}
+}
+
+func TestShelterGuard_OffWithoutOfflineCoastline(t *testing.T) {
+	d := shelterDeps()
+	d.offlineCoastline = nil
+	if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
+		t.Errorf("no Offline coastline on this install: trigger = %q, want none", got)
+	}
+}
+
+func TestShelterGuardInstructionCoversBoatPositionAndOpenWater(t *testing.T) {
+	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil)
+	for _, want := range []string{"find_places", "boat's position", "Otherwise remove"} {
+		if !strings.Contains(ins, want) {
+			t.Errorf("instruction lacks %q: %q", want, ins)
+		}
 	}
 }
