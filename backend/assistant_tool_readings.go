@@ -26,7 +26,8 @@ const (
 		"which is not charted depth. The result's reading names the station and how far it is from the place asked about."
 
 	ruleShelter = "This is an estimate from charted shoreline, not a survey. It cannot see wind bending round headlands, gusts down valleys " +
-		"or swell wrapping round a point, so say it is an estimate and let local knowledge correct it. Wind from inside a sheltered arc is a good night, " +
+		"or swell wrapping round a point, so say it is an estimate. Local knowledge may add what the chart can't show (swell wrapping round a point, gusts down valleys, holding) " +
+		"but must not reverse which directions are sheltered or exposed. Wind from inside a sheltered arc is a good night, " +
 		"and wind from an exposed arc is a lee shore. The result's reading says how old the shoreline is."
 
 	ruleNearbyVessels = "Vessels are AIS targets: only boats that transmit appear. A name is what the vessel broadcasts, typed by its crew, " +

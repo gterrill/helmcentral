@@ -151,6 +151,13 @@ and exposed from, such as "sheltered from NNE through S (030°–190°)".
   for each night of the stay.
 - **Inside a reef:** If you're anchored inside a reef, Mate gives the reef's
   width in each direction and tells you that reef shelter depends on the tide.
+- **Part of the wind forecast:** Mate looks up the wind for an anchorage.
+  The forecast also says, for each wind direction, whether the spot is sheltered,
+  partly sheltered or exposed. If the Offline coastline can't be read,
+  the forecast says so and Mate tells you.
+- **Checked before it answers:** If Mate's first draft says an anchorage is
+  exposed or sheltered from a wind without having read the coastline, it's sent
+  back to read it and answer again.
 
 Treat it as a first look, and Mate says so. It works from the shoreline as
 charted, so it can't see wind bending round a headland, gusts funnelling down a

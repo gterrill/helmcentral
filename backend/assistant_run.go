@@ -420,7 +420,7 @@ type assistantCardSource interface {
 // non-empty trigger sends the draft back once with instruction as a user turn
 // labelled as Helmcentral's own check.
 type assistantDraftChecker interface {
-	checkDraft(draft string, calls []openRouterToolCall) (trigger, instruction string)
+	checkDraft(draft string, calls []openRouterToolCall, results []string) (trigger, instruction string)
 }
 
 // assistantRunner drives one assistant reply's agentic tool loop.
@@ -918,6 +918,10 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	// runCalls is every tool call made this run, for the draft check
 	// (ADR 0234); draftSentBack makes the correction a one-time thing.
 	var runCalls []openRouterToolCall
+	// runResults is what each of those calls returned, by index: the tool
+	// message's content, or "" for a call that did not run. A check can tell a
+	// forecast that carried shelter labels from one that did not.
+	var runResults []string
 	draftSentBack := false
 
 	// seen holds every call made so far, by assistantCallKey, and stalled
@@ -1195,7 +1199,7 @@ forcedLoop:
 			// review is a watch or alarm summary, not a passage answer, and
 			// nobody is there to read a corrected draft.
 			if checker, ok := r.tools.(assistantDraftChecker); ok && !forcedFinal && !r.options.Unattended {
-				trigger, instruction = checker.checkDraft(content, runCalls)
+				trigger, instruction = checker.checkDraft(content, runCalls, runResults)
 			}
 			switch {
 			case trigger == "":
@@ -1303,6 +1307,13 @@ forcedLoop:
 		}
 
 		toolMessages, calls, terr := r.runToolRound(toolCtx, choice.ToolCalls, failures)
+		for i := range choice.ToolCalls {
+			result := ""
+			if i < len(toolMessages) && i < len(calls) && calls[i].Error == "" {
+				result = string(toolMessages[i].Content)
+			}
+			runResults = append(runResults, result)
+		}
 		// collectResults lifts each call's result into the reply and the
 		// forced-final log. finishedOnly skips the calls a round cut short
 		// never ran or abandoned.
