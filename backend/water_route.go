@@ -698,15 +698,34 @@ func routeOverWater(ctx context.Context, from, to shorelinePoint, lines []shorel
 			default:
 				continue
 			}
-			p := wrAdd(v, nudge)
-			if !ix.clear(wrSeg{v, p}, 0, inSeg, outSeg) {
+			// A narrow gap squeezes the full nudge against the far wall. Try
+			// shorter ones, and let the node's own clearance shrink to match.
+			var p wrPt
+			nodeNear, placed := c, false
+			for sc := 1.0; sc >= 1.0/8; sc /= 2 {
+				p = wrAdd(v, wrScale(nudge, sc))
+				if ix.clear(wrSeg{v, p}, 0, inSeg, outSeg) {
+					nodeNear, placed = c*sc, true
+					break
+				}
+			}
+			if !placed {
 				continue // squeezed against other shore
 			}
 			if wrDist(start, p)+wrDist(p, end) > wrDist(start, end)+2*marginNm {
 				continue // too far out of the way to be on a path within the margin
 			}
+			if nodeNear < c {
+				d, _, _, _, found := nearestShore(p, segs)
+				if found && d < nodeNear {
+					nodeNear = d
+				}
+				if nodeNear < c/8*(1-1e-9) {
+					continue // too close to the shore for a route to use
+				}
+			}
 			pos = append(pos, p)
-			near = append(near, c)
+			near = append(near, nodeNear)
 		}
 	}
 

@@ -35,11 +35,36 @@ type passageLegArgs struct {
 	DepartTime   string              `json:"depart_time"`
 }
 
+// jsonList is a list argument. Some models send an array as a JSON string
+// holding the array, so both are accepted. Either way it decodes strictly: an
+// unknown field inside an element is an error, as it is for the arguments
+// around it. A string that does not hold an array is an error.
+type jsonList[T any] []T
+
+func (l *jsonList[T]) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return err
+		}
+		trimmed = []byte(s)
+	}
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.DisallowUnknownFields()
+	var items []T
+	if err := dec.Decode(&items); err != nil {
+		return fmt.Errorf("must be an array: %w", err)
+	}
+	*l = items
+	return nil
+}
+
 type passageWindowArgs struct {
-	Legs           []passageLegArgs `json:"legs"`
-	StaysNights    []int            `json:"stays_nights"`
-	DepartureDates []string         `json:"departure_dates"`
-	DepartTime     string           `json:"depart_time"`
+	Legs           jsonList[passageLegArgs] `json:"legs"`
+	StaysNights    jsonList[int]            `json:"stays_nights"`
+	DepartureDates jsonList[string]         `json:"departure_dates"`
+	DepartTime     string                   `json:"depart_time"`
 }
 
 type passageWindowLimiting struct {
