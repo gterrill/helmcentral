@@ -14,7 +14,7 @@ const COLOR_ATTRS = new Set(['fill', 'stroke', 'color', 'stopColor']);
 const COLOR_PROPS = new Set(['color', 'backgroundColor', 'background', 'borderColor', 'fill', 'stroke', 'outlineColor', 'stopColor']);
 
 const MESSAGE =
-  'Use a semantic token (bg-card, text-muted-foreground, text-gauge-primary, hsl(var(--...)) for SVG) or, for alert semantics only, the Tailwind palette (AGENTS.md "Anti-Slop Constraints").';
+  'Use a semantic token (bg-card, text-muted-foreground, text-gauge-primary, hsl(var(--...)) for SVG) or, for alert semantics only, the Tailwind palette (CODING_STANDARDS.md "Anti-Slop Constraints").';
 
 function isRawColor(text) {
   return COLOR_LITERAL.test(text) && !text.includes('var(--');

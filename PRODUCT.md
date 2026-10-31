@@ -133,7 +133,7 @@ and skins, rules, dwell, hysteresis, transports, severities, plugins, providers.
 - The stack is already committed: React and TypeScript on Vite, Tailwind, Base
   UI, Lucide icons, Geist Sans and Geist Mono, MapLibre for charts and Recharts
   for plots.
-- `AGENTS.md` carries binding UI rules and outranks taste: the 60-30-10 split
+- `CODING_STANDARDS.md` carries binding UI rules and outranks taste: the 60-30-10 split
   for telemetry colour, `text-gauge-*` tokens for instrument readouts with raw
   palette colours reserved for alert semantics, the standard KPI stack (muted
   uppercase label over a large bold tabular readout), and the 12px floor
@@ -170,7 +170,7 @@ or licensing terms. Nothing in that list may be invented.
 ## Accessibility & Inclusion
 
 The product-specific requirement is daylight legibility on a helm screen:
-contrast and type size have to hold in direct sun, which is why `AGENTS.md` bans
+contrast and type size have to hold in direct sun, which is why `CODING_STANDARDS.md` bans
 stacked low-opacity modifiers on small text and sets a floor for de-emphasis.
 Touch is a first-class input on the helm surface, alongside pointer and keyboard
 at the nav station. No formal conformance standard has been adopted.

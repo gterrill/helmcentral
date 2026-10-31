@@ -104,7 +104,7 @@ describe('assistant components design tokens', () => {
     ).toEqual([])
   })
 
-  it('uses only text-[10px]/[9px] for arbitrary micro type - AGENTS.md scale', () => {
+  it('uses only text-[10px]/[9px] for arbitrary micro type - CODING_STANDARDS.md scale', () => {
     const arbitraryTextSizePattern = /text-\[[^\]]*\]/g
     const allowed = new Set(['text-[10px]', 'text-[9px]'])
 

@@ -520,7 +520,7 @@ describe('AnchorWatchMap metric overlay rows', () => {
 
 // Design critique item 1 (2026-09-25 impeccable critique): the panel's
 // translucent ground (bg-black/50, or bg-black/35 while editing) measured
-// 4.1:1 against real satellite imagery, short of the 4.5:1 AGENTS.md
+// 4.1:1 against real satellite imagery, short of the 4.5:1 CODING_STANDARDS.md
 // requires for text this small.
 //
 // The Adjust mode plan (2026-09-26) reverses an earlier decision here:
