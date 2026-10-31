@@ -90,3 +90,21 @@ func TestFindPlacesLive_WhitehavenPartialMatch(t *testing.T) {
 	}
 	t.Logf("find_places(whitehaven): search=%q %s", result.Search, raw)
 }
+
+// TestMarinaDetailsLive_CoralSea runs marina_details end to end through the
+// built plugin: Coral Sea Marina Resort, Airlie Beach, from a point inside
+// the basin.
+func TestMarinaDetailsLive_CoralSea(t *testing.T) {
+	deps := liveFindPlacesDeps(t)
+
+	raw, err := deps.execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
+	if err != nil {
+		t.Fatalf("marina_details: %v", err)
+	}
+	for _, want := range []string{"Coral Sea Marina Resort", `"berths":520`, "A Arm", "travel_lift", "Woolworths"} {
+		if !strings.Contains(raw, want) {
+			t.Errorf("result lacks %q:\n%s", want, raw)
+		}
+	}
+	t.Logf("marina_details(Coral Sea): %s", raw)
+}

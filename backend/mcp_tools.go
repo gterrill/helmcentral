@@ -115,6 +115,8 @@ var mcpToolPolicies = []mcpToolPolicy{
 		Reason: "Read-only routing over the offline coastline. On by default."},
 	{Name: "anchorage_shelter", Plain: "Anchorage shelter", Status: mcpDefaultOn,
 		Reason: "Read-only shelter estimate from the offline coastline. On by default."},
+	{Name: "marina_details", Plain: "Marina details", Status: mcpDefaultOn,
+		Reason: "Read-only marina lookup from OpenStreetMap. It compares charted limits with the boat's length and draft, which get_vessel_particulars already gives. On by default."},
 	{Name: "find_places", Plain: "Place names", Status: mcpDefaultOn,
 		Reason: "Read-only place-name lookup. On by default."},
 	{Name: "read_help", Plain: "Helmcentral help", Status: mcpDefaultOn,

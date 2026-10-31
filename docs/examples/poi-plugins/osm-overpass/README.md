@@ -177,6 +177,32 @@ relations in the box whose own timestamp is newer than `since`
 node moved inside an unedited way. A response with no count is an error, never
 zero.
 
+## One more optional export: marina_details
+
+`marina_details` takes `{"lat": ..., "lon": ...}` and returns what OSM records
+about the marina or harbour charted within 500 m, with the marine features
+within 300 m of it and named shops and services within 1 km. A marina's own
+element usually carries little more than a name, a berth count and whether
+power is laid on, so it makes two requests: `runMarinaDetails` first finds the
+nearest `leisure=marina` (before a bare `seamark:type=harbour`), then queries
+around that element by id (`way(id)->.m` and `around.m`). A position with no
+marina is an error, not an empty result. Neither request asks for `meta`, which
+a local mirror without meta files answers with a runtime error remark that
+`parseOverpassBody` already turns into an error.
+
+The answer holds the marina (berths, fee, power, contact, VHF, charted
+`maxdraught`, `maxlength` and `depth` in metres, unread tags, pontoon arm
+names), facilities by kind with their facts (`fuel:*`, `crane:type`, `fee` and
+similar), entrance marks (lateral beacons and buoys), and services ashore. It
+also carries geometry for a map: the marina outline, every pier, and a list of
+`[lat, lon]` shapes on each facility and mark. A value is only ever reported
+from a tag; fuel type is absent unless a `fuel:*` tag says so. Fixtures:
+`testdata/overpass_marina_resolve_coral_sea.json` and
+`testdata/overpass_marina_details_coral_sea.json`, captured on 2026-10-31 from
+the exact queries the plugin sends (Coral Sea Marina Resort, Airlie Beach,
+`-20.2663105, 148.7101677`) against a local Overpass mirror with data from
+2026-10-29.
+
 ## Truncation is a heuristic, not an exact count
 
 Overpass's `out ... <cap>` statement silently drops anything past the cap -

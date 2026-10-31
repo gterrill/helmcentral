@@ -1,0 +1,929 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-29T21:20:09Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 167312681,
+  "lat": -20.2661325,
+  "lon": 148.7122357,
+  "tags": {
+    "fee": "no",
+    "leisure": "slipway",
+    "name": "Coral Sea Marina Boatramp"
+  }
+},
+{
+  "type": "node",
+  "id": 6965215562,
+  "lat": -20.2666897,
+  "lon": 148.7116152,
+  "tags": {
+    "amenity": "toilets"
+  }
+},
+{
+  "type": "node",
+  "id": 6967644860,
+  "lat": -20.2643403,
+  "lon": 148.7132541,
+  "tags": {
+    "amenity": "toilets"
+  }
+},
+{
+  "type": "node",
+  "id": 7704015421,
+  "lat": -20.2663481,
+  "lon": 148.7113592,
+  "tags": {
+    "waterway": "fuel"
+  }
+},
+{
+  "type": "node",
+  "id": 7704015422,
+  "lat": -20.2666500,
+  "lon": 148.7110990,
+  "tags": {
+    "waterway": "fuel"
+  }
+},
+{
+  "type": "node",
+  "id": 7704015423,
+  "lat": -20.2654725,
+  "lon": 148.7099806,
+  "tags": {
+    "seamark:beacon_lateral:category": "starboard",
+    "seamark:beacon_lateral:colour": "green",
+    "seamark:type": "beacon_lateral"
+  }
+},
+{
+  "type": "node",
+  "id": 7704015424,
+  "lat": -20.2635400,
+  "lon": 148.7098304,
+  "tags": {
+    "seamark:beacon_lateral:category": "starboard",
+    "seamark:beacon_lateral:colour": "green",
+    "seamark:type": "beacon_lateral"
+  }
+},
+{
+  "type": "node",
+  "id": 7704015425,
+  "lat": -20.2644912,
+  "lon": 148.7100986,
+  "tags": {
+    "seamark:beacon_lateral:category": "port",
+    "seamark:beacon_lateral:colour": "red",
+    "seamark:type": "beacon_lateral"
+  }
+},
+{
+  "type": "node",
+  "id": 7704015426,
+  "lat": -20.2630309,
+  "lon": 148.7108639,
+  "tags": {
+    "seamark:beacon_lateral:category": "port",
+    "seamark:beacon_lateral:colour": "red",
+    "seamark:type": "beacon_lateral"
+  }
+},
+{
+  "type": "node",
+  "id": 7704015427,
+  "lat": -20.2673797,
+  "lon": 148.7068585,
+  "tags": {
+    "seamark:beacon_lateral:colour": "yellow",
+    "seamark:type": "beacon_lateral"
+  }
+},
+{
+  "type": "node",
+  "id": 8038851650,
+  "lat": -20.2654093,
+  "lon": 148.7125192,
+  "tags": {
+    "crane:type": "travel_lift",
+    "man_made": "crane"
+  }
+},
+{
+  "type": "node",
+  "id": 8200465048,
+  "lat": -20.2628580,
+  "lon": 148.7100862,
+  "tags": {
+    "seamark:type": "beacon_lateral"
+  }
+},
+{
+  "type": "node",
+  "id": 8200465049,
+  "lat": -20.2607922,
+  "lon": 148.7103142,
+  "tags": {
+    "seamark:type": "beacon_lateral"
+  }
+},
+{
+  "type": "node",
+  "id": 8200465050,
+  "lat": -20.2608526,
+  "lon": 148.7108721,
+  "tags": {
+    "seamark:type": "beacon_lateral"
+  }
+},
+{
+  "type": "way",
+  "id": 137161829,
+  "bounds": {
+    "minlat": -20.2641997,
+    "minlon": 148.7110719,
+    "maxlat": -20.2640642,
+    "maxlon": 148.7125430
+  },
+  "geometry": [
+    { "lat": -20.2641997, "lon": 148.7125430 },
+    { "lat": -20.2640642, "lon": 148.7110719 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier",
+    "name": "D&E Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 137161830,
+  "bounds": {
+    "minlat": -20.2674312,
+    "minlon": 148.7085403,
+    "maxlat": -20.2658934,
+    "maxlon": 148.7107345
+  },
+  "geometry": [
+    { "lat": -20.2674312, "lon": 148.7107345 },
+    { "lat": -20.2658934, "lon": 148.7085403 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier",
+    "name": "M&N Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 137161833,
+  "bounds": {
+    "minlat": -20.2637288,
+    "minlon": 148.7111184,
+    "maxlat": -20.2635335,
+    "maxlon": 148.7133833
+  },
+  "geometry": [
+    { "lat": -20.2637288, "lon": 148.7133833 },
+    { "lat": -20.2635335, "lon": 148.7111184 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier",
+    "name": "B&C Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 137161837,
+  "bounds": {
+    "minlat": -20.2681348,
+    "minlon": 148.7077032,
+    "maxlat": -20.2664568,
+    "maxlon": 148.7100803
+  },
+  "geometry": [
+    { "lat": -20.2681348, "lon": 148.7100803 },
+    { "lat": -20.2680300, "lon": 148.7099373 },
+    { "lat": -20.2664568, "lon": 148.7077032 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier",
+    "name": "O&P Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 137161838,
+  "bounds": {
+    "minlat": -20.2686069,
+    "minlon": 148.7094835,
+    "maxlat": -20.2680300,
+    "maxlon": 148.7099373
+  },
+  "geometry": [
+    { "lat": -20.2680300, "lon": 148.7099373 },
+    { "lat": -20.2686069, "lon": 148.7094835 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 137161839,
+  "bounds": {
+    "minlat": -20.2648192,
+    "minlon": 148.7109911,
+    "maxlat": -20.2646707,
+    "maxlon": 148.7124589
+  },
+  "geometry": [
+    { "lat": -20.2648192, "lon": 148.7124589 },
+    { "lat": -20.2646707, "lon": 148.7109911 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier",
+    "name": "F&G Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 137161840,
+  "bounds": {
+    "minlat": -20.2642108,
+    "minlon": 148.7125497,
+    "maxlat": -20.2641162,
+    "maxlon": 148.7131276
+  },
+  "geometry": [
+    { "lat": -20.2642108, "lon": 148.7131276 },
+    { "lat": -20.2641523, "lon": 148.7129458 },
+    { "lat": -20.2641162, "lon": 148.7125497 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier",
+    "name": "H Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 197500908,
+  "bounds": {
+    "minlat": -20.2660393,
+    "minlon": 148.7117666,
+    "maxlat": -20.2658613,
+    "maxlon": 148.7121641
+  },
+  "geometry": [
+    { "lat": -20.2660393, "lon": 148.7121641 },
+    { "lat": -20.2658613, "lon": 148.7117666 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 197500909,
+  "bounds": {
+    "minlat": -20.2633419,
+    "minlon": 148.7150281,
+    "maxlat": -20.2629540,
+    "maxlon": 148.7152876
+  },
+  "geometry": [
+    { "lat": -20.2629540, "lon": 148.7150281 },
+    { "lat": -20.2633419, "lon": 148.7152876 }
+  ],
+  "tags": {
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 197500910,
+  "bounds": {
+    "minlat": -20.2657138,
+    "minlon": 148.7120200,
+    "maxlat": -20.2656489,
+    "maxlon": 148.7126003
+  },
+  "geometry": [
+    { "lat": -20.2657138, "lon": 148.7126003 },
+    { "lat": -20.2656752, "lon": 148.7122605 },
+    { "lat": -20.2656489, "lon": 148.7120200 }
+  ],
+  "tags": {
+    "access": "private",
+    "floating": "yes",
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 197500911,
+  "bounds": {
+    "minlat": -20.2633073,
+    "minlon": 148.7110703,
+    "maxlat": -20.2631386,
+    "maxlon": 148.7126396
+  },
+  "geometry": [
+    { "lat": -20.2632435, "lon": 148.7126396 },
+    { "lat": -20.2633073, "lon": 148.7124838 },
+    { "lat": -20.2631386, "lon": 148.7110703 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "man_made": "pier",
+    "name": "A Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 245930150,
+  "bounds": {
+    "minlat": -20.2696235,
+    "minlon": 148.7068960,
+    "maxlat": -20.2629975,
+    "maxlon": 148.7134393
+  },
+  "geometry": [
+    { "lat": -20.2675618, "lon": 148.7069032 },
+    { "lat": -20.2682903, "lon": 148.7070857 },
+    { "lat": -20.2688662, "lon": 148.7073240 },
+    { "lat": -20.2689420, "lon": 148.7074197 },
+    { "lat": -20.2690643, "lon": 148.7075743 },
+    { "lat": -20.2692301, "lon": 148.7076818 },
+    { "lat": -20.2693439, "lon": 148.7077606 },
+    { "lat": -20.2694597, "lon": 148.7078926 },
+    { "lat": -20.2695316, "lon": 148.7081204 },
+    { "lat": -20.2696235, "lon": 148.7084333 },
+    { "lat": -20.2696135, "lon": 148.7087846 },
+    { "lat": -20.2696015, "lon": 148.7091018 },
+    { "lat": -20.2695935, "lon": 148.7095595 },
+    { "lat": -20.2695436, "lon": 148.7098980 },
+    { "lat": -20.2694637, "lon": 148.7101854 },
+    { "lat": -20.2693759, "lon": 148.7102961 },
+    { "lat": -20.2692800, "lon": 148.7103408 },
+    { "lat": -20.2691642, "lon": 148.7103536 },
+    { "lat": -20.2691008, "lon": 148.7102590 },
+    { "lat": -20.2690059, "lon": 148.7101742 },
+    { "lat": -20.2689108, "lon": 148.7100678 },
+    { "lat": -20.2688100, "lon": 148.7100516 },
+    { "lat": -20.2687150, "lon": 148.7100298 },
+    { "lat": -20.2685544, "lon": 148.7099983 },
+    { "lat": -20.2683525, "lon": 148.7100183 },
+    { "lat": -20.2682252, "lon": 148.7100903 },
+    { "lat": -20.2674312, "lon": 148.7107345 },
+    { "lat": -20.2670158, "lon": 148.7111413 },
+    { "lat": -20.2663675, "lon": 148.7115874 },
+    { "lat": -20.2662708, "lon": 148.7116448 },
+    { "lat": -20.2662264, "lon": 148.7116955 },
+    { "lat": -20.2662121, "lon": 148.7117564 },
+    { "lat": -20.2662217, "lon": 148.7118223 },
+    { "lat": -20.2663453, "lon": 148.7120926 },
+    { "lat": -20.2661325, "lon": 148.7122357 },
+    { "lat": -20.2660584, "lon": 148.7120233 },
+    { "lat": -20.2657928, "lon": 148.7121539 },
+    { "lat": -20.2657968, "lon": 148.7124390 },
+    { "lat": -20.2652443, "lon": 148.7127761 },
+    { "lat": -20.2643180, "lon": 148.7128969 },
+    { "lat": -20.2640564, "lon": 148.7130354 },
+    { "lat": -20.2636348, "lon": 148.7134058 },
+    { "lat": -20.2635967, "lon": 148.7134393 },
+    { "lat": -20.2632541, "lon": 148.7129599 },
+    { "lat": -20.2629975, "lon": 148.7108195 },
+    { "lat": -20.2630309, "lon": 148.7108639 },
+    { "lat": -20.2641378, "lon": 148.7106854 },
+    { "lat": -20.2635934, "lon": 148.7098715 },
+    { "lat": -20.2637948, "lon": 148.7094921 },
+    { "lat": -20.2639775, "lon": 148.7092624 },
+    { "lat": -20.2642070, "lon": 148.7091227 },
+    { "lat": -20.2644412, "lon": 148.7090428 },
+    { "lat": -20.2647128, "lon": 148.7090478 },
+    { "lat": -20.2649329, "lon": 148.7090827 },
+    { "lat": -20.2651343, "lon": 148.7091926 },
+    { "lat": -20.2652046, "lon": 148.7087582 },
+    { "lat": -20.2653170, "lon": 148.7083338 },
+    { "lat": -20.2655137, "lon": 148.7079095 },
+    { "lat": -20.2657759, "lon": 148.7075201 },
+    { "lat": -20.2661225, "lon": 148.7072505 },
+    { "lat": -20.2664831, "lon": 148.7070258 },
+    { "lat": -20.2668859, "lon": 148.7069110 },
+    { "lat": -20.2674994, "lon": 148.7068960 },
+    { "lat": -20.2675618, "lon": 148.7069032 }
+  ],
+  "tags": {
+    "addr:street": "Shingley Drive",
+    "capacity": "520",
+    "fee": "yes",
+    "leisure": "marina",
+    "name": "Coral Sea Marina Resort",
+    "power_supply": "yes",
+    "website": "https://www.coralseamarina.com/berthing/"
+  }
+},
+{
+  "type": "way",
+  "id": 246094862,
+  "bounds": {
+    "minlat": -20.2659479,
+    "minlon": 148.7125494,
+    "maxlat": -20.2651564,
+    "maxlon": 148.7131743
+  },
+  "geometry": [
+    { "lat": -20.2658002, "lon": 148.7125762 },
+    { "lat": -20.2659411, "lon": 148.7129330 },
+    { "lat": -20.2659479, "lon": 148.7130495 },
+    { "lat": -20.2657770, "lon": 148.7130847 },
+    { "lat": -20.2651873, "lon": 148.7131743 },
+    { "lat": -20.2651564, "lon": 148.7128243 },
+    { "lat": -20.2652542, "lon": 148.7128150 },
+    { "lat": -20.2657348, "lon": 148.7125494 },
+    { "lat": -20.2658002, "lon": 148.7125762 }
+  ],
+  "tags": {
+    "seamark:small_craft_facility:category": "boatyard",
+    "seamark:type": "small_craft_facility"
+  }
+},
+{
+  "type": "way",
+  "id": 246107891,
+  "bounds": {
+    "minlat": -20.2668192,
+    "minlon": 148.7109456,
+    "maxlat": -20.2665435,
+    "maxlon": 148.7111501
+  },
+  "geometry": [
+    { "lat": -20.2668192, "lon": 148.7109456 },
+    { "lat": -20.2665435, "lon": 148.7111501 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "foot": "yes",
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 762897359,
+  "bounds": {
+    "minlat": -20.2665435,
+    "minlon": 148.7103866,
+    "maxlat": -20.2657372,
+    "maxlon": 148.7111501
+  },
+  "geometry": [
+    { "lat": -20.2665435, "lon": 148.7111501 },
+    { "lat": -20.2660113, "lon": 148.7103866 },
+    { "lat": -20.2657372, "lon": 148.7105958 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "foot": "yes",
+    "layer": "1",
+    "man_made": "pier",
+    "name": "L Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 762897360,
+  "bounds": {
+    "minlat": -20.2665435,
+    "minlon": 148.7111501,
+    "maxlat": -20.2661706,
+    "maxlon": 148.7114552
+  },
+  "geometry": [
+    { "lat": -20.2665435, "lon": 148.7111501 },
+    { "lat": -20.2661706, "lon": 148.7114552 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "foot": "yes",
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 824427719,
+  "bounds": {
+    "minlat": -20.2666969,
+    "minlon": 148.7111501,
+    "maxlat": -20.2665435,
+    "maxlon": 148.7114282
+  },
+  "geometry": [
+    { "lat": -20.2666969, "lon": 148.7114282 },
+    { "lat": -20.2665435, "lon": 148.7111501 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "foot": "yes",
+    "layer": "1",
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 825077627,
+  "bounds": {
+    "minlat": -20.2648192,
+    "minlon": 148.7124589,
+    "maxlat": -20.2641162,
+    "maxlon": 148.7125497
+  },
+  "geometry": [
+    { "lat": -20.2641162, "lon": 148.7125497 },
+    { "lat": -20.2641997, "lon": 148.7125430 },
+    { "lat": -20.2648192, "lon": 148.7124589 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 825077628,
+  "bounds": {
+    "minlat": -20.2686069,
+    "minlon": 148.7073298,
+    "maxlat": -20.2671114,
+    "maxlon": 148.7094835
+  },
+  "geometry": [
+    { "lat": -20.2686069, "lon": 148.7094835 },
+    { "lat": -20.2684388, "lon": 148.7092123 },
+    { "lat": -20.2680796, "lon": 148.7087344 },
+    { "lat": -20.2677382, "lon": 148.7082348 },
+    { "lat": -20.2673806, "lon": 148.7077401 },
+    { "lat": -20.2671114, "lon": 148.7073298 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "layer": "1",
+    "man_made": "pier",
+    "name": "Q&Z Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 825077629,
+  "bounds": {
+    "minlat": -20.2687989,
+    "minlon": 148.7089401,
+    "maxlat": -20.2684388,
+    "maxlon": 148.7092123
+  },
+  "geometry": [
+    { "lat": -20.2684388, "lon": 148.7092123 },
+    { "lat": -20.2687989, "lon": 148.7089401 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "man_made": "pier",
+    "name": "R&S Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 825077630,
+  "bounds": {
+    "minlat": -20.2685455,
+    "minlon": 148.7083728,
+    "maxlat": -20.2680796,
+    "maxlon": 148.7087344
+  },
+  "geometry": [
+    { "lat": -20.2680796, "lon": 148.7087344 },
+    { "lat": -20.2685455, "lon": 148.7083728 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "man_made": "pier",
+    "name": "T&U Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 825077631,
+  "bounds": {
+    "minlat": -20.2681965,
+    "minlon": 148.7078740,
+    "maxlat": -20.2677382,
+    "maxlon": 148.7082348
+  },
+  "geometry": [
+    { "lat": -20.2677382, "lon": 148.7082348 },
+    { "lat": -20.2681965, "lon": 148.7078740 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "man_made": "pier",
+    "name": "V&W Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 825077632,
+  "bounds": {
+    "minlat": -20.2678406,
+    "minlon": 148.7073773,
+    "maxlat": -20.2673806,
+    "maxlon": 148.7077401
+  },
+  "geometry": [
+    { "lat": -20.2673806, "lon": 148.7077401 },
+    { "lat": -20.2678406, "lon": 148.7073773 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "man_made": "pier",
+    "name": "X&Y Arm"
+  }
+},
+{
+  "type": "way",
+  "id": 825077636,
+  "bounds": {
+    "minlat": -20.2662726,
+    "minlon": 148.7117333,
+    "maxlat": -20.2661543,
+    "maxlon": 148.7122900
+  },
+  "geometry": [
+    { "lat": -20.2662726, "lon": 148.7122900 },
+    { "lat": -20.2661543, "lon": 148.7117333 }
+  ],
+  "tags": {
+    "floating": "yes",
+    "man_made": "pier"
+  }
+},
+{
+  "type": "way",
+  "id": 996211642,
+  "bounds": {
+    "minlat": -20.2645878,
+    "minlon": 148.7100294,
+    "maxlat": -20.2628055,
+    "maxlon": 148.7135676
+  },
+  "geometry": [
+    { "lat": -20.2635160, "lon": 148.7135676 },
+    { "lat": -20.2635609, "lon": 148.7135607 },
+    { "lat": -20.2635967, "lon": 148.7134393 },
+    { "lat": -20.2632541, "lon": 148.7129599 },
+    { "lat": -20.2630309, "lon": 148.7108639 },
+    { "lat": -20.2641409, "lon": 148.7107842 },
+    { "lat": -20.2643372, "lon": 148.7106314 },
+    { "lat": -20.2644327, "lon": 148.7104494 },
+    { "lat": -20.2645295, "lon": 148.7102705 },
+    { "lat": -20.2645878, "lon": 148.7100823 },
+    { "lat": -20.2644734, "lon": 148.7100294 },
+    { "lat": -20.2642548, "lon": 148.7104486 },
+    { "lat": -20.2640558, "lon": 148.7106265 },
+    { "lat": -20.2637714, "lon": 148.7106483 },
+    { "lat": -20.2628055, "lon": 148.7107312 },
+    { "lat": -20.2630704, "lon": 148.7129876 },
+    { "lat": -20.2633052, "lon": 148.7133004 },
+    { "lat": -20.2635160, "lon": 148.7135676 }
+  ],
+  "tags": {
+    "area": "yes",
+    "man_made": "breakwater",
+    "material": "stone"
+  }
+},
+{
+  "type": "way",
+  "id": 996211643,
+  "bounds": {
+    "minlat": -20.2675046,
+    "minlon": 148.7067660,
+    "maxlat": -20.2634581,
+    "maxlon": 148.7100923
+  },
+  "geometry": [
+    { "lat": -20.2674238, "lon": 148.7067844 },
+    { "lat": -20.2672766, "lon": 148.7067660 },
+    { "lat": -20.2667871, "lon": 148.7067703 },
+    { "lat": -20.2664036, "lon": 148.7069076 },
+    { "lat": -20.2659979, "lon": 148.7071551 },
+    { "lat": -20.2656996, "lon": 148.7073767 },
+    { "lat": -20.2654504, "lon": 148.7076648 },
+    { "lat": -20.2652954, "lon": 148.7079357 },
+    { "lat": -20.2651874, "lon": 148.7082019 },
+    { "lat": -20.2650972, "lon": 148.7084727 },
+    { "lat": -20.2650456, "lon": 148.7087678 },
+    { "lat": -20.2650321, "lon": 148.7088781 },
+    { "lat": -20.2649574, "lon": 148.7089797 },
+    { "lat": -20.2647984, "lon": 148.7089689 },
+    { "lat": -20.2646768, "lon": 148.7089166 },
+    { "lat": -20.2644284, "lon": 148.7089166 },
+    { "lat": -20.2640991, "lon": 148.7090069 },
+    { "lat": -20.2638854, "lon": 148.7091390 },
+    { "lat": -20.2636894, "lon": 148.7093646 },
+    { "lat": -20.2635780, "lon": 148.7095440 },
+    { "lat": -20.2635032, "lon": 148.7096976 },
+    { "lat": -20.2634581, "lon": 148.7099158 },
+    { "lat": -20.2635201, "lon": 148.7099695 },
+    { "lat": -20.2635748, "lon": 148.7099636 },
+    { "lat": -20.2636809, "lon": 148.7098976 },
+    { "lat": -20.2638052, "lon": 148.7096082 },
+    { "lat": -20.2639914, "lon": 148.7093471 },
+    { "lat": -20.2642643, "lon": 148.7091782 },
+    { "lat": -20.2645207, "lon": 148.7091418 },
+    { "lat": -20.2647090, "lon": 148.7091455 },
+    { "lat": -20.2649043, "lon": 148.7092379 },
+    { "lat": -20.2651308, "lon": 148.7093824 },
+    { "lat": -20.2653050, "lon": 148.7096220 },
+    { "lat": -20.2653880, "lon": 148.7099063 },
+    { "lat": -20.2654309, "lon": 148.7100717 },
+    { "lat": -20.2655081, "lon": 148.7100923 },
+    { "lat": -20.2655563, "lon": 148.7100456 },
+    { "lat": -20.2655723, "lon": 148.7099559 },
+    { "lat": -20.2655868, "lon": 148.7098597 },
+    { "lat": -20.2654560, "lon": 148.7094929 },
+    { "lat": -20.2653568, "lon": 148.7093493 },
+    { "lat": -20.2652519, "lon": 148.7092264 },
+    { "lat": -20.2652255, "lon": 148.7089432 },
+    { "lat": -20.2652868, "lon": 148.7086000 },
+    { "lat": -20.2653757, "lon": 148.7082595 },
+    { "lat": -20.2655715, "lon": 148.7078965 },
+    { "lat": -20.2658281, "lon": 148.7075520 },
+    { "lat": -20.2661608, "lon": 148.7072941 },
+    { "lat": -20.2664870, "lon": 148.7071000 },
+    { "lat": -20.2668887, "lon": 148.7069849 },
+    { "lat": -20.2672872, "lon": 148.7069718 },
+    { "lat": -20.2673947, "lon": 148.7069879 },
+    { "lat": -20.2674498, "lon": 148.7069770 },
+    { "lat": -20.2675046, "lon": 148.7068755 },
+    { "lat": -20.2674829, "lon": 148.7068295 },
+    { "lat": -20.2674238, "lon": 148.7067844 }
+  ],
+  "tags": {
+    "area": "yes",
+    "man_made": "breakwater"
+  }
+},
+{
+  "type": "node",
+  "id": 2077328618,
+  "lat": -20.2674893,
+  "lon": 148.7165497,
+  "tags": {
+    "amenity": "doctors",
+    "healthcare": "doctor",
+    "name": "Whitsunday Doctors Service"
+  }
+},
+{
+  "type": "node",
+  "id": 2079907045,
+  "lat": -20.2692133,
+  "lon": 148.7198803,
+  "tags": {
+    "brand": "NightOwl",
+    "brand:wikidata": "Q7033183",
+    "name": "NightOwl",
+    "opening_hours": "Mo-Fr 06:00-23:00; Sa 06:00-00:00; Su 06:00-23:00",
+    "shop": "convenience"
+  }
+},
+{
+  "type": "node",
+  "id": 2079907047,
+  "lat": -20.2692412,
+  "lon": 148.7199814,
+  "tags": {
+    "amenity": "atm",
+    "name": "ANZ"
+  }
+},
+{
+  "type": "node",
+  "id": 4443493857,
+  "lat": -20.2690846,
+  "lon": 148.7205178,
+  "tags": {
+    "name": "Ju-Lee's",
+    "shop": "laundry"
+  }
+},
+{
+  "type": "node",
+  "id": 4443493858,
+  "lat": -20.2682618,
+  "lon": 148.7170030,
+  "tags": {
+    "addr:housenumber": "348",
+    "addr:street": "Shute Harbour Road",
+    "amenity": "bank",
+    "atm": "yes",
+    "brand": "NAB",
+    "brand:wikidata": "Q1430985",
+    "brand:wikipedia": "en:National Australia Bank",
+    "name": "NAB"
+  }
+},
+{
+  "type": "node",
+  "id": 4443493859,
+  "lat": -20.2676952,
+  "lon": 148.7164561,
+  "tags": {
+    "name": "NightOwl",
+    "opening_hours": "Mo-Th 06:00-00:00; Fr 06:00-01:00; Sa 06:00-03:30; Su 06:00-01:00",
+    "shop": "convenience"
+  }
+},
+{
+  "type": "node",
+  "id": 4443493863,
+  "lat": -20.2681013,
+  "lon": 148.7173634,
+  "tags": {
+    "amenity": "atm",
+    "brand": "Westpac",
+    "name": "Westpac"
+  }
+},
+{
+  "type": "node",
+  "id": 4443493867,
+  "lat": -20.2692488,
+  "lon": 148.7188012,
+  "tags": {
+    "amenity": "atm",
+    "brand": "rediATM",
+    "name": "rediATM"
+  }
+},
+{
+  "type": "way",
+  "id": 245931031,
+  "center": {
+    "lat": -20.2719936,
+    "lon": 148.7054668
+  },
+  "tags": {
+    "amenity": "hospital",
+    "name": "Health Care Centre",
+    "source": "Bing"
+  }
+},
+{
+  "type": "way",
+  "id": 323929152,
+  "center": {
+    "lat": -20.2697963,
+    "lon": 148.7188196
+  },
+  "tags": {
+    "addr:postcode": "4802",
+    "addr:street": "Waterson Way",
+    "addr:suburb": "Airlie Beach",
+    "brand": "Woolworths",
+    "brand:wikidata": "Q3249145",
+    "brand:wikipedia": "en:Woolworths Supermarkets",
+    "building": "industrial",
+    "building:levels": "2",
+    "name": "Woolworths",
+    "opening_hours": "Mo-Fr 08:00-21:00; Sa 08:00-18:00; Su 09:00-18:00",
+    "shop": "supermarket",
+    "website": "https://www.woolworths.com.au/shop/storelocator/qld-airlie-beach-2951"
+  }
+}
+
+  ]
+}

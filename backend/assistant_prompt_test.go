@@ -1305,6 +1305,19 @@ func TestBuildAssistantSystemPrompt_AnchorageShelterRule(t *testing.T) {
 	}
 }
 
+func TestBuildAssistantSystemPrompt_MarinaDetailsRule(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{
+		"marina_details",
+		"find_places gave you",
+		"vessel_limit_check",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt misses %q", want)
+		}
+	}
+}
+
 // A straight line across the chart is never a passage distance: the prompt
 // sends Mate to the routing tools and tells it what to say when they fail.
 func TestBuildAssistantSystemPrompt_PassageDistanceIsRoutedNeverStraight(t *testing.T) {

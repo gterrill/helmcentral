@@ -50,7 +50,7 @@ func TestMCPPolicy_CuratedDefaultSet(t *testing.T) {
 		"anchorage_shelter", "find_equipment", "find_places", "get_active_alarms", "get_alarm_context", "get_boat_context",
 		"get_cruise_summary", "get_last_recorded", "get_maintenance_log", "get_nearby_vessels", "get_path_history",
 		"get_planned_stay", "get_tides", "get_vessel_particulars", "get_vessel_status", "get_wind_forecast",
-		"list_maintenance", "list_passages", "read_help", "route_distance",
+		"list_maintenance", "list_passages", "marina_details", "read_help", "route_distance",
 	}
 	got := mcpDefaultTools()
 	sort.Strings(got)
