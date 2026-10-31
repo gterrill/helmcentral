@@ -31,6 +31,7 @@ import {
   type ImportSummary,
   type PassageSummary,
 } from '@/lib/passages'
+import { errorMessage } from '@/lib/errors'
 
 const TREE_COLLAPSED_KEY = 'passages.tree.collapsed'
 const TREE_EXPANDED_KEY = 'passages.tree.expanded'
@@ -153,7 +154,7 @@ export function PassagesPanel({
     try {
       setSummary(await passagesApi.importGPX(files))
     } catch (err) {
-      toast.error('Could not import tracks', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not import tracks', { description: errorMessage(err) })
     } finally {
       setImporting(false)
     }
@@ -167,7 +168,7 @@ export function PassagesPanel({
     try {
       for (const id of selectedIds) await passagesApi.patch(id, { cruise_id: cruiseId })
     } catch (err) {
-      toast.error('Could not move passages', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not move passages', { description: errorMessage(err) })
     } finally {
       setBusy(false)
       afterBulk()
@@ -185,7 +186,7 @@ export function PassagesPanel({
       afterBulk()
       onFilter({ kind: 'cruise', id: cruise.id })
     } catch (err) {
-      toast.error('Could not create cruise', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not create cruise', { description: errorMessage(err) })
     } finally {
       setBusy(false)
     }

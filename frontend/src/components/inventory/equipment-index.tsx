@@ -32,6 +32,7 @@ import {
   EquipmentDependantsNotice,
   dependantsBlock,
 } from '@/components/inventory/equipment-dependants-notice'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0142: the Equipment index, rebuilt on the CRUD pattern library
 // (components/patterns) in place of the hand-rolled shell this used to copy
@@ -162,7 +163,7 @@ export function EquipmentIndex({ list, onListChange, onOpenItem, onNewItem, canW
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message, dialog stays
       // open so the operator sees it (and the item) rather than losing both.
-      setDeleteError(err instanceof Error ? err.message : String(err))
+      setDeleteError(errorMessage(err))
     } finally {
       setDeleting(false)
     }

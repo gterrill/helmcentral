@@ -20,6 +20,7 @@ import { useFollowingDraft } from '@/hooks/use-following-draft'
 import { useDocumentFolderTree } from '@/hooks/use-document-folder-tree'
 import { useDocument, useFolderPath, type DocumentRecord } from '@/hooks/use-documents'
 import { documentDisplayName, documentFailureMessage, formatBytes, formatDocumentTime, mimeLabel } from '@/lib/document-display'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0115: a full-panel page for one document's metadata,
 // mirroring ADR 0112's `/wall-displays/<slug>` editor (display-editor-panel.tsx) -
@@ -216,7 +217,7 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
     } catch (err) {
       // The server's own message; the dialog closes so it is visible on the page.
       setMoveOpen(false)
-      setMoveError(err instanceof Error ? err.message : String(err))
+      setMoveError(errorMessage(err))
     }
   }
 
@@ -318,7 +319,7 @@ export const DocumentDetailsPage = forwardRef<DocumentDetailsPageHandle, Documen
       // is left exactly as typed - a rejected save (a transient network
       // drop, a duplicate title some other rule now forbids) must not cost
       // the operator the edit they were mid-way through.
-      setSaveError(err instanceof Error ? err.message : String(err))
+      setSaveError(errorMessage(err))
     } finally {
       setSaving(false)
     }

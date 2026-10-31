@@ -14,6 +14,7 @@ import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-disp
 import type { NoteLink } from '@/lib/note-links'
 
 import { ChecklistRunner } from './checklist-runner'
+import { errorMessage } from '@/lib/errors'
 
 // The right-hand document viewer: a PDF, an image, a note (read, edit, pin,
 // run its checklist) or plain text. Extracted from documents-panel.tsx so an
@@ -65,7 +66,7 @@ export function DocumentViewerSheet({
       await action()
       setViewerError(null)
     } catch (err) {
-      setViewerError(err instanceof Error ? err.message : String(err))
+      setViewerError(errorMessage(err))
     }
   }, [runActionProp])
 
@@ -141,7 +142,7 @@ export function DocumentViewerSheet({
         // Fail loud (AGENTS.md): an unreadable note must not render as an
         // empty one, which looks exactly like a note the operator emptied.
         if (!cancelled) setViewerText(null)
-        if (!cancelled) setViewerError(err instanceof Error ? err.message : String(err))
+        if (!cancelled) setViewerError(errorMessage(err))
       })
       .finally(() => { if (!cancelled) setViewerLoading(false) })
     return () => { cancelled = true }
@@ -160,7 +161,7 @@ export function DocumentViewerSheet({
       setViewerError(null)
       setViewerEditing(false)
     } catch (err) {
-      setViewerError(err instanceof Error ? err.message : String(err))
+      setViewerError(errorMessage(err))
       throw err // NoteEditor keeps its dirty flag on a failed save
     }
   }, [viewerId, patchViewerNote])

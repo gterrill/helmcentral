@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import type { ActiveAlarm } from './use-alarms'
+import { errorMessage } from '@/lib/errors'
 
 interface UseAnchorAlarmResult {
   /** Audible: a live drag, not yet silenced (or force-resumed via
@@ -241,7 +242,7 @@ export function useAnchorAlarm(
     }
     if (!ruleId || !acknowledge) return
     void acknowledge(ruleId).catch((err: unknown) => {
-      setSilenceError(err instanceof Error ? err.message : String(err))
+      setSilenceError(errorMessage(err))
     })
   }, [ruleId, acknowledge, stopKlaxon, forcedAudible])
 

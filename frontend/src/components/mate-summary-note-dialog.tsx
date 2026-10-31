@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input'
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { fetchSummaryDraft, saveSummaryNote, type SummaryDraft } from '@/lib/mate-summary-note'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0162: the review step between Mate's summary of a conversation and a
 // note. Opening it asks the server for a draft (a few seconds of model time,
@@ -47,7 +48,7 @@ export function MateSummaryNoteDialog({ open, onOpenChange, conversationId, onSa
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
-        setLoadError(err instanceof Error ? err.message : String(err))
+        setLoadError(errorMessage(err))
       })
     return () => controller.abort()
   }, [open, conversationId])
@@ -71,7 +72,7 @@ export function MateSummaryNoteDialog({ open, onOpenChange, conversationId, onSa
       })
       onSaved(result.noteId, result.created)
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
+      setSaveError(errorMessage(err))
     } finally {
       setSaving(false)
     }

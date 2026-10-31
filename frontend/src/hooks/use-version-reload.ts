@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { apiRequest } from '@/lib/api-query'
 import { BUNDLE_BUILD, isUnstamped, type AppVersion } from '@/lib/build-stamp'
+import { errorMessage } from '@/lib/errors'
 
 export type { AppVersion }
 
@@ -133,7 +134,7 @@ export function useVersionReload(options: VersionReloadOptions = {}): VersionWat
         return build
       } catch (err) {
         console.warn('Version check failed; will try again at the next check', err)
-        if (!cancelled && baseline === null) setReadError(err instanceof Error ? err.message : String(err))
+        if (!cancelled && baseline === null) setReadError(errorMessage(err))
         return null
       }
     }

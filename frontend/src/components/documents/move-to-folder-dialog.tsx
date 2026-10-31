@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useDocuments } from '@/hooks/use-documents'
+import { errorMessage } from '@/lib/errors'
 
 // The Move dialog shared by the Documents listing and a document's Details
 // page, so both move into a folder the same way.
@@ -59,7 +60,7 @@ function FolderPicker({
       // "folder name already exists") rather than an invented one, and the
       // picker stays right where it was - the operator didn't ask to move
       // anywhere, only to create a folder that turned out to already exist.
-      setCreateError(err instanceof Error ? err.message : String(err))
+      setCreateError(errorMessage(err))
     } finally {
       setCreating(false)
     }

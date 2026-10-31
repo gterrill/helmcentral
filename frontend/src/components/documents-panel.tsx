@@ -90,6 +90,7 @@ import { ManualFolderView } from './documents/manual-folder-view'
 import { NoteTypeIconButton } from './documents/note-type-icon-button'
 import { UnfiledNotesView } from './documents/unfiled-notes-view'
 import { prefetchNoteEditor } from './note-editor'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0121: this panel is now the ONLY place a note gets created - the
 // global header action and Alt+N shortcut ADR 0119 built are gone. Lazy
@@ -630,7 +631,7 @@ export function DocumentsPanel({
       await action()
       setActionError(null)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err))
+      setActionError(errorMessage(err))
     }
   }, [])
 
@@ -737,7 +738,7 @@ export function DocumentsPanel({
       setDeleteTarget(null)
       void unfiled.refresh() // a deleted document may have been an unfiled note
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : String(err))
+      setDeleteError(errorMessage(err))
     } finally {
       setDeleting(false)
     }

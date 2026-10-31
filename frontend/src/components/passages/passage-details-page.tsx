@@ -33,6 +33,7 @@ import {
   type WaterRise,
   type WaterRiseLabel,
 } from '@/lib/passages'
+import { errorMessage } from '@/lib/errors'
 
 export type PassageDetailsMode =
   | { kind: 'passage'; id: string }
@@ -175,7 +176,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
     try {
       await passagesApi.labelWaterRise(id, riseLabelTime(rise), label)
     } catch (err) {
-      toast.error('Could not label water', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not label water', { description: errorMessage(err) })
     }
   }
 
@@ -233,7 +234,7 @@ function CombinedPassages({ ids, units, canWrite, isDarkTheme, list, onBack, onO
       setSaveOpen(false)
       onOpenCruise(cruise.id)
     } catch (err) {
-      toast.error('Could not save cruise', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not save cruise', { description: errorMessage(err) })
     } finally {
       setBusy(false)
     }

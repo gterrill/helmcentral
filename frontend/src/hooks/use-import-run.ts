@@ -9,6 +9,7 @@ import {
   type ImportDecisionsPatch,
   type ImportRun,
 } from '@/lib/import-run'
+import { errorMessage } from '@/lib/errors'
 
 // One import run and the operator's working copy of its decisions. The
 // decisions are edited locally as the operator moves around a page and sent
@@ -58,7 +59,7 @@ export function useImportRun(runId: string) {
         setDecisions(loaded.decisions)
       },
       (err: unknown) => {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err))
+        if (!cancelled) setLoadError(errorMessage(err))
       },
     )
     return () => { cancelled = true }

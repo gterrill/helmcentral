@@ -41,6 +41,7 @@ import {
   type PassageDetail,
   type TimedSegment,
 } from '@/lib/passages'
+import { errorMessage } from '@/lib/errors'
 
 /** The passage and real instant the replay is standing at. */
 export interface ReplayCursor {
@@ -101,7 +102,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
         })),
       }
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err), items: [] }
+      return { error: errorMessage(err), items: [] }
     }
   }, [passages])
 
@@ -146,7 +147,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       .then(() => insetViewApi.save(insetRange.from, insetRange.to, next))
       .then(() => undefined)
       .catch((err: unknown) => {
-        toast.error('Could not save the overview map', { description: err instanceof Error ? err.message : String(err) })
+        toast.error('Could not save the overview map', { description: errorMessage(err) })
       })
       .finally(() => {
         insetWrites.current -= 1
@@ -304,7 +305,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       try {
         await write()
       } catch (err) {
-        setSignError(err instanceof Error ? err.message : String(err))
+        setSignError(errorMessage(err))
       } finally {
         signWritesPending.current -= 1
         setSignWrites((n) => n - 1)
@@ -481,7 +482,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       await write()
       setShotError(null)
     } catch (err) {
-      setShotError(err instanceof Error ? err.message : String(err))
+      setShotError(errorMessage(err))
     } finally {
       setShotBusy(false)
     }

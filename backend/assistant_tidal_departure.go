@@ -136,7 +136,7 @@ func (d assistantToolDeps) executePlanTidalDeparture(ctx context.Context, raw js
 		}
 	}
 	lat, lon, course, hours, floodSet := *args.Lat, *args.Lon, *args.CourseDeg, *args.PassageHours, *args.FloodSetDeg
-	if lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+	if !validLatLon(lat, lon) {
 		return "", fmt.Errorf("plan_tidal_departure: lat/lon is not a valid position")
 	}
 	if course < 0 || course > 360 {

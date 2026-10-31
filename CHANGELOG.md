@@ -40,6 +40,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   The alarm email no longer has a "Path:" line with the instrument's internal
   name. It shows the message, state, value and time.
 
+- **Mate can keep places you name.** When you give Mate the position of a spot
+  the map doesn't name, such as "Thomas Island South, 020°32.676' S
+  149°07.136' E", it now offers to save it. You tap **Apply** and Mate finds it
+  by name in every later conversation, instead of searching again. See and
+  change your places, or add one yourself, under **Settings → Saved places**.
+  Outside assistants that can look up place names find your saved places too.
+
 - **ChatGPT can now read the boat.** ChatGPT can't send the header that Claude's
   connector uses, so it signs in instead. It opens a Helmcentral page, you paste
   an outside assistant token and select **Allow**, and that token is used for

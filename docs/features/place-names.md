@@ -45,6 +45,37 @@ When a lookup fails, here is what you see:
 - **Mate:** It carries on without names. After a few failures in one answer,
   Mate stops looking places up and says so.
 
+## Places you give Mate
+
+Plenty of anchorages and waypoints have no name on the map. You might call one
+"Thomas Island South" because it's where you anchor in a southerly. The only
+thing that marks it is a position you wrote in the log, so Mate can't find it
+by looking the name up.
+
+So when you tell Mate the position of a named spot that it didn't know, it
+offers to keep it. Here is how that works:
+
+- **Mate asks first:** It shows a card with **Apply** and **Dismiss**, like any
+  other change it proposes. Nothing is saved until you tap **Apply**.
+- **Mate looks here first:** Once a place is saved, Mate finds it by name in
+  every later conversation, with its distance and bearing from the boat. It does
+  that before it asks the map, and it tells you it's using your saved place.
+- **A name that's already saved:** If you give Mate a new position for a name it
+  has, it proposes moving that place. The card shows the old position and the
+  new one.
+- **Names match loosely:** Capitals, punctuation and spacing don't matter, and
+  "Is" or "Isl" stands for "Island". "Thomas Is. South" finds "Thomas Island
+  South". Two places can't have names that match like this.
+
+An outside assistant that can look up place names finds your saved places the same way.
+
+Mate only saves a position you gave it. It never works one out and saves that.
+
+You can add, rename, move and delete saved places under **Settings → Saved places**.
+The steps are in [Manage the places you've given Mate](../how-to/manage-saved-places.md).
+Positions are shown, and typed, as degrees and decimal minutes, such as
+`020°32.676' S`.
+
 ## Running your own server
 
 You can run an Overpass server aboard on the same home server that runs
@@ -90,3 +121,6 @@ What it costs:
   find it by the name you use.
 - Names come from the nearest named feature, so near a headland the name can
   belong to the bay across the water.
+- A saved place is found only by its whole name. Mate doesn't find one from part
+  of the name. Saved places don't change the name the position tile or the
+  Nearby map shows.

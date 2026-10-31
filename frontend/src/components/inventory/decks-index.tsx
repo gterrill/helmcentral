@@ -12,6 +12,7 @@ import { useInventoryDecks, useInventoryZones } from '@/hooks/use-inventory'
 import type { InventoryList } from '@/lib/app-location'
 import { deckRows, orderDecks, type DeckRow } from '@/lib/index-order'
 import { patchList } from '@/lib/list-order'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0156: the Decks list under Locations - one row per deck plan, built on
 // the pattern library like LocationsIndex. A deck is a plan image the
@@ -78,7 +79,7 @@ export function DecksIndex({ list, onListChange, onOpenDeck, onOpenLocations, ca
       onOpenDeck(deck.id)
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message, never an invented one.
-      setCreateError(err instanceof Error ? err.message : String(err))
+      setCreateError(errorMessage(err))
     } finally {
       setSaving(false)
     }

@@ -1,5 +1,6 @@
 import { KEYS } from 'platejs'
 import type { SlateEditor } from 'platejs'
+import { errorMessage } from '@/lib/errors'
 
 // Code-review finding: the note editor's own Image button (note-editor-
 // impl.tsx) hands off to the phone's camera/photo-library UI for Take
@@ -99,6 +100,6 @@ export function insertUploadedPhotos(
  * a Document, just not linked into this note's body). */
 export function describePhotoInsertFailure(names: string[], err: unknown): string {
   const label = names.length === 1 ? names[0] : `${names.length} photos`
-  const reason = err instanceof Error ? err.message : String(err)
+  const reason = errorMessage(err)
   return `${label} uploaded, but could not be placed in the note here: ${reason}. Nothing was lost - find it in Documents.`
 }

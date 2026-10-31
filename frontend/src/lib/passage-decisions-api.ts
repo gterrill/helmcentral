@@ -1,6 +1,7 @@
 import { apiRequest, invalidateQueries } from '@/lib/api-query'
 import { decodePassageDecision, type PassageDecision, type PassageDecisionState } from '@/lib/mate-cards'
 import { PASSAGES_KEY } from '@/lib/passages-api'
+import { errorMessage } from '@/lib/errors'
 
 // What the operator did with a Mate passage plan, over apiRequest. A failed
 // request throws with the server's own message; nothing is shown before the
@@ -27,7 +28,7 @@ export const passageDecisionsApi = {
     try {
       return decodePassageDecision(decision)
     } catch (err) {
-      throw new PassageDecisionUnreadableError(err instanceof Error ? err.message : String(err))
+      throw new PassageDecisionUnreadableError(errorMessage(err))
     }
   },
 }

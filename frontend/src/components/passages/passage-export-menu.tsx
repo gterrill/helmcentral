@@ -43,6 +43,7 @@ import type { CruiseStats, PassageDetail } from '@/lib/passages'
 import { prepareSignPhotos } from '@/lib/passage-export-photos'
 import { CARD_LIMIT_BYTES, fmtMB, signSummary, signsInRange } from '@/lib/passage-export-signs'
 import { saveBlob } from '@/lib/save-blob'
+import { errorMessage } from '@/lib/errors'
 
 export interface PassageExportMenuProps {
   kind: ExportInput['kind']
@@ -56,7 +57,7 @@ export interface PassageExportMenuProps {
 const NO_PHOTOS: ReadonlyMap<string, string> = new Map()
 
 function failed(action: string, err: unknown) {
-  toast.error(`Could not ${action}`, { description: err instanceof Error ? err.message : String(err) })
+  toast.error(`Could not ${action}`, { description: errorMessage(err) })
 }
 
 /** Share a passage, a cruise or a selection: the blog embed and two images. */
@@ -121,7 +122,7 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
     const current = () => latestKey.current === key
     const promise = prepareSignPhotos(photoSigns, { onProgress: (done, total) => { if (current()) setProgress({ done, total }) } })
       .then((prepared) => { if (current()) setPhotos(prepared); return prepared })
-      .catch((err: unknown) => { if (current()) setPhotoError(err instanceof Error ? err.message : String(err)); throw err })
+      .catch((err: unknown) => { if (current()) setPhotoError(errorMessage(err)); throw err })
       .finally(() => { if (preparing.current?.key === key) { preparing.current = null; setProgress(null) } })
     preparing.current = { key, promise }
     return promise

@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { passagesApi } from '@/lib/passages-api'
 import type { CruiseRecord } from '@/lib/passages'
+import { errorMessage } from '@/lib/errors'
 
 export interface CruiseEditPanelProps {
   cruise: CruiseRecord
@@ -39,7 +40,7 @@ export function CruiseEditPanel({ cruise, canWrite, onDeleted }: CruiseEditPanel
     : null)
 
   const fail = (action: string, err: unknown) =>
-    toast.error(`Could not ${action}`, { description: err instanceof Error ? err.message : String(err) })
+    toast.error(`Could not ${action}`, { description: errorMessage(err) })
 
   return (
     <>

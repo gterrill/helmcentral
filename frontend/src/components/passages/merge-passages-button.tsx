@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { mergeBlocker } from '@/lib/passage-merge'
 import { passagesApi } from '@/lib/passages-api'
 import type { PassageSummary } from '@/lib/passages'
+import { errorMessage } from '@/lib/errors'
 
 type Passage = Pick<PassageSummary, 'id' | 'start' | 'end' | 'cruise_id' | 'hidden'>
 
@@ -30,7 +31,7 @@ export function MergePassagesButton({ selected, all, disabled = false, onMerged,
       const merged = await passagesApi.merge([...selected].sort((a, b) => Date.parse(a.start) - Date.parse(b.start)).map((p) => p.id))
       onMerged(merged.id)
     } catch (err) {
-      toast.error('Could not merge passages', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not merge passages', { description: errorMessage(err) })
     } finally {
       setBusy(false)
       onBusyChange?.(false)

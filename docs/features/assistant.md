@@ -99,6 +99,7 @@ On request, it can look up more than that. Here is what it can do:
   and sea angle against your planned course by calculation, not by eye. That
   way a following sea and a head sea are called correctly.
 - **A fair-tide departure:** See the next section.
+- **Places you've named:** Give it a position for a spot the map doesn't name and it offers to save it, then finds it by name from then on. See [Places you give Mate](place-names.md#places-you-give-mate).
 - **Anchorage shelter:** See "Sheltered from which winds" below.
 - **A marina:** See "Checking a marina" below.
 - **Passage time and fuel:** See "Passage estimates" below.

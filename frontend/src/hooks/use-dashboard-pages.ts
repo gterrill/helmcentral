@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/errors'
 import { useCallback, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { DashboardLayoutItem } from '@/lib/dashboard-widgets'
@@ -127,10 +128,6 @@ function samePagesSelection(a: PagesSelection, b: PagesSelection): boolean {
 
 const refetchPages = () => refetchQuery(PAGES_KEY, PAGES_PATH)
 
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 export function useDashboardPages() {
   const [reordering, setReordering] = useState(false)
   const reorderPending = useRef(false)
@@ -162,7 +159,7 @@ export function useDashboardPages() {
       patchPages((prev) => [...prev, page])
       return page
     } catch (err) {
-      toast.error('Could not create page', { description: messageOf(err) })
+      toast.error('Could not create page', { description: errorMessage(err) })
       return null
     }
   }, [])
@@ -181,7 +178,7 @@ export function useDashboardPages() {
       patchPages((prev) => prev.map((p) => (p.id === id ? page : p)))
       return page
     } catch (err) {
-      toast.error('Could not save dashboard', { description: messageOf(err) })
+      toast.error('Could not save dashboard', { description: errorMessage(err) })
       return null
     }
   }, [])
@@ -192,7 +189,7 @@ export function useDashboardPages() {
       patchPages((prev) => prev.filter((p) => p.id !== id))
       return true
     } catch (err) {
-      toast.error('Could not delete page', { description: messageOf(err) })
+      toast.error('Could not delete page', { description: errorMessage(err) })
       return false
     }
   }, [])
@@ -229,7 +226,7 @@ export function useDashboardPages() {
       return true
     } catch (err) {
       // Keep the last confirmed order and leave the dashboard visible.
-      toast.error('Could not reorder pages', { description: messageOf(err) })
+      toast.error('Could not reorder pages', { description: errorMessage(err) })
       return false
     } finally {
       reorderPending.current = false

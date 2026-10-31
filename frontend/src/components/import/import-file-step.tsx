@@ -6,6 +6,7 @@ import { documentContentUrl } from '@/lib/document-download'
 import { fileSettled, uploadImportFile, usableEquipment, type ImportRun, type StagedFile } from '@/lib/import-run'
 import { ImportSelect, Pill, StepHeading, type StepProps } from '@/components/import/import-shared'
 import { cn } from '@/lib/utils'
+import { errorMessage } from '@/lib/errors'
 
 // Step 8, once per photo or document. YachtWave's links point at its own
 // servers and Helmcentral never fetches them: the operator opens the link,
@@ -45,7 +46,7 @@ export function ImportFileStep({ run, decisions, setDecision, file, position, on
       const result = await uploadImportFile(run.id, file.key, blob, filename)
       onUploaded(result.run, file.key)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setUploading(false)
     }

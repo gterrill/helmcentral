@@ -30,6 +30,7 @@ import {
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
 import { documentViewerHref } from '@/lib/document-citation'
 import { addMonthsISO, todayISO } from '@/lib/local-date'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0138: the service log's own two write dialogs - completing a rule
 // (spec §6, always kind='maintenance') and a standalone entry (repair,
@@ -259,7 +260,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
       setCompletedEntry(result.entry)
       setCompletedRule(result.rule)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -272,7 +273,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
       const updated = await uploadPhotoFiles(completedEntry.id, files)
       setCompletedEntry(updated)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     }
   }
 
@@ -282,7 +283,7 @@ export function MaintenanceCompleteDialog({ rule, onCancel, onComplete }: Mainte
       const updated = await deleteMaintenanceLogPhoto(completedEntry.id, documentId)
       setCompletedEntry(updated)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     }
   }
 
@@ -491,7 +492,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
       setSavedEntry(result)
       setDirty(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -518,7 +519,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
       await onDelete(savedEntry.id)
       onCancel()
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -530,7 +531,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
     try {
       setSavedEntry(await uploadPhotoFiles(savedEntry.id, files))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     }
   }
 
@@ -539,7 +540,7 @@ export function MaintenanceLogEntryDialog({ entry, equipmentId, open, onCancel, 
     try {
       setSavedEntry(await deleteMaintenanceLogPhoto(savedEntry.id, documentId))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     }
   }
 

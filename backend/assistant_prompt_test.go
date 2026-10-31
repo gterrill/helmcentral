@@ -1477,3 +1477,12 @@ func TestTrimmedAssistantScreenAlarmID_DropsAnOverlongID(t *testing.T) {
 		t.Errorf("an overlong id must be dropped, got %d runes", len(got))
 	}
 }
+
+func TestBuildAssistantSystemPrompt_OffersSavePlaceAndPrefersSavedPlaces(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{"save_place", `search "saved"`} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the prompt to mention %q", want)
+		}
+	}
+}

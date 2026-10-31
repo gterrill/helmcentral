@@ -87,13 +87,17 @@ type assistantLatLon struct {
 // and headlands, so it is a way to sort candidates and say "about", never
 // the length of a passage: estimate_passage routes that over water.
 type assistantPlaceCandidate struct {
-	Name                   string  `json:"name"`
-	Kind                   string  `json:"kind"`
-	Lat                    float64 `json:"lat"`
-	Lon                    float64 `json:"lon"`
-	StraightLineNm         float64 `json:"straight_line_nm"`
-	StraightLineBearingDeg int     `json:"straight_line_bearing_deg"`
-	Source                 string  `json:"source"`
+	Name string  `json:"name"`
+	Kind string  `json:"kind"`
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+	// The straight-line figures are nil when there was no search centre to
+	// measure from: 0 nm would be a claim.
+	StraightLineNm         *float64 `json:"straight_line_nm,omitempty"`
+	StraightLineBearingDeg *int     `json:"straight_line_bearing_deg,omitempty"`
+	Source                 string   `json:"source"`
+	// Note is the operator's own note on a saved place.
+	Note string `json:"note,omitempty"`
 }
 
 type assistantFindPlacesResult struct {
@@ -195,6 +199,25 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		haveCentre = true
 	}
 
+	// The operator's own saved places come first. A hit is their position for
+	// their name, so it is the answer and the provider is not asked. It needs
+	// no search centre: without one, distance and bearing are left out.
+	saved, err := d.savedPlaceCandidate(query, lat, lon, haveCentre)
+	if err != nil {
+		return "", err
+	}
+	if saved != nil {
+		result := assistantFindPlacesResult{
+			Search:  "saved",
+			Results: []assistantPlaceCandidate{*saved},
+			Note:    "The operator's saved place, in the position they gave. Use it as the place.",
+		}
+		if haveCentre {
+			result.Centre = &assistantLatLon{Lat: lat, Lon: lon}
+		}
+		return capToolResultJSON(&result, nil)
+	}
+
 	if !haveCentre {
 		result := assistantFindPlacesResult{
 			Results: []assistantPlaceCandidate{},
@@ -226,19 +249,20 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 	}
 
 	for _, m := range searchResult.Results {
+		nm, bearing := straightLineFrom(lat, lon, m.Lat, m.Lon)
 		candidates = append(candidates, assistantPlaceCandidate{
 			Name:                   m.Name,
 			Kind:                   m.Kind,
 			Lat:                    m.Lat,
 			Lon:                    m.Lon,
-			StraightLineNm:         roundTo1(haversineMeters(lat, lon, m.Lat, m.Lon) / metersPerNauticalMile),
-			StraightLineBearingDeg: int(math.Round(bearingDeg(lat, lon, m.Lat, m.Lon))),
+			StraightLineNm:         &nm,
+			StraightLineBearingDeg: &bearing,
 			Source:                 providerID,
 		})
 	}
 
 	candidates = dedupeAssistantPlaceCandidates(candidates)
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].StraightLineNm < candidates[j].StraightLineNm })
+	sort.Slice(candidates, func(i, j int) bool { return *candidates[i].StraightLineNm < *candidates[j].StraightLineNm })
 	if len(candidates) > maxResults {
 		candidates = candidates[:maxResults]
 	}
@@ -271,4 +295,37 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		return true
 	}
 	return capToolResultJSON(&result, shrink)
+}
+
+// straightLineFrom is the host-computed straight-line distance (nm, one
+// decimal) and bearing (whole degrees) from (lat, lon) to (toLat, toLon).
+func straightLineFrom(lat, lon, toLat, toLon float64) (float64, int) {
+	return roundTo1(haversineMeters(lat, lon, toLat, toLon) / metersPerNauticalMile),
+		int(math.Round(bearingDeg(lat, lon, toLat, toLon)))
+}
+
+// savedPlaceCandidate is the operator's saved place the query names, with
+// distance and bearing from (lat, lon) as a provider result gets, or nil when
+// none matches. Names match by savedPlaceKey, so there is at most one. A
+// missing record store is an error, as it is for save_place.
+func (d assistantToolDeps) savedPlaceCandidate(query string, lat, lon float64, haveCentre bool) (*assistantPlaceCandidate, error) {
+	store, err := d.recordStore("find_places")
+	if err != nil {
+		return nil, err
+	}
+	place, err := findSavedPlaceByName(store, query)
+	if err != nil {
+		return nil, fmt.Errorf("find_places: %w", err)
+	}
+	if place == nil {
+		return nil, nil
+	}
+	c := &assistantPlaceCandidate{
+		Name: place.Name, Kind: "saved place", Lat: place.Lat, Lon: place.Lon, Source: "saved", Note: place.Note,
+	}
+	if haveCentre {
+		nm, bearing := straightLineFrom(lat, lon, place.Lat, place.Lon)
+		c.StraightLineNm, c.StraightLineBearingDeg = &nm, &bearing
+	}
+	return c, nil
 }

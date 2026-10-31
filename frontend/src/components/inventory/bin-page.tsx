@@ -14,6 +14,7 @@ import { apiBaseUrl } from '@/config/api'
 import { findBinByCode, useEquipment, useInventoryDecks, useInventoryZones, type EquipmentItem, type InventoryBin, type InventoryZone } from '@/hooks/use-inventory'
 import { recordPager } from '@/lib/record-pager'
 import { binTagPath } from '@/lib/tag-url'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0127 (the plan's A4): the screen a scan lands on. Resolves `code`
 // case-insensitively against the zone/bin tree (useInventoryZones) - there
@@ -160,7 +161,7 @@ function BinNotFound({
       // AGENTS.md fallback policy: the server's own conflict message
       // (e.g. a code already in use case-insensitively), never an
       // invented one.
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setSaving(false)
     }
