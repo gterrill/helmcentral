@@ -282,3 +282,69 @@ func TestPassageGuard_BudgetAcceptanceIsLogged(t *testing.T) {
 		t.Fatalf("budget acceptance must be logged, got %q", buf.String())
 	}
 }
+
+// The anchorage-shelter check (ADR 0243). Mate called the south tip of Thomas
+// Island exposed to a northerly and sent the operator to the north side, with
+// the bay in fact facing south, and never called anchorage_shelter.
+const thomasIslandAnswer = "Thomas Island South (the southern tip) is exposed to the NE-N that's forecast tonight and tomorrow. If anchoring, look for a nook on the north side of Thomas Island rather than the south tip, or be ready for an open roadstead to the north wind. This is general knowledge of the coastline - check the chart before committing."
+
+func shelterCall(t *testing.T) []openRouterToolCall {
+	t.Helper()
+	var c openRouterToolCall
+	c.Function.Name = mateToolAnchorageShelter.name
+	c.Function.Arguments = `{"lat":-20.5446,"lon":149.118933}`
+	return []openRouterToolCall{c}
+}
+
+func assessCall() []openRouterToolCall {
+	var c openRouterToolCall
+	c.Function.Name = mateToolAssessPassageWindow.name
+	c.Function.Arguments = pwToolArgs
+	return []openRouterToolCall{c}
+}
+
+func TestShelterGuardTrigger(t *testing.T) {
+	cases := []struct {
+		name  string
+		text  string
+		calls []openRouterToolCall
+		want  string
+	}{
+		{"thomas island answer", thomasIslandAnswer, nil, "anchorage shelter"},
+		{"thomas island, shelter tool ran", thomasIslandAnswer, shelterCall(t), ""},
+		{"passage check ran, no shelter tool", thomasIslandAnswer, assessCall(), "anchorage shelter"},
+		{"both ran", thomasIslandAnswer, append(assessCall(), shelterCall(t)...), ""},
+		{"sheltered from", "The bay is sheltered from the southeast trades.", nil, "anchorage shelter"},
+		{"protected from", "Well protected from a northerly.", nil, "anchorage shelter"},
+		{"lee shore", "With the wind NE that is a lee shore.", nil, "anchorage shelter"},
+		{"open roadstead", "It is an open roadstead in a northerly.", nil, "anchorage shelter"},
+		{"no shelter claim", "Anchorage depth is 6 m on sand, 1.4 nm from the pass.", nil, ""},
+		{"sheltered marina, no direction", "Hamilton Island is a sheltered marina with fuel.", nil, ""},
+		{"head north to marina", "Head north to the sheltered marina and take a berth.", nil, ""},
+		{"exposed, no wind or direction", "The pontoon is exposed to the weather.", nil, ""},
+		{"forecast only", "A northerly of 15 kn tonight, easing tomorrow.", nil, ""},
+	}
+	for _, tc := range cases {
+		if got, _ := pwToolDeps(pwLimitsAll()).checkDraft(tc.text, tc.calls); got != tc.want {
+			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestShelterGuard_TwoTriggersSentTogether(t *testing.T) {
+	text := "A northerly gives you a head sea, and the bay is sheltered from the north."
+	trig, ins := pwToolDeps(passageLimits{}).checkDraft(text, nil)
+	if !strings.Contains(trig, "relative wind") || !strings.Contains(trig, "anchorage shelter") {
+		t.Fatalf("trigger = %q", trig)
+	}
+	if !strings.Contains(ins, "assess_passage_window") || !strings.Contains(ins, "anchorage_shelter") {
+		t.Errorf("instruction should carry both corrections: %q", ins)
+	}
+}
+
+func TestShelterGuard_SentBackOnceAndSecondAnswerWins(t *testing.T) {
+	reply, doer, _ := guardRun(t, pwLimitsAll(), thomasIslandAnswer, guardGood)
+	if len(doer.requests) != 2 || reply.Content != guardGood {
+		t.Fatalf("requests = %d, content = %q", len(doer.requests), reply.Content)
+	}
+}

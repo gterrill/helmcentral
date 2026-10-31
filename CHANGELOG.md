@@ -13,6 +13,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Mate checks the charted shoreline before it says an anchorage is exposed
+  or sheltered.** Asked about Thomas Island South, Mate said the bay was open
+  to a northerly when it faces south and is well protected. Mate now reads the
+  coastline around the anchorage and compares it with the forecast wind before
+  it says how much shelter you'll get. If the coastline isn't downloaded, it
+  tells you that instead of guessing.
 - **Mate can route into marinas with a narrow entrance.** A route to the basin
   at Mackay Marina used to fail with "no water route found", because the gap
   between the breakwaters is only 93 m wide. Mate now finds the way in and
