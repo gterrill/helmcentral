@@ -73,6 +73,7 @@ import {
 } from '@/components/inventory/equipment-dependants-notice'
 import { useEquipmentDependants } from '@/hooks/use-equipment-dependants'
 import { hasDependants, type EquipmentDependants } from '@/lib/equipment-dependants'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0123: the Specifications & IDs form plus the Documents tab, for one
 // equipment record - `id === null` is the "New item" draft, everything else is
@@ -283,7 +284,7 @@ export function EquipmentEditor(
   // stale list would still show a removed photo as linked.
   const reloadDocuments = useCallback((targetId: string) => {
     refreshDocuments(targetId).catch((err: unknown) => {
-      setSaveError(`The documents list could not be reloaded: ${err instanceof Error ? err.message : String(err)}`)
+      setSaveError(`The documents list could not be reloaded: ${errorMessage(err)}`)
     })
   }, [refreshDocuments])
   const [pendingRemoves, setPendingRemoves] = useState<string[]>([])
@@ -314,7 +315,7 @@ export function EquipmentEditor(
       await downloadDocument(doc.document_id, doc.filename)
       setDocumentError(null)
     } catch (err) {
-      setDocumentError(err instanceof Error ? err.message : String(err))
+      setDocumentError(errorMessage(err))
     }
   }
   const [saving, setSaving] = useState(false)
@@ -522,7 +523,7 @@ export function EquipmentEditor(
         (err: unknown) => {
           if (seq !== profilePreviewSeq.current) return
           profilePreviewPending.current = false
-          setProfilePreviewError(err instanceof Error ? err.message : String(err))
+          setProfilePreviewError(errorMessage(err))
         },
       )
     }
@@ -645,7 +646,7 @@ export function EquipmentEditor(
       const updated = await setEquipmentPhotoOrder(id, [photoId, ...item.photo_ids.filter((p) => p !== photoId)])
       setItem(updated)
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
+      setSaveError(errorMessage(err))
     }
   }
 
@@ -667,7 +668,7 @@ export function EquipmentEditor(
       // directly.
       reloadDocuments(id)
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       setSaveError(message)
       // deleteEquipmentPhotoHandler only ever fails AFTER the unlink itself
       // has already committed (its own "the photo was removed from the
@@ -701,7 +702,7 @@ export function EquipmentEditor(
           const blob = await downscaleImage(photo.blob)
           readyToUpload.push({ id: crypto.randomUUID(), blob, filename: photo.filename, previewUrl: '' })
         } catch (err) {
-          stillNeedsDownscale.push({ ...photo, error: err instanceof Error ? err.message : String(err) })
+          stillNeedsDownscale.push({ ...photo, error: errorMessage(err) })
         }
       } else {
         // No previewUrl to revoke for an already-downscaled retry (none was
@@ -923,7 +924,7 @@ export function EquipmentEditor(
       if (err instanceof ProfileChangeDeclined || err instanceof SourceChangeDeclined) return
       // AGENTS.md fallback policy: the server's own message, draft left
       // exactly as typed.
-      setSaveError(err instanceof Error ? err.message : String(err))
+      setSaveError(errorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -957,7 +958,7 @@ export function EquipmentEditor(
       await remove(deletePhotosOnDelete)
       onDeleted()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorMessage(err)
       // deleteEquipmentHandler only ever fails AFTER the item row itself is
       // already gone - its one post-delete failure path is a photo file
       // that could not be removed, worded "the item was deleted, but ..."

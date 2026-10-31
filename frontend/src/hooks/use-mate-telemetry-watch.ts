@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { ApiError, apiRequest } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 /**
  * A watch Mate started on live readings (ADR 0160), as the chat shows it.
@@ -101,7 +102,7 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
     try {
       data = await apiRequest<{ watch: WatchApi } | undefined>(`/api/assistant/conversations/${encodeURIComponent(id)}/watch`)
     } catch (err) {
-      if (conversationRef.current === id) setError(err instanceof Error ? err.message : String(err))
+      if (conversationRef.current === id) setError(errorMessage(err))
       return
     }
     if (conversationRef.current !== id) return
@@ -168,7 +169,7 @@ export function useMateTelemetryWatch(conversationId: string | null, options: { 
         if (shown?.conversationId === id) countEnded(id, shown.watchId)
         return
       }
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
       return
     }
     if (conversationRef.current !== id) return

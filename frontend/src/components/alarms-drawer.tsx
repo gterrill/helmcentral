@@ -28,6 +28,7 @@ import { useSignalKPaths } from '@/hooks/use-signalk-paths'
 import type { MateAlarmContext } from '@/lib/mate-screen'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatDayTimeIn, selectTimeZone } from '@/lib/vessel-time'
+import { errorMessage } from '@/lib/errors'
 
 function formatTime(value: string | undefined, timeZone: string | undefined): string {
   if (!value) return '--'
@@ -114,7 +115,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
       await ignoreSensor(identifier)
       toast.success(`Ignoring ${label}`, { description: 'This sensor no longer counts toward the frozen, impossible or silent-source check.' })
     } catch (err) {
-      toast.error('Could not ignore this sensor', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not ignore this sensor', { description: errorMessage(err) })
     } finally {
       setIgnoringSensor(null)
     }
@@ -187,7 +188,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
       setDraft(null)
       setEditingId(null)
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : String(err))
+      setFormError(errorMessage(err))
     }
   }, [draft, editingId, createRule, updateRule])
 
@@ -196,7 +197,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
     try {
       await onAcknowledge(ruleId)
     } catch (err) {
-      setAckError(err instanceof Error ? err.message : String(err))
+      setAckError(errorMessage(err))
     }
   }, [onAcknowledge])
 
@@ -205,7 +206,7 @@ export const AlarmsDrawer = memo(function AlarmsDrawer({
     try {
       await onSilence(ruleId)
     } catch (err) {
-      setAckError(err instanceof Error ? err.message : String(err))
+      setAckError(errorMessage(err))
     }
   }, [onSilence])
 

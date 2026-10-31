@@ -7,6 +7,7 @@ import { useIgnoredAlarms } from '@/hooks/use-ignored-alarms'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatIgnoredOn } from '@/lib/alarm-display'
 import { selectTimeZone } from '@/lib/vessel-time'
+import { errorMessage } from '@/lib/errors'
 
 /**
  * Network alarms the operator stopped showing from the alarms drawer
@@ -24,7 +25,7 @@ export function IgnoredAlarmsList() {
     try {
       await restore(kind)
     } catch (err) {
-      toast.error('Could not restore this alarm', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not restore this alarm', { description: errorMessage(err) })
     } finally {
       setRestoring(null)
     }

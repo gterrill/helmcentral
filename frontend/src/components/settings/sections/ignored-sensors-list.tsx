@@ -7,6 +7,7 @@ import { useIgnoredSensors } from '@/hooks/use-ignored-sensors'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatIgnoredOn } from '@/lib/alarm-display'
 import { selectTimeZone } from '@/lib/vessel-time'
+import { errorMessage } from '@/lib/errors'
 
 /**
  * Sees and un-ignores the sensor-health checks' own exclusion list
@@ -26,7 +27,7 @@ export function IgnoredSensorsList() {
     try {
       await unignore(identifier)
     } catch (err) {
-      toast.error('Could not remove this sensor from the ignore list', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not remove this sensor from the ignore list', { description: errorMessage(err) })
     } finally {
       setRemoving(null)
     }

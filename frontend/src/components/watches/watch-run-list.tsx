@@ -16,6 +16,7 @@ import {
   type WatchSectionsReport,
   type WatchSeriesReport,
 } from '@/lib/watches'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0227: a watch's run history, newest first. A run is a report, the
 // findings the rules reached, Mate's review, and what it cost.
@@ -237,7 +238,7 @@ export function WatchRunList({
       await onDeleteRun(pending)
       setPending(null)
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : String(err))
+      setDeleteError(errorMessage(err))
     } finally {
       setDeleting(false)
     }

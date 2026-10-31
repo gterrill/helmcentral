@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/errors'
 import { apiBaseUrl } from '@/config/api'
 import { downscaleImage } from '@/lib/image-downscale'
 import { EXPORT_PHOTO_PREFIX, PHOTO_EDGE_PX, PHOTO_QUALITY, cleanJpeg } from '@/lib/passage-export-signs'
@@ -14,8 +15,6 @@ function toBase64(bytes: Uint8Array): string {
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
   return btoa(binary)
 }
-
-const reason = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 const browserDownscale = (blob: Blob) => downscaleImage(blob, PHOTO_EDGE_PX, { quality: PHOTO_QUALITY, opaque: true, reduceDecode: true })
 
@@ -45,7 +44,7 @@ export async function prepareSignPhotos(signs: readonly ReplaySign[], options: P
     const url = `${apiBaseUrl}${sign.photo_url}`
     let uri = cache.get(url)
     if (uri === undefined) {
-      const fail = (what: string, err?: unknown) => new Error(`The photo for the sign "${sign.title}" ${what}${err === undefined ? '' : `: ${reason(err)}`}`)
+      const fail = (what: string, err?: unknown) => new Error(`The photo for the sign "${sign.title}" ${what}${err === undefined ? '' : `: ${errorMessage(err)}`}`)
       let res: Response
       try {
         res = await fetchFn(url)

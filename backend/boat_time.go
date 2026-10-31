@@ -66,7 +66,7 @@ func loadZoneLocation(name string) (*time.Location, error) {
 // zoneAt is the zone at a position: where a place keeps its own time. An
 // empty answer from the finder is an error, never a quiet UTC.
 func zoneAt(lat, lon float64) (placeZone, error) {
-	if math.IsNaN(lat) || math.IsNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+	if !validLatLon(lat, lon) {
 		return placeZone{}, fmt.Errorf("no time zone for position %.4f, %.4f: out of range", lat, lon)
 	}
 	f, err := zoneFinder()

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { useChecklistRun, type ChecklistItemState } from '@/hooks/use-checklist-run'
 import { cn } from '@/lib/utils'
+import { errorMessage } from '@/lib/errors'
 
 // Plan "Notes and the Boat's Manual" §7, ADR 0118: the checklist runner -
 // "a mode of the reading view, not a panel." Both notes reading surfaces
@@ -127,7 +128,7 @@ export function ChecklistRunner({ noteId, noteTitle, onExit }: ChecklistRunnerPr
       await tick(item.item_key, item.occurrence, !item.checked)
       setActionError(null)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err))
+      setActionError(errorMessage(err))
     }
   }, [tick])
 
@@ -136,7 +137,7 @@ export function ChecklistRunner({ noteId, noteTitle, onExit }: ChecklistRunnerPr
       await complete()
       setActionError(null)
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err))
+      setActionError(errorMessage(err))
     }
   }, [complete])
 
@@ -145,7 +146,7 @@ export function ChecklistRunner({ noteId, noteTitle, onExit }: ChecklistRunnerPr
       await abandon()
       onExit()
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err))
+      setActionError(errorMessage(err))
     }
   }, [abandon, onExit])
 

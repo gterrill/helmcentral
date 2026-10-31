@@ -8,6 +8,7 @@ import { BLANK_DRAFT, createEquipment, type EquipmentInput } from '@/hooks/use-i
 import { useNavigationGuard } from '@/hooks/use-navigation-guard'
 import { inventoryWorkClosedBy } from '@/lib/inventory-navigation-guard'
 import { usePhotoStaging, type FailedPhotoUpload } from '@/hooks/use-photo-staging'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0127 (the plan's A5b): the video's own workflow - stand at the open
 // bin, photograph each thing, name it. Reuses PhotoStripEditor's local
@@ -153,7 +154,7 @@ export function BinQuickAdd({ zoneId, binId, onCreated, canWrite = true, binCode
       setQuantity(1)
       onCreated?.()
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : String(err))
+      setSaveError(errorMessage(err))
     } finally {
       savingRef.current = false
       setSaving(false)

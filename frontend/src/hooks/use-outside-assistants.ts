@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 
 import { apiRequest, useApiQuery } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 /**
  * Outside assistants (backend/mcp_routes.go): the tokens that let a program
@@ -70,7 +71,7 @@ export function useOutsideAssistants() {
   const refresh = useCallback(() => {
     void refetchList().then(
       () => setRefreshError(null),
-      (err: unknown) => setRefreshError(`Could not refresh the token list: ${err instanceof Error ? err.message : String(err)}`),
+      (err: unknown) => setRefreshError(`Could not refresh the token list: ${errorMessage(err)}`),
     )
   }, [refetchList])
 

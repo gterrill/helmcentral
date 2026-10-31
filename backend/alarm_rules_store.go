@@ -338,10 +338,7 @@ func refreshAlarmRules(s *documentStore) error {
 // alarmRuleStore is the store the rules live in. A missing store is a boot
 // ordering bug, so it is reported rather than worked around.
 func alarmRuleStore() (*documentStore, error) {
-	if globalDocumentStore == nil {
-		return nil, errors.New("alarm rules: the record store is not open")
-	}
-	return globalDocumentStore, nil
+	return requireDocumentStore("alarm rules")
 }
 
 // seedAlarmRuleSet offers a built-in set once: it adds every rule, stamped

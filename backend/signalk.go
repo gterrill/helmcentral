@@ -1694,6 +1694,12 @@ func normalizeSignedDegrees(value float64) float64 {
 
 func roundTo1(value float64) float64 { return math.Round(value*10) / 10 }
 
+// validLatLon is true for a position on the globe: both coordinates in range
+// and neither NaN nor infinite.
+func validLatLon(lat, lon float64) bool {
+	return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
+}
+
 func haversineMeters(lat1 float64, lon1 float64, lat2 float64, lon2 float64) float64 {
 	const earthRadiusMeters = 6371000.0
 	lat1Rad := lat1 * math.Pi / 180

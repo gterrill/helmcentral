@@ -127,7 +127,7 @@ func createPlacemarkHandler(c echo.Context) error {
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
 	}
-	if body.Lat < -90 || body.Lat > 90 || body.Lon < -180 || body.Lon > 180 {
+	if !validLatLon(body.Lat, body.Lon) {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "lat/lon out of range"})
 	}
 	// A pin is bound to the running session. With no session there is

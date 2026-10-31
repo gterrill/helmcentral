@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { toast } from 'sonner'
 import type { LampStripWidgetConfig } from '@/lib/dashboard-widgets'
 import { apiRequest, declareQuery, setQueryData, useApiQuery } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 interface DashboardRibbonResponse {
   ribbon: LampStripWidgetConfig | null
@@ -38,7 +39,7 @@ export function useDashboardRibbon() {
       return true
     } catch (err) {
       toast.error('Could not save the indicator ribbon', {
-        description: err instanceof Error ? err.message : String(err),
+        description: errorMessage(err),
       })
       return false
     }

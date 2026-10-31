@@ -6,6 +6,7 @@ import { copyTextFrom } from '@/lib/copy-text'
 import { nfcSupported, writeUrlTag } from '@/lib/nfc'
 import { tagUrl } from '@/lib/tag-url'
 import { cn } from '@/lib/utils'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0127 §1/§4: what a tag holds (a plain NDEF URL record, this row's own
 // `url`) and who can write one (Web NFC exists only in Chrome on Android -
@@ -81,7 +82,7 @@ export function TagRow({ path, layout = 'inline' }: TagRowProps) {
       setWriteState('error')
       // AGENTS.md fallback policy: the browser's own thrown reason (a
       // permission refusal, no tag presented), never an invented one.
-      setWriteError(err instanceof Error ? err.message : String(err))
+      setWriteError(errorMessage(err))
     } finally {
       if (abortRef.current === controller) abortRef.current = null
     }

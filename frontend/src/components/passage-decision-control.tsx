@@ -5,6 +5,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/c
 import type { PassageDecision } from '@/lib/mate-cards'
 import { formatRowDate } from '@/lib/passage-dates'
 import { passageDecisionSaved, passageDecisionsApi, PassageDecisionUnreadableError, type PassageDecisionBody } from '@/lib/passage-decisions-api'
+import { errorMessage } from '@/lib/errors'
 
 const WENT_PREFIX = 'went:'
 
@@ -72,7 +73,7 @@ export function PassageDecisionControl({ decision, rowDates, canWrite, onChange,
         onUnreadable?.()
         return
       }
-      toast.error('Could not save that', { description: err instanceof Error ? err.message : String(err) })
+      toast.error('Could not save that', { description: errorMessage(err) })
     } finally {
       setSaving(false)
     }

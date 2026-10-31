@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiRequest } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 // Plan "Notes and the Boat's Manual" §3/§4, ADR 0118: the checklist
 // runner's data layer, the same small "no react-query, one instance per
@@ -87,7 +88,7 @@ export function useChecklistRun(noteId: string) {
       })
       .catch((err) => {
         if (seq !== seqRef.current) return
-        setError(err instanceof Error ? err.message : String(err))
+        setError(errorMessage(err))
       })
       .finally(() => {
         if (seq === seqRef.current) setLoading(false)

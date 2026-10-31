@@ -12,6 +12,7 @@ import {
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import type { MaintenanceRule } from '@/hooks/use-maintenance'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0138: two small, single-purpose dialogs shared by the Maintenance
 // list (maintenance-section.tsx) and the equipment editor's own
@@ -49,7 +50,7 @@ export function MaintenanceAckDialog({ rule, onCancel, onConfirm }: MaintenanceA
     try {
       await onConfirm(nextReason)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -127,7 +128,7 @@ export function MaintenanceLastDoneDialog({ rule, onCancel, onConfirm }: Mainten
     try {
       await onConfirm(date.trim() || undefined, hours.trim() === '' ? undefined : Number(hours))
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorMessage(err))
     } finally {
       setSaving(false)
     }

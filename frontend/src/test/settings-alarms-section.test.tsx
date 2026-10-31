@@ -139,10 +139,10 @@ describe('Settings Alarms section', () => {
     openAlarms()
 
     expect(screen.queryByRole('button', { name: /save notifications/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /^save/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^save\b/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByLabelText(/webhook/i))
-    expect(screen.getAllByRole('button', { name: /^save/i })).toHaveLength(1)
+    expect(screen.getAllByRole('button', { name: /^save\b/i })).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
   })
 })

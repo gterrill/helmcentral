@@ -3,6 +3,7 @@ import { mapProposal, type AssistantProposal, type AssistantProposalOp, type Pro
 import { todayISO } from '@/lib/local-date'
 import { PLANNED_STAY_PATH } from '@/hooks/use-planned-stay'
 import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
+import { SAVED_PLACES_PATH } from '@/hooks/use-saved-places'
 import { WATCHES_PATH } from '@/hooks/use-watches'
 import { decksRecordApplied, equipmentRecordApplied, zonesRecordApplied } from '@/hooks/use-inventory'
 import { maintenanceLogRecordApplied, maintenanceRulesRecordApplied } from '@/hooks/use-maintenance'
@@ -22,6 +23,7 @@ export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void>
   planned_stay: reads(PLANNED_STAY_PATH),
   alarm_rule: reads(ALARM_RULES_PATH),
   watch: reads(WATCHES_PATH),
+  saved_place: reads(SAVED_PLACES_PATH),
   equipment: (op) => equipmentRecordApplied(op.action, op.id),
   location: zonesRecordApplied,
   bin: zonesRecordApplied,

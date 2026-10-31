@@ -207,7 +207,8 @@ func TestExecuteRouteDistance_ErrorsNameWhatIsWrong(t *testing.T) {
 }
 
 func TestFindPlacesLabelsItsDistanceAsAStraightLine(t *testing.T) {
-	raw, err := json.Marshal(assistantPlaceCandidate{Name: "x", StraightLineNm: 7.3, StraightLineBearingDeg: 284})
+	nm, bearing := 7.3, 284
+	raw, err := json.Marshal(assistantPlaceCandidate{Name: "x", StraightLineNm: &nm, StraightLineBearingDeg: &bearing})
 	if err != nil {
 		t.Fatal(err)
 	}

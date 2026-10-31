@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/errors'
 import { useCallback, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 
@@ -45,8 +46,6 @@ interface LocationEditorProps {
   /** Opens a neighbouring location from the arrows. Without it the page has no arrows. */
   onOpenNeighbour?: (id: string) => void
 }
-
-const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 // ADR 0156: where this location sits on its deck plan. Shown whether or not it
 // is on one, so the way to put it there is never hidden.

@@ -13,6 +13,7 @@ import type { InventoryList } from '@/lib/app-location'
 import { orderLocations } from '@/lib/index-order'
 import { useLocationDeckLabel } from '@/hooks/use-location-deck-label'
 import { patchList } from '@/lib/list-order'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0142: the Locations index - a name, deck and bin count per location, built
 // on the pattern library like EquipmentIndex. A location is an area of the
@@ -210,7 +211,7 @@ export function LocationsIndex({
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message (a duplicate
       // name, say), never an invented one.
-      setCreateError(err instanceof Error ? err.message : String(err))
+      setCreateError(errorMessage(err))
     } finally {
       setSaving(false)
     }

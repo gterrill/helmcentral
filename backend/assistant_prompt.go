@@ -1048,7 +1048,9 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"Gloucester Island\"). If it is more than about 20 nautical miles from the vessel, or the lookup returns " +
 		"nothing, resolve a nearby feature you can name (the island, the cape, the harbour) and retry with its " +
 		"coordinates as near_lat/near_lon. If a name still will not resolve, say so and use the nearest resolved " +
-		"feature's position instead, telling the operator that is what you did.\n\n" +
+		"feature's position instead, telling the operator that is what you did. A find_places result with search \"saved\" " +
+		"is the operator's own saved place: use it as given. When the operator gives you a position for a named spot " +
+		"find_places did not know, offer to keep it with save_place, once, and tell them to tap Apply.\n\n" +
 
 		"When the plan starts now or within the forecast range, for every candidate anchorage under discussion, " +
 		"fetch both get_wind_forecast and get_tides. Fetch the " +

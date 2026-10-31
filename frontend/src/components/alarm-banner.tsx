@@ -7,6 +7,7 @@ import { forecastWarningDetailsUrl, type ForecastWarnings } from '@/hooks/use-fo
 import { alarmConditionSentence } from '@/lib/alarm-display'
 import { severityBorderClass, severityFieldClass } from '@/lib/severity'
 import { cn } from '@/lib/utils'
+import { errorMessage } from '@/lib/errors'
 
 interface AlarmBannerProps {
   alarms: ActiveAlarm[]
@@ -140,7 +141,7 @@ export const AlarmBanner = memo(function AlarmBanner({ alarms, onOpen, onAcknowl
         await onAcknowledge(alarm.rule_id)
       }
     } catch (err) {
-      setAckError(err instanceof Error ? err.message : String(err))
+      setAckError(errorMessage(err))
     } finally {
       setAcking(false)
     }

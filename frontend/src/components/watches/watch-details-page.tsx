@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/errors'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Play, Trash2 } from 'lucide-react'
 
@@ -40,8 +41,6 @@ import {
 
 /** How long a run a link points at stays marked. */
 export const LINKED_RUN_HIGHLIGHT_MS = 2500
-
-const errorMessage = (err: unknown) => (err instanceof Error ? err.message : String(err))
 
 export type WatchEditorMode =
   | { kind: 'existing'; id: string }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiBaseUrl } from '@/config/api'
 import { invalidateDocumentLists } from '@/hooks/use-documents'
 import { ApiError, apiRequest } from '@/lib/api-query'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0106 F2: staged attachments for one Mate composer. Each file uploads
 // immediately through POST /api/documents (multipart), then - unless it
@@ -301,7 +302,7 @@ export function useDocumentUploads(folderId?: string | null, options?: UseDocume
           updateItem(item.key, { status: 'failed', error: 'This document is no longer in the library.' })
           return
         }
-        updateItem(item.key, { status: 'failed', error: err instanceof Error ? err.message : String(err) })
+        updateItem(item.key, { status: 'failed', error: errorMessage(err) })
       }
     }))
   }, [updateItem])

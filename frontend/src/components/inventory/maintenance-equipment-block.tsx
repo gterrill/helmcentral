@@ -29,6 +29,7 @@ import {
   type MaintenanceLogEntry,
   type MaintenanceRule,
 } from '@/hooks/use-maintenance'
+import { errorMessage } from '@/lib/errors'
 
 // ADR 0138 spec §9: "Item's own page (equipment editor) gets a Maintenance
 // block listing its rules and recent log entries with add/edit." Day-to-day
@@ -97,7 +98,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
       await deleteMaintenanceRule(deletingRemoved.id)
       setDeletingRemoved(null)
     } catch (err) {
-      setRemovedError(err instanceof Error ? err.message : String(err))
+      setRemovedError(errorMessage(err))
     } finally {
       setRemovedBusy(false)
     }
@@ -112,7 +113,7 @@ export function MaintenanceEquipmentBlock({ equipmentId, hourMeterSource, schedu
       setOldReading('')
       setNewReading('0')
     } catch (err) {
-      setMeterError(err instanceof Error ? err.message : String(err))
+      setMeterError(errorMessage(err))
     } finally {
       setMeterSaving(false)
     }

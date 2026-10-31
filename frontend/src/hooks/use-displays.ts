@@ -1,3 +1,4 @@
+import { errorMessage } from '@/lib/errors'
 import { useCallback } from 'react'
 import { toast } from 'sonner'
 import type { Display } from '@/lib/displays'
@@ -34,10 +35,6 @@ function patchDisplays(fn: (displays: Display[]) => Display[]) {
   }))
 }
 
-function messageOf(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
-}
-
 declareQuery(DISPLAYS_KEY, { structuralSharing: true })
 
 export function useDisplays() {
@@ -54,7 +51,7 @@ export function useDisplays() {
       patchDisplays((prev) => [...prev, display])
       return display
     } catch (err) {
-      toast.error('Could not create display', { description: messageOf(err) })
+      toast.error('Could not create display', { description: errorMessage(err) })
       return null
     }
   }, [])
@@ -70,7 +67,7 @@ export function useDisplays() {
       patchDisplays((prev) => prev.map((d) => (d.id === id ? display : d)))
       return display
     } catch (err) {
-      toast.error('Could not save display', { description: messageOf(err) })
+      toast.error('Could not save display', { description: errorMessage(err) })
       return null
     }
   }, [])
@@ -90,7 +87,7 @@ export function useDisplays() {
       invalidateQueries(['/api/dashboard-pages'])
       return Array.isArray(data.released_page_ids) ? data.released_page_ids : []
     } catch (err) {
-      toast.error('Could not delete display', { description: messageOf(err) })
+      toast.error('Could not delete display', { description: errorMessage(err) })
       return null
     }
   }, [])

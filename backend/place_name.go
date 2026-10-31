@@ -517,6 +517,7 @@ var placeSearchDeps = func() assistantToolDeps {
 	settingsPath := getEnv("SETTINGS_FILE", "../settings.yaml")
 	return assistantToolDeps{
 		vesselState: fetchSignalKVesselState,
+		documents:   func() *documentStore { return globalDocumentStore },
 		placeNames: func() (placeNameProvider, string, error) {
 			return resolvePlaceNameProvider(settingsPath)
 		},

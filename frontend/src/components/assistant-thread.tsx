@@ -31,6 +31,7 @@ import { useNotes } from '@/hooks/use-notes'
 import { documentViewerHref } from '@/lib/document-citation'
 import { MATE_WAITING_ROTATE_MS, pickWaitingPhrase } from '@/lib/mate-waiting-phrases'
 import { cn } from '@/lib/utils'
+import { errorMessage } from '@/lib/errors'
 
 // What Mate can look at, in the operator's words. Each line matches a real
 // capability (position and wind in its live context; the forecast, tide,
@@ -177,7 +178,7 @@ function SaveAsNoteButton({ content }: { content: string }) {
       toast('Saved to Notes. It is unfiled until you put it somewhere.')
     } catch (err) {
       // AGENTS.md fallback policy: the server's own message, verbatim.
-      toast.error(err instanceof Error ? err.message : String(err))
+      toast.error(errorMessage(err))
     } finally {
       setSaving(false)
     }
