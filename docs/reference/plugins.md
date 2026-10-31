@@ -25,6 +25,13 @@ nothing downloads. Mate carries on with everything else, and answers shelter
 questions with an error naming what's missing. The map server it talks to is
 that plugin's own setting.
 
+The same plugin also answers Mate's marina lookup, which needs a version that
+includes it. The google-places plugin doesn't, and with it chosen as the
+place-names plugin Mate says so instead of describing the marina. A plugin
+answers the marina lookup by exporting `marina_details`, which takes a position
+and returns the marina charted within 500 m, with its facilities, entrance marks
+and services ashore. The export is optional, like the place-names pair.
+
 Upper air is optional: leave that plugin out and the forecast page shows no
 500mb section. Points of interest is optional the same way. With no `poi`
 plugin installed, Nearby reports an error saying what to install, and nothing

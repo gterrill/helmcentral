@@ -100,6 +100,7 @@ On request, it can look up more than that. Here is what it can do:
   way a following sea and a head sea are called correctly.
 - **A fair-tide departure:** See the next section.
 - **Anchorage shelter:** See "Sheltered from which winds" below.
+- **A marina:** See "Checking a marina" below.
 - **Passage time and fuel:** See "Passage estimates" below.
 - **Who else is around:** See "Nearby vessels" below.
 - **How the boat is doing:** See "A status update" below.
@@ -161,6 +162,41 @@ the answer needs no signal. It's off until you turn it on in Settings → Offlin
 coastline. It covers the water within 200 nm of the boat plus anywhere you've
 downloaded before. If it hasn't been downloaded, is off, or a neighbouring
 square is missing, Mate tells you which and doesn't guess the shelter.
+
+### Checking a marina
+
+When you're deciding where to stop, Mate can look a marina over. Ask about a
+marina by name and it finds the marina on the chart, then reads what
+OpenStreetMap records about it and the things mapped beside it. Here's what you
+get back:
+
+- **The marina itself:** The number of berths, whether there's a fee and
+  whether power is laid on, plus its phone, email, website and VHF channel when
+  they're mapped.
+- **What's around the berths:** Fuel, a travel lift, a boatyard, a launching
+  ramp, water, pump-out, toilets and showers, and the names of the pontoon arms.
+- **The way in:** The beacons and buoys marking the entrance, with the side and
+  colour each one is mapped with.
+- **Ashore:** The supermarket, laundry, pharmacy, doctor, hospital and cash
+  machines within about a kilometre, with opening hours where they're mapped.
+  Only places with a name are listed.
+- **Your boat against the limits:** If the marina has a maximum draught or
+  maximum length mapped, Mate compares it with your boat's draft and length
+  overall and says whether you're within it. A limit your boat is over is a
+  no-go, and Mate says that first instead of recommending the marina.
+
+The map is kept up by volunteers, so Mate treats anything it doesn't list as
+unknown, never as missing. It won't tell you a marina has no fuel, and it won't
+say what kind of fuel there is unless the map says. If the marina has no limit
+mapped, Mate says so. If your boat's draft or length isn't set, it says it
+couldn't make the check and doesn't assume a number. Either way, Mate tells you
+to call the marina to confirm berths, depth and fuel, and gives you the phone
+number or website when the map has one.
+
+It needs the OpenStreetMap place-names plugin, which is the default, and an
+internet connection. If the place-names plugin doesn't support it, or no marina
+is charted within 500 m of the position, Mate tells you that and doesn't describe
+the marina from memory.
 
 ### Passage estimates
 

@@ -475,6 +475,7 @@ type mateTool struct {
 var mateTools = []mateTool{
 	mateToolFindPlaces,
 	mateToolAnchorageShelter,
+	mateToolMarinaDetails,
 	mateToolGetWindForecast,
 	mateToolGetTides,
 	mateToolEstimatePassage,

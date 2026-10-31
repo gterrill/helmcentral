@@ -1,0 +1,29 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-29T21:20:09Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "way",
+  "id": 245930150,
+  "center": {
+    "lat": -20.2663105,
+    "lon": 148.7101677
+  },
+  "tags": {
+    "addr:street": "Shingley Drive",
+    "capacity": "520",
+    "fee": "yes",
+    "leisure": "marina",
+    "name": "Coral Sea Marina Resort",
+    "power_supply": "yes",
+    "website": "https://www.coralseamarina.com/berthing/"
+  }
+}
+
+  ]
+}

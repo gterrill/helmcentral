@@ -19,7 +19,7 @@ so it works when Mate is switched off.
   units. A reading the boat can't give is marked as missing instead of guessed.
 - **The sea, the tides and the neighbours:** The assistant can also look up the
   wind and wave forecast, the tides and the distance by water between two
-  places. It can ask how much shelter an anchorage has, look up place names, see
+  places. It can ask how much shelter an anchorage has, look over a marina, look up place names, see
   the nearby vessels and read the stay you've planned. It can read Helmcentral's
   own help pages too. Each tool tells the assistant how to read what it returns. A forecast
   says it's a model and not an observation. A tide says which station it came
@@ -53,7 +53,7 @@ A new token can use these:
 - Maintenance, and the equipment list.
 - The boat's particulars and the boat context.
 - Wind and wave forecast, tides, and the distance by water between two places.
-- Anchorage shelter, place names and nearby vessels.
+- Anchorage shelter, marina details, place names and nearby vessels.
 - The planned stay, and Helmcentral's help pages.
 
 These start switched off, and you switch them on for a token when you want them:

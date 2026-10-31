@@ -237,6 +237,12 @@ const placeNameMaxRunes = 64
 // value enters the codebase, rather than left to whichever consumer reads
 // it next to remember to defend itself.
 func sanitizePlaceName(name string) string {
+	return sanitizeMapText(name, placeNameMaxRunes)
+}
+
+// sanitizeMapText is sanitizePlaceName for any text read from the map: control
+// characters stripped, trimmed and cut to maxRunes.
+func sanitizeMapText(name string, maxRunes int) string {
 	var b strings.Builder
 	for _, r := range name {
 		if r == '\n' || r == '\r' || unicode.IsControl(r) {
@@ -247,8 +253,8 @@ func sanitizePlaceName(name string) string {
 
 	cleaned := strings.TrimSpace(b.String())
 	runes := []rune(cleaned)
-	if len(runes) > placeNameMaxRunes {
-		runes = runes[:placeNameMaxRunes]
+	if len(runes) > maxRunes {
+		runes = runes[:maxRunes]
 	}
 	return string(runes)
 }
