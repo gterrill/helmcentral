@@ -15,6 +15,7 @@ import {
   coastlineCheckFailures,
   coastlineFailures,
   coastlineStatusLine,
+  editCheckPauseLine,
   inlandSkippedLine,
   type OfflineCoastlineStatus,
 } from '@/lib/offline-coastline'
@@ -80,6 +81,7 @@ function Failures({ status }: { status: OfflineCoastlineStatus }) {
 export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: OfflineCoastlineSectionProps) {
   const timeZone = useVesselStateSelector(selectTimeZone)
   const { status, loading, error, update, clearCoverage } = useOfflineCoastline()
+  const checkPauseLine = status ? editCheckPauseLine(status, timeZone) : null
   const [actionError, setActionError] = useState<string | null>(null)
   const [updating, setUpdating] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -187,6 +189,11 @@ export function OfflineCoastlineSection({ draft, onChange, onOpenHelp }: Offline
           {status && inlandSkippedLine(status) && (
             <p className="text-xs text-muted-foreground" data-testid="offline-coastline-inland">
               {inlandSkippedLine(status)}
+            </p>
+          )}
+          {checkPauseLine && (
+            <p className="text-xs text-muted-foreground" data-testid="offline-coastline-check-pause">
+              {checkPauseLine}
             </p>
           )}
           {unsaved && <p className="text-xs text-muted-foreground">Save settings to apply the switch.</p>}

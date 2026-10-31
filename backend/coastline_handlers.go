@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v4"
 )
@@ -43,6 +44,10 @@ func initOfflineCoastline(store *coastlineStore, settingsPath string) {
 		Enabled:  offlineCoastlineEnabledFromSettingsFile(settingsPath),
 		Position: ownShipFix,
 		Source:   resolveCoastlineSource,
+		Zone: func() *time.Location {
+			lat, lon, ok := ownShipFix()
+			return boatTimeAt(lat, lon, ok).Loc
+		},
 	})
 }
 
