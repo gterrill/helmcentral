@@ -627,7 +627,7 @@ func TestAssistantRun_APerReplyTimeoutIsNotReportedAsTheReviewsDeadline(t *testi
 // draftingTools sends the first draft back once.
 type draftingTools struct{ fakeToolExecutor }
 
-func (*draftingTools) checkDraft(draft string, calls []openRouterToolCall) (string, string) {
+func (*draftingTools) checkDraft(draft string, calls []openRouterToolCall, results []string) (string, string) {
 	if draft == "first draft" {
 		return "wind claim", "Check the wind first."
 	}

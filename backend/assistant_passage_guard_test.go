@@ -68,7 +68,7 @@ func TestPassageGuardTrigger(t *testing.T) {
 		if tc.limitsSet {
 			limits = pwLimitsAll()
 		}
-		if got, _ := pwToolDeps(limits).checkDraft(tc.text, nil); got != tc.want {
+		if got, _ := pwToolDeps(limits).checkDraft(tc.text, nil, nil); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -249,11 +249,11 @@ func TestPassageLimitsStatusIsInTheLivePartNotTheStable(t *testing.T) {
 }
 
 func TestPassageGuardInstructionPerTrigger(t *testing.T) {
-	_, claim := pwToolDeps(pwLimitsAll()).checkDraft("Set passage limits in Settings.", nil)
+	_, claim := pwToolDeps(pwLimitsAll()).checkDraft("Set passage limits in Settings.", nil, nil)
 	if !strings.Contains(claim, "limits are set") {
 		t.Errorf("claim instruction should say the limits are set: %q", claim)
 	}
-	trig, wind := pwToolDeps(passageLimits{}).checkDraft("A northerly gives you a head sea.", nil)
+	trig, wind := pwToolDeps(passageLimits{}).checkDraft("A northerly gives you a head sea.", nil, nil)
 	if trig != "relative wind" {
 		t.Fatalf("trigger = %q", trig)
 	}
@@ -346,7 +346,7 @@ func TestShelterGuardTrigger(t *testing.T) {
 		{"forecast only", "A northerly of 15 kn tonight, easing tomorrow.", nil, ""},
 	}
 	for _, tc := range cases {
-		if got, _ := shelterDeps().checkDraft(tc.text, tc.calls); got != tc.want {
+		if got, _ := shelterDeps().checkDraft(tc.text, tc.calls, nil); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -354,7 +354,7 @@ func TestShelterGuardTrigger(t *testing.T) {
 
 func TestShelterGuard_TwoTriggersSentTogether(t *testing.T) {
 	text := "A northerly gives you a head sea, and the bay is sheltered from the north."
-	trig, ins := pwToolDepsWithCoastline(passageLimits{}).checkDraft(text, nil)
+	trig, ins := pwToolDepsWithCoastline(passageLimits{}).checkDraft(text, nil, nil)
 	if !strings.Contains(trig, "relative wind") || !strings.Contains(trig, "anchorage shelter") {
 		t.Fatalf("trigger = %q", trig)
 	}
@@ -373,13 +373,13 @@ func TestShelterGuard_SentBackOnceAndSecondAnswerWins(t *testing.T) {
 func TestShelterGuard_OffWithoutOfflineCoastline(t *testing.T) {
 	d := shelterDeps()
 	d.offlineCoastline = nil
-	if got, _ := d.checkDraft(thomasIslandAnswer, nil); got != "" {
+	if got, _ := d.checkDraft(thomasIslandAnswer, nil, nil); got != "" {
 		t.Errorf("no Offline coastline on this install: trigger = %q, want none", got)
 	}
 }
 
 func TestShelterGuardInstructionCoversBoatPositionAndOpenWater(t *testing.T) {
-	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil)
+	_, ins := shelterDeps().checkDraft(thomasIslandAnswer, nil, nil)
 	for _, want := range []string{"find_places", "boat's position", "Otherwise remove"} {
 		if !strings.Contains(ins, want) {
 			t.Errorf("instruction lacks %q: %q", want, ins)

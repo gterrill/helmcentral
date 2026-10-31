@@ -21,7 +21,9 @@ import (
 // Mate said the tip was exposed to the north and sent the operator to the
 // north side. It had not called anchorage_shelter, which reads the charted
 // shoreline and would have said the opposite. A draft that judges an
-// anchorage's shelter or exposure without that call is sent back the same way.
+// anchorage's shelter or exposure without that call, or a get_wind_forecast
+// that came back with shelter labels, is sent back the same way. The labels are
+// the main fix: get_wind_forecast attaches the shelter itself.
 
 // The corrective messages sent back with a draft, one per trigger. They go in
 // as a user turn labelled as Helmcentral's own check: no other part of the
@@ -106,18 +108,18 @@ func judgesAnchorageShelter(draft string) bool {
 //
 //   - "anchorage shelter": the draft judges an anchorage's shelter or exposure
 //     against a wind or direction, and anchorage_shelter was not called this
-//     run. It is on when the tool could run here (the install has an Offline
+//     run, and no get_wind_forecast result carried shelter_summary. It is on when the tool could run here (the install has an Offline
 //     coastline reader; whether the coastline is switched on is not read per
 //     draft), whether or not assess_passage_window ran.
 //
 // A draft that hits more than one trigger gets one message carrying each
 // correction, since the run loop sends a draft back only once.
-func (d assistantToolDeps) checkDraft(draft string, calls []openRouterToolCall) (trigger, instruction string) {
+func (d assistantToolDeps) checkDraft(draft string, calls []openRouterToolCall, results []string) (trigger, instruction string) {
 	var triggers, instructions []string
 	if t, i := d.checkPassageDraft(draft, calls); t != "" {
 		triggers, instructions = append(triggers, t), append(instructions, i)
 	}
-	if t, i := d.checkShelterDraft(draft, calls); t != "" {
+	if t, i := d.checkShelterDraft(draft, calls, results); t != "" {
 		triggers, instructions = append(triggers, t), append(instructions, i)
 	}
 	if len(triggers) == 0 {
@@ -129,14 +131,29 @@ func (d assistantToolDeps) checkDraft(draft string, calls []openRouterToolCall) 
 	return strings.Join(triggers, " and "), assistantCheckLabel + strings.Join(instructions, " Also: ")
 }
 
+// forecastDeliveredShelter reports whether a get_wind_forecast result carries
+// shelter labels. Only a forecast that read the coastline sets shelter_summary:
+// a failed call, shelter_unavailable and open water all leave it out.
+func forecastDeliveredShelter(result string) bool {
+	var r struct {
+		ShelterSummary string `json:"shelter_summary"`
+	}
+	return json.Unmarshal([]byte(result), &r) == nil && r.ShelterSummary != ""
+}
+
 // checkShelterDraft is the "anchorage shelter" trigger.
-func (d assistantToolDeps) checkShelterDraft(draft string, calls []openRouterToolCall) (trigger, instruction string) {
+func (d assistantToolDeps) checkShelterDraft(draft string, calls []openRouterToolCall, results []string) (trigger, instruction string) {
 	if !mateToolAvailable(d, mateToolAnchorageShelter.name) || d.offlineCoastline == nil {
 		return "", ""
 	}
-	for _, c := range calls {
-		if c.Function.Name == mateToolAnchorageShelter.name {
+	for i, c := range calls {
+		switch c.Function.Name {
+		case mateToolAnchorageShelter.name:
 			return "", ""
+		case mateToolGetWindForecast.name:
+			if i < len(results) && forecastDeliveredShelter(results[i]) {
+				return "", ""
+			}
 		}
 	}
 	if judgesAnchorageShelter(draft) {

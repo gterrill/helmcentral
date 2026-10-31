@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -16,7 +17,11 @@ var mateToolGetWindForecast = mateTool{
 			"per-day summary plus a three-hourly breakdown. Use find_places first to resolve a place name " +
 			"to coordinates. If waves_no_data is true the wave model has no figures at that point, so say there is " +
 			"no wave forecast there. If wave_fallback_model is set the wave figures come from that fallback model, " +
-			"because the usual one has no data here, so say so. " + ruleWindForecast,
+			"because the usual one has no data here, so say so. Where the position has charted shoreline around it, each row " +
+			"carries shelter (sheltered, partial, exposed or reef) for the direction the wind comes FROM, each day carries " +
+			"shelter_prevailing, and shelter_summary gives the sheltered and exposed arcs. It is an estimate from the Offline " +
+			"coastline, not a survey: say so, and let local knowledge correct it. " + ruleShelter + " If shelter_unavailable is " +
+			"set, say shelter could not be checked and why. " + ruleWindForecast,
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -138,6 +143,11 @@ type assistantWindHour struct {
 	RelWind    *string `json:"rel_wind,omitempty"`
 	RelWaveDeg *int    `json:"rel_wave_deg,omitempty"`
 	RelWave    *string `json:"rel_wave,omitempty"`
+	// Shelter is the anchorage's grade (sheltered, partial, exposed or reef)
+	// for the bearing nearest this row's wind direction, from the Offline
+	// coastline. Absent when the forecast carries no shelter, and when the
+	// row's wind direction is unknown.
+	Shelter string `json:"shelter,omitempty"`
 }
 
 type assistantDaySummary struct {
@@ -150,6 +160,8 @@ type assistantDaySummary struct {
 	// rows (assistantDayAggregate.prevailingRelWind), present only when
 	// course_deg was given - see RelWind above.
 	RelWindPrevailing *string `json:"rel_wind_prevailing,omitempty"`
+	// ShelterPrevailing is the modal shelter label across the day's rows.
+	ShelterPrevailing *string `json:"shelter_prevailing,omitempty"`
 }
 
 type assistantWindForecastResult struct {
@@ -175,6 +187,12 @@ type assistantWindForecastResult struct {
 	Days              []assistantDaySummary `json:"days"`
 	Hourly            []assistantWindHour   `json:"hourly"`
 	Truncated         bool                  `json:"truncated,omitempty"`
+	// ShelterSummary and ShelterReading come from the Offline coastline
+	// around lat/lon, present only when some bearing is not open water.
+	// ShelterUnavailable is why the coastline could not be read, verbatim.
+	ShelterSummary     string `json:"shelter_summary,omitempty"`
+	ShelterReading     string `json:"shelter_reading,omitempty"`
+	ShelterUnavailable string `json:"shelter_unavailable,omitempty"`
 }
 
 // assistantDayAggregate accumulates one local day's min/max wind, max gust
@@ -191,6 +209,9 @@ type assistantDayAggregate struct {
 	// its compass direction - only populated when course_deg was given.
 	relWindVotes map[string]int
 	relWindOrder []string
+	// shelterVotes/shelterOrder are the same over each row's shelter label.
+	shelterVotes map[string]int
+	shelterOrder []string
 }
 
 func (a *assistantDayAggregate) addWind(v int) {
@@ -229,6 +250,53 @@ func (a *assistantDayAggregate) addRelWind(label string) {
 		a.relWindOrder = append(a.relWindOrder, label)
 	}
 	a.relWindVotes[label]++
+}
+
+func (a *assistantDayAggregate) addShelter(label string) {
+	if a.shelterVotes == nil {
+		a.shelterVotes = map[string]int{}
+	}
+	if _, seen := a.shelterVotes[label]; !seen {
+		a.shelterOrder = append(a.shelterOrder, label)
+	}
+	a.shelterVotes[label]++
+}
+
+func (a *assistantDayAggregate) prevailingShelter() *string {
+	return modeVote(a.shelterVotes, a.shelterOrder)
+}
+
+// shelterGradeAt is the grade of the 10 degree bearing nearest a wind
+// direction (where the wind comes FROM).
+func shelterGradeAt(bearings []shelterBearing, windFromDeg float64) string {
+	want := int(math.Round(windFromDeg/10)) * 10 % 360
+	for _, b := range bearings {
+		if b.BearingDeg == want {
+			return b.Grade
+		}
+	}
+	return ""
+}
+
+// forecastShelter reads the shelter at a forecast position so each row can be
+// labelled. It returns nil when the install has no Offline coastline reader
+// (nothing to say), when the coastline cannot be read (unavailable carries
+// the reason verbatim) and when every bearing is open water (nothing to add).
+func (d assistantToolDeps) forecastShelter(lat, lon float64) (est *assistantAnchorageShelterResult, unavailable string) {
+	if d.offlineCoastline == nil {
+		return nil, ""
+	}
+	res, err := d.shelterAt(lat, lon)
+	if err != nil {
+		log.Printf("assistant: get_wind_forecast: shelter unavailable at %.4f, %.4f: %v", lat, lon, err)
+		return nil, err.Error()
+	}
+	for _, b := range res.Bearings {
+		if b.Grade != shelterExposed {
+			return res, ""
+		}
+	}
+	return nil, ""
 }
 
 // prevailingRelWind returns the mode of the recorded rel_wind label votes -
@@ -481,6 +549,8 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		}
 	}
 
+	shelter, shelterUnavailable := d.forecastShelter(args.Lat, args.Lon)
+
 	loc := place.Loc
 	nowHour := d.now().Truncate(time.Hour)
 
@@ -529,6 +599,10 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 			row.RelWindDeg, row.RelWind = &relDeg, &relLabel
 		}
 
+		if shelter != nil && dir != nil {
+			row.Shelter = shelterGradeAt(shelter.Bearings, hp.WindDirectionDeg)
+		}
+
 		// A wave row needs a height. The period and direction are added only
 		// when the provider gave them: an absent direction is not north, and
 		// a zero period is not a period.
@@ -571,6 +645,9 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		if row.RelWind != nil {
 			agg.addRelWind(*row.RelWind)
 		}
+		if row.Shelter != "" {
+			agg.addShelter(row.Shelter)
+		}
 	}
 
 	days2 := make([]assistantDaySummary, 0, len(dayOrder))
@@ -583,6 +660,7 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 			GustKtsMax:        agg.gustMax,
 			DirPrevailing:     agg.prevailing(),
 			RelWindPrevailing: agg.prevailingRelWind(),
+			ShelterPrevailing: agg.prevailingShelter(),
 		})
 	}
 
@@ -607,6 +685,11 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		CachedAt:          cachedAt,
 		Days:              days2,
 		Hourly:            hourly,
+
+		ShelterUnavailable: shelterUnavailable,
+	}
+	if shelter != nil {
+		result.ShelterSummary, result.ShelterReading = shelter.Summary, shelter.Reading
 	}
 
 	shrink := func() bool {

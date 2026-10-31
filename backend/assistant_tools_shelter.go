@@ -76,16 +76,26 @@ func (d assistantToolDeps) executeAnchorageShelter(ctx context.Context, raw json
 	if d.offlineCoastline == nil {
 		return "", fmt.Errorf("anchorage_shelter: Offline coastline is not available on this install")
 	}
-	set, err := d.offlineCoastline().ShorelineAround(*args.Lat, *args.Lon)
+	result, err := d.shelterAt(*args.Lat, *args.Lon)
 	if err != nil {
 		return "", fmt.Errorf("anchorage_shelter: %w", err)
 	}
+	return capToolResultJSON(result, nil)
+}
 
-	result := assistantAnchorageShelterResult{
-		Lat: *args.Lat, Lon: *args.Lon, Source: "Offline coastline (OpenStreetMap)",
+// shelterAt reads the Offline coastline around a position and estimates its
+// shelter. The caller has checked d.offlineCoastline is set. Both
+// anchorage_shelter and get_wind_forecast use it.
+func (d assistantToolDeps) shelterAt(lat, lon float64) (*assistantAnchorageShelterResult, error) {
+	set, err := d.offlineCoastline().ShorelineAround(lat, lon)
+	if err != nil {
+		return nil, err
+	}
+	result := &assistantAnchorageShelterResult{
+		Lat: lat, Lon: lon, Source: "Offline coastline (OpenStreetMap)",
 		CoastlineDownloaded: set.Oldest.UTC().Format("2006-01-02"),
-		shelterEstimate:     estimateShelter(*args.Lat, *args.Lon, set.Lines),
+		shelterEstimate:     estimateShelter(lat, lon, set.Lines),
 	}
 	result.Reading = readingShelter(result.CoastlineDownloaded)
-	return capToolResultJSON(&result, nil)
+	return result, nil
 }
