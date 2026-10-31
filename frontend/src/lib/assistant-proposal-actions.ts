@@ -7,6 +7,7 @@ import { SAVED_PLACES_PATH } from '@/hooks/use-saved-places'
 import { WATCHES_PATH } from '@/hooks/use-watches'
 import { decksRecordApplied, equipmentRecordApplied, zonesRecordApplied } from '@/hooks/use-inventory'
 import { maintenanceLogRecordApplied, maintenanceRulesRecordApplied } from '@/hooks/use-maintenance'
+import { documentRecordApplied } from '@/hooks/use-documents'
 import { vesselParticularsRecordApplied } from '@/hooks/use-vessel-particulars'
 
 const reads = (path: string) => () => void invalidateQueries([path])
@@ -31,6 +32,7 @@ export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void>
   maintenance_rule: maintenanceRulesRecordApplied,
   maintenance_log: maintenanceLogRecordApplied,
   vessel_particulars: vesselParticularsRecordApplied,
+  document: (op) => documentRecordApplied(op.id),
 }
 
 function refreshPagesFor(proposal: AssistantProposal | undefined): void {

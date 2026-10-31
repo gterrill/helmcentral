@@ -17,6 +17,7 @@ import {
   websiteLabel,
   type LimitTone,
 } from '@/lib/marina-card'
+import { documentViewerHref } from '@/lib/document-citation'
 import type { MarinaCard } from '@/lib/mate-cards'
 import { cn } from '@/lib/utils'
 
@@ -185,6 +186,21 @@ export function AssistantMarinaCard({ card }: { card: MarinaCard }) {
       )}
 
       <div className="flex min-w-0 flex-col gap-1 border-t border-border pt-2">
+        {card.savedDocuments.length > 0 && (
+          <p data-testid="marina-saved-documents" className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
+            <span className="shrink-0">In Documents:</span>
+            {card.savedDocuments.map((doc) => (
+              <a
+                key={doc.id}
+                href={documentViewerHref(doc.id)}
+                title={doc.title}
+                className="min-w-0 max-w-full truncate text-primary underline-offset-2 hover:underline"
+              >
+                {doc.title}
+              </a>
+            ))}
+          </p>
+        )}
         <ContactLinks contact={card.contact} />
         <p data-testid="marina-source" className="min-w-0 truncate text-xs text-muted-foreground">
           {dataDate ? `OpenStreetMap · data as of ${dataDate}` : 'OpenStreetMap'}

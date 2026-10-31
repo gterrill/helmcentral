@@ -37,6 +37,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A marina's own map can live in Documents and be linked to the marina.**
+  Ask Mate for a marina's map and it finds the marina's map page or PDF, if web
+  search is on, and gives you the link. You download the file and upload it to
+  Documents yourself, because Helmcentral never downloads files from the web.
+  Give the document a tag that is the marina's name, or ask Mate to add the tag
+  and tap **Apply** on the card. From then on Mate reads the document whenever
+  it looks at that marina, for berth numbers and the layout, and the marina card
+  shows it under "In Documents:" with a link. Two marinas with exactly the same
+  name share their documents.
+
 - **Mate can look over a marina.** Ask about a marina you're thinking of
   stopping at and Mate reads what OpenStreetMap records about it: the berth
   count, fee and power, fuel, a travel lift, a boatyard, the ramp, the pontoon

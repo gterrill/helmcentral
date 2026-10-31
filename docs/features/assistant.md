@@ -214,6 +214,10 @@ Under the answer, Mate shows a marina card. Here's what's on it:
 - **Folded sections:** The entrance marks, the pontoon arms, and the shops and
   services ashore with their opening hours and how far away they are. Tap a
   heading to open it.
+- **In Documents:** A line that says "In Documents:" followed by the title of
+  each document you've saved for this marina, such as its own berth map. Each
+  title is a link to that document's page. The line only appears when there is
+  one.
 - **The bottom:** The marina's website and phone number as links when the map
   has them. Below them is "OpenStreetMap · data as of" and the date the map was
   last updated. If the map server doesn't give a date, the card leaves it out.
@@ -227,6 +231,33 @@ It needs the OpenStreetMap place-names plugin, which is the default, and an
 internet connection. If the place-names plugin doesn't support it, or no marina
 is charted within 500 m of the position, Mate tells you that and doesn't describe
 the marina from memory.
+
+#### A marina's own map
+
+OpenStreetMap shows where the pontoons are, but it rarely has berth numbers.
+Many marinas publish their own map or berth plan, and you can keep it in
+Documents so that Mate reads it whenever you ask about that marina. Here's how
+it works:
+
+- **Finding the map:** Ask Mate for a marina's own map, for example "get me the
+  Coral Sea Marina map". If web search is on, Mate looks for the marina's map
+  page or PDF and gives you the link. If web search is off, Mate says so and
+  points you to the marina's website when the map has one.
+- **You do the download:** Helmcentral never downloads files from the web, and
+  Mate won't say it has saved the map. You download the file yourself and
+  upload it in Documents.
+- **Linking it to the marina:** A document belongs to a marina when it has a tag
+  that is the marina's name. The name has to match as a whole, but capital
+  letters and spaces at either end don't matter. "Coral Sea Marina" doesn't
+  match a tag of "Coral Sea Marina Resort". You can add the tag on the
+  document's page, or ask Mate to ("link that to Coral Sea Marina Resort") and
+  tap **Apply** on the card it shows you.
+- **Using it:** The next time Mate looks at that marina, it sees the documents
+  linked to it, up to three, and reads them for berth numbers and the layout.
+  The marina card shows them under "In Documents:".
+
+Two marinas with exactly the same name share their documents, because the tag is
+the only link. Remove the tag from a document to unlink it.
 
 ### Passage estimates
 

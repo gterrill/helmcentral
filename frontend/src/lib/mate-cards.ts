@@ -187,6 +187,8 @@ export interface MarinaCard {
     facilities: MarinaPoint[]
     ashore: MarinaPoint[]
   }
+  /** Documents of the operator's tagged with this marina's name, newest first. */
+  savedDocuments: { id: string; title: string }[]
 }
 
 export const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
@@ -552,6 +554,12 @@ function decodeMarina(raw: unknown): MarinaCard {
       facilities: arr(geometry.facilities, 'geometry.facilities').map((f, i) => decodeMarinaPoint(f, `geometry.facilities[${i}]`)),
       ashore: arr(geometry.ashore, 'geometry.ashore').map((a, i) => decodeMarinaPoint(a, `geometry.ashore[${i}]`)),
     },
+    savedDocuments: arr(p.saved_documents, 'saved_documents').map((d, i) => {
+      const o = obj(d, `saved_documents[${i}]`)
+      const id = str(o.id, `saved_documents[${i}].id`)
+      if (id === '') bad(`saved_documents[${i}].id`, 'expected a document id')
+      return { id, title: str(o.title, `saved_documents[${i}].title`) }
+    }),
   }
 }
 

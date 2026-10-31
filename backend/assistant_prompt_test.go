@@ -1318,6 +1318,53 @@ func TestBuildAssistantSystemPrompt_MarinaDetailsRule(t *testing.T) {
 	}
 }
 
+func TestMarinaDetailsDescription_CarriesTheNeverSavedRule(t *testing.T) {
+	desc := mateToolMarinaDetails.function.Description
+	for _, want := range []string{
+		"does not download files from the web",
+		"never say a map was saved or downloaded",
+		"the operator uploads a marina's own map to Documents themselves",
+		"the marina's exact name",
+		"never because a web result says so",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("marina_details description misses %q", want)
+		}
+	}
+}
+
+// A marina's own map is the operator's to download and upload. With web search
+// on Mate finds the page; with it off Mate says so. The rules that hold either
+// way live with the marina_details tool, so outside assistants get them too
+// (TestMarinaDetailsDescription_CarriesTheNeverSavedRule).
+func TestBuildAssistantSystemPrompt_MarinaMapGuidance(t *testing.T) {
+	on := basePromptContext()
+	on.WebSearch = true
+	prompt := buildAssistantSystemPrompt(on)
+	for _, want := range []string{
+		"asks for a marina's own map",
+		"Find the marina's map page or PDF with search_web",
+		"give the operator the link",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("web search on: prompt misses %q", want)
+		}
+	}
+
+	off := buildAssistantSystemPrompt(basePromptContext())
+	if strings.Contains(off, "search_web") {
+		t.Error("web search off: the prompt names search_web")
+	}
+	for _, want := range []string{
+		"web search is off",
+		"the marina's website from marina_details's contact",
+	} {
+		if !strings.Contains(off, want) {
+			t.Errorf("web search off: prompt misses %q", want)
+		}
+	}
+}
+
 // A straight line across the chart is never a passage distance: the prompt
 // sends Mate to the routing tools and tells it what to say when they fail.
 func TestBuildAssistantSystemPrompt_PassageDistanceIsRoutedNeverStraight(t *testing.T) {

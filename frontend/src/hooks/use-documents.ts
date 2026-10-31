@@ -198,6 +198,15 @@ export function invalidateDocumentLists(opts: { counts: boolean }) {
 }
 
 /**
+ * Mate's Apply changed a document's tags: the listings and tag chips read
+ * again, and so does the document's own Details page when it is open.
+ */
+export function documentRecordApplied(id?: string): void {
+  if (id) invalidateQueries([documentPath(id)])
+  invalidateDocumentLists({ counts: false })
+}
+
+/**
  * The documents the Documents listing shows for a folder, as the server
  * returned them: the folder's own, or those carrying `tag` when one is
  * filtered on. The same queries the listing reads, so a Details page opened

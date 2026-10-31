@@ -48,6 +48,12 @@ describe('applying a proposal refreshes the pages it changed', () => {
     expect(invalidated).toContain('/api/inventory/equipment')
   })
 
+  it('reaches the document’s own Details page when its tags change', async () => {
+    reply(['document'], 'update', 'd1')
+    await applyAssistantProposal('p1')
+    expect(invalidated).toContain('/api/documents/d1')
+  })
+
   it('leaves the deleted item’s own maintenance reads alone', async () => {
     reply(['equipment'], 'delete', 'e1')
     await applyAssistantProposal('p1')
@@ -77,6 +83,8 @@ describe('applying a proposal refreshes the pages it changed', () => {
     ['maintenance_rule', '/api/inventory/maintenance/rules'],
     ['maintenance_log', '/api/inventory/maintenance/log'],
     ['vessel_particulars', '/api/vessel/particulars'],
+    ['document', '/api/documents'],
+    ['document', '/api/documents/tags'],
   ])('%s refreshes %s', async (type, path) => {
     reply([type])
     await applyAssistantProposal('p1')

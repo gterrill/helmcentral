@@ -324,4 +324,23 @@ describe('AssistantProposalCard with the server payload', () => {
     expect(screen.getByText('Deck').closest('div')).toHaveTextContent('Main deck')
     expect(screen.getByText('Outline').closest('div')).toHaveTextContent('3 points')
   })
+
+  it('a document proposal shows its tags before and after, and links to the document once applied', () => {
+    const op = {
+      type: 'document',
+      action: 'update' as const,
+      description: 'On Berth map: add tag "Coral Sea Marina Resort"',
+      before: { tags: ['map'] },
+      after: { tags: ['map', 'Coral Sea Marina Resort'] },
+    }
+    const { rerender } = render(<AssistantProposalCard proposal={proposal({ ops: [op] })} canWrite onChange={vi.fn()} />)
+
+    const tags = screen.getByText('Tags').closest('div') as HTMLElement
+    expect(tags).toHaveTextContent('map→map, Coral Sea Marina Resort')
+    expect(screen.getByText('On Berth map: add tag "Coral Sea Marina Resort"')).toBeInTheDocument()
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+
+    rerender(<AssistantProposalCard proposal={proposal({ status: 'applied', ops: [{ ...op, href: '/documents/d1' }] })} canWrite onChange={vi.fn()} />)
+    expect(screen.getByRole('link', { name: /On Berth map/ })).toHaveAttribute('href', '/documents/d1')
+  })
 })

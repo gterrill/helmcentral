@@ -94,6 +94,9 @@ type assistantMarinaDetailsResult struct {
 	Ashore           []marinaAshore     `json:"ashore"`
 	VesselLimitCheck []marinaLimitCheck `json:"vessel_limit_check"`
 	Source           string             `json:"source"`
+	// SavedDocuments are the operator's own documents tagged with this
+	// marina's name (a map of the berths, say). Left out when there are none.
+	SavedDocuments []marinaSavedDocument `json:"saved_documents,omitempty"`
 	// Card is set only where a card sink takes the marina card (Mate's chat), so
 	// an outside assistant is not told to rely on a card it never shows.
 	Card string `json:"card,omitempty"`
@@ -102,6 +105,37 @@ type assistantMarinaDetailsResult struct {
 	DataAsOf  string `json:"data_as_of,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
 	Reading   string `json:"reading"`
+}
+
+// marinaMaxSavedDocuments bounds how many linked documents one call returns.
+const marinaMaxSavedDocuments = 3
+
+// marinaSavedDocument is a document the operator tagged with the marina's name.
+type marinaSavedDocument struct {
+	DocumentID string `json:"document_id"`
+	Title      string `json:"title"`
+}
+
+// savedMarinaDocuments finds the documents tagged with the marina's name. The
+// library only enriches the lookup, so without one there is nothing to find;
+// a query that fails is an error.
+func (d assistantToolDeps) savedMarinaDocuments(name string) ([]marinaSavedDocument, error) {
+	if d.documents == nil {
+		return nil, nil
+	}
+	store := d.documents()
+	if store == nil {
+		return nil, nil
+	}
+	docs, err := store.DocumentsTaggedWith(name, marinaMaxSavedDocuments)
+	if err != nil {
+		return nil, fmt.Errorf("marina_details: look up saved documents: %w", err)
+	}
+	out := make([]marinaSavedDocument, 0, len(docs))
+	for _, doc := range docs {
+		out = append(out, marinaSavedDocument{DocumentID: doc.ID, Title: assistantCitationTitle(doc.Title, doc.Filename)})
+	}
+	return out, nil
 }
 
 func (d assistantToolDeps) executeMarinaDetails(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -177,7 +211,12 @@ func (d assistantToolDeps) executeMarinaDetails(ctx context.Context, raw json.Ra
 			exceeds = append(exceeds, c.label)
 		}
 	}
-	result.Reading = readingMarinaDetails(result.Marina.Contact, exceeds, m.UnreadTags, found.Truncated)
+	saved, err := d.savedMarinaDocuments(m.Name)
+	if err != nil {
+		return "", err
+	}
+	result.SavedDocuments = saved
+	result.Reading = readingMarinaDetails(result.Marina.Contact, exceeds, m.UnreadTags, found.Truncated, saved)
 
 	// shrink drops the least useful detail first: ashore, pontoon arms,
 	// entrance marks, facility facts, then facilities from the end of the list
@@ -203,7 +242,7 @@ func (d assistantToolDeps) executeMarinaDetails(ctx context.Context, raw json.Ra
 		}
 		if trimmed && !result.Truncated {
 			result.Truncated = true
-			result.Reading = readingMarinaDetails(result.Marina.Contact, exceeds, m.UnreadTags, true)
+			result.Reading = readingMarinaDetails(result.Marina.Contact, exceeds, m.UnreadTags, true, saved)
 		}
 		return trimmed
 	}
@@ -212,7 +251,7 @@ func (d assistantToolDeps) executeMarinaDetails(ctx context.Context, raw json.Ra
 	var card json.RawMessage
 	if d.cards != nil {
 		var err error
-		if card, err = json.Marshal(buildMarinaCard(found, result.VesselLimitCheck)); err != nil {
+		if card, err = json.Marshal(buildMarinaCard(found, result.VesselLimitCheck, saved)); err != nil {
 			return "", fmt.Errorf("marina_details card: %w", err)
 		}
 	}
