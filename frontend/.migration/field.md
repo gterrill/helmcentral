@@ -7,7 +7,7 @@ Radix/Base UI imports of its own, only composing this project's already-
 migrated `Label` (`label.tsx`) and `Separator` (`separator.tsx`, untouched,
 already Base UI-backed from the original migration). Only change: density
 overrides to match this app's tight "quietly dense cockpit" convention
-(AGENTS.md) instead of shipping shadcn's spacious defaults.
+(CODING_STANDARDS.md) instead of shipping shadcn's spacious defaults.
 
 ## Changed
 

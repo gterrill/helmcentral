@@ -4,7 +4,7 @@ import noWidgetInUiText from './no-widget-in-ui-text.js';
 import noZonelessTime from './no-zoneless-time.js';
 
 // Local ESLint plugin, registered as `helm` in eslint.config.js. Each rule
-// turns a mechanical part of AGENTS.md into a lint error.
+// turns a mechanical part of CODING_STANDARDS.md into a lint error.
 export default {
   rules: {
     'text-size-scale': textSizeScale,

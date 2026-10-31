@@ -2168,7 +2168,7 @@ function AppShell() {
       <SidebarInset className={activePanel === 'assistant' ? 'h-svh' : undefined}>
         {/* `min-w-0` on both halves is load-bearing, not cosmetic: without it a flex
             item refuses to shrink below its content width and the right-hand cluster
-            gets pushed off a phone screen (AGENTS.md — prevent viewport overflows).
+            gets pushed off a phone screen (CODING_STANDARDS.md — prevent viewport overflows).
             The breadcrumb is the designated slack absorber, so it truncates while the
             clock and controls keep their size. */}
         {/* ADR 0142: the window scrolls, so a dirty form's SaveBar (portalled into this

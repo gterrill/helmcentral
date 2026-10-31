@@ -5,7 +5,7 @@ const ARBITRARY_SIZE = /(?<![\w-])text-\[(\d*\.?\d+)(px|rem)\]/g;
 const SIZE_VALUE = /^(\d*\.?\d+)(px|rem)?$/;
 
 const MESSAGE =
-  'Values use text-xs or larger; 10px is for uppercase micro-labels and 9px for map/marker annotation. 11px is retired (AGENTS.md "Micro-Typography Scale").';
+  'Values use text-xs or larger; 10px is for uppercase micro-labels and 9px for map/marker annotation. 11px is retired (CODING_STANDARDS.md "Micro-Typography Scale").';
 
 function toPx(num, unit) {
   return unit === 'rem' ? Number(num) * 16 : Number(num);

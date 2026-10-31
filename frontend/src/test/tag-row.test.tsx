@@ -40,7 +40,7 @@ describe('TagRow', () => {
 
   // ADR 0142: the Equipment editor's aside is only 20rem wide - the URL row
   // and the button row must each stand on their own to avoid the horizontal
-  // overflow AGENTS.md's own layout-resiliency rule forbids.
+  // overflow CODING_STANDARDS.md's own layout-resiliency rule forbids.
   it('stacks the URL above its own button row with layout="stacked", for a narrow container', () => {
     render(<TagRow path="/inventory/bins/LAZ-02" layout="stacked" />)
     const url = screen.getByText(`${window.location.origin}/inventory/bins/LAZ-02`)

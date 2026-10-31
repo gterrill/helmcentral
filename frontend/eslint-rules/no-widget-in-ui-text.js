@@ -20,7 +20,7 @@ const PROMISE_KEYS = ['loading', 'success', 'error'];
 const TOAST_METHODS = new Set(['success', 'error', 'warning', 'info', 'message', 'loading', 'promise']);
 
 const MESSAGE =
-  'The operator\'s word is "tile"; "widget" is the config-record layer only (AGENTS.md "Tiles And Widgets").';
+  'The operator\'s word is "tile"; "widget" is the config-record layer only (CODING_STANDARDS.md "Tiles And Widgets").';
 
 function isToastCall(callee) {
   if (callee.type === 'Identifier') return callee.name === 'toast';

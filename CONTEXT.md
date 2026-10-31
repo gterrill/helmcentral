@@ -1,7 +1,7 @@
 # Context
 
 Names for the concepts the code is built around. Operator-facing words
-(tile, alarm, operating mode) are set in `AGENTS.md`; this file holds the
+(tile, alarm, operating mode) are set in `CODING_STANDARDS.md`; this file holds the
 engineering terms that name seams in the code.
 
 ## Frontend navigation
