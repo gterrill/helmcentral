@@ -124,15 +124,20 @@ type wasmPluginBase struct {
 	// exports behind the offline coastline. Detected like supportsPlaceNames
 	// (both or neither) and never a reason to fail loading.
 	supportsShoreline bool
+	// supportsMarinaDetails is true when a POI plugin exports marina_details,
+	// the optional export behind Mate's marina_details tool. It is a single
+	// export, so it stands alone, and is never a reason to fail loading.
+	supportsMarinaDetails bool
 }
 
-func (b *wasmPluginBase) ID() string               { return b.id }
-func (b *wasmPluginBase) Name() string             { return b.name }
-func (b *wasmPluginBase) Description() string      { return b.description }
-func (b *wasmPluginBase) TTLSeconds() int64        { return b.ttlSeconds }
-func (b *wasmPluginBase) Path() string             { return b.path }
-func (b *wasmPluginBase) SupportsPlaceNames() bool { return b.supportsPlaceNames }
-func (b *wasmPluginBase) SupportsShoreline() bool  { return b.supportsShoreline }
+func (b *wasmPluginBase) ID() string                  { return b.id }
+func (b *wasmPluginBase) Name() string                { return b.name }
+func (b *wasmPluginBase) Description() string         { return b.description }
+func (b *wasmPluginBase) TTLSeconds() int64           { return b.ttlSeconds }
+func (b *wasmPluginBase) Path() string                { return b.path }
+func (b *wasmPluginBase) SupportsPlaceNames() bool    { return b.supportsPlaceNames }
+func (b *wasmPluginBase) SupportsShoreline() bool     { return b.supportsShoreline }
+func (b *wasmPluginBase) SupportsMarinaDetails() bool { return b.supportsMarinaDetails }
 
 func (b *wasmPluginBase) ttlDuration() time.Duration {
 	return time.Duration(b.ttlSeconds) * time.Second
@@ -734,15 +739,16 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 	supportsShoreline := instance.FunctionExists("shoreline_square") && instance.FunctionExists("shoreline_changes")
 
 	return &wasmPluginBase{
-		id:                 id,
-		name:               name,
-		description:        description,
-		ttlSeconds:         ttlSeconds,
-		path:               path,
-		compiled:           compiled,
-		configFieldKeys:    configFieldKeys,
-		supportsPlaceNames: supportsPlaceNames,
-		supportsShoreline:  supportsShoreline,
+		id:                    id,
+		name:                  name,
+		description:           description,
+		ttlSeconds:            ttlSeconds,
+		path:                  path,
+		compiled:              compiled,
+		configFieldKeys:       configFieldKeys,
+		supportsPlaceNames:    supportsPlaceNames,
+		supportsShoreline:     supportsShoreline,
+		supportsMarinaDetails: instance.FunctionExists("marina_details"),
 	}, nil
 }
 

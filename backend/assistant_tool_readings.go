@@ -1,6 +1,9 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // How to read a tool's result (ADR 0236). The rules live with the tool, so Mate
 // and an outside assistant read the same words.
@@ -63,4 +66,39 @@ func readingTides(st assistantStationInfo, timeBasis string) string {
 // readingShelter depends on how old the coastline is.
 func readingShelter(downloaded string) string {
 	return fmt.Sprintf("From the Offline coastline downloaded %s.", downloaded)
+}
+
+const ruleMarinaDetails = "This is what volunteers have mapped in OpenStreetMap, not a survey and not the marina's own word. " +
+	"Anything not listed is UNKNOWN, not absent: never say a marina lacks fuel, power, water, a ramp or anything else, and never say it has " +
+	"berths free. Fuel type (diesel or petrol) is unknown unless a fuel fact says so. A count is the number of mapped features, and one thing can be " +
+	"mapped twice. A charted draft or length limit the boat exceeds is a no-go, as the passage limits are, so say that plainly and do not recommend " +
+	"the marina; with no limit charted, say so plainly, and never assume one. Charted depths are not tide-referenced. Whatever the figures, tell the " +
+	"operator to call the marina to confirm berths, depth and fuel."
+
+// readingMarinaDetails carries what is particular to one call: the limits the
+// boat exceeds, the tags that could not be read, a cut-short list and how to
+// reach the marina. ruleMarinaDetails holds the rest.
+func readingMarinaDetails(contact marinaContact, exceeds []string, unread []string, truncated bool) string {
+	var parts []string
+	if len(exceeds) > 0 {
+		parts = append(parts, fmt.Sprintf("The boat exceeds the charted %s limit.", strings.Join(exceeds, " and ")))
+	}
+	if len(unread) > 0 {
+		parts = append(parts, fmt.Sprintf("These tags are on the marina but could not be read as figures, so say so rather than guess: %s.", strings.Join(unread, ", ")))
+	}
+	if truncated {
+		parts = append(parts, "The lists were cut short, so there may be more.")
+	}
+	var how []string
+	for _, c := range []struct{ label, value string }{{"phone", contact.Phone}, {"email", contact.Email}, {"website", contact.Website}, {"VHF channel", contact.VHF}} {
+		if v := strings.TrimSpace(c.value); v != "" {
+			how = append(how, c.label+" "+v)
+		}
+	}
+	if len(how) > 0 {
+		parts = append(parts, "Marina contact: "+strings.Join(how, ", ")+".")
+	} else {
+		parts = append(parts, "No phone, email or website is tagged, so the operator has to find the marina's contact details.")
+	}
+	return strings.Join(parts, " ")
 }

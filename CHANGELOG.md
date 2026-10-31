@@ -13,6 +13,19 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Mate can look over a marina.** Ask about a marina you're thinking of
+  stopping at and Mate reads what OpenStreetMap records about it: the berth
+  count, fee and power, fuel, a travel lift, a boatyard, the ramp, the pontoon
+  arm names, the entrance beacons, the phone and website, and the shops and
+  services ashore. It also compares any mapped draught and length limit with
+  your boat's draft and length overall, and says so plainly when your boat is
+  over one. The map is volunteer-kept, so Mate treats anything it doesn't list
+  as unknown, not missing, and tells you to call the marina to confirm berths,
+  depth and fuel. It needs the OpenStreetMap place-names plugin and a version
+  of that plugin that includes the marina lookup, so update the plugin file
+  when you upgrade. Outside assistants can use it too, and a new token starts
+  with it switched on.
+
 - **Alarms on your phone and in your email now come with a chart.** When one of
   your alarm rules, the house bank rule or a tank level alarm goes off, the
   notification carries the last 6 hours of that reading, with the alarm's limit

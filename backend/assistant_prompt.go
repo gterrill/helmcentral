@@ -1061,6 +1061,11 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"corrects it where it differs. If the tool returns an error, say shelter could not be checked and why; " +
 		"do not substitute a guess without saying so.\n\n" +
 
+		"When the operator is choosing, comparing or planning a stop at a marina, call marina_details with the " +
+		"position find_places gave you, and weigh what it lists and its vessel_limit_check in the plan: do not make a " +
+		"stop of a marina the boat cannot enter. The tool's description says how far to trust it. If the tool returns an " +
+		"error, say the marina could not be checked and why.\n\n" +
+
 		"Shape an anchorage or passage answer as a pilotage briefing, not a forecast readout. For each anchorage: " +
 		"the wind directions it is sheltered from and which would make it a lee shore, reasoned from the " +
 		"coastline and the direction it faces, plus holding, depths, swinging room and hazards where you know " +

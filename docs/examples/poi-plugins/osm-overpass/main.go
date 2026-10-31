@@ -42,6 +42,11 @@
 // injectable overpassQueryFunc; this file supplies doOverpassQuery, the one
 // place all three wasmexports below actually call the pdk HTTP client.
 //
+// One more optional export, marina_details, returns what OpenStreetMap records
+// about the marina charted at a position and the features around it - see
+// marina_details.go. It runs two Overpass queries, one to find the marina and
+// one for everything beside it.
+//
 // Two further optional exports, shoreline_square and shoreline_changes,
 // return the raw coastline and reef lines of one coverage square, and count
 // how many were edited since a date, for the host's offline coastline - see
@@ -245,6 +250,27 @@ func searchPlaces() int32 {
 	}
 
 	output, err := runSearchPlaces(doOverpassQuery, input)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	if err := pdk.OutputJSON(output); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
+}
+
+//go:wasmexport marina_details
+func marinaDetails() int32 {
+	var input marinaDetailsInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	output, err := runMarinaDetails(doOverpassQuery, input)
 	if err != nil {
 		pdk.SetError(err)
 		return -1
