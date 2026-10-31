@@ -635,28 +635,30 @@ func (*draftingTools) checkDraft(draft string, calls []openRouterToolCall) (stri
 }
 
 func TestAssistantRun_ACorrectionDoesNotUseUpALookupRound(t *testing.T) {
+	before := assistantMaxToolRounds - 2
 	var responses []*http.Response
-	for i := 0; i < 6; i++ {
+	for i := 0; i < before; i++ {
 		responses = append(responses, newCallRound(t, i))
 	}
-	responses = append(responses, finalResponse(t, "first draft", "m", openRouterUsage{}), newCallRound(t, 6), newCallRound(t, 7), finalResponse(t, "done", "m", openRouterUsage{}))
+	responses = append(responses, finalResponse(t, "first draft", "m", openRouterUsage{}), newCallRound(t, before), newCallRound(t, before+1), finalResponse(t, "done", "m", openRouterUsage{}))
 	doer := queued(responses...)
 	emit, _ := recordingEmitter()
-	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: &draftingTools{}, emit: emit, options: assistantRunnerOptions{Unattended: true}}
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: &draftingTools{}, emit: emit}
 	if _, err := runner.run(context.Background(), "system", "", nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	// 6 lookups, the correction, 2 more lookups (8 in all), then the forced final.
-	if len(doer.requests) != 10 {
-		t.Fatalf("%d requests, want 10", len(doer.requests))
+	// The lookups, the correction, 2 more lookups (the ceiling in all), then the forced final.
+	want := assistantMaxToolRounds + 2
+	if len(doer.requests) != want {
+		t.Fatalf("%d requests, want %d", len(doer.requests), want)
 	}
-	for i := 0; i < 9; i++ {
+	for i := 0; i < want-1; i++ {
 		if len(doer.requests[i].Tools) == 0 {
-			t.Fatalf("request %d withdrew the tools although fewer than %d lookup rounds had run", i, assistantUnattendedMaxToolRounds)
+			t.Fatalf("request %d withdrew the tools although fewer than %d lookup rounds had run", i, assistantMaxToolRounds)
 		}
 	}
-	if len(doer.requests[9].Tools) != 0 {
-		t.Fatal("the request after the eighth lookup round should withdraw the tools")
+	if len(doer.requests[want-1].Tools) != 0 {
+		t.Fatal("the request after the last lookup round should withdraw the tools")
 	}
 }
 
@@ -670,5 +672,147 @@ func TestAssistantRun_AFailedRunRecordsTheModelThatAnsweredItsRounds(t *testing.
 	runs, _ := store.ListRuns(conv.ID)
 	if len(runs) != 1 || runs[0].Model != "anthropic/claude-sonnet-4.5" {
 		t.Fatalf("runs = %+v: the model that answered the first round was not the configured default", runs)
+	}
+}
+
+// An unattended review has nobody to read a corrected draft and no passage to
+// judge, so the draft check must not send its answer back.
+func TestAssistantRun_AnUnattendedRunSkipsThePassageDraftCheck(t *testing.T) {
+	doer := queued(finalResponse(t, "first draft", "m", openRouterUsage{}))
+	emit, _ := recordingEmitter()
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: &draftingTools{}, emit: emit, options: assistantRunnerOptions{Unattended: true}}
+	reply, err := runner.run(context.Background(), "system", "", nil)
+	if err != nil || reply.Content != "first draft" {
+		t.Fatalf("reply %q err %v", reply.Content, err)
+	}
+	if len(doer.requests) != 1 {
+		t.Fatalf("%d requests: the draft was sent back on an unattended run", len(doer.requests))
+	}
+}
+
+func TestAssistantRun_AnAttendedRunStillChecksItsDraft(t *testing.T) {
+	doer := queued(finalResponse(t, "first draft", "m", openRouterUsage{}), finalResponse(t, "second draft", "m", openRouterUsage{}))
+	emit, _ := recordingEmitter()
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: &draftingTools{}, emit: emit}
+	reply, err := runner.run(context.Background(), "system", "", nil)
+	if err != nil || reply.Content != "second draft" || len(doer.requests) != 2 {
+		t.Fatalf("reply %q err %v after %d requests", reply.Content, err, len(doer.requests))
+	}
+}
+
+// requestDeadlineDoer records the deadline each request's context carried.
+type requestDeadlineDoer struct {
+	*queuedChatDoer
+	deadlines []time.Time
+}
+
+func (d *requestDeadlineDoer) Do(req *http.Request) (*http.Response, error) {
+	at, _ := req.Context().Deadline()
+	d.deadlines = append(d.deadlines, at)
+	return d.queuedChatDoer.Do(req)
+}
+
+// The submit retry is part of the forced final, so it shares the forced
+// final's one reserve. A fresh reserve per completion would carry an
+// unattended review past tool phase + 2 x reserve, the deadline it is held to.
+func TestAssistantRun_TheSubmitRetryDoesNotStartAFreshFinalReserve(t *testing.T) {
+	origReserve := assistantFinalReserve
+	assistantFinalReserve = 5 * time.Second
+	t.Cleanup(func() { assistantFinalReserve = origReserve })
+	doer := &requestDeadlineDoer{queuedChatDoer: stalledThenSubmits(t, 2)}
+	emit, _ := recordingEmitter()
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: &failingSubmitTools{fail: 1}, emit: emit, options: assistantRunnerOptions{Unattended: true, SubmitTool: "submit_test"}}
+	if _, err := runner.run(context.Background(), "system", "", nil); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	n := len(doer.deadlines)
+	first, retry := doer.deadlines[n-2], doer.deadlines[n-1]
+	if retry.After(first) {
+		t.Fatalf("the retry's deadline %s is later than the forced final's %s: it started a fresh reserve", retry, first)
+	}
+}
+
+// The old pruner cleared an answer's calls after the retention window and left
+// no mark. On open, an answer older than the window that used tools and has no
+// run is marked, so rating it is refused as it is for one the current pruner
+// cleared. A newer one with no run never had lookups recorded, and answers
+// with a run or that used no tools are not marked either. Opening again
+// changes nothing.
+func TestAssistantRun_AnswersTheOldPrunerClearedAreMarkedOnOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "assistant.sqlite")
+	store, err := newAssistantStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conv, _ := store.CreateConversation("x")
+	old := time.Now().Add(-assistantRunRetention - 24*time.Hour)
+	store.now = func() time.Time { return old }
+	store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "user", Content: "q"})
+	pruned, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a", ToolRounds: 3})
+	noTools, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "c"})
+	hasRun, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "d", ToolRounds: 1})
+	saveAnswerRun(t, store, hasRun, time.Now(), assistantToolCall{Name: "kept", Args: "{}", Result: "{}"})
+	store.now = time.Now
+	recent, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "b", ToolRounds: 2})
+	store.Close()
+
+	store, err = newAssistantStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	marked := func(id string) bool {
+		var n int
+		if err := store.db.QueryRow(`SELECT lookups_pruned FROM messages WHERE id = ?`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	if !marked(pruned.ID) {
+		t.Error("an answer older than the retention window with rounds and no run was cleared by the old pruner and must be marked")
+	}
+	for name, id := range map[string]string{"recent": recent.ID, "noTools": noTools.ID, "hasRun": hasRun.ID} {
+		if marked(id) {
+			t.Errorf("the %s answer must not be marked", name)
+		}
+	}
+	if _, err := store.SetMessageFeedback(pruned.ID, "up", ""); !errors.Is(err, errAssistantFeedbackTooOld) {
+		t.Errorf("rating a pruned answer = %v, want errAssistantFeedbackTooOld", err)
+	}
+	if _, err := store.SetMessageFeedback(recent.ID, "up", ""); err != nil {
+		t.Errorf("a recent answer with no run can still be rated: %v", err)
+	}
+}
+
+// sleepingDoer holds each request for a while before answering, so a short
+// reserve runs out inside the forced final.
+type sleepingDoer struct {
+	*queuedChatDoer
+	after, delay time.Duration
+}
+
+func (d *sleepingDoer) Do(req *http.Request) (*http.Response, error) {
+	if len(d.queuedChatDoer.requests) >= int(d.after) {
+		time.Sleep(d.delay)
+	}
+	return d.queuedChatDoer.Do(req)
+}
+
+// When the forced final's one reserve has run out, the retry can't start. The
+// run fails with the submit error the operator can act on, not a bare
+// deadline.
+func TestAssistantRun_ASubmitRetryWithNoReserveLeftFailsWithTheSubmitError(t *testing.T) {
+	origReserve := assistantFinalReserve
+	assistantFinalReserve = 50 * time.Millisecond
+	t.Cleanup(func() { assistantFinalReserve = origReserve })
+	doer := &sleepingDoer{queuedChatDoer: stalledThenSubmits(t, 2), after: stalledToolRounds, delay: 120 * time.Millisecond}
+	emit, _ := recordingEmitter()
+	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: &failingSubmitTools{fail: 2}, emit: emit, options: assistantRunnerOptions{Unattended: true, SubmitTool: "submit_test"}}
+	_, err := runner.run(context.Background(), "system", "", nil)
+	if err == nil || !strings.Contains(err.Error(), "submit_test did not file") || !strings.Contains(err.Error(), "review is empty") {
+		t.Fatalf("err = %v, want the submit error", err)
+	}
+	if got := len(doer.requests); got != stalledToolRounds+1 {
+		t.Fatalf("%d requests: the retry started with no reserve left", got)
 	}
 }

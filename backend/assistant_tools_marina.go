@@ -247,7 +247,7 @@ func (d assistantToolDeps) executeMarinaDetails(ctx context.Context, raw json.Ra
 		return trimmed
 	}
 	// The card is built from what the plugin returned, before shrink cuts the
-	// model's copy: the operator sees the full set (ADR 0240).
+	// model's copy: the operator sees the full set (ADR 0241).
 	var card json.RawMessage
 	if d.cards != nil {
 		var err error

@@ -49,6 +49,15 @@ take the better part of a minute per square in busy hours. A server aboard
 answers in seconds. See [Run your own Overpass
 server](../how-to/run-your-own-overpass-server.md).
 
+A square held from an older version of Helmcentral has no map-data date. It stays
+on the boat and Mate keeps using it for shelter and passage distances. Helmcentral
+downloads it again in the background, one square at a time, and replaces it only
+when the download works. That needs internet, so with no signal the old square
+stays as it is. The page counts these as **awaiting refresh**. If a try fails, it
+lists the square with the reason and says the old copy is kept. The page also
+says when it will try again. The weekly edit check skips a square until it has
+been downloaded again.
+
 A square with no coastline in it, which is open sea, is still a square, and
 it's stored as one. If a square fails, Helmcentral keeps the reason, shows it on
 the page, and tries it again later, waiting longer after each failure.

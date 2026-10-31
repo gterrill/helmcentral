@@ -2,7 +2,7 @@ package main
 
 import "math"
 
-// The marina card (ADR 0240): what marina_details found, drawn for the
+// The marina card (ADR 0241): what marina_details found, drawn for the
 // operator. It is a snapshot like the passage window: it stores the figures and
 // the geometry the tool read, and a reopened thread draws the same card without
 // asking the map server again. The model reads the compact text result; the

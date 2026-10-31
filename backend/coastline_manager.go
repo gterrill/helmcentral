@@ -446,28 +446,60 @@ func (m *coastlineManager) step() bool {
 		return true
 	}
 
+	// wanted is the squares around the boat, nearest first. It is empty with
+	// no fix, and the top-up below then waits.
+	var wanted []coverageSquare
 	if snap.fix {
-		wanted, _, err := coverageWanted(snap.lat, snap.lon)
+		w, _, err := coverageWanted(snap.lat, snap.lon)
 		if err != nil {
 			m.setError(err.Error())
 		} else {
-			for _, sq := range wanted {
-				rec, held := byKey[sq]
-				if held && rec.Status == coastlineStatusReady {
-					continue
-				}
-				if held && now.Before(rec.NextAttemptAt) {
-					continue
-				}
-				m.download(src, gen, sq, rec, now, nil)
-				return true
-			}
+			wanted = w
 		}
+	}
+	for _, sq := range wanted {
+		rec, held := byKey[sq]
+		if held && rec.Status == coastlineStatusReady {
+			continue
+		}
+		if held && now.Before(rec.NextAttemptAt) {
+			continue
+		}
+		m.download(src, gen, sq, rec, now, nil)
+		return true
+	}
+
+	// A held square without a data date is downloaded again, one at a time.
+	// It is replaced only when the download works, so with no network it
+	// stays as it is and keeps serving routing and shelter. Squares in range
+	// go first, nearest first as the top-up orders them. An all-land square
+	// is left alone, as the edit check leaves it.
+	rank := make(map[coverageSquare]int, len(wanted))
+	for i, sq := range wanted {
+		rank[sq] = i
+	}
+	var refresh []coastlineSquareRecord
+	for _, r := range recs {
+		if r.awaitingRefresh() && !squareInland(r.Square) && !now.Before(r.NextAttemptAt) {
+			refresh = append(refresh, r)
+		}
+	}
+	sort.SliceStable(refresh, func(i, j int) bool {
+		ri, iIn := rank[refresh[i].Square]
+		rj, jIn := rank[refresh[j].Square]
+		if iIn != jIn {
+			return iIn
+		}
+		return iIn && ri < rj
+	})
+	if len(refresh) > 0 {
+		m.download(src, gen, refresh[0].Square, refresh[0], now, nil)
+		return true
 	}
 
 	var due []coastlineSquareRecord
 	for _, r := range recs {
-		if !checkPaused && r.Status == coastlineStatusReady && !squareInland(r.Square) && now.Sub(r.CheckedAt) >= coastlineCheckInterval && !now.Before(r.NextAttemptAt) {
+		if !checkPaused && r.Status == coastlineStatusReady && !r.awaitingRefresh() && !squareInland(r.Square) && now.Sub(r.CheckedAt) >= coastlineCheckInterval && !now.Before(r.NextAttemptAt) {
 			due = append(due, r)
 		}
 	}
@@ -573,13 +605,10 @@ func (m *coastlineManager) download(src coastlineSource, gen uint64, sq coverage
 func (m *coastlineManager) check(src coastlineSource, gen uint64, rec coastlineSquareRecord, now time.Time) {
 	what := "edit check of " + rec.Square.Label()
 	if rec.DataAsOf.IsZero() {
-		// Every stored square has a data date, so this is a bug, not a
-		// condition to work around.
-		err := errors.New("the square has no data date to count edits from")
-		log.Printf("offline coastline: %s failed: %v", what, err)
-		m.commit(gen, "failure of "+what, func() error {
-			return m.cfg.Store.RecordFailure(rec.Square, err.Error(), now, now.Add(coastlineRetryDelay(rec.Attempts+1)))
-		})
+		// step never picks such a square: it is downloaded again first. Reaching
+		// here is a bug, and a zero since must never go to the plugin.
+		log.Printf("offline coastline: %s: refusing to check a square with no data date", what)
+		m.setError(what + ": the square has no data date to count edits from")
 		return
 	}
 	edits, dataAsOfRaw, err := src.ShorelineChanges(rec.Square, rec.DataAsOf)
@@ -719,6 +748,12 @@ type coastlineStatusSquare struct {
 	Error         string     `json:"error,omitempty"`
 	CheckError    string     `json:"check_error,omitempty"`
 	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
+	// AwaitingRefresh marks a held square stored before data dates were kept.
+	// It still serves routing and shelter and is downloaded again.
+	AwaitingRefresh bool `json:"awaiting_refresh,omitempty"`
+	// RefreshError is why the last attempt to download an awaiting square
+	// again failed. The old copy is kept.
+	RefreshError string `json:"refresh_error,omitempty"`
 }
 
 type coastlineStatus struct {
@@ -750,10 +785,14 @@ type coastlineStatus struct {
 	// Failed counts wanted squares whose download failed and will be retried.
 	Failed int `json:"failed"`
 	// CheckFailed counts held squares whose weekly edit check failed.
-	CheckFailed        int        `json:"check_failed"`
-	EditsSince         int        `json:"edits_since"`
-	SquaresWithEdits   int        `json:"squares_with_edits"`
-	Updating           int        `json:"updating"`
+	CheckFailed      int `json:"check_failed"`
+	EditsSince       int `json:"edits_since"`
+	SquaresWithEdits int `json:"squares_with_edits"`
+	Updating         int `json:"updating"`
+	// AwaitingRefresh counts held squares waiting for their download again.
+	AwaitingRefresh int `json:"awaiting_refresh"`
+	// RefreshFailed counts those whose last download failed.
+	RefreshFailed      int        `json:"refresh_failed"`
 	OldestDownloadedAt *time.Time `json:"oldest_downloaded_at,omitempty"`
 }
 
@@ -823,9 +862,13 @@ func (m *coastlineManager) Status() (coastlineStatus, error) {
 		s := coastlineStatusSquare{
 			Lat: r.Square.Lat, Lon: r.Square.Lon, State: r.Status, InRange: inRange[r.Square],
 			DownloadedAt: timePtrUnlessZero(r.DownloadedAt), EditsSince: r.EditsSince, CheckedAt: timePtrUnlessZero(r.CheckedAt),
-			NextAttemptAt: timePtrUnlessZero(r.NextAttemptAt),
+			NextAttemptAt: timePtrUnlessZero(r.NextAttemptAt), AwaitingRefresh: r.awaitingRefresh(),
 		}
-		if r.Status == coastlineStatusReady {
+		if r.awaitingRefresh() {
+			// Only a download touches such a square, so its error is the
+			// refresh's, never an edit check's.
+			s.RefreshError = r.LastError
+		} else if r.Status == coastlineStatusReady {
 			s.CheckError = r.LastError
 		} else {
 			s.Error = r.LastError
@@ -833,6 +876,9 @@ func (m *coastlineManager) Status() (coastlineStatus, error) {
 		st.Squares = append(st.Squares, s)
 		if r.Status == coastlineStatusReady {
 			st.Held++
+			if r.awaitingRefresh() {
+				st.AwaitingRefresh++
+			}
 			st.EditsSince += r.EditsSince
 			if r.EditsSince > 0 {
 				st.SquaresWithEdits++
@@ -842,7 +888,11 @@ func (m *coastlineManager) Status() (coastlineStatus, error) {
 				st.OldestDownloadedAt = &d
 			}
 			if r.LastError != "" {
-				st.CheckFailed++
+				if r.awaitingRefresh() {
+					st.RefreshFailed++
+				} else {
+					st.CheckFailed++
+				}
 			}
 		} else if r.LastError != "" && inRange[r.Square] {
 			st.Failed++

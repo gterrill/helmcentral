@@ -71,6 +71,13 @@ describe('coastlineStatusLine', () => {
     expect(line).toBe('Coverage: 31 squares · oldest 3 Oct · 12 edits since')
   })
 
+  it('says how many held squares are awaiting a refresh', () => {
+    expect(lineIn(status({ held: 31, awaiting_refresh: 1, oldest_downloaded_at: NOON('2026-10-03') }), new Date(NOON('2026-10-20'))))
+      .toBe('Coverage: 31 squares · oldest 3 Oct · 1 awaiting refresh')
+    expect(lineIn(status({ held: 31, awaiting_refresh: 31, oldest_downloaded_at: NOON('2026-10-03') }), new Date(NOON('2026-10-20'))))
+      .toBe('Coverage: 31 squares · oldest 3 Oct · 31 awaiting refresh')
+  })
+
   it('leaves out edits when there are none and says square in the singular', () => {
     expect(lineIn(status({ held: 1, oldest_downloaded_at: NOON('2026-10-03') }), new Date(NOON('2026-10-20'))))
       .toBe('Coverage: 1 square · oldest 3 Oct')

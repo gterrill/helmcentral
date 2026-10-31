@@ -20,6 +20,10 @@ export interface CoastlineSquare {
   /** Why the weekly edit check of a held square failed; the square is still held. */
   check_error?: string
   next_attempt_at?: string
+  /** A held square from before data dates were kept: usable, and downloaded again in the background. */
+  awaiting_refresh?: boolean
+  /** Why the last download again of an awaiting square failed; the old copy is kept. */
+  refresh_error?: string
 }
 
 export type OfflineCoastlineState =
@@ -60,6 +64,10 @@ export interface OfflineCoastlineStatus {
   edits_since: number
   squares_with_edits: number
   updating: number
+  /** Held squares waiting to be downloaded again. They still serve routing and shelter. */
+  awaiting_refresh?: number
+  /** Awaiting squares whose last download again failed. */
+  refresh_failed?: number
   oldest_downloaded_at?: string
 }
 
@@ -92,6 +100,7 @@ function coverageText(s: OfflineCoastlineStatus, now: Date, timeZone: string | u
   const parts = [`Coverage: ${plural(s.held, 'square', 'squares')}`]
   if (s.oldest_downloaded_at) parts.push(`oldest ${shortDate(s.oldest_downloaded_at, now, timeZone)}`)
   if (s.edits_since > 0) parts.push(`${plural(s.edits_since, 'edit', 'edits')} since`)
+  if ((s.awaiting_refresh ?? 0) > 0) parts.push(`${s.awaiting_refresh} awaiting refresh`)
   return parts.join(' · ')
 }
 
@@ -155,6 +164,13 @@ export function coastlineCheckFailures(s: OfflineCoastlineStatus): CoastlineFail
   return s.squares
     .filter((q) => q.state === 'ready' && q.check_error)
     .map((q) => ({ label: squareLabel(q.lat, q.lon), error: q.check_error as string, nextAttemptAt: q.next_attempt_at }))
+}
+
+/** Held squares awaiting a download again whose last try failed. They stay held. */
+export function coastlineRefreshFailures(s: OfflineCoastlineStatus): CoastlineFailure[] {
+  return s.squares
+    .filter((q) => q.state === 'ready' && q.refresh_error)
+    .map((q) => ({ label: squareLabel(q.lat, q.lon), error: q.refresh_error as string, nextAttemptAt: q.next_attempt_at }))
 }
 
 const DAY_MS = 86_400_000

@@ -225,6 +225,23 @@ describe('OfflineCoastlineSection coverage', () => {
   })
 })
 
+describe('OfflineCoastlineSection refresh failures', () => {
+  it('lists a failed download again apart from edit checks, and the square stays held', () => {
+    hook.status = status({
+      held: 2, awaiting_refresh: 1, refresh_failed: 1, oldest_downloaded_at: NOON('2026-10-03'),
+      squares: [
+        heldSquares[0],
+        { ...heldSquares[1], awaiting_refresh: true, refresh_error: 'no route to host' },
+      ],
+    })
+    renderSection({ offlineCoastlineEnabled: true })
+    expect(screen.queryByTestId('offline-coastline-check-failures')).not.toBeInTheDocument()
+    const refreshes = screen.getByTestId('offline-coastline-refresh-failures')
+    expect(refreshes).toHaveTextContent('could not be downloaded again')
+    expect(refreshes).toHaveTextContent('no route to host')
+  })
+})
+
 describe('OfflineCoastlineSection Update', () => {
   it('appears only when there are edits since and updates the squares', async () => {
     hook.status = status({ squares: heldSquares, held: 2, edits_since: 12, squares_with_edits: 2, oldest_downloaded_at: NOON('2026-10-03') })

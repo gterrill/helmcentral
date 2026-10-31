@@ -1,5 +1,5 @@
 import { render, screen, within } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AssistantCard } from '@/components/assistant-card'
 import { AssistantMarinaCard } from '@/components/assistant-marina-card'
@@ -35,6 +35,22 @@ function withChecks(checks: unknown[]) {
     }),
   })
 }
+
+// jsdom has no IntersectionObserver. This one says the card is on screen as
+// soon as it is watched, so the map mounts; the gating has its own test.
+beforeEach(() => {
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      constructor(private cb: (entries: Array<{ isIntersecting: boolean }>) => void) {}
+      observe() {
+        this.cb([{ isIntersecting: true }])
+      }
+      disconnect() {}
+    },
+  )
+})
+afterEach(() => vi.unstubAllGlobals())
 
 describe('AssistantMarinaCard', () => {
   it('names the marina and puts what the map records in one row', () => {

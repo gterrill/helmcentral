@@ -1082,19 +1082,120 @@ func TestCoastlineManager_SquareNewerThanTheLastUpdateDoesNotBlockAnOlderOne(t *
 	}
 }
 
-func TestCoastlineManager_CheckOfASquareWithoutDataDateIsAnExplicitError(t *testing.T) {
-	h := newCoastlineHarness(t)
-	sq := coverageSquare{-21, 148}
-	heldDueForCheck(t, h, sq, coastlineTestDataAsOf)
-	if _, err := h.store.db.Exec(`UPDATE coastline_squares SET data_as_of = 0`); err != nil {
+// A square held from before data dates were kept, as after an upgrade.
+func heldWithoutDataDate(t *testing.T, h *coastlineHarness, sq coverageSquare) {
+	t.Helper()
+	if err := h.store.SaveSquareAsOf(sq, sampleCoastLines(), h.now, coastlineTestDataAsOf); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := h.store.db.Exec(`UPDATE coastline_squares SET data_as_of = 0 WHERE lat = ? AND lon = ?`, sq.Lat, sq.Lon); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCoastlineManager_EditCheckSkipsASquareWithoutDataDate(t *testing.T) {
+	h := newCoastlineHarness(t)
+	sq := coverageSquare{-21, 148}
+	heldWithoutDataDate(t, h, sq)
+	// Downloads fail, so only a check could have reached the plugin with a since.
+	h.src.fail[sq] = errors.New("no route to host")
 	h.now = h.now.Add(8 * 24 * time.Hour)
 	h.fix = false
 	h.m.step()
+	if len(h.src.checks) != 0 {
+		t.Errorf("the edit check must never run on a square without a data date: %v %v", h.src.checks, h.src.sinces)
+	}
+}
+
+func TestCoastlineManager_UpgradeOfflineKeepsTheSquareUsable(t *testing.T) {
+	h := newCoastlineHarness(t)
+	sq := coverageSquare{-21, 148}
+	heldWithoutDataDate(t, h, sq)
+	h.src.fail[sq] = errors.New("dial tcp: no route to host")
+	h.fix = false
+	h.m.step()
+	rec, ok, _ := h.store.Record(sq)
+	if !ok || rec.Status != coastlineStatusReady || !rec.DataAsOf.IsZero() {
+		t.Fatalf("the square must stay held and unrefreshed: %+v", rec)
+	}
+	lines, err := h.store.Lines([]coverageSquare{sq})
+	if err != nil || len(lines) == 0 {
+		t.Fatalf("routing and shelter must still read the square: %v %v", lines, err)
+	}
+	st, _ := h.m.Status()
+	if st.AwaitingRefresh != 1 || st.Held != 1 {
+		t.Errorf("status must show the square held and awaiting refresh: %+v", st)
+	}
+	var found bool
+	for _, q := range st.Squares {
+		if q.Lat == sq.Lat && q.Lon == sq.Lon {
+			found = q.State == coastlineStatusReady && q.AwaitingRefresh
+			if q.CheckError != "" || !strings.Contains(q.RefreshError, "no route") {
+				t.Errorf("a failed refresh is a refresh error, not an edit-check error: %+v", q)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the square must be listed as ready and awaiting refresh: %+v", st.Squares)
+	}
+	if st.CheckFailed != 0 || st.RefreshFailed != 1 {
+		t.Errorf("a failed refresh must be counted as one: check_failed %d, refresh_failed %d", st.CheckFailed, st.RefreshFailed)
+	}
+}
+
+func TestCoastlineManager_RefreshSkipsInlandSquaresAndTakesInRangeFirst(t *testing.T) {
+	h := newCoastlineHarness(t)
+	h.fix = true
+	inRange := coverageSquare{-21, 148}
+	farOff := coverageSquare{-33, 151}
+	var inland coverageSquare
+	found := false
+	for lat := -30; lat < -20 && !found; lat++ {
+		for lon := 130; lon < 145; lon++ {
+			if sq := (coverageSquare{lat, lon}); squareInland(sq) {
+				inland, found = sq, true
+				break
+			}
+		}
+	}
+	if !found {
+		t.Skip("no inland square in the search window")
+	}
+	heldWithoutDataDate(t, h, inland)
+	heldWithoutDataDate(t, h, farOff)
+	heldWithoutDataDate(t, h, inRange)
+	// Everything wanted is held already, so only refreshes remain.
+	wanted, _, _ := coverageWanted(h.lat, h.lon)
+	for _, sq := range wanted {
+		if sq != inRange {
+			_ = h.store.SaveSquareAsOf(sq, nil, h.now, coastlineTestDataAsOf)
+		}
+	}
+	h.m.step()
+	if len(h.src.downloads) != 1 || h.src.downloads[0] != inRange {
+		t.Fatalf("the in-range square must refresh first: %v", h.src.downloads)
+	}
+	h.m.step()
+	h.m.step()
+	for _, d := range h.src.downloads {
+		if d == inland {
+			t.Errorf("an all-land square is not refreshed: %v", h.src.downloads)
+		}
+	}
+}
+
+func TestCoastlineManager_SquareWithoutDataDateRefreshesWhenDownloadsWork(t *testing.T) {
+	h := newCoastlineHarness(t)
+	sq := coverageSquare{-21, 148}
+	heldWithoutDataDate(t, h, sq)
+	h.fix = false
+	h.m.step()
 	rec, _, _ := h.store.Record(sq)
-	if len(h.src.checks) != 0 || !strings.Contains(rec.LastError, "no data date") {
-		t.Errorf("a zero since must never reach the plugin: checks %v, rec %+v", h.src.checks, rec)
+	if rec.DataAsOf.IsZero() || len(h.src.downloads) != 1 {
+		t.Fatalf("the square must be downloaded again and take the server's data date: %+v downloads %v", rec, h.src.downloads)
+	}
+	if st, _ := h.m.Status(); st.AwaitingRefresh != 0 {
+		t.Errorf("nothing awaits refresh now: %+v", st)
 	}
 }
 

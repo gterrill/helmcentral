@@ -13,6 +13,7 @@ import type { HelpTarget } from '@/lib/help-links'
 import {
   clockTime,
   coastlineCheckFailures,
+  coastlineRefreshFailures,
   coastlineFailures,
   coastlineStatusLine,
   editCheckPauseLine,
@@ -42,7 +43,8 @@ function Failures({ status }: { status: OfflineCoastlineStatus }) {
   const timeZone = useVesselStateSelector(selectTimeZone)
   const failures = coastlineFailures(status)
   const checks = coastlineCheckFailures(status)
-  if (failures.length === 0 && checks.length === 0) return null
+  const refreshes = coastlineRefreshFailures(status)
+  if (failures.length === 0 && checks.length === 0 && refreshes.length === 0) return null
   const list = (items: typeof failures) => (
     <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
       {items.map((f) => {
@@ -64,6 +66,14 @@ function Failures({ status }: { status: OfflineCoastlineStatus }) {
             {plural(failures.length, 'square', 'squares')} did not download
           </p>
           {list(failures)}
+        </div>
+      )}
+      {refreshes.length > 0 && (
+        <div className="flex flex-col gap-1" data-testid="offline-coastline-refresh-failures">
+          <p className="text-xs font-medium">
+            {plural(refreshes.length, 'held square', 'held squares')} could not be downloaded again (the old copy is kept)
+          </p>
+          {list(refreshes)}
         </div>
       )}
       {checks.length > 0 && (

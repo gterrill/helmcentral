@@ -545,9 +545,14 @@ func (s *alarmLogStore) addRaisedSources(groups []alarmRaisedGroup, from, to tim
 		if _, ok := index[label]; !ok {
 			continue
 		}
-		if sources[label] == nil {
+		// The kind is the one every source of the label shares. Where they
+		// differ it is left empty, so the report says "sources" and doesn't
+		// call a power fault a vessel.
+		if kind := alarmSourceKindOf(ruleID); sources[label] == nil {
 			sources[label] = map[string]*source{}
-			kinds[label] = alarmSourceKindOf(ruleID)
+			kinds[label] = kind
+		} else if kinds[label] != kind {
+			kinds[label] = ""
 		}
 		src := sources[label][ruleID]
 		if src == nil {

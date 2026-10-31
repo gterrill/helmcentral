@@ -503,3 +503,29 @@ func TestAlarmLog_RaisedSummarySaysNothingOfSourcesWhenSomeRowsHaveNoContext(t *
 		t.Errorf("a label that mixes rows with and without a context makes no claim about sources: %+v", g)
 	}
 }
+
+// One label can be raised by rule ids of different kinds. Labelling them all
+// with the first row's kind would call every source a vessel.
+func TestAlarmLog_RaisedSummaryMixedSourceKindsGetNoKind(t *testing.T) {
+	store := newTestAlarmLog(t)
+	raiseCollision(t, store, "503111111", "Encore inside the CPA limit.", 2, alarmNow)
+	for i := 0; i < 2; i++ {
+		if _, err := store.RecordRaised(alarmLogEntry{
+			RuleID: "notifications:zz.fault@urn:mrn:signalk:uuid:9", Source: alarmSourceSignalK,
+			Label: "Collision Risk", Path: "electrical.fault", State: "alarm", Message: "Something else.",
+			RaisedAt: alarmNow.Add(time.Duration(i) * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	groups, err := store.RaisedSummary(alarmNow.Add(-time.Hour), alarmNow.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].Count != 4 || groups[0].Sources != 2 {
+		t.Fatalf("groups %+v", groups)
+	}
+	if groups[0].SourceKind != "" {
+		t.Errorf("sources of different kinds must not all be called %q", groups[0].SourceKind.Label())
+	}
+}

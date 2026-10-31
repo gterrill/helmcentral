@@ -411,3 +411,19 @@ func migrateMessageToolCalls(db *sql.DB) error {
 	}
 	return tx.Commit()
 }
+
+// markLegacyPrunedAnswers marks the answers the earlier pruner cleared. It
+// cleared an answer's calls after the retention window and left no mark, so an
+// answer older than the window that used tools and has no run lost its
+// lookups. A newer one with no run never had them recorded, which is a
+// different thing and is left alone. It does nothing once everything is
+// marked, so it runs on every open.
+func markLegacyPrunedAnswers(db *sql.DB, now time.Time) error {
+	cutoff := now.Add(-assistantRunRetention).Unix()
+	if _, err := db.Exec(`UPDATE messages SET lookups_pruned = 1
+		WHERE tool_rounds > 0 AND lookups_pruned = 0 AND created_at < ?
+		AND NOT EXISTS (SELECT 1 FROM assistant_runs r WHERE r.answer_message_id = messages.id)`, cutoff); err != nil {
+		return fmt.Errorf("mark answers the earlier pruner cleared: %w", err)
+	}
+	return nil
+}
