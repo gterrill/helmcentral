@@ -7,6 +7,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,12 +15,12 @@ import (
 
 const coralSeaLat, coralSeaLon = -20.2663105, 148.7101677
 
-func coralSeaPost(t *testing.T) (overpassQueryFunc, *[]string) {
+func coralSeaPost(t *testing.T) (overpassResponseFunc, *[]string) {
 	t.Helper()
-	resolve := loadOverpassElements(t, "overpass_marina_resolve_coral_sea.json")
-	details := loadOverpassElements(t, "overpass_marina_details_coral_sea.json")
+	resolve := loadOverpassResult(t, "overpass_marina_resolve_coral_sea.json")
+	details := loadOverpassResult(t, "overpass_marina_details_coral_sea.json")
 	var sent []string
-	post := func(query string) ([]overpassElement, error) {
+	post := func(query string) (overpassResponse, error) {
 		sent = append(sent, query)
 		if strings.Contains(query, "around.m") {
 			return details, nil
@@ -27,6 +28,58 @@ func coralSeaPost(t *testing.T) (overpassQueryFunc, *[]string) {
 		return resolve, nil
 	}
 	return post, &sent
+}
+
+func loadOverpassResult(t *testing.T, filename string) overpassResponse {
+	t.Helper()
+	res, err := parseOverpassResponse("application/json", loadFixture(t, filename))
+	if err != nil {
+		t.Fatalf("parse fixture %s: %v", filename, err)
+	}
+	return res
+}
+
+func TestRunMarinaDetails_PassesTheDataDateThrough(t *testing.T) {
+	post, _ := coralSeaPost(t)
+	out, err := runMarinaDetails(post, marinaDetailsInput{Lat: coralSeaLat, Lon: coralSeaLon})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.DataAsOf != "2026-10-29T21:20:09Z" {
+		t.Errorf("DataAsOf = %q, want the details answer's timestamp_osm_base", out.DataAsOf)
+	}
+	raw, _ := json.Marshal(out)
+	if !strings.Contains(string(raw), `"data_as_of":"2026-10-29T21:20:09Z"`) {
+		t.Errorf("output does not carry data_as_of: %s", raw)
+	}
+}
+
+func TestRunMarinaDetails_NoTimestampLeavesTheDateEmpty(t *testing.T) {
+	post, _ := coralSeaPost(t)
+	bare := func(q string) (overpassResponse, error) {
+		res, err := post(q)
+		res.Osm3s.TimestampOsmBase = ""
+		return res, err
+	}
+	out, err := runMarinaDetails(bare, marinaDetailsInput{Lat: coralSeaLat, Lon: coralSeaLon})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.DataAsOf != "" {
+		t.Errorf("DataAsOf = %q, want empty (never the clock)", out.DataAsOf)
+	}
+	raw, _ := json.Marshal(out)
+	if strings.Contains(string(raw), "data_as_of") {
+		t.Errorf("empty date should be omitted: %s", raw)
+	}
+}
+
+func TestParseOverpassResult_KeepsTheOsmBaseTimestamp(t *testing.T) {
+	body := []byte(`{"version":0.6,"osm3s":{"timestamp_osm_base":"2026-10-29T21:20:09Z"},"elements":[]}`)
+	res, err := parseOverpassResponse("application/json", body)
+	if err != nil || res.Osm3s.TimestampOsmBase != "2026-10-29T21:20:09Z" {
+		t.Fatalf("res = %+v, err = %v", res, err)
+	}
 }
 
 func TestBuildMarinaResolveQuery_NearestMarinaOrHarbourWithin500m(t *testing.T) {
@@ -224,6 +277,26 @@ func TestShapeFromPoints_ThinsLongLinesKeepingTheEnds(t *testing.T) {
 	}
 }
 
+// The host rejects an unclosed polygon, so the plugin must only call a ring a
+// polygon when it closes, and thinning a long ring must keep it closed.
+func TestShapeFromPoints_PolygonsAreAlwaysClosed(t *testing.T) {
+	open, _ := shapeFromPoints([][2]float64{{0, 0}, {0, 1}, {1, 1}, {1, 0}})
+	if open.Kind != "line" {
+		t.Errorf("an open four-point way is %q, want line", open.Kind)
+	}
+	var ring [][2]float64
+	for i := 0; i < 1000; i++ {
+		a := float64(i) / 1000 * 2 * math.Pi
+		ring = append(ring, [2]float64{math.Cos(a), math.Sin(a)})
+	}
+	ring = append(ring, ring[0])
+	sh, _ := shapeFromPoints(ring)
+	closed := sh.Points[0] == sh.Points[len(sh.Points)-1]
+	if sh.Kind != "polygon" || !closed || len(sh.Points) > marinaShapeMaxPoints {
+		t.Errorf("thinned ring: kind %q, %d points, closed %v", sh.Kind, len(sh.Points), closed)
+	}
+}
+
 func facility(out marinaDetailsOutput, kind string) *marinaFacilityOut {
 	for i := range out.Facilities {
 		if out.Facilities[i].Kind == kind {
@@ -234,7 +307,7 @@ func facility(out marinaDetailsOutput, kind string) *marinaFacilityOut {
 }
 
 func TestRunMarinaDetails_NoMarinaIsAnErrorNotAnEmptyResult(t *testing.T) {
-	post := func(string) ([]overpassElement, error) { return nil, nil }
+	post := func(string) (overpassResponse, error) { return overpassResponse{}, nil }
 	_, err := runMarinaDetails(post, marinaDetailsInput{Lat: -20.5, Lon: 149})
 	if err == nil || !strings.Contains(err.Error(), "no marina charted within 500 m of that position") {
 		t.Fatalf("err = %v", err)
@@ -243,7 +316,7 @@ func TestRunMarinaDetails_NoMarinaIsAnErrorNotAnEmptyResult(t *testing.T) {
 
 func TestRunMarinaDetails_QueryErrorIsReturnedNotMasked(t *testing.T) {
 	boom := fmt.Errorf("overpass query failed: runtime error: Tried to use meta file but no meta files available")
-	post := func(string) ([]overpassElement, error) { return nil, boom }
+	post := func(string) (overpassResponse, error) { return overpassResponse{}, boom }
 	if _, err := runMarinaDetails(post, marinaDetailsInput{Lat: coralSeaLat, Lon: coralSeaLon}); err != boom {
 		t.Fatalf("err = %v, want the query's own error", err)
 	}
@@ -251,17 +324,17 @@ func TestRunMarinaDetails_QueryErrorIsReturnedNotMasked(t *testing.T) {
 
 func TestMeterlessRemarkFromTheLocalMirrorIsAnError(t *testing.T) {
 	body := []byte(`{"version":0.6,"elements":[],"remark":"runtime error: Tried to use meta file but no meta files available"}`)
-	if _, err := parseOverpassBody("application/json", body); err == nil {
+	if _, err := parseOverpassResponse("application/json", body); err == nil {
 		t.Fatal("a runtime error remark must not read as an empty answer")
 	}
 }
 
 func TestRunMarinaDetails_SecondQueryErrorIsReturned(t *testing.T) {
-	resolve := loadOverpassElements(t, "overpass_marina_resolve_coral_sea.json")
+	resolve := loadOverpassResult(t, "overpass_marina_resolve_coral_sea.json")
 	boom := fmt.Errorf("overpass rate limited")
-	post := func(q string) ([]overpassElement, error) {
+	post := func(q string) (overpassResponse, error) {
 		if strings.Contains(q, "around.m") {
-			return nil, boom
+			return overpassResponse{}, boom
 		}
 		return resolve, nil
 	}
@@ -448,8 +521,8 @@ func TestClassifyMarina_SmallCraftFacilityTaggedOnTheMarinaItself(t *testing.T) 
 		if f == nil {
 			t.Fatalf("no %q facility in %+v", kind, out.Facilities)
 		}
-		if f.Count != 1 || len(f.Geometry) == 0 {
-			t.Errorf("%s = %+v, want one feature with the marina outline", kind, f)
+		if f.Count != 1 || f.Geometry == nil || len(f.Geometry) != 0 {
+			t.Errorf("%s = %+v, want one feature and no geometry (the marina's outline is not a place)", kind, f)
 		}
 	}
 }

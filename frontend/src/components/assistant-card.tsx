@@ -15,6 +15,10 @@ const AssistantTelemetryChartCard = lazy(() =>
 
 const AssistantWindRoseCard = lazy(() => import('./assistant-wind-rose-card').then((m) => ({ default: m.AssistantWindRoseCard })))
 
+// The marina card's map loads apart again (assistant-marina-map.tsx), so the
+// card's text does not wait for maplibre.
+const AssistantMarinaCard = lazy(() => import('./assistant-marina-card').then((m) => ({ default: m.AssistantMarinaCard })))
+
 // The tiles pull in the stores and hooks they read, so they load only when a
 // reply carries one.
 const AssistantTileCard = lazy(() => import('./assistant-tile-card').then((m) => ({ default: m.AssistantTileCard })))
@@ -58,6 +62,14 @@ export function AssistantCard({
           fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
         >
           <AssistantWindRoseCard card={card} />
+        </Suspense>
+      )
+    case 'marina':
+      return (
+        <Suspense
+          fallback={<div className="h-16 min-w-0 rounded-md border border-border bg-card" aria-hidden="true" />}
+        >
+          <AssistantMarinaCard card={card} />
         </Suspense>
       )
     case 'tile':

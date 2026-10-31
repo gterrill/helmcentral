@@ -6,7 +6,7 @@ import type { TideToday } from '@/hooks/use-tide-today'
  * keyed by `kind`. `error` is not a server kind: it is what the decoder makes
  * of an entry it cannot read, so the thread can say so for that message.
  */
-export type MateCard = PassageWindowCard | TelemetryChartCard | WindRoseCard | TileCard | { kind: 'error'; reason: string; rawKind?: string }
+export type MateCard = PassageWindowCard | TelemetryChartCard | WindRoseCard | TileCard | MarinaCard | { kind: 'error'; reason: string; rawKind?: string }
 
 export type PassageState = 'go' | 'marginal' | 'no_go' | 'no_data'
 export type PassageFactor = 'wind' | 'gust' | 'wave' | 'wind_against_tide' | 'daylight'
@@ -135,6 +135,59 @@ export interface DepthTideSnapshot {
  * older one draws the same tile on `snapshot`, so the picture matches the prose.
  */
 export type TileCard = { kind: 'tile'; tile: 'depth-tide'; capturedAt: string; snapshot: DepthTideSnapshot }
+
+/** A point, a line or a closed polygon, as [lat, lon] pairs. */
+export interface MarinaShape {
+  kind: 'point' | 'line' | 'polygon'
+  points: [number, number][]
+}
+
+export type MarinaLimitStatus = 'ok' | 'exceeds' | 'not charted' | 'particular not set'
+
+/** A place on the marina map: a facility or a service ashore. */
+export interface MarinaPoint {
+  kind: string
+  name: string
+  lat: number
+  lon: number
+}
+
+/**
+ * What marina_details found (ADR 0240), drawn for the operator: the marina's
+ * record and the map shapes the model never sees. A snapshot, like the passage
+ * window: a reopened thread draws it without asking the map server again.
+ * Empty strings are fields the map does not record; `dataAsOf` is "" when the
+ * map server gave no data date.
+ */
+export interface MarinaCard {
+  kind: 'marina'
+  name: string
+  osm: string
+  lat: number
+  lon: number
+  berths: number | null
+  fee: string
+  powerSupply: string
+  openingHours: string
+  contact: { website: string; phone: string; vhf: string; email: string }
+  chartedLimits: { maxDraughtM: number | null; maxLengthM: number | null; depthM: number | null }
+  pontoonArms: string[]
+  facilities: { kind: string; name: string; count: number; facts: Record<string, string> }[]
+  entranceMarks: { kind: string; side: string; colour: string; name: string; count: number }[]
+  ashore: { kind: string; name: string; openingHours: string; distanceM: number }[]
+  vesselLimitCheck: { particular: 'draft' | 'length'; status: MarinaLimitStatus; boatM: number | null; chartedLimitM: number | null }[]
+  dataAsOf: string
+  /** The plugin cut a list to its bound, so the card may not show everything mapped. */
+  truncated: boolean
+  /** The plugin cut or simplified the map's shapes, so the map is not the whole of what is mapped. */
+  geometryTruncated: boolean
+  geometry: {
+    outline: MarinaShape[]
+    pontoons: { name: string; private: boolean; shape: MarinaShape }[]
+    facilities: MarinaPoint[]
+    ashore: MarinaPoint[]
+  }
+}
 
 export const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
 const FACTORS: readonly string[] = ['wind', 'gust', 'wave', 'wind_against_tide', 'daylight']
@@ -383,6 +436,125 @@ function decodeWindRose(raw: unknown): WindRoseCard {
   }
 }
 
+function bool(v: unknown, path: string): boolean {
+  if (typeof v !== 'boolean') bad(path, 'expected true or false')
+  return v as boolean
+}
+/** A position, which MapLibre throws on outside the globe; `at` prefixes the field names. */
+function position(lat: unknown, lon: unknown, at: string): { lat: number; lon: number } {
+  const la = finite(lat, `${at}lat`)
+  const lo = finite(lon, `${at}lon`)
+  if (la < -90 || la > 90) bad(`${at}lat`, 'expected a latitude from -90 to 90')
+  if (lo < -180 || lo > 180) bad(`${at}lon`, 'expected a longitude from -180 to 180')
+  return { lat: la, lon: lo }
+}
+
+const SHAPE_MIN_POINTS = { point: 1, line: 2, polygon: 4 } as const
+
+function decodeMarinaShape(raw: unknown, path: string): MarinaShape {
+  const o = obj(raw, path)
+  const kind = oneOf<MarinaShape['kind']>(o.kind, Object.keys(SHAPE_MIN_POINTS), `${path}.kind`)
+  const points = arr(o.points, `${path}.points`).map((p, i): [number, number] => {
+    const pair = arr(p, `${path}.points[${i}]`)
+    if (pair.length !== 2) bad(`${path}.points[${i}]`, 'expected a [lat, lon] pair')
+    const { lat, lon } = position(pair[0], pair[1], `${path}.points[${i}].`)
+    return [lat, lon]
+  })
+  if (kind === 'point' ? points.length !== 1 : points.length < SHAPE_MIN_POINTS[kind]) {
+    bad(`${path}.points`, `expected ${kind === 'point' ? 'one position' : `at least ${SHAPE_MIN_POINTS[kind]} positions`} for a ${kind}`)
+  }
+  return { kind, points }
+}
+
+function decodeMarinaPoint(raw: unknown, path: string): MarinaPoint {
+  const o = obj(raw, path)
+  return { kind: str(o.kind, `${path}.kind`), name: str(o.name, `${path}.name`), ...position(o.lat, o.lon, `${path}.`) }
+}
+
+function decodeMarinaFacility(raw: unknown, path: string): MarinaCard['facilities'][number] {
+  const o = obj(raw, path)
+  const facts: Record<string, string> = {}
+  for (const [k, v] of Object.entries(obj(o.facts, `${path}.facts`))) facts[k] = str(v, `${path}.facts.${k}`)
+  return { kind: str(o.kind, `${path}.kind`), name: str(o.name, `${path}.name`), count: nonNegInt(o.count, `${path}.count`), facts }
+}
+
+function decodeMarinaMark(raw: unknown, path: string): MarinaCard['entranceMarks'][number] {
+  const o = obj(raw, path)
+  return {
+    kind: str(o.kind, `${path}.kind`),
+    side: str(o.side, `${path}.side`),
+    colour: str(o.colour, `${path}.colour`),
+    name: str(o.name, `${path}.name`),
+    count: nonNegInt(o.count, `${path}.count`),
+  }
+}
+
+function decodeMarinaAshore(raw: unknown, path: string): MarinaCard['ashore'][number] {
+  const o = obj(raw, path)
+  return {
+    kind: str(o.kind, `${path}.kind`),
+    name: str(o.name, `${path}.name`),
+    openingHours: str(o.opening_hours, `${path}.opening_hours`),
+    distanceM: nonNegInt(o.distance_m, `${path}.distance_m`),
+  }
+}
+
+function decodeMarinaLimitCheck(raw: unknown, path: string): MarinaCard['vesselLimitCheck'][number] {
+  const o = obj(raw, path)
+  return {
+    particular: oneOf<'draft' | 'length'>(o.particular, ['draft', 'length'], `${path}.particular`),
+    status: oneOf<MarinaLimitStatus>(o.status, ['ok', 'exceeds', 'not charted', 'particular not set'], `${path}.status`),
+    boatM: nullableNumber(o.boat_m, `${path}.boat_m`, 0),
+    chartedLimitM: nullableNumber(o.charted_limit_m, `${path}.charted_limit_m`, 0),
+  }
+}
+
+function decodeMarina(raw: unknown): MarinaCard {
+  const p = obj(raw, 'payload')
+  const contact = obj(p.contact, 'contact')
+  const limits = obj(p.charted_limits, 'charted_limits')
+  const geometry = obj(p.geometry, 'geometry')
+  return {
+    kind: 'marina',
+    name: str(p.name, 'name'),
+    osm: str(p.osm, 'osm'),
+    ...position(p.lat, p.lon, ''),
+    berths: p.berths === null ? null : nonNegInt(p.berths, 'berths'),
+    fee: str(p.fee, 'fee'),
+    powerSupply: str(p.power_supply, 'power_supply'),
+    openingHours: str(p.opening_hours, 'opening_hours'),
+    contact: {
+      website: str(contact.website, 'contact.website'),
+      phone: str(contact.phone, 'contact.phone'),
+      vhf: str(contact.vhf, 'contact.vhf'),
+      email: str(contact.email, 'contact.email'),
+    },
+    chartedLimits: {
+      maxDraughtM: nullableNumber(limits.max_draught_m, 'charted_limits.max_draught_m', 0),
+      maxLengthM: nullableNumber(limits.max_length_m, 'charted_limits.max_length_m', 0),
+      depthM: nullableNumber(limits.depth_m, 'charted_limits.depth_m', 0),
+    },
+    pontoonArms: arr(p.pontoon_arms, 'pontoon_arms').map((a, i) => str(a, `pontoon_arms[${i}]`)),
+    facilities: arr(p.facilities, 'facilities').map((f, i) => decodeMarinaFacility(f, `facilities[${i}]`)),
+    entranceMarks: arr(p.entrance_marks, 'entrance_marks').map((m, i) => decodeMarinaMark(m, `entrance_marks[${i}]`)),
+    ashore: arr(p.ashore, 'ashore').map((a, i) => decodeMarinaAshore(a, `ashore[${i}]`)),
+    vesselLimitCheck: arr(p.vessel_limit_check, 'vessel_limit_check').map((c, i) => decodeMarinaLimitCheck(c, `vessel_limit_check[${i}]`)),
+    dataAsOf: str(p.data_as_of, 'data_as_of'),
+    truncated: bool(p.truncated, 'truncated'),
+    geometryTruncated: bool(p.geometry_truncated, 'geometry_truncated'),
+    geometry: {
+      outline: arr(geometry.outline, 'geometry.outline').map((s, i) => decodeMarinaShape(s, `geometry.outline[${i}]`)),
+      pontoons: arr(geometry.pontoons, 'geometry.pontoons').map((pt, i) => {
+        const path = `geometry.pontoons[${i}]`
+        const o = obj(pt, path)
+        return { name: str(o.name, `${path}.name`), private: bool(o.private, `${path}.private`), shape: decodeMarinaShape(o.shape, `${path}.shape`) }
+      }),
+      facilities: arr(geometry.facilities, 'geometry.facilities').map((f, i) => decodeMarinaPoint(f, `geometry.facilities[${i}]`)),
+      ashore: arr(geometry.ashore, 'geometry.ashore').map((a, i) => decodeMarinaPoint(a, `geometry.ashore[${i}]`)),
+    },
+  }
+}
+
 function nullableNumber(v: unknown, path: string, min?: number): number | null {
   if (v === null) return null
   const n = finite(v, path)
@@ -475,6 +647,7 @@ const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>
   telemetry_chart: (payload) => decodeTelemetryChart(payload),
   wind_rose: (payload) => decodeWindRose(payload),
   tile: (payload) => decodeTile(payload),
+  marina: (payload) => decodeMarina(payload),
 }
 
 /**

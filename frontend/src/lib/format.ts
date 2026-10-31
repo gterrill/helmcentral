@@ -1,3 +1,11 @@
+import type { DistanceUnits } from '@/config/app-config'
+
+/** A distance in the operator's distance units: kilometres, or nautical miles for imperial. */
+export function formatPoiDistance(distanceM: number, units: DistanceUnits): string {
+  if (units === 'imperial') return `${(distanceM / 1852).toFixed(1)} nm`
+  return `${(distanceM / 1000).toFixed(1)} km`
+}
+
 export function formatCoordinate(value: number | null, latitude: boolean) {
   if (value === null) {
     return '—'

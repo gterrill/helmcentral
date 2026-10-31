@@ -94,8 +94,14 @@ type assistantMarinaDetailsResult struct {
 	Ashore           []marinaAshore     `json:"ashore"`
 	VesselLimitCheck []marinaLimitCheck `json:"vessel_limit_check"`
 	Source           string             `json:"source"`
-	Truncated        bool               `json:"truncated,omitempty"`
-	Reading          string             `json:"reading"`
+	// Card is set only where a card sink takes the marina card (Mate's chat), so
+	// an outside assistant is not told to rely on a card it never shows.
+	Card string `json:"card,omitempty"`
+	// DataAsOf is when the OpenStreetMap data was current, so the answer can
+	// say how old the map is. Left out when the map server did not say.
+	DataAsOf  string `json:"data_as_of,omitempty"`
+	Truncated bool   `json:"truncated,omitempty"`
+	Reading   string `json:"reading"`
 }
 
 func (d assistantToolDeps) executeMarinaDetails(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -145,7 +151,11 @@ func (d assistantToolDeps) executeMarinaDetails(ctx context.Context, raw json.Ra
 		EntranceMarks: make([]marinaMark, 0, len(found.EntranceMarks)),
 		Ashore:        make([]marinaAshore, 0, len(found.Ashore)),
 		Source:        "OpenStreetMap via " + providerID,
+		DataAsOf:      found.DataAsOf,
 		Truncated:     found.Truncated,
+	}
+	if d.cards != nil {
+		result.Card = marinaCardInstruction
 	}
 	for _, f := range found.Facilities {
 		result.Facilities = append(result.Facilities, f.marinaFacility)
@@ -197,7 +207,23 @@ func (d assistantToolDeps) executeMarinaDetails(ctx context.Context, raw json.Ra
 		}
 		return trimmed
 	}
-	return capToolResultJSON(&result, shrink)
+	// The card is built from what the plugin returned, before shrink cuts the
+	// model's copy: the operator sees the full set (ADR 0240).
+	var card json.RawMessage
+	if d.cards != nil {
+		var err error
+		if card, err = json.Marshal(buildMarinaCard(found, result.VesselLimitCheck)); err != nil {
+			return "", fmt.Errorf("marina_details card: %w", err)
+		}
+	}
+	text, err := capToolResultJSON(&result, shrink)
+	if err != nil {
+		return "", err
+	}
+	if d.cards != nil {
+		d.cards.put(text, mateCard{Kind: marinaCardKind, Payload: card})
+	}
+	return text, nil
 }
 
 func hasFacilityFacts(list []marinaFacility) bool {

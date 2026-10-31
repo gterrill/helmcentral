@@ -181,6 +181,9 @@ func (m *mcpService) runTool(ctx context.Context, def mcpToolDef, args json.RawM
 // date is given and the tool says so.
 func (m *mcpService) toolDeps(tool string) assistantToolDeps {
 	d := m.deps()
+	// An outside assistant is shown no card, so no tool builds one or tells
+	// the model that one is on screen.
+	d.cards = nil
 	if tool != "list_maintenance" {
 		return d
 	}

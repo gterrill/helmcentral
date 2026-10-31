@@ -48,7 +48,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   depth and fuel. It needs the OpenStreetMap place-names plugin and a version
   of that plugin that includes the marina lookup, so update the plugin file
   when you upgrade. Outside assistants can use it too, and a new token starts
-  with it switched on.
+  with it switched on. Mate also shows a marina card under its answer, with a
+  map of the marina's outline, pontoons and facilities over satellite imagery,
+  and the date the map data was last updated. Shops and services ashore are on
+  the map once you tap the shop button.
+
 - **Offline coastline squares downloaded before this version download again
   once.** Each square now remembers the date of the map data it came from, and
   the weekly edit check counts changes from that date. A square without one
@@ -108,6 +112,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   reads the same figures, so it no longer guesses a cause for them.
 
 ### Fixed
+
+- **Outside assistants get the whole passage window.** When ChatGPT or another
+  outside assistant ran the passage window, it was told a grid was showing under
+  its reply. No grid appears there, so it could leave the day-by-day verdicts
+  out of its answer. It now gets the verdicts to write out itself.
 
 - **Mate checks the wind against your course before it judges it.** Asked which
   day to leave on a southbound leg with a northerly forecast, Mate called a
