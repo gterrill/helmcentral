@@ -110,10 +110,6 @@ type marinaAshoreWire struct {
 	Lon float64 `json:"lon"`
 }
 
-func validLatLon(lat, lon float64) bool {
-	return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
-}
-
 func validShape(sh marinaShape) bool {
 	switch sh.Kind {
 	case "point":

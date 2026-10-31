@@ -19,9 +19,10 @@ so it works when Mate is switched off.
   units. A reading the boat can't give is marked as missing instead of guessed.
 - **The sea, the tides and the neighbours:** The assistant can also look up the
   wind and wave forecast, the tides and the distance by water between two
-  places. It can ask how much shelter an anchorage has, look over a marina, look up place names (your [saved places](place-names.md#places-you-give-mate) come back first), see
-  the nearby vessels and read the stay you've planned. It can read Helmcentral's
-  own help pages too. Each tool tells the assistant how to read what it returns. A forecast
+  places. It can ask how much shelter an anchorage has, look over a marina, look
+  up place names, see the nearby vessels and read the stay you've planned. Your
+  [saved places](place-names.md#places-you-give-mate) come back first in a
+  place-name lookup. It can read Helmcentral's own help pages too. Each tool tells the assistant how to read what it returns. A forecast
   says it's a model and not an observation. A tide says which station it came
   from and how far away that is. A shelter figure says it's an estimate from
   the charted coastline and not a survey. Mate reads the same words.
