@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.58.0] - 2026-10-31
+
 ### Breaking
 
 - **A self-hosted Overpass server needs a re-import for the weekly coastline
@@ -2432,7 +2434,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.57.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.58.0...HEAD
+[0.58.0]: https://github.com/gterrill/helmcentral/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/gterrill/helmcentral/compare/v0.56.0...v0.57.0
 [0.56.0]: https://github.com/gterrill/helmcentral/compare/v0.55.0...v0.56.0
 [0.55.0]: https://github.com/gterrill/helmcentral/compare/v0.54.0...v0.55.0
