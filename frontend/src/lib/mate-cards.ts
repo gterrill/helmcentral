@@ -153,7 +153,7 @@ export interface MarinaPoint {
 }
 
 /**
- * What marina_details found (ADR 0241), drawn for the operator: the marina's
+ * What marina_details found (ADR 0242), drawn for the operator: the marina's
  * record and the map shapes the model never sees. A snapshot, like the passage
  * window: a reopened thread draws it without asking the map server again.
  * Empty strings are fields the map does not record; `dataAsOf` is "" when the

@@ -28,7 +28,7 @@ const POINT_LABEL_LAYOUT: SymbolLayerSpecification['layout'] = {
 }
 
 /**
- * The marina map on a Mate card (ADR 0241). The base is the same Carto style
+ * The marina map on a Mate card (ADR 0242). The base is the same Carto style
  * the Anchor watch map uses, with Esri World Imagery over it and the OpenSeaMap
  * raster above that: OpenSeaMap draws the lateral marks and the beacons, so
  * this map does not draw them again. On top go the marina's own outline, its

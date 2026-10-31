@@ -1,4 +1,4 @@
-# ADR 0241: A marina card with a drawn map
+# ADR 0242: A marina card with a drawn map
 
 ## Status
 
