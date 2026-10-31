@@ -20,6 +20,7 @@ func newTestCoastlineStore(t *testing.T) *coastlineStore {
 }
 
 var coastlineTestAt = time.Date(2026, 10, 3, 9, 0, 0, 0, time.UTC)
+var coastlineTestDataAsOf = coastlineTestAt.Add(-time.Hour)
 
 func sampleCoastLines() []shorelineLine {
 	ring := []shorelinePoint{{-20.5, 148.5}, {-20.5, 148.6}, {-20.4, 148.6}, {-20.5, 148.5}}
@@ -32,7 +33,7 @@ func sampleCoastLines() []shorelineLine {
 func TestCoastlineStore_RoundTripsASquare(t *testing.T) {
 	s := newTestCoastlineStore(t)
 	sq := coverageSquare{-21, 148}
-	if err := s.SaveSquare(sq, sampleCoastLines(), coastlineTestAt); err != nil {
+	if err := s.SaveSquareAsOf(sq, sampleCoastLines(), coastlineTestAt, coastlineTestDataAsOf); err != nil {
 		t.Fatal(err)
 	}
 	rec, ok, err := s.Record(sq)
@@ -55,7 +56,7 @@ func TestCoastlineStore_RoundTripsASquare(t *testing.T) {
 func TestCoastlineStore_EmptySquareIsValid(t *testing.T) {
 	s := newTestCoastlineStore(t)
 	sq := coverageSquare{-30, 160}
-	if err := s.SaveSquare(sq, nil, coastlineTestAt); err != nil {
+	if err := s.SaveSquareAsOf(sq, nil, coastlineTestAt, coastlineTestDataAsOf); err != nil {
 		t.Fatal(err)
 	}
 	rec, ok, _ := s.Record(sq)
@@ -70,7 +71,7 @@ func TestCoastlineStore_EmptySquareIsValid(t *testing.T) {
 
 func TestCoastlineStore_LinesRefusesASquareNotHeld(t *testing.T) {
 	s := newTestCoastlineStore(t)
-	_ = s.SaveSquare(coverageSquare{-21, 148}, sampleCoastLines(), coastlineTestAt)
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 148}, sampleCoastLines(), coastlineTestAt, coastlineTestDataAsOf)
 	if _, err := s.Lines([]coverageSquare{{-21, 148}, {-21, 149}}); err == nil || !strings.Contains(err.Error(), "21°S 149°E") {
 		t.Errorf("want an error naming the missing square, got %v", err)
 	}
@@ -86,8 +87,8 @@ func TestCoastlineStore_ReefsCrossingASquareEdgeAreDedupedByID(t *testing.T) {
 	reef := shorelineLine{ID: "way/9", Kind: "reef", Closed: true, Points: []shorelinePoint{{-20.9, 148.9}, {-20.9, 149.1}, {-20.8, 149.1}, {-20.9, 148.9}}}
 	coastA := shorelineLine{ID: "way/5", Kind: "coastline", Points: []shorelinePoint{{-20.9, 148.1}, {-20.9, 148.99}}}
 	coastB := shorelineLine{ID: "way/5", Kind: "coastline", Points: []shorelinePoint{{-20.9, 149.0}, {-20.9, 149.4}}}
-	_ = s.SaveSquare(coverageSquare{-21, 148}, []shorelineLine{reef, coastA}, coastlineTestAt)
-	_ = s.SaveSquare(coverageSquare{-21, 149}, []shorelineLine{reef, coastB}, coastlineTestAt)
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 148}, []shorelineLine{reef, coastA}, coastlineTestAt, coastlineTestDataAsOf)
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 149}, []shorelineLine{reef, coastB}, coastlineTestAt, coastlineTestDataAsOf)
 	lines, err := s.Lines([]coverageSquare{{-21, 148}, {-21, 149}})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +128,7 @@ func TestCoastlineStore_FailureEditsAndRetryState(t *testing.T) {
 	}
 
 	// A good download clears the error and the attempts.
-	_ = s.SaveSquare(sq, sampleCoastLines(), coastlineTestAt.Add(time.Hour))
+	_ = s.SaveSquareAsOf(sq, sampleCoastLines(), coastlineTestAt.Add(time.Hour), coastlineTestDataAsOf)
 	rec, _, _ = s.Record(sq)
 	if rec.Status != coastlineStatusReady || rec.Attempts != 0 || rec.LastError != "" {
 		t.Errorf("after download %+v", rec)
@@ -154,7 +155,7 @@ func TestCoastlineStore_FailureEditsAndRetryState(t *testing.T) {
 	}
 
 	// Re-downloading resets the edits.
-	_ = s.SaveSquare(sq, sampleCoastLines(), checked.Add(time.Hour))
+	_ = s.SaveSquareAsOf(sq, sampleCoastLines(), checked.Add(time.Hour), coastlineTestDataAsOf)
 	rec, _, _ = s.Record(sq)
 	if rec.EditsSince != 0 {
 		t.Errorf("edits not reset: %+v", rec)
@@ -170,8 +171,8 @@ func TestCoastlineStore_RecordEditsOnASquareNotHeldIsAnError(t *testing.T) {
 
 func TestCoastlineStore_RecordsAndClear(t *testing.T) {
 	s := newTestCoastlineStore(t)
-	_ = s.SaveSquare(coverageSquare{-21, 148}, sampleCoastLines(), coastlineTestAt)
-	_ = s.SaveSquare(coverageSquare{-21, 149}, nil, coastlineTestAt)
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 148}, sampleCoastLines(), coastlineTestAt, coastlineTestDataAsOf)
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 149}, nil, coastlineTestAt, coastlineTestDataAsOf)
 	_ = s.RecordFailure(coverageSquare{-22, 148}, "x", coastlineTestAt, coastlineTestAt)
 	recs, err := s.Records()
 	if err != nil || len(recs) != 3 {
@@ -199,4 +200,34 @@ func (s *coastlineStore) Record(sq coverageSquare) (coastlineSquareRecord, bool,
 		return coastlineSquareRecord{}, false, fmt.Errorf("read coastline square: %w", err)
 	}
 	return r, true, nil
+}
+
+func TestCoastlineStore_OpeningDropsHeldSquaresWithoutADataDate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "helmcentral.sqlite")
+	s, err := newCoastlineStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 148}, nil, coastlineTestAt, coastlineTestDataAsOf)
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 149}, nil, coastlineTestAt, coastlineTestDataAsOf)
+	if _, err := s.db.Exec(`UPDATE coastline_squares SET data_as_of = 0 WHERE lon = 149`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = newCoastlineStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	recs, _ := s.Records()
+	if len(recs) != 1 || recs[0].Square.Lon != 148 {
+		t.Errorf("only the square with a data date stays: %+v", recs)
+	}
+}
+
+func TestCoastlineStore_SaveSquareRequiresADataDate(t *testing.T) {
+	s := newTestCoastlineStore(t)
+	if err := s.SaveSquareAsOf(coverageSquare{-21, 148}, nil, coastlineTestAt, time.Time{}); err == nil {
+		t.Error("a square without a data date must not be stored")
+	}
 }

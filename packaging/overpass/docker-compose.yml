@@ -3,23 +3,38 @@
 # Import), then point the osm-overpass plugin at
 # http://<box-ip>:12345/api/interpreter and add <box-ip> to its allowed hosts.
 #
-# BEFORE INSTALLING, set two values below. Both are placeholders on purpose, so
-# an unedited file fails to start instead of importing the wrong coast:
+# BEFORE INSTALLING, set three values below. They are placeholders on purpose,
+# so an unedited file fails to start instead of importing the wrong coast:
 #   OVERPASS_PLANET_URL  the Geofabrik extract that contains your cruising
 #                        ground (https://download.geofabrik.de/)
+#   OVERPASS_DIFF_URL    the daily updates folder of the same Geofabrik region
+#                        as OVERPASS_PLANET_URL: the same address with
+#                        -updates/ in place of -latest.osm.pbf. A feed for
+#                        another region would corrupt the database.
 #   --bbox               west,south,east,north in degrees, in
 #                        OVERPASS_PLANET_PREPROCESS. Written inline, not as a
 #                        variable: ZimaOS's compose import expands variable
 #                        references itself and leaves an empty string.
 # Worked example, the Queensland coast from the Gold Coast to Torres Strait:
 #   OVERPASS_PLANET_URL: https://download.geofabrik.de/australia-oceania/australia-latest.osm.pbf
+#   OVERPASS_DIFF_URL: https://download.geofabrik.de/australia-oceania/australia-updates/
 #   --bbox 142.0,-29.2,154.0,-9.0
 #
 # First start downloads the extract, crops it to the box and builds the
 # database: expect one to several hours. The container serves queries once the
-# import finishes. It does not apply daily updates, which would keep adding
-# objects from outside the box. To refresh, or to change the box, delete
-# /DATA/AppData/overpass/db and restart: it imports afresh.
+# import finishes. After that it applies the daily updates, so the data stays
+# current. The updates also add objects from outside the box, which only costs
+# disk. To change the box, delete /DATA/AppData/overpass/db and restart: it
+# imports afresh.
+#
+# OVERPASS_META is "yes" because the weekly offline coastline edit check asks
+# for elements changed since its last run (newer:), and Overpass answers that
+# only from element timestamps. The metadata files make the database grow.
+# They are built on import, so an install made with OVERPASS_META=no must be
+# re-imported for this to take effect: delete /DATA/AppData/overpass/db and
+# restart, as above. The daily updates are what make that check meaningful: a
+# server whose data stops at the import date has nothing newer to report, and
+# Helmcentral says so instead of counting zero edits.
 name: overpass
 services:
   overpass:
@@ -33,9 +48,13 @@ services:
       - 8.8.8.8
     environment:
       OVERPASS_MODE: init
-      OVERPASS_META: "no"
+      # Element timestamps, for the weekly coastline edit check's newer: query.
+      OVERPASS_META: "yes"
       OVERPASS_COMPRESSION: gz
       OVERPASS_PLANET_URL: https://download.geofabrik.de/REGION-latest.osm.pbf
+      # Daily updates for that same region, applied once a day (86400 s).
+      OVERPASS_DIFF_URL: https://download.geofabrik.de/REGION-updates/
+      OVERPASS_UPDATE_SLEEP: "86400"
       # Geofabrik ships PBF; Overpass init wants osm.bz2. Crop while converting.
       OVERPASS_PLANET_PREPROCESS: >-
         mv /db/planet.osm.bz2 /db/extract.osm.pbf &&

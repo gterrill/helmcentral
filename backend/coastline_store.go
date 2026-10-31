@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -31,9 +32,13 @@ const (
 )
 
 type coastlineSquareRecord struct {
-	Square        coverageSquare
-	Status        string
-	DownloadedAt  time.Time // zero while status is failed
+	Square       coverageSquare
+	Status       string
+	DownloadedAt time.Time // zero while status is failed
+	// DataAsOf is the date of the Overpass server's map data when the square
+	// was downloaded: the point edits are counted from. Zero only for a
+	// square held from before it was recorded, which is downloaded again.
+	DataAsOf      time.Time
 	EditsSince    int
 	CheckedAt     time.Time
 	LastError     string
@@ -59,11 +64,12 @@ func createCoastlineSchema(db *sql.DB) error {
 			attempts        INTEGER NOT NULL DEFAULT 0,
 			next_attempt_at INTEGER NOT NULL DEFAULT 0,
 			geometry        BLOB,
+			data_as_of      INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (lat, lon)
 		)`); err != nil {
 		return fmt.Errorf("create coastline squares table: %w", err)
 	}
-	return nil
+	return addColumnIfMissing(db, "coastline_squares", "data_as_of", "INTEGER NOT NULL DEFAULT 0")
 }
 
 func newCoastlineStore(dbPath string) (*coastlineStore, error) {
@@ -74,6 +80,17 @@ func newCoastlineStore(dbPath string) (*coastlineStore, error) {
 	if err := createCoastlineSchema(db); err != nil {
 		db.Close()
 		return nil, err
+	}
+	// Squares stored before data dates were kept can't be checked. Dropping
+	// them makes them ordinary missing squares, downloaded again by the usual
+	// path.
+	res, err := db.Exec(`DELETE FROM coastline_squares WHERE status = ? AND data_as_of = 0`, coastlineStatusReady)
+	if err != nil {
+		db.Close()
+		return nil, fmt.Errorf("drop coastline squares without a data date: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		log.Printf("offline coastline: dropped %d held squares stored without a data date; they download again", n)
 	}
 	return &coastlineStore{db: db}, nil
 }
@@ -174,22 +191,26 @@ func timeOrZero(sec int64) time.Time {
 	return time.Unix(sec, 0).UTC()
 }
 
-// SaveSquare stores a freshly downloaded square: ready, no edits since, no
-// error, replacing whatever the square held.
-func (s *coastlineStore) SaveSquare(sq coverageSquare, lines []shorelineLine, at time.Time) error {
+// SaveSquareAsOf stores a freshly downloaded square: ready, no edits since, no
+// error, replacing whatever the square held. dataAsOf is the date of the map
+// data the server gave it.
+func (s *coastlineStore) SaveSquareAsOf(sq coverageSquare, lines []shorelineLine, at, dataAsOf time.Time) error {
+	if dataAsOf.IsZero() {
+		return fmt.Errorf("save square %s: the server gave no data date", sq.Label())
+	}
 	blob, err := encodeShorelineLines(lines)
 	if err != nil {
 		return fmt.Errorf("encode square %s: %w", sq.Label(), err)
 	}
 	return s.RunTx("save coastline square", func(tx *sql.Tx) error {
 		_, err := tx.Exec(`
-			INSERT INTO coastline_squares (lat, lon, status, downloaded_at, edits_since, checked_at, last_error, attempts, next_attempt_at, geometry)
-			VALUES (?, ?, ?, ?, 0, ?, '', 0, 0, ?)
+			INSERT INTO coastline_squares (lat, lon, status, downloaded_at, edits_since, checked_at, last_error, attempts, next_attempt_at, geometry, data_as_of)
+			VALUES (?, ?, ?, ?, 0, ?, '', 0, 0, ?, ?)
 			ON CONFLICT (lat, lon) DO UPDATE SET
 				status = excluded.status, downloaded_at = excluded.downloaded_at, edits_since = 0,
 				checked_at = excluded.checked_at, last_error = '', attempts = 0, next_attempt_at = 0,
-				geometry = excluded.geometry`,
-			sq.Lat, sq.Lon, coastlineStatusReady, unixOrZero(at), unixOrZero(at), blob)
+				geometry = excluded.geometry, data_as_of = excluded.data_as_of`,
+			sq.Lat, sq.Lon, coastlineStatusReady, unixOrZero(at), unixOrZero(at), blob, unixOrZero(dataAsOf))
 		return err
 	})
 }
@@ -218,6 +239,17 @@ func (s *coastlineStore) DeleteFailed(sq coverageSquare) error {
 	})
 }
 
+// DeferCheck puts a held square's next edit check off until at, without
+// counting it as checked. The check reached a working server, so an earlier
+// failure no longer stands.
+func (s *coastlineStore) DeferCheck(sq coverageSquare, until time.Time) error {
+	return s.RunTx("defer coastline check", func(tx *sql.Tx) error {
+		_, err := tx.Exec(`UPDATE coastline_squares SET next_attempt_at = ?, last_error = '', attempts = 0 WHERE lat = ? AND lon = ? AND status = ?`,
+			unixOrZero(until), sq.Lat, sq.Lon, coastlineStatusReady)
+		return err
+	})
+}
+
 // RecordEdits stores the result of a weekly check on a held square.
 func (s *coastlineStore) RecordEdits(sq coverageSquare, edits int, checkedAt time.Time) error {
 	return s.RunTx("record coastline edits", func(tx *sql.Tx) error {
@@ -237,15 +269,15 @@ func (s *coastlineStore) RecordEdits(sq coverageSquare, edits int, checkedAt tim
 
 func scanCoastlineRecord(row interface{ Scan(...any) error }) (coastlineSquareRecord, error) {
 	var r coastlineSquareRecord
-	var downloaded, checked, next int64
-	if err := row.Scan(&r.Square.Lat, &r.Square.Lon, &r.Status, &downloaded, &r.EditsSince, &checked, &r.LastError, &r.Attempts, &next); err != nil {
+	var downloaded, checked, next, asOf int64
+	if err := row.Scan(&r.Square.Lat, &r.Square.Lon, &r.Status, &downloaded, &r.EditsSince, &checked, &r.LastError, &r.Attempts, &next, &asOf); err != nil {
 		return r, err
 	}
-	r.DownloadedAt, r.CheckedAt, r.NextAttemptAt = timeOrZero(downloaded), timeOrZero(checked), timeOrZero(next)
+	r.DownloadedAt, r.CheckedAt, r.NextAttemptAt, r.DataAsOf = timeOrZero(downloaded), timeOrZero(checked), timeOrZero(next), timeOrZero(asOf)
 	return r, nil
 }
 
-const coastlineRecordColumns = `lat, lon, status, downloaded_at, edits_since, checked_at, last_error, attempts, next_attempt_at`
+const coastlineRecordColumns = `lat, lon, status, downloaded_at, edits_since, checked_at, last_error, attempts, next_attempt_at, data_as_of`
 
 // Records returns every square the store has a row for, without geometry.
 func (s *coastlineStore) Records() ([]coastlineSquareRecord, error) {

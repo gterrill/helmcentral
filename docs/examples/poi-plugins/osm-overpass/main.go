@@ -199,9 +199,18 @@ func fetchWikipediaSummary(title string) (detail, sourceURL string, ok bool) {
 // plain-Go-testable via a fake overpassQueryFunc while this is the one place
 // that actually performs the HTTP call for all three.
 func doOverpassQuery(query string) ([]overpassElement, error) {
-	overpassURL, err := resolveOverpassURL(pdk.GetConfig("overpass_url"))
+	resp, err := doOverpassResponse(query)
 	if err != nil {
 		return nil, err
+	}
+	return resp.Elements, nil
+}
+
+// doOverpassResponse is doOverpassQuery keeping the whole parsed answer.
+func doOverpassResponse(query string) (overpassResponse, error) {
+	overpassURL, err := resolveOverpassURL(pdk.GetConfig("overpass_url"))
+	if err != nil {
+		return overpassResponse{}, err
 	}
 
 	req := pdk.NewHTTPRequest(pdk.MethodPost, overpassURL)
@@ -214,10 +223,10 @@ func doOverpassQuery(query string) ([]overpassElement, error) {
 	contentType := headerCaseInsensitive(resp.Headers(), "Content-Type")
 
 	if resp.Status() != 200 {
-		return nil, overpassStatusError(int(resp.Status()), headerCaseInsensitive(resp.Headers(), "Retry-After"), contentType, body, time.Now())
+		return overpassResponse{}, overpassStatusError(int(resp.Status()), headerCaseInsensitive(resp.Headers(), "Retry-After"), contentType, body, time.Now())
 	}
 
-	return parseOverpassBody(contentType, body)
+	return parseOverpassResponse(contentType, body)
 }
 
 //go:wasmexport place_name_at
@@ -291,7 +300,7 @@ func shorelineSquare() int32 {
 		return -1
 	}
 
-	output, err := runShorelineSquare(doOverpassQuery, input)
+	output, err := runShorelineSquare(doOverpassResponse, input)
 	if err != nil {
 		pdk.SetError(err)
 		return -1
@@ -317,7 +326,7 @@ func shorelineChanges() int32 {
 		return -1
 	}
 
-	output, err := runShorelineChanges(doOverpassQuery, input.box(), since)
+	output, err := runShorelineChanges(doOverpassResponse, input.box(), since)
 	if err != nil {
 		pdk.SetError(err)
 		return -1

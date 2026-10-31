@@ -40,6 +40,10 @@ export interface OfflineCoastlineStatus {
   pause_reason?: string
   pause_detail?: string
   retry_at?: string
+  /** While only the weekly edit check is paused (downloads carry on). */
+  check_pause_reason?: string
+  check_pause_detail?: string
+  check_retry_at?: string
   has_fix: boolean
   position?: { lat: number; lon: number }
   radius_nm: number
@@ -96,6 +100,15 @@ export function inlandSkippedLine(s: OfflineCoastlineStatus): string | null {
   const n = s.inland_skipped ?? 0
   if (n <= 0 || s.state === 'off') return null
   return `${plural(n, 'square', 'squares')} that ${n === 1 ? 'is' : 'are'} all land ${n === 1 ? 'is' : 'are'} skipped.`
+}
+
+/** Why the weekly edit check is on hold while downloads carry on, or null. */
+export function editCheckPauseLine(s: OfflineCoastlineStatus, timeZone?: string, now: Date = new Date()): string | null {
+  if (s.state === 'off' || !s.check_pause_reason) return null
+  const due = s.check_retry_at ? new Date(s.check_retry_at) : null
+  const at = s.check_retry_at ? clockTime(s.check_retry_at, timeZone) : null
+  const retry = due && due.getTime() <= now.getTime() ? 'Trying again now' : at ? `Trying again about ${at}` : 'Trying again later'
+  return `Edit check on hold: ${s.check_pause_reason}. ${retry}.`
 }
 
 /** The one line under the switch. */

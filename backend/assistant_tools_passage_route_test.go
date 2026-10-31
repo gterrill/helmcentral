@@ -25,7 +25,7 @@ func openSeaDeps(t *testing.T, deps assistantToolDeps) assistantToolDeps {
 	store := newTestCoastlineStore(t)
 	for la := -23; la <= -16; la++ {
 		for lo := 158; lo <= 162; lo++ {
-			if err := store.SaveSquare(coverageSquare{la, lo}, nil, coastlineTestAt); err != nil {
+			if err := store.SaveSquareAsOf(coverageSquare{la, lo}, nil, coastlineTestAt, coastlineTestDataAsOf); err != nil {
 				t.Fatal(err)
 			}
 		}

@@ -60,6 +60,31 @@ func coastlineRetryDelay(failures int) time.Duration {
 	return d
 }
 
+// coastlinePause is one hold: why, until when, and how many failures in a row
+// have set it, for the backoff.
+type coastlinePause struct {
+	problem  *coastlineServiceProblem
+	until    time.Time
+	failures int
+}
+
+func (p *coastlinePause) reset() { *p = coastlinePause{} }
+
+// active reports whether the hold still stops work at now.
+func (p *coastlinePause) active(now time.Time) bool { return now.Before(p.until) }
+
+// extend records another failure and holds for the longer of the server's
+// Retry-After and the usual backoff. It returns the time the hold ends.
+func (p *coastlinePause) extend(problem *coastlineServiceProblem, now time.Time) time.Time {
+	p.failures++
+	wait := coastlineRetryDelay(p.failures)
+	if problem.RetryAfter > wait {
+		wait = problem.RetryAfter
+	}
+	p.problem, p.until = problem, now.Add(wait)
+	return p.until
+}
+
 // coastlineServiceProblem is a failure of the whole map server (Overpass) as
 // opposed to one square: rate limiting, refusing the network, an overloaded
 // or unreachable server. It pauses the whole job; marking the square bad
@@ -117,12 +142,101 @@ func classifyCoastlineError(err error) *coastlineServiceProblem {
 	return p
 }
 
+// ── edit-check problems ─────────────────────────────────────────────────
+//
+// Three conditions make the weekly edit check unable to say anything, and
+// each is the same answer for every square: the plugin gave no readable data
+// date, the server holds no element timestamps, or the server's data is not
+// newer than the square's. They pause the edit check only. Downloading a new
+// square needs neither timestamps nor fresh data, so it carries on.
+
+// coastlineServerStaleAfter is how old the Overpass server's own data may be
+// before the edit check stops trusting a count of zero. A server set up with
+// the guide applies daily updates, so data older than three days means the
+// updates have stopped (a weekend or one missed run is not enough).
+const coastlineServerStaleAfter = 3 * 24 * time.Hour
+
+// shorelineErrorNoMetadata is the error_code the osm-overpass plugin returns
+// from shoreline_changes, in place of a count, when the Overpass server holds
+// no element timestamps. See the README's shoreline_changes section.
+const shorelineErrorNoMetadata = "no_metadata"
+
+// coastlineEditCheckCodeError is a shoreline_changes answer that carries an
+// error_code instead of a count.
+type coastlineEditCheckCodeError struct {
+	Code   string
+	Detail string
+}
+
+func (e *coastlineEditCheckCodeError) Error() string {
+	if e.Detail == "" {
+		return "shoreline_changes returned error_code " + e.Code
+	}
+	return "shoreline_changes returned error_code " + e.Code + ": " + e.Detail
+}
+
+// parseCoastlineDataAsOf reads the data date a plugin reports
+// (osm3s.timestamp_osm_base, RFC 3339). It is the one place the date is
+// validated, so a missing or odd value gets one error text.
+func parseCoastlineDataAsOf(raw string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("no readable data date (%q)", raw)
+	}
+	return t, nil
+}
+
+// missingDataDateProblem is the one problem for a plugin answer without a
+// readable data date. Either the plugin is older than Helmcentral, or the
+// server has no data yet, so the words cover both.
+func missingDataDateProblem(pluginID string, err error) *coastlineServiceProblem {
+	return &coastlineServiceProblem{
+		Summary: fmt.Sprintf("Neither the %s plugin nor the Overpass server gave the date of its map data. The plugin may be older than Helmcentral, or the server may still be importing. If the import is done, update the plugin bundle", pluginID),
+		Detail:  fmt.Sprintf("the %s plugin returned %v", pluginID, err),
+	}
+}
+
+// editCheckProblem returns the edit-check-only problem behind a failed
+// shoreline_changes call, or nil.
+func editCheckProblem(err error) *coastlineServiceProblem {
+	var coded *coastlineEditCheckCodeError
+	if !errors.As(err, &coded) || coded.Code != shorelineErrorNoMetadata {
+		return nil
+	}
+	return &coastlineServiceProblem{
+		Summary: "The Overpass server was set up without element timestamps, which the weekly edit check needs. Re-import it with OVERPASS_META=yes, as the Overpass server guide describes",
+		Detail:  err.Error(),
+	}
+}
+
+// judgeEditCheck judges the server on its own terms: it must give a readable
+// data date, and that date must be recent. It returns the parsed date for the
+// caller's per-square comparison. A square whose own data date the server has
+// not passed is not a server problem; check handles it.
+func judgeEditCheck(pluginID, dataAsOfRaw string, now time.Time, loc *time.Location) (time.Time, *coastlineServiceProblem) {
+	asOf, err := parseCoastlineDataAsOf(dataAsOfRaw)
+	if err != nil {
+		return time.Time{}, missingDataDateProblem(pluginID, err)
+	}
+	if now.Sub(asOf) > coastlineServerStaleAfter {
+		return asOf, &coastlineServiceProblem{
+			Summary: fmt.Sprintf("The Overpass server behind the %s plugin has map data from %s, so it has stopped applying its daily updates and has nothing new to check. Check that the server is running its updates", pluginID, asOf.In(loc).Format("2 Jan 2006")),
+			Detail:  fmt.Sprintf("overpass data is from %s, more than %s before now", asOf.UTC().Format(time.RFC3339), coastlineServerStaleAfter),
+		}
+	}
+	return asOf, nil
+}
+
 // coastlineSource is the plugin side: the two optional exports of the
 // osm-overpass plugin.
+//
+// Both exports return the server's data date as the plugin read it
+// (osm3s.timestamp_osm_base, unparsed); the manager validates it.
 type coastlineSource interface {
+	ID() string
 	SupportsShoreline() bool
-	ShorelineSquare(sq coverageSquare) ([]shorelineLine, error)
-	ShorelineChanges(sq coverageSquare, since time.Time) (int, error)
+	ShorelineSquare(sq coverageSquare) (lines []shorelineLine, dataAsOf string, err error)
+	ShorelineChanges(sq coverageSquare, since time.Time) (changed int, dataAsOf string, err error)
 }
 
 // coastlinePluginID is the plugin the offline coastline downloads through.
@@ -147,6 +261,9 @@ type coastlineManagerConfig struct {
 	Position func() (lat, lon float64, ok bool)
 	Source   func() (coastlineSource, error)
 	Now      func() time.Time
+	// Zone is the boat's time zone, for dates in operator-facing text.
+	// Nil means UTC.
+	Zone func() *time.Location
 }
 
 type coastlineManager struct {
@@ -167,9 +284,14 @@ type coastlineManager struct {
 
 	// pause is set when the map server refused the whole job (rate limit,
 	// refused connection, overload). No square is tried until pausedUntil.
-	pause         *coastlineServiceProblem
-	pausedUntil   time.Time
-	pauseFailures int // consecutive service failures, for the backoff
+	pause coastlinePause
+
+	// checkPause is the same for the weekly edit check alone: set when the
+	// check cannot say anything (see editCheckProblem and judgeEditCheck).
+	// Downloads carry on. Its problem stays set after until passes, so the
+	// page keeps saying why, until a check succeeds or another problem
+	// replaces it.
+	checkPause coastlinePause
 
 	// snap is what Status serves: the switch and the boat's position as the
 	// worker last saw them, so a GET polled every few seconds by every open
@@ -188,6 +310,9 @@ type coastlineSnapshot struct {
 func newCoastlineManager(cfg coastlineManagerConfig) *coastlineManager {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.Zone == nil {
+		cfg.Zone = func() *time.Location { return time.UTC }
 	}
 	return &coastlineManager{cfg: cfg, wake: make(chan struct{}, 1)}
 }
@@ -268,7 +393,8 @@ func (m *coastlineManager) step() bool {
 		m.mu.Lock()
 		m.queue = nil
 		m.lastError = ""
-		m.pause, m.pauseFailures, m.pausedUntil = nil, 0, time.Time{}
+		m.pause.reset()
+		m.checkPause.reset()
 		m.mu.Unlock()
 		return false
 	}
@@ -285,7 +411,8 @@ func (m *coastlineManager) step() bool {
 
 	now := m.cfg.Now()
 	m.mu.Lock()
-	paused := now.Before(m.pausedUntil)
+	paused := m.pause.active(now)
+	checkPaused := m.checkPause.active(now)
 	m.mu.Unlock()
 	if paused {
 		return false
@@ -340,7 +467,7 @@ func (m *coastlineManager) step() bool {
 
 	var due []coastlineSquareRecord
 	for _, r := range recs {
-		if r.Status == coastlineStatusReady && !squareInland(r.Square) && now.Sub(r.CheckedAt) >= coastlineCheckInterval && !now.Before(r.NextAttemptAt) {
+		if !checkPaused && r.Status == coastlineStatusReady && !squareInland(r.Square) && now.Sub(r.CheckedAt) >= coastlineCheckInterval && !now.Before(r.NextAttemptAt) {
 			due = append(due, r)
 		}
 	}
@@ -363,6 +490,18 @@ func (m *coastlineManager) step() bool {
 // non-nil requeue is put back at the front of the queue in the same critical
 // section.
 func (m *coastlineManager) serviceFailed(gen uint64, what string, p *coastlineServiceProblem, now time.Time, requeue *coverageSquare) bool {
+	return m.pauseFor(gen, what, p, now, requeue, &m.pause, "pausing until %s")
+}
+
+// editCheckFailed is serviceFailed for a problem that stops only the weekly
+// edit check. Downloads are not paused.
+func (m *coastlineManager) editCheckFailed(gen uint64, what string, p *coastlineServiceProblem, now time.Time) bool {
+	return m.pauseFor(gen, what, p, now, nil, &m.checkPause, "edit check on hold until %s, downloads continue")
+}
+
+// pauseFor holds target (the job's pause or the edit check's) for p. until is
+// the log wording, with the end time as its one argument.
+func (m *coastlineManager) pauseFor(gen uint64, what string, p *coastlineServiceProblem, now time.Time, requeue *coverageSquare, target *coastlinePause, until string) bool {
 	m.gateMu.Lock()
 	defer m.gateMu.Unlock()
 	if gen != m.gen {
@@ -381,22 +520,22 @@ func (m *coastlineManager) serviceFailed(gen uint64, what string, p *coastlineSe
 	if requeue != nil {
 		m.queue = append([]coverageSquare{*requeue}, m.queue...)
 	}
-	m.pauseFailures++
-	wait := coastlineRetryDelay(m.pauseFailures)
-	if p.RetryAfter > wait {
-		wait = p.RetryAfter
-	}
-	m.pause = p
-	m.pausedUntil = now.Add(wait)
+	end := target.extend(p, now)
 	m.mu.Unlock()
-	log.Printf("offline coastline: %s: %s; pausing until %s (%s)", what, p.Summary, now.Add(wait).Format(time.RFC3339), p.Detail)
+	log.Printf("offline coastline: %s: %s; "+until+" (%s)", what, p.Summary, end.Format(time.RFC3339), p.Detail)
 	return true
 }
 
-func (m *coastlineManager) serviceWorked() {
+// serviceWorked clears the job pause after the map server answered. When the
+// answer was an edit check's, it clears the edit-check hold too: a download
+// says nothing about whether the check can run. One lock covers both.
+func (m *coastlineManager) serviceWorked(editCheckRan bool) {
 	m.mu.Lock()
-	m.pause, m.pauseFailures = nil, 0
-	m.mu.Unlock()
+	defer m.mu.Unlock()
+	m.pause.reset()
+	if editCheckRan {
+		m.checkPause.reset()
+	}
 }
 
 // download fetches one square. requeue is the operator-requested square to put
@@ -405,7 +544,7 @@ func (m *coastlineManager) serviceWorked() {
 // serviceFailed, under the same lock as the Clear/switch-off check, so a Clear
 // cannot land between the check and the requeue.
 func (m *coastlineManager) download(src coastlineSource, gen uint64, sq coverageSquare, prev coastlineSquareRecord, now time.Time, requeue *coverageSquare) {
-	lines, err := src.ShorelineSquare(sq)
+	lines, dataAsOfRaw, err := src.ShorelineSquare(sq)
 	if err != nil {
 		log.Printf("offline coastline: download of %s failed: %v", sq.Label(), err)
 		if p := classifyCoastlineError(err); p != nil {
@@ -417,27 +556,66 @@ func (m *coastlineManager) download(src coastlineSource, gen uint64, sq coverage
 		})
 		return
 	}
-	m.serviceWorked()
+	dataAsOf, perr := parseCoastlineDataAsOf(dataAsOfRaw)
+	if perr != nil {
+		// Every square would get the same answer, so this is one problem for
+		// the whole job, not a failure on this square.
+		log.Printf("offline coastline: download of %s failed: %v", sq.Label(), perr)
+		m.serviceFailed(gen, "download of "+sq.Label(), missingDataDateProblem(src.ID(), perr), now, requeue)
+		return
+	}
+	m.serviceWorked(false)
 	m.commit(gen, "download of "+sq.Label(), func() error {
-		return m.cfg.Store.SaveSquare(sq, lines, now)
+		return m.cfg.Store.SaveSquareAsOf(sq, lines, now, dataAsOf)
 	})
 }
 
 func (m *coastlineManager) check(src coastlineSource, gen uint64, rec coastlineSquareRecord, now time.Time) {
-	edits, err := src.ShorelineChanges(rec.Square, rec.DownloadedAt)
-	if err != nil {
-		log.Printf("offline coastline: edit check of %s failed: %v", rec.Square.Label(), err)
-		if p := classifyCoastlineError(err); p != nil {
-			m.serviceFailed(gen, "edit check of "+rec.Square.Label(), p, now, nil)
-			return
-		}
-		m.commit(gen, "failure of edit check of "+rec.Square.Label(), func() error {
+	what := "edit check of " + rec.Square.Label()
+	if rec.DataAsOf.IsZero() {
+		// Every stored square has a data date, so this is a bug, not a
+		// condition to work around.
+		err := errors.New("the square has no data date to count edits from")
+		log.Printf("offline coastline: %s failed: %v", what, err)
+		m.commit(gen, "failure of "+what, func() error {
 			return m.cfg.Store.RecordFailure(rec.Square, err.Error(), now, now.Add(coastlineRetryDelay(rec.Attempts+1)))
 		})
 		return
 	}
-	m.serviceWorked()
-	m.commit(gen, "edit check of "+rec.Square.Label(), func() error {
+	edits, dataAsOfRaw, err := src.ShorelineChanges(rec.Square, rec.DataAsOf)
+	if err != nil {
+		log.Printf("offline coastline: %s failed: %v", what, err)
+		if p := editCheckProblem(err); p != nil {
+			m.editCheckFailed(gen, what, p, now)
+			return
+		}
+		if p := classifyCoastlineError(err); p != nil {
+			m.serviceFailed(gen, what, p, now, nil)
+			return
+		}
+		m.commit(gen, "failure of "+what, func() error {
+			return m.cfg.Store.RecordFailure(rec.Square, err.Error(), now, now.Add(coastlineRetryDelay(rec.Attempts+1)))
+		})
+		return
+	}
+	asOf, p := judgeEditCheck(src.ID(), dataAsOfRaw, now, m.cfg.Zone())
+	if p != nil {
+		log.Printf("offline coastline: %s: %s", what, p.Detail)
+		m.editCheckFailed(gen, what, p, now)
+		return
+	}
+	m.serviceWorked(true)
+	if !asOf.After(rec.DataAsOf) {
+		// The server is current but has not moved past this square's data,
+		// as when the square was downloaded after the last update. There is
+		// nothing to count yet: not a check, not a pause. Try again on the
+		// normal weekly cadence.
+		m.commit(gen, what+" deferred", func() error {
+			return m.cfg.Store.DeferCheck(rec.Square, now.Add(coastlineCheckInterval))
+		})
+		return
+	}
+	m.commit(gen, what, func() error {
 		return m.cfg.Store.RecordEdits(rec.Square, edits, now)
 	})
 }
@@ -488,7 +666,8 @@ func (m *coastlineManager) Clear() error {
 	m.gen++ // any plugin call already in flight is now stale
 	m.mu.Lock()
 	m.queue = nil
-	m.pause, m.pauseFailures, m.pausedUntil = nil, 0, time.Time{}
+	m.pause.reset()
+	m.checkPause.reset()
 	m.mu.Unlock()
 	return m.cfg.Store.Clear()
 }
@@ -550,16 +729,21 @@ type coastlineStatus struct {
 	Error string `json:"error,omitempty"`
 	// While paused: what the map server did, the error behind it, and when
 	// the worker will try again.
-	PauseReason string                  `json:"pause_reason,omitempty"`
-	PauseDetail string                  `json:"pause_detail,omitempty"`
-	RetryAt     *time.Time              `json:"retry_at,omitempty"`
-	HasFix      bool                    `json:"has_fix"`
-	Position    *coastlinePosition      `json:"position,omitempty"`
-	RadiusNm    float64                 `json:"radius_nm"`
-	Squares     []coastlineStatusSquare `json:"squares"`
-	Held        int                     `json:"held"`
-	Wanted      int                     `json:"wanted"`
-	WantedHeld  int                     `json:"wanted_held"`
+	PauseReason string     `json:"pause_reason,omitempty"`
+	PauseDetail string     `json:"pause_detail,omitempty"`
+	RetryAt     *time.Time `json:"retry_at,omitempty"`
+	// While only the weekly edit check is paused (downloads carry on): why,
+	// the underlying text, and when the check will be tried again.
+	CheckPauseReason string                  `json:"check_pause_reason,omitempty"`
+	CheckPauseDetail string                  `json:"check_pause_detail,omitempty"`
+	CheckRetryAt     *time.Time              `json:"check_retry_at,omitempty"`
+	HasFix           bool                    `json:"has_fix"`
+	Position         *coastlinePosition      `json:"position,omitempty"`
+	RadiusNm         float64                 `json:"radius_nm"`
+	Squares          []coastlineStatusSquare `json:"squares"`
+	Held             int                     `json:"held"`
+	Wanted           int                     `json:"wanted"`
+	WantedHeld       int                     `json:"wanted_held"`
 	// InlandSkipped counts squares in range that are all land and so are
 	// not downloaded.
 	InlandSkipped int `json:"inland_skipped"`
@@ -598,11 +782,19 @@ func (m *coastlineManager) Status() (coastlineStatus, error) {
 	m.mu.Lock()
 	st.Error = m.lastError
 	st.Updating = len(m.queue)
-	paused := m.pause != nil && now.Before(m.pausedUntil)
+	paused := m.pause.problem != nil && m.pause.active(now)
 	if paused {
-		st.PauseReason, st.PauseDetail = m.pause.Summary, m.pause.Detail
-		until := m.pausedUntil
+		st.PauseReason, st.PauseDetail = m.pause.problem.Summary, m.pause.problem.Detail
+		until := m.pause.until
 		st.RetryAt = &until
+	}
+	// The edit check's reason outlives its retry time: the page keeps saying
+	// why until a check succeeds, and a retry time in the past reads as
+	// "trying again now".
+	if m.checkPause.problem != nil {
+		st.CheckPauseReason, st.CheckPauseDetail = m.checkPause.problem.Summary, m.checkPause.problem.Detail
+		until := m.checkPause.until
+		st.CheckRetryAt = &until
 	}
 	m.mu.Unlock()
 

@@ -738,7 +738,7 @@ func TestParseOverpassBody_RuntimeErrorRemarkReturnsError(t *testing.T) {
 		"elements": [],
 		"remark": "runtime error: Query timed out in \"query\" at line 8 after 22 seconds."
 	}`)
-	_, err := parseOverpassBody("application/json", body)
+	_, err := parseOverpassResponse("application/json", body)
 	if err == nil {
 		t.Fatalf("expected an error for a runtime error remark")
 	}
@@ -754,7 +754,8 @@ func TestParseOverpassBody_NormalResponseWithElementsParsesSuccessfully(t *testi
 			{"type": "node", "id": 1, "lat": -20.44, "lon": 149.03, "tags": {"seamark:type": "anchorage"}}
 		]
 	}`)
-	elements, err := parseOverpassBody("application/json", body)
+	resp, err := parseOverpassResponse("application/json", body)
+	elements := resp.Elements
 	if err != nil {
 		t.Fatalf("expected no error for a normal response, got: %v", err)
 	}
@@ -774,7 +775,8 @@ func TestParseOverpassBody_InformationalRemarkWithElementsParsesSuccessfully(t *
 		],
 		"remark": "this is just an informational note, not a runtime error"
 	}`)
-	elements, err := parseOverpassBody("application/json", body)
+	resp, err := parseOverpassResponse("application/json", body)
+	elements := resp.Elements
 	if err != nil {
 		t.Fatalf("expected no error for a remark that is not a runtime error, got: %v", err)
 	}
@@ -785,7 +787,7 @@ func TestParseOverpassBody_InformationalRemarkWithElementsParsesSuccessfully(t *
 
 func TestParseOverpassBody_RateLimitHTMLReturnsError(t *testing.T) {
 	body := []byte(`<html><body>Dispatcher_Client::request_read_and_idx::rate_limited</body></html>`)
-	_, err := parseOverpassBody("text/html", body)
+	_, err := parseOverpassResponse("text/html", body)
 	if err == nil {
 		t.Fatalf("expected an error for a rate limit HTML response")
 	}
