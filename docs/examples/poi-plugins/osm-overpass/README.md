@@ -171,11 +171,30 @@ a pole, or is larger than 2°, an Overpass `remark` runtime error, a rate limit,
 and a reef with a missing node are all errors. `lines: []` means open sea.
 
 `shoreline_changes`: input is the same box plus `"since"`, an RFC 3339 time;
-output `{"changed": <integer>}`. It counts coastline ways and reef ways and
+output `{"changed": <integer>, "data_as_of": "<RFC 3339>"}`. It counts coastline ways and reef ways and
 relations in the box whose own timestamp is newer than `since`
 (`(newer:"...")` with `out count;`). It does not see a deleted element or a
 node moved inside an unedited way. A response with no count is an error, never
-zero.
+zero. `data_as_of` is the server's `osm3s.timestamp_osm_base`, the date of its
+map data, passed on as the server wrote it. The plugin does not parse it: the
+host validates it and compares it with the square's own data date, so the
+freshness rule lives in one place. `shoreline_square` returns the same
+`data_as_of`, which the host keeps as the square's data date and passes back
+as `since`. The host requires it: a download whose `data_as_of` can't be read
+fails.
+
+`newer:` needs the server's element timestamps. A server imported with
+`OVERPASS_META=no` can't answer, and `shoreline_changes` then returns, as a
+normal output with no count:
+
+```json
+{"error_code": "no_metadata", "detail": "<the server's own remark>"}
+```
+
+**`error_code` is part of the export's contract.** The host classifies on the
+code, never on message text, and treats `no_metadata` as a problem with the
+server that holds the edit check without failing any square. `no_metadata` is
+the only code defined. The host treats any other code as an error.
 
 ## One more optional export: marina_details
 

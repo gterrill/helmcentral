@@ -67,6 +67,31 @@ since, the page shows an **Update** button, and tapping it downloads those
 squares again. New coverage, by contrast, downloads by itself, since it only
 adds shoreline where there was none.
 
+The check needs two things from the Overpass server. If either is missing, the
+page shows a line starting "Edit check on hold" under the switch, and the check
+tries again later. Downloading new squares carries on meanwhile, because it
+needs neither.
+
+- **Element timestamps:** The server can only say what changed if it keeps them.
+  The server set up in [Run your own Overpass
+  server](../how-to/run-your-own-overpass-server.md) does. A server without
+  them can't answer, and the page says it was set up without element
+  timestamps. You fix that by importing the server again with timestamps on.
+- **Current map data:** A server whose own data is more than three days old
+  has stopped applying its daily updates. A count of zero
+  would be misleading. The page then says the server's map data is from a
+  given date and that it has stopped applying its daily updates. No square shows
+  a count until the server catches up. A square you downloaded after the
+  server's last update has nothing to count yet, and is simply checked again
+  the following week. A server set up with the guide applies
+  daily updates, so this points to updates that have stopped.
+
+If the page says neither the osm-overpass plugin nor the Overpass server gave
+the date of its map data, there are two likely causes. The plugin may be older
+than Helmcentral, or the server may still be importing. Wait for the import to finish. If the message
+stays, update the plugin bundle. Downloads of new squares wait too in that case.
+A square can't be saved without that date.
+
 The count is a hint, not a diff. It sees coastline and reef outlines that were
 edited or added. It doesn't see a deleted outline, or a point nudged within one
 that wasn't otherwise touched. A square with a handful of edits from years of

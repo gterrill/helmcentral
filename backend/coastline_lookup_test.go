@@ -43,7 +43,7 @@ func TestShorelineAround_AnInlandPositionSaysItIsAshore(t *testing.T) {
 
 func TestShorelineAround_AHeldInlandOwnSquareIsUsed(t *testing.T) {
 	store := newTestCoastlineStore(t)
-	if err := store.SaveSquare(coverageSquare{Lat: -24, Lon: 133}, nil, time.Now()); err != nil {
+	if err := store.SaveSquareAsOf(coverageSquare{Lat: -24, Lon: 133}, nil, time.Now(), coastlineTestDataAsOf); err != nil {
 		t.Fatal(err)
 	}
 	r := &offlineCoastlineReader{Enabled: func() (bool, error) { return true, nil }, Store: store}
@@ -74,7 +74,7 @@ func TestShorelineAround_AnUnheldInlandNeighbourHoldsNoCoastline(t *testing.T) {
 			}
 			for _, sq := range needed {
 				if !squareInland(sq) {
-					if err := store.SaveSquare(sq, nil, time.Now()); err != nil {
+					if err := store.SaveSquareAsOf(sq, nil, time.Now(), coastlineTestDataAsOf); err != nil {
 						t.Fatal(err)
 					}
 				}

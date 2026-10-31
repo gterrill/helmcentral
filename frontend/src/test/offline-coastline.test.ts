@@ -6,6 +6,7 @@ import {
   coastlineStatusLine,
   coverageRingGeoJSON,
   coverageSquaresGeoJSON,
+  editCheckPauseLine,
   inlandSkippedLine,
   squareLabel,
   type OfflineCoastlineStatus,
@@ -186,5 +187,20 @@ describe('inlandSkippedLine', () => {
   it('is silent for none, or when the switch is off', () => {
     expect(inlandSkippedLine(status({ inland_skipped: 0 }))).toBeNull()
     expect(inlandSkippedLine(status({ state: 'off', inland_skipped: 12 }))).toBeNull()
+  })
+})
+
+describe('editCheckPauseLine', () => {
+  it('says the edit check is on hold, not the whole job', () => {
+    const line = editCheckPauseLine(status({ state: 'downloading', check_pause_reason: 'The server has nothing new to check', check_retry_at: '2026-10-23T09:05:00Z' }), 'UTC', new Date('2026-10-23T09:00:00Z'))
+    expect(line).toMatch(/^Edit check on hold: The server has nothing new to check\. Trying again about \d\d:\d\d\.$/)
+  })
+  it('says it is trying again now once the retry time has passed', () => {
+    const line = editCheckPauseLine(status({ state: 'idle', check_pause_reason: 'Why', check_retry_at: '2026-10-23T09:05:00Z' }), 'UTC', new Date('2026-10-23T10:00:00Z'))
+    expect(line).toBe('Edit check on hold: Why. Trying again now.')
+  })
+  it('is silent when nothing is on hold or the switch is off', () => {
+    expect(editCheckPauseLine(status())).toBeNull()
+    expect(editCheckPauseLine(status({ state: 'off', check_pause_reason: 'x' }))).toBeNull()
   })
 })

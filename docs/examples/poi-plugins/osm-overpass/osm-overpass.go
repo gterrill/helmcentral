@@ -12,6 +12,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/netip"
@@ -369,6 +370,13 @@ type overpassMember struct {
 type overpassResponse struct {
 	Elements []overpassElement `json:"elements"`
 	Remark   string            `json:"remark"`
+	Osm3s    overpassOsm3s     `json:"osm3s"`
+}
+
+// overpassOsm3s is the server's own header on every JSON answer.
+// TimestampOsmBase is the date of the map data the server holds.
+type overpassOsm3s struct {
+	TimestampOsmBase string `json:"timestamp_osm_base"`
 }
 
 func elementLatLon(el overpassElement) (lat, lon float64, ok bool) {
@@ -407,28 +415,44 @@ func looksLikeOverpassRateLimit(contentType string, body []byte) bool {
 	return bytes.Contains(body, []byte("rate_limited"))
 }
 
-// parseOverpassBody parses an Overpass response, detecting rate limits and
-// runtime error remarks. contentType is the response's Content-Type header;
-// body is the full response body. Returns the parsed elements, or an error
-// for rate limit signatures, runtime error remarks, or JSON parse failures.
-func parseOverpassBody(contentType string, body []byte) ([]overpassElement, error) {
+// shorelineErrorNoMetadata is the error_code shoreline_changes returns, in
+// place of a count, when the server holds no element timestamps. It is part
+// of the export's contract (see the README's shoreline_changes section); the
+// host reads the code, never the message.
+const shorelineErrorNoMetadata = "no_metadata"
+
+// errOverpassNoMeta is returned when the server was built without its
+// metadata files (OVERPASS_META=no). Only queries that filter on element
+// timestamps, such as newer:, hit it, and shoreline_changes is the one that
+// does, so it wraps this with the operator-facing fix.
+var errOverpassNoMeta = errors.New("overpass server has no metadata files")
+
+// parseOverpassResponse parses an Overpass response, detecting rate limits
+// and runtime error remarks. contentType is the response's Content-Type
+// header; body is the full response body. Returns the elements with the
+// server's data timestamp, or an error for rate limit signatures, runtime
+// error remarks, or JSON parse failures.
+func parseOverpassResponse(contentType string, body []byte) (overpassResponse, error) {
 	if looksLikeOverpassRateLimit(contentType, body) {
-		return nil, fmt.Errorf("overpass rate limited")
+		return overpassResponse{}, fmt.Errorf("overpass rate limited")
 	}
 
 	var parsed overpassResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		if looksLikeOverpassRateLimit(contentType, body) {
-			return nil, fmt.Errorf("overpass rate limited")
+			return overpassResponse{}, fmt.Errorf("overpass rate limited")
 		}
-		return nil, fmt.Errorf("failed to parse overpass response: %w", err)
+		return overpassResponse{}, fmt.Errorf("failed to parse overpass response: %w", err)
 	}
 
 	if strings.HasPrefix(parsed.Remark, "runtime error") {
-		return nil, fmt.Errorf("overpass query failed: %s", parsed.Remark)
+		if strings.Contains(parsed.Remark, "Tried to use meta file but no meta files available") {
+			return overpassResponse{}, fmt.Errorf("%w: %s", errOverpassNoMeta, parsed.Remark)
+		}
+		return overpassResponse{}, fmt.Errorf("overpass query failed: %s", parsed.Remark)
 	}
 
-	return parsed.Elements, nil
+	return parsed, nil
 }
 
 // overpassStatusError describes a non-200 Overpass answer. A Retry-After
@@ -845,6 +869,10 @@ func classifyAndCountFeatures(categories []string, elements []overpassElement) (
 // wasmexport functions supply doOverpassQuery, the real implementation using
 // pdk.NewHTTPRequest.
 type overpassQueryFunc func(query string) ([]overpassElement, error)
+
+// overpassResponseFunc is overpassQueryFunc returning the whole answer, for
+// the export that needs the server's data timestamp.
+type overpassResponseFunc func(query string) (overpassResponse, error)
 
 // ── place_name_at ──────────────────────────────────────────────────────
 //
@@ -1491,10 +1519,22 @@ type shorelineLineOut struct {
 
 type shorelineSquareOutput struct {
 	Lines []shorelineLineOut `json:"lines"`
+	// DataAsOf is the server's osm3s.timestamp_osm_base, forwarded as given.
+	// The host validates it and stores it as the square's data date.
+	DataAsOf string `json:"data_as_of"`
 }
 
 type shorelineChangesOutput struct {
-	Changed int `json:"changed"`
+	// Changed is absent when ErrorCode is set: there is no count to give.
+	Changed *int `json:"changed,omitempty"`
+	// ErrorCode names a condition the host acts on without a count. The only
+	// one is shorelineErrorNoMetadata. Detail is the server's own remark.
+	ErrorCode string `json:"error_code,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+	// DataAsOf is the server's osm3s.timestamp_osm_base, forwarded as given.
+	// The host validates it and compares it with the square's data date: a
+	// server whose data is not newer cannot have seen any later edit.
+	DataAsOf string `json:"data_as_of"`
 }
 
 func (b shorelineBoxInput) validate() error {
@@ -1668,17 +1708,18 @@ func assembleOuterRings(ways [][]overpassLatLon) [][]overpassLatLon {
 	return rings
 }
 
-func runShorelineSquare(post overpassQueryFunc, box shorelineBoxInput) (shorelineSquareOutput, error) {
+func runShorelineSquare(post overpassResponseFunc, box shorelineBoxInput) (shorelineSquareOutput, error) {
 	query, err := buildShorelineQuery(box)
 	if err != nil {
 		return shorelineSquareOutput{}, err
 	}
 	south, west, north, east := box.South, box.West, box.North, box.East
 
-	elements, err := post(query)
+	resp, err := post(query)
 	if err != nil {
 		return shorelineSquareOutput{}, fmt.Errorf("shoreline_square: %w", err)
 	}
+	elements := resp.Elements
 
 	lines := []shorelineLineOut{}
 	addReef := func(id, name string, raw []*overpassLatLon) error {
@@ -1731,22 +1772,29 @@ func runShorelineSquare(post overpassQueryFunc, box shorelineBoxInput) (shorelin
 			}
 		}
 	}
-	return shorelineSquareOutput{Lines: lines}, nil
+	return shorelineSquareOutput{Lines: lines, DataAsOf: resp.Osm3s.TimestampOsmBase}, nil
 }
 
 // runShorelineChanges returns how many coastline and reef elements in the box
-// changed after since. A response with no count element is an error, never
-// zero edits.
-func runShorelineChanges(post overpassQueryFunc, box shorelineBoxInput, since time.Time) (shorelineChangesOutput, error) {
+// changed after since, with the date of the server's data. A response with no
+// count element, or with no readable data timestamp, is an error, never zero
+// edits.
+func runShorelineChanges(post overpassResponseFunc, box shorelineBoxInput, since time.Time) (shorelineChangesOutput, error) {
 	query, err := buildShorelineChangesQuery(box, since)
 	if err != nil {
 		return shorelineChangesOutput{}, err
 	}
-	elements, err := post(query)
+	resp, err := post(query)
+	if errors.Is(err, errOverpassNoMeta) {
+		return shorelineChangesOutput{ErrorCode: shorelineErrorNoMetadata, Detail: err.Error()}, nil
+	}
 	if err != nil {
 		return shorelineChangesOutput{}, fmt.Errorf("shoreline_changes: %w", err)
 	}
-	for _, el := range elements {
+	// Forwarded as the server gave it. The host parses and validates it, in
+	// one place, so a missing or odd value gets one error text there.
+	asOf := resp.Osm3s.TimestampOsmBase
+	for _, el := range resp.Elements {
 		if el.Type != "count" {
 			continue
 		}
@@ -1754,7 +1802,7 @@ func runShorelineChanges(post overpassQueryFunc, box shorelineBoxInput, since ti
 		if err != nil || total < 0 {
 			return shorelineChangesOutput{}, fmt.Errorf("shoreline_changes: unreadable count %q", el.Tags["total"])
 		}
-		return shorelineChangesOutput{Changed: total}, nil
+		return shorelineChangesOutput{Changed: &total, DataAsOf: asOf}, nil
 	}
 	return shorelineChangesOutput{}, fmt.Errorf("shoreline_changes: overpass returned no count")
 }

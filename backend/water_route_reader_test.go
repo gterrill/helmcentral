@@ -26,7 +26,7 @@ func holdWhitsundays(t *testing.T, store *coastlineStore, squares ...coverageSqu
 		if i == 0 {
 			l = lines // the way lines are held in one square or both; the router must cope
 		}
-		if err := store.SaveSquare(sq, l, coastlineTestAt.Add(time.Duration(i)*time.Hour)); err != nil {
+		if err := store.SaveSquareAsOf(sq, l, coastlineTestAt.Add(time.Duration(i)*time.Hour), coastlineTestDataAsOf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -48,7 +48,7 @@ func TestRouteOverWaterReader_IntricateCoastStillRoutes(t *testing.T) {
 	r, store := newRouteReader(t, true)
 	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
 	for _, sq := range []coverageSquare{{-21, 148}, {-21, 149}, {-20, 148}, {-20, 149}} {
-		if err := store.SaveSquare(sq, lines, coastlineTestAt); err != nil {
+		if err := store.SaveSquareAsOf(sq, lines, coastlineTestAt, coastlineTestDataAsOf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -72,7 +72,7 @@ func TestRouteOverWaterReader_ASearchPastTheTimeLimitIsTooIntricate(t *testing.T
 	r, store := newRouteReader(t, true)
 	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
 	for _, sq := range []coverageSquare{{-21, 148}, {-21, 149}, {-20, 148}, {-20, 149}} {
-		if err := store.SaveSquare(sq, lines, coastlineTestAt); err != nil {
+		if err := store.SaveSquareAsOf(sq, lines, coastlineTestAt, coastlineTestDataAsOf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -95,7 +95,7 @@ func TestRouteOverWaterReader_AParentDeadlineKeepsItsOwnError(t *testing.T) {
 	r, store := newRouteReader(t, true)
 	lines := loadShorelineFile(t, "testdata/water_route/whitsundays-goldsmith.json.gz")
 	for _, sq := range []coverageSquare{{-21, 148}, {-21, 149}, {-20, 148}, {-20, 149}} {
-		if err := store.SaveSquare(sq, lines, coastlineTestAt); err != nil {
+		if err := store.SaveSquareAsOf(sq, lines, coastlineTestAt, coastlineTestDataAsOf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -111,7 +111,7 @@ func TestRouteOverWaterReader_AWayHeldInTwoSquaresIsOneCoast(t *testing.T) {
 	r, store := newRouteReader(t, true)
 	lines := loadShorelineFile(t, "testdata/water_route/whitsundays.json.gz")
 	for _, sq := range []coverageSquare{{-21, 148}, {-21, 149}} {
-		if err := store.SaveSquare(sq, lines, coastlineTestAt); err != nil {
+		if err := store.SaveSquareAsOf(sq, lines, coastlineTestAt, coastlineTestDataAsOf); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -8,6 +8,7 @@ package main
 import (
 	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -83,29 +84,78 @@ func TestBuildShorelineChangesQuery_NewerFilterAndCount(t *testing.T) {
 	}
 }
 
+func countResponse(total, asOf string) overpassResponse {
+	return overpassResponse{
+		Elements: []overpassElement{{Type: "count", Tags: map[string]string{"nodes": "0", "ways": "2", "relations": "1", "total": total}}},
+		Osm3s:    overpassOsm3s{TimestampOsmBase: asOf},
+	}
+}
+
 func TestRunShorelineChanges(t *testing.T) {
-	count := func(total string) overpassQueryFunc {
-		return func(string) ([]overpassElement, error) {
-			return []overpassElement{{Type: "count", Tags: map[string]string{"nodes": "0", "ways": "2", "relations": "1", "total": total}}}, nil
-		}
+	const asOf = "2026-10-30T04:20:00Z"
+	count := func(total string) overpassResponseFunc {
+		return func(string) (overpassResponse, error) { return countResponse(total, asOf), nil }
 	}
 	out, err := runShorelineChanges(count("3"), testSquare, time.Now())
-	if err != nil || out.Changed != 3 {
+	if err != nil || out.Changed == nil || *out.Changed != 3 || out.DataAsOf != asOf {
 		t.Fatalf("changed %v err %v", out, err)
 	}
-	if out, err := runShorelineChanges(count("0"), testSquare, time.Now()); err != nil || out.Changed != 0 {
+	if out, err := runShorelineChanges(count("0"), testSquare, time.Now()); err != nil || out.Changed == nil || *out.Changed != 0 {
 		t.Errorf("zero edits is a real answer: %v %v", out, err)
 	}
 	if _, err := runShorelineChanges(count("many"), testSquare, time.Now()); err == nil {
 		t.Error("an unreadable count is an error")
 	}
-	none := func(string) ([]overpassElement, error) { return nil, nil }
+	none := func(string) (overpassResponse, error) {
+		return overpassResponse{Osm3s: overpassOsm3s{TimestampOsmBase: asOf}}, nil
+	}
 	if _, err := runShorelineChanges(none, testSquare, time.Now()); err == nil {
 		t.Error("no count element must be an error, never zero edits")
 	}
-	failing := func(string) ([]overpassElement, error) { return nil, fmt.Errorf("overpass rate limited") }
+	failing := func(string) (overpassResponse, error) { return overpassResponse{}, fmt.Errorf("overpass rate limited") }
 	if _, err := runShorelineChanges(failing, testSquare, time.Now()); err == nil || !strings.Contains(err.Error(), "rate limited") {
 		t.Errorf("want the upstream error, got %v", err)
+	}
+}
+
+func TestRunShorelineChanges_ForwardsTheDataTimestampUnparsed(t *testing.T) {
+	// The host is the one place that validates it.
+	for _, asOf := range []string{"", "yesterday"} {
+		post := func(string) (overpassResponse, error) { return countResponse("0", asOf), nil }
+		out, err := runShorelineChanges(post, testSquare, time.Now())
+		if err != nil || out.DataAsOf != asOf {
+			t.Errorf("as of %q: got %+v, %v", asOf, out, err)
+		}
+	}
+}
+
+func TestRunShorelineChanges_NoMetadataIsAnErrorCodeNotACount(t *testing.T) {
+	post := func(string) (overpassResponse, error) {
+		return overpassResponse{}, fmt.Errorf("%w: runtime error: Tried to use meta file but no meta files available", errOverpassNoMeta)
+	}
+	out, err := runShorelineChanges(post, testSquare, time.Now())
+	if err != nil || out.ErrorCode != "no_metadata" || out.Changed != nil {
+		t.Fatalf("want error_code no_metadata and no count, got %+v %v", out, err)
+	}
+	raw, _ := json.Marshal(out)
+	t.Logf("no-metadata output: %s", raw)
+}
+
+func TestRunShorelineSquare_ReturnsTheDataTimestamp(t *testing.T) {
+	post := func(string) (overpassResponse, error) {
+		return overpassResponse{Osm3s: overpassOsm3s{TimestampOsmBase: "2026-10-30T04:20:00Z"}}, nil
+	}
+	out, err := runShorelineSquare(post, testSquare)
+	if err != nil || out.DataAsOf != "2026-10-30T04:20:00Z" {
+		t.Fatalf("%+v %v", out, err)
+	}
+}
+
+// withAsOf lifts an element-only fake into a response with a fixed data date.
+func withAsOf(f overpassQueryFunc) overpassResponseFunc {
+	return func(q string) (overpassResponse, error) {
+		els, err := f(q)
+		return overpassResponse{Elements: els, Osm3s: overpassOsm3s{TimestampOsmBase: "2026-10-30T04:20:00Z"}}, err
 	}
 }
 
@@ -131,7 +181,7 @@ func TestRunShorelineSquare_ClassifiesAndKeepsReefRingsWhole(t *testing.T) {
 			}},
 		}, nil
 	}
-	out, err := runShorelineSquare(post, testSquare)
+	out, err := runShorelineSquare(withAsOf(post), testSquare)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +215,7 @@ func TestRunShorelineSquare_ReefCrossingTheSquareEdgeStaysWhole(t *testing.T) {
 	post := func(string) ([]overpassElement, error) {
 		return []overpassElement{shoreEl("way", 4, map[string]string{"natural": "reef"}, ring...)}, nil
 	}
-	out, err := runShorelineSquare(post, testSquare)
+	out, err := runShorelineSquare(withAsOf(post), testSquare)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +234,7 @@ func TestRunShorelineSquare_ClipsCoastlineToTheSquareAndThins(t *testing.T) {
 	post := func(string) ([]overpassElement, error) {
 		return []overpassElement{shoreEl("way", 5, map[string]string{"natural": "coastline"}, pts...)}, nil
 	}
-	out, err := runShorelineSquare(post, testSquare)
+	out, err := runShorelineSquare(withAsOf(post), testSquare)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +262,7 @@ func TestRunShorelineSquare_ClipsCoastlineToTheSquareAndThins(t *testing.T) {
 	post = func(string) ([]overpassElement, error) {
 		return []overpassElement{shoreEl("way", 6, map[string]string{"natural": "coastline"}, dense...)}, nil
 	}
-	out, err = runShorelineSquare(post, testSquare)
+	out, err = runShorelineSquare(withAsOf(post), testSquare)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +279,7 @@ func TestRunShorelineSquare_NullNodesSplitCoastlineButBreakReefs(t *testing.T) {
 	coast.Geometry = append([]*overpassLatLon{nil}, coast.Geometry...)
 	coast.Geometry = append(coast.Geometry, nil, &overpassLatLon{Lat: -20.45, Lon: 148.9}, &overpassLatLon{Lat: -20.44, Lon: 148.9})
 	post := func(string) ([]overpassElement, error) { return []overpassElement{coast}, nil }
-	out, err := runShorelineSquare(post, testSquare)
+	out, err := runShorelineSquare(withAsOf(post), testSquare)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,35 +290,82 @@ func TestRunShorelineSquare_NullNodesSplitCoastlineButBreakReefs(t *testing.T) {
 	reef := shoreEl("way", 8, map[string]string{"natural": "reef"}, [2]float64{-20, 148.9}, [2]float64{-20, 148.91})
 	reef.Geometry = append(reef.Geometry, nil)
 	post = func(string) ([]overpassElement, error) { return []overpassElement{reef}, nil }
-	if _, err := runShorelineSquare(post, testSquare); err == nil {
+	if _, err := runShorelineSquare(withAsOf(post), testSquare); err == nil {
 		t.Error("a reef with a missing node must be an error")
 	}
 }
 
 func TestRunShorelineSquare_NoCoastIsAnEmptyAnswerButErrorsAreErrors(t *testing.T) {
 	empty := func(string) ([]overpassElement, error) { return nil, nil }
-	out, err := runShorelineSquare(empty, testSquare)
+	out, err := runShorelineSquare(withAsOf(empty), testSquare)
 	if err != nil || out.Lines == nil || len(out.Lines) != 0 {
 		t.Errorf("open sea is an empty list, not an error: %+v %v", out, err)
 	}
 	post := func(string) ([]overpassElement, error) {
 		return nil, fmt.Errorf("overpass query failed: runtime error: timed out")
 	}
-	if _, err := runShorelineSquare(post, testSquare); err == nil || !strings.Contains(err.Error(), "timed out") {
+	if _, err := runShorelineSquare(withAsOf(post), testSquare); err == nil || !strings.Contains(err.Error(), "timed out") {
 		t.Errorf("want the upstream error, got %v", err)
 	}
 }
 
 func TestParseOverpassBody_ShorelineRemarkIsAnError(t *testing.T) {
 	body := []byte(`{"elements":[],"remark":"runtime error: Query timed out in \"query\" at line 1 after 12 seconds."}`)
-	if _, err := parseOverpassBody("application/json", body); err == nil {
+	if _, err := parseOverpassResponse("application/json", body); err == nil {
 		t.Error("a runtime-error remark must be an error")
+	}
+}
+
+const noMetaRemark = "runtime error: Tried to use meta file but no meta files available on this instance.runtime error: open64: 2 No such file or directory /db/db/ways_meta.bin File_Blocks::File_Blocks::1"
+
+func TestParseOverpassBody_NoMetaIsErrOverpassNoMeta(t *testing.T) {
+	body := []byte(`{"elements":[],"remark":"` + noMetaRemark + `"}`)
+	_, err := parseOverpassResponse("application/json", body)
+	if !errors.Is(err, errOverpassNoMeta) {
+		t.Fatalf("want errOverpassNoMeta, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "ways_meta.bin") {
+		t.Errorf("the server's own remark must stay in the error for the log: %v", err)
+	}
+}
+
+func TestParseOverpassBody_NoMetaPhraseOutsideARuntimeErrorIsNotNoMeta(t *testing.T) {
+	for _, remark := range []string{
+		"note: no meta files available",
+		"runtime error: open64: 2 No such file or directory /db/db/ways_meta.bin",
+	} {
+		body := []byte(`{"elements":[],"remark":"` + remark + `"}`)
+		_, err := parseOverpassResponse("application/json", body)
+		if errors.Is(err, errOverpassNoMeta) {
+			t.Errorf("remark %q must not read as no-meta", remark)
+		}
+	}
+}
+
+func TestRunShorelineChanges_NoMetaOnTheServerReturnsTheCodeAndTheServersRemark(t *testing.T) {
+	body := []byte(`{"elements":[],"remark":"` + noMetaRemark + `"}`)
+	post := func(string) (overpassResponse, error) {
+		_, err := parseOverpassResponse("application/json", body)
+		return overpassResponse{}, err
+	}
+	out, err := runShorelineChanges(post, testSquare, time.Now())
+	if err != nil || out.ErrorCode != shorelineErrorNoMetadata || out.Changed != nil || !strings.Contains(out.Detail, "ways_meta.bin") {
+		t.Fatalf("got %+v %v", out, err)
+	}
+}
+
+func TestParseOverpassBody_ReadsTheDataTimestamp(t *testing.T) {
+	body := []byte(`{"osm3s":{"timestamp_osm_base":"2026-10-12T01:02:03Z"},"elements":[]}`)
+	r, err := parseOverpassResponse("application/json", body)
+	if err != nil || r.Osm3s.TimestampOsmBase != "2026-10-12T01:02:03Z" {
+		t.Fatalf("%+v %v", r, err)
 	}
 }
 
 func TestParseOverpassBody_CountElementDecodes(t *testing.T) {
 	body := []byte(`{"elements":[{"type":"count","id":0,"tags":{"nodes":"0","ways":"2","relations":"1","total":"3"}}]}`)
-	els, err := parseOverpassBody("application/json", body)
+	resp, err := parseOverpassResponse("application/json", body)
+	els := resp.Elements
 	if err != nil || len(els) != 1 || els[0].Type != "count" || els[0].Tags["total"] != "3" {
 		t.Errorf("count element: %+v %v", els, err)
 	}
@@ -289,7 +386,7 @@ func TestRunShorelineSquare_RealStonehavenCaptureStaysModest(t *testing.T) {
 		t.Fatal(err)
 	}
 	post := func(string) ([]overpassElement, error) { return resp.Elements, nil }
-	out, err := runShorelineSquare(post, testSquare)
+	out, err := runShorelineSquare(withAsOf(post), testSquare)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +412,7 @@ func TestRunShorelineSquare_ReefRelationOuterRingOfSeveralWaysIsAssembled(t *tes
 			{Type: "way", Role: "outer", Geometry: b},
 		}}}, nil
 	}
-	out, err := runShorelineSquare(post, testSquare)
+	out, err := runShorelineSquare(withAsOf(post), testSquare)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +436,7 @@ func TestRunShorelineSquare_ReefRelationOuterWaysThatDoNotJoinStayOpen(t *testin
 			{Type: "way", Role: "outer", Geometry: a}, {Type: "way", Role: "outer", Geometry: b},
 		}}}, nil
 	}
-	out, err := runShorelineSquare(post, testSquare)
+	out, err := runShorelineSquare(withAsOf(post), testSquare)
 	if err != nil {
 		t.Fatal(err)
 	}

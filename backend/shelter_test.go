@@ -250,11 +250,11 @@ func newShelterWorld(t *testing.T) *shelterWorld {
 // a fixture cropped around one anchorage lands in the squares around it.
 func (w *shelterWorld) hold(t *testing.T, lines []shorelineLine, home coverageSquare, others ...coverageSquare) {
 	t.Helper()
-	if err := w.store.SaveSquare(home, lines, coastlineTestAt); err != nil {
+	if err := w.store.SaveSquareAsOf(home, lines, coastlineTestAt, coastlineTestDataAsOf); err != nil {
 		t.Fatal(err)
 	}
 	for _, sq := range others {
-		if err := w.store.SaveSquare(sq, nil, coastlineTestAt.Add(24*time.Hour)); err != nil {
+		if err := w.store.SaveSquareAsOf(sq, nil, coastlineTestAt.Add(24*time.Hour), coastlineTestDataAsOf); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -367,7 +367,7 @@ func TestAnchorageShelterTool_ReefSpanningTwoSquaresIsOneRing(t *testing.T) {
 	w := newShelterWorld(t)
 	w.boatLat, w.boatLon = faireyLat, faireyLon
 	w.hold(t, lines, coverageSquare{-20, 148})
-	if err := w.store.SaveSquare(coverageSquare{-20, 149}, lines, coastlineTestAt); err != nil {
+	if err := w.store.SaveSquareAsOf(coverageSquare{-20, 149}, lines, coastlineTestAt, coastlineTestDataAsOf); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := w.run(`{"lat":-19.5434,"lon":148.939367}`)
@@ -539,10 +539,10 @@ func TestSupportsShoreline_FalseWithoutExport(t *testing.T) {
 		t.Fatal("configecho exports no shoreline_square")
 	}
 	p := newWasmPOIProviderFromBase(base)
-	if _, err := p.ShorelineSquare(coverageSquare{-21, 148}); err == nil || !strings.Contains(err.Error(), "shoreline_square") {
+	if _, _, err := p.ShorelineSquare(coverageSquare{-21, 148}); err == nil || !strings.Contains(err.Error(), "shoreline_square") {
 		t.Errorf("want a clear error, got %v", err)
 	}
-	if _, err := p.ShorelineChanges(coverageSquare{-21, 148}, time.Now()); err == nil || !strings.Contains(err.Error(), "shoreline_changes") {
+	if _, _, err := p.ShorelineChanges(coverageSquare{-21, 148}, time.Now()); err == nil || !strings.Contains(err.Error(), "shoreline_changes") {
 		t.Errorf("want a clear error, got %v", err)
 	}
 }

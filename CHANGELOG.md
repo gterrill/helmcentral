@@ -11,6 +11,30 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **A self-hosted Overpass server needs a re-import for the weekly coastline
+  check to work.** The check asks the server which map objects changed since
+  you downloaded each square. The server can only answer if it keeps element
+  timestamps and applies the daily map updates, so that its data stays
+  current. The Overpass app file now does both, but a server you
+  installed earlier does neither, so the check can't run. Under the switch, the
+  page shows "Edit check on hold" and says the server was set up without
+  timestamps, or that its map data is more than three days old. New squares
+  keep downloading meanwhile. What to do: follow **Re-import a server
+  set up before timestamps were kept** in
+  [Run your own Overpass server](docs/how-to/run-your-own-overpass-server.md).
+  Set `OVERPASS_META` to `"yes"`, set `OVERPASS_DIFF_URL` to the `-updates/`
+  feed of the same Geofabrik region as `OVERPASS_PLANET_URL`, check that
+  `OVERPASS_UPDATE_SLEEP` is set, delete the app's `db` folder and start the
+  app. The import takes as long as the first one did, and lookups wait until it
+  finishes. The database also grows, so check the free disk space first.
+  Update the plugin bundle from the same release as Helmcentral too. The
+  osm-overpass plugin in it now reports the date of the map data. With an
+  older plugin, downloads of new squares pause as well, and the page says
+  "Neither the osm-overpass plugin nor the Overpass server gave the date of its
+  map data".
+
 ### Added
 
 - **Mate can look over a marina.** Ask about a marina you're thinking of
@@ -25,6 +49,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   of that plugin that includes the marina lookup, so update the plugin file
   when you upgrade. Outside assistants can use it too, and a new token starts
   with it switched on.
+- **Offline coastline squares downloaded before this version download again
+  once.** Each square now remembers the date of the map data it came from, and
+  the weekly edit check counts changes from that date. A square without one
+  can't be checked, so Helmcentral drops it when it starts and downloads it
+  again, one at a time, as it does for new coverage. The page shows those
+  squares as waiting until they're back.
 
 - **Alarms on your phone and in your email now come with a chart.** When one of
   your alarm rules, the house bank rule or a tank level alarm goes off, the
