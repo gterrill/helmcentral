@@ -55,7 +55,7 @@ var (
 	// anchorageShelterRE matches a shelter or exposure judgement. Bare
 	// "sheltered" is left out: "the sheltered marina" is a description, not a
 	// judgement against a wind.
-	anchorageShelterRE = regexp.MustCompile(`(?i)(\bexposed (to|in)\b|\bexposure to\b|\bopen to\b|\b(in|into|under) the lee of\b|\bsheltered from\b|\bshelter from\b|\bshelter against\b|\bprotected from\b|\bprotection from\b|\blee shore\b|\broadstead\b|\b(well|poorly|badly|fully|partly)[- ](sheltered|protected)\b|\bunsheltered\b)`)
+	anchorageShelterRE = regexp.MustCompile(`(?i)(\bexposed (to|in|from)\b|\b(sheltered|untenable) in\b|\bshelter in\b|\bgood shelter\b|\bexposure to\b|\bopen to\b|\b(in|into|under) the lee of\b|\bsheltered from\b|\bshelter from\b|\bshelter against\b|\bprotected from\b|\bprotection from\b|\blee shore\b|\broadstead\b|\b(well|poorly|badly|fully|partly)[- ](sheltered|protected)\b|\bunsheltered\b)`)
 
 	// anchorageDirectionRE matches a compass point or wind named in words, so
 	// a sentence counts only when the shelter word is set against a wind or a
@@ -141,15 +141,38 @@ func forecastDeliveredShelter(result string) bool {
 	return json.Unmarshal([]byte(result), &r) == nil && r.ShelterSummary != ""
 }
 
+// shelterArmed reports whether the coastline is switched on. A coastline the
+// operator turned off cannot be read, so sending a draft back to read it would
+// only send Mate to a tool that says it is off. An unreadable setting disarms
+// the check too, and is logged.
+func (d assistantToolDeps) shelterArmed() bool {
+	r := d.offlineCoastline()
+	if r == nil || r.Enabled == nil {
+		return false
+	}
+	on, err := r.Enabled()
+	if err != nil {
+		log.Printf("assistant: anchorage shelter check skipped: could not read the Offline coastline setting: %v", err)
+		return false
+	}
+	return on
+}
+
 // checkShelterDraft is the "anchorage shelter" trigger.
 func (d assistantToolDeps) checkShelterDraft(draft string, calls []openRouterToolCall, results []string) (trigger, instruction string) {
 	if !mateToolAvailable(d, mateToolAnchorageShelter.name) || d.offlineCoastline == nil {
 		return "", ""
 	}
+	if !d.shelterArmed() {
+		return "", ""
+	}
 	for i, c := range calls {
 		switch c.Function.Name {
 		case mateToolAnchorageShelter.name:
-			return "", ""
+			// A call whose result is empty errored or did not run.
+			if i < len(results) && results[i] != "" {
+				return "", ""
+			}
 		case mateToolGetWindForecast.name:
 			if i < len(results) && forecastDeliveredShelter(results[i]) {
 				return "", ""

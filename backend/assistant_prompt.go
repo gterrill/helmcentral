@@ -1062,9 +1062,11 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"call anchorage_shelter with the position find_places gave you and compare its sheltered arcs with the " +
 		"forecast wind directions over the stay. Every statement that an anchorage is sheltered or exposed must come " +
 		"from those labels or that tool, never from your general knowledge of the coast. The reading says how far " +
-		"to trust it, and your own knowledge of the place corrects it where it differs. If the forecast says " +
-		"shelter_unavailable or the tool returns an error, say shelter could not be checked and why; " +
-		"do not substitute a guess without saying so.\n\n" +
+		"to trust it. Your knowledge of the place may add what charted shoreline can't show (swell wrapping round a " +
+		"point, gusts down valleys, holding), but must not reverse which directions the labels or the tool give as " +
+		"sheltered or exposed. If your answer judges an anchorage and the forecast says shelter_unavailable, or the " +
+		"tool returns an error, say shelter could not be checked and why; do not substitute a guess without saying so. " +
+		"For an offshore or passage point, shelter_unavailable needs no mention.\n\n" +
 
 		"When the operator is choosing, comparing or planning a stop at a marina, call marina_details with the " +
 		"position find_places gave you, and weigh what it lists and its vessel_limit_check in the plan: do not make a " +

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +64,18 @@ func shelterForecastDeps(t *testing.T, lines []shorelineLine, enabled bool) assi
 		waves:            func() (waveProvider, string, error) { return wv, "wv", nil },
 		offlineCoastline: func() *offlineCoastlineReader { return reader },
 	}
+}
+
+// emptyCoastlineDeps has the coastline on but nothing downloaded, so reading
+// the shoreline fails.
+func emptyCoastlineDeps(t *testing.T) assistantToolDeps {
+	t.Helper()
+	d := shelterForecastDeps(t, nil, true)
+	store := newTestCoastlineStore(t)
+	d.offlineCoastline = func() *offlineCoastlineReader {
+		return &offlineCoastlineReader{Enabled: func() (bool, error) { return true, nil }, Store: store}
+	}
+	return d
 }
 
 func runShelterForecast(t *testing.T, d assistantToolDeps) (string, assistantWindForecastResult) {
@@ -124,7 +138,7 @@ func TestGetWindForecast_OpenWaterAddsNoShelterFields(t *testing.T) {
 }
 
 func TestGetWindForecast_CoastlineErrorIsReportedAndForecastStays(t *testing.T) {
-	d := shelterForecastDeps(t, thomasShoreline(), false)
+	d := emptyCoastlineDeps(t)
 	_, res := runShelterForecast(t, d)
 	if len(res.Hourly) != 3 {
 		t.Fatalf("the forecast must still return: %+v", res.Hourly)
@@ -135,6 +149,68 @@ func TestGetWindForecast_CoastlineErrorIsReportedAndForecastStays(t *testing.T) 
 	}
 	if res.ShelterSummary != "" || res.Hourly[0].Shelter != "" {
 		t.Errorf("no labels when unavailable: %+v", res)
+	}
+}
+
+func TestGetWindForecast_CoastlineSwitchedOffAddsNothing(t *testing.T) {
+	// Off is the operator's choice: no shelter_unavailable. anchorage_shelter
+	// still says so when called.
+	raw, res := runShelterForecast(t, shelterForecastDeps(t, thomasShoreline(), false))
+	if strings.Contains(raw, "shelter") || len(res.Hourly) != 3 {
+		t.Errorf("a coastline switched off adds nothing: %s", raw)
+	}
+}
+
+func TestGetWindForecast_UnreadableCoastlineSettingIsUnavailable(t *testing.T) {
+	d := shelterForecastDeps(t, thomasShoreline(), true)
+	d.offlineCoastline = func() *offlineCoastlineReader {
+		return &offlineCoastlineReader{Enabled: func() (bool, error) { return false, errors.New("settings file unreadable") }}
+	}
+	_, res := runShelterForecast(t, d)
+	if res.ShelterUnavailable != "settings file unreadable" || len(res.Hourly) != 3 {
+		t.Errorf("shelter_unavailable = %q", res.ShelterUnavailable)
+	}
+}
+
+// A bay with shore 8 nm off all round is exposed on every bearing but is not
+// open water: it has a shoreline and gets labels.
+func TestGetWindForecast_DistantShoreAllRoundIsLabelledNotOpenWater(t *testing.T) {
+	var ring []shorelinePoint
+	for deg := 0; deg <= 360; deg += 5 {
+		a := float64(deg) * math.Pi / 180
+		r := 8.0 / 60
+		ring = append(ring, shorelinePoint{Lat: thomasLat + r*math.Cos(a), Lon: thomasLon + r*math.Sin(a)/math.Cos(thomasLat*math.Pi/180)})
+	}
+	_, res := runShelterForecast(t, shelterForecastDeps(t, []shorelineLine{{ID: "way/ring", Kind: "coastline", Points: ring}}, true))
+	if res.Hourly[0].Shelter != shelterExposed || res.ShelterSummary == "" {
+		t.Errorf("shore 8 nm off all round is exposed, not open water: %+v", res.Hourly[0])
+	}
+}
+
+func TestForecastShelter_UnusableBoatPositionAddsNothing(t *testing.T) {
+	d := shelterForecastDeps(t, thomasShoreline(), true)
+	if est, un := d.forecastShelter(-1, -1); est != nil || un != "" {
+		t.Errorf("-1,-1 is the no-fix sentinel: est %v, unavailable %q", est, un)
+	}
+}
+
+func TestGetWindForecast_ShelterUnavailableOnlyForAnchorageJudgements(t *testing.T) {
+	d := mateToolGetWindForecast.function.Description
+	if !strings.Contains(d, "judges an anchorage") {
+		t.Errorf("description should limit the shelter_unavailable report to anchorage judgements: %s", d)
+	}
+}
+
+func TestShelterWording_LocalKnowledgeMayAddButNotReverse(t *testing.T) {
+	if strings.Contains(ruleShelter, "let local knowledge correct it") {
+		t.Errorf("ruleShelter lets local knowledge correct the estimate")
+	}
+	if !strings.Contains(ruleShelter, "must not reverse") {
+		t.Errorf("ruleShelter should say local knowledge must not reverse the arcs")
+	}
+	prompt, _ := assistantSystemPromptParts(basePromptContext())
+	if strings.Contains(prompt, "your own knowledge of the place corrects it where it differs") {
+		t.Errorf("the prompt still lets general knowledge correct the labels")
 	}
 }
 
@@ -168,7 +244,7 @@ func TestShelterGuard_UnavailableOpenWaterOrFailedForecastDoNotSatisfyIt(t *test
 	c.Function.Arguments = `{"lat":-20.5446,"lon":149.118933}`
 	calls := []openRouterToolCall{c}
 	for name, d := range map[string]assistantToolDeps{
-		"unavailable": shelterForecastDeps(t, thomasShoreline(), false),
+		"unavailable": emptyCoastlineDeps(t),
 		"open water":  shelterForecastDeps(t, nil, true),
 	} {
 		raw, _ := runShelterForecast(t, d)

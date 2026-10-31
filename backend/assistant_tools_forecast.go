@@ -19,9 +19,9 @@ var mateToolGetWindForecast = mateTool{
 			"no wave forecast there. If wave_fallback_model is set the wave figures come from that fallback model, " +
 			"because the usual one has no data here, so say so. Where the position has charted shoreline around it, each row " +
 			"carries shelter (sheltered, partial, exposed or reef) for the direction the wind comes FROM, each day carries " +
-			"shelter_prevailing, and shelter_summary gives the sheltered and exposed arcs. It is an estimate from the Offline " +
-			"coastline, not a survey: say so, and let local knowledge correct it. " + ruleShelter + " If shelter_unavailable is " +
-			"set, say shelter could not be checked and why. " + ruleWindForecast,
+			"shelter_prevailing, and shelter_summary gives the sheltered and exposed arcs. " + ruleShelter + " If shelter_unavailable is " +
+			"set and your answer judges an anchorage's shelter, say shelter could not be checked and why; for an offshore or " +
+			"passage point, ignore it. " + ruleWindForecast,
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -279,12 +279,24 @@ func shelterGradeAt(bearings []shelterBearing, windFromDeg float64) string {
 }
 
 // forecastShelter reads the shelter at a forecast position so each row can be
-// labelled. It returns nil when the install has no Offline coastline reader
-// (nothing to say), when the coastline cannot be read (unavailable carries
-// the reason verbatim) and when every bearing is open water (nothing to add).
+// labelled. It returns nil, with nothing to say, when the install has no
+// Offline coastline reader, when the position is not a usable fix, when the
+// operator has switched the coastline off (anchorage_shelter still says so if
+// called) and when no bearing has any shoreline within 15 nm (open water).
+// A coastline that cannot be read comes back as unavailable, verbatim.
 func (d assistantToolDeps) forecastShelter(lat, lon float64) (est *assistantAnchorageShelterResult, unavailable string) {
-	if d.offlineCoastline == nil {
+	if d.offlineCoastline == nil || !hasUsableVesselPosition(lat, lon) {
 		return nil, ""
+	}
+	if r := d.offlineCoastline(); r != nil && r.Enabled != nil {
+		on, err := r.Enabled()
+		if err != nil {
+			log.Printf("assistant: get_wind_forecast: shelter unavailable at %.4f, %.4f: %v", lat, lon, err)
+			return nil, err.Error()
+		}
+		if !on {
+			return nil, ""
+		}
 	}
 	res, err := d.shelterAt(lat, lon)
 	if err != nil {
@@ -292,7 +304,7 @@ func (d assistantToolDeps) forecastShelter(lat, lon float64) (est *assistantAnch
 		return nil, err.Error()
 	}
 	for _, b := range res.Bearings {
-		if b.Grade != shelterExposed {
+		if !b.Open {
 			return res, ""
 		}
 	}

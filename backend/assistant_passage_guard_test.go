@@ -292,14 +292,29 @@ const thomasIslandAnswer = "Thomas Island South (the southern tip) is exposed to
 // gate the shelter check needs. The reader is never called by a draft check.
 func shelterDeps() assistantToolDeps {
 	d := pwToolDeps(pwLimitsAll())
-	d.offlineCoastline = func() *offlineCoastlineReader { return nil }
+	d.offlineCoastline = enabledReaderStub
 	return d
+}
+
+// enabledReaderStub is a coastline reader that is switched on and has no
+// store: enough for a draft check, which never reads shorelines.
+func enabledReaderStub() *offlineCoastlineReader {
+	return &offlineCoastlineReader{Enabled: func() (bool, error) { return true, nil }}
 }
 
 func pwToolDepsWithCoastline(l passageLimits) assistantToolDeps {
 	d := pwToolDeps(l)
-	d.offlineCoastline = func() *offlineCoastlineReader { return nil }
+	d.offlineCoastline = enabledReaderStub
 	return d
+}
+
+// okResults is a non-empty result for every call: each one ran.
+func okResults(calls []openRouterToolCall) []string {
+	out := make([]string, len(calls))
+	for i := range out {
+		out[i] = `{"summary":"ok"}`
+	}
+	return out
 }
 
 func shelterCall(t *testing.T) []openRouterToolCall {
@@ -343,10 +358,15 @@ func TestShelterGuardTrigger(t *testing.T) {
 		{"reef exposed at low water", "The reef north of the anchorage is exposed at low water.", nil, ""},
 		{"chain locker exposed", "Keep the windlass clear, the chain locker is exposed.", nil, ""},
 		{"open to the public", "The marina is open to the public.", nil, ""},
+		{"exposed from", "Exposed from NE through SE.", nil, "anchorage shelter"},
+		{"shelter in", "You'll find shelter in a northerly.", nil, "anchorage shelter"},
+		{"sheltered in", "Sheltered in anything from the north.", nil, "anchorage shelter"},
+		{"untenable in", "It is untenable in a southerly.", nil, "anchorage shelter"},
+		{"good shelter", "Good shelter from the east wind here.", nil, "anchorage shelter"},
 		{"forecast only", "A northerly of 15 kn tonight, easing tomorrow.", nil, ""},
 	}
 	for _, tc := range cases {
-		if got, _ := shelterDeps().checkDraft(tc.text, tc.calls, nil); got != tc.want {
+		if got, _ := shelterDeps().checkDraft(tc.text, tc.calls, okResults(tc.calls)); got != tc.want {
 			t.Errorf("%s: trigger = %q, want %q", tc.name, got, tc.want)
 		}
 	}
@@ -384,5 +404,38 @@ func TestShelterGuardInstructionCoversBoatPositionAndOpenWater(t *testing.T) {
 		if !strings.Contains(ins, want) {
 			t.Errorf("instruction lacks %q: %q", want, ins)
 		}
+	}
+}
+
+func TestShelterGuard_AnErroredShelterCallDoesNotSatisfyIt(t *testing.T) {
+	d := shelterDeps()
+	if got, _ := d.checkDraft(thomasIslandAnswer, shelterCall(t), []string{""}); got != "anchorage shelter" {
+		t.Errorf("a call with no result (it errored) must not satisfy the guard, trigger = %q", got)
+	}
+	if got, _ := d.checkDraft(thomasIslandAnswer, shelterCall(t), []string{`{"summary":"ok"}`}); got != "" {
+		t.Errorf("a call that returned satisfies it, trigger = %q", got)
+	}
+}
+
+func TestShelterGuard_DisarmedWhileTheCoastlineIsOffOrUnreadable(t *testing.T) {
+	var buf strings.Builder
+	orig := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(orig) })
+	d := shelterDeps()
+	d.offlineCoastline = func() *offlineCoastlineReader {
+		return &offlineCoastlineReader{Enabled: func() (bool, error) { return false, nil }}
+	}
+	if got, _ := d.checkDraft(thomasIslandAnswer, nil, nil); got != "" {
+		t.Errorf("coastline switched off: trigger = %q, want none", got)
+	}
+	d.offlineCoastline = func() *offlineCoastlineReader {
+		return &offlineCoastlineReader{Enabled: func() (bool, error) { return false, errors.New("settings unreadable") }}
+	}
+	if got, _ := d.checkDraft(thomasIslandAnswer, nil, nil); got != "" {
+		t.Errorf("coastline setting unreadable: trigger = %q, want none", got)
+	}
+	if !strings.Contains(buf.String(), "settings unreadable") {
+		t.Errorf("the unreadable setting must be logged, got %q", buf.String())
 	}
 }
