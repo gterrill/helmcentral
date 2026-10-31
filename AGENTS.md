@@ -22,6 +22,14 @@
 - Entries are written for the operator with the `help-pages` skill: no ADR
   numbers, no implementation detail.
 
+## Standing Authorisation
+
+- In your own worktree, carry finished work to an open PR without asking:
+  commit by path, push the branch, open the PR. The `ship` skill holds the
+  steps and watches the PR until it merges.
+- Ask first before merging, tagging, deploying, editing the main checkout,
+  or changing a design the operator agreed.
+  
 ## Checks Before Commit And Release
 
 - Before `/code-review medium`, run `/simplify` on batches larger than a small
