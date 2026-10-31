@@ -10,7 +10,7 @@
  * tree), swapping the Settings-only hook mocks for the Documents ones
  * app-deep-link.test.tsx already uses to reach the Documents panel.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, screen, fireEvent, act } from '@testing-library/react'
@@ -305,13 +305,19 @@ function doc(overrides: Partial<DocumentRecord> = {}): DocumentRecord {
  */
 async function navigateToDirtyDocumentDetails() {
   fireEvent.click(screen.getByRole('button', { name: 'Documents' }))
-  // The panel is a lazy chunk (now carrying the pattern library and TanStack
-  // Table), so a cold first load can outlast findBy's default 1s.
-  fireEvent.click(await screen.findByRole('button', { name: /actions for receipt\.pdf/i }, { timeout: 5000 }))
-  fireEvent.click(await screen.findByRole('menuitem', { name: /details/i }, { timeout: 5000 }))
-  await screen.findByLabelText('Title', {}, { timeout: 5000 })
+  fireEvent.click(await screen.findByRole('button', { name: /actions for receipt\.pdf/i }))
+  fireEvent.click(await screen.findByRole('menuitem', { name: /details/i }))
+  await screen.findByLabelText('Title')
   fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Impeller kit v2' } })
 }
+
+// The Documents panel is App's lazy chunk, and its graph (pattern library,
+// TanStack Table) is slow to transform on a cold CI worker - longer than any
+// findBy wait. Import it here, under the hook's own timeout, so App's
+// React.lazy resolves from the module cache and the tests wait only on React.
+beforeAll(async () => {
+  await import('@/components/documents-route-panel')
+}, 60_000)
 
 // The stream is up and has said nothing yet: every reading is unknown.
 installFakeTelemetryStream({ seeds: { 'vessel-state': {} } })
