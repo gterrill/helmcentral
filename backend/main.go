@@ -453,7 +453,7 @@ func main() {
 	// Built once: every reader in it looks at settings and stores when it is
 	// called, so nothing here goes stale.
 	globalAlarmDispatcher.chartSources = productionWatchChartSources(settingsPath)
-	globalAlarmReviewer = newAlarmReviewer(getEnv("SETTINGS_FILE", "../settings.yaml"))
+	globalAlarmReviewer = newAlarmReviewer(settingsPath)
 	// Reviews the last run left unfinished are marked failed, loudly.
 	if err := globalAlarmReviewer.start(); err != nil {
 		log.Printf("alarm review: could not settle the reviews left from the last run; alarm cards show no review and no alarm is reviewed until this is fixed: %v", err)

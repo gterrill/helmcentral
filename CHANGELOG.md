@@ -29,11 +29,37 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   `OVERPASS_UPDATE_SLEEP` is set, delete the app's `db` folder and start the
   app. The import takes as long as the first one did, and lookups wait until it
   finishes. The database also grows, so check the free disk space first.
-  Update the plugin bundle from the same release as Helmcentral too. The
-  osm-overpass plugin in it now reports the date of the map data. With an
-  older plugin, downloads of new squares pause as well, and the page says
-  "Neither the osm-overpass plugin nor the Overpass server gave the date of its
-  map data".
+
+- **Update the osm-overpass plugin bundle.** The plugin in this release reports
+  the date of the map data, and has the marina lookup Mate needs. With an older
+  plugin, downloads of new coastline squares pause, and the Offline coastline
+  page says "Neither the osm-overpass plugin nor the Overpass server gave the
+  date of its map data". Mate also can't look over a marina. What to do:
+  install the plugin bundle from the same release as Helmcentral, as described
+  in [Provider plugins](docs/reference/plugins.md).
+
+- **Offline coastline squares downloaded before this version are downloaded
+  again, in the background.** Each square now remembers the date of the map
+  data it came from, and the weekly edit check counts changes from that date.
+  Your old squares have no date. They stay on the boat and Mate keeps using
+  them for shelter and passage distances, so nothing is lost if you upgrade
+  offshore. Helmcentral downloads each one again, one at a time, and replaces
+  it only when the download works. That needs internet, so with no signal the
+  old square simply stays, and the weekly edit check skips it until it's been
+  downloaded again. The Offline coastline page counts them as "awaiting
+  refresh". What to do: nothing, but let the boat reach internet for a while
+  after the upgrade, and don't switch Offline coastline off until the count
+  reaches zero.
+
+- **Pick your collision profile again after the first start.** Helmcentral
+  now remembers the boat's last state, so a restart no longer resets the AIS
+  collision profile. The first start after this update has nothing remembered
+  yet, so it may put the profile back to harbor one last time. What to do: once
+  Helmcentral is running, pick your profile again in the collision plugin, if you'd set one by hand.
+
+- **If you turned on Tailscale Funnel on port 8443, turn it off and set it up
+  again on 443.** Claude only connects on port 443. What to do: turn Funnel off
+  on 8443 and follow **Connect Claude on your phone or the web** again.
 
 ### Added
 
@@ -62,13 +88,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   map of the marina's outline, pontoons and facilities over satellite imagery,
   and the date the map data was last updated. Shops and services ashore are on
   the map once you tap the shop button.
-
-- **Offline coastline squares downloaded before this version download again
-  once.** Each square now remembers the date of the map data it came from, and
-  the weekly edit check counts changes from that date. A square without one
-  can't be checked, so Helmcentral drops it when it starts and downloads it
-  again, one at a time, as it does for new coverage. The page shows those
-  squares as waiting until they're back.
 
 - **Alarms on your phone and in your email now come with a chart.** When one of
   your alarm rules, the house bank rule or a tank level alarm goes off, the
@@ -160,17 +179,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   anchors, moors or gets under way. It used to treat every restart as one of
   those changes, so an update put the marina back on the harbor profile even
   when you'd chosen another. It now remembers the boat's last state, and only a
-  real change of state switches the profile. The first start after this
-  update has nothing remembered yet, so it may reset the profile one last
-  time. Pick your profile again once it's running.
+  real change of state switches the profile.
 
 - **The steps for Claude on the phone and the web now work.** The help page said
   to turn on Tailscale Funnel on port 8443, but Claude only connects on port 443,
   so the connector said it couldn't reach the address. The page now uses port
   443. If your Tailscale machine already uses 443 to open the dashboard, it shows
   how to run a second, small Tailscale machine just for Claude, so the dashboard
-  stays on your tailnet. If you turned on Funnel on 8443, turn it off and follow
-  **Connect Claude on your phone or the web** again.
+  stays on your tailnet.
 
 ## [0.57.0] - 2026-10-30
 

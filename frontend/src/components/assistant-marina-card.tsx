@@ -80,7 +80,7 @@ function ContactLinks({ contact }: { contact: MarinaCard['contact'] }) {
 }
 
 /**
- * The marina under a Mate reply (ADR 0240): the facts the map records, a drawn
+ * The marina under a Mate reply (ADR 0242): the facts the map records, a drawn
  * map of the pontoons and facilities, and how the boat compares with the
  * charted limits. The server built it from what the tool read, and a reopened
  * thread draws the same card.

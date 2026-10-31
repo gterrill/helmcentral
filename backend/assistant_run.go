@@ -941,6 +941,12 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	}
 
 	submitRetried := false
+	// forcedEnd is when the forced final's reserve runs out, set when its
+	// first completion starts.
+	var forcedEnd time.Time
+	// lastSubmitError is why the first submit did not file, kept so a retry
+	// that fails some other way still reports it.
+	lastSubmitError := ""
 	var forcedExtra []openRouterMessage
 forcedLoop:
 	for round := 0; ; round++ {
@@ -1090,7 +1096,13 @@ forcedLoop:
 		// reserve rather than be cut off and redone.
 		completionDeadline := time.Now().Add(openRouterCompletionTimeout)
 		if forcedFinal {
-			budgetEnd = time.Now().Add(budget.finalReserve)
+			// One reserve for the whole forced final: a submit retry is part
+			// of it, so it must not start a fresh one and push an unattended
+			// review past tool phase + 2 x reserve.
+			if forcedEnd.IsZero() {
+				forcedEnd = time.Now().Add(budget.finalReserve)
+			}
+			budgetEnd = forcedEnd
 		} else {
 			budgetEnd = toolEnd.Add(budget.finalReserve)
 		}
@@ -1121,6 +1133,9 @@ forcedLoop:
 				// Neither the tool phase nor the final reserve has run out:
 				// this one reply took longer than a single reply is allowed.
 				err = fmt.Errorf("a reply from the model took too long: %w", err)
+			}
+			if lastSubmitError != "" {
+				err = fmt.Errorf("%s did not file: %s (the retry failed: %w)", r.options.SubmitTool, lastSubmitError, err)
 			}
 			tr.Error = firstErrorLine(err)
 			// The tool phase ran out of time during this completion: take back
@@ -1176,7 +1191,10 @@ forcedLoop:
 				return assistantReply{}, ferr
 			}
 			trigger, instruction := "", ""
-			if checker, ok := r.tools.(assistantDraftChecker); ok && !forcedFinal {
+			// The check is for a conversation with the operator. An unattended
+			// review is a watch or alarm summary, not a passage answer, and
+			// nobody is there to read a corrected draft.
+			if checker, ok := r.tools.(assistantDraftChecker); ok && !forcedFinal && !r.options.Unattended {
 				trigger, instruction = checker.checkDraft(content, runCalls)
 			}
 			switch {
@@ -1238,7 +1256,15 @@ forcedLoop:
 					if submitRetried {
 						return assistantReply{}, fmt.Errorf("%s did not file: %s", r.options.SubmitTool, c.Error)
 					}
+					// The retry is part of the forced final, so it has only what
+					// is left of that one reserve. With none left, fail with the
+					// submit error rather than start a call that can only hit
+					// the deadline.
+					if !time.Now().Before(forcedEnd) {
+						return assistantReply{}, fmt.Errorf("%s did not file: %s (no time left in the final reserve to try again)", r.options.SubmitTool, c.Error)
+					}
 					submitRetried = true
+					lastSubmitError = c.Error
 					forcedExtra = append(append(forcedExtra, choice), filedMessages...)
 					continue forcedLoop
 				}

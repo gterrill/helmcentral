@@ -202,14 +202,14 @@ func (s *coastlineStore) Record(sq coverageSquare) (coastlineSquareRecord, bool,
 	return r, true, nil
 }
 
-func TestCoastlineStore_OpeningDropsHeldSquaresWithoutADataDate(t *testing.T) {
+func TestCoastlineStore_OpeningKeepsHeldSquaresWithoutADataDate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "helmcentral.sqlite")
 	s, err := newCoastlineStore(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_ = s.SaveSquareAsOf(coverageSquare{-21, 148}, nil, coastlineTestAt, coastlineTestDataAsOf)
-	_ = s.SaveSquareAsOf(coverageSquare{-21, 149}, nil, coastlineTestAt, coastlineTestDataAsOf)
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 148}, sampleCoastLines(), coastlineTestAt, coastlineTestDataAsOf)
+	_ = s.SaveSquareAsOf(coverageSquare{-21, 149}, sampleCoastLines(), coastlineTestAt, coastlineTestDataAsOf)
 	if _, err := s.db.Exec(`UPDATE coastline_squares SET data_as_of = 0 WHERE lon = 149`); err != nil {
 		t.Fatal(err)
 	}
@@ -220,8 +220,14 @@ func TestCoastlineStore_OpeningDropsHeldSquaresWithoutADataDate(t *testing.T) {
 	}
 	defer s.Close()
 	recs, _ := s.Records()
-	if len(recs) != 1 || recs[0].Square.Lon != 148 {
-		t.Errorf("only the square with a data date stays: %+v", recs)
+	if len(recs) != 2 {
+		t.Fatalf("both squares must stay: %+v", recs)
+	}
+	if !recs[1].awaitingRefresh() || recs[0].awaitingRefresh() {
+		t.Errorf("only the square without a data date awaits a refresh: %+v", recs)
+	}
+	if _, err := s.Lines([]coverageSquare{{-21, 148}, {-21, 149}}); err != nil {
+		t.Errorf("a square awaiting refresh must still be readable: %v", err)
 	}
 }
 

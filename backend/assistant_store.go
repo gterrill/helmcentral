@@ -262,7 +262,10 @@ func createAssistantSchema(db *sql.DB) error {
 	if err := createAssistantRunsSchema(db); err != nil {
 		return err
 	}
-	return migrateMessageToolCalls(db)
+	if err := migrateMessageToolCalls(db); err != nil {
+		return err
+	}
+	return markLegacyPrunedAnswers(db, time.Now())
 }
 
 // newAssistantStore opens (creating if necessary) the SQLite database at

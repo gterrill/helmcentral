@@ -3,7 +3,7 @@
 ## Status
 
 Accepted (2026-10-31). Builds on [ADR 0238](0238-mate-evaluates-a-marina.md)
-(`marina_details`), [ADR 0240](0240-marina-card.md) (the marina card),
+(`marina_details`), [ADR 0242](0242-marina-card.md) (the marina card),
 [ADR 0159](0159-mate-searches-the-web-on-request.md) (web results never drive a
 write) and [ADR 0158](0158-mate-changes-records-through-changesets.md) (record types: Mate
 proposes, the operator applies).

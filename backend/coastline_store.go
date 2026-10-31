@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"sort"
 	"sync"
 	"time"
@@ -46,6 +45,13 @@ type coastlineSquareRecord struct {
 	NextAttemptAt time.Time
 }
 
+// awaitingRefresh is true for a held square stored before data dates were
+// kept. It is usable, but the edit check can't count from a date it lacks, so
+// it is downloaded again and replaced only when that succeeds.
+func (r coastlineSquareRecord) awaitingRefresh() bool {
+	return r.Status == coastlineStatusReady && r.DataAsOf.IsZero()
+}
+
 type coastlineStore struct {
 	mu sync.Mutex
 	db *sql.DB
@@ -81,17 +87,9 @@ func newCoastlineStore(dbPath string) (*coastlineStore, error) {
 		db.Close()
 		return nil, err
 	}
-	// Squares stored before data dates were kept can't be checked. Dropping
-	// them makes them ordinary missing squares, downloaded again by the usual
-	// path.
-	res, err := db.Exec(`DELETE FROM coastline_squares WHERE status = ? AND data_as_of = 0`, coastlineStatusReady)
-	if err != nil {
-		db.Close()
-		return nil, fmt.Errorf("drop coastline squares without a data date: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n > 0 {
-		log.Printf("offline coastline: dropped %d held squares stored without a data date; they download again", n)
-	}
+	// Squares stored before data dates were kept stay as they are: they still
+	// serve routing and shelter. The manager downloads them again in the
+	// background and replaces each only when that works.
 	return &coastlineStore{db: db}, nil
 }
 
