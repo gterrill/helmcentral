@@ -160,23 +160,61 @@ jobs:
       - name: Lint
         run: vale --no-global docs
 
-  # One runner per published target. Built together, the six compiles of the
-  # single large main package queued on four cores and made this the slowest
-  # job by minutes; --single-target builds only the GOOS/GOARCH/GOARM below,
-  # still through .goreleaser.yaml and its frontend embed hooks.
+  # PRs build linux/amd64 only, unless they touch the release config,
+  # dependencies, workflows or platform-specific Go (an OS/arch file suffix or
+  # a //go:build line), when they build every published target. Pushes to main
+  # always build every target. Plain Go can still break one target (a constant
+  # that overflows 32-bit int on arm/v7, a unix-only syscall on windows); that
+  # shows up on main after the merge rather than on the PR, but still before
+  # the tag.
+  release-targets:
+    name: Release build targets
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The PR merge commit and its first parent, the current base.
+          fetch-depth: 2
+
+      - id: pick
+        run: |
+          all='[
+            {"goos":"linux","goarch":"amd64"},
+            {"goos":"linux","goarch":"arm64"},
+            {"goos":"linux","goarch":"arm","goarm":"7"},
+            {"goos":"darwin","goarch":"amd64"},
+            {"goos":"darwin","goarch":"arm64"},
+            {"goos":"windows","goarch":"amd64"}
+          ]'
+          matrix=$all
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            # Taken first so a failed diff fails the job instead of reading
+            # as "nothing platform-specific changed".
+            files=$(git diff --name-only HEAD^1 HEAD)
+            tags=$(git diff HEAD^1 HEAD -- '*.go')
+            if ! echo "$files" | grep -qE \
+                '^(\.goreleaser\.yaml|backend/go\.(mod|sum)|frontend/package(-lock)?\.json|\.github/workflows/)|_(windows|darwin|linux|unix|arm|arm64|amd64)(_test)?\.go$' &&
+              ! echo "$tags" | grep -qE '^[+-]//go:build'
+            then
+              matrix='[{"goos":"linux","goarch":"amd64"}]'
+            fi
+          fi
+          echo "matrix=$(echo "$matrix" | jq -c .)" >> "$GITHUB_OUTPUT"
+
+  # One runner per target. Built together, the six compiles of the single
+  # large main package queued on four cores and made this the slowest job by
+  # minutes; --single-target builds only the GOOS/GOARCH/GOARM below, still
+  # through .goreleaser.yaml and its frontend embed hooks.
   release-build:
     name: Release build (dry run, ${{ matrix.goos }}/${{ matrix.goarch }})
+    needs: release-targets
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { goos: linux, goarch: amd64 }
-          - { goos: linux, goarch: arm64 }
-          - { goos: linux, goarch: arm, goarm: "7" }
-          - { goos: darwin, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-          - { goos: windows, goarch: amd64 }
+        include: ${{ fromJSON(needs.release-targets.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
 
