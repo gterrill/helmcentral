@@ -27,16 +27,20 @@ func marinaDetailsBudget() time.Duration {
 }
 
 // Bounds on what one answer may carry, so a busy harbour cannot flood Mate's
-// context. A list cut to its bound sets Truncated.
+// context. A list cut to its bound sets Truncated; shapes cut to theirs set
+// GeometryTruncated instead, since the model never reads geometry.
 const (
-	marinaMaxFacilities = 60
-	marinaMaxMarks      = 40
-	marinaMaxAshore     = 30
-	marinaMaxArms       = 60
-	marinaMaxFacts      = 12
-	marinaTextRunes     = 80
-	marinaLongTextRunes = 200
-	marinaMaxLimitM     = 1000.0
+	marinaMaxFacilities    = 60
+	marinaMaxMarks         = 40
+	marinaMaxAshore        = 30
+	marinaMaxArms          = 60
+	marinaMaxPontoons      = 200
+	marinaMaxOutlineShapes = 20
+	marinaMaxShapePoints   = 300 // the osm-overpass plugin thins every shape to this
+	marinaMaxFacts         = 12
+	marinaTextRunes        = 80
+	marinaLongTextRunes    = 200
+	marinaMaxLimitM        = 1000.0
 )
 
 // marinaDetailsProvider is implemented by a place-names provider whose plugin
@@ -57,6 +61,12 @@ type marinaDetails struct {
 	EntranceMarks []marinaMarkWire     `json:"entrance_marks"`
 	Ashore        []marinaAshoreWire   `json:"ashore"`
 	Truncated     bool                 `json:"truncated"`
+	// GeometryTruncated says the map's shapes were cut to their bounds. It is
+	// the card's to carry; the model reads no geometry and is not told.
+	GeometryTruncated bool `json:"-"`
+	// DataAsOf is when the OpenStreetMap data behind the answer was current,
+	// an RFC 3339 time, or empty when the server did not say.
+	DataAsOf string `json:"data_as_of"`
 }
 
 // marinaRecordWire is the marina's own record. Outline and Pontoons are drawn
@@ -121,10 +131,14 @@ func validShape(sh marinaShape) bool {
 			return false
 		}
 	case "polygon":
-		if len(sh.Points) < 4 {
+		// A polygon is closed: its last point repeats its first.
+		if len(sh.Points) < 4 || sh.Points[0] != sh.Points[len(sh.Points)-1] {
 			return false
 		}
 	default:
+		return false
+	}
+	if len(sh.Points) > marinaMaxShapePoints {
 		return false
 	}
 	for _, p := range sh.Points {
@@ -191,6 +205,12 @@ func decodeMarinaDetails(pluginID string, raw []byte) (marinaDetails, error) {
 	}
 	bad := func(format string, args ...any) (marinaDetails, error) {
 		return marinaDetails{}, fmt.Errorf("plugin %q: marina_details returned %s", pluginID, fmt.Sprintf(format, args...))
+	}
+
+	if d.DataAsOf != "" {
+		if _, err := time.Parse(time.RFC3339, d.DataAsOf); err != nil {
+			return bad("a data date %q that is not an RFC 3339 time", sanitizeMapText(d.DataAsOf, marinaTextRunes))
+		}
 	}
 
 	m := &d.Marina
@@ -264,12 +284,18 @@ func decodeMarinaDetails(pluginID string, raw []byte) (marinaDetails, error) {
 	if !validShapes(m.Outline) {
 		return bad("a marina outline that is not a valid shape")
 	}
+	if len(m.Outline) > marinaMaxOutlineShapes {
+		m.Outline, d.GeometryTruncated = m.Outline[:marinaMaxOutlineShapes], true
+	}
 	for i := range m.Pontoons {
 		p := &m.Pontoons[i]
 		if !validShape(p.Shape) {
 			return bad("a pontoon that is not a valid shape")
 		}
 		p.Name = sanitizeMapText(p.Name, marinaTextRunes)
+	}
+	if len(m.Pontoons) > marinaMaxPontoons {
+		m.Pontoons, d.GeometryTruncated = m.Pontoons[:marinaMaxPontoons], true
 	}
 	return d, nil
 }

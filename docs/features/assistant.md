@@ -194,6 +194,35 @@ couldn't make the check and doesn't assume a number. Either way, Mate tells you
 to call the marina to confirm berths, depth and fuel, and gives you the phone
 number or website when the map has one.
 
+Under the answer, Mate shows a marina card. Here's what's on it:
+
+- **The top:** The marina's name, then its berths, power and fee on one line,
+  with a badge for your draft and another for your length. A badge turns red
+  when your boat is over the mapped limit. It stays plain when you're within
+  it. It's grey, and says so, when no limit is mapped or your boat's figure
+  isn't set, because neither of those means you fit.
+- **The map:** The marina drawn over satellite imagery, with its outline, each
+  pontoon labelled with its arm name, and a dot for each facility. The
+  entrance beacons and buoys come from the OpenSeaMap layer, the same one the
+  anchor watch map uses. Shops and services ashore are hidden until you tap the
+  shop button on the map, and the satellite button turns the imagery off. The
+  map doesn't move when you scroll the conversation past it: use two fingers,
+  or hold ⌘ (Ctrl on Windows or Linux) while you scroll, to pan and zoom it. If the marina has no
+  outline or pontoons mapped, the card has no map.
+- **Facilities:** Fuel, haul-out, ramp and the rest, one chip each. A fuel
+  dock the map doesn't give a fuel type for reads "Fuel · type unknown".
+- **Folded sections:** The entrance marks, the pontoon arms, and the shops and
+  services ashore with their opening hours and how far away they are. Tap a
+  heading to open it.
+- **The bottom:** The marina's website and phone number as links when the map
+  has them. Below them is "OpenStreetMap · data as of" and the date the map was
+  last updated. If the map server doesn't give a date, the card leaves it out.
+
+The card is a snapshot of what Mate read at the time, so it looks the same when
+you open the conversation again, even if the map has changed since. Ask about
+two marinas and you get two cards. Only a website that's a normal web address
+becomes a link.
+
 It needs the OpenStreetMap place-names plugin, which is the default, and an
 internet connection. If the place-names plugin doesn't support it, or no marina
 is charted within 500 m of the position, Mate tells you that and doesn't describe

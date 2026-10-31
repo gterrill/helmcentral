@@ -1,34 +1,18 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
-import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
 import { Layer, Map, Marker, Source } from 'react-map-gl/maplibre'
 
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 import { STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
+import { themeColour, useIsDarkTheme } from '@/lib/map-theme'
 import {
   coverageRingGeoJSON,
   coverageSquaresGeoJSON,
   type OfflineCoastlineStatus,
 } from '@/lib/offline-coastline'
 import { hasWebGL2 } from '@/lib/webgl'
-
-// MapLibre paints with literal colours, not CSS classes, so the layers read
-// the app's own theme tokens at draw time. They follow day and night with the
-// rest of the page and nothing here picks a colour of its own.
-function token(name: string): string {
-  const channels = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  if (!channels) throw new Error(`theme token ${name} is not defined`)
-  // The tokens hold space-separated channels; MapLibre's colour parser wants commas.
-  return `hsl(${channels.split(/\s+/).join(', ')})`
-}
-
-function subscribeTheme(onChange: () => void) {
-  const observer = new MutationObserver(onChange)
-  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
-  return () => observer.disconnect()
-}
-const isDarkNow = () => document.documentElement.classList.contains('dark')
 
 const FIT_PADDING = 32
 /** Squares this old or older are drawn at the faintest shade. */
@@ -41,7 +25,7 @@ export interface OfflineCoastlineMapProps {
 export default function OfflineCoastlineMapImpl({ status }: OfflineCoastlineMapProps) {
   const mapRef = useRef<MapRef>(null)
   const collapseAttribution = useCollapsedMapAttribution(mapRef)
-  const dark = useSyncExternalStore(subscribeTheme, isDarkNow, () => false)
+  const dark = useIsDarkTheme()
 
   const squares = useMemo(() => coverageSquaresGeoJSON(status), [status])
   const ring = useMemo(
@@ -101,9 +85,9 @@ export default function OfflineCoastlineMapImpl({ status }: OfflineCoastlineMapP
     )
   }
 
-  const primary = token('--primary')
-  const destructive = token('--destructive')
-  const muted = token('--muted-foreground')
+  const primary = themeColour('--primary')
+  const destructive = themeColour('--destructive')
+  const muted = themeColour('--muted-foreground')
 
   return (
     <Map

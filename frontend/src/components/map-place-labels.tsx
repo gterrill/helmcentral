@@ -25,7 +25,7 @@ export const BASE_VECTOR_SOURCE_ID = 'protomaps'
  * never referenced would mean a fresh glyph request the first time one of
  * these layers paints.
  */
-const PLACE_FONT = ['Montserrat Medium', 'Open Sans Regular', 'Noto Sans Regular', 'Noto Sans CJK JP Regular']
+export const PLACE_FONT = ['Montserrat Medium', 'Open Sans Regular', 'Noto Sans Regular', 'Noto Sans CJK JP Regular']
 const WATER_FONT = ['Montserrat Regular Italic', 'Open Sans Italic', 'Noto Sans Regular', 'Noto Sans CJK JP Regular']
 
 export const PLACE_LABEL_LAYER_IDS = [

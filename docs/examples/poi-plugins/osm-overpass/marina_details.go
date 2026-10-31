@@ -237,6 +237,10 @@ type marinaDetailsOutput struct {
 	EntranceMarks []marinaMarkOut     `json:"entrance_marks"`
 	Ashore        []marinaAshoreOut   `json:"ashore"`
 	Truncated     bool                `json:"truncated,omitempty"`
+	// DataAsOf is when the OpenStreetMap data was last updated on the server
+	// that answered (Overpass's timestamp_osm_base, RFC 3339), empty when the
+	// answer carries none.
+	DataAsOf string `json:"data_as_of,omitempty"`
 }
 
 // ── resolving the marina ─────────────────────────────────────────────────
@@ -273,12 +277,12 @@ func pickMarina(elements []overpassElement, lat, lon float64) (overpassElement, 
 // runMarinaDetails is the export's entry point. A failing query is returned as
 // it came, and a position with no marina charted is an error, never an empty
 // result.
-func runMarinaDetails(post overpassQueryFunc, input marinaDetailsInput) (marinaDetailsOutput, error) {
-	found, err := post(buildMarinaResolveQuery(input.Lat, input.Lon))
+func runMarinaDetails(post overpassResponseFunc, input marinaDetailsInput) (marinaDetailsOutput, error) {
+	resolved, err := post(buildMarinaResolveQuery(input.Lat, input.Lon))
 	if err != nil {
 		return marinaDetailsOutput{}, err
 	}
-	marina, ok := pickMarina(found, input.Lat, input.Lon)
+	marina, ok := pickMarina(resolved.Elements, input.Lat, input.Lon)
 	if !ok {
 		return marinaDetailsOutput{}, fmt.Errorf("no marina charted within %d m of that position", marinaResolveRadiusM)
 	}
@@ -286,12 +290,16 @@ func runMarinaDetails(post overpassQueryFunc, input marinaDetailsInput) (marinaD
 	if err != nil {
 		return marinaDetailsOutput{}, err
 	}
-	elements, err := post(query)
+	details, err := post(query)
 	if err != nil {
 		return marinaDetailsOutput{}, err
 	}
+	elements := details.Elements
 	lat, lon, _ := elementLatLon(marina)
 	out := classifyMarina(marina, elements, lat, lon)
+	// The date is the details answer's own, never the clock: the map data the
+	// card draws came from that answer. An answer without one leaves it empty.
+	out.DataAsOf = strings.TrimSpace(details.Osm3s.TimestampOsmBase)
 	var ashore int
 	for _, el := range elements {
 		if ashoreKind(el.Tags) != "" {
@@ -466,7 +474,9 @@ func classifyMarina(marina overpassElement, elements []overpassElement, lat, lon
 	sort.Strings(unread)
 	m.UnreadTags = unread
 
-	// The marina's own tags.
+	// The marina's own tags. A facility it declares about itself has no place
+	// of its own on a map (its only shape would be the outline), so it carries
+	// no geometry.
 	facilities := map[string]*marinaFacilityOut{}
 	add := func(kind, name string, facts map[string]string, shapes []marinaShape) {
 		key := kind + "|" + name + "|" + factsKey(facts)
@@ -490,7 +500,7 @@ func classifyMarina(marina overpassElement, elements []overpassElement, lat, lon
 			}
 		}
 		if hasFuel {
-			add("fuel", "", fuel, m.Outline)
+			add("fuel", "", fuel, nil)
 		} else {
 			sort.Strings(absent)
 			m.TaggedAbsent = append(m.TaggedAbsent, absent...)
@@ -504,12 +514,12 @@ func classifyMarina(marina overpassElement, elements []overpassElement, lat, lon
 		if kind == "other" {
 			facts = map[string]string{"category": tags["seamark:small_craft_facility:category"]}
 		}
-		add(kind, "", facts, m.Outline)
+		add(kind, "", facts, nil)
 	}
 	for _, o := range marinaOwnFacilityTags {
 		switch strings.TrimSpace(tags[o.tag]) {
 		case "yes":
-			add(o.kind, "", nil, m.Outline)
+			add(o.kind, "", nil, nil)
 		case "no":
 			m.TaggedAbsent = append(m.TaggedAbsent, o.tag)
 		}

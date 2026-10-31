@@ -279,7 +279,7 @@ func marinaDetails() int32 {
 		return -1
 	}
 
-	output, err := runMarinaDetails(doOverpassQuery, input)
+	output, err := runMarinaDetails(doOverpassResponse, input)
 	if err != nil {
 		pdk.SetError(err)
 		return -1

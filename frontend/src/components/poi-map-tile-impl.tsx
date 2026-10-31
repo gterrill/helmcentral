@@ -18,6 +18,7 @@ import { type NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { type AlarmState } from '@/hooks/use-alarms'
 import { type TrailPoint } from '@/hooks/use-server-trails'
 import { type DistanceUnits } from '@/config/app-config'
+import { formatPoiDistance } from '@/lib/format'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
 import { hasWebGL2 } from '@/lib/webgl'
@@ -228,11 +229,6 @@ function waypointsToPointsGeoJSON(waypoints: PoiMapActiveRouteWaypoint[]): GeoJS
       properties: {},
     })),
   }
-}
-
-function formatPoiDistance(distanceM: number, units: DistanceUnits): string {
-  if (units === 'imperial') return `${(distanceM / 1852).toFixed(1)} nm`
-  return `${(distanceM / 1000).toFixed(1)} km`
 }
 
 /**
