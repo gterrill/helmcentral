@@ -182,8 +182,18 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     // Adds the layer if the map does not have it. A new map style (light to
     // dark) drops custom layers, so this runs again on styledata. A failure
     // goes in the console, the dot comes back, and no half-added layer stays.
+    // The model stays the top layer: the sailed line mounts when replay
+    // starts, after the model, and would otherwise be drawn over it.
     const add = () => {
-      if (!layer || map.getLayer(layer.id)) return
+      if (!layer) return
+      if (map.getLayer(layer.id)) {
+        try {
+          if (map.getLayersOrder().at(-1) !== layer.id) map.moveLayer(layer.id)
+        } catch (err) {
+          console.error('Boat model could not be kept above the track', err)
+        }
+        return
+      }
       try {
         map.addLayer(layer)
       } catch (err) {

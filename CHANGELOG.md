@@ -142,6 +142,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The boat stays on top of the track in a 3D replay.** Once a replay
+  started, the line for the stretch already sailed was drawn over the boat.
+  The boat is now drawn last, above the whole track.
+
 - **Outside assistants get the whole passage window.** When ChatGPT or another
   outside assistant ran the passage window, it was told a grid was showing under
   its reply. No grid appears there, so it could leave the day-by-day verdicts

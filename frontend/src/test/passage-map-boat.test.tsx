@@ -8,10 +8,11 @@ import { saveImageryPreference } from '@/lib/passage-imagery-preference'
 vi.mock('maplibre-gl', () => ({ default: {} }))
 vi.mock('@/lib/webgl', () => ({ hasWebGL2: () => true }))
 
-const { addLayer, removeLayer, triggerRepaint, setPose, createBoatLayer, mapOn } = vi.hoisted(() => {
+const { addLayer, removeLayer, moveLayer, triggerRepaint, setPose, createBoatLayer, mapOn } = vi.hoisted(() => {
   const setPose = vi.fn()
   return {
     addLayer: vi.fn(),
+    moveLayer: vi.fn(),
     removeLayer: vi.fn(),
     triggerRepaint: vi.fn(),
     mapOn: vi.fn(),
@@ -19,6 +20,7 @@ const { addLayer, removeLayer, triggerRepaint, setPose, createBoatLayer, mapOn }
     createBoatLayer: vi.fn((hull: unknown) => ({ id: 'passage-boat-model', type: 'custom', hull, setPose })),
   }
 })
+// Insertion-ordered, so it doubles as the map's layer order.
 let present = new Set<string>()
 let mapProps: Record<string, unknown> = {}
 
@@ -39,6 +41,8 @@ vi.mock('react-map-gl/maplibre', async () => {
     getLayer: (id: string) => (present.has(id) ? {} : undefined),
     addLayer: (l: { id: string }) => { addLayer(l); present.add(l.id) },
     removeLayer: (id: string) => { present.delete(id); removeLayer(id) },
+    moveLayer: (id: string) => { moveLayer(id); present.delete(id); present.add(id) },
+    getLayersOrder: () => [...present],
     triggerRepaint,
   }
   return {
@@ -70,7 +74,7 @@ beforeEach(() => {
   localStorage.clear()
   save3dPreference(true)
   saveImageryPreference(true)
-  addLayer.mockClear(); removeLayer.mockClear(); setPose.mockClear(); mapOn.mockClear(); createBoatLayer.mockClear(); triggerRepaint.mockClear()
+  addLayer.mockClear(); removeLayer.mockClear(); moveLayer.mockClear(); setPose.mockClear(); mapOn.mockClear(); createBoatLayer.mockClear(); triggerRepaint.mockClear()
   present = new Set()
 })
 
@@ -132,6 +136,19 @@ describe('PassageMap boat model', () => {
     const handler = mapOn.mock.calls.find((c) => c[0] === 'styledata')?.[1] as () => void
     act(() => handler())
     expect(addLayer).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the model above a track drawn after it', async () => {
+    renderMap()
+    await waitFor(() => expect(addLayer).toHaveBeenCalledTimes(1))
+    present.add('passage-sailed-line-p1') // replay starts and the sailed line mounts on top
+    const handler = mapOn.mock.calls.find((c) => c[0] === 'styledata')?.[1] as () => void
+    act(() => handler())
+    expect(moveLayer).toHaveBeenCalledWith('passage-boat-model')
+    expect([...present].at(-1)).toBe('passage-boat-model')
+    moveLayer.mockClear()
+    act(() => handler())
+    expect(moveLayer).not.toHaveBeenCalled()
   })
 
   it('says so and shows the dot when the layer cannot be put back', async () => {
