@@ -225,6 +225,7 @@ configuration:
 - `voice_input`
 - `read_aloud`
 - `wake_word`
+- `verbose_run_log` (writes a log line for every round of every Mate run. Off by default. A run that fails always logs why)
 
 `allowed_models`, `excluded_models`, and `cost_tier` only affect routing when
 `model` is `openrouter/auto` (or `openrouter/auto-beta`).

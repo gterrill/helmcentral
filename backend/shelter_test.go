@@ -273,7 +273,8 @@ func (w *shelterWorld) deps() assistantToolDeps {
 }
 
 func (w *shelterWorld) run(args string) (string, error) {
-	return w.deps().execute(context.Background(), "anchorage_shelter", json.RawMessage(args))
+	out, _, err := w.deps().execute(context.Background(), "anchorage_shelter", json.RawMessage(args))
+	return out, err
 }
 
 var (
@@ -464,7 +465,7 @@ func TestAnchorageShelterTool_NoLiveFallbackWithoutCoastline(t *testing.T) {
 	deps := assistantToolDeps{
 		placeNames: func() (placeNameProvider, string, error) { called = true; return nil, "", nil },
 	}
-	_, err := deps.execute(context.Background(), "anchorage_shelter", json.RawMessage(`{"lat":-20.1,"lon":148.9}`))
+	_, _, err := deps.execute(context.Background(), "anchorage_shelter", json.RawMessage(`{"lat":-20.1,"lon":148.9}`))
 	if err == nil || !strings.Contains(err.Error(), "Offline coastline") {
 		t.Errorf("want an Offline coastline error, got %v", err)
 	}

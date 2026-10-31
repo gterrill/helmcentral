@@ -53,6 +53,9 @@ export interface AssistantSendOptions {
    * is cleared, so a caller that appends it to its thread there swaps draft
    * for message in one render and the reply never leaves the screen. */
   onMessage?: (message: AssistantMessage) => void
+  /** Called when the server refused the question outright (not ready, busy,
+   * no stream), so nothing of it was stored and no run began. */
+  onRefused?: () => void
 }
 
 const STALE_PAGE_MESSAGE = 'Helmcentral has been updated since this page was opened. Reload the page to keep talking to Mate.'
@@ -339,12 +342,14 @@ export function useAssistantChat() {
         const message = response.status === 409 ? MATE_BUSY_MESSAGE : await readErrorMessage(response)
         removeMateWatch(conversationId)
         if (isCurrent()) setError(message)
+        options?.onRefused?.()
         return null
       }
 
       if (response.body === null) {
         removeMateWatch(conversationId)
         if (isCurrent()) setError('streaming not supported')
+        options?.onRefused?.()
         return null
       }
 
@@ -443,5 +448,7 @@ export function useAssistantChat() {
 
   const answerDelivered = useCallback(() => deliveredRef.current, [])
 
-  return { send, sending, statusText, draft, error, abort, attach, isStreamingConversation, answerDelivered, deliveredMessageId, draftKey }
+  const clearError = useCallback(() => setError(null), [])
+
+  return { send, sending, statusText, draft, error, clearError, abort, attach, isStreamingConversation, answerDelivered, deliveredMessageId, draftKey }
 }

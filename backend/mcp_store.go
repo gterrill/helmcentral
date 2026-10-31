@@ -495,7 +495,7 @@ func (s *outsideAssistantStore) ListActivity(limit int) ([]mcpActivity, error) {
 
 // runMCPActivityPruner prunes the activity log once at start and then daily.
 func runMCPActivityPruner(ctx context.Context, s *outsideAssistantStore) {
-	prune := func() {
+	runEvery(ctx, 24*time.Hour, func() {
 		n, err := s.PruneActivity()
 		if err != nil {
 			log.Printf("outside assistants: %v", err)
@@ -504,16 +504,5 @@ func runMCPActivityPruner(ctx context.Context, s *outsideAssistantStore) {
 		if n > 0 {
 			log.Printf("outside assistants: pruned %d activity rows older than %s", n, mcpActivityRetention)
 		}
-	}
-	prune()
-	t := time.NewTicker(24 * time.Hour)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			prune()
-		}
-	}
+	})
 }

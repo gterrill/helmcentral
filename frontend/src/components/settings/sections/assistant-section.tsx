@@ -361,6 +361,26 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
             </FieldGroup>
           </FormSection>
 
+          <FormSection title="Diagnostics">
+            <FieldGroup>
+              <Field orientation="horizontal">
+                <Switch
+                  checked={draft.assistantVerboseRunLog}
+                  onCheckedChange={(checked) => onChange({ assistantVerboseRunLog: checked })}
+                  aria-label="Verbose run log"
+                />
+                <FieldContent>
+                  <FieldLabel>Verbose run log</FieldLabel>
+                  <FieldDescription>
+                    Writes a line to the server log for every round of every Mate run: how long it took, what it cost, how
+                    many lookups it made and how much time was left. Turn it on while you are working out why Mate is slow
+                    or stops early. Every run&apos;s details are kept either way, and a run that fails always logs why.
+                  </FieldDescription>
+                </FieldContent>
+              </Field>
+            </FieldGroup>
+          </FormSection>
+
           <FormSection title="OpenRouter API key">
             <SecretFieldGroup fields={[{ key: 'OPENROUTER_API_KEY', label: 'OpenRouter API key' }]} />
           </FormSection>

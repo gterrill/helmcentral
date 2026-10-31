@@ -70,6 +70,8 @@ type fakeAssistantRunner struct {
 	deltas    []string
 	// gotStable, when set, receives the stable system-prompt part.
 	gotStable *string
+	// calls, when set, are recorded as the tool calls of the run's first round.
+	calls []assistantToolCall
 }
 
 func (f *fakeAssistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
@@ -78,6 +80,9 @@ func (f *fakeAssistantRunner) run(ctx context.Context, systemStable, systemLive 
 		*f.gotStable = systemStable
 	}
 	f.emit(mateStatusEvent{Text: "Thinking…"})
+	if len(f.calls) > 0 {
+		assistantRunRecorderFrom(ctx).addRound(assistantTraceRound{Calls: f.calls})
+	}
 	for _, d := range f.deltas {
 		f.emit(mateDeltaEvent{Text: d})
 	}
@@ -206,7 +211,7 @@ func waitForBodyContains(t *testing.T, c *sseBodyCollector, substr string, timeo
 
 // swapAssistantRunner replaces newAssistantRunner for the duration of a
 // test, restoring the previous value on cleanup.
-func swapAssistantRunner(t *testing.T, fn func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace) {
+func swapAssistantRunner(t *testing.T, fn func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace) {
 	t.Helper()
 	prev := newAssistantRunner
 	newAssistantRunner = fn
@@ -1011,7 +1016,7 @@ func TestPostAssistantMessageHandler_TooLongContentReturns400(t *testing.T) {
 func TestPostAssistantMessageHandler_TodayRequiredAndValidated(t *testing.T) {
 	_, _, conv := postAssistantMessageTestSetup(t)
 
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		t.Errorf("no run may start when today is missing or malformed")
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "x", Model: "openai/gpt-4o"}}
 	})
@@ -1039,7 +1044,7 @@ func TestPostAssistantMessageHandler_TodayReachesTheRunner(t *testing.T) {
 	_, _, conv := postAssistantMessageTestSetup(t)
 
 	var got time.Time
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		got = tools.today
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "openai/gpt-4o"}}
 	})
@@ -1221,7 +1226,7 @@ func TestPostAssistantMessageHandler_EmptyContentWithAttachmentAcceptedAndTitles
 		t.Fatalf("Insert: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Sure, here's what's in it.", Model: "openai/gpt-4o"}}
 	})
 
@@ -1264,7 +1269,7 @@ func TestPostAssistantMessageHandler_AttachmentsPersistedWithFilenameFromDocumen
 		t.Fatalf("Insert: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Noted.", Model: "openai/gpt-4o"}}
 	})
 
@@ -1304,7 +1309,7 @@ func TestPostAssistantMessageHandler_SuccessStreamsSSEAndPersistsRows(t *testing
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content:          "Tongue Bay first, on the rising tide.",
 			Model:            "openai/gpt-4o",
@@ -1411,7 +1416,7 @@ func TestPostAssistantMessageHandler_StreamsDeltaEventsBeforeMessage(t *testing.
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{
 			emit:   emit,
 			deltas: []string{"Tongue Bay ", "first, on the rising tide."},
@@ -1484,7 +1489,7 @@ func TestPostAssistantMessageHandler_UsesSpokenSummaryAsConversationTitle(t *tes
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "## Spoken summary\n\nGloucester Island Anchorages\n\n## Passage plan\n\nWe should favour the north side.",
 			Model:   "openai/gpt-4o",
@@ -1524,7 +1529,7 @@ func TestPostAssistantMessageHandler_SpokenAndScreenReachSystemPrompt(t *testing
 	}
 
 	var runner *fakeAssistantRunner
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		runner = &fakeAssistantRunner{emit: emit, reply: assistantReply{
 			Content: "The upper atmosphere chart is the 500mb height and vorticity pattern.",
 			Model:   "openai/gpt-4o",
@@ -1565,7 +1570,7 @@ func TestPostAssistantMessageHandler_RunnerErrorEmitsErrorEventAndPersistsOnlyUs
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, err: fmt.Errorf("openrouter status 401: invalid api key")}
 	})
 
@@ -1618,7 +1623,7 @@ func TestPostAssistantMessageHandler_RunnerPanicYieldsErrorEventAndFreesTheRun(t
 		t.Fatalf("CreateConversation: %v", err)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &panicAssistantRunner{}
 	})
 
@@ -1664,7 +1669,7 @@ func TestPostAssistantMessageHandler_SecondRequestWhileFirstInFlightReturns409(t
 
 	started := make(chan struct{})
 	proceed := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &blockingAssistantRunner{started: started, proceed: proceed, reply: assistantReply{Content: "ok"}}
 	})
 
@@ -1716,7 +1721,7 @@ func TestPostAssistantMessageHandler_ClientDisconnectDoesNotStopTheRun(t *testin
 
 	started := make(chan struct{})
 	proceed := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &blockingAssistantRunner{
 			started: started,
 			proceed: proceed,
@@ -1807,7 +1812,7 @@ func TestGetAssistantRunHandler_ReplaysThenStreamsLiveUntilMessage(t *testing.T)
 
 	started := make(chan struct{})
 	attach := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &scriptedAssistantRunner{
 			emit:    emit,
 			started: started,
@@ -1898,7 +1903,7 @@ func TestPostAssistantRunCancelHandler_CancelsRunAndEmitsStoppedError(t *testing
 	}
 
 	started := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &cancelAwareAssistantRunner{emit: emit, started: started}
 	})
 
@@ -1990,7 +1995,7 @@ func TestPostAssistantRunCancelHandler_RespondsOnlyOnceTheConversationIsFree(t *
 	}
 
 	started := make(chan struct{})
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &slowTeardownAssistantRunner{started: started, teardown: 300 * time.Millisecond}
 	})
 

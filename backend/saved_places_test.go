@@ -176,7 +176,7 @@ func TestSavePlaceTool_ProposesCreateThenUpdateWithOldAndNew(t *testing.T) {
 	env := newProposalEnv(t)
 	ctx := context.Background()
 	run := func(args string) assistantProposal {
-		raw, err := env.deps.execute(ctx, "save_place", json.RawMessage(args))
+		raw, _, err := env.deps.execute(ctx, "save_place", json.RawMessage(args))
 		if err != nil {
 			t.Fatalf("save_place: %v", err)
 		}
@@ -207,7 +207,7 @@ func TestSavePlaceTool_ProposesCreateThenUpdateWithOldAndNew(t *testing.T) {
 
 func TestSavePlaceTool_RefusesAnImpossiblePosition(t *testing.T) {
 	env := newProposalEnv(t)
-	_, err := env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"X","lat":-200,"lon":149}`))
+	_, _, err := env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"X","lat":-200,"lon":149}`))
 	if err == nil || !strings.Contains(err.Error(), "lat") {
 		t.Fatalf("expected a lat error, got %v", err)
 	}
@@ -220,7 +220,7 @@ func TestFindPlaces_SavedPlaceAnswersWithoutAskingTheProvider(t *testing.T) {
 	deps := findPlacesDeps(-20.1, 149.1, provider)
 	deps.documents = env.deps.documents
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Thomas Is. South"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Thomas Is. South"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +250,7 @@ func TestFindPlaces_NoSavedHitStillAsksTheProvider(t *testing.T) {
 	deps := findPlacesDeps(-20.1, 149.1, provider)
 	deps.documents = env.deps.documents
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestFindPlaces_SavedPlaceFoundWithoutAVesselPosition(t *testing.T) {
 	deps.vesselState = func() (vesselStateData, error) { return vesselStateData{Latitude: -1, Longitude: -1}, nil }
 	deps.documents = env.deps.documents
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Thomas Island South"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Thomas Island South"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestSavedPlaces_CardShowsTheWholePositionWhenOnlyLatChanges(t *testing.T) {
 func TestSavePlaceTool_AMoveKeepsTheStoredName(t *testing.T) {
 	env := newProposalEnv(t)
 	createTestSavedPlace(t, env, "Thomas Island South", -20.5446, 149.118933)
-	raw, err := env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"thomas is. south","lat":-20.55,"lon":149.12}`))
+	raw, _, err := env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"thomas is. south","lat":-20.55,"lon":149.12}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -389,7 +389,7 @@ func TestSavePlaceTool_AMoveKeepsTheStoredName(t *testing.T) {
 func TestSavePlaceTool_SamePositionIsAlreadySavedAndOnlyANewNoteIsProposed(t *testing.T) {
 	env := newProposalEnv(t)
 	createTestSavedPlace(t, env, "Thomas Island South", -20.5446, 149.118933)
-	raw, err := env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"Thomas Island South","lat":-20.5446,"lon":149.118933}`))
+	raw, _, err := env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"Thomas Island South","lat":-20.5446,"lon":149.118933}`))
 	if err != nil {
 		t.Fatalf("an already saved place is a plain answer, not an error: %v", err)
 	}
@@ -397,7 +397,7 @@ func TestSavePlaceTool_SamePositionIsAlreadySavedAndOnlyANewNoteIsProposed(t *te
 		t.Fatalf("expected a plain already-saved result, got %s", raw)
 	}
 
-	raw, err = env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"Thomas Island South","lat":-20.5446,"lon":149.118933,"note":"Quiet in a southerly"}`))
+	raw, _, err = env.deps.execute(context.Background(), "save_place", json.RawMessage(`{"name":"Thomas Island South","lat":-20.5446,"lon":149.118933,"note":"Quiet in a southerly"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,11 +414,11 @@ func TestFindPlaces_NoRecordStoreIsAnError(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places"}
 	deps := findPlacesDeps(-20.1, 149.1, provider)
 	deps.documents = func() *documentStore { return nil }
-	if _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Thomas Island South"}`)); err == nil {
+	if _, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Thomas Island South"}`)); err == nil {
 		t.Fatal("a missing record store must be reported, not skipped")
 	}
 	deps.documents = nil
-	if _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Thomas Island South"}`)); err == nil {
+	if _, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Thomas Island South"}`)); err == nil {
 		t.Fatal("no record store seam must be reported, not skipped")
 	}
 }

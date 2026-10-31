@@ -38,7 +38,7 @@ func tidalDeps(extremes []tideExtremePoint) assistantToolDeps {
 
 func runTidalDeparture(t *testing.T, deps assistantToolDeps, args string) assistantTidalDepartureResult {
 	t.Helper()
-	raw, err := deps.execute(context.Background(), "plan_tidal_departure", json.RawMessage(args))
+	raw, _, err := deps.execute(context.Background(), "plan_tidal_departure", json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("plan_tidal_departure: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestPlanTidalDeparture_FailsFast(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := tc.deps.execute(context.Background(), "plan_tidal_departure", json.RawMessage(tc.args))
+			_, _, err := tc.deps.execute(context.Background(), "plan_tidal_departure", json.RawMessage(tc.args))
 			if err == nil {
 				t.Fatalf("expected an error")
 			}

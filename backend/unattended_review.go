@@ -25,6 +25,8 @@ type unattendedInput struct {
 	Tools   assistantToolExecutor
 	// Submitted says whether the model ended the turn with its submit tool.
 	Submitted func() bool
+	// SubmitTool names that tool, which the forced final answer keeps.
+	SubmitTool string
 }
 
 type unattendedTurn struct {
@@ -66,11 +68,6 @@ func runUnattendedReview(ctx context.Context, t unattendedTurn) unattendedOutcom
 	if err != nil {
 		return unattendedOutcome{Problem: "Mate's settings could not be read: " + firstErrorLine(err), CostKnown: true}
 	}
-	if t.Deadline > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, t.Deadline)
-		defer cancel()
-	}
 	loc := t.Loc
 	if loc == nil {
 		loc = time.UTC
@@ -88,8 +85,17 @@ func runUnattendedReview(ctx context.Context, t unattendedTurn) unattendedOutcom
 	}
 
 	meter := &assistantCostMeter{}
-	runCtx := withAssistantConversationID(withAssistantCostMeter(ctx, meter), t.ConversationID)
-	runner := watchReviewRunnerFor(cfg.APIKey, cfg.Readiness.Model, in.Tools, params.autoRouter)
+	// The deadline starts here, after the input is built, so the run always
+	// gets its whole ceiling.
+	reviewCtx := ctx
+	if t.Deadline > 0 {
+		var cancel context.CancelFunc
+		reviewCtx, cancel = context.WithTimeout(ctx, t.Deadline)
+		defer cancel()
+	}
+	runCtx := withAssistantConversationID(withAssistantCostMeter(reviewCtx, meter), t.ConversationID)
+	params.options.SubmitTool = in.SubmitTool
+	runner := watchReviewRunnerFor(cfg.APIKey, cfg.Readiness.Model, in.Tools, params.options)
 	reply, runErr := func() (reply assistantReply, err error) {
 		// The caller's goroutine must outlive a bug in one review.
 		defer func() {
@@ -116,7 +122,7 @@ func runUnattendedReview(ctx context.Context, t unattendedTurn) unattendedOutcom
 		return generationCostLookup(c, cfg.APIKey, id)
 	})
 	switch {
-	case runErr != nil && t.Deadline > 0 && (errors.Is(runErr, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded)):
+	case runErr != nil && t.Deadline > 0 && errors.Is(reviewCtx.Err(), context.DeadlineExceeded):
 		log.Printf("%s: Mate's review of %q ran past its deadline: %v", t.LogPrefix, t.Name, runErr)
 		out.Problem = fmt.Sprintf("Mate's review ran past its deadline of %s", t.Deadline)
 	case runErr != nil:

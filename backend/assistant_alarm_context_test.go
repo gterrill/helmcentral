@@ -108,7 +108,7 @@ func askMateEnv(t *testing.T, raisedAt time.Time) (assistantToolDeps, *alarmLogS
 
 func runAlarmContext(t *testing.T, deps assistantToolDeps, id string) (string, alarmContextOut) {
 	t.Helper()
-	raw, err := deps.execute(context.Background(), "get_alarm_context", json.RawMessage(`{"alarm_id":"`+id+`"}`))
+	raw, _, err := deps.execute(context.Background(), "get_alarm_context", json.RawMessage(`{"alarm_id":"`+id+`"}`))
 	if err != nil {
 		t.Fatalf("get_alarm_context: %v", err)
 	}
@@ -235,10 +235,10 @@ func TestGetAlarmContext_HistoryFailureIsReportedNotHidden(t *testing.T) {
 
 func TestGetAlarmContext_UnknownAlarmIsAnError(t *testing.T) {
 	deps, _ := askMateEnv(t, time.Date(2026, 10, 20, 2, 0, 0, 0, time.UTC))
-	if _, err := deps.execute(context.Background(), "get_alarm_context", json.RawMessage(`{"alarm_id":"nope"}`)); err == nil {
+	if _, _, err := deps.execute(context.Background(), "get_alarm_context", json.RawMessage(`{"alarm_id":"nope"}`)); err == nil {
 		t.Fatal("an id that matches nothing must be an error")
 	}
-	if _, err := deps.execute(context.Background(), "get_alarm_context", json.RawMessage(`{}`)); err == nil {
+	if _, _, err := deps.execute(context.Background(), "get_alarm_context", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("alarm_id is required")
 	}
 }

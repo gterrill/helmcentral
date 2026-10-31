@@ -54,7 +54,7 @@ func marinaDeps(p placeNameProvider, state vesselStateData, stateErr error) assi
 
 func runMarina(t *testing.T, d assistantToolDeps, args string) assistantMarinaDetailsResult {
 	t.Helper()
-	raw, err := d.execute(context.Background(), "marina_details", json.RawMessage(args))
+	raw, _, err := d.execute(context.Background(), "marina_details", json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("marina_details: %v", err)
 	}
@@ -198,28 +198,28 @@ func TestMarinaDetails_Errors(t *testing.T) {
 		{"no position", `{}`, "lat and lon are required"},
 		{"unusable position", `{"lat":-1,"lon":-1}`, "not a usable position"},
 	} {
-		if _, err := good.execute(ctx, "marina_details", json.RawMessage(tc.args)); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, _, err := good.execute(ctx, "marina_details", json.RawMessage(tc.args)); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
 		}
 	}
 
 	// A plugin without the export: a clear error, no fallback.
 	plain := &fakeSearchPlacesProvider{id: "no-marinas"}
-	_, err := marinaDeps(plain, vesselStateData{}, nil).execute(ctx, "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
+	_, _, err := marinaDeps(plain, vesselStateData{}, nil).execute(ctx, "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
 	if err == nil || !strings.Contains(err.Error(), "does not provide marina details") {
 		t.Errorf("unsupported plugin: err = %v", err)
 	}
 
 	// The plugin's own error (no marina charted, a runtime error remark) reaches Mate.
 	failing := &fakeMarinaProvider{err: fmt.Errorf("no marina charted within 500 m of that position")}
-	_, err = marinaDeps(failing, vesselStateData{}, nil).execute(ctx, "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
+	_, _, err = marinaDeps(failing, vesselStateData{}, nil).execute(ctx, "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
 	if err == nil || !strings.Contains(err.Error(), "no marina charted within 500 m of that position") {
 		t.Errorf("plugin error: err = %v", err)
 	}
 
 	// Provider resolution fails.
 	noProv := assistantToolDeps{placeNames: func() (placeNameProvider, string, error) { return nil, "x", fmt.Errorf("unknown place-names provider") }}
-	if _, err := noProv.execute(ctx, "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`)); err == nil || !strings.Contains(err.Error(), "unknown place-names provider") {
+	if _, _, err := noProv.execute(ctx, "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`)); err == nil || !strings.Contains(err.Error(), "unknown place-names provider") {
 		t.Errorf("resolution error: err = %v", err)
 	}
 }
@@ -315,7 +315,7 @@ func TestMarinaDetails_ModelNeverSeesGeometry(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &fakeMarinaProvider{details: d}
-	raw, err := marinaDeps(p, vesselStateData{LengthOverallM: -1, DraftM: -1}, nil).execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.0,"lon":148.0}`))
+	raw, _, err := marinaDeps(p, vesselStateData{LengthOverallM: -1, DraftM: -1}, nil).execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.0,"lon":148.0}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -342,7 +342,7 @@ func TestMarinaDetails_ShrinksBeforeTheStub(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		d.EntranceMarks = append(d.EntranceMarks, marinaMarkWire{marinaMark: marinaMark{Kind: "beacon", Side: "port", Colour: "red", Name: fmt.Sprintf("Mark %d", i), Count: 1}})
 	}
-	raw, err := marinaDeps(&fakeMarinaProvider{details: d}, vesselStateData{LengthOverallM: 15, DraftM: 1.4}, nil).
+	raw, _, err := marinaDeps(&fakeMarinaProvider{details: d}, vesselStateData{LengthOverallM: 15, DraftM: 1.4}, nil).
 		execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
 	if err != nil {
 		t.Fatal(err)

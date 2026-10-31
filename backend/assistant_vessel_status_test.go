@@ -94,7 +94,7 @@ func statusTestDeps(t *testing.T) assistantToolDeps {
 
 func runStatus(t *testing.T, d assistantToolDeps) vesselStatusResult {
 	t.Helper()
-	out, err := d.execute(context.Background(), "get_vessel_status", json.RawMessage(`{}`))
+	out, _, err := d.execute(context.Background(), "get_vessel_status", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("get_vessel_status: %v", err)
 	}
@@ -504,12 +504,12 @@ func TestVesselStatus_NoPlannedStayOrAnEndedOne(t *testing.T) {
 func TestVesselStatus_ToolFailsPlainlyWithoutLiveData(t *testing.T) {
 	d := statusTestDeps(t)
 	d.telemetry = func(time.Time) (telemetryReader, error) { return nil, errSignalKNoSelf }
-	if _, err := d.execute(context.Background(), "get_vessel_status", json.RawMessage(`{}`)); err == nil {
+	if _, _, err := d.execute(context.Background(), "get_vessel_status", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("expected an error when SignalK has delivered nothing")
 	}
 	d = statusTestDeps(t)
 	d.telemetry = nil
-	if _, err := d.execute(context.Background(), "get_vessel_status", json.RawMessage(`{}`)); err == nil {
+	if _, _, err := d.execute(context.Background(), "get_vessel_status", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("expected an error when the telemetry reader is not wired")
 	}
 }

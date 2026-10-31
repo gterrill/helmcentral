@@ -7,6 +7,7 @@ import { AssistantAnswerFeedback } from '@/components/assistant-answer-feedback'
 import { AssistantCard } from '@/components/assistant-card'
 import { AssistantFormDraftCard } from '@/components/assistant-form-draft-card'
 import { AssistantProposalCard } from '@/components/assistant-proposal-card'
+import { AssistantRunDetails } from '@/components/assistant-run-details'
 import { Bubble, BubbleContent } from '@/components/ui/bubble'
 import { Button } from '@/components/ui/button'
 import { MateSummaryNoteDialog } from '@/components/mate-summary-note-dialog'
@@ -29,6 +30,7 @@ import { useDocumentUploads, type StagedDocument } from '@/hooks/use-document-up
 import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { useNotes } from '@/hooks/use-notes'
 import { documentViewerHref } from '@/lib/document-citation'
+import { runOutcomeText, type AssistantRun } from '@/lib/mate-run'
 import { MATE_WAITING_ROTATE_MS, pickWaitingPhrase } from '@/lib/mate-waiting-phrases'
 import { cn } from '@/lib/utils'
 import { errorMessage } from '@/lib/errors'
@@ -195,6 +197,22 @@ function SaveAsNoteButton({ content }: { content: string }) {
       <NotebookPen className="h-3.5 w-3.5" data-icon="inline-start" aria-hidden="true" />
       Save as note
     </Button>
+  )
+}
+
+/**
+ * A question that got no answer, in its place in the thread: what stopped Mate
+ * and how far it got, with the run's details beneath. It is not a message from
+ * Mate and says so plainly (ADR 0240).
+ */
+function FailedRunRow({ run }: { run: AssistantRun }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1" data-testid="mate-unanswered-run">
+      <div role="status" className="min-w-0 rounded-md border border-border bg-muted/50 px-3 py-2 text-xs">
+        <p className={run.stopReason === 'cancelled' ? 'text-muted-foreground' : 'text-destructive'}>{runOutcomeText(run)}</p>
+      </div>
+      <AssistantRunDetails runId={run.id} />
+    </div>
   )
 }
 
@@ -541,7 +559,16 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                       that replaces it, so delivery keeps one row. A swap of
                       one row for another makes the scroller re-anchor to a
                       question it has not yet handled. */}
-                  {[...session.messages.map((message) => (
+                  {[...session.timeline.map((item) => {
+                    if (item.kind === 'failed-run') {
+                      return (
+                        <MessageScrollerItem key={`run-${item.run.id}`} messageId={`run-${item.run.id}`}>
+                          <FailedRunRow run={item.run} />
+                        </MessageScrollerItem>
+                      )
+                    }
+                    const { message } = item
+                    return (
                     <MessageScrollerItem
                       key={message.clientKey ?? message.id}
                       messageId={message.id}
@@ -633,6 +660,7 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                                 <SaveAsNoteButton content={message.content} />
                               )}
                             </div>
+                            {message.runId !== undefined && <AssistantRunDetails runId={message.runId} />}
                             {/* Rate in the live chat; a rating stays with
                                 the answer. A rated answer always shows its
                                 verdict; one read back unrated is not offered. */}
@@ -648,7 +676,8 @@ export function AssistantThread({ canWrite, session, autoFocus, composerRef, onH
                         </Message>
                       )}
                     </MessageScrollerItem>
-                  )),
+                    )
+                  }),
                   ...(showDraft ? [
                     <MessageScrollerItem key={status.draftKey ?? 'draft'} messageId="draft">
                       <Message>

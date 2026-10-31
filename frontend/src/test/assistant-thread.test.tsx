@@ -8,6 +8,8 @@ import { type useMateTelemetryWatch } from '@/hooks/use-mate-telemetry-watch'
 import { MATE_WAITING_PHRASES } from '@/lib/mate-waiting-phrases'
 import type { MateSession } from '@/hooks/use-mate-session'
 import { fakeMateSession } from './helpers/fake-mate-session'
+import type { ThreadItem } from '@/hooks/use-assistant-conversations'
+import type { AssistantRun } from '@/lib/mate-run'
 
 // The thread creates a note directly (no sheet) when the operator saves an
 // answer - Mate is often itself a sheet, so opening the capture sheet over
@@ -1161,9 +1163,11 @@ describe('scroll to the start of a delivered reply', () => {
     const draftRow = container.querySelector('[data-message-id="draft"]')
     expect(draftRow).not.toBeNull()
 
+    const reply = assistantMessage({ id: 'm9', content: 'Blue Pearl Bay first.', clientKey: 'draft-1' })
     const delivered: MateSession = {
       ...session,
-      messages: [...session.messages, assistantMessage({ id: 'm9', content: 'Blue Pearl Bay first.', clientKey: 'draft-1' })],
+      messages: [...session.messages, reply],
+      timeline: [...session.timeline, { kind: 'message', message: reply }],
       status: { ...session.status, sending: true, draft: null, draftKey: 'draft-1', deliveredMessageId: 'm9' },
     }
     rerender(<AssistantThread canWrite session={delivered} />)
@@ -1376,5 +1380,100 @@ describe('AssistantThread: rating an answer', () => {
 
     expect(screen.getByRole('button', { name: 'Good answer' })).toHaveAttribute('aria-pressed', 'false')
     expect(screen.getByRole('button', { name: 'Poor answer' })).toBeInTheDocument()
+  })
+})
+
+// ADR 0240: a question Mate never answered stays in the thread as a plain row,
+// and every run offers its details.
+const runBudget = { maxRounds: 30, maxStalledRounds: 2, toolPhaseMs: 600000, finalReserveMs: 120000 }
+const run = (overrides: Partial<AssistantRun> = {}): AssistantRun => ({
+  id: 'run-1',
+  afterSeq: 1,
+  answerMessageId: null,
+  model: 'anthropic/claude-sonnet-4.5',
+  startedAt: '2026-10-31T09:00:00Z',
+  durationMs: 133000,
+  stopReason: 'time_ceiling',
+  error: 'read openrouter stream: context deadline exceeded',
+  roundCount: 11,
+  budget: runBudget,
+  ...overrides,
+})
+const question = (overrides: Partial<AssistantMessage> = {}): AssistantMessage => ({
+  id: 'u1',
+  conversationId: 'c1',
+  seq: 1,
+  role: 'user',
+  content: 'Check the passage to Hamilton Island',
+  createdAt: '2026-10-31T09:00:00Z',
+  ...overrides,
+})
+
+describe('AssistantThread unanswered runs', () => {
+  const failedRun = (overrides: Partial<AssistantRun> = {}): ThreadItem => ({ kind: 'failed-run', run: run(overrides) })
+  const messageItem = (message: AssistantMessage): ThreadItem => ({ kind: 'message', message })
+
+  it('shows a plain row with the headline only, not a Mate message, in place of the missing answer', () => {
+    render(<AssistantThread canWrite session={fakeMateSession({ messages: [question()], timeline: [messageItem(question()), failedRun()] })} />)
+
+    const row = screen.getByTestId('mate-unanswered-run')
+    expect(within(row).getByText('Mate stopped before answering: it ran out of time after 11 rounds.')).toBeInTheDocument()
+    expect(within(row).queryByText('read openrouter stream: context deadline exceeded')).not.toBeInTheDocument()
+    expect(screen.queryByText(/anthropic\/claude-sonnet-4.5 ·/)).not.toBeInTheDocument()
+    expect(within(row).getByRole('button', { name: 'Run details' })).toBeInTheDocument()
+  })
+
+  it('keeps the quiet row for a run the operator stopped', () => {
+    render(
+      <AssistantThread
+        canWrite
+        session={fakeMateSession({ messages: [question()], timeline: [messageItem(question()), failedRun({ stopReason: 'cancelled', error: '' })] })}
+      />,
+    )
+
+    expect(screen.getByText('You stopped Mate before it answered.')).toBeInTheDocument()
+  })
+
+  it('puts the row where the timeline puts it, between the question and the next one', () => {
+    const later = question({ id: 'u2', seq: 3, content: 'And the way back?' })
+    const answer = assistantMessage({ id: 'm1', seq: 4 })
+    render(
+      <AssistantThread
+        canWrite
+        session={fakeMateSession({
+          messages: [question(), answer, later],
+          timeline: [messageItem(question()), failedRun({ afterSeq: 1 }), messageItem(answer), messageItem(later)],
+        })}
+      />,
+    )
+
+    const items = screen.getAllByText(/Check the passage|Mate stopped before answering|And the way back/).map((el) => el.textContent)
+    expect(items).toEqual(['Check the passage to Hamilton Island', 'Mate stopped before answering: it ran out of time after 11 rounds.', 'And the way back?'])
+  })
+
+  it('still shows the live error, which only the session clears once a run takes its place', () => {
+    const session = fakeMateSession({
+      messages: [question(), question({ id: 'local-1', seq: -1, content: 'Another try' })],
+      status: { error: 'Mate is switched off.' },
+    })
+    render(<AssistantThread canWrite session={session} />)
+
+    expect(screen.getByText('Mate is switched off.')).toBeInTheDocument()
+  })
+
+  it('offers run details under an answer that carries a run id', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    const session = fakeMateSession({ messages: [question(), assistantMessage({ id: 'm1', seq: 2, runId: 'run-1' })] })
+    render(<AssistantThread canWrite session={session} />)
+
+    expect(screen.getByRole('button', { name: 'Run details' })).toBeInTheDocument()
+    expect(screen.queryByTestId('mate-unanswered-run')).not.toBeInTheDocument()
+  })
+
+  it('offers no details under an answer whose run was cleared', () => {
+    mockedUseNotes.mockReturnValue(makeNotesMock())
+    render(<AssistantThread canWrite session={fakeMateSession({ messages: [assistantMessage()] })} />)
+
+    expect(screen.queryByRole('button', { name: 'Run details' })).not.toBeInTheDocument()
   })
 })

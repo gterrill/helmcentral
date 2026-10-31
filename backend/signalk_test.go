@@ -2895,3 +2895,26 @@ func TestParseSignalKCurrent_NegativeRadianSetIsRadians(t *testing.T) {
 		t.Fatalf("expected ~302.7 deg, got %v", setDeg)
 	}
 }
+
+// TestSettingsPayloadRoundTripsVerboseRunLog proves the "Verbose run log"
+// switch persists and reads back, and is off when the setting was never written.
+func TestSettingsPayloadRoundTripsVerboseRunLog(t *testing.T) {
+	if buildSettingsPayload(map[string]any{}).Assistant.VerboseRunLog {
+		t.Fatal("expected assistant.verbose_run_log to default to false when the block is absent")
+	}
+
+	settingsPath := writeTestSettings(t, "203.0.113.1", 3000)
+	code, body := postSettings(t, settingsPath, func(p *settingsPayload) {
+		p.Assistant.VerboseRunLog = true
+	})
+	if code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body %v)", code, body)
+	}
+	saved, err := readSettings(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+	if !buildSettingsPayload(saved).Assistant.VerboseRunLog {
+		t.Fatal("expected assistant.verbose_run_log to round-trip true")
+	}
+}

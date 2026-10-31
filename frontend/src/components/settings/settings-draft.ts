@@ -171,6 +171,7 @@ export interface RegularSettingsDraft {
   assistantVoiceInput: boolean
   assistantReadAloud: boolean
   assistantWakeWord: boolean
+  assistantVerboseRunLog: boolean
   assistantWebSearch: boolean
   assistantWebSearchModel: string
   assistantPassageLimits: PassageLimitsDraft
@@ -227,6 +228,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   assistantVoiceInput: false,
   assistantReadAloud: false,
   assistantWakeWord: false,
+  assistantVerboseRunLog: false,
   assistantWebSearch: false,
   assistantWebSearchModel: defaultWebSearchModel,
   assistantPassageLimits: blankPassageLimits(),
@@ -325,6 +327,7 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   if (typeof settings.assistant?.voice_input === 'boolean') draft.assistantVoiceInput = settings.assistant.voice_input
   if (typeof settings.assistant?.read_aloud === 'boolean') draft.assistantReadAloud = settings.assistant.read_aloud
   if (typeof settings.assistant?.wake_word === 'boolean') draft.assistantWakeWord = settings.assistant.wake_word
+  if (typeof settings.assistant?.verbose_run_log === 'boolean') draft.assistantVerboseRunLog = settings.assistant.verbose_run_log
   if (typeof settings.assistant?.web_search === 'boolean') draft.assistantWebSearch = settings.assistant.web_search
   if (typeof settings.assistant?.web_search_model === 'string') draft.assistantWebSearchModel = settings.assistant.web_search_model
 
@@ -390,6 +393,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.assistantVoiceInput !== b.assistantVoiceInput) return false
   if (a.assistantReadAloud !== b.assistantReadAloud) return false
   if (a.assistantWakeWord !== b.assistantWakeWord) return false
+  if (a.assistantVerboseRunLog !== b.assistantVerboseRunLog) return false
   if (a.assistantWebSearch !== b.assistantWebSearch) return false
   if (a.assistantWebSearchModel !== b.assistantWebSearchModel) return false
   if (!passageLimitsEqual(a.assistantPassageLimits, b.assistantPassageLimits)) return false
@@ -474,6 +478,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       voice_input: draft.assistantVoiceInput,
       read_aloud: draft.assistantReadAloud,
       wake_word: draft.assistantWakeWord,
+      verbose_run_log: draft.assistantVerboseRunLog,
       web_search: draft.assistantWebSearch,
       web_search_model: draft.assistantWebSearchModel.trim(),
       passage_limits: passageLimitsToPayload(draft.assistantPassageLimits),

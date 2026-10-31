@@ -65,7 +65,7 @@ func TestMateTools_DefinitionNameIsRecordName(t *testing.T) {
 
 func TestMateTools_UnavailableToolIsRefusedByExecute(t *testing.T) {
 	deps := assistantToolDeps{} // webSearch nil: search_web unavailable
-	_, err := deps.execute(context.Background(), "search_web", json.RawMessage(`{"query":"x"}`))
+	_, _, err := deps.execute(context.Background(), "search_web", json.RawMessage(`{"query":"x"}`))
 	if err == nil || !strings.Contains(err.Error(), "switched off") {
 		t.Fatalf("expected a switched-off refusal, got %v", err)
 	}

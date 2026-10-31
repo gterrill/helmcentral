@@ -157,7 +157,7 @@ var globalAssistantRuns = &assistantRunRegistry{runs: make(map[string]*assistant
 // did. The returned context is derived from context.Background(), not any
 // HTTP request's - see ADR 0105 "the answer outlives the page": the run
 // this context drives must survive every subscriber disconnecting, and end
-// only via its own cancel() or assistantRunTimeout.
+// only via its own cancel() or the run ceiling (assistantRunCeiling).
 func (reg *assistantRunRegistry) start(conversationID string) (ctx context.Context, run *assistantRun, ok bool) {
 	reg.mu.Lock()
 	defer reg.mu.Unlock()

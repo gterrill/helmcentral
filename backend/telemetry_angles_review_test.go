@@ -122,7 +122,7 @@ func TestGetPathHistoryOnAnAngleWithoutSourceCheckingFailsFast(t *testing.T) {
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(now, now, true),
 		siUnit:                     func(string) string { return "rad" },
 	}
-	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"environment.wind.directionTrue","hours_back":3}`))
+	_, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"environment.wind.directionTrue","hours_back":3}`))
 	if err == nil || !strings.Contains(err.Error(), "sources") {
 		t.Errorf("err = %v, want a refusal naming the missing source check", err)
 	}

@@ -280,7 +280,7 @@ var mateToolSearchWeb = mateTool{
 				"required": ["query"]
 			}`),
 	},
-	execute: assistantToolDeps.executeSearchWeb,
+	execute: plainTool(assistantToolDeps.executeSearchWeb),
 	describe: func(args json.RawMessage) string {
 		var a assistantSearchWebArgs
 		query := ""

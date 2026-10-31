@@ -119,7 +119,7 @@ func TestPostAssistantMessageHandler_PersistsCardsWithTheReplyAndAFailedRunSaves
 		return rec.Body.String()
 	}
 
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, err: errors.New("stopped")}
 	})
 	post()
@@ -127,7 +127,7 @@ func TestPostAssistantMessageHandler_PersistsCardsWithTheReplyAndAFailedRunSaves
 		t.Fatalf("a failed run saves no card, got %d", n)
 	}
 
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "Here.", Model: "openai/gpt-4o", Cards: []mateCard{{Kind: testCardKind, Payload: json.RawMessage(`{"n":1}`)}}}}
 	})
 	body := post()

@@ -668,7 +668,7 @@ var mateToolListPassages = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeListPassages,
+	execute: plainTool(assistantToolDeps.executeListPassages),
 	describe: func(args json.RawMessage) string {
 		return "Reading the Passages logbook…"
 	},
@@ -691,7 +691,7 @@ var mateToolGetCruiseSummary = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeGetCruiseSummary,
+	execute: plainTool(assistantToolDeps.executeGetCruiseSummary),
 	describe: func(args json.RawMessage) string {
 		return "Adding up the Passages logbook…"
 	},

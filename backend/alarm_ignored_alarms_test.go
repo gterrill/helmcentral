@@ -251,7 +251,7 @@ func TestActiveAlarmsResultListsIgnoredTitlesForMate(t *testing.T) {
 		t.Fatal(err)
 	}
 	deps := assistantToolDeps{activeAlarms: func() []alarmStatus { return nil }}
-	out, err := deps.execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`))
+	out, _, err := deps.execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

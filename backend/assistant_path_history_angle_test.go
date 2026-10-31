@@ -40,7 +40,7 @@ func TestExecuteGetPathHistory_AnAngleIsAVectorMeanInDegreesWithASpreadAndNoMinM
 		siUnit:                     func(path string) string { return map[string]string{"environment.wind.directionTrue": "rad"}[path] },
 		influxPathSources:          func(context.Context, string, time.Time, time.Time) ([]string, error) { return nil, nil },
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"environment.wind.directionTrue","hours_back":3}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"environment.wind.directionTrue","hours_back":3}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestExecuteGetPathHistory_AScalarKeepsMinMeanMax(t *testing.T) {
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(t0, t0, true),
 		siUnit:                     func(string) string { return "m/s" },
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"environment.wind.speedTrue","hours_back":3}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"environment.wind.speedTrue","hours_back":3}`))
 	if err != nil {
 		t.Fatal(err)
 	}

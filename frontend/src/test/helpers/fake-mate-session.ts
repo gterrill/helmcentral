@@ -38,6 +38,8 @@ export function fakeMateSession(overrides: FakeMateSessionOverrides = {}): MateS
     liveAnswerIds: new Set<string>(),
     ratings: {},
     rateAnswer: vi.fn().mockResolvedValue(null),
+    // The thread shows the timeline; unless a test sets one, it is the messages.
+    timeline: (rest.messages ?? []).map((message) => ({ kind: 'message' as const, message })),
     ...rest,
     status: {
       sending: false,

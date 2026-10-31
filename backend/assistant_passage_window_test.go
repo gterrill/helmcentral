@@ -694,7 +694,7 @@ func TestPassageRowVerdict(t *testing.T) {
 func TestAssessPassageWindowTool_BothHoursAndSpeedUseTheHoursAndSayTheSpeedWasIgnored(t *testing.T) {
 	d := pwToolDeps(pwLimitsAll())
 	both := strings.Replace(pwToolArgs, `"speed_kn":6`, `"passage_hours":10,"speed_kn":6`, 1)
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(both))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(both))
 	if err != nil {
 		t.Fatalf("both fields must be accepted: %v", err)
 	}
@@ -719,7 +719,7 @@ func TestAssessPassageWindowTool_BothHoursAndSpeedUseTheHoursAndSayTheSpeedWasIg
 
 func pwToolResultWithoutBoth(t *testing.T, d assistantToolDeps) string {
 	t.Helper()
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -797,7 +797,7 @@ func pwRun(t *testing.T, d assistantToolDeps, args string) (assistantReply, erro
 
 func TestAssessPassageWindowTool_CollectsExactlyOneCardAndTellsTheModelNotToRepeatIt(t *testing.T) {
 	d := pwToolDeps(pwLimitsAll())
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -868,7 +868,7 @@ func TestAssessPassageWindowTool_TheCardIsNotCappedAndTheModelStillNamesEveryVer
 		t.Fatalf("the fixture is meant to exceed the chat cap, card is %d bytes", len(reply.Cards[0].Payload))
 	}
 
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwBigArgs()))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwBigArgs()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -912,7 +912,7 @@ func TestPassageModelResult_ShrinksDetailBeforeVerdicts(t *testing.T) {
 
 func TestAssessPassageWindowTool_RefusesWithoutLimits(t *testing.T) {
 	d := pwToolDeps(passageLimits{})
-	_, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	_, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err == nil || !strings.Contains(err.Error(), "Passage limits aren't set") {
 		t.Fatalf("err = %v", err)
 	}
@@ -921,7 +921,7 @@ func TestAssessPassageWindowTool_RefusesWithoutLimits(t *testing.T) {
 func TestAssessPassageWindowTool_WaveProviderDownIsNotCheckedNotCalm(t *testing.T) {
 	d := pwToolDeps(pwLimitsAll())
 	d.waves = func() (waveProvider, string, error) { return nil, "", fmt.Errorf("no wave provider") }
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1089,7 +1089,7 @@ func TestAssessPassageWindowTool_CachedForecastReportsItsCacheAge(t *testing.T) 
 	d := pwToolDeps(pwLimitsAll())
 	wx := d.mustWeatherStub(t)
 	wx.bundle.Cached, wx.bundle.CachedAt = true, pwNow.Add(-5*time.Hour)
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1188,7 +1188,7 @@ func TestAssessPassageWindowTool_ProviderGapsAreLoggedOncePerCauseAndStayNotChec
 	l.WindAgainstTideOffsetKn = pwF(5)
 	d.passageLimits = func() (passageLimits, error) { return l, nil }
 	d.tides = func() (tideProvider, string, error) { return nil, "tide-x", errors.New("tide provider offline") }
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(args))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(args))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1390,7 +1390,7 @@ func TestAssessPassageWindowDescription_SaysOnlyNoGoLimitsAreSet(t *testing.T) {
 // that leaves the tool carries them, one list per leg, and not on the wire.
 func TestAssessPassageWindowTool_CardCarriesTheLegRoutesToTheSink(t *testing.T) {
 	d := pwToolDeps(pwLimitsAll())
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1414,7 +1414,7 @@ func TestAssessPassageWindowTool_FallbackWaveModelIsReported(t *testing.T) {
 	d.waves = func() (waveProvider, string, error) {
 		return &stubWaveProvider{id: "wv", bundle: waveForecastBundle{FallbackModel: "best_match"}}, "wv", nil
 	}
-	result, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	result, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
 		t.Fatal(err)
 	}

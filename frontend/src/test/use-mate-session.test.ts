@@ -39,6 +39,7 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
   const cancels: string[] = []
   const runs: string[] = []
   const ratings: Array<{ method: string; messageId: string; body?: Record<string, unknown> }> = []
+  const runRecords = new Map<string, unknown[]>()
   let counter = 0
 
   const store = (conversationId: string, record: { id: string; role: string; content: string }): MessageRecord => {
@@ -61,6 +62,7 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
     cancels,
     runs,
     ratings,
+    runRecords,
     messages,
     store,
     answer,
@@ -68,6 +70,8 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
     onRun: ((): FetchLike => ({ ok: true, status: 204 })) as (conversationId: string) => FetchLike | Promise<FetchLike>,
     /** Awaited before a conversation read answers; tests hold it to keep a read in flight. */
     readGate: null as Promise<void> | null,
+    cancelGate: null as Promise<void> | null,
+    reads: 0,
     /** Every request, as 'METHOD path', in order. */
     log: [] as string[],
     fetch: vi.fn(async (url: string, init?: RequestInit): Promise<FetchLike> => {
@@ -89,12 +93,16 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
         const body = JSON.parse(init?.body as string) as Record<string, unknown>
         posts.push({ conversationId: id, body })
         counter += 1
-        store(id, { id: `u${counter}`, role: 'user', content: body.content as string })
-        return server.onSend(id, body)
+        const stored = store(id, { id: `u${counter}`, role: 'user', content: body.content as string })
+        const response = await server.onSend(id, body)
+        // A refused question (not ready, busy) is never stored.
+        if (response.ok === false) messages.set(id, (messages.get(id) ?? []).filter((m) => m.id !== stored.id))
+        return response
       }
       const cancel = url.match(/\/api\/assistant\/conversations\/([^/]+)\/run\/cancel$/)
       if (cancel && method === 'POST') {
         cancels.push(decodeURIComponent(cancel[1]))
+        if (server.cancelGate) await server.cancelGate
         return { ok: true, status: 204 }
       }
       const run = url.match(/\/api\/assistant\/conversations\/([^/]+)\/run$/)
@@ -107,9 +115,10 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
       if (read && method === 'GET') {
         const id = decodeURIComponent(read[1])
         const convo = conversations.find((c) => c.id === id) ?? conversation(id)
+        server.reads += 1
         if (server.readGate) await server.readGate
         const list = messages.get(id) ?? []
-        return { ok: true, json: async () => ({ conversation: convo, messages: list }) }
+        return { ok: true, json: async () => ({ conversation: convo, messages: list, runs: runRecords.get(id) ?? [] }) }
       }
       const rating = url.match(/\/api\/assistant\/messages\/([^/]+)\/feedback$/)
       if (rating && (method === 'PUT' || method === 'DELETE')) {
@@ -226,6 +235,53 @@ describe('useMateSession', () => {
       })
 
       expect(server.posts[0].body).toEqual({ content: 'Plain question', today: todayISO() })
+    })
+
+    it('reads the thread again when a question gets no answer, and the run replaces the live notice', async () => {
+      const server = fakeMateServer({ conversations: [conversation('c1')] })
+      server.onSend = (id) => {
+        server.runRecords.set(id, [{
+          id: 'run-1', conversation_id: id, after_seq: 1, answer_message_id: null, model: 'm', started_at: '2026-10-31T09:00:00Z',
+          duration_ms: 1000, stop_reason: 'time_ceiling', error: 'timed out', round_count: 3,
+          budget: { max_rounds: 30, max_stalled_rounds: 2, tool_phase_ms: 600000, final_reserve_ms: 120000 },
+        }])
+        return { ok: true, body: sseStream([sseFrame('error', { error: 'timed out' })]) }
+      }
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.activeId).toBe('c1'))
+      let openGate!: () => void
+      server.readGate = new Promise<void>((resolve) => { openGate = resolve })
+
+      await act(async () => {
+        await result.current.send('Check the passage')
+      })
+      // The live notice shows until the thread's own row is there to replace it.
+      expect(result.current.status.error).toBe('timed out')
+      await act(async () => {
+        openGate()
+        await flushMicrotasks()
+      })
+
+      await waitFor(() => expect(result.current.timeline).toHaveLength(2))
+      expect(result.current.timeline[0]).toMatchObject({ kind: 'message', message: { role: 'user', content: 'Check the passage', seq: 1 } })
+      expect(result.current.timeline[1]).toMatchObject({ kind: 'failed-run', run: { id: 'run-1', afterSeq: 1, answerMessageId: null, stopReason: 'time_ceiling' } })
+      await waitFor(() => expect(result.current.status.error).toBeNull())
+    })
+
+    it('keeps the typed question when it was refused and left no run', async () => {
+      const server = fakeMateServer({ conversations: [conversation('c1')] })
+      server.onSend = () => ({ ok: false, status: 503, json: async () => ({ error: 'Mate is off' }) })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.activeId).toBe('c1'))
+
+      await act(async () => {
+        await result.current.send('Check the passage')
+        await flushMicrotasks()
+      })
+
+      expect(result.current.timeline).toHaveLength(1)
+      expect(result.current.messages[0].id).toMatch(/^local-/)
+      expect(result.current.status.error).not.toBeNull()
     })
 
     it('shows the question at once, before the server has answered', async () => {
@@ -598,6 +654,38 @@ describe('useMateSession', () => {
         await result.current.send('Try again')
       })
       expect(result.current.status.stopped).toBe(false)
+      removeMateWatch('c1')
+    })
+
+    it('re-reads the thread only once the cancel request has answered', async () => {
+      const server = fakeMateServer({ conversations: [conversation('c1')] })
+      const stream = controllableSseStream()
+      server.onSend = () => ({ ok: true, body: stream.stream })
+      const { result } = await renderSession({ initialId: 'c1' })
+      await waitFor(() => expect(result.current.activeId).toBe('c1'))
+      await waitFor(() => expect(server.reads).toBeGreaterThan(0))
+
+      let openCancel!: () => void
+      server.cancelGate = new Promise<void>((resolve) => { openCancel = resolve })
+      await act(async () => {
+        void result.current.send('Is the tide turning?')
+        await flushMicrotasks()
+      })
+      const readsBefore = server.reads
+      await act(async () => {
+        result.current.stop()
+        await flushMicrotasks()
+        await flushMicrotasks()
+      })
+      expect(server.cancels).toEqual(['c1'])
+      // The local stream is closed, but the server has not finished the run.
+      expect(server.reads).toBe(readsBefore)
+
+      await act(async () => {
+        openCancel()
+        await flushMicrotasks()
+      })
+      await waitFor(() => expect(server.reads).toBeGreaterThan(readsBefore))
       removeMateWatch('c1')
     })
 

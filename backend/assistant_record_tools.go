@@ -202,7 +202,7 @@ var mateToolDescribeRecordType = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeDescribeRecordType,
+	execute: plainTool(assistantToolDeps.executeDescribeRecordType),
 	describe: func(args json.RawMessage) string {
 		return "Checking what can be recorded…"
 	},
@@ -224,7 +224,7 @@ var mateToolListRecords = mateTool{
 					"required": ["type"]
 				}`),
 	},
-	execute: assistantToolDeps.executeListRecords,
+	execute: plainTool(assistantToolDeps.executeListRecords),
 	describe: func(args json.RawMessage) string {
 		return "Reading the records…"
 	},
@@ -243,7 +243,7 @@ var mateToolGetRecord = mateTool{
 					"required": ["type", "id"]
 				}`),
 	},
-	execute: assistantToolDeps.executeGetRecord,
+	execute: plainTool(assistantToolDeps.executeGetRecord),
 	describe: func(args json.RawMessage) string {
 		return "Reading a record…"
 	},

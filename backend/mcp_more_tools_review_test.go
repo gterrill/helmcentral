@@ -56,7 +56,7 @@ func TestMCPMoreTools_EstimatePassageSaysEachRuleOnce(t *testing.T) {
 func TestAssessPassageWindow_NoCardSinkMeansNoCardInstruction(t *testing.T) {
 	d := pwToolDeps(pwLimitsAll())
 	d.cards = nil
-	out, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	out, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
 		t.Fatalf("without a card sink the tool should still answer: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestAssessPassageWindow_NoCardSinkMeansNoCardInstruction(t *testing.T) {
 
 func TestAssessPassageWindow_MateKeepsItsCardAndInstruction(t *testing.T) {
 	d := pwToolDeps(pwLimitsAll())
-	out, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
+	out, _, err := d.execute(context.Background(), "assess_passage_window", json.RawMessage(pwToolArgs))
 	if err != nil {
 		t.Fatal(err)
 	}

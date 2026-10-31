@@ -41,7 +41,7 @@ var mateToolSavePlace = mateTool{
 					"required": ["name", "lat", "lon"]
 				}`),
 	},
-	execute: assistantToolDeps.executeSavePlace,
+	execute: plainTool(assistantToolDeps.executeSavePlace),
 	describe: func(args json.RawMessage) string {
 		var a assistantSavePlaceArgs
 		if json.Unmarshal(args, &a) == nil {

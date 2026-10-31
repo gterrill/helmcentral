@@ -69,7 +69,7 @@ func whitsundayDeps(t *testing.T) assistantToolDeps {
 
 func TestExecuteEstimatePassage_RoutesRoundAnIslandInsteadOfThroughIt(t *testing.T) {
 	deps := whitsundayDeps(t)
-	raw, err := deps.execute(context.Background(), "estimate_passage",
+	raw, _, err := deps.execute(context.Background(), "estimate_passage",
 		json.RawMessage(fmt.Sprintf(`{"to_lat":%v,"to_lon":%v,"speed_kts":10}`, cidHarbour.Lat, cidHarbour.Lon)))
 	if err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func TestExecuteEstimatePassage_RoutesRoundAnIslandInsteadOfThroughIt(t *testing
 func TestExecuteEstimatePassage_PlannedLegStartsWhereGiven(t *testing.T) {
 	deps := whitsundayDeps(t)
 	deps.vesselState = func() (vesselStateData, error) { return vesselStateData{}, fmt.Errorf("no fix") }
-	raw, err := deps.execute(context.Background(), "estimate_passage",
+	raw, _, err := deps.execute(context.Background(), "estimate_passage",
 		json.RawMessage(fmt.Sprintf(`{"from_lat":%v,"from_lon":%v,"to_lat":%v,"to_lon":%v,"speed_kts":10}`,
 			haslewood.Lat, haslewood.Lon, cidHarbour.Lat, cidHarbour.Lon)))
 	if err != nil {
@@ -128,7 +128,7 @@ func TestExecuteEstimatePassage_MissingSquareIsReportedNotAStraightLine(t *testi
 	r, store := newRouteReader(t, true)
 	holdWhitsundays(t, store, coverageSquare{-21, 149}) // -21,148 missing
 	deps.offlineCoastline = func() *offlineCoastlineReader { return r }
-	raw, err := deps.execute(context.Background(), "estimate_passage",
+	raw, _, err := deps.execute(context.Background(), "estimate_passage",
 		json.RawMessage(fmt.Sprintf(`{"to_lat":%v,"to_lon":%v}`, coralSea.Lat, coralSea.Lon)))
 	if err == nil {
 		t.Fatalf("expected an error, got %s", raw)
@@ -143,7 +143,7 @@ func TestExecuteEstimatePassage_MissingSquareIsReportedNotAStraightLine(t *testi
 func TestExecuteEstimatePassage_NoVesselFixAndNoStartIsAnError(t *testing.T) {
 	deps := whitsundayDeps(t)
 	deps.vesselState = func() (vesselStateData, error) { return vesselStateData{}, fmt.Errorf("no fix") }
-	_, err := deps.execute(context.Background(), "estimate_passage",
+	_, _, err := deps.execute(context.Background(), "estimate_passage",
 		json.RawMessage(fmt.Sprintf(`{"to_lat":%v,"to_lon":%v}`, cidHarbour.Lat, cidHarbour.Lon)))
 	if err == nil || !strings.Contains(err.Error(), "from_lat") {
 		t.Fatalf("got %v", err)
@@ -152,7 +152,7 @@ func TestExecuteEstimatePassage_NoVesselFixAndNoStartIsAnError(t *testing.T) {
 
 func TestExecuteEstimatePassage_OnlyOneStartCoordinateIsAnError(t *testing.T) {
 	deps := whitsundayDeps(t)
-	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"from_lat":-20.1,"to_lat":-20.2,"to_lon":149}`))
+	_, _, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"from_lat":-20.1,"to_lat":-20.2,"to_lon":149}`))
 	if err == nil || !strings.Contains(err.Error(), "both from_lat and from_lon") {
 		t.Fatalf("got %v", err)
 	}
@@ -161,7 +161,7 @@ func TestExecuteEstimatePassage_OnlyOneStartCoordinateIsAnError(t *testing.T) {
 func TestExecuteEstimatePassage_EndOnLandIsAnError(t *testing.T) {
 	deps := whitsundayDeps(t)
 	// Inside Whitsunday Island, kilometres from either shore.
-	_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"to_lat":-20.28,"to_lon":148.99}`))
+	_, _, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(`{"to_lat":-20.28,"to_lon":148.99}`))
 	if err == nil || !strings.Contains(err.Error(), "on land") {
 		t.Fatalf("got %v", err)
 	}
@@ -176,7 +176,7 @@ func TestExecuteEstimatePassage_DistanceIsNoLongerAnArgument(t *testing.T) {
 
 func TestExecuteRouteDistance_RoutesAndNamesTheStraightLineAsSuch(t *testing.T) {
 	deps := whitsundayDeps(t)
-	raw, err := deps.execute(context.Background(), "route_distance",
+	raw, _, err := deps.execute(context.Background(), "route_distance",
 		json.RawMessage(fmt.Sprintf(`{"to_lat":%v,"to_lon":%v}`, coralSea.Lat, coralSea.Lon)))
 	if err != nil {
 		t.Fatal(err)
@@ -196,11 +196,11 @@ func TestExecuteRouteDistance_RoutesAndNamesTheStraightLineAsSuch(t *testing.T) 
 func TestExecuteRouteDistance_ErrorsNameWhatIsWrong(t *testing.T) {
 	deps := whitsundayDeps(t)
 	deps.offlineCoastline = nil
-	_, err := deps.execute(context.Background(), "route_distance", json.RawMessage(`{"to_lat":-20.25,"to_lon":148.95}`))
+	_, _, err := deps.execute(context.Background(), "route_distance", json.RawMessage(`{"to_lat":-20.25,"to_lon":148.95}`))
 	if err == nil || !strings.Contains(err.Error(), "no passage distance") {
 		t.Fatalf("got %v", err)
 	}
-	_, err = whitsundayDeps(t).execute(context.Background(), "route_distance", json.RawMessage(`{"to_lat":-20.25}`))
+	_, _, err = whitsundayDeps(t).execute(context.Background(), "route_distance", json.RawMessage(`{"to_lat":-20.25}`))
 	if err == nil || !strings.Contains(err.Error(), "to_lat and to_lon are required") {
 		t.Fatalf("got %v", err)
 	}

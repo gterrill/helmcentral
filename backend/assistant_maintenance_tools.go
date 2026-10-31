@@ -598,7 +598,7 @@ var mateToolFindEquipment = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeFindEquipment,
+	execute: plainTool(assistantToolDeps.executeFindEquipment),
 	describe: func(args json.RawMessage) string {
 		var a assistantFindEquipmentArgs
 		query := ""
@@ -636,7 +636,7 @@ var mateToolListMaintenance = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeListMaintenance,
+	execute: plainTool(assistantToolDeps.executeListMaintenance),
 	describe: func(args json.RawMessage) string {
 		return "Checking the maintenance list…"
 	},
@@ -660,7 +660,7 @@ var mateToolGetMaintenanceLog = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeGetMaintenanceLog,
+	execute: plainTool(assistantToolDeps.executeGetMaintenanceLog),
 	describe: func(args json.RawMessage) string {
 		return "Reading the maintenance log…"
 	},

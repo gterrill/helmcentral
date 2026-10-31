@@ -40,7 +40,7 @@ func TestExecuteCheckSignalKPaths_NoSelfTreeErrorsExplicitly(t *testing.T) {
 		signalKDiagnostics: fixedSignalKDiagnostics(signalKDiagnosticsSnapshot{HasSelfTree: false}),
 	}
 
-	_, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{}`))
+	_, _, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatalf("expected an error when the snapshot has no self tree")
 	}
@@ -66,7 +66,7 @@ func TestExecuteCheckSignalKPaths_NoFilterShowsConnectionAndSourcesOnly(t *testi
 		signalKDiagnostics: fixedSignalKDiagnostics(snap),
 	}
 
-	raw, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{}`))
+	raw, _, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute check_signalk_paths: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestExecuteCheckSignalKPaths_FilterMatchesPathsAcrossTree(t *testing.T) {
 		signalKDiagnostics: fixedSignalKDiagnostics(snap),
 	}
 
-	raw, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{"filter":"tanks"}`))
+	raw, _, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{"filter":"tanks"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestExecuteCheckSignalKPaths_NoMatchSaysSoExplicitly(t *testing.T) {
 		signalKDiagnostics: fixedSignalKDiagnostics(snap),
 	}
 
-	raw, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{"filter":"exhaust"}`))
+	raw, _, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{"filter":"exhaust"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -183,7 +183,7 @@ func TestExecuteCheckSignalKPaths_SourceFilterIsCaseInsensitiveSubstring(t *test
 		signalKDiagnostics: fixedSignalKDiagnostics(snap),
 	}
 
-	raw, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{"source":"yachtdevices"}`))
+	raw, _, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{"source":"yachtdevices"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -207,7 +207,7 @@ func TestExecuteCheckSignalKPaths_TruncatesAtMaxMatches(t *testing.T) {
 		signalKDiagnostics: fixedSignalKDiagnostics(signalKDiagnosticsSnapshot{HasSelfTree: true, Samples: samples}),
 	}
 
-	raw, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{"filter":"electrical"}`))
+	raw, _, err := deps.execute(context.Background(), "check_signalk_paths", json.RawMessage(`{"filter":"electrical"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -312,7 +312,7 @@ func mustParseRFC3339(t *testing.T, s string) time.Time {
 
 func TestExecuteGetLastRecorded_RequiresPathPrefixOrSource(t *testing.T) {
 	deps := assistantToolDeps{now: func() time.Time { return time.Now() }}
-	_, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{}`))
+	_, _, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatalf("expected an error when neither path_prefix nor source is given")
 	}
@@ -341,7 +341,7 @@ func TestExecuteGetLastRecorded_ReturnsRowsSortedOldestFirst(t *testing.T) {
 		},
 	}
 
-	raw, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{"source":"YachtDevices"}`))
+	raw, _, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{"source":"YachtDevices"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestExecuteGetLastRecorded_ClampsLookbackDaysToMax(t *testing.T) {
 			return nil, nil
 		},
 	}
-	_, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{"path_prefix":"tanks","lookback_days":100000}`))
+	_, _, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{"path_prefix":"tanks","lookback_days":100000}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestExecuteGetLastRecorded_InfluxNotConfiguredReturnsExplicitError(t *testi
 			return nil, errInfluxNotConfiguredForTest
 		},
 	}
-	_, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{"path_prefix":"tanks"}`))
+	_, _, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{"path_prefix":"tanks"}`))
 	if err == nil {
 		t.Fatalf("expected an error when influx is not configured")
 	}
@@ -411,7 +411,7 @@ func TestExecuteGetLastRecorded_NoRowsAddsExplicitNote(t *testing.T) {
 			return nil, nil
 		},
 	}
-	raw, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{"path_prefix":"nonexistent"}`))
+	raw, _, err := deps.execute(context.Background(), "get_last_recorded", json.RawMessage(`{"path_prefix":"nonexistent"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -477,7 +477,7 @@ func stubInfluxPathHistoryFirstLastNotFound(ctx context.Context, path, source st
 
 func TestExecuteGetPathHistory_RequiresPath(t *testing.T) {
 	deps := assistantToolDeps{now: func() time.Time { return time.Now() }}
-	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{}`))
+	_, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatalf("expected an error when path is missing")
 	}
@@ -492,7 +492,7 @@ func TestExecuteGetPathHistory_DefaultsToLast24Hours(t *testing.T) {
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(nil, &calls),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
-	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel"}`))
+	_, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -521,7 +521,7 @@ func TestExecuteGetPathHistory_HoursBackOverridesDefault(t *testing.T) {
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(nil, &calls),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
-	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":2}`))
+	_, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":2}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestExecuteGetPathHistory_HoursBackOverridesDefault(t *testing.T) {
 
 func TestExecuteGetPathHistory_StartEndMustBeRFC3339(t *testing.T) {
 	deps := assistantToolDeps{now: func() time.Time { return time.Now() }}
-	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","start":"not-a-time","end":"2026-09-22T00:00:00Z"}`))
+	_, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","start":"not-a-time","end":"2026-09-22T00:00:00Z"}`))
 	if err == nil {
 		t.Fatalf("expected an error for a malformed start time")
 	}
@@ -546,7 +546,7 @@ func TestExecuteGetPathHistory_StartEndMustBeRFC3339(t *testing.T) {
 
 func TestExecuteGetPathHistory_EndMustBeAfterStart(t *testing.T) {
 	deps := assistantToolDeps{now: func() time.Time { return time.Now() }}
-	_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(
+	_, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(
 		`{"path":"x","start":"2026-09-22T00:00:00Z","end":"2026-09-21T00:00:00Z"}`))
 	if err == nil {
 		t.Fatalf("expected an error when end is before start")
@@ -564,7 +564,7 @@ func TestExecuteGetPathHistory_ClampsSpanToMax90Days(t *testing.T) {
 	}
 	start := "2020-01-01T00:00:00Z"
 	end := now.Format(time.RFC3339)
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","start":"`+start+`","end":"`+end+`"}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","start":"`+start+`","end":"`+end+`"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -595,7 +595,7 @@ func TestExecuteGetPathHistory_RejectsFluxInjectionInPathAndSource(t *testing.T)
 		`{"path":"tanks.${r._measurement}"}`,
 		`{"path":"tanks.fuel.2.currentLevel","source":"${evil}"}`,
 	} {
-		_, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(args))
+		_, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(args))
 		if err == nil {
 			t.Errorf("expected an error for hostile input %s", args)
 		}
@@ -728,7 +728,7 @@ func TestExecuteGetPathHistory_FitsUnderCapWithNoTruncationForRepresentativeSpan
 		}
 
 		args := fmt.Sprintf(`{"path":"tanks.fuel.2.currentLevel","hours_back":%v}`, hoursBack)
-		raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(args))
+		raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(args))
 		if err != nil {
 			t.Fatalf("hours_back=%v: execute: %v", hoursBack, err)
 		}
@@ -783,7 +783,7 @@ func TestExecuteGetPathHistory_RoundsBucketValuesForCompactness(t *testing.T) {
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":1}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":1}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -858,7 +858,7 @@ func TestExecuteGetPathHistory_ComputesOverallStats(t *testing.T) {
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
 
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -913,7 +913,7 @@ func TestExecuteGetPathHistory_FirstLastSeenComesFromActualSampleTimesNotBucketS
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(realFirst, realLast, true),
 	}
 
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -954,7 +954,7 @@ func TestExecuteGetPathHistory_NoFirstLastSampleLeavesFirstLastSeenEmpty(t *test
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel","hours_back":3}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -998,7 +998,7 @@ func TestExecuteGetPathHistory_NoGapsWhenFullyPopulated(t *testing.T) {
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","hours_back":1}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"x","hours_back":1}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1022,7 +1022,7 @@ func TestExecuteGetPathHistory_NoDataAddsExplicitNote(t *testing.T) {
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(nil, nil),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel"}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.fuel.2.currentLevel"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1246,7 +1246,7 @@ func TestExecuteGetPathHistory_CapsGapsToMostRecentIncludingOpenGap(t *testing.T
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(fmt.Sprintf(`{"path":"x","hours_back":%v}`, hoursBack)))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(fmt.Sprintf(`{"path":"x","hours_back":%v}`, hoursBack)))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1398,7 +1398,7 @@ func TestExecuteGetPathHistory_NarrowsToSpanThatHoldsData(t *testing.T) {
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, &calls),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(firstSeen, lastSeen, true),
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"engine.load","hours_back":6}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"engine.load","hours_back":6}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1444,7 +1444,7 @@ func TestExecuteGetPathHistory_FullSpanDataIsUnchanged(t *testing.T) {
 		influxPathHistoryStat:      stubInfluxPathHistoryStat(nil, &calls),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(now.Add(-6*time.Hour+10*time.Second), now.Add(-5*time.Second), true),
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"engine.load","hours_back":6}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"engine.load","hours_back":6}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1479,7 +1479,7 @@ func TestExecuteGetPathHistory_ReportsTrailingSilenceAsAGap(t *testing.T) {
 		influxPathHistoryStat:      stubInfluxPathHistoryStatFullyPopulated(t),
 		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(firstSeen, lastSeen, true),
 	}
-	raw, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"engine.load","hours_back":6}`))
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"engine.load","hours_back":6}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

@@ -213,7 +213,7 @@ func TestListAlarmRules_ShowsStoredRulesInOperatorUnitsAndDerivedAsReadOnly(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := env.deps.execute(context.Background(), "list_alarm_rules", json.RawMessage(`{}`))
+	raw, _, err := env.deps.execute(context.Background(), "list_alarm_rules", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatal(err)
 	}

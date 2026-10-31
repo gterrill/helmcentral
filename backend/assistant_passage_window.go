@@ -1204,7 +1204,7 @@ var mateToolAssessPassageWindow = mateTool{
 					"required": ["legs", "stays_nights", "departure_dates", "depart_time"]
 				}`),
 	},
-	execute: assistantToolDeps.executeAssessPassageWindow,
+	execute: plainTool(assistantToolDeps.executeAssessPassageWindow),
 	describe: func(args json.RawMessage) string {
 		return "Checking the forecast along the route against your passage limits…"
 	},

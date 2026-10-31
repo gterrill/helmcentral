@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, apiRequest, fetchQuery, getQueryData, invalidateQueries, setQueryData, useApiQuery } from '@/lib/api-query'
 import type { MessageApi } from '@/lib/mate-api'
 import { onPassageDecisionSaved } from '@/lib/passage-decisions-api'
 import { decodeMateCards, type MateCard, type PassageDecision } from '@/lib/mate-cards'
+import { splitConversationRuns, type AssistantRun, type RunApi, type RunRefApi } from '@/lib/mate-run'
 
 // ADR 0093: the wire shape (Conversation/Message) is snake_case, persisted
 // as-is by the assistant's SQLite store. Mapped to camelCase here the same
@@ -164,6 +165,39 @@ export interface AssistantMessage {
   cards?: MateCard[]
   /** The operator's rating of this answer, when it has one. */
   feedback?: { verdict: 'up' | 'down'; note: string }
+  /** On a question typed here that the server refused: nothing of it was
+   * stored, so it stays as typed through a re-read of the thread. */
+  refused?: boolean
+  /** The run that wrote this answer, when the server still holds it: what its
+   * Run details view reads. Set by reading the thread, not by a live answer. */
+  runId?: string
+}
+
+/** What the thread shows, in order: the messages, and after the question it
+ * belongs to each run that gave no answer (ADR 0240). */
+export type ThreadItem =
+  | { kind: 'message'; message: AssistantMessage }
+  | { kind: 'failed-run'; run: AssistantRun }
+
+/** Messages and the runs that gave no answer as one ordered timeline. A run
+ * follows the question with its sequence number; an optimistic question has
+ * none yet, and a run whose question is missing goes last rather than being lost. */
+export function buildTimeline(messages: AssistantMessage[], failedRuns: AssistantRun[]): ThreadItem[] {
+  const items: ThreadItem[] = []
+  const placed = new Set<string>()
+  for (const message of messages) {
+    items.push({ kind: 'message', message })
+    if (message.role === 'assistant' || message.seq < 0) continue
+    for (const run of failedRuns) {
+      if (run.afterSeq !== message.seq) continue
+      items.push({ kind: 'failed-run', run })
+      placed.add(run.id)
+    }
+  }
+  for (const run of failedRuns) {
+    if (!placed.has(run.id)) items.push({ kind: 'failed-run', run })
+  }
+  return items
 }
 
 export function mapProposal(api: ProposalApi): AssistantProposal {
@@ -188,6 +222,7 @@ export function mapProposal(api: ProposalApi): AssistantProposal {
 
 const LIST_PATH = '/api/assistant/conversations'
 const NO_CONVERSATIONS: AssistantConversation[] = []
+const NO_RUNS: AssistantRun[] = []
 
 interface ConversationListApi {
   conversations?: ConversationApi[]
@@ -226,6 +261,24 @@ export function mapMessage(api: MessageApi): AssistantMessage {
   }
 }
 
+interface ConversationReadApi {
+  conversation?: ConversationApi
+  messages?: MessageApi[]
+  runs?: Array<RunApi | RunRefApi>
+}
+
+// A conversation's messages as read, each answer carrying the id of the run
+// that wrote it, and the runs that gave no answer.
+function readThread(data: ConversationReadApi): { messages: AssistantMessage[]; unanswered: AssistantRun[] } {
+  const { unanswered, idByAnswer } = splitConversationRuns(Array.isArray(data.runs) ? data.runs : [])
+  const messages = (Array.isArray(data.messages) ? data.messages : []).map((api) => {
+    const message = mapMessage(api)
+    const runId = idByAnswer.get(message.id)
+    return runId === undefined ? message : { ...message, runId }
+  })
+  return { messages, unanswered }
+}
+
 function sameMessage(a: AssistantMessage, b: AssistantMessage): boolean {
   return JSON.stringify({ ...a, clientKey: undefined }) === JSON.stringify({ ...b, clientKey: undefined })
 }
@@ -237,14 +290,15 @@ function sameMessage(a: AssistantMessage, b: AssistantMessage): boolean {
 function mergeReloaded(previous: AssistantMessage[], fresh: AssistantMessage[]): AssistantMessage[] {
   const byId = new Map(previous.map((message) => [message.id, message]))
   const optimistic = previous.filter((message) => message.id.startsWith('local-'))
-  return fresh.map((message) => {
+  const merged = fresh.map((message) => {
     const old = byId.get(message.id)
     if (old) {
       if (sameMessage(old, message)) return old
       return old.clientKey ? { ...message, clientKey: old.clientKey } : message
     }
     if (message.role === 'user') {
-      const index = optimistic.findIndex((local) => local.content === message.content)
+      // The server stores a question trimmed.
+      const index = optimistic.findIndex((local) => !local.refused && local.content.trim() === message.content.trim())
       if (index !== -1) {
         const [local] = optimistic.splice(index, 1)
         return { ...message, clientKey: local.clientKey ?? local.id }
@@ -252,6 +306,21 @@ function mergeReloaded(previous: AssistantMessage[], fresh: AssistantMessage[]):
     }
     return message
   })
+  // A question the server refused was never stored: it stays as typed, after
+  // the message it followed, not after whatever the server has added since.
+  for (const local of optimistic) {
+    if (!local.refused) continue
+    let insertAt = 0
+    for (let i = previous.indexOf(local) - 1; i >= 0; i -= 1) {
+      const found = merged.findIndex((message) => message.id === previous[i].id)
+      if (found !== -1) {
+        insertAt = found + 1
+        break
+      }
+    }
+    merged.splice(insertAt, 0, local)
+  }
+  return merged
 }
 
 export interface UseAssistantConversationsOptions {
@@ -297,6 +366,9 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   const [mountInitialId] = useState(() => initialId)
   const [activeId, setActiveId] = useState<string | null>(null)
   const [messages, setMessages] = useState<AssistantMessage[]>([])
+  // The active conversation's runs that gave no answer (ADR 0240): they show
+  // in the thread, after their question, in place of one.
+  const [failedRuns, setFailedRuns] = useState<AssistantRun[]>([])
   // The active conversation's summary note (ADR 0162), null until the
   // operator has saved one. Read from the conversation when it is opened and
   // set by the summary dialog after a save.
@@ -341,11 +413,11 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     setSummaryNoteId(null)
     setConversationLoading(true)
     try {
-      const data = await apiRequest<{ conversation?: ConversationApi; messages?: MessageApi[] }>(
-        `${LIST_PATH}/${encodeURIComponent(id)}`,
-      )
+      const data = await apiRequest<ConversationReadApi>(`${LIST_PATH}/${encodeURIComponent(id)}`)
       if (selectionSeqRef.current !== seq) return
-      setMessages(Array.isArray(data.messages) ? data.messages.map(mapMessage) : [])
+      const thread = readThread(data)
+      setMessages(thread.messages)
+      setFailedRuns(thread.unanswered)
       setSummaryNoteId(data.conversation?.summary_note_id ?? null)
       setActionError(null)
       setConversationLoading(false)
@@ -353,6 +425,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
       if (selectionSeqRef.current !== seq) return
       setActionError(wireMessage(err))
       setMessages([])
+      setFailedRuns(NO_RUNS)
       setConversationLoading(false)
     }
   }, [])
@@ -421,6 +494,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     selectionSeqRef.current += 1
     setActiveId(null)
     setMessages([])
+    setFailedRuns(NO_RUNS)
     setSummaryNoteId(null)
     setConversationLoading(false)
     setActionError(null)
@@ -466,6 +540,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
       onCreated?.(created.id)
       setActiveId(created.id)
       setMessages([])
+      setFailedRuns(NO_RUNS)
       setSummaryNoteId(null)
       setConversationLoading(false)
       setActionError(null)
@@ -503,6 +578,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
           selectionSeqRef.current += 1
           setActiveId(null)
           setMessages([])
+          setFailedRuns(NO_RUNS)
           setSummaryNoteId(null)
           setConversationLoading(false)
         }
@@ -537,18 +613,24 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // The answer is dropped when anything changed meanwhile: another
   // conversation opened (the selection sequence moved) or a message was
   // appended locally (the read may predate it).
-  const reloadMessages = useCallback(async (id: string) => {
+  // Resolves true when the read showed a run that gave no answer to the
+  // newest question: the thread then says what happened, in its own row.
+  // Marks an optimistic question as refused by the server.
+  const markRefused = useCallback((localId: string) => {
+    setMessages((previous) => previous.map((message) => (message.id === localId ? { ...message, refused: true } : message)))
+  }, [])
+
+  const reloadMessages = useCallback(async (id: string): Promise<boolean> => {
     const seq = selectionSeqRef.current
     const appends = localAppendsRef.current
     const feedbackVersion = feedbackVersionRef.current
     const decisionVersion = decisionVersionRef.current
     reloadsInFlightRef.current += 1
     try {
-      const data = await apiRequest<{ conversation?: ConversationApi; messages?: MessageApi[] }>(
-        `${LIST_PATH}/${encodeURIComponent(id)}`,
-      )
-      if (selectionSeqRef.current !== seq || localAppendsRef.current !== appends) return
-      const fresh = Array.isArray(data.messages) ? data.messages.map(mapMessage) : []
+      const data = await apiRequest<ConversationReadApi>(`${LIST_PATH}/${encodeURIComponent(id)}`)
+      if (selectionSeqRef.current !== seq || localAppendsRef.current !== appends) return false
+      const thread = readThread(data)
+      const fresh = thread.messages
       // A rating changed after this read began, or still being saved, is newer
       // than what the read saw: keep it rather than the server's older copy.
       const newer = fresh.map((message) => {
@@ -567,10 +649,14 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
           : message,
       )
       setMessages((previous) => mergeReloaded(previous, withDecisions))
+      // The same runs read again change nothing on screen.
+      setFailedRuns((previous) => (JSON.stringify(previous) === JSON.stringify(thread.unanswered) ? previous : thread.unanswered))
       setSummaryNoteId(data.conversation?.summary_note_id ?? null)
+      const newestQuestion = [...fresh].reverse().find((message) => message.role !== 'assistant')
+      return newestQuestion !== undefined && thread.unanswered.some((run) => run.afterSeq === newestQuestion.seq)
     } catch (err) {
-      if (selectionSeqRef.current !== seq) return
-      setActionError(wireMessage(err))
+      if (selectionSeqRef.current === seq) setActionError(wireMessage(err))
+      return false
     } finally {
       reloadsInFlightRef.current -= 1
       if (reloadsInFlightRef.current === 0) {
@@ -664,11 +750,13 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   }, [])
 
   const errorMessage = error !== null ? describeLoadError(error) : null
+  const timeline = useMemo(() => buildTimeline(messages, failedRuns), [messages, failedRuns])
 
   return {
     conversations: list.data ?? NO_CONVERSATIONS,
     activeId,
     messages,
+    timeline,
     summaryNoteId,
     setSummaryNoteId,
     conversationLoading,
@@ -681,6 +769,7 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
     remove,
     appendLocal,
     reloadMessages,
+    markRefused,
     updateProposal,
     updatePassageDecision,
     updateFormDraft,

@@ -124,7 +124,8 @@ func tcDeps(f *tcFake, v vesselView, units string) assistantToolDeps {
 
 func tcRun(t *testing.T, d assistantToolDeps, args string) (string, error) {
 	t.Helper()
-	return d.execute(context.Background(), "show_telemetry_chart", json.RawMessage(args))
+	out, _, err := d.execute(context.Background(), "show_telemetry_chart", json.RawMessage(args))
+	return out, err
 }
 
 func tcPayload(t *testing.T, d assistantToolDeps, result string) telemetryChartPayload {
@@ -807,7 +808,7 @@ func TestShowTelemetryChart_CancelStopsFurtherReads(t *testing.T) {
 	// 4 series x 3 ranges = 12 jobs, bounded at 8.
 	cmp := tcCmp("A") + `,` + `{"label":"B","from":"2026-10-14T00:00:00Z","to":"2026-10-15T00:00:00Z"},{"label":"C","from":"2026-10-16T00:00:00Z","to":"2026-10-17T00:00:00Z"}`
 	args := `{"series":[{"path":"a.one"},{"path":"b.two"},{"path":"c.three"},{"path":"d.four"}],` + tcRange + `,"compare":[` + cmp + `]}`
-	_, err := d.execute(ctx, "show_telemetry_chart", json.RawMessage(args))
+	_, _, err := d.execute(ctx, "show_telemetry_chart", json.RawMessage(args))
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("want a cancellation error, got %v", err)
 	}

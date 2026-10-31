@@ -35,7 +35,7 @@ func TestGetActiveAlarms_ReturnsSensorIdentifiers(t *testing.T) {
 	deps := assistantToolDeps{activeAlarms: func() []alarmStatus {
 		return []alarmStatus{sensorHealthAlarmForTest()}
 	}}
-	out, err := deps.execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`))
+	out, _, err := deps.execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestGetActiveAlarms_ReturnsSensorIdentifiers(t *testing.T) {
 
 func TestGetActiveAlarms_EmptyIsAnAnswer(t *testing.T) {
 	deps := assistantToolDeps{activeAlarms: func() []alarmStatus { return nil }}
-	out, err := deps.execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`))
+	out, _, err := deps.execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestGetActiveAlarms_EmptyIsAnAnswer(t *testing.T) {
 }
 
 func TestGetActiveAlarms_UnwiredFailsFast(t *testing.T) {
-	if _, err := (assistantToolDeps{}).execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`)); err == nil {
+	if _, _, err := (assistantToolDeps{}).execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`)); err == nil {
 		t.Fatal("expected an error when the alarm source is not wired")
 	}
 }
@@ -91,7 +91,7 @@ func truncateForLog(s string) string {
 
 func runActiveAlarms(t *testing.T, deps assistantToolDeps) string {
 	t.Helper()
-	out, err := deps.execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`))
+	out, _, err := deps.execute(context.Background(), "get_active_alarms", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

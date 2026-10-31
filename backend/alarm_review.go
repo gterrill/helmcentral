@@ -41,11 +41,7 @@ const (
 
 	// alarmReviewRepeatWindow is how long after a review the same rule's next
 	// raise is left alone.
-	alarmReviewRepeatWindow = time.Hour
-	// alarmReviewDeadline is how long a review may take before it is recorded
-	// as failed.
-	alarmReviewDeadline = 3 * time.Minute
-
+	alarmReviewRepeatWindow  = time.Hour
 	maxAlarmReviewChars      = 1200
 	maxAlarmReviewRuleChange = 300
 
@@ -200,7 +196,9 @@ func newAlarmReviewer(settingsPath string) *alarmReviewer {
 			raw, _ := json.Marshal(assistantAlarmContextArgs{AlarmID: ruleID})
 			return deps.executeGetAlarmContext(ctx, raw)
 		},
-		deadline: alarmReviewDeadline,
+		// How long a review may take before it is recorded as failed: the
+		// unattended budget's whole ceiling, so the final reserve happens.
+		deadline: assistantRunnerOptions{Unattended: true}.budget().ceiling(),
 	}
 }
 
@@ -530,12 +528,13 @@ func (t *alarmReviewTools) definitions() []openRouterTool {
 	return append(out, openRouterTool{Type: "function", Function: alarmReviewToolDef})
 }
 
-func (t *alarmReviewTools) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+func (t *alarmReviewTools) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
 	if name == alarmReviewToolName {
-		return t.submit(args)
+		result, err := t.submit(args)
+		return result, assistantToolOutcome{}, err
 	}
 	if !alarmReviewReadTool(name) {
-		return "", fmt.Errorf("%s is not available in an alarm review: it reads the boat and cannot change anything", name)
+		return "", assistantToolOutcome{}, fmt.Errorf("%s is not available in an alarm review: it reads the boat and cannot change anything", name)
 	}
 	return t.assistantToolDeps.execute(ctx, name, args)
 }
@@ -604,8 +603,9 @@ func (r *alarmReviewer) run(rev alarmReview, event alarmEvent, cfg watchConfig) 
 				System: buildAlarmReviewPrompt(pc, units, now, loc, boatKnown),
 				Message: "This alarm has just gone off. Review it. The alarm id for get_alarm_context is " + rev.RuleID + "; do not repeat it in the review. " +
 					"What follows is what get_alarm_context returned a moment ago.\n" + alarmContext,
-				Tools:     tools,
-				Submitted: func() bool { return tools.submission() != nil },
+				Tools:      tools,
+				Submitted:  func() bool { return tools.submission() != nil },
+				SubmitTool: alarmReviewToolName,
 			}, ""
 		},
 	})

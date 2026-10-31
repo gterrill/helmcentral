@@ -77,7 +77,7 @@ func submitAlarmReview(text string) json.RawMessage {
 
 func withAlarmReviewScript(t *testing.T, text string) *fakeReviewRunner {
 	return withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
-		if _, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview(text)); err != nil {
+		if _, _, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview(text)); err != nil {
 			return assistantReply{}, err
 		}
 		assistantCostMeterFrom(ctx).add(0.012)
@@ -149,7 +149,7 @@ func TestAlarmReview_ARaiseStartsOneReviewAndARepeatWithinAnHourDoesNot(t *testi
 	runs := 0
 	withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
 		runs++
-		if _, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview("The house bank is at 11.6 V and still falling. It needs you now.")); err != nil {
+		if _, _, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview("The house bank is at 11.6 V and still falling. It needs you now.")); err != nil {
 			return assistantReply{}, err
 		}
 		return assistantReply{Content: "done", Model: "test/model"}, nil
@@ -250,11 +250,11 @@ func TestAlarmReview_TheTurnIsGivenTheAlarmContextAndOnlyReadTools(t *testing.T)
 			offered = append(offered, def.Function.Name)
 		}
 		for _, name := range []string{"propose_changes", "start_watch", "fill_form", "inspect_form", "run_watch_now", "show_telemetry_chart", "search_web", watchReviewToolName} {
-			if _, err := tools.execute(ctx, name, json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "not available in an alarm review") {
+			if _, _, err := tools.execute(ctx, name, json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "not available in an alarm review") {
 				t.Errorf("%s must be refused in an alarm review, got %v", name, err)
 			}
 		}
-		_, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview("Fine."))
+		_, _, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview("Fine."))
 		return assistantReply{}, err
 	})
 	h.r.onRaise(h.raise(), h.now)
@@ -302,12 +302,12 @@ func TestAlarmReview_SubmissionIsHeldToTheAlarmWording(t *testing.T) {
 		"rule id":  "Rule rule-9 fired.",
 		"long":     strings.Repeat("a", maxAlarmReviewChars+1),
 	} {
-		if _, err := tools.execute(context.Background(), alarmReviewToolName, submitAlarmReview(text)); err == nil {
+		if _, _, err := tools.execute(context.Background(), alarmReviewToolName, submitAlarmReview(text)); err == nil {
 			t.Errorf("%s should be refused", name)
 		}
 	}
 	raw, _ := json.Marshal(map[string]any{"review": "The bank is low.", "suggested_rule_change": "Raise the clear point to 12.4 V."})
-	if _, err := tools.execute(context.Background(), alarmReviewToolName, raw); err != nil {
+	if _, _, err := tools.execute(context.Background(), alarmReviewToolName, raw); err != nil {
 		t.Fatal(err)
 	}
 	if s := tools.submission(); s == nil || s.RuleChange != "Raise the clear point to 12.4 V." {
@@ -538,7 +538,7 @@ func TestAlarmReview_TwoRaisesTogetherAreReviewedOnce(t *testing.T) {
 		mu.Lock()
 		runs++
 		mu.Unlock()
-		_, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview("The house bank is low."))
+		_, _, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview("The house bank is low."))
 		return assistantReply{}, err
 	})
 	for i := 0; i < 5; i++ {
@@ -618,7 +618,7 @@ func TestAlarmReview_StartupFailsReviewsLeftRunningAndTheyDoNotHoldBackTheNext(t
 	runs := 0
 	withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
 		runs++
-		_, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview("The house bank is low."))
+		_, _, err := tools.execute(ctx, alarmReviewToolName, submitAlarmReview("The house bank is low."))
 		return assistantReply{}, err
 	})
 	again.onRaise(h.raise(), h.now)

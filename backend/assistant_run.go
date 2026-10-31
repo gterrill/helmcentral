@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 )
@@ -18,13 +20,30 @@ import (
 // handlers.go owns the SSE framing and persistence around one call to run;
 // this file has no knowledge of HTTP or the conversation store.
 
-// assistantMaxToolRounds bounds how many rounds of tool calls the loop will
-// answer before withdrawing tools and forcing a final answer. Comparing two
-// candidate anchorages (find_places, then wind and tides for each) is four
-// calls; eight rounds leaves headroom for a model that checks a third
-// option or retries, while still bounding a runaway loop's latency and
-// OpenRouter spend.
-const assistantMaxToolRounds = 8
+// A run's budget is progress, not a round count (ADR 0240). A round of tool
+// calls is progress when it makes at least one call that is new this run (the
+// same tool with the same arguments has not been called before) and that
+// succeeds. A model that keeps finding new things to look up may keep going,
+// because a passage with several legs legitimately needs many lookups; a model
+// that only repeats itself, or only fails, is stuck, and more rounds will not
+// change that. Three limits follow, and all of them end in the same way: the
+// tools are withdrawn and the model is asked for its answer.
+
+// assistantMaxStalledRounds is how many rounds in a row may make no progress
+// before the loop withdraws tools and forces the final answer. One round with
+// nothing new is ordinary (a model double-checks a figure, or retries after a
+// failure with different wording and gets the same result); two in a row means
+// it has run out of new ideas. Three or more would only spend the operator's
+// money repeating calls whose answers the model already holds.
+const assistantMaxStalledRounds = 2
+
+// assistantMaxToolRounds is the ceiling on tool rounds, however much progress
+// each one makes. It is a safety net against a model that invents new
+// arguments forever, not a target. A three-leg passage check in the field took
+// eight rounds (places, route estimates, wind, tides and a web search for each
+// leg, several calls to a round); 30 is about three times that, enough for a
+// longer passage with a retry or two, and still bounded in OpenRouter spend.
+const assistantMaxToolRounds = 30
 
 // assistantMaxToolFailures bounds how many times one named tool may fail
 // before the loop stops dispatching it for the rest of this run. Three
@@ -80,12 +99,32 @@ const assistantMaxConcurrentToolCalls = 4
 // than silently served a truncated round.
 const assistantMaxToolCallsPerRound = 20
 
-// assistantRunTimeout bounds one whole reply end to end, across every tool
-// round. openRouterCompletionTimeout (openrouter_client.go) bounds each
-// individual completion inside it; this is the outer ceiling so a model
-// that keeps calling tools slowly can never wedge a conversation open past
-// a few minutes.
-const assistantRunTimeout = 3 * time.Minute
+// assistantToolAbandonGrace is how long a round whose tool phase has ended
+// waits for tools that honour the context to return before it stops waiting.
+// A var so a test can shorten it.
+var assistantToolAbandonGrace = 200 * time.Millisecond
+
+// assistantRoundFullError is the error recorded on a call refused for the
+// per-round call cap.
+const assistantRoundFullError = "not run: round already at the call limit"
+
+// assistantToolPhaseTimeout bounds the tool phase of one reply: when it passes,
+// no tool round starts and one in flight is abandoned (ADR 0240). A var so a
+// test can shorten it.
+var assistantToolPhaseTimeout = 10 * time.Minute
+
+// assistantFinalReserve is the time the final answer always gets, however
+// much of the tool phase was used, and the extra time an answer already
+// streaming at the tool deadline gets to finish (ADR 0240). A var so a test
+// can shorten it.
+var assistantFinalReserve = 2 * time.Minute
+
+// assistantRunCeiling is the longest a run can last: the tool phase, then a
+// reserve for a round that was already writing text when it ended, then the
+// forced final answer's own reserve. Cancelling ends it at once.
+func assistantRunCeiling() time.Duration {
+	return assistantRunnerOptions{}.budget().ceiling()
+}
 
 // assistantReply is what one call to assistantRunner.run produces: the
 // final answer text, plus the accounting assistant_handlers.go persists
@@ -114,9 +153,6 @@ type assistantReply struct {
 	// Cards are the cards (ADR 0191) tools built from their results during
 	// this run, in call order. Saved with the assistant message like Proposals.
 	Cards []mateCard
-	// ToolCalls are every tool call this run made, in order, saved with the
-	// assistant message so the answer can be traced.
-	ToolCalls []assistantToolCall
 }
 
 // assistantToolFailures counts, per tool name, how many times a tool call
@@ -261,6 +297,17 @@ type assistantForcedFinalToolLogEntry struct {
 	Result string
 }
 
+// assistantForcedFinalCauseText says, for the model, why the lookups stopped.
+func assistantForcedFinalCauseText(forced string) string {
+	switch forced {
+	case assistantStopStalled:
+		return "before further lookups stopped turning up anything new"
+	case assistantStopRoundCeiling:
+		return "before reaching the limit on lookups"
+	}
+	return "before the time for lookups ran out"
+}
+
 // assistantForcedFinalToolLogText renders log as a "what you already looked
 // up" section for the forced final round's system message, appended after
 // assistantForcedFinalInstruction in the same live suffix - see that
@@ -269,12 +316,12 @@ type assistantForcedFinalToolLogEntry struct {
 // completed tool call - not the ordinary way to get here, but not this
 // function's job to rule out) so run can skip the extra blank line entirely
 // rather than appending a section with nothing in it.
-func assistantForcedFinalToolLogText(log []assistantForcedFinalToolLogEntry) string {
+func assistantForcedFinalToolLogText(log []assistantForcedFinalToolLogEntry, forced string) string {
 	if len(log) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("What you already looked up this turn, before running out of tool calls:")
+	b.WriteString("What you already looked up this turn, " + assistantForcedFinalCauseText(forced) + ":")
 	for _, entry := range log {
 		fmt.Fprintf(&b, "\n- %s(%s) -> %s", entry.Name, entry.Args, entry.Result)
 	}
@@ -349,7 +396,9 @@ type assistantToolExecutor interface {
 	// definitions is the tool list offered to the model, computed from the
 	// same dependencies that execute the calls.
 	definitions() []openRouterTool
-	execute(ctx context.Context, name string, args json.RawMessage) (string, error)
+	// execute returns the tool's result and anything it can say about how it
+	// ran (assistantToolOutcome; zero for a tool with nothing to report).
+	execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error)
 }
 
 // assistantUsageReporter is implemented by a tool executor whose tools make
@@ -376,12 +425,12 @@ type assistantDraftChecker interface {
 
 // assistantRunner drives one assistant reply's agentic tool loop.
 type assistantRunner struct {
-	doer       openRouterDoer
-	apiKey     string
-	model      string
-	autoRouter assistantAutoRouterOptions
-	tools      assistantToolExecutor
-	emit       assistantEmitter
+	doer    openRouterDoer
+	apiKey  string
+	model   string
+	options assistantRunnerOptions
+	tools   assistantToolExecutor
+	emit    assistantEmitter
 }
 
 // assistantTextToolCallMarkers lists the substrings that mark a message's
@@ -560,7 +609,7 @@ func assistantSafeStreamLen(text string) int {
 	return safeLen
 }
 
-func autoRouterPluginForModel(model string, opts assistantAutoRouterOptions) *openRouterPlugin {
+func autoRouterPluginForModel(model string, opts assistantRunnerOptions) *openRouterPlugin {
 	trimmed := strings.TrimSpace(strings.ToLower(model))
 	pluginID := ""
 	switch trimmed {
@@ -623,8 +672,9 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 }
 
 // run asks the model for a reply, answers any tool calls it makes, and
-// repeats until the model returns plain text or assistantMaxToolRounds is
-// reached, at which point Tools and ToolChoice are both left unset entirely
+// repeats until the model returns plain text or the budget (see
+// assistantMaxStalledRounds, assistantMaxToolRounds and
+// assistantToolPhaseTimeout) is used up, at which point Tools and ToolChoice are both left unset entirely
 // to force a final answer with no tool machinery on the wire at all - an
 // earlier version of this loop set tool_choice "none" while leaving Tools
 // populated, which some models/providers still answered with a tool call
@@ -642,10 +692,12 @@ func assistantSystemMessage(model, systemStable, systemLive string) openRouterMe
 // checked and rejected on every round, not only the forced one, since a
 // model doing this mid-run is just as broken. A tool that keeps failing is
 // handled separately and earlier: assistantMaxToolFailures withholds it
-// from further dispatch (see runToolRound) well before the round budget
+// from further dispatch (see runToolRound) well before the run budget
 // above is exhausted. Every completion is independently timed out
-// (openRouterCompletionTimeout); the whole call is bounded by
-// assistantRunTimeout via ctx.
+// (openRouterCompletionTimeout). The tool phase is bounded by
+// assistantToolPhaseTimeout and the forced final answer starts its own clock
+// of assistantFinalReserve, so the whole call is bounded by
+// assistantRunCeiling; cancelling ctx ends it at once.
 //
 // Each round's text streams live to the operator as "delta" events, built
 // from the onContent callback openRouterChatCompletion invokes once per
@@ -804,10 +856,48 @@ func assistantCostMeterFrom(ctx context.Context) *assistantCostMeter {
 	return meter
 }
 
-func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (assistantReply, error) {
-	ctx, cancel := context.WithTimeout(ctx, assistantRunTimeout)
-	defer cancel()
+func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive string, history []openRouterMessage) (reply assistantReply, err error) {
+	started := time.Now()
 	meter := assistantCostMeterFrom(ctx)
+	recorder := assistantRunRecorderFrom(ctx)
+	verbose := r.options.VerboseRunLog
+	runID := assistantConversationIDFrom(ctx)
+
+	// The tool phase runs on its own clock. The final answer does not: it is
+	// given a fresh assistantFinalReserve when it starts, however much of the
+	// tool phase was used, so ctx (the caller's, which only the operator's
+	// cancel ends) is what it derives from.
+	budget := r.options.budget()
+	toolCtx, cancelTool := context.WithTimeout(ctx, budget.toolPhase)
+	defer cancelTool()
+	toolEnd, _ := toolCtx.Deadline()
+
+	// forced is why the budget withdrew the tools, empty until it does.
+	forced := ""
+	// toolRounds counts the rounds of tool calls completed. It is copied into
+	// the reply only when the run answers: the reply is zeroed on an error, and
+	// the log below still wants the count.
+	toolRounds := 0
+	// budgetEnd is when the budget's own clock runs out for the completion in
+	// hand, so a deadline error before it is the completion's own timeout.
+	var budgetEnd time.Time
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("assistant: run %s panicked: %v\n%s", runID, rec, debug.Stack())
+			reply, err = assistantReply{}, fmt.Errorf("the assistant run crashed: %v", rec)
+		}
+		cancelled := err != nil && errors.Is(ctx.Err(), context.Canceled)
+		timeUp := !budgetEnd.IsZero() && !time.Now().Before(budgetEnd)
+		reason := assistantStopReasonFor(forced, err, cancelled, timeUp)
+		recorder.setStop(reason)
+		took := time.Since(started).Round(time.Millisecond)
+		switch {
+		case err != nil:
+			log.Printf("assistant: run %s stopped (%s) after %d tool rounds in %s: %v", runID, reason, toolRounds, took, err)
+		case verbose:
+			log.Printf("assistant: run %s stopped (%s) after %d tool rounds in %s", runID, reason, toolRounds, took)
+		}
+	}()
 
 	messages := make([]openRouterMessage, 0, len(history)+1)
 	messages = append(messages, assistantSystemMessage(r.model, systemStable, systemLive))
@@ -819,24 +909,49 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 
 	// toolLog accumulates every tool call and result this run has made so
 	// far, across every round - see assistantForcedFinalToolLogText's own
-	// doc comment for why: if the round cap is hit, the forced final
+	// doc comment for why: when the budget forces the final answer, that
 	// round's request drops this turn's own tool-call/tool-role messages
-	// entirely, and toolLog is what lets that round still answer from the
-	// earlier rounds' findings instead of none at all.
+	// entirely, and toolLog is what lets it still answer from the earlier
+	// rounds' findings instead of none at all.
 	var toolLog []assistantForcedFinalToolLogEntry
-
-	var reply assistantReply
 
 	// runCalls is every tool call made this run, for the draft check
 	// (ADR 0234); draftSentBack makes the correction a one-time thing.
 	var runCalls []openRouterToolCall
 	draftSentBack := false
 
+	// seen holds every call made so far, by assistantCallKey, and stalled
+	// counts the rounds in a row that made no progress: the budget (ADR 0240).
+	seen := make(map[string]struct{})
+	stalled := 0
+
+	// budgetReason says why the tools must be withdrawn when lookupRounds rounds
+	// of lookups have run, or "" when the budget allows another. A correction
+	// or a round cut off by time is not a round of lookups.
+	budgetReason := func(lookupRounds int) string {
+		switch {
+		case stalled >= budget.maxStalled:
+			return assistantStopStalled
+		case lookupRounds >= budget.maxRounds:
+			return assistantStopRoundCeiling
+		case toolCtx.Err() != nil:
+			return assistantStopTimeCeiling
+		}
+		return ""
+	}
+
+	submitRetried := false
+	var forcedExtra []openRouterMessage
+forcedLoop:
 	for round := 0; ; round++ {
 		// Nothing is sent on a run that has already been stopped.
 		if err := ctx.Err(); err != nil {
 			return assistantReply{}, err
 		}
+		if forced == "" {
+			forced = budgetReason(toolRounds)
+		}
+		forcedFinal := forced != ""
 		r.emit(mateWaitingStatus())
 
 		// session_id makes OpenRouter keep this conversation on one
@@ -850,12 +965,11 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			Usage:     &openRouterUsageOption{Include: true},
 			SessionID: assistantConversationIDFrom(ctx),
 		}
-		if plugin := autoRouterPluginForModel(r.model, r.autoRouter); plugin != nil {
+		if plugin := autoRouterPluginForModel(r.model, r.options); plugin != nil {
 			req.Plugins = []openRouterPlugin{*plugin}
 		}
-		forcedFinal := round == assistantMaxToolRounds
 		if forcedFinal {
-			log.Printf("assistant: tool round cap (%d) reached, forcing a final answer with no tool machinery on the wire", assistantMaxToolRounds)
+			log.Printf("assistant: run %s: %s after %d tool rounds, forcing a final answer with no tool machinery on the wire", runID, assistantForcedReasonText(forced, budget), toolRounds)
 			// No Tools and no ToolChoice at all - tool_choice "none" plus
 			// assistantForcedFinalInstruction already covered the ordinary
 			// case, but a model or provider behind an auto-router can still
@@ -866,6 +980,14 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			// built with Tools populated for every ordinary round, and this
 			// is the one round that unsets it.
 			req.Tools = nil
+			if tool := r.options.SubmitTool; tool != "" {
+				// The one tool an unattended run may still call.
+				for _, def := range r.tools.definitions() {
+					if def.Function.Name == tool {
+						req.Tools = []openRouterTool{def}
+					}
+				}
+			}
 			// This turn's own assistant/tool-call and tool-role messages -
 			// everything appended to messages after the initial system
 			// message and history - are dropped from the request entirely
@@ -881,11 +1003,47 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			// is never modified - only this request's own Messages field is
 			// rebuilt from history, not from messages[1:].
 			forcedLive := systemLive + "\n\n" + assistantForcedFinalInstruction
-			if summary := assistantForcedFinalToolLogText(toolLog); summary != "" {
+			if tool := r.options.SubmitTool; tool != "" {
+				forcedLive += " File your result now by calling " + tool + " with what you have."
+			}
+			if summary := assistantForcedFinalToolLogText(toolLog, forced); summary != "" {
 				forcedLive += "\n\n" + summary
 			}
 			forcedSys := assistantSystemMessage(r.model, systemStable, forcedLive)
-			req.Messages = append([]openRouterMessage{forcedSys}, history...)
+			req.Messages = append(append([]openRouterMessage{forcedSys}, history...), forcedExtra...)
+		}
+
+		// tr is this round's entry in the run's trace; commit files it, with
+		// a one-line log when the operator has asked for the verbose log.
+		tr := assistantTraceRound{Index: round, StartOffsetMs: time.Since(started).Milliseconds(), ForcedFinal: forcedFinal}
+		commit := func(state string) {
+			switch state {
+			case "progress", "no progress":
+				tr.Kind = assistantRoundLookups
+			case "draft sent back":
+				tr.Kind = assistantRoundCorrection
+			case "answer":
+				tr.Kind = assistantRoundAnswer
+				if forcedFinal {
+					tr.Kind = assistantRoundFinal
+				}
+			case "filed with what it had":
+				tr.Kind = assistantRoundFinal
+			case "cut off by time":
+				tr.Kind = assistantRoundCut
+			default:
+				tr.Kind = assistantRoundFailed
+			}
+			recorder.addRound(tr)
+			if verbose {
+				left := time.Until(toolEnd).Round(time.Second)
+				if left < 0 {
+					left = 0
+				}
+				log.Printf("assistant: run %s round %d (%d/%d lookup rounds): elapsed %s, latency %s, tokens %d+%d (%d cached), %d tool calls, %s, stalled %d/%d, tool phase left %s",
+					runID, round, toolRounds, budget.maxRounds, time.Since(started).Round(time.Millisecond), time.Duration(tr.LatencyMs)*time.Millisecond,
+					tr.PromptTokens, tr.CompletionTokens, tr.CachedTokens, len(tr.Calls), state, stalled, budget.maxStalled, left)
+			}
 		}
 
 		// roundText mirrors, fragment by fragment, the content
@@ -903,11 +1061,13 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			emittedLen   int
 			markerFound  bool
 			deltaEmitted bool
+			textStarted  atomic.Bool
 		)
 		onContent := func(fragment string) {
 			if markerFound {
 				return
 			}
+			textStarted.Store(true)
 			roundText.WriteString(fragment)
 			text := roundText.String()
 			if _, found := assistantTextToolCallMarker(text); found {
@@ -923,13 +1083,57 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			deltaEmitted = true
 		}
 
-		completionCtx, cancelCompletion := context.WithTimeout(ctx, openRouterCompletionTimeout)
+		// The forced final completion starts its own clock, so it never
+		// inherits what is left of the tool phase. A tool-phase completion is
+		// abandoned when the tool phase ends, unless it has started writing
+		// text: that is probably the answer, and it may run on into the final
+		// reserve rather than be cut off and redone.
+		completionDeadline := time.Now().Add(openRouterCompletionTimeout)
+		if forcedFinal {
+			budgetEnd = time.Now().Add(budget.finalReserve)
+		} else {
+			budgetEnd = toolEnd.Add(budget.finalReserve)
+		}
+		if budgetEnd.Before(completionDeadline) {
+			completionDeadline = budgetEnd
+		}
+		completionCtx, cancelCompletion := context.WithDeadline(ctx, completionDeadline)
+		stopAtToolEnd := func() bool { return false }
+		if !forcedFinal {
+			stopAtToolEnd = context.AfterFunc(toolCtx, func() {
+				if !textStarted.Load() {
+					cancelCompletion()
+				}
+			})
+		}
+		completionStart := time.Now()
 		resp, err := openRouterChatCompletion(completionCtx, r.doer, r.apiKey, req, onContent)
+		stopAtToolEnd()
 		cancelCompletion()
+		tr.LatencyMs = time.Since(completionStart).Milliseconds()
 		if err != nil {
 			// A request OpenRouter refused outright cost nothing. Any other
 			// failure may have been charged for what it had generated.
 			meter.note(err)
+			toolPhaseOver := !forcedFinal && ctx.Err() == nil && toolCtx.Err() != nil &&
+				(errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled))
+			if !toolPhaseOver && errors.Is(err, context.DeadlineExceeded) && time.Now().Before(budgetEnd) {
+				// Neither the tool phase nor the final reserve has run out:
+				// this one reply took longer than a single reply is allowed.
+				err = fmt.Errorf("a reply from the model took too long: %w", err)
+			}
+			tr.Error = firstErrorLine(err)
+			// The tool phase ran out of time during this completion: take back
+			// what it had shown and go to the final answer.
+			if toolPhaseOver {
+				commit("cut off by time")
+				if deltaEmitted {
+					r.emit(mateRetractEvent{})
+				}
+				forced = assistantStopTimeCeiling
+				continue
+			}
+			commit("completion failed")
 			return assistantReply{}, err
 		}
 
@@ -940,6 +1144,11 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		reply.CostUSD += resp.Usage.Cost
 		meter.add(resp.Usage.Cost)
 		reply.Model = resp.Model
+		recorder.setModel(resp.Model)
+		tr.PromptTokens = resp.Usage.PromptTokens
+		tr.CachedTokens = resp.Usage.PromptTokensDetails.CachedTokens
+		tr.CompletionTokens = resp.Usage.CompletionTokens
+		tr.CostUSD = resp.Usage.Cost
 
 		// Text returned alongside tool calls is thinking aloud, not the
 		// answer - only a choice with zero tool calls is treated as final.
@@ -947,7 +1156,10 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		if len(choice.ToolCalls) == 0 {
 			content := string(choice.Content)
 			if marker, found := assistantTextToolCallMarkerIsGenuine(content); found {
-				return assistantReply{}, fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings. If this answer was actually quoting that syntax verbatim (for example, describing a document that discusses it) rather than attempting a real call, asking the model to quote it inside a code block will avoid this", r.model, marker)
+				ferr := fmt.Errorf("model %q returned a tool call as plain text (%s) instead of an answer; it is not reliably usable with tool calling here - choose a different model in Settings. If this answer was actually quoting that syntax verbatim (for example, describing a document that discusses it) rather than attempting a real call, asking the model to quote it inside a code block will avoid this", r.model, marker)
+				tr.Error = firstErrorLine(ferr)
+				commit("tool call written as text")
+				return assistantReply{}, ferr
 			}
 			// The forced final round asked the model to answer now from
 			// whatever it already gathered - a blank reply here is not a
@@ -958,7 +1170,10 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			// explicitly instead (AGENTS.md's fallback policy: no fake
 			// answer).
 			if forcedFinal && strings.TrimSpace(content) == "" {
-				return assistantReply{}, fmt.Errorf("the assistant did not produce an answer within %d tool rounds (forced final round returned no text)", assistantMaxToolRounds)
+				ferr := fmt.Errorf("the assistant did not produce an answer after %d tool rounds (the final round returned no text)", toolRounds)
+				tr.Error = firstErrorLine(ferr)
+				commit("empty final answer")
+				return assistantReply{}, ferr
 			}
 			trigger, instruction := "", ""
 			if checker, ok := r.tools.(assistantDraftChecker); ok && !forcedFinal {
@@ -970,7 +1185,7 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 				// The correction was sent and the draft still fails the
 				// check. Accept the answer, but say so in the log.
 				log.Printf("assistant: draft check: answer still has a %s; accepted as is", trigger)
-			case round+1 < assistantMaxToolRounds:
+			case budgetReason(toolRounds) == "":
 				draftSentBack = true
 				log.Printf("assistant: draft check: draft has a %s; sending it back once", trigger)
 				// The draft already streamed in part is withdrawn the same
@@ -979,10 +1194,11 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 					r.emit(mateRetractEvent{})
 				}
 				messages = append(messages, choice, openRouterMessage{Role: "user", Content: openRouterContent(instruction)})
+				commit("draft sent back")
 				continue
 			default:
 				// No round left to send it back in.
-				log.Printf("assistant: draft check: draft has a %s; accepted as is (round cap reached)", trigger)
+				log.Printf("assistant: draft check: draft has a %s; accepted as is (budget used up)", trigger)
 			}
 			// The round ended clean: flush whatever the hold-back window
 			// was still withholding, so the operator sees the reply in
@@ -991,11 +1207,62 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 				r.emit(mateDeltaEvent{Text: tail})
 			}
 			reply.Content = content
+			reply.ToolRounds = toolRounds
+			commit("answer")
 			return reply, nil
 		}
 
 		if forcedFinal {
-			return assistantReply{}, fmt.Errorf("the assistant did not produce an answer within %d tool rounds", assistantMaxToolRounds)
+			// An unattended run files its result with its submit tool, which the
+			// forced final answer keeps: that call is run, and the run is done.
+			if r.options.SubmitTool != "" && onlyToolCalls(choice.ToolCalls, r.options.SubmitTool) {
+				filedMessages, calls, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
+				for i := range calls {
+					calls[i].Round = round
+				}
+				tr.Calls = ranToolCalls(calls)
+				if terr != nil {
+					tr.Error = firstErrorLine(terr)
+					commit("tools failed")
+					return assistantReply{}, terr
+				}
+				// A submit that failed or was withheld filed nothing. The model
+				// gets one more turn with the error; if that fails too, the run
+				// fails with the submit error so the real reason shows.
+				for _, c := range calls {
+					if c.Error == "" {
+						continue
+					}
+					tr.Error = c.Error
+					commit("tools failed")
+					if submitRetried {
+						return assistantReply{}, fmt.Errorf("%s did not file: %s", r.options.SubmitTool, c.Error)
+					}
+					submitRetried = true
+					forcedExtra = append(append(forcedExtra, choice), filedMessages...)
+					continue forcedLoop
+				}
+				toolRounds++
+				reply.Content, reply.ToolRounds = string(choice.Content), toolRounds
+				commit("filed with what it had")
+				return reply, nil
+			}
+			ferr := fmt.Errorf("the assistant did not produce an answer after %d tool rounds (it kept calling tools when asked to answer)", toolRounds)
+			tr.Error = firstErrorLine(ferr)
+			commit("tool calls on the final round")
+			return assistantReply{}, ferr
+		}
+
+		// The tool phase ended while this round was being written: a round that
+		// began text and then asked for tools is not run. Its text is withdrawn
+		// and the final answer follows.
+		if toolCtx.Err() != nil {
+			if deltaEmitted {
+				r.emit(mateRetractEvent{})
+			}
+			forced = assistantStopTimeCeiling
+			commit("cut off by time")
+			continue
 		}
 
 		messages = append(messages, choice)
@@ -1009,7 +1276,39 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			r.emit(mateRetractEvent{})
 		}
 
-		toolMessages, calls, terr := r.runToolRound(ctx, choice.ToolCalls, failures)
+		toolMessages, calls, terr := r.runToolRound(toolCtx, choice.ToolCalls, failures)
+		// collectResults lifts each call's result into the reply and the
+		// forced-final log. finishedOnly skips the calls a round cut short
+		// never ran or abandoned.
+		collectResults := func(finishedOnly bool) error {
+			for i, call := range choice.ToolCalls {
+				if finishedOnly && (i >= len(calls) || calls[i].Name == "" || calls[i].Error != "") {
+					continue
+				}
+				result := ""
+				if i < len(toolMessages) {
+					result = string(toolMessages[i].Content)
+				}
+				if tool := lookupMateTool(call.Function.Name); tool != nil && tool.collect != nil {
+					if cerr := tool.collect(result, &reply); cerr != nil {
+						return cerr
+					}
+				}
+				if src, ok := r.tools.(assistantCardSource); ok {
+					reply.Cards = append(reply.Cards, src.takeCards(result)...)
+				}
+				toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
+					Name:   call.Function.Name,
+					Args:   string(call.Function.Arguments),
+					Result: result,
+				})
+			}
+			return nil
+		}
+		for i := range calls {
+			calls[i].Round = round
+		}
+		tr.Calls = ranToolCalls(calls)
 		// Tools that make their own OpenRouter calls (search_web) report what
 		// those cost, so the reply's footer covers them too. This runs before
 		// the error return below: a failed round has still spent.
@@ -1021,6 +1320,12 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			reply.CompletionTokens += u.CompletionTokens
 			reply.CostUSD += u.Cost
 			meter.add(u.Cost)
+			// The round carries what its tools spent too, so the rounds add up
+			// to the answer's cost.
+			tr.PromptTokens += u.PromptTokens
+			tr.CachedTokens += u.PromptTokensDetails.CachedTokens
+			tr.CompletionTokens += u.CompletionTokens
+			tr.CostUSD += u.Cost
 		}
 		if risk, ok := r.tools.(assistantRiskReporter); ok {
 			ids, unknown := risk.drainRisk()
@@ -1032,12 +1337,50 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 			}
 		}
 		if terr != nil {
+			tr.Error = firstErrorLine(terr)
+			timeCut := ctx.Err() == nil && toolCtx.Err() != nil
+			if timeCut {
+				commit("cut off by time")
+			} else {
+				commit("tools failed")
+			}
+			// The tool phase ran out of time during this round: abandon it
+			// and go to the final answer, which has its own time.
+			if timeCut {
+				// What finished still goes to the final answer, with the cards
+				// and proposals it produced.
+				if cerr := collectResults(true); cerr != nil {
+					return assistantReply{}, cerr
+				}
+				forced = assistantStopTimeCeiling
+				continue
+			}
 			return assistantReply{}, terr
 		}
-		for _, tc := range calls {
-			tc.Round = reply.ToolRounds
-			reply.ToolCalls = append(reply.ToolCalls, tc)
+
+		// A round is progress when one of its calls is new to this run and
+		// succeeded. A call that failed still counts as seen, so retrying it
+		// unchanged is not new.
+		progress := false
+		for i, call := range choice.ToolCalls {
+			if i < len(calls) && calls[i].Error == assistantRoundFullError {
+				// Refused, not run: asking again is not a repeat.
+				continue
+			}
+			key := assistantCallKey(call.Function.Name, string(call.Function.Arguments))
+			_, repeat := seen[key]
+			seen[key] = struct{}{}
+			if !repeat && i < len(calls) && calls[i].Error == "" {
+				progress = true
+			}
 		}
+		if progress {
+			stalled = 0
+		} else {
+			stalled++
+		}
+		tr.Progress = progress
+
 		messages = append(messages, toolMessages...)
 
 		// Recorded alongside messages, not instead of it, so a forced final
@@ -1046,28 +1389,32 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 		// messages are dropped from the request. runToolRound's own doc
 		// comment guarantees toolMessages comes back in the same order as
 		// choice.ToolCalls, so the two line up by index.
-		for i, call := range choice.ToolCalls {
-			result := ""
-			if i < len(toolMessages) {
-				result = string(toolMessages[i].Content)
-			}
-			if tool := lookupMateTool(call.Function.Name); tool != nil && tool.collect != nil {
-				if cerr := tool.collect(result, &reply); cerr != nil {
-					return assistantReply{}, cerr
-				}
-			}
-			if src, ok := r.tools.(assistantCardSource); ok {
-				reply.Cards = append(reply.Cards, src.takeCards(result)...)
-			}
-			toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
-				Name:   call.Function.Name,
-				Args:   string(call.Function.Arguments),
-				Result: result,
-			})
+		if cerr := collectResults(false); cerr != nil {
+			tr.Error = firstErrorLine(cerr)
+			commit("tool result unreadable")
+			return assistantReply{}, cerr
 		}
 
-		reply.ToolRounds++
+		toolRounds++
+		state := "no progress"
+		if progress {
+			state = "progress"
+		}
+		commit(state)
 	}
+}
+
+// assistantForcedReasonText says, for the log, why the budget withdrew tools.
+func assistantForcedReasonText(forced string, b assistantRunBudget) string {
+	switch forced {
+	case assistantStopStalled:
+		return fmt.Sprintf("%d rounds in a row made no progress", b.maxStalled)
+	case assistantStopRoundCeiling:
+		return fmt.Sprintf("round ceiling (%d) reached", b.maxRounds)
+	case assistantStopTimeCeiling:
+		return fmt.Sprintf("tool phase time (%s) used up", b.toolPhase)
+	}
+	return forced
 }
 
 // runToolRound executes one round's tool calls concurrently, capped at
@@ -1132,6 +1479,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
+	abandoned := false
 
 	for i, call := range calls {
 		args := json.RawMessage(call.Function.Arguments)
@@ -1158,7 +1506,7 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			r.emit(mateStatusEvent{Text: fmt.Sprintf("%s was not run: this round asked for more than %d tool calls", call.Function.Name, assistantMaxToolCallsPerRound)})
 			mu.Unlock()
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(body), ToolCallID: call.ID}
-			records[i] = assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), Result: body, Error: "not run: round already at the call limit"}
+			records[i] = assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), Result: body, Error: assistantRoundFullError}
 			continue
 		}
 
@@ -1215,9 +1563,9 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 			defer func() { <-sem }()
 
 			toolStart := time.Now()
-			result, terr := r.tools.execute(ctx, call.Function.Name, args)
+			result, outcome, terr := r.tools.execute(ctx, call.Function.Name, args)
 			elapsed := time.Since(toolStart).Round(time.Millisecond)
-			rec := assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), ElapsedMs: elapsed.Milliseconds()}
+			rec := assistantToolCall{Seq: i, Name: call.Function.Name, Args: string(call.Function.Arguments), ElapsedMs: elapsed.Milliseconds(), Cache: outcome.Cache}
 			if terr != nil {
 				failures.record(call.Function.Name)
 				oneLine := firstErrorLine(terr)
@@ -1234,26 +1582,76 @@ func (r *assistantRunner) runToolRound(ctx context.Context, calls []openRouterTo
 				result = string(errBody)
 				rec.Error = oneLine
 				mu.Lock()
-				r.emit(mateStatusEvent{Text: fmt.Sprintf("%s failed: %s", call.Function.Name, oneLine)})
+				if !abandoned {
+					r.emit(mateStatusEvent{Text: fmt.Sprintf("%s failed: %s", call.Function.Name, oneLine)})
+				}
 				mu.Unlock()
 			} else {
 				log.Printf("assistant: tool %s -> %d chars in %s%s", call.Function.Name, len(result), elapsed, assistantFindPlacesLogSuffix(call.Function.Name, result))
 			}
 
-			rec.Result = result
+			rec.Result, rec.ResultBytes = result, len(result)
+			// Under mu: a round abandoned at the end of the tool phase has
+			// already taken its copy of the slots, and what a straggler writes
+			// here afterwards is discarded.
+			mu.Lock()
 			records[i] = rec
 			results[i] = openRouterMessage{Role: "tool", Content: openRouterContent(result), ToolCallID: call.ID}
+			mu.Unlock()
 		}(i, call, args)
 	}
 
-	wg.Wait()
+	finished := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		// The tool phase is over. Tools that honour ctx return at once; give
+		// them a moment to be recorded, then stop waiting. A tool that ignores
+		// ctx finishes on its own and its result is discarded.
+		select {
+		case <-finished:
+		case <-time.After(assistantToolAbandonGrace):
+		}
+	}
+	select {
+	case <-finished:
+	default:
+		mu.Lock()
+		abandoned = true
+		heldResults := append([]openRouterMessage(nil), results...)
+		heldRecords := append([]assistantToolCall(nil), records...)
+		err := firstErr
+		mu.Unlock()
+		if err == nil {
+			err = ctx.Err()
+		}
+		return heldResults, heldRecords, err
+	}
+	// A round that stops early still returns the calls that ran, so the trace
+	// shows what it was doing when it stopped.
 	if firstErr != nil {
-		return nil, nil, firstErr
+		return results, records, firstErr
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, nil, err
+		return results, records, err
 	}
 	return results, records, nil
+}
+
+// ranToolCalls drops the slots of a round's records that no call filled, which
+// a round cut short leaves empty.
+func ranToolCalls(records []assistantToolCall) []assistantToolCall {
+	out := make([]assistantToolCall, 0, len(records))
+	for _, rec := range records {
+		if rec.Name != "" {
+			out = append(out, rec)
+		}
+	}
+	return out
 }
 
 // compactAssistantToolArgs trims a tool call's raw arguments to 200 runes
@@ -1520,4 +1918,14 @@ func assistantAttachmentBlock(doc document, showExcerpt bool) string {
 	b.WriteString("\n")
 
 	return b.String()
+}
+
+// onlyToolCalls says every call in calls is to the named tool.
+func onlyToolCalls(calls []openRouterToolCall, name string) bool {
+	for _, c := range calls {
+		if c.Function.Name != name {
+			return false
+		}
+	}
+	return len(calls) > 0
 }

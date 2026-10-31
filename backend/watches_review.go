@@ -131,12 +131,13 @@ func (t *watchReviewTools) definitions() []openRouterTool {
 	return append(out, openRouterTool{Type: "function", Function: watchReviewToolDef})
 }
 
-func (t *watchReviewTools) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+func (t *watchReviewTools) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
 	if name == watchReviewToolName {
-		return t.submit(args)
+		result, err := t.submit(args)
+		return result, assistantToolOutcome{}, err
 	}
 	if !watchReviewReadTools[name] {
-		return "", fmt.Errorf("%s is not available in a watch review: it reads the boat and cannot change anything", name)
+		return "", assistantToolOutcome{}, fmt.Errorf("%s is not available in a watch review: it reads the boat and cannot change anything", name)
 	}
 	return t.assistantToolDeps.execute(ctx, name, args)
 }
@@ -199,14 +200,16 @@ func (t *watchReviewTools) submission() *watchReviewSubmission {
 
 // watchReviewRunnerFor builds the runner a review drives. A var so a test can
 // replace the whole model exchange.
-var watchReviewRunnerFor = func(apiKey, model string, tools assistantToolExecutor, autoRouter assistantAutoRouterOptions) assistantRunnerFace {
+var watchReviewRunnerFor = func(apiKey, model string, tools assistantToolExecutor, options assistantRunnerOptions) assistantRunnerFace {
+	// Nobody is waiting on a review: it keeps the unattended budget.
+	options.Unattended = true
 	return &assistantRunner{
-		doer:       openRouterHTTPClient,
-		apiKey:     apiKey,
-		model:      model,
-		autoRouter: autoRouter,
-		tools:      tools,
-		emit:       func(mateEvent) {},
+		doer:    openRouterHTTPClient,
+		apiKey:  apiKey,
+		model:   model,
+		options: options,
+		tools:   tools,
+		emit:    func(mateEvent) {},
 	}
 }
 
@@ -264,10 +267,11 @@ func runWatchReview(ctx context.Context, cfg watchConfig, w savedWatch, report w
 				return unattendedInput{}, "the report could not be given to Mate: " + firstErrorLine(err)
 			}
 			return unattendedInput{
-				System:    buildWatchReviewPrompt(pc, units, now, loc, mateToolAvailable(deps, "search_web")),
-				Message:   message,
-				Tools:     tools,
-				Submitted: func() bool { return tools.submission() != nil },
+				System:     buildWatchReviewPrompt(pc, units, now, loc, mateToolAvailable(deps, "search_web")),
+				Message:    message,
+				Tools:      tools,
+				Submitted:  func() bool { return tools.submission() != nil },
+				SubmitTool: watchReviewToolName,
 			}, ""
 		},
 	})

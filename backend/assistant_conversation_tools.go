@@ -196,7 +196,7 @@ var mateToolSearchConversations = mateTool{
 					"required": ["query"]
 				}`),
 	},
-	execute: assistantToolDeps.executeSearchConversations,
+	execute: plainTool(assistantToolDeps.executeSearchConversations),
 	describe: func(args json.RawMessage) string {
 		var a assistantSearchConversationsArgs
 		query := ""
@@ -227,7 +227,7 @@ var mateToolReadConversation = mateTool{
 					"required": ["id"]
 				}`),
 	},
-	execute: assistantToolDeps.executeReadConversation,
+	execute: plainTool(assistantToolDeps.executeReadConversation),
 	describe: func(args json.RawMessage) string {
 		return "Reading an earlier conversation…"
 	},

@@ -117,7 +117,7 @@ var mateToolProposeChanges = mateTool{
 					"required": ["operations"]
 				}`),
 	},
-	execute: assistantToolDeps.executeProposeChanges,
+	execute: plainTool(assistantToolDeps.executeProposeChanges),
 	describe: func(args json.RawMessage) string {
 		return "Preparing the changes…"
 	},

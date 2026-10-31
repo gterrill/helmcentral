@@ -154,19 +154,20 @@ func (e *findPlacesQueryError) Error() string { return e.msg }
 // search_places (ADR 0101) - the provider owns the actual search ladder (an
 // exact-name rung, and a broader rung it runs when told to); this host
 // computes distance/bearing, dedupes, sorts, and trims to maxResults.
-func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMessage) (string, error) {
+func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMessage) (string, assistantToolOutcome, error) {
+	var outcome assistantToolOutcome
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return "", assistantToolOutcome{}, err
 	}
 
 	var args assistantFindPlacesArgs
 	if err := json.Unmarshal(raw, &args); err != nil {
-		return "", fmt.Errorf("parse find_places arguments: %w", err)
+		return "", assistantToolOutcome{}, fmt.Errorf("parse find_places arguments: %w", err)
 	}
 
 	query := strings.TrimSpace(args.Query)
 	if query == "" {
-		return "", &findPlacesQueryError{msg: "find_places: query is required"}
+		return "", assistantToolOutcome{}, &findPlacesQueryError{msg: "find_places: query is required"}
 	}
 	// M-4 finding: query is the only text that reaches a third-party host
 	// (the configured place-names provider) verbatim, so it is bounded and
@@ -175,10 +176,10 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 	// trusting the prompt alone to keep the model from passing through
 	// whatever a document told it to encode here.
 	if n := utf8.RuneCountInString(query); n > assistantFindPlacesMaxQueryRunes {
-		return "", &findPlacesQueryError{msg: fmt.Sprintf("find_places: query is %d characters, longer than the %d-character limit for a place name search", n, assistantFindPlacesMaxQueryRunes)}
+		return "", assistantToolOutcome{}, &findPlacesQueryError{msg: fmt.Sprintf("find_places: query is %d characters, longer than the %d-character limit for a place name search", n, assistantFindPlacesMaxQueryRunes)}
 	}
 	if !assistantFindPlacesQueryPattern.MatchString(query) {
-		return "", &findPlacesQueryError{msg: fmt.Sprintf("find_places: query %q contains characters not valid in a place name search", query)}
+		return "", assistantToolOutcome{}, &findPlacesQueryError{msg: fmt.Sprintf("find_places: query %q contains characters not valid in a place name search", query)}
 	}
 
 	maxResults := args.MaxResults
@@ -204,7 +205,7 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 	// no search centre: without one, distance and bearing are left out.
 	saved, err := d.savedPlaceCandidate(query, lat, lon, haveCentre)
 	if err != nil {
-		return "", err
+		return "", assistantToolOutcome{}, err
 	}
 	if saved != nil {
 		result := assistantFindPlacesResult{
@@ -215,7 +216,8 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		if haveCentre {
 			result.Centre = &assistantLatLon{Lat: lat, Lon: lon}
 		}
-		return capToolResultJSON(&result, nil)
+		out, err := capToolResultJSON(&result, nil)
+		return out, outcome, err
 	}
 
 	if !haveCentre {
@@ -223,21 +225,22 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 			Results: []assistantPlaceCandidate{},
 			Note:    "vessel position unknown; ask the operator for a region or coordinates",
 		}
-		return capToolResultJSON(&result, nil)
+		out, err := capToolResultJSON(&result, nil)
+		return out, outcome, err
 	}
 
 	var candidates []assistantPlaceCandidate
 
 	if err := ctx.Err(); err != nil {
-		return "", err
+		return "", assistantToolOutcome{}, err
 	}
 
 	provider, providerID, err := d.placeNames()
 	if err != nil {
-		return "", fmt.Errorf("find_places: %w", err)
+		return "", assistantToolOutcome{}, fmt.Errorf("find_places: %w", err)
 	}
 
-	searchResult, err := searchPlacesCached(provider, providerID, placeSearchInput{
+	searchResult, cacheHit, err := searchPlacesCached(provider, providerID, placeSearchInput{
 		Query:      query,
 		Lat:        lat,
 		Lon:        lon,
@@ -245,7 +248,11 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		Broad:      true,
 	})
 	if err != nil {
-		return "", fmt.Errorf("find_places: %w", err)
+		return "", assistantToolOutcome{}, fmt.Errorf("find_places: %w", err)
+	}
+	outcome.Cache = "miss"
+	if cacheHit {
+		outcome.Cache = "hit"
 	}
 
 	for _, m := range searchResult.Results {
@@ -294,7 +301,8 @@ func (d assistantToolDeps) executeFindPlaces(ctx context.Context, raw json.RawMe
 		result.Truncated = true
 		return true
 	}
-	return capToolResultJSON(&result, shrink)
+	out, err := capToolResultJSON(&result, shrink)
+	return out, outcome, err
 }
 
 // straightLineFrom is the host-computed straight-line distance (nm, one

@@ -193,6 +193,12 @@ is what it does with them:
 If Mate isn't ready, for example because no model is chosen, the report is still
 recorded and the run says why there is no review.
 
+Nobody is waiting on a review, so Mate gets tighter limits than in a
+conversation. It makes at most 8 rounds of lookups, and spends at most 3 minutes
+on them, before it writes the review with what it has. It also stops sooner if
+two rounds in a row bring nothing new. Either way, Mate still files the review
+with what it has.
+
 Each run shows what its review cost. The page also shows the total for the last
 24 hours. When a failed request leaves the cost unreadable, the run says "cost
 not known". Nothing is paused or skipped because of a cost.
