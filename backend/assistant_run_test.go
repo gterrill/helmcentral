@@ -16,6 +16,12 @@ import (
 	"time"
 )
 
+// stalledToolRounds is how many rounds of the same call it takes to reach the
+// forced final answer: the first is new (progress), the next
+// assistantMaxStalledRounds repeat it and stall. Tests that need the final
+// round without caring why use it as their round count.
+const stalledToolRounds = 1 + assistantMaxStalledRounds
+
 // ── fakes ───────────────────────────────────────────────────────────────
 
 // queuedChatDoer is one captured request/response pair a queuedChatDoer
@@ -265,18 +271,18 @@ func (f *fakeToolExecutor) definitions() []openRouterTool {
 	return assistantToolDefinitions(assistantToolDeps{})
 }
 
-func (f *fakeToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+func (f *fakeToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
 	f.mu.Lock()
 	f.calls = append(f.calls, fakeToolCall{name: name, args: string(args)})
 	f.mu.Unlock()
 
 	if err, ok := f.errs[name]; ok {
-		return "", err
+		return "", assistantToolOutcome{}, err
 	}
 	if result, ok := f.results[name]; ok {
-		return result, nil
+		return result, assistantToolOutcome{}, nil
 	}
-	return "{}", nil
+	return "{}", assistantToolOutcome{}, nil
 }
 
 // slowToolExecutor's execute sleeps for delay before returning a canned
@@ -296,16 +302,16 @@ func (s *slowToolExecutor) definitions() []openRouterTool {
 	return assistantToolDefinitions(assistantToolDeps{})
 }
 
-func (s *slowToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+func (s *slowToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
 	select {
 	case <-time.After(s.delay):
 	case <-ctx.Done():
-		return "", ctx.Err()
+		return "", assistantToolOutcome{}, ctx.Err()
 	}
 	s.mu.Lock()
 	s.calls++
 	s.mu.Unlock()
-	return "{}", nil
+	return "{}", assistantToolOutcome{}, nil
 }
 
 // orderedDelayToolExecutor answers each named tool after that tool's own
@@ -321,18 +327,18 @@ func (o *orderedDelayToolExecutor) definitions() []openRouterTool {
 	return assistantToolDefinitions(assistantToolDeps{})
 }
 
-func (o *orderedDelayToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+func (o *orderedDelayToolExecutor) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
 	if d, ok := o.delays[name]; ok {
 		select {
 		case <-time.After(d):
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", assistantToolOutcome{}, ctx.Err()
 		}
 	}
 	if r, ok := o.results[name]; ok {
-		return r, nil
+		return r, assistantToolOutcome{}, nil
 	}
-	return "{}", nil
+	return "{}", assistantToolOutcome{}, nil
 }
 
 // recordedEvent is one call a recordingEmitter captured, with "text"
@@ -518,7 +524,7 @@ func TestAssistantRunner_OpenRouterAutoAddsAutoRouterPlugin(t *testing.T) {
 		doer:   doer,
 		apiKey: "test-key",
 		model:  "openrouter/auto",
-		autoRouter: assistantAutoRouterOptions{
+		options: assistantRunnerOptions{
 			AllowedModels:  []string{"anthropic/*"},
 			ExcludedModels: []string{"openai/gpt-4o-mini"},
 			CostTier:       "high",
@@ -561,7 +567,7 @@ func TestAssistantRunner_NonAutoModelOmitsAutoRouterPlugin(t *testing.T) {
 		doer:   doer,
 		apiKey: "test-key",
 		model:  "anthropic/claude-sonnet-4.5",
-		autoRouter: assistantAutoRouterOptions{
+		options: assistantRunnerOptions{
 			AllowedModels: []string{"anthropic/*"},
 			CostTier:      "high",
 		},
@@ -686,7 +692,7 @@ func TestAssistantRunner_ToolExecutorErrorBecomesErrorJSONAndContinues(t *testin
 //
 // Background: a real conversation had every find_places call fail because
 // Overpass was down. The model retried it in 7 of 8 rounds, burning the
-// whole assistantMaxToolRounds budget, and only on the forced final round
+// whole stalledToolRounds budget, and only on the forced final round
 // (with no budget left to actually answer) did it fall back to text
 // tool-call markup - see the next section below. assistantMaxToolFailures
 // exists so a tool that is simply down stops being retried long before the
@@ -705,7 +711,16 @@ func TestAssistantRunner_ToolExhaustsFailureBudgetAndIsWithheldOnFourthCall(t *t
 	responses := make([]*http.Response, 0, assistantMaxToolFailures+2)
 	errs := make([]error, 0, assistantMaxToolFailures+2)
 	for i := 0; i <= assistantMaxToolFailures; i++ {
-		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
+		// Each round also makes a new, successful wind call: a round of
+		// nothing but failures is a stall (assistantMaxStalledRounds) and ends
+		// the tool phase before the failure budget is reached, and this test is
+		// about the failure budget.
+		responses = append(responses, chatResponse(t, http.StatusOK, openRouterChatResponse{
+			Choices: []openRouterChoice{{Message: openRouterMessage{Role: "assistant", ToolCalls: []openRouterToolCall{
+				{ID: fmt.Sprintf("call_%d", i), Type: "function", Function: openRouterToolCallFunction{Name: "get_tides", Arguments: openRouterArguments(fmt.Sprintf(`{"lat":%d,"lon":2}`, i))}},
+				{ID: fmt.Sprintf("wind_%d", i), Type: "function", Function: openRouterToolCallFunction{Name: "get_wind_forecast", Arguments: openRouterArguments(fmt.Sprintf(`{"lat":%d,"lon":2}`, i))}},
+			}}}},
+		}))
 		errs = append(errs, nil)
 	}
 	responses = append(responses, finalResponse(t, "here is what I know without tides", "m", openRouterUsage{}))
@@ -726,8 +741,14 @@ func TestAssistantRunner_ToolExhaustsFailureBudgetAndIsWithheldOnFourthCall(t *t
 		t.Fatalf("unexpected content: %q", reply.Content)
 	}
 
-	if len(tools.calls) != assistantMaxToolFailures {
-		t.Fatalf("expected get_tides to be executed exactly %d times, got %d: %+v", assistantMaxToolFailures, len(tools.calls), tools.calls)
+	tideCalls := 0
+	for _, c := range tools.calls {
+		if c.name == "get_tides" {
+			tideCalls++
+		}
+	}
+	if tideCalls != assistantMaxToolFailures {
+		t.Fatalf("expected get_tides to be executed exactly %d times, got %d: %+v", assistantMaxToolFailures, tideCalls, tools.calls)
 	}
 
 	// The request sent right after the withheld 4th call is at index
@@ -736,7 +757,7 @@ func TestAssistantRunner_ToolExhaustsFailureBudgetAndIsWithheldOnFourthCall(t *t
 	withheldReq := doer.requests[assistantMaxToolFailures+1]
 	var toolMsg *openRouterMessage
 	for i := range withheldReq.Messages {
-		if withheldReq.Messages[i].Role == "tool" {
+		if withheldReq.Messages[i].Role == "tool" && withheldReq.Messages[i].ToolCallID == fmt.Sprintf("call_%d", assistantMaxToolFailures) {
 			toolMsg = &withheldReq.Messages[i]
 		}
 	}
@@ -767,8 +788,8 @@ func TestAssistantRunner_UnrelatedToolUnaffectedByExhaustedToolBudget(t *testing
 				Message: openRouterMessage{
 					Role: "assistant",
 					ToolCalls: []openRouterToolCall{
-						{ID: fmt.Sprintf("tides_%d", round), Type: "function", Function: openRouterToolCallFunction{Name: "get_tides", Arguments: openRouterArguments(`{"lat":1,"lon":2}`)}},
-						{ID: fmt.Sprintf("wind_%d", round), Type: "function", Function: openRouterToolCallFunction{Name: "get_wind_forecast", Arguments: openRouterArguments(`{"lat":1,"lon":2}`)}},
+						{ID: fmt.Sprintf("tides_%d", round), Type: "function", Function: openRouterToolCallFunction{Name: "get_tides", Arguments: openRouterArguments(fmt.Sprintf(`{"lat":%d,"lon":2}`, round))}},
+						{ID: fmt.Sprintf("wind_%d", round), Type: "function", Function: openRouterToolCallFunction{Name: "get_wind_forecast", Arguments: openRouterArguments(fmt.Sprintf(`{"lat":%d,"lon":2}`, round))}},
 					},
 				},
 			}},
@@ -817,10 +838,10 @@ func TestAssistantRunner_UnrelatedToolUnaffectedByExhaustedToolBudget(t *testing
 // withheld.
 func TestAssistantRunner_ToolFailureBudgetAccumulatesAcrossNonConsecutiveRounds(t *testing.T) {
 	tidesCall := func(id string) *http.Response {
-		return toolCallResponse(t, id, "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{})
+		return toolCallResponse(t, id, "get_tides", fmt.Sprintf(`{"lat":1,"lon":2,"id":%q}`, id), openRouterUsage{})
 	}
 	windCall := func(id string) *http.Response {
-		return toolCallResponse(t, id, "get_wind_forecast", `{"lat":1,"lon":2}`, openRouterUsage{})
+		return toolCallResponse(t, id, "get_wind_forecast", fmt.Sprintf(`{"lat":1,"lon":2,"id":%q}`, id), openRouterUsage{})
 	}
 
 	responses := []*http.Response{
@@ -829,8 +850,9 @@ func TestAssistantRunner_ToolFailureBudgetAccumulatesAcrossNonConsecutiveRounds(
 		tidesCall("tides_1"), // round 2: fails, count -> 2
 		windCall("wind_1"),   // round 3: unrelated tool again
 		tidesCall("tides_2"), // round 4: fails, count -> 3, budget exhausted
-		tidesCall("tides_3"), // round 5: 4th ask - must be withheld
-		finalResponse(t, "no tides available, but the wind looks fine", "m", openRouterUsage{}), // round 6
+		windCall("wind_2"),   // round 5: progress again, so the run is not stalled
+		tidesCall("tides_3"), // round 6: 4th ask - must be withheld
+		finalResponse(t, "no tides available, but the wind looks fine", "m", openRouterUsage{}), // round 7
 	}
 	errs := make([]error, len(responses))
 
@@ -857,8 +879,8 @@ func TestAssistantRunner_ToolFailureBudgetAccumulatesAcrossNonConsecutiveRounds(
 	if got["get_tides"] != assistantMaxToolFailures {
 		t.Fatalf("expected get_tides executed exactly %d times across non-consecutive rounds, got %d", assistantMaxToolFailures, got["get_tides"])
 	}
-	if got["get_wind_forecast"] != 2 {
-		t.Fatalf("expected get_wind_forecast executed twice, got %d", got["get_wind_forecast"])
+	if got["get_wind_forecast"] != 3 {
+		t.Fatalf("expected get_wind_forecast executed three times, got %d", got["get_wind_forecast"])
 	}
 
 	last := doer.requests[len(doer.requests)-1]
@@ -879,7 +901,7 @@ func TestAssistantRunner_ToolFailureBudgetAccumulatesAcrossNonConsecutiveRounds(
 // ── per-round tool call cap (M-2: nothing bounded how WIDE a single round
 // could be) ────────────────────────────────────────────────────────────
 //
-// Background: assistantMaxToolFailures and assistantMaxToolRounds both
+// Background: assistantMaxToolFailures and stalledToolRounds both
 // bound how long a bad conversation can be retried, but neither stops a
 // single round from asking for an unbounded number of tool calls in one
 // go - an injected document telling the model "check the forecast at each
@@ -982,9 +1004,9 @@ func TestAssistantRunner_ForcedFinalRoundOmitsToolMachinery(t *testing.T) {
 		{Role: "user", Content: openRouterContent("Why did the depth reading stop updating?")},
 	}
 
-	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
-	errs := make([]error, 0, assistantMaxToolRounds+1)
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	responses := make([]*http.Response, 0, stalledToolRounds+1)
+	errs := make([]error, 0, stalledToolRounds+1)
+	for i := 0; i < stalledToolRounds; i++ {
 		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
 		errs = append(errs, nil)
 	}
@@ -999,11 +1021,11 @@ func TestAssistantRunner_ForcedFinalRoundOmitsToolMachinery(t *testing.T) {
 	if _, err := runner.run(context.Background(), "system", "", history); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(doer.requests) != assistantMaxToolRounds+1 {
-		t.Fatalf("expected %d requests, got %d", assistantMaxToolRounds+1, len(doer.requests))
+	if len(doer.requests) != stalledToolRounds+1 {
+		t.Fatalf("expected %d requests, got %d", stalledToolRounds+1, len(doer.requests))
 	}
 
-	forced := doer.requests[assistantMaxToolRounds]
+	forced := doer.requests[stalledToolRounds]
 	if len(forced.Tools) != 0 {
 		t.Fatalf("expected the forced final round to carry no tools, got %d", len(forced.Tools))
 	}
@@ -1039,7 +1061,7 @@ func TestAssistantRunner_ForcedFinalRoundOmitsToolMachinery(t *testing.T) {
 
 	// Every earlier round must still have offered tools normally, with no
 	// tool_choice forced and no instruction yet in its system message.
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	for i := 0; i < stalledToolRounds; i++ {
 		if len(doer.requests[i].Tools) == 0 {
 			t.Fatalf("expected round %d to offer tools", i)
 		}
@@ -1059,9 +1081,9 @@ func TestAssistantRunner_ForcedFinalRoundOmitsToolMachinery(t *testing.T) {
 // any other round's, with ToolRounds correctly counting the rounds that
 // came before it.
 func TestAssistantRunner_ForcedFinalRoundNormalAnswerIsSaved(t *testing.T) {
-	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
-	errs := make([]error, 0, assistantMaxToolRounds+1)
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	responses := make([]*http.Response, 0, stalledToolRounds+1)
+	errs := make([]error, 0, stalledToolRounds+1)
+	for i := 0; i < stalledToolRounds; i++ {
 		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
 		errs = append(errs, nil)
 	}
@@ -1080,8 +1102,8 @@ func TestAssistantRunner_ForcedFinalRoundNormalAnswerIsSaved(t *testing.T) {
 	if reply.Content != "here is what I found" {
 		t.Fatalf("expected the forced round's plain-text answer to be saved, got %q", reply.Content)
 	}
-	if reply.ToolRounds != assistantMaxToolRounds {
-		t.Fatalf("expected ToolRounds to count the %d earlier rounds, got %d", assistantMaxToolRounds, reply.ToolRounds)
+	if reply.ToolRounds != stalledToolRounds {
+		t.Fatalf("expected ToolRounds to count the %d earlier rounds, got %d", stalledToolRounds, reply.ToolRounds)
 	}
 }
 
@@ -1093,9 +1115,9 @@ func TestAssistantRunner_ForcedFinalRoundNormalAnswerIsSaved(t *testing.T) {
 // being disabled - so it must fail the run explicitly rather than saving a
 // blank reply as if it were the assistant's answer.
 func TestAssistantRunner_ForcedFinalRoundWithNoTextErrors(t *testing.T) {
-	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
-	errs := make([]error, 0, assistantMaxToolRounds+1)
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	responses := make([]*http.Response, 0, stalledToolRounds+1)
+	errs := make([]error, 0, stalledToolRounds+1)
+	for i := 0; i < stalledToolRounds; i++ {
 		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
 		errs = append(errs, nil)
 	}
@@ -1111,15 +1133,15 @@ func TestAssistantRunner_ForcedFinalRoundWithNoTextErrors(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when the forced final round returns no text at all")
 	}
-	if !strings.Contains(err.Error(), fmt.Sprintf("%d tool rounds", assistantMaxToolRounds)) {
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d tool rounds", stalledToolRounds)) {
 		t.Fatalf("expected the error to name the round cap, got %q", err)
 	}
 }
 
 func TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors(t *testing.T) {
-	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
-	errs := make([]error, 0, assistantMaxToolRounds+1)
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	responses := make([]*http.Response, 0, stalledToolRounds+1)
+	errs := make([]error, 0, stalledToolRounds+1)
+	for i := 0; i < stalledToolRounds; i++ {
 		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
 		errs = append(errs, nil)
 	}
@@ -1136,7 +1158,7 @@ func TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors(t *testin
 	if err == nil {
 		t.Fatal("expected an error when the model keeps calling tools past the forced final round")
 	}
-	if !strings.Contains(err.Error(), fmt.Sprintf("%d tool rounds", assistantMaxToolRounds)) {
+	if !strings.Contains(err.Error(), fmt.Sprintf("%d tool rounds", stalledToolRounds)) {
 		t.Fatalf("expected the error to name the round cap, got %q", err)
 	}
 }
@@ -1157,9 +1179,9 @@ func TestAssistantRunner_ForcedFinalRoundStillReturningToolCallsErrors(t *testin
 func TestAssistantRunner_ForcedFinalRoundAnthropicCachedBlockUnchanged(t *testing.T) {
 	const model = "anthropic/claude-sonnet-4.5"
 
-	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
-	errs := make([]error, 0, assistantMaxToolRounds+1)
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	responses := make([]*http.Response, 0, stalledToolRounds+1)
+	errs := make([]error, 0, stalledToolRounds+1)
+	for i := 0; i < stalledToolRounds; i++ {
 		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
 		errs = append(errs, nil)
 	}
@@ -1174,8 +1196,8 @@ func TestAssistantRunner_ForcedFinalRoundAnthropicCachedBlockUnchanged(t *testin
 	if _, err := runner.run(context.Background(), "STABLE PREFIX", "LIVE SUFFIX", nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(doer.rawBodies) != assistantMaxToolRounds+1 {
-		t.Fatalf("expected %d requests, got %d", assistantMaxToolRounds+1, len(doer.rawBodies))
+	if len(doer.rawBodies) != stalledToolRounds+1 {
+		t.Fatalf("expected %d requests, got %d", stalledToolRounds+1, len(doer.rawBodies))
 	}
 
 	type block struct {
@@ -1222,7 +1244,7 @@ func TestAssistantRunner_ForcedFinalRoundAnthropicCachedBlockUnchanged(t *testin
 		t.Fatalf("expected round 0's second block to carry the plain live suffix with no instruction yet, got %+v", round0[1])
 	}
 
-	forced := systemBlocks(doer.rawBodies[assistantMaxToolRounds])
+	forced := systemBlocks(doer.rawBodies[stalledToolRounds])
 	if len(forced) != 2 {
 		t.Fatalf("expected 2 content blocks on the forced round, got %+v", forced)
 	}
@@ -1232,13 +1254,13 @@ func TestAssistantRunner_ForcedFinalRoundAnthropicCachedBlockUnchanged(t *testin
 	if forced[0].Text != round0[0].Text || forced[0].CacheControl == nil || round0[0].CacheControl == nil || forced[0].CacheControl.Type != round0[0].CacheControl.Type {
 		t.Fatalf("expected the forced round's cached stable block to be unchanged, got %+v, want %+v", forced[0], round0[0])
 	}
-	// Every one of the assistantMaxToolRounds earlier rounds called
+	// Every one of the stalledToolRounds earlier rounds called
 	// get_tides with the same arguments, and fakeToolExecutor{} (no results
 	// configured) answers every call with "{}" - see
 	// assistantForcedFinalToolLogText for the exact rendering this mirrors.
 	var toolLog strings.Builder
-	toolLog.WriteString("What you already looked up this turn, before running out of tool calls:")
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	toolLog.WriteString("What you already looked up this turn, before further lookups stopped turning up anything new:")
+	for i := 0; i < stalledToolRounds; i++ {
 		toolLog.WriteString("\n- get_tides({\"lat\":1,\"lon\":2}) -> {}")
 	}
 	wantLive := "LIVE SUFFIX\n\n" + assistantForcedFinalInstruction + "\n\n" + toolLog.String()
@@ -1287,12 +1309,12 @@ func TestAssistantRunner_TextToolCallMarkupInFinalResponseErrorsInsteadOfReturni
 
 // TestAssistantRunner_TextToolCallMarkupOnForcedFinalRoundStillErrors checks
 // the same rejection fires on the forced final round (round ==
-// assistantMaxToolRounds) - the exact round the real incident's markup came
+// stalledToolRounds) - the exact round the real incident's markup came
 // back on - rather than only on an earlier round.
 func TestAssistantRunner_TextToolCallMarkupOnForcedFinalRoundStillErrors(t *testing.T) {
-	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
-	errs := make([]error, 0, assistantMaxToolRounds+1)
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	responses := make([]*http.Response, 0, stalledToolRounds+1)
+	errs := make([]error, 0, stalledToolRounds+1)
+	for i := 0; i < stalledToolRounds; i++ {
 		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "find_places", `{"query":"Cairns"}`, openRouterUsage{}))
 		errs = append(errs, nil)
 	}
@@ -2072,9 +2094,9 @@ func TestAssistantRunner_DeltaEventsConcatenateToFinalContent(t *testing.T) {
 func TestAssistantRunner_ForcedFinalRoundStreamsDeltas(t *testing.T) {
 	const want = "Here is the answer after working through every round of tool calls available to it."
 
-	responses := make([]*http.Response, 0, assistantMaxToolRounds+1)
-	errs := make([]error, 0, assistantMaxToolRounds+1)
-	for i := 0; i < assistantMaxToolRounds; i++ {
+	responses := make([]*http.Response, 0, stalledToolRounds+1)
+	errs := make([]error, 0, stalledToolRounds+1)
+	for i := 0; i < stalledToolRounds; i++ {
 		responses = append(responses, toolCallResponse(t, fmt.Sprintf("call_%d", i), "get_tides", `{"lat":1,"lon":2}`, openRouterUsage{}))
 		errs = append(errs, nil)
 	}
@@ -2282,14 +2304,18 @@ func TestAssistantRunner_RecordsToolCallsForTheReply(t *testing.T) {
 	emit, _ := recordingEmitter()
 
 	runner := &assistantRunner{doer: doer, apiKey: "key", model: "m", tools: tools, emit: emit}
-	reply, err := runner.run(context.Background(), "system", "", nil)
-	if err != nil {
+	rec := &assistantRunRecorder{}
+	if _, err := runner.run(withAssistantRunRecorder(context.Background(), rec), "system", "", nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if len(reply.ToolCalls) != 3 {
-		t.Fatalf("expected 3 recorded calls, got %+v", reply.ToolCalls)
+	var c []assistantToolCall
+	recorded, _ := rec.result()
+	for _, r := range recorded {
+		c = append(c, r.Calls...)
 	}
-	c := reply.ToolCalls
+	if len(c) != 3 {
+		t.Fatalf("expected 3 recorded calls, got %+v", c)
+	}
 	if c[0].Round != 0 || c[0].Seq != 0 || c[0].Name != "get_tides" || c[0].Args != `{"lat":1}` || c[0].Error != "" {
 		t.Errorf("call 0: %+v", c[0])
 	}

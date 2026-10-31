@@ -122,15 +122,16 @@ func (s *placeSearchCacheStore) put(key string, result placeSearchResult) {
 }
 
 // searchPlacesCached answers from the cache when it can and otherwise
-// calls the provider, caching only a successful, non-degraded answer.
-func searchPlacesCached(provider placeNameProvider, providerID string, in placeSearchInput) (placeSearchResult, error) {
+// calls the provider, caching only a successful, non-degraded answer. hit says
+// which, so a run's trace can show whether a slow lookup went to the provider.
+func searchPlacesCached(provider placeNameProvider, providerID string, in placeSearchInput) (result placeSearchResult, hit bool, err error) {
 	key := placeSearchCacheKey(providerID, in)
 	if cached, ok := placeSearchCache.get(key); ok {
-		return cached, nil
+		return cached, true, nil
 	}
-	result, err := provider.SearchPlaces(in)
+	result, err = provider.SearchPlaces(in)
 	if err != nil {
-		return placeSearchResult{}, err
+		return placeSearchResult{}, false, err
 	}
 	// An empty result carrying a Note is how a provider reports a degraded
 	// search; remembering it would repeat the failure for hours. A
@@ -143,8 +144,8 @@ func searchPlacesCached(provider placeNameProvider, providerID string, in placeS
 	// empty answer is judged by this rule alone. Replace it with an explicit
 	// flag if the plugin ABI gains one.
 	if len(result.Results) == 0 && result.Note != "" {
-		return result, nil
+		return result, false, nil
 	}
 	placeSearchCache.put(key, result)
-	return result, nil
+	return result, false, nil
 }

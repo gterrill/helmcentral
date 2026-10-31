@@ -390,7 +390,7 @@ var mateToolPlanTidalDeparture = mateTool{
 					"required": ["lat", "lon", "course_deg", "passage_hours", "flood_set_deg", "flood_set_source"]
 				}`),
 	},
-	execute: assistantToolDeps.executePlanTidalDeparture,
+	execute: plainTool(assistantToolDeps.executePlanTidalDeparture),
 	describe: func(args json.RawMessage) string {
 		return fmt.Sprintf("Timing the departure to the tide near %s…", assistantLocationLabel(args))
 	},

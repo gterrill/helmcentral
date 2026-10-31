@@ -12,7 +12,8 @@ import (
 
 func runRecordTool(t *testing.T, deps assistantToolDeps, name, args string) (string, error) {
 	t.Helper()
-	return deps.execute(context.Background(), name, json.RawMessage(args))
+	out, _, err := deps.execute(context.Background(), name, json.RawMessage(args))
+	return out, err
 }
 
 func TestDescribeRecordType_ListsTypesAndDescribesFields(t *testing.T) {

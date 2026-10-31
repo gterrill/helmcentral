@@ -34,7 +34,7 @@ var mateToolMarinaDetails = mateTool{
 					"required": ["lat", "lon"]
 				}`),
 	},
-	execute: assistantToolDeps.executeMarinaDetails,
+	execute: plainTool(assistantToolDeps.executeMarinaDetails),
 	describe: func(args json.RawMessage) string {
 		return "Looking up the marina…"
 	},

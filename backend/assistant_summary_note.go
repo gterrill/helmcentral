@@ -386,7 +386,7 @@ func postAssistantSummaryDraftHandler(c echo.Context) error {
 		},
 		Usage: &openRouterUsageOption{Include: true},
 	}
-	if plugin := autoRouterPluginForModel(params.model, params.autoRouter); plugin != nil {
+	if plugin := autoRouterPluginForModel(params.model, params.options); plugin != nil {
 		req.Plugins = []openRouterPlugin{*plugin}
 	}
 

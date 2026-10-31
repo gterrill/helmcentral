@@ -253,7 +253,7 @@ func buildMCPToolDefs() []mcpToolDef {
 
 func mcpRunMateTool(mt *mateTool, name string) func(context.Context, assistantToolDeps, json.RawMessage) (string, error) {
 	return func(ctx context.Context, d assistantToolDeps, args json.RawMessage) (string, error) {
-		out, err := mt.execute(d, ctx, args)
+		out, _, err := mt.execute(d, ctx, args)
 		if err != nil {
 			return "", err
 		}

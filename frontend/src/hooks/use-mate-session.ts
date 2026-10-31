@@ -66,6 +66,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     appendLocal,
     refresh,
     reloadMessages,
+    markRefused,
     select,
     startNew,
     remove,
@@ -77,7 +78,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     holdFeedback,
     setSummaryNoteId,
   } = conversations
-  const { send: chatSend, abort, attach, isStreamingConversation, answerDelivered } = chat
+  const { send: chatSend, abort, attach, isStreamingConversation, answerDelivered, clearError } = chat
 
   // Answers delivered live to this surface, by message id and the
   // conversation they belong to. Only these can be rated (an answer read back
@@ -210,6 +211,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
       // stream closes makes chat.send resolve null, but the answer is there.
       const askedIn = conversationId
       let answered = false
+      let refused = false
       let shown: AssistantMessage | null = null
       const ids = attachments.map((a) => a.documentId)
       const screen = typeof screenRef.current === 'function' ? screenRef.current() : screenRef.current
@@ -217,6 +219,9 @@ export function useMateSession(options: MateSessionOptions = {}) {
         ...(sendOptions.spoken ? { spoken: true } : {}),
         ...(screen !== undefined ? { screen } : {}),
         ...(ids.length > 0 ? { attachments: ids } : {}),
+        onRefused: () => {
+          refused = true
+        },
         onMessage: (message) => {
           answered = true
           if (activeIdRef.current !== askedIn) return
@@ -232,11 +237,28 @@ export function useMateSession(options: MateSessionOptions = {}) {
       // copy. Not awaited: the session is free for the next question, and
       // the read is dropped if anything changed meanwhile.
       if (shown !== null) void Promise.all([refresh(), reloadMessages(askedIn)])
+      // A refused question (not ready, busy) leaves no run and was never
+      // stored: its bubble stays as typed and so does its notice.
+      else if (refused) {
+        markRefused(localId)
+      }
+      // A question that got no answer may have left a run behind (it ran out
+      // of time, or was stopped): read the thread so the run shows in it, in
+      // place of the live notice.
+      else if (activeIdRef.current === askedIn) {
+        void (cancelRef.current ?? Promise.resolve()).then(() => reloadMessages(askedIn)).then((runShown) => {
+          cancelRef.current = null
+          // The notice belongs to the conversation it was asked in.
+          if (!runShown || activeIdRef.current !== askedIn) return
+          setStoppedIn(null)
+          clearError()
+        })
+      }
       return { answered, message: shown }
     } finally {
       release()
     }
-  }, [create, appendLocal, markLive, chatSend, refresh, reloadMessages])
+  }, [create, appendLocal, markLive, chatSend, refresh, reloadMessages, markRefused, clearError])
 
   const isAnswering = useCallback(() => {
     const id = activeIdRef.current
@@ -245,8 +267,11 @@ export function useMateSession(options: MateSessionOptions = {}) {
 
   // Stop (ADR 0105) tells the server to give up on the run. Stop after the
   // final frame arrived leaves a finished answer, not a stopped one.
+  // The cancel request in flight after Stop. The server answers it only once
+  // the run has stored its trace, so the re-read of the thread waits for it.
+  const cancelRef = useRef<Promise<void> | null>(null)
   const stop = useCallback(() => {
-    void abort()
+    cancelRef.current = abort()
     if (!answerDelivered()) setStoppedIn(activeIdRef.current)
   }, [abort, answerDelivered])
 
@@ -316,6 +341,9 @@ export function useMateSession(options: MateSessionOptions = {}) {
     conversations: conversations.conversations,
     activeId,
     messages: conversations.messages,
+    /** The thread in order: messages, and each run that gave no answer after its
+     * question (ADR 0240). */
+    timeline: conversations.timeline,
     summaryNoteId: conversations.summaryNoteId,
     setSummaryNoteId,
     /** The open conversation is still being read; its previous messages are
@@ -349,6 +377,7 @@ export function useMateSession(options: MateSessionOptions = {}) {
     reloadMessages,
     activeId,
     conversations.messages,
+    conversations.timeline,
     conversations.summaryNoteId,
     setSummaryNoteId,
     conversations.conversationLoading,

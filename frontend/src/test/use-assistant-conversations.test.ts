@@ -290,6 +290,82 @@ describe('useAssistantConversations', () => {
     expect(result.current.messages[1]).toBe(streamedReply)
   })
 
+  // The server trims a question before it stores it, so the optimistic copy
+  // (as typed, with stray spaces) is still the same question.
+  it('reloadMessages matches an optimistic question to the server copy by trimmed content', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+      return { ok: true, json: async () => ({ conversation: conversationApi(), messages: [messageApi({ id: 'u1', content: 'Is the tide turning?' })] }) }
+    }))
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => {
+      result.current.appendLocal({ id: 'local-1', clientKey: 'local-1', conversationId: 'c1', seq: -1, role: 'user', content: '  Is the tide turning?\n', createdAt: '' })
+    })
+
+    await act(async () => { await result.current.reloadMessages('c1') })
+
+    expect(result.current.messages).toEqual([expect.objectContaining({ id: 'u1', clientKey: 'local-1' })])
+  })
+
+  // A refused question was never stored: it stays where it was typed, not after
+  // messages the server has since added, and an unmatched question that was not
+  // refused is dropped.
+  it('reloadMessages keeps a refused question in place and drops an unmatched one that was not refused', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+      return {
+        ok: true,
+        json: async () => ({
+          conversation: conversationApi(),
+          messages: [
+            messageApi({ id: 'u1', seq: 1, content: 'First' }),
+            messageApi({ id: 'w1', seq: 2, role: 'watch', content: 'Watch finished: depth' }),
+          ],
+        }),
+      }
+    }))
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => {
+      result.current.appendLocal({ id: 'u1', conversationId: 'c1', seq: 1, role: 'user', content: 'First', createdAt: '' })
+      result.current.appendLocal({ id: 'local-1', conversationId: 'c1', seq: -1, role: 'user', content: 'Refused one', createdAt: '' })
+      result.current.markRefused('local-1')
+    })
+
+    await act(async () => { await result.current.reloadMessages('c1') })
+    expect(result.current.messages.map((m) => m.id)).toEqual(['u1', 'local-1', 'w1'])
+
+    act(() => {
+      result.current.appendLocal({ id: 'local-2', conversationId: 'c1', seq: -1, role: 'user', content: 'Never stored', createdAt: '' })
+    })
+    await act(async () => { await result.current.reloadMessages('c1') })
+    expect(result.current.messages.map((m) => m.id)).toEqual(['u1', 'local-1', 'w1'])
+  })
+
+  // The same text asked twice, the first refused: the stored question belongs
+  // to the second send, and the refused bubble stays where it was.
+  it('reloadMessages does not give a stored question to an earlier refused one with the same text', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url: string) => {
+      if (url === '/api/assistant/conversations') return { ok: true, json: async () => ({ conversations: [conversationApi()] }) }
+      return { ok: true, json: async () => ({ conversation: conversationApi(), messages: [messageApi({ id: 'u1', seq: 1, content: 'Tide at the bar?' })] }) }
+    }))
+    const { result } = renderHook(() => useAssistantConversations())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => {
+      result.current.appendLocal({ id: 'local-1', clientKey: 'k1', conversationId: 'c1', seq: -1, role: 'user', content: 'Tide at the bar?', createdAt: '' })
+      result.current.markRefused('local-1')
+      result.current.appendLocal({ id: 'local-2', clientKey: 'k2', conversationId: 'c1', seq: -1, role: 'user', content: 'Tide at the bar?', createdAt: '' })
+    })
+
+    await act(async () => { await result.current.reloadMessages('c1') })
+
+    expect(result.current.messages).toEqual([
+      expect.objectContaining({ id: 'local-1', refused: true }),
+      expect.objectContaining({ id: 'u1', clientKey: 'k2' }),
+    ])
+  })
+
   // The quiet re-read after an answer lands must not drop a message
   // appended while it was in flight: it may predate that message.
   it('reloadMessages drops its answer when a message was appended meanwhile', async () => {
@@ -305,7 +381,7 @@ describe('useAssistantConversations', () => {
     const { result } = renderHook(() => useAssistantConversations())
     await waitFor(() => expect(result.current.loading).toBe(false))
 
-    let reloading!: Promise<void>
+    let reloading!: Promise<boolean>
     act(() => { reloading = result.current.reloadMessages('c1') })
     await waitFor(() => expect(answer).toBeTypeOf('function'))
     act(() => {
@@ -729,7 +805,7 @@ describe('describeLoadError', () => {
       await act(async () => { await result.current.select('c1') })
 
       slow = true
-      let reloading!: Promise<void>
+      let reloading!: Promise<boolean>
       act(() => { reloading = result.current.reloadMessages('c1') })
       await waitFor(() => expect(answer).toBeTypeOf('function'))
       act(() => result.current.updatePassageDecision(12, savedView))

@@ -19,7 +19,7 @@ func TestSearchConversationsTool_ReturnsExcerptsAndExcludesCurrent(t *testing.T)
 	current := seedSearchConv(t, s, "Today", [2]string{"user", "reverso again"})
 
 	ctx := withAssistantConversationID(context.Background(), current.ID)
-	out, err := conversationToolDeps(s).execute(ctx, "search_conversations", json.RawMessage(`{"query":"reverso"}`))
+	out, _, err := conversationToolDeps(s).execute(ctx, "search_conversations", json.RawMessage(`{"query":"reverso"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestSearchConversationsTool_FindsWordInLaterMessage(t *testing.T) {
 	past := seedSearchConv(t, s, "Fuel",
 		[2]string{"user", "hello"},
 		[2]string{"assistant", "the manifold has no sampling valve"})
-	out, err := conversationToolDeps(s).execute(context.Background(), "search_conversations", json.RawMessage(`{"query":"sampling valve"}`))
+	out, _, err := conversationToolDeps(s).execute(context.Background(), "search_conversations", json.RawMessage(`{"query":"sampling valve"}`))
 	if err != nil || !strings.Contains(out, past.ID) {
 		t.Fatalf("out=%s err=%v", out, err)
 	}
@@ -48,10 +48,10 @@ func TestSearchConversationsTool_FindsWordInLaterMessage(t *testing.T) {
 
 func TestSearchConversationsTool_Errors(t *testing.T) {
 	s := newTestAssistantStore(t)
-	if _, err := conversationToolDeps(s).execute(context.Background(), "search_conversations", json.RawMessage(`{"query":" "}`)); err == nil {
+	if _, _, err := conversationToolDeps(s).execute(context.Background(), "search_conversations", json.RawMessage(`{"query":" "}`)); err == nil {
 		t.Fatal("expected empty-query error")
 	}
-	if _, err := (assistantToolDeps{}).execute(context.Background(), "search_conversations", json.RawMessage(`{"query":"x"}`)); err == nil {
+	if _, _, err := (assistantToolDeps{}).execute(context.Background(), "search_conversations", json.RawMessage(`{"query":"x"}`)); err == nil {
 		t.Fatal("expected unavailable error")
 	}
 }
@@ -64,7 +64,7 @@ func TestReadConversationTool_ReturnsMessagesAndAttachments(t *testing.T) {
 	s.AppendMessage(assistantMessage{ConversationID: c.ID, Role: "watch", Content: "watch report"})
 	s.AppendMessage(assistantMessage{ConversationID: c.ID, Role: "assistant", Content: strings.Repeat("x", 3000)})
 
-	out, err := conversationToolDeps(s).execute(context.Background(), "read_conversation", json.RawMessage(`{"id":"`+c.ID+`"}`))
+	out, _, err := conversationToolDeps(s).execute(context.Background(), "read_conversation", json.RawMessage(`{"id":"`+c.ID+`"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,10 +84,10 @@ func TestReadConversationTool_RefusesCurrentAndUnknown(t *testing.T) {
 	s := newTestAssistantStore(t)
 	c, _ := s.CreateConversation("x")
 	ctx := withAssistantConversationID(context.Background(), c.ID)
-	if _, err := conversationToolDeps(s).execute(ctx, "read_conversation", json.RawMessage(`{"id":"`+c.ID+`"}`)); err == nil {
+	if _, _, err := conversationToolDeps(s).execute(ctx, "read_conversation", json.RawMessage(`{"id":"`+c.ID+`"}`)); err == nil {
 		t.Fatal("expected current-conversation error")
 	}
-	if _, err := conversationToolDeps(s).execute(context.Background(), "read_conversation", json.RawMessage(`{"id":"nope"}`)); err == nil {
+	if _, _, err := conversationToolDeps(s).execute(context.Background(), "read_conversation", json.RawMessage(`{"id":"nope"}`)); err == nil {
 		t.Fatal("expected unknown error")
 	}
 }

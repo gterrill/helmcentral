@@ -46,7 +46,7 @@ func mustToolRule(t *testing.T, store *documentStore, in maintenanceRuleInput) m
 
 func runMaintenanceTool(t *testing.T, deps assistantToolDeps, name, args string) string {
 	t.Helper()
-	raw, err := deps.execute(context.Background(), name, json.RawMessage(args))
+	raw, _, err := deps.execute(context.Background(), name, json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("execute %s: %v", name, err)
 	}
@@ -354,7 +354,7 @@ func TestListMaintenance_Filters(t *testing.T) {
 
 func TestListMaintenance_UnknownStatusIsAnError(t *testing.T) {
 	deps, _ := maintenanceToolDeps(t)
-	_, err := deps.execute(context.Background(), "list_maintenance", json.RawMessage(`{"status":"soonish"}`))
+	_, _, err := deps.execute(context.Background(), "list_maintenance", json.RawMessage(`{"status":"soonish"}`))
 	if err == nil || !strings.Contains(err.Error(), "status") {
 		t.Fatalf("expected an error naming the status argument, got %v", err)
 	}
@@ -383,19 +383,19 @@ func TestMaintenanceTools_RequireTodayAndAStore(t *testing.T) {
 
 	noToday := deps
 	noToday.today = time.Time{}
-	if _, err := noToday.execute(context.Background(), "list_maintenance", json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "today") {
+	if _, _, err := noToday.execute(context.Background(), "list_maintenance", json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "today") {
 		t.Fatalf("expected list_maintenance to fail naming today, got %v", err)
 	}
 
 	noStore := assistantToolDeps{today: deps.today}
 	for _, tool := range []string{"find_equipment", "list_maintenance", "get_maintenance_log"} {
-		_, err := noStore.execute(context.Background(), tool, json.RawMessage(`{}`))
+		_, _, err := noStore.execute(context.Background(), tool, json.RawMessage(`{}`))
 		if err == nil || !strings.Contains(err.Error(), "not available") {
 			t.Errorf("%s: expected a store-unavailable error, got %v", tool, err)
 		}
 	}
 	nilStore := assistantToolDeps{today: deps.today, documents: func() *documentStore { return nil }}
-	if _, err := nilStore.execute(context.Background(), "list_maintenance", json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "not available") {
+	if _, _, err := nilStore.execute(context.Background(), "list_maintenance", json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "not available") {
 		t.Fatalf("expected a nil store to be an error, got %v", err)
 	}
 }
@@ -456,7 +456,7 @@ func TestListMaintenance_MeterReadingsSurviveAMeterReplacement(t *testing.T) {
 
 func TestListMaintenance_UnknownEquipmentIDIsAnError(t *testing.T) {
 	deps, _ := maintenanceToolDeps(t)
-	_, err := deps.execute(context.Background(), "list_maintenance", json.RawMessage(`{"equipment_id":"nope"}`))
+	_, _, err := deps.execute(context.Background(), "list_maintenance", json.RawMessage(`{"equipment_id":"nope"}`))
 	if err == nil || !strings.Contains(err.Error(), `"nope"`) || !strings.Contains(err.Error(), "find_equipment") {
 		t.Fatalf("expected an error naming the id and pointing to find_equipment, got %v", err)
 	}
@@ -544,7 +544,7 @@ func TestGetMaintenanceLog_RuleFilterAndBadArguments(t *testing.T) {
 	}
 
 	for _, args := range []string{`{"since":"last week"}`, `{"equipment_id":"nope"}`, `{"rule_id":"nope"}`} {
-		if _, err := deps.execute(context.Background(), "get_maintenance_log", json.RawMessage(args)); err == nil {
+		if _, _, err := deps.execute(context.Background(), "get_maintenance_log", json.RawMessage(args)); err == nil {
 			t.Errorf("expected an error for %s", args)
 		}
 	}

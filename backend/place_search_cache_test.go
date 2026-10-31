@@ -10,7 +10,8 @@ import (
 
 func findPlacesRaw(t *testing.T, deps assistantToolDeps, args string) (string, error) {
 	t.Helper()
-	return deps.execute(context.Background(), "find_places", json.RawMessage(args))
+	out, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(args))
+	return out, err
 }
 
 func cacheTestResult() placeSearchResult {

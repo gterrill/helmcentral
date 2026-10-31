@@ -849,7 +849,7 @@ var mateToolShowTelemetryChart = mateTool{
 					"required": ["series", "from", "to"]
 				}`),
 	},
-	execute: assistantToolDeps.executeShowTelemetryChart,
+	execute: plainTool(assistantToolDeps.executeShowTelemetryChart),
 	describe: func(args json.RawMessage) string {
 		return "Drawing a chart of the logged readings…"
 	},

@@ -46,7 +46,7 @@ type tileCardResult struct {
 
 func tileCardRun(t *testing.T, d assistantToolDeps, args string) (string, tileCardResult) {
 	t.Helper()
-	out, err := d.execute(context.Background(), "show_tile", json.RawMessage(args))
+	out, _, err := d.execute(context.Background(), "show_tile", json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("show_tile: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestShowTileDepthTideSaysWhichReadingIsMissing(t *testing.T) {
 func TestShowTileRefusesATileOutsideTheTable(t *testing.T) {
 	d := tileCardDeps(vesselStateData{Depth: 3})
 	for _, args := range []string{`{"tile":"generator"}`, `{"tile":"wind"}`, `{}`} {
-		_, err := d.execute(context.Background(), "show_tile", json.RawMessage(args))
+		_, _, err := d.execute(context.Background(), "show_tile", json.RawMessage(args))
 		if err == nil || !strings.Contains(err.Error(), "depth-tide") {
 			t.Errorf("%s: err = %v, want one naming the tiles on offer", args, err)
 		}
@@ -236,7 +236,7 @@ func TestShowTileStopsWhenTheTurnIsCancelled(t *testing.T) {
 		t.Error("the tide was read after the turn was cancelled")
 		return tideTodayResponse{}, nil
 	}
-	if _, err := d.execute(ctx, "show_tile", json.RawMessage(`{"tile":"depth-tide"}`)); !errors.Is(err, context.Canceled) {
+	if _, _, err := d.execute(ctx, "show_tile", json.RawMessage(`{"tile":"depth-tide"}`)); !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
 	if got := d.takeCards(""); got != nil {
@@ -247,7 +247,7 @@ func TestShowTileStopsWhenTheTurnIsCancelled(t *testing.T) {
 func TestShowTileNamesTheDependencyThatIsNotWired(t *testing.T) {
 	d := tileCardDeps(vesselStateData{Depth: 3})
 	d.tileTide = nil
-	_, err := d.execute(context.Background(), "show_tile", json.RawMessage(`{"tile":"depth-tide"}`))
+	_, _, err := d.execute(context.Background(), "show_tile", json.RawMessage(`{"tile":"depth-tide"}`))
 	if err == nil || !strings.Contains(err.Error(), "depth-tide") || !strings.Contains(err.Error(), "tileTide") {
 		t.Errorf("err = %v, want one naming depth-tide and tileTide", err)
 	}

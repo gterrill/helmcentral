@@ -1005,7 +1005,7 @@ var mateToolCheckSignalKPaths = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeCheckSignalKPaths,
+	execute: plainTool(assistantToolDeps.executeCheckSignalKPaths),
 	describe: func(args json.RawMessage) string {
 		var a assistantCheckSignalKPathsArgs
 		filter := ""
@@ -1045,7 +1045,7 @@ var mateToolGetLastRecorded = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeGetLastRecorded,
+	execute: plainTool(assistantToolDeps.executeGetLastRecorded),
 	describe: func(args json.RawMessage) string {
 		var a assistantGetLastRecordedArgs
 		label := ""
@@ -1090,7 +1090,7 @@ var mateToolGetPathHistory = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeGetPathHistory,
+	execute: plainTool(assistantToolDeps.executeGetPathHistory),
 	describe: func(args json.RawMessage) string {
 		var a assistantGetPathHistoryArgs
 		path := ""

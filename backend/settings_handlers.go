@@ -145,6 +145,9 @@ type settingsPayload struct {
 		VoiceInput          bool     `json:"voice_input"`
 		ReadAloud           bool     `json:"read_aloud"`
 		WakeWord            bool     `json:"wake_word"`
+		// VerboseRunLog writes one log line for every round of every Mate run,
+		// for use while Mate's behaviour is being worked on. Off by default.
+		VerboseRunLog bool `json:"verbose_run_log"`
 		// WebSearch lets Mate search the web through OpenRouter when it needs
 		// outside information (search_web). Off by default; when off the tool
 		// is not offered to the model at all.
@@ -385,6 +388,7 @@ func updateSettingsHandler(c echo.Context) error {
 		"voice_input":          normalized.Assistant.VoiceInput,
 		"read_aloud":           normalized.Assistant.ReadAloud,
 		"wake_word":            normalized.Assistant.WakeWord,
+		"verbose_run_log":      normalized.Assistant.VerboseRunLog,
 		"web_search":           normalized.Assistant.WebSearch,
 		"web_search_model":     normalized.Assistant.WebSearchModel,
 	}
@@ -738,6 +742,9 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		if v, ok := assistantMap["wake_word"].(bool); ok {
 			payload.Assistant.WakeWord = v
 		}
+		if v, ok := assistantMap["verbose_run_log"].(bool); ok {
+			payload.Assistant.VerboseRunLog = v
+		}
 		if raw, ok := assistantMap["web_search_model"]; ok {
 			payload.Assistant.WebSearchModel = strings.TrimSpace(coerceString(raw))
 		}
@@ -906,6 +913,7 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	normalized.Assistant.VoiceInput = req.Assistant.VoiceInput
 	normalized.Assistant.ReadAloud = req.Assistant.ReadAloud
 	normalized.Assistant.WakeWord = req.Assistant.WakeWord
+	normalized.Assistant.VerboseRunLog = req.Assistant.VerboseRunLog
 	normalized.Assistant.WebSearch = req.Assistant.WebSearch
 	normalized.Assistant.WebSearchModel = strings.TrimSpace(req.Assistant.WebSearchModel)
 	normalized.Assistant.PassageLimits = req.Assistant.PassageLimits

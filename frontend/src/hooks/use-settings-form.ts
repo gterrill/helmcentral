@@ -87,6 +87,7 @@ export type SettingsPayload = {
     voice_input?: boolean
     read_aloud?: boolean
     wake_word?: boolean
+    verbose_run_log?: boolean
     web_search?: boolean
     web_search_model?: string
     passage_limits?: PassageLimitsPayload

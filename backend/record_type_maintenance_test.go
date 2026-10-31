@@ -23,7 +23,7 @@ func proposeDeps(t *testing.T) (assistantToolDeps, *documentStore) {
 
 func runPropose(t *testing.T, deps assistantToolDeps, args string) assistantProposal {
 	t.Helper()
-	raw, err := deps.execute(context.Background(), "propose_changes", json.RawMessage(args))
+	raw, _, err := deps.execute(context.Background(), "propose_changes", json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("propose_changes: %v", err)
 	}
@@ -45,7 +45,7 @@ func opsArgs(ops ...changeOp) string {
 
 func proposeError(t *testing.T, deps assistantToolDeps, args string) string {
 	t.Helper()
-	_, err := deps.execute(context.Background(), "propose_changes", json.RawMessage(args))
+	_, _, err := deps.execute(context.Background(), "propose_changes", json.RawMessage(args))
 	if err == nil {
 		t.Fatalf("expected propose_changes to fail for %s", args)
 	}

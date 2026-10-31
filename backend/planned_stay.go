@@ -502,7 +502,7 @@ var mateToolGetPlannedStay = mateTool{
 			"pass its lat and lon to get_wind_forecast and get_tides. " + rulePlannedStay,
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
-	execute: assistantToolDeps.executeGetPlannedStay,
+	execute: plainTool(assistantToolDeps.executeGetPlannedStay),
 	describe: func(args json.RawMessage) string {
 		return "Reading the planned stay…"
 	},

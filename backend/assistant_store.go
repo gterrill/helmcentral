@@ -54,13 +54,6 @@ type assistantMessage struct {
 	// answer was written under (assistantPromptVersion). Empty on user rows
 	// and on answers from before it was recorded.
 	PromptVersion string `json:"prompt_version,omitempty"`
-	// ToolCalls are the calls Mate made to write this answer. They are saved
-	// with the row (message_tool_calls) and read through ListToolCalls, never
-	// sent with the message itself: results can be tens of kB.
-	ToolCalls []assistantToolCall `json:"-"`
-	// ToolCallsRecorded marks a row whose tool calls were written with it (even
-	// when there were none), so a missing trace is told apart from "no tools".
-	ToolCallsRecorded bool `json:"-"`
 	// Feedback is the operator's rating of this answer, nil when unrated.
 	// Read by ListMessages; the live "message" event never carries one.
 	Feedback  *assistantFeedbackSummary `json:"feedback,omitempty"`
@@ -171,7 +164,7 @@ func createAssistantSchema(db *sql.DB) error {
 			cache_write_tokens INTEGER NOT NULL DEFAULT 0,
 			tool_rounds       INTEGER NOT NULL DEFAULT 0,
 			prompt_version    TEXT NOT NULL DEFAULT '',
-			tool_calls_recorded INTEGER NOT NULL DEFAULT 0,
+			lookups_pruned    INTEGER NOT NULL DEFAULT 0,
 			created_at        INTEGER NOT NULL
 		)`); err != nil {
 		return fmt.Errorf("create messages table: %w", err)
@@ -223,13 +216,14 @@ func createAssistantSchema(db *sql.DB) error {
 		}
 	}
 
-	var hasRecorded int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'tool_calls_recorded'`).Scan(&hasRecorded); err != nil {
+	// lookups_pruned marks an answer whose run the retention rule cleared.
+	var hasPruned int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name = 'lookups_pruned'`).Scan(&hasPruned); err != nil {
 		return fmt.Errorf("inspect messages table: %w", err)
 	}
-	if hasRecorded == 0 {
-		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN tool_calls_recorded INTEGER NOT NULL DEFAULT 0`); err != nil {
-			return fmt.Errorf("add messages.tool_calls_recorded: %w", err)
+	if hasPruned == 0 {
+		if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN lookups_pruned INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add messages.lookups_pruned: %w", err)
 		}
 	}
 
@@ -262,7 +256,13 @@ func createAssistantSchema(db *sql.DB) error {
 	if err := createPassageDecisionsSchema(db); err != nil {
 		return err
 	}
-	return createAssistantFeedbackSchema(db)
+	if err := createAssistantFeedbackSchema(db); err != nil {
+		return err
+	}
+	if err := createAssistantRunsSchema(db); err != nil {
+		return err
+	}
+	return migrateMessageToolCalls(db)
 }
 
 // newAssistantStore opens (creating if necessary) the SQLite database at
@@ -446,6 +446,11 @@ func (s *assistantStore) DeleteConversation(id string) error {
 		return fmt.Errorf("delete conversation messages: %w", err)
 	}
 
+	// The runs' rounds and calls go with them (ON DELETE CASCADE).
+	if _, err := tx.Exec(`DELETE FROM assistant_runs WHERE conversation_id = ?`, id); err != nil {
+		return fmt.Errorf("delete conversation runs: %w", err)
+	}
+
 	result, err := tx.Exec(`DELETE FROM conversations WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete conversation: %w", err)
@@ -502,9 +507,9 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 	m.CreatedAt = now
 
 	if _, err := tx.Exec(
-		`INSERT INTO messages (id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, prompt_version, tool_calls_recorded, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ID, m.ConversationID, m.Seq, m.Role, m.Content, m.Model, m.PromptTokens, m.CompletionTokens, m.CostUSD, m.CachedTokens, m.CacheWriteTokens, m.ToolRounds, m.PromptVersion, m.ToolCallsRecorded, m.CreatedAt.Unix()); err != nil {
+		`INSERT INTO messages (id, conversation_id, seq, role, content, model, prompt_tokens, completion_tokens, cost_usd, cached_tokens, cache_write_tokens, tool_rounds, prompt_version, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ID, m.ConversationID, m.Seq, m.Role, m.Content, m.Model, m.PromptTokens, m.CompletionTokens, m.CostUSD, m.CachedTokens, m.CacheWriteTokens, m.ToolRounds, m.PromptVersion, m.CreatedAt.Unix()); err != nil {
 		return assistantMessage{}, fmt.Errorf("insert message: %w", err)
 	}
 
@@ -544,15 +549,6 @@ func (s *assistantStore) AppendMessage(m assistantMessage) (assistantMessage, er
 			return assistantMessage{}, fmt.Errorf("insert message cards: only an assistant message can carry them, got role %q", m.Role)
 		}
 		if err := insertAssistantCardsTx(tx, m.ConversationID, m.ID, m.Cards, now); err != nil {
-			return assistantMessage{}, err
-		}
-	}
-
-	if len(m.ToolCalls) > 0 {
-		if m.Role != "assistant" {
-			return assistantMessage{}, fmt.Errorf("insert message tool calls: only an assistant message can carry them, got role %q", m.Role)
-		}
-		if err := insertAssistantToolCallsTx(tx, m.ID, m.ToolCalls); err != nil {
 			return assistantMessage{}, err
 		}
 	}

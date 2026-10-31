@@ -313,9 +313,9 @@ var mateToolShowTile = mateTool{
 			"first and quote the key figure. If a reading is missing the tool says which, and you say so too.",
 		Parameters: mateTileParameters(),
 	},
-	execute: func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, error) {
+	execute: plainTool(func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, error) {
 		return d.executeShowTile(ctx, args)
-	},
+	}),
 	describe: func(args json.RawMessage) string {
 		var in struct {
 			Tile string `json:"tile"`

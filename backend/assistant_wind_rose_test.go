@@ -135,7 +135,8 @@ const knMS = 0.514444
 
 func wrRun(t *testing.T, d assistantToolDeps, args string) (string, error) {
 	t.Helper()
-	return d.execute(context.Background(), "show_wind_rose", json.RawMessage(args))
+	out, _, err := d.execute(context.Background(), "show_wind_rose", json.RawMessage(args))
+	return out, err
 }
 
 func wrCard(t *testing.T, d assistantToolDeps, res string) windRosePayload {

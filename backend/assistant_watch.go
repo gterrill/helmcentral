@@ -87,10 +87,16 @@ const (
 	assistantWatchFinishedKeep = 15 * time.Minute
 )
 
-// assistantWatchFollowUpDeadline bounds how long the end-of-watch turn waits
-// for questions the skipper is asking in the same conversation to finish.
-// A var so a test can shorten it.
-var assistantWatchFollowUpDeadline = 3 * (assistantRunTimeout + 30*time.Second)
+// assistantWatchFollowUpGrace is added to each run's ceiling when working out
+// how long the end-of-watch turn waits. A var so a test can shorten it.
+var assistantWatchFollowUpGrace = 30 * time.Second
+
+// assistantWatchFollowUpWait bounds how long the end-of-watch turn waits for
+// questions the skipper is asking in the same conversation to finish: three
+// runs at the ceiling. Worked out when used, so it follows the budget.
+func assistantWatchFollowUpWait() time.Duration {
+	return 3 * (assistantRunCeiling() + assistantWatchFollowUpGrace)
+}
 
 // ── arguments ───────────────────────────────────────────────────────────
 
@@ -1192,7 +1198,7 @@ func assistantWatchFollowUp(info assistantWatchInfo, content string, release fun
 		release()
 	}
 
-	runCtx, run, ok := acquireAssistantRunForWatch(id, assistantWatchFollowUpDeadline)
+	runCtx, run, ok := acquireAssistantRunForWatch(id, assistantWatchFollowUpWait())
 	if !ok {
 		// Not dropped: the report is in the conversation, where the skipper
 		// sees it and Mate reads it with the next question.
@@ -1406,7 +1412,7 @@ var mateToolStartWatch = mateTool{
 				"required": ["paths", "minutes", "reason"]
 			}`),
 	},
-	execute: assistantToolDeps.executeStartWatch,
+	execute: plainTool(assistantToolDeps.executeStartWatch),
 	describe: func(args json.RawMessage) string {
 		return "Starting a watch…"
 	},

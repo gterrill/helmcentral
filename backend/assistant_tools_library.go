@@ -31,7 +31,7 @@ var mateToolReadHelp = mateTool{
 					"required": ["page"]
 				}`),
 	},
-	execute: assistantToolDeps.executeReadHelp,
+	execute: plainTool(assistantToolDeps.executeReadHelp),
 	describe: func(args json.RawMessage) string {
 		var a assistantReadHelpArgs
 		page := ""
@@ -74,7 +74,7 @@ var mateToolSearchDocuments = mateTool{
 					"required": ["query"]
 				}`),
 	},
-	execute: assistantToolDeps.executeSearchDocuments,
+	execute: plainTool(assistantToolDeps.executeSearchDocuments),
 	describe: func(args json.RawMessage) string {
 		var a assistantSearchDocumentsArgs
 		query := ""
@@ -110,7 +110,7 @@ var mateToolReadDocument = mateTool{
 					"required": ["document_id"]
 				}`),
 	},
-	execute: assistantToolDeps.executeReadDocument,
+	execute: plainTool(assistantToolDeps.executeReadDocument),
 	describe: func(args json.RawMessage) string {
 		// No access to the document store here (describeAssistantToolCall is
 		// a pure function of name+args, the same as read_help's case just

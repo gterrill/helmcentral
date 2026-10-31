@@ -276,7 +276,7 @@ var mateToolGetActiveAlarms = mateTool{
 			"change the list; the operator restores a kind in Settings.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
-	execute: assistantToolDeps.executeGetActiveAlarms,
+	execute: plainTool(assistantToolDeps.executeGetActiveAlarms),
 	describe: func(json.RawMessage) string {
 		return "Checking the active alarms…"
 	},

@@ -307,6 +307,8 @@ Here is what happens once it's on:
   level, the reading and how it moved. It also covers what else went off nearby
   in time, and how often it has happened. Mate only reads. It can't change a rule, search
   the web or fill in a form.
+- How long it looks: Nobody is waiting, so Mate makes at most 8 rounds of
+  lookups, over at most 3 minutes, and then writes the review with what it has.
 - What you get: A short review in a Mate conversation named after the alarm.
   The first sentence says what the reading is doing and whether it needs you
   now. If Mate thinks the rule itself is wrong, it says so in words, once, and

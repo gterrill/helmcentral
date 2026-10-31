@@ -1100,6 +1100,55 @@ sign. Nothing is shown when none were cached. Follow-up questions in one
 conversation stay with the same provider, which is what lets the cache be
 reused.
 
+## How long Mate keeps looking
+
+Mate can make a lot of lookups for one question. A passage with several legs
+needs places, routes, wind and tides for each, and Mate keeps going for as long
+as it's finding something new. It stops looking in one of these cases:
+
+- **Nothing new:** If two rounds in a row bring nothing it hasn't already asked
+  for, or only lookups that failed, Mate has run out of ideas. It stops looking
+  and answers with what it has.
+- **Too many rounds:** After 30 rounds of lookups it answers with what it has,
+  however well they were going.
+- **Too long:** After 10 minutes of lookups it answers with what it has.
+
+Whichever it is, Mate gets its own 2 minutes to write the answer. That time
+doesn't come out of the 10 minutes, so a long search never leaves Mate with no
+time to say what it found. If Mate has already started writing its answer when
+the 10 minutes run out, it carries on and finishes within those 2 minutes
+rather than starting again. When Mate has been told to wrap up like this, it says
+what it couldn't check. Stopping a question with the stop button ends it at once.
+
+### When Mate doesn't answer
+
+If Mate runs out of time before it can write an answer, or something goes wrong,
+your question stays in the conversation with a plain line beneath it. For
+example: "Mate stopped before answering: it ran out of time after 11 rounds."
+It stays there when you close the conversation and open it again. The error
+behind it is in **Run details**, under the line. A question you stopped yourself shows "You stopped Mate before it
+answered."
+
+### Run details
+
+Under every answer, and under a line like that, **Run details** shows what Mate
+did. For a question that got no answer it also gives the error. For each round it gives when the round started, how long the model took to
+reply, the tokens used, the cost, and whether the round found anything new.
+Under each round are the lookups it made, how long each took and how big the
+answer was. A place search also says whether the answer was already in memory
+or had to be looked up. Each round says what it was: lookups, a draft sent back for
+correction, the answer, the final answer, or cut off by time. The top of the
+details says how the run ended and what limits it was given.
+
+Helmcentral keeps the details of an answer for a week, unless you've rated the
+answer, when they stay as long as the rating does. The details of a question
+that got no answer are kept for 30 days.
+
+To have Helmcentral also write a line to its log for every round of every run,
+turn on **Verbose run log** in Settings → Mate. It's meant for working out why
+Mate is slow or stops early, so leave it off otherwise. A run that fails always
+writes why to the log, whatever this is set to.
+
 ## Rating an answer
 
 Under each answer Mate gives you in the chat there's a thumbs-up and a
@@ -1166,7 +1215,7 @@ rather than making one. Mate refuses that reply instead of showing it to you,
 and the error names the model. Pick a different one in Settings → Mate.
 
 A lookup that keeps failing is abandoned rather than retried forever, so a dead
-server doesn't use up every round Mate is allowed. See
+server doesn't keep Mate busy. See
 [What Mate can look up](../reference/mate-tools.md) for when that kicks in and
 what Mate says when it does.
 

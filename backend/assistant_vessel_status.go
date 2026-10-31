@@ -878,7 +878,7 @@ var mateToolGetVesselStatus = mateTool{
 			"and no value, and an empty observations list does not cover anything listed in observations_unchecked.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
-	execute: assistantToolDeps.executeGetVesselStatus,
+	execute: plainTool(assistantToolDeps.executeGetVesselStatus),
 	describe: func(args json.RawMessage) string {
 		return "Reading the boat's status…"
 	},

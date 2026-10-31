@@ -35,7 +35,7 @@ var mateToolAnchorageShelter = mateTool{
 					"required": ["lat", "lon"]
 				}`),
 	},
-	execute: assistantToolDeps.executeAnchorageShelter,
+	execute: plainTool(assistantToolDeps.executeAnchorageShelter),
 	describe: func(args json.RawMessage) string {
 		return "Checking anchorage shelter…"
 	},

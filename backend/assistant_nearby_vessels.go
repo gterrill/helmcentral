@@ -675,7 +675,7 @@ var mateToolGetNearbyVessels = mateTool{
 					}
 				}`),
 	},
-	execute: assistantToolDeps.executeGetNearbyVessels,
+	execute: plainTool(assistantToolDeps.executeGetNearbyVessels),
 	describe: func(args json.RawMessage) string {
 		var a assistantGetNearbyVesselsArgs
 		vesselName := ""

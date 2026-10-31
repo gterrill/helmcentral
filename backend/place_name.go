@@ -551,7 +551,7 @@ func placeSearchHandler(c echo.Context) error {
 	if err != nil {
 		return err
 	}
-	body, err := deps.executeFindPlaces(c.Request().Context(), args)
+	body, _, err := deps.executeFindPlaces(c.Request().Context(), args)
 	if err != nil {
 		var qerr *findPlacesQueryError
 		if errors.As(err, &qerr) {

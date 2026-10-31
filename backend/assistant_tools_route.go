@@ -37,7 +37,7 @@ var mateToolRouteDistance = mateTool{
 					"required": ["to_lat", "to_lon"]
 				}`),
 	},
-	execute: assistantToolDeps.executeRouteDistance,
+	execute: plainTool(assistantToolDeps.executeRouteDistance),
 	describe: func(args json.RawMessage) string {
 		var a assistantRouteDistanceArgs
 		if err := json.Unmarshal(args, &a); err != nil || a.ToLat == nil || a.ToLon == nil {

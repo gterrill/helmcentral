@@ -17,6 +17,30 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+// saveAnswerRun records the run behind answer, with its calls, as the handler
+// does once the answer is stored. A run is always recorded, with or without
+// calls, so an answer that used no tools is told apart from one with no record.
+func saveAnswerRun(t *testing.T, store *assistantStore, answer assistantMessage, startedAt time.Time, calls ...assistantToolCall) {
+	t.Helper()
+	byRound := map[int][]assistantToolCall{}
+	var rounds []assistantTraceRound
+	for _, c := range calls {
+		if _, ok := byRound[c.Round]; !ok {
+			rounds = append(rounds, assistantTraceRound{Index: c.Round})
+		}
+		byRound[c.Round] = append(byRound[c.Round], c)
+	}
+	for i := range rounds {
+		rounds[i].Calls = byRound[rounds[i].Index]
+	}
+	if _, err := store.SaveRun(assistantRunTrace{
+		ConversationID: answer.ConversationID, AnswerMessageID: &answer.ID, StartedAt: startedAt,
+		StopReason: assistantStopAnswered, Budget: currentAssistantTraceBudget(), Rounds: rounds,
+	}); err != nil {
+		t.Fatalf("SaveRun: %v", err)
+	}
+}
+
 // feedbackFixture appends a user question and an assistant answer and returns
 // both rows.
 func feedbackFixture(t *testing.T, store *assistantStore) (user, answer assistantMessage) {
@@ -31,15 +55,14 @@ func feedbackFixture(t *testing.T, store *assistantStore) (user, answer assistan
 	}
 	answer, err = store.AppendMessage(assistantMessage{
 		ConversationID: conv.ID, Role: "assistant", Content: "About 300 L.", Model: "m",
-		PromptVersion: "abc123def456", ToolCallsRecorded: true,
-		ToolCalls: []assistantToolCall{
-			{Round: 0, Seq: 0, Name: "get_vessel_state", Args: `{"a":1}`, Result: `{"fuel":300}`, ElapsedMs: 12},
-			{Round: 0, Seq: 1, Name: "find_places", Args: `{}`, Result: `{"error":"boom"}`, ElapsedMs: 3, Error: "boom"},
-		},
+		PromptVersion: "abc123def456",
 	})
 	if err != nil {
 		t.Fatalf("append assistant: %v", err)
 	}
+	saveAnswerRun(t, store, answer, time.Now(),
+		assistantToolCall{Round: 0, Seq: 0, Name: "get_vessel_state", Args: `{"a":1}`, Result: `{"fuel":300}`, ElapsedMs: 12},
+		assistantToolCall{Round: 0, Seq: 1, Name: "find_places", Args: `{}`, Result: `{"error":"boom"}`, ElapsedMs: 3, Error: "boom"})
 	return user, answer
 }
 
@@ -54,21 +77,9 @@ func TestAssistantStore_PersistsToolCallsAndPromptVersion(t *testing.T) {
 	if got := msgs[1].PromptVersion; got != "abc123def456" {
 		t.Fatalf("prompt_version = %q", got)
 	}
-	calls, err := store.ListToolCalls(answer.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	calls := toolCallsForTest(t, store, answer.ID)
 	if len(calls) != 2 || calls[0].Name != "get_vessel_state" || calls[1].Error != "boom" || calls[1].Seq != 1 || calls[0].ElapsedMs != 12 || calls[0].Result != `{"fuel":300}` {
 		t.Fatalf("unexpected tool calls: %+v", calls)
-	}
-}
-
-func TestAssistantStore_ToolCallsOnlyOnAssistantMessages(t *testing.T) {
-	store := newTestAssistantStore(t)
-	conv, _ := store.CreateConversation("x")
-	_, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "user", Content: "q", ToolCalls: []assistantToolCall{{Name: "x"}}})
-	if err == nil {
-		t.Fatal("expected an error for tool calls on a user message")
 	}
 }
 
@@ -82,7 +93,7 @@ func TestAssistantStore_ToolCallsDeleteWithConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	var n int
-	if err := store.db.QueryRow(`SELECT (SELECT COUNT(*) FROM message_tool_calls) + (SELECT COUNT(*) FROM message_feedback)`).Scan(&n); err != nil {
+	if err := store.db.QueryRow(`SELECT (SELECT COUNT(*) FROM assistant_run_calls) + (SELECT COUNT(*) FROM assistant_runs) + (SELECT COUNT(*) FROM message_feedback)`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	if n != 0 {
@@ -183,11 +194,9 @@ func TestAssistantStore_PromptVersionAddedToExistingDatabase(t *testing.T) {
 
 func TestPostAssistantMessageHandler_PersistsToolCallsAndPromptVersion(t *testing.T) {
 	store, _, conv := postAssistantMessageTestSetup(t)
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
-		return &fakeAssistantRunner{emit: emit, reply: assistantReply{
-			Content: "ok", Model: "openai/gpt-4o",
-			ToolCalls: []assistantToolCall{{Round: 0, Seq: 0, Name: "get_vessel_state", Args: "{}", Result: "{}", ElapsedMs: 5}},
-		}}
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
+		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "openai/gpt-4o"},
+			calls: []assistantToolCall{{Round: 0, Seq: 0, Name: "get_vessel_state", Args: "{}", Result: "{}", ElapsedMs: 5}}}
 	})
 	c, rec := newAssistantEchoContext(http.MethodPost, "/api/assistant/conversations/"+conv.ID+"/messages", `{"today":"2026-10-03","content":"hi"}`, conv.ID)
 	if err := postAssistantMessageHandler(c); err != nil || rec.Code != http.StatusOK {
@@ -201,7 +210,7 @@ func TestPostAssistantMessageHandler_PersistsToolCallsAndPromptVersion(t *testin
 	if row.Role != "assistant" || row.PromptVersion == "" {
 		t.Fatalf("prompt version %q is empty", row.PromptVersion)
 	}
-	calls, _ := store.ListToolCalls(row.ID)
+	calls := toolCallsForTest(t, store, row.ID)
 	if len(calls) != 1 || calls[0].Name != "get_vessel_state" {
 		t.Fatalf("tool calls not persisted: %+v", calls)
 	}
@@ -315,17 +324,18 @@ func pruneFixture(t *testing.T, store *assistantStore, at time.Time) assistantMe
 		t.Fatal(err)
 	}
 	m, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a",
-		ToolRounds: 1, ToolCalls: []assistantToolCall{{Name: "t", Args: "{}", Result: "{}"}}})
+		ToolRounds: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
+	saveAnswerRun(t, store, m, at, assistantToolCall{Name: "t", Args: "{}", Result: "{}"})
 	return m
 }
 
-func TestAssistantStore_PruneToolCallsDeletesOnlyUnratedPastTheWindow(t *testing.T) {
+func TestAssistantStore_PruneRunsDeletesOnlyUnratedPastTheWindow(t *testing.T) {
 	store := newTestAssistantStore(t)
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	old := now.Add(-assistantToolCallRetention - time.Hour)
+	old := now.Add(-assistantRunRetention - time.Hour)
 	oldUnrated := pruneFixture(t, store, old)
 	oldRated := pruneFixture(t, store, old)
 	fresh := pruneFixture(t, store, now.Add(-time.Hour))
@@ -334,11 +344,11 @@ func TestAssistantStore_PruneToolCallsDeletesOnlyUnratedPastTheWindow(t *testing
 	}
 
 	store.now = func() time.Time { return now }
-	n, err := store.PruneToolCalls()
+	n, err := store.PruneRuns()
 	if err != nil || n != 1 {
 		t.Fatalf("pruned %d, err %v", n, err)
 	}
-	count := func(id string) int { c, _ := store.ListToolCalls(id); return len(c) }
+	count := func(id string) int { return len(toolCallsForTest(t, store, id)) }
 	if count(oldUnrated.ID) != 0 || count(oldRated.ID) != 1 || count(fresh.ID) != 1 {
 		t.Fatalf("unexpected survivors: %d %d %d", count(oldUnrated.ID), count(oldRated.ID), count(fresh.ID))
 	}
@@ -347,7 +357,7 @@ func TestAssistantStore_PruneToolCallsDeletesOnlyUnratedPastTheWindow(t *testing
 	if err := store.ClearMessageFeedback(oldRated.ID); err != nil {
 		t.Fatal(err)
 	}
-	if n, err = store.PruneToolCalls(); err != nil || n != 1 || count(oldRated.ID) != 0 {
+	if n, err = store.PruneRuns(); err != nil || n != 1 || count(oldRated.ID) != 0 {
 		t.Fatalf("after clear: pruned %d err %v left %d", n, err, count(oldRated.ID))
 	}
 	if count(fresh.ID) != 1 {
@@ -361,15 +371,14 @@ func TestAssistantStore_TruncatesOversizeToolCallOnAUTF8Boundary(t *testing.T) {
 	// "é" is two bytes, so a cut at the cap lands mid-rune when the cap is odd
 	// relative to the prefix.
 	big := "x" + strings.Repeat("é", assistantToolCallMaxBytes)
-	m, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a",
-		ToolCalls: []assistantToolCall{
-			{Name: "big", Args: "{}", Result: big},
-			{Seq: 1, Name: "small", Args: "{}", Result: "ok"},
-		}})
+	m, err := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	calls, _ := store.ListToolCalls(m.ID)
+	saveAnswerRun(t, store, m, time.Now(),
+		assistantToolCall{Name: "big", Args: "{}", Result: big},
+		assistantToolCall{Seq: 1, Name: "small", Args: "{}", Result: "ok"})
+	calls := toolCallsForTest(t, store, m.ID)
 	b, s := calls[0], calls[1]
 	if !b.Truncated || b.OriginalBytes != 2+len(big) || len(b.Result) > assistantToolCallMaxBytes || !utf8.ValidString(b.Result) || len(b.Result) < assistantToolCallMaxBytes-3 {
 		t.Fatalf("big call: truncated=%v original=%d len=%d valid=%v", b.Truncated, b.OriginalBytes, len(b.Result), utf8.ValidString(b.Result))
@@ -379,9 +388,9 @@ func TestAssistantStore_TruncatesOversizeToolCallOnAUTF8Boundary(t *testing.T) {
 	}
 
 	args := strings.Repeat("a", assistantToolCallMaxBytes+10)
-	m2, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a",
-		ToolCalls: []assistantToolCall{{Name: "bigargs", Args: args, Result: "ok"}}})
-	c2, _ := store.ListToolCalls(m2.ID)
+	m2, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "a"})
+	saveAnswerRun(t, store, m2, time.Now(), assistantToolCall{Name: "bigargs", Args: args, Result: "ok"})
+	c2 := toolCallsForTest(t, store, m2.ID)
 	if !c2[0].Truncated || len(c2[0].Args) != assistantToolCallMaxBytes || c2[0].OriginalBytes != len(args)+2 {
 		t.Fatalf("args truncation: %+v", c2[0].Truncated)
 	}
@@ -408,11 +417,11 @@ func TestAssistantStore_ListFeedbackNamesTheInputThatPromptedTheAnswer(t *testin
 func TestAssistantStore_RatingDependsOnWhetherTheLookupsAreGoneNotOnAge(t *testing.T) {
 	store := newTestAssistantStore(t)
 	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	longAgo := now.Add(-assistantToolCallRetention - time.Hour)
+	longAgo := now.Add(-assistantRunRetention - time.Hour)
 
 	pruned := pruneFixture(t, store, longAgo)
 	store.now = func() time.Time { return now }
-	if n, err := store.PruneToolCalls(); err != nil || n != 1 {
+	if n, err := store.PruneRuns(); err != nil || n != 1 {
 		t.Fatalf("the prune takes the first answer's lookups: %d, %v", n, err)
 	}
 
@@ -422,7 +431,8 @@ func TestAssistantStore_RatingDependsOnWhetherTheLookupsAreGoneNotOnAge(t *testi
 	rated := pruneFixture(t, store, longAgo)
 	conv, _ := store.CreateConversation("y")
 	store.now = func() time.Time { return longAgo }
-	noTools, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "no tools", ToolCallsRecorded: true})
+	noTools, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "no tools"})
+	saveAnswerRun(t, store, noTools, longAgo)
 	store.now = func() time.Time { return longAgo.Add(time.Hour) }
 	if _, err := store.SetMessageFeedback(rated.ID, "up", ""); err != nil {
 		t.Fatalf("rating inside the window: %v", err)
@@ -435,7 +445,9 @@ func TestAssistantStore_RatingDependsOnWhetherTheLookupsAreGoneNotOnAge(t *testi
 	if _, err := store.SetMessageFeedback(kept.ID, "up", ""); err != nil {
 		t.Fatalf("an old answer whose lookups are still on record can be rated: %v", err)
 	}
-	if n, err := store.PruneToolCalls(); err != nil || n != 0 {
+	// Only the old unrated run of the answer that used no tools goes; the rated
+	// and the unrated-but-recent runs stay.
+	if n, err := store.PruneRuns(); err != nil || n != 1 {
 		t.Fatalf("rated answers keep their lookups: pruned %d, %v", n, err)
 	}
 	if _, err := store.SetMessageFeedback(noTools.ID, "up", ""); err != nil {
@@ -447,7 +459,7 @@ func TestAssistantStore_RatingDependsOnWhetherTheLookupsAreGoneNotOnAge(t *testi
 	if err := store.ClearMessageFeedback(rated.ID); err != nil {
 		t.Fatalf("clearing: %v", err)
 	}
-	if n, err := store.PruneToolCalls(); err != nil || n != 1 {
+	if n, err := store.PruneRuns(); err != nil || n != 1 {
 		t.Fatalf("clearing puts it back under the retention rule: pruned %d, %v", n, err)
 	}
 	if _, err := store.SetMessageFeedback(rated.ID, "up", ""); !errors.Is(err, errAssistantFeedbackTooOld) {
@@ -459,7 +471,8 @@ func TestAssistantStore_ToolCallsRecordedFlag(t *testing.T) {
 	store := newTestAssistantStore(t)
 	conv, _ := store.CreateConversation("x")
 	legacy, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "from before recording"})
-	noTools, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "no tools", ToolCallsRecorded: true})
+	noTools, _ := store.AppendMessage(assistantMessage{ConversationID: conv.ID, Role: "assistant", Content: "no tools"})
+	saveAnswerRun(t, store, noTools, time.Now())
 	for _, m := range []assistantMessage{legacy, noTools} {
 		if _, err := store.SetMessageFeedback(m.ID, "up", ""); err != nil {
 			t.Fatal(err)
@@ -472,20 +485,6 @@ func TestAssistantStore_ToolCallsRecordedFlag(t *testing.T) {
 	}
 	if got[legacy.ID] || !got[noTools.ID] {
 		t.Fatalf("legacy must be unrecorded, a recorded answer with no tools must be recorded: %v", got)
-	}
-}
-
-func TestAssistantStore_PruneMarksPrunedAnswersAsNoLongerRecorded(t *testing.T) {
-	store := newTestAssistantStore(t)
-	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
-	m := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
-	store.now = func() time.Time { return now }
-	if _, err := store.PruneToolCalls(); err != nil {
-		t.Fatal(err)
-	}
-	var recorded int
-	if err := store.db.QueryRow(`SELECT tool_calls_recorded FROM messages WHERE id = ?`, m.ID).Scan(&recorded); err != nil || recorded != 0 {
-		t.Fatalf("recorded=%d err=%v", recorded, err)
 	}
 }
 
@@ -534,9 +533,9 @@ func TestAssistantFeedbackHandlers_ListLimitAndConflict(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	old := pruneFixture(t, store, now.Add(-assistantToolCallRetention-time.Hour))
+	old := pruneFixture(t, store, now.Add(-assistantRunRetention-time.Hour))
 	store.now = func() time.Time { return now }
-	if _, err := store.PruneToolCalls(); err != nil {
+	if _, err := store.PruneRuns(); err != nil {
 		t.Fatal(err)
 	}
 	if rec := feedbackRequest(t, http.MethodPut, "/x", old.ID, `{"verdict":"up"}`); rec.Code != http.StatusConflict {
@@ -564,7 +563,7 @@ func TestAssistantPromptVersion_IsTheRulesAndToolsNotTheBoat(t *testing.T) {
 func TestPostAssistantMessageHandler_PromptVersionFollowsTheToolsTheRunnerGets(t *testing.T) {
 	store, _, conv := postAssistantMessageTestSetup(t)
 	var offered assistantToolDeps
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		offered = tools
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "m"}}
 	})
@@ -594,7 +593,7 @@ func TestPostAssistantMessageHandler_PromptVersionFollowsTheToolsTheRunnerGets(t
 
 func TestPostAssistantMessageHandler_PromptVersionIgnoresVesselAndOperatorData(t *testing.T) {
 	store, _, conv := postAssistantMessageTestSetup(t)
-	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+	swapAssistantRunner(t, func(apiKey, model string, tools assistantToolDeps, autoRouter assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 		return &fakeAssistantRunner{emit: emit, reply: assistantReply{Content: "ok", Model: "m"}}
 	})
 	ask := func(notes string) string {

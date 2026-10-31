@@ -457,7 +457,10 @@ type mateTool struct {
 	// definition's function name, so function.Name stays empty.
 	name     string
 	function openRouterFunctionDef
-	execute  func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, error)
+	// execute runs the tool. The outcome is what the run's trace records about
+	// how it ran (find_places: cache hit or miss); a tool with nothing to
+	// report returns the zero outcome, which plainTool does for it.
+	execute func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, assistantToolOutcome, error)
 	// describe renders the one-line status shown while the call runs.
 	describe func(args json.RawMessage) string
 	// collect, when set, lifts something out of the tool's result into the
@@ -571,15 +574,23 @@ func (d assistantToolDeps) definitions() []openRouterTool { return assistantTool
 // request already in flight when ctx
 // is cancelled still runs to completion - threading a context through those
 // layers is out of scope here (backend performance audit, Tier 3).
-func (d assistantToolDeps) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
+func (d assistantToolDeps) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
 	t := lookupMateTool(name)
 	if t == nil {
-		return "", fmt.Errorf("unknown tool %q", name)
+		return "", assistantToolOutcome{}, fmt.Errorf("unknown tool %q", name)
 	}
 	if !t.availableTo(d) {
-		return "", fmt.Errorf("%s is not available: it is switched off in Settings", name)
+		return "", assistantToolOutcome{}, fmt.Errorf("%s is not available: it is switched off in Settings", name)
 	}
 	return t.execute(d, ctx, args)
+}
+
+// plainTool adapts a tool with nothing to report about how it ran.
+func plainTool(fn func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, error)) func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, assistantToolOutcome, error) {
+	return func(d assistantToolDeps, ctx context.Context, args json.RawMessage) (string, assistantToolOutcome, error) {
+		result, err := fn(d, ctx, args)
+		return result, assistantToolOutcome{}, err
+	}
 }
 
 // describeAssistantToolCall renders the one-line status the SSE stream

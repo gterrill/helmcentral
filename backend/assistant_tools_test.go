@@ -137,7 +137,7 @@ func TestExecuteFindPlaces_NoWaypointHitRunsBroadSearch(t *testing.T) {
 	}}
 	deps := findPlacesDeps(vesselLat, vesselLon, provider)
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestExecuteFindPlaces_NoteMentionsRadiusWhenNothingFound(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "none", RadiusNm: 20}}
 	deps := findPlacesDeps(-20.1, 149.1, provider)
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Shag Cove"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestExecuteFindPlaces_ProviderNoteIsPreservedEvenWithResults(t *testing.T) 
 	}}
 	deps := findPlacesDeps(-20.1, 149.1, provider)
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestExecuteFindPlaces_ProviderErrorIsNeverSwallowed(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", err: fmt.Errorf("network unreachable")}
 	deps := findPlacesDeps(-20.1, 149.1, provider)
 
-	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
+	_, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
 	if err == nil {
 		t.Fatalf("expected the provider's search_places error to surface as an error, not be swallowed")
 	}
@@ -242,7 +242,7 @@ func TestExecuteFindPlaces_OverlongQueryRejectedBeforeReachingTheProvider(t *tes
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	_, err = deps.execute(context.Background(), "find_places", raw)
+	_, _, err = deps.execute(context.Background(), "find_places", raw)
 	if err == nil {
 		t.Fatalf("expected an overlong query to be rejected")
 	}
@@ -267,7 +267,7 @@ func TestExecuteFindPlaces_QueryWithDisallowedCharactersRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal args: %v", err)
 	}
-	_, err = deps.execute(context.Background(), "find_places", raw)
+	_, _, err = deps.execute(context.Background(), "find_places", raw)
 	if err == nil {
 		t.Fatalf("expected a query with disallowed characters to be rejected")
 	}
@@ -287,7 +287,7 @@ func TestExecuteFindPlaces_OrdinaryCompoundQueryStillAccepted(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "exact"}}
 	deps := findPlacesDeps(-20.1, 149.1, provider)
 
-	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
+	_, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
 	if err != nil {
 		t.Fatalf("expected the ordinary comma-qualified query to be accepted, got: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestExecuteFindPlaces_ProviderResolutionErrorSurfaces(t *testing.T) {
 		},
 	}
 
-	_, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
+	_, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bay"}`))
 	if err == nil {
 		t.Fatalf("expected a provider-resolution failure to surface as an error")
 	}
@@ -329,7 +329,7 @@ func TestExecuteFindPlaces_CentredOnEchoesProviderQualifierHit(t *testing.T) {
 	}}
 	deps := findPlacesDeps(vesselLat, vesselLon, provider)
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestExecuteFindPlaces_NoCentredOnKeepsVesselCentre(t *testing.T) {
 	provider := &fakeSearchPlacesProvider{id: "fake-places", result: placeSearchResult{Search: "none", RadiusNm: 20}}
 	deps := findPlacesDeps(vesselLat, vesselLon, provider)
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Bona Bay, Gloucester Island"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestExecuteFindPlaces_NoFixAndNoNearArgsReturnsNoteNotError(t *testing.T) {
 		placeNames:  func() (placeNameProvider, string, error) { return provider, provider.ID(), nil },
 	}
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue Bay"}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Tongue Bay"}`))
 	if err != nil {
 		t.Fatalf("execute find_places: %v", err)
 	}
@@ -435,7 +435,7 @@ func TestExecuteGetWindForecast_RoundsFiltersNullsAndJoinsWaves(t *testing.T) {
 		waves:   func() (waveProvider, string, error) { return waveStub, "open-meteo-marine", nil },
 	}
 
-	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(fmt.Sprintf(`{"lat":%f,"lon":%f,"days":2}`, lat, lon)))
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(fmt.Sprintf(`{"lat":%f,"lon":%f,"days":2}`, lat, lon)))
 	if err != nil {
 		t.Fatalf("execute get_wind_forecast: %v", err)
 	}
@@ -520,7 +520,7 @@ func TestExecuteGetWindForecast_WaveErrorStillReturnsWind(t *testing.T) {
 		waves:   func() (waveProvider, string, error) { return nil, "", fmt.Errorf("no wave plugin installed") },
 	}
 
-	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-20.1,"lon":149.1}`))
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-20.1,"lon":149.1}`))
 	if err != nil {
 		t.Fatalf("execute get_wind_forecast: %v", err)
 	}
@@ -554,7 +554,7 @@ func TestExecuteGetWindForecast_ClampsDays(t *testing.T) {
 		{`{"lat":-20.1,"lon":149.1,"days":5}`, 5},
 	}
 	for _, tc := range cases {
-		if _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(tc.body)); err != nil {
+		if _, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(tc.body)); err != nil {
 			t.Fatalf("execute(%s): %v", tc.body, err)
 		}
 		if weatherStub.gotDays != tc.want {
@@ -602,7 +602,7 @@ func TestExecuteGetWindForecast_CourseDegAddsRelativeAngles(t *testing.T) {
 		waves:   func() (waveProvider, string, error) { return waveStub, "open-meteo-marine", nil },
 	}
 
-	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(
 		fmt.Sprintf(`{"lat":%f,"lon":%f,"days":1,"course_deg":%f}`, lat, lon, courseDeg)))
 	if err != nil {
 		t.Fatalf("execute get_wind_forecast: %v", err)
@@ -666,7 +666,7 @@ func TestExecuteGetWindForecast_NoCourseDegOmitsRelativeAngles(t *testing.T) {
 		waves:   func() (waveProvider, string, error) { return nil, "", fmt.Errorf("no wave plugin installed") },
 	}
 
-	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-20.1,"lon":149.1}`))
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-20.1,"lon":149.1}`))
 	if err != nil {
 		t.Fatalf("execute get_wind_forecast: %v", err)
 	}
@@ -726,7 +726,7 @@ func TestExecuteGetTides_NearestStationWindowedExtremesAustraliaBrisbane(t *test
 		tides: func() (tideProvider, string, error) { return provider, "bom", nil },
 	}
 
-	raw, err := deps.execute(context.Background(), "get_tides", json.RawMessage(`{"lat":-27.4,"lon":153.1,"days":2}`))
+	raw, _, err := deps.execute(context.Background(), "get_tides", json.RawMessage(`{"lat":-27.4,"lon":153.1,"days":2}`))
 	if err != nil {
 		t.Fatalf("execute get_tides: %v", err)
 	}
@@ -775,7 +775,7 @@ func TestExecuteGetTides_NoStationsIsError(t *testing.T) {
 		tides: func() (tideProvider, string, error) { return provider, "bom", nil },
 	}
 
-	_, err := deps.execute(context.Background(), "get_tides", json.RawMessage(`{"lat":-27.4,"lon":153.1}`))
+	_, _, err := deps.execute(context.Background(), "get_tides", json.RawMessage(`{"lat":-27.4,"lon":153.1}`))
 	if err == nil {
 		t.Fatalf("expected an error when the provider has no stations")
 	}
@@ -797,7 +797,7 @@ func TestExecuteGetTides_EmptyWindowAddsNote(t *testing.T) {
 		tides: func() (tideProvider, string, error) { return provider, "bom", nil },
 	}
 
-	raw, err := deps.execute(context.Background(), "get_tides", json.RawMessage(`{"lat":-27.0,"lon":153.0}`))
+	raw, _, err := deps.execute(context.Background(), "get_tides", json.RawMessage(`{"lat":-27.0,"lon":153.0}`))
 	if err != nil {
 		t.Fatalf("execute get_tides: %v", err)
 	}
@@ -853,7 +853,7 @@ func TestExecuteEstimatePassage_UnreadableSettingsIsNotReportedAsNotSetUp(t *tes
 		influxRange:       stubInfluxRangeByPath(singleBandPerformanceSeries()),
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return nil, errors.New("boom") },
 	}
-	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
+	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err == nil || !strings.Contains(err.Error(), "settings could not be read") || strings.Contains(err.Error(), "not set up") {
 		t.Fatalf("expected a settings-unreadable error, got %v", err)
 	}
@@ -910,7 +910,7 @@ func TestExecuteEstimatePassage_RequestedSpeed(t *testing.T) {
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 	}
 
-	raw, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
+	raw, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
@@ -967,7 +967,7 @@ func TestExecuteEstimatePassage_OmittedSpeedUsesMostSampledBand(t *testing.T) {
 
 	// 97nm at the single band's 9.7kts mean is exactly 10.0 hours, chosen so
 	// the expected value is exact rather than needing its own rounding.
-	raw, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(97, ``))
+	raw, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(97, ``))
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
@@ -1004,7 +1004,7 @@ func TestExecuteEstimatePassage_NoUnderwayHistoryIsError(t *testing.T) {
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return testEngines("port", "starboard"), nil },
 	}
 
-	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"days":30`))
+	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"days":30`))
 	if err == nil {
 		t.Fatalf("expected an error when there is no underway history in the window")
 	}
@@ -1064,7 +1064,7 @@ func estimatePassageWithout(t *testing.T, missing, signature string) error {
 		},
 		engineSignature: func(string) string { return signature },
 	}
-	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"days":30`))
+	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"days":30`))
 	if err == nil {
 		t.Fatalf("%s: expected an error", missing)
 	}
@@ -1078,7 +1078,7 @@ func TestExecuteEstimatePassage_NoEnginesConfiguredSaysEnginesAreNotSetUp(t *tes
 		fuelRateInstances: func() ([]vesselEngineSetting, error) { return nil, nil }, // no vessel.engines
 	}
 
-	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
+	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err == nil {
 		t.Fatalf("expected an error when no engines are configured, not an assumed pair")
 	}
@@ -1095,7 +1095,7 @@ func TestExecuteEstimatePassage_FuelAboardKnownAddsMargin(t *testing.T) {
 		fuelAboardM3:      func() (float64, bool) { return 0.6, true }, // 600 L aboard
 	}
 
-	raw, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
+	raw, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
@@ -1126,7 +1126,7 @@ func TestExecuteEstimatePassage_FuelAboardUnknownOmitsFieldsAndNotesIt(t *testin
 		fuelAboardM3:      func() (float64, bool) { return 0, false },
 	}
 
-	raw, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
+	raw, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":10`))
 	if err != nil {
 		t.Fatalf("execute estimate_passage: %v", err)
 	}
@@ -1160,7 +1160,7 @@ func TestExecuteEstimatePassage_FuelAboardUnknownOmitsFieldsAndNotesIt(t *testin
 func TestExecuteEstimatePassage_DestinationRequired(t *testing.T) {
 	deps := assistantToolDeps{now: time.Now}
 	for _, args := range []string{`{}`, `{"distance_nm":20}`, `{"to_lat":-20}`} {
-		_, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(args))
+		_, _, err := deps.execute(context.Background(), "estimate_passage", json.RawMessage(args))
 		if err == nil || !strings.Contains(err.Error(), "to_lat and to_lon are required") {
 			t.Errorf("%s: expected the destination to be required, got %v", args, err)
 		}
@@ -1169,7 +1169,7 @@ func TestExecuteEstimatePassage_DestinationRequired(t *testing.T) {
 
 func TestExecuteEstimatePassage_NonPositiveSpeedIsError(t *testing.T) {
 	deps := assistantToolDeps{now: time.Now}
-	_, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":0`))
+	_, _, err := openSeaDeps(t, deps).execute(context.Background(), "estimate_passage", openSeaArgs(20, `"speed_kts":0`))
 	if err == nil {
 		t.Fatalf("expected an error for a non-positive speed_kts")
 	}
@@ -1235,7 +1235,7 @@ func TestExecuteGetNearbyVessels_ListsLiveVesselWithRangeBearingAndSpeed(t *test
 	}
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute get_nearby_vessels: %v", err)
 	}
@@ -1283,7 +1283,7 @@ func TestExecuteGetNearbyVessels_MaxResultsDefaultAndClamp(t *testing.T) {
 
 	// Default (no max_results given): 10.
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute (default): %v", err)
 	}
@@ -1306,7 +1306,7 @@ func TestExecuteGetNearbyVessels_MaxResultsDefaultAndClamp(t *testing.T) {
 
 	// max_results above the 25 ceiling clamps to 25 (only 15 live, so this
 	// also confirms the ceiling doesn't truncate below what's available).
-	raw, err = deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"max_results":100}`))
+	raw, _, err = deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"max_results":100}`))
 	if err != nil {
 		t.Fatalf("execute (clamped): %v", err)
 	}
@@ -1333,7 +1333,7 @@ func TestExecuteGetNearbyVessels_NameFilterMatchesSubstringCaseInsensitive(t *te
 	}
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1354,7 +1354,7 @@ func TestExecuteGetNearbyVessels_NameFilterMatchesExactMMSI(t *testing.T) {
 	}
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"111222333"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"111222333"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1408,7 +1408,7 @@ func TestExecuteGetNearbyVessels_NameFilterFindsVesselBeyondTheNormalSearchCap(t
 		},
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"solaris"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"solaris"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1438,7 +1438,7 @@ func TestExecuteGetNearbyVessels_NameFilterNoLiveMatchFallsBackToSightingLog(t *
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, nil) // nothing currently in range
 	deps.contacts = func() *nearbyContactStore { return store }
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1477,7 +1477,7 @@ func TestExecuteGetNearbyVessels_InRangeSinceFromNewestConfirmedSighting(t *test
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 	deps.contacts = func() *nearbyContactStore { return store }
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1521,7 +1521,7 @@ func TestExecuteGetNearbyVessels_InRangeSinceAbsentWhilePending(t *testing.T) {
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 	deps.contacts = func() *nearbyContactStore { return store }
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1583,7 +1583,7 @@ func TestExecuteGetNearbyVessels_ReturningVesselPendingKeepsPriorEncounterAsHist
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 	deps.contacts = func() *nearbyContactStore { return store }
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1627,7 +1627,7 @@ func TestExecuteGetNearbyVessels_DuplicateMMSIOnlyAttachesMatchingVesselsHistory
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 	deps.contacts = func() *nearbyContactStore { return store }
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1689,7 +1689,7 @@ func TestExecuteGetNearbyVessels_PlaceholderStoredNameIsNotTreatedAsAMismatch(t 
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 	deps.contacts = func() *nearbyContactStore { return store }
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1725,7 +1725,7 @@ func TestExecuteGetNearbyVessels_PastSightingsIncludedWithNameDefault(t *testing
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 	deps.contacts = func() *nearbyContactStore { return store }
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1769,7 +1769,7 @@ func TestExecuteGetNearbyVessels_HistoryOmittedWithoutNameByDefault(t *testing.T
 		return nil, nil
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1810,7 +1810,7 @@ func TestExecuteGetNearbyVessels_PositionHistorySkippedWithoutNameEvenWhenInclud
 		return nil, nil
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"include_history":true}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"include_history":true}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1866,7 +1866,7 @@ func TestExecuteGetNearbyVessels_IncludeHistoryFalseExplicitlyOmitsPastSightings
 	deps := nearbyVesselsDeps(vesselLat, vesselLon, live)
 	deps.contacts = func() *nearbyContactStore { return store }
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli","include_history":false}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli","include_history":false}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1916,7 +1916,7 @@ func TestExecuteGetNearbyVessels_StationarySinceWalksBackToLastMovement(t *testi
 		return points, nil
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -1957,7 +1957,7 @@ func TestExecuteGetNearbyVessels_StationarySinceAllWithinThresholdUsesOldestPoin
 		return points, nil
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -2137,7 +2137,7 @@ func TestExecuteGetNearbyVessels_UnderWayVesselIsNotReportedStationary(t *testin
 		return points, nil
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -2182,7 +2182,7 @@ func TestExecuteGetNearbyVessels_JustArrivedVesselIsReportedStationarySinceArriv
 		return points, nil
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -2208,7 +2208,7 @@ func TestExecuteGetNearbyVessels_PositionHistoryEmptyReportsNoneRecorded(t *test
 		return nil, nil
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -2233,7 +2233,7 @@ func TestExecuteGetNearbyVessels_PositionHistoryErrorSurfacesPerVessel(t *testin
 		return nil, fmt.Errorf("signalk history endpoint returned status 502: bad gateway")
 	}
 
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"chilli"}`))
 	if err != nil {
 		t.Fatalf("execute: %v (a per-vessel history failure must not fail the whole tool call)", err)
 	}
@@ -2289,7 +2289,7 @@ func TestExecuteGetNearbyVessels_HistoryLookupsRunConcurrentlyAndAreAttributedCo
 	}
 
 	start := time.Now()
-	raw, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"fleet"}`))
+	raw, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{"name":"fleet"}`))
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -2324,7 +2324,7 @@ func TestExecuteGetNearbyVessels_VesselStateErrorIsToolError(t *testing.T) {
 		now:         time.Now,
 		vesselState: func() (vesselStateData, error) { return vesselStateData{}, fmt.Errorf("signalk unreachable") },
 	}
-	_, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
+	_, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatalf("expected an error when the vessel's own position can't be read")
 	}
@@ -2335,7 +2335,7 @@ func TestExecuteGetNearbyVessels_UnsetNearbyVesselsDependencyReturnsErrorNotPani
 		now:         time.Now,
 		vesselState: func() (vesselStateData, error) { return vesselStateData{Latitude: -20.1, Longitude: 149.1}, nil },
 	}
-	_, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
+	_, _, err := deps.execute(context.Background(), "get_nearby_vessels", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatalf("expected an error when d.nearbyVessels is unset")
 	}
@@ -2415,7 +2415,7 @@ func TestAssistantToolDefinitions_GetNearbyVesselsDescriptionMentionsCollisionRi
 
 func TestExecute_UnknownToolIsError(t *testing.T) {
 	deps := assistantToolDeps{}
-	_, err := deps.execute(context.Background(), "not_a_real_tool", json.RawMessage(`{}`))
+	_, _, err := deps.execute(context.Background(), "not_a_real_tool", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatalf("expected an error for an unknown tool name")
 	}
@@ -2500,7 +2500,7 @@ func TestAssistantToolDeps_ExecuteReturnsContextErrorWhenAlreadyCancelled(t *tes
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := deps.execute(ctx, "read_help", json.RawMessage(`{"page":"features/forecast"}`))
+	_, _, err := deps.execute(ctx, "read_help", json.RawMessage(`{"page":"features/forecast"}`))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected a cancelled context to short-circuit the tool, got %v", err)
 	}
@@ -2546,7 +2546,7 @@ func TestExecuteSearchDocuments_ReturnsShapeWithFolderPathAndCleanSnippet(t *tes
 	doc := insertSearchableDocument(t, store, "sha-impeller", "yanmar-4jh.pdf", &engine.ID,
 		"Replace the raw water impeller every 200 hours of running time.")
 
-	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	raw, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
 	if err != nil {
 		t.Fatalf("execute search_documents: %v", err)
 	}
@@ -2597,7 +2597,7 @@ func TestExecuteSearchDocuments_TitleFallsBackToFilenameForCitations(t *testing.
 	deps, store := documentToolDeps(t)
 	insertSearchableDocument(t, store, "sha-citation-1", "yanmar-4jh.pdf", nil, "Replace the raw water impeller every 200 hours.")
 
-	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	raw, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
 	if err != nil {
 		t.Fatalf("execute search_documents: %v", err)
 	}
@@ -2627,7 +2627,7 @@ func TestExecuteSearchDocuments_TitleUsesStoredTitleWhenSet(t *testing.T) {
 		t.Fatalf("ReplaceChunks: %v", err)
 	}
 
-	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	raw, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
 	if err != nil {
 		t.Fatalf("execute search_documents: %v", err)
 	}
@@ -2672,7 +2672,7 @@ func TestExecuteSearchDocuments_SemanticallyConfiguredFindsVectorOnlyDocument(t 
 	t.Cleanup(func() { openRouterHTTPClient = prevDoer })
 	deps.documentSearchReadiness = hybridTestReadiness(model, dims)
 
-	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"receipt"}`))
+	raw, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"receipt"}`))
 	if err != nil {
 		t.Fatalf("execute search_documents: %v", err)
 	}
@@ -2716,7 +2716,7 @@ func TestExecuteSearchDocuments_FolderArgumentScopesRecursively(t *testing.T) {
 	inFolder := insertSearchableDocument(t, store, "sha-in", "in-manuals.pdf", &engine.ID, "impeller service notes")
 	insertSearchableDocument(t, store, "sha-out", "in-receipts.pdf", &receipts.ID, "impeller purchase receipt")
 
-	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","folder":"manuals"}`))
+	raw, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","folder":"manuals"}`))
 	if err != nil {
 		t.Fatalf("execute search_documents: %v", err)
 	}
@@ -2738,7 +2738,7 @@ func TestExecuteSearchDocuments_UnknownFolderNamesTopLevelFolders(t *testing.T) 
 		t.Fatalf("CreateFolder: %v", err)
 	}
 
-	_, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","folder":"Nope"}`))
+	_, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","folder":"Nope"}`))
 	if err == nil {
 		t.Fatalf("expected an error for an unknown folder")
 	}
@@ -2753,7 +2753,7 @@ func TestExecuteSearchDocuments_LimitCappedAtTen(t *testing.T) {
 		insertSearchableDocument(t, store, fmt.Sprintf("sha-limit-%d", i), fmt.Sprintf("doc-%d.pdf", i), nil, "impeller service manual")
 	}
 
-	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","limit":50}`))
+	raw, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","limit":50}`))
 	if err != nil {
 		t.Fatalf("execute search_documents: %v", err)
 	}
@@ -2772,7 +2772,7 @@ func TestExecuteSearchDocuments_DefaultLimitIsFive(t *testing.T) {
 		insertSearchableDocument(t, store, fmt.Sprintf("sha-default-%d", i), fmt.Sprintf("doc-%d.pdf", i), nil, "impeller service manual")
 	}
 
-	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	raw, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
 	if err != nil {
 		t.Fatalf("execute search_documents: %v", err)
 	}
@@ -2808,7 +2808,7 @@ func TestExecuteSearchDocuments_TwoHitsInSameNestedFolderResolvePathsCorrectly(t
 	docA := insertSearchableDocument(t, store, "sha-nested-a", "impeller-a.pdf", &engine.ID, "impeller service notes A")
 	docB := insertSearchableDocument(t, store, "sha-nested-b", "impeller-b.pdf", &engine.ID, "impeller service notes B")
 
-	raw, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","limit":10}`))
+	raw, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller","limit":10}`))
 	if err != nil {
 		t.Fatalf("execute search_documents: %v", err)
 	}
@@ -2859,7 +2859,7 @@ func TestExecuteSearchDocuments_FolderPathStoreErrorSurfacesAsToolError(t *testi
 		t.Fatalf("drop document_folders: %v", err)
 	}
 
-	_, err = deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	_, _, err = deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
 	if err == nil {
 		t.Fatalf("expected a store error to surface as a tool error")
 	}
@@ -2880,7 +2880,7 @@ func TestExecuteReadDocument_DefaultStartsAfterMetaChunk(t *testing.T) {
 		t.Fatalf("ReplaceChunks: %v", err)
 	}
 
-	raw, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
+	raw, _, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
 	if err != nil {
 		t.Fatalf("execute read_document: %v", err)
 	}
@@ -2922,7 +2922,7 @@ func TestExecuteReadDocument_ResultCarriesCitableTitle(t *testing.T) {
 		t.Fatalf("ReplaceChunks: %v", err)
 	}
 
-	raw, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
+	raw, _, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
 	if err != nil {
 		t.Fatalf("execute read_document: %v", err)
 	}
@@ -2949,7 +2949,7 @@ func TestExecuteReadDocument_FromChunkResumesAtGivenSeq(t *testing.T) {
 		t.Fatalf("ReplaceChunks: %v", err)
 	}
 
-	raw, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q,"from_chunk":3}`, doc.ID)))
+	raw, _, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q,"from_chunk":3}`, doc.ID)))
 	if err != nil {
 		t.Fatalf("execute read_document: %v", err)
 	}
@@ -2979,7 +2979,7 @@ func TestExecuteReadDocument_TruncatesAndReportsNextChunk(t *testing.T) {
 		t.Fatalf("ReplaceChunks: %v", err)
 	}
 
-	raw, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
+	raw, _, err := deps.execute(context.Background(), "read_document", json.RawMessage(fmt.Sprintf(`{"document_id":%q}`, doc.ID)))
 	if err != nil {
 		t.Fatalf("execute read_document: %v", err)
 	}
@@ -3003,7 +3003,7 @@ func TestExecuteReadDocument_TruncatesAndReportsNextChunk(t *testing.T) {
 
 func TestExecuteReadDocument_UnknownDocumentIDIsError(t *testing.T) {
 	deps, _ := documentToolDeps(t)
-	_, err := deps.execute(context.Background(), "read_document", json.RawMessage(`{"document_id":"does-not-exist"}`))
+	_, _, err := deps.execute(context.Background(), "read_document", json.RawMessage(`{"document_id":"does-not-exist"}`))
 	if err == nil {
 		t.Fatalf("expected an error for an unknown document id")
 	}
@@ -3020,7 +3020,7 @@ func TestExecuteReadDocument_UnknownDocumentIDIsError(t *testing.T) {
 // error the doc comment promises.
 func TestExecuteSearchDocuments_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
 	deps := assistantToolDeps{}
-	_, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
+	_, _, err := deps.execute(context.Background(), "search_documents", json.RawMessage(`{"query":"impeller"}`))
 	if err == nil {
 		t.Fatalf("expected an error when d.documents is unset")
 	}
@@ -3034,7 +3034,7 @@ func TestExecuteSearchDocuments_UnsetDependencyReturnsErrorNotPanic(t *testing.T
 // assistant_tools.go:1702 the same way search_documents calls it at 1571.
 func TestExecuteReadDocument_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
 	deps := assistantToolDeps{}
-	_, err := deps.execute(context.Background(), "read_document", json.RawMessage(`{"document_id":"doc-1"}`))
+	_, _, err := deps.execute(context.Background(), "read_document", json.RawMessage(`{"document_id":"doc-1"}`))
 	if err == nil {
 		t.Fatalf("expected an error when d.documents is unset")
 	}
@@ -3049,7 +3049,7 @@ func TestExecuteReadDocument_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
 // whether it was set.
 func TestExecuteReadHelp_UnsetDependencyReturnsErrorNotPanic(t *testing.T) {
 	deps := assistantToolDeps{}
-	_, err := deps.execute(context.Background(), "read_help", json.RawMessage(`{"page":"features/forecast"}`))
+	_, _, err := deps.execute(context.Background(), "read_help", json.RawMessage(`{"page":"features/forecast"}`))
 	if err == nil {
 		t.Fatalf("expected an error when d.help is unset")
 	}
@@ -3083,7 +3083,7 @@ func TestGetWindForecast_AbsentWaveFiguresAreOmitted(t *testing.T) {
 		weather: func() (weatherProvider, string, error) { return weatherStub, "capturing-weather", nil },
 		waves:   func() (waveProvider, string, error) { return waveStub, "open-meteo-marine", nil },
 	}
-	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(fmt.Sprintf(`{"lat":%f,"lon":%f,"days":1,"course_deg":0}`, lat, lon)))
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(fmt.Sprintf(`{"lat":%f,"lon":%f,"days":1,"course_deg":0}`, lat, lon)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3119,7 +3119,7 @@ func windForecastWithWaves(t *testing.T, bundle waveForecastBundle) assistantWin
 		weather: func() (weatherProvider, string, error) { return weatherStub, "wx", nil },
 		waves:   func() (waveProvider, string, error) { return waveStub, "w", nil },
 	}
-	raw, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-20.1,"lon":149.1,"days":2}`))
+	raw, _, err := deps.execute(context.Background(), "get_wind_forecast", json.RawMessage(`{"lat":-20.1,"lon":149.1,"days":2}`))
 	if err != nil {
 		t.Fatal(err)
 	}

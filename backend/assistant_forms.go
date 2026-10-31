@@ -299,7 +299,7 @@ var mateToolInspectForm = mateTool{
 				"required": ["document_id"]
 			}`),
 	},
-	execute: assistantToolDeps.executeInspectForm,
+	execute: plainTool(assistantToolDeps.executeInspectForm),
 	describe: func(args json.RawMessage) string {
 		return "Reading the form…"
 	},
@@ -340,7 +340,7 @@ var mateToolFillForm = mateTool{
 				"required": ["document_id", "entries"]
 			}`),
 	},
-	execute: assistantToolDeps.executeFillForm,
+	execute: plainTool(assistantToolDeps.executeFillForm),
 	describe: func(args json.RawMessage) string {
 		return "Filling in the form…"
 	},

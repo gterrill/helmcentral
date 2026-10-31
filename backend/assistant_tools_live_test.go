@@ -46,7 +46,7 @@ type liveFindPlacesResult struct {
 func TestFindPlacesLive_HillInlet(t *testing.T) {
 	deps := liveFindPlacesDeps(t)
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Hill Inlet","near_lat":-20.2833,"near_lon":148.9667}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"Hill Inlet","near_lat":-20.2833,"near_lon":148.9667}`))
 	if err != nil {
 		t.Fatalf("find_places: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestFindPlacesLive_HillInlet(t *testing.T) {
 func TestFindPlacesLive_WhitehavenPartialMatch(t *testing.T) {
 	deps := liveFindPlacesDeps(t)
 
-	raw, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"whitehaven","near_lat":-20.2833,"near_lon":148.9667}`))
+	raw, _, err := deps.execute(context.Background(), "find_places", json.RawMessage(`{"query":"whitehaven","near_lat":-20.2833,"near_lon":148.9667}`))
 	if err != nil {
 		t.Fatalf("find_places: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestFindPlacesLive_WhitehavenPartialMatch(t *testing.T) {
 func TestMarinaDetailsLive_CoralSea(t *testing.T) {
 	deps := liveFindPlacesDeps(t)
 
-	raw, err := deps.execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
+	raw, _, err := deps.execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
 	if err != nil {
 		t.Fatalf("marina_details: %v", err)
 	}

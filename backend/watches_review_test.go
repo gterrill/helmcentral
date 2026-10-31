@@ -28,7 +28,7 @@ func withReviewRunner(t *testing.T, script func(ctx context.Context, tools assis
 	t.Helper()
 	fake := &fakeReviewRunner{script: script}
 	prev := watchReviewRunnerFor
-	watchReviewRunnerFor = func(_, _ string, tools assistantToolExecutor, _ assistantAutoRouterOptions) assistantRunnerFace {
+	watchReviewRunnerFor = func(_, _ string, tools assistantToolExecutor, _ assistantRunnerOptions) assistantRunnerFace {
 		fake.tools = tools
 		return fake
 	}
@@ -64,7 +64,7 @@ func submitArgs(review string, added ...string) json.RawMessage {
 func TestWatchReview_MateNotReadyIsAProblemAndNeverReachesTheModel(t *testing.T) {
 	built := false
 	prev := watchReviewRunnerFor
-	watchReviewRunnerFor = func(_, _ string, _ assistantToolExecutor, _ assistantAutoRouterOptions) assistantRunnerFace {
+	watchReviewRunnerFor = func(_, _ string, _ assistantToolExecutor, _ assistantRunnerOptions) assistantRunnerFace {
 		built = true
 		return nil
 	}
@@ -78,7 +78,7 @@ func TestWatchReview_MateNotReadyIsAProblemAndNeverReachesTheModel(t *testing.T)
 
 func TestWatchReview_ParsesTheSubmittedReviewAndAddedFindings(t *testing.T) {
 	fake := withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
-		if _, err := tools.execute(ctx, watchReviewToolName, submitArgs("Diesel fell faster than the engine hours explain. Were the generator and heater on overnight?", "Diesel fell 14 points in three hours.")); err != nil {
+		if _, _, err := tools.execute(ctx, watchReviewToolName, submitArgs("Diesel fell faster than the engine hours explain. Were the generator and heater on overnight?", "Diesel fell 14 points in three hours.")); err != nil {
 			return assistantReply{}, err
 		}
 		assistantCostMeterFrom(ctx).add(0.031)
@@ -114,11 +114,11 @@ func TestWatchReview_OffersOnlyReadToolsAndTheSubmitTool(t *testing.T) {
 			offered = append(offered, def.Function.Name)
 		}
 		for _, name := range []string{"propose_changes", "start_watch", "fill_form", "inspect_form", "run_watch_now", "list_watches", "show_telemetry_chart"} {
-			if _, err := tools.execute(ctx, name, json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "not available in a watch review") {
+			if _, _, err := tools.execute(ctx, name, json.RawMessage(`{}`)); err == nil || !strings.Contains(err.Error(), "not available in a watch review") {
 				t.Errorf("%s must be refused in a review, got %v", name, err)
 			}
 		}
-		if _, err := tools.execute(ctx, "search_web", json.RawMessage(`{"query":"tides"}`)); err == nil {
+		if _, _, err := tools.execute(ctx, "search_web", json.RawMessage(`{"query":"tides"}`)); err == nil {
 			t.Error("web search is refused while the operator has it off")
 		}
 		return assistantReply{}, errors.New("stop here")
@@ -292,7 +292,7 @@ func TestWatchReview_AddedFindingsNeedAStableLowerSnakeKey(t *testing.T) {
 
 func TestWatchReview_AddedFindingsCarryTheirKeyOut(t *testing.T) {
 	withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
-		_, err := tools.execute(ctx, watchReviewToolName, submitArgs("Diesel is falling.", "Diesel is down 14 points."))
+		_, _, err := tools.execute(ctx, watchReviewToolName, submitArgs("Diesel is falling.", "Diesel is down 14 points."))
 		return assistantReply{Content: "done", Model: "m"}, err
 	})
 	w, report, findings := reviewInputs()
@@ -360,7 +360,7 @@ func TestWatchReview_SubmitChecksAChartRequest(t *testing.T) {
 
 func TestWatchReview_AddedFindingCarriesAChartSpecForTheWindowAsked(t *testing.T) {
 	withReviewRunner(t, func(ctx context.Context, tools assistantToolExecutor) (assistantReply, error) {
-		_, err := tools.execute(ctx, watchReviewToolName, submitWithChart(`{"path":"electrical.pump.current","hours":6,"label":"Pump current"}`))
+		_, _, err := tools.execute(ctx, watchReviewToolName, submitWithChart(`{"path":"electrical.pump.current","hours":6,"label":"Pump current"}`))
 		return assistantReply{Content: "done"}, err
 	})
 	w, report, findings := reviewInputs()

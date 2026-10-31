@@ -91,7 +91,7 @@ var mateToolListWatches = mateTool{
 			"At most 20 scheduled watches can exist.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
-	execute: assistantToolDeps.executeListWatches,
+	execute: plainTool(assistantToolDeps.executeListWatches),
 	describe: func(args json.RawMessage) string {
 		return "Checking the watches…"
 	},
@@ -191,7 +191,7 @@ var mateToolGetWatchRuns = mateTool{
 			}
 		}`),
 	},
-	execute: assistantToolDeps.executeGetWatchRuns,
+	execute: plainTool(assistantToolDeps.executeGetWatchRuns),
 	describe: func(args json.RawMessage) string {
 		return "Reading the watch's runs…"
 	},
@@ -244,7 +244,7 @@ var mateToolRunWatchNow = mateTool{
 			"required": ["watch_id"]
 		}`),
 	},
-	execute: assistantToolDeps.executeRunWatchNow,
+	execute: plainTool(assistantToolDeps.executeRunWatchNow),
 	describe: func(args json.RawMessage) string {
 		return "Running the watch…"
 	},

@@ -110,7 +110,7 @@ var mateToolListAlarmRules = mateTool{
 			"adding a second one, and so you can say what the boat already has when the operator asks what is monitored.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
-	execute: assistantToolDeps.executeListAlarmRules,
+	execute: plainTool(assistantToolDeps.executeListAlarmRules),
 	describe: func(args json.RawMessage) string {
 		return "Checking the alarm rules…"
 	},

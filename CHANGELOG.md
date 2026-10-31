@@ -77,6 +77,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   change your places, or add one yourself, under **Settings → Saved places**.
   Outside assistants that can look up place names find your saved places too.
 
+- **Mate can now work through a long question.** It used to stop looking after
+  eight rounds, and a question about a passage with several legs could run out
+  of time before Mate wrote anything. Now Mate keeps looking for as long as it's
+  finding something new. It answers with what it has when two rounds in a row
+  bring nothing new, after 30 rounds, or after 10 minutes of lookups. The answer
+  gets its own 2 minutes, so it can't be starved by the lookups, and an answer
+  Mate has already started writing when the lookups run out is left to finish.
+- **A question Mate couldn't answer stays in the conversation.** Instead of
+  vanishing, it shows a line such as "Mate stopped before answering: it ran out
+  of time after 11 rounds". It's still there after you reload, and **Run
+  details** under it gives the error.
+- **Run details under every answer.** Tap **Run details** to see each round, how
+  long it took, what it cost, the lookups it made and how the run ended.
+  Details are kept for a week, or for as long as an answer is rated, and for 30
+  days when there was no answer.
+- **Verbose run log.** Turn it on in Settings → Mate to log a line for every
+  round of every run, while you're working out why Mate is slow. A failed run
+  always logs why, whatever this is set to.
+
 - **ChatGPT can now read the boat.** ChatGPT can't send the header that Claude's
   connector uses, so it signs in instead. It opens a Helmcentral page, you paste
   an outside assistant token and select **Allow**, and that token is used for

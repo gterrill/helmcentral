@@ -35,7 +35,7 @@ var mateToolGetWindForecast = mateTool{
 					"required": ["lat", "lon"]
 				}`),
 	},
-	execute: assistantToolDeps.executeGetWindForecast,
+	execute: plainTool(assistantToolDeps.executeGetWindForecast),
 	describe: func(args json.RawMessage) string {
 		return fmt.Sprintf("Fetching wind forecast for %s…", assistantLocationLabel(args))
 	},
@@ -59,7 +59,7 @@ var mateToolGetTides = mateTool{
 					"required": ["lat", "lon"]
 				}`),
 	},
-	execute: assistantToolDeps.executeGetTides,
+	execute: plainTool(assistantToolDeps.executeGetTides),
 	describe: func(args json.RawMessage) string {
 		return fmt.Sprintf("Fetching tides near %s…", assistantLocationLabel(args))
 	},
@@ -98,7 +98,7 @@ var mateToolEstimatePassage = mateTool{
 					"required": ["to_lat", "to_lon"]
 				}`),
 	},
-	execute: assistantToolDeps.executeEstimatePassage,
+	execute: plainTool(assistantToolDeps.executeEstimatePassage),
 	describe: func(args json.RawMessage) string {
 		var a assistantEstimatePassageArgs
 		if err := json.Unmarshal(args, &a); err != nil {

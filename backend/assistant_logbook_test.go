@@ -98,7 +98,7 @@ type listResult struct {
 
 func runTool(t *testing.T, d assistantToolDeps, name, args string, into any) string {
 	t.Helper()
-	out, err := d.execute(context.Background(), name, json.RawMessage(args))
+	out, _, err := d.execute(context.Background(), name, json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("%s: %v", name, err)
 	}
@@ -218,16 +218,16 @@ func TestPassageTools_FailPlainly(t *testing.T) {
 	d := logbookDeps(t, s)
 	for _, tool := range []string{"list_passages", "get_cruise_summary"} {
 		for _, args := range []string{`{"from":"yesterday"}`, `{"to":"2026-13-40"}`, `{"from":"2026-10-02","to":"2026-10-01"}`} {
-			if _, err := d.execute(context.Background(), tool, json.RawMessage(args)); err == nil {
+			if _, _, err := d.execute(context.Background(), tool, json.RawMessage(args)); err == nil {
 				t.Errorf("%s %s: want an error", tool, args)
 			}
 		}
 		none := assistantToolDeps{now: d.now}
-		if _, err := none.execute(context.Background(), tool, nil); err == nil || !strings.Contains(err.Error(), "passage log is not running") {
+		if _, _, err := none.execute(context.Background(), tool, nil); err == nil || !strings.Contains(err.Error(), "passage log is not running") {
 			t.Errorf("%s with no store: %v", tool, err)
 		}
 		gone := assistantToolDeps{now: d.now, passageLog: func() *passageStore { return nil }}
-		if _, err := gone.execute(context.Background(), tool, nil); err == nil {
+		if _, _, err := gone.execute(context.Background(), tool, nil); err == nil {
 			t.Errorf("%s with a nil store: want an error", tool)
 		}
 	}
@@ -559,7 +559,7 @@ func TestPassageTools_StopWhenCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, tool := range []string{"list_passages", "get_cruise_summary"} {
-		if _, err := logbookDeps(t, s).execute(ctx, tool, nil); err == nil {
+		if _, _, err := logbookDeps(t, s).execute(ctx, tool, nil); err == nil {
 			t.Errorf("%s ran on a cancelled context", tool)
 		}
 	}

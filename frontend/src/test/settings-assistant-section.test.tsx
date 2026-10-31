@@ -391,6 +391,7 @@ describe('assistant settings-draft plumbing', () => {
       voice_input: false,
       read_aloud: false,
       wake_word: false,
+      verbose_run_log: false,
       web_search: false,
       web_search_model: 'google/gemini-2.5-flash-lite',
       passage_limits: expect.objectContaining({ daylight_arrival: false }),
@@ -503,6 +504,19 @@ describe('assistant settings-draft plumbing', () => {
     expect(draft.assistantVoiceInput).toBe(false)
     expect(draft.assistantReadAloud).toBe(false)
     expect(draft.assistantWakeWord).toBe(false)
+  })
+
+  it('toggling Verbose run log marks the form dirty and defaults off', () => {
+    const { latestDraft } = renderSection()
+
+    expect(latestDraft().assistantVerboseRunLog).toBe(false)
+    fireEvent.click(screen.getByLabelText('Verbose run log'))
+
+    expect(latestDraft().assistantVerboseRunLog).toBe(true)
+    expect(draftsEqual(latestDraft(), enabledBaseline)).toBe(false)
+    expect(buildRegularSettingsPatch(latestDraft()).assistant?.verbose_run_log).toBe(true)
+    expect(hydrateDraftFromSettings({ assistant: { verbose_run_log: true } }).assistantVerboseRunLog).toBe(true)
+    expect(hydrateDraftFromSettings({}).assistantVerboseRunLog).toBe(false)
   })
 
   it('toggling Web search marks the form dirty and defaults off', () => {

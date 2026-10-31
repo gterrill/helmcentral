@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mateCase struct {
@@ -214,8 +215,8 @@ func TestPassageGuard_OffWhenTheToolIsNotOffered(t *testing.T) {
 type noPassageTools struct{}
 
 func (noPassageTools) definitions() []openRouterTool { return nil }
-func (noPassageTools) execute(ctx context.Context, name string, args json.RawMessage) (string, error) {
-	return "{}", nil
+func (noPassageTools) execute(ctx context.Context, name string, args json.RawMessage) (string, assistantToolOutcome, error) {
+	return "{}", assistantToolOutcome{}, nil
 }
 
 func TestPassageLimitsStatusLine(t *testing.T) {
@@ -261,26 +262,23 @@ func TestPassageGuardInstructionPerTrigger(t *testing.T) {
 	}
 }
 
-func TestPassageGuard_RoundCapAcceptanceIsLogged(t *testing.T) {
+func TestPassageGuard_BudgetAcceptanceIsLogged(t *testing.T) {
 	var buf strings.Builder
 	orig := log.Writer()
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(orig) })
 	d := pwToolDeps(passageLimits{})
-	doer := &queuedChatDoer{}
-	// Burn every round but the last on tool calls, then a bad final draft.
-	for i := 0; i < assistantMaxToolRounds-1; i++ {
-		doer.responses = append(doer.responses, toolCallResponse(t, "call_1", mateToolGetWindForecast.name, `{"lat":-19,"lon":147}`, usage(1, 1, 0)))
-		doer.errs = append(doer.errs, nil)
-	}
-	doer.responses = append(doer.responses, finalResponse(t, "A northerly gives you a head sea.", "m", usage(1, 1, 0)))
-	doer.errs = append(doer.errs, nil)
+	// A bad draft that finishes streaming after the tool phase has ended: no
+	// round is left to send it back in. (A used-up round ceiling withdraws the
+	// checker with the tools, so only time reaches this.)
+	shortBudget(t, 50*time.Millisecond, 5*time.Second)
+	doer := &streamingAnswerDoer{first: "A northerly gives you ", rest: "a head sea.", delay: 200 * time.Millisecond}
 	emit, _ := recordingEmitter()
 	runner := &assistantRunner{doer: doer, apiKey: "k", model: "m", tools: d, emit: emit}
 	if _, err := runner.run(context.Background(), "system", "", nil); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if !strings.Contains(buf.String(), "accepted as is") || !strings.Contains(buf.String(), "round cap") {
-		t.Fatalf("round-cap acceptance must be logged, got %q", buf.String())
+	if !strings.Contains(buf.String(), "accepted as is") || !strings.Contains(buf.String(), "budget used up") {
+		t.Fatalf("budget acceptance must be logged, got %q", buf.String())
 	}
 }

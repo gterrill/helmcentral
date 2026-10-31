@@ -126,7 +126,7 @@ var mateToolGetVesselParticulars = mateTool{
 			"memory or guess it, ask the operator. Use it before filling in any form.",
 		Parameters: json.RawMessage(`{"type": "object", "properties": {}}`),
 	},
-	execute: assistantToolDeps.executeGetVesselParticulars,
+	execute: plainTool(assistantToolDeps.executeGetVesselParticulars),
 	describe: func(args json.RawMessage) string {
 		return "Reading the vessel details…"
 	},

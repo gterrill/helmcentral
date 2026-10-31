@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -115,10 +116,21 @@ type assistantReadiness struct {
 
 const openRouterModelsListURL = "https://openrouter.ai/api/v1/models"
 
-type assistantAutoRouterOptions struct {
+// assistantRunnerOptions is what a run is configured with beyond its tools:
+// how the auto router may choose a model, and whether to log every round.
+type assistantRunnerOptions struct {
 	AllowedModels  []string
 	ExcludedModels []string
 	CostTier       string
+	// VerboseRunLog is the operator's "Verbose run log" setting: one log line
+	// per round of a run.
+	VerboseRunLog bool
+	// Unattended is a run with nobody watching (a watch or alarm review).
+	Unattended bool
+	// SubmitTool names the tool an unattended run files its result with. The
+	// forced final answer keeps that tool and no other, so a run that ran out
+	// of rounds can still file with what it has.
+	SubmitTool string
 }
 
 type assistantModelOption struct {
@@ -780,7 +792,43 @@ func getAssistantConversationHandler(c echo.Context) error {
 		messages = []assistantMessage{}
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{"conversation": conv, "messages": messages})
+	// The thread needs the runs that gave no answer, in full, to show them in
+	// their place, and for the rest only which answer each belongs to, so the
+	// answer can offer its Run details (ADR 0240).
+	runs, err := globalAssistantStore.ListRuns(id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	listed := make([]any, 0, len(runs))
+	for _, run := range runs {
+		if run.AnswerMessageID == nil {
+			listed = append(listed, run)
+		} else {
+			listed = append(listed, assistantRunRef{ID: run.ID, AnswerMessageID: *run.AnswerMessageID})
+		}
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{"conversation": conv, "messages": messages, "runs": listed})
+}
+
+// assistantRunRef is how the conversation lists a run that gave an answer.
+type assistantRunRef struct {
+	ID              string `json:"id"`
+	AnswerMessageID string `json:"answer_message_id"`
+}
+
+// GET /api/assistant/runs/:id
+//
+// One run's full trace: its rounds, timings and tool calls (ADR 0240).
+func getAssistantRunTraceHandler(c echo.Context) error {
+	run, ok, err := globalAssistantStore.GetRun(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+	}
+	if !ok {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": "run not found"})
+	}
+	return c.JSON(http.StatusOK, run)
 }
 
 // DELETE /api/assistant/conversations/:id
@@ -868,14 +916,14 @@ func assistantDocumentLookup(id string) (document, error) {
 // straight through. A package-level var (not a plain function) so tests can
 // substitute a fake whole-run implementation without touching
 // postAssistantMessageHandler.
-var newAssistantRunner = func(apiKey, model string, tools assistantToolDeps, autoRouter assistantAutoRouterOptions, emit assistantEmitter) assistantRunnerFace {
+var newAssistantRunner = func(apiKey, model string, tools assistantToolDeps, options assistantRunnerOptions, emit assistantEmitter) assistantRunnerFace {
 	return &assistantRunner{
-		doer:       openRouterHTTPClient,
-		apiKey:     apiKey,
-		model:      model,
-		autoRouter: autoRouter,
-		tools:      tools,
-		emit:       emit,
+		doer:    openRouterHTTPClient,
+		apiKey:  apiKey,
+		model:   model,
+		options: options,
+		tools:   tools,
+		emit:    emit,
 	}
 }
 
@@ -1080,7 +1128,7 @@ type assistantTurnParams struct {
 	apiKey       string
 	model        string
 	settingsPath string
-	autoRouter   assistantAutoRouterOptions
+	options      assistantRunnerOptions
 	webSearch    bool
 	today        time.Time
 	spoken       bool
@@ -1100,10 +1148,11 @@ func assistantTurnParamsFromSettings(settingsPath string, readiness assistantRea
 		model:        readiness.Model,
 		settingsPath: settingsPath,
 		webSearch:    readiness.WebSearch,
-		autoRouter: assistantAutoRouterOptions{
+		options: assistantRunnerOptions{
 			AllowedModels:  settingsPayload.Assistant.AllowedModels,
 			ExcludedModels: settingsPayload.Assistant.ExcludedModels,
 			CostTier:       settingsPayload.Assistant.CostTier,
+			VerboseRunLog:  settingsPayload.Assistant.VerboseRunLog,
 		},
 	}, nil
 }
@@ -1116,6 +1165,9 @@ func assistantTurnParamsFromSettings(settingsPath string, readiness assistantRea
 // launched and the caller removes it. postAssistantMessageHandler and the
 // end-of-watch handoff (ADR 0160, assistant_watch.go) both start turns here.
 func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, messages []assistantMessage, p assistantTurnParams) error {
+	// The store is read once: the run goroutine outlives the request and must
+	// not look the global up again as it ends.
+	store := globalAssistantStore
 	pc := collectAssistantPromptContext(p.settingsPath, time.Now())
 	pc.Spoken = p.spoken
 	// One construction of the turn's tools: the prompt, the version stamped on
@@ -1137,14 +1189,60 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		return err
 	}
 
-	runner := newAssistantRunner(p.apiKey, p.model, toolDeps, p.autoRouter, run.append)
+	runner := newAssistantRunner(p.apiKey, p.model, toolDeps, p.options, run.append)
 	// The conversation rides on the run's context so start_watch (ADR 0160)
 	// knows where to report back.
 	runCtx = withAssistantConversationID(runCtx, id)
+	// The run's trace (ADR 0240): the runner records its rounds here and the
+	// goroutine below stores it however the run ends.
+	recorder := &assistantRunRecorder{}
+	runCtx = withAssistantRunRecorder(runCtx, recorder)
+	runStarted := time.Now()
+	afterSeq := 0
+	if len(messages) > 0 {
+		afterSeq = messages[len(messages)-1].Seq
+	}
+	// saveTrace stores the run (ADR 0240). answerID is empty when it gave no
+	// answer. A failure to store is logged and does not undo the answer saved.
+	saved := false
+	saveTrace := func(answerID, model string, runErr error) {
+		if saved {
+			return
+		}
+		saved = true
+		rounds, stop := recorder.result()
+		if stop == "" {
+			// The runner never said (a test double, or a crash before it could).
+			stop = assistantStopReasonFor("", runErr, run.wasCancelled(), false)
+		}
+		if answerID == "" && stop == assistantStopAnswered {
+			// The run answered but the answer could not be stored.
+			stop = assistantStopError
+		}
+		trace := assistantRunTrace{
+			ConversationID: id,
+			AfterSeq:       afterSeq,
+			Model:          cmp.Or(model, recorder.lastModel(), p.model),
+			StartedAt:      runStarted.UTC(),
+			DurationMs:     time.Since(runStarted).Milliseconds(),
+			StopReason:     stop,
+			Budget:         p.options.budget().trace(),
+			Rounds:         rounds,
+		}
+		if answerID != "" {
+			trace.AnswerMessageID = &answerID
+		}
+		if runErr != nil {
+			trace.Error = firstErrorLine(runErr)
+		}
+		if _, err := store.SaveRun(trace); err != nil {
+			log.Printf("assistant: store the trace of the run for conversation %s: %v", id, err)
+		}
+	}
 
 	// runCtx, not c.Request().Context(): this goroutine, and the run it
 	// drives, must outlive this one HTTP request (ADR 0105). Only
-	// run.cancel() (POST .../run/cancel) or assistantRunTimeout, applied
+	// run.cancel() (POST .../run/cancel) or the run ceiling (assistantRunCeiling), applied
 	// inside runner.run itself, ever ends it early.
 	go func() {
 		defer globalAssistantRuns.remove(id, run)
@@ -1158,6 +1256,7 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("assistant: run for conversation %s panicked: %v\n%s", id, r, debug.Stack())
+				saveTrace("", "", fmt.Errorf("the assistant run crashed: %v", r))
 				run.append(mateErrorEvent{Error: fmt.Sprintf("the assistant run crashed: %v", r)})
 				run.finish()
 			}
@@ -1165,6 +1264,7 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 
 		reply, runErr := runner.run(runCtx, systemStable, systemLive, history)
 		if runErr != nil {
+			saveTrace("", reply.Model, runErr)
 			if run.wasCancelled() {
 				log.Printf("assistant: run for conversation %s stopped by the operator", id)
 				run.append(mateErrorEvent{Error: "stopped"})
@@ -1179,8 +1279,9 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 			id, reply.Model, reply.ToolRounds, reply.PromptTokens, reply.CompletionTokens, reply.CostUSD)
 
 		if summaryTitle := assistantSummaryTitle(reply.Content); summaryTitle != "" {
-			if err := globalAssistantStore.SetTitle(id, summaryTitle); err != nil {
+			if err := store.SetTitle(id, summaryTitle); err != nil {
 				log.Printf("assistant: update conversation summary title for %s: %v", id, err)
+				saveTrace("", reply.Model, err)
 				run.append(mateErrorEvent{Error: firstErrorLine(err)})
 				run.finish()
 				return
@@ -1190,32 +1291,33 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 		// The assistant row is persisted before "message" is appended, so a
 		// client that finds no run in progress (GET .../run -> 204) can
 		// still read the answer straight from GET the conversation.
-		assistantRow, err := globalAssistantStore.AppendMessage(assistantMessage{
-			ConversationID:    id,
-			Role:              "assistant",
-			Content:           reply.Content,
-			Model:             reply.Model,
-			PromptTokens:      reply.PromptTokens,
-			CompletionTokens:  reply.CompletionTokens,
-			CostUSD:           reply.CostUSD,
-			CachedTokens:      reply.CachedTokens,
-			CacheWriteTokens:  reply.CacheWriteTokens,
-			ToolRounds:        reply.ToolRounds,
-			PromptVersion:     assistantPromptVersion(pc.WebSearch, toolDefs),
-			ToolCallsRecorded: true,
-			ToolCalls:         reply.ToolCalls,
-			Proposals:         reply.Proposals,
-			FormDrafts:        reply.FormDrafts,
-			Cards:             reply.Cards,
+		assistantRow, err := store.AppendMessage(assistantMessage{
+			ConversationID:   id,
+			Role:             "assistant",
+			Content:          reply.Content,
+			Model:            reply.Model,
+			PromptTokens:     reply.PromptTokens,
+			CompletionTokens: reply.CompletionTokens,
+			CostUSD:          reply.CostUSD,
+			CachedTokens:     reply.CachedTokens,
+			CacheWriteTokens: reply.CacheWriteTokens,
+			ToolRounds:       reply.ToolRounds,
+			PromptVersion:    assistantPromptVersion(pc.WebSearch, toolDefs),
+			Proposals:        reply.Proposals,
+			FormDrafts:       reply.FormDrafts,
+			Cards:            reply.Cards,
 		})
 		if err != nil {
 			log.Printf("assistant: persist reply for conversation %s: %v", id, err)
+			saveTrace("", reply.Model, err)
 			run.append(mateErrorEvent{Error: firstErrorLine(err)})
 			run.finish()
 			return
 		}
 
-		updatedConv, ok, err := globalAssistantStore.GetConversation(id)
+		saveTrace(assistantRow.ID, reply.Model, nil)
+
+		updatedConv, ok, err := store.GetConversation(id)
 		if err != nil || !ok {
 			log.Printf("assistant: reload conversation %s after reply: ok=%v err=%v", id, ok, err)
 			run.append(mateErrorEvent{Error: "failed to reload the conversation after the reply"})
@@ -1295,6 +1397,9 @@ func assistantRoutes() []apiRoute {
 		{http.MethodGet, "/api/assistant/conversations", tierRead, listAssistantConversationsHandler},
 		{http.MethodGet, "/api/assistant/conversations/search", tierRead, searchAssistantConversationsHandler},
 		{http.MethodGet, "/api/assistant/conversations/:id", tierRead, getAssistantConversationHandler},
+		// One run's trace, for the Run details view. Read tier: it reports what
+		// already happened.
+		{http.MethodGet, "/api/assistant/runs/:id", tierRead, getAssistantRunTraceHandler},
 
 		// Rejoining a reply still being written (ADR 0105): replay-then-live
 		// SSE if a run is in flight, 204 if not - read-only, same tier as
