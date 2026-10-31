@@ -284,7 +284,7 @@ func normalizeFieldValue(f recordField, v any, ops []changeOp, i int) (any, erro
 		for _, e := range list {
 			s, ok := e.(string)
 			if !ok {
-				return nil, errors.New("must be a list of text")
+				return nil, fmt.Errorf("must be a list of text, but %v is not text", e)
 			}
 			out = append(out, s)
 		}

@@ -35,7 +35,7 @@ func marinaCardDeps(p placeNameProvider, state vesselStateData) assistantToolDep
 
 func runMarinaForCard(t *testing.T, d assistantToolDeps, args string) (string, []mateCard) {
 	t.Helper()
-	text, err := d.execute(context.Background(), "marina_details", json.RawMessage(args))
+	text, _, err := d.execute(context.Background(), "marina_details", json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("marina_details: %v", err)
 	}
@@ -93,7 +93,8 @@ func TestMarinaDetails_TwoCallsMakeTwoCards(t *testing.T) {
 	run := func(details marinaDetails) (string, error) {
 		d := marinaDeps(&fakeMarinaProvider{details: details}, vesselStateData{LengthOverallM: 15, DraftM: 1.4}, nil)
 		d.cards = sink
-		return d.execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
+		text, _, err := d.execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`))
+		return text, err
 	}
 	a, err := run(wire)
 	if err != nil {
@@ -114,7 +115,7 @@ func TestMarinaDetails_TwoCallsMakeTwoCards(t *testing.T) {
 
 func TestMarinaDetails_AFailedCallPutsNoCard(t *testing.T) {
 	d := marinaCardDeps(&fakeMarinaProvider{err: fmt.Errorf("no marina charted within 500 m of that position")}, vesselStateData{})
-	if _, err := d.execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`)); err == nil {
+	if _, _, err := d.execute(context.Background(), "marina_details", json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`)); err == nil {
 		t.Fatal("expected an error")
 	}
 	if got := d.cards.take(""); got != nil {
@@ -188,7 +189,7 @@ func TestMarinaDetails_TheResultMentionsACardOnlyWhereOneIsShown(t *testing.T) {
 	args := json.RawMessage(`{"lat":-20.2663,"lon":148.7102}`)
 	state := vesselStateData{LengthOverallM: 15, DraftM: 1.4}
 	noSink := marinaDeps(&fakeMarinaProvider{details: coralSeaWire(t)}, state, nil)
-	text, err := noSink.execute(context.Background(), "marina_details", args)
+	text, _, err := noSink.execute(context.Background(), "marina_details", args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +232,7 @@ func TestMarinaCard_FacilityPointsAreCentresOfTheirShapes(t *testing.T) {
 			{marinaFacility: marinaFacility{Kind: "power", Count: 1}, Geometry: []marinaShape{}},
 		},
 	}
-	card := buildMarinaCard(wire, nil)
+	card := buildMarinaCard(wire, nil, nil)
 	if len(card.Facilities) != 2 {
 		t.Errorf("facility rows = %d, want 2", len(card.Facilities))
 	}

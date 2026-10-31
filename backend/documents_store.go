@@ -1221,7 +1221,7 @@ func (s *documentStore) attachTags(q sqlQueryer, doc *document) error {
 // transaction - by Insert, UpdateMeta, SetSuggested and MoveDocuments for
 // the document itself, and by rebuildMetaChunksUnderFolderTx for every
 // document under a renamed or moved folder.
-func (s *documentStore) rebuildMetaChunkTx(tx *sql.Tx, docID string) error {
+func rebuildMetaChunkTx(tx *sql.Tx, docID string) error {
 	var title, filename, notes, summary string
 	var folderID sql.NullString
 	err := tx.QueryRow(`SELECT title, filename, notes, summary, folder_id FROM documents WHERE id = ?`, docID).
@@ -1322,7 +1322,7 @@ func (s *documentStore) rebuildMetaChunksUnderFolderTx(tx *sql.Tx, folderID stri
 	}
 
 	for _, id := range docIDs {
-		if err := s.rebuildMetaChunkTx(tx, id); err != nil {
+		if err := rebuildMetaChunkTx(tx, id); err != nil {
 			return err
 		}
 	}
@@ -1418,7 +1418,7 @@ func (s *documentStore) Insert(doc document) (document, error) {
 			return fmt.Errorf("insert document: tags: %w", err)
 		}
 
-		if err := s.rebuildMetaChunkTx(tx, doc.ID); err != nil {
+		if err := rebuildMetaChunkTx(tx, doc.ID); err != nil {
 			return err
 		}
 
@@ -1701,6 +1701,82 @@ func (s *documentStore) Search(query string, folderID *string, recursive bool, t
 	return out, rows.Err()
 }
 
+// taggedDocument is the little of a document the marina link needs.
+type taggedDocument struct {
+	ID       string
+	Title    string
+	Filename string
+}
+
+// DocumentsTaggedWith returns up to limit documents carrying an operator tag
+// equal to name, newest first. The match is the whole tag, ignoring case and
+// the spaces round either side, so "Coral Sea Marina" never finds a document
+// tagged "Coral Sea Marina Resort". Suggested tags do not count: a receipt
+// whose text names the marina is not the marina's map. Case is folded here
+// rather than in SQL, whose lower() leaves accented letters alone. A blank
+// name matches nothing.
+func (s *documentStore) DocumentsTaggedWith(name string, limit int) ([]taggedDocument, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	return s.taggedDocuments(name, limit)
+}
+
+// taggedDocuments is DocumentsTaggedWith with limit <= 0 meaning no limit.
+func (s *documentStore) taggedDocuments(name string, limit int) ([]taggedDocument, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`SELECT id, title, filename, tag FROM documents
+		JOIN document_tags ON document_id = id
+		WHERE source = 'operator'
+		ORDER BY updated_at DESC, id DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("documents tagged with %q: %w", name, err)
+	}
+	defer rows.Close()
+	var out []taggedDocument
+	seen := map[string]bool{}
+	for (limit <= 0 || len(out) < limit) && rows.Next() {
+		var d taggedDocument
+		var tag string
+		if err := rows.Scan(&d.ID, &d.Title, &d.Filename, &tag); err != nil {
+			return nil, fmt.Errorf("documents tagged with %q: scan: %w", name, err)
+		}
+		if seen[d.ID] || !strings.EqualFold(strings.TrimSpace(tag), name) {
+			continue
+		}
+		seen[d.ID] = true
+		out = append(out, d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("documents tagged with %q: %w", name, err)
+	}
+	return out, nil
+}
+
+// documentsWithOperatorTag returns every document the marina link would find
+// for tag, in full, for the record listing.
+func (s *documentStore) documentsWithOperatorTag(tag string) ([]document, error) {
+	found, err := s.taggedDocuments(tag, 0)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]document, 0, len(found))
+	for _, f := range found {
+		d, err := s.Get(f.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
 // insertOperatorTagsTx inserts tags (trimmed, empty entries skipped - the
 // same rule an operator retyping the field with stray commas gets) as
 // docID's operator tags inside tx, promoting a tag already present as
@@ -1729,7 +1805,7 @@ func insertOperatorTagsTx(tx *sql.Tx, docID string, tags []string) error {
 // the same transaction as a folder move rather than two separate commits.
 // It does not rebuild the meta chunk itself - PatchDocument and UpdateMeta
 // each do that once, after every edit they're applying has landed.
-func (s *documentStore) updateMetaTx(tx *sql.Tx, now time.Time, id string, title, notes *string, tags []string) error {
+func updateMetaTx(tx *sql.Tx, now time.Time, id string, title, notes *string, tags []string) error {
 	ok, err := rowExists(tx, `SELECT 1 FROM documents WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("update meta: check document: %w", err)
@@ -1767,10 +1843,10 @@ func (s *documentStore) updateMetaTx(tx *sql.Tx, now time.Time, id string, title
 // afterward so search reflects the edit immediately.
 func (s *documentStore) UpdateMeta(id string, title, notes *string, tags []string) error {
 	return s.RunTx("update meta", func(tx *sql.Tx, now time.Time) error {
-		if err := s.updateMetaTx(tx, now, id, title, notes, tags); err != nil {
+		if err := updateMetaTx(tx, now, id, title, notes, tags); err != nil {
 			return err
 		}
-		return s.rebuildMetaChunkTx(tx, id)
+		return rebuildMetaChunkTx(tx, id)
 	})
 }
 
@@ -1811,7 +1887,7 @@ func (s *documentStore) SetSuggested(id, title, summary string, tags []string) e
 			}
 		}
 
-		return s.rebuildMetaChunkTx(tx, id)
+		return rebuildMetaChunkTx(tx, id)
 	})
 }
 
@@ -2157,7 +2233,7 @@ func (s *documentStore) moveDocumentsTx(tx *sql.Tx, now time.Time, ids []string,
 		if err := checkRowsAffected(res, errDocumentNotFound); err != nil {
 			return err
 		}
-		if err := s.rebuildMetaChunkTx(tx, id); err != nil {
+		if err := rebuildMetaChunkTx(tx, id); err != nil {
 			return err
 		}
 	}
@@ -2195,7 +2271,7 @@ func (s *documentStore) PatchDocument(id string, title, notes *string, tags []st
 		metaChanged := title != nil || notes != nil || tags != nil
 
 		if metaChanged {
-			if err := s.updateMetaTx(tx, now, id, title, notes, tags); err != nil {
+			if err := updateMetaTx(tx, now, id, title, notes, tags); err != nil {
 				return err
 			}
 		} else if !moveFolder && sortIndex == nil {
@@ -2217,7 +2293,7 @@ func (s *documentStore) PatchDocument(id string, title, notes *string, tags []st
 				return err
 			}
 		} else if metaChanged {
-			if err := s.rebuildMetaChunkTx(tx, id); err != nil {
+			if err := rebuildMetaChunkTx(tx, id); err != nil {
 				return err
 			}
 		}

@@ -35,6 +35,22 @@ describe('decodeMateCards: marina', () => {
     expect(card.geometry.pontoons[0].shape.points[0]).toHaveLength(2)
   })
 
+  it('reads the documents linked to the marina', () => {
+    const card = marinaCard({ saved_documents: [{ id: 'd1', title: 'Berth map' }, { id: 'd2', title: 'Rules' }] })
+    expect(card.savedDocuments).toEqual([{ id: 'd1', title: 'Berth map' }, { id: 'd2', title: 'Rules' }])
+    expect(marinaCard().savedDocuments).toEqual([])
+  })
+
+  it('refuses a card without saved_documents', () => {
+    expect(reasonOf(mutate((p) => delete p.saved_documents))).toMatch(/saved_documents.*array/)
+  })
+
+  it('refuses a saved document that is malformed', () => {
+    expect(reasonOf(mutate((p) => (p.saved_documents = 'x')))).toMatch(/saved_documents.*array/)
+    expect(reasonOf(mutate((p) => (p.saved_documents = [{ id: 'd1' }])))).toMatch(/saved_documents\[0\]\.title/)
+    expect(reasonOf(mutate((p) => (p.saved_documents = [{ id: '', title: 'x' }])))).toMatch(/saved_documents\[0\]\.id/)
+  })
+
   it('accepts an unknown data date as empty', () => {
     expect(marinaCard({ data_as_of: '' }).dataAsOf).toBe('')
   })

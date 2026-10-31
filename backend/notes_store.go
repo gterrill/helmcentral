@@ -122,7 +122,7 @@ func (s *documentStore) ReplaceNoteBody(id, newSHA string, size int64) (string, 
 			return err
 		}
 
-		if err := s.rebuildMetaChunkTx(tx, id); err != nil {
+		if err := rebuildMetaChunkTx(tx, id); err != nil {
 			return err
 		}
 

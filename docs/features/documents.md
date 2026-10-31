@@ -123,6 +123,13 @@ Every document carries:
   the file itself: where the paper original lives, who to call about it, why
   it's worth keeping.
 
+A tag can also link a document to a marina. Give a marina's own map or berth
+plan a tag that is the marina's name, such as "Coral Sea Marina Resort", and
+Mate reads it whenever it looks at that marina. Only tags you've kept or typed
+yourself link a document. A tag Mate merely suggested does not. The marina card shows it too,
+with a link back here. See "A marina's own map" in
+[Mate](assistant.md#a-marinas-own-map).
+
 Title, filename, folder, tags, summary and notes are all searched along with
 the document's own text. A document titled "Impeller kit" turns up on the word
 "impeller" even before its contents have been read.

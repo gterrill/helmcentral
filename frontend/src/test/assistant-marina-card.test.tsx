@@ -204,6 +204,20 @@ describe('AssistantMarinaCard', () => {
     expect(await screen.findByText('Coral Sea Marina Resort')).toBeInTheDocument()
   })
 
+  it('links each document saved for the marina to its page', () => {
+    render(<AssistantMarinaCard card={marinaCard({ saved_documents: [{ id: 'd1', title: 'Berth map' }, { id: 'd 2', title: 'Marina rules' }] })} />)
+    const row = screen.getByTestId('marina-saved-documents')
+    expect(row).toHaveTextContent('In Documents:')
+    expect(within(row).getByRole('link', { name: 'Berth map' })).toHaveAttribute('href', '/documents?document=d1')
+    expect(within(row).getByRole('link', { name: 'Marina rules' })).toHaveAttribute('href', '/documents?document=d+2')
+  })
+
+  it('shows no Documents row when nothing is saved for the marina', () => {
+    render(<AssistantMarinaCard card={marinaCard()} />)
+    expect(screen.queryByTestId('marina-saved-documents')).not.toBeInTheDocument()
+    expect(screen.queryByText(/In Documents/)).not.toBeInTheDocument()
+  })
+
   it('never says widget', () => {
     const { container } = render(<AssistantMarinaCard card={marinaCard()} />)
     expect(container.textContent).not.toMatch(/widget/i)

@@ -1067,6 +1067,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"position find_places gave you, and weigh what it lists and its vessel_limit_check in the plan: do not make a " +
 		"stop of a marina the boat cannot enter. The tool's description says how far to trust it. If the tool returns an " +
 		"error, say the marina could not be checked and why.\n\n" +
+		marinaMapGuidance(pc.WebSearch) +
 
 		"Shape an anchorage or passage answer as a pilotage briefing, not a forecast readout. For each anchorage: " +
 		"the wind directions it is sheltered from and which would make it a lee shore, reasoned from the " +
@@ -1318,6 +1319,18 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	live = lb.String()
 
 	return stable, live
+}
+
+// marinaMapGuidance is what Mate does when the operator asks for a marina's
+// own map. Helmcentral fetches no files from the web, so the operator downloads
+// the map and uploads it to Documents; Mate only finds where it is. Like the
+// search_web paragraph, it never names search_web when web search is off.
+func marinaMapGuidance(webSearch bool) string {
+	find := "Web search is off, so say that web search is off and suggest the marina's website from marina_details's contact. "
+	if webSearch {
+		find = "Find the marina's map page or PDF with search_web and give the operator the link to download and upload to Documents themselves. "
+	}
+	return "When the operator asks for a marina's own map (its berth layout or pontoon plan), " + find + "\n\n"
 }
 
 // passageLimitsStatusLine states whether the passage limits are set. An

@@ -68,6 +68,13 @@ type marinaCardGeometry struct {
 	Ashore     []marinaCardPoint `json:"ashore"`
 }
 
+// marinaCardSavedDocument is a document of the operator's tagged with the
+// marina's name, which the card links to.
+type marinaCardSavedDocument struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
 type marinaCardPayload struct {
 	Name             string               `json:"name"`
 	OSM              string               `json:"osm"`
@@ -93,6 +100,8 @@ type marinaCardPayload struct {
 	// GeometryTruncated says the map's shapes were simplified or cut.
 	GeometryTruncated bool               `json:"geometry_truncated"`
 	Geometry          marinaCardGeometry `json:"geometry"`
+	// SavedDocuments are the operator's documents linked to this marina by tag.
+	SavedDocuments []marinaCardSavedDocument `json:"saved_documents"`
 }
 
 // shapeCentre is the place a shape stands for on the map: a point as it is,
@@ -147,10 +156,11 @@ func lineMidpoint(pts [][2]float64) (lat, lon float64) {
 // buildMarinaCard keeps everything the plugin returned, un-shrunk. A facility
 // the marina declares about itself (its own fuel tags, say) arrives with no
 // geometry: it gets no dot, but still a row.
-func buildMarinaCard(found marinaDetails, checks []marinaLimitCheck) marinaCardPayload {
+func buildMarinaCard(found marinaDetails, checks []marinaLimitCheck, saved []marinaSavedDocument) marinaCardPayload {
 	m := found.Marina
 	card := marinaCardPayload{
-		Name: m.Name, OSM: m.OSM, Lat: m.Lat, Lon: m.Lon, Berths: m.Berths,
+		SavedDocuments: make([]marinaCardSavedDocument, 0, len(saved)),
+		Name:           m.Name, OSM: m.OSM, Lat: m.Lat, Lon: m.Lon, Berths: m.Berths,
 		Fee: m.Fee, PowerSupply: m.PowerSupply, OpeningHours: m.OpeningHours,
 		Contact:           marinaCardContact{Website: m.Website, Phone: m.Phone, VHF: m.VHF, Email: m.Email},
 		ChartedLimits:     m.marinaChartedLimits,
@@ -185,6 +195,9 @@ func buildMarinaCard(found marinaDetails, checks []marinaLimitCheck) marinaCardP
 	for _, a := range found.Ashore {
 		card.Ashore = append(card.Ashore, marinaCardAshore(a.marinaAshore))
 		card.Geometry.Ashore = append(card.Geometry.Ashore, marinaCardPoint{Kind: a.Kind, Name: a.Name, Lat: a.Lat, Lon: a.Lon})
+	}
+	for _, s := range saved {
+		card.SavedDocuments = append(card.SavedDocuments, marinaCardSavedDocument{ID: s.DocumentID, Title: s.Title})
 	}
 	for _, c := range checks {
 		card.VesselLimitCheck = append(card.VesselLimitCheck, marinaCardLimit{Particular: c.Particular, Status: c.Status, BoatM: c.BoatM, ChartedLimitM: c.ChartedLimitM})
