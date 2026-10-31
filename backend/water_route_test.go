@@ -35,6 +35,28 @@ func routePolylineCrossesShore(route waterRoute, lines []shorelineLine) bool {
 	return false
 }
 
+// routeMinShoreClearanceMeters is the closest the route polyline comes to any
+// shoreline segment, measured both ways: route vertices to shore segments and
+// shore vertices to route segments (the two cannot cross, so that is the
+// minimum).
+func routeMinShoreClearanceMeters(route waterRoute, lines []shorelineLine) float64 {
+	best := math.Inf(1)
+	for _, l := range lines {
+		for j := 1; j < len(l.Points); j++ {
+			c, d := l.Points[j-1], l.Points[j]
+			for i, a := range route.Points {
+				best = math.Min(best, pointToSegmentMeters(a.Lat, a.Lon, c.Lat, c.Lon, d.Lat, d.Lon))
+				if i > 0 {
+					b := route.Points[i-1]
+					best = math.Min(best, pointToSegmentMeters(c.Lat, c.Lon, a.Lat, a.Lon, b.Lat, b.Lon))
+					best = math.Min(best, pointToSegmentMeters(d.Lat, d.Lon, a.Lat, a.Lon, b.Lat, b.Lon))
+				}
+			}
+		}
+	}
+	return best
+}
+
 func TestRouteOverWater_ClearWaterIsTheStraightLine(t *testing.T) {
 	from, to := shorelinePoint{-20.0, 149.0}, shorelinePoint{-20.0, 149.3}
 	far := []shorelineLine{islandRing("way/far", -20.4, 149.15, 0.02)}
@@ -384,5 +406,40 @@ func TestRouteOverWater_ACancelledContextStopsTheSearch(t *testing.T) {
 	_, err := routeOverWater(ctx, haslewood, coralSea, lines, 6)
 	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// ── real shoreline: Mackay Marina ─────────────────────────────────────────
+//
+// testdata/water_route/mackay.json.gz is natural=coastline from the boat's
+// Overpass server, trimmed to the ways touching 21.15°S-20.78°S,
+// 149.15°E-149.32°E, captured 2026-10-31. The marina entrance is 93 m wide,
+// narrower than twice the clearance a bend is normally kept off the shore.
+
+func TestRouteOverWater_NarrowMarinaEntranceStillRoutes(t *testing.T) {
+	lines := loadShorelineFile(t, "testdata/water_route/mackay.json.gz")
+	westBay := shorelinePoint{-20.815, 149.261}
+	basin := shorelinePoint{-21.113, 149.227}
+	for _, margin := range []float64{3, 8} {
+		r, err := routeOverWater(context.Background(), westBay, basin, lines, margin)
+		if err != nil {
+			t.Fatalf("margin %.0f: %v", margin, err)
+		}
+		t.Logf("margin %.0f: %.2f nm routed, %.2f straight, %d points, end moved %.3f nm", margin, r.DistanceNm, r.StraightLineNm, len(r.Points), r.EndMovedNm)
+		if r.DistanceNm < 17 || r.DistanceNm > 22 {
+			t.Errorf("routed %.1f nm outside 17-22", r.DistanceNm)
+		}
+		if r.EndMovedNm > 0.05 {
+			t.Errorf("end moved %.3f nm: it did not reach the basin", r.EndMovedNm)
+		}
+		if routePolylineCrossesShore(r, lines) {
+			t.Errorf("route crosses the shoreline: %+v", r.Points)
+		}
+		floor := waterRouteClearanceNm / 8 * metersPerNauticalMile
+		clr := routeMinShoreClearanceMeters(r, lines)
+		t.Logf("margin %.0f: minimum shore clearance %.1f m (floor %.1f m)", margin, clr, floor)
+		if clr < floor*0.99 {
+			t.Errorf("route comes within %.1f m of the shore, floor %.1f m", clr, floor)
+		}
 	}
 }

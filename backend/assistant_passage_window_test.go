@@ -1431,3 +1431,48 @@ func TestPassageLimitsFromSettingsMap(t *testing.T) {
 		t.Fatalf("junk block must be an error, got %v", l)
 	}
 }
+
+func TestParsePassageWindowArgs_LegsGivenAsAJSONString(t *testing.T) {
+	legs := `[{"name":"A to B","route":[{"lat":-20.0,"lon":149.0},{"lat":-20.1,"lon":149.1}],"speed_kn":6}]`
+	quoted, _ := json.Marshal(legs)
+	raw := `{"legs":` + string(quoted) + `,"stays_nights":[],"departure_dates":["2026-11-02"],"depart_time":"06:00"}`
+	args, err := parsePassageWindowArgs(json.RawMessage(raw))
+	if err != nil {
+		t.Fatalf("string-encoded legs rejected: %v", err)
+	}
+	if len(args.Legs) != 1 || args.Legs[0].Name != "A to B" || len(args.Legs[0].Route) != 2 {
+		t.Fatalf("legs = %+v", args.Legs)
+	}
+}
+
+func TestParsePassageWindowArgs_LegsStringThatIsNotAnArrayStillErrors(t *testing.T) {
+	for _, legs := range []string{`"not json"`, `"{\"name\":\"x\"}"`} {
+		raw := `{"legs":` + legs + `,"stays_nights":[],"departure_dates":["2026-11-02"],"depart_time":"06:00"}`
+		_, err := parsePassageWindowArgs(json.RawMessage(raw))
+		if err == nil || !strings.Contains(err.Error(), "must be an array") {
+			t.Errorf("legs %s: err = %v, want a must-be-an-array error", legs, err)
+		}
+	}
+}
+
+func TestParsePassageWindowArgs_UnknownFieldInALegStillErrors(t *testing.T) {
+	leg := `{"name":"A","route":[{"lat":-20.0,"lon":149.0},{"lat":-20.1,"lon":149.1}],"speed_kn":6,"speeed_kn":7}`
+	quoted, _ := json.Marshal("[" + leg + "]")
+	for name, legs := range map[string]string{"array": "[" + leg + "]", "string": string(quoted)} {
+		raw := `{"legs":` + legs + `,"stays_nights":[],"departure_dates":["2026-11-02"],"depart_time":"06:00"}`
+		if _, err := parsePassageWindowArgs(json.RawMessage(raw)); err == nil || !strings.Contains(err.Error(), "speeed_kn") {
+			t.Errorf("%s form: err = %v, want unknown field error", name, err)
+		}
+	}
+}
+
+func TestParsePassageWindowArgs_DatesAndNightsGivenAsStrings(t *testing.T) {
+	raw := `{"legs":[{"route":[{"lat":-20.0,"lon":149.0},{"lat":-20.1,"lon":149.1}],"speed_kn":6},{"route":[{"lat":-20.1,"lon":149.1},{"lat":-20.2,"lon":149.2}],"speed_kn":6}],"stays_nights":"[1]","departure_dates":"[\"2026-11-02\",\"2026-11-03\"]","depart_time":"06:00"}`
+	args, err := parsePassageWindowArgs(json.RawMessage(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(args.StaysNights) != 1 || args.StaysNights[0] != 1 || len(args.DepartureDates) != 2 {
+		t.Fatalf("args = %+v", args)
+	}
+}

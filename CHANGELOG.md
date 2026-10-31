@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mate can route into marinas with a narrow entrance.** A route to the basin
+  at Mackay Marina used to fail with "no water route found", because the gap
+  between the breakwaters is only 93 m wide. Mate now finds the way in and
+  keeps the route off the shore.
+- **The passage-window check no longer fails when a model formats the legs
+  differently.** Some models sent the list of legs as text instead of a list,
+  and the check refused it. Mate now reads both.
+
 ## [0.58.0] - 2026-10-31
 
 ### Breaking
