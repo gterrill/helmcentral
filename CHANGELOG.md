@@ -95,6 +95,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and FWD and AFT labels are larger and match the dial. The bars are wider, and
   the two labels sit on one line under them.
 
+- **Boat names on the anchor watch map are larger.** The name, range and
+  bearing under each AIS boat, radar target and marked spot are a third bigger,
+  so they read at arm's length. When two boats sit close together on screen,
+  the farther one hides its label sooner.
+
 ### Fixed
 
 - **Grabbing the map during a replay's opening move stops it where you let

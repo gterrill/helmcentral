@@ -5,9 +5,9 @@
 // (and anything importing from it) keep working unchanged.
 
 // ── AIS label collision avoidance ───────────────────────────────────────────
-// Design critique item 4: AIS labels are 9px map annotation (DESIGN.md's
-// legibility floor) and must stay there rather than growing to "fix"
-// legibility -- the fix is keeping them apart, not bigger. Two independent
+// Design critique item 4 kept AIS labels at the 9px floor and solved overlap
+// by keeping them apart. They have since grown to 12px because the floor was
+// too small to read at arm's length, so they take a wider radius. Two independent
 // collisions matter: a label sitting under the metric overlay or the control
 // stack (both draw at a much higher z-index and simply blot the text out),
 // and two vessel labels landing close enough on screen to overlap each
@@ -31,14 +31,17 @@ export interface MarkerLabelPoint {
   priority: number
 }
 
-// Half the label block's on-screen footprint (max-w-28 = 112px wide, two
-// lines of 9px text under the marker icon): two labels whose projected
-// centres land closer than this will visibly overlap.
+// How close two projected marker centres can land before their labels
+// visibly overlap. Tuned by eye against the label block under the icon: 50
+// for the POI tile's one-line labels, 65 for the anchor watch's two-line
+// 12px AIS labels.
 export const LABEL_COLLISION_RADIUS_PX = 50
+export const AIS_LABEL_COLLISION_RADIUS_PX = 65
 
 export function resolveMarkerLabelSuppression(
   points: MarkerLabelPoint[],
   avoidZones: ScreenRect[],
+  radiusPx = LABEL_COLLISION_RADIUS_PX,
 ): Set<string> {
   const suppressed = new Set<string>()
 
@@ -62,7 +65,7 @@ export function resolveMarkerLabelSuppression(
       if (suppressed.has(b.id)) continue
       const dx = a.x - b.x
       const dy = a.y - b.y
-      if (Math.sqrt(dx * dx + dy * dy) < LABEL_COLLISION_RADIUS_PX) {
+      if (Math.sqrt(dx * dx + dy * dy) < radiusPx) {
         // b comes after a in priority order, so it's the one that yields.
         suppressed.add(b.id)
       }
