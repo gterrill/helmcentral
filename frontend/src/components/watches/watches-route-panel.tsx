@@ -12,13 +12,15 @@ import type { MateWatchRunContext } from '@/lib/mate-screen'
 
 export interface WatchesRoutePanelProps {
   canWrite: boolean
+  /** Settings is admin-only: without it the links to Alarm settings are plain words. */
+  canAdmin: boolean
   onAskMate?: (question: string, options: { newConversation: true; watchRun: MateWatchRunContext }) => void
 }
 
 // ADR 0227: Watches wired to the app location. The index and one watch's page
 // (or a new, unsaved one) are one panel; which renders is the route's view.
 // AppShell re-renders on every live delta; memo keeps this page out of it.
-export const WatchesRoutePanel = memo(function WatchesRoutePanel({ canWrite, onAskMate }: WatchesRoutePanelProps) {
+export const WatchesRoutePanel = memo(function WatchesRoutePanel({ canWrite, canAdmin, onAskMate }: WatchesRoutePanelProps) {
   const { route, openIndex, openWatch, openNew, setSort } = useWatchesRoute()
   // A watch's page reads the list too, for its arrows: the index's watches in
   // the index's order, from the same query.
@@ -62,6 +64,7 @@ export const WatchesRoutePanel = memo(function WatchesRoutePanel({ canWrite, onA
       pager={pager}
       linkedRunId={route.view === 'details' ? route.run ?? null : null}
       canWrite={canWrite}
+      canAdmin={canAdmin}
       onOpenIndex={() => { openIndex() }}
       onCreated={(id) => { openWatch(id, { replace: true }) }}
       onDeleted={() => { openIndex({ replace: true }) }}

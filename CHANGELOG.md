@@ -82,6 +82,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **A watch's Notifications section is easier to read.** Only the channels
+  that are on get a checkbox, and the ones that aren't are named in a line
+  underneath with a link to Alarm settings. A channel the watch still uses
+  but that has been turned off keeps its checkbox, with a warning and a link
+  to turn it on. When no channel is on, the section says reports stay on the
+  page. **Send** is now **When to send**, with both choices laid out and what
+  each one means shown under it.
+  
 - **Asking Mate about the same anchorage again is faster.** The map lookup
   inside Anchorage details is kept for six hours per spot, so changing the
   arrival or leave time doesn't wait for the map server a second time. Asking

@@ -1871,7 +1871,7 @@ function AppShell() {
       case 'passages':
         return <PassagesRoutePanel units={uiConfig.distanceUnits} canWrite={canWrite} isDarkTheme={isDarkTheme} />
       case 'watches':
-        return <WatchesRoutePanel canWrite={canWrite} onAskMate={openMate} />
+        return <WatchesRoutePanel canWrite={canWrite} canAdmin={canAdmin} onAskMate={openMate} />
       case 'inventory':
         return <InventoryRoutePanel canWrite={canWrite} />
       case 'settings':
