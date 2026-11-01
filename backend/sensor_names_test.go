@@ -507,3 +507,84 @@ func TestRealValueFromAnotherDeviceStillMakesItAPublisher(t *testing.T) {
 		t.Errorf("YachtDevices.47 should be recorded as a publisher of instance 1")
 	}
 }
+
+// sourceNameAfter names source once each leaf ({source, path, value}) has
+// been published on the self vessel.
+func sourceNameAfter(source string, leaves [][3]any) string {
+	snapshot := newAnomalyTestSnapshot()
+	for _, l := range leaves {
+		snapshot.applyDelta(acDelta(l[0].(string), l[1].(string), l[2], sensorNamesTestNow), sensorNamesTestNow)
+	}
+	return newSensorNamer(snapshot, vesselView{}, nil).sourceName(source)
+}
+
+func TestSourceTakesTheNameItsElectricalInstanceCarries(t *testing.T) {
+	const charger = "venus.com.victronenergy.charger.0"
+	cases := []struct {
+		name   string
+		source string
+		leaves [][3]any
+		want   string
+	}{
+		{"the GX's own name, trimmed", "venus.com.victronenergy.alternator.2",
+			[][3]any{{"venus.com.victronenergy.alternator.2", "electrical.alternator.2.name", " Alt.Port "}}, "Alt.Port"},
+		{"a renamed device takes its new name", charger,
+			[][3]any{{charger, "electrical.chargers.0.name", "Old"}, {charger, "electrical.chargers.0.name", "Shore charger"}}, "Shore charger"},
+		{"two instances that disagree fall to the kind", charger,
+			[][3]any{{charger, "electrical.chargers.0.name", "Shore A"}, {charger, "electrical.chargers.1.name", "Shore B"}}, "Victron charger"},
+		{"a blank name falls to the kind", charger,
+			[][3]any{{charger, "electrical.chargers.0.name", "  "}}, "Victron charger"},
+		{"the GX's own name is the boat's, not a device's", "venus.com.victronenergy.settings.0",
+			[][3]any{{"venus.com.victronenergy.settings.0", "electrical.venus.name", "Pikorua"}}, "Victron GX"},
+		{"a switch bank is not named for one circuit", "czone.1",
+			[][3]any{{"czone.1", "electrical.switches.bank.1.3.name", "Bilge pump"}}, unnamedSourceName},
+		{"a name cleared on the GX falls back to the kind", charger,
+			[][3]any{{charger, "electrical.chargers.0.name", "Shore charger"}, {charger, "electrical.chargers.0.name", nil}}, "Victron charger"},
+		{"only a GX service is named this way", "czone.1",
+			[][3]any{{"czone.1", "electrical.switches.pump1.name", "Bilge pump"}}, unnamedSourceName},
+		{"a relayed route name does not name the source", "plotter.1",
+			[][3]any{{"plotter.1", "navigation.courseRhumbline.activeRoute.name", "Whangarei to Opua"}}, unnamedSourceName},
+		{"another source's name is not this one's", charger,
+			[][3]any{{"venus.com.victronenergy.battery.512", "electrical.chargers.0.name", "House BMS"}}, "Victron charger"},
+	}
+	for _, tc := range cases {
+		if got := sourceNameAfter(tc.source, tc.leaves); got != tc.want {
+			t.Errorf("%s: name = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestGXSourceNamedFromItsKindWhenNoNameIsSet(t *testing.T) {
+	namer := newSensorNamer(newAnomalyTestSnapshot(), vesselView{}, nil)
+	cases := map[string]string{
+		"venus.com.victronenergy.charger.0":     "Victron charger",
+		"gx.saloon.com.victronenergy.charger.0": "Victron charger",
+		"venus.com.victronenergy.multi.274":     "Victron inverter/charger",
+		"venus.com.victronenergy.gps":           "Victron device",
+		"venus.com.victronenergy.generator.0":   "Victron device",
+	}
+	for source, want := range cases {
+		if got := namer.sourceName(source); got != want {
+			t.Errorf("%s: name = %q, want %q", source, got, want)
+		}
+	}
+}
+
+func TestUnknownNonVenusSourceStaysAnInstrument(t *testing.T) {
+	namer := newSensorNamer(newAnomalyTestSnapshot(), vesselView{}, nil)
+	for _, src := range []string{"derived-data", "ydwg.12", "foo.com.victronenergy", "foo.org.victronenergy.charger.0", "foo.com.victronenergy.charger.0.extra"} {
+		if got := namer.sourceName(src); got != unnamedSourceName {
+			t.Errorf("%s: name = %q, want %q", src, got, unnamedSourceName)
+		}
+	}
+}
+
+func TestAnotherVesselsDeviceNamesAreNotKept(t *testing.T) {
+	snapshot := newAnomalyTestSnapshot()
+	delta := acDelta("venus.com.victronenergy.charger.0", "electrical.chargers.0.name", "Their charger", sensorNamesTestNow)
+	delta.Context = "vessels.urn:mrn:imo:mmsi:123456789"
+	snapshot.applyDelta(delta, sensorNamesTestNow)
+	if len(snapshot.deviceNames) != 0 {
+		t.Errorf("deviceNames = %v, want only the self vessel's names kept", snapshot.deviceNames)
+	}
+}
