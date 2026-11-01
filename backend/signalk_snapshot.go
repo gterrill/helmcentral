@@ -43,6 +43,12 @@ type signalKSnapshot struct {
 	// reading check must know all of them to tell a battery from a charger's
 	// own input (sensor_names.go).
 	batteryPublishers map[string]map[string]struct{}
+	// deviceNames is, per self-vessel $source, the latest non-blank
+	// electrical.<kind>.<id>.name each instance that source published carries
+	// ("chargers.0" -> "Shore charger"): the name a Victron GX gives its own
+	// devices. Kept for the same reason as batteryPublishers: a silent device
+	// must keep the name it had.
+	deviceNames map[string]map[string]string
 	// controlStamps tracks mayara radar controls ("<context>|radars.<id>.controls.<name>"):
 	// the mayara timestamp last held and when, on our clock, it last advanced.
 	controlStamps map[string]controlStampEntry
@@ -296,6 +302,7 @@ func newSignalKSnapshot() *signalKSnapshot {
 		sourceSeen:        make(map[string]sourceSeenEntry),
 		acSourceSeen:      make(map[acSourceKey]acSourceEntry),
 		batteryPublishers: make(map[string]map[string]struct{}),
+		deviceNames:       make(map[string]map[string]string),
 		sentenceSeen:      make(map[string]time.Time),
 		contextHeard:      make(map[string]time.Time),
 		distressCleared:   make(map[string]struct{}),
@@ -547,6 +554,9 @@ func (s *signalKSnapshot) applyDelta(d signalKDelta, now time.Time) {
 			s.pathSeen[d.Context+"|"+val.Path] = now
 			if update.SourceRef != "" && isNumericSignalKValue(val.Value) {
 				s.noteBatteryPublisherLocked(d.Context, val.Path, update.SourceRef)
+			}
+			if update.SourceRef != "" {
+				s.noteDeviceNameLocked(d.Context, val.Path, update.SourceRef, val.Value)
 			}
 			if radarControlPath(val.Path) {
 				s.noteControlStamp(d.Context, d.Context+"|"+val.Path, val.Value, update.Timestamp, now)
@@ -946,6 +956,9 @@ func (s *signalKSnapshot) sourcesLocked(context string) map[string]sourceSeenEnt
 const (
 	signalKBatteryMaxInstances  = 64
 	signalKBatteryMaxPublishers = 16
+	// Caps on deviceNames: sources tracked, and instances per source.
+	signalKDeviceNameMaxSources   = 128
+	signalKDeviceNameMaxInstances = 16
 )
 
 // isNumericSignalKValue reports whether a delta value is a number. Booleans,
@@ -1029,6 +1042,60 @@ func (s *signalKSnapshot) batteryInstancesPublishedBy(context, source string) []
 	}
 	sort.Strings(out)
 	return out
+}
+
+// noteDeviceNameLocked records the name an electrical.<kind>.<id>.name leaf
+// gives source's instance on the self vessel. Only that exact shape counts:
+// deeper names belong to something the source relays (a switch bank's
+// circuit, electrical.switches.bank.1.3.name), and shallower ones to the
+// system as a whole (the GX's electrical.venus.name is the boat's name). A
+// blank or null name clears it, as clearing the name on the GX does. Must be
+// called with s.mu held for writing. Past a cap a new entry is dropped.
+func (s *signalKSnapshot) noteDeviceNameLocked(context, path, source string, value any) {
+	if s.selfCtx == "" || context != s.selfCtx {
+		return
+	}
+	rest, ok := strings.CutPrefix(path, "electrical.")
+	if !ok {
+		return
+	}
+	instance, ok := strings.CutSuffix(rest, ".name")
+	if !ok || strings.Count(instance, ".") != 1 {
+		return
+	}
+	name, _ := value.(string)
+	names := s.deviceNames[source]
+	if name = strings.TrimSpace(name); name == "" {
+		delete(names, instance)
+		return
+	}
+	if names == nil {
+		if len(s.deviceNames) >= signalKDeviceNameMaxSources {
+			return
+		}
+		names = make(map[string]string)
+		s.deviceNames[source] = names
+	}
+	if _, known := names[instance]; !known && len(names) >= signalKDeviceNameMaxInstances {
+		return
+	}
+	names[instance] = name
+}
+
+// deviceNameOf is the one name source's self-vessel electrical instances
+// carry, or "" when it has published none or they disagree.
+func (s *signalKSnapshot) deviceNameOf(source string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var only string
+	for _, name := range s.deviceNames[source] {
+		if only != "" && name != only {
+			return ""
+		}
+		only = name
+	}
+	return only
 }
 
 // lastSeen reports when a path last carried an update, or the zero time if it

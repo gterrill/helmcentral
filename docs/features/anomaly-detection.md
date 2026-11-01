@@ -51,6 +51,11 @@ The names are the ones you give your batteries and engines, taken from their
 equipment items. Where a source has no item, the card uses what the boat's own
 instruments call it.
 
+A Victron device that reaches Helmcentral through a GX shows the name you set
+for it on the GX. If you haven't set one, the card says what kind of device it
+is, such as "Victron charger" or "Victron solar charger". To give a device a
+proper name, set one on the GX.
+
 A serial instrument can send several kinds of data. A combined AIS, GPS and
 instrument multiplexer is one example. It shows as one device on the card,
 named for its connection. Here's how the card describes it:

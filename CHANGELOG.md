@@ -13,6 +13,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The Instruments Silent card names a Victron device behind a GX.** A
+  silent shore charger used to show as "An instrument has stopped sending".
+  The card now uses the name you set for the device on the GX. If there isn't
+  one, it says what kind of device it is, such as "Victron charger".
 - **Mate reads the charted shoreline before it says an anchorage is exposed
   or sheltered.** Asked about Thomas Island South, Mate said the bay was open
   to a northerly when it faces south and is well protected. The wind forecast

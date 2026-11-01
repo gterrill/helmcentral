@@ -402,8 +402,11 @@ func (n *sensorNamer) pathEntry(path string) sensorHealthEntry {
 // list. A source that is the sole publisher of its one battery instance takes the
 // name of the bank it reports (the operator's own name, if given). Otherwise
 // the device's installation name, then its product name, then its
-// manufacturer. A source nothing readable is known about is called a plain
-// "An instrument": a bus address or plugin id is not for the watchkeeper.
+// manufacturer. A Victron GX service has no such record, so it takes the
+// name its electrical instances carry (the name set on the GX), then the
+// kind of device it is ("Victron charger"). A source nothing readable is
+// known about is called a plain "An instrument": a bus address or plugin id
+// is not for the watchkeeper.
 const unnamedSourceName = "An instrument"
 
 func (n *sensorNamer) sourceName(source string) string {
@@ -429,6 +432,15 @@ func (n *sensorNamer) sourceNameTyped(source, busType string) string {
 			return d.Manufacturer + " device"
 		}
 	}
+	if service, ok := victronService(source); ok {
+		if name := n.snapshot.deviceNameOf(source); name != "" {
+			return name
+		}
+		if name, ok := victronServiceNames[service]; ok {
+			return name
+		}
+		return "Victron device"
+	}
 	if busType == busTypeNMEA0183 {
 		conn, _ := split0183Source(source)
 		if name := connectionDisplayName(conn); name != "" {
@@ -437,6 +449,39 @@ func (n *sensorNamer) sourceNameTyped(source, busType string) string {
 	}
 	// The $source id stays in Identifier for Ignore; it never reaches a card.
 	return unnamedSourceName
+}
+
+// victronServiceNames is what the venus plugin's D-Bus service names mean.
+var victronServiceNames = map[string]string{
+	"charger":      "Victron charger",
+	"solarcharger": "Victron solar charger",
+	"vebus":        "Victron inverter/charger",
+	"multi":        "Victron inverter/charger",
+	"pvinverter":   "Victron PV inverter",
+	"battery":      "Victron battery monitor",
+	"alternator":   "Victron alternator",
+	"dcdc":         "Victron DC-DC charger",
+	"inverter":     "Victron inverter",
+	"tank":         "Victron tank sensor",
+	"temperature":  "Victron temperature sensor",
+	"system":       "Victron GX",
+	"settings":     "Victron GX",
+}
+
+// victronService is a GX source's D-Bus service. The venus plugin's ids read
+// "<connection>.com.victronenergy.<service>[.<instance>]"; the instance is an
+// internal number and stays off the card. ok is false when source is not
+// shaped that way.
+func victronService(source string) (service string, ok bool) {
+	_, rest, found := strings.Cut(source, ".com.victronenergy.")
+	if !found {
+		return "", false
+	}
+	parts := strings.Split(rest, ".")
+	if len(parts) > 2 || parts[0] == "" || (len(parts) == 2 && parts[1] == "") {
+		return "", false
+	}
+	return parts[0], true
 }
 
 // busTypeNMEA0183 is the "type" a SignalK update's source object carries for
