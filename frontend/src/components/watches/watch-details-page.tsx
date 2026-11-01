@@ -51,6 +51,7 @@ export interface WatchDetailsPageProps {
   /** A run a link points at: shown at the top of the history, scrolled to and highlighted for a moment. */
   linkedRunId?: string | null
   canWrite: boolean
+  canAdmin: boolean
   /** The watch before and after this one in the index as the operator had it sorted. */
   pager?: PagerProps
   /** The breadcrumb's Watches: up to the index. */
@@ -139,7 +140,7 @@ function oneOffStatus(w: WatchRecord): string {
   return w.ends_at ? `Ended ${oneOffTimeLabel(w, 'ends')}` : 'Finished'
 }
 
-export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, pager, onOpenIndex, onCreated, onDeleted, onAskMate }: WatchDetailsPageProps) {
+export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin, pager, onOpenIndex, onCreated, onDeleted, onAskMate }: WatchDetailsPageProps) {
   const id = mode.kind === 'existing' ? mode.id : null
   const detail = useWatchDetail(id)
   const record = detail.watch
@@ -443,6 +444,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, pager, on
                 channelsOn={channels.on}
                 channelsLoaded={channels.loaded}
                 channelsError={channels.error}
+                canAdmin={canAdmin}
                 disabled={readOnly}
                 onNotifyChange={(notify) => update({ notify })}
                 onSendChange={(send) => update({ send })}

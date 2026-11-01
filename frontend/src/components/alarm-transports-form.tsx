@@ -1,12 +1,14 @@
-import { memo, useEffect } from 'react'
+import { memo } from 'react'
 
 import { FormSection } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { takeAnchorScroll } from '@/lib/anchor-scroll'
+import { useSetupFocus } from '@/hooks/use-setup-focus'
 import { WebPushSection } from '@/components/web-push-section'
 import { useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
+
+const acceptsNotifications = (control: string) => control === 'notifications'
 
 function Toggle({ id, checked, label, onChange }: { id: string; checked: boolean; label: string; onChange: (v: boolean) => void }) {
   return (
@@ -30,10 +32,8 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
   const { draft, setSection, setLinkAddress, secrets, setSecret, secretsPresent, loading, error, test, testResults, testing } =
     useAlarmTransportsFormContext()
 
-  // Reached from a watch's "Alarm settings" link: scroll once the form is drawn.
-  useEffect(() => {
-    if (!loading && takeAnchorScroll('notifications')) document.getElementById('notifications')?.scrollIntoView({ block: 'start' })
-  }, [loading])
+  // A watch's "Alarm settings" link asks for this section; it scrolls here once drawn.
+  useSetupFocus(acceptsNotifications)
 
   if (loading) {
     return (

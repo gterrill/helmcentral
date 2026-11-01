@@ -8,9 +8,9 @@ import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 import { WatchDetailsPage, type WatchDetailsPageProps } from '@/components/watches/watch-details-page'
 import { AppRouterContext } from '@/hooks/use-app-location'
 import { invalidateWatches } from '@/hooks/use-watches'
-import { takeAnchorScroll } from '@/lib/anchor-scroll'
 import { resetQueryStore } from '@/lib/api-query'
 import { createAppRouter, memoryHistory } from '@/lib/app-router'
+import { clearPendingSetupFocus, peekPendingSetupFocus } from '@/lib/setup-status'
 import { WATCH_TEMPLATES, type WatchDetail, type WatchRecord, type WatchRun, type WatchSchedulePreview } from '@/lib/watches'
 
 function record(overrides: Partial<WatchRecord> = {}): WatchRecord {
@@ -129,7 +129,7 @@ function renderPage(props: Partial<WatchDetailsPageProps> = {}) {
   render(
     <div className="relative">
       <SaveBarSlot />
-      <WatchDetailsPage mode={{ kind: 'existing', id: 'w1' }} canWrite {...handlers} {...props} />
+      <WatchDetailsPage mode={{ kind: 'existing', id: 'w1' }} canWrite canAdmin {...handlers} {...props} />
     </div>,
   )
   return handlers
@@ -464,29 +464,65 @@ describe('WatchDetailsPage notifications', () => {
     expect(within(group).getByRole('checkbox', { name: 'Phone and browser push' })).not.toBeChecked()
     expect(within(group).queryByRole('checkbox', { name: 'Webhook' })).not.toBeInTheDocument()
     expect(within(group).queryByRole('checkbox', { name: /signalk/i })).not.toBeInTheDocument()
-    expect(within(group).getByText(/Email and Webhook are not set up for this boat\./)).toBeInTheDocument()
+    expect(group).toHaveTextContent(/Email and Webhook are not set up for this boat\. Set them up in Alarm settings\./)
     const link = within(group).getByRole('link', { name: 'Alarm settings' })
-    expect(link).toHaveAttribute('href', '/settings/alarms#notifications')
+    expect(link).toHaveAttribute('href', '/settings/alarms')
   })
 
-  it('moves to the alarm settings in the app, without a page load, and asks for the section to be scrolled to', async () => {
+  it('moves to the alarm settings in the app, without a page load, and asks for the section to be focused', async () => {
     const router = createAppRouter(memoryHistory('/watches/w1'))
     const navigate = vi.spyOn(router, 'navigate')
     render(
       <AppRouterContext.Provider value={router}>
-        <WatchDetailsPage mode={{ kind: 'existing', id: 'w1' }} canWrite onOpenIndex={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onAskMate={vi.fn()} />
+        <WatchDetailsPage mode={{ kind: 'existing', id: 'w1' }} canWrite canAdmin onOpenIndex={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onAskMate={vi.fn()} />
       </AppRouterContext.Provider>,
     )
     fireEvent.click(await screen.findByRole('link', { name: 'Alarm settings' }))
     expect(navigate).toHaveBeenCalledWith({ panel: 'settings', route: { view: 'section', section: 'alarms' } })
-    expect(takeAnchorScroll('notifications')).toBe(true)
+    expect(peekPendingSetupFocus()).toBe('notifications')
+    clearPendingSetupFocus()
+  })
+
+  it('keeps a request for the section when a guard holds the move, and asks again once the move is made', async () => {
+    const router = createAppRouter(memoryHistory('/watches/w1'))
+    const release = router.registerGuard(() => ({ owner: 't', label: 'Watch', blocks: () => ({ kind: 'dirty' as const, detail: null }) }))
+    render(
+      <AppRouterContext.Provider value={router}>
+        <WatchDetailsPage mode={{ kind: 'existing', id: 'w1' }} canWrite canAdmin onOpenIndex={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onAskMate={vi.fn()} />
+      </AppRouterContext.Provider>,
+    )
+    fireEvent.click(await screen.findByRole('link', { name: 'Alarm settings' }))
+    expect(router.getSnapshot().pending).not.toBeNull()
+    expect(peekPendingSetupFocus()).toBeNull()
+    act(() => router.confirmPending())
+    expect(peekPendingSetupFocus()).toBe('notifications')
+    release()
+    clearPendingSetupFocus()
+  })
+
+  it('names the place in plain words, with no link, when the user cannot open Settings', async () => {
+    renderPage({ canAdmin: false })
+    const group = await screen.findByRole('group', { name: 'Send to' })
+    expect(await within(group).findByText(/Ask whoever runs this boat's Helmcentral to set them up in Alarm settings\./)).toBeInTheDocument()
+    expect(within(group).queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('draws no channel rows until Settings has answered', async () => {
+    let release: () => void = () => {}
+    channelsGate = new Promise<void>((resolve) => { release = resolve })
+    renderPage()
+    const group = await screen.findByRole('group', { name: 'Send to' })
+    expect(within(group).getByText('Checking which channels are on…')).toBeInTheDocument()
+    expect(within(group).queryByRole('checkbox')).not.toBeInTheDocument()
+    await act(async () => { release(); await Promise.resolve() })
+    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeInTheDocument())
   })
 
   it('names a single channel that is not set up in the singular', async () => {
     channels = { offered: ['ntfy', 'smtp', 'webhook', 'webpush'], enabled: ['ntfy', 'smtp', 'webpush'] }
     renderPage()
-    expect(await screen.findByText(/Webhook is not set up for this boat\./)).toBeInTheDocument()
-    expect(screen.getByText(/Set it up in/)).toBeInTheDocument()
+    await screen.findByRole('group', { name: 'Send to' })
+    await waitFor(() => expect(screen.getByRole('group', { name: 'Send to' })).toHaveTextContent(/Webhook is not set up for this boat\. Set it up in Alarm settings\./))
   })
 
   it('keeps a selected channel that is off, checked, with a warning and a way to turn it on, and lets it go', async () => {
@@ -496,10 +532,10 @@ describe('WatchDetailsPage notifications', () => {
     const email = await within(group).findByRole('checkbox', { name: 'Email' })
     expect(email).toBeChecked()
     expect(within(group).getByText(/Off for the boat, so nothing goes here\./)).toBeInTheDocument()
-    expect(within(group).getByRole('link', { name: 'Turn it on' })).toHaveAttribute('href', '/settings/alarms#notifications')
+    expect(within(group).getByRole('link', { name: 'Turn it on' })).toHaveAttribute('href', '/settings/alarms')
     fireEvent.click(email)
     await waitFor(() => expect(within(group).queryByRole('checkbox', { name: 'Email' })).not.toBeInTheDocument())
-    expect(within(group).getByText(/Email and Webhook are not set up for this boat\./)).toBeInTheDocument()
+    expect(group).toHaveTextContent(/Email and Webhook are not set up for this boat\. Set them up in Alarm settings\./)
   })
 
   it('says reports stay on the page when no channel is on', async () => {
@@ -507,9 +543,9 @@ describe('WatchDetailsPage notifications', () => {
     detail = { ...detail, watch: record({ notify: [] }) }
     renderPage()
     const group = await screen.findByRole('group', { name: 'Send to' })
-    expect(await within(group).findByText(/Nowhere yet\./)).toBeInTheDocument()
+    expect(await within(group).findByText(/Nowhere yet\. Reports stay on this page until ntfy, Email, Webhook or Phone and browser push is set up for the boat\./)).toBeInTheDocument()
     expect(within(group).queryByRole('checkbox')).not.toBeInTheDocument()
-    expect(within(group).getByRole('link', { name: 'Set up in Alarm settings' })).toHaveAttribute('href', '/settings/alarms#notifications')
+    expect(within(group).getByRole('link', { name: 'Set up in Alarm settings' })).toHaveAttribute('href', '/settings/alarms')
   })
 
   it('shows every channel as a plain checkbox and an alert when Settings could not be read', async () => {
@@ -528,7 +564,7 @@ describe('WatchDetailsPage notifications', () => {
 
   it('chooses when to send with a radio group that always shows what each choice means', async () => {
     renderPage()
-    const group = await screen.findByRole('radiogroup', { name: 'When to send' })
+    const group = await screen.findByRole('group', { name: 'When to send' })
     expect(within(group).getByRole('radio', { name: /When it finds something/ })).toBeChecked()
     expect(within(group).getByText(/A problem that stays is not sent again every hour\./)).toBeInTheDocument()
     expect(within(group).getByText('Including the ones that find nothing.')).toBeInTheDocument()

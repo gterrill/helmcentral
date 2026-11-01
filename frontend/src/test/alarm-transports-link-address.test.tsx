@@ -1,10 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AlarmTransportsForm } from '@/components/alarm-transports-form'
 import { AlarmTransportsProvider, useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
-import { requestAnchorScroll } from '@/lib/anchor-scroll'
 import { resetQueryStore } from '@/lib/api-query'
+import { clearPendingSetupFocus, requestSetupFocus } from '@/lib/setup-status'
 
 // The address for links: where Helmcentral is reached from off the boat, so a
 // notification can carry a link to a watch run. Empty by default.
@@ -63,15 +63,27 @@ describe('the address for links', () => {
 })
 
 describe('the notifications anchor', () => {
-  it('scrolls to the section once drawn when a link asked for it', async () => {
+  it('scrolls to and focuses the section once drawn when a link asked for it', async () => {
     stub('')
     const scroll = vi.fn()
     Element.prototype.scrollIntoView = scroll
-    requestAnchorScroll('notifications')
+    requestSetupFocus('notifications')
     render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
     await screen.findByLabelText('Address for links')
     await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1))
     expect(scroll.mock.contexts[0]).toHaveAttribute('id', 'notifications')
+    expect(document.getElementById('notifications')).toHaveFocus()
+  })
+
+  it('acts on a request made after the form is already showing', async () => {
+    stub('')
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
+    await screen.findByLabelText('Address for links')
+    act(() => requestSetupFocus('notifications'))
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1))
+    clearPendingSetupFocus()
   })
 
   it('does not scroll when nothing asked', async () => {
