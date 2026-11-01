@@ -109,6 +109,10 @@ type anchorageFeatures struct {
 	Truncated       bool                      `json:"truncated"`
 	// DataAsOf is Overpass's data time, an RFC 3339 time, or empty.
 	DataAsOf string `json:"data_as_of"`
+	// Cached and CachedAt are set by the host when it reused an earlier answer;
+	// the guest never sends them.
+	Cached   bool      `json:"-"`
+	CachedAt time.Time `json:"-"`
 }
 
 // decodeAnchorageFeatures reads the guest's JSON strictly. Every text comes
@@ -232,8 +236,13 @@ func capFeatureList[T any](list []T, limit int, truncated *bool) []T {
 }
 
 // AnchorageFeatures calls the guest's anchorage_features export, with the
-// same config overlay and panic recovery as MarinaDetails.
+// same config overlay and panic recovery as MarinaDetails. A success is reused
+// for anchorageFeaturesTTL; an error is never cached.
 func (p *wasmPOIProvider) AnchorageFeatures(lat, lon float64) (anchorageFeatures, error) {
-	return callOptionalExport(p, "anchorage_features", p.SupportsAnchorageFeatures(), errNoAnchorageFeaturesExport,
-		wasmLatLonInput{Lat: lat, Lon: lon}, decodeAnchorageFeatures)
+	fetch := func() (anchorageFeatures, error) {
+		return callOptionalExport(p, "anchorage_features", p.SupportsAnchorageFeatures(), errNoAnchorageFeaturesExport,
+			wasmLatLonInput{Lat: lat, Lon: lon}, decodeAnchorageFeatures)
+	}
+	// The config salt makes a saved setting a miss, as for every other cache.
+	return p.featuresCache.get(anchorageFeaturesCacheKey(p.saltedCacheKey(p.id), lat, lon), fetch)
 }

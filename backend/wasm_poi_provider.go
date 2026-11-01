@@ -32,6 +32,8 @@ import (
 type wasmPOIProvider struct {
 	*wasmPluginBase
 	cache *wasmPluginCache[poiFetchResult]
+	// featuresCache holds anchorage_features answers (ADR 0244), in memory only.
+	featuresCache *anchorageFeaturesCache
 }
 
 // pluginsPOIDir follows the codebase's cacheFilePath(envKey, fallback)
@@ -74,7 +76,7 @@ func newWasmPOIProviderFromBase(base *wasmPluginBase) *wasmPOIProvider {
 	cache := newWasmPluginCache[poiFetchResult](cacheFile)
 	cache.loadFromDisk()
 
-	return &wasmPOIProvider{wasmPluginBase: base, cache: cache}
+	return &wasmPOIProvider{wasmPluginBase: base, cache: cache, featuresCache: newAnchorageFeaturesCache()}
 }
 
 // wasmFetchPOIInput mirrors the guest's fetch_poi input contract.

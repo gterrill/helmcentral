@@ -82,6 +82,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Asking Mate about the same anchorage again is faster.** The map lookup
+  inside Anchorage details is kept for six hours per spot, so changing the
+  arrival or leave time doesn't wait for the map server a second time. Asking
+  again about the same position within six hours reuses the earlier lookup.
+  Mate says when it used a kept lookup, and the map's own date is still the one shown. A lookup that fails is
+  never kept, and a failure never falls back to an older answer.
+
 - **The engine card's fuel bars match the dial.** The two tank bars now draw
   in the same blue sweep as the RPM dial, so amber and red only show up when a
   tank has dropped past its warn or alarm level. The scale numbers, tick marks
