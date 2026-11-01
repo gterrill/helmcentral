@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { getQueryData, invalidateQueries } from '@/lib/api-query'
+import { getQueryData, invalidateQueries, setQueryData } from '@/lib/api-query'
 import { ProviderSettingsModal, type ProviderDomain } from '@/components/settings/provider-settings-modal'
 import { SecretsStatusProvider } from '@/components/settings/secrets-status-context'
 
@@ -14,10 +14,10 @@ const secretsGetResponse = {
   WEATHERKIT_PRIVATE_KEY: false,
 }
 
-function renderModal(type: ProviderDomain, providerId: string) {
+function renderModal(type: ProviderDomain, providerId: string, onOpenChange: (open: boolean) => void = () => {}) {
   return render(
     <SecretsStatusProvider>
-      <ProviderSettingsModal type={type} providerId={providerId} open onOpenChange={() => {}} />
+      <ProviderSettingsModal type={type} providerId={providerId} open onOpenChange={onOpenChange} />
     </SecretsStatusProvider>,
   )
 }
@@ -347,6 +347,32 @@ describe('ProviderSettingsModal config fields', () => {
     })
   })
 
+  it('compares later saves with what the server stored, not what was typed', async () => {
+    const fetchMock = vi.fn(async (url: string, options?: { method?: string }) => {
+      if (url.endsWith('/osm-overpass/config') && options?.method === 'POST') {
+        return { ok: true, json: async () => osmOverpassInfo('https://tidy.example/api') }
+      }
+      if (url.includes('/api/plugins/poi/osm-overpass')) {
+        return { ok: true, json: async () => osmOverpassInfo('') }
+      }
+      if (url.includes('/api/settings/secrets')) {
+        return { ok: true, json: async () => secretsGetResponse }
+      }
+      return { ok: false, json: async () => ({}) }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderModal('poi', 'osm-overpass')
+
+    const input = (await screen.findByLabelText('Overpass server')) as HTMLInputElement
+    fireEvent.change(input, { target: { value: ' https://tidy.example/api ' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await waitFor(() => expect(input.value).toBe('https://tidy.example/api'))
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /^save$/i })).toBeTruthy())
+    expect(fetchMock.mock.calls.filter(([u, o]) => String(u).endsWith('/config') && o?.method === 'POST')).toHaveLength(1)
+  })
+
   it('shows the 400 error message from a rejected config save inline', async () => {
     vi.stubGlobal(
       'fetch',
@@ -379,6 +405,8 @@ describe('ProviderSettingsModal config fields', () => {
   })
 })
 
+const BLEND_SWITCH = "Use Open-Meteo's blend where GFS-Wave has no data"
+
 describe('ProviderSettingsModal boolean config fields', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -397,7 +425,7 @@ describe('ProviderSettingsModal boolean config fields', () => {
     config_fields: [
       {
         key: 'use_blend_fallback',
-        label: "Use Open-Meteo's blend where GFS-Wave has no data",
+        label: BLEND_SWITCH,
         type: 'boolean',
         help: 'Asks the blend for spots GFS-Wave cannot answer.',
         placeholder: '',
@@ -427,7 +455,7 @@ describe('ProviderSettingsModal boolean config fields', () => {
 
     renderModal('wave', 'open-meteo-marine')
 
-    const toggle = await screen.findByRole('switch', { name: "Use Open-Meteo's blend where GFS-Wave has no data" })
+    const toggle = await screen.findByRole('switch', { name: BLEND_SWITCH })
     expect(toggle.getAttribute('aria-checked')).toBe('false')
     expect(screen.getByText('Asks the blend for spots GFS-Wave cannot answer.')).toBeTruthy()
 
@@ -440,5 +468,367 @@ describe('ProviderSettingsModal boolean config fields', () => {
         expect.objectContaining({ method: 'POST' }),
       )
     })
+  })
+
+  // Save closes the dialog once it has worked, and only posts what the
+  // operator actually changed: an untouched allowlist must not be pinned
+  // (allowed_hosts_overridden) to its current values.
+  const saveMock = (opts: { configFails?: boolean; overridesFails?: () => boolean; overridesGate?: Promise<void>; getInfo?: () => object } = {}) => {
+    // The server keeps what a /config save stored, so later answers carry it.
+    let storedBlend = ''
+    return vi.fn(async (url: string, options?: { method?: string; body?: string }) => {
+      if (url.includes('/api/plugins/wave/open-meteo-marine/config') && options?.method === 'POST') {
+        if (opts.configFails) {
+          return { ok: false, status: 500, json: async () => ({ error: 'config store unavailable' }) }
+        }
+        storedBlend = 'true'
+        return { ok: true, json: async () => waveInfo('true') }
+      }
+      if (url.includes('/api/plugins/wave/open-meteo-marine/overrides') && options?.method === 'POST') {
+        await opts.overridesGate
+        if (opts.overridesFails?.()) {
+          return { ok: false, status: 500, json: async () => ({ error: 'overrides unavailable' }) }
+        }
+        // Echo the posted lists the way the server stores them: no repeats.
+        const posted = JSON.parse(options.body!)
+        return {
+          ok: true,
+          json: async () => ({ ...waveInfo(storedBlend), allowed_hosts: [...new Set<string>(posted.allowed_hosts)] }),
+        }
+      }
+      if (url.endsWith('/open-meteo-marine/overrides') && options?.method === 'DELETE') {
+        return { ok: true, json: async () => waveInfo('') }
+      }
+      if (url.includes('/api/plugins/wave/open-meteo-marine')) {
+        return { ok: true, json: async () => opts.getInfo?.() ?? waveInfo('') }
+      }
+      if (url.includes('/api/settings/secrets')) {
+        return { ok: true, json: async () => secretsGetResponse }
+      }
+      return { ok: false, json: async () => ({}) }
+    })
+  }
+
+  const posts = (fetchMock: ReturnType<typeof saveMock>, suffix: string) =>
+    fetchMock.mock.calls.filter(([url, options]) => String(url).endsWith(suffix) && options?.method === 'POST')
+
+  // Stubs fetch, renders the wave plugin's dialog and waits for the drafts to
+  // be seeded, returning the mock, the onOpenChange spy and the hosts input.
+  const openDialog = async (opts?: Parameters<typeof saveMock>[0]) => {
+    const fetchMock = saveMock(opts)
+    vi.stubGlobal('fetch', fetchMock)
+    const onOpenChange = vi.fn()
+    renderModal('wave', 'open-meteo-marine', onOpenChange)
+    const hosts = (await screen.findByLabelText('Allowed Hosts')) as HTMLInputElement
+    await waitFor(() => expect(hosts.value).toBe('marine-api.open-meteo.com'))
+    return { fetchMock, onOpenChange, hosts }
+  }
+
+  const clickSave = () => fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+  const toggleSwitch = async () => fireEvent.click(await screen.findByRole('switch', { name: BLEND_SWITCH }))
+
+  it('saving a toggled switch posts /config only and closes the dialog', async () => {
+    const { fetchMock, onOpenChange } = await openDialog()
+
+    await toggleSwitch()
+    clickSave()
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(posts(fetchMock, '/config')).toHaveLength(1)
+    expect(posts(fetchMock, '/overrides')).toHaveLength(0)
+  })
+
+  it('saving with nothing changed posts nothing and closes the dialog', async () => {
+    const { fetchMock, onOpenChange } = await openDialog()
+
+    clickSave()
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(posts(fetchMock, '/config')).toHaveLength(0)
+    expect(posts(fetchMock, '/overrides')).toHaveLength(0)
+  })
+
+  it('saving edited allowed hosts posts /overrides and stays open with the restart note', async () => {
+    const { fetchMock, onOpenChange, hosts } = await openDialog()
+
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com, example.com' } })
+    clickSave()
+
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/^Saved\.$/))
+    expect(onOpenChange).not.toHaveBeenCalled()
+    expect(posts(fetchMock, '/overrides')).toHaveLength(1)
+    expect(JSON.parse(posts(fetchMock, '/overrides')[0][1]!.body!)).toEqual({
+      allowed_hosts: ['marine-api.open-meteo.com', 'example.com'],
+      allowed_secrets: [],
+    })
+  })
+
+  it('reordered or repeated hosts count as no change', async () => {
+    const { fetchMock, onOpenChange, hosts } = await openDialog()
+
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com, marine-api.open-meteo.com' } })
+    clickSave()
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(posts(fetchMock, '/overrides')).toHaveLength(0)
+  })
+
+  it('compares against what the dialog was opened with, not a later refetch', async () => {
+    const { fetchMock, onOpenChange } = await openDialog()
+
+    setQueryData(['/api/plugins/wave/open-meteo-marine'], {
+      ...waveInfo(''),
+      allowed_hosts: ['marine-api.open-meteo.com', 'new-default.example'],
+    })
+    await toggleSwitch()
+    clickSave()
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(posts(fetchMock, '/overrides')).toHaveLength(0)
+  })
+
+  it('keeps a host edit when /config saves but /overrides fails, and a retry posts /overrides only', async () => {
+    let overridesFail = true
+    const { fetchMock, onOpenChange, hosts } = await openDialog({ overridesFails: () => overridesFail })
+
+    await toggleSwitch()
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com, example.com' } })
+    clickSave()
+
+    await waitFor(() => expect(screen.getByText('overrides unavailable')).toBeTruthy())
+    expect(screen.getByRole('status').textContent).toBe('Options saved.')
+    expect(hosts.value).toBe('marine-api.open-meteo.com, example.com')
+    expect(onOpenChange).not.toHaveBeenCalled()
+
+    overridesFail = false
+    clickSave()
+
+    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy())
+    expect(posts(fetchMock, '/config')).toHaveLength(1)
+    expect(posts(fetchMock, '/overrides')).toHaveLength(2)
+  })
+
+  it('after an allowlist save the inputs show the lists the server stored, and config drafts are left alone', async () => {
+    const { hosts } = await openDialog()
+
+    await toggleSwitch()
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com,   example.com , example.com' } })
+    clickSave()
+
+    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy())
+    expect(hosts.value).toBe('marine-api.open-meteo.com, example.com')
+    expect(screen.getByRole('switch', { name: BLEND_SWITCH }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('Reset to defaults replaces an earlier saved note with its own', async () => {
+    const { hosts } = await openDialog()
+
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com, example.com' } })
+    clickSave()
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/^Saved\./))
+
+    fireEvent.click(screen.getByRole('button', { name: /reset to defaults/i }))
+
+    await waitFor(() =>
+      expect(screen.getByRole('status').textContent).toBe(
+        'Reset to defaults.',
+      ),
+    )
+  })
+
+  it('disables Reset while a save is in flight and Save while a reset is', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { hosts } = await openDialog({ overridesGate: gate })
+
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com, example.com' } })
+    clickSave()
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /^saving$/i })).toBeTruthy())
+    expect((screen.getByRole('button', { name: /reset to defaults/i }) as HTMLButtonElement).disabled).toBe(true)
+    release()
+    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy())
+  })
+
+  it('a refetch reseeds the parts the operator has not touched and leaves edited parts alone', async () => {
+    const { hosts } = await openDialog()
+    const secrets = screen.getByLabelText('Allowed secrets') as HTMLInputElement
+
+    fireEvent.change(secrets, { target: { value: 'MY_KEY' } })
+    act(() => {
+      setQueryData(['/api/plugins/wave/open-meteo-marine'], {
+        ...waveInfo('true'),
+        allowed_hosts: ['marine-api.open-meteo.com', 'new-default.example'],
+        allowed_secrets: ['OTHER'],
+      })
+    })
+
+    await waitFor(() => expect(hosts.value).toBe('marine-api.open-meteo.com, new-default.example'))
+    expect(secrets.value).toBe('MY_KEY')
+    expect(screen.getByRole('switch', { name: BLEND_SWITCH }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('never posts a config key the plugin no longer declares', async () => {
+    const oldField = { key: 'old_key', label: 'Old option', type: 'text', help: '', placeholder: '', value: 'x' }
+    const withOld = { ...waveInfo(''), config_fields: [...waveInfo('').config_fields, oldField] }
+    const { fetchMock, onOpenChange } = await openDialog({ getInfo: () => withOld })
+    await screen.findByLabelText('Old option')
+
+    act(() => {
+      setQueryData(['/api/plugins/wave/open-meteo-marine'], waveInfo(''))
+    })
+    await toggleSwitch()
+    clickSave()
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(JSON.parse(posts(fetchMock, '/config')[0][1]!.body!).values).toEqual({ use_blend_fallback: 'true' })
+  })
+
+  it('a change of host case is a real edit and posts /overrides', async () => {
+    const { fetchMock, hosts } = await openDialog()
+
+    fireEvent.change(hosts, { target: { value: 'Marine-API.Open-Meteo.com' } })
+    clickSave()
+
+    await waitFor(() => expect(posts(fetchMock, '/overrides')).toHaveLength(1))
+  })
+
+  it('posts only the config fields that changed', async () => {
+    const other = { key: 'other', label: 'Other option', type: 'text', help: '', placeholder: '', value: 'x' }
+    const info = { ...waveInfo(''), config_fields: [...waveInfo('').config_fields, other] }
+    const { fetchMock, onOpenChange } = await openDialog({ getInfo: () => info })
+
+    fireEvent.change(await screen.findByLabelText('Other option'), { target: { value: 'y' } })
+    clickSave()
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(JSON.parse(posts(fetchMock, '/config')[0][1]!.body!).values).toEqual({ other: 'y' })
+  })
+
+  it('does not close mid-save when Escape is pressed', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { hosts, onOpenChange } = await openDialog({ overridesGate: gate })
+
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com, example.com' } })
+    clickSave()
+    await waitFor(() => expect(hosts.disabled).toBe(true))
+    fireEvent.keyDown(document.body, { key: 'Escape' })
+    fireEvent.keyDown(hosts, { key: 'Escape' })
+    expect(onOpenChange).not.toHaveBeenCalled()
+
+    release()
+    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy())
+  })
+
+  it('clears the saved note when the operator edits a field afterwards', async () => {
+    const { hosts } = await openDialog()
+
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com, example.com' } })
+    clickSave()
+    await waitFor(() => expect(screen.getByRole('status')).toBeTruthy())
+
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com' } })
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('a boolean stored as unset, switched on then off, is no change', async () => {
+    const { fetchMock, onOpenChange } = await openDialog()
+
+    await toggleSwitch()
+    await toggleSwitch()
+    clickSave()
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+    expect(posts(fetchMock, '/config')).toHaveLength(0)
+    expect(posts(fetchMock, '/overrides')).toHaveLength(0)
+  })
+
+  it('disables the inputs while a save is in flight', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const { hosts } = await openDialog({ overridesGate: gate })
+
+    fireEvent.change(hosts, { target: { value: 'marine-api.open-meteo.com, example.com' } })
+    clickSave()
+
+    await waitFor(() => expect(hosts.disabled).toBe(true))
+    expect((screen.getByLabelText('Allowed secrets') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('switch', { name: BLEND_SWITCH }) as HTMLElement).hasAttribute('data-disabled')).toBe(true)
+    release()
+    await waitFor(() => expect(hosts.disabled).toBe(false))
+  })
+
+  it('a failed save keeps the dialog open and shows the error', async () => {
+    const { onOpenChange } = await openDialog({ configFails: true })
+
+    await toggleSwitch()
+    clickSave()
+
+    await waitFor(() => expect(screen.getByText('config store unavailable')).toBeTruthy())
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+})
+
+describe('ProviderSettingsModal allowlist saved but secrets failed', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('shows the error and says the allowlist saved, even when secrets fail first', async () => {
+    let release: () => void = () => {}
+    const overridesGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const info = {
+      type: 'weather',
+      id: 'weatherkit',
+      name: 'WeatherKit',
+      description: "Apple's weather API",
+      sandboxed: true,
+      allowed_hosts: ['weatherkit.apple.com'],
+      allowed_hosts_overridden: false,
+      allowed_secrets: ['WEATHERKIT_KEY_ID'],
+      allowed_secrets_overridden: false,
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, options?: { method?: string }) => {
+        if (url.includes('/api/plugins/weather/weatherkit/overrides') && options?.method === 'POST') {
+          await overridesGate
+          return { ok: true, json: async () => ({ ...info, allowed_hosts: ['weatherkit.apple.com', 'example.com'] }) }
+        }
+        if (url.includes('/api/plugins/weather/weatherkit')) {
+          return { ok: true, json: async () => info }
+        }
+        if (url.includes('/api/settings/secrets') && options?.method === 'POST') {
+          return { ok: false, status: 500, json: async () => ({ error: 'secret store unavailable' }) }
+        }
+        if (url.includes('/api/settings/secrets')) {
+          return { ok: true, json: async () => secretsGetResponse }
+        }
+        return { ok: false, json: async () => ({}) }
+      }),
+    )
+    const onOpenChange = vi.fn()
+    renderModal('weather', 'weatherkit', onOpenChange)
+
+    const hosts = (await screen.findByLabelText('Allowed Hosts')) as HTMLInputElement
+    await waitFor(() => expect(hosts.value).toBe('weatherkit.apple.com'))
+    fireEvent.change(hosts, { target: { value: 'weatherkit.apple.com, example.com' } })
+    fireEvent.change(screen.getByLabelText('WeatherKit Key ID'), { target: { value: 'ABC123' } })
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }))
+
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    release()
+    await waitFor(() => expect(screen.getByText('secret store unavailable')).toBeTruthy())
+    expect(screen.getByRole('status').textContent).toMatch(/Allowlist saved/)
+    expect(onOpenChange).not.toHaveBeenCalled()
   })
 })

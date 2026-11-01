@@ -25,3 +25,10 @@ export function sameShallow<T extends object>(a: T, b: T): boolean {
   const keys = Object.keys(a) as Array<keyof T>
   return keys.length === Object.keys(b).length && keys.every((key) => key in b && Object.is(a[key], b[key]))
 }
+
+/** The same entries in two string lists, ignoring order and repeats. */
+export function sameSet(a: string[], b: string[]): boolean {
+  const left = new Set(a)
+  const right = new Set(b)
+  return left.size === right.size && [...left].every((entry) => right.has(entry))
+}

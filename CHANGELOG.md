@@ -17,6 +17,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   silent shore charger used to show as "An instrument has stopped sending".
   The card now uses the name you set for the device on the GX. If there isn't
   one, it says what kind of device it is, such as "Victron charger".
+- **Save in a plugin's settings closes the dialog once it has saved.** It used
+  to stay open with nothing to show it had worked, so it looked as if Save did
+  nothing. If the save fails, the dialog stays open and says why. After you
+  change the Allowed Hosts or Allowed Secrets lists, the dialog stays open on
+  purpose so that its reminder about restarting the backend stays in view.
+- **Turning a plugin's option on or off no longer saves its allowed hosts as
+  though you'd edited them.** It used to, so hosts added by a later version of
+  the plugin were ignored. Saving now leaves the allowed hosts alone unless you
+  change the Allowed Hosts or Allowed Secrets lists.
 - **Mate reads the charted shoreline before it says an anchorage is exposed
   or sheltered.** Asked about Thomas Island South, Mate said the bay was open
   to a northerly when it faces south and is well protected. The wind forecast
