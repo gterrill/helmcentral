@@ -745,3 +745,23 @@ func TestAnchorageCard_AnAreaWithNoShapesEmitsAnEmptyList(t *testing.T) {
 		t.Errorf(`"shapes":[] appears %d times, want 3`, got)
 	}
 }
+
+func TestAnchorageDetails_ACachedLookupSaysSoAndKeepsOverpassDataTime(t *testing.T) {
+	f := butterflyBayFeatures(t)
+	f.Cached, f.CachedAt = true, time.Date(2026, 11, 1, 1, 2, 3, 0, time.UTC)
+	d, _ := anchorageDeps(t, f)
+	_, res := runAnchorage(t, d, anchorageArgs)
+	b := res.Features.AnchorageFeaturesBody
+	if b == nil || !b.Cached || b.CachedAt != "2026-11-01T01:02:03Z" || b.DataAsOf != f.DataAsOf {
+		t.Errorf("features = %+v", b)
+	}
+	if !strings.Contains(b.Reading, "lookup made at 2026-11-01T01:02:03Z, kept for six hours") {
+		t.Errorf("reading must say the lookup was kept: %q", b.Reading)
+	}
+}
+
+func TestReadingAnchorageFeatures_FreshLookupSaysNothingAboutKeeping(t *testing.T) {
+	if got := readingAnchorageFeatures(nil, false, time.Time{}); strings.Contains(got, "kept for six hours") {
+		t.Errorf("fresh reading mentions a kept lookup: %q", got)
+	}
+}

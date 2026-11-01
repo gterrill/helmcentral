@@ -148,6 +148,13 @@ warning appears when it would be less. There is no environment-variable override
 defaults to `0.5`. Zero is accepted (a deliberate "warn only once the keel would
 touch"), but a negative value isn't.
 
+`anchor.transducer_depth_m` in `settings.yaml` (or **Transducer Depth** under
+Settings → Anchor Watch) is how far below the waterline the depth transducer
+sits, in metres. Only the anchor watch's **Save depth** uses it, and only for a
+sounder reading. The rode planner and the clearance check don't use it yet. There is no
+default and no environment-variable override. Leave it empty, or `0`, to say
+it isn't set. A value below zero or above `5` is refused when you save.
+
 ### State paths
 
 Each of these overrides one file or directory and takes precedence over

@@ -47,6 +47,12 @@ type anchorWatchData struct {
 	// correctly as "not captured" - no migration.
 	PlanningDepthM       float64 `json:"planning_depth_m"`
 	PlanningTideHeightFt float64 `json:"planning_tide_height_ft"`
+	// PlanningDepthSource says who the depth came from: "sounder" when it was
+	// seeded from the live reading at the drop, "operator" when it was typed in
+	// the rode planner, "" when that cannot be known (no depth, or a watch
+	// stored before this field). Only a sounder figure is read below the
+	// transducer; see computeDatumDepth.
+	PlanningDepthSource string `json:"planning_depth_source"`
 	// PlaceName is resolved once from the anchor position (place_name.go's
 	// resolveAndPinAnchorWatchPlaceName), then pinned for the life of this
 	// watch so it stops drifting as the boat swings - see docs/adr/0056.
@@ -232,7 +238,7 @@ func getAnchorWatch(c echo.Context) error {
 		return c.JSON(http.StatusOK, withLastAutoRaise(resp))
 	}
 
-	return c.JSON(http.StatusOK, withLastAutoRaise(map[string]any{
+	return c.JSON(http.StatusOK, withLastAutoRaise(withDatumDepth(map[string]any{
 		"active":                  true,
 		"lat":                     state.Lat,
 		"lon":                     state.Lon,
@@ -248,7 +254,7 @@ func getAnchorWatch(c echo.Context) error {
 		"planning_depth_m":        state.PlanningDepthM,
 		"planning_tide_height_ft": state.PlanningTideHeightFt,
 		"place_name":              state.PlaceName,
-	}))
+	}, state)))
 }
 
 // POST /api/anchor-watch
@@ -303,6 +309,7 @@ func setAnchorWatch(c echo.Context) error {
 	seabedType := "sand"
 	planningDepthM := -1.0
 	planningTideHeightFt := -1.0
+	planningDepthSource := ""
 	if current != nil {
 		// set_at is the session's identity rather than a "last written"
 		// stamp. Clients compare it against the session their map view was
@@ -326,6 +333,7 @@ func setAnchorWatch(c echo.Context) error {
 		// the water was when it went down.
 		if current.PlanningDepthM > 0 {
 			planningDepthM = current.PlanningDepthM
+			planningDepthSource = current.PlanningDepthSource
 		}
 		if current.PlanningTideHeightFt >= 0 {
 			planningTideHeightFt = current.PlanningTideHeightFt
@@ -333,6 +341,12 @@ func setAnchorWatch(c echo.Context) error {
 	}
 	if body.PlanningDepthM != nil {
 		planningDepthM = *body.PlanningDepthM
+		// The drop is the only POST that carries a depth, and it is the
+		// sounder's reading.
+		planningDepthSource = ""
+		if planningDepthM > 0 {
+			planningDepthSource = planningDepthFromSounder
+		}
 	}
 	if body.PlanningTideHeightFt != nil {
 		planningTideHeightFt = *body.PlanningTideHeightFt
@@ -392,6 +406,7 @@ func setAnchorWatch(c echo.Context) error {
 		HeadingAtSetDeg:      headingAtSetDeg,
 		PlanningDepthM:       planningDepthM,
 		PlanningTideHeightFt: planningTideHeightFt,
+		PlanningDepthSource:  planningDepthSource,
 	}
 
 	// A drop or reposition starts a fresh swing trail. It goes first, before
@@ -438,7 +453,7 @@ func setAnchorWatch(c echo.Context) error {
 		resolveAndPinAnchorWatchPlaceName(aw, aw.Lat, aw.Lon)
 	})
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return c.JSON(http.StatusOK, withDatumDepth(map[string]any{
 		"active":                  true,
 		"lat":                     aw.Lat,
 		"lon":                     aw.Lon,
@@ -454,7 +469,7 @@ func setAnchorWatch(c echo.Context) error {
 		"planning_depth_m":        aw.PlanningDepthM,
 		"planning_tide_height_ft": aw.PlanningTideHeightFt,
 		"place_name":              aw.PlaceName,
-	})
+	}, aw))
 }
 
 // anchorRestoreStringFieldMaxLen bounds restore.bow_offset_reason and
@@ -699,6 +714,7 @@ func patchAnchorWatch(c echo.Context) error {
 		// and a working plan would go dark.
 		PlanningDepthM:       current.PlanningDepthM,
 		PlanningTideHeightFt: current.PlanningTideHeightFt,
+		PlanningDepthSource:  current.PlanningDepthSource,
 		PlaceName:            current.PlaceName,
 	}
 
@@ -720,7 +736,10 @@ func patchAnchorWatch(c echo.Context) error {
 	}
 	if body.PlanningDepthM != nil {
 		updated.PlanningDepthM = *body.PlanningDepthM
+		// PATCH is where the operator edits the depth, so what it writes is theirs.
+		updated.PlanningDepthSource = planningDepthFromOperator
 		if *body.PlanningDepthM == -1 {
+			updated.PlanningDepthSource = ""
 			// Clearing the depth clears its stamp with it — a half-cleared
 			// pair is not a thing.
 			updated.PlanningTideHeightFt = -1
@@ -877,7 +896,7 @@ func patchAnchorWatch(c echo.Context) error {
 		}
 	}
 
-	return c.JSON(http.StatusOK, map[string]any{
+	return c.JSON(http.StatusOK, withDatumDepth(map[string]any{
 		"active":                  true,
 		"lat":                     updated.Lat,
 		"lon":                     updated.Lon,
@@ -893,7 +912,7 @@ func patchAnchorWatch(c echo.Context) error {
 		"planning_depth_m":        updated.PlanningDepthM,
 		"planning_tide_height_ft": updated.PlanningTideHeightFt,
 		"place_name":              updated.PlaceName,
-	})
+	}, updated))
 }
 
 // DELETE /api/anchor-watch

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { AnchorConfig } from '@/config/app-config'
@@ -69,6 +70,8 @@ interface AnchorWatchDrawerProps {
   headingAtSetDeg?: number
   /** Empty until the background resolver pins one. Same Undo-restore use as headingAtSetDeg. */
   placeName?: string
+  /** Shown under the rode planner while a watch is set: the Save depth control, supplied by the live wrapper. */
+  saveDepth?: ReactNode
   // The watch's set_at, passed straight through to the map: it centres on
   // the anchor whenever the session changes.
   anchorSetAt: string | null
@@ -164,6 +167,7 @@ export function AnchorWatchDrawer({
   bowOffsetReason = '',
   headingAtSetDeg = -1,
   placeName = '',
+  saveDepth = null,
   anchorSetAt,
   anchorStateKnown,
   error = null,
@@ -716,6 +720,7 @@ export function AnchorWatchDrawer({
           onApplyAlarmRadius={applyRadius}
           applyLockedReason={adjustActive ? 'Save or cancel Adjust first' : null}
         />
+        {saveDepth}
       </div>
     </div>
   )

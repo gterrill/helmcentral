@@ -216,15 +216,21 @@ to every other device on the network.
 
 Each watch has a **Notifications** section with two choices:
 
-- **Channels:** Any of ntfy, Email, Webhook and Phone and browser push. They are
+- **Send to:** Any of ntfy, Email, Webhook and Phone and browser push. They are
   the same channels your alarms use, switched on in **Settings** under
-  **Alarms**. A new watch starts with every channel that is on. A channel that is
-  off shows as off, with a reminder where to turn it on, and nothing is sent to it
-  until you do. The SignalK channel isn't offered.
-- **Send:** **Only when it finds something** is the default. **Every report**
-  sends each report, including the ones with nothing to report.
+  **Alarms**. A new watch starts with every channel that is on. Only the
+  channels that are on get a checkbox. The others are named in one line under
+  the list. That line links to **Alarm settings**, where you can set them up. If
+  none are on, the section says so, and reports stay on the watch's page. A
+  channel the watch already uses that has since been turned off keeps its
+  checkbox, with a warning that nothing goes there and a link to turn it on.
+  Untick it and it moves into the line under the list. The SignalK channel
+  isn't offered.
+- **When to send:** **When it finds something** is the default. **Every
+  report** sends each report, including the ones with nothing to report. Both
+  choices show what they mean, so you don't have to pick one to find out.
 
-Here is how **Only when it finds something** decides. A report goes out when it
+Here is how **When it finds something** decides. A report goes out when it
 has a finding that the report before it did not have. It also goes out when you
 never got that finding, because the report before it didn't reach you.
 

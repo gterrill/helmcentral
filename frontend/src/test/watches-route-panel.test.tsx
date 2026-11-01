@@ -35,7 +35,7 @@ describe('WatchesRoutePanel', () => {
   it('reads the list on the index', async () => {
     const urls = stubFetch()
     const { wrapper } = testRouter('/watches')
-    render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite /></div>, { wrapper })
+    render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite canAdmin /></div>, { wrapper })
     expect(await screen.findByText('Overnight check')).toBeInTheDocument()
     expect(urls.some((u) => u.endsWith('/api/watches'))).toBe(true)
   })
@@ -43,7 +43,7 @@ describe('WatchesRoutePanel', () => {
   it('reads the list on a details page too, for the arrows', async () => {
     const urls = stubFetch()
     const { wrapper } = testRouter('/watches/w1')
-    render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite /></div>, { wrapper })
+    render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite canAdmin /></div>, { wrapper })
     expect(await screen.findByDisplayValue('Overnight check')).toBeInTheDocument()
     await waitFor(() => expect(urls.some((u) => u.includes('/api/watches/w1'))).toBe(true))
     await waitFor(() => expect(urls.filter((u) => u.endsWith('/api/watches')).length).toBeGreaterThan(0))
@@ -53,7 +53,7 @@ describe('WatchesRoutePanel', () => {
     const urls = stubFetch()
     const { wrapper, router } = testRouter('/watches')
     router.navigate({ panel: 'watches', route: { view: 'new', template: null } })
-    render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite /></div>, { wrapper })
+    render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite canAdmin /></div>, { wrapper })
     await screen.findByLabelText('Name')
     await act(async () => { await new Promise((r) => setTimeout(r, 30)) })
     expect(urls.filter((u) => u.endsWith('/api/watches'))).toEqual([])
@@ -79,7 +79,7 @@ describe('WatchesRoutePanel', () => {
     it('step through the watches in the index order, by name unless the index was sorted', async () => {
       stubTwoMore()
       const { wrapper, history } = testRouter('/watches/w1')
-      render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite /></div>, { wrapper })
+      render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite canAdmin /></div>, { wrapper })
       // Anchor check, Overnight check, Zed.
       fireEvent.click(await screen.findByRole('button', { name: 'Next: Zed' }))
       await waitFor(() => expect(history.path()).toBe('/watches/w3'))
@@ -88,7 +88,7 @@ describe('WatchesRoutePanel', () => {
     it('send Back to the index in the same sort', async () => {
       stubTwoMore()
       const { wrapper, history } = testRouter('/watches/w1?sort=-name')
-      render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite /></div>, { wrapper })
+      render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite canAdmin /></div>, { wrapper })
       fireEvent.click(await screen.findByRole('link', { name: 'Watches' }))
       await waitFor(() => expect(history.path()).toBe('/watches?sort=-name'))
     })
@@ -96,7 +96,7 @@ describe('WatchesRoutePanel', () => {
     it('follow the sort in the address, and keep it when they step', async () => {
       stubTwoMore()
       const { wrapper, history } = testRouter('/watches/w1?sort=-name')
-      render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite /></div>, { wrapper })
+      render(<div className="relative"><SaveBarSlot /><WatchesRoutePanel canWrite canAdmin /></div>, { wrapper })
       // Zed, Overnight check, Anchor check.
       fireEvent.click(await screen.findByRole('button', { name: 'Next: Anchor check' }))
       await waitFor(() => expect(history.path()).toBe('/watches/w2?sort=-name'))

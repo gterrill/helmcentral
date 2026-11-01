@@ -53,6 +53,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   behind the boat. Pressing **Play** from the start now opens on the globe and
   comes down onto the track. Touching the map during that move stops it where
   you are. A track broken into more than 12 pieces keeps its plain colour.
+- **Anchor watch can save the depth under the anchor to a saved place.** Set
+  **Transducer Depth** in **Settings, Anchor Watch**, the distance from the
+  waterline down to your depth transducer. Once the anchor is down, Anchor watch
+  shows a line such as "Save 4.2 m at datum" with a button, and says whether the
+  figure comes from the sounder or from a depth you typed in the rode planner.
+  It saves to the nearest saved place within 0.1 nm that has a depth, else the
+  nearest place there, or asks for a name if there's none, and only after you
+  confirm. If the place already has a depth, the confirm step shows the old
+  figure and the new one. The depth is saved as sounded, dated the day the
+  anchor went down. A sounder reading gets the transducer depth added; a depth
+  you typed is taken as depth below the surface. The transducer depth applies
+  here only, not yet to the rode planner or the clearance check. If something
+  is missing, you get a sentence saying what instead of a button. A watch set
+  before this release doesn't record where its depth came from, so enter the
+  depth again in the rode planner.
+  See [Manage the places you've given Mate](docs/how-to/manage-saved-places.md).
 
 - **Mate assesses an anchorage for your stay, and shows an anchorage card.**
   Tell Mate when you'll arrive, and when you'll leave if you know. It reads the
@@ -95,12 +111,32 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **The passage replay's night is darker.** The map at night is tinted a very
   dark blue and dimmed more, and twilight is a little darker to match. The
   track, the wake and the boat stay bright.
+  
+- **A watch's Notifications section is easier to read.** Only the channels
+  that are on get a checkbox, and the ones that aren't are named in a line
+  underneath with a link to Alarm settings. A channel the watch still uses
+  but that has been turned off keeps its checkbox, with a warning and a link
+  to turn it on. When no channel is on, the section says reports stay on the
+  page. **Send** is now **When to send**, with both choices laid out and what
+  each one means shown under it.
+  
+- **Asking Mate about the same anchorage again is faster.** The map lookup
+  inside Anchorage details is kept for six hours per spot, so changing the
+  arrival or leave time doesn't wait for the map server a second time. Asking
+  again about the same position within six hours reuses the earlier lookup.
+  Mate says when it used a kept lookup, and the map's own date is still the one shown. A lookup that fails is
+  never kept, and a failure never falls back to an older answer.
 
 - **The engine card's fuel bars match the dial.** The two tank bars now draw
   in the same blue sweep as the RPM dial, so amber and red only show up when a
   tank has dropped past its warn or alarm level. The scale numbers, tick marks
   and FWD and AFT labels are larger and match the dial. The bars are wider, and
   the two labels sit on one line under them.
+
+- **Boat names on the anchor watch map are larger.** The name, range and
+  bearing under each AIS boat, radar target and marked spot are a third bigger,
+  so they read at arm's length. When two boats sit close together on screen,
+  the farther one hides its label sooner.
 
 ### Fixed
 

@@ -239,3 +239,29 @@ func TestSavedPlaceProposal_ClearsADepthWithNull(t *testing.T) {
 		t.Fatalf("cleared: %+v", got)
 	}
 }
+
+// The anchor watch's Save depth button writes a sounded figure through the
+// same REST routes the Saved places screen uses.
+func TestSavedPlaceDepthREST_AcceptsSounded(t *testing.T) {
+	env := newProposalEnv(t)
+	c, rec := watchRequestTo(http.MethodPost, "/api/saved-places", `{"name":"Cove","lat":-20,"lon":149,"depth_m":3.5,"depth_source":"charted","depth_date":"2026-10-30"}`)
+	if err := createSavedPlaceHandler(c); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("create: %v %d %s", err, rec.Code, rec.Body)
+	}
+	c, rec = watchRequestTo(http.MethodPost, "/api/saved-places", `{"name":"Bay","lat":-21,"lon":149,"depth_m":4.2,"depth_source":"sounded","depth_date":"2026-11-01"}`)
+	if err := createSavedPlaceHandler(c); err != nil || rec.Code != http.StatusCreated {
+		t.Fatalf("create sounded: %v %d %s", err, rec.Code, rec.Body)
+	}
+	cove, err := findSavedPlaceByName(env.docs, "Cove")
+	if err != nil || cove == nil {
+		t.Fatal(err)
+	}
+	c, rec = watchRequestTo(http.MethodPatch, "/api/saved-places/"+cove.ID, `{"depth_m":4.2,"depth_source":"sounded","depth_date":"2026-11-01"}`, "id", cove.ID)
+	if err := patchSavedPlaceHandler(c); err != nil || rec.Code != http.StatusOK {
+		t.Fatalf("patch sounded: %v %d %s", err, rec.Code, rec.Body)
+	}
+	got, _ := savedPlaceByIDQ(env.docs.db, cove.ID)
+	if got.DepthSource != "sounded" || got.DepthDate != "2026-11-01" {
+		t.Fatalf("got %+v", got)
+	}
+}
