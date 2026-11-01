@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -13,7 +13,9 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { SecretFieldGroup, type SecretFieldSpec } from '@/components/settings/secret-field-group'
 import { useSecretsStatusContext } from '@/components/settings/secrets-status-context'
+import { useFollowingDraft } from '@/hooks/use-following-draft'
 import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
+import { sameSet } from '@/lib/same-value'
 
 export type ProviderDomain = 'tide' | 'weather' | 'wave' | 'poi' | 'forecast-warnings'
 
@@ -74,13 +76,20 @@ const parseList = (value: string) =>
     .map((entry) => entry.trim())
     .filter(Boolean)
 
-// buildConfigValues turns a provider's declared config fields into the
-// {key: value} shape the initial POST /config request body wants, seeded
-// from each field's currently-stored value. Tolerates a missing
-// config_fields (older/mocked responses that predate this field) as "none
-// declared" rather than throwing.
-const buildConfigValues = (fields: PluginConfigField[] | undefined) =>
-  Object.fromEntries((fields ?? []).map((field) => [field.key, field.value]))
+// The dialog's draft: the hosts and secrets as the text in their inputs, and
+// one entry per declared config field under "config:<key>". A boolean field
+// with nothing stored reads as off, so switching it on and back off is no
+// change.
+type Draft = Record<string, string>
+const configKey = (key: string) => `config:${key}`
+
+const toDraft = (info: PluginInfoResponse): Draft => {
+  const draft: Draft = { hosts: info.allowed_hosts.join(', '), secrets: info.allowed_secrets.join(', ') }
+  for (const field of info.config_fields ?? []) {
+    draft[configKey(field.key)] = field.type === 'boolean' && field.value === '' ? 'false' : field.value
+  }
+  return draft
+}
 
 /**
  * Per-provider settings modal: fetches `GET /api/plugins/:type/:id` only
@@ -109,87 +118,118 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
   })
   const [saveError, setSaveError] = useState<string | null>(null)
   const error = saveError ?? loadError?.message ?? null
-  const [hostsInput, setHostsInput] = useState('')
-  const [secretsInput, setSecretsInput] = useState('')
-  const [configValues, setConfigValues] = useState<Record<string, string>>({})
   const [isSaving, setIsSaving] = useState(false)
   const [isResetting, setIsResetting] = useState(false)
+  const [savedNote, setSavedNote] = useState<string | null>(null)
+  const busy = isSaving || isResetting
 
-  const seedDrafts = (from: PluginInfoResponse) => {
-    setHostsInput(from.allowed_hosts.join(', '))
-    setSecretsInput(from.allowed_secrets.join(', '))
-    setConfigValues(buildConfigValues(from.config_fields))
+  // The draft follows the plugin's record: a refetch that lands while the
+  // dialog is open updates every field the operator hasn't edited and keeps
+  // the ones they have. With the dialog closed there is no record, so each
+  // opening seeds the draft afresh.
+  const record = useMemo(() => (open && info ? { ...info, id: infoPath } : null), [open, info, infoPath])
+  const [draft, setDraft] = useFollowingDraft<PluginInfoResponse & { id: string }, Draft, Draft>(record, toDraft, {})
+  const hostsInput = draft.hosts ?? ''
+  const secretsInput = draft.secrets ?? ''
+  const setField = (key: string, value: string) => {
+    setSavedNote(null)
+    setDraft((previous) => ({ ...previous, [key]: value }))
   }
 
-  // The drafts are seeded once per opening, from the first answer to arrive
-  // (cached or fresh), and again after each save or reset. A background
-  // refetch landing later must not overwrite what the operator is typing.
-  const seededFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!open) {
-      seededFor.current = null
-      return
+    if (open) {
+      setSaveError(null)
+      setSavedNote(null)
     }
-    if (!info || seededFor.current === infoPath) return
-    seededFor.current = infoPath
-    seedDrafts(info)
-  }, [info, open, infoPath])
-
-  useEffect(() => {
-    if (open) setSaveError(null)
   }, [open, providerId, type])
 
-  const applyResponse = (data: PluginInfoResponse) => {
-    setQueryData<PluginInfoResponse>([infoPath], data)
-    seedDrafts(data)
-  }
+  const cacheInfo = (data: PluginInfoResponse) => setQueryData<PluginInfoResponse>([infoPath], data)
 
   const secretFields = providerId ? PROVIDER_SECRET_FIELDS[type]?.[providerId] : undefined
   const configFields = info?.config_fields ?? []
 
-  // Single Save button for the whole modal: saves the plugin's own config
-  // fields (if any), allowlist overrides, AND any touched secret field(s)
-  // (only relevant for providers listed in PROVIDER_SECRET_FIELDS) in the
-  // same click. Config is saved FIRST and awaited on its own — a 400 there
-  // (an unknown key, or a bad URL) stops before touching the allowlist or
-  // secrets, so a rejected config edit can never look like the OTHER two
-  // succeeded. The overrides branch is skipped only while `info` hasn't
-  // loaded yet (every provider is sandboxed once loaded, see
-  // backend/plugin_overrides_handlers.go).
+  // Single Save button for the whole modal: config fields, allowlist
+  // overrides and touched secret fields in one click.
+  // - Config goes first and stops the save on an error.
+  // - An unchanged allowlist is never posted: that would pin
+  //   allowed_hosts_overridden and hide a later plugin version's new defaults.
+  // - Hosts and secrets post together, because the backend stores one override.
+  // - Overrides and secrets run side by side and both outcomes are read, so a
+  //   failure in one never hides that the other went through.
+  // - The cache is written once, at the end, from the latest answer, so the
+  //   draft is never reseeded under the operator mid-save. The dialog can't be
+  //   dismissed mid-save, so a late answer never lands in another provider's.
+  // - The dialog closes on success, unless the allowlist was saved: then it
+  //   stays open so the restart reminder stays in view.
   const handleSave = async () => {
-    if (!providerId) return
+    if (!providerId || !info) return
     setIsSaving(true)
     setSaveError(null)
+    setSavedNote(null)
     try {
-      if (configFields.length > 0) {
-        applyResponse(
-          await apiRequest<PluginInfoResponse>(`${infoPath}/config`, {
-            method: 'POST',
-            json: { values: configValues },
-          }),
-        )
+      const stored = toDraft(info)
+      let latest: PluginInfoResponse | null = null
+
+      const changedConfig = configFields.filter((field) => draft[configKey(field.key)] !== stored[configKey(field.key)])
+      let configSaved = false
+      if (changedConfig.length > 0) {
+        // Only the changed fields go: the backend leaves omitted keys as they
+        // are, so an unset option isn't pinned to an explicit value.
+        const configData = await apiRequest<PluginInfoResponse>(`${infoPath}/config`, {
+          method: 'POST',
+          json: { values: Object.fromEntries(changedConfig.map((field) => [field.key, draft[configKey(field.key)] ?? ''])) },
+        })
+        latest = configData
+        configSaved = true
+        // Show the values as the plugin stored them.
+        const saved = toDraft(configData)
+        setDraft((previous) => ({
+          ...previous,
+          ...Object.fromEntries(Object.entries(saved).filter(([key]) => key.startsWith('config:'))),
+        }))
       }
 
-      const overridesPromise =
-        info?.sandboxed === true
+      const hosts = parseList(hostsInput)
+      const secrets = parseList(secretsInput)
+      const overridesChanged =
+        info.sandboxed === true && !(sameSet(hosts, info.allowed_hosts) && sameSet(secrets, info.allowed_secrets))
+
+      const [overridesResult, secretsResult] = await Promise.allSettled([
+        overridesChanged
           ? apiRequest<PluginInfoResponse>(`${infoPath}/overrides`, {
               method: 'POST',
-              json: {
-                allowed_hosts: parseList(hostsInput),
-                allowed_secrets: parseList(secretsInput),
-              },
+              json: { allowed_hosts: hosts, allowed_secrets: secrets },
             })
-          : null
+          : null,
+        secretFields && secretFields.length > 0 ? saveTouchedKeys(secretFields.map((field) => field.key)) : null,
+      ])
 
-      const secretsPromise =
-        secretFields && secretFields.length > 0
-          ? saveTouchedKeys(secretFields.map((field) => field.key))
-          : null
+      const overridesSaved = overridesResult.status === 'fulfilled' && overridesChanged
+      if (overridesResult.status === 'fulfilled' && overridesResult.value) {
+        latest = overridesResult.value
+        // Show the lists as the server stored them (no repeats, tidy spacing).
+        const saved = toDraft(overridesResult.value)
+        setDraft((previous) => ({ ...previous, hosts: saved.hosts, secrets: saved.secrets }))
+      }
+      if (latest) cacheInfo(latest)
 
-      const [overridesData] = await Promise.all([overridesPromise, secretsPromise])
-
-      if (overridesData) {
-        applyResponse(overridesData)
+      const failure =
+        overridesResult.status === 'rejected'
+          ? overridesResult.reason
+          : secretsResult.status === 'rejected'
+            ? secretsResult.reason
+            : null
+      if (failure) {
+        if (configSaved || overridesSaved) {
+          setSavedNote(
+            configSaved && overridesSaved ? 'Options and allowlist saved.' : configSaved ? 'Options saved.' : 'Allowlist saved.',
+          )
+        }
+        setSaveError(failure instanceof Error ? failure.message : 'Unable to save settings')
+      } else if (overridesSaved) {
+        setSavedNote('Saved.')
+      } else {
+        onOpenChange(false)
       }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Unable to save settings')
@@ -198,13 +238,18 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
     }
   }
 
+  // Reset discards the operator's edits by design, so the whole draft is set
+  // from the answer.
   const handleResetOverrides = async () => {
     if (!providerId) return
     setIsResetting(true)
     setSaveError(null)
+    setSavedNote(null)
     try {
       const data = await apiRequest<PluginInfoResponse>(`${infoPath}/overrides`, { method: 'DELETE' })
-      applyResponse(data)
+      cacheInfo(data)
+      setDraft(toDraft(data))
+      setSavedNote('Reset to defaults.')
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Unable to reset allowlist overrides')
     } finally {
@@ -223,7 +268,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
   const showSaveButton = isSandboxed || hasSecretFields || hasConfigFields
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(next) => (next || !busy) && onOpenChange(next)}>
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{info?.name ?? providerId ?? 'Provider Settings'}</DialogTitle>
@@ -236,7 +281,11 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
           </div>
         )}
 
-        {hasSecretFields && <SecretFieldGroup fields={secretFields!} />}
+        {hasSecretFields && (
+          <fieldset disabled={busy} className="contents">
+            <SecretFieldGroup fields={secretFields!} />
+          </fieldset>
+        )}
 
         {hasConfigFields && (
           <div className="space-y-2">
@@ -246,10 +295,9 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                   <Field orientation="horizontal">
                     <Switch
                       id={`config-field-${field.key}`}
-                      checked={configValues[field.key] === 'true'}
-                      onCheckedChange={(checked) =>
-                        setConfigValues((previous) => ({ ...previous, [field.key]: checked ? 'true' : 'false' }))
-                      }
+                      checked={draft[configKey(field.key)] === 'true'}
+                      disabled={busy}
+                      onCheckedChange={(checked) => setField(configKey(field.key), checked ? 'true' : 'false')}
                     />
                     <FieldLabel htmlFor={`config-field-${field.key}`}>{field.label}</FieldLabel>
                   </Field>
@@ -258,8 +306,9 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                     <FieldLabel htmlFor={`config-field-${field.key}`}>{field.label}</FieldLabel>
                     <Input
                       id={`config-field-${field.key}`}
-                      value={configValues[field.key] ?? ''}
-                      onChange={(e) => setConfigValues((previous) => ({ ...previous, [field.key]: e.target.value }))}
+                      value={draft[configKey(field.key)] ?? ''}
+                      disabled={busy}
+                      onChange={(e) => setField(configKey(field.key), e.target.value)}
                       placeholder={field.placeholder}
                       aria-label={field.label}
                     />
@@ -281,7 +330,8 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
               <Input
                 id="allowed-hosts"
                 value={hostsInput}
-                onChange={(e) => setHostsInput(e.target.value)}
+                disabled={busy}
+                onChange={(e) => setField('hosts', e.target.value)}
                 placeholder="example.com, api.example.org"
                 aria-label="Allowed hosts"
               />
@@ -291,7 +341,8 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
               <Input
                 id="allowed-secrets"
                 value={secretsInput}
-                onChange={(e) => setSecretsInput(e.target.value)}
+                disabled={busy}
+                onChange={(e) => setField('secrets', e.target.value)}
                 aria-label="Allowed secrets"
               />
             </Field>
@@ -304,7 +355,7 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
                 variant="ghost"
                 className="h-8 whitespace-nowrap px-3 text-[10px] uppercase tracking-[0.1em]"
                 onClick={handleResetOverrides}
-                disabled={isResetting}
+                disabled={busy}
               >
                 {isResetting ? 'Resetting' : 'Reset to defaults'}
               </Button>
@@ -313,13 +364,14 @@ export function ProviderSettingsModal({ type, providerId, open, onOpenChange }: 
         )}
 
         {showSaveButton && (
-          <div className="flex justify-end gap-2">
+          <div className="flex items-center justify-end gap-2">
+            {savedNote && <p role="status" className="mr-auto text-xs text-muted-foreground">{savedNote}</p>}
             <Button
               type="button"
               variant="outline"
               className="h-8 whitespace-nowrap px-3 text-[10px] uppercase tracking-[0.1em]"
               onClick={handleSave}
-              disabled={isSaving}
+              disabled={busy}
             >
               {isSaving ? 'Saving' : 'Save'}
             </Button>
