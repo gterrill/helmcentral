@@ -1,16 +1,24 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 
-import { fitMinHeight, fitScale } from '@/lib/cluster-canvas'
+import { fitBasisHeight, pickDesign, type FitDesign } from '@/lib/cluster-canvas'
 import { cn } from '@/lib/utils'
 
+/** What the children of a multi-design canvas are told about the design in use. */
+export type FitChoice = { key: string; width: number; height: number }
+
 interface FitCanvasProps {
-  designWidth: number
-  designHeight: number
+  /** The ways of drawing the canvas; the one that fits the box best is used. The first is the default. */
+  designs: readonly FitDesign[]
   /** Classes for the measured box, e.g. a breakpoint visibility class. */
   className?: string
   /** Attributes for the canvas itself (data-* hooks, extra classes). */
   canvasProps?: React.HTMLAttributes<HTMLDivElement> & { [key: `data-${string}`]: string | undefined }
-  children: ReactNode
+  /**
+   * A function when the content depends on which design was chosen and how wide
+   * it was drawn (the engine cluster); plain content when it does not (the wind
+   * compass has one design and fills it).
+   */
+  children: ReactNode | ((choice: FitChoice) => ReactNode)
 }
 
 /**
@@ -19,14 +27,24 @@ interface FitCanvasProps {
  * The box fills the space the tile gives it (`flex-1`, so the tile must be a
  * flex column with `min-h-0` down to here: `Tile` does that when asked to
  * `fill`). The canvas is absolutely positioned inside it, so nothing the
- * scaling does can change the size being measured. The box's `min-height` is
- * the design scaled to its width without growth: where the tile has no height
- * of its own, such as the stacked phone layout where tiles only have a minimum
- * height, that is the box's whole height and the canvas is fitted by width
- * alone. Where the tile does have a height, the box grows into it and the
- * canvas grows with it, up to MAX_FIT_SCALE.
+ * scaling does can change the size being measured.
+ *
+ * What the box asks for is its flex-basis, the design scaled to its width
+ * without growth, and not a min-height. Where the tile has no height of its
+ * own, such as the stacked phone layout where tiles only have a minimum
+ * height, the basis is what sizes the box and the canvas is fitted by width
+ * alone. Where the tile does have a height the box is flexed to it: it grows
+ * past the basis up to MAX_FIT_SCALE, and it shrinks below it. A min-height
+ * could not shrink, and on a short wide tile it held the box taller than the
+ * tile, so the canvas was fitted to a height the tile did not have and ran out
+ * of the bottom of it.
+ *
+ * Given several designs, the one that draws at the largest scale is used and,
+ * if it stretches, the canvas is as wide as the box needs at that scale. The
+ * basis comes from the first design, so the pick never feeds back into the
+ * height it is made against.
  */
-export function FitCanvas({ designWidth, designHeight, className, canvasProps, children }: FitCanvasProps) {
+export function FitCanvas({ designs, className, canvasProps, children }: FitCanvasProps) {
   const ref = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ w: number; h: number }>({ w: 0, h: 0 })
 
@@ -40,27 +58,29 @@ export function FitCanvas({ designWidth, designHeight, className, canvasProps, c
     return () => observer.disconnect()
   }, [])
 
-  const scale = fitScale({ availW: box.w, availH: box.h, designW: designWidth, designH: designHeight })
-  const left = (box.w - designWidth * scale) / 2
-  const top = (box.h - designHeight * scale) / 2
+  const first = designs[0]
+  const { design, scale, width } = pickDesign(designs, { availW: box.w, availH: box.h })
+  const left = (box.w - width * scale) / 2
+  const top = (box.h - design.height * scale) / 2
 
   return (
     <div
       ref={ref}
-      className={cn('relative min-h-0 w-full flex-1', className)}
-      style={{ minHeight: fitMinHeight({ availW: box.w, designW: designWidth, designH: designHeight }) }}
+      className={cn('relative min-h-0 w-full grow shrink', className)}
+      style={{ flexBasis: fitBasisHeight({ availW: box.w, designW: first.width, designH: first.height }) }}
     >
       <div
         {...canvasProps}
+        data-layout={design.key}
         className={cn('absolute left-0 top-0 origin-top-left', canvasProps?.className)}
         style={{
           ...canvasProps?.style,
-          width: designWidth,
-          height: designHeight,
+          width,
+          height: design.height,
           transform: `translate(${left}px, ${top}px) scale(${scale})`,
         } as CSSProperties}
       >
-        {children}
+        {typeof children === 'function' ? children({ key: design.key, width, height: design.height }) : children}
       </div>
     </div>
   )

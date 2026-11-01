@@ -1,7 +1,7 @@
 import { Gauge as GaugeIcon, Settings2 } from 'lucide-react'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { formatTimeOfDay, NO_TIME, selectTimeZone } from '@/lib/vessel-time'
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 
 import {
   AlternatorCard, BatteryCard, FOOTER_ICONS, FuelFan, GapArc, ReadingCard, ReadoutContent, SlotIcon,
@@ -14,11 +14,13 @@ import { Tile, tilePillButtonClass, tilePillClass } from '@/components/ui/tile'
 import { cn } from '@/lib/utils'
 import type { EngineStatus } from '@/hooks/use-gauge-values'
 import { clusterSlots, reading } from '@/lib/cluster-readings'
-import type { ResolvedClusterConfig } from '@/lib/dashboard-widgets'
+import type { ClusterSide, ResolvedClusterConfig } from '@/lib/dashboard-widgets'
 import { toneFor } from '@/lib/engine-cluster-bullet'
 import { propulsionId } from '@/lib/equipment-tiles'
+import type { FitDesign } from '@/lib/cluster-canvas'
 import {
-  CLUSTER_H, CLUSTER_INNER_H, CLUSTER_INNER_TOP, CLUSTER_W, DIAL_CX, DIAL_CY, clusterLayout,
+  CLUSTER_INNER_TOP, CLUSTER_SIZES, CLUSTER_W, DIAL_CX, DIAL_CY, STACKED_MARGIN, clusterLayout,
+  type ClusterLayoutKind,
 } from '@/lib/engine-cluster-layout'
 import { severityTextClass, worstZoneState, type ZoneState } from '@/lib/severity'
 import { formatDataAge } from '@/lib/staleness'
@@ -36,6 +38,17 @@ import { formatDataAge } from '@/lib/staleness'
  * card is drawn from that slot's zones: the graphs and the alarms are the same
  * thresholds.
  */
+
+/**
+ * The two ways the card is drawn. The stacked card keeps its footer in a row
+ * under the dial; the strip moves the footer beside the readouts and is
+ * shorter, for a tile that is wide and not tall. The tile uses whichever draws
+ * larger in the box it has, and the stacked card is the default. Both let the
+ * readout cards take any width the box has over their shape.
+ */
+const CLUSTER_DESIGNS: readonly FitDesign[] = (['stacked', 'strip'] as const).map((key) => ({
+  key, ...CLUSTER_SIZES[key], stretch: true,
+}))
 
 /**
  * The hub reads revs the way the reference does: whole revs rounded to the
@@ -91,6 +104,153 @@ function chipFor(running: boolean, state: ZoneState | null): { text: string; cla
   return null
 }
 
+interface ClusterCanvasProps {
+  kind: ClusterLayoutKind
+  width: number
+  height: number
+  side: ClusterSide
+  title: string
+  config: ResolvedClusterConfig
+  values: Record<string, number | null>
+  ages: Record<string, number | null> | undefined
+  off: boolean
+  ring: ReturnType<typeof reading>
+  centre: ReturnType<typeof reading>
+  ringMin: number
+  ringMax: number
+  ringStep: number
+  cornerTones: ReturnType<typeof toneFor>[]
+}
+
+/**
+ * The card drawn in one layout at one width. A component of its own so the
+ * layout, which only depends on the side, the layout and the width, is worked
+ * out once and not on every live-data render.
+ */
+function ClusterCanvas({
+  kind, width, height, side, title, config, values, ages, off, ring, centre, ringMin, ringMax, ringStep, cornerTones,
+}: ClusterCanvasProps) {
+  const layout = useMemo(() => clusterLayout(side, kind, width), [side, kind, width])
+  const footer = config.footer ?? {}
+  const stbd = side === 'stbd'
+  const strip = kind === 'strip'
+
+  // The four footer cards are the same in both layouts; only what holds them
+  // differs: a row under the dial, or a column of cells beside the readouts.
+  // Each card fills whatever holds it.
+  const footerCards = [
+    <BatteryCard key="battery" slot={footer.battery} values={values} ages={ages} boxed={strip} />,
+    <AlternatorCard key="alternator" footer={footer} values={values} ages={ages}
+      historyEnabled={!off && footer.altAmps !== undefined} />,
+    <ReadingCard key="trans"
+      testId="cluster-trans" label="Trans" icon={FOOTER_ICONS.trans} slot={footer.transPressure}
+      flex={`0 0 ${layout.footerBulletWidth + 40}px`} values={values} ages={ages}
+      bulletWidth={layout.footerBulletWidth} side={side}
+    />,
+    <ReadingCard key="egt"
+      testId="cluster-egt" label="EGT" icon={FOOTER_ICONS.egt} slot={footer.egt}
+      flex={`0 0 ${layout.footerBulletWidth + 24}px`} values={values} ages={ages}
+      bulletWidth={layout.footerBulletWidth} side={side}
+    />,
+  ]
+
+  return (
+    <div className="absolute left-0" style={{ top: CLUSTER_INNER_TOP, width, height: height - CLUSTER_INNER_TOP }}>
+      {/* The readout card outlines sit under everything else, so nothing they paint lands on a reading. */}
+      <svg width={width} height={height - CLUSTER_INNER_TOP} className="absolute left-0 top-0" aria-hidden="true">
+        {layout.readouts.map((box, i) => (
+          <path key={i} data-card-outline={i} d={box.path}
+            strokeWidth={cornerTones[i] === 'neutral' ? 1.5 : 2.5}
+            style={{ fill: 'hsl(var(--cluster-surface))', stroke: toneStroke(cornerTones[i] ?? 'neutral') }} />
+        ))}
+      </svg>
+
+      {/* The fuel card and fan, the dial and the gap arcs are drawn at the
+          stacked layout's coordinates and moved as one block to the outer margin. */}
+      <div className="absolute top-0" style={{ left: layout.shift, width: CLUSTER_W, height: height - CLUSTER_INNER_TOP }}>
+        <svg width={CLUSTER_W} height={height - CLUSTER_INNER_TOP} className="absolute left-0 top-0" aria-hidden="true">
+          {config.fuel && (
+            <>
+              <path data-fuel-card="" d={layout.fuelCard} strokeWidth={1.5}
+                style={{ fill: 'hsl(var(--cluster-surface))', stroke: 'hsl(var(--cluster-stroke))' }} />
+              <FuelFan config={config.fuel} title={title} side={side} values={values} ages={ages} />
+            </>
+          )}
+        </svg>
+
+        <div data-cluster-dial="" className="absolute"
+          style={{ left: DIAL_CX - CLUSTER_DIAL_SIZE / 2, top: DIAL_CY - CLUSTER_DIAL_SIZE / 2 }}>
+          <ClusterDial
+            value={ring.converted}
+            min={ringMin}
+            max={ringMax}
+            majorStep={ringStep}
+            labelDivisor={config.ring.labelDivisor}
+            zones={config.ring.zones}
+          >
+            <div data-testid="cluster-centre" className="flex flex-col items-center gap-1.5">
+              <span data-testid="cluster-centre-value"
+                className={`font-display text-6xl font-semibold leading-[0.9] tracking-tight tabular-nums ${
+                  severityTextClass(ring.zone, 'text-foreground')}`}>
+                {hubText(ring, config.ring.unit) ?? '--'}
+              </span>
+              <div className="h-0.5 w-[118px] bg-foreground/25" />
+              <span className="text-2xl font-semibold uppercase tracking-[0.16em] text-foreground">
+                {config.ring.label.trim() || ring.unit}
+              </span>
+              {config.ring.labelDivisor ? (
+                <span data-testid="cluster-scale-note" className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
+                  scale x{config.ring.labelDivisor}
+                </span>
+              ) : null}
+              <span data-testid="cluster-hours" className="mt-1 flex items-center gap-2">
+                <SlotIcon name={config.centreIcon} slot={config.centre} className="size-4 shrink-0 text-primary" />
+                <span className="font-display text-lg font-semibold tabular-nums text-foreground">{centre.text ?? '--'}</span>
+                <span className="text-xs font-semibold tracking-[0.16em] text-muted-foreground">HRS</span>
+              </span>
+            </div>
+          </ClusterDial>
+        </div>
+
+        <svg width={CLUSTER_W} height={height - CLUSTER_INNER_TOP} className="pointer-events-none absolute left-0 top-0" aria-hidden="true">
+          {gapArcNames().map((name) => (
+            <GapArc key={name} name={name} slot={config.arcs?.[name]} values={values} ages={ages} />
+          ))}
+        </svg>
+      </div>
+
+      {config.corners.slice(0, 4).map((corner, i) => {
+        const row = corner.rows[0]
+        const box = layout.readouts[i]
+        if (!row) return null
+        return (
+          <div key={i} className="absolute" style={{ left: box.left, top: box.top, width: box.width }}>
+            <ReadoutContent
+              index={i} slot={row} icon={corner.icon} label={corner.label.trim() || row.label.trim()}
+              values={values} ages={ages} side={side} width={box.width} bulletWidth={layout.bulletWidth}
+            />
+          </div>
+        )
+      })}
+
+      {strip ? (
+        // One footer card beside each readout card, so the column reads across.
+        layout.footer.map((cell, i) => (
+          <div key={i} data-footer-cell="" className="absolute"
+            style={{ left: cell.left, top: cell.top, width: cell.width, height: cell.height }}>
+            {footerCards[i]}
+          </div>
+        ))
+      ) : (
+        <div data-testid="cluster-footer" className="absolute flex h-[100px] items-center gap-3"
+          style={{ left: STACKED_MARGIN, top: 536, width: width - 2 * STACKED_MARGIN, flexDirection: stbd ? 'row-reverse' : 'row' }}>
+          {footerCards}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export const EngineClusterTile = memo(function EngineClusterTile({
   config, values: liveValues, ages: liveAges, engine, editing, onConfigure,
 }: EngineClusterTileProps) {
@@ -108,7 +268,6 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   const ages = offEngineId !== null ? withoutEnginePaths(liveAges, offEngineId) : liveAges
 
   const title = config.title.trim() || 'Engine'
-  const layout = clusterLayout(side)
 
   const ring = reading(config.ring, values, ages)
   const centre = reading(config.centre, values, ages)
@@ -127,10 +286,8 @@ export const EngineClusterTile = memo(function EngineClusterTile({
   const tileStale = knownAges.length > 0 && knownAges.every((r) => r.stale)
   const staleLabel = tileStale ? formatDataAge(Math.max(...knownAges.map((r) => r.age as number))) : undefined
 
-  const footer = config.footer ?? {}
   const running = !off && !tileStale && engineStatus?.state !== 'lost' && ring.converted !== null && ring.converted > 0
   const chip = chipFor(running, state)
-  const stbd = side === 'stbd'
 
   const cornerTones = config.corners.slice(0, 4).map((corner) => {
     const row = corner.rows[0]
@@ -165,99 +322,14 @@ export const EngineClusterTile = memo(function EngineClusterTile({
         ) : undefined
       }
     >
-      <FitCanvas designWidth={CLUSTER_W} designHeight={CLUSTER_H} canvasProps={{ 'data-cluster-canvas': '', 'data-side': side }}>
-        <div className="absolute left-0" style={{ top: CLUSTER_INNER_TOP, width: CLUSTER_W, height: CLUSTER_INNER_H }}>
-          {/* The card outlines and the fuel fan share one SVG layer under the
-              dial: outlines first, so nothing they paint lands on a reading. */}
-          <svg width={CLUSTER_W} height={CLUSTER_INNER_H} viewBox={`0 0 ${CLUSTER_W} ${CLUSTER_INNER_H}`}
-            className="absolute left-0 top-0" aria-hidden="true">
-            {config.fuel && (
-              <path data-fuel-card="" d={layout.fuelCard} strokeWidth={1.5}
-                style={{ fill: 'hsl(var(--cluster-surface))', stroke: 'hsl(var(--cluster-stroke))' }} />
-            )}
-            {layout.readouts.map((box, i) => (
-              <path key={i} data-card-outline={i} d={box.path}
-                strokeWidth={cornerTones[i] === 'neutral' ? 1.5 : 2.5}
-                style={{ fill: 'hsl(var(--cluster-surface))', stroke: toneStroke(cornerTones[i] ?? 'neutral') }} />
-            ))}
-            {config.fuel && <FuelFan config={config.fuel} title={title} side={side} values={values} ages={ages} />}
-          </svg>
-
-          <div data-cluster-dial="" className="absolute"
-            style={{ left: DIAL_CX - CLUSTER_DIAL_SIZE / 2, top: DIAL_CY - CLUSTER_DIAL_SIZE / 2 }}>
-            <ClusterDial
-              value={ring.converted}
-              min={ringMin}
-              max={ringMax}
-              majorStep={ringStep}
-              labelDivisor={config.ring.labelDivisor}
-              zones={config.ring.zones}
-            >
-              <div data-testid="cluster-centre" className="flex flex-col items-center gap-1.5">
-                <span data-testid="cluster-centre-value"
-                  className={`font-display text-6xl font-semibold leading-[0.9] tracking-tight tabular-nums ${
-                    severityTextClass(ring.zone, 'text-foreground')}`}>
-                  {hubText(ring, config.ring.unit) ?? '--'}
-                </span>
-                <div className="h-0.5 w-[118px] bg-foreground/25" />
-                <span className="text-2xl font-semibold uppercase tracking-[0.16em] text-foreground">
-                  {config.ring.label.trim() || ring.unit}
-                </span>
-                {config.ring.labelDivisor ? (
-                  <span data-testid="cluster-scale-note" className="text-xs uppercase tracking-[0.16em] text-muted-foreground">
-                    scale x{config.ring.labelDivisor}
-                  </span>
-                ) : null}
-                <span data-testid="cluster-hours" className="mt-1 flex items-center gap-2">
-                  <SlotIcon name={config.centreIcon} slot={config.centre} className="size-4 shrink-0 text-primary" />
-                  <span className="font-display text-lg font-semibold tabular-nums text-foreground">{centre.text ?? '--'}</span>
-                  <span className="text-xs font-semibold tracking-[0.16em] text-muted-foreground">HRS</span>
-                </span>
-              </div>
-            </ClusterDial>
-          </div>
-
-          <svg width={CLUSTER_W} height={CLUSTER_INNER_H} viewBox={`0 0 ${CLUSTER_W} ${CLUSTER_INNER_H}`}
-            className="pointer-events-none absolute left-0 top-0" aria-hidden="true">
-            {gapArcNames().map((name) => (
-              <GapArc key={name} name={name} slot={config.arcs?.[name]} values={values} ages={ages} />
-            ))}
-          </svg>
-
-          {config.corners.slice(0, 4).map((corner, i) => {
-            const row = corner.rows[0]
-            const box = layout.readouts[i]
-            if (!row) return null
-            return (
-              <div key={i} className="absolute" style={{ left: box.left, top: box.top, width: box.width }}>
-                <ReadoutContent
-                  index={i} slot={row} icon={corner.icon} label={corner.label.trim() || row.label.trim()}
-                  values={values} ages={ages} side={side} width={box.width} bulletWidth={layout.bulletWidth}
-                />
-              </div>
-            )
-          })}
-
-          <div data-testid="cluster-footer" className="absolute flex items-center gap-3"
-            style={{ left: 40, top: 536, width: 720, height: 100, flexDirection: stbd ? 'row-reverse' : 'row' }}>
-            <BatteryCard slot={footer.battery} values={values} ages={ages} />
-            <AlternatorCard footer={footer} values={values} ages={ages}
-              historyEnabled={!off && footer.altAmps !== undefined} />
-            <ReadingCard
-              testId="cluster-trans" label="Trans" icon={FOOTER_ICONS.trans}
-              slot={footer.transPressure}
-              flex={`0 0 ${layout.bulletWidth + 40}px`} values={values} ages={ages}
-              bulletWidth={layout.bulletWidth} side={side}
-            />
-            <ReadingCard
-              testId="cluster-egt" label="EGT" icon={FOOTER_ICONS.egt}
-              slot={footer.egt}
-              flex={`0 0 ${layout.bulletWidth + 24}px`} values={values} ages={ages}
-              bulletWidth={layout.bulletWidth} side={side}
-            />
-          </div>
-        </div>
-
+      <FitCanvas designs={CLUSTER_DESIGNS} canvasProps={{ 'data-cluster-canvas': '', 'data-side': side }}>
+        {({ key, width, height }) => (
+          <ClusterCanvas
+            kind={key as ClusterLayoutKind} width={width} height={height} side={side} title={title}
+            config={config} values={values} ages={ages} off={off} ring={ring} centre={centre}
+            ringMin={ringMin} ringMax={ringMax} ringStep={ringStep} cornerTones={cornerTones}
+          />
+        )}
       </FitCanvas>
     </Tile>
   )

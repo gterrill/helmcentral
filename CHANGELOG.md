@@ -21,6 +21,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The engine card fits a short, wide tile whole.** On the wall display the
+  bottom row of the card, with the battery, alternator, gearbox and exhaust,
+  ran off the bottom of the tile and was cut off. The card now scales down to
+  fit the tile's height. When the tile is wide and short, the card puts those
+  four readings in a column beside the readout cards, so the dial can stay
+  larger. When a tile is wider than the card needs, the readout cards stretch
+  to fill the extra width.
 - **The Instruments Silent card names a Victron device behind a GX.** A
   silent shore charger used to show as "An instrument has stopped sending".
   The card now uses the name you set for the device on the GX. If there isn't

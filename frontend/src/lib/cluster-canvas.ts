@@ -168,11 +168,51 @@ export function fitScale({ availW, availH, designW, designH }: FitInput): number
 }
 
 /**
- * The height a fit box must always keep: the design scaled to the width with
- * no growth. On a layout that gives the box no height of its own this is the
- * box's whole height, so the result is the width-only fit. It depends only on
- * the width, never on the scaled content, so measuring cannot feed back.
+ * The height a fit box asks for: the design scaled to the width with no growth.
+ * It is the box's flex-basis, so where the tile gives the box no height of its
+ * own (the stacked phone layout) this is the box's whole height and the result
+ * is the width-only fit. A tile with a height of its own may shrink the box
+ * below it, or grow it above. It depends only on the width, never on the
+ * scaled content, so measuring cannot feed back.
  */
-export function fitMinHeight({ availW, designW, designH }: Omit<FitInput, 'availH'>): number {
+export function fitBasisHeight({ availW, designW, designH }: Omit<FitInput, 'availH'>): number {
   return designH * Math.min(1, Math.max(0, availW) / designW)
+}
+
+/**
+ * One way of drawing a tile's canvas. A tile that can be laid out more than one
+ * way (the engine cluster has a stacked card and a strip) offers each as a
+ * design and lets the box decide.
+ */
+export type FitDesign = {
+  key: string
+  width: number
+  height: number
+  /**
+   * Whether the canvas may be drawn wider than `width` when the box is wider
+   * than the design's shape allows for. Height sets the scale, so a wide box
+   * would otherwise have empty bands either side; the layout gets the extra
+   * width to spend instead.
+   */
+  stretch?: boolean
+}
+
+/**
+ * The design that fills the box at the largest scale, with that scale and the
+ * width to draw the canvas at. The first design wins a tie, so it is the
+ * default before the box has been measured. Once measured, a tie (both at
+ * MAX_FIT_SCALE, say) goes to the design that has to stretch least, so a huge
+ * box is not filled by stretching one layout without limit.
+ */
+export function pickDesign<D extends FitDesign>(designs: readonly D[], box: { availW: number; availH?: number }) {
+  const candidates = designs.map((design) => {
+    const scale = fitScale({ ...box, designW: design.width, designH: design.height })
+    const width = design.stretch && scale > 0 ? Math.max(design.width, box.availW / scale) : design.width
+    return { design, scale, width }
+  })
+  return candidates.reduce((best, c) => {
+    if (c.scale > best.scale) return c
+    if (c.scale === best.scale && c.scale > 0 && c.width / c.design.width < best.width / best.design.width) return c
+    return best
+  })
 }
