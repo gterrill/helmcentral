@@ -177,6 +177,30 @@ it, the server logs it. It won't try again until the conditions break and
 re-form. The watch is still up and the boat is outside the circle, so the drag
 alarm sounds. Raise by hand.
 
+## Save the depth
+
+While a watch is set, Anchor watch can give a saved place the depth under the
+anchor. Mate then has a figure of your own the next time you ask about that
+anchorage. The line under the rode planner shows what it will save, for example
+"Save 4.2 m at datum". It says whether the figure comes from the sounder or from
+the depth you entered. Nothing is saved until you tap the button and confirm.
+
+A sounder reading is the water below the transducer. Helmcentral adds how far
+below the waterline the transducer sits, then takes off the tide at the drop, so
+it matches a chart. That needs the **Transducer Depth** in Settings → Anchor
+Watch. A depth you typed into the rode planner is taken as depth below the
+surface, so it needs no transducer depth, only the tide. A tide below chart datum
+counts as a real reading.
+
+The transducer depth is used here only. The rode planner and the low-water
+clearance check don't use it yet.
+
+If the depth, the tide at the drop or the transducer depth is missing, the button
+gives way to a sentence that says which. An older watch that doesn't record where
+its depth came from asks you to enter the depth again in the rode planner.
+Helmcentral doesn't guess a replacement. The steps are
+in [Manage the places you've given Mate](../how-to/manage-saved-places.md#save-the-depth-from-your-anchor-watch).
+
 ## Low-water clearance warning
 
 Anchor Watch checks the depth under the keel against the next low tide. A spot

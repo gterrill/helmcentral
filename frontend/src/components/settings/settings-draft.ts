@@ -141,6 +141,8 @@ export interface RegularSettingsDraft {
   bowRollerHeightM: string
   gpsFromBowM: string
   loaM: string
+  // How far below the waterline the depth transducer sits; '' leaves it unset (no default).
+  transducerDepthM: string
   chainSizeMm: string
   chainOnboardM: string
   hullType: HullType
@@ -197,6 +199,7 @@ export const initialRegularSettingsDraft: RegularSettingsDraft = {
   bowRollerHeightM: '1.5',
   gpsFromBowM: '0',
   loaM: '0',
+  transducerDepthM: '',
   chainSizeMm: '12',
   chainOnboardM: '150',
   hullType: 'power_cat',
@@ -271,6 +274,8 @@ export function hydrateDraftFromSettings(settings: SettingsPayload): RegularSett
   // an absent one, so it must hydrate the same as any other number here.
   if (typeof settings.anchor?.gps_from_bow_m === 'number') draft.gpsFromBowM = String(settings.anchor.gps_from_bow_m)
   if (typeof settings.anchor?.loa_m === 'number') draft.loaM = String(settings.anchor.loa_m)
+  // The server sends 0 for unset; the box stays empty then.
+  if (typeof settings.anchor?.transducer_depth_m === 'number' && settings.anchor.transducer_depth_m > 0) draft.transducerDepthM = String(settings.anchor.transducer_depth_m)
   if (typeof settings.anchor?.chain_size_mm === 'number') draft.chainSizeMm = String(settings.anchor.chain_size_mm)
   if (typeof settings.anchor?.chain_onboard_m === 'number') draft.chainOnboardM = String(settings.anchor.chain_onboard_m)
   if (
@@ -345,6 +350,15 @@ const parseNumber = (value: string, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
+// Empty leaves the transducer depth unset (0). Anything typed is sent as it is
+// read, and text that is not a number is sent as -1, so the server refuses it
+// and names the field instead of the box quietly emptying.
+const parseTransducerDepth = (value: string) => {
+  if (value.trim() === '') return 0
+  const parsed = Number(value.trim().replace(',', '.'))
+  return Number.isFinite(parsed) ? parsed : -1
+}
+
 // gps_from_bow_m defaults to 0, meaning "no correction" - unlike every other
 // numeric anchor field, 0 is the meaningful explicit value here, not an
 // absent one, so parseNumber's `parsed > 0` guard would wrongly discard it.
@@ -371,6 +385,7 @@ export function draftsEqual(a: RegularSettingsDraft, b: RegularSettingsDraft): b
   if (a.bowRollerHeightM !== b.bowRollerHeightM) return false
   if (a.gpsFromBowM !== b.gpsFromBowM) return false
   if (a.loaM !== b.loaM) return false
+  if (a.transducerDepthM !== b.transducerDepthM) return false
   if (a.chainSizeMm !== b.chainSizeMm) return false
   if (a.chainOnboardM !== b.chainOnboardM) return false
   if (a.hullType !== b.hullType) return false
@@ -443,6 +458,7 @@ export function buildRegularSettingsPatch(draft: RegularSettingsDraft): DeepPart
       bow_roller_height_m: parseNumber(draft.bowRollerHeightM, 1.5),
       gps_from_bow_m: parseNonNegativeNumber(draft.gpsFromBowM, 0),
       loa_m: parseNumber(draft.loaM, 0),
+      transducer_depth_m: parseTransducerDepth(draft.transducerDepthM),
       chain_size_mm: parseNumber(draft.chainSizeMm, 12),
       chain_onboard_m: parseNumber(draft.chainOnboardM, 150),
       hull_type: draft.hullType,

@@ -32,7 +32,7 @@ export interface SavedPlaceChange {
   lon?: number
   note?: string
   depth_m?: number | null
-  depth_source?: 'charted'
+  depth_source?: 'charted' | 'sounded'
   depth_date?: string
 }
 
@@ -42,7 +42,7 @@ export interface NewSavedPlace {
   lon: number
   note: string
   depth_m?: number
-  depth_source?: 'charted'
+  depth_source?: 'charted' | 'sounded'
   depth_date?: string
 }
 

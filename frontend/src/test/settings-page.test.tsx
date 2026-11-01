@@ -247,6 +247,29 @@ describe('SettingsPage Anchor auto-raise setting', () => {
   })
 })
 
+describe('SettingsPage transducer depth', () => {
+  it('sends the typed transducer depth, and 0 (unset) when the box is empty', async () => {
+    render(<SettingsPage onOpenHelp={vi.fn()} onDirtyChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
+    const box = screen.getByLabelText('Depth transducer below the waterline in metres')
+    expect(box).toHaveValue('')
+
+    fireEvent.change(box, { target: { value: '0.45' } })
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    expect((saveMock.mock.calls[0][0] as { anchor?: { transducer_depth_m?: number } }).anchor?.transducer_depth_m).toBe(0.45)
+  })
+
+  it('sends text that is not a number as -1 so the server refuses it', async () => {
+    render(<SettingsPage onOpenHelp={vi.fn()} onDirtyChange={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Anchor Watch' }))
+    fireEvent.change(screen.getByLabelText('Depth transducer below the waterline in metres'), { target: { value: 'deep' } })
+    fireEvent.click(saveBar().getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    expect((saveMock.mock.calls[0][0] as { anchor?: { transducer_depth_m?: number } }).anchor?.transducer_depth_m).toBe(-1)
+  })
+})
+
 describe('SettingsPage imperative save handle', () => {
   it('saves the settings patch and ALL touched secrets (the full SECRET_KEYS set, not just the inline-section subset)', async () => {
     const ref = createRef<SettingsPageHandle>()

@@ -36,6 +36,11 @@ interface AnchorWatchServerState {
   place_name?: string
   planning_depth_m?: number
   planning_tide_height_ft?: number
+  // The planning depth at chart datum, worked out on the server; null with a
+  // reason when it cannot be.
+  datum_depth_m?: number | null
+  datum_depth_reason?: string
+  planning_depth_source?: string
   // ADR 0099: present whenever the server has ever auto-raised a watch
   // (in this process's lifetime), regardless of whether one is active now -
   // a successful auto-raise is exactly what makes `active` false again.
@@ -87,6 +92,11 @@ export interface AnchorWatchRecord {
    * (legacy record, or no reading was available at the moment of drop). */
   planningDepthM: number | null
   planningTideHeightFt: number | null
+  /** The depth under the anchor at chart datum (planning depth plus the transducer depth, less the tide at the drop). Null when it cannot be worked out; datumDepthReason then says why. */
+  datumDepthM: number | null
+  datumDepthReason: string
+  /** Who the planning depth came from: the sounder at the drop, or the operator in the rode planner. Null when unknown. */
+  planningDepthSource: 'sounder' | 'operator' | null
   /** The server's most recent automatic raise (ADR 0099), if it has ever
    * raised one in this process's lifetime - independent of `active`,
    * since a successful auto-raise is what makes the watch inactive. App.tsx watches this for a change to show a one-time toast. */
@@ -250,6 +260,11 @@ export function parseAnchorWatch(data: AnchorWatchServerState | undefined): Anch
       : null,
     planningTideHeightFt: on && typeof serverState.planning_tide_height_ft === 'number' && serverState.planning_tide_height_ft >= 0
       ? serverState.planning_tide_height_ft
+      : null,
+    datumDepthM: on && typeof serverState.datum_depth_m === 'number' ? serverState.datum_depth_m : null,
+    datumDepthReason: on && typeof serverState.datum_depth_reason === 'string' ? serverState.datum_depth_reason : '',
+    planningDepthSource: on && (serverState.planning_depth_source === 'sounder' || serverState.planning_depth_source === 'operator')
+      ? serverState.planning_depth_source
       : null,
     // Not gated on active, unlike every field above: a successful auto-raise
     // is exactly what flips active to false, so gating this the same way

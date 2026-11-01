@@ -1,5 +1,6 @@
 import { lazy, memo, useCallback, useMemo, type ComponentProps } from 'react'
 
+import { AnchorSaveDepth } from '@/components/anchor-save-depth'
 import { FORECAST_REFRESH_SECONDS, TRAIL_POLL_MS } from '@/config/app-config'
 import { useAlarmRules } from '@/hooks/use-alarm-rules'
 import { useAssistantStatus } from '@/hooks/use-assistant-status'
@@ -105,7 +106,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
   | 'currentDriftKts' | 'currentSetDeg' | 'currentDriftImpactKts' | 'distanceMeters' | 'bearingDeg' | 'anchorState'
   | 'canDrop' | 'windSpeedApparentKts' | 'maxGustKts' | 'vesselLengthOverallM' | 'vesselDraftM'
   | 'anchorLat' | 'anchorLon' | 'radiusMeters' | 'bowOffsetM' | 'bowOffsetApplied' | 'bowOffsetReason' | 'headingAtSetDeg'
-  | 'placeName' | 'anchorSetAt' | 'anchorStateKnown' | 'error' | 'onRadiusChange' | 'adjustAnchor' | 'onClearAnchor'
+  | 'placeName' | 'saveDepth' | 'anchorSetAt' | 'anchorStateKnown' | 'error' | 'onRadiusChange' | 'adjustAnchor' | 'onClearAnchor'
   | 'rodeDeployedM' | 'seaState' | 'seabedType' | 'onUpdateRodeAndConditions'
   | 'vesselTrail' | 'aisTrails' | 'placemarks' | 'onPlacemarkCreate' | 'onPlacemarkRemove'
   | 'aisVessels' | 'radarTargets' | 'radars' | 'radarSource' | 'tide' | 'onDropAnchor'>) {
@@ -144,6 +145,7 @@ export const LiveAnchorWatchDrawer = memo(function LiveAnchorWatchDrawer(props: 
       bowOffsetReason={watch.bowOffsetReason}
       headingAtSetDeg={watch.headingAtSetDeg}
       placeName={watch.placeName}
+      saveDepth={<AnchorSaveDepth watch={watch} />}
       anchorSetAt={watch.setAt}
       anchorStateKnown={watch.loaded}
       error={watch.error}
