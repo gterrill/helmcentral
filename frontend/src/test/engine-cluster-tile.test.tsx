@@ -1,5 +1,5 @@
-import { render, screen, within } from '@testing-library/react'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { act, render, screen, within } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { EngineClusterTile } from '@/components/engine-cluster-tile'
 import { FUEL_BAR_W } from '@/lib/engine-cluster-layout'
@@ -774,5 +774,62 @@ describe('engine off (ADR 0163)', () => {
     renderCluster(full, values, { engine: { id: 'starboard', state: 'off', lastUpdate: since } })
     expect(screen.queryByTestId('tile-off-badge')).not.toBeInTheDocument()
     expect(screen.getByTestId('cluster-centre-value')).toHaveTextContent('700')
+  })
+})
+
+describe('strip layout', () => {
+  let observers: Array<(entries: unknown[]) => void> = []
+  beforeEach(() => {
+    observers = []
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(cb: (entries: unknown[]) => void) { observers.push(cb) }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  const resize = (w: number, h: number) =>
+    act(() => { observers.forEach((cb) => cb([{ contentRect: { width: w, height: h } }])) })
+  const canvas = (c: HTMLElement) => c.querySelector('[data-cluster-canvas]') as HTMLElement
+  const stbd: ResolvedClusterConfig = { ...full, side: 'stbd', title: 'Starboard', fuel: { ...fuel, side: 'right' } }
+
+  test('a squarish box keeps the footer under the dial', () => {
+    const { container } = renderCluster()
+    resize(560, 440)
+    expect(canvas(container)).toHaveAttribute('data-layout', 'stacked')
+    expect(screen.getByTestId('cluster-footer').style.top).toBe('536px')
+  })
+
+  test('a short wide box moves the footer beside the readouts, one card per row', () => {
+    const { container } = renderCluster()
+    resize(743, 310)
+    expect(canvas(container)).toHaveAttribute('data-layout', 'strip')
+    const tops = ['cluster-battery', 'cluster-alternator', 'cluster-trans', 'cluster-egt']
+      .map((id) => parseFloat((screen.getByTestId(id).closest('[data-footer-cell]') as HTMLElement).style.top))
+    expect(tops).toEqual([119, 221, 323, 425])
+    // Port: the footer column is to the right of the readout column.
+    const readoutLeft = parseFloat((screen.getByTestId('cluster-corner-0').parentElement as HTMLElement).style.left)
+    const footerLeft = parseFloat((screen.getByTestId('cluster-battery').closest('[data-footer-cell]') as HTMLElement).style.left)
+    expect(footerLeft).toBeGreaterThan(readoutLeft)
+  })
+
+  test('starboard puts the footer column on the far left', () => {
+    renderCluster(stbd)
+    resize(743, 310)
+    const readoutLeft = parseFloat((screen.getByTestId('cluster-corner-0').parentElement as HTMLElement).style.left)
+    const footerLeft = parseFloat((screen.getByTestId('cluster-battery').closest('[data-footer-cell]') as HTMLElement).style.left)
+    expect(footerLeft).toBeLessThan(readoutLeft)
+  })
+
+  test('a wider box draws a wider canvas at the same scale', () => {
+    const { container } = renderCluster()
+    resize(780, 310)
+    const narrow = parseFloat(canvas(container).style.width)
+    const scale = canvas(container).style.transform.match(/scale\(([\d.]+)\)/)?.[1]
+    resize(902, 310)
+    expect(parseFloat(canvas(container).style.width)).toBeGreaterThan(narrow)
+    expect(canvas(container).style.transform.match(/scale\(([\d.]+)\)/)?.[1]).toBe(scale)
   })
 })

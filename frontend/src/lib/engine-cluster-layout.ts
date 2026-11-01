@@ -16,11 +16,12 @@ import type { ClusterSide } from '@/lib/dashboard-widgets'
  */
 
 export const CLUSTER_W = 800
+/** The stacked card's side margin; the strip's is STRIP_MARGIN. */
+export const STACKED_MARGIN = 40
 // The card ends 12px under the footer: the design's frame padded 20px past it, which the tile's own border now does.
 export const CLUSTER_H = 540
 /** The inner space starts this far above the visible card. */
 export const CLUSTER_INNER_TOP = -108
-export const CLUSTER_INNER_H = CLUSTER_H - CLUSTER_INNER_TOP
 
 export const DIAL_CX = 400
 export const DIAL_CY = 320
@@ -28,7 +29,7 @@ export const DIAL_CY = 320
 const CARD_CUT_R = 204
 
 const CARD_X0 = 430
-const CARD_X1 = 760
+const CARD_X1 = CLUSTER_W - STACKED_MARGIN
 export const CARD_TOPS = [119, 221, 323, 425] as const
 export const CARD_H = 96
 
@@ -52,9 +53,9 @@ const RAD = Math.PI / 180
 /** How far a bar's square end drops below its centre line at the foot (and rises at the head). */
 const FUEL_BAR_EDGE = (FUEL_BAR_W / 2) * Math.sin(FUEL_SPAN * RAD)
 
-/** x on the starboard side is the port x reflected about the centre line. */
-export function mirrorX(side: ClusterSide): (x: number) => number {
-  return side === 'stbd' ? (x) => CLUSTER_W - x : (x) => x
+/** x on the starboard side is the port x reflected about the centre line of a canvas `width` wide. */
+export function mirrorX(side: ClusterSide, width = CLUSTER_W): (x: number) => number {
+  return side === 'stbd' ? (x) => width - x : (x) => x
 }
 
 const n1 = (v: number) => v.toFixed(1)
@@ -65,12 +66,12 @@ const n1 = (v: number) => v.toFixed(1)
  * one. `maxL` is how far the concave edge reaches into the card, which is where
  * its text has to start.
  */
-export function cardPath(x0: number, y0: number, x1: number, y1: number, tf: (x: number) => number) {
+export function cardPath(x0: number, y0: number, x1: number, y1: number, tf: (x: number) => number, cx = DIAL_CX) {
   const rr = 22
   const P = (x: number, y: number) => `${n1(tf(x))} ${n1(y)}`
   const L = (y: number) => {
     const dy = y - DIAL_CY
-    return Math.abs(dy) < CARD_CUT_R ? Math.max(x0, DIAL_CX + Math.sqrt(CARD_CUT_R * CARD_CUT_R - dy * dy)) : x0
+    return Math.abs(dy) < CARD_CUT_R ? Math.max(x0, cx + Math.sqrt(CARD_CUT_R * CARD_CUT_R - dy * dy)) : x0
   }
   const tl = L(y0) === x0
   const bl = L(y1) === x0
@@ -99,11 +100,64 @@ export interface ReadoutBox {
   innerEdge: number
 }
 
-/** The four readout cards, the shared bullet width, and the fuel card's outline. */
-export function clusterLayout(side: ClusterSide) {
-  const m = mirrorX(side)
-  const cards = CARD_TOPS.map((top) => cardPath(CARD_X0, top, CARD_X1, top + CARD_H, m))
-  const textRight = CARD_X1 - 16
+export type ClusterLayoutKind = 'stacked' | 'strip'
+
+/**
+ * The strip: the footer's four readings become a column of cards beside the
+ * readout column, on the side away from the dial, for a tile that is short and
+ * wide. With no footer row the canvas is only as tall as the dial block, with
+ * the stacked card's 11px margin above the first readout card and below the
+ * last. The side margins shrink from 40 to 12, so the whole dial block moves
+ * out by the difference.
+ */
+export const STRIP_MARGIN = 12
+export const STRIP_H = (CARD_TOPS[3] + CARD_H + CLUSTER_INNER_TOP) + (CARD_TOPS[0] + CLUSTER_INNER_TOP)
+/** Where the dial sits in port space: the outer margin moves from 40 to 12, and the dial and fan move with it. */
+const STRIP_SHIFT = STRIP_MARGIN - STACKED_MARGIN
+const STRIP_DIAL_CX = DIAL_CX + STRIP_SHIFT
+const READOUT_W = CARD_X1 - CARD_X0
+const STRIP_GAP = 14
+const STRIP_FOOTER_W = 260
+/** The footer cards' side padding (the `px-3` on their frame), which their bullets sit inside. */
+const FOOTER_PAD = 12
+/** The narrowest the strip is drawn: fan and dial, readout column, footer column, between two 12px margins. */
+const STRIP_W = (CARD_X0 - DIAL_CX) + STRIP_DIAL_CX + READOUT_W + STRIP_GAP + STRIP_FOOTER_W + STRIP_MARGIN
+
+/** Each layout's narrowest width and its height. A wider canvas gives the extra to the cards that can use it. */
+export const CLUSTER_SIZES: Record<ClusterLayoutKind, { width: number; height: number }> = {
+  stacked: { width: CLUSTER_W, height: CLUSTER_H },
+  strip: { width: STRIP_W, height: STRIP_H },
+}
+
+interface FooterBox {
+  left: number
+  width: number
+  top: number
+  height: number
+}
+
+/**
+ * The four readout cards, the shared bullet width, and the fuel card's outline,
+ * for the given layout drawn `width` wide (never less than its base width).
+ *
+ * The dial, the fuel fan and the gap arcs are a rigid block drawn from the
+ * stacked layout's coordinates; `shift` is how far the tile moves that block
+ * to put it on its outer margin. Only the readout column, and the strip's
+ * footer column, change size with `width`: they are the cards that can use more
+ * room without anything having to be redrawn.
+ */
+export function clusterLayout(side: ClusterSide, kind: ClusterLayoutKind = 'stacked', width = CLUSTER_SIZES[kind].width) {
+  const strip = kind === 'strip'
+  const base = CLUSTER_SIZES[kind].width
+  const w = Math.max(width, base)
+  const m = mirrorX(side, w)
+  const cx = strip ? STRIP_DIAL_CX : DIAL_CX
+  const x0 = cx + (CARD_X0 - DIAL_CX)
+  // The extra width over the base is split evenly between the two columns in the strip.
+  const extra = w - base
+  const x1 = strip ? x0 + READOUT_W + extra / 2 : w - STACKED_MARGIN
+  const cards = CARD_TOPS.map((top) => cardPath(x0, top, x1, top + CARD_H, m, cx))
+  const textRight = x1 - 16
   // One width for every bullet, so their scales line up down the column.
   const bulletWidth = Math.min(...cards.map((c) => textRight - (c.maxL + 18)))
 
@@ -119,14 +173,32 @@ export function clusterLayout(side: ClusterSide) {
     }
   })
 
-  // The fuel card is the readout column's reflection about the centre line,
-  // so on the port side it sits left and on the starboard side right.
+  const footerLeft = x1 + STRIP_GAP
+  const footerW = w - STRIP_MARGIN - footerLeft
+  const footer: FooterBox[] = strip
+    ? CARD_TOPS.map((top) => ({ left: Math.min(m(footerLeft), m(footerLeft + footerW)), width: footerW, top, height: CARD_H }))
+    : []
+
+  // The fuel card is the readout column's reflection about the centre line, so
+  // on the port side it sits left and on the starboard side right. It is part
+  // of the rigid block, so it is drawn in the stacked 800-wide space.
+  const stackedMirror = mirrorX(side)
   const fuelCard = cardPath(
-    2 * DIAL_CX - 370, CARD_TOPS[0], 2 * DIAL_CX - 40, CARD_TOPS[3] + CARD_H,
-    (x) => m(2 * DIAL_CX - x),
+    2 * DIAL_CX - 370, CARD_TOPS[0], 2 * DIAL_CX - STACKED_MARGIN, CARD_TOPS[3] + CARD_H,
+    (x) => stackedMirror(2 * DIAL_CX - x),
   ).d
 
-  return { readouts, bulletWidth, fuelCard }
+  // Port: the block's outer edge is on the left margin. Starboard: it is the
+  // stacked mirror about 800, moved so its outer edge is on the right margin.
+  const margin = strip ? STRIP_SHIFT : 0
+  const shift = side === 'stbd' ? w - CLUSTER_W - margin : margin
+  // The strip's footer bullets fill their card. The stacked footer row's match
+  // the readouts' at the unstretched width: trans and EGT are sized from them,
+  // and if they grew with the readouts they would take twice the extra width
+  // the row has and squeeze the alternator, which should take it instead.
+  const footerBulletWidth = strip ? footerW - 2 * FOOTER_PAD : bulletWidth - extra
+
+  return { readouts, bulletWidth, fuelCard, footer, footerBulletWidth, shift }
 }
 
 /** Point on the fuel fan at radius `r` and fraction `t` (0 = foot, 1 = full). */

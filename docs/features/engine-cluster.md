@@ -32,6 +32,19 @@ Here's what each part of the tile tells you:
   you have connected the battery management system, a dashed line on the trace
   marks its charge limit.
 
+## Short, wide tiles
+
+The tile picks whichever arrangement draws larger in the space it has. On a
+squarer tile, such as one on the dashboard, the four footer readings sit in a
+row under the dial. On a short, wide tile, such as one on a wall display, the
+footer moves into a column of four cards beside the readout cards, one card
+beside each readout. That column is on the side away from the dial, so the
+whole card is shorter and the dial can be larger.
+
+The card always fits inside its tile. If the tile is wider than the card needs,
+the dial and the fuel arcs keep their size. The readout cards, and the footer
+cards in the column, stretch to fill the extra width.
+
 ## Port and starboard
 
 Choose **Port** or **Starboard** for each tile. A starboard tile is a mirror

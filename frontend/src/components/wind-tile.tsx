@@ -128,7 +128,7 @@ function WindGaugeCluster({
   ringRotationDeg, bowRotationDeg, arrowAngleDeg, windSide, windAngleRelativeDeg, windSpeedKts, windKind,
 }: WindGaugeClusterProps) {
   return (
-    <FitCanvas designWidth={cfg.width} designHeight={cfg.height} className={visibilityClassName}>
+    <FitCanvas designs={[{ key: 'wind', width: cfg.width, height: cfg.height }]} className={visibilityClassName}>
         <div className="grid h-full w-full grid-cols-2 grid-rows-2">
           <div className="self-start justify-self-start">
             <WindMetricCard

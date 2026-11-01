@@ -353,7 +353,7 @@ function FooterFrame({ icon, label, extra, flex, children, tone = 'neutral', tes
 }) {
   return (
     <div data-testid={testId} data-tone={tone}
-      className="flex h-[100px] min-w-0 flex-col gap-1 rounded-[22px] px-3 pt-2.5"
+      className="flex h-full min-w-0 flex-col gap-1 rounded-[22px] px-3 pt-2.5"
       style={{ ...cardStyle(tone), flex }}>
       <div className="flex h-4 items-center gap-2">
         <span className="shrink-0 text-primary">{icon}</span>
@@ -380,13 +380,21 @@ function HeaderTemp({ slot, values, ages }: { slot: GaugeWidgetConfig | undefine
 }
 
 /** Starter battery voltage in a battery silhouette; filled only in a warn or alarm zone. */
-export function BatteryCard({ slot, values, ages }: { slot: GaugeWidgetConfig | undefined; values: Values; ages: Ages }) {
+export function BatteryCard({ slot, values, ages, boxed = false }: {
+  slot: GaugeWidgetConfig | undefined
+  values: Values
+  ages: Ages
+  /** In a card of its own, like the other footer readings, for the strip's footer column. In the footer row it is a bare silhouette. */
+  boxed?: boolean
+}) {
   const model = slot ? bulletFor(slot, values, ages) : null
   const tone = model?.tone ?? 'neutral'
   const edge = tone === 'neutral' ? 'hsl(var(--muted-foreground))' : toneStroke(tone)
   const filled = tone === 'warn' || tone === 'alarm'
   return (
-    <div data-testid="cluster-battery" data-tone={tone} className="flex h-[100px] shrink-0 items-center px-1">
+    <div data-testid="cluster-battery" data-tone={tone}
+      className={boxed ? 'flex h-full items-center justify-center rounded-[22px]' : 'flex h-full shrink-0 items-center px-1'}
+      style={boxed ? cardStyle(tone) : undefined}>
       <div className="flex w-[136px] flex-col">
         <div className="flex h-2 justify-between px-[18px]">
           <div className="h-2 w-[18px] rounded-t-xs" style={{ background: edge }} />
@@ -521,8 +529,7 @@ export function ReadingCard({ testId, label, icon, slot, flex, values, ages, bul
 }) {
   const model = slot ? bulletFor(slot, values, ages) : null
   return (
-    <FooterFrame testId={testId} tone={model?.tone ?? 'neutral'} flex={flex} icon={icon} label={label}
-      >
+    <FooterFrame testId={testId} tone={model?.tone ?? 'neutral'} flex={flex} icon={icon} label={label}>
       <div className="flex h-[30px] items-baseline justify-end gap-1.5">
         <span data-reading="" className={`font-display text-3xl font-semibold leading-none tabular-nums ${toneText(model?.tone ?? 'neutral')}`}>
           {model?.text ?? '--'}
