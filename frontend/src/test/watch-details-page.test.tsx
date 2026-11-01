@@ -6,8 +6,11 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 
 import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 import { WatchDetailsPage, type WatchDetailsPageProps } from '@/components/watches/watch-details-page'
+import { AppRouterContext } from '@/hooks/use-app-location'
 import { invalidateWatches } from '@/hooks/use-watches'
+import { takeAnchorScroll } from '@/lib/anchor-scroll'
 import { resetQueryStore } from '@/lib/api-query'
+import { createAppRouter, memoryHistory } from '@/lib/app-router'
 import { WATCH_TEMPLATES, type WatchDetail, type WatchRecord, type WatchRun, type WatchSchedulePreview } from '@/lib/watches'
 
 function record(overrides: Partial<WatchRecord> = {}): WatchRecord {
@@ -453,42 +456,105 @@ describe('WatchDetailsPage changed elsewhere', () => {
 })
 
 describe('WatchDetailsPage notifications', () => {
-  it('offers the channels alarms use, never SignalK, and says which are off in Settings', async () => {
+  it('offers a checkbox only for the channels switched on, never SignalK, and lists the rest in one line', async () => {
     renderPage()
-    const group = await screen.findByRole('group', { name: 'Send reports to' })
-    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'Email' })).toHaveAttribute('aria-disabled', 'true'))
+    const group = await screen.findByRole('group', { name: 'Send to' })
+    await waitFor(() => expect(within(group).queryByRole('checkbox', { name: 'Email' })).not.toBeInTheDocument())
     expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked()
     expect(within(group).getByRole('checkbox', { name: 'Phone and browser push' })).not.toBeChecked()
-    expect(within(group).getByRole('checkbox', { name: 'Phone and browser push' })).not.toHaveAttribute('aria-disabled', 'true')
+    expect(within(group).queryByRole('checkbox', { name: 'Webhook' })).not.toBeInTheDocument()
     expect(within(group).queryByRole('checkbox', { name: /signalk/i })).not.toBeInTheDocument()
-    expect(within(group).getAllByText(/Turn it on in Settings under Alarms/)).toHaveLength(2)
+    expect(within(group).getByText(/Email and Webhook are not set up for this boat\./)).toBeInTheDocument()
+    const link = within(group).getByRole('link', { name: 'Alarm settings' })
+    expect(link).toHaveAttribute('href', '/settings/alarms#notifications')
+  })
+
+  it('moves to the alarm settings in the app, without a page load, and asks for the section to be scrolled to', async () => {
+    const router = createAppRouter(memoryHistory('/watches/w1'))
+    const navigate = vi.spyOn(router, 'navigate')
+    render(
+      <AppRouterContext.Provider value={router}>
+        <WatchDetailsPage mode={{ kind: 'existing', id: 'w1' }} canWrite onOpenIndex={vi.fn()} onCreated={vi.fn()} onDeleted={vi.fn()} onAskMate={vi.fn()} />
+      </AppRouterContext.Provider>,
+    )
+    fireEvent.click(await screen.findByRole('link', { name: 'Alarm settings' }))
+    expect(navigate).toHaveBeenCalledWith({ panel: 'settings', route: { view: 'section', section: 'alarms' } })
+    expect(takeAnchorScroll('notifications')).toBe(true)
+  })
+
+  it('names a single channel that is not set up in the singular', async () => {
+    channels = { offered: ['ntfy', 'smtp', 'webhook', 'webpush'], enabled: ['ntfy', 'smtp', 'webpush'] }
+    renderPage()
+    expect(await screen.findByText(/Webhook is not set up for this boat\./)).toBeInTheDocument()
+    expect(screen.getByText(/Set it up in/)).toBeInTheDocument()
+  })
+
+  it('keeps a selected channel that is off, checked, with a warning and a way to turn it on, and lets it go', async () => {
+    detail = { ...detail, watch: record({ notify: ['ntfy', 'smtp'] }) }
+    renderPage()
+    const group = await screen.findByRole('group', { name: 'Send to' })
+    const email = await within(group).findByRole('checkbox', { name: 'Email' })
+    expect(email).toBeChecked()
+    expect(within(group).getByText(/Off for the boat, so nothing goes here\./)).toBeInTheDocument()
+    expect(within(group).getByRole('link', { name: 'Turn it on' })).toHaveAttribute('href', '/settings/alarms#notifications')
+    fireEvent.click(email)
+    await waitFor(() => expect(within(group).queryByRole('checkbox', { name: 'Email' })).not.toBeInTheDocument())
+    expect(within(group).getByText(/Email and Webhook are not set up for this boat\./)).toBeInTheDocument()
+  })
+
+  it('says reports stay on the page when no channel is on', async () => {
+    channels = { offered: ['ntfy', 'smtp', 'webhook', 'webpush'], enabled: [] }
+    detail = { ...detail, watch: record({ notify: [] }) }
+    renderPage()
+    const group = await screen.findByRole('group', { name: 'Send to' })
+    expect(await within(group).findByText(/Nowhere yet\./)).toBeInTheDocument()
+    expect(within(group).queryByRole('checkbox')).not.toBeInTheDocument()
+    expect(within(group).getByRole('link', { name: 'Set up in Alarm settings' })).toHaveAttribute('href', '/settings/alarms#notifications')
+  })
+
+  it('shows every channel as a plain checkbox and an alert when Settings could not be read', async () => {
+    const real = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith('/api/watches/channels')) return { ok: false, status: 500, json: async () => ({ error: 'boom' }) }
+      return (real as typeof fetch)(url, init)
+    }))
+    renderPage()
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent(/Could not read which channels are on: .*The choices below are saved, but may not be sent\./)
+    const group = screen.getByRole('group', { name: 'Send to' })
+    expect(within(group).getAllByRole('checkbox')).toHaveLength(4)
+    expect(within(group).queryByText(/not set up/)).not.toBeInTheDocument()
+  })
+
+  it('chooses when to send with a radio group that always shows what each choice means', async () => {
+    renderPage()
+    const group = await screen.findByRole('radiogroup', { name: 'When to send' })
+    expect(within(group).getByRole('radio', { name: /When it finds something/ })).toBeChecked()
+    expect(within(group).getByText(/A problem that stays is not sent again every hour\./)).toBeInTheDocument()
+    expect(within(group).getByText('Including the ones that find nothing.')).toBeInTheDocument()
+    fireEvent.click(within(group).getByRole('radio', { name: /Every report/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(), { timeout: 3000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(sent('PATCH')[0].body).toMatchObject({ send: 'every' }))
   })
 
   it('learns which channels are on from the watches route, which a read-write user can open, and never from the alarm settings', async () => {
     renderPage()
-    await screen.findByRole('group', { name: 'Send reports to' })
+    await screen.findByRole('group', { name: 'Send to' })
     await waitFor(() => expect(calls.some((c) => c.url.endsWith('/api/watches/channels'))).toBe(true))
     expect(calls.some((c) => c.url.includes('/api/alarm-transports'))).toBe(false)
   })
 
   it('saves the channels and when to send with the rest of the watch', async () => {
     renderPage()
-    const group = await screen.findByRole('group', { name: 'Send reports to' })
-    await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'Email' })).toHaveAttribute('aria-disabled', 'true'))
+    const group = await screen.findByRole('group', { name: 'Send to' })
+    await waitFor(() => expect(within(group).queryByRole('checkbox', { name: 'Email' })).not.toBeInTheDocument())
     fireEvent.click(within(group).getByRole('checkbox', { name: 'Phone and browser push' }))
     fireEvent.click(within(group).getByRole('checkbox', { name: 'ntfy' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(), { timeout: 3000 })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(sent('PATCH')).toHaveLength(1))
     expect(sent('PATCH')[0].body).toMatchObject({ notify: ['webpush'], send: 'findings' })
-  })
-
-  it('keeps a channel that is off in Settings selected and explains that nothing goes there yet', async () => {
-    detail = { ...detail, watch: record({ notify: ['smtp'] }) }
-    renderPage()
-    const group = await screen.findByRole('group', { name: 'Send reports to' })
-    await waitFor(() => expect(within(group).getByText(/Off in Settings, so nothing is sent here yet/)).toBeInTheDocument())
-    expect(within(group).getByRole('checkbox', { name: 'Email' })).toBeChecked()
   })
 
   it('shows who a run was sent to, what is still being retried, and why one was not sent', async () => {
@@ -513,15 +579,15 @@ describe('a new watch', () => {
 
   it('shows the channels that are switched on and sends only for findings', async () => {
     renderPage({ mode: newMode })
-    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    const group = await screen.findByRole('group', { name: 'Send to' })
     await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
     expect(within(group).getByRole('checkbox', { name: 'Phone and browser push' })).toBeChecked()
-    expect(within(group).getByRole('checkbox', { name: 'Email' })).not.toBeChecked()
+    expect(within(group).queryByRole('checkbox', { name: 'Email' })).not.toBeInTheDocument()
   })
 
   it('leaves the channels to the server unless the operator changed them', async () => {
     renderPage({ mode: newMode })
-    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    const group = await screen.findByRole('group', { name: 'Send to' })
     await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Dawn check' } })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled(), { timeout: 3000 })
@@ -534,7 +600,7 @@ describe('a new watch', () => {
 
   it('sends the channels once the operator has chosen them', async () => {
     renderPage({ mode: newMode })
-    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    const group = await screen.findByRole('group', { name: 'Send to' })
     await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
     fireEvent.click(within(group).getByRole('checkbox', { name: 'ntfy' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Dawn check' } })
@@ -550,7 +616,7 @@ describe('a new watch', () => {
     renderPage({ mode: newMode })
     fireEvent.change(await screen.findByLabelText('Name'), { target: { value: 'Dawn check' } })
     await act(async () => { release(); await Promise.resolve() })
-    const group = await screen.findByRole('group', { name: 'Send reports to' })
+    const group = await screen.findByRole('group', { name: 'Send to' })
     await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
     expect(screen.queryByText(/changed elsewhere/i)).not.toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toHaveValue('Dawn check')

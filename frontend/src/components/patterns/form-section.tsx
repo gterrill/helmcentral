@@ -19,11 +19,13 @@ export interface FormSectionProps {
   action?: ReactNode
   children: ReactNode
   className?: string
+  /** The anchor a link can scroll to. */
+  id?: string
 }
 
-export function FormSection({ title, description, action, children, className }: FormSectionProps) {
+export function FormSection({ title, description, action, children, className, id }: FormSectionProps) {
   return (
-    <Card className={className}>
+    <Card id={id} className={className}>
       <CardHeader>
         <CardTitle
           as="h2"

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { AlarmTransportsForm } from '@/components/alarm-transports-form'
 import { AlarmTransportsProvider, useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
+import { requestAnchorScroll } from '@/lib/anchor-scroll'
 import { resetQueryStore } from '@/lib/api-query'
 
 // The address for links: where Helmcentral is reached from off the boat, so a
@@ -58,5 +59,27 @@ describe('the address for links', () => {
     stub('https://boat.example')
     render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
     expect(await screen.findByLabelText('Address for links')).toHaveValue('https://boat.example')
+  })
+})
+
+describe('the notifications anchor', () => {
+  it('scrolls to the section once drawn when a link asked for it', async () => {
+    stub('')
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    requestAnchorScroll('notifications')
+    render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
+    await screen.findByLabelText('Address for links')
+    await waitFor(() => expect(scroll).toHaveBeenCalledTimes(1))
+    expect(scroll.mock.contexts[0]).toHaveAttribute('id', 'notifications')
+  })
+
+  it('does not scroll when nothing asked', async () => {
+    stub('')
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
+    await screen.findByLabelText('Address for links')
+    expect(scroll).not.toHaveBeenCalled()
   })
 })

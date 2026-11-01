@@ -1,9 +1,10 @@
-import { memo } from 'react'
+import { memo, useEffect } from 'react'
 
 import { FormSection } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { takeAnchorScroll } from '@/lib/anchor-scroll'
 import { WebPushSection } from '@/components/web-push-section'
 import { useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
 
@@ -29,9 +30,14 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
   const { draft, setSection, setLinkAddress, secrets, setSecret, secretsPresent, loading, error, test, testResults, testing } =
     useAlarmTransportsFormContext()
 
+  // Reached from a watch's "Alarm settings" link: scroll once the form is drawn.
+  useEffect(() => {
+    if (!loading && takeAnchorScroll('notifications')) document.getElementById('notifications')?.scrollIntoView({ block: 'start' })
+  }, [loading])
+
   if (loading) {
     return (
-      <FormSection title="Notifications">
+      <FormSection id="notifications" title="Notifications">
         <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Loading…</p>
       </FormSection>
     )
@@ -39,6 +45,7 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
 
   return (
     <FormSection
+      id="notifications"
       title="Notifications"
       action={
         <Button size="sm" variant="outline" onClick={() => void test()} disabled={testing}>

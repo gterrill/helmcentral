@@ -82,6 +82,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **A watch's Notifications section is easier to read.** Only the channels
+  that are on get a checkbox, and the ones that aren't are named in a line
+  underneath with a link to Alarm settings. A channel the watch still uses
+  but that has been turned off keeps its checkbox, with a warning and a link
+  to turn it on. When no channel is on, the section says reports stay on the
+  page. **Send** is now **When to send**, with both choices laid out and what
+  each one means shown under it.
+
 - **The engine card's fuel bars match the dial.** The two tank bars now draw
   in the same blue sweep as the RPM dial, so amber and red only show up when a
   tank has dropped past its warn or alarm level. The scale numbers, tick marks
