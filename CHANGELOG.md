@@ -11,6 +11,14 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **The engine card's fuel bars match the dial.** The two tank bars now draw
+  in the same blue sweep as the RPM dial, so amber and red only show up when a
+  tank has dropped past its warn or alarm level. The scale numbers, tick marks
+  and FWD and AFT labels are larger and match the dial. The bars are wider, and
+  the two labels sit on one line under them.
+
 ### Fixed
 
 - **The Instruments Silent card names a Victron device behind a GX.** A

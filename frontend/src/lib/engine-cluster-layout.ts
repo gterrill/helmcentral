@@ -35,8 +35,22 @@ export const CARD_H = 96
 export const FUEL_R_FWD = 256
 export const FUEL_R_AFT = 284
 const FUEL_SPAN = 24
+/** Stroke width of a tank bar and its track. The ticks and scale numbers sit inside the inner bar's edge (256 - 11) with a gap. */
+export const FUEL_BAR_W = 22
+/** Type sizes on the fan, here because the legend's reach and the captions' drop are worked out from them. */
+export const FUEL_LEGEND_SIZE = 14
+export const FUEL_FOOT_SIZE = 14
+/** The 0 / 50 / 100 numbers. FUEL_LABEL_R leaves room for them inside the ticks. */
+export const FUEL_SCALE_SIZE = 18
+/** Radii of the tick marks and the scale numbers' centre, measured in from the inner bar's edge. */
+const FUEL_TICK_OUT = FUEL_R_FWD - FUEL_BAR_W / 2 - 4
+const FUEL_TICK_MAJOR_IN = FUEL_TICK_OUT - 11
+const FUEL_TICK_MINOR_IN = FUEL_TICK_OUT - 6
+const FUEL_LABEL_R = FUEL_TICK_MAJOR_IN - FUEL_SCALE_SIZE - 2
 
 const RAD = Math.PI / 180
+/** How far a bar's square end drops below its centre line at the foot (and rises at the head). */
+const FUEL_BAR_EDGE = (FUEL_BAR_W / 2) * Math.sin(FUEL_SPAN * RAD)
 
 /** x on the starboard side is the port x reflected about the centre line. */
 export function mirrorX(side: ClusterSide): (x: number) => number {
@@ -133,6 +147,14 @@ export function fuelArc(side: ClusterSide, r: number, f: number): string {
   return d
 }
 
+/** The y of the foot and of the head of the bar at radius `r`, which is the run its colour sweep climbs. */
+export function fuelSweep(side: ClusterSide, r: number) {
+  return {
+    foot: fuelPoint(side, r, 0)[1] + FUEL_BAR_EDGE,
+    top: fuelPoint(side, r, 1)[1] - FUEL_BAR_EDGE,
+  }
+}
+
 /** The fan's tick marks, in two paths so majors can be heavier. */
 export function fuelTicks(side: ClusterSide) {
   let minor = ''
@@ -140,8 +162,8 @@ export function fuelTicks(side: ClusterSide) {
   for (let i = 0; i <= 10; i += 1) {
     const t = i / 10
     const isMajor = i % 5 === 0
-    const [ax, ay] = fuelPoint(side, isMajor ? 210 : 213, t)
-    const [bx, by] = fuelPoint(side, isMajor ? 228 : 223, t)
+    const [ax, ay] = fuelPoint(side, isMajor ? FUEL_TICK_MAJOR_IN : FUEL_TICK_MINOR_IN, t)
+    const [bx, by] = fuelPoint(side, FUEL_TICK_OUT, t)
     const seg = `M${n1(ax)} ${n1(ay)}L${n1(bx)} ${n1(by)}`
     if (isMajor) major += seg
     else minor += seg
@@ -152,7 +174,7 @@ export function fuelTicks(side: ClusterSide) {
 /** Where the 0 / 50 / 100 scale numbers sit. */
 export function fuelScaleLabels(side: ClusterSide) {
   return [0, 50, 100].map((p) => {
-    const [x, y] = fuelPoint(side, 240, p / 100)
+    const [x, y] = fuelPoint(side, FUEL_LABEL_R, p / 100)
     return { value: p, x, y }
   })
 }
@@ -160,7 +182,9 @@ export function fuelScaleLabels(side: ClusterSide) {
 /** Where a tank's percentage label rides: inside the bar's end when it fits, beyond it when not. */
 export function fuelLegendPoint(side: ClusterSide, r: number, fraction: number) {
   const length = r * 2 * FUEL_SPAN * RAD
-  const off = 22 / length
+  // The label's centre sits half its "100%" width (about 2.4 em of bold) plus a
+  // 3 px margin from the end of the fill, so it clears the end either way.
+  const off = (FUEL_LEGEND_SIZE * 1.2 + 3) / length
   const inside = fraction >= 2 * off
   const t = inside ? fraction - off : fraction + off
   const [x, y] = fuelPoint(side, r, t)
@@ -172,9 +196,16 @@ export function fuelLegendPoint(side: ClusterSide, r: number, fraction: number) 
 export function fuelFeet(side: ClusterSide) {
   const [fx, fy] = fuelPoint(side, FUEL_R_FWD, 0)
   const [ax, ay] = fuelPoint(side, FUEL_R_AFT, 0)
+  // One baseline for both, under whichever bar ends lower, so the pair reads as
+  // a row. The bar's square end drops a little below its centre line.
+  const y = Math.max(fy, ay) + FUEL_BAR_EDGE + FUEL_FOOT_SIZE
+  // The feet are only about 26 px apart, less than one caption is wide, so each
+  // caption runs away from its neighbour: the outer bar's outward, the inner's inward.
+  const outward: 'start' | 'end' = side === 'stbd' ? 'start' : 'end'
+  const inward: 'start' | 'end' = side === 'stbd' ? 'end' : 'start'
   return [
-    { label: 'FWD', x: fx, y: fy + 16 },
-    { label: 'AFT', x: ax, y: ay + 16 },
+    { label: 'FWD', x: fx, y, anchor: inward },
+    { label: 'AFT', x: ax, y, anchor: outward },
   ]
 }
 

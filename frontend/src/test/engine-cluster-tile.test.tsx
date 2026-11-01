@@ -2,6 +2,7 @@ import { render, screen, within } from '@testing-library/react'
 import { beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { EngineClusterTile } from '@/components/engine-cluster-tile'
+import { FUEL_BAR_W } from '@/lib/engine-cluster-layout'
 import type { ResolvedClusterConfig, GaugeWidgetConfig } from '@/lib/dashboard-widgets'
 import { setViewportWidth } from './viewport'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
@@ -409,6 +410,52 @@ describe('fuel fan', () => {
   })
 })
 
+describe('fuel fan colour', () => {
+  const levelled = {
+    ...full,
+    fuel: {
+      ...fuel,
+      bars: fuel.bars.map((b) => ({
+        ...b,
+        level: { ...b.level, zones: [
+          { from: 0, to: 10, state: 'alarm' as const },
+          { from: 10, to: 20, state: 'warn' as const },
+          { from: 20, to: 100, state: 'normal' as const },
+        ] },
+      })),
+    },
+  }
+  const fill = (container: HTMLElement, i: number) =>
+    container.querySelectorAll(`[data-fuel-bar="${i}"] path`)[1] as SVGPathElement
+
+  test('a healthy tank draws in the dial gradient', () => {
+    const { container } = renderCluster(levelled)
+    const stroke = fill(container, 0).style.stroke
+    expect(stroke).toMatch(/^url\(#.+\)$/)
+    const id = stroke.slice(5, -1)
+    expect(container.querySelector(`linearGradient[id="${id}"]`)).not.toBeNull()
+  })
+
+  test('each tank climbs a gradient run to its own head, so two full tanks end equally bright', () => {
+    const { container } = renderCluster(levelled)
+    const gradientOf = (i: number) => container.querySelector(`linearGradient[id="${fill(container, i).style.stroke.slice(5, -1)}"]`)!
+    expect(gradientOf(0)).not.toBe(gradientOf(1))
+    expect(gradientOf(0).getAttribute('y2')).not.toBe(gradientOf(1).getAttribute('y2'))
+  })
+
+  test('a tank in its warn band draws in the zone colour, not the gradient', () => {
+    const { container } = renderCluster(levelled, { ...values, 'tanks.fuel.2.currentLevel': 0.15 })
+    expect(container.querySelector('[data-fuel-bar="0"]')).toHaveAttribute('data-tone', 'warn')
+    expect(fill(container, 0).style.stroke).not.toContain('url(')
+  })
+
+  test('a tank in its alarm band draws in the zone colour, not the gradient', () => {
+    const { container } = renderCluster(levelled, { ...values, 'tanks.fuel.2.currentLevel': 0.05 })
+    expect(container.querySelector('[data-fuel-bar="0"]')).toHaveAttribute('data-tone', 'alarm')
+    expect(fill(container, 0).style.stroke).not.toContain('url(')
+  })
+})
+
 describe('fuel fan staleness', () => {
   const railed = { ...full, fuel }
 
@@ -416,7 +463,7 @@ describe('fuel fan staleness', () => {
     const { container } = renderCluster(railed, values, { ages: { 'tanks.fuel.4.currentLevel': 300 } })
     expect(container.querySelector('[data-fuel-bar="1"]')).toHaveAttribute('data-bar-state', 'absent')
     expect(container.querySelector('[data-fuel-legend="1"]')).toBeNull()
-    expect(container.querySelector('[data-fuel-bar="1"] path[stroke-width="18"]:not([stroke-dasharray])')).toBeNull()
+    expect(container.querySelector(`[data-fuel-bar="1"] path[stroke-width="${FUEL_BAR_W}"]:not([stroke-dasharray])`)).toBeNull()
     expect(screen.getByTestId('fuel-total')).toHaveTextContent('--')
   })
 
