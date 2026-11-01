@@ -14,7 +14,15 @@ Commit And Release, Fallback Policy and Test-First Policy.
 checkout, and `git status` must hold only your changes. Run `git fetch
 origin` and rebase onto `origin/main`; local `main` often lags.
 
-**Done:** all three true. If the first two are not, stop and ask.
+`/code-review` and `/security-review` review the session's own directory,
+whatever a `cd` says. When a subagent built the change and this session
+still sits in the main checkout, switch the session in first: `EnterWorktree`
+with the worktree's path. If it refuses (a session already in another
+worktree, or a subagent, whose switch never moves its parent), review
+`git diff origin/main...HEAD` inside the worktree by hand for steps 5 and 7.
+
+**Done:** all three true, and the session's directory is the worktree. If
+the first two are not, stop and ask.
 
 ## 2. Release notes and docs
 
@@ -49,9 +57,12 @@ Run `/code-review medium` on the working tree. Then read the
 against them. Check each finding against the code. Fix the real ones
 test-first, then go back to step 4.
 
-**Done:** every finding is fixed or dismissed with a reason you can state,
-every touched standards section has been applied to the diff, and step 4 is
-green on the fixed tree.
+A real finding gets fixed in this PR, even when it sits in code the change
+only passes through. Dismiss a finding only when the code proves it wrong.
+
+**Done:** every finding is fixed or shown wrong against the code, every
+touched standards section has been applied to the diff, and step 4 is green
+on the fixed tree.
 
 ## 6. Commit and open the PR
 
@@ -65,27 +76,21 @@ footer.
 
 ## 7. Security review
 
-Run `/security-review`. It sees committed work only, so it runs after step
-6. Fix each confirmed finding test-first, then go back to step 4.
+Run `/security-review`. It diffs `origin/HEAD...` in the session's directory,
+so it sees committed work only and runs after step 6. Fix each confirmed
+finding test-first, then go back to step 4.
 
-**Done:** the report is clean, or every finding is fixed and pushed.
+**Done:** the report covers this branch's commits, and it has no findings or
+every finding is fixed and pushed. A report on an empty diff ran in the
+wrong directory: go back to step 1.
 
 ## 8. Watch until merged
 
 Report the PR URL and a one-paragraph summary to the operator. Then start a
-Monitor on this loop, which prints `state | mergeable | failed checks` only
-when that line changes:
-
-```bash
-prev=; while :; do
-  cur=$(gh pr view <N> --json state,mergeable,statusCheckRollup --jq '[.state, .mergeable,
-    ([.statusCheckRollup[] | select((.conclusion // .state) | IN("FAILURE","ERROR","CANCELLED","TIMED_OUT","STARTUP_FAILURE","ACTION_REQUIRED"))
-      | (.name // .context)] | join(", "))] | join(" | ")')
-  [ "$cur" != "$prev" ] && echo "$cur" && prev=$cur
-  case $cur in MERGED*|CLOSED*) exit 0;; esac
-  sleep 60
-done
-```
+Monitor on `sh scripts/watch-pr.sh <N>` with the longest timeout, re-armed
+on each expiry. It prints `state | mergeable | failed checks` when that line
+changes, and exits on merge or close. Each re-arm repeats the current line
+once; act only on a line that differs from the last.
 
 - A failed check: read its log with `gh run view --log-failed`, fix it,
   go back to step 4.

@@ -28,7 +28,9 @@ docs-lint:
 # A second checkout for a second concurrent session, so two sessions editing
 # at once cannot race in one working tree. `make worktree NAME=ux-tweaks`
 # creates ../helmcentral-ux-tweaks on a new branch of the same name, matching
-# the ../helmcentral-security layout already in use.
+# the ../helmcentral-security layout already in use. The branch starts from a
+# freshly fetched origin/main: local main lags, and a branch cut from it builds
+# on superseded code.
 #
 # frontend/node_modules is 453MB and is not tracked, so a fresh worktree would
 # need its own `npm ci` before vitest or tsc would run at all. It gets a
@@ -50,7 +52,8 @@ docs-lint:
 # the help pages.
 worktree:
 	@if [ -z "$(NAME)" ]; then echo "usage: make worktree NAME=<short-name>"; exit 1; fi
-	git worktree add -b "$(NAME)" "../$(notdir $(CURDIR))-$(NAME)"
+	git fetch origin
+	git worktree add --no-track -b "$(NAME)" "../$(notdir $(CURDIR))-$(NAME)" origin/main
 	ln -s "$(CURDIR)/frontend/node_modules" "../$(notdir $(CURDIR))-$(NAME)/frontend/node_modules"
 	@echo "worktree: ../$(notdir $(CURDIR))-$(NAME)  (branch $(NAME), node_modules symlinked)"
 
