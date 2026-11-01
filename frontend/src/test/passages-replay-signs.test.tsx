@@ -9,7 +9,9 @@ import { resetQueryStore } from '@/lib/api-query'
 import { exifJpeg } from './helpers/exif-jpeg'
 import { jsonResponse, stubApi, type StubRequest } from './helpers/stub-api'
 
-let flyGate: Promise<void> | null = null
+// Set to give the map a framing, so Play opens with the zoom-in; it runs long enough to look at.
+let framing: { overview: { center: [number, number]; zoom: number; pitch: number; bearing: number }; bearing: number } | null = null
+vi.mock('@/lib/replay-intro', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/replay-intro')>()), INTRO_MS: 600_000 }))
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => null }))
 vi.mock('react-map-gl/maplibre', () => ({
   Marker: ({ children, longitude, latitude }: { children: ReactNode; longitude: number; latitude: number }) => (
@@ -20,7 +22,7 @@ vi.mock('react-map-gl/maplibre', () => ({
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
   PassageMap: forwardRef(function PassageMapMock(p: { markers?: ReactNode }, ref) {
-    useImperativeHandle(ref, () => ({ flyIn: () => flyGate ?? Promise.resolve(), getView: () => ({ zoom: 13, pitch: 40, bearing: 0 }) }))
+    useImperativeHandle(ref, () => ({ getFraming: () => framing, jumpTo: () => {}, getView: () => ({ zoom: 13, pitch: 40, bearing: 0 }) }))
     return <div data-testid="map">{p.markers}</div>
   }),
   InsetMap: () => <div />,
@@ -731,8 +733,7 @@ describe('ReplayPanel signs: moving a sign', () => {
 
   it('the move controls are off while the fly-in runs', async () => {
     signs = [sign('s1', 250, { document_id: 'doc1', photo_url: '/api/documents/doc1/content' })]
-    let release: () => void = () => {}
-    flyGate = new Promise<void>((r) => { release = r })
+    framing = { overview: { center: [149.5, 0], zoom: 9, pitch: 0, bearing: 0 }, bearing: 0 }
     try {
       render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
       fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
@@ -743,8 +744,7 @@ describe('ReplayPanel signs: moving a sign', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Photo' }))
       expect(await screen.findByRole('menuitem', { name: 'Back to photo time' })).toHaveAttribute('aria-disabled', 'true')
     } finally {
-      release()
-      flyGate = null
+      framing = null
     }
   })
 

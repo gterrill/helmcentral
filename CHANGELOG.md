@@ -77,6 +77,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **Grabbing the map during a replay's opening move stops it where you let
+  go.** Dragging the map while the replay was still flying down onto the track
+  could throw the view somewhere unrelated, such as the far side of the world.
+  The opening move now stops when you touch, drag or scroll the map, and the
+  replay carries on playing. See [Passages](docs/features/passages.md).
 - **The Collision Profile Not Changed warning clears when you pick a working
   profile yourself.** If the boat was anchored and the anchored profile couldn't
   raise alarms, the warning stayed up even after you switched the plugin to a

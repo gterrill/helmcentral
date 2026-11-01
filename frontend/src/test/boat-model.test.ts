@@ -199,6 +199,17 @@ describe('normalizeBoatHull', () => {
 
 describe('HeadingSmoother', () => {
   const T = 500
+  it('peek says what a step would give without taking it', () => {
+    const s = new HeadingSmoother()
+    s.step(90, 0)
+    const a = s.peek(180, 300)
+    expect(s.peek(180, 300)).toEqual(a)
+    expect(a.held).toBeGreaterThan(90)
+    expect(a.held).toBeLessThan(180)
+    // Nothing was taken: the real step from the same state agrees.
+    expect(s.step(180, 300)).toBe(a.held)
+    expect(s.peek(0, 300, { hold: true }).held).toBe(a.held)
+  })
   it('holds nothing until a heading arrives, and returns the first one exactly', () => {
     const s = new HeadingSmoother()
     expect(s.step(null, 0)).toBeNull()

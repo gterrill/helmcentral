@@ -14,6 +14,8 @@ const easeTo = vi.fn()
 const fitBounds = vi.fn()
 const jumpTo = vi.fn()
 let onceHandlers: (() => void)[] = []
+const surface = document.createElement('div')
+const mapHandlers: Record<string, ((e: unknown) => void)[]> = {}
 const moveEnd = () => { const h = onceHandlers; onceHandlers = []; act(() => h.forEach((f) => f())) }
 let mapProps: Record<string, unknown> = {}
 let sources: Record<string, Record<string, unknown>> = {}
@@ -30,13 +32,14 @@ vi.mock('react-map-gl/maplibre', async () => {
           getSource: () => ({}),
           easeTo,
           getZoom: () => 10,
+          getBearing: () => 0,
           fitBounds,
           jumpTo,
           once: (_: string, cb: () => void) => { onceHandlers.push(cb) },
-          on: () => {},
-          off: () => {},
+          on: (name: string, cb: (e: unknown) => void) => { (mapHandlers[name] ??= []).push(cb) },
+          off: (name: string, cb: (e: unknown) => void) => { mapHandlers[name] = (mapHandlers[name] ?? []).filter((f) => f !== cb) },
           setSky: () => {},
-          getCanvasContainer: () => document.createElement('div'),
+          getCanvasContainer: () => surface,
           cameraForBounds: () => ({ center: { lng: 148.05, lat: -20.05 }, zoom: 9 }),
           getContainer: () => ({ clientWidth: 800, clientHeight: 400 }),
         }),
@@ -152,22 +155,65 @@ describe('PassageMap 3D', () => {
     expect(cam.zoom).toBeLessThanOrEqual(9)
   })
 
-  it('flies in to the same pitched, fitted camera', () => {
+  it('offers the same pitched, fitted camera as the framing the opening move lands on', () => {
     const ref = createRef<PassageMapHandle>()
     render(<PassageMap ref={ref} passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} />)
-    act(() => { void ref.current?.flyIn() })
-    const cam = easeTo.mock.calls.at(-1)?.[0]
-    expect(cam).toMatchObject({ pitch: 50, bearing: 0, duration: 3200 })
-    expect(cam.zoom).toBeLessThanOrEqual(9)
+    const framing = ref.current?.getFraming()
+    expect(framing?.overview).toMatchObject({ pitch: 50, bearing: 0 })
+    expect(framing!.overview.zoom).toBeLessThanOrEqual(9)
+    expect(framing?.bearing).toBe(0)
+    expect(easeTo).not.toHaveBeenCalled()
     expect(fitBounds).not.toHaveBeenCalled()
+  })
+
+  it('places a camera it is handed, for the opening move', () => {
+    const ref = createRef<PassageMapHandle>()
+    render(<PassageMap ref={ref} passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} />)
+    act(() => { (mapProps.onLoad as () => void)() })
+    const view = { center: [149, -20] as [number, number], zoom: 3, pitch: 10, bearing: 0 }
+    ref.current?.jumpTo(view)
+    expect(jumpTo).toHaveBeenLastCalledWith(view)
+  })
+
+  describe('while the opening move runs', () => {
+    const mountIntro = () => {
+      const interrupted = vi.fn()
+      render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive onIntroInterrupt={interrupted} />)
+      act(() => { (mapProps.onLoad as () => void)() })
+      return interrupted
+    }
+
+    it('a drag that starts a move of its own ends it, the camera\'s own jumps do not', () => {
+      const interrupted = mountIntro()
+      act(() => { mapHandlers.movestart?.forEach((f) => f({})) })
+      expect(interrupted).not.toHaveBeenCalled()
+      act(() => { mapHandlers.movestart?.forEach((f) => f({ originalEvent: {} })) })
+      expect(interrupted).toHaveBeenCalledTimes(1)
+    })
+
+    it.each(['pointerdown', 'touchstart', 'wheel'])('a %s on the map ends it, even if no move of its own starts', (type) => {
+      const interrupted = mountIntro()
+      act(() => { surface.dispatchEvent(new Event(type)) })
+      expect(interrupted).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not listen once it is over', () => {
+      const interrupted = vi.fn()
+      const { rerender } = render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive onIntroInterrupt={interrupted} />)
+      act(() => { (mapProps.onLoad as () => void)() })
+      rerender(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive={false} onIntroInterrupt={interrupted} />)
+      act(() => { surface.dispatchEvent(new Event('pointerdown')) })
+      expect(interrupted).not.toHaveBeenCalled()
+    })
   })
 
   it('frames flat exactly as before with 3D off', () => {
     localStorage.setItem('passages.replay3d', '0')
     renderMap()
     act(() => { (mapProps.onLoad as () => void)() })
-    expect(jumpTo).not.toHaveBeenCalled()
-    expect(fitBounds).toHaveBeenLastCalledWith(expect.anything(), expect.not.objectContaining({ pitch: expect.anything() }))
+    // MapLibre's own fit, level and facing north, through the same padding and zoom ceiling.
+    expect(jumpTo).toHaveBeenLastCalledWith({ center: [148.05, -20.05], zoom: 9, pitch: 0, bearing: 0 })
+    expect(fitBounds).not.toHaveBeenCalled()
   })
 
   it('says so and goes flat when the terrain cannot be loaded', () => {
