@@ -289,3 +289,23 @@ screen. Other card kinds and different positions are untouched.
 The `protect_class` code list on a marine park (such as `1;2;4;6`) is no longer
 passed on as its category: the plugin stopped sending it, the host drops it from
 any plugin version's answer, and the card ignores it on stored cards.
+
+## Amendment: a six-hour cache for the features lookup
+
+Mate often asks again about the same anchorage with a different stay window,
+and outside assistants do too, and each ask paid the whole Overpass round trip.
+The host now keeps a successful `anchorage_features` answer in memory for six
+hours (`anchorageFeaturesTTL`), in the provider around the export call, so Mate
+and MCP both benefit. The key is the plugin id with its saved-config salt and
+the position formatted to six decimals, as the plugin query uses it. The guest
+works out distances and bay containment from the exact point, so rounding the
+key would hand a later caller the first caller's answer. Concurrent identical
+asks share one plugin call. The cache holds at most 64 answers; on insert it
+drops expired ones, then the oldest, and an expired entry is deleted when read.
+It is not persisted, so a restart or plugin swap starts empty.
+
+An error is never cached, and an error after an earlier success is returned as
+an error: the cache does not serve an old answer for a failed one, unlike the
+weather caches. A reused answer sets `cached` and `cached_at` on the features
+section, as the forecast result does; `data_as_of` stays Overpass's own time and
+the card is unchanged.

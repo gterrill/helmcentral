@@ -176,6 +176,11 @@ and tells you that's what it assumed. A stay can be up to seven days. Here's wha
   where the map has them. A mooring with neither is listed as having its details
   not tagged.
 
+Helmcentral keeps each map lookup for six hours, so asking again about the
+same spot, with a different arrival or leave time, answers faster. Asking again
+about the same position within six hours reuses the earlier lookup. If the map server fails, Mate says so.
+It never fills in with an older lookup.
+
 The map is kept up by volunteers, so Mate treats anything it doesn't list as
 unknown, never as missing. An empty list means nothing is mapped, not that
 nothing is there. Mate gives you no holding from this lookup. It says so if it
