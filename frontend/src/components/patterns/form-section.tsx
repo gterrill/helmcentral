@@ -25,7 +25,7 @@ export interface FormSectionProps {
 
 export function FormSection({ title, description, action, children, className, id }: FormSectionProps) {
   return (
-    <Card id={id} tabIndex={id ? -1 : undefined} className={cn(id && 'outline-none', className)}>
+    <Card id={id} tabIndex={id ? -1 : undefined} className={cn(id && 'outline-none focus-visible:ring-3 focus-visible:ring-ring/50', className)}>
       <CardHeader>
         <CardTitle
           as="h2"
