@@ -45,7 +45,7 @@ For anything larger than a small edit, run `/simplify`.
 Run every suite the change touches:
 
 - Backend: `cd backend && go vet ./... && go test -short ./...`
-- Frontend: `cd frontend && npm test && npm run lint && npm run knip:deps && npm run build`
+- Frontend: `make check-frontend-deps && cd frontend && npm test && npm run lint && npm run knip:deps && npm run build`
 - Help pages under `docs/`: `make docs-lint`
 
 **Done:** every suite you ran is green. Keep the pass counts for the PR body.
