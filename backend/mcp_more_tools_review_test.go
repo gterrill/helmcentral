@@ -31,7 +31,7 @@ func TestMCPMoreTools_OnlyFigureDependentTextIsAReading(t *testing.T) {
 	}
 	for name, v := range map[string]any{
 		"tides":   assistantGetTidesResult{},
-		"shelter": assistantAnchorageShelterResult{},
+		"shelter": shelterResult{},
 		"tidal":   assistantTidalDepartureResult{},
 	} {
 		if !has(v) {

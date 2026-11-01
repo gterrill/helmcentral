@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -81,7 +82,7 @@ type assistantToolDeps struct {
 	// placeNameProviderResolver shape place_name.go uses - read fresh on
 	// every call so a Settings change takes effect on the very next lookup.
 	placeNames placeNameProviderResolver
-	// offlineCoastline is the on-board shoreline anchorage_shelter reads
+	// offlineCoastline is the on-board shoreline anchorage_details reads
 	// (ADR 0203). nil when the install has none; the tool then says so.
 	offlineCoastline func() *offlineCoastlineReader
 	// influxRange is estimate_passage's only I/O dependency: any SignalK
@@ -477,7 +478,7 @@ type mateTool struct {
 // search_web stays last: it is the only conditional tool.
 var mateTools = []mateTool{
 	mateToolFindPlaces,
-	mateToolAnchorageShelter,
+	mateToolAnchorageDetails,
 	mateToolMarinaDetails,
 	mateToolGetWindForecast,
 	mateToolGetTides,
@@ -650,6 +651,9 @@ func clampAssistantDays(days, def, max int) int {
 	return days
 }
 
+// toolFallbackSeq numbers capToolResultJSON's fallback text.
+var toolFallbackSeq atomic.Uint64
+
 // capToolResultJSON marshals result (a pointer to one of the assistant*
 // Result structs below) to compact JSON and, if the encoding exceeds
 // assistantMaxToolResultChars, repeatedly calls shrink - which trims one
@@ -672,7 +676,10 @@ func capToolResultJSON(result any, shrink func() bool) (string, error) {
 
 	for len(data) > assistantMaxToolResultChars {
 		if shrink == nil || !shrink() {
-			return `{"truncated":true,"note":"result too large to return in full even after trimming"}`, nil
+			// The card sink keys cards by result text, so the fallback is
+			// numbered: two calls that both fall back must not share a key.
+			n := toolFallbackSeq.Add(1)
+			return fmt.Sprintf(`{"truncated":true,"note":"result too large to return in full even after trimming","fallback":%d}`, n), nil
 		}
 		data, err = json.Marshal(result)
 		if err != nil {
@@ -681,6 +688,20 @@ func capToolResultJSON(result any, shrink func() bool) (string, error) {
 	}
 
 	return string(data), nil
+}
+
+// trimTailToFit drops the fewest trailing rows whose encoded sizes, with a
+// separator each, add up to over bytes: one cut instead of an encoding of the
+// whole result after every row.
+func trimTailToFit[T any](rows []T, over int) []T {
+	cut, freed := 0, 0
+	for cut < len(rows) && (cut == 0 || freed < over) {
+		cut++
+		if b, err := json.Marshal(rows[len(rows)-cut]); err == nil {
+			freed += len(b) + 1
+		}
+	}
+	return rows[:len(rows)-cut]
 }
 
 type assistantStationInfo struct {
@@ -698,21 +719,22 @@ func roundTo2(value float64) float64 { return math.Round(value*100) / 100 }
 
 // resolveTideStation picks the nearest station to (lat, lon) from the
 // selected tide provider and fetches its chart. Every failure is returned
-// with the tool's name in front; nothing is guessed when a piece is missing.
-func (d assistantToolDeps) resolveTideStation(tool string, lat, lon float64) (assistantResolvedTideStation, error) {
+// without a tool name, which each caller puts in front; nothing is guessed when
+// a piece is missing.
+func (d assistantToolDeps) resolveTideStation(lat, lon float64) (assistantResolvedTideStation, error) {
 	provider, providerID, err := d.tides()
 	if err != nil {
-		return assistantResolvedTideStation{}, fmt.Errorf("%s: %w", tool, err)
+		return assistantResolvedTideStation{}, err
 	}
 
 	station, ok := nearestStation(provider, lat, lon)
 	if !ok {
-		return assistantResolvedTideStation{}, fmt.Errorf("%s: tide provider %q has no stations", tool, providerID)
+		return assistantResolvedTideStation{}, fmt.Errorf("tide provider %q has no stations", providerID)
 	}
 
 	res, err := provider.FetchTideChart(station.StationID)
 	if err != nil {
-		return assistantResolvedTideStation{}, fmt.Errorf("%s: tide provider %q: %w", tool, providerID, err)
+		return assistantResolvedTideStation{}, fmt.Errorf("tide provider %q: %w", providerID, err)
 	}
 
 	// The station's own timezone is preferred (it's the zone tide times are
@@ -730,7 +752,7 @@ func (d assistantToolDeps) resolveTideStation(tool string, lat, lon float64) (as
 	if loc == nil {
 		z, zerr := zoneAt(station.Lat, station.Lon)
 		if zerr != nil {
-			return assistantResolvedTideStation{}, fmt.Errorf("%s: the time zone at tide station %q is not known: %w", tool, station.Name, zerr)
+			return assistantResolvedTideStation{}, fmt.Errorf("the time zone at tide station %q is not known: %w", station.Name, zerr)
 		}
 		loc, timeBasis = z.Loc, z.Name
 	}

@@ -12,7 +12,7 @@ import (
 var mcpMoreToolPolicy = map[string]mcpToolStatus{
 	"read_help":             mcpDefaultOn,
 	"find_places":           mcpDefaultOn,
-	"anchorage_shelter":     mcpDefaultOn,
+	"anchorage_details":     mcpDefaultOn,
 	"get_wind_forecast":     mcpDefaultOn,
 	"get_tides":             mcpDefaultOn,
 	"route_distance":        mcpDefaultOn,
@@ -73,7 +73,7 @@ func TestMCPMoreTools_DescriptionsCarryTheirRules(t *testing.T) {
 	want := map[string][]string{
 		"read_help":             {"no link", "valid page ids"},
 		"find_places":           {"say which candidate", "never a passage distance", "straight_line_bearing_deg", "never a course"},
-		"anchorage_shelter":     {"not a survey", "lee shore"},
+		"anchorage_details":     {"not a survey", "lee shore"},
 		"get_wind_forecast":     {"not observed", "ten days", "local to the place"},
 		"get_tides":             {"predicted", "datum"},
 		"route_distance":        {"never substitute a straight line", "never a passage distance"},

@@ -252,6 +252,26 @@ func (a *assistantDayAggregate) addRelWind(label string) {
 	a.relWindVotes[label]++
 }
 
+// addRow votes one hour into the day: its wind, gust, direction, relative wind
+// and shelter, each only when the row has it.
+func (a *assistantDayAggregate) addRow(row assistantWindHour) {
+	if row.WindKts != nil {
+		a.addWind(*row.WindKts)
+	}
+	if row.GustKts != nil {
+		a.addGust(*row.GustKts)
+	}
+	if row.Dir != nil {
+		a.addDir(*row.Dir)
+	}
+	if row.RelWind != nil {
+		a.addRelWind(*row.RelWind)
+	}
+	if row.Shelter != "" {
+		a.addShelter(row.Shelter)
+	}
+}
+
 func (a *assistantDayAggregate) addShelter(label string) {
 	if a.shelterVotes == nil {
 		a.shelterVotes = map[string]int{}
@@ -281,10 +301,10 @@ func shelterGradeAt(bearings []shelterBearing, windFromDeg float64) string {
 // forecastShelter reads the shelter at a forecast position so each row can be
 // labelled. It returns nil, with nothing to say, when the install has no
 // Offline coastline reader, when the position is not a usable fix, when the
-// operator has switched the coastline off (anchorage_shelter still says so if
+// operator has switched the coastline off (anchorage_details still says so if
 // called) and when no bearing has any shoreline within 15 nm (open water).
 // A coastline that cannot be read comes back as unavailable, verbatim.
-func (d assistantToolDeps) forecastShelter(lat, lon float64) (est *assistantAnchorageShelterResult, unavailable string) {
+func (d assistantToolDeps) forecastShelter(lat, lon float64) (est *shelterResult, unavailable string) {
 	if d.offlineCoastline == nil || !hasUsableVesselPosition(lat, lon) {
 		return nil, ""
 	}
@@ -378,6 +398,22 @@ type assistantResolvedTideStation struct {
 	info       assistantStationInfo
 }
 
+// toolTimeLayout is how the tide and forecast tools write a local time to the
+// model: weekday, day, month, clock.
+const toolTimeLayout = "Mon 2 Jan 15:04"
+
+// toAssistantTideExtreme renders one predicted high or low water in loc.
+func toAssistantTideExtreme(e tideExtremePoint, loc *time.Location) assistantTideExtreme {
+	kind := "low"
+	if e.High {
+		kind = "high"
+	}
+	return assistantTideExtreme{
+		Time: e.Time.In(loc).Format(toolTimeLayout), ISO: e.Time.UTC().Format(time.RFC3339),
+		Type: kind, HeightM: roundTo2(e.HeightM),
+	}
+}
+
 func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -389,9 +425,9 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 	}
 	days := clampAssistantDays(args.Days, 3, assistantMaxTideDays)
 
-	st, err := d.resolveTideStation("get_tides", args.Lat, args.Lon)
+	st, err := d.resolveTideStation(args.Lat, args.Lon)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("get_tides: %w", err)
 	}
 	providerID, res, loc, timeBasis, stationInfo := st.providerID, st.chart, st.loc, st.timeBasis, st.info
 
@@ -405,16 +441,7 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 		if e.Time.Before(windowStart) || !e.Time.Before(windowEnd) {
 			continue
 		}
-		extremeType := "low"
-		if e.High {
-			extremeType = "high"
-		}
-		extremes = append(extremes, assistantTideExtreme{
-			Time:    e.Time.In(loc).Format("Mon 2 Jan 15:04"),
-			ISO:     e.Time.UTC().Format(time.RFC3339),
-			Type:    extremeType,
-			HeightM: roundTo2(e.HeightM),
-		})
+		extremes = append(extremes, toAssistantTideExtreme(e, loc))
 	}
 
 	var cachedAt *string
@@ -428,7 +455,7 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 		Station:  stationInfo,
 		Provider: providerID,
 		Now: assistantTideNow{
-			Time:      localNow.Format("Mon 2 Jan 15:04"),
+			Time:      localNow.Format(toolTimeLayout),
 			HeightM:   res.CurrentHeightM,
 			Direction: res.Direction,
 		},
@@ -512,6 +539,168 @@ func (a *assistantDayAggregate) prevailing() *string {
 	return modeVote(a.dirVotes, a.dirOrder)
 }
 
+// waveSeries is the wave forecast for a position, or why there is none.
+// err is the wave provider's first error line and leaves byUnix empty; noData
+// is an answer (the wave model has no figures here), not a failure.
+type waveSeries struct {
+	providerID    string
+	err           string
+	noData        bool
+	fallbackModel string
+	byUnix        map[int64]waveHourPoint
+}
+
+// fetchWaveSeries reads the wave forecast for get_wind_forecast and
+// anchorage_details. A wave failure never fails the caller: the error rides in
+// the result so the answer can say there are no wave figures and why.
+func (d assistantToolDeps) fetchWaveSeries(lat, lon float64, days int) waveSeries {
+	out := waveSeries{byUnix: map[int64]waveHourPoint{}}
+	if d.waves == nil {
+		out.err = "no wave provider is available on this install"
+		return out
+	}
+	waveProvider, wpID, werr := d.waves()
+	out.providerID = wpID
+	if werr != nil {
+		out.err = firstErrorLine(werr)
+		return out
+	}
+	bundle, ferr := waveProvider.FetchWaves(lat, lon, days)
+	if ferr != nil {
+		out.err = firstErrorLine(ferr)
+		return out
+	}
+	out.fallbackModel = bundle.FallbackModel
+	out.noData = waveSeriesHasNoValues(bundle.Hourly)
+	for _, whp := range bundle.Hourly {
+		out.byUnix[whp.Time.Unix()] = whp
+	}
+	return out
+}
+
+// buildWindHour renders one forecast hour as the row Mate reads: wind and gust
+// in knots, the direction, the wave figures when the wave model has them, the
+// angles relative to course_deg when given, and the shelter grade for the wind
+// direction when the position has a shelter estimate. A figure the provider
+// gave as zero is unknown, never a calm. Shared by get_wind_forecast and
+// anchorage_details so the two cannot read the same hour differently.
+func buildWindHour(hp weatherHourPoint, loc *time.Location, waveByUnix map[int64]waveHourPoint, courseDeg *float64, shelter *shelterResult) assistantWindHour {
+	row := assistantWindHour{T: hp.Time.In(loc).Format("Mon 2 15:04")}
+
+	var windKts *int
+	if hp.WindSpeedMS != 0 {
+		v := int(math.Round(hp.WindSpeedMS * metersPerSecondToKnots))
+		windKts = &v
+	}
+	var gustKts *int
+	if hp.WindGustMS != 0 {
+		v := int(math.Round(hp.WindGustMS * metersPerSecondToKnots))
+		gustKts = &v
+	}
+	var dir *string
+	var dirDeg *int
+	if hp.WindDirectionDeg != 0 {
+		dv := degreesToDirection(hp.WindDirectionDeg)
+		dgv := int(math.Round(hp.WindDirectionDeg))
+		dir, dirDeg = &dv, &dgv
+	}
+	row.WindKts, row.GustKts, row.Dir, row.DirDeg = windKts, gustKts, dir, dirDeg
+
+	// course_deg is the model passing along the vessel's intended
+	// course over ground; the host computes the relative angle rather
+	// than leaving the model to subtract bearings itself (ADR 0093
+	// §2). Nil whenever the wind direction itself is unknown (dir ==
+	// nil), even with course_deg given.
+	if courseDeg != nil && dir != nil {
+		relDeg := relativeAngleDeg(*courseDeg, hp.WindDirectionDeg)
+		relLabel := relativeAngleLabel(relDeg)
+		row.RelWindDeg, row.RelWind = &relDeg, &relLabel
+	}
+
+	if shelter != nil && dir != nil {
+		row.Shelter = shelterGradeAt(shelter.Bearings, hp.WindDirectionDeg)
+	}
+
+	// A wave row needs a height. The period and direction are added only
+	// when the provider gave them: an absent direction is not north, and
+	// a zero period is not a period.
+	if whp, ok := waveByUnix[hp.Time.Unix()]; ok && whp.WaveHeightM != nil {
+		hm := roundTo1(*whp.WaveHeightM)
+		row.WaveM = &hm
+		if whp.WavePeriodS != nil && *whp.WavePeriodS > 0 {
+			ps := roundTo1(*whp.WavePeriodS)
+			row.WaveS = &ps
+		}
+		if whp.WaveDirectionDeg != nil {
+			wd := degreesToDirection(*whp.WaveDirectionDeg)
+			row.WaveDir = &wd
+			if courseDeg != nil {
+				relDeg := relativeAngleDeg(*courseDeg, *whp.WaveDirectionDeg)
+				relLabel := relativeAngleLabel(relDeg)
+				row.RelWaveDeg, row.RelWave = &relDeg, &relLabel
+			}
+		}
+	}
+	return row
+}
+
+// forecastWindow is the part of a forecast bundle a tool reports: every third
+// local hour from `from` (to `until` when that is set), with the instant each
+// row is for, and the day summaries over those rows.
+type forecastWindow struct {
+	at     []time.Time
+	hourly []assistantWindHour
+	days   []assistantDaySummary
+	// last is the latest hour the bundle holds, inside the window or not.
+	last time.Time
+}
+
+// forecastRows builds the rows and day summaries get_wind_forecast and
+// anchorage_details share, so the two cannot read the same hour differently.
+// pick, when set, chooses the hours kept in place of the default (every third
+// local hour from `from` to `until`).
+func forecastRows(hours []weatherHourPoint, loc *time.Location, from, until time.Time, pick func(time.Time) bool, waveByUnix map[int64]waveHourPoint, courseDeg *float64, shelter *shelterResult) forecastWindow {
+	win := forecastWindow{at: []time.Time{}, hourly: []assistantWindHour{}, days: []assistantDaySummary{}}
+	var dayOrder []string
+	dayAggs := map[string]*assistantDayAggregate{}
+	for _, hp := range hours {
+		if hp.Time.IsZero() {
+			continue
+		}
+		if hp.Time.After(win.last) {
+			win.last = hp.Time
+		}
+		local := hp.Time.In(loc)
+		if pick != nil {
+			if !pick(hp.Time) {
+				continue
+			}
+		} else if hp.Time.Before(from) || (!until.IsZero() && hp.Time.After(until)) || local.Hour()%3 != 0 {
+			continue
+		}
+		row := buildWindHour(hp, loc, waveByUnix, courseDeg, shelter)
+		win.at = append(win.at, hp.Time)
+		win.hourly = append(win.hourly, row)
+
+		key := local.Format("2006-01-02")
+		agg, ok := dayAggs[key]
+		if !ok {
+			agg = &assistantDayAggregate{}
+			dayAggs[key] = agg
+			dayOrder = append(dayOrder, key)
+		}
+		agg.addRow(row)
+	}
+	for _, key := range dayOrder {
+		agg := dayAggs[key]
+		win.days = append(win.days, assistantDaySummary{
+			Date: key, WindKtsMin: agg.windMin, WindKtsMax: agg.windMax, GustKtsMax: agg.gustMax,
+			DirPrevailing: agg.prevailing(), RelWindPrevailing: agg.prevailingRelWind(), ShelterPrevailing: agg.prevailingShelter(),
+		})
+	}
+	return win
+}
+
 func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -541,140 +730,12 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		return "", err
 	}
 
-	var waveProviderID, wavesError, waveFallbackModel string
-	var wavesNoData bool
-	waveByUnix := map[int64]waveHourPoint{}
-	if waveProvider, wpID, werr := d.waves(); werr != nil {
-		waveProviderID = wpID
-		wavesError = firstErrorLine(werr)
-	} else {
-		waveProviderID = wpID
-		waveBundle, ferr := waveProvider.FetchWaves(args.Lat, args.Lon, days)
-		if ferr != nil {
-			wavesError = firstErrorLine(ferr)
-		} else {
-			waveFallbackModel = waveBundle.FallbackModel
-			wavesNoData = waveSeriesHasNoValues(waveBundle.Hourly)
-			for _, whp := range waveBundle.Hourly {
-				waveByUnix[whp.Time.Unix()] = whp
-			}
-		}
-	}
+	waves := d.fetchWaveSeries(args.Lat, args.Lon, days)
+	waveProviderID, wavesError, waveFallbackModel, wavesNoData, waveByUnix := waves.providerID, waves.err, waves.fallbackModel, waves.noData, waves.byUnix
 
 	shelter, shelterUnavailable := d.forecastShelter(args.Lat, args.Lon)
 
-	loc := place.Loc
-	nowHour := d.now().Truncate(time.Hour)
-
-	dayOrder := make([]string, 0)
-	dayAggs := make(map[string]*assistantDayAggregate)
-	hourly := make([]assistantWindHour, 0)
-
-	for _, hp := range bundle.Hourly {
-		if hp.Time.IsZero() || hp.Time.Before(nowHour) {
-			continue
-		}
-		localTime := hp.Time.In(loc)
-		if localTime.Hour()%3 != 0 {
-			continue
-		}
-
-		row := assistantWindHour{T: localTime.Format("Mon 2 15:04")}
-
-		var windKts *int
-		if hp.WindSpeedMS != 0 {
-			v := int(math.Round(hp.WindSpeedMS * metersPerSecondToKnots))
-			windKts = &v
-		}
-		var gustKts *int
-		if hp.WindGustMS != 0 {
-			v := int(math.Round(hp.WindGustMS * metersPerSecondToKnots))
-			gustKts = &v
-		}
-		var dir *string
-		var dirDeg *int
-		if hp.WindDirectionDeg != 0 {
-			dv := degreesToDirection(hp.WindDirectionDeg)
-			dgv := int(math.Round(hp.WindDirectionDeg))
-			dir, dirDeg = &dv, &dgv
-		}
-		row.WindKts, row.GustKts, row.Dir, row.DirDeg = windKts, gustKts, dir, dirDeg
-
-		// course_deg is the model passing along the vessel's intended
-		// course over ground; the host computes the relative angle rather
-		// than leaving the model to subtract bearings itself (ADR 0093
-		// §2). Nil whenever the wind direction itself is unknown (dir ==
-		// nil), even with course_deg given.
-		if args.CourseDeg != nil && dir != nil {
-			relDeg := relativeAngleDeg(*args.CourseDeg, hp.WindDirectionDeg)
-			relLabel := relativeAngleLabel(relDeg)
-			row.RelWindDeg, row.RelWind = &relDeg, &relLabel
-		}
-
-		if shelter != nil && dir != nil {
-			row.Shelter = shelterGradeAt(shelter.Bearings, hp.WindDirectionDeg)
-		}
-
-		// A wave row needs a height. The period and direction are added only
-		// when the provider gave them: an absent direction is not north, and
-		// a zero period is not a period.
-		if whp, ok := waveByUnix[hp.Time.Unix()]; ok && whp.WaveHeightM != nil {
-			hm := roundTo1(*whp.WaveHeightM)
-			row.WaveM = &hm
-			if whp.WavePeriodS != nil && *whp.WavePeriodS > 0 {
-				ps := roundTo1(*whp.WavePeriodS)
-				row.WaveS = &ps
-			}
-			if whp.WaveDirectionDeg != nil {
-				wd := degreesToDirection(*whp.WaveDirectionDeg)
-				row.WaveDir = &wd
-				if args.CourseDeg != nil {
-					relDeg := relativeAngleDeg(*args.CourseDeg, *whp.WaveDirectionDeg)
-					relLabel := relativeAngleLabel(relDeg)
-					row.RelWaveDeg, row.RelWave = &relDeg, &relLabel
-				}
-			}
-		}
-
-		hourly = append(hourly, row)
-
-		dayKey := localTime.Format("2006-01-02")
-		agg, ok := dayAggs[dayKey]
-		if !ok {
-			agg = &assistantDayAggregate{}
-			dayAggs[dayKey] = agg
-			dayOrder = append(dayOrder, dayKey)
-		}
-		if windKts != nil {
-			agg.addWind(*windKts)
-		}
-		if gustKts != nil {
-			agg.addGust(*gustKts)
-		}
-		if dir != nil {
-			agg.addDir(*dir)
-		}
-		if row.RelWind != nil {
-			agg.addRelWind(*row.RelWind)
-		}
-		if row.Shelter != "" {
-			agg.addShelter(row.Shelter)
-		}
-	}
-
-	days2 := make([]assistantDaySummary, 0, len(dayOrder))
-	for _, dayKey := range dayOrder {
-		agg := dayAggs[dayKey]
-		days2 = append(days2, assistantDaySummary{
-			Date:              dayKey,
-			WindKtsMin:        agg.windMin,
-			WindKtsMax:        agg.windMax,
-			GustKtsMax:        agg.gustMax,
-			DirPrevailing:     agg.prevailing(),
-			RelWindPrevailing: agg.prevailingRelWind(),
-			ShelterPrevailing: agg.prevailingShelter(),
-		})
-	}
+	win := forecastRows(bundle.Hourly, place.Loc, d.now().Truncate(time.Hour), time.Time{}, nil, waveByUnix, args.CourseDeg, shelter)
 
 	var cachedAt *string
 	if !bundle.CachedAt.IsZero() {
@@ -695,8 +756,8 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 		WaveFallbackModel: waveFallbackModel,
 		Cached:            bundle.Cached,
 		CachedAt:          cachedAt,
-		Days:              days2,
-		Hourly:            hourly,
+		Days:              win.days,
+		Hourly:            win.hourly,
 
 		ShelterUnavailable: shelterUnavailable,
 	}

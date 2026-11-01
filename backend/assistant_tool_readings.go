@@ -108,3 +108,45 @@ func readingMarinaDetails(contact marinaContact, exceeds []string, unread []stri
 	}
 	return strings.Join(parts, " ")
 }
+
+// ruleAnchorageDetails is how to read anchorage_details, in the tool's
+// description where the prompt cache holds it. The shelter, forecast and tide
+// rules are the ones those tools carry, said once.
+const ruleAnchorageDetails = "Shelter: " + ruleShelter + " Forecast: " + ruleWindForecast + " Each row's shelter is the grade for the direction the wind comes FROM, " +
+	"and shelter_prevailing is the day's most common. Tide: " + ruleTides + " The range is of the high and low waters through the stay; range_note says how it was worked out, " +
+	"and at_arrival is null, with a height_note, when arrival is outside the predicted tides. Features: these are what volunteers have mapped in OpenStreetMap within a " +
+	"nautical mile, not a survey. An empty list means nothing is mapped, never that nothing is there: do not say an anchorage is free of restrictions, clear of reef " +
+	"or safe to anchor from an empty list. An area whose restriction prohibits anchoring is a no-go for anchoring there: say so first and do not recommend it. A restricted " +
+	"area that only restricts, and a marine protected area, need the operator to check the zoning and the rules, which the map does not give. Public moorings: " +
+	"vessel_size_m is the maximum vessel length in metres, as the mooring's own record has it, and class is as mapped; a mooring with details_untagged has no size " +
+	"or class mapped, so say so and never assume it suits the boat. Compare a size limit with the boat's length from get_vessel_particulars. Depth and holding are not part of this " +
+	"result: do not state either from it, and label any you give as general knowledge. A forecast, tide or features section that carries an error was not " +
+	"checked: say so and why. Weigh each wind direction in the forecast against the shelter arcs, and say which rows put the boat on a lee shore. " +
+	"The result's reading says what to do about the parts that depend on this call."
+
+// readingAnchorageDetails carries what is particular to one call.
+func readingAnchorageDetails(leaveDefaulted bool, forecastErr, tideErr, featuresErr string) string {
+	var parts []string
+	if leaveDefaulted {
+		parts = append(parts, "No leave time was given, so the stay ends at 08:00 local time, the first at least six hours after arrival: say that is what you assumed.")
+	}
+	for _, e := range []struct{ label, err string }{{"forecast", forecastErr}, {"tide", tideErr}, {"features", featuresErr}} {
+		if e.err != "" {
+			parts = append(parts, fmt.Sprintf("The %s was not checked (%s): say so, and do not fill it from memory.", e.label, e.err))
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+// readingAnchorageFeatures carries what the map's restrictions mean for this call.
+func readingAnchorageFeatures(prohibited []string, truncated bool) string {
+	var parts []string
+	if len(prohibited) > 0 {
+		parts = append(parts, fmt.Sprintf("Anchoring is prohibited in: %s. Treat that as a no-go for anchoring there and say so first.", strings.Join(prohibited, ", ")))
+	}
+	if truncated {
+		parts = append(parts, "A list was cut short, so there may be more mapped.")
+	}
+	parts = append(parts, "Anything not listed is UNKNOWN, not absent.")
+	return strings.Join(parts, " ")
+}

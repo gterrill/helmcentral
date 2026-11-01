@@ -1,0 +1,86 @@
+{
+  "restricted_areas": [
+    {
+      "osm": "relation/7927863",
+      "name": "Moreton Bay Marine Park (IUCN Cat II Parts)",
+      "source": "protected_area",
+      "restriction": "",
+      "category": "2",
+      "distance_m": null,
+      "geometry": []
+    },
+    {
+      "osm": "relation/7930278",
+      "name": "Moreton Bay Marine Park (IUCN Cat IV Parts)",
+      "source": "protected_area",
+      "restriction": "",
+      "category": "4",
+      "distance_m": null,
+      "geometry": []
+    },
+    {
+      "osm": "relation/7931766",
+      "name": "Moreton Bay Marine Park",
+      "source": "protected_area",
+      "restriction": "",
+      "category": "2;4",
+      "distance_m": null,
+      "geometry": []
+    },
+    {
+      "osm": "relation/16318001",
+      "name": "Peel Island Fish Habitat Area",
+      "source": "protected_area",
+      "restriction": "Fish Habitat Area (A)",
+      "category": "6",
+      "distance_m": null,
+      "geometry": []
+    }
+  ],
+  "moorings": [],
+  "anchorage_areas": [
+    {
+      "osm": "node/6531603351",
+      "name": "The Corner",
+      "category": "",
+      "distance_m": 1409,
+      "geometry": [
+        {
+          "kind": "point",
+          "points": [
+            [
+              -27.506667,
+              153.336272
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "seabed_areas": [
+    {
+      "osm": "node/6531603347",
+      "name": "",
+      "surface": "coral",
+      "distance_m": 1411,
+      "geometry": [
+        {
+          "kind": "point",
+          "points": [
+            [
+              -27.481311,
+              153.336766
+            ]
+          ]
+        }
+      ]
+    }
+  ],
+  "bay": {
+    "osm": "node/732075920",
+    "name": "The Lazaret",
+    "contains": false,
+    "distance_m": 1531
+  },
+  "data_as_of": "2026-10-31T21:22:14Z"
+}

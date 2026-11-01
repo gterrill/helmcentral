@@ -1294,13 +1294,30 @@ func TestBuildAssistantSystemPrompt_HonestPassageClaimsRule(t *testing.T) {
 func TestBuildAssistantSystemPrompt_AnchorageShelterRule(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(basePromptContext())
 	for _, want := range []string{
-		"anchorage_shelter",
+		"anchorage_details",
 		"sheltered arcs",
 		"forecast wind directions",
 		"estimate",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("prompt misses %q", want)
+		}
+	}
+}
+
+// The anchorage rules are stated once, in the tool's description. The prompt
+// only says when to call it.
+func TestAnchorageDetailsRules_LiveInTheToolDescription(t *testing.T) {
+	desc := mateToolAnchorageDetails.function.Description
+	for _, want := range []string{"was not checked", "never that nothing is there", "lee shore", "label any you give as general knowledge"} {
+		if !strings.Contains(desc, want) {
+			t.Errorf("tool description misses %q", want)
+		}
+	}
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, gone := range []string{"none are mapped, not that there are none", "The tool gives no depth or", "carries an error was not checked"} {
+		if strings.Contains(prompt, gone) {
+			t.Errorf("prompt repeats a tool rule: %q", gone)
 		}
 	}
 }

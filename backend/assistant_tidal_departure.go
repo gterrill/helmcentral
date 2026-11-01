@@ -187,9 +187,9 @@ func (d assistantToolDeps) executePlanTidalDeparture(ctx context.Context, raw js
 		return "", fmt.Errorf("plan_tidal_departure: the departure window may span at most %d hours", int(assistantTidalDepartureMaxWindow/time.Hour))
 	}
 
-	st, err := d.resolveTideStation("plan_tidal_departure", lat, lon)
+	st, err := d.resolveTideStation(lat, lon)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("plan_tidal_departure: %w", err)
 	}
 
 	// Whole minutes keep the arithmetic exact (6.2 h is 372 min, not 372 min

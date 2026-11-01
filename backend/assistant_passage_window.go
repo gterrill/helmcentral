@@ -1135,8 +1135,9 @@ func (d assistantToolDeps) executeAssessPassageWindow(ctx context.Context, raw j
 		if d.tides == nil {
 			return nil, fmt.Errorf("no tide provider")
 		}
-		st, err := d.resolveTideStation("assess_passage_window", lat, lon)
+		st, err := d.resolveTideStation(lat, lon)
 		if err != nil {
+			err = fmt.Errorf("assess_passage_window: %w", err)
 			_, id, _ := d.tides()
 			logOnce("tides:"+id+":"+err.Error(), "tide provider %q failed at %.2f, %.2f, wind against tide not checked: %v", id, lat, lon, err)
 			return nil, err

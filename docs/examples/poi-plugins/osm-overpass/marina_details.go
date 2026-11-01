@@ -427,7 +427,7 @@ func classifyMarina(marina overpassElement, elements []overpassElement, lat, lon
 		Ashore:        []marinaAshoreOut{},
 	}
 	m := &out.Marina
-	m.OSM = fmt.Sprintf("%s/%d", marina.Type, marina.ID)
+	m.OSM = osmRef(marina)
 	m.Name = bestName(tags)
 	m.Lat, m.Lon = lat, lon
 	m.Fee = strings.TrimSpace(tags["fee"])

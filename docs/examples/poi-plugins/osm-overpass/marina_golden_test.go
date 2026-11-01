@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-var updateMarinaGolden = flag.Bool("update", false, "rewrite testdata/marina_details_coral_sea_output.json")
+var updateMarinaGolden = flag.Bool("update", false, "rewrite the golden output files under testdata/")
 
 // The host's marina card is built from this exact answer (backend
 // assistant_marina_card_test.go reads the file), so it is what the export

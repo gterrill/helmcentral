@@ -100,7 +100,7 @@ On request, it can look up more than that. Here is what it can do:
   way a following sea and a head sea are called correctly.
 - **A fair-tide departure:** See the next section.
 - **Places you've named:** Give it a position for a spot the map doesn't name and it offers to save it, then finds it by name from then on. See [Places you give Mate](place-names.md#places-you-give-mate).
-- **Anchorage shelter:** See "Sheltered from which winds" below.
+- **An anchorage:** See "Assessing an anchorage" below.
 - **A marina:** See "Checking a marina" below.
 - **Passage time and fuel:** See "Passage estimates" below.
 - **Who else is around:** See "Nearby vessels" below.
@@ -137,39 +137,106 @@ which spell of flood or ebb you'll be in, not how fast it runs.
 - **A course across the stream:** A course square across the stream gains
   little from timing, and Mate says so.
 
-### Sheltered from which winds
+### Assessing an anchorage
 
-Mate can tell you which wind directions an anchorage is sheltered from. Ask
-about a bay or a position, and it reads the charted coastline and reefs around
-it. Then it reports the compass arcs the spot is sheltered, partly sheltered
-and exposed from, such as "sheltered from NNE through S (030°–190°)".
+When you're choosing where to anchor, Mate can look an anchorage over for the
+time you'll be there. Ask about a bay or a position, and say when you'll arrive
+and when you'll leave. If you don't say when you'll leave, Mate assumes 08:00
+local time at the anchorage, the first one at least six hours after you arrive,
+and tells you that's what it assumed. A stay can be up to seven days. Here's what Mate reads for you:
 
-- **Bearing table:** A bearing-by-bearing table shows how far the nearest land
-  or reef is and what it is.
-- **Choosing between anchorages:** When you're choosing between anchorages
-  against a forecast, Mate compares those arcs with the wind direction forecast
-  for each night of the stay.
-- **Inside a reef:** If you're anchored inside a reef, Mate gives the reef's
-  width in each direction and tells you that reef shelter depends on the tide.
-- **Part of the wind forecast:** Mate looks up the wind for an anchorage.
-  The forecast also says, for each wind direction, whether the spot is sheltered,
-  partly sheltered or exposed. If the Offline coastline can't be read,
-  the forecast says so and Mate tells you.
-- **Checked before it answers:** If Mate's first draft says an anchorage is
-  exposed or sheltered from a wind without having read the coastline, it's sent
-  back to read it and answer again.
+- **Shelter:** It reads the charted coastline and reefs around the spot. Then it
+  reports the compass arcs the spot is sheltered, partly sheltered and exposed
+  from, such as "sheltered from NNE through S (030°–190°)". Inside a reef, Mate
+  gives the reef's width in each direction. It also tells you that reef shelter
+  depends on the tide.
+- **The forecast over your stay:** The wind, gusts, wind direction and waves
+  every three hours from the hour nearest your arrival to the hour nearest your
+  departure. Each row says whether the spot is sheltered, partly sheltered or
+  exposed from that wind, and each day says
+  which of those the wind was for most of it. Mate uses these to tell you which
+  hours put the boat on a lee shore.
+- **The tide:** The height at the time you arrive, each high and low water
+  through your stay, and the range between the highest and the lowest. If fewer
+  than two high or low waters fall inside your stay, the range also uses the one
+  before you arrive and the one after you leave, and Mate says so. If the tide
+  prediction ends before you leave, the card says when it ends.
+- **What the map records nearby:** Anything within a nautical mile that
+  OpenStreetMap lists as a restricted area, a public mooring, an anchorage area,
+  a seabed area or the bay the spot is in. A restricted area that prohibits
+  anchoring is a no-go. Mate says that first instead of recommending the
+  anchorage. A marine park is listed with a reminder to check its zoning,
+  because the map doesn't say whether the zone allows anchoring. Public
+  moorings come with the biggest vessel they take, in metres, and their class,
+  where the map has them. A mooring with neither is listed as having its details
+  not tagged.
 
-Treat it as a first look, and Mate says so. It works from the shoreline as
-charted, so it can't see wind bending round a headland, gusts funnelling down a
-valley or swell wrapping round a point. That means it can read an anchorage as
+The map is kept up by volunteers, so Mate treats anything it doesn't list as
+unknown, never as missing. An empty list means nothing is mapped, not that
+nothing is there. Mate gives you no depth or holding from this lookup. It says
+so if it uses what it knows of the place for either.
+
+Treat the shelter as a first look, and Mate says so. It works from the shoreline
+as charted, so it can't see wind bending round a headland, gusts funnelling down
+a valley or swell wrapping round a point. That means it can read an anchorage as
 better sheltered than it is on the side where swell curls in. It's only as good
 as the chart.
 
+Each part is checked on its own. Shelter is the one part Mate can't do without.
+If the coastline can't be read, Mate tells you why and doesn't guess. If the
+forecast, the tide or the map lookup fails, that part says what went wrong and
+shows nothing. Mate tells you it wasn't checked instead of filling it in from
+memory. If Mate's first answer calls an anchorage exposed or sheltered from
+a wind without having read the coastline, it's sent back to read it and answer
+again.
+
+Under the answer, Mate shows an anchorage card. Here's what's on it:
+
+- **The top:** The anchorage's name, then your arrival and departure in local
+  time at the anchorage.
+- **Shelter:** A compass ring of 36 spokes, one for every 10° of wind
+  direction. The colour of a spoke says how sheltered you are from wind coming
+  from that direction. Blue is sheltered, amber is partly sheltered, red is
+  exposed and grey is reef. A spoke's length is how far the wind has run over
+  water, up to 15 nm, so a short spoke is land close by on that side. Beside it
+  are the arcs in words.
+- **Forecast:** A table of the three-hourly rows. Each row has the time, the
+  wind and gust in knots, the direction it's from, a badge for the shelter from
+  that wind, and the waves. Wave heights follow your distance units. Below it is
+  each day's prevailing shelter.
+- **Tide:** The tide station and how far away it is, the height when you
+  arrive, the high and low waters and the range. Heights are on the tide table's
+  datum, not charted depth.
+- **Local features:** Restricted areas first, with a prohibition in red. Then
+  the public moorings grouped by size limit and class, with the nearest
+  distance, the anchorage and seabed areas, and the bay.
+- **Map:** Folded away until you tap **Map**. It shows the same spokes drawn out
+  over satellite imagery in the same colours. It also shows the moorings
+  labelled with their size limit, restricted areas shaded, and anchorage and
+  seabed areas outlined. The OpenSeaMap layer draws the marks, as on the anchor
+  watch map, and the satellite button turns the imagery off. It doesn't move
+  when you scroll the conversation past it: use two fingers, or hold ⌘ (Ctrl on
+  Windows or Linux) while you scroll, to pan and zoom it. A browser without
+  WebGL2 shows a line saying so.
+- **The bottom:** When the forecast was fetched, when the coastline was
+  downloaded and "OpenStreetMap · data as of" the date the map was last updated.
+  If the map server doesn't give a date, the card leaves it out. A part that
+  couldn't be checked shows its error in place of its figures.
+
+The card is a snapshot of what Mate read at the time, so it looks the same when
+you open the conversation again. Ask about two anchorages and you get two cards.
+
 The shoreline is the [Offline coastline](offline-coastline.md), kept aboard, so
-the answer needs no signal. It's off until you turn it on in Settings → Offline
+the shelter needs no signal. It's off until you turn it on in Settings → Offline
 coastline. It covers the water within 200 nm of the boat plus anywhere you've
 downloaded before. If it hasn't been downloaded, is off, or a neighbouring
-square is missing, Mate tells you which and doesn't guess the shelter.
+square is missing, Mate tells you which and doesn't guess the shelter. The
+forecast, the tide and the map lookup do need a connection. The map lookup needs
+the OpenStreetMap place-names plugin, which is the default, in a version that
+supports it. See [What Mate can look up](../reference/mate-tools.md).
+
+The forecast for any other place still labels each row with the shelter, using
+the same coastline, when you ask for it by name.
 
 ### Checking a marina
 

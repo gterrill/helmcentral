@@ -51,7 +51,7 @@ func initOfflineCoastline(store *coastlineStore, settingsPath string) {
 	})
 }
 
-// offlineCoastlineReaderFor is the production reader behind anchorage_shelter.
+// offlineCoastlineReaderFor is the production reader behind anchorage_details.
 func offlineCoastlineReaderFor(settingsPath string) func() *offlineCoastlineReader {
 	enabled := offlineCoastlineEnabledFromSettingsFile(settingsPath)
 	return func() *offlineCoastlineReader {

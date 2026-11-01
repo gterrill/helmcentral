@@ -1052,20 +1052,24 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"is the operator's own saved place: use it as given. When the operator gives you a position for a named spot " +
 		"find_places did not know, offer to keep it with save_place, once, and tell them to tap Apply.\n\n" +
 
-		"When the plan starts now or within the forecast range, for every candidate anchorage under discussion, " +
+		"When the plan starts now or within the forecast range, for every candidate anchorage under discussion " +
+		"call anchorage_details, which returns the forecast and the tide for the stay along with the shelter and the " +
+		"local features, rather than fetching them separately. For any other position, " +
 		"fetch both get_wind_forecast and get_tides. Fetch the " +
 		"forecast once per position with enough days for the whole plan; do not re-fetch the same position " +
 		"under a different name.\n\n" +
 
-		"When you choose or assess an anchorage against a forecast, shelter comes from the charted shoreline. " +
-		"get_wind_forecast labels each row and day with the shelter for that wind direction; for anything else, " +
-		"call anchorage_shelter with the position find_places gave you and compare its sheltered arcs with the " +
-		"forecast wind directions over the stay. Every statement that an anchorage is sheltered or exposed must come " +
-		"from those labels or that tool, never from your general knowledge of the coast. The reading says how far " +
-		"to trust it. Your knowledge of the place may add what charted shoreline can't show (swell wrapping round a " +
-		"point, gusts down valleys, holding), but must not reverse which directions the labels or the tool give as " +
-		"sheltered or exposed. If your answer judges an anchorage and the forecast says shelter_unavailable, or the " +
-		"tool returns an error, say shelter could not be checked and why; do not substitute a guess without saying so. " +
+		"When you choose, compare or assess an anchorage, call anchorage_details with the position find_places gave you " +
+		"and the times the boat arrives and leaves. If the operator has not said when, use the planned stay from " +
+		"get_planned_stay or say what you assumed. Shelter comes from the charted shoreline: compare its sheltered arcs " +
+		"with the forecast wind directions over the stay, which the result grades row by row. For a position you are " +
+		"not assessing as an anchorage, get_wind_forecast labels each row and day with the shelter for that wind direction. " +
+		"Every statement that an anchorage is sheltered or exposed must come from those labels or that tool, never from " +
+		"your general knowledge of the coast. The reading says how far to trust it. Your knowledge of the place may add " +
+		"what charted shoreline can't show (swell wrapping round a point, gusts down valleys, holding), but must not " +
+		"reverse which directions the labels or the tool give as sheltered or exposed. If your answer judges an anchorage " +
+		"and the forecast says shelter_unavailable, or the tool returns an error, say shelter could not be checked and why; " +
+		"do not substitute a guess without saying so. The tool's description says how to read the rest of its result. " +
 		"For an offshore or passage point, shelter_unavailable needs no mention.\n\n" +
 
 		"When the operator is choosing, comparing or planning a stop at a marina, call marina_details with the " +

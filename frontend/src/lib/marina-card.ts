@@ -203,21 +203,24 @@ export function dataDateText(iso: string): string {
 
 export type Bounds = [[number, number], [number, number]]
 
-/** The south-west and north-east corners of a set of shapes, as [lon, lat] for MapLibre. */
-export function shapesBounds(shapes: MarinaShape[]): Bounds | null {
+/** The south-west and north-east corners of a set of [lat, lon] points, as [lon, lat] for MapLibre. */
+export function pointsBounds(points: [number, number][]): Bounds | null {
   let minLat = Infinity
   let minLon = Infinity
   let maxLat = -Infinity
   let maxLon = -Infinity
-  for (const sh of shapes) {
-    for (const [lat, lon] of sh.points) {
-      minLat = Math.min(minLat, lat)
-      maxLat = Math.max(maxLat, lat)
-      minLon = Math.min(minLon, lon)
-      maxLon = Math.max(maxLon, lon)
-    }
+  for (const [lat, lon] of points) {
+    minLat = Math.min(minLat, lat)
+    maxLat = Math.max(maxLat, lat)
+    minLon = Math.min(minLon, lon)
+    maxLon = Math.max(maxLon, lon)
   }
   return Number.isFinite(minLat) ? [[minLon, minLat], [maxLon, maxLat]] : null
+}
+
+/** The corners of a set of shapes. */
+export function shapesBounds(shapes: MarinaShape[]): Bounds | null {
+  return pointsBounds(shapes.flatMap((sh) => sh.points))
 }
 
 /** The outline shapes and pontoon shapes the map draws: a point has no extent and is drawn as neither. */
@@ -259,7 +262,10 @@ export interface MarinaFeatureCollections {
   ashore: GeoJSON.FeatureCollection
 }
 
-const lonLat = ([lat, lon]: [number, number]): [number, number] => [lon, lat]
+/** A [lat, lon] pair as the [lon, lat] GeoJSON wants. */
+export const lonLat = ([lat, lon]: [number, number]): [number, number] => [lon, lat]
+
+export const featureCollection = (features: GeoJSON.Feature[]): GeoJSON.FeatureCollection => ({ type: 'FeatureCollection', features })
 
 /**
  * The marina's outline, pontoons and points as GeoJSON for the map. A point
@@ -269,7 +275,7 @@ const lonLat = ([lat, lon]: [number, number]): [number, number] => [lon, lat]
  * the point). The decoder has already checked every shape's point count.
  */
 export function marinaFeatures(card: MarinaCard): MarinaFeatureCollections {
-  const fc = (features: GeoJSON.Feature[]): GeoJSON.FeatureCollection => ({ type: 'FeatureCollection', features })
+  const fc = featureCollection
   const line = (pts: [number, number][], properties: GeoJSON.GeoJsonProperties): GeoJSON.Feature => ({
     type: 'Feature',
     properties,

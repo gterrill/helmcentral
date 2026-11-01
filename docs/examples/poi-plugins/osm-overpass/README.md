@@ -222,6 +222,44 @@ the exact queries the plugin sends (Coral Sea Marina Resort, Airlie Beach,
 `-20.2663105, 148.7101677`) against a local Overpass mirror with data from
 2026-10-29.
 
+## One more optional export: anchorage_features
+
+`anchorage_features` takes `{"lat": ..., "lon": ...}` and returns what OSM
+records within 1852 m (one nautical mile) that bears on anchoring there, in one
+request with a separate cap for each class so that a field of public moorings
+cannot crowd out a restricted area:
+
+- `restricted_areas`: `seamark:type=restricted_area` with its
+  `seamark:restricted_area:restriction` and `:category` tags, and marine
+  protected areas (`boundary=protected_area` or `marine_protected_area` that is
+  also `maritime=yes`). A protected area carries no geometry and a `null`
+  distance, because its boundary can run for hundreds of kilometres and its
+  centre says nothing about how near the boundary is. It is never described as
+  forbidding anchoring.
+- `moorings`: `seamark:type=mooring`, and `buoy_special_purpose` with category
+  `mooring`. For the Queensland public moorings only the `VesselSize` and
+  `Mooring_cl` lines of the free-text `description` are read, as the size limit
+  in metres and the class. The rest of the description is not passed on.
+- `anchorage_areas` (`seamark:type=anchorage` or `anchorage=yes`, with
+  `seamark:anchorage:category`) and `seabed_areas` (`seamark:seabed_area:surface`).
+- `bay`: the `natural=bay` whose outline holds the position, else the nearest by
+  name. A bay mapped as one node never holds anything.
+
+Areas carry `[lat, lon]` shapes for the host's map, thinned like the marina
+shapes. `data_as_of` is `osm3s.timestamp_osm_base`, empty when the server gives
+none. The query uses no `is_in` or area lookups, which a mirror without the
+areas database answers with a dispatcher error, so a protected area or a bay is
+found only when its boundary comes within the mile. Fixtures:
+`testdata/overpass_anchorage_butterfly_bay.json` (23 public moorings, two bays,
+two marine parks; West Butterfly Bay, `-20.0765, 148.925`) and
+`testdata/overpass_anchorage_moreton_bay.json` (an anchorage node, a coral
+seabed area, a bay and marine parks; `-27.494, 153.3366`), captured on
+2026-11-01 from the exact queries the plugin sends against a local Overpass
+mirror with data from 2026-10-31. The mirror holds no `restricted_area` to
+capture, so that path is tested on a small hand-written element set.
+`go test -update` rewrites the golden `anchorage_features_*_output.json` files
+that the host's card tests read.
+
 ## Truncation is a heuristic, not an exact count
 
 Overpass's `out ... <cap>` statement silently drops anything past the cap -

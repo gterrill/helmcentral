@@ -15,17 +15,6 @@ import (
 // error, never an empty answer, since an empty answer would read as a marina
 // with nothing in it.
 
-// marinaDetailsCallBudget is longer than the shared plugin budget because the
-// export makes two Overpass requests, one after the other.
-const marinaDetailsCallBudget = 30 * time.Second
-
-// marinaDetailsBudget is the larger of marinaDetailsCallBudget and the
-// configured plugin timeout, so an operator who raised WASM_PLUGIN_TIMEOUT_MS
-// never gets less here than for any other export.
-func marinaDetailsBudget() time.Duration {
-	return max(marinaDetailsCallBudget, time.Duration(wasmPluginTimeoutMS())*time.Millisecond)
-}
-
 // Bounds on what one answer may carry, so a busy harbour cannot flood Mate's
 // context. A list cut to its bound sets Truncated; shapes cut to theirs set
 // GeometryTruncated instead, since the model never reads geometry.
@@ -327,33 +316,16 @@ func cleanFacts(in map[string]string, truncated *bool) map[string]string {
 	return out
 }
 
-type wasmMarinaDetailsInput struct {
+// wasmLatLonInput is the input of an optional export that takes a position.
+type wasmLatLonInput struct {
 	Lat float64 `json:"lat"`
 	Lon float64 `json:"lon"`
 }
 
-// MarinaDetails calls the guest's marina_details export. Same config overlay
-// and panic recovery as PlaceNameAt. The guest's own error text (no marina
-// charted within 500 m, a rate limit, a runtime error from the map server)
-// comes back as the error.
-func (p *wasmPOIProvider) MarinaDetails(lat, lon float64) (result marinaDetails, err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("plugin %q panicked in marina_details: %v", p.id, r)
-			result = marinaDetails{}
-		}
-	}()
-
-	if !p.SupportsMarinaDetails() {
-		return marinaDetails{}, fmt.Errorf("plugin %q: %w", p.id, errNoMarinaDetailsExport)
-	}
-	input, err := json.Marshal(wasmMarinaDetailsInput{Lat: lat, Lon: lon})
-	if err != nil {
-		return marinaDetails{}, fmt.Errorf("plugin %q: failed to marshal marina_details input: %w", p.id, err)
-	}
-	out, err := p.callWithin("marina_details", input, marinaDetailsBudget())
-	if err != nil {
-		return marinaDetails{}, err
-	}
-	return decodeMarinaDetails(p.id, out)
+// MarinaDetails calls the guest's marina_details export. The guest's own error
+// text (no marina charted within 500 m, a rate limit, a runtime error from the
+// map server) comes back as the error.
+func (p *wasmPOIProvider) MarinaDetails(lat, lon float64) (marinaDetails, error) {
+	return callOptionalExport(p, "marina_details", p.SupportsMarinaDetails(), errNoMarinaDetailsExport,
+		wasmLatLonInput{Lat: lat, Lon: lon}, decodeMarinaDetails)
 }

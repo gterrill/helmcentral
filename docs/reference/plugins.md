@@ -32,6 +32,18 @@ answers the marina lookup by exporting `marina_details`, which takes a position
 and returns the marina charted within 500 m, with its facilities, entrance marks
 and services ashore. The export is optional, like the place-names pair.
 
+Mate's anchorage lookup needs a version of the plugin with a second optional
+export, `anchorage_features`. It takes a position and returns what is mapped
+within 1 nm: restricted areas, public moorings, anchorage areas, seabed areas
+and the bay. It also returns marine protected areas, which are boundaries tagged
+as a protected area and as maritime. Land parks are left out. A restricted area
+here is a seamark restricted area, and a protected area is only found when its
+boundary comes within 1 nm. For a Queensland public mooring the plugin reads the
+vessel size limit (`VesselSize`) and class (`Mooring_cl`) from the mooring's
+description, and passes on nothing else from it. With the google-places plugin,
+or an older osm-overpass, the anchorage's shelter, forecast and tide still work
+and the map features say the plugin doesn't provide them.
+
 Upper air is optional: leave that plugin out and the forecast page shows no
 500mb section. Points of interest is optional the same way. With no `poi`
 plugin installed, Nearby reports an error saying what to install, and nothing

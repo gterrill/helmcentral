@@ -1,0 +1,401 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-31T21:22:14Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 11106074852,
+  "lat": -20.0778246,
+  "lon": 148.9251835,
+  "tags": {
+    "description": "Pt_No 139\nLocation West Butterfly Bay\nMSQ_Moorin 795\nLat_dDeg -20.078\nLong_dDEG 148.92522\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 138",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074853,
+  "lat": -20.0769353,
+  "lon": 148.9251131,
+  "tags": {
+    "description": "Pt_No 140\nLocation West Butterfly Bay\nMSQ_Moorin 796\nLat_dDeg -20.07707\nLong_dDEG 148.92517\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 139",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074854,
+  "lat": -20.0764756,
+  "lon": 148.9252218,
+  "tags": {
+    "description": "Pt_No 137\nLocation West Butterfly Bay\nMSQ_Moorin 797\nLat_dDeg -20.0766\nLong_dDEG 148.92523\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 136",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074855,
+  "lat": -20.0764677,
+  "lon": 148.9245692,
+  "tags": {
+    "description": "Pt_No 142\nLocation West Butterfly Bay\nMSQ_Moorin 798\nLat_dDeg -20.07658\nLong_dDEG 148.92455\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 141",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074856,
+  "lat": -20.0756756,
+  "lon": 148.9238276,
+  "tags": {
+    "description": "Pt_No 144\nLocation West Butterfly Bay\nMSQ_Moorin 887\nLat_dDeg -20.07572\nLong_dDEG 148.9238\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 143",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074857,
+  "lat": -20.0748210,
+  "lon": 148.9254633,
+  "tags": {
+    "description": "Pt_No 136\nLocation West Butterfly Bay\nMSQ_Moorin 799\nLat_dDeg -20.07492\nLong_dDEG 148.9255\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 135",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074858,
+  "lat": -20.0747267,
+  "lon": 148.9244049,
+  "tags": {
+    "description": "Pt_No 143\nLocation West Butterfly Bay\nMSQ_Moorin 884\nLat_dDeg -20.07479\nLong_dDEG 148.92429\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 142",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074859,
+  "lat": -20.0740751,
+  "lon": 148.9246522,
+  "tags": {
+    "description": "Pt_No 141\nLocation West Butterfly Bay\nMSQ_Moorin 800\nLat_dDeg -20.07422\nLong_dDEG 148.92465\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 140",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074860,
+  "lat": -20.0735133,
+  "lon": 148.9253592,
+  "tags": {
+    "description": "Pt_No 138\nLocation West Butterfly Bay\nMSQ_Moorin 801\nLat_dDeg -20.0735\nLong_dDEG 148.92523\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 137",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074861,
+  "lat": -20.0731075,
+  "lon": 148.9241235,
+  "tags": {
+    "description": "Pt_No 134\nLocation West Butterfly (load test to 4.2t minimum)\nMSQ_Moorin 961\nLat_dDeg -20.07316\nLong_dDEG 148.92419\nVesselSize\nMooring_cl D\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 133",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "red",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074862,
+  "lat": -20.0719605,
+  "lon": 148.9247488,
+  "tags": {
+    "description": "Pt_No 135\nLocation West Butterfly (load test to 4.2t minimum)\nMSQ_Moorin 929\nLat_dDeg -20.07209\nLong_dDEG 148.92474\nVesselSize\nMooring_cl D\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 134",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "red",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074863,
+  "lat": -20.0728002,
+  "lon": 148.9285200,
+  "tags": {
+    "description": "Pt_No 60\nLocation East Butterfly Bay\nMSQ_Moorin 885\nLat_dDeg -20.0724\nLong_dDEG 148.9286\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 59",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074864,
+  "lat": -20.0730086,
+  "lon": 148.9294190,
+  "tags": {
+    "description": "Pt_No 58\nLocation East Butterfly Bay\nMSQ_Moorin 794\nLat_dDeg -20.07323\nLong_dDEG 148.92943\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 57",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074865,
+  "lat": -20.0724557,
+  "lon": 148.9303076,
+  "tags": {
+    "description": "Pt_No 59\nLocation East Butterfly Bay\nMSQ_Moorin 886\nLat_dDeg -20.07252\nLong_dDEG 148.93037\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 58",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074866,
+  "lat": -20.0719906,
+  "lon": 148.9309019,
+  "tags": {
+    "description": "Pt_No 55\nLocation East Butterfly\nMSQ_Moorin 932\nLat_dDeg -20.07204\nLong_dDEG 148.93096\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 54",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074867,
+  "lat": -20.0710644,
+  "lon": 148.9315034,
+  "tags": {
+    "description": "Pt_No 56\nLocation East Butterfly\nMSQ_Moorin 933\nLat_dDeg -20.07114\nLong_dDEG 148.93147\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 55",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074868,
+  "lat": -20.0701323,
+  "lon": 148.9318342,
+  "tags": {
+    "description": "Pt_No 57\nLocation East Butterfly\nMSQ_Moorin 934\nLat_dDeg -20.07022\nLong_dDEG 148.93184\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 56",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074869,
+  "lat": -20.0683896,
+  "lon": 148.9374421,
+  "tags": {
+    "description": "Pt_No 85\nLocation Maureens Cove\nMSQ_Moorin 793\nLat_dDeg -20.06847\nLong_dDEG 148.93745\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 84",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074870,
+  "lat": -20.0687472,
+  "lon": 148.9381826,
+  "tags": {
+    "description": "Pt_No 86\nLocation Maureens Cove\nMSQ_Moorin 792\nLat_dDeg -20.06882\nLong_dDEG 148.93807\nVesselSize 6\nMooring_cl T\nMooring_Li 20 mm silver",
+    "name": "FID 85",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "orange",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074871,
+  "lat": -20.0684722,
+  "lon": 148.9385591,
+  "tags": {
+    "description": "Pt_No 84\nLocation Maureens Cove\nMSQ_Moorin 791\nLat_dDeg -20.06875\nLong_dDEG 148.93867\nVesselSize 10\nMooring_cl A\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 83",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "yellow",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074872,
+  "lat": -20.0689871,
+  "lon": 148.9387747,
+  "tags": {
+    "description": "Pt_No 88\nLocation Maureens Cove\nMSQ_Moorin 960\nLat_dDeg -20.06904\nLong_dDEG 148.93889\nVesselSize 6 (12)\nMooring_cl T/P\nMooring_Li 24mm 8 strand polypropylene",
+    "name": "FID 87",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "orange",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074873,
+  "lat": -20.0676227,
+  "lon": 148.9394003,
+  "tags": {
+    "description": "Pt_No 89\nLocation Maureens Cove\nMSQ_Moorin 790\nLat_dDeg -20.0676\nLong_dDEG 148.93943\nVesselSize 20\nMooring_cl B\nMooring_Li 48mm square stabilized polyprop",
+    "name": "FID 88",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "green",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 11106074874,
+  "lat": -20.0683787,
+  "lon": 148.9390407,
+  "tags": {
+    "description": "Pt_No 87\nLocation Maureens Cove\nMSQ_Moorin 959\nLat_dDeg -20.06833\nLong_dDEG 148.93922\nVesselSize 6 (12)\nMooring_cl T/P\nMooring_Li 24mm 8 strand polypropylene",
+    "name": "FID 86",
+    "seamark:buoy_special_purpose:category": "mooring",
+    "seamark:buoy_special_purpose:colour": "orange",
+    "seamark:buoy_special_purpose:shape": "barrel",
+    "seamark:type": "buoy_special_purpose"
+  }
+},
+{
+  "type": "node",
+  "id": 2838870584,
+  "lat": -20.0710452,
+  "lon": 148.9265217,
+  "tags": {
+    "name": "Butterfly Bay",
+    "natural": "bay"
+  }
+},
+{
+  "type": "node",
+  "id": 2838870585,
+  "lat": -20.0677398,
+  "lon": 148.9381518,
+  "tags": {
+    "name": "Maureen's Cove",
+    "natural": "bay"
+  }
+},
+{
+  "type": "relation",
+  "id": 16623817,
+  "center": {
+    "lat": -17.5927309,
+    "lon": 147.8063853
+  },
+  "tags": {
+    "boundary": "protected_area",
+    "iucn_level": "IA;II;IV;VI",
+    "leisure": "nature_reserve",
+    "maritime": "yes",
+    "name": "Great Barrier Reef Coast Marine Park",
+    "operator": "Queensland Department of Environment and Science",
+    "operator:wikidata": "Q5260301",
+    "protect_class": "1;2;4;6",
+    "protection_title": "Marine Park",
+    "ref:capad:pa_id": "227",
+    "source": "CAPAD2022",
+    "start_date": "2004-11-05",
+    "type": "boundary",
+    "wikidata": "Q106961241"
+  }
+},
+{
+  "type": "relation",
+  "id": 16623818,
+  "center": {
+    "lat": -17.5901939,
+    "lon": 148.2663248
+  },
+  "tags": {
+    "boundary": "protected_area",
+    "iucn_level": "IA;II;IV;VI",
+    "leisure": "nature_reserve",
+    "maritime": "yes",
+    "name": "Great Barrier Reef Marine Park",
+    "name:it": "Parco marino della Grande barriera corallina",
+    "protect_class": "1;2;4;6",
+    "protection_title": "Marine Park",
+    "ref:capad:pa_id": "216",
+    "source": "CAPAD2022",
+    "start_date": "2004-04-21",
+    "type": "boundary",
+    "wikidata": "Q938159"
+  }
+}
+
+  ]
+}
