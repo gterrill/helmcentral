@@ -32,8 +32,8 @@ export function AnchorageShelterRose({ card }: { card: AnchorageCard }) {
       {RINGS_NM.map((nm) => (
         <g key={nm}>
           <circle cx={CENTRE} cy={CENTRE} r={radius(nm / MAX_FETCH_NM)} fill="none" stroke={TRACK} strokeWidth={1} strokeDasharray={nm === MAX_FETCH_NM ? undefined : '2 3'} />
-          <text x={CENTRE + 3} y={CENTRE - radius(nm / MAX_FETCH_NM) - 2} fontSize="10" fill={TOKEN_TEXT}>
-            {nm} nm
+          <text x={CENTRE + 3} y={CENTRE - radius(nm / MAX_FETCH_NM) - 2} fontSize="10" letterSpacing="0.05em" fill={TOKEN_TEXT}>
+            {nm} NM
           </text>
         </g>
       ))}
