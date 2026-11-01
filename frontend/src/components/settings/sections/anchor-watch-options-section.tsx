@@ -73,6 +73,25 @@ export function AnchorWatchOptionsSection({
           </Field>
 
           <Field>
+            <FieldLabel htmlFor="transducer-depth">Transducer Depth</FieldLabel>
+            <InputGroup>
+              <InputGroupInput
+                id="transducer-depth"
+                inputMode="decimal"
+                value={draft.transducerDepthM}
+                onChange={(e) => onChange({ transducerDepthM: e.target.value })}
+                aria-label="Depth transducer below the waterline in metres"
+              />
+              <InputGroupAddon align="inline-end">
+                <InputGroupText>m</InputGroupText>
+              </InputGroupAddon>
+            </InputGroup>
+            <FieldDescription>
+              How far below the waterline the depth transducer sits. Used when Save depth turns a sounder reading into a charted depth. The rode planner and clearance check don't use it yet.
+            </FieldDescription>
+          </Field>
+
+          <Field>
             <FieldLabel htmlFor="chain-size">Chain Size</FieldLabel>
             <InputGroup>
               <InputGroupInput

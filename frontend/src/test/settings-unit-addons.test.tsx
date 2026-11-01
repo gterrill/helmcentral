@@ -56,10 +56,13 @@ describe('settings unit addons', () => {
       const minClearanceAtLow = screen.getByLabelText('Minimum clearance at low water in metres')
       expect(within(minClearanceAtLow.closest('[data-slot="input-group"]') as HTMLElement).getByText('m')).toBeInTheDocument()
 
-      // "m" appears five times on this section (bow roller, GPS-from-bow, LOA,
-      // chain onboard, clearance at low water), hence scoping each lookup
-      // above rather than a single page-wide getByText.
-      expect(screen.getAllByText('m')).toHaveLength(5)
+      const transducer = screen.getByLabelText('Depth transducer below the waterline in metres')
+      expect(within(transducer.closest('[data-slot="input-group"]') as HTMLElement).getByText('m')).toBeInTheDocument()
+
+      // "m" appears six times on this section (bow roller, GPS-from-bow, LOA,
+      // transducer, chain onboard, clearance at low water), hence scoping each
+      // lookup above rather than a single page-wide getByText.
+      expect(screen.getAllByText('m')).toHaveLength(6)
     })
 
     it('still fires onChange with the raw string value when typing into an addon-wrapped input', () => {

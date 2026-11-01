@@ -43,6 +43,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   behind the boat. Pressing **Play** from the start now opens on the globe and
   comes down onto the track. Touching the map during that move stops it where
   you are. A track broken into more than 12 pieces keeps its plain colour.
+- **Anchor watch can save the depth under the anchor to a saved place.** Set
+  **Transducer Depth** in **Settings, Anchor Watch**, the distance from the
+  waterline down to your depth transducer. Once the anchor is down, Anchor watch
+  shows a line such as "Save 4.2 m at datum" with a button, and says whether the
+  figure comes from the sounder or from a depth you typed in the rode planner.
+  It saves to the nearest saved place within 0.1 nm that has a depth, else the
+  nearest place there, or asks for a name if there's none, and only after you
+  confirm. If the place already has a depth, the confirm step shows the old
+  figure and the new one. The depth is saved as sounded, dated the day the
+  anchor went down. A sounder reading gets the transducer depth added; a depth
+  you typed is taken as depth below the surface. The transducer depth applies
+  here only, not yet to the rode planner or the clearance check. If something
+  is missing, you get a sentence saying what instead of a button. A watch set
+  before this release doesn't record where its depth came from, so enter the
+  depth again in the rode planner.
+  See [Manage the places you've given Mate](docs/how-to/manage-saved-places.md).
 
 - **Mate assesses an anchorage for your stay, and shows an anchorage card.**
   Tell Mate when you'll arrive, and when you'll leave if you know. It reads the

@@ -191,10 +191,11 @@ that is present is still decoded strictly.
   second answer is sourced. A depth stated in the same sentence as an anchorage
   word but about something else (a channel at a marina entrance has no anchorage
   word and passes) is the cost of a narrow pattern.
-- The third part: the anchor watch saves the anchor's depth to a saved place when
-  the watch starts, as `sounded`, with the transducer depth (`transducer_depth_m`)
-  so that a depth below the transducer becomes a depth below the surface. It
-  replaces a charted figure, as any new depth does.
+- The third part is
+  [ADR 0246](0246-anchor-watch-saves-a-sounded-depth.md): the anchor watch
+  saves its depth to a saved place as `sounded`, on the operator's tap, using a
+  transducer depth setting so that a depth below the transducer becomes a depth
+  at datum. It replaces a charted figure, as any new depth does.
 
 ## Rejected
 

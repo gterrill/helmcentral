@@ -70,6 +70,18 @@ func cachedSettingsFor(settingsPath string, info os.FileInfo) (map[string]any, b
 	return deepCopyMap(entry.settings), true
 }
 
+// sharedCachedSettings is cachedSettingsFor without the copy. Cached maps are
+// never mutated after storing, so a caller that only reads may share one.
+func sharedCachedSettings(settingsPath string, info os.FileInfo) (map[string]any, bool) {
+	settingsCacheMu.Lock()
+	entry, ok := settingsCache[settingsPath]
+	settingsCacheMu.Unlock()
+	if !ok || !entry.modTime.Equal(info.ModTime()) || entry.size != info.Size() {
+		return nil, false
+	}
+	return entry.settings, true
+}
+
 // storeSettingsCache records settings (already parsed, never mutated
 // in-place after this call) as settingsPath's current cached parse.
 func storeSettingsCache(settingsPath string, info os.FileInfo, settings map[string]any) {

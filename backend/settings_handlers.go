@@ -70,6 +70,12 @@ type settingsPayload struct {
 		WindageAreaM2    float64 `json:"windage_area_m2"`
 		GPSFromBowM      float64 `json:"gps_from_bow_m"`
 		LOAM             float64 `json:"loa_m"`
+		// TransducerDepthM is how far below the waterline the depth
+		// transducer sits, in metres. 0 means not set: there is no default,
+		// since it is a fact about one hull. Only the anchor watch's
+		// "save depth" uses it, to turn a depth below the transducer into a
+		// depth below the surface.
+		TransducerDepthM float64 `json:"transducer_depth_m"`
 		// AutoRaiseOnMotoring gates the server-side anchor auto-raise
 		// watcher (anchor_auto_raise.go, ADR 0099): true unless the
 		// operator has explicitly turned it off. Unlike every other field
@@ -359,6 +365,7 @@ func updateSettingsHandler(c echo.Context) error {
 		"windage_area_m2":        normalized.Anchor.WindageAreaM2,
 		"gps_from_bow_m":         normalized.Anchor.GPSFromBowM,
 		"loa_m":                  normalized.Anchor.LOAM,
+		"transducer_depth_m":     normalized.Anchor.TransducerDepthM,
 		"auto_raise_on_motoring": normalized.Anchor.AutoRaiseOnMotoring,
 		"min_clearance_at_low_m": normalized.Anchor.MinClearanceAtLowM,
 	}
@@ -493,6 +500,13 @@ func validateSettingsChange(current, next settingsPayload) *settingsValidationEr
 		return &settingsValidationError{
 			Field:   "assistant.web_search_model",
 			Message: "choose a search model before turning on web search",
+		}
+	}
+
+	if t := next.Anchor.TransducerDepthM; math.IsNaN(t) || t < 0 || t > maxTransducerDepthM {
+		return &settingsValidationError{
+			Field:   "anchor.transducer_depth_m",
+			Message: fmt.Sprintf("transducer depth must be between 0 and %g m (0 leaves it unset)", maxTransducerDepthM),
 		}
 	}
 
@@ -641,6 +655,9 @@ func buildSettingsPayload(settings map[string]any) settingsPayload {
 		}
 		if value := coerceFloat(anchorMap["loa_m"]); value > 0 {
 			payload.Anchor.LOAM = value
+		}
+		if value := coerceFloat(anchorMap["transducer_depth_m"]); value > 0 {
+			payload.Anchor.TransducerDepthM = value
 		}
 		// Presence, not truthiness, is what distinguishes "the operator
 		// explicitly turned this off" from "this settings.yaml predates the
@@ -842,6 +859,9 @@ func normalizeSettingsPayload(req settingsPayload) settingsPayload {
 	if normalized.Anchor.LOAM < 0 {
 		normalized.Anchor.LOAM = 0
 	}
+	// Passed through unchanged, even when out of range: validateSettingsChange
+	// refuses it, so a typo is reported rather than quietly replaced.
+	normalized.Anchor.TransducerDepthM = req.Anchor.TransducerDepthM
 	// Straight passthrough, deliberately with no override in either
 	// direction - see the comment on the field itself for why this one
 	// field can't use the "default when invalid/absent" pattern every other
