@@ -65,21 +65,34 @@ describe('lightFor', () => {
   })
 
   describe('the base map', () => {
-    it('is dark blue and heavy at night', () => {
+    it('is very dark blue and heavy at night', () => {
       const night = lightFor({ altitudeDeg: -20, azimuthDeg: 0 })
-      expect(night.tint.opacity).toBeGreaterThanOrEqual(0.55)
-      expect(night.tint.opacity).toBeLessThanOrEqual(0.65)
+      expect(night.tint.opacity).toBeGreaterThanOrEqual(0.72)
+      expect(night.tint.opacity).toBeLessThanOrEqual(0.78)
+      expect(night.tint.colour).toBe('#071433')
       const [r, , b] = rgb(night.tint.colour)
       expect(b).toBeGreaterThan(r)
-      expect(luma(night.tint.colour)).toBeLessThan(60)
+      expect(luma(night.tint.colour)).toBeLessThan(35)
     })
 
-    it('is blue to purple at about a third in civil twilight', () => {
+    it('is blue to purple at about two fifths in civil twilight', () => {
       const dusk = lightFor({ altitudeDeg: -6, azimuthDeg: 270 })
-      expect(dusk.tint.opacity).toBeGreaterThan(0.3)
-      expect(dusk.tint.opacity).toBeLessThan(0.4)
+      expect(dusk.tint.opacity).toBeGreaterThan(0.36)
+      expect(dusk.tint.opacity).toBeLessThan(0.46)
       const [r, , b] = rgb(dusk.tint.colour)
       expect(b).toBeGreaterThan(r)
+    })
+
+    it('eases from night through twilight to sunset without a step: each change is gentler than the last', () => {
+      const at = (alt: number) => lightFor({ altitudeDeg: alt, azimuthDeg: 270 }).tint.opacity
+      const step = (a: number, b: number) => (at(a) - at(b)) / (b - a)
+      // Opacity falls faster per degree between night and twilight than it does afterwards, and never rises.
+      let last = Infinity
+      for (const alt of [-12, -10, -8, -6, -4, -2, 0, 3, 6, 12, 18]) {
+        expect(at(alt)).toBeLessThanOrEqual(last)
+        last = at(alt)
+      }
+      expect(step(-12, -6)).toBeGreaterThan(step(-6, 0))
     })
 
     it('is a light warm amber at sunrise, sunset and golden hour', () => {

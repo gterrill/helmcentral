@@ -19,14 +19,16 @@ const jumpTo = vi.fn()
 const setProjection = vi.fn()
 let interrupt: (() => void) | undefined
 let introActive = false
+let momentActive = false
 let lastLight: { key: string } | null = null
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
-  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null; inset?: React.ReactNode; insetCorner?: string; introActive?: boolean; onIntroInterrupt?: () => void; light?: { key: string } | null }, ref) {
+  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null; inset?: React.ReactNode; insetCorner?: string; introActive?: boolean; momentActive?: boolean; onInterrupt?: () => void; light?: { key: string } | null }, ref) {
     lastLight = p.light ?? null
-    useImperativeHandle(ref, () => ({ getFraming, jumpTo, setProjection }))
-    interrupt = p.onIntroInterrupt
+    useImperativeHandle(ref, () => ({ getFraming, jumpTo, setProjection, project: () => ({ point: { x: 500, y: 300 }, container: { w: 1000, h: 400 } }) }))
+    interrupt = p.onInterrupt
     introActive = !!p.introActive
+    momentActive = !!p.momentActive
     lastBoat = p.boat
     return <div data-testid="map" data-inset-corner={p.insetCorner}>{p.inset}</div>
   }),
@@ -261,6 +263,103 @@ describe('ReplayPanel', () => {
       releases[1]()
       await waitFor(() => expect(screen.getByTestId('inset')).toHaveAttribute('data-zoom-offset', '2'))
       expect(saved.zoom_offset).toBe(2)
+    })
+  })
+
+  describe('a photo moment', () => {
+    const photoSign = { id: 's1', t_ms: (start + 500) * 1000, title: 'Whale', note: '', document_id: 'd1', photo_url: '/api/documents/d1/content', visibility: 'passing', show_s: 4, starts_leg: false, photo_moment: null, created_at: '', updated_at: '' }
+    const withSign = (extra: Record<string, unknown> = {}) => stubApi({ 'GET /api/passages/camera-shots': { shots: [] }, 'GET /api/passages/signs': { signs: [{ ...photoSign, ...extra }] }, ...insetRoutes() })
+    const scrub = (v: number) => fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: String(v) } })
+    // Jumping to a sign, from its mark on the slider: the one way to land on its moment.
+    const jumpToSign = async () => fireEvent.click(await screen.findByRole('button', { name: /^Sign Whale at/ }))
+
+    it('shows the photo over the map where the replay is held on a sign, and not elsewhere', async () => {
+      withSign()
+      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      await screen.findByRole('button', { name: /^Sign Whale at/ })
+      scrub(200)
+      expect(screen.queryByTestId('photo-moment')).toBeNull()
+      await jumpToSign()
+      expect(await screen.findByTestId('photo-moment')).toHaveAttribute('data-phase', 'grow')
+      // Paused on the moment, a touch of the map is not what ends it.
+      expect(momentActive).toBe(false)
+      scrub(501)
+      expect(screen.queryByTestId('photo-moment')).toBeNull()
+    })
+
+    it('shows nothing for a sign switched off, or without a photo', async () => {
+      withSign({ photo_moment: false })
+      const { unmount } = render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      await jumpToSign()
+      expect(screen.queryByTestId('photo-moment')).toBeNull()
+      unmount()
+      withSign({ document_id: null, photo_url: null })
+      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      await jumpToSign()
+      expect(screen.queryByTestId('photo-moment')).toBeNull()
+    })
+
+    it('ends when a hand takes the map, and the replay stays where it is, past the sign', async () => {
+      withSign()
+      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      await jumpToSign()
+      await screen.findByTestId('photo-moment')
+      act(() => { interrupt?.() })
+      expect(screen.queryByTestId('photo-moment')).toBeNull()
+      expect(screen.getByLabelText('Replay position')).toHaveValue('500')
+    })
+
+    it('does not fly in again when the replay is started again inside a moment at the very start', async () => {
+      withSign({ t_ms: start * 1000 })
+      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      await screen.findByRole('button', { name: /^Sign Whale at/ })
+      vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance'] })
+      try {
+        fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+        expect(getFraming).toHaveBeenCalledTimes(1)
+        // The move lands and the replay plays: held in the moment at the start, with the slider still on 0.
+        act(() => { vi.advanceTimersByTime(100) })
+        act(() => { vi.advanceTimersByTime(500) })
+        expect(screen.getByTestId('photo-moment')).toBeInTheDocument()
+        expect(screen.getByLabelText('Replay position')).toHaveValue('0')
+        fireEvent.click(screen.getByRole('button', { name: 'Pause replay' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+        expect(getFraming).toHaveBeenCalledTimes(1)
+        expect(screen.getByRole('button', { name: 'Pause replay' })).toBeInTheDocument()
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('holds for no moment over a photo that will not load, and says so', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.stubGlobal('Image', class {
+        onerror: (() => void) | null = null
+        set src(_v: string) { queueMicrotask(() => this.onerror?.()) }
+      })
+      try {
+        withSign()
+        render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+        await screen.findByRole('button', { name: /^Sign Whale at/ })
+        await act(async () => { await Promise.resolve() })
+        await jumpToSign()
+        expect(screen.queryByTestId('photo-moment')).toBeNull()
+        expect(warn).toHaveBeenCalledWith(expect.stringContaining('Whale'))
+      } finally {
+        vi.unstubAllGlobals()
+        warn.mockRestore()
+      }
+    })
+
+    it('keeps the slider over the sailing: scrubbing to or past the sign skips its moment', async () => {
+      withSign()
+      render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+      await screen.findByRole('button', { name: /^Sign Whale at/ })
+      scrub(500)
+      expect(screen.queryByTestId('photo-moment')).toBeNull()
+      scrub(900)
+      expect(screen.queryByTestId('photo-moment')).toBeNull()
+      expect(screen.getByLabelText('Replay position')).toHaveValue('900')
     })
   })
 })

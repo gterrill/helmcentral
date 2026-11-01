@@ -3,7 +3,10 @@ import { useEffect, useState } from 'react'
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { apiBaseUrl } from '@/config/api'
-import type { ReplaySign } from '@/lib/replay-signs'
+import {
+  SIGN_CARD_GAP_PX, SIGN_CARD_PAD_PX, SIGN_CARD_PHOTO_W_PX, SIGN_CARD_TEXT_W_PX, SIGN_NOTE_LINE_PX, SIGN_TITLE_LINE_PX, type ReplaySign,
+} from '@/lib/replay-signs'
+import { PHOTO_ASPECT } from '@/lib/replay-time'
 import { cn } from '@/lib/utils'
 
 /** The address of a sign's photo, or null when it has none (or the document is gone). */
@@ -48,22 +51,24 @@ export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, maxW
   const body = (
     <>
       {src && !failed && (
-        <img src={src} alt="" loading="lazy" className="aspect-[4/3] w-full shrink-0 rounded-sm bg-muted object-cover" onError={() => { logPhotoFailure(sign); setFailed(true) }} />
+        <img src={src} alt="" loading="lazy" style={{ aspectRatio: PHOTO_ASPECT }} className="w-full shrink-0 rounded-sm bg-muted object-cover" onError={() => { logPhotoFailure(sign); setFailed(true) }} />
       )}
       {src && failed && (
-        <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground" data-testid="sign-photo-missing">
+        <span style={{ aspectRatio: PHOTO_ASPECT }} className="flex w-full shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground" data-testid="sign-photo-missing">
           <ImageOff className="h-6 w-6" aria-hidden="true" />
         </span>
       )}
       <span className="flex min-w-0 flex-col text-left">
-        <span className="truncate text-sm font-semibold text-foreground">{sign.title}</span>
-        {sign.note && <span className="line-clamp-2 whitespace-pre-line text-xs text-muted-foreground">{sign.note}</span>}
+        <span style={{ lineHeight: `${SIGN_TITLE_LINE_PX}px` }} className="truncate text-sm font-semibold text-foreground">{sign.title}</span>
+        {sign.note && <span style={{ lineHeight: `${SIGN_NOTE_LINE_PX}px` }} className="line-clamp-2 whitespace-pre-line text-xs text-muted-foreground">{sign.note}</span>}
         {src && failed && <span className="text-xs text-muted-foreground">Photo not available</span>}
       </span>
     </>
   )
   // The photo leads, full width; a note-only sign stays a compact text card.
-  const surface = cn(src ? 'w-64' : 'w-56', 'flex max-w-full flex-col items-stretch gap-2 rounded-md border border-border bg-card p-2 text-card-foreground shadow-md')
+  // Its size comes from lib/replay-signs, which the photo moment grows from.
+  const surface = 'flex max-w-full flex-col items-stretch rounded-md border border-border bg-card text-card-foreground shadow-md'
+  const surfaceStyle = { width: src ? SIGN_CARD_PHOTO_W_PX : SIGN_CARD_TEXT_W_PX, padding: SIGN_CARD_PAD_PX, gap: SIGN_CARD_GAP_PX }
   return (
     <div
       style={maxWidthPx === undefined ? undefined : { maxWidth: maxWidthPx }}
@@ -72,11 +77,11 @@ export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, maxW
       data-sign-id={sign.id}
     >
       {canOpenPhoto && src && !failed ? (
-        <button type="button" aria-label={`Open photo: ${sign.title}`} className={cn(surface, 'cursor-zoom-in focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring')} onClick={() => onOpenPhoto(sign)}>
+        <button type="button" aria-label={`Open photo: ${sign.title}`} style={surfaceStyle} className={cn(surface, 'cursor-zoom-in focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring')} onClick={() => onOpenPhoto(sign)}>
           {body}
         </button>
       ) : (
-        <div className={surface} role="group" aria-label={`Sign: ${sign.title}`}>{body}</div>
+        <div style={surfaceStyle} className={surface} role="group" aria-label={`Sign: ${sign.title}`}>{body}</div>
       )}
       {onClose && (
         <button

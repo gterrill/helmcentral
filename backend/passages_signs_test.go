@@ -232,3 +232,76 @@ func TestSignRoutesAreAuthTieredAndNotShadowed(t *testing.T) {
 		t.Errorf("PATCH sign resolved to %q", c.Path())
 	}
 }
+
+// photo_moment is the operator's choice for a sign's photo to fill the frame in
+// a replay. Null is "the default": on when there is a photo. Only an explicit
+// false turns it off, so a photo added later is on without a second step.
+func TestSignPhotoMomentRoundTrip(t *testing.T) {
+	store := withPassageStore(t)
+	seedPassage(t, store, passageEpoch, passageEpoch.Add(2*time.Hour))
+	at := passageEpoch.Add(time.Hour).UnixMilli()
+
+	// Left out: null, in the answer and in the list.
+	code, body := send(t, createSignHandler, http.MethodPost, signBody(at, ""))
+	if code != http.StatusCreated {
+		t.Fatal(code, body)
+	}
+	plain := body["sign"].(map[string]any)
+	if v, ok := plain["photo_moment"]; !ok || v != nil {
+		t.Fatalf("a sign made without a choice: %v", plain)
+	}
+	id := plain["id"].(string)
+
+	// Off, then on, then left alone by an unrelated edit.
+	if code, body = send(t, patchSignHandler, http.MethodPatch, `{"photo_moment":false}`, "id", id); code != 200 || body["sign"].(map[string]any)["photo_moment"] != false {
+		t.Fatal(code, body)
+	}
+	if code, body = send(t, patchSignHandler, http.MethodPatch, `{"note":"edited"}`, "id", id); code != 200 || body["sign"].(map[string]any)["photo_moment"] != false {
+		t.Fatalf("an edit that leaves the choice out changed it: %d %v", code, body)
+	}
+	if code, body = send(t, patchSignHandler, http.MethodPatch, `{"photo_moment":true}`, "id", id); code != 200 || body["sign"].(map[string]any)["photo_moment"] != true {
+		t.Fatal(code, body)
+	}
+	if code, body = send(t, patchSignHandler, http.MethodPatch, `{"photo_moment":null}`, "id", id); code != 200 || body["sign"].(map[string]any)["photo_moment"] != nil {
+		t.Fatalf("null should put it back to the default: %d %v", code, body)
+	}
+
+	// Made with a choice.
+	if code, body = send(t, createSignHandler, http.MethodPost, signBody(at+1000, `"photo_moment":false`)); code != http.StatusCreated || body["sign"].(map[string]any)["photo_moment"] != false {
+		t.Fatal(code, body)
+	}
+	code, body = send(t, listSignsHandler, http.MethodGet, "")
+	if code != 200 {
+		t.Fatal(code, body)
+	}
+	got := map[string]any{}
+	for _, s := range body["signs"].([]any) {
+		m := s.(map[string]any)
+		got[m["id"].(string)] = m["photo_moment"]
+	}
+	if len(got) != 2 || got[id] != nil {
+		t.Fatalf("list: %v", got)
+	}
+
+	// Not a yes or no.
+	if code, _ = send(t, patchSignHandler, http.MethodPatch, `{"photo_moment":"maybe"}`, "id", id); code != http.StatusBadRequest {
+		t.Errorf("a string for photo_moment: %d", code)
+	}
+}
+
+// A database from before photo moments gains the column, with every sign on
+// the default.
+func TestSignPhotoMomentColumnIsAddedToAnOlderDatabase(t *testing.T) {
+	store := withPassageStore(t)
+	if _, err := store.db.Exec(`ALTER TABLE replay_signs DROP COLUMN photo_moment`); err != nil {
+		t.Fatal(err)
+	}
+	if err := createSignSchema(store.db); err != nil {
+		t.Fatal(err)
+	}
+	seedPassage(t, store, passageEpoch, passageEpoch.Add(2*time.Hour))
+	sg, err := store.CreateSign(replaySign{TMs: passageEpoch.Add(time.Hour).UnixMilli(), Title: "Whale", Visibility: signPassing, ShowS: signShowDef})
+	if err != nil || sg.PhotoMoment != nil {
+		t.Fatalf("%+v %v", sg, err)
+	}
+}

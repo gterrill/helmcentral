@@ -61,6 +61,8 @@ export interface PassageMapHandle {
   getFraming: () => { overview: Camera; bearing: number } | null
   /** Places a camera: the replay's opening move, a frame at a time. */
   jumpTo: (camera: Camera) => void
+  /** Where the map puts a point, in the map's own pixels, and how big the map is: for what is drawn over it. Null until the map can say. */
+  project: (lon: number, lat: number) => { point: { x: number; y: number }; container: { w: number; h: number } } | null
   /** Sets the projection: the globe the opening move starts from. `flatAtZoom` is the zoom from which it is flat anyway, or null. */
   setProjection: (projection: MapProjection, flatAtZoom: number | null) => void
 }
@@ -113,15 +115,17 @@ export interface PassageMapProps {
   /** Greys the zoom and fit buttons: the replay owns the camera while it plays. */
   controlsDisabled?: boolean
   /** The replay's opening move is placing the camera. A person taking hold of
-   * the map meanwhile calls `onIntroInterrupt`. */
+   * the map meanwhile calls `onInterrupt`. */
   introActive?: boolean
+  /** A photo moment is under way and the replay is playing. A person taking hold of the map ends it, as for the opening move, by calling `onInterrupt`. */
+  momentActive?: boolean
   /** The light for the time of day at the boat: the sky, the map light and the relief shading. Null leaves the sky to the app theme. */
   light?: ReplayLight | null
   /** The sailed track coloured by speed, and the wake, for the frame being shown. Without it a replaying map draws the plain sailed line. */
   speed?: SpeedFrame | null
   /** Told the map's zoom, in quarter steps, as it changes. */
   onZoomBucket?: (zoom: number) => void
-  onIntroInterrupt?: () => void
+  onInterrupt?: () => void
 }
 
 const LEVEL_MS = 600
@@ -154,7 +158,7 @@ function centreOf(bounds: [number, number, number, number]) {
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs, pieces: given, controlsDisabled = false, introActive = false, onIntroInterrupt, light = null, speed = null, onZoomBucket },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs, pieces: given, controlsDisabled = false, introActive = false, momentActive = false, onInterrupt, light = null, speed = null, onZoomBucket },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -284,6 +288,13 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
       return { zoom: map.getZoom(), pitch: camera3d ? map.getPitch() : null, bearing: map.getBearing() }
     },
     jumpTo: (camera) => { mapRef.current?.getMap?.()?.jumpTo(camera) },
+    project: (lon, lat) => {
+      const map = mapRef.current?.getMap?.()
+      if (!map) return null
+      const p = map.project([lon, lat])
+      const box = map.getContainer()
+      return { point: { x: p.x, y: p.y }, container: { w: box.clientWidth, h: box.clientHeight } }
+    },
     setProjection: (projection, flatAtZoom) => {
       const map = mapRef.current?.getMap?.()
       if (!map) return
@@ -426,13 +437,18 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   // The opening move is the replay's to work out; the map places each camera
   // it is given. A person taking hold of the map ends it: the camera's own
   // jumps carry no originalEvent.
-  const interruptRef = useRef(onIntroInterrupt)
-  useEffect(() => { interruptRef.current = onIntroInterrupt })
+  const interruptRef = useRef(onInterrupt)
+  useEffect(() => { interruptRef.current = onInterrupt })
+  const interruptible = introActive || momentActive
   useEffect(() => {
     const map = mapRef.current?.getMap?.()
-    if (!mapLoaded || !map || !introActive) return
+    if (!mapLoaded || !map || !interruptible) return
     const surface = map.getCanvasContainer()
-    const stop = () => interruptRef.current?.()
+    // A sign's card is a marker on the map; a tap on it (to open its photo) is not a hand on the map.
+    const stop = (e?: Event) => {
+      if (e?.target instanceof Element && e.target.closest('.maplibregl-marker')) return
+      interruptRef.current?.()
+    }
     const onMoveStart = (e: { originalEvent?: unknown }) => {
       if (e.originalEvent) stop()
     }
@@ -448,7 +464,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
       surface.removeEventListener('touchstart', stop)
       surface.removeEventListener('wheel', stop)
     }
-  }, [mapLoaded, introActive])
+  }, [mapLoaded, interruptible])
 
   // The sky and light follow the time of day at the boat (lib/replay-light),
   // put on the map by lib/replay-map-style. `light` is the same object while

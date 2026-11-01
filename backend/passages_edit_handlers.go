@@ -56,16 +56,11 @@ func patchPassageHandler(c echo.Context) error {
 		return err
 	}
 	patch := passagePatch{Title: body.Title, Notes: body.Notes, FromName: body.FromName, ToName: body.ToName, Hidden: body.Hidden, Rating: body.Rating}
-	if body.CruiseID != nil {
-		patch.CruiseIDSet = true
-		if !bytes.Equal(bytes.TrimSpace(body.CruiseID), []byte("null")) {
-			var id string
-			if err := json.Unmarshal(body.CruiseID, &id); err != nil {
-				return c.JSON(http.StatusBadRequest, map[string]string{"error": "cruise_id must be a string or null"})
-			}
-			patch.CruiseID = &id
-		}
+	set, cruiseID, err := decodeNullable[string](body.CruiseID)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "cruise_id must be a string or null"})
 	}
+	patch.CruiseIDSet, patch.CruiseID = set, cruiseID
 	rec, err := store.PatchPassage(c.Param("id"), patch)
 	if err != nil {
 		return passageErrorResponse(c, err)
@@ -255,4 +250,21 @@ func putWaterRiseLabelHandler(c echo.Context) error {
 		return passageErrorResponse(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"ok": true})
+}
+
+// decodeNullable reads a JSON field that may be left out, null, or a value of
+// type T, which a pointer alone cannot tell apart. set says the field was
+// present; v is nil for null and points at the value otherwise.
+func decodeNullable[T any](raw json.RawMessage) (set bool, v *T, err error) {
+	if raw == nil {
+		return false, nil, nil
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return true, nil, nil
+	}
+	var value T
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return true, nil, err
+	}
+	return true, &value, nil
 }

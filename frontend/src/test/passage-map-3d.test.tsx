@@ -204,7 +204,7 @@ describe('PassageMap 3D', () => {
   describe('while the opening move runs', () => {
     const mountIntro = () => {
       const interrupted = vi.fn()
-      render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive onIntroInterrupt={interrupted} />)
+      render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive onInterrupt={interrupted} />)
       act(() => { (mapProps.onLoad as () => void)() })
       return interrupted
     }
@@ -223,11 +223,49 @@ describe('PassageMap 3D', () => {
       expect(interrupted).toHaveBeenCalledTimes(1)
     })
 
+    it('a tap on a sign\'s card, which is a marker on the map, is not a hand on the map', () => {
+      const interrupted = vi.fn()
+      render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive onInterrupt={interrupted} />)
+      act(() => { (mapProps.onLoad as () => void)() })
+      const marker = document.createElement('div')
+      marker.className = 'maplibregl-marker'
+      const button = document.createElement('button')
+      marker.appendChild(button)
+      surface.appendChild(marker)
+      for (const type of ['pointerdown', 'touchstart', 'wheel']) act(() => { button.dispatchEvent(new Event(type, { bubbles: true })) })
+      expect(interrupted).not.toHaveBeenCalled()
+      act(() => { surface.dispatchEvent(new Event('pointerdown')) })
+      expect(interrupted).toHaveBeenCalledTimes(1)
+      surface.removeChild(marker)
+    })
+
+    it('a photo moment is ended by a hand on the map, not by one on a marker', () => {
+      const interrupted = vi.fn()
+      render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} momentActive onInterrupt={interrupted} />)
+      act(() => { (mapProps.onLoad as () => void)() })
+      const marker = document.createElement('div')
+      marker.className = 'maplibregl-marker'
+      const button = document.createElement('button')
+      marker.appendChild(button)
+      surface.appendChild(marker)
+      act(() => { button.dispatchEvent(new Event('pointerdown', { bubbles: true })) })
+      expect(interrupted).not.toHaveBeenCalled()
+      surface.removeChild(marker)
+    })
+
+    it('a hand on the map ends a photo moment too', () => {
+      const interrupted = vi.fn()
+      render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} momentActive onInterrupt={interrupted} />)
+      act(() => { (mapProps.onLoad as () => void)() })
+      act(() => { surface.dispatchEvent(new Event('pointerdown')) })
+      expect(interrupted).toHaveBeenCalledTimes(1)
+    })
+
     it('does not listen once it is over', () => {
       const interrupted = vi.fn()
-      const { rerender } = render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive onIntroInterrupt={interrupted} />)
+      const { rerender } = render(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive onInterrupt={interrupted} />)
       act(() => { (mapProps.onLoad as () => void)() })
-      rerender(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive={false} onIntroInterrupt={interrupted} />)
+      rerender(<PassageMap passages={passages} playedIds={new Set()} boat={null} isDarkTheme={false} introActive={false} onInterrupt={interrupted} />)
       act(() => { surface.dispatchEvent(new Event('pointerdown')) })
       expect(interrupted).not.toHaveBeenCalled()
     })

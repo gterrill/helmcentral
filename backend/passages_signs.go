@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -45,24 +44,30 @@ type replaySign struct {
 	ShowS      int
 	// StartsLeg marks a join: the track from here on is drawn as a new leg.
 	StartsLeg bool
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	// PhotoMoment is the operator's choice for the photo to fill the frame in
+	// a replay. Nil is the default, which is on when the sign has a photo; only
+	// an explicit false turns it off.
+	PhotoMoment *bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // signJSON is a sign as the client sees it. The photo fields are filled only
 // when the document is still in the library.
 type signJSON struct {
-	ID         string    `json:"id"`
-	TMs        int64     `json:"t_ms"`
-	Title      string    `json:"title"`
-	Note       string    `json:"note"`
-	DocumentID *string   `json:"document_id"`
-	PhotoURL   *string   `json:"photo_url"`
-	Visibility string    `json:"visibility"`
-	ShowS      int       `json:"show_s"`
-	StartsLeg  bool      `json:"starts_leg"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string  `json:"id"`
+	TMs        int64   `json:"t_ms"`
+	Title      string  `json:"title"`
+	Note       string  `json:"note"`
+	DocumentID *string `json:"document_id"`
+	PhotoURL   *string `json:"photo_url"`
+	Visibility string  `json:"visibility"`
+	ShowS      int     `json:"show_s"`
+	StartsLeg  bool    `json:"starts_leg"`
+	// PhotoMoment is null for the default (on when there is a photo).
+	PhotoMoment *bool     `json:"photo_moment"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 func createSignSchema(db *sql.DB) error {
@@ -89,7 +94,19 @@ func createSignSchema(db *sql.DB) error {
 	if err := ensureColumn(db, "replay_signs", "starts_leg", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
-	return ensureColumn(db, "replay_signs", "name_attempted_ms", "INTEGER")
+	if err := ensureColumn(db, "replay_signs", "name_attempted_ms", "INTEGER"); err != nil {
+		return err
+	}
+	// photo_moment is null until the operator chooses; null means the default.
+	return ensureColumn(db, "replay_signs", "photo_moment", "INTEGER")
+}
+
+// nullableBool is a *bool as a database value: NULL, 0 or 1.
+func nullableBool(b *bool) any {
+	if b == nil {
+		return nil
+	}
+	return boolInt(*b)
 }
 
 // joinTitle cuts a place name written into a join sign to the title limit, so
@@ -141,15 +158,20 @@ func checkSignPhoto(id string) error {
 	return nil
 }
 
-const signColumns = `id, t_ms, title, note, document_id, visibility, show_s, starts_leg, created_ms, updated_ms`
+const signColumns = `id, t_ms, title, note, document_id, visibility, show_s, starts_leg, photo_moment, created_ms, updated_ms`
 
 func scanSign(row interface{ Scan(...any) error }) (replaySign, error) {
 	var s replaySign
 	var doc sql.NullString
 	var created, updated int64
 	var startsLeg int
-	err := row.Scan(&s.ID, &s.TMs, &s.Title, &s.Note, &doc, &s.Visibility, &s.ShowS, &startsLeg, &created, &updated)
+	var moment sql.NullInt64
+	err := row.Scan(&s.ID, &s.TMs, &s.Title, &s.Note, &doc, &s.Visibility, &s.ShowS, &startsLeg, &moment, &created, &updated)
 	s.StartsLeg = startsLeg != 0
+	if moment.Valid {
+		on := moment.Int64 != 0
+		s.PhotoMoment = &on
+	}
 	if doc.Valid {
 		s.DocumentID = &doc.String
 	}
@@ -201,8 +223,8 @@ func (s *passageStore) CreateSign(in replaySign) (replaySign, error) {
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	in.ID, in.CreatedAt, in.UpdatedAt = uuid.NewString(), now, now
-	if _, err := tx.Exec(`INSERT INTO replay_signs (`+signColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		in.ID, in.TMs, in.Title, in.Note, in.DocumentID, in.Visibility, in.ShowS, boolInt(in.StartsLeg), now.UnixMilli(), now.UnixMilli()); err != nil {
+	if _, err := tx.Exec(`INSERT INTO replay_signs (`+signColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		in.ID, in.TMs, in.Title, in.Note, in.DocumentID, in.Visibility, in.ShowS, boolInt(in.StartsLeg), nullableBool(in.PhotoMoment), now.UnixMilli(), now.UnixMilli()); err != nil {
 		return replaySign{}, fmt.Errorf("insert sign: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -227,6 +249,10 @@ type signPatch struct {
 	Visibility    *string
 	ShowS         *int
 	StartsLeg     *bool
+	// PhotoMomentSet says photo_moment was present; a nil PhotoMoment with it
+	// set puts the choice back to the default.
+	PhotoMoment    *bool
+	PhotoMomentSet bool
 }
 
 func (s *passageStore) PatchSign(id string, p signPatch) (replaySign, error) {
@@ -263,6 +289,9 @@ func (s *passageStore) PatchSign(id string, p signPatch) (replaySign, error) {
 	if p.StartsLeg != nil {
 		sg.StartsLeg = *p.StartsLeg
 	}
+	if p.PhotoMomentSet {
+		sg.PhotoMoment = p.PhotoMoment
+	}
 	if err := validateSign(sg); err != nil {
 		return sg, err
 	}
@@ -273,9 +302,9 @@ func (s *passageStore) PatchSign(id string, p signPatch) (replaySign, error) {
 	}
 	sg.UpdatedAt = time.Now().UTC().Truncate(time.Millisecond)
 	untitledJoin := sg.StartsLeg && sg.Title == ""
-	if _, err := tx.Exec(`UPDATE replay_signs SET t_ms=?, title=?, note=?, document_id=?, visibility=?, show_s=?, starts_leg=?, updated_ms=?,
+	if _, err := tx.Exec(`UPDATE replay_signs SET t_ms=?, title=?, note=?, document_id=?, visibility=?, show_s=?, starts_leg=?, photo_moment=?, updated_ms=?,
 		name_attempted_ms = CASE WHEN ? THEN NULL ELSE name_attempted_ms END WHERE id=?`,
-		sg.TMs, sg.Title, sg.Note, sg.DocumentID, sg.Visibility, sg.ShowS, boolInt(sg.StartsLeg), sg.UpdatedAt.UnixMilli(), untitledJoin, id); err != nil {
+		sg.TMs, sg.Title, sg.Note, sg.DocumentID, sg.Visibility, sg.ShowS, boolInt(sg.StartsLeg), nullableBool(sg.PhotoMoment), sg.UpdatedAt.UnixMilli(), untitledJoin, id); err != nil {
 		return sg, fmt.Errorf("update sign: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -317,7 +346,7 @@ func signErrorResponse(c echo.Context, err error) error {
 func toSignJSON(sg replaySign, exists func(id string) (bool, error)) (signJSON, error) {
 	out := signJSON{
 		ID: sg.ID, TMs: sg.TMs, Title: sg.Title, Note: sg.Note, Visibility: sg.Visibility,
-		ShowS: sg.ShowS, StartsLeg: sg.StartsLeg, CreatedAt: sg.CreatedAt, UpdatedAt: sg.UpdatedAt,
+		ShowS: sg.ShowS, StartsLeg: sg.StartsLeg, PhotoMoment: sg.PhotoMoment, CreatedAt: sg.CreatedAt, UpdatedAt: sg.UpdatedAt,
 	}
 	if sg.DocumentID == nil {
 		return out, nil
@@ -404,6 +433,8 @@ func createSignHandler(c echo.Context) error {
 		Visibility *string `json:"visibility"`
 		ShowS      *int    `json:"show_s"`
 		StartsLeg  bool    `json:"starts_leg"`
+		// Null or left out is the default.
+		PhotoMoment *bool `json:"photo_moment"`
 	}
 	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
 		return err
@@ -412,7 +443,7 @@ func createSignHandler(c echo.Context) error {
 	if body.TMs == nil || (body.Title == nil && !body.StartsLeg) {
 		return passageErrorResponse(c, invalidf("t_ms and title are required"))
 	}
-	in := replaySign{TMs: *body.TMs, Note: body.Note, DocumentID: body.DocumentID, Visibility: signPassing, ShowS: signShowDef, StartsLeg: body.StartsLeg}
+	in := replaySign{TMs: *body.TMs, Note: body.Note, DocumentID: body.DocumentID, Visibility: signPassing, ShowS: signShowDef, StartsLeg: body.StartsLeg, PhotoMoment: body.PhotoMoment}
 	if body.Title != nil {
 		in.Title = *body.Title
 	}
@@ -449,22 +480,23 @@ func patchSignHandler(c echo.Context) error {
 		Visibility *string         `json:"visibility"`
 		ShowS      *int            `json:"show_s"`
 		StartsLeg  *bool           `json:"starts_leg"`
+		// Left out leaves the choice alone; null puts it back to the default.
+		PhotoMoment json.RawMessage `json:"photo_moment"`
 	}
 	if err := bindPassageBody(c, &body); err != nil || c.Response().Committed {
 		return err
 	}
 	patch := signPatch{TMs: body.TMs, Title: body.Title, Note: body.Note, Visibility: body.Visibility, ShowS: body.ShowS, StartsLeg: body.StartsLeg}
-	if body.DocumentID != nil {
-		patch.DocumentIDSet = true
-		if !bytes.Equal(bytes.TrimSpace(body.DocumentID), []byte("null")) {
-			var id string
-			if err := json.Unmarshal(body.DocumentID, &id); err != nil {
-				return passageErrorResponse(c, invalidf("document_id must be a string or null"))
-			}
-			if err := checkSignPhoto(id); err != nil {
-				return signErrorResponse(c, err)
-			}
-			patch.DocumentID = &id
+	var err error
+	if patch.PhotoMomentSet, patch.PhotoMoment, err = decodeNullable[bool](body.PhotoMoment); err != nil {
+		return passageErrorResponse(c, invalidf("photo_moment must be true, false or null"))
+	}
+	if patch.DocumentIDSet, patch.DocumentID, err = decodeNullable[string](body.DocumentID); err != nil {
+		return passageErrorResponse(c, invalidf("document_id must be a string or null"))
+	}
+	if patch.DocumentID != nil {
+		if err := checkSignPhoto(*patch.DocumentID); err != nil {
+			return signErrorResponse(c, err)
 		}
 	}
 	sg, err := store.PatchSign(c.Param("id"), patch)

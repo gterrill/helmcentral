@@ -41,8 +41,8 @@ interface Stop {
 // hour, day. Dawn and dusk run warm at the horizon; night is deep blue and
 // keeps some light so the boat model stays readable.
 const STOPS: readonly Stop[] = [
-  { at: -12, sky: '#050b16', horizon: '#0f1f33', lightColor: '#8aa4d6', intensity: 0.15, shading: 0.15, tint: '#0a1a3d', tintOpacity: 0.62, brightness: 0.4, saturation: -0.35 },
-  { at: -6, sky: '#1d2b4f', horizon: '#7a5a7e', lightColor: '#b7a8d9', intensity: 0.25, shading: 0.22, tint: '#3d3f8f', tintOpacity: 0.35, brightness: 0.65, saturation: -0.2 },
+  { at: -12, sky: '#050b16', horizon: '#0f1f33', lightColor: '#8aa4d6', intensity: 0.15, shading: 0.15, tint: '#071433', tintOpacity: 0.75, brightness: 0.32, saturation: -0.4 },
+  { at: -6, sky: '#1d2b4f', horizon: '#7a5a7e', lightColor: '#b7a8d9', intensity: 0.25, shading: 0.22, tint: '#363a88', tintOpacity: 0.4, brightness: 0.6, saturation: -0.22 },
   { at: 0, sky: '#4a6fa5', horizon: '#f2a65a', lightColor: '#ffb870', intensity: 0.35, shading: 0.5, tint: '#ffa64d', tintOpacity: 0.18, brightness: 0.95, saturation: 0 },
   { at: 6, sky: '#6f9fcf', horizon: '#f7d9a8', lightColor: '#ffd9a0', intensity: 0.45, shading: 0.5, tint: '#ffb866', tintOpacity: 0.12, brightness: 1, saturation: 0 },
   { at: 18, sky: SKY_DAY['sky-color'], horizon: SKY_DAY['horizon-color'], lightColor: '#ffffff', intensity: 0.5, shading: 0.35, tint: '#ffb866', tintOpacity: 0, brightness: 1, saturation: 0 },

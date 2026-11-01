@@ -27,7 +27,7 @@ class FakeResizeObserver {
 }
 
 const resolved: ResolvedSign = {
-  sign: { id: 's1', t_ms: 0, title: 'Reef', note: '', document_id: null, photo_url: '/api/x.jpg', visibility: 'always', show_s: 4, starts_leg: false },
+  sign: { id: 's1', t_ms: 0, title: 'Reef', note: '', document_id: null, photo_url: '/api/x.jpg', visibility: 'always', show_s: 4, starts_leg: false, photo_moment: null },
   clock: 0, at: 0, entryId: 'p1', lat: 0, lon: 0,
 }
 const mount = () => render(<SignMarkers cards={[resolved]} pins={[]} openId={null} canOpenPhoto={false} still onOpenPhoto={() => {}} onPinClick={() => {}} onCloseOpen={() => {}} />)

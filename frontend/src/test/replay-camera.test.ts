@@ -107,6 +107,26 @@ describe('camera director', () => {
     expect(spin(100)).toBeCloseTo(90 + 100 + 0.016 * 5, 0)
   })
 
+  it('stands still while the replay is held for a photo moment, then goes on from where it was', () => {
+    const r = rig([shot('a', 0, { mode: 'orbit', orbit_deg_per_s: 10 })])
+    r.play(0, 16)
+    for (let i = 0; i < 30; i++) r.play(1, 100) // past the ease into the shot
+    const before = r.play(1, 100).camera.bearing
+    let held = before
+    for (let i = 0; i < 20; i++) held = r.play(1, 100, { hold: true }).camera.bearing // two seconds held
+    expect(held).toBeCloseTo(before, 6)
+    // A tenth of a second after the hold is a tenth of a second of turning, not two seconds of it.
+    expect(r.play(1, 100).camera.bearing).toBeCloseTo(before + 1, 3)
+  })
+
+  it('does not run the ease into a shot while held', () => {
+    const r = rig([shot('a', 0)])
+    r.play(0, 16)
+    const early = r.play(0, 500)
+    const held = r.play(0, 1000, { hold: true })
+    expect(held.camera).toEqual(early.camera)
+  })
+
   it('a replay speed change or a pace edit mid-shot leaves the bearing continuous', () => {
     const r = rig([shot('a', 0, { mode: 'orbit', orbit_deg_per_s: 10 })])
     r.play(0, 16)

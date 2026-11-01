@@ -67,6 +67,8 @@ export interface FrameInput {
   reduced: boolean
   /** Bumped when the operator hands control back (Play, a scrub). */
   resume: number
+  /** A photo moment holds the replay: time does not advance for the camera, which stays as it is. */
+  hold?: boolean
   /** The boat now, with its held heading. */
   boat: BoatState
   /** The map's camera as it is this instant. */
@@ -141,7 +143,7 @@ export class CameraDirector {
     }
     const rs = index >= 0 ? resolved[index] : null
     const key = rs ? rs.shot.id : 'before'
-    const dt = playing && this.wasPlaying && this.lastNow !== null ? Math.max(0, Math.min(0.5, (nowMs - this.lastNow) / 1000)) : 0
+    const dt = playing && !input.hold && this.wasPlaying && this.lastNow !== null ? Math.max(0, Math.min(0.5, (nowMs - this.lastNow) / 1000)) : 0
     this.lastNow = nowMs
     this.wasPlaying = playing
 

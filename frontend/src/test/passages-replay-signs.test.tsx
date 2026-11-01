@@ -22,7 +22,7 @@ vi.mock('react-map-gl/maplibre', () => ({
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
   PassageMap: forwardRef(function PassageMapMock(p: { markers?: ReactNode }, ref) {
-    useImperativeHandle(ref, () => ({ getFraming: () => framing, jumpTo: () => {}, setProjection: () => {}, getView: () => ({ zoom: 13, pitch: 40, bearing: 0 }) }))
+    useImperativeHandle(ref, () => ({ getFraming: () => framing, jumpTo: () => {}, setProjection: () => {}, project: () => ({ point: { x: 500, y: 300 }, container: { w: 1000, h: 400 } }), getView: () => ({ zoom: 13, pitch: 40, bearing: 0 }) }))
     return <div data-testid="map">{p.markers}</div>
   }),
   InsetMap: () => <div />,
@@ -856,5 +856,46 @@ describe('ReplayPanel signs: legs', () => {
     fireEvent.blur(title)
     await waitFor(() => expect(writes).toHaveLength(1))
     expect(writes[0].body).toEqual({ title: 'Percy Island', starts_leg: false })
+  })
+})
+
+describe('ReplayPanel signs: photo moment', () => {
+  const photo = { document_id: 'doc1', photo_url: '/api/documents/doc1/content' }
+
+  it('offers the switch for a sign with a photo, on until it is switched off', async () => {
+    signs = [sign('s1', 250, photo)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    const sw = screen.getByRole('switch', { name: 'Photo moment' })
+    expect(sw).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText(/replay pauses at this sign/i)).toBeInTheDocument()
+    fireEvent.click(sw)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].body).toEqual({ photo_moment: false })
+  })
+
+  it('shows it off when the operator has switched it off, and switches it on again', async () => {
+    signs = [sign('s1', 250, { ...photo, photo_moment: false })]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    const sw = screen.getByRole('switch', { name: 'Photo moment' })
+    expect(sw).toHaveAttribute('aria-checked', 'false')
+    fireEvent.click(sw)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0].body).toEqual({ photo_moment: true })
+  })
+
+  it('is not there for a sign without a photo', async () => {
+    signs = [sign('s1', 250)]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    expect(screen.queryByRole('switch', { name: 'Photo moment' })).toBeNull()
+  })
+
+  it('is not offered when the photo is not available, though the sign still names a document', async () => {
+    signs = [sign('s1', 250, { document_id: 'doc1', photo_url: null })]
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(await screen.findByRole('button', { name: /^Sign Sign s1 at/ }))
+    expect(screen.queryByRole('switch', { name: 'Photo moment' })).toBeNull()
   })
 })

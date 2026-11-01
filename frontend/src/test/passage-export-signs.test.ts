@@ -34,7 +34,7 @@ function passage(id: string, t0: number): PassageDetail {
 }
 
 const sign = (id: string, atS: number, over: Partial<ReplaySign> = {}): ReplaySign => ({
-  id, t_ms: atS * 1000, title: `Sign ${id}`, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, ...over,
+  id, t_ms: atS * 1000, title: `Sign ${id}`, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, photo_moment: null, ...over,
 })
 const withPhoto = (id: string, atS: number, over: Partial<ReplaySign> = {}) =>
   sign(id, atS, { document_id: `doc-${id}`, photo_url: `/api/documents/doc-${id}/content`, ...over })
