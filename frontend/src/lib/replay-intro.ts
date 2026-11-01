@@ -9,6 +9,8 @@
 // sped up while the zoom changes so the target stays in view as the map
 // closes in (the `speedup` term in MapLibre's handleEaseTo).
 
+import type { Map as MapLibreMap } from 'maplibre-gl'
+
 import { latOfMercatorY, lonOfMercatorX, mercatorX, mercatorY } from '@/lib/geo'
 import { norm360, shortTurn, type Camera } from '@/lib/replay-camera'
 
@@ -85,5 +87,35 @@ export function makeIntroPath(from: Camera, to: Camera, durationMs: number = INT
       pitch: from.pitch + (to.pitch - from.pitch) * k,
       bearing: norm360(from.bearing + turn * k),
     }
+  }
+}
+
+// ── the globe ────────────────────────────────────────────────────────────
+
+/** A MapLibre projection, as `map.setProjection` takes it. */
+export type MapProjection = NonNullable<Parameters<MapLibreMap['setProjection']>[0]>
+
+export const MERCATOR: MapProjection = { type: 'mercator' }
+/** The zoom by which the opening move has left the globe behind, at the latest. */
+const GLOBE_BLEND_END_ZOOM = 5.5
+const GLOBE_BLEND_SPAN = 2
+
+export interface IntroProjection {
+  projection: MapProjection
+  /** The zoom from which the map is flat whatever else is set, or null when it already is. */
+  flatAtZoom: number | null
+}
+
+/** The projection `elapsedMs` into the opening move. The move starts on the
+ * globe and MapLibre blends it into the flat map by zoom, completing the
+ * blend by `GLOBE_BLEND_END_ZOOM` or the zoom the move lands on, whichever is
+ * lower, so the hand-off is done well before the camera lands and nothing
+ * jumps. Once the move is over (`durationMs`) it is the flat map. */
+export function introProjectionAt(to: Camera, elapsedMs: number, durationMs: number = INTRO_MS): IntroProjection {
+  const end = Math.min(GLOBE_BLEND_END_ZOOM, to.zoom)
+  if (!(durationMs > 0) || elapsedMs >= durationMs || end <= 0.1) return { projection: MERCATOR, flatAtZoom: null }
+  return {
+    projection: { type: ['interpolate', ['linear'], ['zoom'], Math.max(0, end - GLOBE_BLEND_SPAN), 'vertical-perspective', end, 'mercator'] },
+    flatAtZoom: end,
   }
 }

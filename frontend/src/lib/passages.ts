@@ -235,6 +235,42 @@ export function segmentsToGeoJSON(segments: TimedSegment[]): GeoJSON.Feature<Geo
   }
 }
 
+/** The part of one segment sailed by `at`, as [lon, lat] points ending on the
+ * position interpolated between the fixes either side of it, or null when the
+ * cursor has not reached the segment or less than a line would be drawn. */
+export function sailedLine(seg: TimedSegment, at: number): [number, number][] | null {
+  if (seg.length === 0 || at < seg[0].t) return null
+  const line: [number, number][] = []
+  for (let i = 0; i < seg.length; i++) {
+    const p = seg[i]
+    if (p.t <= at) {
+      line.push([p.lon, p.lat])
+      continue
+    }
+    const a = seg[i - 1]
+    if (a.t === at) break
+    const span = p.t - a.t
+    const f = span > 0 ? (at - a.t) / span : 1
+    line.push([a.lon + (p.lon - a.lon) * f, a.lat + (p.lat - a.lat) * f])
+    break
+  }
+  return line.length >= 2 ? line : null
+}
+
+/** `sailedLine` for each segment, in step with them (null where there is no
+ * line). When `end` is given (the boat marker's position) the last line drawn
+ * ends exactly on it, so the line and the marker cannot sit apart. */
+export function sailedLines(segments: TimedSegment[], at: number, end?: { lat: number; lon: number }): ([number, number][] | null)[] {
+  const lines = segments.map((seg) => sailedLine(seg, at))
+  if (end) {
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i]
+      if (line) { line[line.length - 1] = [end.lon, end.lat]; break }
+    }
+  }
+  return lines
+}
+
 /** The part of the track sailed by `at` (Unix seconds), as a GeoJSON
  * MultiLineString in [lon, lat] order. Each segment is cut at the cursor and
  * ends on the position interpolated between the fixes either side of it, so
@@ -247,26 +283,7 @@ export function sailedToGeoJSON(
   at: number,
   end?: { lat: number; lon: number },
 ): GeoJSON.Feature<GeoJSON.MultiLineString> {
-  const coordinates: [number, number][][] = []
-  for (const seg of segments) {
-    if (seg.length === 0 || at < seg[0].t) continue
-    const line: [number, number][] = []
-    for (let i = 0; i < seg.length; i++) {
-      const p = seg[i]
-      if (p.t <= at) {
-        line.push([p.lon, p.lat])
-        continue
-      }
-      const a = seg[i - 1]
-      if (a.t === at) break
-      const span = p.t - a.t
-      const f = span > 0 ? (at - a.t) / span : 1
-      line.push([a.lon + (p.lon - a.lon) * f, a.lat + (p.lat - a.lat) * f])
-      break
-    }
-    if (line.length >= 2) coordinates.push(line)
-  }
-  if (end && coordinates.length > 0) coordinates[coordinates.length - 1][coordinates[coordinates.length - 1].length - 1] = [end.lon, end.lat]
+  const coordinates = sailedLines(segments, at, end).filter((l): l is [number, number][] => l !== null)
   return { type: 'Feature', properties: {}, geometry: { type: 'MultiLineString', coordinates } }
 }
 

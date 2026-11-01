@@ -83,3 +83,36 @@ export function exportLegSegments(segments: TimedSegment[], legs: readonly { a: 
   if (legs.length <= 1) return segments
   return clipSegments(segments, index === 0 ? -Infinity : legs[index].a, index === legs.length - 1 ? Infinity : legs[index].b)
 }
+
+/** A piece of track as the map draws it: a leg of a passage. */
+export interface DrawnPiece {
+  key: string
+  passageId: string
+  segments: TimedSegment[]
+  colourIndex: number
+  /** The real times (Unix seconds) the piece covers; open at a passage's two ends. */
+  from: number
+  to: number
+}
+
+/** What is drawn: a piece of track per leg. The first piece of a passage is
+ * open at its start and the last at its end, as the sailed line reads it. */
+export function drawnPieces(passages: readonly { id: string; segments: TimedSegment[] }[], legs?: readonly PassageLeg[]): DrawnPiece[] {
+  const out: DrawnPiece[] = []
+  passages.forEach((p, i) => {
+    const mine = legs ? legsOf(legs, p.id) : []
+    if (mine.length === 0) {
+      out.push({ key: p.id, passageId: p.id, segments: p.segments, colourIndex: i, from: -Infinity, to: Infinity })
+      return
+    }
+    mine.forEach((leg, k) => out.push({
+      key: mine.length === 1 ? p.id : `${p.id}-${k}`,
+      passageId: p.id,
+      segments: legSegments(p.segments, mine, k),
+      colourIndex: leg.colourIndex,
+      from: k === 0 ? -Infinity : leg.fromMs / 1000,
+      to: k === mine.length - 1 ? Infinity : leg.toMs / 1000,
+    }))
+  })
+  return out
+}

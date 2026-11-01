@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Camera } from '@/lib/replay-camera'
-import { INTRO_MS, INTRO_START_ZOOM, defaultEasing, makeIntroPath } from '@/lib/replay-intro'
+import { INTRO_MS, INTRO_START_ZOOM, MERCATOR, defaultEasing, introProjectionAt, makeIntroPath } from '@/lib/replay-intro'
 
 const introCameraAt = (f: Camera, t: Camera, ms: number) => makeIntroPath(f, t)(ms)
 
@@ -55,5 +55,39 @@ describe('the opening move', () => {
     const a = introCameraAt(from, to, 1234)
     introCameraAt(from, to, 3000)
     expect(introCameraAt(from, to, 1234)).toEqual(a)
+  })
+})
+
+describe('the globe', () => {
+  const stops = (p: { projection: unknown }) => (p.projection as { type: unknown[] }).type
+
+  it('starts on the globe and blends to the flat map by zoom', () => {
+    const t = stops(introProjectionAt(to, 0))
+    expect(t.slice(0, 3)).toEqual(['interpolate', ['linear'], ['zoom']])
+    expect(t[4]).toBe('vertical-perspective')
+    expect(t[6]).toBe('mercator')
+  })
+
+  it('has finished the blend before the move lands, and says where it is flat', () => {
+    const p = introProjectionAt(to, 100)
+    expect(stops(p)[5]).toBe(p.flatAtZoom)
+    expect(p.flatAtZoom).toBeLessThanOrEqual(to.zoom)
+    expect(p.flatAtZoom).toBe(5.5)
+    expect(introProjectionAt({ ...to, zoom: 3 }, 100).flatAtZoom).toBe(3)
+  })
+
+  it('has strictly rising zoom stops, whatever the landing zoom', () => {
+    for (const zoom of [0.5, 1, 2, 4, 9, 14]) {
+      const p = introProjectionAt({ ...to, zoom }, 0)
+      if (p.flatAtZoom === null) continue
+      const s = stops(p)
+      expect(s[5] as number).toBeGreaterThan(s[3] as number)
+    }
+  })
+
+  it('is the flat map once the move is over, and when there is no globe to leave', () => {
+    for (const p of [introProjectionAt(to, INTRO_MS), introProjectionAt(to, INTRO_MS + 500), introProjectionAt({ ...to, zoom: 0 }, 0), introProjectionAt(to, 0, 0)]) {
+      expect(p).toEqual({ projection: MERCATOR, flatAtZoom: null })
+    }
   })
 })

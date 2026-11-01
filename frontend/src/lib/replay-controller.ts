@@ -15,7 +15,11 @@ import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-mode
 import {
   type Camera, type CameraEnv, type CameraResult, CameraDirector, shotStartState,
 } from '@/lib/replay-camera'
-import { INTRO_MS, makeIntroPath } from '@/lib/replay-intro'
+import type { DrawnPiece } from '@/lib/passage-legs'
+import { INTRO_MS, introProjectionAt, makeIntroPath, type IntroProjection } from '@/lib/replay-intro'
+import { lightFor, lightKey, type ReplayLight } from '@/lib/replay-light'
+import { MAX_SPEED_SEGMENTS, SPEED_RAMP_DARK, SPEED_RAMP_LIGHT, speedFrameAt, speedTrack, type SpeedFrame, type SpeedTrack, type WakeView } from '@/lib/replay-speed'
+import { sunPosition } from '@/lib/sun'
 import { timelineAtWall, wallAtTimeline, type PaceSpan, type ResolvedShot } from '@/lib/replay-clock'
 import { visibleSigns, type ResolvedSign } from '@/lib/replay-signs'
 import { locate, positionAt, sailedAt, type Timeline, type TimelineEntry } from '@/lib/passages'
@@ -115,6 +119,10 @@ export interface ReplayConfig {
   resolved: readonly ResolvedShot[]
   /** The signs that draw something (a join awaiting its name is left out). */
   signs: ResolvedSign[]
+  /** The pieces of track as the map draws them, which the sailed track is coloured on. */
+  pieces: readonly DrawnPiece[]
+  /** Picks the speed ramp that shows on the map. */
+  isDarkTheme: boolean
 }
 
 export interface FrameInput {
@@ -130,6 +138,10 @@ export interface FrameInput {
   wantHeading: boolean
   /** The sign editor is open, so every sign shows as a pin. */
   signsOpen?: boolean
+  /** Hours added to the time the sun is worked out for. A development check only; 0 otherwise. */
+  sunOffsetH?: number
+  /** The map's zoom, which sizes the wake. */
+  view: WakeView
 }
 
 export interface ReplayFrame {
@@ -142,10 +154,14 @@ export interface ReplayFrame {
   cards: ResolvedSign[]
   /** Signs shown as pins. */
   pins: ResolvedSign[]
+  /** The light for the sun over the boat at the track's own time; null without a boat. The same object while the sun has barely moved. */
+  light: ReplayLight | null
+  /** The sailed track coloured by speed, and the wake; null before the replay has moved, and for a track cut into too many segments to colour. */
+  speed: SpeedFrame | null
 }
 
 interface Smoothed { clock: number; playing: boolean; id: string | null; raw: number | null; out: number | null }
-interface Intro { path: (elapsedMs: number) => Camera; start: number; durationMs: number }
+interface Intro { path: (elapsedMs: number) => Camera; to: Camera; start: number; durationMs: number }
 /** What a frame will move the controller on to, once it is committed. */
 interface Pending {
   config: ReplayConfig
@@ -153,6 +169,7 @@ interface Pending {
   lastHeading: HeadingState | null
   smoothed: Smoothed
   smoother: { held: number | null; lastMs: number } | null
+  speed: SpeedFrame | null
 }
 
 export class ReplayController {
@@ -164,12 +181,25 @@ export class ReplayController {
   /** The frame on screen, which the camera is placed against. */
   private committed: { pending: Pending; frame: ReplayFrame } | null = null
   private intro: Intro | null = null
+  private lightCache: ReplayLight | null = null
+  /** The speed frame on screen, which the next one keeps its gradients and lines from. */
+  private speedPrev: SpeedFrame | null = null
   // Memory of work already done for the same inputs; it holds no state of the replay.
-  private memo: { parts: unknown[]; sailed: Map<number, Map<string, SailedTo> | null>; cards: Map<number, ResolvedSign[]> } | null = null
+  private memo: { parts: unknown[]; track: SpeedTrack | null; sailed: Map<number, Map<string, SailedTo> | null>; cards: Map<number, ResolvedSign[]> } | null = null
+
+  /** The speeds along the track. A track cut into more segments than the colours take has none, and the replay draws its plain line; that is said once, here, with the count. */
+  private trackFor(pieces: readonly DrawnPiece[]): SpeedTrack | null {
+    const track = speedTrack(pieces)
+    if (!track) {
+      const segments = pieces.reduce((n, p) => n + p.segments.length, 0)
+      console.warn(`Sailed track is not coloured by speed: ${segments} track segments, and the colours take ${MAX_SPEED_SEGMENTS}`)
+    }
+    return track
+  }
 
   private memoFor(config: ReplayConfig) {
-    const parts = [config.timeline, config.lengthS, config.spans, config.resolved, config.signs]
-    if (!this.memo || this.memo.parts.some((v, i) => v !== parts[i])) this.memo = { parts, sailed: new Map(), cards: new Map() }
+    const parts = [config.timeline, config.lengthS, config.spans, config.resolved, config.signs, config.pieces]
+    if (!this.memo || this.memo.parts.some((v, i) => v !== parts[i])) this.memo = { parts, track: this.trackFor(config.pieces), sailed: new Map(), cards: new Map() }
     return this.memo
   }
 
@@ -200,8 +230,16 @@ export class ReplayController {
       memo.cards.clear()
       memo.cards.set(clock, cards)
     }
-    const frame: ReplayFrame = { here, boat, heading: smoothed.out, sailedTo, cards, pins: !replaying || input.signsOpen ? config.signs : [] }
-    this.pending.set(frame, { config, input, lastHeading: raw, smoothed, smoother })
+    const sun = boat && here ? sunPosition((here.at + (input.sunOffsetH ?? 0) * 3600) * 1000, boat.lat, boat.lon) : null
+    let light: ReplayLight | null = null
+    if (sun) {
+      // The light is built only when the rounded sun has changed.
+      light = this.lightCache && this.lightCache.key === lightKey(sun) ? this.lightCache : lightFor(sun)
+      this.lightCache = light
+    }
+    const speed = sailedTo && memo.track ? speedFrameAt(config.pieces, memo.track, sailedTo, config.isDarkTheme ? SPEED_RAMP_DARK : SPEED_RAMP_LIGHT, this.speedPrev, input.view) : null
+    const frame: ReplayFrame = { here, boat, heading: smoothed.out, sailedTo, cards, pins: !replaying || input.signsOpen ? config.signs : [], light, speed }
+    this.pending.set(frame, { config, input, lastHeading: raw, smoothed, smoother, speed })
     return frame
   }
 
@@ -212,6 +250,7 @@ export class ReplayController {
     if (!p) throw new Error('That frame did not come from this controller')
     this.lastHeading = p.lastHeading
     this.smoothed = p.smoothed
+    this.speedPrev = p.speed
     if (p.smoother) this.smoother.apply(p.smoother)
     this.committed = { pending: p, frame }
   }
@@ -255,7 +294,7 @@ export class ReplayController {
 
   /** Begins the opening move at `nowMs`. A duration of 0 lands on `to` at once. */
   startIntro(from: Camera, to: Camera, nowMs: number, durationMs: number = INTRO_MS) {
-    this.intro = { path: makeIntroPath(from, to, durationMs), start: nowMs, durationMs }
+    this.intro = { path: makeIntroPath(from, to, durationMs), to, start: nowMs, durationMs }
   }
 
   /** The opening move is over, or a person took the map out of its hands. */
@@ -267,13 +306,14 @@ export class ReplayController {
     return this.intro !== null
   }
 
-  /** The camera `nowMs` into the opening move, and whether it has landed (the
-   * landing frame is the move's last camera). Null when there is no move. */
-  introAt(nowMs: number): { camera: Camera; done: boolean } | null {
+  /** The camera and projection `nowMs` into the opening move, and whether it
+   * has landed (the landing frame is the move's last camera, on the flat map).
+   * Null when there is no move. */
+  introAt(nowMs: number): ({ camera: Camera; done: boolean } & IntroProjection) | null {
     const i = this.intro
     if (!i) return null
     const elapsed = nowMs - i.start
-    return { camera: i.path(elapsed), done: elapsed >= i.durationMs }
+    return { camera: i.path(elapsed), ...introProjectionAt(i.to, elapsed, i.durationMs), done: elapsed >= i.durationMs }
   }
 
   // One smoothed heading serves the boat and the camera, so the model does not

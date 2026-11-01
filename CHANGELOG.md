@@ -31,6 +31,19 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **The passage replay follows the sun, colours the track by speed and opens on
+  the globe.** The sky and the map in the replay now match the real time of day
+  where the boat is. At night the sky is deep blue and the map is dimmed and
+  tinted dark blue, in twilight the tint is blue to purple, and around sunrise
+  and sunset the horizon and the map turn a light amber. The track, the wake
+  and the boat stay bright on top. The shading on the hills moves with the sun
+  as well, and the replay shows the right light when you pause or drag the
+  slider. The part of the track you've sailed is coloured by speed, from purple
+  for slow to green and yellow for fast, with a wide pale wake fading out
+  behind the boat. Pressing **Play** from the start now opens on the globe and
+  comes down onto the track. Touching the map during that move stops it where
+  you are. A track broken into more than 12 pieces keeps its plain colour.
+
 - **Mate assesses an anchorage for your stay, and shows an anchorage card.**
   Tell Mate when you'll arrive, and when you'll leave if you know. It reads the
   shelter from each wind direction, the wind and waves every three hours over

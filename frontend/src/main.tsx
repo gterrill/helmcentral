@@ -1,3 +1,5 @@
+// First, so the development switches see the query the page was opened with.
+import '@/lib/dev-flags'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 

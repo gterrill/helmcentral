@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { buildTimeline, type TimedSegment } from '@/lib/passages'
 import type { Camera } from '@/lib/replay-camera'
@@ -23,9 +23,15 @@ const sign = (id: string, t: number, extra: Partial<ReplaySign> = {}): ReplaySig
   id, t_ms: t * 1000, title: id, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, ...extra,
 })
 
+// The line as the map draws it: a piece per passage.
+const PIECES = [
+  { key: 'p1', passageId: 'p1', segments: [east], colourIndex: 0, from: -Infinity, to: Infinity },
+  { key: 'p2', passageId: 'p2', segments: [north], colourIndex: 1, from: -Infinity, to: Infinity },
+]
+
 function config(shots: CameraShot[] = [], signs: ReplaySign[] = []): ReplayConfig {
   const resolved = resolveShots(shots, timeline)
-  return { timeline, lengthS: LENGTH, spans: paceSpans(resolved), resolved, signs: resolveSigns(signs, timeline) }
+  return { timeline, lengthS: LENGTH, spans: paceSpans(resolved), resolved, signs: resolveSigns(signs, timeline), pieces: PIECES, isDarkTheme: false }
 }
 // A controller with its replay, stepped the way a caller with no render would.
 function stepper(cfg: ReplayConfig) {
@@ -42,7 +48,7 @@ function stepper(cfg: ReplayConfig) {
 }
 const overview: Camera = { center: [149.05, -20], zoom: 10, pitch: 0, bearing: 0 }
 const input = (clock: number, extra: Partial<FrameInput> = {}): FrameInput => ({
-  clock, nowMs: 1000, playing: false, resume: 0, reduced: false, wantHeading: true, ...extra,
+  clock, nowMs: 1000, playing: false, resume: 0, reduced: false, wantHeading: true, view: { zoom: 12 }, ...extra,
 })
 const env = { flat: false, overview, current: overview }
 // The frame at a clock, then the camera the map would ask for against it.
@@ -214,6 +220,110 @@ describe('frameAt', () => {
   })
 })
 
+describe('the light', () => {
+  const cfg = config()
+
+  it('follows the sun over the boat at the track\'s own time', () => {
+    // Track time is Unix seconds ~10000 s in 1970 on the equator-ish at 149 E: just before 03:00 UTC
+    // is just before 13:00 there, so the sun is up.
+    const c = stepper(cfg)
+    const f = c.frameAt(input(0))
+    expect(f.light).not.toBeNull()
+    expect(f.light!.light.position[2]).toBeLessThan(90)
+    expect(f.light!.light.position[1]).toBeGreaterThanOrEqual(0)
+  })
+
+  it('changes with the time of day as the replay moves', () => {
+    // 40 000 s on: the sun has gone round to the other side of the day.
+    const c = stepper(cfg)
+    const early = c.frameAt(input(0))
+    const late = c.frameAt(input(1200))
+    // Polar angle from straight up: 90 and over is a sun on or under the horizon.
+    expect(late.light!.light.position[2]).toBeGreaterThan(early.light!.light.position[2])
+    expect(late.light!.key).not.toBe(early.light!.key)
+  })
+
+  it('shows the light for a scrub time when paused', () => {
+    const a = stepper(cfg).frameAt(input(700))
+    const b = stepper(cfg).frameAt(input(700))
+    expect(b.light).toEqual(a.light)
+  })
+
+  it('hands back the same object while the sun has barely moved, so the map is touched only when it changes', () => {
+    const c = stepper(cfg)
+    const a = c.frameAt(input(500))
+    const b = c.frameAt(input(501))
+    expect(b.light).toBe(a.light)
+  })
+
+  it('moves the sun, and only the sun, by a development offset', () => {
+    const c = stepper(cfg)
+    const day = c.frameAt(input(0))
+    const shifted = c.frameAt(input(0, { sunOffsetH: 12 }))
+    expect(shifted.light!.light.position[2]).toBeGreaterThan(day.light!.light.position[2] + 30)
+    expect(shifted.here).toEqual(day.here)
+    expect(shifted.boat).toEqual(day.boat)
+  })
+
+  it('has no light without a boat', () => {
+    const f = stepper({ ...cfg, timeline: buildTimeline([]) }).frameAt(input(0))
+    expect(f.light).toBeNull()
+  })
+})
+
+describe('the sailed track', () => {
+  it('has no speed frame before the replay has moved off the start', () => {
+    expect(stepper(config()).frameAt(input(0)).speed).toBeNull()
+  })
+
+  it('colours the track sailed, passage by passage, and draws a wake behind the boat', () => {
+    const f = stepper(config()).frameAt(input(500))
+    expect(f.speed!.lines.get('p1')![0]!.data.geometry.coordinates.length).toBeGreaterThan(2)
+    expect(f.speed!.lines.has('p2')).toBe(true)
+    expect(f.speed!.wake).not.toBeNull()
+  })
+
+  it('keeps the lines it drew for a passage the replay has left behind, once the frame is taken', () => {
+    const c = stepper(config())
+    const a = c.frameAt(input(1100))
+    const b = c.frameAt(input(1110))
+    expect(b.speed!.lines.get('p1')).toBe(a.speed!.lines.get('p1'))
+  })
+
+  it('does not keep them from a frame that was worked out and thrown away', () => {
+    const cfg = config()
+    const c = new ReplayController()
+    c.frameAt(cfg, input(1100))
+    const kept = c.step(cfg, input(1110))
+    const fresh = new ReplayController().frameAt(cfg, input(1110))
+    expect(kept.speed!.lines.get('p1')![0]!.data).toEqual(fresh.speed!.lines.get('p1')![0]!.data)
+  })
+
+  it('says so, with the count, when a track has too many segments to colour', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const segs = Array.from({ length: 13 }, (_, i) => [{ t: 10000 + i * 70, lat: -20, lon: 149 + i * 0.001 }, { t: 10000 + i * 70 + 60, lat: -20, lon: 149.0005 + i * 0.001 }]) as TimedSegment[]
+    const pieces = [{ key: 'p1', passageId: 'p1', segments: segs, colourIndex: 0, from: -Infinity, to: Infinity }]
+    const c = stepper({ ...config(), pieces })
+    c.frameAt(input(500))
+    c.frameAt(input(510))
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('13 track segments'))
+    warn.mockRestore()
+  })
+
+  it('has none for a track cut into too many segments to colour', () => {
+    const segs = Array.from({ length: 13 }, (_, i) => [{ t: 10000 + i * 70, lat: -20, lon: 149 + i * 0.001 }, { t: 10000 + i * 70 + 60, lat: -20, lon: 149.0005 + i * 0.001 }]) as TimedSegment[]
+    const pieces = [{ key: 'p1', passageId: 'p1', segments: segs, colourIndex: 0, from: -Infinity, to: Infinity }]
+    expect(stepper({ ...config(), pieces }).frameAt(input(500)).speed).toBeNull()
+  })
+
+  it('takes its wake from the map\'s zoom', () => {
+    const near = stepper(config()).frameAt(input(500, { view: { zoom: 16 } })).speed!.wake!.data.geometry.coordinates
+    const far = stepper(config()).frameAt(input(500, { view: { zoom: 8 } })).speed!.wake!.data.geometry.coordinates
+    expect(far.length).toBeGreaterThanOrEqual(near.length)
+  })
+})
+
 describe('the opening move', () => {
   const from: Camera = { center: [149.05, -20], zoom: 1.5, pitch: 0, bearing: 0 }
   const to: Camera = { center: [149.05, -20], zoom: 10, pitch: 50, bearing: 0 }
@@ -233,9 +343,14 @@ describe('the opening move', () => {
     expect(mid.done).toBe(false)
     expect(mid.camera.zoom).toBeGreaterThan(1.5)
     expect(mid.camera.zoom).toBeLessThan(10)
+    // On the globe from the start, flat by the time it lands.
+    expect(c.introAt(10_000)!.projection).not.toEqual({ type: 'mercator' })
+    expect(c.introAt(10_000)!.flatAtZoom).toBe(5.5)
     const end = c.introAt(10_000 + INTRO_MS)!
     expect(end.done).toBe(true)
     expect(end.camera).toEqual(to)
+    expect(end.projection).toEqual({ type: 'mercator' })
+    expect(end.flatAtZoom).toBeNull()
     c.endIntro()
     expect(c.introAt(20_000)).toBeNull()
     expect(c.introActive).toBe(false)

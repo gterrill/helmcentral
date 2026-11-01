@@ -2,7 +2,7 @@ import { Satellite } from 'lucide-react'
 import { Layer, Source } from 'react-map-gl/maplibre'
 
 import { MapToggleButton } from '@/components/map-toggle-button'
-import { worldImageryPaint, worldImagerySource } from '@/lib/world-imagery'
+import { WORLD_IMAGERY_LAYER_ID, worldImageryPaint, worldImagerySource } from '@/lib/world-imagery'
 
 export interface WorldImageryLayerProps {
   /** A fixed opacity, or a style expression that follows the zoom. */
@@ -17,7 +17,7 @@ export interface WorldImageryLayerProps {
 export function WorldImageryLayer({ opacity, beforeId, minzoom }: WorldImageryLayerProps) {
   return (
     <Source id="world-imagery" {...worldImagerySource({})}>
-      <Layer id="world-imagery-layer" type="raster" beforeId={beforeId} minzoom={minzoom} paint={worldImageryPaint(opacity)} />
+      <Layer id={WORLD_IMAGERY_LAYER_ID} type="raster" beforeId={beforeId} minzoom={minzoom} paint={worldImageryPaint(opacity)} />
     </Source>
   )
 }

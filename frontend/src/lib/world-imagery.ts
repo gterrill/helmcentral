@@ -2,6 +2,7 @@
 // proxy so every map that shows it shares one tile address, one fade and one
 // credit. The anchor map and the passage map both draw from here.
 
+export const WORLD_IMAGERY_LAYER_ID = 'world-imagery-layer'
 export const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
 export const WORLD_IMAGERY_MAX_ZOOM = 18
 export const WORLD_IMAGERY_ATTRIBUTION = 'Source: Esri, Maxar, Earthstar Geographics'
