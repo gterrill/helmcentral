@@ -274,7 +274,7 @@ func TestCollisionProfileSyncerRaisesAgainAfterTheRefusalClears(t *testing.T) {
 			if loadErr != nil {
 				return "", nil, loadErr
 			}
-			return "coastal", map[string]collisionProfile{}, nil
+			return "coastal", map[string]collisionProfile{"coastal": {Warning: collisionTier{Cpa: 2}}}, nil
 		},
 		save: func(string) error { return nil },
 	}
@@ -402,7 +402,7 @@ func TestCollisionProfileSyncerAdoptsTheOpenRowAfterARestart(t *testing.T) {
 				if loadErr != nil {
 					return "", nil, loadErr
 				}
-				return "coastal", map[string]collisionProfile{}, nil
+				return "coastal", map[string]collisionProfile{"coastal": {Warning: collisionTier{Cpa: 2}}}, nil
 			},
 			save: func(string) error { return nil },
 		}
@@ -647,7 +647,7 @@ func standingRefusalSyncer(t *testing.T) (syncer *collisionProfileSyncer, setCur
 			return current, profiles, nil
 		},
 		save: func(string) error {
-			t.Fatal("polling a standing refusal must never write to the plugin")
+			t.Fatal("a refusal that nothing has fixed must not write to the plugin")
 			return nil
 		},
 	}
@@ -682,6 +682,141 @@ func TestCollisionProfileSyncerClearsAStandingRefusalWhenTheOperatorPicksAWorkin
 	}
 }
 
+// After a restart from an old row the profile the refusal was raised on is
+// unknown. Without a baseline the "moved by hand" rule is skipped: the
+// warning stands until the wanted profile works or the plugin is on it.
+func TestCollisionProfileSyncerAdoptedRefusalWithNoBaselineDoesNotGuess(t *testing.T) {
+	syncer, setCurrent, _, _ := standingRefusalSyncer(t)
+	fresh := &collisionProfileSyncer{snapshot: syncer.snapshot, load: syncer.load, save: syncer.save}
+	fresh.adoptOpenRefusal(alarmLogEntry{RuleID: collisionProfileRuleID, Message: syncer.refusedMessage, RaisedAt: alarmNow})
+	fresh.lastState = "anchored"
+
+	setCurrent("harbor")
+	at := alarmNow.Add(collisionProfilePollInterval)
+	for i := 0; i < 2; i++ {
+		if events := fresh.check(at); len(events) != 0 {
+			t.Fatalf("poll %d: expected no event, got %+v", i+1, events)
+		}
+		at = at.Add(collisionProfilePollInterval)
+	}
+	if len(fresh.active()) != 1 {
+		t.Fatal("with no baseline the refusal must stand")
+	}
+}
+
+// retrySyncer anchors the boat while the wanted "anchor" profile is silent,
+// and lets a test fill it in. Saves are recorded.
+func retrySyncer(t *testing.T) (syncer *collisionProfileSyncer, fillAnchor func(), setCurrent func(string), saved *[]string, stored *string) {
+	t.Helper()
+	current, profiles, err := parseCollisionProfiles([]byte(collisionProfilesJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved = &[]string{}
+	stored = new(string)
+	syncer = &collisionProfileSyncer{
+		snapshot: snapshotInState("anchored"),
+		load: func() (string, map[string]collisionProfile, error) {
+			return current, profiles, nil
+		},
+		save:             func(p string) error { *saved = append(*saved, p); current = p; return nil },
+		persistRefusedOn: func(p string) error { *stored = p; return nil },
+	}
+	if events := syncer.check(alarmNow); len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("expected a raised refusal, got %+v", events)
+	}
+	fill := func() {
+		profiles["anchor"] = collisionProfile{Warning: collisionTier{Cpa: 0.3}, Guard: collisionGuard{Range: 0.1}}
+	}
+	return syncer, fill, func(n string) { current = n }, saved, stored
+}
+
+// The first remedy the docs give: put real numbers in the wanted profile. The
+// next poll switches to it and clears.
+func TestCollisionProfileSyncerPollSwitchesOnceTheWantedProfileIsFilledIn(t *testing.T) {
+	syncer, fill, _, saved, stored := retrySyncer(t)
+	if *stored != "offshore" {
+		t.Fatalf("refused-on must be persisted, got %q", *stored)
+	}
+	fill()
+	events := syncer.check(alarmNow.Add(collisionProfilePollInterval))
+	if len(*saved) != 1 || (*saved)[0] != "anchor" {
+		t.Fatalf("the poll must switch to anchor, saved %v", *saved)
+	}
+	if len(events) != 1 || events[0].Kind != alarmEventCleared || len(syncer.active()) != 0 {
+		t.Fatalf("the refusal must clear, got %+v", events)
+	}
+	if *stored != "" {
+		t.Fatalf("refused-on must be cleared, got %q", *stored)
+	}
+}
+
+// Nothing fixed: polls repeat and the warning stays, with no write.
+func TestCollisionProfileSyncerRepeatedPollsKeepTheWarningWhileNothingChanges(t *testing.T) {
+	syncer, _, _, saved, _ := retrySyncer(t)
+	at := alarmNow
+	for i := 0; i < 3; i++ {
+		at = at.Add(collisionProfilePollInterval)
+		if events := syncer.check(at); len(events) != 0 {
+			t.Fatalf("poll %d: got %+v", i+1, events)
+		}
+	}
+	if len(syncer.active()) != 1 || len(*saved) != 0 {
+		t.Fatalf("warning must stand with no writes, saved %v", *saved)
+	}
+}
+
+// The operator picks another loud profile by hand: their choice stands.
+func TestCollisionProfileSyncerPollLeavesAProfilePickedByHand(t *testing.T) {
+	syncer, _, setCurrent, saved, _ := retrySyncer(t)
+	setCurrent("coastal")
+	events := syncer.check(alarmNow.Add(collisionProfilePollInterval))
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected clear, got %+v", events)
+	}
+	if len(*saved) != 0 {
+		t.Fatalf("the operator's choice must not be overwritten, saved %v", *saved)
+	}
+}
+
+// Restart after the operator already switched by hand: the persisted
+// refused-on profile lets the adopted refusal see that.
+func TestCollisionProfileSyncerRestartAfterAHandSwitchClears(t *testing.T) {
+	first, _, setCurrent, _, stored := retrySyncer(t)
+	words := first.refusedMessage
+	setCurrent("coastal")
+
+	current, profiles, _ := parseCollisionProfiles([]byte(collisionProfilesJSON))
+	current = "coastal"
+	second := &collisionProfileSyncer{
+		snapshot: snapshotInState("anchored"),
+		load:     func() (string, map[string]collisionProfile, error) { return current, profiles, nil },
+		save:     func(string) error { t.Fatal("must not switch"); return nil },
+	}
+	second.adoptOpenRefusal(alarmLogEntry{RuleID: collisionProfileRuleID, Message: words, RaisedAt: alarmNow})
+	if err := second.attachRefusalStore(func() (string, error) { return *stored, nil }, func(string) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	events := second.check(alarmNow.Add(time.Hour))
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected clear after restart, got %+v", events)
+	}
+}
+
+// A refusal reworded because the load now fails keeps the known baseline.
+func TestCollisionProfileSyncerRewordedLoadFailureKeepsTheRefusedOnProfile(t *testing.T) {
+	syncer, _, _, _, stored := retrySyncer(t)
+	syncer.load = func() (string, map[string]collisionProfile, error) { return "", nil, &signalkStatusError{Status: 401} }
+	syncer.lastState = ""
+	events := syncer.check(alarmNow.Add(time.Minute))
+	if len(events) != 1 || events[0].Kind != alarmEventChanged {
+		t.Fatalf("expected a reworded card, got %+v", events)
+	}
+	if syncer.refusedOn != "offshore" || *stored != "offshore" {
+		t.Fatalf("refused-on lost: %q, stored %q", syncer.refusedOn, *stored)
+	}
+}
+
 func TestCollisionProfileSyncerDoesNotPollBeforeTheIntervalElapses(t *testing.T) {
 	syncer, setCurrent, _, loads := standingRefusalSyncer(t)
 	setCurrent("harbor")
@@ -705,6 +840,19 @@ func TestCollisionProfileSyncerKeepsTheRefusalWhileTheCurrentProfileCannotFire(t
 		if *loads != 1 || len(syncer.active()) != 1 {
 			t.Fatalf("current %q: refusal must stand after one poll, loads %d", current, *loads)
 		}
+	}
+}
+
+// The refusal came from a switch that was declined; the plugin is still on the
+// loud profile it was on then. Nobody has acted, so the warning stays.
+func TestCollisionProfileSyncerKeepsTheRefusalWhileThePluginStaysOnItsOldLoudProfile(t *testing.T) {
+	syncer, _, _, loads := standingRefusalSyncer(t)
+
+	if events := syncer.check(alarmNow.Add(collisionProfilePollInterval)); len(events) != 0 {
+		t.Fatalf("expected no event, got %+v", events)
+	}
+	if *loads != 1 || len(syncer.active()) != 1 {
+		t.Fatalf("refusal must stand when nothing changed, loads %d", *loads)
 	}
 }
 
@@ -736,5 +884,98 @@ func TestCollisionProfileSyncerDoesNotPollWhenNothingIsRefused(t *testing.T) {
 	}
 	if *loads != 0 {
 		t.Fatalf("nothing is wrong, so nothing should be read, got %d loads", *loads)
+	}
+}
+
+// The plugin left by hand on the silent wanted profile is not a fix, on a
+// transition any more than on a poll.
+func TestCollisionProfileSyncerDoesNotClearWhenThePluginSitsOnASilentWantedProfile(t *testing.T) {
+	syncer, setCurrent, _, _ := standingRefusalSyncer(t)
+	syncer.save = func(string) error { return nil }
+
+	// Under way the mapping wants coastal, which works, so the refusal clears.
+	syncer.snapshot = snapshotInState("motoring")
+	if events := syncer.check(alarmNow.Add(time.Minute)); len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected clear under way, got %+v", events)
+	}
+	// The operator leaves the plugin on the silent anchor profile by hand.
+	setCurrent("anchor")
+	syncer.snapshot = snapshotInState("anchored")
+	events := syncer.check(alarmNow.Add(2 * time.Minute))
+	if len(events) != 1 || events[0].Kind != alarmEventRaised || len(syncer.active()) != 1 {
+		t.Fatalf("a silent wanted profile must not count as fixed, got %+v", events)
+	}
+}
+
+// Persisting must not hold the lock active() takes.
+func TestCollisionProfileSyncerPersistsRefusedOnWithoutHoldingTheLock(t *testing.T) {
+	syncer, _, _, _, _ := retrySyncer(t)
+	syncer.persistRefusedOn = func(string) error {
+		syncer.active()
+		return nil
+	}
+	done := make(chan struct{})
+	go func() { syncer.resolve(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("persisting while holding the syncer lock")
+	}
+}
+
+// failedSaveSyncer is refused because the save failed (a valid wanted profile).
+func failedSaveSyncer(t *testing.T) (syncer *collisionProfileSyncer, setCurrent func(string), saves *int, failing *bool) {
+	t.Helper()
+	current, profiles, err := parseCollisionProfiles([]byte(collisionProfilesJSON))
+	if err != nil {
+		t.Fatal(err)
+	}
+	saves, failing = new(int), new(bool)
+	*failing = true
+	syncer = &collisionProfileSyncer{
+		snapshot: snapshotInState("sailing"),
+		load: func() (string, map[string]collisionProfile, error) {
+			return current, profiles, nil
+		},
+		save: func(p string) error {
+			*saves++
+			if *failing {
+				return &signalkStatusError{Status: 401}
+			}
+			current = p
+			return nil
+		},
+	}
+	if events := syncer.check(alarmNow); len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("expected a raised refusal, got %+v", events)
+	}
+	*saves = 0
+	return syncer, func(n string) { current = n }, saves, failing
+}
+
+// A hand pick wins over the retry: no save, the warning clears.
+func TestCollisionProfileSyncerPollLeavesAHandPickAfterAFailedSave(t *testing.T) {
+	syncer, setCurrent, saves, _ := failedSaveSyncer(t)
+	setCurrent("harbor")
+	events := syncer.check(alarmNow.Add(collisionProfilePollInterval))
+	if *saves != 0 {
+		t.Fatalf("the operator's pick must not be overwritten, saves %d", *saves)
+	}
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected clear, got %+v", events)
+	}
+}
+
+// Not moved: the poll retries the save.
+func TestCollisionProfileSyncerPollRetriesAFailedSaveWhenNothingMoved(t *testing.T) {
+	syncer, _, saves, failing := failedSaveSyncer(t)
+	at := alarmNow.Add(collisionProfilePollInterval)
+	if events := syncer.check(at); len(events) != 0 || *saves != 1 {
+		t.Fatalf("still failing: want a retry and no event, got saves %d, %+v", *saves, events)
+	}
+	*failing = false
+	events := syncer.check(at.Add(collisionProfilePollInterval))
+	if *saves != 2 || len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected the retry to succeed and clear, saves %d, %+v", *saves, events)
 	}
 }

@@ -611,6 +611,98 @@ func TestDecodeAnchorageFeatures_CleansTextAndDerivesUntagged(t *testing.T) {
 	}
 }
 
+func TestDecodeAnchorageFeatures_KeepsTheNearestMooringsWhenCutToTheCap(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString(`{"moorings":[`)
+	for i := 0; i < anchorageMaxMoorings+5; i++ {
+		if i > 0 {
+			sb.WriteString(",")
+		}
+		// Nearest last, in the plugin's order.
+		fmt.Fprintf(&sb, `{"osm":"node/%d","lat":-20,"lon":148,"vessel_size_m":12,"distance_m":%d}`, i, 900-i)
+	}
+	sb.WriteString(`]}`)
+	d, err := decodeAnchorageFeatures("p", []byte(sb.String()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(d.Moorings) != anchorageMaxMoorings || !d.Truncated || d.Moorings[0].DistanceM != 900-(anchorageMaxMoorings+4) {
+		t.Errorf("kept %d, first at %d m, truncated %v: the cap must drop the farthest, not the last", len(d.Moorings), d.Moorings[0].DistanceM, d.Truncated)
+	}
+}
+
+func TestDecodeAnchorageFeatures_KeepsTheNearestAreasWhenCutToTheCap(t *testing.T) {
+	var anchorage, seabed, restricted []string
+	for i := 0; i < anchorageMaxAreas+5; i++ {
+		d := 900 - i // nearest last, in the plugin's order
+		anchorage = append(anchorage, fmt.Sprintf(`{"osm":"way/%d","distance_m":%d,"geometry":[]}`, i, d))
+		seabed = append(seabed, fmt.Sprintf(`{"osm":"way/%d","surface":"sand","distance_m":%d,"geometry":[]}`, i, d))
+	}
+	for i := 0; i < anchorageMaxRestricted+5; i++ {
+		restricted = append(restricted, fmt.Sprintf(`{"osm":"way/%d","source":"seamark","distance_m":%d,"geometry":[]}`, i, 900-i))
+	}
+	js := `{"anchorage_areas":[` + strings.Join(anchorage, ",") + `],"seabed_areas":[` + strings.Join(seabed, ",") + `],"restricted_areas":[` + strings.Join(restricted, ",") + `]}`
+	d, err := decodeAnchorageFeatures("p", []byte(js))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := d.AnchorageAreas[0].DistanceM, 900-(anchorageMaxAreas+4); got != want {
+		t.Errorf("anchorage areas: nearest kept is %d m, want %d", got, want)
+	}
+	if got, want := d.SeabedAreas[0].DistanceM, 900-(anchorageMaxAreas+4); got != want {
+		t.Errorf("seabed areas: nearest kept is %d m, want %d", got, want)
+	}
+	if got, want := *d.RestrictedAreas[0].DistanceM, 900-(anchorageMaxRestricted+4); got != want {
+		t.Errorf("restricted areas: nearest kept is %d m, want %d", got, want)
+	}
+}
+
+func TestDecodeAnchorageFeatures_KeepsTheProtectedAreasWhenCutToTheCap(t *testing.T) {
+	var restricted []string
+	for i := 0; i < anchorageMaxRestricted+5; i++ {
+		restricted = append(restricted, fmt.Sprintf(`{"osm":"way/%d","source":"seamark","distance_m":%d,"geometry":[]}`, i, 100+i))
+	}
+	restricted = append(restricted, `{"osm":"relation/1","name":"Park","source":"protected_area","restriction":"Marine Park","geometry":[]}`)
+	d, err := decodeAnchorageFeatures("p", []byte(`{"restricted_areas":[`+strings.Join(restricted, ",")+`]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Truncated || len(d.RestrictedAreas) != 1+anchorageMaxSeamark {
+		t.Fatalf("restricted areas = %d, truncated %v; want the park and %d seamark areas", len(d.RestrictedAreas), d.Truncated, anchorageMaxSeamark)
+	}
+	found := false
+	for _, r := range d.RestrictedAreas {
+		found = found || r.Name == "Park"
+	}
+	if !found {
+		t.Error("the marine park was cut")
+	}
+}
+
+// Seamark areas and protected areas are capped apart, so a coast full of marine
+// parks cannot push out a no-anchoring zone 80 m away.
+func TestDecodeAnchorageFeatures_ManyProtectedAreasDoNotPushOutANearbySeamarkArea(t *testing.T) {
+	var restricted []string
+	for i := 0; i < anchorageMaxProtected+60; i++ {
+		restricted = append(restricted, fmt.Sprintf(`{"osm":"relation/%d","name":"Park %d","source":"protected_area","restriction":"Marine Park","geometry":[]}`, i, i))
+	}
+	restricted = append(restricted, `{"osm":"way/9","name":"No anchoring","source":"seamark","restriction":"anchoring_prohibited","distance_m":80,"geometry":[]}`)
+	d, err := decodeAnchorageFeatures("p", []byte(`{"restricted_areas":[`+strings.Join(restricted, ",")+`]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.Truncated || len(d.RestrictedAreas) != anchorageMaxProtected+1 {
+		t.Fatalf("restricted areas = %d, truncated %v; want %d protected and the seamark area", len(d.RestrictedAreas), d.Truncated, anchorageMaxProtected)
+	}
+	if got := d.RestrictedAreas[0].Name; got != "No anchoring" {
+		t.Errorf("first restricted area = %q, want the seamark zone 80 m away ahead of the parks", got)
+	}
+	// The parks keep the plugin's order.
+	if got := d.RestrictedAreas[1].Name; got != "Park 0" {
+		t.Errorf("first park = %q, want Park 0: protected areas keep the plugin's order", got)
+	}
+}
+
 func TestDecodeAnchorageFeatures_DropsProtectClassFromProtectedAreas(t *testing.T) {
 	d, err := decodeAnchorageFeatures("p", []byte(`{"restricted_areas":[`+
 		`{"osm":"relation/1","name":"Park","source":"protected_area","restriction":"Marine Park","category":"1;2;4;6","geometry":[]},`+
@@ -618,10 +710,11 @@ func TestDecodeAnchorageFeatures_DropsProtectClassFromProtectedAreas(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := d.RestrictedAreas[0].Category; got != "" {
+	// The seamark zone comes ahead of the park.
+	if got := d.RestrictedAreas[1].Category; got != "" {
 		t.Errorf("protected area category = %q, want it dropped (an IUCN code list)", got)
 	}
-	if got := d.RestrictedAreas[1].Category; got != "nature_reserve" {
+	if got := d.RestrictedAreas[0].Category; got != "nature_reserve" {
 		t.Errorf("seamark category = %q, want it kept", got)
 	}
 }

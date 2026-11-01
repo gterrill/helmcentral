@@ -108,6 +108,48 @@ func createAlarmLogSchema(db *sql.DB) error {
 		)`); err != nil {
 		return fmt.Errorf("create collision profile state table: %w", err)
 	}
+	// The profile the plugin was on when the standing refusal was raised, so a
+	// restart can still tell a hand switch from the refusal itself. Empty means
+	// unknown.
+	if _, err := db.Exec(`ALTER TABLE collision_profile_state ADD COLUMN refused_on TEXT NOT NULL DEFAULT ''`); err != nil &&
+		!strings.Contains(err.Error(), "duplicate column name") {
+		return fmt.Errorf("create collision profile refused_on column: %w", err)
+	}
+	return nil
+}
+
+// LoadCollisionProfileRefusedOn returns the profile the plugin was on when the
+// standing refusal was raised, empty when unknown.
+func (s *alarmLogStore) LoadCollisionProfileRefusedOn() (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("alarm log is not available")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var profile string
+	err := s.db.QueryRow(`SELECT refused_on FROM collision_profile_state WHERE id = 1`).Scan(&profile)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read collision profile refused_on: %w", err)
+	}
+	return profile, nil
+}
+
+// SaveCollisionProfileRefusedOn stores the refused-on profile, leaving the
+// settled navigation state as it is. An empty profile clears it.
+func (s *alarmLogStore) SaveCollisionProfileRefusedOn(profile string) error {
+	if s == nil {
+		return fmt.Errorf("alarm log is not available")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := s.db.Exec(
+		`INSERT INTO collision_profile_state (id, state, refused_on) VALUES (1, '', ?)
+		 ON CONFLICT(id) DO UPDATE SET refused_on = excluded.refused_on`, profile); err != nil {
+		return fmt.Errorf("save collision profile refused_on: %w", err)
+	}
 	return nil
 }
 

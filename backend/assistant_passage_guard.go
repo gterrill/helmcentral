@@ -40,10 +40,12 @@ import (
 const assistantCheckLabel = "[Helmcentral check, not from the operator] "
 
 const (
-	assistantPassageLimitsClaimInstruction  = "This answer talks about passage limits without the check having run. The operator's passage limits are set. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base the answer on its result. Otherwise remove the statements about the limits."
-	assistantPassageRelativeWindInstruction = "This answer judges the wind or sea against the course without the check having run. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base any ahead, abeam or astern judgement on its sectors. Otherwise take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
-	assistantAnchorageDepthInstruction      = "This answer states a water depth for an anchorage that has no source. " + ruleDepth + " If the operator gave the figure, call anchorage_details with it as depth_m and base the answer on its result. Otherwise remove the depth."
-	assistantAnchorageShelterInstruction    = "This answer judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_details with its position (from find_places, or the boat's position if it is where you are now) and when the boat arrives, and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
+	assistantPassageLimitsClaimInstruction   = "This answer talks about passage limits without the check having run. The operator's passage limits are set. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base the answer on its result. Otherwise remove the statements about the limits."
+	assistantPassageRelativeWindInstruction  = "This answer judges the wind or sea against the course without the check having run. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base any ahead, abeam or astern judgement on its sectors. Otherwise take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
+	assistantAnchorageDepthLead              = "This answer states a water depth for an anchorage that has no source. " + ruleDepth
+	assistantAnchorageDepthInstruction       = assistantAnchorageDepthLead + " If the operator gave the figure, call anchorage_details with it as depth_m and base the answer on its result. Otherwise remove the depth."
+	assistantAnchorageDepthNoToolInstruction = assistantAnchorageDepthLead + " The anchorage tool cannot run here, so state a depth only if the operator gave you the figure in this conversation (say it is theirs) or you read it from a tool result this turn, such as the boat's depth sounder (say where it is from). Otherwise remove the depth and tell the operator to check the chart."
+	assistantAnchorageShelterInstruction     = "This answer judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_details with its position (from find_places, or the boat's position if it is where you are now) and when the boat arrives, and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
 )
 
 var (
@@ -243,8 +245,18 @@ func depthSourced(calls []openRouterToolCall, results []string) bool {
 
 // checkDepthDraft is the "anchorage depth" trigger.
 func (d assistantToolDeps) checkDepthDraft(sentences []string, calls []openRouterToolCall, results []string, armed func() bool) (trigger, instruction string) {
-	if !statesAnchorageDepth(sentences) || !armed() || depthSourced(calls, results) {
+	if !statesAnchorageDepth(sentences) || depthSourced(calls, results) {
 		return "", ""
+	}
+	if !armed() {
+		// anchorage_details cannot run, whatever the reason (not offered, no
+		// Offline coastline, coastline off or unreadable). A depth with no
+		// source is as wrong without the tool, and an invented one must never
+		// reach the operator, so the guard is not narrowed to one cause. Send
+		// nothing to the tool. The checker cannot see the conversation, so a
+		// figure the operator gave still costs one send-back; the second
+		// answer wins and the instruction says to keep it as theirs.
+		return "anchorage depth", assistantAnchorageDepthNoToolInstruction
 	}
 	return "anchorage depth", assistantAnchorageDepthInstruction
 }

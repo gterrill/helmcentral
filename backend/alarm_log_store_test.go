@@ -529,3 +529,40 @@ func TestAlarmLog_RaisedSummaryMixedSourceKindsGetNoKind(t *testing.T) {
 		t.Errorf("sources of different kinds must not all be called %q", groups[0].SourceKind.Label())
 	}
 }
+
+func TestCollisionProfileRefusedOnSurvivesReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "helmcentral.sqlite")
+	store, err := newAlarmLogStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := store.LoadCollisionProfileRefusedOn(); err != nil || got != "" {
+		t.Fatalf("empty store: %q, %v", got, err)
+	}
+	// Saving the refusal must not disturb the settled navigation state.
+	if err := store.SaveCollisionProfileState("moored"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveCollisionProfileRefusedOn("offshore"); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	store, err = newAlarmLogStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if got, _ := store.LoadCollisionProfileRefusedOn(); got != "offshore" {
+		t.Fatalf("refused-on: got %q", got)
+	}
+	if got, _ := store.LoadCollisionProfileState(); got != "moored" {
+		t.Fatalf("state: got %q", got)
+	}
+	if err := store.SaveCollisionProfileRefusedOn(""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := store.LoadCollisionProfileRefusedOn(); got != "" {
+		t.Fatalf("cleared: got %q", got)
+	}
+}

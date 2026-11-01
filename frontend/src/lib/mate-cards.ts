@@ -345,6 +345,8 @@ export interface AnchorageDepth {
     draftM: number | null
     clearanceM: number | null
     wantedM: number | null
+    /** When the tide prediction ends, if before the stay does: a lower or higher water may follow. Empty when it covers the stay. */
+    tideCheckedUntil: string
   }
   rode: DepthCheckBase<'ok' | 'short'> & {
     highestWaterAt: string
@@ -356,6 +358,8 @@ export interface AnchorageDepth {
     scopeRatio: number | null
     chainOnboardM: number | null
     shortByM: number | null
+    /** As for the clearance: the highest water was found only in the predicted part of the stay. */
+    tideCheckedUntil: string
     /** When the forecast ends, if before the stay does: the wind was checked only up to then. Empty when it covers the stay. */
     windCheckedUntil: string
   }
@@ -366,6 +370,8 @@ export interface AnchorageDepth {
     loaM: number | null
     /** True when the rode check was short: the swing is for all the chain aboard. */
     allChainOut: boolean
+    /** As for the rode: the swing is worked from the highest water seen. */
+    tideCheckedUntil: string
   }
 }
 
@@ -878,6 +884,7 @@ function decodeAnchorageDepth(raw: unknown): AnchorageDepth {
       draftM: nullableNumber(c.draft_m, 'depth.clearance.draft_m'),
       clearanceM: nullableNumber(c.clearance_m, 'depth.clearance.clearance_m'),
       wantedM: nullableNumber(c.wanted_m, 'depth.clearance.wanted_m'),
+      tideCheckedUntil: emptyOrStamp(c.tide_checked_until, 'depth.clearance.tide_checked_until'),
     },
     rode: {
       ...decodeDepthCheck(r, 'depth.rode', ['ok', 'short'] as const),
@@ -890,6 +897,7 @@ function decodeAnchorageDepth(raw: unknown): AnchorageDepth {
       scopeRatio: nullableNumber(r.scope_ratio, 'depth.rode.scope_ratio'),
       chainOnboardM: nullableNumber(r.chain_onboard_m, 'depth.rode.chain_onboard_m'),
       shortByM: nullableNumber(r.short_by_m, 'depth.rode.short_by_m'),
+      tideCheckedUntil: emptyOrStamp(r.tide_checked_until, 'depth.rode.tide_checked_until'),
       windCheckedUntil: emptyOrStamp(r.wind_checked_until, 'depth.rode.wind_checked_until'),
     },
     swing: {
@@ -898,6 +906,7 @@ function decodeAnchorageDepth(raw: unknown): AnchorageDepth {
       rodeM: nullableNumber(w.rode_m, 'depth.swing.rode_m'),
       bowOffsetM: nullableNumber(w.bow_offset_m, 'depth.swing.bow_offset_m'),
       loaM: nullableNumber(w.loa_m, 'depth.swing.loa_m'),
+      tideCheckedUntil: emptyOrStamp(w.tide_checked_until, 'depth.swing.tide_checked_until'),
       allChainOut: bool(w.all_chain_out, 'depth.swing.all_chain_out'),
     },
   }

@@ -114,8 +114,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   ratio under **Settings, Anchor Watch** to have them checked. With no depth,
   Mate says the depth is unknown and those checks are skipped. A check that is missing the draft, the tide, the
   forecast, the boat's length or an anchor setting is skipped too, and says what
-  it lacked. Mate never gives a depth from its own knowledge, and an answer that
-  does is sent back. See [Mate](docs/features/assistant.md#depth-swing-and-clearance)
+  it lacked. If the tide prediction ends before your stay does, the water,
+  chain and swing checks say so, and the card shows it. Mate never gives a depth from its
+  own knowledge, and an answer that does is sent back, even when the Offline
+  coastline is off. See [Mate](docs/features/assistant.md#depth-swing-and-clearance)
   and [Places you give Mate](docs/features/place-names.md#places-you-give-mate).
 
 ### Changed
@@ -164,13 +166,15 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   "N". A marine park no longer ends in a string of numbers such as "1;2;4;6".
   If Mate looks up the same anchorage twice in one answer, you get one card, the
   later one. See [Mate](docs/features/assistant.md).
-- **The Collision Profile Not Changed warning clears when you pick a working
-  profile yourself.** If the boat was anchored and the anchored profile couldn't
-  raise alarms, the warning stayed up even after you switched the plugin to a
-  profile that could, until the boat next changed state. It now checks about
-  once a minute and clears once the plugin is on a profile that can raise
-  alarms. If Helmcentral can't read the profiles, the warning stays up. See
-  [Alarms](docs/features/alarms.md).
+- **The Collision Profile Not Changed warning clears once you've fixed the
+  profile.** Before, it stayed up until the boat next changed state, whatever
+  you did. While it stands, Helmcentral now looks again about once a minute. If
+  you've put real numbers in the profile it wanted, it switches the plugin to
+  that profile and the warning goes. If you've switched the plugin by hand to
+  another profile that can raise alarms, it leaves your choice and the warning
+  goes. The warning stays while the plugin is still on the profile it was on
+  when Helmcentral refused, or while Helmcentral can't read the profiles. This
+  holds across a restart. See [Alarms](docs/features/alarms.md).
 - **The engine card fits a short, wide tile whole.** On the wall display the
   bottom row of the card, with the battery, alternator, gearbox and exhaust,
   ran off the bottom of the tile and was cut off. The card now scales down to

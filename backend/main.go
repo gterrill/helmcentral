@@ -251,6 +251,10 @@ func main() {
 		als.LoadCollisionProfileState, als.SaveCollisionProfileState); err != nil {
 		log.Fatalf("failed to read the collision profile navigation state: %v", err)
 	}
+	if err := globalCollisionProfileSyncer.attachRefusalStore(
+		als.LoadCollisionProfileRefusedOn, als.SaveCollisionProfileRefusedOn); err != nil {
+		log.Fatalf("failed to read the collision profile refusal: %v", err)
+	}
 
 	// The operator's two ignore lists (ignored sensors, ignored network
 	// alarms), in the same file.

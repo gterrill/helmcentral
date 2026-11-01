@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The stay in anchorageArgs runs 04:00Z to 22:00Z on 2 November. The stub tide
@@ -246,6 +247,94 @@ func TestAnchorageDepth_ForecastEndingBeforeTheStaySaysHowFarTheWindWasChecked(t
 	}
 	if card := string(d.takeCards(raw)[0].Payload); !strings.Contains(card, `"wind_checked_until":"2026-11-02T23:00:00+10:00"`) {
 		t.Errorf("card lacks wind_checked_until")
+	}
+}
+
+func TestAnchorageDepth_TidePredictionEndingBeforeTheStayCaveatsClearanceAndRode(t *testing.T) {
+	d, _ := depthDeps(t)
+	tp := anchorageTides()
+	tp.result.Extremes = tp.result.Extremes[:4] // ends with the 20:00Z high, 06:00 local on the 3rd
+	d.tides = func() (tideProvider, string, error) { return tp, "bom", nil }
+	raw, res := runAnchorage(t, d, `{"lat":-20.5446,"lon":149.118933,"arrive":"2026-11-03T01:00:00+10:00","leave":"2026-11-03T09:00:00+10:00","depth_m":4}`)
+	c, r, w := res.Depth.Clearance, res.Depth.Rode, res.Depth.Swing
+	for name, text := range map[string]string{"clearance": c.Text, "rode": r.Text, "swing": w.Text} {
+		if !strings.Contains(text, "higher water may follow") {
+			t.Errorf("%s text lacks the tide caveat: %q", name, text)
+		}
+	}
+	if c.TideCheckedUntil != "2026-11-03T06:00:00+10:00" || r.TideCheckedUntil != c.TideCheckedUntil || w.TideCheckedUntil != c.TideCheckedUntil {
+		t.Errorf("tide_checked_until: clearance %q, rode %q", c.TideCheckedUntil, r.TideCheckedUntil)
+	}
+	if card := string(d.takeCards(raw)[0].Payload); strings.Count(card, `"tide_checked_until":"2026-11-03T06:00:00+10:00"`) != 3 {
+		t.Errorf("card lacks tide_checked_until on both checks")
+	}
+}
+
+// The checks' times are in the stay's zone. A tide station in another zone must
+// not put a second local time into the same sentence.
+func TestAnchorageDepth_TideCaveatUsesTheStaysZoneNotTheStations(t *testing.T) {
+	d, _ := depthDeps(t)
+	tp := anchorageTides()
+	tp.stations[0].Timezone = "UTC"
+	tp.result.Extremes = tp.result.Extremes[:4] // ends 20:00Z, which is 06:00 on the 3rd at the anchorage
+	d.tides = func() (tideProvider, string, error) { return tp, "bom", nil }
+	_, res := runAnchorage(t, d, `{"lat":-20.5446,"lon":149.118933,"arrive":"2026-11-03T01:00:00+10:00","leave":"2026-11-03T09:00:00+10:00","depth_m":4}`)
+	for name, text := range map[string]string{"clearance": res.Depth.Clearance.Text, "rode": res.Depth.Rode.Text} {
+		if !strings.Contains(text, "prediction ends at Tue 3 Nov 06:00") || strings.Contains(text, "20:00") {
+			t.Errorf("%s text = %q: the caveat should be in the stay's zone", name, text)
+		}
+	}
+}
+
+// Forecast hours are on the local clock (the forecast is fetched in the stay's
+// zone), so in a zone that is not a whole hour from UTC they fall at :30 UTC.
+func TestForecastEndsBeforeLeave_UsesTheStaysLocalHour(t *testing.T) {
+	loc := time.FixedZone("IST", 5*3600+1800)
+	stay := anchorageStay{zone: placeZone{Loc: loc}}
+	stay.leave = time.Date(2026, 11, 2, 22, 45, 0, 0, loc)
+	if forecastEndsBeforeLeave(time.Date(2026, 11, 2, 22, 0, 0, 0, loc), stay) {
+		t.Error("a forecast with the 22:00 local hour covers a 22:45 leave")
+	}
+	if !forecastEndsBeforeLeave(time.Date(2026, 11, 2, 21, 0, 0, 0, loc), stay) {
+		t.Error("a forecast ending at 21:00 local does not reach a 22:45 leave")
+	}
+}
+
+func TestAnchorageTide_NoteIsInTheStaysZoneWhateverTheStationsIs(t *testing.T) {
+	d, _ := depthDeps(t)
+	tp := anchorageTides()
+	tp.stations[0].Timezone = "UTC"
+	tp.result.Extremes = tp.result.Extremes[:4]
+	d.tides = func() (tideProvider, string, error) { return tp, "bom", nil }
+	_, res := runAnchorage(t, d, `{"lat":-20.5446,"lon":149.118933,"arrive":"2026-11-03T01:00:00+10:00","leave":"2026-11-03T09:00:00+10:00","depth_m":4}`)
+	if n := res.Tide.Note; !strings.Contains(n, "ends at Tue 3 Nov 06:00") {
+		t.Errorf("note = %q: want the stay's clock", n)
+	}
+}
+
+// The forecast section and the rode check must agree on whether the forecast
+// stops short of the stay (the stay ends 22:00Z).
+func TestAnchorageDepth_ForecastSectionAndRodeAgreeWhenTheForecastStopsShort(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		hours int
+		short bool
+	}{
+		{"ends two hours before leaving", 21, true}, // last hour 20:00Z
+		{"ends an hour before leaving", 22, true},   // last hour 21:00Z: the 22:00Z gust is unchecked
+		{"ends on the leaving hour", 23, false},     // last hour 22:00Z
+		{"covers the stay", 30, false},
+	} {
+		d, _ := depthDeps(t)
+		wx := anchorageWeather()
+		wx.bundle.Hourly = wx.bundle.Hourly[:tc.hours]
+		d.weather = func() (weatherProvider, string, error) { return wx, "wx", nil }
+		_, res := runAnchorage(t, d, anchorageWithDepth("4"))
+		sectionSays := res.Forecast.Note != ""
+		rodeSays := res.Depth.Rode.WindCheckedUntil != ""
+		if sectionSays != tc.short || rodeSays != tc.short {
+			t.Errorf("%s: forecast note %q, rode checked until %q, want caveat %v in both", tc.name, res.Forecast.Note, res.Depth.Rode.WindCheckedUntil, tc.short)
+		}
 	}
 }
 

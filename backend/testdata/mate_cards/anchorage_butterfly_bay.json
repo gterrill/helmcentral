@@ -699,7 +699,8 @@
         "depth_at_low_m": 4.8,
         "draft_m": 1.4,
         "clearance_m": 3.4,
-        "wanted_m": 0.5
+        "wanted_m": 0.5,
+        "tide_checked_until": ""
       },
       "rode": {
         "status": "short",
@@ -713,6 +714,7 @@
         "scope_ratio": 7,
         "chain_onboard_m": 40,
         "short_by_m": 20.9,
+        "tide_checked_until": "",
         "wind_checked_until": ""
       },
       "swing": {
@@ -722,7 +724,8 @@
         "rode_m": 40,
         "bow_offset_m": 3,
         "loa_m": 13,
-        "all_chain_out": true
+        "all_chain_out": true,
+        "tide_checked_until": ""
       }
     },
     "data_as_of": "2026-10-31T21:22:14Z"

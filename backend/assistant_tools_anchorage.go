@@ -143,6 +143,9 @@ type AnchorageTideBody struct {
 type anchorageTideOut struct {
 	section anchorageTideSection
 	sorted  []tideExtremePoint
+	// endsAt is when the prediction ends, set only when that is before the
+	// stay does. The note and the depth checks both read it.
+	endsAt time.Time
 }
 
 type anchorageMooringSize struct {
@@ -363,22 +366,32 @@ func (d assistantToolDeps) executeAnchorageDetails(ctx context.Context, raw json
 	// the later tide extremes, the later forecast rows, then the fetch table
 	// (the arcs and the summary stay). The first cut says so.
 	shrink := func() bool {
+		// How far over the cap the result is, from one encoding. Each list is
+		// cut by the sizes of the rows it holds, in one step, not one
+		// re-encoding of the result per row.
+		over := func() (int, bool) {
+			encoded, err := json.Marshal(&result)
+			if err != nil {
+				return 0, false
+			}
+			return len(encoded) - assistantMaxToolResultChars, true
+		}
+		n, ok := over()
+		if !ok {
+			return false
+		}
 		switch {
 		case result.Features.AnchorageFeaturesBody != nil && len(result.Features.Moorings.Nearest) > 0:
 			m := &result.Features.Moorings
-			m.Nearest = m.Nearest[:len(m.Nearest)-1]
+			m.Nearest = trimTailToFit(m.Nearest, n)
 			result.Features.Truncated = true
 		case result.Tide.AnchorageTideBody != nil && len(result.Tide.Extremes) > 2:
-			result.Tide.Extremes = result.Tide.Extremes[:len(result.Tide.Extremes)-1]
+			// Two extremes always stay: they are the range.
+			full := result.Tide.Extremes
+			result.Tide.Extremes = append(full[:2:2], trimTailToFit(full[2:], n)...)
 			result.Tide.Truncated = true
 		case result.Forecast.AnchorageForecastBody != nil && len(result.Forecast.Hourly) > 0:
-			// Cut the rows that bring the result under the cap in one step,
-			// from their encoded sizes, not one re-encoding of the result each.
-			encoded, err := json.Marshal(&result)
-			if err != nil {
-				return false
-			}
-			result.Forecast.Hourly = trimTailToFit(result.Forecast.Hourly, len(encoded)-assistantMaxToolResultChars)
+			result.Forecast.Hourly = trimTailToFit(result.Forecast.Hourly, n)
 			result.Forecast.Truncated = true
 		case len(result.Shelter.Bearings) > 0:
 			// A copy: the card was built from the full estimate.
@@ -417,6 +430,17 @@ type anchorageForecastOut struct {
 	// forecast holds.
 	stayMaxKts *float64
 	lastHour   time.Time
+}
+
+// forecastEndsBeforeLeave is the one test for a forecast that stops short of the
+// stay, used by the forecast section's note and the rode check's caveat so the
+// two never disagree. Forecast hours are an hour apart on the stay zone's clock
+// (the forecast is fetched in that zone), so the stay is covered only by a
+// forecast with an hour at or after the local hour leaving falls in: the gust
+// of that hour is part of the stay.
+func forecastEndsBeforeLeave(lastHour time.Time, stay anchorageStay) bool {
+	l := stay.leave.In(stay.zone.Loc)
+	return lastHour.Before(time.Date(l.Year(), l.Month(), l.Day(), l.Hour(), 0, 0, 0, stay.zone.Loc))
 }
 
 // stayStrongestWindKts is the strongest rounded gust or wind among the hourly
@@ -477,7 +501,7 @@ func (d assistantToolDeps) anchorageForecast(lat, lon float64, stay anchorageSta
 		WavesError: waves.err, WavesNoData: waves.noData, WaveFallbackModel: waves.fallbackModel,
 		Days: win.days, Hourly: win.hourly,
 	}
-	if win.last.Before(stay.leave.Add(-3 * time.Hour)) {
+	if forecastEndsBeforeLeave(win.last, stay) {
 		body.Note = fmt.Sprintf("The forecast ends at %s, before the stay does.", win.last.In(stay.zone.Loc).Format(toolTimeLayout))
 	}
 	return anchorageForecastOut{
@@ -573,8 +597,11 @@ func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) a
 		Reading: readingTides(st.info, st.timeBasis), Station: st.info, Provider: st.providerID, TimeBasis: st.timeBasis,
 	}
 
+	var endsAt time.Time
 	if n := len(sorted); n > 0 && sorted[n-1].Time.Before(stay.leave) {
-		body.Note = fmt.Sprintf("The tide prediction ends at %s, before the stay does.", sorted[n-1].Time.In(loc).Format(toolTimeLayout))
+		endsAt = sorted[n-1].Time
+		// In the stay's zone, like the checks that quote it; the extremes below stay on the station's clock.
+		body.Note = fmt.Sprintf("The tide prediction ends at %s, before the stay does.", endsAt.In(stay.zone.Loc).Format(toolTimeLayout))
 	}
 
 	// The height at arrival is read between the extremes either side of it,
@@ -629,7 +656,7 @@ func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) a
 	} else {
 		body.RangeNote = "Fewer than two high or low waters are predicted around the stay, so there is no range."
 	}
-	return anchorageTideOut{section: anchorageTideSection{AnchorageTideBody: body}, sorted: sorted}
+	return anchorageTideOut{section: anchorageTideSection{AnchorageTideBody: body}, sorted: sorted, endsAt: endsAt}
 }
 
 // ── features ─────────────────────────────────────────────────────────────
