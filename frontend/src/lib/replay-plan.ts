@@ -12,6 +12,7 @@ import { drawnPieces, passageLegs, type DrawnPiece, type LegPassage } from '@/li
 import { buildTimeline, segmentBounds, timedSegments, type PassageDetail, type TimedSegment, type Timeline } from '@/lib/passages'
 import { resolveShots, type CameraShot, type ResolvedShot } from '@/lib/replay-clock'
 import { resolveSigns, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
+import { staysOf, type ReplayStay } from '@/lib/replay-stay'
 
 /** A passage as the replay reads it: the real times, the track it replays, and the track it draws. */
 export interface ReplayItem {
@@ -63,6 +64,8 @@ export interface ReplayPlan {
   /** The placed signs that draw something. */
   labelled: ResolvedSign[]
   wantHeading: boolean
+  /** The stays between the passages, in order. */
+  stays: ReplayStay[]
 }
 
 export function planReplay(passages: readonly PassageDetail[], shots: readonly CameraShot[], signs: readonly ReplaySign[], hull: BoatHull | null, threeD: boolean): ReplayPlan {
@@ -80,5 +83,6 @@ export function planReplay(passages: readonly PassageDetail[], shots: readonly C
     placed,
     labelled: labelledSigns(placed),
     wantHeading: wantsHeading(hull, threeD, resolved),
+    stays: staysOf(timeline, passages),
   }
 }

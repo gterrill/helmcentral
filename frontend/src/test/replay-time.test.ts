@@ -25,7 +25,7 @@ describe('a replay with no moments', () => {
 
   it('maps watching time to the timeline and back', () => {
     expect(t.at(5).clock).toBeCloseTo(500)
-    expect(t.at(5).moment).toBeNull()
+    expect(t.at(5).hold).toBeNull()
     expect(t.wallAtClock(500)).toBeCloseTo(5)
   })
 
@@ -44,17 +44,17 @@ describe('a replay with moments', () => {
 
   it('sails as far as the first sign, then holds there for a moment', () => {
     expect(t.at(2.9).clock).toBeCloseTo(290)
-    expect(t.at(3).moment).toMatchObject({ id: 'a' })
-    expect(t.at(3).moment!.elapsed).toBeCloseTo(0)
+    expect(t.at(3).hold).toMatchObject({ id: 'a' })
+    expect(t.at(3).hold!.elapsed).toBeCloseTo(0)
     const mid = t.at(3 + 1)
     expect(mid.clock).toBeCloseTo(300)
-    expect(mid.moment!.elapsed).toBeCloseTo(1)
+    expect(mid.hold!.elapsed).toBeCloseTo(1)
     expect(t.at(3 + MOMENT_TOTAL_S - 0.01).clock).toBeCloseTo(300)
   })
 
   it('carries on from the sign when the hold is over', () => {
     const after = t.at(3 + MOMENT_TOTAL_S)
-    expect(after.moment).toBeNull()
+    expect(after.hold).toBeNull()
     expect(after.clock).toBeCloseTo(300)
     expect(t.at(3 + MOMENT_TOTAL_S + 1).clock).toBeCloseTo(400)
   })
@@ -62,14 +62,14 @@ describe('a replay with moments', () => {
   it('shifts the second hold by the first', () => {
     // The second sign is 7 s into the sailing and one hold later in the watching.
     const start = 7 + MOMENT_TOTAL_S
-    expect(t.at(start - 0.01).moment).toBeNull()
-    expect(t.at(start).moment).toMatchObject({ id: 'b' })
+    expect(t.at(start - 0.01).hold).toBeNull()
+    expect(t.at(start).hold).toMatchObject({ id: 'b' })
     expect(t.at(start + MOMENT_TOTAL_S).clock).toBeCloseTo(700)
   })
 
   it('ends at the end of the timeline, holds and all', () => {
     expect(t.at(t.totalWall).clock).toBe(TOTAL)
-    expect(t.at(t.totalWall).moment).toBeNull()
+    expect(t.at(t.totalWall).hold).toBeNull()
   })
 
   it('never goes backwards as the watching goes on', () => {
@@ -86,7 +86,7 @@ describe('a replay with moments', () => {
     // 5 s to reach 500, then twice as long for the next 500: 15 s of sailing.
     expect(slow.totalWall).toBeCloseTo(15 + MOMENT_TOTAL_S)
     expect(slow.at(5 + 4).clock).toBeCloseTo(700 - 0, -1)
-    expect(slow.at(5 + 4).moment).not.toBeNull()
+    expect(slow.at(5 + 4).hold).not.toBeNull()
   })
 })
 
@@ -103,7 +103,7 @@ describe('seeking', () => {
 
   it('never lands in the middle of a hold, even on the very clock of a sign', () => {
     for (const clock of [0, 100, 299, 300, 301, 450, 699.5, 700, 701, 999, 1000]) {
-      expect(t.at(t.wallAtClock(clock)).moment).toBeNull()
+      expect(t.at(t.wallAtClock(clock)).hold).toBeNull()
     }
   })
 
@@ -116,13 +116,13 @@ describe('seeking', () => {
   it('counts a seek to the end as the end, even with a sign standing there', () => {
     const atEnd = build([{ clock: 300, id: 'a' }, { clock: TOTAL, id: 'z' }])
     expect(atEnd.wallAtClock(TOTAL)).toBeCloseTo(atEnd.totalWall)
-    expect(atEnd.at(atEnd.wallAtClock(TOTAL)).moment).toBeNull()
+    expect(atEnd.at(atEnd.wallAtClock(TOTAL)).hold).toBeNull()
   })
 
   it('lands on the start of a sign\'s moment only when asked to land on the sign', () => {
     const w = t.wallAtClock(300, { onSign: true })
-    expect(t.at(w).moment).toMatchObject({ id: 'a' })
-    expect(t.at(w).moment!.elapsed).toBeCloseTo(0)
+    expect(t.at(w).hold).toMatchObject({ id: 'a' })
+    expect(t.at(w).hold!.elapsed).toBeCloseTo(0)
     expect(t.at(w).clock).toBeCloseTo(300)
     // Any other clock is the same either way.
     expect(t.wallAtClock(450, { onSign: true })).toBe(t.wallAtClock(450))
@@ -131,10 +131,10 @@ describe('seeking', () => {
   it('puts two signs at one place one hold after another; a seek there lands after both, or on the first', () => {
     const two = build([{ clock: 300, id: 'a' }, { clock: 300, id: 'b' }])
     expect(two.totalWall).toBeCloseTo(10 + 2 * MOMENT_TOTAL_S)
-    expect(two.at(two.wallAtClock(300, { onSign: true })).moment!.id).toBe('a')
-    expect(two.at(3 + MOMENT_TOTAL_S).moment!.id).toBe('b')
+    expect(two.at(two.wallAtClock(300, { onSign: true })).hold!.id).toBe('a')
+    expect(two.at(3 + MOMENT_TOTAL_S).hold!.id).toBe('b')
     expect(two.wallAtClock(300)).toBeCloseTo(3 + 2 * MOMENT_TOTAL_S)
-    expect(two.at(two.wallAtClock(301)).moment).toBeNull()
+    expect(two.at(two.wallAtClock(301)).hold).toBeNull()
   })
 })
 

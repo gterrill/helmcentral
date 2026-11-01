@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { forwardRef, useImperativeHandle } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { REPLAY_SPEEDS } from '@/hooks/use-replay'
+import { PASSAGE_REPLAY_LENGTHS } from '@/lib/replay-lengths'
 
 import type { ReplayCursor } from '@/components/passages/replay-panel'
 import { ReplayPanel } from '@/test/replay-panel-harness'
@@ -151,7 +151,7 @@ describe('ReplayPanel', () => {
   })
 
   it('plays the whole track in 60, 30, 15 or 8 seconds', () => {
-    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['30 s', 30], ['15 s', 15], ['8 s', 8]])
+    expect(PASSAGE_REPLAY_LENGTHS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['30 s', 30], ['15 s', 15], ['8 s', 8]])
   })
 
   it('says so when no track was kept rather than drawing nothing', () => {

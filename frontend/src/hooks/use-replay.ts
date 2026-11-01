@@ -2,19 +2,9 @@ import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 
 import { ReplayPlayer } from '@/lib/replay-controller'
 import type { PaceSpan } from '@/lib/replay-clock'
-import { buildReplayTime, type ReplayMoment } from '@/lib/replay-time'
+import { buildReplayTime, type ReplayHoldInput } from '@/lib/replay-time'
 
-/** Replay lengths: how long the whole timeline takes to watch at full pace, in seconds. */
-export const REPLAY_SPEEDS = [
-  { id: '60s', label: '60 s', seconds: 60 },
-  { id: '30s', label: '30 s', seconds: 30 },
-  { id: '15s', label: '15 s', seconds: 15 },
-  { id: '8s', label: '8 s', seconds: 8 },
-] as const
-export type ReplaySpeedId = (typeof REPLAY_SPEEDS)[number]['id']
-
-export const DEFAULT_REPLAY_LENGTH: ReplaySpeedId = '15s'
-export const replaySeconds = (speed: ReplaySpeedId) => REPLAY_SPEEDS.find((s) => s.id === speed)?.seconds ?? 15
+const NO_STAYS: readonly ReplayHoldInput[] = []
 
 /** Advances a replay of `total` timeline seconds, sailed in `lengthS` seconds
  * of watching, slowed through any `spans`, and held for each photo moment in
@@ -23,8 +13,8 @@ export const replaySeconds = (speed: ReplaySpeedId) => REPLAY_SPEEDS.find((s) =>
  * the timing again. `clock` is 0..total and stays in timeline units whatever the
  * pace. The place and whether it is playing belong to a ReplayPlayer; this hook
  * feeds it requestAnimationFrame times and mirrors it into state. */
-export function useReplay(total: number, lengthS: number, spans: readonly PaceSpan[], moments: readonly ReplayMoment[]) {
-  const time = useMemo(() => buildReplayTime({ total, lengthS, spans, moments }), [total, lengthS, spans, moments])
+export function useReplay(total: number, lengthS: number, spans: readonly PaceSpan[], moments: readonly ReplayHoldInput[], stays: readonly ReplayHoldInput[] = NO_STAYS) {
+  const time = useMemo(() => buildReplayTime({ total, lengthS, spans, moments, stays }), [total, lengthS, spans, moments, stays])
   const [player] = useState(() => new ReplayPlayer(time))
   // Re-render when the player has moved.
   const [, bump] = useReducer((n: number) => n + 1, 0)
@@ -34,7 +24,7 @@ export function useReplay(total: number, lengthS: number, spans: readonly PaceSp
   // timeline starts again from the beginning.)
   if (player.timing !== time) player.setTime(time, performance.now())
 
-  const setClock = useCallback((value: number, opts?: { onSign?: boolean }) => {
+  const setClock = useCallback((value: number, opts?: { onSign?: boolean; at?: number }) => {
     player.seek(value, opts)
     bump()
   }, [player])

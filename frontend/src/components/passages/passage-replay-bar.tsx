@@ -1,12 +1,12 @@
 import { Map as MapIcon, Minus, Pause, Play, Plus, RefreshCw, Signpost, SlidersHorizontal, Video } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
 import { InputGroup, InputGroupButton } from '@/components/ui/input-group'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { REPLAY_SPEEDS, type ReplaySpeedId } from '@/hooks/use-replay'
+import { PASSAGE_REPLAY_LENGTHS, type ReplayLength, type ReplaySpeedId } from '@/lib/replay-lengths'
 import {
   INSET_CORNERS, INSET_ZOOM_STEP_MAX, INSET_ZOOM_STEP_MIN, clampInsetStep, insetStepLabel, type InsetView,
 } from '@/lib/passage-inset-view'
@@ -38,6 +38,8 @@ export interface PassageReplayBarProps {
   /** Boat-local date and time of the replay position, zone labelled. */
   readout: string
   speed: ReplaySpeedId
+  /** The lengths on offer. A single passage's, unless the page says more. */
+  lengths?: readonly ReplayLength[]
   insetOn: boolean
   disabled: boolean
   onToggle: () => void
@@ -66,11 +68,13 @@ export interface PassageReplayBarProps {
 }
 
 export function PassageReplayBar({
-  clock, total, playing, readout, speed, insetOn, disabled, onToggle, onScrub, onSpeed, onInsetChange,
+  clock, total, playing, readout, speed, lengths = PASSAGE_REPLAY_LENGTHS, insetOn, disabled, onToggle, onScrub, onSpeed, onInsetChange,
   insetView, onInsetViewChange, insetViewError = null, onInsetViewRetry,
   shotTicks = [], cameraOpen = false, onCameraToggle, onTickClick, editor,
   signTicks = [], signsOpen = false, onSignsToggle, onSignTickClick, signsEditor,
 }: PassageReplayBarProps) {
+  // The Select's items, built once for the lengths on offer and not on every frame of the replay.
+  const items = useMemo(() => lengths.map((l) => ({ value: l.id, label: l.label })), [lengths])
   return (
     <div className="border-t border-border bg-card" data-testid="passage-replay-bar">
     <div className="flex flex-wrap items-center gap-2 p-2">
@@ -135,7 +139,7 @@ export function PassageReplayBar({
       </div>
       <span className="min-w-36 truncate text-xs tabular-nums text-foreground" data-testid="replay-readout">{readout}</span>
       <Select
-        items={SPEED_ITEMS}
+        items={items}
         value={speed}
         onValueChange={(value) => value && onSpeed(value as ReplaySpeedId)}
       >
@@ -143,7 +147,7 @@ export function PassageReplayBar({
           <SelectValue />
         </SelectTrigger>
         <SelectPopup>
-          {REPLAY_SPEEDS.map((s) => (
+          {lengths.map((s) => (
             <SelectItem key={s.id} value={s.id}>{s.label}</SelectItem>
           ))}
         </SelectPopup>
@@ -206,7 +210,6 @@ export function PassageReplayBar({
   )
 }
 
-const SPEED_ITEMS = REPLAY_SPEEDS.map((s) => ({ value: s.id, label: s.label }))
 
 /** Corner and zoom step of the overview map, in a small popover beside its switch. */
 function InsetPlacement({ view, disabled, onChange }: { view: InsetView; disabled: boolean; onChange: (view: InsetView) => void }) {

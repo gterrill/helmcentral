@@ -47,8 +47,8 @@ export function photoMomentOn(sign: Pick<ReplaySign, 'photo_url' | 'photo_moment
 }
 
 /** The signs whose photos hold the replay for a moment, and where the boat meets them: the ones with a title to show (a join waiting for a name draws nothing) and a photo that is not switched off, less any in `excluded` (a photo that would not load). */
-export function momentsOf(placed: readonly ResolvedSign[], excluded: ReadonlySet<string> = new Set()): { clock: number; id: string }[] {
-  return placed.filter((r) => r.sign.title !== '' && photoMomentOn(r.sign) && !excluded.has(r.sign.id)).map((r) => ({ clock: r.clock, id: r.sign.id }))
+export function momentsOf(placed: readonly ResolvedSign[], excluded: ReadonlySet<string> = new Set()): { clock: number; id: string; at: number }[] {
+  return placed.filter((r) => r.sign.title !== '' && photoMomentOn(r.sign) && !excluded.has(r.sign.id)).map((r) => ({ clock: r.clock, id: r.sign.id, at: r.at }))
 }
 
 /** A sign placed on the replay. */
@@ -117,11 +117,11 @@ function window(r: ResolvedSign, reachedAt: number): { from: number; to: number 
  * Watching time is wall-clock: `wallAt` (the replay clock's mapping) is what
  * makes a slowed stretch last as long as it feels.
  */
-export function visibleSigns(resolved: readonly ResolvedSign[], wall: number, wallAt: (clock: number) => number): ResolvedSign[] {
+export function visibleSigns(resolved: readonly ResolvedSign[], wall: number, wallAt: (clock: number, sign: ResolvedSign) => number): ResolvedSign[] {
   interface Entry { r: ResolvedSign; from: number; to: number }
   const entries: Entry[] = []
   for (const r of resolved) {
-    const w = window(r, wallAt(r.clock))
+    const w = window(r, wallAt(r.clock, r))
     if (w.from <= wall) entries.push({ r, ...w })
   }
   entries.sort((a, b) => a.from - b.from || a.r.sign.t_ms - b.r.sign.t_ms || a.r.sign.id.localeCompare(b.r.sign.id))
@@ -196,6 +196,9 @@ export function placeSignCard({ point, container, card, lift }: SignPlacementInp
 // ── the card's size ──────────────────────────────────────────────────────
 // SignCard is built from these, so the page and the replay's photo moment, which
 // grows from the card's photo, cannot disagree about where the photo is.
+
+/** Seconds a card takes to fade in, and the stay's label to fade in and out. */
+export const CARD_FADE_S = 0.3
 
 /** The width of a card with a photo, and of one with text alone. */
 export const SIGN_CARD_PHOTO_W_PX = 256

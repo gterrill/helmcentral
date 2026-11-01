@@ -36,6 +36,7 @@ import {
   type PassageDetail,
   type TimedSegment,
 } from '@/lib/passages'
+import { midnightsSince } from '@/lib/boat-nights'
 import { zoneOffsetLabel, zoneOffsetMinutes } from '@/lib/vessel-time'
 import { CARD_LIMIT_BYTES, ESTIMATED_PHOTO_BYTES, EXPORT_PHOTO_PREFIX, exportSigns, oversizeMessage, signsInRange, type ExportSign } from '@/lib/passage-export-signs'
 import type { CameraMode, CameraShot } from '@/lib/replay-clock'
@@ -277,14 +278,6 @@ export function dateRangeLabel(startUnix: number, endUnix: number, offsetHours: 
   return `${a.day} to ${full(b)}`
 }
 
-const localDay = (unix: number, offsetHours: number) => Math.floor((unix + offsetHours * 3600) / 86400)
-
-/** Boat-local midnights from the first departure up to an instant: the rule
- * the cruise page uses for its nights. An instant exactly on midnight does not
- * count its own midnight. */
-export function midnightsSince(firstStartUnix: number, unix: number, offsetHours: number): number {
-  return Math.max(0, localDay(unix - 0.001, offsetHours) - localDay(firstStartUnix, offsetHours))
-}
 
 /** A heading for a hand-picked set of passages. */
 export function combinedTitle(passages: Pick<PassageDetail, 'from_name' | 'to_name' | 'start'>[]): string {

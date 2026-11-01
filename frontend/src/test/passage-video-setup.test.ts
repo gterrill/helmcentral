@@ -44,13 +44,13 @@ describe('prepareVideoReplay', () => {
 
   it('adds a hold for a sign with a photo, and none for one without or switched off', () => {
     const s = prepareVideoReplay(input({ signs: [sign('a', 300), sign('b', 400, { photo_moment: false }), sign('c', 500, { photo_url: null, document_id: null })] }))
-    expect(s.config.time.moments.map((m) => m.id)).toEqual(['a'])
+    expect(s.config.time.holds.map((h) => h.id)).toEqual(['a'])
     expect(s.config.time.totalWall).toBeCloseTo(15 + MOMENT_TOTAL_S)
   })
 
   it('leaves out the moment of a sign whose photo would not load', () => {
     const s = prepareVideoReplay(input({ signs: [sign('a', 300)] }), new Set(['a']))
-    expect(s.config.time.moments).toEqual([])
+    expect(s.config.time.holds).toEqual([])
     // The sign is still there, to say its photo is not available.
     expect(s.config.signs.map((r) => r.sign.id)).toEqual(['a'])
   })

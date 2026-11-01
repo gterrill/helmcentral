@@ -1,7 +1,8 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { REPLAY_SPEEDS, useReplay } from '@/hooks/use-replay'
+import { useReplay } from '@/hooks/use-replay'
+import { PASSAGE_REPLAY_LENGTHS } from '@/lib/replay-lengths'
 import type { ReplayTime } from '@/lib/replay-time'
 
 const NONE: never[] = []
@@ -11,11 +12,11 @@ beforeEach(() => { vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelA
 afterEach(() => { vi.useRealTimers() })
 
 // The photo moment the replay is in.
-const momentOf = (r: { time: ReplayTime; wall: number }) => r.time.at(r.wall).moment
+const momentOf = (r: { time: ReplayTime; wall: number }) => r.time.at(r.wall).hold
 
 describe('useReplay', () => {
   it('offers a 60 second length beside the existing ones', () => {
-    expect(REPLAY_SPEEDS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['30 s', 30], ['15 s', 15], ['8 s', 8]])
+    expect(PASSAGE_REPLAY_LENGTHS.map((s) => [s.label, s.seconds])).toEqual([['60 s', 60], ['30 s', 30], ['15 s', 15], ['8 s', 8]])
   })
 
   it('plays the timeline in the chosen length', () => {

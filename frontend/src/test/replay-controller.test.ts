@@ -121,12 +121,12 @@ describe('the replay clock', () => {
       p.play(0)
       p.tick(5000)
       expect(p.clock).toBeCloseTo(500)
-      expect(p.moment!.id).toBe('a')
+      expect(p.hold!.id).toBe('a')
       p.tick(5000 + 1000)
       expect(p.clock).toBeCloseTo(500)
-      expect(p.moment!.elapsed).toBeCloseTo(1)
+      expect(p.hold!.elapsed).toBeCloseTo(1)
       p.tick(5000 + MOMENT_TOTAL_S * 1000 + 1000)
-      expect(p.moment).toBeNull()
+      expect(p.hold).toBeNull()
       expect(p.clock).toBeCloseTo(600)
     })
 
@@ -146,10 +146,10 @@ describe('the replay clock', () => {
       p.tick(5000 + 500)
       p.pause()
       p.tick(60_000)
-      expect(p.moment!.elapsed).toBeCloseTo(0.5)
+      expect(p.hold!.elapsed).toBeCloseTo(0.5)
       p.play(100_000)
       p.tick(100_000 + 500)
-      expect(p.moment!.elapsed).toBeCloseTo(1)
+      expect(p.hold!.elapsed).toBeCloseTo(1)
     })
 
     it('ends the moment when told to, and carries on from the sign', () => {
@@ -157,7 +157,7 @@ describe('the replay clock', () => {
       p.play(0)
       p.tick(5000 + 700)
       p.skipMoment()
-      expect(p.moment).toBeNull()
+      expect(p.hold).toBeNull()
       expect(p.clock).toBeCloseTo(500)
       expect(p.playing).toBe(true)
       p.tick(5000 + 700 + 1000)
@@ -176,17 +176,17 @@ describe('the replay clock', () => {
       const p = new ReplayPlayer(timeOf(moments))
       for (const c of [0, 250, 499, 501, 900, 1500]) {
         p.seek(c)
-        expect(p.moment).toBeNull()
+        expect(p.hold).toBeNull()
         expect(p.clock).toBeCloseTo(c)
       }
       // Even at the sign's own clock the slider lands after the hold.
       p.seek(500)
-      expect(p.moment).toBeNull()
+      expect(p.hold).toBeNull()
       expect(p.clock).toBeCloseTo(500)
       // Only a jump to the sign lands on its moment.
       p.seek(500, { onSign: true })
-      expect(p.moment!.id).toBe('a')
-      expect(p.moment!.elapsed).toBeCloseTo(0)
+      expect(p.hold!.id).toBe('a')
+      expect(p.hold!.elapsed).toBeCloseTo(0)
     })
 
     it('counts a seek to the end as ended', () => {
@@ -201,9 +201,9 @@ describe('the replay clock', () => {
       const p = new ReplayPlayer(timeOf(moments))
       p.play(0)
       p.tick(5000 + MOMENT_TOTAL_S * 1000)
-      expect(p.moment).toBeNull()
+      expect(p.hold).toBeNull()
       p.setTime(changed, 0)
-      expect(p.moment).toBeNull()
+      expect(p.hold).toBeNull()
       expect(p.clock).toBeCloseTo(500)
       p.play(0)
       p.tick(500)
@@ -213,7 +213,7 @@ describe('the replay clock', () => {
       q.seek(500, { onSign: true })
       q.skipMoment()
       q.setTime(changed, 0)
-      expect(q.moment).toBeNull()
+      expect(q.hold).toBeNull()
       expect(q.clock).toBeCloseTo(500)
       // A replay that has not reached the hold is still before it.
       const r = new ReplayPlayer(timeOf(moments))
@@ -221,7 +221,7 @@ describe('the replay clock', () => {
       r.setTime(changed, 0)
       r.play(0)
       r.tick(2500 + 100)
-      expect(r.moment).not.toBeNull()
+      expect(r.hold).not.toBeNull()
     })
 
     it('stays at the very start, before a moment standing there, when signs load after the page', () => {
@@ -230,7 +230,7 @@ describe('the replay clock', () => {
       expect(p.wall).toBe(0)
       p.play(0)
       p.tick(500)
-      expect(p.moment?.id).toBe('first')
+      expect(p.hold?.id).toBe('first')
     })
 
     it('keeps its place, and its place in a moment, when the timing changes under it', () => {
@@ -238,8 +238,8 @@ describe('the replay clock', () => {
       p.play(0)
       p.tick(5000 + 800)
       p.setTime(timeOf(moments, [{ from: 900, pace: 0.5 }]), 5800)
-      expect(p.moment!.id).toBe('a')
-      expect(p.moment!.elapsed).toBeCloseTo(0.8)
+      expect(p.hold!.id).toBe('a')
+      expect(p.hold!.elapsed).toBeCloseTo(0.8)
       p.pause()
       p.seek(300)
       p.setTime(timeOf(moments, [{ from: 100, pace: 0.5 }]), 0)
@@ -247,7 +247,7 @@ describe('the replay clock', () => {
       // The sign goes: the moment with it.
       p.seek(500, { onSign: true })
       p.setTime(timeOf([]), 0)
-      expect(p.moment).toBeNull()
+      expect(p.hold).toBeNull()
       expect(p.clock).toBeCloseTo(500)
     })
   })
@@ -445,9 +445,9 @@ describe('a photo moment', () => {
   })
 
   it('has no moment for a sign without a photo, or one switched off', () => {
-    expect(withPhoto({ photo_url: null, document_id: null }).time.moments).toHaveLength(0)
-    expect(withPhoto({ photo_moment: false }).time.moments).toHaveLength(0)
-    expect(withPhoto().time.moments).toHaveLength(1)
+    expect(withPhoto({ photo_url: null, document_id: null }).time.holds.filter((h) => h.kind === 'moment')).toHaveLength(0)
+    expect(withPhoto({ photo_moment: false }).time.holds.filter((h) => h.kind === 'moment')).toHaveLength(0)
+    expect(withPhoto().time.holds.filter((h) => h.kind === 'moment')).toHaveLength(1)
   })
 
   it('holds the clock while it grows, holds and shrinks, then carries on', () => {

@@ -3,7 +3,8 @@
 // shot with a pace slows the timeline down for as long as it lasts, so the two
 // are related by a piecewise rate. Everything here is pure.
 
-import type { Timeline } from '@/lib/passages'
+import { locate, type Timeline } from '@/lib/passages'
+import { lowerBound } from '@/lib/sorted-search'
 
 export type CameraMode = 'overview' | 'follow' | 'orbit'
 export const CAMERA_PACES = [1, 0.5, 0.25] as const
@@ -135,4 +136,59 @@ export function wallAtTimeline(total: number, lengthS: number, spans: readonly P
   if (clock >= total) return p[p.length - 1].w1
   const piece = find(p, clock, 'c1')
   return piece.w0 + ((clock - piece.c0) / (piece.c1 - piece.c0)) * (piece.w1 - piece.w0)
+}
+
+// ── sharing the length between passages ──────────────────────────────────
+
+/** The least a passage gets of the replay's length in a cruise, in seconds of sailing at full pace. */
+export const MIN_PASSAGE_SHARE_S = 4
+
+/** Shares the replay's length (seconds of sailing) between passages, by their
+ * sailing time. Each passage gets at least `minS`: the short ones are lifted
+ * to it and the others scaled down to fit what is left, until none of them
+ * falls below it. When the minimums alone come to more than the length, every
+ * passage gets an equal share. A passage with no sailing time gets none. The
+ * shares add up to `lengthS`. */
+export function passageShares(durations: readonly number[], lengthS: number, minS: number = MIN_PASSAGE_SHARE_S): number[] {
+  const sailed = durations.map((d) => (d > 0 ? d : 0))
+  const count = sailed.filter((d) => d > 0).length
+  if (count === 0 || !(lengthS > 0)) return sailed.map(() => 0)
+  if (count * minS >= lengthS) return sailed.map((d) => (d > 0 ? lengthS / count : 0))
+  const pinned = new Set<number>()
+  for (;;) {
+    const free = sailed.map((d, i) => (d > 0 && !pinned.has(i) ? d : 0))
+    const freeTotal = free.reduce((a, b) => a + b, 0)
+    const left = lengthS - pinned.size * minS
+    const shares = sailed.map((d, i) => (d <= 0 ? 0 : pinned.has(i) ? minS : (left * free[i]) / freeTotal))
+    const low = shares.map((s, i) => (sailed[i] > 0 && !pinned.has(i) && s < minS ? i : -1)).filter((i) => i >= 0)
+    if (low.length === 0) return shares
+    // Every one below the minimum is lifted to it at once; the rest are shared out again.
+    low.forEach((i) => pinned.add(i))
+  }
+}
+
+/** The pace spans of a replay of several passages: the camera shots' own
+ * paces, with each passage's share of the length worked in. A passage given
+ * more or less of the length than its sailing time earns runs slower or faster
+ * by that ratio, on top of any shot's pace. A single passage is the shots'
+ * spans as they are. */
+export function cruisePaceSpans(resolved: readonly ResolvedShot[], timeline: Timeline, lengthS: number): PaceSpan[] {
+  const shots = paceSpans(resolved)
+  if (timeline.entries.length < 2 || !(timeline.total > 0) || !(lengthS > 0)) return shots
+  const lengths = timeline.entries.map((e) => Math.max(0, e.end - e.start))
+  const shares = passageShares(lengths, lengthS)
+  // Relative to the pace the whole length would run at: 1 for a passage that gets what it earns.
+  const base = timeline.total / lengthS
+  const relative = lengths.map((d, i) => (d > 0 && shares[i] > 0 ? d / shares[i] / base : 1))
+  const sortedShots = [...shots].sort((a, b) => a.from - b.from)
+  // The pace in force at a position: that of the last shot at or before it.
+  const shotPaceAt = (clock: number) => {
+    const n = lowerBound(sortedShots, (s) => s.from, clock, true)
+    return n > 0 ? sortedShots[n - 1].pace : 1
+  }
+  const points = [...new Set([...timeline.entries.map((e) => e.offset), ...sortedShots.map((s) => Math.max(0, s.from))])].filter((c) => c < timeline.total).sort((a, b) => a - b)
+  // The passage a clock position is in, by the rule the replay locates the boat by.
+  const indexOf = new Map(timeline.entries.map((e, i) => [e.id, i]))
+  const passageAt = (clock: number) => indexOf.get(locate(timeline, clock)!.entry.id)!
+  return points.map((from) => ({ from, pace: shotPaceAt(from) * relative[passageAt(from)] }))
 }

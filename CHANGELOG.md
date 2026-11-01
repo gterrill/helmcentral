@@ -31,6 +31,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A cruise replay now stops at each anchorage.** The replay of a cruise, or
+  of passages you select together, used to jump from one passage's end to the
+  next one's start. Now it holds for a moment at each stay, with the sun and
+  sky running from the day you arrived to the day you left, so a night at
+  anchor passes as dusk, dark and dawn, and a small label says how long you
+  stayed and where, such as "2 nights · Blue Pearl Bay". Every passage also
+  gets at least four seconds of the length you chose, so a short hop doesn't
+  flash past, and the length list for a cruise adds 2 and 3 minutes and starts
+  on 60 seconds. A single passage replay is as it was. The video you export
+  from a cruise holds at each stay the same way.
+
 - **Export a passage replay as a video.** **Export**, then **Video**, on a
   passage, cruise or selection makes an MP4 of the replay as it's set: the
   length you picked, your camera shots, the map and satellite picture, 3D, and

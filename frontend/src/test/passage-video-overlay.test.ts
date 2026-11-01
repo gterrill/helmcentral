@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
-import { CARD_FADE_S, UI_SCALE, buildOverlay, type OverlayInput } from '@/lib/passage-video/overlay'
-import { signCardBox, signCardPhotoRect, signCardRect, SIGN_LIFT_PX, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
+import { stayLabelBox, stayView } from '@/lib/replay-stay'
+import { UI_SCALE, buildOverlay, type OverlayInput } from '@/lib/passage-video/overlay'
+import { CARD_FADE_S, signCardBox, signCardPhotoRect, signCardRect, SIGN_LIFT_PX, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
 import type { ReplayFrame } from '@/lib/replay-controller'
 import { MOMENT_GROW_S, momentRect, momentView } from '@/lib/replay-time'
 
@@ -12,7 +13,7 @@ const placed = (s: ReplaySign, lon = 149, lat = -20): ResolvedSign => ({ sign: s
 const photo = { document_id: 'd', photo_url: '/api/documents/d/content' }
 
 const frame = (extra: Partial<ReplayFrame> = {}): ReplayFrame => ({
-  here: null, boat: { lat: -20, lon: 149 }, heading: null, sailedTo: null, cards: [], pins: [], light: null, speed: null, moment: null, ...extra,
+  here: null, boat: { lat: -20, lon: 149 }, heading: null, sailedTo: null, cards: [], pins: [], light: null, speed: null, moment: null, stay: null, hold: null, ...extra,
 })
 
 // The map, 1920 by 1080, putting a point at a pixel by its longitude.
@@ -20,6 +21,22 @@ const SIZE = { width: 1920, height: 1080 }
 const project = (lon: number, lat: number) => ({ x: (lon - 148) * 600, y: 700 + lat * 5 })
 const input = (f: ReplayFrame, extra: Partial<OverlayInput> = {}): OverlayInput => ({
   frame: f, size: SIZE, project, wall: 10, firstSeen: new Map(), bitmaps: new Set(), momentSign: undefined, boatDot: false, measure: (t) => t.length * 7, ...extra,
+})
+
+describe('buildOverlay and a stay', () => {
+  const stayFrame = (elapsed: number) => frame({
+    stay: stayView({ id: 'stay:a>b', index: 0, clock: 10, at: 0, fromId: 'a', toId: 'b', arrival: 0, departure: 3600, label: '1 h 00 m \u00b7 Bay' }, elapsed),
+  })
+
+  it('carries the stay\'s label and its place in the frame, in design pixels', () => {
+    const m = buildOverlay(input(stayFrame(0.75)))
+    expect(m.stay).toEqual({ text: '1 h 00 m \u00b7 Bay', box: stayLabelBox(m.design, 0.75) })
+    expect(m.stay!.box.cx).toBe(m.design.w / 2)
+  })
+
+  it('has none outside a stay', () => {
+    expect(buildOverlay(input(frame())).stay).toBeNull()
+  })
 })
 
 describe('buildOverlay', () => {

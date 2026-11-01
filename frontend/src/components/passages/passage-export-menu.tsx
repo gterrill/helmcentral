@@ -21,7 +21,7 @@ import type { DistanceUnits } from '@/config/app-config'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
 import { useInsetView } from '@/hooks/use-inset-view'
-import { DEFAULT_REPLAY_LENGTH, replaySeconds, type ReplaySpeedId } from '@/hooks/use-replay'
+import { DEFAULT_REPLAY_LENGTH, replaySeconds, type ReplaySpeedId } from '@/lib/replay-lengths'
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import {
   DEFAULT_PLAY_SECONDS,

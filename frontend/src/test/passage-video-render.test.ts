@@ -13,7 +13,7 @@ import type { PassageDetail } from '@/lib/passages'
 import type { Camera } from '@/lib/replay-camera'
 import { INTRO_START_ZOOM } from '@/lib/replay-intro'
 import type { ReplaySign } from '@/lib/replay-signs'
-import { MOMENT_TOTAL_S } from '@/lib/replay-time'
+import { MOMENT_TOTAL_S, STAY_S } from '@/lib/replay-time'
 
 const t0 = Date.UTC(2026, 9, 24, 0, 0) / 1000
 const passage = (): PassageDetail => ({
@@ -210,6 +210,32 @@ describe('renderPassageVideo', () => {
       expect(spy).toHaveBeenCalledTimes(1)
       expect((spy.mock.calls[0][0] as ReplaySign[]).map((x) => x.id)).toEqual(['on'])
       expect(spy.mock.calls[0][1]).toBe(Math.ceil(1008 * 1.06))
+    })
+
+    it('holds for each stay between passages of a cruise, with the light and the boat of the stay', async () => {
+      const f = fakes()
+      const later = { ...passage(), id: 'p2', start: new Date((t0 + 90_000) * 1000).toISOString(), end: new Date((t0 + 91_000) * 1000).toISOString(),
+        track_times: [[t0 + 90_000, t0 + 91_000]], replay_times: [[t0 + 90_000, t0 + 90_500, t0 + 91_000]] } as unknown as PassageDetail
+      const i = input({ lengthS: 8, passages: [passage(), later] })
+      await renderPassageVideo(i, {}, f.deps)
+      const setup = prepareVideoReplay(i)
+      const s = frameSchedule(setup.config.time)
+      expect(setup.config.stays).toHaveLength(1)
+      // The watching is the sailing and one stay, and every frame of it was made.
+      expect(setup.config.time.totalWall).toBeCloseTo(8 + STAY_S)
+      expect(f.added).toHaveLength(s.total)
+      const held = f.shown.filter((x) => x.frame.stay !== null)
+      expect(held.length).toBeGreaterThanOrEqual(Math.floor(STAY_S * FPS) - 1)
+      expect(held.length).toBeLessThanOrEqual(Math.ceil(STAY_S * FPS) + 1)
+      // The boat stays where the first passage ended, and the light runs on to the departure.
+      expect(new Set(held.map((x) => `${x.frame.boat!.lat},${x.frame.boat!.lon}`)).size).toBe(1)
+      expect(held[0].frame.stay!.stay.label).toMatch(/^1 night/)
+      expect(held[held.length - 1].frame.stay!.progress).toBeGreaterThan(0.9)
+      expect(held[0].frame.stay!.sunAt).toBeLessThan(held[held.length - 1].frame.stay!.sunAt)
+      // No stay for a single passage.
+      const one = fakes()
+      await renderPassageVideo(input({ lengthS: 8 }), {}, one.deps)
+      expect(one.shown.every((x) => x.frame.stay === null)).toBe(true)
     })
 
     it('gives no moment to a photo that would not load', async () => {
