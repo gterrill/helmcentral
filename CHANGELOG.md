@@ -11,6 +11,42 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **Mate's "Anchorage shelter" lookup is now "Anchorage details", and a
+  program that connects to Helmcentral loses the old one.** The new lookup
+  needs the time the boat arrives, so a program that asked for shelter with
+  only a position has to say when. A token that could use Anchorage shelter
+  doesn't gain Anchorage details by itself. What to do: in **Settings, Outside
+  assistants**, switch on Anchorage details for each token that used it. Until
+  then, a program that asks for the old tool is told it doesn't exist.
+
+- **Update the osm-overpass plugin bundle to get the map features in
+  Anchorage details.** The plugin in this release has a new lookup for what's
+  mapped within a nautical mile of an anchorage. With an older plugin, or with
+  google-places as the place-names plugin, Mate still gives the shelter, the
+  forecast and the tide, and the features part says the plugin doesn't provide
+  them. What to do: install the plugin bundle from the same release as
+  Helmcentral, as described in [Provider plugins](docs/reference/plugins.md).
+
+### Added
+
+- **Mate assesses an anchorage for your stay, and shows an anchorage card.**
+  Tell Mate when you'll arrive, and when you'll leave if you know. It reads the
+  shelter from each wind direction, the wind and waves every three hours over
+  your stay with the shelter from each wind, the tide at arrival, each high and
+  low water and their range, and what OpenStreetMap records within a nautical
+  mile. That's restricted areas, marine parks, public moorings with the biggest
+  vessel they take, anchorage areas, seabed areas and the bay. Without a leave
+  time the stay ends at the first 08:00 local time at least six hours after
+  arrival, and Mate says so.
+  The card under the answer shows a ring of 36 spokes coloured by shelter, the
+  forecast and tide tables, the local features, and a map folded under **Map**.
+  If the forecast, the tide or the map lookup fails, that part says why and
+  shows nothing. Only the shelter is needed for the lookup to run. Mate says an
+  anchorage where anchoring is prohibited is a no-go, and gives no depth or
+  holding from this lookup. See [Mate](docs/features/assistant.md).
+
 ### Changed
 
 - **The engine card's fuel bars match the dial.** The two tank bars now draw

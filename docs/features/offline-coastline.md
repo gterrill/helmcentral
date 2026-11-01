@@ -109,8 +109,8 @@ rely on, is.
 
 ## What Mate does with it
 
-If you ask Mate about an anchorage, it estimates the shelter from this coastline
-alone. That's a **shelter estimate**. Mate reads the shoreline out to 15 nm in
+If you ask Mate to assess an anchorage, it estimates the shelter from this
+coastline alone. That's a **shelter estimate**. Mate reads the shoreline out to 15 nm in
 every direction and reports the **sheltered arcs**. These are the runs of
 compass directions the spot is sheltered, partly sheltered or exposed from, with
 the distance to the nearest land or reef each way. Inside a reef it reports

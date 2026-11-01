@@ -504,7 +504,7 @@ func parsePOIElements(categories []string, elements []overpassElement) (features
 		countByCategory[category]++
 
 		features = append(features, poiFeatureOut{
-			ID:       fmt.Sprintf("%s/%d", el.Type, el.ID),
+			ID:       osmRef(el),
 			Category: category,
 			Name:     name,
 			Lat:      lat,

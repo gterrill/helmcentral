@@ -285,7 +285,7 @@ func TestPassageGuard_BudgetAcceptanceIsLogged(t *testing.T) {
 
 // The anchorage-shelter check (ADR 0243). Mate called the south tip of Thomas
 // Island exposed to a northerly and sent the operator to the north side, with
-// the bay in fact facing south, and never called anchorage_shelter.
+// the bay in fact facing south, and never called anchorage_details.
 const thomasIslandAnswer = "Thomas Island South (the southern tip) is exposed to the NE-N that's forecast tonight and tomorrow. If anchoring, look for a nook on the north side of Thomas Island rather than the south tip, or be ready for an open roadstead to the north wind. This is general knowledge of the coastline - check the chart before committing."
 
 // shelterDeps is the passage fixture with an Offline coastline wired in, the
@@ -320,7 +320,7 @@ func okResults(calls []openRouterToolCall) []string {
 func shelterCall(t *testing.T) []openRouterToolCall {
 	t.Helper()
 	var c openRouterToolCall
-	c.Function.Name = mateToolAnchorageShelter.name
+	c.Function.Name = mateToolAnchorageDetails.name
 	c.Function.Arguments = `{"lat":-20.5446,"lon":149.118933}`
 	return []openRouterToolCall{c}
 }
@@ -378,7 +378,7 @@ func TestShelterGuard_TwoTriggersSentTogether(t *testing.T) {
 	if !strings.Contains(trig, "relative wind") || !strings.Contains(trig, "anchorage shelter") {
 		t.Fatalf("trigger = %q", trig)
 	}
-	if !strings.Contains(ins, "assess_passage_window") || !strings.Contains(ins, "anchorage_shelter") {
+	if !strings.Contains(ins, "assess_passage_window") || !strings.Contains(ins, "anchorage_details") {
 		t.Errorf("instruction should carry both corrections: %q", ins)
 	}
 }

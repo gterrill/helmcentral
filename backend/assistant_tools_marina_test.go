@@ -394,14 +394,14 @@ func TestMarinaDetails_LimitCheckAtTheLimitSaysThereIsNoMargin(t *testing.T) {
 	}
 }
 
-func TestMarinaDetailsCallBudget_KeepsALongerConfiguredTimeout(t *testing.T) {
+func TestOptionalExportBudget_KeepsALongerConfiguredTimeout(t *testing.T) {
 	t.Setenv("WASM_PLUGIN_TIMEOUT_MS", "60000")
-	if got := marinaDetailsBudget(); got != 60*time.Second {
+	if got := optionalExportBudget(); got != 60*time.Second {
 		t.Errorf("budget = %v, want 60s", got)
 	}
 	t.Setenv("WASM_PLUGIN_TIMEOUT_MS", "5000")
-	if got := marinaDetailsBudget(); got != marinaDetailsCallBudget {
-		t.Errorf("budget = %v, want %v", got, marinaDetailsCallBudget)
+	if got := optionalExportBudget(); got != optionalExportCallBudget {
+		t.Errorf("budget = %v, want %v", got, optionalExportCallBudget)
 	}
 }
 

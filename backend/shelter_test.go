@@ -272,9 +272,39 @@ func (w *shelterWorld) deps() assistantToolDeps {
 	}
 }
 
-func (w *shelterWorld) run(args string) (string, error) {
-	out, _, err := w.deps().execute(context.Background(), "anchorage_shelter", json.RawMessage(args))
+// runFull calls anchorage_details with an arrival added when the arguments have
+// none, and returns the whole result. The world has no weather, tide or
+// place-names provider, so those sections carry their errors and the shelter
+// is what the tests read.
+func (w *shelterWorld) runFull(args string) (string, error) {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(args), &m); err != nil {
+		return "", err
+	}
+	if _, ok := m["arrive"]; !ok {
+		m["arrive"] = "2026-11-02T15:00:00+10:00"
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	out, _, err := w.deps().execute(context.Background(), "anchorage_details", raw)
 	return out, err
+}
+
+// run returns just the result's shelter section.
+func (w *shelterWorld) run(args string) (string, error) {
+	out, err := w.runFull(args)
+	if err != nil {
+		return "", err
+	}
+	var res struct {
+		Shelter json.RawMessage `json:"shelter"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		return "", err
+	}
+	return string(res.Shelter), nil
 }
 
 var (
@@ -282,7 +312,7 @@ var (
 	faireySquares     = []coverageSquare{{-20, 149}}
 )
 
-func TestAnchorageShelterTool_StonehavenFromStoredSquaresMatchesTheDirectEstimate(t *testing.T) {
+func TestAnchorageDetailsShelter_StonehavenFromStoredSquaresMatchesTheDirectEstimate(t *testing.T) {
 	lines := loadShorelineFixture(t, "stonehaven")
 	w := newShelterWorld(t)
 	w.hold(t, lines, coverageSquare{-21, 148}, stonehavenSquares...)
@@ -292,7 +322,7 @@ func TestAnchorageShelterTool_StonehavenFromStoredSquaresMatchesTheDirectEstimat
 		t.Fatalf("execute: %v", err)
 	}
 	if !strings.Contains(raw, `"reading":"From the Offline coastline downloaded `) {
-		t.Errorf("anchorage_shelter should say how old the shoreline is, got %s", raw)
+		t.Errorf("anchorage_details should say how old the shoreline is, got %s", raw)
 	}
 	var out struct {
 		Summary             string           `json:"summary"`
@@ -331,7 +361,7 @@ func TestAnchorageShelterTool_StonehavenFromStoredSquaresMatchesTheDirectEstimat
 	}
 }
 
-func TestAnchorageShelterTool_FaireyReefFromStoredSquaresMatchesTheDirectEstimate(t *testing.T) {
+func TestAnchorageDetailsShelter_FaireyReefFromStoredSquaresMatchesTheDirectEstimate(t *testing.T) {
 	lines := loadShorelineFixture(t, "fairey")
 	w := newShelterWorld(t)
 	w.boatLat, w.boatLon = faireyLat, faireyLon
@@ -361,7 +391,7 @@ func TestAnchorageShelterTool_FaireyReefFromStoredSquaresMatchesTheDirectEstimat
 	}
 }
 
-func TestAnchorageShelterTool_ReefSpanningTwoSquaresIsOneRing(t *testing.T) {
+func TestAnchorageDetailsShelter_ReefSpanningTwoSquaresIsOneRing(t *testing.T) {
 	// Fairey's reef ring split across two squares by the 149°E meridian, held
 	// whole in both as the plugin returns it: the answer must not change.
 	lines := loadShorelineFixture(t, "fairey")
@@ -384,7 +414,7 @@ func TestAnchorageShelterTool_ReefSpanningTwoSquaresIsOneRing(t *testing.T) {
 	}
 }
 
-func TestAnchorageShelterTool_SaysExactlyWhyItCannotAnswer(t *testing.T) {
+func TestAnchorageDetailsShelter_SaysExactlyWhyItCannotAnswer(t *testing.T) {
 	const args = `{"lat":-20.097633,"lon":148.902533}`
 	lines := loadShorelineFixture(t, "stonehaven")
 
@@ -459,22 +489,22 @@ func TestAnchorageShelterTool_SaysExactlyWhyItCannotAnswer(t *testing.T) {
 	}
 }
 
-func TestAnchorageShelterTool_NoLiveFallbackWithoutCoastline(t *testing.T) {
+func TestAnchorageDetailsShelter_NoLiveFallbackWithoutCoastline(t *testing.T) {
 	// A place-names plugin that could answer must never be consulted.
 	called := false
 	deps := assistantToolDeps{
 		placeNames: func() (placeNameProvider, string, error) { called = true; return nil, "", nil },
 	}
-	_, _, err := deps.execute(context.Background(), "anchorage_shelter", json.RawMessage(`{"lat":-20.1,"lon":148.9}`))
+	_, _, err := deps.execute(context.Background(), "anchorage_details", json.RawMessage(`{"lat":-20.1,"lon":148.9,"arrive":"2026-11-02T15:00:00+10:00"}`))
 	if err == nil || !strings.Contains(err.Error(), "Offline coastline") {
 		t.Errorf("want an Offline coastline error, got %v", err)
 	}
 	if called {
-		t.Error("anchorage_shelter must not reach for a live source")
+		t.Error("anchorage_details must not reach for a live source")
 	}
 }
 
-func TestAnchorageShelterTool_RefusesBadArguments(t *testing.T) {
+func TestAnchorageDetailsShelter_RefusesBadArguments(t *testing.T) {
 	w := newShelterWorld(t)
 	for _, args := range []string{`{}`, `{"lat":95,"lon":10}`, `{"lat":-20,"lon":200}`, `{"lat":0,"lon":0}`, `{"lat":"x"}`} {
 		if _, err := w.run(args); err == nil {
@@ -483,12 +513,12 @@ func TestAnchorageShelterTool_RefusesBadArguments(t *testing.T) {
 	}
 }
 
-func TestDescribeAnchorageShelter(t *testing.T) {
-	tool := lookupMateTool("anchorage_shelter")
+func TestDescribeAnchorageDetails(t *testing.T) {
+	tool := lookupMateTool("anchorage_details")
 	if tool == nil {
-		t.Fatal("anchorage_shelter is not registered")
+		t.Fatal("anchorage_details is not registered")
 	}
-	if got := tool.describe(json.RawMessage(`{"lat":-20.1,"lon":148.9}`)); !strings.Contains(got, "shelter") {
+	if got := tool.describe(json.RawMessage(`{"lat":-20.1,"lon":148.9}`)); !strings.Contains(got, "anchorage") {
 		t.Errorf("describe %q", got)
 	}
 	for _, want := range []string{"estimate", "headland", "valley", "swell", "forecast"} {

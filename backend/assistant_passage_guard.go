@@ -19,7 +19,7 @@ import (
 // A second trigger (ADR 0243) covers anchorages. Asked about a passage to the
 // south end of Thomas Island, whose bay faces south, with a northerly forecast,
 // Mate said the tip was exposed to the north and sent the operator to the
-// north side. It had not called anchorage_shelter, which reads the charted
+// north side. It had not called anchorage_details, which reads the charted
 // shoreline and would have said the opposite. A draft that judges an
 // anchorage's shelter or exposure without that call, or a get_wind_forecast
 // that came back with shelter labels, is sent back the same way. The labels are
@@ -35,7 +35,7 @@ const assistantCheckLabel = "[Helmcentral check, not from the operator] "
 const (
 	assistantPassageLimitsClaimInstruction  = "This answer talks about passage limits without the check having run. The operator's passage limits are set. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base the answer on its result. Otherwise remove the statements about the limits."
 	assistantPassageRelativeWindInstruction = "This answer judges the wind or sea against the course without the check having run. If the question is whether or when to go, call assess_passage_window for the legs and days under discussion and base any ahead, abeam or astern judgement on its sectors. Otherwise take the angle only from get_wind_forecast's rel_wind and rel_wave labels, called with course_deg, or remove those statements."
-	assistantAnchorageShelterInstruction    = "This answer judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_shelter with its position (from find_places, or the boat's position if it is where you are now) and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
+	assistantAnchorageShelterInstruction    = "This answer judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_details with its position (from find_places, or the boat's position if it is where you are now) and when the boat arrives, and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
 )
 
 var (
@@ -107,7 +107,7 @@ func judgesAnchorageShelter(draft string) bool {
 // A third trigger stands apart from those two:
 //
 //   - "anchorage shelter": the draft judges an anchorage's shelter or exposure
-//     against a wind or direction, and anchorage_shelter was not called this
+//     against a wind or direction, and anchorage_details was not called this
 //     run, and no get_wind_forecast result carried shelter_summary. It is on when the tool could run here (the install has an Offline
 //     coastline reader; whether the coastline is switched on is not read per
 //     draft), whether or not assess_passage_window ran.
@@ -160,7 +160,7 @@ func (d assistantToolDeps) shelterArmed() bool {
 
 // checkShelterDraft is the "anchorage shelter" trigger.
 func (d assistantToolDeps) checkShelterDraft(draft string, calls []openRouterToolCall, results []string) (trigger, instruction string) {
-	if !mateToolAvailable(d, mateToolAnchorageShelter.name) || d.offlineCoastline == nil {
+	if !mateToolAvailable(d, mateToolAnchorageDetails.name) || d.offlineCoastline == nil {
 		return "", ""
 	}
 	if !d.shelterArmed() {
@@ -168,7 +168,7 @@ func (d assistantToolDeps) checkShelterDraft(draft string, calls []openRouterToo
 	}
 	for i, c := range calls {
 		switch c.Function.Name {
-		case mateToolAnchorageShelter.name:
+		case mateToolAnchorageDetails.name:
 			// A call whose result is empty errored or did not run.
 			if i < len(results) && results[i] != "" {
 				return "", ""

@@ -353,3 +353,32 @@ func shelterSummary(est shelterEstimate) string {
 	}
 	return strings.Join(parts, ". ") + ". Directions are where the wind comes from."
 }
+
+type shelterResult struct {
+	Lat    float64 `json:"lat"`
+	Lon    float64 `json:"lon"`
+	Source string  `json:"source"`
+	// CoastlineDownloaded is the date of the oldest coverage square the
+	// estimate used, so Mate can say how old the shoreline is.
+	CoastlineDownloaded string `json:"coastline_downloaded"`
+	// Reading says how old the shoreline is.
+	Reading string `json:"reading"`
+	shelterEstimate
+}
+
+// shelterAt reads the Offline coastline around a position and estimates its
+// shelter. The caller has checked d.offlineCoastline is set. Both
+// anchorage_details and get_wind_forecast use it.
+func (d assistantToolDeps) shelterAt(lat, lon float64) (*shelterResult, error) {
+	set, err := d.offlineCoastline().ShorelineAround(lat, lon)
+	if err != nil {
+		return nil, err
+	}
+	result := &shelterResult{
+		Lat: lat, Lon: lon, Source: "Offline coastline (OpenStreetMap)",
+		CoastlineDownloaded: set.Oldest.UTC().Format("2006-01-02"),
+		shelterEstimate:     estimateShelter(lat, lon, set.Lines),
+	}
+	result.Reading = readingShelter(result.CoastlineDownloaded)
+	return result, nil
+}

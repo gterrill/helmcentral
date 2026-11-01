@@ -1,0 +1,687 @@
+{
+  "kind": "anchorage",
+  "payload": {
+    "name": "West Butterfly Bay",
+    "lat": -20.0765,
+    "lon": 148.925,
+    "arrive": "2026-11-02T14:00:00+10:00",
+    "leave": "2026-11-03T08:00:00+10:00",
+    "timezone": "Australia/Lindeman",
+    "shelter": {
+      "summary": "Sheltered from ENE through NW (060°–320°). Partly sheltered from NNE through NE (030°–050°) and from NNW through N (330°–350°). Exposed to N through NNE (000°–020°). Directions are where the wind comes from.",
+      "inside_reef": false,
+      "reef_name": "",
+      "coastline_downloaded": "2026-10-03",
+      "bearings": [
+        {
+          "bearing_deg": 0,
+          "fetch_nm": 15,
+          "grade": "exposed",
+          "open": true
+        },
+        {
+          "bearing_deg": 10,
+          "fetch_nm": 15,
+          "grade": "exposed",
+          "open": true
+        },
+        {
+          "bearing_deg": 20,
+          "fetch_nm": 15,
+          "grade": "exposed",
+          "open": true
+        },
+        {
+          "bearing_deg": 30,
+          "fetch_nm": 0.18,
+          "grade": "partial",
+          "open": false
+        },
+        {
+          "bearing_deg": 40,
+          "fetch_nm": 0.15,
+          "grade": "partial",
+          "open": false
+        },
+        {
+          "bearing_deg": 50,
+          "fetch_nm": 0.13,
+          "grade": "partial",
+          "open": false
+        },
+        {
+          "bearing_deg": 60,
+          "fetch_nm": 0.12,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 70,
+          "fetch_nm": 0.1,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 80,
+          "fetch_nm": 0.09,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 90,
+          "fetch_nm": 0.08,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 100,
+          "fetch_nm": 0.08,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 110,
+          "fetch_nm": 0.09,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 120,
+          "fetch_nm": 0.09,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 130,
+          "fetch_nm": 0.12,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 140,
+          "fetch_nm": 0.15,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 150,
+          "fetch_nm": 0.23,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 160,
+          "fetch_nm": 0.31,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 170,
+          "fetch_nm": 0.38,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 180,
+          "fetch_nm": 0.31,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 190,
+          "fetch_nm": 0.23,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 200,
+          "fetch_nm": 0.2,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 210,
+          "fetch_nm": 0.16,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 220,
+          "fetch_nm": 0.14,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 230,
+          "fetch_nm": 0.14,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 240,
+          "fetch_nm": 0.13,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 250,
+          "fetch_nm": 0.14,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 260,
+          "fetch_nm": 0.16,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 270,
+          "fetch_nm": 0.17,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 280,
+          "fetch_nm": 0.19,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 290,
+          "fetch_nm": 0.22,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 300,
+          "fetch_nm": 0.31,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 310,
+          "fetch_nm": 0.38,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 320,
+          "fetch_nm": 0.46,
+          "grade": "sheltered",
+          "open": false
+        },
+        {
+          "bearing_deg": 330,
+          "fetch_nm": 0.55,
+          "grade": "partial",
+          "open": false
+        },
+        {
+          "bearing_deg": 340,
+          "fetch_nm": 0.62,
+          "grade": "partial",
+          "open": false
+        },
+        {
+          "bearing_deg": 350,
+          "fetch_nm": 0.75,
+          "grade": "partial",
+          "open": false
+        }
+      ],
+      "arcs": [
+        {
+          "grade": "exposed",
+          "from_deg": 0,
+          "to_deg": 20,
+          "text": "N through NNE (000°–020°)"
+        },
+        {
+          "grade": "partial",
+          "from_deg": 30,
+          "to_deg": 50,
+          "text": "NNE through NE (030°–050°)"
+        },
+        {
+          "grade": "sheltered",
+          "from_deg": 60,
+          "to_deg": 320,
+          "text": "ENE through NW (060°–320°)"
+        },
+        {
+          "grade": "partial",
+          "from_deg": 330,
+          "to_deg": 350,
+          "text": "NNW through N (330°–350°)"
+        }
+      ]
+    },
+    "forecast": {
+      "error": "",
+      "note": "",
+      "fetched_at": "2026-11-02T01:00:00Z",
+      "waves_error": "",
+      "waves_no_data": false,
+      "rows": [
+        {
+          "time": "2026-11-02T14:00:00+10:00",
+          "wind_kts": 15,
+          "gust_kts": 19,
+          "dir_deg": 5,
+          "dir": "N",
+          "shelter": "exposed",
+          "wave_m": 0.8,
+          "wave_s": 5,
+          "wave_dir": "SE"
+        },
+        {
+          "time": "2026-11-02T17:00:00+10:00",
+          "wind_kts": 15,
+          "gust_kts": 19,
+          "dir_deg": 5,
+          "dir": "N",
+          "shelter": "exposed",
+          "wave_m": 0.8,
+          "wave_s": 5,
+          "wave_dir": "SE"
+        },
+        {
+          "time": "2026-11-02T20:00:00+10:00",
+          "wind_kts": 15,
+          "gust_kts": 19,
+          "dir_deg": 5,
+          "dir": "N",
+          "shelter": "exposed",
+          "wave_m": 0.8,
+          "wave_s": 5,
+          "wave_dir": "SE"
+        },
+        {
+          "time": "2026-11-02T23:00:00+10:00",
+          "wind_kts": 15,
+          "gust_kts": 19,
+          "dir_deg": 180,
+          "dir": "S",
+          "shelter": "sheltered",
+          "wave_m": 0.8,
+          "wave_s": 5,
+          "wave_dir": "SE"
+        },
+        {
+          "time": "2026-11-03T02:00:00+10:00",
+          "wind_kts": 15,
+          "gust_kts": 19,
+          "dir_deg": 180,
+          "dir": "S",
+          "shelter": "sheltered",
+          "wave_m": 0.8,
+          "wave_s": 5,
+          "wave_dir": "SE"
+        },
+        {
+          "time": "2026-11-03T05:00:00+10:00",
+          "wind_kts": 15,
+          "gust_kts": 19,
+          "dir_deg": 180,
+          "dir": "S",
+          "shelter": "sheltered",
+          "wave_m": 0.8,
+          "wave_s": 5,
+          "wave_dir": "SE"
+        },
+        {
+          "time": "2026-11-03T08:00:00+10:00",
+          "wind_kts": 15,
+          "gust_kts": 19,
+          "dir_deg": 180,
+          "dir": "S",
+          "shelter": "sheltered",
+          "wave_m": 0.8,
+          "wave_s": 5,
+          "wave_dir": "SE"
+        }
+      ],
+      "days": [
+        {
+          "date": "2026-11-02",
+          "wind_kts_min": 15,
+          "wind_kts_max": 15,
+          "gust_kts_max": 19,
+          "dir_prevailing": "N",
+          "shelter_prevailing": "exposed"
+        },
+        {
+          "date": "2026-11-03",
+          "wind_kts_min": 15,
+          "wind_kts_max": 15,
+          "gust_kts_max": 19,
+          "dir_prevailing": "S",
+          "shelter_prevailing": "sheltered"
+        }
+      ]
+    },
+    "tide": {
+      "error": "",
+      "station": "Shute Harbour",
+      "distance_nm": 15.2,
+      "time_basis": "Australia/Brisbane",
+      "height_at_arrival_m": 1.5,
+      "direction": "Rising",
+      "height_note": "",
+      "note": "",
+      "extremes": [
+        {
+          "time": "2026-11-02T08:00:00Z",
+          "type": "high",
+          "height_m": 3,
+          "in_window": true
+        },
+        {
+          "time": "2026-11-02T14:00:00Z",
+          "type": "low",
+          "height_m": 0.8,
+          "in_window": true
+        },
+        {
+          "time": "2026-11-02T20:00:00Z",
+          "type": "high",
+          "height_m": 3.2,
+          "in_window": true
+        }
+      ],
+      "range_m": 2.4,
+      "range_note": "Range is the highest minus the lowest high and low water inside the stay."
+    },
+    "features": {
+      "error": "",
+      "restricted_areas": [
+        {
+          "osm": "relation/16623817",
+          "name": "Great Barrier Reef Coast Marine Park",
+          "source": "protected_area",
+          "restriction": "Marine Park",
+          "category": "1;2;4;6",
+          "distance_m": null,
+          "prohibits_anchoring": false,
+          "shapes": []
+        },
+        {
+          "osm": "relation/16623818",
+          "name": "Great Barrier Reef Marine Park",
+          "source": "protected_area",
+          "restriction": "Marine Park",
+          "category": "1;2;4;6",
+          "distance_m": null,
+          "prohibits_anchoring": false,
+          "shapes": []
+        }
+      ],
+      "moorings": [
+        {
+          "osm": "node/11106074854",
+          "name": "FID 136",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 23,
+          "lat": -20.076476,
+          "lon": 148.925222
+        },
+        {
+          "osm": "node/11106074855",
+          "name": "FID 141",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 45,
+          "lat": -20.076468,
+          "lon": 148.924569
+        },
+        {
+          "osm": "node/11106074853",
+          "name": "FID 139",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 50,
+          "lat": -20.076935,
+          "lon": 148.925113
+        },
+        {
+          "osm": "node/11106074852",
+          "name": "FID 138",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 149,
+          "lat": -20.077825,
+          "lon": 148.925184
+        },
+        {
+          "osm": "node/11106074856",
+          "name": "FID 143",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 153,
+          "lat": -20.075676,
+          "lon": 148.923828
+        },
+        {
+          "osm": "node/11106074857",
+          "name": "FID 135",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 193,
+          "lat": -20.074821,
+          "lon": 148.925463
+        },
+        {
+          "osm": "node/11106074858",
+          "name": "FID 142",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 207,
+          "lat": -20.074727,
+          "lon": 148.924405
+        },
+        {
+          "osm": "node/11106074859",
+          "name": "FID 140",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 272,
+          "lat": -20.074075,
+          "lon": 148.924652
+        },
+        {
+          "osm": "node/11106074860",
+          "name": "FID 137",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 334,
+          "lat": -20.073513,
+          "lon": 148.925359
+        },
+        {
+          "osm": "node/11106074861",
+          "name": "FID 133",
+          "ref": "",
+          "vessel_size_m": null,
+          "class": "D",
+          "details_untagged": false,
+          "distance_m": 388,
+          "lat": -20.073108,
+          "lon": 148.924124
+        },
+        {
+          "osm": "node/11106074862",
+          "name": "FID 134",
+          "ref": "",
+          "vessel_size_m": null,
+          "class": "D",
+          "details_untagged": false,
+          "distance_m": 505,
+          "lat": -20.071961,
+          "lon": 148.924749
+        },
+        {
+          "osm": "node/11106074863",
+          "name": "FID 59",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 552,
+          "lat": -20.0728,
+          "lon": 148.92852
+        },
+        {
+          "osm": "node/11106074864",
+          "name": "FID 57",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 603,
+          "lat": -20.073009,
+          "lon": 148.929419
+        },
+        {
+          "osm": "node/11106074865",
+          "name": "FID 58",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 714,
+          "lat": -20.072456,
+          "lon": 148.930308
+        },
+        {
+          "osm": "node/11106074866",
+          "name": "FID 54",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 795,
+          "lat": -20.071991,
+          "lon": 148.930902
+        },
+        {
+          "osm": "node/11106074867",
+          "name": "FID 55",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 909,
+          "lat": -20.071064,
+          "lon": 148.931503
+        },
+        {
+          "osm": "node/11106074868",
+          "name": "FID 56",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 1005,
+          "lat": -20.070132,
+          "lon": 148.931834
+        },
+        {
+          "osm": "node/11106074869",
+          "name": "FID 84",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 1582,
+          "lat": -20.06839,
+          "lon": 148.937442
+        },
+        {
+          "osm": "node/11106074870",
+          "name": "FID 85",
+          "ref": "",
+          "vessel_size_m": 6,
+          "class": "T",
+          "details_untagged": false,
+          "distance_m": 1624,
+          "lat": -20.068747,
+          "lon": 148.938183
+        },
+        {
+          "osm": "node/11106074872",
+          "name": "FID 87",
+          "ref": "",
+          "vessel_size_m": null,
+          "class": "T/P",
+          "details_untagged": false,
+          "distance_m": 1664,
+          "lat": -20.068987,
+          "lon": 148.938775
+        },
+        {
+          "osm": "node/11106074871",
+          "name": "FID 83",
+          "ref": "",
+          "vessel_size_m": 10,
+          "class": "A",
+          "details_untagged": false,
+          "distance_m": 1674,
+          "lat": -20.068472,
+          "lon": 148.938559
+        },
+        {
+          "osm": "node/11106074874",
+          "name": "FID 86",
+          "ref": "",
+          "vessel_size_m": null,
+          "class": "T/P",
+          "details_untagged": false,
+          "distance_m": 1722,
+          "lat": -20.068379,
+          "lon": 148.939041
+        },
+        {
+          "osm": "node/11106074873",
+          "name": "FID 88",
+          "ref": "",
+          "vessel_size_m": 20,
+          "class": "B",
+          "details_untagged": false,
+          "distance_m": 1799,
+          "lat": -20.067623,
+          "lon": 148.9394
+        }
+      ],
+      "anchorage_areas": [],
+      "seabed_areas": [],
+      "bay": {
+        "osm": "node/2838870584",
+        "name": "Butterfly Bay",
+        "contains": false,
+        "distance_m": 627
+      },
+      "truncated": false
+    },
+    "data_as_of": "2026-10-31T21:22:14Z"
+  }
+}

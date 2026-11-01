@@ -19,7 +19,7 @@ so it works when Mate is switched off.
   units. A reading the boat can't give is marked as missing instead of guessed.
 - **The sea, the tides and the neighbours:** The assistant can also look up the
   wind and wave forecast, the tides and the distance by water between two
-  places. It can ask how much shelter an anchorage has, look over a marina, look
+  places. It can assess an anchorage for a stay, look over a marina, look
   up place names, see the nearby vessels and read the stay you've planned. Your
   [saved places](place-names.md#places-you-give-mate) come back first in a
   place-name lookup. It can read Helmcentral's own help pages too. Each tool tells the assistant how to read what it returns. A forecast
@@ -54,7 +54,7 @@ A new token can use these:
 - Maintenance, and the equipment list.
 - The boat's particulars and the boat context.
 - Wind and wave forecast, tides, and the distance by water between two places.
-- Anchorage shelter, marina details, place names and nearby vessels.
+- Anchorage details, marina details, place names and nearby vessels.
 - The planned stay, and Helmcentral's help pages.
 
 These start switched off, and you switch them on for a token when you want them:
@@ -66,6 +66,13 @@ These start switched off, and you switch them on for a token when you want them:
 A token keeps the tools it was made with. Tokens you made before this change
 don't gain the new ones, and you switch them on yourself in **Settings, Outside
 assistants**. Only a token you make from now on starts with them.
+
+Anchorage details replaces what used to be called Anchorage shelter. A token that
+could use Anchorage shelter loses it, and doesn't gain Anchorage details until
+you switch that on for the token in **Settings, Outside assistants**. Until you
+do, a program that asks for the old tool is told it doesn't exist. Anchorage
+details also needs the time the boat arrives, so a program that called the old
+tool with only a position has to say when.
 
 ## What it never offers
 

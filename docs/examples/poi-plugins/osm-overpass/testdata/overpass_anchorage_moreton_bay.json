@@ -1,0 +1,119 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-10-31T21:22:14Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "node",
+  "id": 6531603347,
+  "lat": -27.4813110,
+  "lon": 153.3367658,
+  "tags": {
+    "seamark:seabed_area:surface": "coral",
+    "seamark:type": "seabed_area"
+  }
+},
+{
+  "type": "node",
+  "id": 6531603351,
+  "lat": -27.5066673,
+  "lon": 153.3362723,
+  "tags": {
+    "seamark:name": "The Corner",
+    "seamark:type": "anchorage"
+  }
+},
+{
+  "type": "node",
+  "id": 732075920,
+  "lat": -27.4887827,
+  "lon": 153.3509614,
+  "tags": {
+    "name": "The Lazaret",
+    "natural": "bay"
+  }
+},
+{
+  "type": "relation",
+  "id": 7927863,
+  "center": {
+    "lat": -27.3632627,
+    "lon": 153.2931583
+  },
+  "tags": {
+    "boundary": "protected_area",
+    "maritime": "yes",
+    "name": "Moreton Bay Marine Park (IUCN Cat II Parts)",
+    "protect_class": "2",
+    "ref:capad:uid": "053_II",
+    "source": "CAPAD2016;existing data",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 7930278,
+  "center": {
+    "lat": -27.3677488,
+    "lon": 153.3118515
+  },
+  "tags": {
+    "boundary": "protected_area",
+    "maritime": "yes",
+    "name": "Moreton Bay Marine Park (IUCN Cat IV Parts)",
+    "protect_class": "4",
+    "ref:capad:uid": "053_IV",
+    "source": "CAPAD2016;existing data",
+    "start_date": "1993",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 7931766,
+  "center": {
+    "lat": -27.3677488,
+    "lon": 153.3110484
+  },
+  "tags": {
+    "boundary": "protected_area",
+    "communication:amateur_radio:pota": "AU-7027",
+    "leisure": "nature_reserve",
+    "maritime": "yes",
+    "name": "Moreton Bay Marine Park",
+    "protect_class": "2;4",
+    "ref:capad:pa_id": "053",
+    "source": "CAPAD2016;existing data",
+    "type": "boundary"
+  }
+},
+{
+  "type": "relation",
+  "id": 16318001,
+  "center": {
+    "lat": -27.4946242,
+    "lon": 153.3585344
+  },
+  "tags": {
+    "boundary": "protected_area",
+    "communication:amateur_radio:pota": "AU-10946",
+    "iucn_level": "VI",
+    "leisure": "nature_reserve",
+    "maritime": "yes",
+    "name": "Peel Island Fish Habitat Area",
+    "operator": "Queensland Department of Environment and Science",
+    "protect_class": "6",
+    "protection_title": "Fish Habitat Area (A)",
+    "ref:capad:pa_id": "024",
+    "source": "CAPAD2022",
+    "start_date": "1971-06-10",
+    "type": "boundary"
+  }
+}
+
+  ]
+}

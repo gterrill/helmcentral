@@ -153,7 +153,7 @@ func TestGetWindForecast_CoastlineErrorIsReportedAndForecastStays(t *testing.T) 
 }
 
 func TestGetWindForecast_CoastlineSwitchedOffAddsNothing(t *testing.T) {
-	// Off is the operator's choice: no shelter_unavailable. anchorage_shelter
+	// Off is the operator's choice: no shelter_unavailable. anchorage_details
 	// still says so when called.
 	raw, res := runShelterForecast(t, shelterForecastDeps(t, thomasShoreline(), false))
 	if strings.Contains(raw, "shelter") || len(res.Hourly) != 3 {

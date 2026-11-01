@@ -1,0 +1,263 @@
+{
+  "restricted_areas": [
+    {
+      "osm": "relation/16623817",
+      "name": "Great Barrier Reef Coast Marine Park",
+      "source": "protected_area",
+      "restriction": "Marine Park",
+      "category": "1;2;4;6",
+      "distance_m": null,
+      "geometry": []
+    },
+    {
+      "osm": "relation/16623818",
+      "name": "Great Barrier Reef Marine Park",
+      "source": "protected_area",
+      "restriction": "Marine Park",
+      "category": "1;2;4;6",
+      "distance_m": null,
+      "geometry": []
+    }
+  ],
+  "moorings": [
+    {
+      "osm": "node/11106074854",
+      "name": "FID 136",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.076476,
+      "lon": 148.925222,
+      "distance_m": 23
+    },
+    {
+      "osm": "node/11106074855",
+      "name": "FID 141",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.076468,
+      "lon": 148.924569,
+      "distance_m": 45
+    },
+    {
+      "osm": "node/11106074853",
+      "name": "FID 139",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.076935,
+      "lon": 148.925113,
+      "distance_m": 50
+    },
+    {
+      "osm": "node/11106074852",
+      "name": "FID 138",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.077825,
+      "lon": 148.925184,
+      "distance_m": 149
+    },
+    {
+      "osm": "node/11106074856",
+      "name": "FID 143",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.075676,
+      "lon": 148.923828,
+      "distance_m": 153
+    },
+    {
+      "osm": "node/11106074857",
+      "name": "FID 135",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.074821,
+      "lon": 148.925463,
+      "distance_m": 193
+    },
+    {
+      "osm": "node/11106074858",
+      "name": "FID 142",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.074727,
+      "lon": 148.924405,
+      "distance_m": 207
+    },
+    {
+      "osm": "node/11106074859",
+      "name": "FID 140",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.074075,
+      "lon": 148.924652,
+      "distance_m": 272
+    },
+    {
+      "osm": "node/11106074860",
+      "name": "FID 137",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.073513,
+      "lon": 148.925359,
+      "distance_m": 334
+    },
+    {
+      "osm": "node/11106074861",
+      "name": "FID 133",
+      "ref": "",
+      "vessel_size_m": null,
+      "class": "D",
+      "lat": -20.073108,
+      "lon": 148.924124,
+      "distance_m": 388
+    },
+    {
+      "osm": "node/11106074862",
+      "name": "FID 134",
+      "ref": "",
+      "vessel_size_m": null,
+      "class": "D",
+      "lat": -20.071961,
+      "lon": 148.924749,
+      "distance_m": 505
+    },
+    {
+      "osm": "node/11106074863",
+      "name": "FID 59",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.0728,
+      "lon": 148.92852,
+      "distance_m": 552
+    },
+    {
+      "osm": "node/11106074864",
+      "name": "FID 57",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.073009,
+      "lon": 148.929419,
+      "distance_m": 603
+    },
+    {
+      "osm": "node/11106074865",
+      "name": "FID 58",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.072456,
+      "lon": 148.930308,
+      "distance_m": 714
+    },
+    {
+      "osm": "node/11106074866",
+      "name": "FID 54",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.071991,
+      "lon": 148.930902,
+      "distance_m": 795
+    },
+    {
+      "osm": "node/11106074867",
+      "name": "FID 55",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.071064,
+      "lon": 148.931503,
+      "distance_m": 909
+    },
+    {
+      "osm": "node/11106074868",
+      "name": "FID 56",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.070132,
+      "lon": 148.931834,
+      "distance_m": 1005
+    },
+    {
+      "osm": "node/11106074869",
+      "name": "FID 84",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.06839,
+      "lon": 148.937442,
+      "distance_m": 1582
+    },
+    {
+      "osm": "node/11106074870",
+      "name": "FID 85",
+      "ref": "",
+      "vessel_size_m": 6,
+      "class": "T",
+      "lat": -20.068747,
+      "lon": 148.938183,
+      "distance_m": 1624
+    },
+    {
+      "osm": "node/11106074872",
+      "name": "FID 87",
+      "ref": "",
+      "vessel_size_m": null,
+      "class": "T/P",
+      "lat": -20.068987,
+      "lon": 148.938775,
+      "distance_m": 1664
+    },
+    {
+      "osm": "node/11106074871",
+      "name": "FID 83",
+      "ref": "",
+      "vessel_size_m": 10,
+      "class": "A",
+      "lat": -20.068472,
+      "lon": 148.938559,
+      "distance_m": 1674
+    },
+    {
+      "osm": "node/11106074874",
+      "name": "FID 86",
+      "ref": "",
+      "vessel_size_m": null,
+      "class": "T/P",
+      "lat": -20.068379,
+      "lon": 148.939041,
+      "distance_m": 1722
+    },
+    {
+      "osm": "node/11106074873",
+      "name": "FID 88",
+      "ref": "",
+      "vessel_size_m": 20,
+      "class": "B",
+      "lat": -20.067623,
+      "lon": 148.9394,
+      "distance_m": 1799
+    }
+  ],
+  "anchorage_areas": [],
+  "seabed_areas": [],
+  "bay": {
+    "osm": "node/2838870584",
+    "name": "Butterfly Bay",
+    "contains": false,
+    "distance_m": 627
+  },
+  "data_as_of": "2026-10-31T21:22:14Z"
+}

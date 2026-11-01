@@ -128,6 +128,10 @@ type wasmPluginBase struct {
 	// the optional export behind Mate's marina_details tool. It is a single
 	// export, so it stands alone, and is never a reason to fail loading.
 	supportsMarinaDetails bool
+	// supportsAnchorageFeatures is true when a POI plugin exports
+	// anchorage_features, the optional export behind the features section of
+	// Mate's anchorage_details tool. Like marina_details it stands alone.
+	supportsAnchorageFeatures bool
 }
 
 func (b *wasmPluginBase) ID() string                  { return b.id }
@@ -138,6 +142,9 @@ func (b *wasmPluginBase) Path() string                { return b.path }
 func (b *wasmPluginBase) SupportsPlaceNames() bool    { return b.supportsPlaceNames }
 func (b *wasmPluginBase) SupportsShoreline() bool     { return b.supportsShoreline }
 func (b *wasmPluginBase) SupportsMarinaDetails() bool { return b.supportsMarinaDetails }
+func (b *wasmPluginBase) SupportsAnchorageFeatures() bool {
+	return b.supportsAnchorageFeatures
+}
 
 func (b *wasmPluginBase) ttlDuration() time.Duration {
 	return time.Duration(b.ttlSeconds) * time.Second
@@ -749,6 +756,8 @@ func newWasmPluginBase(manifest extism.Manifest, logPrefix string) (base *wasmPl
 		supportsPlaceNames:    supportsPlaceNames,
 		supportsShoreline:     supportsShoreline,
 		supportsMarinaDetails: instance.FunctionExists("marina_details"),
+
+		supportsAnchorageFeatures: instance.FunctionExists("anchorage_features"),
 	}, nil
 }
 

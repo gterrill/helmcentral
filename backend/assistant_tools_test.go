@@ -2493,6 +2493,26 @@ func TestCapToolResultJSON_FallsBackWhenNothingLeftToShrink(t *testing.T) {
 	}
 }
 
+// The card sink keys cards by result text, so two calls that both fall back
+// must not return the same text, or their cards could be handed out swapped.
+func TestCapToolResultJSON_FallbackTextIsUniquePerCall(t *testing.T) {
+	type payload struct {
+		Filler string `json:"filler"`
+	}
+	big := payload{Filler: strings.Repeat("x", assistantMaxToolResultChars*2)}
+	a, err := capToolResultJSON(&big, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := capToolResultJSON(&big, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == b {
+		t.Fatalf("two fallbacks returned the same text %q", a)
+	}
+}
+
 func TestAssistantToolDeps_ExecuteReturnsContextErrorWhenAlreadyCancelled(t *testing.T) {
 	deps := assistantToolDeps{help: func() []helpPage {
 		return []helpPage{{ID: "features/forecast", Title: "Forecast", Body: "# Forecast"}}

@@ -47,6 +47,10 @@
 // marina_details.go. It runs two Overpass queries, one to find the marina and
 // one for everything beside it.
 //
+// Another optional export, anchorage_features, returns the restricted areas,
+// public moorings, anchorage and seabed areas and the bay within a nautical
+// mile of a position - see anchorage_features.go. It is one Overpass query.
+//
 // Two further optional exports, shoreline_square and shoreline_changes,
 // return the raw coastline and reef lines of one coverage square, and count
 // how many were edited since a date, for the host's offline coastline - see
@@ -280,6 +284,27 @@ func marinaDetails() int32 {
 	}
 
 	output, err := runMarinaDetails(doOverpassResponse, input)
+	if err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	if err := pdk.OutputJSON(output); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+	return 0
+}
+
+//go:wasmexport anchorage_features
+func anchorageFeatures() int32 {
+	var input anchorageFeaturesInput
+	if err := pdk.InputJSON(&input); err != nil {
+		pdk.SetError(err)
+		return -1
+	}
+
+	output, err := runAnchorageFeatures(doOverpassResponse, input)
 	if err != nil {
 		pdk.SetError(err)
 		return -1

@@ -6,7 +6,7 @@ import type { TideToday } from '@/hooks/use-tide-today'
  * keyed by `kind`. `error` is not a server kind: it is what the decoder makes
  * of an entry it cannot read, so the thread can say so for that message.
  */
-export type MateCard = PassageWindowCard | TelemetryChartCard | WindRoseCard | TileCard | MarinaCard | { kind: 'error'; reason: string; rawKind?: string }
+export type MateCard = PassageWindowCard | TelemetryChartCard | WindRoseCard | TileCard | MarinaCard | AnchorageCard | { kind: 'error'; reason: string; rawKind?: string }
 
 export type PassageState = 'go' | 'marginal' | 'no_go' | 'no_data'
 export type PassageFactor = 'wind' | 'gust' | 'wave' | 'wind_against_tide' | 'daylight'
@@ -189,6 +189,129 @@ export interface MarinaCard {
   }
   /** Documents of the operator's tagged with this marina's name, newest first. */
   savedDocuments: { id: string; title: string }[]
+}
+
+export type ShelterGrade = 'sheltered' | 'partial' | 'exposed' | 'reef'
+
+export interface AnchorageRestrictedArea {
+  osm: string
+  name: string
+  /** "seamark" is a charted restricted area; "protected_area" a marine park or similar, with no distance. */
+  source: 'seamark' | 'protected_area'
+  restriction: string
+  category: string
+  distanceM: number | null
+  prohibitsAnchoring: boolean
+  /** One shape for each way the area is mapped; empty for a protected area. */
+  shapes: MarinaShape[]
+}
+
+export interface AnchorageMooring {
+  osm: string
+  name: string
+  ref: string
+  /** The vessel size limit in metres, null when the mooring's record gives none. */
+  vesselSizeM: number | null
+  class: string
+  detailsUntagged: boolean
+  distanceM: number
+  lat: number
+  lon: number
+}
+
+export interface AnchorageArea {
+  osm: string
+  name: string
+  category: string
+  distanceM: number
+  shapes: MarinaShape[]
+}
+
+export interface AnchorageSeabedArea {
+  osm: string
+  name: string
+  surface: string
+  distanceM: number
+  shapes: MarinaShape[]
+}
+
+/**
+ * What anchorage_details found (ADR 0244), drawn for the operator: the shelter
+ * rose, the forecast and tide for the stay, and what the map records nearby
+ * with the shapes the model never sees. A snapshot like the marina card. A section that
+ * failed carries its `error` text and empty lists; the card never fills it.
+ */
+export interface AnchorageCard {
+  kind: 'anchorage'
+  name: string
+  lat: number
+  lon: number
+  /** RFC 3339 with the anchorage's offset. */
+  arrive: string
+  leave: string
+  timezone: string
+  shelter: {
+    summary: string
+    insideReef: boolean
+    reefName: string
+    /** YYYY-MM-DD of the oldest coastline square used. */
+    coastlineDownloaded: string
+    /** One per 10 degrees, 000 to 350, where the wind comes FROM. */
+    bearings: { bearingDeg: number; fetchNm: number; grade: ShelterGrade; open: boolean }[]
+    arcs: { grade: ShelterGrade; fromDeg: number; toDeg: number; text: string }[]
+  }
+  forecast: {
+    error: string
+    note: string
+    /** When the forecast was fetched; "" when the provider did not say. */
+    fetchedAt: string
+    wavesError: string
+    wavesNoData: boolean
+    rows: {
+      time: string
+      windKts: number | null
+      gustKts: number | null
+      dirDeg: number | null
+      dir: string
+      shelter: ShelterGrade | ''
+      waveM: number | null
+      waveS: number | null
+      waveDir: string
+    }[]
+    days: {
+      date: string
+      windKtsMin: number | null
+      windKtsMax: number | null
+      gustKtsMax: number | null
+      dirPrevailing: string
+      shelterPrevailing: ShelterGrade | ''
+    }[]
+  }
+  tide: {
+    error: string
+    station: string
+    distanceNm: number
+    timeBasis: string
+    heightAtArrivalM: number | null
+    direction: string
+    heightNote: string
+    /** Set when the tide prediction ends before the stay does. */
+    note: string
+    extremes: { time: string; type: 'high' | 'low'; heightM: number; inWindow: boolean }[]
+    rangeM: number | null
+    rangeNote: string
+  }
+  features: {
+    error: string
+    restrictedAreas: AnchorageRestrictedArea[]
+    moorings: AnchorageMooring[]
+    anchorageAreas: AnchorageArea[]
+    seabedAreas: AnchorageSeabedArea[]
+    bay: { osm: string; name: string; contains: boolean; distanceM: number } | null
+    truncated: boolean
+  }
+  /** OpenStreetMap data time, "" when the map server gave none. */
+  dataAsOf: string
 }
 
 export const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
@@ -563,6 +686,183 @@ function decodeMarina(raw: unknown): MarinaCard {
   }
 }
 
+const GRADES: readonly string[] = ['sheltered', 'partial', 'exposed', 'reef']
+
+function nullableInt(v: unknown, path: string): number | null {
+  return v === null ? null : nonNegInt(v, path)
+}
+
+function decodeAnchorageShelter(raw: unknown): AnchorageCard['shelter'] {
+  const o = obj(raw, 'shelter')
+  const bearings = arr(o.bearings, 'shelter.bearings').map((b, i) => {
+    const p = `shelter.bearings[${i}]`
+    const r = obj(b, p)
+    const bearingDeg = nonNegInt(r.bearing_deg, `${p}.bearing_deg`)
+    if (bearingDeg !== i * 10) bad(`${p}.bearing_deg`, `expected ${i * 10}, the bearings run 000 to 350 in tens`)
+    return { bearingDeg, fetchNm: finite(r.fetch_nm, `${p}.fetch_nm`), grade: oneOf<ShelterGrade>(r.grade, GRADES, `${p}.grade`), open: bool(r.open, `${p}.open`) }
+  })
+  if (bearings.length !== 36) bad('shelter.bearings', 'expected 36 bearings, one for every 10 degrees')
+  return {
+    summary: str(o.summary, 'shelter.summary'),
+    insideReef: bool(o.inside_reef, 'shelter.inside_reef'),
+    reefName: str(o.reef_name, 'shelter.reef_name'),
+    coastlineDownloaded: str(o.coastline_downloaded, 'shelter.coastline_downloaded'),
+    bearings,
+    arcs: arr(o.arcs, 'shelter.arcs').map((a, i) => {
+      const p = `shelter.arcs[${i}]`
+      const r = obj(a, p)
+      return {
+        grade: oneOf<ShelterGrade>(r.grade, GRADES, `${p}.grade`),
+        fromDeg: nonNegInt(r.from_deg, `${p}.from_deg`),
+        toDeg: nonNegInt(r.to_deg, `${p}.to_deg`),
+        text: str(r.text, `${p}.text`),
+      }
+    }),
+  }
+}
+
+function decodeAnchorageForecast(raw: unknown): AnchorageCard['forecast'] {
+  const o = obj(raw, 'forecast')
+  const fetchedAt = str(o.fetched_at, 'forecast.fetched_at')
+  if (fetchedAt !== '') stamp(fetchedAt, 'forecast.fetched_at')
+  const grade = (v: unknown, path: string) => oneOf<ShelterGrade | ''>(v, ['', ...GRADES], path)
+  return {
+    error: str(o.error, 'forecast.error'),
+    note: str(o.note, 'forecast.note'),
+    fetchedAt,
+    wavesError: str(o.waves_error, 'forecast.waves_error'),
+    wavesNoData: bool(o.waves_no_data, 'forecast.waves_no_data'),
+    rows: arr(o.rows, 'forecast.rows').map((r, i) => {
+      const p = `forecast.rows[${i}]`
+      const x = obj(r, p)
+      return {
+        time: stamp(x.time, `${p}.time`),
+        windKts: nullableNumber(x.wind_kts, `${p}.wind_kts`, 0),
+        gustKts: nullableNumber(x.gust_kts, `${p}.gust_kts`, 0),
+        dirDeg: nullableNumber(x.dir_deg, `${p}.dir_deg`, 0),
+        dir: str(x.dir, `${p}.dir`),
+        shelter: grade(x.shelter, `${p}.shelter`),
+        waveM: nullableNumber(x.wave_m, `${p}.wave_m`, 0),
+        waveS: nullableNumber(x.wave_s, `${p}.wave_s`, 0),
+        waveDir: str(x.wave_dir, `${p}.wave_dir`),
+      }
+    }),
+    days: arr(o.days, 'forecast.days').map((d, i) => {
+      const p = `forecast.days[${i}]`
+      const x = obj(d, p)
+      return {
+        date: ymd(x.date, `${p}.date`),
+        windKtsMin: nullableNumber(x.wind_kts_min, `${p}.wind_kts_min`, 0),
+        windKtsMax: nullableNumber(x.wind_kts_max, `${p}.wind_kts_max`, 0),
+        gustKtsMax: nullableNumber(x.gust_kts_max, `${p}.gust_kts_max`, 0),
+        dirPrevailing: str(x.dir_prevailing, `${p}.dir_prevailing`),
+        shelterPrevailing: grade(x.shelter_prevailing, `${p}.shelter_prevailing`),
+      }
+    }),
+  }
+}
+
+function decodeAnchorageTide(raw: unknown): AnchorageCard['tide'] {
+  const o = obj(raw, 'tide')
+  return {
+    error: str(o.error, 'tide.error'),
+    station: str(o.station, 'tide.station'),
+    distanceNm: finite(o.distance_nm, 'tide.distance_nm'),
+    timeBasis: str(o.time_basis, 'tide.time_basis'),
+    heightAtArrivalM: nullableNumber(o.height_at_arrival_m, 'tide.height_at_arrival_m'),
+    direction: str(o.direction, 'tide.direction'),
+    heightNote: str(o.height_note, 'tide.height_note'),
+    note: str(o.note, 'tide.note'),
+    extremes: arr(o.extremes, 'tide.extremes').map((e, i) => {
+      const p = `tide.extremes[${i}]`
+      const x = obj(e, p)
+      return {
+        time: stamp(x.time, `${p}.time`),
+        type: oneOf<'high' | 'low'>(x.type, ['high', 'low'], `${p}.type`),
+        heightM: finite(x.height_m, `${p}.height_m`),
+        inWindow: bool(x.in_window, `${p}.in_window`),
+      }
+    }),
+    rangeM: nullableNumber(o.range_m, 'tide.range_m', 0),
+    rangeNote: str(o.range_note, 'tide.range_note'),
+  }
+}
+
+function decodeShapes(raw: unknown, path: string): MarinaShape[] {
+  return arr(raw, path).map((s, i) => decodeMarinaShape(s, `${path}[${i}]`))
+}
+
+function decodeAnchorageFeatures(raw: unknown): AnchorageCard['features'] {
+  const o = obj(raw, 'features')
+  const bay = o.bay === null ? null : (() => {
+    const b = obj(o.bay, 'features.bay')
+    return { osm: str(b.osm, 'features.bay.osm'), name: str(b.name, 'features.bay.name'), contains: bool(b.contains, 'features.bay.contains'), distanceM: nonNegInt(b.distance_m, 'features.bay.distance_m') }
+  })()
+  return {
+    error: str(o.error, 'features.error'),
+    restrictedAreas: arr(o.restricted_areas, 'features.restricted_areas').map((r, i) => {
+      const p = `features.restricted_areas[${i}]`
+      const x = obj(r, p)
+      return {
+        osm: str(x.osm, `${p}.osm`),
+        name: str(x.name, `${p}.name`),
+        source: oneOf<'seamark' | 'protected_area'>(x.source, ['seamark', 'protected_area'], `${p}.source`),
+        restriction: str(x.restriction, `${p}.restriction`),
+        category: str(x.category, `${p}.category`),
+        distanceM: nullableInt(x.distance_m, `${p}.distance_m`),
+        prohibitsAnchoring: bool(x.prohibits_anchoring, `${p}.prohibits_anchoring`),
+        shapes: decodeShapes(x.shapes, `${p}.shapes`),
+      }
+    }),
+    moorings: arr(o.moorings, 'features.moorings').map((m, i) => {
+      const p = `features.moorings[${i}]`
+      const x = obj(m, p)
+      return {
+        osm: str(x.osm, `${p}.osm`),
+        name: str(x.name, `${p}.name`),
+        ref: str(x.ref, `${p}.ref`),
+        vesselSizeM: nullableNumber(x.vessel_size_m, `${p}.vessel_size_m`, 0),
+        class: str(x.class, `${p}.class`),
+        detailsUntagged: bool(x.details_untagged, `${p}.details_untagged`),
+        distanceM: nonNegInt(x.distance_m, `${p}.distance_m`),
+        ...position(x.lat, x.lon, `${p}.`),
+      }
+    }),
+    anchorageAreas: arr(o.anchorage_areas, 'features.anchorage_areas').map((a, i) => {
+      const p = `features.anchorage_areas[${i}]`
+      const x = obj(a, p)
+      return { osm: str(x.osm, `${p}.osm`), name: str(x.name, `${p}.name`), category: str(x.category, `${p}.category`), distanceM: nonNegInt(x.distance_m, `${p}.distance_m`), shapes: decodeShapes(x.shapes, `${p}.shapes`) }
+    }),
+    seabedAreas: arr(o.seabed_areas, 'features.seabed_areas').map((a, i) => {
+      const p = `features.seabed_areas[${i}]`
+      const x = obj(a, p)
+      return { osm: str(x.osm, `${p}.osm`), name: str(x.name, `${p}.name`), surface: str(x.surface, `${p}.surface`), distanceM: nonNegInt(x.distance_m, `${p}.distance_m`), shapes: decodeShapes(x.shapes, `${p}.shapes`) }
+    }),
+    bay,
+    truncated: bool(o.truncated, 'features.truncated'),
+  }
+}
+
+function decodeAnchorage(raw: unknown): AnchorageCard {
+  const p = obj(raw, 'payload')
+  const dataAsOf = str(p.data_as_of, 'data_as_of')
+  if (dataAsOf !== '') stamp(dataAsOf, 'data_as_of')
+  return {
+    kind: 'anchorage',
+    name: str(p.name, 'name'),
+    ...position(p.lat, p.lon, ''),
+    arrive: stamp(p.arrive, 'arrive'),
+    leave: stamp(p.leave, 'leave'),
+    timezone: zone(p.timezone, 'timezone'),
+    shelter: decodeAnchorageShelter(p.shelter),
+    forecast: decodeAnchorageForecast(p.forecast),
+    tide: decodeAnchorageTide(p.tide),
+    features: decodeAnchorageFeatures(p.features),
+    dataAsOf,
+  }
+}
+
+
 function nullableNumber(v: unknown, path: string, min?: number): number | null {
   if (v === null) return null
   const n = finite(v, path)
@@ -656,6 +956,7 @@ const DECODERS: Record<string, (payload: unknown, entry: Record<string, unknown>
   wind_rose: (payload) => decodeWindRose(payload),
   tile: (payload) => decodeTile(payload),
   marina: (payload) => decodeMarina(payload),
+  anchorage: (payload) => decodeAnchorage(payload),
 }
 
 /**
