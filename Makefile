@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint worktree prune-merged check-vite-config
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint worktree prune-merged check-vite-config check-frontend-deps
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -36,8 +36,14 @@ docs-lint:
 # need its own `npm ci` before vitest or tsc would run at all. It gets a
 # symlink to this checkout's copy instead, which is correct as long as the
 # branch does not change frontend/package-lock.json, and makes the worktree
-# usable a second after it is created rather than a few minutes. frontend's
-# .gitignore lists node_modules without a trailing slash so this link is
+# usable a second after it is created rather than a few minutes. This
+# checkout's copy lags whenever origin/main has changed a dependency since its
+# last install, so the target checks the link against the worktree's lockfile
+# (`make check-frontend-deps`) and, on a mismatch, swaps it for the worktree's
+# own `npm ci`. If that install fails (no network), the worktree is left with
+# no node_modules and the target fails. Ship's test step runs the check again,
+# for a branch that has merged origin/main since. frontend's .gitignore lists
+# node_modules without a trailing slash so this link is
 # ignored; a slash there matches directories only and leaves it untracked.
 #
 # That symlink points at shared state: `npm install` run inside the worktree
@@ -55,7 +61,19 @@ worktree:
 	git fetch origin
 	git worktree add --no-track -b "$(NAME)" "../$(notdir $(CURDIR))-$(NAME)" origin/main
 	ln -s "$(CURDIR)/frontend/node_modules" "../$(notdir $(CURDIR))-$(NAME)/frontend/node_modules"
-	@echo "worktree: ../$(notdir $(CURDIR))-$(NAME)  (branch $(NAME), node_modules symlinked)"
+	@cd "../$(notdir $(CURDIR))-$(NAME)/frontend" && if node "$(CURDIR)/scripts/check-frontend-deps.mjs" .; then \
+		echo "worktree: ../$(notdir $(CURDIR))-$(NAME)  (branch $(NAME), node_modules symlinked)"; \
+	else \
+		echo "worktree: running npm ci in the worktree instead of using the link"; \
+		rm node_modules; \
+		npm ci || { rm -rf node_modules; \
+			echo "worktree: npm ci failed, so the worktree has no node_modules. Run npm ci in its frontend once it can reach the registry."; exit 1; }; \
+	fi
+
+# Exits 1 and lists each package whose installed version differs from
+# DIR's package-lock.json. DIR defaults to this checkout's frontend.
+check-frontend-deps:
+	@node scripts/check-frontend-deps.mjs "$(or $(DIR),frontend)"
 
 # Clears up after merged work: removes each worktree, local branch and remote
 # branch whose GitHub PR is merged. Lists what it would do by default;
