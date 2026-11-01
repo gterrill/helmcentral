@@ -38,7 +38,7 @@
   no test-first, no CHANGELOG entry.
 - Run `/code-review medium` on the working tree before committing a batch of changes.
 - Run `/code-review high` on the commits since the last tag before creating a release tag. For large migrations (framework or major dependency upgrades), use `/code-review ultra` instead.
-- Run `/security-review` once the changes are committed, before merging a branch or creating a release tag. It diffs `origin/HEAD...`, so it sees committed work only, and reports nothing on an uncommitted working tree.
+- Run `/security-review` once the changes are committed, before merging a branch or creating a release tag. It diffs `origin/HEAD...` in the session's own directory, whatever a `cd` says, so run it from the checkout holding the branch's commits (step 1 of the `ship` skill covers a worktree). A report on an empty diff checked nothing.
 - `/security-review` takes no arguments and never edits code. It returns a markdown report of HIGH/MEDIUM findings only and filters anything below 8/10 confidence.
 - Check each finding against the code before acting on it. `high` and above report uncertain findings.
 - Findings applied with `--fix` still have to follow the Fallback and Test-First policies below.
@@ -62,8 +62,11 @@
   the worktree's frontend on the next free port against the same backend:
   `cd frontend && npx vite --port 5175 --strictPort`. Vite proxies `/api` to
   the running backend on :8080, so the page shows the same live data as :5173
-  and the two can be compared side by side. Ports 5173 and 5174 belong to the
-  dev and e2e stacks; go up from 5175 if another worktree already holds it.
+  and the two can be compared side by side. To see the boat's own data
+  instead, prefix `VITE_API_PROXY_TARGET=http://192.168.50.240:9091`; that
+  page writes to the boat, so use it to look and save on the dev stack.
+  Ports 5173 and 5174 belong to the dev and e2e stacks; go up from 5175 if
+  another worktree already holds it.
   Stop the server once the change is checked; `make prune-merged` will not
   remove a worktree while it runs.
 - Once a branch's PR is merged, `make prune-merged` lists the worktrees and
