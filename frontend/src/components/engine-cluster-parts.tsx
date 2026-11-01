@@ -1,6 +1,7 @@
 import { Thermometer, Zap } from 'lucide-react'
-import { useMemo, type CSSProperties, type ReactNode } from 'react'
+import { useId, useMemo, type CSSProperties, type ReactNode } from 'react'
 
+import { DIAL_TICK_W, SweepStops } from '@/components/ui/cluster-dial'
 import { CoolantIcon, ExhaustIcon, GearboxIcon } from '@/components/ui/telltale-icons'
 import { useTelemetryHistory } from '@/hooks/use-telemetry-history'
 import { CLUSTER_ICONS, iconForSlot } from '@/lib/cluster-icons'
@@ -9,8 +10,8 @@ import {
   bulletFor, chargeStageLabel, type BulletBand, type BulletMark, type BulletModel, type BulletTone,
 } from '@/lib/engine-cluster-bullet'
 import {
-  FUEL_R_AFT, FUEL_R_FWD, GAP_ARCS, fuelArc, fuelFeet, fuelLegendPoint, fuelScaleLabels,
-  fuelTicks, fuelTitleLeft, fuelTotalX, gapArcLabelAt, gapArcMark, gapArcPath, type GapArcName,
+  FUEL_BAR_W, FUEL_FOOT_SIZE, FUEL_LEGEND_SIZE, FUEL_R_AFT, FUEL_SCALE_SIZE, FUEL_R_FWD, GAP_ARCS, fuelArc, fuelFeet, fuelLegendPoint, fuelScaleLabels,
+  fuelSweep, fuelTicks, fuelTitleLeft, fuelTotalX, gapArcLabelAt, gapArcMark, gapArcPath, type GapArcName,
 } from '@/lib/engine-cluster-layout'
 import { reading } from '@/lib/cluster-readings'
 import { isStale } from '@/lib/staleness'
@@ -255,36 +256,51 @@ export function FuelFan({ config, title, side, values, ages }: {
   const ticks = fuelTicks(side)
   const feet = fuelFeet(side)
   const left = fuelTitleLeft(side)
+  const gradientId = useId()
   const fuelLabel = title.trim() ? `${title.trim()} fuel` : 'Fuel'
 
   return (
     <g data-fuel-fan="" data-side={side}>
+      <defs>
+        {/* The dial's own sweep, fixed to the scale and not to each fill, so a half-full tank shows
+            half the climb. One run per bar, to its own head, so two full tanks end equally bright.
+            Amber and red are left for a tank level alert. */}
+        {bars.map((bar, i) => {
+          const sweep = fuelSweep(side, bar.r)
+          return (
+            <linearGradient key={i} id={`${gradientId}-${i}`} gradientUnits="userSpaceOnUse"
+              x1={0} y1={sweep.foot} x2={0} y2={sweep.top}>
+              <SweepStops />
+            </linearGradient>
+          )
+        })}
+      </defs>
       {bars.map((bar, i) => {
         const f = bar.percent === null ? 0 : Math.max(0, Math.min(1, bar.percent / 100))
         return (
           <g key={i} data-fuel-bar={i} data-bar-state={bar.percent === null ? 'absent' : 'reading'} data-tone={bar.level.tone}>
-            <path d={fuelArc(side, bar.r, 1)} fill="none" strokeWidth={18}
+            <path d={fuelArc(side, bar.r, 1)} fill="none" strokeWidth={FUEL_BAR_W}
               strokeDasharray={bar.percent === null ? '6 8' : undefined}
               style={{ stroke: 'hsl(var(--fuel-track))', opacity: bar.percent === null ? 0.55 : 1 }} />
             {f > 0 && (
-              <path d={fuelArc(side, bar.r, f)} fill="none" strokeWidth={18}
+              <path d={fuelArc(side, bar.r, f)} fill="none" strokeWidth={FUEL_BAR_W}
                 style={{
-                  stroke: bar.level.tone === 'neutral' ? 'hsl(var(--fuel-bar))' : fillOf(bar.level.tone),
+                  stroke: bar.level.tone === 'neutral' ? `url(#${gradientId}-${i})` : fillOf(bar.level.tone),
                   filter: bar.level.tone === 'neutral' ? 'var(--fuel-bar-glow)' : undefined,
                 }} />
             )}
           </g>
         )
       })}
-      <path d={ticks.minor} fill="none" strokeWidth={1.5} style={{ stroke: 'hsl(var(--fuel-tick-minor))' }} />
-      <path d={ticks.major} fill="none" strokeWidth={2.5} style={{ stroke: 'hsl(var(--fuel-tick-major))' }} />
+      <path d={ticks.minor} fill="none" strokeWidth={DIAL_TICK_W.minor} style={{ stroke: 'hsl(var(--fuel-tick-minor))' }} />
+      <path d={ticks.major} fill="none" strokeWidth={DIAL_TICK_W.major} style={{ stroke: 'hsl(var(--fuel-tick-major))' }} />
       {fuelScaleLabels(side).map((s) => (
-        <text key={s.value} x={s.x} y={s.y} fontSize="13" fontWeight="500" textAnchor="middle" dominantBaseline="central"
+        <text key={s.value} x={s.x} y={s.y} fontSize={FUEL_SCALE_SIZE} fontWeight="600" textAnchor="middle" dominantBaseline="central"
           style={{ fill: 'hsl(var(--fuel-label))' }}>{s.value}</text>
       ))}
       {bars.map((bar, i) => (
-        <text key={`foot${i}`} x={feet[i].x} y={feet[i].y} fontSize="12" fontWeight="600" letterSpacing="1"
-          textAnchor="middle" dominantBaseline="central" style={{ fill: 'hsl(var(--muted-foreground))' }}>
+        <text key={`foot${i}`} x={feet[i].x} y={feet[i].y} fontSize={FUEL_FOOT_SIZE} fontWeight="600" letterSpacing="1"
+          textAnchor={feet[i].anchor} dominantBaseline="central" style={{ fill: 'hsl(var(--muted-foreground))' }}>
           {bar.label.toUpperCase()}
         </text>
       ))}
@@ -292,10 +308,13 @@ export function FuelFan({ config, title, side, values, ages }: {
         if (bar.percent === null) return null
         const legend = fuelLegendPoint(side, bar.r, Math.max(0, Math.min(1, bar.percent / 100)))
         return (
-          <text key={`leg${i}`} data-fuel-legend={i} x={legend.x} y={legend.y} fontSize="12" fontWeight="700"
+          <text key={`leg${i}`} data-fuel-legend={i} x={legend.x} y={legend.y} fontSize={FUEL_LEGEND_SIZE} fontWeight="700"
             textAnchor="middle" dominantBaseline="central"
             transform={`rotate(${legend.rotate.toFixed(1)} ${legend.x.toFixed(1)} ${legend.y.toFixed(1)})`}
-            style={{ fill: legend.inside ? 'hsl(var(--cluster-surface))' : 'hsl(var(--foreground))' }}>
+            // Inside the bar the backdrop runs from a faint wash at the foot to a bright blue at the head, so no
+            // single text colour reads on all of it. A halo in the card's colour does.
+            stroke={legend.inside ? 'hsl(var(--cluster-surface))' : undefined} strokeWidth={3.5} strokeLinejoin="round"
+            paintOrder="stroke" style={{ fill: 'hsl(var(--foreground))' }}>
             {Math.round(bar.percent)}%
           </text>
         )

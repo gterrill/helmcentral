@@ -31,6 +31,23 @@ const R_LABEL = 156 * K
 const HUB = 190
 const SWEEP = 250
 
+/** Tick stroke widths, shared with the fuel fan so the two scales draw at one weight. */
+export const DIAL_TICK_W = { major: 5.5, minor: 2.4 }
+
+/**
+ * The sweep band's colour stops, shared with the fuel fan's bars. The caller
+ * owns the <linearGradient> because the run it climbs is its own.
+ */
+export function SweepStops() {
+  return (
+    <>
+      <stop offset="0%" style={{ stopColor: 'hsl(var(--primary))', stopOpacity: 'var(--cluster-sweep-o0)' }} />
+      <stop offset="50%" style={{ stopColor: 'hsl(var(--primary))', stopOpacity: 'var(--cluster-sweep-o1)' }} />
+      <stop offset="100%" style={{ stopColor: 'hsl(var(--dial-needle))', stopOpacity: 'var(--cluster-sweep-o2)' }} />
+    </>
+  )
+}
+
 export interface ClusterDialProps {
   /** Already converted to display units, or null with no reading. */
   value: number | null
@@ -62,7 +79,7 @@ export function ClusterDial({
         x1={x1} y1={y1} x2={x2} y2={y2} strokeLinecap="butt"
         style={{
           stroke: mark ? zoneColor(mark) : 'hsl(var(--dial-tick-major))',
-          strokeWidth: major ? 5.5 : 2.4,
+          strokeWidth: major ? DIAL_TICK_W.major : DIAL_TICK_W.minor,
         }} />
     )
   }
@@ -97,9 +114,7 @@ export function ClusterDial({
         <defs>
           {/* Climbs the face from its foot, as the reference's does. */}
           <linearGradient id={gradientId} gradientUnits="userSpaceOnUse" x1={0} y1={R * 2 * 0.9} x2={0} y2={0}>
-            <stop offset="0%" style={{ stopColor: 'hsl(var(--primary))', stopOpacity: 'var(--cluster-sweep-o0)' }} />
-            <stop offset="50%" style={{ stopColor: 'hsl(var(--primary))', stopOpacity: 'var(--cluster-sweep-o1)' }} />
-            <stop offset="100%" style={{ stopColor: 'hsl(var(--dial-needle))', stopOpacity: 'var(--cluster-sweep-o2)' }} />
+            <SweepStops />
           </linearGradient>
         </defs>
         {bandPath && <path data-value-arc="" d={bandPath} fill="none" strokeWidth={W_BAND} stroke={`url(#${gradientId})`} />}

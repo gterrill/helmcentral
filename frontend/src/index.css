@@ -232,10 +232,13 @@
        component, because the tick radii are derived from the bar radii in the
        same file: a skin free to move one and not the other could put a bar
        through its neighbour. Nothing about a skin needs them anyway. */
-    --fuel-bar: var(--gauge-primary);
+    /* The bars draw in the dial's sweep gradient, not this flat colour, so
+       amber and red only ever mean a tank level alert. It is what the skin's
+       glow takes its colour from. */
+    --fuel-bar: var(--primary);
     --fuel-track: var(--muted);
     --fuel-tick-major: var(--dial-tick-major);
-    --fuel-tick-minor: var(--dial-tick-minor);
+    --fuel-tick-minor: var(--dial-tick-major);
     --fuel-label: var(--dial-label);
     /* A whole `filter` value, not one drop-shadow's arguments the way
        --dial-needle-glow is. That single argument list can only make one
@@ -383,7 +386,6 @@
        band left the pointer sitting on the brightest part of its own arc. */
     --dial-needle-r: 100px;
     --dial-needle-w: 48px;
-    --fuel-bar: 190 95% 62%;
     --fuel-track: 205 32% 18%;
     --fuel-bar-glow:
       drop-shadow(0 0 2px hsl(var(--fuel-bar) / 0.9))

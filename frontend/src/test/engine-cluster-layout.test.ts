@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'vitest'
 
 import {
-  CARD_TOPS, CLUSTER_H, CLUSTER_INNER_H, CLUSTER_INNER_TOP, CLUSTER_W, clusterLayout, fuelArc, fuelPoint, fuelTitleLeft, gapArcPath, mirrorX,
+  CARD_TOPS, CLUSTER_H, CLUSTER_INNER_H, CLUSTER_INNER_TOP, CLUSTER_W, clusterLayout, fuelArc, fuelFeet, fuelPoint, fuelTitleLeft, gapArcPath, mirrorX,
 } from '@/lib/engine-cluster-layout'
 
 /** Pulls every "x y" pair out of an SVG path built from M/L/Q commands. */
@@ -78,5 +78,18 @@ describe('engine cluster layout: the starboard tile is the port tile reflected',
     const right = points(gapArcPath('right', 0, 1))
     expect(Math.max(...left.map((p) => p[0]))).toBeLessThan(CLUSTER_W / 2)
     expect(Math.min(...right.map((p) => p[0]))).toBeGreaterThan(CLUSTER_W / 2)
+  })
+})
+
+// The feet are closer together than one caption is wide, so each caption must
+// run away from its neighbour or the pair prints as "FWDAFT".
+describe('engine cluster layout: the FWD and AFT captions', () => {
+  test.each(['port', 'stbd'] as const)('on %s share one baseline and run apart', (side) => {
+    const [fwd, aft] = fuelFeet(side)
+    expect(fwd.y).toBe(aft.y)
+    // The caption nearer the card edge grows towards it, the inner one towards the dial.
+    const aftIsLeft = aft.x < fwd.x
+    expect(aft.anchor).toBe(aftIsLeft ? 'end' : 'start')
+    expect(fwd.anchor).toBe(aftIsLeft ? 'start' : 'end')
   })
 })
