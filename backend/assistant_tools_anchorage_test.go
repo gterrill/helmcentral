@@ -611,6 +611,21 @@ func TestDecodeAnchorageFeatures_CleansTextAndDerivesUntagged(t *testing.T) {
 	}
 }
 
+func TestDecodeAnchorageFeatures_DropsProtectClassFromProtectedAreas(t *testing.T) {
+	d, err := decodeAnchorageFeatures("p", []byte(`{"restricted_areas":[`+
+		`{"osm":"relation/1","name":"Park","source":"protected_area","restriction":"Marine Park","category":"1;2;4;6","geometry":[]},`+
+		`{"osm":"way/2","name":"Zone","source":"seamark","restriction":"no anchoring","category":"nature_reserve","distance_m":5,"geometry":[]}]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.RestrictedAreas[0].Category; got != "" {
+		t.Errorf("protected area category = %q, want it dropped (an IUCN code list)", got)
+	}
+	if got := d.RestrictedAreas[1].Category; got != "nature_reserve" {
+		t.Errorf("seamark category = %q, want it kept", got)
+	}
+}
+
 func TestAnchorageDetailsTool_IsRegisteredAndDescribed(t *testing.T) {
 	tool := lookupMateTool("anchorage_details")
 	if tool == nil {

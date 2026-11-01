@@ -401,7 +401,7 @@
           "name": "Great Barrier Reef Coast Marine Park",
           "source": "protected_area",
           "restriction": "Marine Park",
-          "category": "1;2;4;6",
+          "category": "",
           "distance_m": null,
           "prohibits_anchoring": false,
           "shapes": []
@@ -411,7 +411,7 @@
           "name": "Great Barrier Reef Marine Park",
           "source": "protected_area",
           "restriction": "Marine Park",
-          "category": "1;2;4;6",
+          "category": "",
           "distance_m": null,
           "prohibits_anchoring": false,
           "shapes": []

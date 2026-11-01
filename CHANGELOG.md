@@ -82,6 +82,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   could throw the view somewhere unrelated, such as the far side of the world.
   The opening move now stops when you touch, drag or scroll the map, and the
   replay carries on playing. See [Passages](docs/features/passages.md).
+- **The anchorage card's shelter ring shows the sheltered side, and the card
+  stays honest.** Directions with land close by had spokes too short to see, so
+  the ring looked like exposure only. A thin band around the ring now shows the
+  shelter from all 36 directions, and the "15 NM" label no longer sits on the
+  "N". A marine park no longer ends in a string of numbers such as "1;2;4;6".
+  If Mate looks up the same anchorage twice in one answer, you get one card, the
+  later one. See [Mate](docs/features/assistant.md).
 - **The Collision Profile Not Changed warning clears when you pick a working
   profile yourself.** If the boat was anchored and the anchored profile couldn't
   raise alarms, the warning stayed up even after you switched the plugin to a

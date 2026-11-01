@@ -67,8 +67,8 @@ func TestRunAnchorageFeatures_ButterflyBayMoorings(t *testing.T) {
 		t.Errorf("restricted = %+v, want the two marine protected areas and no land park", out.RestrictedAreas)
 	}
 	for _, r := range out.RestrictedAreas {
-		if r.Source != "protected_area" || r.Restriction != "Marine Park" || len(r.Geometry) != 0 || r.DistanceM != nil {
-			t.Errorf("protected area %+v: want source protected_area, title Marine Park, no geometry and no distance", r)
+		if r.Source != "protected_area" || r.Restriction != "Marine Park" || len(r.Geometry) != 0 || r.DistanceM != nil || r.Category != "" {
+			t.Errorf("protected area %+v: want source protected_area, title Marine Park, no geometry, no distance and no category (the raw protect_class is not a name)", r)
 		}
 	}
 }

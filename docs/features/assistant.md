@@ -258,8 +258,10 @@ Under the answer, Mate shows an anchorage card. Here's what's on it:
   direction. The colour of a spoke says how sheltered you are from wind coming
   from that direction. Blue is sheltered, amber is partly sheltered, red is
   exposed and grey is reef. A spoke's length is how far the wind has run over
-  water, up to 15 nm, so a short spoke is land close by on that side. Beside it
-  are the arcs in words.
+  water, up to 15 nm, so a short spoke is land close by on that side. A thin
+  band just outside the ring repeats the colour of all 36 directions, so a
+  sheltered side with no spoke to see still shows. Beside it are the arcs in
+  words.
 - **Forecast:** A table of the three-hourly rows. Each row has the time, the
   wind and gust in knots, the direction it's from, a badge for the shelter from
   that wind, and the waves. Wave heights follow your distance units. Below it is
@@ -291,6 +293,8 @@ Under the answer, Mate shows an anchorage card. Here's what's on it:
 
 The card is a snapshot of what Mate read at the time, so it looks the same when
 you open the conversation again. Ask about two anchorages and you get two cards.
+If Mate looks up the same anchorage twice in one answer, only the later card is
+kept, because that's the one the answer is built on.
 
 The shoreline is the [Offline coastline](offline-coastline.md), kept aboard, so
 the shelter needs no signal. It's off until you turn it on in Settings → Offline

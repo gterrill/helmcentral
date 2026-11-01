@@ -26,6 +26,36 @@ type mateCard struct {
 	// created is when the tool built the card, which is when the operator saw
 	// the forecast, not when the reply was saved.
 	created time.Time
+	// lat and lon place an anchorage card; positioned says they are set. The
+	// run uses them to keep one anchorage card per position in a reply.
+	lat, lon   float64
+	positioned bool
+}
+
+// anchorageSamePositionM is how close two anchorage cards must be to count as
+// the same place.
+const anchorageSamePositionM = 10
+
+// appendReplyCards adds a tool call's cards to the reply. A second anchorage
+// card for a position the reply already holds one for replaces it: the model
+// answers from its later call, so the earlier card would contradict the
+// reply. The run calls this in the model's call order, across rounds.
+func appendReplyCards(cards []mateCard, add ...mateCard) []mateCard {
+	for _, c := range add {
+		if c.Kind == anchorageCardKind && c.positioned {
+			kept := cards[:0:0]
+			for _, e := range cards {
+				if e.Kind == anchorageCardKind && e.positioned &&
+					haversineMeters(e.lat, e.lon, c.lat, c.lon) <= anchorageSamePositionM {
+					continue
+				}
+				kept = append(kept, e)
+			}
+			cards = kept
+		}
+		cards = append(cards, c)
+	}
+	return cards
 }
 
 func createAssistantCardsSchema(db *sql.DB) error {

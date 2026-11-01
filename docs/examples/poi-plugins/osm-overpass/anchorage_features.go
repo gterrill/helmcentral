@@ -68,7 +68,7 @@ type anchorageRestricted struct {
 	Name        string        `json:"name"`
 	Source      string        `json:"source"`
 	Restriction string        `json:"restriction"`
-	Category    string        `json:"category"`
+	Category    string        `json:"category,omitempty"`
 	DistanceM   *int          `json:"distance_m"`
 	Geometry    []marinaShape `json:"geometry"`
 }
@@ -363,7 +363,8 @@ func classifyAnchorage(elements []overpassElement, lat, lon float64) anchorageFe
 			out.RestrictedAreas = append(out.RestrictedAreas, anchorageRestricted{
 				OSM: ref, Name: areaName(tags), Source: "protected_area",
 				Restriction: firstTag(tags, "protection_title"),
-				Category:    strings.TrimSpace(tags["protect_class"]),
+				// protect_class is an IUCN code list such as "1;2;4;6"; it names
+				// nothing an operator can read, so it is not passed on.
 				DistanceM:   nil, Geometry: []marinaShape{},
 			})
 		case isMooringElement(tags):

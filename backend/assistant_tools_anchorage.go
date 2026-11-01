@@ -391,7 +391,10 @@ func (d assistantToolDeps) executeAnchorageDetails(ctx context.Context, raw json
 		return "", err
 	}
 	if d.cards != nil {
-		d.cards.put(text, mateCard{Kind: anchorageCardKind, Payload: card})
+		d.cards.put(text, mateCard{
+			Kind: anchorageCardKind, Payload: card,
+			lat: shelter.Lat, lon: shelter.Lon, positioned: true,
+		})
 	}
 	return text, nil
 }

@@ -127,7 +127,8 @@ export function restrictedLine(r: AnchorageRestrictedArea, units: DistanceUnits)
   } else {
     parts.push('Restricted area')
   }
-  if (r.category) parts.push(humanise(r.category))
+  // A protected area's category is the raw protect_class code list, which names nothing.
+  if (r.category && r.source !== 'protected_area') parts.push(humanise(r.category))
   if (r.distanceM !== null) parts.push(r.distanceM === 0 ? 'you are inside it' : distanceText(r.distanceM, units))
   return { label, detail: parts.join(' · '), tone: r.prohibitsAnchoring ? 'critical' : r.source === 'protected_area' ? 'muted' : 'warning' }
 }
