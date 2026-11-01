@@ -507,6 +507,13 @@ describe('WatchDetailsPage notifications', () => {
     expect(within(group).queryByRole('link')).not.toBeInTheDocument()
   })
 
+  it('keeps the links for an admin when the form is read-only', async () => {
+    renderPage({ canWrite: false })
+    const group = await screen.findByRole('group', { name: 'Send to' })
+    expect(await within(group).findByRole('link', { name: 'Alarm settings' })).toBeInTheDocument()
+    expect(group).not.toHaveTextContent(/Ask whoever runs/)
+  })
+
   it('draws no channel rows until Settings has answered', async () => {
     let release: () => void = () => {}
     channelsGate = new Promise<void>((resolve) => { release = resolve })

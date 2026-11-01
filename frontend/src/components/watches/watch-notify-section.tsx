@@ -90,7 +90,6 @@ export function WatchNotifySection({
     onNotifyChange(WATCH_CHANNELS.map((c) => c.id as string).filter((c) => (c === id ? on : notify.includes(c))))
 
   const sendId = useId()
-  const canOpenSettings = canAdmin && !disabled
 
   // A channel that is off in Settings keeps its row only while this watch still selects it.
   const known = channelsLoaded && !channelsError
@@ -117,9 +116,9 @@ export function WatchNotifySection({
           <div className="flex flex-col items-start gap-3">
             <p className="text-sm text-muted-foreground">
               Nowhere yet. Reports stay on this page until {joinNames(WATCH_CHANNELS.map((c) => c.label), 'or')} is set up for the boat.
-              {!canOpenSettings && ` ${ASK_ADMIN} set one up in Alarm settings.`}
+              {!canAdmin && ` ${ASK_ADMIN} set one up in Alarm settings.`}
             </p>
-            {canOpenSettings && <SettingsLink className={buttonVariants({ variant: 'outline', size: 'sm' })}>Set up in Alarm settings</SettingsLink>}
+            {canAdmin && <SettingsLink className={buttonVariants({ variant: 'outline', size: 'sm' })}>Set up in Alarm settings</SettingsLink>}
           </div>
         ) : (
           <div className="flex flex-col">
@@ -141,7 +140,7 @@ export function WatchNotifySection({
                       <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
                       <span>
                         Off for the boat, so nothing goes here.{' '}
-                        {canOpenSettings
+                        {canAdmin
                           ? <SettingsLink className="font-medium underline underline-offset-2 hover:text-foreground">Turn it on</SettingsLink>
                           : `${ASK_ADMIN} turn it on in Alarm settings.`}
                       </span>
@@ -155,7 +154,7 @@ export function WatchNotifySection({
         {notSetUp.length > 0 && rows.length > 0 && (
           <p className="mt-1 border-t border-border pt-3 text-xs text-muted-foreground">
             {joinNames(notSetUp)} {one ? 'is' : 'are'} not set up for this boat.{' '}
-            {canOpenSettings
+            {canAdmin
               ? <>{one ? 'Set it up' : 'Set them up'} in <SettingsLink className={linkClass}>Alarm settings</SettingsLink>.</>
               : `${ASK_ADMIN} set ${one ? 'it' : 'them'} up in Alarm settings.`}
           </p>
