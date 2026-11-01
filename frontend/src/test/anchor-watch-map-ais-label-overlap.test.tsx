@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  AIS_LABEL_COLLISION_RADIUS_PX,
   AnchorWatchMap,
   LABEL_COLLISION_RADIUS_PX,
   resolveMarkerLabelSuppression,
@@ -56,6 +57,16 @@ describe('resolveMarkerLabelSuppression', () => {
       { id: 'b', x: LABEL_COLLISION_RADIUS_PX + 5, y: 0, priority: 2 },
     ]
     expect(resolveMarkerLabelSuppression(points, [])).toEqual(new Set())
+  })
+
+  it('takes a wider radius for the larger AIS labels without changing the default the POI tile uses', () => {
+    const points: MarkerLabelPoint[] = [
+      { id: 'a', x: 0, y: 0, priority: 1 },
+      { id: 'b', x: 55, y: 0, priority: 2 },
+    ]
+    expect(LABEL_COLLISION_RADIUS_PX).toBe(50)
+    expect(resolveMarkerLabelSuppression(points, [])).toEqual(new Set())
+    expect(resolveMarkerLabelSuppression(points, [], AIS_LABEL_COLLISION_RADIUS_PX)).toEqual(new Set(['b']))
   })
 
   it('does not re-suppress past an already-suppressed vessel in a three-way pile-up', () => {

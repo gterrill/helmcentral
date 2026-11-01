@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // How to read a tool's result (ADR 0236). The rules live with the tool, so Mate
@@ -159,8 +160,11 @@ func readingAnchorageDetails(leaveDefaulted bool, forecastErr, tideErr, features
 }
 
 // readingAnchorageFeatures carries what the map's restrictions mean for this call.
-func readingAnchorageFeatures(prohibited []string, truncated bool) string {
+func readingAnchorageFeatures(prohibited []string, truncated bool, cachedAt time.Time) string {
 	var parts []string
+	if !cachedAt.IsZero() {
+		parts = append(parts, fmt.Sprintf("The map features are from a lookup made at %s, kept for six hours.", cachedAt.UTC().Format(time.RFC3339)))
+	}
 	if len(prohibited) > 0 {
 		parts = append(parts, fmt.Sprintf("Anchoring is prohibited in: %s. Treat that as a no-go for anchoring there and say so first.", strings.Join(prohibited, ", ")))
 	}

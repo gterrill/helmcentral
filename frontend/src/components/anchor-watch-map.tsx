@@ -34,6 +34,7 @@ import {
   MAP_LABEL_HALO,
   resolveMarkerLabelSuppression,
   markerScaleForZoom,
+  AIS_LABEL_COLLISION_RADIUS_PX,
   LABEL_COLLISION_RADIUS_PX,
   type MarkerLabelPoint,
   type ScreenRect,
@@ -115,7 +116,7 @@ export function resolveRadarEchoAvailability(params: {
 // lib/marker-labels.ts, shared with the poi-map widget's own marker labels
 // (ADR 0091 phase 3b). Re-exported here so existing imports from this module
 // keep working unchanged.
-export { resolveMarkerLabelSuppression, LABEL_COLLISION_RADIUS_PX }
+export { resolveMarkerLabelSuppression, AIS_LABEL_COLLISION_RADIUS_PX, LABEL_COLLISION_RADIUS_PX }
 export type { MarkerLabelPoint, ScreenRect }
 
 // The zoom the operator last left the map at, tagged with the anchor session
@@ -1265,9 +1266,8 @@ export function AnchorWatchMap({
     onRadarEchoToggle?.(!showRadarEcho)
   }, [showRadarEcho, onRadarEchoToggle])
 
-  // AIS labels (9px map annotation, DESIGN.md's legibility floor) whose
-  // projected screen position lands under the metric overlay, under the
-  // control stack, or within LABEL_COLLISION_RADIUS_PX of a higher-priority
+  // AIS labels whose projected screen position lands under the metric overlay, under the
+  // control stack, or within AIS_LABEL_COLLISION_RADIUS_PX of a higher-priority
   // vessel's label — see resolveMarkerLabelSuppression above. `project`
   // isn't part of every test double for MapRef (only a live maplibre map
   // provides it), so this degrades to "suppress nothing" — today's
@@ -1327,7 +1327,7 @@ export function AnchorWatchMap({
         priority: haversineMeters(lat, lon, vessel.lat, vessel.lon),
       })
     }
-    const next = resolveMarkerLabelSuppression(points, avoidZonesRef.current)
+    const next = resolveMarkerLabelSuppression(points, avoidZonesRef.current, AIS_LABEL_COLLISION_RADIUS_PX)
     setSuppressedAisLabelIds((current) => (suppressedIdsEqual(current, next) ? current : next))
   }, [aisVessels])
 
@@ -1682,21 +1682,29 @@ export function AnchorWatchMap({
                   >
                     <Ship className={cn('text-white', isSelected ? 'h-6 w-6' : 'h-5 w-5')} />
                   </div>
-                  {/* Suppressed when it would sit under the metric overlay,
-                      the control stack, or a closer vessel's own label (see
-                      resolveMarkerLabelSuppression) — but never for the
-                      vessel the operator just tapped; that one is expected
-                      to answer, not disappear. The marker dot itself always
-                      stays put either way. */}
-                  {(isSelected || !suppressedAisLabelIds.has(vessel.id)) && (
-                    <div className={`mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white ${MAP_LABEL_HALO}`}>
-                      <div className="truncate">{vessel.name}</div>
-                      <div className="whitespace-nowrap text-[9px] font-medium tracking-normal">
-                        {formatRange(distanceM)} · {bearing}°
-                      </div>
-                    </div>
-                  )}
                 </div>
+                {/* Suppressed when it would sit under the metric overlay,
+                    the control stack, or a closer vessel's own label (see
+                    resolveMarkerLabelSuppression) — but never for the
+                    vessel the operator just tapped; that one is expected
+                    to answer, not disappear. The marker dot itself always
+                    stays put either way. It sits outside the zoom scale so
+                    the text stays 12px when the icon shrinks. */}
+                {(isSelected || !suppressedAisLabelIds.has(vessel.id)) && (
+                  <div
+                    className={cn(
+                      'max-w-36 text-center font-mono text-xs font-semibold uppercase tracking-wider text-white',
+                      // The selected icon grows past its box; keep it off the name.
+                      isSelected ? 'mt-2.5' : 'mt-0.5',
+                      MAP_LABEL_HALO,
+                    )}
+                  >
+                    <div className="truncate">{vessel.name}</div>
+                    <div className="whitespace-nowrap font-medium tracking-normal">
+                      {formatRange(distanceM)} · {bearing}°
+                    </div>
+                  </div>
+                )}
               </button>
             </Marker>
           )
@@ -1758,7 +1766,7 @@ export function AnchorWatchMap({
                     style={{ clipPath: 'polygon(50% 0%, 0% 100%, 100% 100%)' }}
                   />
                 </div>
-                <div className={`mt-0.5 max-w-24 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-white ${MAP_LABEL_HALO}`}>
+                <div className={`mt-0.5 text-center font-mono text-xs font-semibold uppercase tracking-wider text-white ${MAP_LABEL_HALO}`}>
                   <div className="whitespace-nowrap">
                     RDR {formatRange(distanceM)} · {bearing}°
                   </div>
@@ -1863,9 +1871,9 @@ export function AnchorWatchMap({
                       way so a crowded anchorage doesn't fill up with opaque
                       boxes; only interactive controls (the Pin tooltip, the
                       Remove button) get a solid background. */}
-                  <div className={`mt-0.5 max-w-28 text-center font-mono text-[9px] font-semibold uppercase tracking-wider text-fuchsia-300 ${MAP_LABEL_HALO}`}>
+                  <div className={`mt-0.5 max-w-36 text-center font-mono text-xs font-semibold uppercase tracking-wider text-fuchsia-300 ${MAP_LABEL_HALO}`}>
                     {pm.label && <div className="truncate">{pm.label}</div>}
-                    <div className="whitespace-nowrap text-[9px] font-medium tracking-normal text-white">
+                    <div className="whitespace-nowrap font-medium tracking-normal text-white">
                       {formatRange(distanceM)} · {bearing}°
                     </div>
                   </div>

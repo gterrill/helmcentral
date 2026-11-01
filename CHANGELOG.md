@@ -89,12 +89,24 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   to turn it on. When no channel is on, the section says reports stay on the
   page. **Send** is now **When to send**, with both choices laid out and what
   each one means shown under it.
+  
+- **Asking Mate about the same anchorage again is faster.** The map lookup
+  inside Anchorage details is kept for six hours per spot, so changing the
+  arrival or leave time doesn't wait for the map server a second time. Asking
+  again about the same position within six hours reuses the earlier lookup.
+  Mate says when it used a kept lookup, and the map's own date is still the one shown. A lookup that fails is
+  never kept, and a failure never falls back to an older answer.
 
 - **The engine card's fuel bars match the dial.** The two tank bars now draw
   in the same blue sweep as the RPM dial, so amber and red only show up when a
   tank has dropped past its warn or alarm level. The scale numbers, tick marks
   and FWD and AFT labels are larger and match the dial. The bars are wider, and
   the two labels sit on one line under them.
+
+- **Boat names on the anchor watch map are larger.** The name, range and
+  bearing under each AIS boat, radar target and marked spot are a third bigger,
+  so they read at arm's length. When two boats sit close together on screen,
+  the farther one hides its label sooner.
 
 ### Fixed
 

@@ -173,7 +173,11 @@ type AnchorageFeaturesBody struct {
 	Bay             *anchorageBayRecord       `json:"bay"`
 	DataAsOf        string                    `json:"data_as_of,omitempty"`
 	Truncated       bool                      `json:"truncated,omitempty"`
-	Reading         string                    `json:"reading"`
+	// Cached is set when the host reused an earlier lookup of this position;
+	// DataAsOf is still Overpass's own time.
+	Cached   bool   `json:"cached,omitempty"`
+	CachedAt string `json:"cached_at,omitempty"`
+	Reading  string `json:"reading"`
 }
 
 type assistantAnchorageDetailsResult struct {
@@ -678,8 +682,13 @@ func (d assistantToolDeps) anchorageFeatures(lat, lon float64) anchorageFeatures
 	for _, s := range found.SeabedAreas {
 		body.SeabedAreas = append(body.SeabedAreas, s.anchorageSeabedRecord)
 	}
+	var cachedAt time.Time
+	if found.Cached {
+		cachedAt = found.CachedAt
+		body.Cached, body.CachedAt = true, cachedAt.UTC().Format(time.RFC3339)
+	}
 	body.Moorings = summariseMoorings(found.Moorings)
-	body.Reading = readingAnchorageFeatures(prohibited, found.Truncated)
+	body.Reading = readingAnchorageFeatures(prohibited, found.Truncated, cachedAt)
 	return anchorageFeaturesOut{section: anchorageFeaturesSection{AnchorageFeaturesBody: body}, found: found}
 }
 
