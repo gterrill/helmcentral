@@ -5,6 +5,8 @@
 // field of view 36.87 degrees, so the camera stands 1.5 screen heights from the
 // centre) and backs the zoom off until they are all in.
 
+import { mercatorX, mercatorY } from '@/lib/geo'
+
 const WORLD_TILE = 512
 const CAMERA_DISTANCE_PER_HEIGHT = 1.5
 const ZOOM_STEP = 0.05
@@ -15,11 +17,7 @@ export interface PitchedCamera extends LonLat { zoom: number; pitch: number; wid
 
 function mercator(p: LonLat, zoom: number): { x: number; y: number } {
   const scale = WORLD_TILE * 2 ** zoom
-  const latRad = (p.lat * Math.PI) / 180
-  return {
-    x: ((p.lon + 180) / 360) * scale,
-    y: (0.5 - Math.log(Math.tan(Math.PI / 4 + latRad / 2)) / (2 * Math.PI)) * scale,
-  }
+  return { x: mercatorX(p.lon) * scale, y: mercatorY(p.lat) * scale }
 }
 
 /** Where a ground point lands on screen (pixels from the top left), north up,

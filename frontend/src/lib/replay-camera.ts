@@ -14,6 +14,16 @@ export interface Camera {
   bearing: number
 }
 
+/** What the map says about itself when the replay places the camera. */
+export interface CameraEnv {
+  /** The map is flat: 3D is off or the terrain failed. */
+  flat: boolean
+  /** The framing of the whole replayed track. */
+  overview: Camera
+  /** The map's camera as it is this instant. */
+  current: Camera
+}
+
 export interface BoatState {
   lat: number
   lon: number
@@ -76,10 +86,14 @@ export const easeInOut = (t: number) => {
   return x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2
 }
 
-const norm360 = (d: number) => ((d % 360) + 360) % 360
+/** An angle brought into 0..360. */
+export const norm360 = (d: number) => ((d % 360) + 360) % 360
+
+/** The short way round from one bearing to another, in -180..180 degrees. */
+export const shortTurn = (from: number, to: number) => ((((to - from) % 360) + 540) % 360) - 180
 
 export function blendCameras(a: Camera, b: Camera, t: number): Camera {
-  const turn = ((((b.bearing - a.bearing) % 360) + 540) % 360) - 180
+  const turn = shortTurn(a.bearing, b.bearing)
   return {
     center: [a.center[0] + (b.center[0] - a.center[0]) * t, a.center[1] + (b.center[1] - a.center[1]) * t],
     zoom: a.zoom + (b.zoom - a.zoom) * t,

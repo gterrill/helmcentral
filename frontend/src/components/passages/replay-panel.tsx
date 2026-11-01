@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { CameraEditor, type CameraShotChange } from '@/components/passages/camera-editor'
 import { SignPhotoDialog, signPhotoSrc } from '@/components/passages/sign-card'
@@ -16,26 +16,24 @@ import { useInsetView } from '@/hooks/use-inset-view'
 import { insetViewApi } from '@/lib/inset-view-api'
 import { insetViewRange, type InsetView } from '@/lib/passage-inset-view'
 import { usePrefersReducedMotion } from '@/hooks/use-prefers-reduced-motion'
-import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
 import { cameraShotsApi } from '@/lib/camera-shots-api'
 import { getQueryData, setQueryData } from '@/lib/api-query'
 import { replaySignsKey } from '@/hooks/use-replay-signs'
 import { replaySignsApi, type ReplaySignPatch } from '@/lib/replay-signs-api'
 import { usePassageLegs } from '@/hooks/use-passage-legs'
-import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX, visibleSigns } from '@/lib/replay-signs'
+import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX } from '@/lib/replay-signs'
 import { moveByCapture, placeByCapture } from '@/lib/sign-placement'
 import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-photo'
-import { CameraDirector, shotStartState } from '@/lib/replay-camera'
-import { paceSpans, resolveShots, wallAtTimeline, type CameraMode } from '@/lib/replay-clock'
+import { shotStartState, type Camera } from '@/lib/replay-camera'
+import { INTRO_MS, INTRO_START_ZOOM } from '@/lib/replay-intro'
+import { ReplayController } from '@/lib/replay-controller'
+import { paceSpans, resolveShots, type CameraMode } from '@/lib/replay-clock'
 import { REPLAY_3D_PITCH } from '@/lib/terrain'
 import { zoneKnown, zoneOffsetMinutes } from '@/lib/vessel-time'
 import { replaySeconds, useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
 import {
   buildTimeline,
   formatLocalDateTime, localDateTimeParts,
-  locate,
-  positionAt,
-  sailedAt,
   segmentBounds,
   timedSegments,
   type PassageDetail,
@@ -83,10 +81,12 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const [resume, setResume] = useState(0)
   // The map says whether it is flat: 3D off, or the terrain failed.
   const [mapFlat, setMapFlat] = useState(false)
-  const [director] = useState(() => new CameraDirector())
   const reducedMotion = usePrefersReducedMotion()
   const [insetOn, setInsetOn] = useInsetPreference()
+  // The opening move is running: from the press of Play until it has landed.
+  // The controller owns the move; React hears only of its start and its end.
   const [flying, setFlying] = useState(false)
+  const introClock = useRef(0)
   const mapHandle = useRef<PassageMapHandle>(null)
 
   const built = useMemo(() => {
@@ -170,119 +170,92 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // A join still waiting for its name is listed but draws nothing on the map.
   const labelledSigns = useMemo(() => placedSigns.filter((r) => r.sign.title !== ''), [placedSigns])
 
-  const here = locate(timeline, replay.clock)
-  const boat = here ? positionAt(here.entry.segments, here.at) : null
   const hull = useBoatHull()
   // The bow follows the course sailed; worked out only when there is a model
-  // to point. A held heading carries on only while playback moves forward.
+  // to point. Everything that moves with time is the controller's: the
+  // heading, the sailed track, the signs up and the camera. This asks it for
+  // the frame at the clock, in performance.now() time.
   const [threeD] = use3dPreference()
-  const lastHeading = useRef<HeadingState | null>(null)
-  const heading = ((hull && threeD) || resolved.length > 0) && here ? nextHeading(lastHeading.current, { id: here.entry.id, at: here.at }, here.entry.segments) : null
-  useEffect(() => { lastHeading.current = heading })
-  // One smoothed heading serves the boat and the camera, so the model does not
-  // swing against the screen. It is stepped in render because both need it in
-  // the same render; the step is keyed on (clock, playing, passage, raw
-  // heading), so a repeat render with the same key (StrictMode) returns the
-  // cached value and cannot advance it twice. Pausing keeps the value as it
-  // stands. A scrub or seek while paused, a new passage and reduced motion
-  // show the exact heading. Resuming eases from the held value, timed from
-  // the resume.
-  const smoother = useRef<HeadingSmoother | null>(null)
-  if (smoother.current === null) smoother.current = new HeadingSmoother()
-  const smoothed = useRef<{ clock: number; playing: boolean; id: string | null; raw: number | null; out: number | null } | null>(null)
-  const rawHeading = heading ? heading.heading : null
-  const hereKey = here ? here.entry.id : null
-  const sm = smoothed.current
-  if (!sm || sm.clock !== replay.clock || sm.playing !== replay.playing || sm.id !== hereKey || sm.raw !== rawHeading) {
-    const now = performance.now()
-    const idChanged = !!sm && sm.id !== hereKey
-    const moved = !sm || sm.clock !== replay.clock || sm.raw !== rawHeading
-    if (!replay.playing || (sm && !sm.playing)) smoother.current.hold(now)
-    // Only a move made while already paused is a scrub; the last tick of a
-    // replay moves the clock and stops in the same render, and keeps its ease.
-    const snap = reducedMotion || idChanged || (!replay.playing && moved && (!sm || !sm.playing))
-    smoothed.current = {
-      clock: replay.clock, playing: replay.playing, id: hereKey, raw: rawHeading,
-      out: smoother.current.step(rawHeading, now, { snap }),
-    }
+  const [controller] = useState(() => new ReplayController())
+  const frameInput = {
+    clock: replay.clock,
+    nowMs: performance.now(),
+    playing: replay.playing,
+    resume,
+    reduced: reducedMotion,
+    wantHeading: !!(hull && threeD) || resolved.length > 0,
+    signsOpen,
   }
-  const shownHeading = smoothed.current ? smoothed.current.out : null
+  // Working the frame out changes nothing; it is taken once this render is the
+  // one on screen, before the map places its camera against it.
+  const frame = controller.frameAt({ timeline, lengthS, spans, resolved, signs: labelledSigns }, frameInput)
+  useLayoutEffect(() => { controller.commit(frame) })
+  const { here, boat, sailedTo, cards, pins } = frame
+  const shownHeading = frame.heading
   useEffect(() => {
     if (cursorRef) cursorRef.current = here ? { id: here.entry.id, at: here.at } : null
   })
 
+  // The opening move runs on requestAnimationFrame, straight onto the map.
+  // Landing, or a person taking hold of the map, ends it once: playback then
+  // starts from the start, unless the operator moved the replay meanwhile (a
+  // jump to a shot or a sign) and so chose where it stands.
+  const latest = useRef({ replay, total: timeline.total })
+  useEffect(() => { latest.current = { replay, total: timeline.total } })
+  const landIntro = () => {
+    if (!controller.introActive) return
+    controller.endIntro()
+    setFlying(false)
+    const { replay: r, total } = latest.current
+    if (r.clock !== introClock.current) return
+    if (r.clock >= total) r.setClock(0)
+    r.setPlaying(true)
+  }
+  const landRef = useRef(landIntro)
+  useEffect(() => { landRef.current = landIntro })
+  useEffect(() => {
+    if (!flying) return
+    let id = requestAnimationFrame(function tick() {
+      const at = controller.introAt(performance.now())
+      if (!at) return
+      mapHandle.current?.jumpTo(at.camera)
+      if (at.done) landRef.current()
+      else id = requestAnimationFrame(tick)
+    })
+    return () => cancelAnimationFrame(id)
+  }, [flying, controller])
+
   // Play from the very start (or from the end, which starts over) opens with
   // the zoom-in; resuming from a pause or a scrub just plays.
-  const handlePlay = async () => {
+  const handlePlay = () => {
     if (replay.playing) { replay.toggle(); return }
     // An opened pin is a paused preview; playing hands the cards back to each sign's own window.
     setOpenPinId(null)
     setResume((n) => n + 1)
-    if (replay.clock <= 0 || replay.clock >= timeline.total) {
+    const framing = replay.clock <= 0 || replay.clock >= timeline.total ? mapHandle.current?.getFraming() : null
+    if (framing && bounds) {
+      const from: Camera = { center: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2], zoom: INTRO_START_ZOOM, pitch: 0, bearing: framing.bearing }
+      controller.startIntro(from, framing.overview, performance.now(), reducedMotion ? 0 : INTRO_MS)
+      introClock.current = replay.clock
       setFlying(true)
-      try {
-        await mapHandle.current?.flyIn()
-      } finally {
-        setFlying(false)
-      }
+      const first = controller.introAt(performance.now())
+      if (first) mapHandle.current?.jumpTo(first.camera)
+      if (first?.done) landIntro()
+      return
     }
     replay.toggle()
   }
 
-  // Once the replay has moved off the start, each track is drawn up to the
-  // boat: earlier passages whole, later ones not at all. The passage the boat
-  // is on ends exactly where the marker stands.
-  const hereId = here?.entry.id
-  const boatLat = boat?.lat
-  const boatLon = boat?.lon
-  const sailedTo = useMemo(() => {
-    if (replay.clock <= 0) return null
-    const at = new Map<string, { at: number; end?: { lat: number; lon: number } }>()
-    for (const e of timeline.entries) {
-      const end = e.id === hereId && boatLat !== undefined && boatLon !== undefined ? { lat: boatLat, lon: boatLon } : undefined
-      at.set(e.id, { at: sailedAt(e, replay.clock), end })
-    }
-    return at
-  }, [timeline, replay.clock, hereId, boatLat, boatLon])
-
   // The camera: asked for by clock position; the map applies it per frame.
-  const wallAt = useCallback(
-    (clock: number) => wallAtTimeline(timeline.total, lengthS, spans, clock),
-    [timeline.total, lengthS, spans],
-  )
   const cameraDriver: CameraDriver | null = resolved.length > 0 && !flying
     ? {
         clock: replay.clock,
         reduced: reducedMotion,
         resume,
-        resolve: ({ flat, overview, current }) => {
-          if (!boat) return null
-          return director.frame(
-            { overview, flat, shotStart: (rs) => shotStartState(timeline, rs), elapsedAt: (rs, clock) => wallAt(clock) - wallAt(rs.clock) },
-            {
-              resolved,
-              clock: replay.clock,
-              playing: replay.playing,
-              nowMs: performance.now(),
-              reduced: reducedMotion,
-              resume,
-              boat: { lat: boat.lat, lon: boat.lon, heading: shownHeading },
-              current,
-            },
-          )
-        },
+        resolve: (env) => controller.cameraAt(env, performance.now()),
       }
     : null
 
-  // Cards come and go on watched (wall-clock) time. Before the replay has
-  // moved off the start every sign is a pin, and the pins show while the sign
-  // editor is open.
-  const replaying = replay.clock > 0
-  const cards = useMemo(
-    () => (replaying ? visibleSigns(labelledSigns, wallAt(replay.clock), wallAt) : []),
-    [replaying, labelledSigns, wallAt, replay.clock],
-  )
-  const pins = !replaying || signsOpen ? labelledSigns : []
   // A pin pressed mid-play or mid-fly-in must not open a card that outlasts its window.
   const openId = !replay.playing && !flying && pins.some((p) => p.sign.id === openPinId) ? openPinId : null
   const photoSign = signs.find((s) => s.id === photoSignId) ?? null
@@ -584,6 +557,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           boatHeading={shownHeading}
           hull={hull}
           cameraDriver={cameraDriver}
+          introActive={flying}
+          onIntroInterrupt={landIntro}
           onFlatChange={setMapFlat}
           controlsDisabled={replay.playing || flying}
           markers={

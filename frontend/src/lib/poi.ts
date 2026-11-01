@@ -13,6 +13,8 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
+import { mercatorX, mercatorY } from '@/lib/geo'
+
 /**
  * A point-of-interest feature exactly as GET /api/poi returns it (see
  * backend/poi_providers.go's poiFeature), mapped from the wire's snake_case
@@ -103,17 +105,6 @@ export function zoomForRangeNm(rangeNm: number, lat: number, heightPx: number): 
 // (earth's equatorial circumference / 512), so fitCameraAroundPoint below
 // stays in the same projection zoomForRangeNm already uses.
 const MERCATOR_TILE_SIZE_PX = 512
-
-/** Fraction of the world's width, 0 (antimeridian, west) to 1 (antimeridian, east). */
-function mercatorX(lon: number): number {
-  return (lon + 180) / 360
-}
-
-/** Fraction of the world's height, 0 (north) to 1 (south) - Web Mercator's characteristic latitude stretch. */
-function mercatorY(lat: number): number {
-  const latRad = (lat * Math.PI) / 180
-  return 0.5 - Math.log(Math.tan(Math.PI / 4 + latRad / 2)) / (2 * Math.PI)
-}
 
 export interface MapPoint {
   lat: number

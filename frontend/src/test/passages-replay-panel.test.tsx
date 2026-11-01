@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import { forwardRef, useImperativeHandle } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -12,12 +12,18 @@ import { waitFor } from '@testing-library/react'
 
 vi.mock('@/hooks/use-boat-hull', () => ({ useBoatHull: () => null }))
 
-const flyIn = vi.fn(() => Promise.resolve())
+const getFraming = vi.fn(() => ({ overview: { center: [149.5, 0] as [number, number], zoom: 9, pitch: 0, bearing: 0 }, bearing: 0 }))
+vi.mock('@/lib/replay-intro', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/replay-intro')>()), INTRO_MS: 50 }))
 let lastBoat: { lat: number; lon: number } | null = null
+const jumpTo = vi.fn()
+let interrupt: (() => void) | undefined
+let introActive = false
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
-  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null; inset?: React.ReactNode; insetCorner?: string }, ref) {
-    useImperativeHandle(ref, () => ({ flyIn }))
+  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null; inset?: React.ReactNode; insetCorner?: string; introActive?: boolean; onIntroInterrupt?: () => void }, ref) {
+    useImperativeHandle(ref, () => ({ getFraming, jumpTo }))
+    interrupt = p.onIntroInterrupt
+    introActive = !!p.introActive
     lastBoat = p.boat
     return <div data-testid="map" data-inset-corner={p.insetCorner}>{p.inset}</div>
   }),
@@ -55,7 +61,7 @@ const insetRoutes = () => ({
   },
 })
 
-beforeEach(() => { saveInsetPreference(false); saved = { corner: 'top-right', zoom_offset: 0 }; puts = []; toast.error.mockClear(); stubApi({ 'GET /api/passages/camera-shots': { shots: [] }, 'GET /api/passages/signs': { signs: [] }, ...insetRoutes() }); localStorage.clear(); lastBoat = null; flyIn.mockClear() })
+beforeEach(() => { saveInsetPreference(false); saved = { corner: 'top-right', zoom_offset: 0 }; puts = []; toast.error.mockClear(); stubApi({ 'GET /api/passages/camera-shots': { shots: [] }, 'GET /api/passages/signs': { signs: [] }, ...insetRoutes() }); localStorage.clear(); lastBoat = null; getFraming.mockClear(); jumpTo.mockClear() })
 
 describe('ReplayPanel', () => {
   it('scrubbing moves the boat and the boat-local readout, and reports the cursor', () => {
@@ -70,7 +76,7 @@ describe('ReplayPanel', () => {
 
   it('frames the track on load without the zoom-in', () => {
     render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
-    expect(flyIn).not.toHaveBeenCalled()
+    expect(getFraming).not.toHaveBeenCalled()
   })
 
   it('zooms in when Play is pressed at the start, then plays and shows the overview map', async () => {
@@ -78,9 +84,37 @@ describe('ReplayPanel', () => {
     fireEvent.click(screen.getByRole('switch', { name: 'Overview map' }))
     expect(localStorage.getItem('passages.insetMap')).toBe('1')
     fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
-    expect(flyIn).toHaveBeenCalledTimes(1)
+    expect(getFraming).toHaveBeenCalledTimes(1)
     expect(await screen.findByRole('button', { name: 'Pause replay' })).toBeInTheDocument()
     expect(screen.getByTestId('inset')).toBeInTheDocument()
+  })
+
+  it('places the opening move on the map a frame at a time, and renders the panel only at its start and end', async () => {
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    expect(introActive).toBe(true)
+    expect(jumpTo).toHaveBeenCalled()
+    expect(await screen.findByRole('button', { name: 'Pause replay' })).toBeInTheDocument()
+    expect(introActive).toBe(false)
+    // The last camera of the move is the framing it lands on.
+    expect(jumpTo).toHaveBeenLastCalledWith({ center: [149.5, 0], zoom: 9, pitch: 0, bearing: 0 })
+  })
+
+  it('two gestures on the map before the panel redraws end the move once and leave the replay playing', async () => {
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    act(() => { interrupt?.(); interrupt?.() })
+    expect(await screen.findByRole('button', { name: 'Pause replay' })).toBeInTheDocument()
+    expect(introActive).toBe(false)
+  })
+
+  it('does not start playing at the landing if the operator moved the replay during the move', async () => {
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    act(() => { fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: '500' } }) })
+    await waitFor(() => expect(introActive).toBe(false))
+    expect(screen.getByRole('button', { name: 'Play replay' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Pause replay' })).toBeNull()
   })
 
   it('does not zoom when resuming after a pause or after scrubbing mid-replay', async () => {
@@ -88,7 +122,7 @@ describe('ReplayPanel', () => {
     fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: '500' } })
     fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
     expect(await screen.findByRole('button', { name: 'Pause replay' })).toBeInTheDocument()
-    expect(flyIn).not.toHaveBeenCalled()
+    expect(getFraming).not.toHaveBeenCalled()
   })
 
   it('plays the whole track in 60, 30, 15 or 8 seconds', () => {

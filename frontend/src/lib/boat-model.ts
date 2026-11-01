@@ -192,25 +192,33 @@ export class HeadingSmoother {
     this.lastMs = nowMs
   }
 
-  /** `snap` takes the target exactly; a null target with snap clears the
-   * held value. Otherwise a null target keeps what is held. */
-  step(target: number | null, nowMs: number, opts: { snap?: boolean } = {}): number | null {
-    const dtS = this.lastMs === null ? 0 : Math.min(HEADING_MAX_DT_S, Math.max(0, (nowMs - this.lastMs) / 1000))
-    this.lastMs = nowMs
-    if (opts.snap) {
-      this.held = target
-      return this.held
-    }
-    if (target === null) return this.held
-    if (this.held === null) {
-      this.held = target
-      return this.held
-    }
-    if (dtS <= 0) return this.held
+  /** What a step would leave held, without taking it. `snap` takes the target
+   * exactly; a null target with snap clears the held value. Otherwise a null
+   * target keeps what is held. `hold` first says that time passed without
+   * easing across it, as `hold()` does. */
+  peek(target: number | null, nowMs: number, opts: { snap?: boolean; hold?: boolean } = {}): { held: number | null; lastMs: number } {
+    const last = opts.hold ? nowMs : this.lastMs
+    const dtS = last === null ? 0 : Math.min(HEADING_MAX_DT_S, Math.max(0, (nowMs - last) / 1000))
+    if (opts.snap) return { held: target, lastMs: nowMs }
+    if (target === null) return { held: this.held, lastMs: nowMs }
+    if (this.held === null) return { held: target, lastMs: nowMs }
+    if (dtS <= 0) return { held: this.held, lastMs: nowMs }
     const alpha = 1 - Math.exp(-dtS / HEADING_SMOOTH_S)
     const diff = ((((target - this.held) % 360) + 540) % 360) - 180
-    this.held = (((this.held + diff * alpha) % 360) + 360) % 360
-    return this.held
+    return { held: (((this.held + diff * alpha) % 360) + 360) % 360, lastMs: nowMs }
+  }
+
+  /** Takes what `peek` returned. */
+  apply(next: { held: number | null; lastMs: number }): void {
+    this.held = next.held
+    this.lastMs = next.lastMs
+  }
+
+  /** Peek and take in one. */
+  step(target: number | null, nowMs: number, opts: { snap?: boolean } = {}): number | null {
+    const next = this.peek(target, nowMs, opts)
+    this.apply(next)
+    return next.held
   }
 }
 

@@ -16,7 +16,7 @@ const getView = vi.fn(() => ({ zoom: 13.456, pitch: 42 as number | null, bearing
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
   PassageMap: forwardRef(function PassageMapMock(p: { cameraDriver?: CameraDriver | null; onFlatChange?: (flat: boolean) => void }, ref) {
-    useImperativeHandle(ref, () => ({ flyIn: () => Promise.resolve(), getView }))
+    useImperativeHandle(ref, () => ({ getFraming: () => null, jumpTo: () => {}, getView }))
     driver = p.cameraDriver ?? null
     onFlat = p.onFlatChange
     return <div data-testid="map" />
