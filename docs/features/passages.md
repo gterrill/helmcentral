@@ -150,8 +150,8 @@ a passage without replaying, the whole track shows as before.
   passage's length, or 60 pixels on the screen if that is longer, so it stays
   easy to see when you zoom out.
 - **Sky and light:** The sky and the map follow the real time of day where the
-  boat is. At night the sky is deep blue and the map is dimmed and tinted dark
-  blue. In twilight the tint is blue to purple. Around sunrise and sunset, and
+  boat is. At night the sky is deep blue and the map is dimmed and tinted a very
+  dark blue. In twilight the tint is blue to purple. Around sunrise and sunset, and
   in golden hour, the horizon and the map turn a light warm amber. By day
   nothing is tinted. The track, the wake and the boat stay bright on top, so
   you can still follow them at night. The shading on the hills moves with the
@@ -167,8 +167,10 @@ flattening out as it comes in, then runs the replay with a boat marker. If you
 touch the map while it comes down, the move stops where you are and the replay
 carries on from the start. The slider scrubs to any point, and Play from the middle just
 carries on with no zoom. The readout shows the local date and time at that
-point. The length list sets how long the whole replay takes, 60, 30, 15 or 8
-seconds, however long the passage was. The **Overview map** switch puts a small
+point. The length list sets how long the replay takes to sail, 60, 30, 15 or 8
+seconds, however long the passage was. A sign's photo moment, described under
+Signs, adds a couple of seconds of watching on top of that, and the slider still
+runs over the sailing alone. The **Overview map** switch puts a small
 map of the surrounding coast in the corner, with a box where the track is. It
 stays on or off the next time you open a passage.
 
@@ -277,6 +279,28 @@ that is made the first time, or chosen from a photo already in Documents.
   sign keeps its title and note and shows no picture. If a photo is still there
   but can't be loaded, the card says "Photo not available" instead of hiding
   it.
+
+A sign with a photo also gets a photo moment. When the replay reaches the sign,
+the replay holds still while the photo grows out of the card to fill about
+seventy percent of the map. It zooms in slowly for a second and a half, then
+shrinks back into the card and the replay carries on. The whole moment takes
+about 2.3 seconds, and it is added on top of the length you chose, so a replay
+with three photo moments takes about seven seconds longer to watch. In the sign
+editor, the **Photo moment** switch turns it off for one sign. It shows only for
+a sign with a photo, and it is on until you turn it off.
+
+- **Pause:** Pausing during a moment pauses the moment, and Play carries on from
+  where it stopped.
+- **Touching the map:** While the replay plays, a drag, a tap or the wheel on the
+  map ends the moment and the replay carries on from the sign. Tapping a sign's
+  card, to open its photo, doesn't.
+- **A photo that won't load:** The replay doesn't stop for it. The sign's card
+  still says "Photo not available", so you can see what went wrong.
+- **The slider:** The slider runs over the sailing, so dragging it never leaves
+  the replay stuck in the middle of a moment. Jumping to a sign, from its
+  diamond or its chip in the editor, does show that sign's moment from its start.
+- **Reduced motion:** If your device asks for reduced motion, the photo doesn't
+  grow, shrink or zoom. It appears full size for the moment and then goes.
 
 You can change when a sign appears without deleting it. With the sign picked,
 **Move sign here** puts it at the moment the slider is on. The four buttons

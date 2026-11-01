@@ -10,7 +10,9 @@ import { InsetMap, PassageMap, type CameraDriver, type PassageMapHandle } from '
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
+import { PhotoMoment } from '@/components/passages/photo-moment'
 import { useBoatHull } from '@/hooks/use-boat-hull'
+import { useSignMoments } from '@/hooks/use-sign-moments'
 import { useCameraShots } from '@/hooks/use-camera-shots'
 import { useInsetView } from '@/hooks/use-inset-view'
 import { insetViewApi } from '@/lib/inset-view-api'
@@ -22,7 +24,7 @@ import { replaySignsKey } from '@/hooks/use-replay-signs'
 import { replaySignsApi, type ReplaySignPatch } from '@/lib/replay-signs-api'
 import { usePassageLegs } from '@/hooks/use-passage-legs'
 import { drawnPieces } from '@/lib/passage-legs'
-import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX } from '@/lib/replay-signs'
+import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_LIFT_PX, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX } from '@/lib/replay-signs'
 import { moveByCapture, placeByCapture } from '@/lib/sign-placement'
 import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-photo'
 import { shotStartState, type Camera } from '@/lib/replay-camera'
@@ -162,7 +164,6 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   )
   const spans = useMemo(() => paceSpans(resolved), [resolved])
   const lengthS = replaySeconds(speed)
-  const replay = useReplay(timeline.total, lengthS, spans)
 
   // Signs, like shots, belong to real time: the ones inside the replayed
   // passages are the ones placed; a trimmed-out sign is kept but not shown.
@@ -171,6 +172,9 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const placedSigns = useMemo(() => resolveSigns(signs, timeline), [signs, timeline])
   // A join still waiting for its name is listed but draws nothing on the map.
   const labelledSigns = useMemo(() => placedSigns.filter((r) => r.sign.title !== ''), [placedSigns])
+  // A sign with a photo holds the replay for a moment where the boat meets it.
+  const moments = useSignMoments(placedSigns)
+  const replay = useReplay(timeline.total, lengthS, spans, moments)
 
   const hull = useBoatHull()
   // The bow follows the course sailed; worked out only when there is a model
@@ -187,7 +191,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   const pieces = useMemo(() => drawnPieces(mapPassages, legs), [mapPassages, legs])
   const [zoomBucket, setZoomBucket] = useState(12)
   const frameInput = {
-    clock: replay.clock,
+    wall: replay.wall,
     nowMs: performance.now(),
     playing: replay.playing,
     resume,
@@ -199,7 +203,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   }
   // Working the frame out changes nothing; it is taken once this render is the
   // one on screen, before the map places its camera against it.
-  const frame = controller.frameAt({ timeline, lengthS, spans, resolved, signs: labelledSigns, pieces, isDarkTheme }, frameInput)
+  const frame = controller.frameAt({ timeline, time: replay.time, resolved, signs: labelledSigns, pieces, isDarkTheme }, frameInput)
   useLayoutEffect(() => { controller.commit(frame) })
   const { here, boat, sailedTo, cards, pins } = frame
   const shownHeading = frame.heading
@@ -211,17 +215,20 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // Landing, or a person taking hold of the map, ends it once: playback then
   // starts from the start, unless the operator moved the replay meanwhile (a
   // jump to a shot or a sign) and so chose where it stands.
-  const latest = useRef({ replay, total: timeline.total })
-  useEffect(() => { latest.current = { replay, total: timeline.total } })
+  const latest = useRef(replay)
+  useEffect(() => { latest.current = replay })
   const landIntro = () => {
     if (!controller.introActive) return
     controller.endIntro()
     setFlying(false)
-    const { replay: r, total } = latest.current
+    const r = latest.current
     if (r.clock !== introClock.current) return
-    if (r.clock >= total) r.setClock(0)
+    if (r.ended) r.setClock(0)
     r.setPlaying(true)
   }
+  // A hand on the map ends whatever is holding the replay's attention: the
+  // opening move, or a photo moment.
+  const interrupt = () => (controller.introActive ? landIntro() : replay.skipMoment())
   const landRef = useRef(landIntro)
   useEffect(() => { landRef.current = landIntro })
   // The camera and the projection (the globe, flat by the time it lands) go to
@@ -253,7 +260,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     // An opened pin is a paused preview; playing hands the cards back to each sign's own window.
     setOpenPinId(null)
     setResume((n) => n + 1)
-    const framing = replay.clock <= 0 || replay.clock >= timeline.total ? mapHandle.current?.getFraming() : null
+    const framing = replay.wall <= 0 || replay.ended ? mapHandle.current?.getFraming() : null
     if (framing && bounds) {
       const from: Camera = { center: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2], zoom: INTRO_START_ZOOM, pitch: 0, bearing: framing.bearing }
       controller.startIntro(from, framing.overview, performance.now(), reducedMotion ? 0 : INTRO_MS)
@@ -281,6 +288,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // A pin pressed mid-play or mid-fly-in must not open a card that outlasts its window.
   const openId = !replay.playing && !flying && pins.some((p) => p.sign.id === openPinId) ? openPinId : null
   const photoSign = signs.find((s) => s.id === photoSignId) ?? null
+  const momentAt = frame.moment ? labelledSigns.find((r) => r.sign.id === frame.moment!.signId) : undefined
 
   const selectedSign = signs.find((s) => s.id === selectedSignId && placedSigns.some((r) => r.sign.id === s.id)) ?? null
   const selectSign = (id: string | null) => {
@@ -312,7 +320,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     const entry = live.current.timeline.entries.find((e) => at >= e.start && at <= e.end)
     if (!entry) return
     replay.setPlaying(false)
-    replay.setClock(entry.offset + (at - entry.start))
+    replay.setClock(entry.offset + (at - entry.start), { onSign: true })
     setResume((n) => n + 1)
   }
   const addSign = () => {
@@ -583,7 +591,8 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           speed={frame.speed}
           onZoomBucket={setZoomBucket}
           light={frame.light}
-          onIntroInterrupt={landIntro}
+          momentActive={frame.moment !== null && replay.playing}
+          onInterrupt={interrupt}
           onFlatChange={setMapFlat}
           controlsDisabled={replay.playing || flying}
           markers={
@@ -615,6 +624,14 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
             ) : null
           }
         />
+        {frame.moment && momentAt && (
+          <PhotoMoment
+            view={frame.moment}
+            sign={momentAt.sign}
+            lift={SIGN_LIFT_PX[Math.min(Math.max(0, cards.indexOf(momentAt)), SIGN_LIFT_PX.length - 1)]}
+            project={() => mapHandle.current?.project(momentAt.lon, momentAt.lat) ?? null}
+          />
+        )}
       </div>
       <PassageReplayBar
         clock={replay.clock}

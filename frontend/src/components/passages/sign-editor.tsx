@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { Textarea } from '@/components/ui/textarea'
 import { isSignPhotoType, SIGN_PHOTO_TYPES } from '@/lib/sign-photo'
 import {
+  photoMomentOn,
   SIGN_NOTE_MAX,
   SIGN_SHOW_MAX,
   SIGN_SHOW_MIN,
@@ -20,7 +21,7 @@ import {
 } from '@/lib/replay-signs'
 
 /** The editable fields of a sign. */
-export type SignChange = Partial<Pick<ReplaySign, 'title' | 'note' | 'visibility' | 'show_s' | 'starts_leg'>>
+export type SignChange = Partial<Pick<ReplaySign, 'title' | 'note' | 'visibility' | 'show_s' | 'starts_leg' | 'photo_moment'>>
 
 // Nothing in here is disabled while a write is under way. A field saves when
 // it is left, and the click that left it must still land on the button the
@@ -312,6 +313,22 @@ export function SignEditor({
             )}
             {needsTitle && <p role="status" className="text-xs text-muted-foreground">Give this sign a name before it stops starting a leg.</p>}
           </div>
+          {sign.photo_url != null && (
+            <div className="flex min-w-0 flex-col gap-1 sm:col-span-2">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Switch
+                  id="sign-photo-moment"
+                  aria-describedby="sign-photo-moment-help"
+                  checked={photoMomentOn(sign)}
+                  onCheckedChange={(on) => onChange({ photo_moment: on })}
+                />
+                <label htmlFor="sign-photo-moment">Photo moment</label>
+              </div>
+              <p id="sign-photo-moment-help" className="text-xs text-muted-foreground">
+                The replay pauses at this sign while its photo fills the map for a couple of seconds.
+              </p>
+            </div>
+          )}
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="flex items-center gap-2" role="group" aria-label="Sign photo">
               {thumb && !thumbFailed && (

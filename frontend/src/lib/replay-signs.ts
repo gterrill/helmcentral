@@ -3,6 +3,7 @@
 // screen at a given moment of watching. Everything here is pure.
 
 import { positionAt, type Timeline } from '@/lib/passages'
+import { PHOTO_ASPECT } from '@/lib/replay-time'
 
 export type SignVisibility = 'always' | 'passing' | 'after'
 
@@ -35,6 +36,19 @@ export interface ReplaySign {
   /** A join: the track from here on is drawn as a new leg. Only a join may
    * have no title; it waits for a name from the track. */
   starts_leg: boolean
+  /** The operator's choice for the photo to fill the frame in a replay. Null is the default (see photoMomentOn). */
+  photo_moment: boolean | null
+}
+
+/** Whether a sign's photo gets a moment in the replay: it must have a photo,
+ * and the operator must not have switched it off. Null means the default, which is on. */
+export function photoMomentOn(sign: Pick<ReplaySign, 'photo_url' | 'photo_moment'>): boolean {
+  return sign.photo_url != null && sign.photo_moment !== false
+}
+
+/** The signs whose photos hold the replay for a moment, and where the boat meets them: the ones with a title to show (a join waiting for a name draws nothing) and a photo that is not switched off, less any in `excluded` (a photo that would not load). */
+export function momentsOf(placed: readonly ResolvedSign[], excluded: ReadonlySet<string> = new Set()): { clock: number; id: string }[] {
+  return placed.filter((r) => r.sign.title !== '' && photoMomentOn(r.sign) && !excluded.has(r.sign.id)).map((r) => ({ clock: r.clock, id: r.sign.id }))
 }
 
 /** A sign placed on the replay. */
@@ -177,4 +191,51 @@ export function placeSignCard({ point, container, card, lift }: SignPlacementInp
   const under = container.h - m - point.y - card.h
   if (under > room) return { dx, below: true, leader: Math.max(SIGN_MIN_LEADER_PX, Math.min(lift, under)) }
   return { dx, below: false, leader: SIGN_MIN_LEADER_PX }
+}
+
+// ── the card's size ──────────────────────────────────────────────────────
+// SignCard is built from these, so the page and the replay's photo moment, which
+// grows from the card's photo, cannot disagree about where the photo is.
+
+/** The width of a card with a photo, and of one with text alone. */
+export const SIGN_CARD_PHOTO_W_PX = 256
+export const SIGN_CARD_TEXT_W_PX = 224
+/** The space round the card's contents, and between its photo and its text. */
+export const SIGN_CARD_PAD_PX = 8
+export const SIGN_CARD_GAP_PX = 8
+/** The line heights of the title and of the note, which shows two lines at most. */
+export const SIGN_TITLE_LINE_PX = 20
+export const SIGN_NOTE_LINE_PX = 16
+const SIGN_NOTE_MAX_LINES = 2
+/** About how many characters of the note fit on a line of a card with a photo. */
+const SIGN_NOTE_LINE_CHARS = 36
+/** How far the card's leader meets the point: the dot's height that shows. */
+const SIGN_DOT_NET_PX = 4
+
+/** How many lines of the note the card shows. */
+function noteLines(note: string): number {
+  if (note === '') return 0
+  const lines = note.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / SIGN_NOTE_LINE_CHARS)), 0)
+  return Math.min(SIGN_NOTE_MAX_LINES, lines)
+}
+
+/** Where the photo of a sign's card is in the map, in the map's pixels: the card
+ * as `placeSignCard` puts it for the sign's point, its photo inside the padding.
+ * The card's height is worked out from its contents, since the page has not
+ * measured it. */
+export function signCardPhotoRect(
+  sign: Pick<ReplaySign, 'note'>,
+  point: { x: number; y: number },
+  container: { w: number; h: number },
+  lift: number,
+): { x: number; y: number; w: number; h: number } {
+  const w = Math.min(SIGN_CARD_PHOTO_W_PX, Math.max(0, container.w - 2 * SIGN_EDGE_MARGIN_PX))
+  const photoW = w - 2 * SIGN_CARD_PAD_PX
+  const photoH = photoW / PHOTO_ASPECT
+  const text = SIGN_TITLE_LINE_PX + noteLines(sign.note) * SIGN_NOTE_LINE_PX
+  const h = 2 * SIGN_CARD_PAD_PX + photoH + SIGN_CARD_GAP_PX + text
+  const place = placeSignCard({ point, container, card: { w, h }, lift })
+  const x = point.x - w / 2 + place.dx
+  const y = place.below ? point.y + SIGN_DOT_NET_PX + place.leader : point.y - SIGN_DOT_NET_PX - place.leader - h
+  return { x: x + SIGN_CARD_PAD_PX, y: y + SIGN_CARD_PAD_PX, w: photoW, h: photoH }
 }

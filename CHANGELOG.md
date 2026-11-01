@@ -31,6 +31,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A sign's photo can fill the map for a moment in the passage replay.** When
+  the replay reaches a sign with a photo, it holds still while the photo grows
+  out of the sign's card to fill most of the map, zooms in slowly for a second
+  and a half, then shrinks back into the card and the replay carries on. The
+  moment takes about 2.3 seconds and is added on top of the replay length you
+  chose, and the slider still runs over the sailing alone. Pausing pauses the
+  moment, touching the map ends it, and with reduced motion the photo simply
+  shows full size and goes. It is on for every sign with a photo. In the sign
+  editor, the new **Photo moment** switch turns it off for one sign.
+
 - **The passage replay follows the sun, colours the track by speed and opens on
   the globe.** The sky and the map in the replay now match the real time of day
   where the boat is. At night the sky is deep blue and the map is dimmed and
@@ -81,6 +91,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   and [Places you give Mate](docs/features/place-names.md#places-you-give-mate).
 
 ### Changed
+
+- **The passage replay's night is darker.** The map at night is tinted a very
+  dark blue and dimmed more, and twilight is a little darker to match. The
+  track, the wake and the boat stay bright.
 
 - **The engine card's fuel bars match the dial.** The two tank bars now draw
   in the same blue sweep as the RPM dial, so amber and red only show up when a

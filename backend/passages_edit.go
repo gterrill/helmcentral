@@ -277,8 +277,8 @@ func (s *passageStore) MergePassages(ids ...string) (passageRecord, error) {
 		}
 		if have == 0 {
 			untitled = untitled || title == ""
-			if _, err := tx.Exec(`INSERT INTO replay_signs (`+signColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-				uuid.NewString(), a.End.UnixMilli(), title, "", nil, signAfter, signShowDef, 1, now, now); err != nil {
+			if _, err := tx.Exec(`INSERT INTO replay_signs (`+signColumns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+				uuid.NewString(), a.End.UnixMilli(), title, "", nil, signAfter, signShowDef, 1, nil, now, now); err != nil {
 				return m, fmt.Errorf("insert join sign: %w", err)
 			}
 		}

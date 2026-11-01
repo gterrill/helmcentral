@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildTimeline, type TimedSegment } from '@/lib/passages'
-import { MAX_SIGN_CARDS, SIGN_LEAD_S, placeSignCard, resolveSigns, visibleSigns, type ReplaySign } from '@/lib/replay-signs'
+import { MAX_SIGN_CARDS, SIGN_LEAD_S, momentsOf, placeSignCard, resolveSigns, signCardPhotoRect, visibleSigns, type ReplaySign } from '@/lib/replay-signs'
 
 const sign = (id: string, t: number, extra: Partial<ReplaySign> = {}): ReplaySign => ({
-  id, t_ms: t * 1000, title: id, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, ...extra,
+  id, t_ms: t * 1000, title: id, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, photo_moment: null, ...extra,
 })
 
 // One passage, 1000 s long starting at t=10000, moving east a little each 100 s.
@@ -181,5 +181,60 @@ describe('placeSignCard', () => {
     expect(r.below).toBe(false)
     expect(r.leader).toBe(32)
     expect(300 - r.leader - 220).toBeGreaterThanOrEqual(48)
+  })
+})
+
+describe('momentsOf', () => {
+  const placed = (id: string, clock: number, extra: Partial<ReplaySign> = {}) => ({
+    sign: sign(id, 0, { photo_url: '/p', document_id: 'd', ...extra }), clock, at: 0, entryId: 'p1', lat: 0, lon: 0,
+  })
+
+  it('lists the signs whose photos hold the replay, where the boat meets them', () => {
+    expect(momentsOf([placed('a', 100), placed('b', 300)])).toEqual([{ clock: 100, id: 'a' }, { clock: 300, id: 'b' }])
+  })
+
+  it('leaves out a sign without a photo, one switched off, and one with no title yet', () => {
+    expect(momentsOf([
+      placed('nophoto', 1, { photo_url: null, document_id: null }),
+      placed('off', 2, { photo_moment: false }),
+      placed('untitled', 3, { title: '' }),
+      placed('on', 4, { photo_moment: true }),
+    ])).toEqual([{ clock: 4, id: 'on' }])
+  })
+})
+
+describe('signCardPhotoRect', () => {
+  const container = { w: 1000, h: 400 }
+  const at = (point: { x: number; y: number }, extra: Partial<ReplaySign> = {}, lift = 20, box = container) =>
+    signCardPhotoRect(sign('a', 0, { photo_url: '/p', document_id: 'd', ...extra }), point, box, lift)
+
+  it('is the photo inside a card that floats above its point on the leader', () => {
+    // 256 wide with 8 around the photo: 240 by 180. The card is centred over the point.
+    expect(at({ x: 500, y: 300 })).toEqual({ x: 380, y: 60, w: 240, h: 180 })
+  })
+
+  it('moves up with a note, which makes the card taller', () => {
+    const noted = at({ x: 500, y: 300 }, { note: 'A humpback off the bow, very close' })
+    expect(noted.y).toBeLessThan(60)
+    expect(noted.h).toBe(180)
+  })
+
+  it('floats higher for a card in the second place', () => {
+    expect(at({ x: 500, y: 300 }, {}, 104).y).toBeLessThan(at({ x: 500, y: 300 }).y)
+  })
+
+  it('goes under its point when there is no room above it', () => {
+    const r = at({ x: 500, y: 60 })
+    expect(r.y).toBeGreaterThan(60)
+  })
+
+  it('slides along to stay inside the map', () => {
+    const r = at({ x: 20, y: 300 })
+    expect(r.x).toBeGreaterThanOrEqual(6)
+    expect(at({ x: 990, y: 300 }).x + 240).toBeLessThanOrEqual(1000 - 6 + 8)
+  })
+
+  it('narrows to a narrow map, as the card does', () => {
+    expect(at({ x: 100, y: 300 }, {}, 20, { w: 200, h: 400 }).w).toBe(200 - 2 * 6 - 2 * 8)
   })
 })
