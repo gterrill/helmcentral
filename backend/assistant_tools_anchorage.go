@@ -23,7 +23,7 @@ var mateToolAnchorageDetails = mateTool{
 			"(for example 2026-11-02T15:00:00+10:00) and leave as the time the boat leaves; without leave the stay ends at the first 08:00 local time " +
 			"at least six hours after arrival, and the result says so. The stay may be up to seven days. " + ruleAnchorageDetails + " Shelter must come " +
 			"from this tool: if it returns an error (turned off, outside coverage, still downloading), tell the operator what it says " +
-			"rather than guessing the shelter.",
+			"rather than guessing the shelter. With no depth known the swing and clearance checks are skipped.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -43,7 +43,8 @@ var mateToolAnchorageDetails = mateTool{
 							"type": "string",
 							"description": "When the boat leaves, an RFC 3339 time after arrive. Optional: default the first 08:00 local time at least six hours after arrive."
 						},
-						"name": {"type": "string", "description": "Optional name of the anchorage, for display only."}
+						"name": {"type": "string", "description": "Optional name of the anchorage, for display only."},
+						"depth_m": {"type": "number", "description": "Water depth at the anchorage in metres at chart datum, ONLY when the operator stated it in this conversation. Omit otherwise: never from your own knowledge."}
 					},
 					"required": ["lat", "lon", "arrive"]
 				}`),
@@ -60,6 +61,7 @@ type assistantAnchorageDetailsArgs struct {
 	Arrive string   `json:"arrive"`
 	Leave  string   `json:"leave"`
 	Name   string   `json:"name"`
+	DepthM *float64 `json:"depth_m"`
 }
 
 const (
@@ -126,14 +128,21 @@ type AnchorageTideBody struct {
 	TimeBasis string               `json:"time_basis"`
 	// AtArrival is nil, with HeightNote saying why, when arrival is outside
 	// the predicted extremes: the height is never read off the nearest one.
-	AtArrival  *anchorageTideHeight   `json:"at_arrival"`
-	HeightNote string                 `json:"height_note,omitempty"`
+	AtArrival  *anchorageTideHeight `json:"at_arrival"`
+	HeightNote string               `json:"height_note,omitempty"`
 	// Note is set when the prediction ends before the stay does.
-	Note string `json:"note,omitempty"`
-	Extremes   []anchorageTideExtreme `json:"extremes"`
-	RangeM     *float64               `json:"range_m"`
-	RangeNote  string                 `json:"range_note"`
-	Truncated  bool                   `json:"truncated,omitempty"`
+	Note      string                 `json:"note,omitempty"`
+	Extremes  []anchorageTideExtreme `json:"extremes"`
+	RangeM    *float64               `json:"range_m"`
+	RangeNote string                 `json:"range_note"`
+	Truncated bool                   `json:"truncated,omitempty"`
+}
+
+// anchorageTideOut is the tide section with the sorted predictions behind it,
+// from which the depth checks find the lowest and highest water in the stay.
+type anchorageTideOut struct {
+	section anchorageTideSection
+	sorted  []tideExtremePoint
 }
 
 type anchorageMooringSize struct {
@@ -180,6 +189,8 @@ type assistantAnchorageDetailsResult struct {
 	Forecast anchorageForecastSection `json:"forecast"`
 	Tide     anchorageTideSection     `json:"tide"`
 	Features anchorageFeaturesSection `json:"features"`
+	// Depth is the depth used and what it means for the stay (anchorage_depth.go).
+	Depth anchorageDepthSection `json:"depth"`
 	// Card is set only where a card sink takes the anchorage card (Mate's
 	// chat), so an outside assistant is not told to rely on a card it never
 	// shows.
@@ -246,6 +257,7 @@ type anchorageParts struct {
 	forecast anchorageForecastOut
 	tide     anchorageTideSection
 	features anchorageFeaturesOut
+	depth    anchorageDepthSection
 }
 
 func (d assistantToolDeps) executeAnchorageDetails(ctx context.Context, raw json.RawMessage) (string, error) {
@@ -266,6 +278,9 @@ func (d assistantToolDeps) executeAnchorageDetails(ctx context.Context, raw json
 	if err != nil {
 		return "", err
 	}
+	if args.DepthM != nil && !validDatumDepthM(*args.DepthM) {
+		return "", fmt.Errorf("anchorage_details: depth_m %g is not a depth in metres at chart datum between %g and %g", *args.DepthM, minSavedPlaceDepthM, maxSavedPlaceDepthM)
+	}
 
 	// Shelter is the one required section: an anchorage judged without it is a
 	// guess, so its failure is the call's. It is local and quick, so it is
@@ -282,23 +297,27 @@ func (d assistantToolDeps) executeAnchorageDetails(ctx context.Context, raw json
 		return "", err
 	}
 
-	// The three lookups run together. Each sends its one result on a buffered
+	// The four lookups run together. Each sends its one result on a buffered
 	// channel, so a lookup that outlives a cancelled call finishes in the
 	// background and writes nothing the caller can see.
-	tideCh := make(chan anchorageTideSection, 1)
+	tideCh := make(chan anchorageTideOut, 1)
 	featuresCh := make(chan anchorageFeaturesOut, 1)
 	forecastCh := make(chan anchorageForecastOut, 1)
+	depthCh := make(chan anchorageDepthSection, 1)
 	go func() { tideCh <- d.anchorageTide(lat, lon, stay) }()
 	go func() { featuresCh <- d.anchorageFeatures(lat, lon) }()
 	go func() { forecastCh <- d.anchorageForecast(lat, lon, stay, shelter) }()
-	var tide anchorageTideSection
+	go func() { depthCh <- d.resolveAnchorageDepth(lat, lon, args.DepthM) }()
+	var tide anchorageTideOut
 	var features anchorageFeaturesOut
 	var forecast anchorageForecastOut
-	for got := 0; got < 3; got++ {
+	var resolved anchorageDepthSection
+	for got := 0; got < 4; got++ {
 		select {
 		case tide = <-tideCh:
 		case features = <-featuresCh:
 		case forecast = <-forecastCh:
+		case resolved = <-depthCh:
 		case <-ctx.Done():
 			return "", ctx.Err()
 		}
@@ -307,9 +326,10 @@ func (d assistantToolDeps) executeAnchorageDetails(ctx context.Context, raw json
 		return "", err
 	}
 
+	depth := d.anchorageDepthChecks(resolved, tide, forecast, stay)
 	parts := anchorageParts{
 		stay: stay, name: strings.TrimSpace(args.Name), shelter: shelter,
-		forecast: forecast, tide: tide, features: features,
+		forecast: forecast, tide: tide.section, features: features, depth: depth,
 	}
 	result := assistantAnchorageDetailsResult{
 		Name: parts.name, Lat: lat, Lon: lon,
@@ -319,9 +339,10 @@ func (d assistantToolDeps) executeAnchorageDetails(ctx context.Context, raw json
 		Timezone:       stay.zone.Name,
 		Shelter:        shelter,
 		Forecast:       forecast.section,
-		Tide:           tide,
+		Tide:           tide.section,
 		Features:       features.section,
-		Reading:        readingAnchorageDetails(stay.leaveDefaulted, forecast.section.Error, tide.Error, features.section.Error),
+		Depth:          depth,
+		Reading:        readingAnchorageDetails(stay.leaveDefaulted, forecast.section.Error, tide.section.Error, features.section.Error, depth),
 	}
 
 	// The card is built from the full data before the model's copy is shrunk
@@ -383,6 +404,33 @@ type anchorageForecastOut struct {
 	// in full.
 	at        []time.Time
 	fetchedAt time.Time
+	// stayMaxKts is the strongest wind or gust, in knots, in any hourly
+	// forecast row from arrival to leaving, not only the rows the card keeps.
+	// nil when no hour in the stay has a wind. lastHour is the latest hour the
+	// forecast holds.
+	stayMaxKts *float64
+	lastHour   time.Time
+}
+
+// stayStrongestWindKts is the strongest rounded gust or wind among the hourly
+// points inside the stay, rounded as the forecast rows are.
+func stayStrongestWindKts(hours []weatherHourPoint, stay anchorageStay) *float64 {
+	var best *float64
+	for _, h := range hours {
+		if h.Time.IsZero() || h.Time.Before(stay.arrive) || h.Time.After(stay.leave) {
+			continue
+		}
+		for _, ms := range []float64{h.WindGustMS, h.WindSpeedMS} {
+			if ms == 0 {
+				continue
+			}
+			kts := math.Round(ms * metersPerSecondToKnots)
+			if best == nil || kts > *best {
+				best = &kts
+			}
+		}
+	}
+	return best
 }
 
 func (d assistantToolDeps) anchorageForecast(lat, lon float64, stay anchorageStay, shelter *shelterResult) anchorageForecastOut {
@@ -425,7 +473,10 @@ func (d assistantToolDeps) anchorageForecast(lat, lon float64, stay anchorageSta
 	if win.last.Before(stay.leave.Add(-3 * time.Hour)) {
 		body.Note = fmt.Sprintf("The forecast ends at %s, before the stay does.", win.last.In(stay.zone.Loc).Format(toolTimeLayout))
 	}
-	return anchorageForecastOut{section: anchorageForecastSection{AnchorageForecastBody: body}, at: win.at, fetchedAt: bundle.CachedAt}
+	return anchorageForecastOut{
+		section: anchorageForecastSection{AnchorageForecastBody: body}, at: win.at, fetchedAt: bundle.CachedAt,
+		stayMaxKts: stayStrongestWindKts(bundle.Hourly, stay), lastHour: win.last,
+	}
 }
 
 // anchorageForecastHours picks the forecast hours the stay is read from: the
@@ -484,9 +535,9 @@ const (
 	anchorageTideRangeAfter    = "Fewer than two high or low waters fall inside the stay, so the range includes the one after leaving."
 )
 
-func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) anchorageTideSection {
-	fail := func(err error) anchorageTideSection {
-		return anchorageTideSection{Error: "Tide unavailable: " + firstErrorLine(err)}
+func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) anchorageTideOut {
+	fail := func(err error) anchorageTideOut {
+		return anchorageTideOut{section: anchorageTideSection{Error: "Tide unavailable: " + firstErrorLine(err)}}
 	}
 	if d.tides == nil {
 		return fail(errors.New("no tide provider is available on this install"))
@@ -571,7 +622,7 @@ func (d assistantToolDeps) anchorageTide(lat, lon float64, stay anchorageStay) a
 	} else {
 		body.RangeNote = "Fewer than two high or low waters are predicted around the stay, so there is no range."
 	}
-	return anchorageTideSection{AnchorageTideBody: body}
+	return anchorageTideOut{section: anchorageTideSection{AnchorageTideBody: body}, sorted: sorted}
 }
 
 // ── features ─────────────────────────────────────────────────────────────

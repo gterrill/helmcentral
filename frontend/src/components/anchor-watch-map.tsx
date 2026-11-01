@@ -6,7 +6,7 @@ import { Map, Marker, Source, Layer } from 'react-map-gl/maplibre'
 import { Anchor, ArrowUp, Crosshair, Expand, MapPin, Minus, Move, Plus, Radar, Ship, X } from 'lucide-react'
 import type { AnchorPlacemark } from '@/hooks/use-anchor-placemarks'
 import { cn } from '@/lib/utils'
-import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
+import { haversineMeters, bearingDeg, circlePolygon } from '@/lib/geo'
 import { ALARM_STATES, type AlarmState } from '@/hooks/use-alarms'
 import type { NearbyVessel } from '@/hooks/use-nearby-vessels'
 import type { RadarInfo, RadarSource, RadarTarget } from '@/hooks/use-radar-targets'
@@ -212,16 +212,9 @@ function writeStoredCenter(latitude: number, longitude: number, sessionId: strin
 
 // ── Generate a circle GeoJSON polygon ──────────────────────────────────────
 function generateCircleGeoJSON(anchorLon: number, anchorLat: number, radiusM: number): GeoJSON.Feature<GeoJSON.Polygon> {
-  const steps = 64
-  const coordinates: [number, number][] = []
-  for (let i = 0; i <= steps; i++) {
-    const bearing = (i / steps) * 2 * Math.PI
-    const [lat, lon] = destinationPoint(anchorLat, anchorLon, bearing, radiusM)
-    coordinates.push([lon, lat])
-  }
   return {
     type: 'Feature',
-    geometry: { type: 'Polygon', coordinates: [coordinates] },
+    geometry: { type: 'Polygon', coordinates: [circlePolygon(anchorLat, anchorLon, radiusM)] },
     properties: {},
   }
 }

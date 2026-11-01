@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
+import { depthLines } from '@/lib/anchorage-card'
 import { decodeMateCards } from '@/lib/mate-cards'
 
-import { anchorageCard, anchoragePayload } from './helpers/anchorage-fixture'
+import { anchorageCard, anchorageCardWithoutDepth, anchoragePayload } from './helpers/anchorage-fixture'
 
 type Loose = ReturnType<typeof JSON.parse>
 
@@ -104,6 +105,45 @@ describe('decodeMateCards: anchorage', () => {
     expect(reasonOf(mutate((p) => (p.features.moorings[0].lat = null)))).toMatch(/lat/)
     expect(reasonOf(mutate((p) => (p.features.moorings[0].lon = 200)))).toMatch(/lon/)
     expect(reasonOf(mutate((p) => delete p.features.restricted_areas[0].shapes))).toMatch(/shapes/)
+  })
+
+  it('reads the depth section the Go side writes', () => {
+    const depth = anchorageCard().depth!
+    expect(depth).toMatchObject({ known: true, depthM: 4, source: 'operator' })
+    expect(depth.clearance).toMatchObject({ status: 'ok', depthAtLowM: 4.8, draftM: 1.4, clearanceM: 3.4, wantedM: 0.5 })
+    expect(depth.rode).toMatchObject({ status: 'short', method: 'ratio', rodeNeededM: 60.9, shortByM: 20.9, chainOnboardM: 40 })
+    expect(depth.swing).toMatchObject({ status: 'computed', radiusM: 56, rodeM: 40, allChainOut: true, loaM: 13 })
+    expect(depth.rode.windCheckedUntil).toBe('')
+  })
+
+  it('reads an unknown depth with every check skipped', () => {
+    const depth = anchorageCardWithoutDepth().depth!
+    expect(depth.known).toBe(false)
+    expect(depth.depthM).toBeNull()
+    expect([depth.clearance.status, depth.rode.status, depth.swing.status]).toEqual(['skipped', 'skipped', 'skipped'])
+    expect(depth.clearance.skippedReason).toBe('the depth is unknown')
+  })
+
+  it('rejects a depth section that is missing a key or has a bad value', () => {
+    expect(reasonOf(mutate((p) => delete p.depth.clearance.draft_m))).toMatch(/draft_m/)
+    expect(reasonOf(mutate((p) => delete p.depth.swing.radius_m))).toMatch(/radius_m/)
+    expect(reasonOf(mutate((p) => (p.depth.source = 'memory')))).toMatch(/depth\.source/)
+    expect(reasonOf(mutate((p) => (p.depth.rode.status = 'fine')))).toMatch(/rode\.status/)
+    expect(reasonOf(mutate((p) => (p.depth.clearance.clearance_m = '3')))).toMatch(/clearance_m/)
+    expect(reasonOf(mutate((p) => (p.depth.swing.radius_m = -2)))).toMatch(/radius_m/)
+    // a skipped check must say why
+    expect(reasonOf(mutate((p) => { p.depth.clearance.status = 'skipped'; p.depth.clearance.skipped_reason = '' }))).toMatch(/skipped_reason/)
+  })
+
+  it('reads a card stored before the depth checks as having no depth', () => {
+    // The card shape from #322: the golden without its depth section.
+    const stored = anchoragePayload()
+    delete stored.depth
+    const [card] = decodeMateCards([{ kind: 'anchorage', payload: stored }])
+    expect(card.kind === 'anchorage' && card.depth).toBeNull()
+    expect(card.kind === 'anchorage' && depthLines(card, 'metric')).toEqual([])
+    // A depth that is present is still read strictly.
+    expect(reasonOf(mutate((p) => (p.depth = {})))).toMatch(/depth\./)
   })
 
   it('turns a non-object payload into an error entry', () => {

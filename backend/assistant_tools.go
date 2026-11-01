@@ -215,6 +215,11 @@ type assistantToolDeps struct {
 	// (assistant.passage_limits) fresh on every call, for
 	// assess_passage_window. nil is an error, never empty limits.
 	passageLimits func() (passageLimits, error)
+	// anchorSettings reads the Anchor settings (bow roller height, chain,
+	// scope method, LOA, the clearance the operator wants at low water) fresh
+	// on every call, for anchorage_details' depth checks. nil is an error,
+	// never default settings.
+	anchorSettings func() (anchorageBoatSettings, error)
 	// vesselView reads the operator's roles (house bank, alternators,
 	// engines) fresh on every call, for show_telemetry_chart. nil is an
 	// error, never an empty vessel.
@@ -371,6 +376,7 @@ func assistantProductionToolDeps(settingsPath string) assistantToolDeps {
 		watches:                    globalAssistantWatches,
 		conversations:              func() *assistantStore { return globalAssistantStore },
 		passageLimits:              passageLimitsFromSettingsFile(settingsPath),
+		anchorSettings:             anchorSettingsFromSettingsFile(settingsPath),
 		vesselView:                 func() (vesselView, error) { return loadVesselView(settingsPath) },
 		displayUnits:               displayUnitsFromSettingsFile(settingsPath),
 		tileTide: func(ctx context.Context, now time.Time) (tideTodayResponse, error) {

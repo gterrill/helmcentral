@@ -19,3 +19,8 @@ export function metersToFeet(meters: number): number {
 export function feetToMeters(feet: number): number {
   return feet / METERS_PER_FOOT
 }
+
+/** A depth-shaped figure in the unit the operator reads, to a tenth: "4.0" in metres, "13.1" in feet. */
+export function depthValueText(meters: number, imperial: boolean): string {
+  return (imperial ? metersToFeet(meters) : meters).toFixed(1)
+}

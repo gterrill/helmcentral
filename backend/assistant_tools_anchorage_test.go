@@ -630,9 +630,6 @@ func TestAnchorageDetailsTool_IsRegisteredAndDescribed(t *testing.T) {
 	if err := json.Unmarshal(tool.function.Parameters, &schema); err != nil || strings.Join(schema.Required, ",") != "lat,lon,arrive" {
 		t.Errorf("required = %v (%v)", schema.Required, err)
 	}
-	if strings.Contains(string(tool.function.Parameters), "depth") {
-		t.Error("depth is a later change")
-	}
 }
 
 func TestAnchorageCardGolden(t *testing.T) {
@@ -649,9 +646,13 @@ func TestAnchorageCardGolden(t *testing.T) {
 	d.tides = func() (tideProvider, string, error) { return tides, "bom", nil }
 	d.placeNames = func() (placeNameProvider, string, error) { return p, "osm-overpass", nil }
 	d.cards = newAssistantCardSink()
+	// A depth the operator gave, and a boat with generic settings, so the card
+	// carries the whole depth section.
+	d.vesselState = func() (vesselStateData, error) { return vesselStateData{DraftM: 1.4, LengthOverallM: 13}, nil }
+	d.anchorSettings = func() (anchorageBoatSettings, error) { return anchorageBoat(), nil }
 
 	text, _, err := d.execute(context.Background(), "anchorage_details", json.RawMessage(
-		`{"lat":-20.0765,"lon":148.925,"arrive":"2026-11-02T14:00:00+10:00","name":"West Butterfly Bay"}`))
+		`{"lat":-20.0765,"lon":148.925,"arrive":"2026-11-02T14:00:00+10:00","name":"West Butterfly Bay","depth_m":4}`))
 	if err != nil {
 		t.Fatal(err)
 	}

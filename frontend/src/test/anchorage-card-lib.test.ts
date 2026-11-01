@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   anchorageFeatures,
+  depthLines,
+  swingRing,
   anchorageFrame,
   footerLines,
   groupMoorings,
@@ -18,7 +20,7 @@ import {
 import { destinationPoint } from '@/lib/geo'
 import { distanceText } from '@/lib/marina-card'
 
-import { anchorageCard, anchoragePayload } from './helpers/anchorage-fixture'
+import { anchorageCard, anchorageCardWithoutDepth, anchoragePayload, unknownDepth } from './helpers/anchorage-fixture'
 
 describe('roseSectors', () => {
   it('has 36 sectors and sizes each spoke by its fetch up to 15 nm', () => {
@@ -184,5 +186,87 @@ describe('the map', () => {
     const [lat, lon] = destinationPoint(-20, 148, 0, 1852 * 60)
     expect(lat).toBeCloseTo(-19, 1)
     expect(lon).toBeCloseTo(148, 3)
+  })
+})
+
+describe('depthLines', () => {
+  it('words each check from the figures, in the operator units', () => {
+    const lines = depthLines(anchorageCard(), 'metric')
+    expect(lines.map((l) => l.key)).toEqual(['depth', 'clearance', 'rode', 'swing'])
+    expect(lines[0]).toMatchObject({ badge: '4 m', text: '4 m at chart datum, from you' })
+    expect(lines[1]).toMatchObject({ badge: 'OK', tone: 'good' })
+    expect(lines[1].text).toMatch(/4\.8 m of water, 3\.4 m under a 1\.4 m draft\. You want at least 0\.5 m\./)
+    expect(lines[2]).toMatchObject({ badge: 'Short by 20.9 m', tone: 'critical' })
+    expect(lines[2].text).toMatch(/About 60\.9 m of rode \(7:1, ratio\) against 40 m aboard/)
+    expect(lines[2].detail).toBe('Planned at 20 kts, the strongest forecast gust in the stay rounded up to its band.')
+    expect(lines[3]).toMatchObject({ badge: '56 m', tone: 'neutral' })
+    expect(lines[3].text).toMatch(/^With all 40 m of chain out, short of the 60\.9 m needed, the boat swings within about 56 m of the anchor/)
+  })
+
+  it('writes feet when the operator reads imperial', () => {
+    const lines = depthLines(anchorageCard(), 'imperial')
+    expect(lines[0].text).toBe('13.1 ft at chart datum, from you')
+    expect(lines[3].badge).toBe('183.7 ft')
+  })
+
+  it('says where a saved place depth came from', () => {
+    const base = anchoragePayload().depth as object
+    const card = anchorageCard({ depth: { ...base, source: 'saved_place', saved_place: 'Butterfly Bay', saved_source: 'sounded', saved_date: '2026-10-20' } })
+    expect(depthLines(card, 'metric')[0].text).toBe('4 m at chart datum, from saved place Butterfly Bay (sounded 2026-10-20)')
+  })
+
+  it('calls a too-shallow low water what it is', () => {
+    const base = anchoragePayload().depth as { clearance: object }
+    const card = anchorageCard({ depth: { ...base, clearance: { ...base.clearance, status: 'too_shallow', clearance_m: 0.4 } } })
+    expect(depthLines(card, 'metric')[1]).toMatchObject({ badge: 'Too shallow', tone: 'critical' })
+  })
+
+  it('says how far the wind was checked when the forecast ends before the stay', () => {
+    const base = anchoragePayload().depth as { rode: object }
+    const card = anchorageCard({ depth: { ...base, rode: { ...base.rode, wind_checked_until: '2026-11-02T23:00:00+10:00' } } })
+    expect(depthLines(card, 'metric')[2].detail).toMatch(/before the stay does, so the wind was only checked up to then\.$/)
+  })
+
+  it('words the swing for the rode needed when the chain is enough', () => {
+    const base = anchoragePayload().depth as { swing: object }
+    const card = anchorageCard({ depth: { ...base, swing: { ...base.swing, all_chain_out: false, rode_m: 60.9, radius_m: 76.9 } } })
+    expect(depthLines(card, 'metric')[3].text).toBe("The boat swings within about 76.9 m of the anchor: 60.9 m of rode, 3 m from bow to GPS and the boat's 13 m length.")
+  })
+
+  it('with no depth says so and skips every check with its reason, never as passed', () => {
+    const lines = depthLines(anchorageCardWithoutDepth(), 'metric')
+    expect(lines[0]).toMatchObject({ badge: 'Unknown', text: 'Depth unknown: check the chart.' })
+    for (const l of lines.slice(1)) {
+      expect(l).toMatchObject({ badge: 'Skipped', tone: 'muted', text: 'Skipped: the depth is unknown.' })
+    }
+  })
+
+  it('shows a saved-places error in place of a depth', () => {
+    const depth = { ...unknownDepth(), error: 'Depth unavailable: disk full' }
+    expect(depthLines(anchorageCard({ depth }), 'metric')[0]).toMatchObject({ badge: 'Unknown', text: 'Depth unavailable: disk full' })
+  })
+})
+
+describe('the swing circle', () => {
+  it('is a closed ring at the computed radius round the anchorage', () => {
+    const card = anchorageCard()
+    const ring = swingRing(card)!
+    expect(ring).toHaveLength(65)
+    expect(ring[0]).toEqual(ring[64])
+    for (const [lon, lat] of ring.slice(0, 64)) {
+      const dLat = ((lat - card.lat) * Math.PI) / 180
+      const dLon = ((lon - card.lon) * Math.PI) / 180
+      const m = Math.hypot(dLat * 6371000, dLon * 6371000 * Math.cos((card.lat * Math.PI) / 180))
+      expect(m).toBeCloseTo(56, 0)
+    }
+    const swing = anchorageFeatures(card, 'metric').swing
+    expect(swing.features).toHaveLength(1)
+    expect(swing.features[0].geometry.type).toBe('Polygon')
+  })
+
+  it('is not drawn when no radius was computed', () => {
+    const card = anchorageCardWithoutDepth()
+    expect(swingRing(card)).toBeNull()
+    expect(anchorageFeatures(card, 'metric').swing.features).toHaveLength(0)
   })
 })

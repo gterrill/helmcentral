@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import AssistantAnchorageMapImpl from '@/components/assistant-anchorage-map-impl'
 
-import { anchorageCard } from './helpers/anchorage-fixture'
+import { anchorageCard, anchorageCardWithoutDepth } from './helpers/anchorage-fixture'
 
 // MapLibre needs WebGL, which jsdom has not got. The stand-ins record what the
 // card asks the map to draw: the sources, the layers and the first view.
@@ -64,6 +64,19 @@ describe('AssistantAnchorageMapImpl', () => {
       expect(screen.getByTestId(`layer-${id}`)).toBeInTheDocument()
     }
     expect((layerProps['anchorage-rays-line'].paint as Record<string, unknown>)['line-color']).toEqual(expect.arrayContaining(['match']))
+  })
+
+  it('draws the swing circle round the anchorage when a depth made one', () => {
+    render(<AssistantAnchorageMapImpl card={anchorageCard()} />)
+    const swing = sourceProps['anchorage-swing'].data as GeoJSON.FeatureCollection
+    expect(swing.features).toHaveLength(1)
+    expect(swing.features[0].geometry.type).toBe('Polygon')
+    expect(screen.getByTestId('layer-anchorage-swing-edge')).toBeInTheDocument()
+  })
+
+  it('draws no swing circle without a depth', () => {
+    render(<AssistantAnchorageMapImpl card={anchorageCardWithoutDepth()} />)
+    expect((sourceProps['anchorage-swing'].data as GeoJSON.FeatureCollection).features).toHaveLength(0)
   })
 
   it('does not draw the shoreline', () => {

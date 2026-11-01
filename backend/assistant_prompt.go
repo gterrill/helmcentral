@@ -1069,7 +1069,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"what charted shoreline can't show (swell wrapping round a point, gusts down valleys, holding), but must not " +
 		"reverse which directions the labels or the tool give as sheltered or exposed. If your answer judges an anchorage " +
 		"and the forecast says shelter_unavailable, or the tool returns an error, say shelter could not be checked and why; " +
-		"do not substitute a guess without saying so. The tool's description says how to read the rest of its result. " +
+		"do not substitute a guess without saying so. The tool's description says how to read the rest of its result, " +
+		"and where a depth may come from: never your own knowledge. " +
 		"For an offshore or passage point, shelter_unavailable needs no mention.\n\n" +
 
 		"When the operator is choosing, comparing or planning a stop at a marina, call marina_details with the " +

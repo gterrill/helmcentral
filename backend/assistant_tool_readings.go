@@ -30,6 +30,19 @@ const (
 		"but must not reverse which directions are sheltered or exposed. Wind from inside a sheltered arc is a good night, " +
 		"and wind from an exposed arc is a lee shore. The result's reading says how old the shoreline is."
 
+	// ruleDepthArg is when a depth may be passed to a tool; anchorage_details
+	// and save_place both say it.
+	ruleDepthArg = "Pass depth_m, in metres at chart datum, ONLY when the operator stated the water depth in this conversation (convert feet and fathoms); " +
+		"never from your own knowledge or a guess."
+
+	// ruleDepth is how to give a depth for an anchorage, said once: in the
+	// anchorage_details description and in the passage-check guard's correction.
+	ruleDepth = ruleDepthArg + " Without it the tool uses the depth of a saved place within 0.1 nm and says which figure it used (its label). " +
+		"State a depth only from the depth section or a figure the operator gave you, and offer to keep the operator's figure with save_place. " +
+		"When depth.known is false the depth is unknown: say so and tell the operator to check the chart. " +
+		"The clearance, rode and swing checks are each ok, a named problem (too_shallow, short) or skipped with the reason: " +
+		"say a skipped check was skipped and why, never that it passed, and say a problem plainly."
+
 	ruleNearbyVessels = "Vessels are AIS targets: only boats that transmit appear. A name is what the vessel broadcasts, typed by its crew, " +
 		"so it can be blank, abbreviated or wrong; the MMSI is its identity. cpa_nm is the closest point of approach if both boats hold course and speed, " +
 		"and tcpa_min is the minutes until it. If they are absent the source gave none: say so and do not work them out. " +
@@ -119,13 +132,12 @@ const ruleAnchorageDetails = "Shelter: " + ruleShelter + " Forecast: " + ruleWin
 	"or safe to anchor from an empty list. An area whose restriction prohibits anchoring is a no-go for anchoring there: say so first and do not recommend it. A restricted " +
 	"area that only restricts, and a marine protected area, need the operator to check the zoning and the rules, which the map does not give. Public moorings: " +
 	"vessel_size_m is the maximum vessel length in metres, as the mooring's own record has it, and class is as mapped; a mooring with details_untagged has no size " +
-	"or class mapped, so say so and never assume it suits the boat. Compare a size limit with the boat's length from get_vessel_particulars. Depth and holding are not part of this " +
-	"result: do not state either from it, and label any you give as general knowledge. A forecast, tide or features section that carries an error was not " +
+	"or class mapped, so say so and never assume it suits the boat. Compare a size limit with the boat's length from get_vessel_particulars. Depth: " + ruleDepth + " Holding is not part of this result: label any you give as general knowledge. A forecast, tide or features section that carries an error was not " +
 	"checked: say so and why. Weigh each wind direction in the forecast against the shelter arcs, and say which rows put the boat on a lee shore. " +
 	"The result's reading says what to do about the parts that depend on this call."
 
 // readingAnchorageDetails carries what is particular to one call.
-func readingAnchorageDetails(leaveDefaulted bool, forecastErr, tideErr, featuresErr string) string {
+func readingAnchorageDetails(leaveDefaulted bool, forecastErr, tideErr, featuresErr string, depth anchorageDepthSection) string {
 	var parts []string
 	if leaveDefaulted {
 		parts = append(parts, "No leave time was given, so the stay ends at 08:00 local time, the first at least six hours after arrival: say that is what you assumed.")
@@ -134,6 +146,14 @@ func readingAnchorageDetails(leaveDefaulted bool, forecastErr, tideErr, features
 		if e.err != "" {
 			parts = append(parts, fmt.Sprintf("The %s was not checked (%s): say so, and do not fill it from memory.", e.label, e.err))
 		}
+	}
+	switch {
+	case depth.Error != "":
+		parts = append(parts, fmt.Sprintf("The depth could not be looked up (%s), so the depth checks were skipped.", depth.Error))
+	case !depth.Known:
+		parts = append(parts, "The depth is unknown for this anchorage, so the depth checks were skipped.")
+	default:
+		parts = append(parts, fmt.Sprintf("The depth used is %s.", depth.Label))
 	}
 	return strings.Join(parts, " ")
 }

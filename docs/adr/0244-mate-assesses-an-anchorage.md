@@ -244,9 +244,10 @@ and layer order for no change in behaviour, so it is a later cleanup.
   when the model ran.
 - The tool gives no depth and no holding, and says so. The follow-ups, each a
   separate change:
-  - **Depth, swing and clearance.** Take a saved place's depth, compute the swing
-    circle and the water under the keel at low water against the tide range, and
-    add a depth section to the card.
+  - **Depth, swing and clearance.** Done in
+    [ADR 0245](0245-anchorage-depth-and-swing.md): a saved place's depth or the
+    operator's stated figure, the swing circle and the water under the keel at
+    low water, and a depth section on the card. Holding is still not given.
   - **Anchor watch.** Save the anchor's depth when the watch starts, with
     the transducer depth (`transducer_depth_m`) so that a depth below the
     transducer is turned into a depth below the surface.

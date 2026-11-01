@@ -351,6 +351,8 @@ func round2(v float64) float64 { return math.Round(v*100) / 100 }
 
 func ptr2(v float64) *float64 { r := round2(v); return &r }
 
+func ptr1(v float64) *float64 { r := roundTo1(v); return &r }
+
 func (d assistantToolDeps) executeShowTelemetryChart(ctx context.Context, raw json.RawMessage) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err

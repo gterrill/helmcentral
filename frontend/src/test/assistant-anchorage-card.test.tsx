@@ -3,9 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AssistantAnchorageCard } from '@/components/assistant-anchorage-card'
 import { AssistantCard } from '@/components/assistant-card'
-import type { AnchorageCard } from '@/lib/mate-cards'
+import { decodeMateCards, type AnchorageCard } from '@/lib/mate-cards'
 
-import { anchorageCard, anchorageCardWithErrors, anchoragePayload } from './helpers/anchorage-fixture'
+import { anchorageCard, anchorageCardWithErrors, anchorageCardWithoutDepth, anchoragePayload } from './helpers/anchorage-fixture'
 
 // The map is MapLibre; its own files are under test elsewhere.
 vi.mock('@/components/assistant-anchorage-map', () => ({
@@ -136,6 +136,49 @@ describe('AssistantAnchorageCard', () => {
     expect(screen.queryByText(/public moorings/)).toBeNull()
     // The shelter is required and is still there.
     expect(screen.getByRole('img', { name: /Shelter by the direction/ })).toBeInTheDocument()
+  })
+
+  it('shows the depth and its three checks after the local features and before the map', () => {
+    render(<AssistantAnchorageCard card={anchorageCard()} />)
+    const depth = screen.getByTestId('anchorage-depth')
+    expect(within(depth).getByTestId('anchorage-depth-depth')).toHaveTextContent('4 m at chart datum, from you')
+    expect(within(depth).getByTestId('anchorage-depth-clearance')).toHaveTextContent('3.4 m under a 1.4 m draft')
+    expect(within(depth).getByTestId('anchorage-depth-rode')).toHaveTextContent('Short by 20.9 m')
+    expect(within(depth).getByTestId('anchorage-depth-swing')).toHaveTextContent('With all 40 m of chain out, short of the 60.9 m needed, the boat swings within about 56 m')
+    const order = screen.getAllByRole('region').map((r) => r.getAttribute('data-testid'))
+    expect(order.indexOf('anchorage-features')).toBeLessThan(order.indexOf('anchorage-depth'))
+    const featuresEl = screen.getByTestId('anchorage-features')
+    const mapEl = screen.getByText('Map')
+    expect(depth.compareDocumentPosition(mapEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(featuresEl.compareDocumentPosition(depth) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('draws no depth section for a card stored before the depth checks', () => {
+    const payload = anchoragePayload()
+    delete payload.depth
+    const [card] = decodeMateCards([{ kind: 'anchorage', payload }])
+    if (card.kind !== 'anchorage') throw new Error('did not decode')
+    render(<AssistantAnchorageCard card={card} />)
+    expect(screen.queryByTestId('anchorage-depth')).toBeNull()
+    expect(screen.queryByText(/Depth unknown/)).toBeNull()
+  })
+
+  it('says the depth is unknown and lists the checks as skipped, not passed', () => {
+    render(<AssistantAnchorageCard card={anchorageCardWithoutDepth()} />)
+    const depth = screen.getByTestId('anchorage-depth')
+    expect(within(depth).getByTestId('anchorage-depth-depth')).toHaveTextContent('Depth unknown: check the chart.')
+    for (const key of ['clearance', 'rode', 'swing']) {
+      const line = within(depth).getByTestId(`anchorage-depth-${key}`)
+      expect(line).toHaveTextContent('Skipped')
+      expect(line).toHaveTextContent('the depth is unknown')
+      expect(line).not.toHaveTextContent('OK')
+    }
+  })
+
+  it('shows depth lengths in feet when the operator reads imperial', () => {
+    config.distanceUnits = 'imperial'
+    render(<AssistantAnchorageCard card={anchorageCard()} />)
+    expect(screen.getByTestId('anchorage-depth-depth')).toHaveTextContent('13.1 ft at chart datum')
   })
 
   it('keeps the map closed until opened, and loads it only then', () => {

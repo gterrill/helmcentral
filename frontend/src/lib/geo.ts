@@ -39,3 +39,15 @@ export function destinationPoint(lat: number, lon: number, bearingRad: number, d
     )
   return [(lat2 * 180) / Math.PI, ((lon2 * 180) / Math.PI + 540) % 360 - 180]
 }
+
+// ── Circle round a point ────────────────────────────────────────────────────
+/** A closed ring of [lon, lat] points `radiusM` from (lat, lon): `steps` points round, then the first again. */
+export function circlePolygon(lat: number, lon: number, radiusM: number, steps = 64): [number, number][] {
+  const ring: [number, number][] = []
+  for (let i = 0; i < steps; i += 1) {
+    const [pLat, pLon] = destinationPoint(lat, lon, (2 * Math.PI * i) / steps, radiusM)
+    ring.push([pLon, pLat])
+  }
+  ring.push(ring[0])
+  return ring
+}

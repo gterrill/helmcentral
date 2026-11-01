@@ -682,6 +682,49 @@
       },
       "truncated": false
     },
+    "depth": {
+      "error": "",
+      "known": true,
+      "depth_m": 4,
+      "source": "operator",
+      "saved_place": "",
+      "saved_source": "",
+      "saved_date": "",
+      "note": "",
+      "clearance": {
+        "status": "ok",
+        "skipped_reason": "",
+        "lowest_water_at": "2026-11-03T00:00:00+10:00",
+        "lowest_water_height_m": 0.8,
+        "depth_at_low_m": 4.8,
+        "draft_m": 1.4,
+        "clearance_m": 3.4,
+        "wanted_m": 0.5
+      },
+      "rode": {
+        "status": "short",
+        "skipped_reason": "",
+        "highest_water_at": "2026-11-03T06:00:00+10:00",
+        "highest_water_height_m": 3.2,
+        "depth_at_high_m": 7.2,
+        "method": "ratio",
+        "wind_kts": 20,
+        "rode_needed_m": 60.9,
+        "scope_ratio": 7,
+        "chain_onboard_m": 40,
+        "short_by_m": 20.9,
+        "wind_checked_until": ""
+      },
+      "swing": {
+        "status": "computed",
+        "skipped_reason": "",
+        "radius_m": 56,
+        "rode_m": 40,
+        "bow_offset_m": 3,
+        "loa_m": 13,
+        "all_chain_out": true
+      }
+    },
     "data_as_of": "2026-10-31T21:22:14Z"
   }
 }
