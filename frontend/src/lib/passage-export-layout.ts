@@ -39,6 +39,8 @@ export interface ImageLayout {
   height: number
   band: Rect
   title: TextItem
+  /** The lines of a long title after the first (portrait only). */
+  titleRest: TextItem[]
   dates: TextItem
   stats: { label: TextItem; value: TextItem }[]
   attribution: TextItem
@@ -77,11 +79,14 @@ export interface LayoutSpec {
   insetCorner?: InsetCorner
   /** The map is drawn over satellite imagery, which needs its credit. */
   satellite?: boolean
+  /** A tall frame: the title wraps, the date goes under it, and the figures flow onto rows. */
+  portrait?: boolean
 }
 
 /** Where everything goes on the image. Stats that do not fit are dropped from
  * the end, never squeezed. */
 export function composeImageLayout(spec: LayoutSpec, measure: Measure): ImageLayout {
+  if (spec.portrait) return composePortraitLayout(spec, measure)
   const { width, height } = spec
   const margin = 36
   const bandH = Math.round(height * 0.24)
@@ -133,7 +138,87 @@ export function composeImageLayout(spec: LayoutSpec, measure: Measure): ImageLay
     }
     : null
   return {
-    width, height, band, title, dates, stats, attribution, inset,
+    width, height, band, title, titleRest: [], dates, stats, attribution, inset,
+    padding: { top: 48, right: 64, bottom: bandH + 48, left: 64 },
+  }
+}
+
+/** The text broken into at most `maxLines` lines that fit `maxWidth` in `font`; the last
+ * is shortened with an ellipsis if there is more. New lines in it stay. */
+export function wrapLines(text: string, maxWidth: number, font: string, measure: Measure, maxLines: number): string[] {
+  if (text === '') return []
+  const lines: string[] = []
+  for (const paragraph of text.split('\n')) {
+    let line = ''
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      const next = line === '' ? word : `${line} ${word}`
+      if (measure(next, font) <= maxWidth || line === '') line = next
+      else { lines.push(line); line = word }
+    }
+    lines.push(line)
+  }
+  const truncated = lines.length > maxLines
+  const out = lines.slice(0, maxLines)
+  const last = out.length - 1
+  out[last] = fitText(truncated ? `${out[last]}…` : out[last], maxWidth, font, measure)
+  return out
+}
+
+/** The tall layout: the band is as high as what is in it. The title wraps onto
+ * two lines at a size that fits the width, the date sits under it, and the
+ * figures flow onto rows (three at most; any more are dropped, never squeezed). */
+function composePortraitLayout(spec: LayoutSpec, measure: Measure): ImageLayout {
+  const { width, height } = spec
+  const margin = 28
+  const inner = width - margin * 2
+  const titleFont = font(700, 28)
+  const titleLineH = 34
+  const datesFont = font(400, 15)
+  const labelFont = font(600, 12)
+  const valueFont = font(700, 22)
+  const attrFont = font(400, 12)
+  const rowH = 50
+  const gap = 28
+
+  const lines = wrapLines(spec.title, inner, titleFont, measure, 2)
+  const top = 20
+  const titleY = (i: number) => top + 24 + i * titleLineH
+  const datesY = top + 24 + (Math.max(lines.length, 1) - 1) * titleLineH + 24
+
+  // The figures flow left to right and drop to the next row when the next one does not fit.
+  const items: { label: string; value: string; w: number }[] = spec.stats.map((s) => {
+    const label = s.l.toUpperCase()
+    return { label, value: s.v, w: Math.max(measure(label, labelFont), measure(s.v, valueFont)) }
+  })
+  const placed: { row: number; x: number; item: (typeof items)[number] }[] = []
+  let row = 0
+  let x = margin
+  for (const item of items) {
+    if (x > margin && x + item.w > margin + inner) { row++; x = margin }
+    if (row >= 3) break
+    placed.push({ row, x, item })
+    x += item.w + gap
+  }
+  const rows = placed.length === 0 ? 0 : placed[placed.length - 1].row + 1
+  const statsTop = datesY + 18
+  const attrH = 30
+  const bandH = statsTop + rows * rowH + attrH
+  const band: Rect = { x: 0, y: height - bandH, w: width, h: bandH }
+
+  const text = (t: string, xx: number, y: number, f: string, fill: string, align: 'left' | 'right' = 'left'): TextItem => ({ text: t, x: xx, y: band.y + y, font: f, fill, align })
+  const [first = '', ...rest] = lines
+  const attribution: TextItem = { text: exportImageAttribution(spec.satellite ?? false), x: width - margin, y: height - 12, font: attrFont, fill: MUTED, align: 'right' }
+  return {
+    width, height, band,
+    title: text(first, margin, titleY(0), titleFont, INK),
+    titleRest: rest.map((l, i) => text(l, margin, titleY(i + 1), titleFont, INK)),
+    dates: text(fitText(spec.dates, inner, datesFont, measure), margin, datesY, datesFont, MUTED),
+    stats: placed.map(({ row: r, x: xx, item }) => ({
+      label: text(item.label, xx, statsTop + r * rowH + 12, labelFont, MUTED),
+      value: text(item.value, xx, statsTop + r * rowH + 12 + 24, valueFont, INK),
+    })),
+    attribution,
+    inset: null,
     padding: { top: 48, right: 64, bottom: bandH + 48, left: 64 },
   }
 }
@@ -155,6 +240,7 @@ export function paintOverlay(ctx: CanvasRenderingContext2D, layout: ImageLayout)
   ctx.fillStyle = '#e7e5e4'
   ctx.fillRect(layout.band.x, layout.band.y, layout.band.w, 1)
   drawText(ctx, layout.title)
+  for (const t of layout.titleRest) drawText(ctx, t)
   drawText(ctx, layout.dates)
   for (const s of layout.stats) {
     drawText(ctx, s.label)

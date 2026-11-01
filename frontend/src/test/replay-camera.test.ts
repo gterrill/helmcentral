@@ -9,6 +9,7 @@ import {
   sameCamera,
   shotStartState,
   TRANSITION_S,
+  zoomBucket,
   type BoatState,
   type Camera,
   type CameraContext,
@@ -329,5 +330,14 @@ describe('sameCamera', () => {
     const a: Camera = { center: [1, 2], zoom: 3, pitch: 4, bearing: 359.999 }
     expect(sameCamera(a, { ...a, bearing: 0 })).toBe(true)
     expect(sameCamera(a, { ...a, bearing: 5 })).toBe(false)
+  })
+})
+
+describe('zoomBucket', () => {
+  it('rounds a zoom to the nearest quarter', () => {
+    expect(zoomBucket(9.1)).toBe(9)
+    expect(zoomBucket(9.13)).toBe(9.25)
+    expect(zoomBucket(9.37)).toBe(9.25)
+    expect(zoomBucket(9.9)).toBe(10)
   })
 })

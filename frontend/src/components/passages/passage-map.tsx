@@ -14,38 +14,33 @@ import { ImageryToggleButton, WorldImageryLayer } from '@/components/world-image
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 import type { BoatLayer } from '@/lib/boat-layer'
 import { boatMarkerKind, type BoatHull } from '@/lib/boat-model'
-import { OPENSEAMAP_TILES, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
+import { OPENSEAMAP_TILES, SEAMARK_SOURCE_ID, STYLE_DARK, STYLE_LIGHT } from '@/lib/basemap'
 import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useImageryPreference } from '@/lib/passage-imagery-preference'
 import { insetZoom } from '@/lib/passage-export-style'
 import { offsetInsetZoom, type InsetCorner } from '@/lib/passage-inset-view'
-import { CameraGate, outsideCentral, type Camera, type CameraEnv, type CameraResult } from '@/lib/replay-camera'
+import { CameraGate, outsideCentral, zoomBucket, type Camera, type CameraEnv, type CameraResult } from '@/lib/replay-camera'
 import type { SailedTo } from '@/lib/replay-controller'
 import { INTRO_START_ZOOM, MERCATOR, type MapProjection } from '@/lib/replay-intro'
 import type { ReplayLight } from '@/lib/replay-light'
-import { applyLight, plainSailedOverlay, speedLineOverlay, tintLayer, wakeOverlay, wholeLineLayers, type OverlaySpec } from '@/lib/replay-map-style'
+import { applyLight, hillshadeLayer, imageryLayerProps, plainSailedOverlay, sailedEndFor, seamarkLayer, wholeLineOpacity, speedLineOverlay, tintLayer, wakeOverlay, wholeLineLayers, type OverlaySpec } from '@/lib/replay-map-style'
 import type { SpeedFrame } from '@/lib/replay-speed'
 import { overviewCameraFor } from '@/lib/replay-framing'
 import { drawnPieces, type DrawnPiece, type PassageLeg } from '@/lib/passage-legs'
 import { createSailedCache, segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
 import {
-  HILLSHADE_LAYER_ID,
-  hillshadePaint,
   REPLAY_3D_MAX_PITCH,
   REPLAY_3D_PITCH,
   TERRAIN_SOURCE_ID,
   terrainSetting,
   terrainSource,
 } from '@/lib/terrain'
+import { PASSAGE_COLOURS, passageColour } from '@/lib/passage-colours'
 import { hasWebGL2 } from '@/lib/webgl'
-import { SAT_HANDOFF_START_ZOOM, WORLD_IMAGERY_OPACITY_EXPRESSION } from '@/lib/world-imagery'
 import { cn } from '@/lib/utils'
 
-// Map line colours cannot be CSS tokens (MapLibre paints with literal
-// colours), so the passages share one fixed palette, light enough for the
-// dark basemap and dark enough for Positron. A single passage uses the first.
-export const PASSAGE_COLOURS = ['#0284c7', '#d97706', '#059669', '#c026d3', '#e11d48', '#4f46e5'] as const
-export const passageColour = (index: number) => PASSAGE_COLOURS[index % PASSAGE_COLOURS.length]
+// The passages' line colours are in lib/passage-colours, shared with the video export's map.
+export { PASSAGE_COLOURS, passageColour }
 
 export interface MapPassage {
   id: string
@@ -480,7 +475,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   useEffect(() => {
     const map = mapRef.current?.getMap?.()
     if (!mapLoaded || !map) return
-    const read = () => zoomRef.current?.(Math.round(map.getZoom() * 4) / 4)
+    const read = () => zoomRef.current?.(zoomBucket(map.getZoom()))
     read()
     map.on('zoomend', read)
     return () => { map.off('zoomend', read) }
@@ -540,20 +535,16 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
         {/* Bottom to top: basemap, imagery, seamarks, place names, then the
             passage lines. Imagery is anchored under the seamarks so toggling it
             mid-session cannot land on top of them. */}
-        <Source id="openseamap" type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
-          <Layer id="openseamap-layer" type="raster" paint={{ 'raster-opacity': 0.85 }} />
+        <Source id={SEAMARK_SOURCE_ID} type="raster" tiles={[OPENSEAMAP_TILES]} tileSize={256} attribution="© OpenSeaMap contributors">
+          <Layer {...(seamarkLayer() as unknown as LayerProps)} />
         </Source>
         {terrainOn && (
           <Source id={TERRAIN_SOURCE_ID} {...terrainSource}>
-            <Layer id={HILLSHADE_LAYER_ID} type="hillshade" beforeId="openseamap-layer" paint={hillshadePaint} />
+            <Layer {...(hillshadeLayer() as unknown as LayerProps)} />
           </Source>
         )}
         {satellite && (
-          <WorldImageryLayer
-            opacity={[...WORLD_IMAGERY_OPACITY_EXPRESSION]}
-            minzoom={SAT_HANDOFF_START_ZOOM}
-            beforeId="openseamap-layer"
-          />
+          <WorldImageryLayer {...imageryLayerProps()} />
         )}
         {/* The time of day over the base map: above the chart, the relief and the
             imagery, below the place names, the track and the boat (the order is
@@ -566,15 +557,14 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
           const progressive = sailed !== undefined
           // While replaying, the whole line is the dim road ahead and the
           // sailed part is drawn over it; otherwise one line, as before.
-          const lineOpacity = progressive ? 0.4 : playedIds.has(p.passageId) ? 0.95 : 0.45
-          const casingOpacity = progressive ? 0.35 : playedIds.has(p.passageId) ? 0.95 : 0.5
+          const { line: lineOpacity, casing: casingOpacity } = wholeLineOpacity(progressive, playedIds.has(p.passageId))
           return (
             <Fragment key={p.key}>
               <Source id={`passage-${p.key}`} type="geojson" data={fullLines[i]}>
                 {wholeLineLayers(p.key, passageColour(p.colourIndex), lineOpacity, casingOpacity, satellite).map((l) => <Layer key={l.id} {...(l as unknown as LayerProps)} />)}
               </Source>
               {progressive && !speed && (
-                <Overlay spec={plainSailedOverlay(p.key, sailedCache.get(p.key, p.segments, sailed.at, sailed.end && sailed.at >= p.from && sailed.at <= p.to ? sailed.end : undefined), passageColour(p.colourIndex), satellite)} />
+                <Overlay spec={plainSailedOverlay(p.key, sailedCache.get(p.key, p.segments, sailed.at, sailedEndFor(sailed, p)), passageColour(p.colourIndex), satellite)} />
               )}
               {progressive && speed?.lines.get(p.key)?.map((line, k) => line && <Overlay key={k} spec={speedLineOverlay(p.key, k, line, satellite)} />)}
             </Fragment>

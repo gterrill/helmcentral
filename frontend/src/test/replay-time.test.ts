@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { MOMENT_FRAME_FRACTION, MOMENT_GROW_S, MOMENT_TOTAL_S, buildReplayTime, momentRect, momentView } from '@/lib/replay-time'
+import { MOMENT_FRAME_FRACTION, MOMENT_GROW_S, MOMENT_TOTAL_S, buildReplayTime, momentRect, momentView, playedIds } from '@/lib/replay-time'
 
 // 1000 timeline seconds watched in 10: 100 timeline seconds a second at full pace.
 const TOTAL = 1000
@@ -241,5 +241,13 @@ describe('momentRect', () => {
     const a = momentRect(v, card, frame)
     momentRect(momentView('a', 1, false), { x: 0, y: 0, w: 1, h: 1 }, { w: 10, h: 10 })
     expect(momentRect(v, card, frame)).toEqual(a)
+  })
+})
+
+describe('playedIds', () => {
+  const timeline = { entries: [{ id: 'a', offset: 0 }, { id: 'b', offset: 500 }] }
+  it('is the passages the replay has begun by the clock', () => {
+    expect([...playedIds(timeline, 0)]).toEqual(['a'])
+    expect([...playedIds(timeline, 500)]).toEqual(['a', 'b'])
   })
 })

@@ -1,4 +1,7 @@
-import maplibregl from 'maplibre-gl'
+import type maplibregl from 'maplibre-gl'
+
+import { openOffscreenMap } from '@/lib/offscreen-map'
+import { seamarkLayer } from '@/lib/replay-map-style'
 
 import { worldImageryVisibleAtZoom } from '@/lib/world-imagery'
 import { addExportImagery } from '@/lib/passage-export-style'
@@ -14,8 +17,9 @@ import { IMAGE_SIZES, composeImageLayout, mapCropRect, paintOverlay, roundRectPa
 // ── the map ──────────────────────────────────────────────────────────────
 
 const RENDER_TIMEOUT_MS = 30_000
+const RENDER_TIMEOUT_MESSAGE = 'The map did not finish drawing. Check the internet connection and try again.'
 
-interface OffscreenMapOptions {
+interface RenderMapOptions {
   width: number
   height: number
   pixelRatio: number
@@ -52,66 +56,52 @@ function trackCollection(data: ExportData): GeoJSON.FeatureCollection {
 
 /** Draws one map into a hidden element and hands back a copy of its canvas once
  * every tile has loaded. Fails, rather than returns a half-drawn map. */
-async function renderMap(data: ExportData, o: OffscreenMapOptions): Promise<{ canvas: HTMLCanvasElement; zoom: number }> {
-  const host = document.createElement('div')
-  host.style.cssText = `position:fixed;left:-99999px;top:0;width:${o.width}px;height:${o.height}px;`
-  document.body.appendChild(host)
-  let map: maplibregl.Map | null = null
+async function renderMap(data: ExportData, o: RenderMapOptions): Promise<{ canvas: HTMLCanvasElement; zoom: number }> {
+  const offscreen = await openOffscreenMap({
+    width: o.width,
+    height: o.height,
+    pixelRatio: o.pixelRatio,
+    hostStyle: { position: 'fixed', left: '-99999px', top: '0' },
+    map: { style: data.map.style, ...(o.bounds ? { bounds: o.bounds, fitBoundsOptions: { padding: o.padding, maxZoom: 14 } } : { center: o.center, zoom: o.zoom }) },
+    loadTimeoutMs: RENDER_TIMEOUT_MS,
+    loadTimeoutError: () => new Error(RENDER_TIMEOUT_MESSAGE),
+    disposedError: () => new Error('The image was cancelled.'),
+    // Any map error means a tile, source or style did not arrive, and the
+    // picture would be incomplete: fail rather than save it.
+    onError: (e) => new Error(`The map could not be drawn completely (${e.error?.message ?? 'unknown error'}). Check the internet connection and try again.`),
+  })
   try {
-    const m = new maplibregl.Map({
-      container: host,
-      style: data.map.style,
-      interactive: false,
-      attributionControl: false,
-      fadeDuration: 0,
-      pixelRatio: o.pixelRatio,
-      canvasContextAttributes: { preserveDrawingBuffer: true },
-      ...(o.bounds ? { bounds: o.bounds, fitBoundsOptions: { padding: o.padding, maxZoom: 14 } } : { center: o.center, zoom: o.zoom }),
-    })
-    map = m
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('The map did not finish drawing. Check the internet connection and try again.')), RENDER_TIMEOUT_MS)
-      // Any map error means a tile, source or style did not arrive, and the
-      // picture would be incomplete: fail rather than save it.
-      m.on('error', (e) => {
-        clearTimeout(timer)
-        reject(new Error(`The map could not be drawn completely (${e.error?.message ?? 'unknown error'}). Check the internet connection and try again.`))
-      })
-      m.once('load', () => {
-        // Imagery goes under the style's first label layer, so place and water
-        // names stay readable on top of it. Below the handoff zoom it would be
-        // invisible, so nothing is added and nothing is fetched.
-        if (o.satellite && worldImageryVisibleAtZoom(m.getZoom())) {
-          const firstLabel = m.getStyle().layers.find((l) => l.type === 'symbol')?.id
-          addExportImagery(m, window.location.origin, firstLabel)
-        }
-        const seamarks = data.map.seamarks
-        m.addSource(seamarks.id, { type: 'raster', tiles: [seamarks.tiles], tileSize: 256 })
-        m.addLayer({ id: seamarks.layerId, type: 'raster', source: seamarks.id, paint: { 'raster-opacity': 0.85 } })
-        if (o.withTrack) {
-          m.addSource(data.map.trackSource, { type: 'geojson', data: trackCollection(data) })
-          for (const layer of data.map.layers) {
-            if ((layer as { source: string }).source === data.map.trackSource) m.addLayer(layer as maplibregl.LayerSpecification)
-          }
-        }
-        if (o.withBox) {
-          m.addSource('hcp-box', { type: 'geojson', data: bboxPolygon(data.bounds) })
-          if (data.insetDot) {
-            m.addSource('hcp-dot', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: o.center ?? [0, 0] } } })
-            m.addLayer({ id: 'hcp-dot', type: 'circle', source: 'hcp-dot', paint: { 'circle-radius': 5, 'circle-color': '#e11d48', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } })
-          } else {
-            m.addLayer({ id: 'hcp-box-fill', type: 'fill', source: 'hcp-box', paint: { 'fill-color': '#e11d48', 'fill-opacity': 0.2 } })
-            m.addLayer({ id: 'hcp-box-line', type: 'line', source: 'hcp-box', paint: { 'line-color': '#e11d48', 'line-width': 2 } })
-          }
-        }
-        m.once('idle', () => { clearTimeout(timer); resolve() })
-        m.triggerRepaint()
-      })
-    })
+    const m = offscreen.map
+    // Imagery goes under the style's first label layer, so place and water
+    // names stay readable on top of it. Below the handoff zoom it would be
+    // invisible, so nothing is added and nothing is fetched.
+    if (o.satellite && worldImageryVisibleAtZoom(m.getZoom())) {
+      const firstLabel = m.getStyle().layers.find((l) => l.type === 'symbol')?.id
+      addExportImagery(m, window.location.origin, firstLabel)
+    }
+    const seamarks = data.map.seamarks
+    m.addSource(seamarks.id, { type: 'raster', tiles: [seamarks.tiles], tileSize: 256 })
+    m.addLayer({ id: seamarks.layerId, type: 'raster', source: seamarks.id, paint: seamarkLayer().paint })
+    if (o.withTrack) {
+      m.addSource(data.map.trackSource, { type: 'geojson', data: trackCollection(data) })
+      for (const layer of data.map.layers) {
+        if ((layer as { source: string }).source === data.map.trackSource) m.addLayer(layer as maplibregl.LayerSpecification)
+      }
+    }
+    if (o.withBox) {
+      m.addSource('hcp-box', { type: 'geojson', data: bboxPolygon(data.bounds) })
+      if (data.insetDot) {
+        m.addSource('hcp-dot', { type: 'geojson', data: { type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: o.center ?? [0, 0] } } })
+        m.addLayer({ id: 'hcp-dot', type: 'circle', source: 'hcp-dot', paint: { 'circle-radius': 5, 'circle-color': '#e11d48', 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } })
+      } else {
+        m.addLayer({ id: 'hcp-box-fill', type: 'fill', source: 'hcp-box', paint: { 'fill-color': '#e11d48', 'fill-opacity': 0.2 } })
+        m.addLayer({ id: 'hcp-box-line', type: 'line', source: 'hcp-box', paint: { 'line-color': '#e11d48', 'line-width': 2 } })
+      }
+    }
+    await offscreen.settle(RENDER_TIMEOUT_MS, () => new Error(RENDER_TIMEOUT_MESSAGE))
     return { canvas: copyCanvas(m.getCanvas()), zoom: m.getZoom() }
   } finally {
-    map?.remove()
-    host.remove()
+    offscreen.dispose()
   }
 }
 
@@ -178,7 +168,8 @@ export async function renderPassageImage(data: ExportData, kind: ImageKind, sate
   })
 }
 
-function measureWithCanvas(): Measure {
+/** Measures text with a canvas, as it will be drawn. */
+export function measureWithCanvas(): Measure {
   const ctx = document.createElement('canvas').getContext('2d')
   if (!ctx) throw new Error('This browser cannot draw the image')
   return (text, f) => {

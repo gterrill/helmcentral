@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildTimeline, type TimedSegment } from '@/lib/passages'
-import { MAX_SIGN_CARDS, SIGN_LEAD_S, momentsOf, placeSignCard, resolveSigns, signCardPhotoRect, visibleSigns, type ReplaySign } from '@/lib/replay-signs'
+import { MAX_SIGN_CARDS, SIGN_LEAD_S, momentsOf, placeSignCard, resolveSigns, signCardBox, signCardPhotoRect, visibleSigns, type ReplaySign } from '@/lib/replay-signs'
 
 const sign = (id: string, t: number, extra: Partial<ReplaySign> = {}): ReplaySign => ({
   id, t_ms: t * 1000, title: id, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, photo_moment: null, ...extra,
@@ -236,5 +236,31 @@ describe('signCardPhotoRect', () => {
 
   it('narrows to a narrow map, as the card does', () => {
     expect(at({ x: 100, y: 300 }, {}, 20, { w: 200, h: 400 }).w).toBe(200 - 2 * 6 - 2 * 8)
+  })
+})
+
+describe('signCardBox', () => {
+  it('is 256 wide with a photo and 224 with text alone, as the card is', () => {
+    expect(signCardBox(sign('a', 0, { photo_url: '/p' }), 1000).w).toBe(256)
+    expect(signCardBox(sign('a', 0), 1000).w).toBe(224)
+  })
+
+  it('has the photo at 4 by 3 inside the padding, and the text under it', () => {
+    const b = signCardBox(sign('a', 0, { photo_url: '/p' }), 1000)
+    expect([b.photoW, b.photoH]).toEqual([240, 180])
+    // padding, photo, gap, one line of title, padding
+    expect(b.h).toBe(8 + 180 + 8 + 20 + 8)
+  })
+
+  it('grows a line for each line of the note, to two', () => {
+    const h = (note: string) => signCardBox(sign('a', 0, { photo_url: '/p', note }), 1000).h
+    expect(h('Short')).toBe(h('') + 16)
+    expect(h('x'.repeat(60))).toBe(h('') + 32)
+    expect(h('x'.repeat(500))).toBe(h('') + 32)
+    expect(h('one\ntwo\nthree')).toBe(h('') + 32)
+  })
+
+  it('narrows to the map, with its margins', () => {
+    expect(signCardBox(sign('a', 0, { photo_url: '/p' }), 200).w).toBe(188)
   })
 })

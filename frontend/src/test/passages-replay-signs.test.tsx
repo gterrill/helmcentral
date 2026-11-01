@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { forwardRef, useImperativeHandle } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ReplayPanel } from '@/components/passages/replay-panel'
+import { ReplayPanel } from '@/test/replay-panel-harness'
 import type { PassageDetail } from '@/lib/passages'
 import { resetQueryStore } from '@/lib/api-query'
 import { exifJpeg } from './helpers/exif-jpeg'

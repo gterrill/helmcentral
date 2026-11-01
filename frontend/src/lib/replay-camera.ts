@@ -237,3 +237,6 @@ export class CameraGate {
     return sameCamera(current, result.camera) ? null : result.camera
   }
 }
+
+/** A zoom rounded to the nearest quarter, which is as fine as the shots care. */
+export const zoomBucket = (zoom: number): number => Math.round(zoom * 4) / 4

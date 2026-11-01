@@ -9,3 +9,7 @@
 export const STYLE_LIGHT = '/api/basemap/style/positron'
 export const STYLE_DARK = '/api/basemap/style/dark-matter'
 export const OPENSEAMAP_TILES = 'https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png'
+/** The sea marks overlay on the live maps: one source, one raster layer. */
+export const SEAMARK_SOURCE_ID = 'openseamap'
+export const SEAMARK_LAYER_ID = 'openseamap-layer'
+export const SEAMARK_OPACITY = 0.85

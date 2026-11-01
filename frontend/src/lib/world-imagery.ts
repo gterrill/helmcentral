@@ -2,6 +2,7 @@
 // proxy so every map that shows it shares one tile address, one fade and one
 // credit. The anchor map and the passage map both draw from here.
 
+export const IMAGERY_SOURCE_ID = 'world-imagery'
 export const WORLD_IMAGERY_LAYER_ID = 'world-imagery-layer'
 export const WORLD_IMAGERY_TILES = '/api/world-imagery/{z}/{x}/{y}'
 export const WORLD_IMAGERY_MAX_ZOOM = 18

@@ -34,6 +34,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.469.0",
     "maplibre-gl": "^5.24.0",
+    "mediabunny": "^1.65.0",
     "platejs": "^53.3.14",
     "qrcode-generator": "^2.0.4",
     "react": "^19.2",

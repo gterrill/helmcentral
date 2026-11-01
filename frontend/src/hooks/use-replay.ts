@@ -13,6 +13,7 @@ export const REPLAY_SPEEDS = [
 ] as const
 export type ReplaySpeedId = (typeof REPLAY_SPEEDS)[number]['id']
 
+export const DEFAULT_REPLAY_LENGTH: ReplaySpeedId = '15s'
 export const replaySeconds = (speed: ReplaySpeedId) => REPLAY_SPEEDS.find((s) => s.id === speed)?.seconds ?? 15
 
 /** Advances a replay of `total` timeline seconds, sailed in `lengthS` seconds

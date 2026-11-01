@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { REPLAY_SPEEDS } from '@/hooks/use-replay'
 
-import { ReplayPanel, type ReplayCursor } from '@/components/passages/replay-panel'
+import type { ReplayCursor } from '@/components/passages/replay-panel'
+import { ReplayPanel } from '@/test/replay-panel-harness'
 import type { PassageDetail } from '@/lib/passages'
 import { saveInsetPreference } from '@/lib/passage-inset-preference'
 import { stubApi, type StubRequest } from './helpers/stub-api'
@@ -361,5 +362,18 @@ describe('ReplayPanel', () => {
       expect(screen.queryByTestId('photo-moment')).toBeNull()
       expect(screen.getByLabelText('Replay position')).toHaveValue('900')
     })
+  })
+})
+
+describe('ReplayPanel tells the page its length', () => {
+  it('reports the length chosen from the bar', async () => {
+    const onLength = vi.fn()
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} onLength={onLength} />)
+    fireEvent.click(screen.getByRole('combobox', { name: 'Replay length' }))
+    const option = await screen.findByRole('option', { name: '30 s' })
+    fireEvent.pointerDown(option)
+    fireEvent.pointerUp(option)
+    fireEvent.click(option)
+    expect(onLength).toHaveBeenCalledWith('30s')
   })
 })
