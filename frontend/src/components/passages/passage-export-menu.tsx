@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { PassageEmbedDialog } from '@/components/passages/passage-embed-dialog'
+import { PassageVideoDialog, type PassageVideoSource } from '@/components/passages/passage-video-dialog'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -20,6 +21,7 @@ import type { DistanceUnits } from '@/config/app-config'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useCameraShots } from '@/hooks/use-camera-shots'
 import { useInsetView } from '@/hooks/use-inset-view'
+import { DEFAULT_REPLAY_LENGTH, replaySeconds, type ReplaySpeedId } from '@/hooks/use-replay'
 import { useReplaySigns } from '@/hooks/use-replay-signs'
 import {
   DEFAULT_PLAY_SECONDS,
@@ -52,6 +54,10 @@ export interface PassageExportMenuProps {
   passages: PassageDetail[]
   cruiseStats?: CruiseStats | null
   units: DistanceUnits
+  /** The app theme, which the replay's map follows and so does the video's. */
+  isDarkTheme?: boolean
+  /** The length the replay beside this menu is set to; the video is made to it. */
+  replayLength?: ReplaySpeedId
 }
 
 const NO_PHOTOS: ReadonlyMap<string, string> = new Map()
@@ -61,7 +67,7 @@ function failed(action: string, err: unknown) {
 }
 
 /** Share a passage, a cruise or a selection: the blog embed and two images. */
-export function PassageExportMenu({ kind, title, passages, cruiseStats, units }: PassageExportMenuProps) {
+export function PassageExportMenu({ kind, title, passages, cruiseStats, units, isDarkTheme = false, replayLength = DEFAULT_REPLAY_LENGTH }: PassageExportMenuProps) {
   const [playSeconds, setPlaySeconds] = useState<PlaySeconds>(DEFAULT_PLAY_SECONDS)
   const [inset, setInset] = useInsetPreference()
   // Terrain in 3D follows the passage map: 3D on there, 3D here.
@@ -71,15 +77,18 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
   const [satellite] = useImageryPreference()
   const [busy, setBusy] = useState(false)
   const [embed, setEmbed] = useState<string | null>(null)
+  const [videoOpen, setVideoOpen] = useState(false)
   const exportable = useMemo(() => exportablePassages(passages), [passages])
   const hasTrack = exportable.length > 0
   // Camera shots always go in. They belong to real time, so the ones saved
   // between the first departure and the last arrival are the ones that play.
+  // The span is over every passage shown, as the replay's own is, so the video
+  // is made from the same shots and signs the replay beside this menu plays.
   const span = useMemo(() => (
     hasTrack
-      ? { from: Math.min(...exportable.map((x) => Date.parse(x.p.start))), to: Math.max(...exportable.map((x) => Date.parse(x.p.end))) }
+      ? { from: Math.min(...passages.map((p) => Date.parse(p.start))), to: Math.max(...passages.map((p) => Date.parse(p.end))) }
       : null
-  ), [exportable, hasTrack])
+  ), [passages, hasTrack])
   const { shots, loading: shotsLoading, error: shotsError } = useCameraShots(span ? span.from : null, span ? span.to : null)
   // The overview map's corner and zoom step are saved with the replay, keyed by
   // its range over every passage shown (the key the replay saves under); the
@@ -221,6 +230,26 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
     }
   }
 
+  // The video leaves the overview map out, so only the shots and signs must have been read.
+  const openVideo = () => {
+    if (shotsError) { failed('read the camera shots', new Error(shotsError)); return }
+    if (signsFailed) { failed('read the signs', new Error(signsError as string)); return }
+    setVideoOpen(true)
+  }
+
+  // Read when the video is started, so it is the replay as it is then.
+  const videoSource = (): PassageVideoSource => ({
+    passages,
+    shots,
+    signs: allSigns,
+    hull,
+    threeD,
+    satellite,
+    isDarkTheme,
+    lengthS: replaySeconds(replayLength),
+    summary: prepareExport({ ...exportInput(), signs: undefined, photos: undefined }),
+  })
+
   const downloadImage = async (imageKind: ImageKind) => {
     if (busy || !insetReady()) return
     if (signsFailed) {
@@ -301,9 +330,11 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units }:
         <DropdownMenuItem disabled={shotsLoading || insetViewLoading || signsWait} onClick={() => void downloadPage()}>Download embed as HTML</DropdownMenuItem>
         <DropdownMenuItem disabled={busy || insetViewLoading || signsWait} onClick={() => void downloadImage('og')}>Download image {IMAGE_SIZES.og.label}</DropdownMenuItem>
         <DropdownMenuItem disabled={busy || insetViewLoading || signsWait} onClick={() => void downloadImage('wide')}>Download image {IMAGE_SIZES.wide.label}</DropdownMenuItem>
+        <DropdownMenuItem disabled={shotsLoading || signsWait} onClick={openVideo}>Video</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
     <PassageEmbedDialog embed={embed} onClose={() => setEmbed(null)} />
+    <PassageVideoDialog open={videoOpen} onClose={() => setVideoOpen(false)} source={videoSource} />
     </>
   )
 }

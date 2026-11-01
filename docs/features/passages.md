@@ -395,6 +395,35 @@ and the photos are shrunk, have their location details removed, and are written
 into the card. A card can be at most 3 MB. See
 [Share a passage on your blog](../how-to/share-a-passage-on-your-blog.md).
 
+### Video
+
+**Export**, then **Video**, makes an MP4 of the replay, ready to post or send. You
+choose landscape (1920 × 1080) or portrait (1080 × 1920), and that is the only
+choice. The video is the replay as it is set on the page: the length you picked,
+your camera shots, the map and satellite picture, 3D, and your signs with their
+photos. It opens with the fly-in from the globe, sails the whole passage, and ends
+on a closing card held for about three seconds. The closing card has the same
+title, dates and figures as the still pictures, and a small line saying it was
+made with Helmcentral.
+
+- **Photo moments:** Each photo moment holds the video for about 2.3 seconds, as
+  it does in the replay, so the video is that much longer than the length you
+  picked.
+- **Portrait:** The overview shots fit the whole track into the tall frame. Follow
+  and orbit shots stay as they are.
+- **No overview map:** The small overview map in the corner isn't in the video.
+- **Made in this browser:** Your browser draws and encodes the video, one frame at
+  a time, so it takes a few minutes and works the same on a slow machine as a
+  fast one. Keep the tab open and in front until it's done. Nothing is stored on
+  the boat: when it finishes you download the file, or share it from the share
+  sheet on a phone or tablet.
+- **If it can't finish:** The video stops and says why, rather than giving you a
+  video with gaps. It says so if your browser can't make H.264 video, if the
+  satellite picture, the 3D land or the chart didn't load (the boat may be
+  offline), or if a frame never finished drawing.
+- **Cancel:** **Cancel**, closing the box, or leaving the page stops it and frees
+  what it was using.
+
 ## Limits
 
 - Tracks imported from GPX files carry no readings, so their battery, wind,

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { forwardRef, useImperativeHandle } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ReplayPanel } from '@/components/passages/replay-panel'
+import { ReplayPanel } from '@/test/replay-panel-harness'
 import type { CameraDriver } from '@/components/passages/passage-map'
 import type { PassageDetail } from '@/lib/passages'
 import { resetQueryStore } from '@/lib/api-query'

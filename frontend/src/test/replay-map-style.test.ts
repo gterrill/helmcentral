@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { SEAMARK_LAYER_ID } from '@/lib/basemap'
 import {
-  TINT_LAYER_ID, WAKE_LAYER_ID, applyLight, plainSailedOverlay, speedLineOverlay, tintLayer, wakeOverlay, wholeLineLayers,
+  TINT_LAYER_ID, WAKE_LAYER_ID, applyLight, hillshadeLayer, imageryLayerProps, lightController, plainSailedOverlay, sailedEndFor, seamarkLayer,
+  speedLineOverlay, tintLayer, wakeOverlay, wholeLineLayers, wholeLineOpacity,
 } from '@/lib/replay-map-style'
 import { lightFor } from '@/lib/replay-light'
 import { SPEED_RAMP_LIGHT, nextSpeedGradient, speedProfile, speedFrameAt, speedTrack } from '@/lib/replay-speed'
@@ -13,16 +15,20 @@ const dusk = lightFor({ altitudeDeg: -3, azimuthDeg: 250 })
 function fakeMap(initial: string[] = [HILLSHADE_LAYER_ID, WORLD_IMAGERY_LAYER_ID]) {
   const layers = new Set(initial)
   const paint = new Map<string, unknown>()
+  // A layer is the same object each time it is asked for, until it is added again.
+  const objects = new Map<string, object>()
   const handlers: Record<string, Set<() => void>> = {}
   return {
     layers,
+    objects,
+    paint,
     handlers,
     emit: (type: string) => handlers[type]?.forEach((f) => f()),
     setSky: vi.fn(),
     setLight: vi.fn(),
     setPaintProperty: vi.fn((layer: string, name: string, value: unknown) => { paint.set(`${layer}/${name}`, value) }),
     getPaintProperty: (layer: string, name: string) => paint.get(`${layer}/${name}`),
-    getLayer: (id: string) => (layers.has(id) ? {} : undefined),
+    getLayer: (id: string) => (layers.has(id) ? (objects.get(id) ?? objects.set(id, {}).get(id)) : undefined),
     on: (type: string, f: () => void) => { (handlers[type] ??= new Set()).add(f) },
     off: (type: string, f: () => void) => { handlers[type]?.delete(f) },
   }
@@ -184,5 +190,94 @@ describe('the layers', () => {
     expect(o.layers[0].paint['line-width']).toBeGreaterThan(3.5)
     expect(o.layers[0].paint['line-gradient']).toBe(f.wake!.gradient)
     expect(o.source.lineMetrics).toBe(true)
+  })
+})
+
+describe('lightController', () => {
+  const night = lightFor({ altitudeDeg: -30, azimuthDeg: 10 })
+
+  it('moves from one light to the next in place, without going back to the defaults between', () => {
+    const map = fakeMap()
+    const c = lightController(map, scene)
+    c.set(dusk)
+    c.set(night)
+    expect(map.setLight.mock.calls.map((x) => x[0])).toEqual([dusk.light, night.light])
+    expect(map.setSky.mock.calls.map((x) => x[0])).toEqual([dusk.sky, night.sky])
+  })
+
+  it('does nothing for the light it already has', () => {
+    const map = fakeMap()
+    const c = lightController(map, scene)
+    c.set(dusk)
+    map.setLight.mockClear()
+    map.setSky.mockClear()
+    c.set(dusk)
+    expect(map.setLight).not.toHaveBeenCalled()
+    expect(map.setSky).not.toHaveBeenCalled()
+  })
+
+  it('puts the defaults back when the light goes, and again on stop only if there is one', () => {
+    const map = fakeMap()
+    const c = lightController(map, scene)
+    c.set(dusk)
+    c.set(null)
+    expect(map.setLight).toHaveBeenLastCalledWith(expect.objectContaining({ anchor: 'viewport' }))
+    map.setLight.mockClear()
+    c.stop()
+    expect(map.setLight).not.toHaveBeenCalled()
+  })
+
+  it('leaves the imagery and the relief alone while other layers change, and repaints them when they are re-added', () => {
+    const map = fakeMap()
+    const c = lightController(map, scene)
+    c.set(dusk)
+    map.setPaintProperty.mockClear()
+    // Layers other than those two come and go; styledata fires for each.
+    map.layers.add('somewhere-else')
+    for (let i = 0; i < 5; i++) map.emit('styledata')
+    expect(map.setPaintProperty).not.toHaveBeenCalled()
+    // The style replaces the imagery layer.
+    map.layers.delete(WORLD_IMAGERY_LAYER_ID)
+    map.objects.delete(WORLD_IMAGERY_LAYER_ID)
+    map.paint.clear()
+    map.layers.add(WORLD_IMAGERY_LAYER_ID)
+    map.emit('styledata')
+    expect(map.setPaintProperty).toHaveBeenCalledWith(WORLD_IMAGERY_LAYER_ID, 'raster-brightness-max', dusk.raster['raster-brightness-max'])
+  })
+})
+
+describe('wholeLineOpacity', () => {
+  it('dims the road ahead while the sailed part is drawn over it', () => {
+    expect(wholeLineOpacity(true, true)).toEqual({ line: 0.4, casing: 0.35 })
+    expect(wholeLineOpacity(true, false)).toEqual({ line: 0.4, casing: 0.35 })
+  })
+  it('is bright for a passage the replay has begun, and mid for one it has not', () => {
+    expect(wholeLineOpacity(false, true)).toEqual({ line: 0.95, casing: 0.95 })
+    expect(wholeLineOpacity(false, false)).toEqual({ line: 0.45, casing: 0.5 })
+  })
+})
+
+describe('sailedEndFor', () => {
+  const end = { lat: -20, lon: 149 }
+  it('ends the line on the boat while the replay is inside the piece', () => {
+    expect(sailedEndFor({ at: 150, end }, { from: 100, to: 200 })).toBe(end)
+    expect(sailedEndFor({ at: 100, end }, { from: 100, to: 200 })).toBe(end)
+    expect(sailedEndFor({ at: 200, end }, { from: 100, to: 200 })).toBe(end)
+  })
+  it('leaves it to the fixes outside the piece, or with no boat', () => {
+    expect(sailedEndFor({ at: 99, end }, { from: 100, to: 200 })).toBeUndefined()
+    expect(sailedEndFor({ at: 201, end }, { from: 100, to: 200 })).toBeUndefined()
+    expect(sailedEndFor({ at: 150 }, { from: 100, to: 200 })).toBeUndefined()
+  })
+})
+
+describe('the base raster stack', () => {
+  it('draws the sea marks at 0.85', () => {
+    expect(seamarkLayer()).toMatchObject({ id: SEAMARK_LAYER_ID, type: 'raster', paint: { 'raster-opacity': 0.85 } })
+  })
+  it('tucks the relief and the imagery under the sea marks', () => {
+    expect(hillshadeLayer()).toMatchObject({ id: HILLSHADE_LAYER_ID, beforeId: SEAMARK_LAYER_ID, paint: hillshadePaint })
+    expect(imageryLayerProps()).toMatchObject({ beforeId: SEAMARK_LAYER_ID, minzoom: 9 })
+    expect(imageryLayerProps().opacity).toEqual(['interpolate', ['linear'], ['zoom'], 9, 0, 10, 1])
   })
 })

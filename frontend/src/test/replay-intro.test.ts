@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { Camera } from '@/lib/replay-camera'
-import { INTRO_MS, INTRO_START_ZOOM, MERCATOR, defaultEasing, introProjectionAt, makeIntroPath } from '@/lib/replay-intro'
+import { INTRO_MS, INTRO_START_ZOOM, MERCATOR, defaultEasing, introProjectionAt, introStartCamera, makeIntroPath } from '@/lib/replay-intro'
 
 const introCameraAt = (f: Camera, t: Camera, ms: number) => makeIntroPath(f, t)(ms)
 
@@ -89,5 +89,14 @@ describe('the globe', () => {
     for (const p of [introProjectionAt(to, INTRO_MS), introProjectionAt(to, INTRO_MS + 500), introProjectionAt({ ...to, zoom: 0 }, 0), introProjectionAt(to, 0, 0)]) {
       expect(p).toEqual({ projection: MERCATOR, flatAtZoom: null })
     }
+  })
+})
+
+describe('introStartCamera', () => {
+  it('starts over the middle of the track, flat, with the whole earth in view', () => {
+    expect(introStartCamera([148, -21, 150, -19])).toEqual({ center: [149, -20], zoom: INTRO_START_ZOOM, pitch: 0, bearing: 0 })
+  })
+  it('keeps the bearing it is given', () => {
+    expect(introStartCamera([148, -21, 150, -19], 30).bearing).toBe(30)
   })
 })

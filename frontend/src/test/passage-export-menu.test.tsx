@@ -19,6 +19,8 @@ const signsHook = vi.hoisted(() => ({ value: { signs: [] as unknown[], loading: 
 vi.mock('@/hooks/use-replay-signs', () => ({ useReplaySigns: () => signsHook.value }))
 const photos = vi.hoisted(() => ({ prepare: vi.fn<(signs: { id: string }[], o?: { onProgress?: (d: number, t: number) => void }) => Promise<Map<string, string>>>() }))
 vi.mock('@/lib/passage-export-photos', () => ({ prepareSignPhotos: photos.prepare }))
+const video = vi.hoisted(() => ({ renderPassageVideo: vi.fn<(input: Record<string, unknown>) => Promise<Blob>>(() => new Promise(() => {})) }))
+vi.mock('@/lib/passage-video/render', () => video)
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), loading: vi.fn(), dismiss: vi.fn() }))
 vi.mock('sonner', () => ({ toast }))
 
@@ -400,6 +402,48 @@ describe('PassageExportMenu, cinematic card', () => {
       openMenu()
       expect((await screen.findByRole('menuitem', { name: 'Copy blog embed' })).hasAttribute('data-disabled')).toBe(true)
       expect(screen.queryByTestId('card-size')).toBeNull()
+    })
+  })
+
+  describe('the Video item', () => {
+    it('makes the video of the replay as it is set: its length, the map, 3D and the signs', async () => {
+      signsHook.value = { signs: SIGNS, loading: false, error: null }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" isDarkTheme replayLength="30s" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Video' }))
+      fireEvent.click(await screen.findByRole('button', { name: /Portrait/ }))
+      fireEvent.click(screen.getByRole('button', { name: 'Make video' }))
+      await vi.waitFor(() => expect(video.renderPassageVideo).toHaveBeenCalled())
+      const input = video.renderPassageVideo.mock.calls[0][0]
+      expect(input).toMatchObject({ orientation: 'portrait', lengthS: 30, isDarkTheme: true, satellite: true, hull: { type: 'sail_mono' } })
+      expect((input.summary as { title: string }).title).toBe('Out and back')
+      expect(input.signs).toBe(SIGNS)
+    })
+
+    it('is in the menu, and opens the choice of shape', async () => {
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Video' }))
+      expect(await screen.findByRole('button', { name: 'Make video' })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Landscape/ })).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Portrait/ })).toBeTruthy()
+    })
+
+    it('is held back while the signs are being read, and does not open when the camera shots could not be read', async () => {
+      shotsHook.value = { shots: [], loading: false, error: 'HTTP 500' }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Video' }))
+      expect(toast.error).toHaveBeenCalledWith('Could not read the camera shots', expect.anything())
+      expect(screen.queryByRole('button', { name: 'Make video' })).toBeNull()
+    })
+
+    it('does not open when the signs could not be read', async () => {
+      signsHook.value = { signs: [], loading: false, error: 'HTTP 500' }
+      render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+      openMenu()
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Video' }))
+      expect(toast.error).toHaveBeenCalledWith('Could not read the signs', expect.anything())
     })
   })
 })

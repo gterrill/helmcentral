@@ -16,6 +16,10 @@ import { norm360, shortTurn, type Camera } from '@/lib/replay-camera'
 
 /** The zoom the opening move starts from: the whole earth in view. */
 export const INTRO_START_ZOOM = 1.5
+/** Where the opening move starts: over the middle of the track, the whole earth in view. */
+export const introStartCamera = (bounds: readonly [number, number, number, number], bearing = 0): Camera => ({
+  center: [(bounds[0] + bounds[2]) / 2, (bounds[1] + bounds[3]) / 2], zoom: INTRO_START_ZOOM, pitch: 0, bearing,
+})
 /** How long the opening move takes. */
 export const INTRO_MS = 3200
 

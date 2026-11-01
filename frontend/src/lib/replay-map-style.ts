@@ -17,7 +17,8 @@ import type { ExpressionSpecification } from 'maplibre-gl'
 import type { ReplayLight } from '@/lib/replay-light'
 import type { SpeedLine, SpeedWake } from '@/lib/replay-speed'
 import { HILLSHADE_LAYER_ID, hillshadePaint, skyFor } from '@/lib/terrain'
-import { SAT_HANDOFF_END_ZOOM, SAT_HANDOFF_START_ZOOM, WORLD_IMAGERY_LAYER_ID } from '@/lib/world-imagery'
+import { SEAMARK_LAYER_ID, SEAMARK_OPACITY } from '@/lib/basemap'
+import { SAT_HANDOFF_END_ZOOM, SAT_HANDOFF_START_ZOOM, WORLD_IMAGERY_LAYER_ID, WORLD_IMAGERY_OPACITY_EXPRESSION } from '@/lib/world-imagery'
 
 export const TINT_LAYER_ID = 'replay-tint'
 export const WAKE_SOURCE_ID = 'replay-wake'
@@ -64,17 +65,30 @@ function paint(map: StyledMap, layer: string, values: Record<string, unknown>) {
   }
 }
 
+/** What `lightController` hands back. */
+export interface LightController {
+  /** Moves the map to this light, in place: nothing is put back to the defaults between two lights. */
+  set(light: ReplayLight | null): void
+  /** Stops following the style, and puts back what the light changed. */
+  stop(): void
+}
+
 /** Puts the sky, the map light, the satellite dimming and the relief shading
- * for `light` on the map. The sky shows only over the tilted terrain, and
- * follows the app theme while there is no light; the light, the imagery and
- * the shading follow the sun. A new map style (light to dark) drops them: the
- * sky and light are put back on `style.load`, and the imagery and relief,
- * which the style adds a moment after that, whenever the style changes and
- * they are not as they should be. Returns the way to stop, which also puts
- * everything the light changed back to the map's defaults, so a night does
- * not outlast the replay. */
-export function applyLight(map: StyledMap, light: ReplayLight | null, scene: LightScene): () => void {
+ * for a light on the map, and keeps them there. The sky shows only over the
+ * tilted terrain, and follows the app theme while there is no light; the
+ * light, the imagery and the shading follow the sun. A new map style (light
+ * to dark) drops them: the sky and light are put back on `style.load`, and
+ * the imagery and relief, which the style adds a moment after that, when
+ * their layers turn up again. `stop` puts everything the light changed back
+ * to the map's defaults, so a night does not outlast the replay. */
+export function lightController(map: StyledMap, scene: LightScene): LightController {
+  let light: ReplayLight | null = null
+  let started = false
+  let imagery: unknown = null
+  let hillshade: unknown = null
   const layers = () => {
+    imagery = map.getLayer(WORLD_IMAGERY_LAYER_ID)
+    hillshade = map.getLayer(HILLSHADE_LAYER_ID)
     if (!light) return
     if (scene.satellite) paint(map, WORLD_IMAGERY_LAYER_ID, light.raster)
     if (scene.terrain) {
@@ -92,14 +106,12 @@ export function applyLight(map: StyledMap, light: ReplayLight | null, scene: Lig
     map.setLight(light.light)
     layers()
   }
-  apply()
-  map.on('style.load', apply)
-  // The layers a style adds after it has loaded are painted as they appear.
-  if (light) map.on('styledata', layers)
-  return () => {
-    map.off('style.load', apply)
-    map.off('styledata', layers)
-    if (!light) return
+  // The layers a style adds after it has loaded are painted as they appear;
+  // every other change to the style leaves them as they are.
+  const onStyleData = () => {
+    if (light && (map.getLayer(WORLD_IMAGERY_LAYER_ID) !== imagery || map.getLayer(HILLSHADE_LAYER_ID) !== hillshade)) layers()
+  }
+  const restore = () => {
     try {
       map.setLight(DEFAULT_LIGHT)
       paint(map, WORLD_IMAGERY_LAYER_ID, IMAGERY_DEFAULTS)
@@ -108,6 +120,39 @@ export function applyLight(map: StyledMap, light: ReplayLight | null, scene: Lig
       // The map is being taken down with the page; there is nothing left to put back.
     }
   }
+  // Followed only while there is a light to keep on the layers.
+  let following = false
+  const follow = (on: boolean) => {
+    if (on === following) return
+    following = on
+    if (on) map.on('styledata', onStyleData)
+    else map.off('styledata', onStyleData)
+  }
+  map.on('style.load', apply)
+  return {
+    set(next) {
+      if (started && next === light) return
+      started = true
+      const was = light
+      light = next
+      apply()
+      follow(next !== null)
+      if (was && !next) restore()
+    },
+    stop() {
+      map.off('style.load', apply)
+      follow(false)
+      if (light) restore()
+      light = null
+    },
+  }
+}
+
+/** `lightController` for a light that stays: set once, and the way to stop. */
+export function applyLight(map: StyledMap, light: ReplayLight | null, scene: LightScene): () => void {
+  const controller = lightController(map, scene)
+  controller.set(light)
+  return controller.stop
 }
 
 // ── the layers ───────────────────────────────────────────────────────────
@@ -206,3 +251,35 @@ export function wholeLineLayers(pieceKey: string, colour: string, opacity: numbe
     ...(satellite ? [casingLayer(`passage-casing-${pieceKey}`, lineId, casingOpacity)] : []),
   ]
 }
+
+/** How bright the faint whole-track line and its casing are. While replaying
+ * it is the dim road ahead of the sailed part (`progressive`); once the
+ * replay has begun the passage it is bright; before that it is mid. */
+export function wholeLineOpacity(progressive: boolean, played: boolean): { line: number; casing: number } {
+  if (progressive) return { line: 0.4, casing: 0.35 }
+  return played ? { line: 0.95, casing: 0.95 } : { line: 0.45, casing: 0.5 }
+}
+
+/** The end point the sailed line is drawn to: the boat's own position, but
+ * only while the replay is inside this piece of the track. */
+export function sailedEndFor(sailed: { at: number; end?: { lat: number; lon: number } }, piece: { from: number; to: number }): { lat: number; lon: number } | undefined {
+  return sailed.end && sailed.at >= piece.from && sailed.at <= piece.to ? sailed.end : undefined
+}
+
+// ── the base raster stack ────────────────────────────────────────────────
+// Bottom to top: the base map, the sea marks, then the relief and the
+// imagery tucked under the sea marks, so toggling either mid-session cannot
+// land on top of them.
+
+/** The sea marks layer, on the source `SEAMARK_SOURCE_ID`. */
+export const seamarkLayer = () => ({ id: SEAMARK_LAYER_ID, type: 'raster' as const, paint: { 'raster-opacity': SEAMARK_OPACITY } })
+
+/** The relief shading, on the terrain source. */
+export const hillshadeLayer = () => ({ id: HILLSHADE_LAYER_ID, type: 'hillshade' as const, beforeId: SEAMARK_LAYER_ID, paint: hillshadePaint })
+
+/** What the imagery layer is given: where it goes, from which zoom, and how it fades in. */
+export const imageryLayerProps = () => ({
+  beforeId: SEAMARK_LAYER_ID,
+  minzoom: SAT_HANDOFF_START_ZOOM,
+  opacity: [...WORLD_IMAGERY_OPACITY_EXPRESSION] as unknown[],
+})

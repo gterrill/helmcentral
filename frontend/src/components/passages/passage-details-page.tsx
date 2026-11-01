@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
+import { DEFAULT_REPLAY_LENGTH, type ReplaySpeedId } from '@/hooks/use-replay'
 import type { DistanceUnits } from '@/config/app-config'
 import type { PassagesFilter } from '@/lib/app-location'
 import { CruiseEditPanel } from '@/components/passages/cruise-edit-panel'
@@ -122,6 +123,7 @@ function pagerTarget(p: PassageSummary | null, open: (id: string) => void) {
 function SinglePassage({ id, units, canWrite, isDarkTheme, list, filter, cruises, onBack, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
   const { passage, loading, error } = usePassageDetail(id)
   const cursorRef = useRef<ReplayCursor | null>(null)
+  const [replayLength, setReplayLength] = useState<ReplaySpeedId>(DEFAULT_REPLAY_LENGTH)
   const index = list.findIndex((p) => p.id === id)
   const neighbours = passageNeighbours(list, id, filter)
   return (
@@ -153,9 +155,9 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, filter, cruises
           <p className="text-sm text-muted-foreground">{passage.from_name || passage.to_name ? `${passageRoute(passage)} · ` : ''}{formatLocalDate(passage.start, passage.timezone)}</p>
           <PassagePlans passageId={passage.id} plans={passage.plannedWithMate} error={passage.plannedWithMateError} canWrite={canWrite} />
           <div className="flex justify-end">
-            <PassageExportMenu kind="passage" title={passageHeading(passage)} passages={[passage]} units={units} />
+            <PassageExportMenu kind="passage" title={passageHeading(passage)} passages={[passage]} units={units} isDarkTheme={isDarkTheme} replayLength={replayLength} />
           </div>
-          <ReplayPanel passages={[passage]} isDarkTheme={isDarkTheme} cursorRef={cursorRef} />
+          <ReplayPanel passages={[passage]} isDarkTheme={isDarkTheme} length={replayLength} onLengthChange={setReplayLength} cursorRef={cursorRef} />
           <PassageStatsStrip stats={passage.stats} units={units} />
         </DetailsLayout>
       )}
@@ -167,6 +169,7 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, filter, cruises
 
 function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
   const { data, loading, error } = useCruiseDetails(id)
+  const [replayLength, setReplayLength] = useState<ReplaySpeedId>(DEFAULT_REPLAY_LENGTH)
   const visible = (data?.passages ?? []).filter((p) => !p.hidden)
   const { passages, error: tracksError } = usePassageDetails(visible.map((p) => p.id))
   const timeZone = firstTimeZone(passages)
@@ -203,9 +206,9 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
           {tracksError ? <ErrorLine message={tracksError} /> : (
             <>
               <div className="flex justify-end">
-                <PassageExportMenu kind="cruise" title={data.cruise.name} passages={passages} cruiseStats={data.stats} units={units} />
+                <PassageExportMenu kind="cruise" title={data.cruise.name} passages={passages} cruiseStats={data.stats} units={units} isDarkTheme={isDarkTheme} replayLength={replayLength} />
               </div>
-              <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} />
+              <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} length={replayLength} onLengthChange={setReplayLength} />
             </>
           )}
           <CruiseStatsPanel stats={data.stats} units={units} timeZone={timeZone} canWrite={canWrite} onLabelRise={(r, l) => void labelRise(r, l)} />
@@ -219,6 +222,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
 
 function CombinedPassages({ ids, units, canWrite, isDarkTheme, list, onBack, onOpenPassage, onOpenCruise }: PassageDetailsPageProps & { ids: string[] }) {
   const { passages, loading, error } = usePassageDetails(ids)
+  const [replayLength, setReplayLength] = useState<ReplaySpeedId>(DEFAULT_REPLAY_LENGTH)
   const [saveOpen, setSaveOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const ordered = [...passages].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
@@ -257,9 +261,9 @@ function CombinedPassages({ ids, units, canWrite, isDarkTheme, list, onBack, onO
         >
           <div className="flex flex-wrap justify-end gap-2">
             {canWrite && <MergePassagesButton selected={ordered} all={list} onMerged={onOpenPassage} />}
-            <PassageExportMenu kind="combined" title={combinedTitle(ordered)} passages={ordered} units={units} />
+            <PassageExportMenu kind="combined" title={combinedTitle(ordered)} passages={ordered} units={units} isDarkTheme={isDarkTheme} replayLength={replayLength} />
           </div>
-          <ReplayPanel passages={ordered} isDarkTheme={isDarkTheme} />
+          <ReplayPanel passages={ordered} isDarkTheme={isDarkTheme} length={replayLength} onLengthChange={setReplayLength} />
         </DetailsLayout>
       )}
       <NameCruiseDialog

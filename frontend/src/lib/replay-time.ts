@@ -23,7 +23,7 @@ export const MOMENT_TOTAL_S = MOMENT_GROW_S + MOMENT_HOLD_S + MOMENT_SHRINK_S
 /** How much of the frame the photo fills when it is grown (each way). */
 export const MOMENT_FRAME_FRACTION = 0.7
 /** The slow zoom across the hold. */
-const MOMENT_KEN_BURNS = 1.06
+export const MOMENT_KEN_BURNS = 1.06
 /** The photo's shape: the same 4 by 3 the sign's card shows it in. */
 export const PHOTO_ASPECT = 4 / 3
 
@@ -176,3 +176,7 @@ export function buildReplayTime({ total, lengthS, spans, moments }: ReplayTimeIn
     },
   }
 }
+
+/** The passages the replay has begun by `clock` (timeline seconds), as the page marks them. */
+export const playedIds = (timeline: { entries: readonly { id: string; offset: number }[] }, clock: number): ReadonlySet<string> =>
+  new Set(timeline.entries.filter((e) => e.offset <= clock).map((e) => e.id))

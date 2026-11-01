@@ -1,4 +1,4 @@
-# ADR 0246: Photo moments hold the replay
+# ADR 0248: Photo moments hold the replay
 
 ## Status
 

@@ -219,23 +219,44 @@ function noteLines(note: string): number {
   return Math.min(SIGN_NOTE_MAX_LINES, lines)
 }
 
-/** Where the photo of a sign's card is in the map, in the map's pixels: the card
- * as `placeSignCard` puts it for the sign's point, its photo inside the padding.
- * The card's height is worked out from its contents, since the page has not
- * measured it. */
-export function signCardPhotoRect(
-  sign: Pick<ReplaySign, 'note'>,
+/** The size of a sign's card in a map `containerW` wide, and of its photo. The
+ * height is worked out from the contents, since the page has not measured it:
+ * the note's lines are a guess by characters unless the caller has measured
+ * them and says how many (`measuredNoteLines`). */
+export function signCardBox(sign: Pick<ReplaySign, 'note' | 'photo_url'>, containerW: number, measuredNoteLines?: number): { w: number; h: number; photoW: number; photoH: number } {
+  const w = Math.min(sign.photo_url != null ? SIGN_CARD_PHOTO_W_PX : SIGN_CARD_TEXT_W_PX, Math.max(0, containerW - 2 * SIGN_EDGE_MARGIN_PX))
+  const photoW = w - 2 * SIGN_CARD_PAD_PX
+  const photoH = photoW / PHOTO_ASPECT
+  const text = SIGN_TITLE_LINE_PX + (measuredNoteLines ?? noteLines(sign.note)) * SIGN_NOTE_LINE_PX
+  return { w, h: 2 * SIGN_CARD_PAD_PX + (sign.photo_url != null ? photoH + SIGN_CARD_GAP_PX : 0) + text, photoW, photoH }
+}
+
+/** Where a sign's card is in the map, in the map's pixels: as `placeSignCard`
+ * puts it for the sign's point. */
+export function signCardRect(
+  sign: Pick<ReplaySign, 'note' | 'photo_url'>,
   point: { x: number; y: number },
   container: { w: number; h: number },
   lift: number,
-): { x: number; y: number; w: number; h: number } {
-  const w = Math.min(SIGN_CARD_PHOTO_W_PX, Math.max(0, container.w - 2 * SIGN_EDGE_MARGIN_PX))
-  const photoW = w - 2 * SIGN_CARD_PAD_PX
-  const photoH = photoW / PHOTO_ASPECT
-  const text = SIGN_TITLE_LINE_PX + noteLines(sign.note) * SIGN_NOTE_LINE_PX
-  const h = 2 * SIGN_CARD_PAD_PX + photoH + SIGN_CARD_GAP_PX + text
+  measuredNoteLines?: number,
+): { x: number; y: number; w: number; h: number; below: boolean; leader: number } {
+  const { w, h } = signCardBox(sign, container.w, measuredNoteLines)
   const place = placeSignCard({ point, container, card: { w, h }, lift })
   const x = point.x - w / 2 + place.dx
   const y = place.below ? point.y + SIGN_DOT_NET_PX + place.leader : point.y - SIGN_DOT_NET_PX - place.leader - h
-  return { x: x + SIGN_CARD_PAD_PX, y: y + SIGN_CARD_PAD_PX, w: photoW, h: photoH }
+  return { x, y, w, h, below: place.below, leader: place.leader }
+}
+
+/** Where the photo of a sign's card is in the map, in the map's pixels: the
+ * card inside which it sits, less the padding. */
+export function signCardPhotoRect(
+  sign: Pick<ReplaySign, 'note' | 'photo_url'>,
+  point: { x: number; y: number },
+  container: { w: number; h: number },
+  lift: number,
+  measuredNoteLines?: number,
+): { x: number; y: number; w: number; h: number } {
+  const card = signCardRect(sign, point, container, lift, measuredNoteLines)
+  const { photoW, photoH } = signCardBox(sign, container.w, measuredNoteLines)
+  return { x: card.x + SIGN_CARD_PAD_PX, y: card.y + SIGN_CARD_PAD_PX, w: photoW, h: photoH }
 }

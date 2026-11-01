@@ -31,6 +31,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Export a passage replay as a video.** **Export**, then **Video**, on a
+  passage, cruise or selection makes an MP4 of the replay as it's set: the
+  length you picked, your camera shots, the map and satellite picture, 3D, and
+  your signs with their photos, including the photo moments. It opens with the
+  fly-in from the globe and ends on a closing card with the title, dates and
+  figures. You choose landscape (1920 × 1080) or portrait (1080 × 1920). Your
+  browser makes it, one frame at a time, with a progress bar and **Cancel**,
+  and nothing is stored on the boat: you download the file, or share it on a
+  phone or tablet. If the browser can't make H.264 video, or the satellite
+  picture, the 3D land or the chart doesn't load, it stops and says so instead
+  of giving you a video with gaps.
+
 - **A sign's photo can fill the map for a moment in the passage replay.** When
   the replay reaches a sign with a photo, it holds still while the photo grows
   out of the sign's card to fill most of the map, zooms in slowly for a second
