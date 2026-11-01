@@ -230,6 +230,14 @@ a different profile yourself, it stays in force until the state next changes,
 even across a Helmcentral restart or update. Going from sailing to motoring
 counts as a change, so starting the engine puts you back on coastal.
 
+Helmcentral won't switch to a profile that can't raise an alarm, such as the
+shipped anchored profile, where every range is zero. It leaves the profile
+alone and shows a Collision Profile Not Changed warning instead. Set real
+numbers in that profile, or choose a working one yourself in the plugin. The
+warning clears by itself within about a minute of the plugin being on a
+profile that can raise alarms, and it also clears the next time the navigation
+state changes to one Helmcentral can switch to.
+
 Those numbers are yours, and the shipped harbor profile needs attention before a
 marina. It warns on any target closer than half a mile with a reported speed over
 half a knot. Alongside a pontoon every neighbour is inside half a mile. GPS

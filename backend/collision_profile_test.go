@@ -625,3 +625,116 @@ func TestCollisionProfileSyncerRetriesARefusalAfterRestart(t *testing.T) {
 		t.Fatalf("the adopted refusal must clear, got %+v", cleared)
 	}
 }
+
+// standingRefusalSyncer anchors the boat on the shipped, silent anchor profile
+// so a refusal stands, then lets a test change what the plugin reports and
+// counts how often the profiles are read.
+func standingRefusalSyncer(t *testing.T) (syncer *collisionProfileSyncer, setCurrent func(string), setLoadErr func(error), loads *int) {
+	t.Helper()
+	current, profiles, err := parseCollisionProfiles([]byte(collisionProfilesJSON))
+	if err != nil {
+		t.Fatalf("parseCollisionProfiles: %v", err)
+	}
+	var loadErr error
+	count := 0
+	syncer = &collisionProfileSyncer{
+		snapshot: snapshotInState("anchored"),
+		load: func() (string, map[string]collisionProfile, error) {
+			count++
+			if loadErr != nil {
+				return "", nil, loadErr
+			}
+			return current, profiles, nil
+		},
+		save: func(string) error {
+			t.Fatal("polling a standing refusal must never write to the plugin")
+			return nil
+		},
+	}
+	if events := syncer.check(alarmNow); len(events) != 1 || events[0].Kind != alarmEventRaised {
+		t.Fatalf("expected a raised refusal, got %+v", events)
+	}
+	count = 0
+	return syncer, func(name string) { current = name }, func(err error) { loadErr = err }, &count
+}
+
+// The operator picks a working profile by hand while still anchored.
+// navigation.state never changes, so only the poll can see it.
+func TestCollisionProfileSyncerClearsAStandingRefusalWhenTheOperatorPicksAWorkingProfile(t *testing.T) {
+	syncer, setCurrent, _, loads := standingRefusalSyncer(t)
+	stored := []string{}
+	syncer.persistState = func(state string) error { stored = append(stored, state); return nil }
+
+	setCurrent("harbor")
+	events := syncer.check(alarmNow.Add(collisionProfilePollInterval))
+	if *loads != 1 {
+		t.Fatalf("expected one poll, got %d loads", *loads)
+	}
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("the refusal must clear, got %+v", events)
+	}
+	if got := syncer.active(); len(got) != 0 {
+		t.Fatalf("no alarm should stand, got %+v", got)
+	}
+	// A restart must not replay the transition and refuse again.
+	if len(stored) != 1 || stored[0] != "anchored" {
+		t.Fatalf("the settled state must be persisted, got %v", stored)
+	}
+}
+
+func TestCollisionProfileSyncerDoesNotPollBeforeTheIntervalElapses(t *testing.T) {
+	syncer, setCurrent, _, loads := standingRefusalSyncer(t)
+	setCurrent("harbor")
+
+	if events := syncer.check(alarmNow.Add(collisionProfilePollInterval - time.Second)); len(events) != 0 {
+		t.Fatalf("expected no event, got %+v", events)
+	}
+	if *loads != 0 {
+		t.Fatalf("expected no load before the interval, got %d", *loads)
+	}
+}
+
+func TestCollisionProfileSyncerKeepsTheRefusalWhileTheCurrentProfileCannotFire(t *testing.T) {
+	for _, current := range []string{"anchor", "nonesuch"} {
+		syncer, setCurrent, _, loads := standingRefusalSyncer(t)
+		setCurrent(current)
+
+		if events := syncer.check(alarmNow.Add(collisionProfilePollInterval)); len(events) != 0 {
+			t.Fatalf("current %q: expected no event, got %+v", current, events)
+		}
+		if *loads != 1 || len(syncer.active()) != 1 {
+			t.Fatalf("current %q: refusal must stand after one poll, loads %d", current, *loads)
+		}
+	}
+}
+
+// A failed poll is not a pass: the refusal stays, and the next poll waits a
+// full interval rather than hammering SignalK.
+func TestCollisionProfileSyncerKeepsTheRefusalWhenThePollFails(t *testing.T) {
+	syncer, setCurrent, setLoadErr, loads := standingRefusalSyncer(t)
+	setCurrent("harbor")
+	setLoadErr(errors.New("signalk returned status 502"))
+
+	if events := syncer.check(alarmNow.Add(collisionProfilePollInterval)); len(events) != 0 {
+		t.Fatalf("expected no event, got %+v", events)
+	}
+	if len(syncer.active()) != 1 {
+		t.Fatal("a failed poll must leave the refusal standing")
+	}
+	syncer.check(alarmNow.Add(collisionProfilePollInterval + time.Second))
+	if *loads != 1 {
+		t.Fatalf("a failed poll must not be retried every tick, got %d loads", *loads)
+	}
+}
+
+func TestCollisionProfileSyncerDoesNotPollWhenNothingIsRefused(t *testing.T) {
+	syncer, _, _, loads := standingRefusalSyncer(t)
+	syncer.resolve()
+
+	if events := syncer.check(alarmNow.Add(time.Hour)); len(events) != 0 {
+		t.Fatalf("expected no event, got %+v", events)
+	}
+	if *loads != 0 {
+		t.Fatalf("nothing is wrong, so nothing should be read, got %d loads", *loads)
+	}
+}

@@ -57,6 +57,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Fixed
 
+- **The Collision Profile Not Changed warning clears when you pick a working
+  profile yourself.** If the boat was anchored and the anchored profile couldn't
+  raise alarms, the warning stayed up even after you switched the plugin to a
+  profile that could, until the boat next changed state. It now checks about
+  once a minute and clears once the plugin is on a profile that can raise
+  alarms. If Helmcentral can't read the profiles, the warning stays up. See
+  [Alarms](docs/features/alarms.md).
 - **The engine card fits a short, wide tile whole.** On the wall display the
   bottom row of the card, with the battery, alternator, gearbox and exhaust,
   ran off the bottom of the tile and was cut off. The card now scales down to

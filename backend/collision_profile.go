@@ -15,6 +15,12 @@ const (
 	collisionProfilesLoadPath = "/plugins/" + collisionPluginID + "/loadCollisionProfiles"
 	collisionProfilesSavePath = "/plugins/" + collisionPluginID + "/saveCollisionProfiles"
 
+	// collisionProfilePollInterval is how often a standing refusal re-reads the
+	// plugin's profiles to see whether the operator has fixed it by hand. It is
+	// slow on purpose: the alarm is a warning, not a race, and the read is an
+	// authenticated call into another project's server.
+	collisionProfilePollInterval = time.Minute
+
 	collisionProfileRuleID = "collision-profile"
 	collisionProfileLabel  = "Collision Profile Not Changed"
 
@@ -140,6 +146,11 @@ type collisionProfileSyncer struct {
 	// checkedAt is the time of the check in progress, used as the raised time.
 	checkedAt time.Time
 
+	// polledAt is when a standing refusal last re-read the profiles, kept so
+	// the poll waits a full interval after a failed read too. Only check
+	// touches it.
+	polledAt time.Time
+
 	// refusedMessage is the card body of the standing refusal, so a later
 	// refusal with different words updates the card instead of leaving it stale.
 	refusedMessage string
@@ -217,8 +228,11 @@ func (s *collisionProfileSyncer) active() []alarmStatus {
 func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 	s.checkedAt = now
 	state := vesselNavigationState(s.snapshot)
-	if state == "" || state == s.lastState {
+	if state == "" {
 		return nil
+	}
+	if state == s.lastState {
+		return s.pollStandingRefusal(now, state)
 	}
 	// Recorded before the work below, so a refusal is reported once for the
 	// transition rather than retried on every tick for as long as it lasts.
@@ -265,6 +279,51 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 	}
 
 	log.Printf("collision profile: vessel is %s, selected %q", state, want)
+	s.remember(state)
+	return s.resolve()
+}
+
+// pollStandingRefusal clears a refusal the operator has fixed by hand.
+//
+// The syncer acts only on a change of navigation.state (ADR 0058), so a boat
+// that stays anchored never reloads the profiles. If the operator then picks a
+// working profile in the plugin, nothing would ever notice, and the warning
+// would sit there describing a problem that is gone. While a refusal stands,
+// and the state has not changed, the profiles are re-read about once a minute.
+//
+// This only reads. It never selects or saves a profile, and it does not try to
+// bring the plugin back in line with the mapping: the manual choice stands.
+// A failed read is logged and leaves the warning up, since a warning that
+// clears on the strength of data we could not read would be a fallback.
+func (s *collisionProfileSyncer) pollStandingRefusal(now time.Time, state string) []alarmEvent {
+	s.mu.Lock()
+	standing, since := s.standing, s.refusedAt
+	s.mu.Unlock()
+	if !standing {
+		return nil
+	}
+	if s.polledAt.After(since) {
+		since = s.polledAt
+	}
+	if now.Sub(since) < collisionProfilePollInterval {
+		return nil
+	}
+	s.polledAt = now
+
+	current, profiles, err := s.load()
+	if err != nil {
+		log.Printf("collision profile: could not re-read the profiles to check the refusal: %v", err)
+		return nil
+	}
+	if profile, defined := profiles[current]; !defined || !profile.canFire() {
+		return nil
+	}
+
+	log.Printf("collision profile: the plugin is on %q, which can raise alarms, so the refusal is cleared", current)
+	// The refusal path deliberately left this state unsaved so a restart would
+	// retry it. Now that it is settled by hand, save it: a restart would
+	// otherwise replay the transition and refuse again on the same silent
+	// profile.
 	s.remember(state)
 	return s.resolve()
 }
