@@ -101,6 +101,10 @@ describe('moorings and restrictions', () => {
     expect(park.tone).toBe('muted')
     expect(park.detail).toContain('check the zoning')
     expect(park.detail).not.toMatch(/prohibited/)
+    // A stored card may still carry the raw protect_class list.
+    const coded = restrictedLine({ ...base, source: 'protected_area', restriction: 'Marine Park', category: '1;2;4;6', prohibitsAnchoring: false, distanceM: null }, 'metric')
+    expect(coded.detail).not.toContain('1;2;4;6')
+    expect(coded.detail).not.toMatch(/\d;\d/)
   })
 })
 

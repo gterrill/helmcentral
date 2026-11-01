@@ -75,7 +75,7 @@ function ShelterBlock({ card }: { card: AnchorageCard }) {
             <p className="text-muted-foreground">Inside {card.shelter.reefName || 'a reef'}: shelter depends on the tide.</p>
           )}
           <GradeLegend />
-          <p className="text-muted-foreground">Directions are where the wind comes from. Spoke length is the fetch up to 15 nm. An estimate from charted shoreline only.</p>
+          <p className="text-muted-foreground">Directions are where the wind comes from. Spoke length is the fetch up to 15 nm; the band outside the ring shows the grade of every direction, including the short ones. An estimate from charted shoreline only.</p>
         </div>
       </div>
     </Block>

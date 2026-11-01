@@ -5,7 +5,6 @@
       "name": "Moreton Bay Marine Park (IUCN Cat II Parts)",
       "source": "protected_area",
       "restriction": "",
-      "category": "2",
       "distance_m": null,
       "geometry": []
     },
@@ -14,7 +13,6 @@
       "name": "Moreton Bay Marine Park (IUCN Cat IV Parts)",
       "source": "protected_area",
       "restriction": "",
-      "category": "4",
       "distance_m": null,
       "geometry": []
     },
@@ -23,7 +21,6 @@
       "name": "Moreton Bay Marine Park",
       "source": "protected_area",
       "restriction": "",
-      "category": "2;4",
       "distance_m": null,
       "geometry": []
     },
@@ -32,7 +29,6 @@
       "name": "Peel Island Fish Habitat Area",
       "source": "protected_area",
       "restriction": "Fish Habitat Area (A)",
-      "category": "6",
       "distance_m": null,
       "geometry": []
     }

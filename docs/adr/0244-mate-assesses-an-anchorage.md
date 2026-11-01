@@ -195,7 +195,11 @@ top to bottom the card shows:
   length proportional to fetch up to 15 nm, and an accessible label made from the
   server's summary. Grades use theme tokens (primary for sheltered, the gauge
   amber for partial, destructive for exposed, muted for reef) and are also
-  written out as words in every badge, so colour is never the only cue.
+  written out as words in every badge, so colour is never the only cue. A thin
+  band outside the ring carries one segment per bearing, graded the same way
+  whatever the fetch, because short spokes on sheltered sides were invisible and
+  the rose read as exposure only. The ring's distance labels sit along 45 degrees
+  so they never meet the compass letters.
 - **The forecast:** three-hourly rows in the anchorage's local time (wind and
   gust in knots, the direction, the shelter badge, the waves in the operator's
   distance units) and each day's prevailing grade.
@@ -270,3 +274,18 @@ and layer order for no change in behaviour, so it is a later cleanup.
   and the tags do not say.
 - **Drawing the blocking shoreline on the map.** It is thousands of segments, and
   the rays already show where they stop.
+
+## Amendment: one card per position per reply
+
+Mate sometimes calls the tool with a guessed arrival, then again with the right
+one, and both cards showed, the first contradicting the answer. The run now
+applies the rule where it adds a tool call's cards to the reply: an anchorage
+card within 10 m of one the reply already holds replaces it. The run takes cards
+in the model's call order, within a round and across rounds, so the later call
+in the model's list wins whatever order the calls finished in. The card carries
+its position beside the payload, so nothing re-parses the JSON. Cards are saved
+with the reply and never streamed per round, so nothing needs withdrawing on
+screen. Other card kinds and different positions are untouched.
+The `protect_class` code list on a marine park (such as `1;2;4;6`) is no longer
+passed on as its category: the plugin stopped sending it, the host drops it from
+any plugin version's answer, and the card ignores it on stored cards.

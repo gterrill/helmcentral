@@ -36,6 +36,46 @@ describe('AssistantAnchorageCard', () => {
     expect(arcs).toHaveLength(card.shelter.arcs.length)
   })
 
+  it('draws a grade band for all 36 bearings, even where the fetch is too short to see', () => {
+    const card = anchorageCard()
+    card.shelter.bearings = card.shelter.bearings.map((b, i) => (i % 2 === 0 ? { ...b, open: false, fetchNm: 0.1, grade: 'sheltered' } : { ...b, open: true, fetchNm: 15, grade: 'exposed' }))
+    render(<AssistantAnchorageCard card={card} />)
+    const rose = screen.getByTestId('anchorage-rose')
+    const band = rose.querySelectorAll('path[data-band-grade]')
+    expect(band).toHaveLength(36)
+    const sheltered = rose.querySelector('path[data-band-grade="sheltered"]')
+    expect(sheltered?.getAttribute('fill')).toBe('hsl(var(--primary))')
+    expect(rose.querySelector('path[data-band-grade="exposed"]')?.getAttribute('fill')).toBe('hsl(var(--destructive))')
+    expect(screen.getByText(/band outside the ring/i)).toBeInTheDocument()
+  })
+
+  it('keeps the ring distance labels clear of the compass letters', () => {
+    render(<AssistantAnchorageCard card={anchorageCard()} />)
+    const rose = screen.getByTestId('anchorage-rose')
+    const at = (el: Element) => ({ x: Number(el.getAttribute('x')), y: Number(el.getAttribute('y')) })
+    const compass = ['N', 'E', 'S', 'W'].map((l) => at(Array.from(rose.querySelectorAll('text')).find((t) => t.textContent === l)!))
+    const rings = Array.from(rose.querySelectorAll('text[data-ring-label]'))
+    expect(rings).toHaveLength(2)
+    for (const ring of rings) {
+      const r = at(ring)
+      for (const c of compass) expect(Math.hypot(r.x - c.x, r.y - c.y)).toBeGreaterThan(25)
+    }
+  })
+
+  it('draws the ring labels after the spokes, with a halo, so a long spoke does not hide them', () => {
+    render(<AssistantAnchorageCard card={anchorageCard()} />)
+    const rose = screen.getByTestId('anchorage-rose')
+    const all = Array.from(rose.querySelectorAll('*'))
+    const lastSpoke = Math.max(...Array.from(rose.querySelectorAll('[data-bearing]')).map((el) => all.indexOf(el)))
+    const labels = Array.from(rose.querySelectorAll('text[data-ring-label]'))
+    expect(labels).toHaveLength(2)
+    for (const label of labels) {
+      expect(all.indexOf(label)).toBeGreaterThan(lastSpoke)
+      expect(label.getAttribute('paint-order')).toBe('stroke')
+      expect(label.getAttribute('stroke')).toBe('hsl(var(--card))')
+    }
+  })
+
   it('lists the forecast rows with wind, direction, shelter and waves', () => {
     render(<AssistantAnchorageCard card={anchorageCard()} />)
     const table = screen.getByRole('table')

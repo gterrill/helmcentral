@@ -141,6 +141,12 @@ func decodeAnchorageFeatures(pluginID string, raw []byte) (anchorageFeatures, er
 		}
 		r.Restriction = sanitizeMapText(r.Restriction, marinaTextRunes)
 		r.Category = sanitizeMapText(r.Category, marinaTextRunes)
+		if r.Source == "protected_area" {
+			// An older plugin sends protect_class here, an IUCN code list such
+			// as "1;2;4;6" that names nothing the model or the operator can
+			// use. Drop it whatever the plugin version.
+			r.Category = ""
+		}
 		if !validShapes(r.Geometry) {
 			return bad("a restricted area with an invalid shape")
 		}

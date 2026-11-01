@@ -1332,7 +1332,7 @@ forcedLoop:
 					}
 				}
 				if src, ok := r.tools.(assistantCardSource); ok {
-					reply.Cards = append(reply.Cards, src.takeCards(result)...)
+					reply.Cards = appendReplyCards(reply.Cards, src.takeCards(result)...)
 				}
 				toolLog = append(toolLog, assistantForcedFinalToolLogEntry{
 					Name:   call.Function.Name,
