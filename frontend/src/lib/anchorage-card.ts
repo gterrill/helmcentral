@@ -186,6 +186,12 @@ const skippedLine = (key: DepthLine['key'], title: string, reason: string): Dept
   detail: '',
 })
 
+/** The caveat for a check made on a forecast or prediction that stops before the stay does; empty when it covers the stay. */
+const endsBeforeStayText = (what: string, until: string, timezone: string, consequence: string): string =>
+  until === '' ? '' : `The ${what} ends at ${timeText(until, timezone)}, before the stay does, so ${consequence}.`
+
+const tideEndsText = (until: string, timezone: string): string => endsBeforeStayText('tide prediction', until, timezone, 'a lower or higher water may follow')
+
 /** Where the depth came from, in words: "from you", or "from saved place X (charted 2026-11-01)". */
 export function depthSourceText(d: AnchorageDepth): string {
   if (d.source === 'operator') return 'from you'
@@ -223,7 +229,7 @@ export function depthLines(card: AnchorageCard, units: DistanceUnits): DepthLine
       badge: shallow ? 'Too shallow' : 'OK',
       tone: shallow ? 'critical' : 'good',
       text: `Lowest water ${timeText(c.lowestWaterAt, card.timezone)} (${len(c.lowestWaterM)} on the tide table): ${len(c.depthAtLowM)} of water, ${len(c.clearanceM)} under a ${len(c.draftM)} draft. You want at least ${len(c.wantedM)}.`,
-      detail: '',
+      detail: tideEndsText(c.tideCheckedUntil, card.timezone),
     })
   }
 
@@ -240,7 +246,8 @@ export function depthLines(card: AnchorageCard, units: DistanceUnits): DepthLine
       text: `Highest water ${timeText(r.highestWaterAt, card.timezone)} (${len(r.highestWaterM)}): ${len(r.depthAtHighM)} of water. About ${len(r.rodeNeededM)} of rode (${r.scopeRatio === null ? '--' : Number(r.scopeRatio.toFixed(1))}:1, ${r.method}) against ${len(r.chainOnboardM)} aboard.`,
       detail: [
         r.windKts === null ? '' : `Planned at ${r.windKts} kts, the strongest forecast gust in the stay rounded up to its band.`,
-        r.windCheckedUntil === '' ? '' : `The forecast ends at ${timeText(r.windCheckedUntil, card.timezone)}, before the stay does, so the wind was only checked up to then.`,
+        endsBeforeStayText('forecast', r.windCheckedUntil, card.timezone, 'the wind was only checked up to then'),
+        tideEndsText(r.tideCheckedUntil, card.timezone),
       ]
         .filter(Boolean)
         .join(' '),
@@ -259,7 +266,7 @@ export function depthLines(card: AnchorageCard, units: DistanceUnits): DepthLine
       text: w.allChainOut
         ? `With all ${len(w.rodeM)} of chain out, short of the ${len(r.rodeNeededM)} needed, the boat swings within about ${len(w.radiusM)} of the anchor: ${len(w.bowOffsetM)} from bow to GPS and the boat's ${len(w.loaM)} length.`
         : `The boat swings within about ${len(w.radiusM)} of the anchor: ${len(w.rodeM)} of rode, ${len(w.bowOffsetM)} from bow to GPS and the boat's ${len(w.loaM)} length.`,
-      detail: '',
+      detail: tideEndsText(w.tideCheckedUntil, card.timezone),
     })
   }
   return lines
@@ -303,7 +310,6 @@ export interface AnchorageFeatureCollections {
   swing: GeoJSON.FeatureCollection
 }
 
-/** Points on the circle of the swing radius round the anchorage; the ring closes. */
 /** The swing circle as a closed ring of [lon, lat], or null when no radius was computed. */
 export function swingRing(card: AnchorageCard): [number, number][] | null {
   if (card.depth === null) return null

@@ -71,6 +71,9 @@ type anchorageClearanceCheck struct {
 	DraftM        *float64 `json:"draft_m"`
 	ClearanceM    *float64 `json:"clearance_m"`
 	WantedM       *float64 `json:"wanted_m"`
+	// TideCheckedUntil is when the tide prediction ends, RFC 3339, when it ends
+	// before the stay does: a lower or higher water may follow. Empty otherwise.
+	TideCheckedUntil string `json:"tide_checked_until"`
 }
 
 type anchorageRodeCheck struct {
@@ -84,6 +87,9 @@ type anchorageRodeCheck struct {
 	ScopeRatio     *float64 `json:"scope_ratio"`
 	ChainAboardM   *float64 `json:"chain_onboard_m"`
 	ShortByM       *float64 `json:"short_by_m"`
+	// TideCheckedUntil is as for the clearance check: the highest water was
+	// found only in the predicted part of the stay.
+	TideCheckedUntil string `json:"tide_checked_until"`
 	// WindCheckedUntil is when the forecast ends, RFC 3339, when it ends before
 	// the stay does: the wind was checked only up to then. Empty when the
 	// forecast covers the whole stay.
@@ -99,6 +105,8 @@ type anchorageSwingCheck struct {
 	// AllChainOut is true when the rode check came out short: the swing is
 	// then for all the chain aboard, not the rode needed.
 	AllChainOut bool `json:"all_chain_out"`
+	// TideCheckedUntil is as for the rode check it is worked from.
+	TideCheckedUntil string `json:"tide_checked_until"`
 }
 
 // anchorageDepthSection is what the tool result and the card both carry. Every
@@ -267,10 +275,6 @@ func (d assistantToolDeps) anchorageDepthChecks(s anchorageDepthSection, tide an
 	} else if low, high = tideStayWaters(tide.sorted, stay); low == nil {
 		tideErr = "the tide gives no water height inside the stay"
 	}
-	tideCaveat := ""
-	if tide.section.AnchorageTideBody != nil && tide.section.Note != "" {
-		tideCaveat = " " + tide.section.Note + " A lower or higher water may follow."
-	}
 
 	// The boat's draft and length, read once.
 	boat := d.marinaBoat()
@@ -301,8 +305,8 @@ func (d assistantToolDeps) anchorageDepthChecks(s anchorageDepthSection, tide an
 			c.Status = "too_shallow"
 			verdict = fmt.Sprintf("LESS than the %.1f m wanted", settings.MinClearanceAtLowM)
 		}
-		c.Text = fmt.Sprintf("At the lowest water in the stay (%s at %s, %.2f m) there is %.1f m of water, %.1f m under a %.1f m draft: %s.%s",
-			low.what, at(low.at), low.heightM, depthAtLow, clearance, draft, verdict, tideCaveat)
+		c.Text = fmt.Sprintf("At the lowest water in the stay (%s at %s, %.2f m) there is %.1f m of water, %.1f m under a %.1f m draft: %s.",
+			low.what, at(low.at), low.heightM, depthAtLow, clearance, draft, verdict)
 	}
 
 	// Rode at the highest water.
@@ -348,6 +352,22 @@ func (d assistantToolDeps) anchorageDepthChecks(s anchorageDepthSection, tide an
 				radius, rode, settings.GPSFromBowM, loa)
 		}
 	}
+	// A tide prediction that stops before the stay leaves open a lower or higher
+	// water the checks could not see: each check that ran says so. The swing is
+	// worked from the rode at the highest water seen, so it carries it too.
+	if !tide.endsAt.IsZero() {
+		until := tide.endsAt.In(loc).Format(time.RFC3339)
+		caveat := " " + tide.section.Note + " A lower or higher water may follow."
+		if c.Status != checkSkipped {
+			c.Text, c.TideCheckedUntil = c.Text+caveat, until
+		}
+		if r.Status != checkSkipped {
+			r.Text, r.TideCheckedUntil = r.Text+caveat, until
+		}
+		if w.Status != checkSkipped {
+			w.Text, w.TideCheckedUntil = w.Text+caveat, until
+		}
+	}
 	return s
 }
 
@@ -388,7 +408,7 @@ func fillRodeCheck(r *anchorageRodeCheck, settings anchorageBoatSettings, foreca
 
 	needed := res.RecommendedRodeM
 	checkedNote := ""
-	if forecast.lastHour.Before(stay.leave) {
+	if forecastEndsBeforeLeave(forecast.lastHour, stay) {
 		r.WindCheckedUntil = forecast.lastHour.In(stay.zone.Loc).Format(time.RFC3339)
 		checkedNote = fmt.Sprintf(" The forecast ends at %s, before the stay does, so the wind was only checked up to then.", forecast.lastHour.In(stay.zone.Loc).Format(toolTimeLayout))
 	}

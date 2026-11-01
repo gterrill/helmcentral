@@ -231,6 +231,21 @@ describe('depthLines', () => {
     expect(depthLines(card, 'metric')[2].detail).toMatch(/before the stay does, so the wind was only checked up to then\.$/)
   })
 
+  it('says so on the clearance and rode lines when the tide prediction ends before the stay', () => {
+    const base = anchoragePayload().depth as { clearance: object; rode: object; swing: object }
+    const until = '2026-11-03T06:00:00+10:00'
+    const card = anchorageCard({
+      depth: {
+        ...base,
+        clearance: { ...base.clearance, tide_checked_until: until },
+        rode: { ...base.rode, tide_checked_until: until },
+        swing: { ...base.swing, tide_checked_until: until },
+      },
+    })
+    const lines = depthLines(card, 'metric')
+    for (const i of [1, 2, 3]) expect(lines[i].detail).toMatch(/tide prediction ends at .*before the stay does, so a lower or higher water may follow\.$/)
+  })
+
   it('words the swing for the rode needed when the chain is enough', () => {
     const base = anchoragePayload().depth as { swing: object }
     const card = anchorageCard({ depth: { ...base, swing: { ...base.swing, all_chain_out: false, rode_m: 60.9, radius_m: 76.9 } } })

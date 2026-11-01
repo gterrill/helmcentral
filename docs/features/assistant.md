@@ -219,7 +219,10 @@ With a depth, Mate makes three checks over your stay:
   it is. The wind is the strongest gust in any hour of the forecast between your
   arrival and your departure, rounded up to the anchor rode planner's wind band.
   If the forecast ends before your stay does, Mate still checks, and says the wind
-  was only checked up to the time the forecast ends. If you've set the catenary method under
+  was only checked up to the time the forecast ends. The same goes for the tide.
+  If the tide prediction ends before your stay does, the water, chain and swing
+  checks each say a lower or higher water may follow. The card shows when the
+  prediction ends. If you've set the catenary method under
   **Settings → Anchor Watch**, Mate skips this check and the swing, and says why.
   The catenary method needs the sea state and the seabed, and Helmcentral doesn't
   know either for a stay that hasn't begun. Set the method to ratio to have Mate
@@ -239,7 +242,10 @@ passed. If a check finds a problem, such as less water under the keel than you
 want or not enough chain, Mate says so plainly.
 
 If Mate's answer states a depth for an anchorage that has neither of those
-sources, it's sent back to look the anchorage up and answer again.
+sources, it's sent back to look the anchorage up and answer again. When the
+Offline coastline is off, the anchorage lookup can't run. Then Mate is sent back
+to use only a depth you gave or one it read from the boat, or to leave the depth
+out.
 
 Treat the shelter as a first look, and Mate says so. It works from the shoreline
 as charted, so it can't see wind bending round a headland, gusts funnelling down

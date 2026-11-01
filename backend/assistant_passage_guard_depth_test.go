@@ -73,19 +73,35 @@ func TestDepthGuardTrigger(t *testing.T) {
 	}
 }
 
-func TestDepthGuard_OffWhenTheToolCannotRun(t *testing.T) {
+// An unsourced depth is wrong whether or not anchorage_details can run, so the
+// guard stays armed with the coastline off. Its correction then must not send
+// Mate to a tool that would only refuse.
+func TestDepthGuard_StaysArmedWhenTheToolCannotRun(t *testing.T) {
 	text := "Butterfly Bay is about 6 m deep on sand."
-	d := shelterDeps()
-	d.offlineCoastline = nil
-	if got, _ := d.checkDraft(text, nil, nil); got != "" {
-		t.Errorf("no Offline coastline: trigger = %q, want none", got)
-	}
-	d = shelterDeps()
-	d.offlineCoastline = func() *offlineCoastlineReader {
+	off := func() *offlineCoastlineReader {
 		return &offlineCoastlineReader{Enabled: func() (bool, error) { return false, nil }}
 	}
-	if got, _ := d.checkDraft(text, nil, nil); got != "" {
-		t.Errorf("coastline switched off: trigger = %q, want none", got)
+	for name, reader := range map[string]func() *offlineCoastlineReader{"no coastline on this install": nil, "coastline switched off": off} {
+		d := shelterDeps()
+		d.offlineCoastline = reader
+		got, ins := d.checkDraft(text, nil, nil)
+		if got != "anchorage depth" {
+			t.Errorf("%s: trigger = %q, want anchorage depth", name, got)
+		}
+		if !strings.Contains(ins, "from a tool result this turn") {
+			t.Errorf("%s: instruction should allow a depth read from another tool: %q", name, ins)
+		}
+		if strings.Contains(ins, "call anchorage_details") || !strings.Contains(ins, "Otherwise remove the depth") || !strings.Contains(ins, ruleDepth) {
+			t.Errorf("%s: instruction = %q", name, ins)
+		}
+		// The shelter check stays disarmed: it can only be answered by the tool.
+		if got, _ := d.checkDraft(thomasIslandAnswer, nil, nil); got != "" {
+			t.Errorf("%s: shelter trigger = %q, want none", name, got)
+		}
+		// A figure passed on in a call that ran still sources it.
+		if got, _ := d.checkDraft(text, depthCall("save_place", `{"name":"Butterfly Bay","lat":-20,"lon":149,"depth_m":6}`), []string{`{"proposal":{}}`}); got != "" {
+			t.Errorf("%s: sourced depth trigger = %q, want none", name, got)
+		}
 	}
 }
 

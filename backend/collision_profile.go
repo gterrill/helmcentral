@@ -143,6 +143,13 @@ type collisionProfileSyncer struct {
 	// refusedAt is when the standing refusal was raised.
 	refusedAt time.Time
 
+	// refusedOn is the profile the plugin was on when the refusal was raised
+	// or last reworded. Empty when that is unknown (the read failed, or the
+	// refusal was adopted from an old row). It is persisted with the refusal
+	// (persistRefusedOn) so a restart keeps it. The "moved by hand" rule needs
+	// it and is skipped while it is empty: no baseline is guessed.
+	refusedOn string
+
 	// checkedAt is the time of the check in progress, used as the raised time.
 	checkedAt time.Time
 
@@ -161,6 +168,13 @@ type collisionProfileSyncer struct {
 	// persistState stores lastState so a restart is not a transition. Nil in
 	// tests that do not need it.
 	persistState func(state string) error
+
+	// persistRefusedOn stores refusedOn beside lastState: written on refuse,
+	// cleared on resolve. Nil in tests that do not need it.
+	persistRefusedOn func(profile string) error
+
+	// persistMu orders the writes to persistRefusedOn, outside mu.
+	persistMu sync.Mutex
 }
 
 func newCollisionProfileSyncer(snapshot *signalKSnapshot) *collisionProfileSyncer {
@@ -199,6 +213,40 @@ func (s *collisionProfileSyncer) attachStateStore(load func() (string, error), s
 	defer s.mu.Unlock()
 	s.lastState, s.persistState = state, save
 	return nil
+}
+
+// attachRefusalStore restores the refused-on profile of an adopted refusal and
+// persists it from then on. Call it after adoptOpenRefusal: a stored profile
+// with no open refusal is stale and ignored.
+func (s *collisionProfileSyncer) attachRefusalStore(load func() (string, error), save func(string) error) error {
+	profile, err := load()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.standing {
+		s.refusedOn = profile
+	}
+	s.persistRefusedOn = save
+	return nil
+}
+
+// storeRefusedOn writes the refused-on profile to the store. The caller does
+// not hold mu, which active() takes: a database write must not block the alarm
+// handlers. persistMu keeps writes in order. A failed write is logged: the cost
+// is that a restart loses the baseline and skips the "moved by hand" rule.
+// refuse and resolve are called only from check() on the alarm service loop,
+// so persistMu ordering is enough.
+func (s *collisionProfileSyncer) storeRefusedOn(profile string) {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	if s.persistRefusedOn == nil {
+		return
+	}
+	if err := s.persistRefusedOn(profile); err != nil {
+		log.Printf("collision profile: could not remember the refused-on profile %q: %v", profile, err)
+	}
 }
 
 // remember stores the state once it has been acted on. A failed write is
@@ -248,33 +296,46 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 	if err != nil {
 		var statusErr *signalkStatusError
 		if errors.As(err, &statusErr) && (statusErr.Status == http.StatusUnauthorized || statusErr.Status == http.StatusForbidden) {
-			return s.refuse(want, err, fmt.Sprintf(
+			return s.refuse(want, "", err, fmt.Sprintf(
 				"SignalK refused Helmcentral's login when reading the collision profiles, so the boat is %s on the old profile.", state))
 		}
-		return s.refuse(want, err, fmt.Sprintf(
+		return s.refuse(want, "", err, fmt.Sprintf(
 			"Helmcentral could not read the collision profiles from SignalK, so the boat is %s on the old profile.", state))
 	}
-	if current == want {
+	return s.evaluate(state, want, current, profiles)
+}
+
+// evaluate decides what a state should do given what the plugin reports now.
+// A transition and the poll of a standing refusal both run it, so a remedy
+// applied while the refusal stands is acted on the way a fresh transition
+// would act on it.
+func (s *collisionProfileSyncer) evaluate(state, want, current string, profiles map[string]collisionProfile) []alarmEvent {
+	profile, defined := profiles[want]
+	// A plugin sitting on a wanted profile that cannot fire is not a fix: the
+	// refusal is still true.
+	if current == want && defined && profile.canFire() {
 		s.remember(state)
 		return s.resolve()
 	}
 
-	profile, defined := profiles[want]
-	if !defined {
-		return s.refuse(want, nil, fmt.Sprintf(
-			"The %q collision profile is not defined in SignalK, so the boat is %s on the old profile.", want, state))
-	}
-	if !profile.canFire() {
-		return s.refuse(want, nil, fmt.Sprintf(
+	if !defined || !profile.canFire() {
+		if current != want && s.movedByHand(current, profiles) {
+			return s.settleByHand(state, current)
+		}
+		if !defined {
+			return s.refuse(want, current, nil, fmt.Sprintf(
+				"The %q collision profile is not defined in SignalK, so the boat is %s on the old profile.", want, state))
+		}
+		return s.refuse(want, current, nil, fmt.Sprintf(
 			"The %q collision profile has every CPA and guard range at zero, so it would silence AIS collision alarms. The boat is %s on the old profile.", want, state))
 	}
 	if err := s.save(want); err != nil {
 		var statusErr *signalkStatusError
 		if errors.As(err, &statusErr) && (statusErr.Status == http.StatusUnauthorized || statusErr.Status == http.StatusForbidden) {
-			return s.refuse(want, err, fmt.Sprintf(
+			return s.refuse(want, current, err, fmt.Sprintf(
 				"SignalK refused Helmcentral's login when switching to the %q collision profile, so the boat is %s on the old profile.", want, state))
 		}
-		return s.refuse(want, err, fmt.Sprintf(
+		return s.refuse(want, current, err, fmt.Sprintf(
 			"Helmcentral could not switch SignalK to the %q collision profile, so the boat is %s on the old profile.", want, state))
 	}
 
@@ -283,16 +344,47 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 	return s.resolve()
 }
 
-// pollStandingRefusal clears a refusal the operator has fixed by hand.
+// movedByHand reports whether a refusal stands and the operator has put the
+// plugin on a working profile other than the one it was on at the refusal.
+// With no known baseline it is false: guessing one is how the warning once got
+// stuck or cleared wrongly.
+func (s *collisionProfileSyncer) movedByHand(current string, profiles map[string]collisionProfile) bool {
+	s.mu.Lock()
+	standing, refusedOn := s.standing, s.refusedOn
+	s.mu.Unlock()
+	if !standing || refusedOn == "" || current == refusedOn {
+		return false
+	}
+	profile, defined := profiles[current]
+	return defined && profile.canFire()
+}
+
+// settleByHand clears a refusal the operator settled by picking a profile.
+func (s *collisionProfileSyncer) settleByHand(state, current string) []alarmEvent {
+	log.Printf("collision profile: the plugin is on %q, chosen by hand, so the refusal is cleared", current)
+	// The refusal path left this state unsaved so a restart would retry it.
+	// Now that it is settled, save it: a restart would otherwise replay the
+	// transition.
+	s.remember(state)
+	return s.resolve()
+}
+
+// pollStandingRefusal retries a refusal that has stood since the last
+// transition.
 //
-// The syncer acts only on a change of navigation.state (ADR 0058), so a boat
-// that stays anchored never reloads the profiles. If the operator then picks a
-// working profile in the plugin, nothing would ever notice, and the warning
-// would sit there describing a problem that is gone. While a refusal stands,
-// and the state has not changed, the profiles are re-read about once a minute.
+// The syncer acts on a change of navigation.state (ADR 0058), so a boat that
+// stays anchored never reloads the profiles. The remedies for a refusal are
+// made in the plugin: fill in the wanted profile, or pick another working
+// profile. While a refusal stands, and the state has not changed, the profiles
+// are re-read about once a minute and the evaluation a transition runs is run
+// again for the current state:
+//   - the wanted profile now works and the plugin is not on it: switch to it;
+//   - the plugin is already on the wanted profile: clear;
+//   - the operator has put the plugin on a working profile other than the one
+//     it was on at the refusal: leave their choice and clear;
+//   - otherwise the refusal stands, and its words are updated if the reason
+//     has changed.
 //
-// This only reads. It never selects or saves a profile, and it does not try to
-// bring the plugin back in line with the mapping: the manual choice stands.
 // A failed read is logged and leaves the warning up, since a warning that
 // clears on the strength of data we could not read would be a fallback.
 func (s *collisionProfileSyncer) pollStandingRefusal(now time.Time, state string) []alarmEvent {
@@ -315,52 +407,66 @@ func (s *collisionProfileSyncer) pollStandingRefusal(now time.Time, state string
 		log.Printf("collision profile: could not re-read the profiles to check the refusal: %v", err)
 		return nil
 	}
-	if profile, defined := profiles[current]; !defined || !profile.canFire() {
+	// The operator's own pick wins over the retry: switching would overwrite
+	// it, and a login that still fails would keep warning about a boat they
+	// have already sorted.
+	if s.movedByHand(current, profiles) {
+		return s.settleByHand(state, current)
+	}
+	want, mapped := vesselStateProfiles[state]
+	if !mapped {
 		return nil
 	}
-
-	log.Printf("collision profile: the plugin is on %q, which can raise alarms, so the refusal is cleared", current)
-	// The refusal path deliberately left this state unsaved so a restart would
-	// retry it. Now that it is settled by hand, save it: a restart would
-	// otherwise replay the transition and refuse again on the same silent
-	// profile.
-	s.remember(state)
-	return s.resolve()
+	return s.evaluate(state, want, current, profiles)
 }
 
 // refuse leaves the plugin alone and raises Helmcentral's own alarm instead.
 // Staying loud on the wrong profile is a worse night and a better outcome than
 // going quiet on the right one.
-func (s *collisionProfileSyncer) refuse(profile string, cause error, message string) []alarmEvent {
+func (s *collisionProfileSyncer) refuse(profile, current string, cause error, message string) []alarmEvent {
 	if cause != nil {
 		log.Printf("collision profile: refusing %q: %s: %v", profile, message, cause)
 	} else {
 		log.Printf("collision profile: refusing %q: %s", profile, message)
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.standing {
 		// One refusal is standing already. Raising again on every navigation
 		// state change piled up hundreds of open rows in the alarm log. The
 		// standing card is updated in place when the words change, so it never
 		// shows an old state or cause.
 		if message == s.refusedMessage {
+			s.mu.Unlock()
 			return nil
 		}
 		s.refused, s.refusedMessage = profile, message
+		// A failed read passes no current profile; it must not wipe the known
+		// one.
+		if current != "" {
+			s.refusedOn = current
+		}
+		refusedOn := s.refusedOn
+		s.mu.Unlock()
+		if current != "" {
+			s.storeRefusedOn(refusedOn)
+		}
 		return []alarmEvent{collisionProfileEvent(alarmEventChanged, alarmStateWarn, message)}
 	}
-	s.standing, s.refused, s.refusedMessage, s.refusedAt = true, profile, message, s.checkedAt
+	s.standing, s.refused, s.refusedMessage, s.refusedAt, s.refusedOn = true, profile, message, s.checkedAt, current
+	s.mu.Unlock()
+	s.storeRefusedOn(current)
 	return []alarmEvent{collisionProfileEvent(alarmEventRaised, alarmStateWarn, message)}
 }
 
 func (s *collisionProfileSyncer) resolve() []alarmEvent {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.standing {
+		s.mu.Unlock()
 		return nil
 	}
-	s.standing, s.refused, s.refusedMessage, s.refusedAt = false, "", "", time.Time{}
+	s.standing, s.refused, s.refusedMessage, s.refusedAt, s.refusedOn = false, "", "", time.Time{}, ""
+	s.mu.Unlock()
+	s.storeRefusedOn("")
 	return []alarmEvent{collisionProfileEvent(alarmEventCleared, alarmStateNormal, "")}
 }
 

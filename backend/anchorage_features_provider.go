@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 )
 
@@ -16,8 +17,10 @@ import (
 
 // Bounds on one answer. A list cut to its bound sets Truncated.
 const (
-	anchorageMaxRestricted = 50 + 20 // seamark areas plus marine protected areas
-	anchorageMaxAreas      = 50      // anchorage areas, and seabed areas, each
+	anchorageMaxSeamark    = 50 // seamark restricted areas, which have a measured distance
+	anchorageMaxProtected  = 20 // marine protected areas, which have none
+	anchorageMaxRestricted = anchorageMaxSeamark + anchorageMaxProtected
+	anchorageMaxAreas      = 50 // anchorage areas, and seabed areas, each
 	anchorageMaxMoorings   = 200
 	anchorageMaxRadiusM    = 1852 * 2 // a distance the plugin could not report from a 1 nm search
 	anchorageMaxVesselM    = 1000.0
@@ -155,7 +158,20 @@ func decodeAnchorageFeatures(pluginID string, raw []byte) (anchorageFeatures, er
 			return bad("a restricted area with an invalid shape")
 		}
 	}
-	d.RestrictedAreas = capFeatureList(d.RestrictedAreas, anchorageMaxRestricted, &d.Truncated)
+	// Capped apart, so a run of marine parks cannot push out a no-anchoring
+	// zone close by, and listed seamark areas first, nearest first. A protected
+	// area has no measured distance, so those keep the plugin's order.
+	var seamark, protected []anchorageRestrictedWire
+	for _, r := range d.RestrictedAreas {
+		if r.Source == "protected_area" {
+			protected = append(protected, r)
+		} else {
+			seamark = append(seamark, r)
+		}
+	}
+	protected = capFeatureList(protected, anchorageMaxProtected, &d.Truncated, nil)
+	seamark = capFeatureList(seamark, anchorageMaxSeamark, &d.Truncated, func(r anchorageRestrictedWire) int { return *r.DistanceM })
+	d.RestrictedAreas = append(seamark, protected...)
 
 	for i := range d.Moorings {
 		m := &d.Moorings[i]
@@ -173,7 +189,7 @@ func decodeAnchorageFeatures(pluginID string, raw []byte) (anchorageFeatures, er
 		// The flag is derived here, not trusted: untagged means nothing was read.
 		m.DetailsUntagged = m.VesselSizeM == nil && m.Class == ""
 	}
-	d.Moorings = capFeatureList(d.Moorings, anchorageMaxMoorings, &d.Truncated)
+	d.Moorings = capFeatureList(d.Moorings, anchorageMaxMoorings, &d.Truncated, func(m anchorageMooringWire) int { return m.DistanceM })
 
 	for i := range d.AnchorageAreas {
 		a := &d.AnchorageAreas[i]
@@ -185,7 +201,7 @@ func decodeAnchorageFeatures(pluginID string, raw []byte) (anchorageFeatures, er
 			return bad("an anchorage area with an invalid shape")
 		}
 	}
-	d.AnchorageAreas = capFeatureList(d.AnchorageAreas, anchorageMaxAreas, &d.Truncated)
+	d.AnchorageAreas = capFeatureList(d.AnchorageAreas, anchorageMaxAreas, &d.Truncated, func(a anchorageAreaWire) int { return a.DistanceM })
 
 	for i := range d.SeabedAreas {
 		s := &d.SeabedAreas[i]
@@ -199,7 +215,7 @@ func decodeAnchorageFeatures(pluginID string, raw []byte) (anchorageFeatures, er
 			return bad("a seabed area with an invalid shape")
 		}
 	}
-	d.SeabedAreas = capFeatureList(d.SeabedAreas, anchorageMaxAreas, &d.Truncated)
+	d.SeabedAreas = capFeatureList(d.SeabedAreas, anchorageMaxAreas, &d.Truncated, func(a anchorageSeabedWire) int { return a.DistanceM })
 
 	if b := d.Bay; b != nil {
 		if msg := checkAnchorageRecord("a bay", &b.OSM, &b.Name, &b.DistanceM); msg != "" {
@@ -226,8 +242,15 @@ func checkAnchorageRecord(what string, osm, name *string, distanceM *int) string
 	return ""
 }
 
-// capFeatureList cuts list to limit, setting truncated when it did.
-func capFeatureList[T any](list []T, limit int, truncated *bool) []T {
+// capFeatureList puts list nearest first, then cuts it to limit, setting
+// truncated when it did, so the cap drops the farthest and never whichever the
+// plugin listed last. The order is stable, so equal distances keep the plugin's.
+// With a nil distance the list is not sorted: it keeps the plugin's order and
+// the cut drops the last.
+func capFeatureList[T any](list []T, limit int, truncated *bool, distance func(T) int) []T {
+	if distance != nil {
+		sort.SliceStable(list, func(i, j int) bool { return distance(list[i]) < distance(list[j]) })
+	}
 	if len(list) > limit {
 		*truncated = true
 		return list[:limit]

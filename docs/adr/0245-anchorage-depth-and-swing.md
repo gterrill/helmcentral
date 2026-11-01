@@ -91,7 +91,11 @@ section is the usual kind: if the saved places cannot be read it carries an
   three-hourly rows the card keeps, rounded up to the planner's wind band as the
   planner does. When the forecast ends before the stay does, the row is still
   worked out, and says (`wind_checked_until`) that the wind was only checked up
-  to then. A chain
+  to then. The forecast section's own note and this caveat use one test, a
+  forecast without the local hour leaving falls in, so they never disagree. When the tide
+  prediction ends before the stay does, the clearance, rode and swing rows all carry
+  the section's note and say when it ends (`tide_checked_until`), and the card
+  shows it. A chain
   aboard of zero or unset skips the row and names the setting; the bow roller
   height is checked once, by the ratio method, which says it is not configured. When the operator's
   `scope_method` is catenary the row is skipped, and says why (below).
@@ -154,8 +158,11 @@ any tool call that ran carrying a `depth_m` argument (the operator's figure bein
 passed on or offered for saving). The checker cannot see the conversation, so it
 trusts the argument, and the tool's description is what restricts it. The
 correction says to call the tool with the operator's figure or to say the depth is
-unknown. The check is armed under the same conditions as the shelter check, since
-the correction points at the same tool. A bare "charted" is not a depth word, so
+unknown. The check is armed whether or not the tool can run. While the Offline
+coastline is off or missing, the tool refuses every call, so the correction
+drops the instruction to call it and says to state only a figure the operator
+gave, or to remove the depth. (The shelter check stays disarmed then: only the
+tool can answer it.) A bare "charted" is not a depth word, so
 a mooring "charted at 12 m" is a vessel size and passes. The common phrasing
 "anchored in 5 m" has no depth word, so a sentence with "anchor", "anchored" or
 "anchoring" followed directly by "in" and a figure with a length unit also counts.
