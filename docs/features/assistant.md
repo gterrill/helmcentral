@@ -161,6 +161,11 @@ and tells you that's what it assumed. A stay can be up to seven days. Here's wha
   than two high or low waters fall inside your stay, the range also uses the one
   before you arrive and the one after you leave, and Mate says so. If the tide
   prediction ends before you leave, the card says when it ends.
+- **Depth, swing and clearance:** The water at the anchorage, and what it means
+  for your stay. Mate works out the water under the keel at the lowest low water
+  of your stay, the chain you need at the highest high water, and how far the
+  boat swings on that much chain. The next section says where the depth comes
+  from and how each check is worked out.
 - **What the map records nearby:** Anything within a nautical mile that
   OpenStreetMap lists as a restricted area, a public mooring, an anchorage area,
   a seabed area or the bay the spot is in. A restricted area that prohibits
@@ -173,8 +178,63 @@ and tells you that's what it assumed. A stay can be up to seven days. Here's wha
 
 The map is kept up by volunteers, so Mate treats anything it doesn't list as
 unknown, never as missing. An empty list means nothing is mapped, not that
-nothing is there. Mate gives you no depth or holding from this lookup. It says
-so if it uses what it knows of the place for either.
+nothing is there. Mate gives you no holding from this lookup. It says so if it
+uses what it knows of the place for holding.
+
+#### Depth, swing and clearance
+
+Mate never gives you a depth from its own knowledge of a place. The depth comes
+from one of two places, and Mate always says which one it used:
+
+- **A figure you gave it:** If you tell Mate the depth in the conversation, such
+  as "it's 4 metres there at low water", Mate uses that. It reads "4.0 m at
+  datum, from you". A figure you gave wins over a saved one.
+- **A saved place:** If you've saved a place within 0.1 nm of the anchorage, and
+  you've given that place a depth, Mate uses it. It reads "from saved place
+  Butterfly Bay (charted 2026-11-01)". If several saved places are within that
+  distance, the nearest one that has a depth counts. A nearer place with no
+  depth doesn't get in the way. See [Places you give Mate](place-names.md#places-you-give-mate).
+
+Depths are in metres at chart datum, the same datum the tide table uses. If
+Mate has neither, it tells you the depth is unknown, tells you to check the
+chart, and lists the three checks below as skipped, with the reason.
+
+With a depth, Mate makes three checks over your stay:
+
+- **Water under the keel at low water:** The depth plus the height of the lowest
+  low water in your stay, less your boat's draft. Mate compares it with the
+  clearance you want at low water, to the nearest tenth of a metre as the card
+  shows it, which you set under **Settings → Anchor Watch**.
+  The draft comes from your boat's instruments. If they don't report it, Mate
+  skips this check and says the draft isn't reported. It never assumes one.
+- **Chain needed at high water:** The depth plus the highest high water in your
+  stay, plus the height of the bow roller, worked out by the ratio method: five
+  times that, or seven times from 20 knots of wind. Mate compares it with the
+  chain you have aboard and says either that it's enough or how many metres short
+  it is. The wind is the strongest gust in any hour of the forecast between your
+  arrival and your departure, rounded up to the anchor rode planner's wind band.
+  If the forecast ends before your stay does, Mate still checks, and says the wind
+  was only checked up to the time the forecast ends. If you've set the catenary method under
+  **Settings → Anchor Watch**, Mate skips this check and the swing, and says why.
+  The catenary method needs the sea state and the seabed, and Helmcentral doesn't
+  know either for a stay that hasn't begun. Set the method to ratio to have Mate
+  check the chain.
+- **Swing:** How far the boat swings around the anchor on that much chain. It's
+  the same figure the anchor rode planner gives: the chain, plus the distance
+  from the bow to the GPS, plus the length of the boat. If you're short of chain,
+  Mate works the swing out for all the chain you have aboard and says so, since
+  that's the circle the boat will make. The length is the one in
+  **Settings → Anchor Watch** or, if that's blank, the one your boat reports or
+  your vessel particulars hold.
+
+A check that needs something Helmcentral doesn't have is skipped, and the card and
+Mate both say what was missing. That might be the tide, the forecast, the draft,
+the boat's length or one of the anchor settings. A skipped check is never shown as
+passed. If a check finds a problem, such as less water under the keel than you
+want or not enough chain, Mate says so plainly.
+
+If Mate's answer states a depth for an anchorage that has neither of those
+sources, it's sent back to look the anchorage up and answer again.
 
 Treat the shelter as a first look, and Mate says so. It works from the shoreline
 as charted, so it can't see wind bending round a headland, gusts funnelling down
@@ -210,10 +270,16 @@ Under the answer, Mate shows an anchorage card. Here's what's on it:
 - **Local features:** Restricted areas first, with a prohibition in red. Then
   the public moorings grouped by size limit and class, with the nearest
   distance, the anchorage and seabed areas, and the bay.
+- **Depth and swing:** The depth Mate used and where it came from, then the
+  water under the keel at low water, the chain needed at high water and the
+  swing. Each has a badge in words, such as **OK**, **Too shallow**, **Short by
+  20.9 m** or **Skipped**, and a skipped check gives its reason. Distances follow
+  your distance units.
 - **Map:** Folded away until you tap **Map**. It shows the same spokes drawn out
   over satellite imagery in the same colours. It also shows the moorings
   labelled with their size limit, restricted areas shaded, and anchorage and
-  seabed areas outlined. The OpenSeaMap layer draws the marks, as on the anchor
+  seabed areas outlined. When Mate has a depth, a dashed circle shows how far the
+  boat swings around the anchorage. The OpenSeaMap layer draws the marks, as on the anchor
   watch map, and the satellite button turns the imagery off. It doesn't move
   when you scroll the conversation past it: use two fingers, or hold ⌘ (Ctrl on
   Windows or Linux) while you scroll, to pan and zoom it. A browser without

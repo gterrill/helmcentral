@@ -13,7 +13,7 @@ const anchorageCardKind = "anchorage"
 
 // anchorageCardInstruction is what the model is told when the operator will
 // see the card, so it does not read the same rows back as a table.
-const anchorageCardInstruction = "An anchorage card with the shelter rose, the forecast and tide for the stay, the local features and a map is shown under your reply, so do not repeat the forecast rows, the tide table or the feature lists back; say what they mean for the stay."
+const anchorageCardInstruction = "An anchorage card with the shelter rose, the forecast and tide for the stay, the local features, the depth with its swing and clearance checks, and a map is shown under your reply, so do not repeat the forecast rows, the tide table, the feature lists or the depth checks back; say what they mean for the stay."
 
 type anchorageCardBearing struct {
 	BearingDeg int     `json:"bearing_deg"`
@@ -133,6 +133,10 @@ type anchorageCardPayload struct {
 	Forecast anchorageCardForecast `json:"forecast"`
 	Tide     anchorageCardTide     `json:"tide"`
 	Features anchorageCardFeatures `json:"features"`
+	// Depth is the depth used, where it came from and the checks it allows,
+	// each present with its reason when skipped. It carries the figures only:
+	// the card words its own lines, in the operator's units.
+	Depth anchorageDepthSection `json:"depth"`
 	// DataAsOf is the OpenStreetMap data time the plugin reported, "" when it
 	// reported none. It is never filled from the clock.
 	DataAsOf string `json:"data_as_of"`
@@ -160,6 +164,7 @@ func buildAnchorageCard(p anchorageParts) anchorageCardPayload {
 			Bearings:            make([]anchorageCardBearing, 0, len(p.shelter.Bearings)),
 			Arcs:                make([]anchorageCardArc, 0, len(p.shelter.Arcs)),
 		},
+		Depth:    p.depth.forCard(),
 		Forecast: anchorageCardForecast{Rows: []anchorageCardRow{}, Days: []anchorageCardDay{}},
 		Tide:     anchorageCardTide{Extremes: []anchorageCardExtreme{}},
 		Features: anchorageCardFeatures{

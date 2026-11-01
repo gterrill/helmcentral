@@ -12,15 +12,28 @@ export interface SavedPlace {
   lat: number
   lon: number
   note: string
+  /** Metres at chart datum; null when no depth is known. */
+  depth_m: number | null
+  depth_source: 'charted' | 'sounded' | ''
+  /** The day the depth was taken or entered, YYYY-MM-DD; "" with no depth. */
+  depth_date: string
   created_at: string
   updated_at: string
 }
 
+/**
+ * A new depth comes with its own source and date and replaces the old; a
+ * depth_m of null clears all three. The server refuses a source or date with
+ * no depth_m.
+ */
 export interface SavedPlaceChange {
   name?: string
   lat?: number
   lon?: number
   note?: string
+  depth_m?: number | null
+  depth_source?: 'charted'
+  depth_date?: string
 }
 
 export interface NewSavedPlace {
@@ -28,6 +41,9 @@ export interface NewSavedPlace {
   lat: number
   lon: number
   note: string
+  depth_m?: number
+  depth_source?: 'charted'
+  depth_date?: string
 }
 
 export const SAVED_PLACES_PATH = '/api/saved-places'

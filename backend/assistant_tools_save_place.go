@@ -15,10 +15,11 @@ import (
 // positions.
 
 type assistantSavePlaceArgs struct {
-	Name string   `json:"name"`
-	Lat  *float64 `json:"lat"`
-	Lon  *float64 `json:"lon"`
-	Note string   `json:"note"`
+	Name   string   `json:"name"`
+	Lat    *float64 `json:"lat"`
+	Lon    *float64 `json:"lon"`
+	Note   string   `json:"note"`
+	DepthM *float64 `json:"depth_m"`
 }
 
 var mateToolSavePlace = mateTool{
@@ -29,14 +30,16 @@ var mateToolSavePlace = mateTool{
 			"This changes NOTHING: the operator sees a card under your reply and taps Apply or Dismiss, so tell them to tap " +
 			"Apply and never say it is saved. Give lat and lon as signed decimal degrees (south and west negative): " +
 			"convert 20°32.676' S 149°07.136' E to -20.5446 and 149.118933 (keep at least six decimals). If the name is already saved this proposes moving it " +
-			"and the card shows the old and new position.",
+			"and the card shows the old and new position. " +
+			ruleDepthArg + " It is recorded as charted, dated today, and replaces any depth already saved.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
 						"name": {"type": "string", "description": "The operator's name for the spot, as they said it, e.g. \"Thomas Island South\"."},
 						"lat": {"type": "number", "description": "Latitude in decimal degrees, south negative."},
 						"lon": {"type": "number", "description": "Longitude in decimal degrees, west negative."},
-						"note": {"type": "string", "description": "Optional short note, e.g. what the spot is for."}
+						"note": {"type": "string", "description": "Optional short note, e.g. what the spot is for."},
+						"depth_m": {"type": "number", "description": "Water depth at the spot in metres at chart datum, only when the operator stated it. Omit otherwise."}
 					},
 					"required": ["name", "lat", "lon"]
 				}`),
@@ -72,6 +75,13 @@ func (d assistantToolDeps) executeSavePlace(ctx context.Context, raw json.RawMes
 		return "", errors.New("save_place: lat and lon are required, as signed decimal degrees")
 	}
 	candidate := savedPlace{Name: args.Name, Lat: *args.Lat, Lon: *args.Lon, Note: args.Note}
+	if args.DepthM != nil {
+		// The date is the operator's own calendar date, never the server's clock.
+		if d.today.IsZero() {
+			return "", errors.New("save_place: today's date is not known, so a depth cannot be dated")
+		}
+		candidate.DepthM, candidate.DepthSource, candidate.DepthDate = args.DepthM, savedPlaceDepthCharted, d.today.Format("2006-01-02")
+	}
 	if err := validateSavedPlace(&candidate); err != nil {
 		return "", fmt.Errorf("save_place: %w", err)
 	}
@@ -98,9 +108,14 @@ func (d assistantToolDeps) executeSavePlace(ctx context.Context, raw json.RawMes
 		if candidate.Note != "" && candidate.Note != existing.Note {
 			op.Fields["note"] = candidate.Note
 		}
-		if len(op.Fields) == 0 {
-			return fmt.Sprintf(`{"already_saved":true,"message":%q}`, fmt.Sprintf("%s is already saved at %s. Nothing to apply.", existing.Name, formatSavedPlacePosition(existing.Lat, existing.Lon))), nil
-		}
+	}
+	// A depth is new, or replaces the old one with its own source and date; the
+	// same figure is not a change.
+	if candidate.DepthM != nil && (existing == nil || existing.DepthM == nil || *existing.DepthM != *candidate.DepthM) {
+		op.Fields["depth_m"], op.Fields["depth_source"], op.Fields["depth_date"] = *candidate.DepthM, candidate.DepthSource, candidate.DepthDate
+	}
+	if existing != nil && len(op.Fields) == 0 {
+		return fmt.Sprintf(`{"already_saved":true,"message":%q}`, fmt.Sprintf("%s is already saved at %s. Nothing to apply.", existing.Name, formatSavedPlacePosition(existing.Lat, existing.Lon))), nil
 	}
 	body, err := json.Marshal(assistantProposeArgs{Operations: []changeOp{op}})
 	if err != nil {

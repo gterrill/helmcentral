@@ -6,21 +6,12 @@ import type { TideToday } from '@/hooks/use-tide-today'
 import { lowWaterClearanceReasonLabel, underKeelPhrase, type computeLowWaterClearance } from '@/lib/low-water-clearance'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { estimateDepthAtNextTurn, nextTideExtreme } from '@/lib/tide-estimate'
-import { feetToMeters, metersToFeet } from '@/lib/units'
+import { depthValueText, feetToMeters } from '@/lib/units'
 import { cn } from '@/lib/utils'
 
 /** A tide height in feet, converted to the host's chosen unit — matches depth-tide-tile.tsx's own conversion. */
 function tideValueDisplay(heightFt: number, isImperial: boolean): string {
   return isImperial ? heightFt.toFixed(1) : feetToMeters(heightFt).toFixed(2)
-}
-
-/**
- * A depth-shaped figure (the hero reading, or the Est. high/low projection)
- * in the host's chosen unit — matches depth-tide-tile.tsx's own conversion,
- * one decimal place either way.
- */
-function depthValueDisplay(meters: number, isImperial: boolean): string {
-  return (isImperial ? metersToFeet(meters) : meters).toFixed(1)
 }
 
 /** A tide time as the host reads it on the boat's clock, e.g. "9:13 AM". */
@@ -87,7 +78,7 @@ export function AnchorWatchReadings({
         )}
       </p>
       <p className={cn('font-display leading-none tabular-nums text-gauge-primary', hud ? 'text-3xl' : 'text-4xl')}>
-        {depthMeters !== null ? depthValueDisplay(depthMeters, isImperial) : '—'}
+        {depthMeters !== null ? depthValueText(depthMeters, isImperial) : '—'}
         <span className={cn(quiet, hud ? 'ml-1 text-sm' : 'ml-2 align-baseline text-lg')}>
           {depthMeters !== null ? lengthUnit : 'unavailable'}
         </span>
@@ -118,7 +109,7 @@ export function AnchorWatchReadings({
 
   const estimate = estimatedDepthAtNextTurn !== null && (
     <span className="font-semibold text-gauge-secondary">
-      {depthValueDisplay(estimatedDepthAtNextTurn, isImperial)} {lengthUnit}
+      {depthValueText(estimatedDepthAtNextTurn, isImperial)} {lengthUnit}
     </span>
   )
 

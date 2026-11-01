@@ -44,8 +44,28 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   forecast and tide tables, the local features, and a map folded under **Map**.
   If the forecast, the tide or the map lookup fails, that part says why and
   shows nothing. Only the shelter is needed for the lookup to run. Mate says an
-  anchorage where anchoring is prohibited is a no-go, and gives no depth or
-  holding from this lookup. See [Mate](docs/features/assistant.md).
+  anchorage where anchoring is prohibited is a no-go, and gives no holding
+  from this lookup. See [Mate](docs/features/assistant.md).
+
+- **Saved places can hold a depth, and Mate checks the swing and the water
+  under the keel.** Tell Mate how deep the water is at a spot, or type it in
+  **Settings, Saved places**, and the place keeps it with the date, as a
+  charted figure. When you ask Mate about an anchorage, it uses a depth you gave
+  in the conversation, or else the depth of the nearest saved place within 0.1
+  nm that has one, and says which. With a depth, it works out the water under the keel at the
+  lowest low water in your stay against the clearance you want, the chain you
+  need at the highest high water against the chain you have aboard, and how
+  far the boat swings. The anchorage card has a new Depth and swing section, and
+  its map draws the swing circle. The chain is worked out by the ratio method.
+  If your scope method is set to catenary, Mate skips the chain and swing checks
+  and says why: the catenary method needs the sea state and the seabed, and
+  Helmcentral doesn't know them for a stay that hasn't begun. Set the method to
+  ratio under **Settings, Anchor Watch** to have them checked. With no depth,
+  Mate says the depth is unknown and those checks are skipped. A check that is missing the draft, the tide, the
+  forecast, the boat's length or an anchor setting is skipped too, and says what
+  it lacked. Mate never gives a depth from its own knowledge, and an answer that
+  does is sent back. See [Mate](docs/features/assistant.md#depth-swing-and-clearance)
+  and [Places you give Mate](docs/features/place-names.md#places-you-give-mate).
 
 ### Changed
 

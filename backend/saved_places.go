@@ -35,14 +35,33 @@ var (
 )
 
 type savedPlace struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Lat       float64   `json:"lat"`
-	Lon       float64   `json:"lon"`
-	Note      string    `json:"note"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID   string  `json:"id"`
+	Name string  `json:"name"`
+	Lat  float64 `json:"lat"`
+	Lon  float64 `json:"lon"`
+	Note string  `json:"note"`
+	// DepthM is the water at the place in metres at chart datum, nil when no
+	// depth is known (a drying spot is negative). DepthSource says where the
+	// figure came from (savedPlaceDepthCharted or savedPlaceDepthSounded) and
+	// DepthDate is the day it was taken or entered, YYYY-MM-DD. The three are
+	// set together or not at all, and a new depth replaces the old one.
+	DepthM      *float64  `json:"depth_m"`
+	DepthSource string    `json:"depth_source"`
+	DepthDate   string    `json:"depth_date"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+const (
+	// savedPlaceDepthCharted is a figure the operator read off a chart or was
+	// told; savedPlaceDepthSounded is one the boat measured at anchor.
+	savedPlaceDepthCharted = "charted"
+	savedPlaceDepthSounded = "sounded"
+
+	// The bounds on a depth at chart datum: a drying height is negative.
+	minSavedPlaceDepthM = -10.0
+	maxSavedPlaceDepthM = 1000.0
+)
 
 func createSavedPlacesSchema(db *sql.DB) error {
 	if _, err := db.Exec(`
@@ -57,6 +76,17 @@ func createSavedPlacesSchema(db *sql.DB) error {
 			updated_at      INTEGER NOT NULL
 		)`); err != nil {
 		return fmt.Errorf("create saved_places table: %w", err)
+	}
+	// The depth columns came after the table did; the single operator has no
+	// installed base, so adding them in place is the whole migration.
+	for _, col := range [][2]string{
+		{"depth_m", "REAL"},
+		{"depth_source", "TEXT NOT NULL DEFAULT ''"},
+		{"depth_date", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := addColumnIfMissing(db, "saved_places", col[0], col[1]); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -100,16 +130,48 @@ func validateSavedPlace(p *savedPlace) error {
 	if !validLatLon(0, p.Lon) {
 		return fieldErr("lon", "must be a longitude between -180 and 180 degrees")
 	}
+	return validateSavedPlaceDepth(p)
+}
+
+// validDatumDepthM says whether v is a depth in metres at chart datum a saved
+// place, or an anchorage, can have.
+func validDatumDepthM(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= minSavedPlaceDepthM && v <= maxSavedPlaceDepthM
+}
+
+// validateSavedPlaceDepth checks the three depth fields as a group: none, or a
+// finite depth with a known source and a calendar date.
+func validateSavedPlaceDepth(p *savedPlace) error {
+	p.DepthSource, p.DepthDate = strings.TrimSpace(p.DepthSource), strings.TrimSpace(p.DepthDate)
+	if p.DepthM == nil {
+		if p.DepthSource != "" || p.DepthDate != "" {
+			return fieldErr("depth_m", "is required when a depth source or date is given")
+		}
+		return nil
+	}
+	if !validDatumDepthM(*p.DepthM) {
+		return fieldErr("depth_m", "must be a depth in metres at chart datum between %g and %g (a drying height is negative)", minSavedPlaceDepthM, maxSavedPlaceDepthM)
+	}
+	if p.DepthSource != savedPlaceDepthCharted && p.DepthSource != savedPlaceDepthSounded {
+		return fieldErr("depth_source", "must be %q or %q when a depth is set", savedPlaceDepthCharted, savedPlaceDepthSounded)
+	}
+	if _, err := time.Parse("2006-01-02", p.DepthDate); err != nil {
+		return fieldErr("depth_date", "must be the date the depth was taken, as YYYY-MM-DD")
+	}
 	return nil
 }
 
-const savedPlaceColumns = `id, name, lat, lon, note, created_at, updated_at`
+const savedPlaceColumns = `id, name, lat, lon, note, depth_m, depth_source, depth_date, created_at, updated_at`
 
 func scanSavedPlace(row rowScanner) (savedPlace, error) {
 	var p savedPlace
 	var created, updated int64
-	if err := row.Scan(&p.ID, &p.Name, &p.Lat, &p.Lon, &p.Note, &created, &updated); err != nil {
+	var depth sql.NullFloat64
+	if err := row.Scan(&p.ID, &p.Name, &p.Lat, &p.Lon, &p.Note, &depth, &p.DepthSource, &p.DepthDate, &created, &updated); err != nil {
 		return savedPlace{}, err
+	}
+	if depth.Valid {
+		p.DepthM = &depth.Float64
 	}
 	p.CreatedAt = time.Unix(0, created).UTC()
 	p.UpdatedAt = time.Unix(0, updated).UTC()
@@ -157,10 +219,12 @@ func findSavedPlaceByName(store *documentStore, name string) (*savedPlace, error
 	return found, err
 }
 
-func listSavedPlacesQ(q sqlQueryer) ([]savedPlace, error) {
-	rows, err := q.Query(`SELECT ` + savedPlaceColumns + ` FROM saved_places ORDER BY name_key`)
+// querySavedPlaces runs the saved places select with a WHERE clause (empty for
+// every place) and its arguments, in name order.
+func querySavedPlaces(q sqlQueryer, what, where string, args ...any) ([]savedPlace, error) {
+	rows, err := q.Query(`SELECT `+savedPlaceColumns+` FROM saved_places `+where+` ORDER BY name_key`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list saved places: %w", err)
+		return nil, fmt.Errorf("list saved places%s: %w", what, err)
 	}
 	defer rows.Close()
 	out := []savedPlace{}
@@ -172,6 +236,38 @@ func listSavedPlacesQ(q sqlQueryer) ([]savedPlace, error) {
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+func listSavedPlacesQ(q sqlQueryer) ([]savedPlace, error) {
+	return querySavedPlaces(q, "", "")
+}
+
+// listSavedPlacesNearQ lists the places in the latitude and longitude box that
+// holds the circle of radiusM metres round a point. The box is a little
+// larger than the circle, so the caller still measures the distance. Near the
+// poles or the antimeridian the longitude bound is dropped rather than
+// wrapped, which only widens the box.
+func listSavedPlacesNearQ(q sqlQueryer, lat, lon, radiusM float64) ([]savedPlace, error) {
+	const metersPerDegree = 111320.0
+	dLat := 1.1 * radiusM / metersPerDegree
+	lonLo, lonHi := -180.0, 180.0
+	if c := math.Cos(lat * math.Pi / 180); c > 0.01 {
+		if dLon := dLat / c; lon-dLon >= -180 && lon+dLon <= 180 {
+			lonLo, lonHi = lon-dLon, lon+dLon
+		}
+	}
+	return querySavedPlaces(q, " near a point", `WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?`, lat-dLat, lat+dLat, lonLo, lonHi)
+}
+
+// readSavedPlacesNear is listSavedPlacesNearQ in its own read.
+func readSavedPlacesNear(store *documentStore, lat, lon, radiusM float64) ([]savedPlace, error) {
+	var places []savedPlace
+	err := store.Read(func(q sqlQueryer) error {
+		var err error
+		places, err = listSavedPlacesNearQ(q, lat, lon, radiusM)
+		return err
+	})
+	return places, err
 }
 
 // readSavedPlaces is listSavedPlacesQ in its own read.
@@ -218,9 +314,9 @@ func createSavedPlaceTx(x alarmSQLExecer, p savedPlace, now time.Time) (savedPla
 	}
 	p.ID = uuid.NewString()
 	p.CreatedAt, p.UpdatedAt = now.UTC(), now.UTC()
-	if _, err := x.Exec(`INSERT INTO saved_places (id, name, name_key, lat, lon, note, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, savedPlaceKey(p.Name), p.Lat, p.Lon, p.Note, p.CreatedAt.UnixNano(), p.UpdatedAt.UnixNano()); err != nil {
+	if _, err := x.Exec(`INSERT INTO saved_places (id, name, name_key, lat, lon, note, depth_m, depth_source, depth_date, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, savedPlaceKey(p.Name), p.Lat, p.Lon, p.Note, p.DepthM, p.DepthSource, p.DepthDate, p.CreatedAt.UnixNano(), p.UpdatedAt.UnixNano()); err != nil {
 		return savedPlace{}, fmt.Errorf("insert saved place: %w", savedPlaceWriteError(err))
 	}
 	return p, nil
@@ -234,8 +330,8 @@ func updateSavedPlaceTx(x alarmSQLExecer, next savedPlace, now time.Time) (saved
 		return savedPlace{}, err
 	}
 	next.UpdatedAt = now.UTC()
-	res, err := x.Exec(`UPDATE saved_places SET name = ?, name_key = ?, lat = ?, lon = ?, note = ?, updated_at = ? WHERE id = ?`,
-		next.Name, savedPlaceKey(next.Name), next.Lat, next.Lon, next.Note, next.UpdatedAt.UnixNano(), next.ID)
+	res, err := x.Exec(`UPDATE saved_places SET name = ?, name_key = ?, lat = ?, lon = ?, note = ?, depth_m = ?, depth_source = ?, depth_date = ?, updated_at = ? WHERE id = ?`,
+		next.Name, savedPlaceKey(next.Name), next.Lat, next.Lon, next.Note, next.DepthM, next.DepthSource, next.DepthDate, next.UpdatedAt.UnixNano(), next.ID)
 	if err != nil {
 		return savedPlace{}, fmt.Errorf("update saved place: %w", savedPlaceWriteError(err))
 	}
@@ -291,6 +387,9 @@ func savedPlaceRecordType() *recordType {
 			{Name: "lat", Kind: kindNumber, Writable: true, Description: "latitude in decimal degrees, south negative"},
 			{Name: "lon", Kind: kindNumber, Writable: true, Description: "longitude in decimal degrees, west negative"},
 			{Name: "note", Kind: kindString, Writable: true, Description: "an optional note, up to 300 characters"},
+			{Name: "depth_m", Kind: kindNumber, Writable: true, Nullable: true, Description: "the water here in metres at chart datum, the figure the operator gave (a drying height is negative); null clears the depth, source and date. Set it together with depth_source and depth_date"},
+			{Name: "depth_source", Kind: kindString, Writable: true, Enum: []string{savedPlaceDepthCharted, savedPlaceDepthSounded}, Description: "where the depth came from: charted for a figure the operator gave you, sounded only for one the boat measured at anchor"},
+			{Name: "depth_date", Kind: kindDate, Writable: true, Description: "the day the depth was taken or given, YYYY-MM-DD"},
 		},
 		Get: func(q sqlQueryer, id string) (recordSnapshot, error) {
 			p, err := savedPlaceByIDQ(q, id)
@@ -355,9 +454,18 @@ func savedPlaceVersion(p savedPlace) string {
 }
 
 func savedPlaceSnapshot(p savedPlace) recordSnapshot {
+	// A nil *float64 inside an any would not read as null, so the depth is nil
+	// or a plain number.
+	var depth any
+	if p.DepthM != nil {
+		depth = *p.DepthM
+	}
 	return recordSnapshot{
 		ID: p.ID, Label: p.Name, Version: savedPlaceVersion(p),
-		Fields: map[string]any{"name": p.Name, "lat": p.Lat, "lon": p.Lon, "note": p.Note},
+		Fields: map[string]any{
+			"name": p.Name, "lat": p.Lat, "lon": p.Lon, "note": p.Note,
+			"depth_m": depth, "depth_source": p.DepthSource, "depth_date": p.DepthDate,
+		},
 	}
 }
 
@@ -380,6 +488,34 @@ func applySavedPlaceFields(p savedPlace, given fieldSet) (savedPlace, error) {
 			*f.dst = *n
 		}
 	}
+	return applySavedPlaceDepthFields(p, given)
+}
+
+// applySavedPlaceDepthFields lays the depth group over a place. A depth_m of
+// null clears the group; a number replaces it and must come with its own source
+// and date, so a new figure never inherits the old one's provenance. A source
+// or date with no depth_m is refused.
+func applySavedPlaceDepthFields(p savedPlace, given fieldSet) (savedPlace, error) {
+	depth, hasDepth := given["depth_m"]
+	_, hasSource := given["depth_source"]
+	_, hasDate := given["depth_date"]
+	switch {
+	case !hasDepth && (hasSource || hasDate):
+		return savedPlace{}, fieldErr("depth_m", "is required when a depth source or date is given")
+	case !hasDepth:
+		return p, nil
+	case depth == nil:
+		p.DepthM, p.DepthSource, p.DepthDate = nil, "", ""
+		return p, nil
+	}
+	n := floatPtrOf(depth)
+	if n == nil {
+		return savedPlace{}, fieldErr("depth_m", "must be a number")
+	}
+	if !hasSource || !hasDate {
+		return savedPlace{}, fieldErr("depth_source", "and depth_date are required with a new depth_m")
+	}
+	p.DepthM, p.DepthSource, p.DepthDate = n, stringOf(given["depth_source"]), stringOf(given["depth_date"])
 	return p, nil
 }
 
@@ -401,7 +537,23 @@ func describeSavedPlace(d describeInput) string {
 	if savedPlacePositionOf(d.Before.Fields) != savedPlacePositionOf(d.After.Fields) {
 		return "Move saved place " + d.Before.Label + " to " + savedPlacePositionOf(d.After.Fields)
 	}
+	if savedPlaceDepthOf(d.Before.Fields) != savedPlaceDepthOf(d.After.Fields) {
+		if after := savedPlaceDepthOf(d.After.Fields); after != "" {
+			return "Set the depth of saved place " + d.Before.Label + " to " + after
+		}
+		return "Clear the depth of saved place " + d.Before.Label
+	}
 	return "Change saved place " + d.Before.Label
+}
+
+// savedPlaceDepthOf writes a place's depth the way the operator reads it,
+// "4.0 m at datum (charted 2026-11-01)", or "" when it has none.
+func savedPlaceDepthOf(f map[string]any) string {
+	depth := floatPtrOf(f["depth_m"])
+	if depth == nil {
+		return ""
+	}
+	return fmt.Sprintf("%.1f m at datum (%s %s)", *depth, stringOf(f["depth_source"]), stringOf(f["depth_date"]))
 }
 
 // displaySavedPlaceFields shows lat and lon as one position in degrees and
@@ -412,6 +564,14 @@ func displaySavedPlaceFields(snap recordSnapshot, fields map[string]any) map[str
 		switch k {
 		case "lat", "lon":
 			out["position"] = savedPlacePositionOf(mergeFields(snap.Fields, fields))
+			continue
+		case "depth_m", "depth_source", "depth_date":
+			// One line for the three, from the whole record the display is of.
+			if d := savedPlaceDepthOf(mergeFields(snap.Fields, fields)); d != "" {
+				out["depth"] = d
+			} else {
+				out["depth"] = "none"
+			}
 			continue
 		}
 		out[k] = v
@@ -469,10 +629,13 @@ func createSavedPlaceHandler(c echo.Context) error {
 		return savedPlaceError(c, err)
 	}
 	var req struct {
-		Name string   `json:"name"`
-		Lat  *float64 `json:"lat"`
-		Lon  *float64 `json:"lon"`
-		Note string   `json:"note"`
+		Name        string   `json:"name"`
+		Lat         *float64 `json:"lat"`
+		Lon         *float64 `json:"lon"`
+		Note        string   `json:"note"`
+		DepthM      *float64 `json:"depth_m"`
+		DepthSource string   `json:"depth_source"`
+		DepthDate   string   `json:"depth_date"`
 	}
 	dec := json.NewDecoder(c.Request().Body)
 	dec.DisallowUnknownFields()
@@ -488,7 +651,10 @@ func createSavedPlaceHandler(c echo.Context) error {
 	var created savedPlace
 	err = docs.RunTx("create saved place", func(tx *sql.Tx, now time.Time) error {
 		var err error
-		created, err = createSavedPlaceTx(tx, savedPlace{Name: req.Name, Lat: *req.Lat, Lon: *req.Lon, Note: req.Note}, now)
+		created, err = createSavedPlaceTx(tx, savedPlace{
+			Name: req.Name, Lat: *req.Lat, Lon: *req.Lon, Note: req.Note,
+			DepthM: req.DepthM, DepthSource: req.DepthSource, DepthDate: req.DepthDate,
+		}, now)
 		return err
 	})
 	if err != nil {
@@ -497,8 +663,9 @@ func createSavedPlaceHandler(c echo.Context) error {
 	return c.JSON(http.StatusCreated, created)
 }
 
-// PATCH /api/saved-places/:id renames, moves or re-notes a place; only the
-// fields sent change.
+// PATCH /api/saved-places/:id renames, moves or re-notes a place, or sets or
+// clears its depth; only the fields sent change. A depth_m of null clears the
+// depth, its source and its date.
 func patchSavedPlaceHandler(c echo.Context) error {
 	docs, err := savedPlaceStore()
 	if err != nil {
@@ -510,10 +677,10 @@ func patchSavedPlaceHandler(c echo.Context) error {
 	}
 	for k, v := range given {
 		switch {
-		case k != "name" && k != "lat" && k != "lon" && k != "note":
+		case k != "name" && k != "lat" && k != "lon" && k != "note" && k != "depth_m" && k != "depth_source" && k != "depth_date":
 			return savedPlaceError(c, fieldErr("body", "json: unknown field %q", k))
-		case v == nil:
-			delete(given, k) // null leaves the field as it is
+		case v == nil && k != "depth_m":
+			delete(given, k) // null leaves the field as it is; a null depth_m clears the depth
 		}
 	}
 	var updated savedPlace

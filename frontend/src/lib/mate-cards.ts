@@ -310,8 +310,63 @@ export interface AnchorageCard {
     bay: { osm: string; name: string; contains: boolean; distanceM: number } | null
     truncated: boolean
   }
+  /** null on a card stored before the depth checks existed: it draws no depth section. */
+  depth: AnchorageDepth | null
   /** OpenStreetMap data time, "" when the map server gave none. */
   dataAsOf: string
+}
+
+/** One depth check: its status, and why it was skipped when it was. The card words its own lines from the figures. */
+interface DepthCheckBase<S extends string> {
+  status: S | 'skipped'
+  skippedReason: string
+}
+
+/**
+ * The depth used for the stay and what it allows (the swing and clearance
+ * checks). With no depth every check is skipped and says why; a skipped check
+ * is never drawn as passed.
+ */
+export interface AnchorageDepth {
+  /** Set when the saved places could not be read. */
+  error: string
+  known: boolean
+  /** Metres at chart datum; null when unknown. */
+  depthM: number | null
+  source: 'operator' | 'saved_place' | 'none'
+  savedPlace: string
+  savedSource: 'charted' | 'sounded' | ''
+  savedDate: string
+  note: string
+  clearance: DepthCheckBase<'ok' | 'too_shallow'> & {
+    lowestWaterAt: string
+    lowestWaterM: number | null
+    depthAtLowM: number | null
+    draftM: number | null
+    clearanceM: number | null
+    wantedM: number | null
+  }
+  rode: DepthCheckBase<'ok' | 'short'> & {
+    highestWaterAt: string
+    highestWaterM: number | null
+    depthAtHighM: number | null
+    method: string
+    windKts: number | null
+    rodeNeededM: number | null
+    scopeRatio: number | null
+    chainOnboardM: number | null
+    shortByM: number | null
+    /** When the forecast ends, if before the stay does: the wind was checked only up to then. Empty when it covers the stay. */
+    windCheckedUntil: string
+  }
+  swing: DepthCheckBase<'computed'> & {
+    radiusM: number | null
+    rodeM: number | null
+    bowOffsetM: number | null
+    loaM: number | null
+    /** True when the rode check was short: the swing is for all the chain aboard. */
+    allChainOut: boolean
+  }
 }
 
 export const STATES: readonly string[] = ['go', 'marginal', 'no_go', 'no_data']
@@ -345,6 +400,11 @@ function stamp(v: unknown, path: string): string {
   const s = str(v, path)
   if (Number.isNaN(Date.parse(s))) bad(path, 'expected a timestamp')
   return s
+}
+/** A timestamp, or "" for none. */
+function emptyOrStamp(v: unknown, path: string): string {
+  const s = str(v, path)
+  return s === '' ? s : stamp(s, path)
 }
 function ymd(v: unknown, path: string): string {
   const s = str(v, path)
@@ -788,6 +848,61 @@ function decodeAnchorageTide(raw: unknown): AnchorageCard['tide'] {
   }
 }
 
+function decodeDepthCheck<S extends string>(o: Record<string, unknown>, path: string, statuses: readonly S[]): DepthCheckBase<S> {
+  const status = oneOf<S | 'skipped'>(o.status, [...statuses, 'skipped'], `${path}.status`)
+  const skippedReason = str(o.skipped_reason, `${path}.skipped_reason`)
+  if (status === 'skipped' && skippedReason === '') bad(`${path}.skipped_reason`, 'a skipped check must say why')
+  return { status, skippedReason }
+}
+
+function decodeAnchorageDepth(raw: unknown): AnchorageDepth {
+  const o = obj(raw, 'depth')
+  const depthM = nullableNumber(o.depth_m, 'depth.depth_m')
+  const c = obj(o.clearance, 'depth.clearance')
+  const r = obj(o.rode, 'depth.rode')
+  const w = obj(o.swing, 'depth.swing')
+  return {
+    error: str(o.error, 'depth.error'),
+    known: depthM !== null,
+    depthM,
+    source: oneOf<AnchorageDepth['source']>(o.source, ['operator', 'saved_place', 'none'], 'depth.source'),
+    savedPlace: str(o.saved_place, 'depth.saved_place'),
+    savedSource: oneOf<AnchorageDepth['savedSource']>(o.saved_source, ['charted', 'sounded', ''], 'depth.saved_source'),
+    savedDate: str(o.saved_date, 'depth.saved_date'),
+    note: str(o.note, 'depth.note'),
+    clearance: {
+      ...decodeDepthCheck(c, 'depth.clearance', ['ok', 'too_shallow'] as const),
+      lowestWaterAt: str(c.lowest_water_at, 'depth.clearance.lowest_water_at'),
+      lowestWaterM: nullableNumber(c.lowest_water_height_m, 'depth.clearance.lowest_water_height_m'),
+      depthAtLowM: nullableNumber(c.depth_at_low_m, 'depth.clearance.depth_at_low_m'),
+      draftM: nullableNumber(c.draft_m, 'depth.clearance.draft_m'),
+      clearanceM: nullableNumber(c.clearance_m, 'depth.clearance.clearance_m'),
+      wantedM: nullableNumber(c.wanted_m, 'depth.clearance.wanted_m'),
+    },
+    rode: {
+      ...decodeDepthCheck(r, 'depth.rode', ['ok', 'short'] as const),
+      highestWaterAt: str(r.highest_water_at, 'depth.rode.highest_water_at'),
+      highestWaterM: nullableNumber(r.highest_water_height_m, 'depth.rode.highest_water_height_m'),
+      depthAtHighM: nullableNumber(r.depth_at_high_m, 'depth.rode.depth_at_high_m'),
+      method: str(r.method, 'depth.rode.method'),
+      windKts: nullableNumber(r.wind_kts, 'depth.rode.wind_kts'),
+      rodeNeededM: nullableNumber(r.rode_needed_m, 'depth.rode.rode_needed_m'),
+      scopeRatio: nullableNumber(r.scope_ratio, 'depth.rode.scope_ratio'),
+      chainOnboardM: nullableNumber(r.chain_onboard_m, 'depth.rode.chain_onboard_m'),
+      shortByM: nullableNumber(r.short_by_m, 'depth.rode.short_by_m'),
+      windCheckedUntil: emptyOrStamp(r.wind_checked_until, 'depth.rode.wind_checked_until'),
+    },
+    swing: {
+      ...decodeDepthCheck(w, 'depth.swing', ['computed'] as const),
+      radiusM: nullableNumber(w.radius_m, 'depth.swing.radius_m', 0),
+      rodeM: nullableNumber(w.rode_m, 'depth.swing.rode_m'),
+      bowOffsetM: nullableNumber(w.bow_offset_m, 'depth.swing.bow_offset_m'),
+      loaM: nullableNumber(w.loa_m, 'depth.swing.loa_m'),
+      allChainOut: bool(w.all_chain_out, 'depth.swing.all_chain_out'),
+    },
+  }
+}
+
 function decodeShapes(raw: unknown, path: string): MarinaShape[] {
   return arr(raw, path).map((s, i) => decodeMarinaShape(s, `${path}[${i}]`))
 }
@@ -858,6 +973,8 @@ function decodeAnchorage(raw: unknown): AnchorageCard {
     forecast: decodeAnchorageForecast(p.forecast),
     tide: decodeAnchorageTide(p.tide),
     features: decodeAnchorageFeatures(p.features),
+    // A card stored before the depth checks has no depth key; any depth present is read strictly.
+    depth: p.depth === undefined ? null : decodeAnchorageDepth(p.depth),
     dataAsOf,
   }
 }

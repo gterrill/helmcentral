@@ -14,7 +14,8 @@ const MOORING_LABEL_LAYOUT: SymbolLayerSpecification['layout'] = { ...POINT_LABE
 /**
  * The anchorage map on a Mate card (ADR 0244), on the base it shares with the
  * marina map. On top go the 36 fetch rays coloured by shelter grade, the
- * public moorings labelled with their vessel size limit, restricted areas
+ * public moorings labelled with their vessel size limit, the swing circle
+ * when a depth made one, restricted areas
  * filled in the alert colour, and anchorage and seabed areas outlined. The
  * shore the rays stop at is not drawn: the rays say where it is.
  */
@@ -70,6 +71,11 @@ function AnchorageMap({ card }: { card: AnchorageCard }) {
       <Source id="anchorage-seabed" type="geojson" data={features.seabedAreas}>
         <Layer id="anchorage-seabed-line" type="line" filter={['!', IS_POINT]} layout={{ 'line-join': 'round' }} paint={{ 'line-color': muted, 'line-width': 2, 'line-dasharray': [2, 2] }} />
         <Layer id="anchorage-seabed-point" type="circle" filter={IS_POINT} paint={{ 'circle-radius': 4, 'circle-color': background, 'circle-stroke-color': muted, 'circle-stroke-width': 2 }} />
+      </Source>
+
+      <Source id="anchorage-swing" type="geojson" data={features.swing}>
+        <Layer id="anchorage-swing-fill" type="fill" paint={{ 'fill-color': foreground, 'fill-opacity': 0.08 }} />
+        <Layer id="anchorage-swing-edge" type="line" paint={{ 'line-color': foreground, 'line-width': 1.5, 'line-dasharray': [3, 2] }} />
       </Source>
 
       <Source id="anchorage-rays" type="geojson" data={features.rays}>

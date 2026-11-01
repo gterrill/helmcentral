@@ -1,0 +1,288 @@
+{
+  "note": "Test vectors for the ratio method and swing maths in frontend/src/lib/rode-plan.ts (the reference) and backend/anchorage_rode.go. Both suites run every case. Regenerate with the reference when its behaviour is meant to change: expected values come from the TypeScript, never from the Go.",
+  "tolerance": 1e-09,
+  "cases": [
+    {
+      "name": "typical breeze, 7:1 from 20 kts",
+      "input": {
+        "planningDepthM": 6,
+        "bowRollerHeightM": 1.2,
+        "windKts": 20,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 50.4,
+          "scopeRatio": 7,
+          "unavailableReason": null
+        },
+        "ratioSwingRadiusM": 66.4
+      }
+    },
+    {
+      "name": "light wind plans at 5:1",
+      "input": {
+        "planningDepthM": 6,
+        "bowRollerHeightM": 1.2,
+        "windKts": 3,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 36,
+          "scopeRatio": 5,
+          "unavailableReason": null
+        },
+        "ratioSwingRadiusM": 52
+      }
+    },
+    {
+      "name": "ratio switches to 7:1 at 20 kts",
+      "input": {
+        "planningDepthM": 6,
+        "bowRollerHeightM": 1.2,
+        "windKts": 19.9,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 36,
+          "scopeRatio": 5,
+          "unavailableReason": null
+        },
+        "ratioSwingRadiusM": 52
+      }
+    },
+    {
+      "name": "ratio 7:1 exactly at 20",
+      "input": {
+        "planningDepthM": 6,
+        "bowRollerHeightM": 1.2,
+        "windKts": 20,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 50.4,
+          "scopeRatio": 7,
+          "unavailableReason": null
+        },
+        "ratioSwingRadiusM": 66.4
+      }
+    },
+    {
+      "name": "shallow",
+      "input": {
+        "planningDepthM": 1.5,
+        "bowRollerHeightM": 1.2,
+        "windKts": 15,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 13.5,
+          "scopeRatio": 5,
+          "unavailableReason": null
+        },
+        "ratioSwingRadiusM": 29.5
+      }
+    },
+    {
+      "name": "deep",
+      "input": {
+        "planningDepthM": 14.25,
+        "bowRollerHeightM": 1.2,
+        "windKts": 30,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 108.14999999999999,
+          "scopeRatio": 7,
+          "unavailableReason": null
+        },
+        "ratioSwingRadiusM": 124.14999999999999
+      }
+    },
+    {
+      "name": "no wind data",
+      "input": {
+        "planningDepthM": 6,
+        "bowRollerHeightM": 1.2,
+        "windKts": null,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 0,
+          "scopeRatio": 0,
+          "unavailableReason": "no wind data"
+        },
+        "ratioSwingRadiusM": null
+      }
+    },
+    {
+      "name": "zero wind",
+      "input": {
+        "planningDepthM": 6,
+        "bowRollerHeightM": 1.2,
+        "windKts": 0,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 36,
+          "scopeRatio": 5,
+          "unavailableReason": null
+        },
+        "ratioSwingRadiusM": 52
+      }
+    },
+    {
+      "name": "no bow roller height",
+      "input": {
+        "planningDepthM": 6,
+        "bowRollerHeightM": 0,
+        "windKts": 20,
+        "loaM": 14,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 0,
+          "scopeRatio": 0,
+          "unavailableReason": "bow roller height not configured"
+        },
+        "ratioSwingRadiusM": null
+      }
+    },
+    {
+      "name": "loa unknown",
+      "input": {
+        "planningDepthM": 6,
+        "bowRollerHeightM": 1.2,
+        "windKts": 20,
+        "loaM": null,
+        "bowOffsetM": 2
+      },
+      "expected": {
+        "ratio": {
+          "recommendedRodeM": 50.4,
+          "scopeRatio": 7,
+          "unavailableReason": null
+        },
+        "ratioSwingRadiusM": null
+      }
+    }
+  ],
+  "windBands": [
+    {
+      "kts": null,
+      "planKts": null
+    },
+    {
+      "kts": 0,
+      "planKts": 10
+    },
+    {
+      "kts": 4,
+      "planKts": 10
+    },
+    {
+      "kts": 10,
+      "planKts": 15
+    },
+    {
+      "kts": 10.1,
+      "planKts": 15
+    },
+    {
+      "kts": 15,
+      "planKts": 20
+    },
+    {
+      "kts": 19.9,
+      "planKts": 20
+    },
+    {
+      "kts": 20,
+      "planKts": 25
+    },
+    {
+      "kts": 24.9,
+      "planKts": 25
+    },
+    {
+      "kts": 25,
+      "planKts": 30
+    },
+    {
+      "kts": 29,
+      "planKts": 30
+    },
+    {
+      "kts": 39.99,
+      "planKts": 40
+    },
+    {
+      "kts": 40,
+      "planKts": 50
+    },
+    {
+      "kts": 49,
+      "planKts": 50
+    },
+    {
+      "kts": 50,
+      "planKts": 50
+    },
+    {
+      "kts": 80,
+      "planKts": 50
+    },
+    {
+      "kts": -3,
+      "planKts": 10
+    }
+  ],
+  "loa": [
+    {
+      "settingsLoaM": 14,
+      "vesselLengthOverallM": null,
+      "loaM": 14
+    },
+    {
+      "settingsLoaM": 0,
+      "vesselLengthOverallM": 13.5,
+      "loaM": 13.5
+    },
+    {
+      "settingsLoaM": 0,
+      "vesselLengthOverallM": null,
+      "loaM": null
+    },
+    {
+      "settingsLoaM": 12,
+      "vesselLengthOverallM": 13.5,
+      "loaM": 12
+    },
+    {
+      "settingsLoaM": 0,
+      "vesselLengthOverallM": 0,
+      "loaM": null
+    },
+    {
+      "settingsLoaM": 0,
+      "vesselLengthOverallM": -1,
+      "loaM": null
+    }
+  ]
+}

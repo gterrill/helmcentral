@@ -63,13 +63,21 @@ offers to keep it. Here is how that works:
 - **A name that's already saved:** If you give Mate a new position for a name it
   has, it proposes moving that place. The card shows the old position and the
   new one.
+- **A depth:** A saved place can also hold the depth of the water there, in
+  metres at chart datum. If you tell Mate the depth when you give it the
+  position, it adds the depth to the card and the card shows it. A place keeps one
+  depth, with where it came from (charted, which is a figure you gave) and the
+  date. A new depth replaces the old one, and the card shows both. When you
+  ask Mate about an anchorage within 0.1 nm of the place, and no nearer place has a depth, it uses the depth for
+  the swing and clearance checks. See [Mate](assistant.md#depth-swing-and-clearance).
 - **Names match loosely:** Capitals, punctuation and spacing don't matter, and
   "Is" or "Isl" stands for "Island". "Thomas Is. South" finds "Thomas Island
   South". Two places can't have names that match like this.
 
 An outside assistant that can look up place names finds your saved places the same way.
 
-Mate only saves a position you gave it. It never works one out and saves that.
+Mate only saves a position, and a depth, that you gave it. It never works one
+out and saves that.
 
 You can add, rename, move and delete saved places under **Settings → Saved places**.
 The steps are in [Manage the places you've given Mate](../how-to/manage-saved-places.md).

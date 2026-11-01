@@ -1,7 +1,7 @@
 import type { DistanceUnits } from '@/config/app-config'
-import { destinationPoint } from '@/lib/geo'
+import { circlePolygon, destinationPoint } from '@/lib/geo'
 import { dataDateText, distanceText, featureCollection, humanise, lonLat, pointsBounds, type Bounds } from '@/lib/marina-card'
-import type { AnchorageCard, AnchorageMooring, AnchorageRestrictedArea, MarinaShape, ShelterGrade } from '@/lib/mate-cards'
+import type { AnchorageCard, AnchorageDepth, AnchorageMooring, AnchorageRestrictedArea, MarinaShape, ShelterGrade } from '@/lib/mate-cards'
 import { metersToFeet } from '@/lib/units'
 import { formatDayMonthIn, formatTimeOfDay, formatWeekday } from '@/lib/vessel-time'
 
@@ -162,6 +162,108 @@ export function groupMoorings(list: AnchorageMooring[], units: DistanceUnits): M
   return [...groups.values()].sort((a, b) => a.nearestM - b.nearestM)
 }
 
+// ── depth and swing ──────────────────────────────────────────────────────
+
+/** One line of the depth section: a check, its verdict and the sentence that says it. */
+export interface DepthLine {
+  key: 'depth' | 'clearance' | 'rode' | 'swing'
+  title: string
+  /** The verdict in words, so colour is never the only cue. */
+  badge: string
+  tone: BadgeTone
+  text: string
+  /** The basis or caveat behind the figure, when there is one. */
+  detail: string
+}
+
+const skippedLine = (key: DepthLine['key'], title: string, reason: string): DepthLine => ({
+  key,
+  title,
+  badge: 'Skipped',
+  tone: 'muted',
+  text: `Skipped: ${reason}.`,
+  detail: '',
+})
+
+/** Where the depth came from, in words: "from you", or "from saved place X (charted 2026-11-01)". */
+export function depthSourceText(d: AnchorageDepth): string {
+  if (d.source === 'operator') return 'from you'
+  if (d.source === 'saved_place') return `from saved place ${d.savedPlace} (${d.savedSource} ${d.savedDate})`
+  return ''
+}
+
+/**
+ * The depth section's lines, in the operator's units. With no depth there is
+ * one line saying so and each check skipped with its reason: a check that did
+ * not run is never drawn as passed.
+ */
+export function depthLines(card: AnchorageCard, units: DistanceUnits): DepthLine[] {
+  const d = card.depth
+  // A card stored before the depth checks existed has none: nothing to draw.
+  if (d === null) return []
+  const len = (m: number | null) => (m === null ? '--' : lengthText(m, units))
+  const lines: DepthLine[] = []
+  if (d.error !== '') {
+    lines.push({ key: 'depth', title: 'Depth', badge: 'Unknown', tone: 'warning', text: d.error, detail: '' })
+  } else if (!d.known || d.depthM === null) {
+    lines.push({ key: 'depth', title: 'Depth', badge: 'Unknown', tone: 'warning', text: 'Depth unknown: check the chart.', detail: d.note })
+  } else {
+    lines.push({ key: 'depth', title: 'Depth', badge: len(d.depthM), tone: 'neutral', text: `${len(d.depthM)} at chart datum, ${depthSourceText(d)}`, detail: d.note })
+  }
+
+  const c = d.clearance
+  if (c.status === 'skipped') {
+    lines.push(skippedLine('clearance', 'Clearance at low water', c.skippedReason))
+  } else {
+    const shallow = c.status === 'too_shallow'
+    lines.push({
+      key: 'clearance',
+      title: 'Clearance at low water',
+      badge: shallow ? 'Too shallow' : 'OK',
+      tone: shallow ? 'critical' : 'good',
+      text: `Lowest water ${timeText(c.lowestWaterAt, card.timezone)} (${len(c.lowestWaterM)} on the tide table): ${len(c.depthAtLowM)} of water, ${len(c.clearanceM)} under a ${len(c.draftM)} draft. You want at least ${len(c.wantedM)}.`,
+      detail: '',
+    })
+  }
+
+  const r = d.rode
+  if (r.status === 'skipped') {
+    lines.push(skippedLine('rode', 'Rode at high water', r.skippedReason))
+  } else {
+    const short = r.status === 'short'
+    lines.push({
+      key: 'rode',
+      title: 'Rode at high water',
+      badge: short ? `Short by ${len(r.shortByM)}` : 'OK',
+      tone: short ? 'critical' : 'good',
+      text: `Highest water ${timeText(r.highestWaterAt, card.timezone)} (${len(r.highestWaterM)}): ${len(r.depthAtHighM)} of water. About ${len(r.rodeNeededM)} of rode (${r.scopeRatio === null ? '--' : Number(r.scopeRatio.toFixed(1))}:1, ${r.method}) against ${len(r.chainOnboardM)} aboard.`,
+      detail: [
+        r.windKts === null ? '' : `Planned at ${r.windKts} kts, the strongest forecast gust in the stay rounded up to its band.`,
+        r.windCheckedUntil === '' ? '' : `The forecast ends at ${timeText(r.windCheckedUntil, card.timezone)}, before the stay does, so the wind was only checked up to then.`,
+      ]
+        .filter(Boolean)
+        .join(' '),
+    })
+  }
+
+  const w = d.swing
+  if (w.status === 'skipped') {
+    lines.push(skippedLine('swing', 'Swing', w.skippedReason))
+  } else {
+    lines.push({
+      key: 'swing',
+      title: 'Swing',
+      badge: len(w.radiusM),
+      tone: 'neutral',
+      text: w.allChainOut
+        ? `With all ${len(w.rodeM)} of chain out, short of the ${len(r.rodeNeededM)} needed, the boat swings within about ${len(w.radiusM)} of the anchor: ${len(w.bowOffsetM)} from bow to GPS and the boat's ${len(w.loaM)} length.`
+        : `The boat swings within about ${len(w.radiusM)} of the anchor: ${len(w.rodeM)} of rode, ${len(w.bowOffsetM)} from bow to GPS and the boat's ${len(w.loaM)} length.`,
+      detail: '',
+    })
+  }
+  return lines
+}
+
 /** The footer's dated lines, each only when its date is known. */
 export function footerLines(card: AnchorageCard): string[] {
   const lines: string[] = []
@@ -196,6 +298,17 @@ export interface AnchorageFeatureCollections {
   seabedAreas: GeoJSON.FeatureCollection
   moorings: GeoJSON.FeatureCollection
   anchorage: GeoJSON.FeatureCollection
+  /** The swing circle round the anchorage; empty when it was not computed. */
+  swing: GeoJSON.FeatureCollection
+}
+
+/** Points on the circle of the swing radius round the anchorage; the ring closes. */
+/** The swing circle as a closed ring of [lon, lat], or null when no radius was computed. */
+export function swingRing(card: AnchorageCard): [number, number][] | null {
+  if (card.depth === null) return null
+  const radius = card.depth.swing.radiusM
+  if (card.depth.swing.status !== 'computed' || radius === null || radius <= 0) return null
+  return circlePolygon(card.lat, card.lon, radius)
 }
 
 /**
@@ -217,6 +330,7 @@ export function anchorageFeatures(card: AnchorageCard, units: DistanceUnits): An
   const polygon = (sh: MarinaShape, properties: GeoJSON.GeoJsonProperties): GeoJSON.Feature => ({ type: 'Feature', properties, geometry: { type: 'Polygon', coordinates: [sh.points.map(lonLat)] } })
   const outline = (sh: MarinaShape, properties: GeoJSON.GeoJsonProperties): GeoJSON.Feature =>
     sh.kind === 'point' ? { type: 'Feature', properties, geometry: { type: 'Point', coordinates: lonLat(sh.points[0]) } } : { type: 'Feature', properties, geometry: { type: 'LineString', coordinates: sh.points.map(lonLat) } }
+  const ring = swingRing(card)
   const restricted = card.features.restrictedAreas
   const restrictedProps = (r: AnchorageRestrictedArea) => ({ name: r.name, prohibits: r.prohibitsAnchoring })
   return {
@@ -231,5 +345,6 @@ export function anchorageFeatures(card: AnchorageCard, units: DistanceUnits): An
       geometry: { type: 'Point', coordinates: [m.lon, m.lat] },
     }))),
     anchorage: fc([{ type: 'Feature', properties: { name: card.name }, geometry: { type: 'Point', coordinates: [card.lon, card.lat] } }]),
+    swing: fc(ring ? [{ type: 'Feature', properties: { radiusM: card.depth?.swing.radiusM ?? null }, geometry: { type: 'Polygon', coordinates: [ring] } }] : []),
   }
 }

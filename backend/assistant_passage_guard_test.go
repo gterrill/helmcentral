@@ -347,7 +347,7 @@ func TestShelterGuardTrigger(t *testing.T) {
 		{"protected from", "Well protected from a northerly.", nil, "anchorage shelter"},
 		{"lee shore", "With the wind NE that is a lee shore.", nil, "anchorage shelter"},
 		{"open roadstead", "It is an open roadstead in a northerly.", nil, "anchorage shelter"},
-		{"no shelter claim", "Anchorage depth is 6 m on sand, 1.4 nm from the pass.", nil, ""},
+		{"no shelter claim", "Anchorage is on sand, 1.4 nm from the pass.", nil, ""},
 		{"sheltered marina, no direction", "Hamilton Island is a sheltered marina with fuel.", nil, ""},
 		{"head north to marina", "Head north to the sheltered marina and take a berth.", nil, ""},
 		{"exposed, no wind or direction", "The pontoon is exposed to the weather.", nil, ""},

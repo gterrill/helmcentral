@@ -5,6 +5,7 @@ import { AssistantAnchorageMap } from '@/components/assistant-anchorage-map'
 import { AnchorageShelterRose, GradeLegend } from '@/components/anchorage-shelter-rose'
 import {
   dateTimeText,
+  depthLines,
   directionText,
   footerLines,
   GRADE_LABEL,
@@ -239,6 +240,29 @@ function FeaturesBlock({ card }: { card: AnchorageCard }) {
   )
 }
 
+function DepthBlock({ card }: { card: AnchorageCard }) {
+  const { ui } = useAppConfig()
+  const lines = depthLines(card, ui.distanceUnits)
+  if (lines.length === 0) return null
+  return (
+    <Block title="Depth and swing" testId="anchorage-depth">
+      <ul aria-label="Depth, clearance and swing" className="flex min-w-0 flex-col gap-1.5">
+        {lines.map((l) => (
+          <li key={l.key} data-testid={`anchorage-depth-${l.key}`} className="flex min-w-0 flex-col gap-0.5 text-xs">
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+              <span className="font-medium text-foreground">{l.title}</span>
+              <span className={cn('inline-block whitespace-nowrap rounded border px-1.5 py-0.5 text-xs', TONE[l.tone])}>{l.badge}</span>
+            </span>
+            <span className={cn('min-w-0', l.tone === 'muted' ? 'text-muted-foreground' : 'text-foreground')}>{l.text}</span>
+            {l.detail && <span className="min-w-0 text-muted-foreground">{l.detail}</span>}
+          </li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted-foreground">Depth is metres at chart datum, from your figure or a saved place, never the map. Tide heights are taken on the same datum.</p>
+    </Block>
+  )
+}
+
 /**
  * The anchorage under a Mate reply (ADR 0244): the shelter rose, the forecast
  * and the tide for the stay, what the map records nearby and a map. The server
@@ -265,6 +289,7 @@ export const AssistantAnchorageCard = memo(function AssistantAnchorageCard({ car
       <ForecastBlock card={card} />
       <TideBlock card={card} />
       <FeaturesBlock card={card} />
+      <DepthBlock card={card} />
 
       <details className="group min-w-0 border-t border-border pt-2" onToggle={(e) => setMapOpen(e.currentTarget.open)}>
         <summary className="cursor-pointer list-none text-xs font-medium text-foreground marker:hidden [&::-webkit-details-marker]:hidden">

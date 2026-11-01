@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest'
-import { haversineMeters, bearingDeg, destinationPoint } from '@/lib/geo'
+import { haversineMeters, bearingDeg, circlePolygon, destinationPoint } from '@/lib/geo'
+
+describe('circlePolygon', () => {
+  it('is a closed [lon, lat] ring at the radius from the centre', () => {
+    const ring = circlePolygon(-20.5, 149.1, 80)
+    expect(ring).toHaveLength(65)
+    expect(ring[64]).toEqual(ring[0])
+    for (const [lon, lat] of ring) expect(haversineMeters(-20.5, 149.1, lat, lon)).toBeCloseTo(80, 0)
+  })
+
+  it('takes the number of steps', () => {
+    expect(circlePolygon(0, 0, 10, 8)).toHaveLength(9)
+  })
+})
 
 describe('haversineMeters', () => {
   it('returns ~111.2km for one degree of latitude', () => {

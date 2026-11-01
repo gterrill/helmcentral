@@ -1,5 +1,5 @@
 import { errorMessage } from '@/lib/errors'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Pencil, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -7,8 +7,12 @@ import { ConfirmDelete, EmptyState, FormSection, ResourceItem, ResourceList, Set
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { useAppConfig } from '@/hooks/use-app-config'
+import { useVesselStateSelector } from '@/hooks/use-vessel-state'
 import { useSavedPlaces, type NewSavedPlace, type SavedPlace, type SavedPlaceChange } from '@/hooks/use-saved-places'
 import { formatCoordinateDM, formatPositionDM, parseCoordinate } from '@/lib/coordinates'
+import { depthSummary, depthToText, depthUnitLabel, parseDepthText, todayDate } from '@/lib/saved-place-depth'
+import { selectTimeZone } from '@/lib/vessel-time'
 
 interface PlaceDialogProps {
   /** The place being edited, or null for a new one. */
@@ -35,22 +39,42 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
   const [lat, setLat] = useState(savedLat)
   const [lon, setLon] = useState(savedLon)
   const [note, setNote] = useState(place?.note ?? '')
+  const { ui } = useAppConfig()
+  const units = ui.distanceUnits
+  const savedDepth = depthToText(place?.depth_m ?? null, units)
+  const [depth, setDepth] = useState(savedDepth)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const latValue = parseCoordinate(lat, 'lat')
   const lonValue = parseCoordinate(lon, 'lon')
-  const invalid = name.trim() === '' || latValue === null || lonValue === null
+  const depthValue = parseDepthText(depth, units)
+  const depthBad = !depthValue.ok
+  // A typed depth is dated today at the boat, which needs the boat's zone.
+  const timeZone = useVesselStateSelector(selectTimeZone)
+  const today = useMemo(() => todayDate(timeZone), [timeZone])
+  const depthChanged = depth.trim() !== savedDepth
+  // What the operator typed into the depth box, in metres: undefined while it
+  // is untouched or not a depth, null once emptied, a number for a new figure.
+  const typedDepth = depthChanged && depthValue.ok ? depthValue.depthM : undefined
+  const needsDate = typeof typedDepth === 'number'
+  const dateMissing = needsDate && today === null
+  const invalid = name.trim() === '' || latValue === null || lonValue === null || depthBad || dateMissing
+  // A figure typed over a saved one replaces it, so the old one is shown first.
+  const hadDepth = place !== null && place.depth_m !== null
+  const replacing = hadDepth && typeof typedDepth === 'number'
+  const clearing = hadDepth && typedDepth === null
   // A new place starts with empty boxes; do not shout about them before the operator types.
   const latBad = latValue === null && lat.trim() !== ''
   const lonBad = lonValue === null && lon.trim() !== ''
 
   const submit = async () => {
-    if (invalid || latValue === null || lonValue === null) return
+    if (invalid || latValue === null || lonValue === null || !depthValue.ok) return
     setSaving(true)
     setError(null)
     try {
-      const fields = { name: name.trim(), lat: latValue, lon: lonValue, note: note.trim() }
+      const stamp = depthValue.depthM === null || today === null ? {} : { depth_m: depthValue.depthM, depth_source: 'charted' as const, depth_date: today }
+      const fields: NewSavedPlace = { name: name.trim(), lat: latValue, lon: lonValue, note: note.trim(), ...stamp }
       // The boxes show the position rounded to a thousandth of a minute, so a
       // position the operator did not touch is left out rather than re-sent.
       const changed: SavedPlaceChange = {}
@@ -58,6 +82,8 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
       if (lat !== savedLat) changed.lat = fields.lat
       if (lon !== savedLon) changed.lon = fields.lon
       if (fields.note !== place?.note) changed.note = fields.note
+      // A typed depth is charted and dated today; a box emptied clears it.
+      if (depthChanged) Object.assign(changed, depthValue.depthM === null ? { depth_m: null } : stamp)
       await onSave(fields, changed)
       onClose()
     } catch (err) {
@@ -99,6 +125,30 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
         <label htmlFor="saved-place-note" className="text-xs font-medium text-muted-foreground">Note</label>
         <Input id="saved-place-note" value={note} maxLength={300} onChange={(e) => setNote(e.target.value)} />
       </div>
+      <div className="flex min-w-0 flex-col gap-1.5">
+        <label htmlFor="saved-place-depth" className="text-xs font-medium text-muted-foreground">Depth at chart datum ({depthUnitLabel(units)}), optional</label>
+        <Input id="saved-place-depth" inputMode="decimal" value={depth} aria-invalid={depthBad} aria-describedby="saved-place-depth-help" onChange={(e) => setDepth(e.target.value)} className="tabular-nums" />
+        {depthBad && <p className="text-xs text-destructive">Not a depth. Type a number in {units === 'imperial' ? 'feet' : 'metres'}; a drying height is negative.</p>}
+        <p id="saved-place-depth-help" className="text-xs text-muted-foreground">
+          What a chart or someone local gives for the water here. Mate uses it for the swing and clearance checks. Saved as charted, dated today.
+        </p>
+        {place !== null && place.depth_m !== null && (
+          <p className="text-xs text-muted-foreground" data-testid="saved-place-depth-current">Now {depthSummary(place, units)}.</p>
+        )}
+        {replacing && (
+          <p role="status" className="text-xs text-foreground" data-testid="saved-place-depth-replaces">
+            Saving replaces {depthSummary(place, units)} with {depthToText(typedDepth ?? null, units)} {depthUnitLabel(units)} (charted {today}).
+          </p>
+        )}
+        {dateMissing && (
+          <p className="text-xs text-destructive" role="alert">The boat has not reported its time zone yet, so today&apos;s date is not known. Try again once it has.</p>
+        )}
+        {clearing && (
+          <p role="status" className="text-xs text-foreground" data-testid="saved-place-depth-clears">
+            Saving clears {depthSummary(place, units)}.
+          </p>
+        )}
+      </div>
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
@@ -109,6 +159,7 @@ function PlaceForm({ place, onClose, onSave }: Omit<PlaceDialogProps, 'open'>) {
 }
 
 export function SavedPlacesSection() {
+  const { ui } = useAppConfig()
   const { places, loading, error, refresh, add, change, remove } = useSavedPlaces()
   // The place being edited, 'new' for the add dialog, null when it is closed.
   const [editing, setEditing] = useState<SavedPlace | 'new' | null>(null)
@@ -159,16 +210,19 @@ export function SavedPlacesSection() {
             />
           }
         >
-          {places.map((place) => (
-            <ResourceItem
-              key={place.id}
-              item={place}
-              title={place.name}
-              meta={<span className="tabular-nums">{formatPositionDM(place.lat, place.lon)}{place.note ? ` · ${place.note}` : ''}</span>}
-              actions={actions}
-              actionsLabel={`Actions for ${place.name}`}
-            />
-          ))}
+          {places.map((place) => {
+            const depth = depthSummary(place, ui.distanceUnits)
+            return (
+              <ResourceItem
+                key={place.id}
+                item={place}
+                title={place.name}
+                meta={<span className="tabular-nums">{formatPositionDM(place.lat, place.lon)}{depth ? ` · ${depth}` : ''}{place.note ? ` · ${place.note}` : ''}</span>}
+                actions={actions}
+                actionsLabel={`Actions for ${place.name}`}
+              />
+            )
+          })}
         </ResourceList>
       </FormSection>
 
