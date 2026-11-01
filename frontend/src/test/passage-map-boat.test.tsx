@@ -33,6 +33,7 @@ vi.mock('react-map-gl/maplibre', async () => {
     jumpTo: vi.fn(),
     once: vi.fn(),
     setSky: vi.fn(),
+    getZoom: () => 10,
     getCanvasContainer: () => document.createElement('div'),
     on: mapOn,
     off: vi.fn(),

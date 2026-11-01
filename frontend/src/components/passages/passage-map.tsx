@@ -4,6 +4,7 @@ import { Maximize, Minus, Mountain, Plus } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { forwardRef, Fragment, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
 import type { MapRef } from 'react-map-gl/maplibre'
+import type { LayerProps } from 'react-map-gl/maplibre'
 import { Layer, Map, Marker, Source } from 'react-map-gl/maplibre'
 
 import { MapPlaceLabels, warnIfBaseVectorSourceMissing } from '@/components/map-place-labels'
@@ -20,21 +21,24 @@ import { insetZoom } from '@/lib/passage-export-style'
 import { offsetInsetZoom, type InsetCorner } from '@/lib/passage-inset-view'
 import { CameraGate, outsideCentral, type Camera, type CameraEnv, type CameraResult } from '@/lib/replay-camera'
 import type { SailedTo } from '@/lib/replay-controller'
-import { INTRO_START_ZOOM } from '@/lib/replay-intro'
+import { INTRO_START_ZOOM, MERCATOR, type MapProjection } from '@/lib/replay-intro'
+import type { ReplayLight } from '@/lib/replay-light'
+import { applyLight, plainSailedOverlay, speedLineOverlay, tintLayer, wakeOverlay, wholeLineLayers, type OverlaySpec } from '@/lib/replay-map-style'
+import type { SpeedFrame } from '@/lib/replay-speed'
 import { overviewCameraFor } from '@/lib/replay-framing'
-import { legsOf, legSegments, type PassageLeg } from '@/lib/passage-legs'
+import { drawnPieces, type DrawnPiece, type PassageLeg } from '@/lib/passage-legs'
 import { createSailedCache, segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
 import {
+  HILLSHADE_LAYER_ID,
   hillshadePaint,
   REPLAY_3D_MAX_PITCH,
   REPLAY_3D_PITCH,
-  skyFor,
   TERRAIN_SOURCE_ID,
   terrainSetting,
   terrainSource,
 } from '@/lib/terrain'
 import { hasWebGL2 } from '@/lib/webgl'
-import { SAT_HANDOFF_END_ZOOM, SAT_HANDOFF_START_ZOOM, WORLD_IMAGERY_OPACITY_EXPRESSION } from '@/lib/world-imagery'
+import { SAT_HANDOFF_START_ZOOM, WORLD_IMAGERY_OPACITY_EXPRESSION } from '@/lib/world-imagery'
 import { cn } from '@/lib/utils'
 
 // Map line colours cannot be CSS tokens (MapLibre paints with literal
@@ -57,6 +61,8 @@ export interface PassageMapHandle {
   getFraming: () => { overview: Camera; bearing: number } | null
   /** Places a camera: the replay's opening move, a frame at a time. */
   jumpTo: (camera: Camera) => void
+  /** Sets the projection: the globe the opening move starts from. `flatAtZoom` is the zoom from which it is flat anyway, or null. */
+  setProjection: (projection: MapProjection, flatAtZoom: number | null) => void
 }
 
 /** What the replay asks of the camera. The map places the camera when `clock`
@@ -102,11 +108,19 @@ export interface PassageMapProps {
   /** The legs each passage is drawn in, one colour per leg. Without it every
    * passage is one leg, coloured by its place in the list. */
   legs?: readonly PassageLeg[]
+  /** The pieces of track to draw, when the caller has worked them out already (from `passages` and `legs`). */
+  pieces?: readonly DrawnPiece[]
   /** Greys the zoom and fit buttons: the replay owns the camera while it plays. */
   controlsDisabled?: boolean
   /** The replay's opening move is placing the camera. A person taking hold of
    * the map meanwhile calls `onIntroInterrupt`. */
   introActive?: boolean
+  /** The light for the time of day at the boat: the sky, the map light and the relief shading. Null leaves the sky to the app theme. */
+  light?: ReplayLight | null
+  /** The sailed track coloured by speed, and the wake, for the frame being shown. Without it a replaying map draws the plain sailed line. */
+  speed?: SpeedFrame | null
+  /** Told the map's zoom, in quarter steps, as it changes. */
+  onZoomBucket?: (zoom: number) => void
   onIntroInterrupt?: () => void
 }
 
@@ -126,12 +140,21 @@ type TerrainState = 'ok' | 'failed' | 'retrying'
 
 type MapInstance = ReturnType<NonNullable<MapRef['getMap']>>
 
+/** A source with its layers, drawn from a description in lib/replay-map-style. */
+function Overlay({ spec }: { spec: OverlaySpec }) {
+  return (
+    <Source id={spec.source.id} type="geojson" data={spec.source.data} lineMetrics={spec.source.lineMetrics}>
+      {spec.layers.map((l) => <Layer key={l.id} {...(l as unknown as LayerProps)} />)}
+    </Source>
+  )
+}
+
 function centreOf(bounds: [number, number, number, number]) {
   return { longitude: (bounds[0] + bounds[2]) / 2, latitude: (bounds[1] + bounds[3]) / 2 }
 }
 
 export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function PassageMap(
-  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs, controlsDisabled = false, introActive = false, onIntroInterrupt },
+  { passages, playedIds, sailedTo = null, boat, boatHeading = null, hull = null, cameraDriver = null, onFlatChange, isDarkTheme, className, inset, insetCorner = 'top-right', markers, legs, pieces: given, controlsDisabled = false, introActive = false, onIntroInterrupt, light = null, speed = null, onZoomBucket },
   ref,
 ) {
   const mapRef = useRef<MapRef>(null)
@@ -214,30 +237,13 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     if (layerReady) boatLayerRef.current?.setPose(boat ? { lat: boat.lat, lon: boat.lon, headingDeg: boatHeading } : null)
   }, [layerReady, boat, boatHeading])
   const marker = boatMarkerKind({ threeD, terrain, hull: hull ?? null, layerReady })
-  const sailedCache = useMemo(() => createSailedCache(), [])
-  // What is drawn: a piece of track per leg. The first piece of a passage is
-  // open at its start and the last at its end, as the sailed line reads it.
-  const pieces = useMemo(() => {
-    const out: { key: string; passageId: string; segments: TimedSegment[]; colourIndex: number; from: number; to: number }[] = []
-    passages.forEach((p, i) => {
-      const mine = legs ? legsOf(legs, p.id) : []
-      if (mine.length === 0) {
-        out.push({ key: p.id, passageId: p.id, segments: p.segments, colourIndex: i, from: -Infinity, to: Infinity })
-        return
-      }
-      mine.forEach((leg, k) => out.push({
-        key: mine.length === 1 ? p.id : `${p.id}-${k}`,
-        passageId: p.id,
-        segments: legSegments(p.segments, mine, k),
-        colourIndex: leg.colourIndex,
-        from: k === 0 ? -Infinity : leg.fromMs / 1000,
-        to: k === mine.length - 1 ? Infinity : leg.toMs / 1000,
-      }))
-    })
-    return out
-  }, [passages, legs])
+  // What is drawn: a piece of track per leg (see drawnPieces).
+  const pieces = useMemo(() => given ?? drawnPieces(passages, legs), [given, passages, legs])
   const fullLines = useMemo(() => pieces.map((p) => segmentsToGeoJSON(p.segments)), [pieces])
 
+  // The sailed track is coloured by speed from the replay's own frame (the
+  // `speed` prop). Without one it keeps the plain sailed line in the leg's colour.
+  const sailedCache = useMemo(() => createSailedCache(), [])
   // The whole-track framing as a camera, flat or pitched (see replay-framing).
   // Remembered per track, pitch and size: working it out searches for a zoom.
   const overviewCache = useRef<{ key: string; camera: Camera } | null>(null)
@@ -278,6 +284,12 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
       return { zoom: map.getZoom(), pitch: camera3d ? map.getPitch() : null, bearing: map.getBearing() }
     },
     jumpTo: (camera) => { mapRef.current?.getMap?.()?.jumpTo(camera) },
+    setProjection: (projection, flatAtZoom) => {
+      const map = mapRef.current?.getMap?.()
+      if (!map) return
+      map.setProjection(projection)
+      flatAt.current = flatAtZoom
+    },
     getFraming: () => {
       const map = mapRef.current?.getMap?.()
       const overview = map ? overviewCamera(map) : null
@@ -438,17 +450,36 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     }
   }, [mapLoaded, introActive])
 
-  // The sky over the tilted map, only while the terrain is really up.
+  // The sky and light follow the time of day at the boat (lib/replay-light),
+  // put on the map by lib/replay-map-style. `light` is the same object while
+  // the sun has barely moved, so this runs only when it matters.
   useEffect(() => {
     const map = mapRef.current?.getMap?.()
     if (!mapLoaded || !map) return
-    // The typings leave undefined (no sky) out; the runtime clears the sky with it.
-    const apply = () => map.setSky((camera3d ? skyFor(isDarkTheme) : undefined) as never)
-    apply()
-    // A new map style (light to dark) drops the sky.
-    map.on('style.load', apply)
-    return () => { map.off('style.load', apply) }
-  }, [mapLoaded, camera3d, isDarkTheme])
+    return applyLight(map, light, { isDarkTheme, satellite, terrain: terrainOn, camera3d })
+  }, [mapLoaded, camera3d, isDarkTheme, light, terrainOn, satellite])
+
+  const zoomRef = useRef(onZoomBucket)
+  useEffect(() => { zoomRef.current = onZoomBucket })
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.()
+    if (!mapLoaded || !map) return
+    const read = () => zoomRef.current?.(Math.round(map.getZoom() * 4) / 4)
+    read()
+    map.on('zoomend', read)
+    return () => { map.off('zoomend', read) }
+  }, [mapLoaded])
+
+  // When the opening move ends with the map still on the globe (a hand took it
+  // before it landed), the map goes flat at once, at whatever zoom it is at.
+  // Past the move, nothing here assumes the globe.
+  const flatAt = useRef<number | null>(null)
+  useEffect(() => {
+    const map = mapRef.current?.getMap?.()
+    if (!mapLoaded || !map || introActive || flatAt.current === null) return
+    map.setProjection(MERCATOR)
+    flatAt.current = null
+  }, [mapLoaded, introActive])
 
   useEffect(() => { onFlatChange?.(!camera3d) }, [camera3d, onFlatChange])
 
@@ -498,7 +529,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
         </Source>
         {terrainOn && (
           <Source id={TERRAIN_SOURCE_ID} {...terrainSource}>
-            <Layer id="terrain-hillshade" type="hillshade" beforeId="openseamap-layer" paint={hillshadePaint} />
+            <Layer id={HILLSHADE_LAYER_ID} type="hillshade" beforeId="openseamap-layer" paint={hillshadePaint} />
           </Source>
         )}
         {satellite && (
@@ -508,6 +539,11 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
             beforeId="openseamap-layer"
           />
         )}
+        {/* The time of day over the base map: above the chart, the relief and the
+            imagery, below the place names, the track and the boat (the order is
+            written down in lib/replay-map-style). Always mounted, so it keeps
+            this place in the stack; clear by day. */}
+        <Layer {...(tintLayer(light, satellite) as unknown as LayerProps)} />
         <MapPlaceLabels isDarkTheme={isDarkTheme} overImagery={satellite} />
         {pieces.map((p, i) => {
           const sailed = sailedTo ? sailedTo.get(p.passageId) : undefined
@@ -519,54 +555,16 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
           return (
             <Fragment key={p.key}>
               <Source id={`passage-${p.key}`} type="geojson" data={fullLines[i]}>
-                <Layer
-                  id={`passage-line-${p.key}`}
-                  type="line"
-                  layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-                  paint={{ 'line-color': passageColour(p.colourIndex), 'line-width': 3.5, 'line-opacity': lineOpacity }}
-                />
-                {satellite && (
-                  <Layer
-                    id={`passage-casing-${p.key}`}
-                    type="line"
-                    beforeId={`passage-line-${p.key}`}
-                    layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-                    minzoom={SAT_HANDOFF_START_ZOOM}
-                    paint={{
-                      'line-color': '#ffffff',
-                      'line-width': 6.5,
-                      'line-opacity': ['interpolate', ['linear'], ['zoom'], SAT_HANDOFF_START_ZOOM, 0, SAT_HANDOFF_END_ZOOM, casingOpacity],
-                    }}
-                  />
-                )}
+                {wholeLineLayers(p.key, passageColour(p.colourIndex), lineOpacity, casingOpacity, satellite).map((l) => <Layer key={l.id} {...(l as unknown as LayerProps)} />)}
               </Source>
-              {progressive && (
-                <Source id={`passage-sailed-${p.key}`} type="geojson" data={sailedCache.get(p.key, p.segments, sailed.at, sailed.end && sailed.at >= p.from && sailed.at <= p.to ? sailed.end : undefined)}>
-                  <Layer
-                    id={`passage-sailed-line-${p.key}`}
-                    type="line"
-                    layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-                    paint={{ 'line-color': passageColour(p.colourIndex), 'line-width': 3.5, 'line-opacity': 0.95 }}
-                  />
-                  {satellite && (
-                    <Layer
-                      id={`passage-sailed-casing-${p.key}`}
-                      type="line"
-                      beforeId={`passage-sailed-line-${p.key}`}
-                      layout={{ 'line-cap': 'round', 'line-join': 'round' }}
-                      minzoom={SAT_HANDOFF_START_ZOOM}
-                      paint={{
-                        'line-color': '#ffffff',
-                        'line-width': 6.5,
-                        'line-opacity': ['interpolate', ['linear'], ['zoom'], SAT_HANDOFF_START_ZOOM, 0, SAT_HANDOFF_END_ZOOM, 0.95],
-                      }}
-                    />
-                  )}
-                </Source>
+              {progressive && !speed && (
+                <Overlay spec={plainSailedOverlay(p.key, sailedCache.get(p.key, p.segments, sailed.at, sailed.end && sailed.at >= p.from && sailed.at <= p.to ? sailed.end : undefined), passageColour(p.colourIndex), satellite)} />
               )}
+              {progressive && speed?.lines.get(p.key)?.map((line, k) => line && <Overlay key={k} spec={speedLineOverlay(p.key, k, line, satellite)} />)}
             </Fragment>
           )
         })}
+        {speed?.wake && <Overlay spec={wakeOverlay(speed.wake)} />}
         {boat && marker === 'dot' && (
           <Marker longitude={boat.lon} latitude={boat.lat} anchor="center">
             <div

@@ -22,7 +22,7 @@ vi.mock('react-map-gl/maplibre', () => ({
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
   PassageMap: forwardRef(function PassageMapMock(p: { markers?: ReactNode }, ref) {
-    useImperativeHandle(ref, () => ({ getFraming: () => framing, jumpTo: () => {}, getView: () => ({ zoom: 13, pitch: 40, bearing: 0 }) }))
+    useImperativeHandle(ref, () => ({ getFraming: () => framing, jumpTo: () => {}, setProjection: () => {}, getView: () => ({ zoom: 13, pitch: 40, bearing: 0 }) }))
     return <div data-testid="map">{p.markers}</div>
   }),
   InsetMap: () => <div />,

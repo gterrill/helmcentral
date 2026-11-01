@@ -16,12 +16,15 @@ const getFraming = vi.fn(() => ({ overview: { center: [149.5, 0] as [number, num
 vi.mock('@/lib/replay-intro', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/lib/replay-intro')>()), INTRO_MS: 50 }))
 let lastBoat: { lat: number; lon: number } | null = null
 const jumpTo = vi.fn()
+const setProjection = vi.fn()
 let interrupt: (() => void) | undefined
 let introActive = false
+let lastLight: { key: string } | null = null
 vi.mock('@/components/passages/passage-map', () => ({
   passageColour: () => 'x',
-  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null; inset?: React.ReactNode; insetCorner?: string; introActive?: boolean; onIntroInterrupt?: () => void }, ref) {
-    useImperativeHandle(ref, () => ({ getFraming, jumpTo }))
+  PassageMap: forwardRef(function PassageMapMock(p: { boat: { lat: number; lon: number } | null; inset?: React.ReactNode; insetCorner?: string; introActive?: boolean; onIntroInterrupt?: () => void; light?: { key: string } | null }, ref) {
+    lastLight = p.light ?? null
+    useImperativeHandle(ref, () => ({ getFraming, jumpTo, setProjection }))
     interrupt = p.onIntroInterrupt
     introActive = !!p.introActive
     lastBoat = p.boat
@@ -61,7 +64,7 @@ const insetRoutes = () => ({
   },
 })
 
-beforeEach(() => { saveInsetPreference(false); saved = { corner: 'top-right', zoom_offset: 0 }; puts = []; toast.error.mockClear(); stubApi({ 'GET /api/passages/camera-shots': { shots: [] }, 'GET /api/passages/signs': { signs: [] }, ...insetRoutes() }); localStorage.clear(); lastBoat = null; getFraming.mockClear(); jumpTo.mockClear() })
+beforeEach(() => { saveInsetPreference(false); saved = { corner: 'top-right', zoom_offset: 0 }; puts = []; toast.error.mockClear(); stubApi({ 'GET /api/passages/camera-shots': { shots: [] }, 'GET /api/passages/signs': { signs: [] }, ...insetRoutes() }); localStorage.clear(); lastBoat = null; getFraming.mockClear(); jumpTo.mockClear(); setProjection.mockClear() })
 
 describe('ReplayPanel', () => {
   it('scrubbing moves the boat and the boat-local readout, and reports the cursor', () => {
@@ -72,6 +75,15 @@ describe('ReplayPanel', () => {
     // The straight display line would put her at 149.5; the replay track shows her stopped.
     expect(lastBoat).toEqual({ lat: 0, lon: 149.2 })
     expect(cursorRef.current).toEqual({ id: 'p1', at: start + 500 })
+  })
+
+  it('hands the map the light for the time of day at the boat, and changes it as the slider moves', () => {
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    // 23:00 UTC on 13 March is 09:00 the next morning in the boat's zone: the sun is up.
+    const morning = lastLight
+    expect(morning).not.toBeNull()
+    fireEvent.change(screen.getByLabelText('Replay position'), { target: { value: '500' } })
+    expect(lastLight).not.toBeNull()
   })
 
   it('frames the track on load without the zoom-in', () => {
@@ -98,6 +110,16 @@ describe('ReplayPanel', () => {
     expect(introActive).toBe(false)
     // The last camera of the move is the framing it lands on.
     expect(jumpTo).toHaveBeenLastCalledWith({ center: [149.5, 0], zoom: 9, pitch: 0, bearing: 0 })
+  })
+
+  it('starts the opening move on the globe and ends on the flat map, setting the projection only when it changes', async () => {
+    render(<ReplayPanel passages={[passage]} isDarkTheme={false} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Play replay' }))
+    expect(setProjection.mock.calls[0][0].type).toEqual(expect.arrayContaining(['vertical-perspective']))
+    expect(setProjection.mock.calls[0][1]).toBe(5.5)
+    await waitFor(() => expect(introActive).toBe(false))
+    expect(setProjection).toHaveBeenLastCalledWith({ type: 'mercator' }, null)
+    expect(setProjection.mock.calls.length).toBeLessThanOrEqual(2)
   })
 
   it('two gestures on the map before the panel redraws end the move once and leave the replay playing', async () => {

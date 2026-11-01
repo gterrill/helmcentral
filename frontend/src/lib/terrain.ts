@@ -3,6 +3,7 @@
 // stay level on the water instead of sagging into the bathymetry.
 
 export const TERRAIN_SOURCE_ID = 'terrain-dem'
+export const HILLSHADE_LAYER_ID = 'terrain-hillshade'
 export const TERRAIN_TILES = '/api/terrain/{z}/{x}/{y}'
 export const TERRAIN_MAX_ZOOM = 15
 export const TERRAIN_EXAGGERATION = 1.5

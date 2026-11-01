@@ -132,13 +132,40 @@ plain dot.
   stopped it points the way she is about to go, or keeps its last heading if she
   goes nowhere more.
 
-During a replay the track is drawn as the boat sails it: solid up to the boat,
-and a faint line for the water still ahead. Before Play, and when you view a
-passage without replaying, the whole track shows as before.
+During a replay the track is drawn as the boat sails it: coloured up to the
+boat, and a faint line for the water still ahead. Before Play, and when you view
+a passage without replaying, the whole track shows as before.
+
+- **Speed colours:** The part you've sailed is coloured by how fast the boat was
+  going at each point. Slow stretches are purple, then the colour runs through
+  blue-green to green, and on to yellow on the dark map, for the fastest. The
+  colours are scaled to the passage itself, with the top of the range never
+  below 5 knots, so a slow passage doesn't make every drift look fast. The
+  speed is worked out from the track's positions and times, the distance
+  between two fixes over the time between them. A track broken into more than
+  12 separate pieces keeps its plain colour for the sailed part. The faint
+  line ahead keeps its usual colour.
+- **Wake:** A wide, pale trail follows the boat, a lighter tint of the colour
+  she's sailing in, and fades out behind her. It's about 4 percent of the
+  passage's length, or 60 pixels on the screen if that is longer, so it stays
+  easy to see when you zoom out.
+- **Sky and light:** The sky and the map follow the real time of day where the
+  boat is. At night the sky is deep blue and the map is dimmed and tinted dark
+  blue. In twilight the tint is blue to purple. Around sunrise and sunset, and
+  in golden hour, the horizon and the map turn a light warm amber. By day
+  nothing is tinted. The track, the wake and the boat stay bright on top, so
+  you can still follow them at night. The shading on the hills moves with the
+  sun too, so the light falls from the east in the morning and the west in the
+  evening. When the replay is paused, or you drag the slider, you see the light
+  for that moment. The satellite picture is dimmed as well. The sky shows only
+  with 3D on and the terrain available. The dimming and the tint work in 2D as
+  well.
 
 The map opens with the whole track framed. Pressing **Play** from the start
-brings the map down from high above onto the track, then runs the replay with a
-boat marker. The slider scrubs to any point, and Play from the middle just
+starts on the globe, high above, and brings the map down onto the track,
+flattening out as it comes in, then runs the replay with a boat marker. If you
+touch the map while it comes down, the move stops where you are and the replay
+carries on from the start. The slider scrubs to any point, and Play from the middle just
 carries on with no zoom. The readout shows the local date and time at that
 point. The length list sets how long the whole replay takes, 60, 30, 15 or 8
 seconds, however long the passage was. The **Overview map** switch puts a small

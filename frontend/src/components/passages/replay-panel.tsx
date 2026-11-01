@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 
 import { CameraEditor, type CameraShotChange } from '@/components/passages/camera-editor'
 import { SignPhotoDialog, signPhotoSrc } from '@/components/passages/sign-card'
@@ -21,6 +21,7 @@ import { getQueryData, setQueryData } from '@/lib/api-query'
 import { replaySignsKey } from '@/hooks/use-replay-signs'
 import { replaySignsApi, type ReplaySignPatch } from '@/lib/replay-signs-api'
 import { usePassageLegs } from '@/hooks/use-passage-legs'
+import { drawnPieces } from '@/lib/passage-legs'
 import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX } from '@/lib/replay-signs'
 import { moveByCapture, placeByCapture } from '@/lib/sign-placement'
 import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-photo'
@@ -39,6 +40,7 @@ import {
   type PassageDetail,
   type TimedSegment,
 } from '@/lib/passages'
+import { replayClockOffsetHours } from '@/lib/dev-flags'
 import { errorMessage } from '@/lib/errors'
 
 /** The passage and real instant the replay is standing at. */
@@ -177,6 +179,13 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   // the frame at the clock, in performance.now() time.
   const [threeD] = use3dPreference()
   const [controller] = useState(() => new ReplayController())
+  // A development check of dusk and night on a passage sailed by day (lib/dev-flags); 0 in production.
+  const [devSunOffsetH] = useState(() => (import.meta.env.DEV ? replayClockOffsetHours() : 0))
+  // The track as the map draws it, which the speed colours go on; and the map's
+  // zoom, which sizes the wake.
+  const mapPassages = useMemo(() => built.items.map((i) => ({ id: i.id, segments: i.line })), [built.items])
+  const pieces = useMemo(() => drawnPieces(mapPassages, legs), [mapPassages, legs])
+  const [zoomBucket, setZoomBucket] = useState(12)
   const frameInput = {
     clock: replay.clock,
     nowMs: performance.now(),
@@ -185,10 +194,12 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     reduced: reducedMotion,
     wantHeading: !!(hull && threeD) || resolved.length > 0,
     signsOpen,
+    sunOffsetH: devSunOffsetH,
+    view: { zoom: zoomBucket },
   }
   // Working the frame out changes nothing; it is taken once this render is the
   // one on screen, before the map places its camera against it.
-  const frame = controller.frameAt({ timeline, lengthS, spans, resolved, signs: labelledSigns }, frameInput)
+  const frame = controller.frameAt({ timeline, lengthS, spans, resolved, signs: labelledSigns, pieces, isDarkTheme }, frameInput)
   useLayoutEffect(() => { controller.commit(frame) })
   const { here, boat, sailedTo, cards, pins } = frame
   const shownHeading = frame.heading
@@ -213,17 +224,27 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
   }
   const landRef = useRef(landIntro)
   useEffect(() => { landRef.current = landIntro })
+  // The camera and the projection (the globe, flat by the time it lands) go to
+  // the map; the projection when the zoom it is flat from changes.
+  const introFlatAt = useRef<number | null | undefined>(undefined)
+  const placeIntro = useCallback((at: NonNullable<ReturnType<typeof controller.introAt>>) => {
+    mapHandle.current?.jumpTo(at.camera)
+    if (at.flatAtZoom !== introFlatAt.current) {
+      introFlatAt.current = at.flatAtZoom
+      mapHandle.current?.setProjection(at.projection, at.flatAtZoom)
+    }
+  }, [controller])
   useEffect(() => {
     if (!flying) return
     let id = requestAnimationFrame(function tick() {
       const at = controller.introAt(performance.now())
       if (!at) return
-      mapHandle.current?.jumpTo(at.camera)
+      placeIntro(at)
       if (at.done) landRef.current()
       else id = requestAnimationFrame(tick)
     })
     return () => cancelAnimationFrame(id)
-  }, [flying, controller])
+  }, [flying, controller, placeIntro])
 
   // Play from the very start (or from the end, which starts over) opens with
   // the zoom-in; resuming from a pause or a scrub just plays.
@@ -238,8 +259,9 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
       controller.startIntro(from, framing.overview, performance.now(), reducedMotion ? 0 : INTRO_MS)
       introClock.current = replay.clock
       setFlying(true)
+      introFlatAt.current = undefined
       const first = controller.introAt(performance.now())
-      if (first) mapHandle.current?.jumpTo(first.camera)
+      if (first) placeIntro(first)
       if (first?.done) landIntro()
       return
     }
@@ -525,7 +547,6 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
     return { shotTicks: ticks, shotHeading: { number: idx + 1, total: resolved.length, from: short(parts[idx]), to } }
   }, [resolved, timeZone, timeline, selectedShotId2])
 
-  const mapPassages = useMemo(() => built.items.map((i) => ({ id: i.id, segments: i.line })), [built.items])
 
   const playedIds = useMemo(
     () => new Set(timeline.entries.filter((e) => e.offset <= replay.clock).map((e) => e.id)),
@@ -550,6 +571,7 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           className="h-full"
           ref={mapHandle}
           passages={mapPassages}
+          pieces={pieces}
           legs={legs}
           playedIds={playedIds}
           sailedTo={sailedTo}
@@ -558,6 +580,9 @@ export function ReplayPanel({ passages, isDarkTheme, cursorRef }: ReplayPanelPro
           hull={hull}
           cameraDriver={cameraDriver}
           introActive={flying}
+          speed={frame.speed}
+          onZoomBucket={setZoomBucket}
+          light={frame.light}
           onIntroInterrupt={landIntro}
           onFlatChange={setMapFlat}
           controlsDisabled={replay.playing || flying}

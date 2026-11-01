@@ -2,7 +2,8 @@ import { render } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PASSAGE_COLOURS, PassageMap } from '@/components/passages/passage-map'
-import { passageLegs } from '@/lib/passage-legs'
+import { drawnPieces, passageLegs } from '@/lib/passage-legs'
+import { SPEED_RAMP_LIGHT, speedFrameAt, speedTrack } from '@/lib/replay-speed'
 
 vi.mock('maplibre-gl', () => ({ default: {} }))
 vi.mock('@/lib/webgl', () => ({ hasWebGL2: () => true }))
@@ -61,11 +62,16 @@ describe('PassageMap legs', () => {
     expect(b).toHaveLength(7)
   })
 
-  it('draws the sailed overlay per leg, only the reached part, in the leg colour', () => {
-    render(<PassageMap passages={passages} legs={legs} playedIds={new Set()} boat={{ lat: -20.02, lon: 148.02 }} sailedTo={new Map([['p1', { at: 20, end: { lat: -20.02, lon: 148.02 } }]])} isDarkTheme={false} />)
-    const sailed = layers.filter((l) => l.id.startsWith('passage-sailed-line-'))
-    expect(sailed.map((l) => [l.id, l.paint['line-color']])).toEqual([['passage-sailed-line-p1-0', PASSAGE_COLOURS[0]], ['passage-sailed-line-p1-1', PASSAGE_COLOURS[1]]])
-    expect(sources.find((s) => s.id === 'passage-sailed-p1-0')!.data.geometry.coordinates[0]).toHaveLength(3)
-    expect(sources.find((s) => s.id === 'passage-sailed-p1-1')!.data.geometry.coordinates).toHaveLength(0)
+  it('draws the sailed overlay per leg, only the reached part, coloured by speed', () => {
+    const sailedTo = new Map([['p1', { at: 20, end: { lat: -20.02, lon: 148.02 } }]])
+    const pieces = drawnPieces(passages, legs)
+    const speed = speedFrameAt(pieces, speedTrack(pieces)!, sailedTo, SPEED_RAMP_LIGHT, null, { zoom: 12 })
+    render(<PassageMap passages={passages} legs={legs} playedIds={new Set()} boat={{ lat: -20.02, lon: 148.02 }} sailedTo={sailedTo} speed={speed} isDarkTheme={false} />)
+    // The unsailed road ahead keeps each leg's colour; the part sailed is the speed ramp, leg by leg.
+    const sailed = layers.filter((l) => l.id.startsWith('passage-speed-line-'))
+    expect(sailed.map((l) => l.id)).toEqual(['passage-speed-line-p1-0-0'])
+    expect(sailed[0].paint['line-gradient']).toBeDefined()
+    expect(sources.find((s) => s.id === 'passage-speed-p1-0-0')!.data.geometry.coordinates).toHaveLength(3)
+    expect(sources.find((s) => s.id === 'passage-speed-p1-1-0')).toBeUndefined()
   })
 })
