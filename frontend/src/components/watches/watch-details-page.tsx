@@ -1,5 +1,5 @@
 import { errorMessage } from '@/lib/errors'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Trash2 } from 'lucide-react'
 
 import { WatchNotifySection } from '@/components/watches/watch-notify-section'
@@ -35,9 +35,11 @@ import {
   type WatchThresholds,
 } from '@/lib/watches'
 
-// ADR 0227: one watch. The settings are one draft saved through the Save bar;
-// the run history sits beneath them. A scheduled watch is edited here, a
-// one-off watch (started from a Mate chat) is read-only and can be deleted.
+// ADR 0227: one watch. The settings are one draft saved through the Save bar.
+// The name, what to look out for and the run history fill the main column; the
+// schedule, report sections and notifications sit in the aside beside it (below
+// everything on a phone). A scheduled watch is edited here, a one-off watch
+// (started from a Mate chat) is read-only, has no aside, and can be deleted.
 
 /** How long a run a link points at stays marked. */
 export const LINKED_RUN_HIGHLIGHT_MS = 2500
@@ -271,14 +273,16 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
     }
   }
 
-  const askMate = onAskMate && record
+  // Stable across edits to the draft, so typing doesn't redraw every open run.
+  const recordName = record?.name
+  const askMate = useMemo(() => (onAskMate && recordName !== undefined
     ? (run: WatchRun) => {
-        onAskMate(`What do you make of the ${record.name} report from ${runTimeLabel(run)}?`, {
+        onAskMate(`What do you make of the ${recordName} report from ${runTimeLabel(run)}?`, {
           newConversation: true,
-          watchRun: { id: run.id, name: record.name },
+          watchRun: { id: run.id, name: recordName },
         })
       }
-    : undefined
+    : undefined), [onAskMate, recordName])
 
   const title = mode.kind === 'new' ? 'New watch' : record?.name ?? 'Watch'
   const breadcrumb = (
@@ -316,6 +320,73 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
 
   const readOnly = !canWrite || oneOff
 
+  // The settings that are not about the watch's name or what Mate looks for.
+  // A one-off watch has none of them.
+  const settingsAside = oneOff ? undefined : (
+    <>
+      <FormSection title="Schedule" description="Times are on the boat's clock, worked out from its position.">
+        <WatchSchedulePicker
+          value={draft.schedule}
+          onChange={(schedule) => update({ schedule })}
+          preview={preview}
+          disabled={readOnly}
+        />
+      </FormSection>
+
+      <FormSection
+        title="Report sections"
+        description="What each report covers, and how much of it counts as a finding."
+      >
+        <div className="flex flex-col gap-4" role="group" aria-label="Report sections">
+          {WATCH_SECTIONS.map((s) => {
+            const on = draft.sections.includes(s.id)
+            const spec = THRESHOLDS[s.id]
+            return (
+              <div key={s.id} className="flex min-w-0 flex-col gap-2">
+                <div className="flex min-h-9 items-center gap-2">
+                  <Checkbox
+                    id={`watch-section-${s.id}`}
+                    checked={on}
+                    disabled={readOnly}
+                    onCheckedChange={(checked) => toggleSection(s.id, checked)}
+                  />
+                  <label htmlFor={`watch-section-${s.id}`} className="text-sm font-medium text-foreground">{s.label}</label>
+                </div>
+                {spec ? (
+                  <NumberField
+                    id={`watch-threshold-${spec.key}`}
+                    label={spec.label}
+                    hint={spec.hint}
+                    step={spec.step}
+                    value={draft.thresholds[spec.key]}
+                    error={errors[spec.key]}
+                    disabled={readOnly}
+                    onChange={(n) => setThreshold(spec.key, n)}
+                  />
+                ) : (
+                  <p className="min-w-0 text-xs text-muted-foreground">{SECTION_NOTES[s.id]}</p>
+                )}
+              </div>
+            )
+          })}
+          {errors.sections && <FieldError>{errors.sections}</FieldError>}
+        </div>
+      </FormSection>
+
+      <WatchNotifySection
+        notify={draft.notify ?? channels.on}
+        send={draft.send}
+        channelsOn={channels.on}
+        channelsLoaded={channels.loaded}
+        channelsError={channels.error}
+        canAdmin={canAdmin}
+        disabled={readOnly}
+        onNotifyChange={(notify) => update({ notify })}
+        onSendChange={(send) => update({ send })}
+      />
+    </>
+  )
+
   return (
     <div className="h-full overflow-y-auto p-4">
       <Page
@@ -339,7 +410,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
           </p>
         )}
         {detail.error && record && <RefreshFailedNote reason={detail.error} onRetry={() => { void detail.refresh() }} />}
-        <DetailsLayout>
+        <DetailsLayout aside={settingsAside}>
           {oneOff && record ? (
             <FormSection
               title="One-off watch"
@@ -388,67 +459,6 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
                   <FieldLabel htmlFor="watch-enabled">Enabled</FieldLabel>
                 </Field>
               </FormSection>
-
-              <FormSection title="Schedule" description="Times are on the boat's clock, worked out from its position.">
-                <WatchSchedulePicker
-                  value={draft.schedule}
-                  onChange={(schedule) => update({ schedule })}
-                  preview={preview}
-                  disabled={readOnly}
-                />
-              </FormSection>
-
-              <FormSection
-                title="Report sections"
-                description="What each report covers, and how much of it counts as a finding."
-              >
-                <div className="flex flex-col gap-4" role="group" aria-label="Report sections">
-                  {WATCH_SECTIONS.map((s) => {
-                    const on = draft.sections.includes(s.id)
-                    const spec = THRESHOLDS[s.id]
-                    return (
-                      <div key={s.id} className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start sm:gap-6">
-                        <div className="flex min-h-9 items-center gap-2 sm:w-40">
-                          <Checkbox
-                            id={`watch-section-${s.id}`}
-                            checked={on}
-                            disabled={readOnly}
-                            onCheckedChange={(checked) => toggleSection(s.id, checked)}
-                          />
-                          <label htmlFor={`watch-section-${s.id}`} className="text-sm font-medium text-foreground">{s.label}</label>
-                        </div>
-                        {spec ? (
-                          <NumberField
-                            id={`watch-threshold-${spec.key}`}
-                            label={spec.label}
-                            hint={spec.hint}
-                            step={spec.step}
-                            value={draft.thresholds[spec.key]}
-                            error={errors[spec.key]}
-                            disabled={readOnly}
-                            onChange={(n) => setThreshold(spec.key, n)}
-                          />
-                        ) : (
-                          <p className="min-w-0 text-xs text-muted-foreground sm:pt-2.5">{SECTION_NOTES[s.id]}</p>
-                        )}
-                      </div>
-                    )
-                  })}
-                  {errors.sections && <FieldError>{errors.sections}</FieldError>}
-                </div>
-              </FormSection>
-
-              <WatchNotifySection
-                notify={draft.notify ?? channels.on}
-                send={draft.send}
-                channelsOn={channels.on}
-                channelsLoaded={channels.loaded}
-                channelsError={channels.error}
-                canAdmin={canAdmin}
-                disabled={readOnly}
-                onNotifyChange={(notify) => update({ notify })}
-                onSendChange={(send) => update({ send })}
-              />
 
               <FormSection title="What to look out for">
                 <Field>
@@ -503,10 +513,8 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
                       <p className="text-[10px] font-normal uppercase tracking-[0.16em] text-muted-foreground">Linked run</p>
                       <WatchRunCard
                         run={linked.run}
-                        canWrite={false}
                         highlighted={highlighted}
                         onAskMate={askMate}
-                        onDelete={() => {}}
                       />
                     </>
                   ) : linked.gone ? (
@@ -520,6 +528,7 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
               )}
               <WatchRunList
                 runs={linkedRunId ? detail.runs.filter((r) => r.id !== linkedRunId) : detail.runs}
+                expandNewest={!linkedRunId || linked.gone || linked.error !== null}
                 hasOlder={detail.hasOlder}
                 canWrite={canWrite}
                 loadingOlder={detail.loadingOlder}
@@ -551,7 +560,8 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
           <SaveBar
             dirty={dirty}
             saving={saving}
-            error={saveError}
+            // Below lg the field at fault can sit under the whole run history.
+            error={saveError ?? (saveDisabled && !preview.pending && (mode.kind === 'existing' || nameTouched) ? 'Fix the highlighted fields first.' : null)}
             saveDisabled={saveDisabled}
             saveLabel={mode.kind === 'new' ? 'Create watch' : 'Save'}
             onSave={() => { void performSave().catch(() => {}) }}

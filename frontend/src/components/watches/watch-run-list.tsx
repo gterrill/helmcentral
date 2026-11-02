@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import { Sparkles, Trash2 } from 'lucide-react'
 
 import { AssistantMarkdown } from '@/components/assistant-markdown'
 import { ConfirmDelete } from '@/components/patterns'
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { WatchChart } from '@/components/watches/watch-chart'
@@ -19,7 +20,8 @@ import {
 import { errorMessage } from '@/lib/errors'
 
 // ADR 0227: a watch's run history, newest first. A run is a report, the
-// findings the rules reached, Mate's review, and what it cost.
+// findings the rules reached, Mate's review, and what it cost. In the list
+// each run is its summary until it is opened; the newest starts open.
 
 const MICRO_LABEL = 'text-[10px] font-normal uppercase tracking-[0.16em] text-muted-foreground'
 
@@ -96,40 +98,51 @@ export interface WatchRunCardProps {
   run: WatchRun
   /** Set on the run a link points at: whether it is marked right now. */
   highlighted?: boolean
-  canWrite: boolean
   onAskMate?: (run: WatchRun) => void
-  onDelete: (run: WatchRun) => void
 }
 
-export function WatchRunCard({ run, highlighted, canWrite, onAskMate, onDelete }: WatchRunCardProps) {
+/** What a run shows when it is closed: when, whether it ran, how many findings, anything that went wrong, what it cost. */
+function RunSummary({ run }: { run: WatchRun }) {
   const cost = run.outcome === 'ran' ? runCostLabel(run) : null
-  const found = run.findings.length > 0
+  const count = run.findings.length
+  const undelivered = (run.notify_pending ?? []).length > 0
   return (
-    <article
-      className={`flex min-w-0 flex-col gap-3 rounded-md border bg-background p-3 transition-colors ${
-        highlighted ? 'border-primary ring-2 ring-primary/40' : 'border-border'
-      }`}
-      data-testid="watch-run"
-      data-highlighted={highlighted === undefined ? undefined : String(highlighted)}
-      aria-label={`Run ${runTimeLabel(run)}`}
-      id={`run-${run.id}`}
-    >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h3 className="text-sm font-medium tabular-nums text-foreground">{runTimeLabel(run)}</h3>
-        <Badge variant={run.outcome === 'ran' ? 'secondary' : 'outline'}>{run.outcome === 'ran' ? 'Ran' : 'Skipped'}</Badge>
-        {found && (
-          <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
-            {run.findings.length === 1 ? '1 finding' : `${run.findings.length} findings`}
-          </Badge>
-        )}
-        {cost && <span className="ml-auto text-xs text-muted-foreground">{cost}</span>}
-      </header>
+    <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+      <span className="text-sm font-medium tabular-nums text-foreground">{runTimeLabel(run)}</span>
+      <Badge variant={run.outcome === 'ran' ? 'secondary' : 'outline'}>{run.outcome === 'ran' ? 'Ran' : 'Skipped'}</Badge>
+      {count > 0 && (
+        <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-400">
+          {count === 1 ? '1 finding' : `${count} findings`}
+        </Badge>
+      )}
+      {undelivered && <Badge variant="outline" className="border-destructive/50 text-destructive">Not delivered</Badge>}
+      {run.not_sent && <Badge variant="outline">Not sent</Badge>}
+      {run.outcome === 'ran' && !run.review && <Badge variant="outline">No review</Badge>}
+      {cost &&<span className="ml-auto text-xs text-muted-foreground">{cost}</span>}
+    </span>
+  )
+}
 
+interface RunBodyProps {
+  run: WatchRun
+  onAskMate?: (run: WatchRun) => void
+  /** Left out where the run can't be deleted. */
+  onDelete?: (run: WatchRun) => void
+}
+
+/**
+ * Everything else about a run: findings, charts, report, Mate's review, who was
+ * told, and the actions. Memoised so opening one run doesn't redraw the charts
+ * of the others.
+ */
+const RunBody = memo(function RunBody({ run, onAskMate, onDelete }: RunBodyProps) {
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
       {run.outcome === 'skipped' && (
         <p className="text-sm text-muted-foreground">{run.skip_reason || 'Skipped.'}</p>
       )}
 
-      {found && (
+      {run.findings.length > 0 && (
         <ul className="flex flex-col gap-1" aria-label="Findings">
           {run.findings.map((f, i) => (
             <li key={i} className="flex min-w-0 flex-col gap-1.5 text-sm text-foreground">
@@ -189,13 +202,33 @@ export function WatchRunCard({ run, highlighted, canWrite, onAskMate, onDelete }
             Ask Mate about this run
           </Button>
         )}
-        {canWrite && (
+        {onDelete && (
           <Button type="button" variant="ghost" size="sm" onClick={() => onDelete(run)}>
             <Trash2 className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
             Delete run
           </Button>
         )}
       </div>
+    </div>
+  )
+})
+
+/** A run shown fully open, as the linked run is pinned above the list. */
+export function WatchRunCard({ run, highlighted = false, onAskMate }: WatchRunCardProps) {
+  return (
+    <article
+      className={`flex min-w-0 flex-col gap-3 rounded-md border bg-background p-3 transition-colors ${
+        highlighted ? 'border-primary ring-2 ring-primary/40' : 'border-border'
+      }`}
+      data-testid="watch-run"
+      data-highlighted={String(highlighted)}
+      aria-label={`Run ${runTimeLabel(run)}`}
+      id={`run-${run.id}`}
+    >
+      <h3 className="flex">
+        <RunSummary run={run} />
+      </h3>
+      <RunBody run={run} onAskMate={onAskMate} />
     </article>
   )
 }
@@ -210,6 +243,8 @@ export interface WatchRunListProps {
   onAskMate?: (run: WatchRun) => void
   /** Deletes the run; a refusal throws with the server's own words. */
   onDeleteRun: (run: WatchRun) => Promise<void>
+  /** Open the newest run when it arrives. Off while a linked run is pinned above the list. */
+  expandNewest: boolean
 }
 
 export function WatchRunList({
@@ -221,10 +256,37 @@ export function WatchRunList({
   onShowOlder,
   onAskMate,
   onDeleteRun,
+  expandNewest,
 }: WatchRunListProps) {
   const [pending, setPending] = useState<WatchRun | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  // Which runs are open. A run that becomes the newest (first load, Run now, a
+  // live refresh, the newest being deleted) opens during render so no frame
+  // shows it closed, and takes over from the run opened that way before it, so
+  // a page left open doesn't collect a run per report. A run opened by hand
+  // stays open. Showing older runs changes the list's tail, never its head, so
+  // nothing opens or closes then.
+  const newestId = expandNewest ? runs[0]?.id ?? null : null
+  const [seenNewestId, setSeenNewestId] = useState<string | null>(null)
+  const [openIds, setOpenIds] = useState<string[]>([])
+  const [autoOpenedId, setAutoOpenedId] = useState<string | null>(null)
+  if (newestId !== seenNewestId) {
+    setSeenNewestId(newestId)
+    const kept = openIds.filter((id) => id !== autoOpenedId)
+    const opens = newestId !== null && !kept.includes(newestId)
+    setOpenIds(opens ? [...kept, newestId] : kept)
+    setAutoOpenedId(opens ? newestId : null)
+  }
+  const changeOpen = (ids: string[]) => {
+    setOpenIds(ids)
+    // Closed by hand: if it is opened again, that was by hand too.
+    if (autoOpenedId !== null && !ids.includes(autoOpenedId)) setAutoOpenedId(null)
+  }
+  const askToDelete = useCallback((run: WatchRun) => {
+    setDeleteError(null)
+    setPending(run)
+  }, [])
 
   if (runs.length === 0) {
     return <p className="text-sm text-muted-foreground">No runs yet. The first one appears here when the watch next runs.</p>
@@ -246,15 +308,24 @@ export function WatchRunList({
 
   return (
     <div className="flex flex-col gap-3">
-      {runs.map((run) => (
-        <WatchRunCard
-          key={run.id}
-          run={run}
-          canWrite={canWrite}
-          onAskMate={onAskMate}
-          onDelete={(r) => { setDeleteError(null); setPending(r) }}
-        />
-      ))}
+      <Accordion multiple value={openIds} onValueChange={changeOpen} className="gap-3">
+        {runs.map((run) => (
+          <AccordionItem
+            key={run.id}
+            value={run.id}
+            id={`run-${run.id}`}
+            data-testid="watch-run"
+            className="rounded-md border border-border bg-background px-3"
+          >
+            <AccordionTrigger>
+              <RunSummary run={run} />
+            </AccordionTrigger>
+            <AccordionContent className="pb-3">
+              <RunBody run={run} onAskMate={onAskMate} onDelete={canWrite ? askToDelete : undefined} />
+            </AccordionContent>
+          </AccordionItem>
+        ))}
+      </Accordion>
       {hasOlder && (
         <div className="flex flex-col items-start gap-1">
           <Button type="button" variant="outline" size="sm" disabled={loadingOlder} onClick={onShowOlder}>
@@ -267,7 +338,7 @@ export function WatchRunList({
       <ConfirmDelete
         open={pending !== null}
         onOpenChange={(open) => { if (!open) { setPending(null); setDeleteError(null) } }}
-        title="Delete this run?"
+        title={pending ? `Delete the run from ${runTimeLabel(pending)}?` : 'Delete this run?'}
         description={deleteError ?? 'The report, findings and Mate’s review of this run are removed. This can’t be undone.'}
         confirmLabel="Delete run"
         deleting={deleting}

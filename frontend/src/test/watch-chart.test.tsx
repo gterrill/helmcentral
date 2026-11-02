@@ -74,10 +74,9 @@ describe('WatchChart', () => {
 })
 
 describe('WatchRunCard charts', () => {
-  const props = { canWrite: false, onDelete: () => {} }
 
   it('puts a chart under its finding and the reason a chart is missing as a muted line', () => {
-    render(<WatchRunCard run={run()} {...props} />)
+    render(<WatchRunCard run={run()} />)
     const first = screen.getByText('Pressure is down 4 hPa in 3 hours.').closest('li')!
     expect(within(first).getByTestId('watch-chart')).toBeInTheDocument()
     const second = screen.getByText('Diesel is down 14 points.').closest('li')!
@@ -90,7 +89,7 @@ describe('WatchRunCard charts', () => {
   })
 
   it('shows a delivery note such as a message sent without its chart', () => {
-    render(<WatchRunCard run={run({ notified: ['ntfy'], notify_notes: ['ntfy: sent without the chart (the server answered 400: attachments not allowed)'] })} {...props} />)
+    render(<WatchRunCard run={run({ notified: ['ntfy'], notify_notes: ['ntfy: sent without the chart (the server answered 400: attachments not allowed)'] })} />)
     expect(screen.getByText('ntfy: sent without the chart (the server answered 400: attachments not allowed)')).toBeInTheDocument()
   })
 
@@ -98,7 +97,7 @@ describe('WatchRunCard charts', () => {
     const old = run()
     delete (old as Partial<WatchRun>).charts
     delete (old as Partial<WatchRun>).notify_notes
-    render(<WatchRunCard run={old} {...props} />)
+    render(<WatchRunCard run={old} />)
     expect(screen.queryByTestId('watch-chart')).toBeNull()
   })
 })

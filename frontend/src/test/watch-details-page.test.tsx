@@ -6,12 +6,13 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 
 import { SaveBarSlot } from '@/components/patterns/save-bar-slot'
 import { WatchDetailsPage, type WatchDetailsPageProps } from '@/components/watches/watch-details-page'
+import { WatchRunList } from '@/components/watches/watch-run-list'
 import { AppRouterContext } from '@/hooks/use-app-location'
 import { invalidateWatches } from '@/hooks/use-watches'
 import { resetQueryStore } from '@/lib/api-query'
 import { createAppRouter, memoryHistory } from '@/lib/app-router'
 import { clearPendingSetupFocus, peekPendingSetupFocus } from '@/lib/setup-status'
-import { WATCH_TEMPLATES, type WatchDetail, type WatchRecord, type WatchRun, type WatchSchedulePreview } from '@/lib/watches'
+import { runTimeLabel, WATCH_TEMPLATES, type WatchDetail, type WatchRecord, type WatchRun, type WatchSchedulePreview } from '@/lib/watches'
 
 function record(overrides: Partial<WatchRecord> = {}): WatchRecord {
   return {
@@ -236,6 +237,14 @@ describe('WatchDetailsPage settings', () => {
   })
 })
 
+describe('WatchDetailsPage save bar', () => {
+  it('says why Save is off, since the field at fault can be a long way down the page', async () => {
+    renderPage()
+    fireEvent.change(await screen.findByLabelText('Alarms raised that count'), { target: { value: '' } })
+    await waitFor(() => expect(document.querySelector('[data-slot="save-bar"]')).toHaveTextContent('Fix the highlighted fields first.'))
+  })
+})
+
 describe('WatchDetailsPage new watch', () => {
   it('opens pre-filled from a template and saves nothing until Create', async () => {
     const onCreated = vi.fn()
@@ -252,6 +261,211 @@ describe('WatchDetailsPage new watch', () => {
     renderPage({ mode: { kind: 'new', template: null } })
     await screen.findByRole('heading', { name: 'New watch' })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeDisabled())
+  })
+})
+
+/** The accordion trigger of a run in the history list: the button inside the item's heading. */
+function triggerOf(item: HTMLElement): HTMLElement {
+  return within(within(item).getByRole('heading')).getByRole('button')
+}
+const runItem = (id: string) => {
+  const item = document.getElementById(`run-${id}`)
+  if (!item) throw new Error(`no run ${id} on the page`)
+  return item
+}
+async function deleteRun(id: string) {
+  fireEvent.click(within(runItem(id)).getByRole('button', { name: 'Delete run' }))
+  const dialog = await screen.findByRole('alertdialog')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Delete run' }))
+  await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+}
+
+describe('WatchDetailsPage settings aside', () => {
+  it('puts the schedule, report sections and notifications in the complementary column, in that order', async () => {
+    renderPage()
+    const aside = await screen.findByRole('complementary')
+    expect(within(aside).getByRole('combobox', { name: 'Schedule' })).toBeInTheDocument()
+    expect(within(aside).getByRole('group', { name: 'Report sections' })).toBeInTheDocument()
+    expect(await within(aside).findByRole('group', { name: 'Send to' })).toBeInTheDocument()
+    const text = aside.textContent ?? ''
+    expect(text.indexOf('Report sections')).toBeGreaterThan(text.indexOf('Times are on the boat'))
+    expect(text.indexOf('Notifications')).toBeGreaterThan(text.indexOf('What each report covers'))
+  })
+
+  it('keeps the name, what to look out for and the run history in the main column', async () => {
+    renderPage()
+    const aside = await screen.findByRole('complementary')
+    await screen.findByTestId('watch-run')
+    for (const inMain of [screen.getByLabelText('Name'), screen.getByLabelText('What to look out for'), screen.getByText('Run history'), screen.getByTestId('watch-run')]) {
+      expect(aside.contains(inMain)).toBe(false)
+    }
+  })
+
+  it('also uses the aside for a new watch', async () => {
+    renderPage({ mode: { kind: 'new', template: null } })
+    const aside = await screen.findByRole('complementary')
+    expect(within(aside).getByRole('group', { name: 'Report sections' })).toBeInTheDocument()
+    expect(aside.contains(screen.getByLabelText('Name'))).toBe(false)
+  })
+
+  it('gives a one-off watch no aside', async () => {
+    detail = {
+      watch: record({ kind: 'one_off', name: 'Engine load', schedule: undefined, duration_minutes: 10, schedule_sentence: 'One-off · 10 minutes' }),
+      runs: [],
+      has_older: false,
+    }
+    renderPage()
+    expect(await screen.findByText('One-off watch')).toBeInTheDocument()
+    expect(screen.queryByRole('complementary')).not.toBeInTheDocument()
+  })
+})
+
+describe('WatchDetailsPage run history accordion', () => {
+  const newest = () => run('r1', { review: 'Newest review text' })
+  const older = () =>
+    run('r2', {
+      started_at: '2026-10-27T17:00:00Z',
+      boat_time: 'Wed 28 Oct 06:00 UTC+13',
+      findings: [{ section: 'alarms', rule: 'alarms_raised', text: 'One older alarm', by: 'rules' }],
+      review: 'Older review text',
+      cost_usd: 0.05,
+    })
+
+  it('opens only the newest run, and a closed run still shows its time, findings and cost', async () => {
+    detail = { ...detail, runs: [newest(), older()] }
+    renderPage()
+    expect(await screen.findAllByTestId('watch-run')).toHaveLength(2)
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'true')
+    expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'false')
+    expect(await screen.findByText('Newest review text')).toBeInTheDocument()
+    expect(screen.queryByText('Older review text')).not.toBeInTheDocument()
+    const closed = within(runItem('r2'))
+    expect(closed.getByText('Wed 28 Oct 06:00 UTC+13')).toBeInTheDocument()
+    expect(closed.getByText('1 finding')).toBeInTheDocument()
+    expect(closed.getByText('$0.05')).toBeInTheDocument()
+    expect(closed.queryByText('One older alarm')).not.toBeInTheDocument()
+  })
+
+  it('opens an older run on a tap and leaves the newest open', async () => {
+    detail = { ...detail, runs: [newest(), older()] }
+    renderPage()
+    await screen.findByText('Newest review text')
+    fireEvent.click(triggerOf(runItem('r2')))
+    expect(await screen.findByText('Older review text')).toBeInTheDocument()
+    expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'true')
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('Newest review text')).toBeInTheDocument()
+  })
+
+  it('hands the open newest run over to a newer one that arrives, and leaves a run opened by hand open', async () => {
+    detail = { ...detail, runs: [newest(), older()] }
+    renderPage()
+    await screen.findByText('Newest review text')
+    fireEvent.click(triggerOf(runItem('r2')))
+    await screen.findByText('Older review text')
+    detail = { ...detail, runs: [run('r3', { started_at: '2026-10-29T17:00:00Z', boat_time: 'Fri 30 Oct 06:00 UTC+13', review: 'Brand new review' }), newest(), older()] }
+    await act(async () => { await invalidateWatches() })
+    expect(await screen.findByText('Brand new review')).toBeInTheDocument()
+    expect(triggerOf(runItem('r3'))).toHaveAttribute('aria-expanded', 'true')
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'false')
+    expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('keeps a run opened by hand open after it becomes the newest and a newer one arrives', async () => {
+    detail = { ...detail, runs: [newest(), older()] }
+    renderPage()
+    await screen.findByText('Newest review text')
+    fireEvent.click(triggerOf(runItem('r2')))
+    await screen.findByText('Older review text')
+    detail = { ...detail, runs: [older()] }
+    await deleteRun('r1')
+    await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(1))
+    detail = { ...detail, runs: [run('r3', { started_at: '2026-10-29T17:00:00Z', boat_time: 'Fri 30 Oct 06:00 UTC+13', review: 'Brand new review' }), older()] }
+    await act(async () => { await invalidateWatches() })
+    expect(await screen.findByText('Brand new review')).toBeInTheDocument()
+    expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('opens the next run when the newest is deleted', async () => {
+    detail = { ...detail, runs: [newest(), older()] }
+    renderPage()
+    await screen.findByText('Newest review text')
+    detail = { ...detail, runs: [older()] }
+    await deleteRun('r1')
+    expect(await screen.findByText('Older review text')).toBeInTheDocument()
+    expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('leaves the newest closed across a refresh once it was closed by hand', async () => {
+    detail = { ...detail, runs: [newest(), older()] }
+    renderPage()
+    await screen.findByText('Newest review text')
+    fireEvent.click(triggerOf(runItem('r1')))
+    await waitFor(() => expect(screen.queryByText('Newest review text')).not.toBeInTheDocument())
+    detail = { ...detail, runs: [{ ...newest(), review: 'Newest review text, changed' }, older()] }
+    await act(async () => { await invalidateWatches() })
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  it('says on the closed line when a run did not reach anyone or has no review', async () => {
+    detail = {
+      ...detail,
+      runs: [
+        run('r1'),
+        run('r2', { notify_pending: [{ channel: 'smtp', reason: 'connection refused' }] }),
+        run('r3', { not_sent: 'no channel is switched on for this watch (ntfy)' }),
+        run('r4', { review: null, review_problem: 'Mate is not ready' }),
+      ],
+    }
+    renderPage()
+    await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(4))
+    expect(triggerOf(runItem('r1'))).not.toHaveTextContent(/Not delivered|Not sent|No review/)
+    expect(triggerOf(runItem('r2'))).toHaveTextContent('Not delivered')
+    expect(triggerOf(runItem('r3'))).toHaveTextContent('Not sent')
+    expect(triggerOf(runItem('r4'))).toHaveTextContent('No review')
+  })
+
+  it('names the run the delete dialog is about', async () => {
+    detail = { ...detail, runs: [newest(), older()] }
+    renderPage()
+    await screen.findByText('Newest review text')
+    fireEvent.click(screen.getByRole('button', { name: 'Delete run' }))
+    const dialog = await screen.findByRole('alertdialog')
+    expect(dialog).toHaveTextContent(`Delete the run from ${runTimeLabel(newest())}?`)
+  })
+
+  it('follows a linked run being pinned and cleared without a remount', () => {
+    const listProps = { hasOlder: false, canWrite: false, loadingOlder: false, olderError: null, onShowOlder: () => {}, onDeleteRun: async () => {} }
+    const { rerender } = render(<WatchRunList runs={[newest(), older()]} expandNewest {...listProps} />)
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'true')
+    rerender(<WatchRunList runs={[newest(), older()]} expandNewest={false} {...listProps} />)
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'false')
+    rerender(<WatchRunList runs={[newest(), older()]} expandNewest {...listProps} />)
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('opens nothing when Show older brings older runs in', async () => {
+    detail = { ...detail, runs: [newest()], has_older: true }
+    olderRuns = [older()]
+    renderPage()
+    await screen.findByText('Newest review text')
+    fireEvent.click(screen.getByRole('button', { name: 'Show older' }))
+    await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(2))
+    expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'false')
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.queryByText('Older review text')).not.toBeInTheDocument()
+  })
+
+  it('starts the list closed when a linked run is pinned above it', async () => {
+    Element.prototype.scrollIntoView = vi.fn()
+    linkedRuns = { old: run('old', { boat_time: 'Mon 12 Oct 03:00 UTC+13' }) }
+    detail = { ...detail, runs: [newest(), older()] }
+    renderPage({ linkedRunId: 'old' })
+    await screen.findByTestId('watch-linked-run')
+    await screen.findByText('Linked run')
+    expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'false')
+    expect(triggerOf(runItem('r2'))).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('Newest review text')).not.toBeInTheDocument()
   })
 })
 
@@ -395,7 +609,7 @@ describe('WatchDetailsPage boat time', () => {
   it('shows a run on the boat clock the server gave, never the device\u2019s', async () => {
     renderPage()
     const card = await screen.findByTestId('watch-run')
-    expect(within(card).getByRole('heading', { name: 'Thu 29 Oct 06:00 UTC+13' })).toBeInTheDocument()
+    expect(within(card).getByRole('heading', { name: /^Thu 29 Oct 06:00 UTC\+13/ })).toBeInTheDocument()
     // 17:00 UTC is Wed 28 Oct 07:00 in Honolulu, the device zone of this test.
     expect(screen.queryByText(/Wed 28 Oct 07:00/)).not.toBeInTheDocument()
   })
@@ -403,7 +617,7 @@ describe('WatchDetailsPage boat time', () => {
   it('says a run with no boat position is on UTC and not boat time', async () => {
     detail = { ...detail, runs: [run('r1', { boat_time: 'Thu 29 Oct 17:00 UTC (boat time not known)', timezone: '' })] }
     renderPage()
-    expect(await screen.findByRole('heading', { name: 'Thu 29 Oct 17:00 UTC (boat time not known)' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: /^Thu 29 Oct 17:00 UTC \(boat time not known\)/ })).toBeInTheDocument()
   })
 
   it('asks Mate with the same label the card shows', async () => {
@@ -609,6 +823,8 @@ describe('WatchDetailsPage notifications', () => {
       ],
     }
     renderPage()
+    await waitFor(() => expect(screen.getAllByTestId('watch-run')).toHaveLength(2))
+    fireEvent.click(triggerOf(runItem('r2')))
     await waitFor(() => expect(screen.getAllByTestId('watch-run-notified')).toHaveLength(2))
     const notes = screen.getAllByTestId('watch-run-notified')
     expect(notes[0]).toHaveTextContent('Notified: ntfy')
@@ -698,5 +914,7 @@ describe('a link to a run', () => {
     renderPage({ linkedRunId: 'missing' })
     expect(await screen.findByText(/linked run is no longer there/i)).toBeInTheDocument()
     expect(screen.getAllByTestId('watch-run')).toHaveLength(1)
+    // Nothing is pinned, so the newest run is open as it is on any arrival.
+    await waitFor(() => expect(triggerOf(runItem('r1'))).toHaveAttribute('aria-expanded', 'true'))
   })
 })
