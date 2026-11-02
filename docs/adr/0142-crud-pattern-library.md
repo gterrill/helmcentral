@@ -401,8 +401,11 @@ duplication problem this ADR exists to close.
   side by side in a wide main column and single-column in the aside or on a
   phone.
 - `ChoiceList` replaces hand-built groups of radios and checkboxes, starting
-  with a watch's Notifications and Report sections. It follows Shopify's `s-choice-list`
-  with one addition: `details` and `secondaryContent` are always visible, as
+  with a watch's Notifications and Report sections, then the choices in the
+  place map, lamp strip, zone conflict and Mate note dialogs. The import
+  wizard's steps stay as cards, because their rows carry pills and dropdowns and
+  the notes step mixes in rows with no checkbox. It follows Shopify's
+  `s-choice-list` with one addition: `details` and `secondaryContent` are always visible, as
   Shopify's `details` and `secondary-content` are, and `selectedContent` shows
   only while its choice is selected. A field goes in `secondaryContent` when a
   bad value in it blocks Save, because hiding it would hide the error, which

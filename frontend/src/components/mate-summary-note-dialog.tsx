@@ -2,8 +2,8 @@ import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 
 import { NoteEditorBody } from '@/components/note-editor'
+import { ChoiceList } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { useUnsavedWorkReport } from '@/hooks/use-navigation-guard'
@@ -30,7 +30,7 @@ export function MateSummaryNoteDialog({ open, onOpenChange, conversationId, onSa
   const [saving, setSaving] = useState(false)
   const [title, setTitle] = useState('')
   const bodyRef = useRef('')
-  const [ticked, setTicked] = useState<Record<string, boolean>>({})
+  const [linkedIds, setLinkedIds] = useState<string[]>([])
 
   useEffect(() => {
     if (!open) return
@@ -44,7 +44,7 @@ export function MateSummaryNoteDialog({ open, onOpenChange, conversationId, onSa
         setTitle(d.title)
         bodyRef.current = d.body
         // Suggested links start ticked: the operator unticks what is wrong.
-        setTicked(Object.fromEntries(d.equipment.map((e) => [e.id, true])))
+        setLinkedIds(d.equipment.map((e) => e.id))
       })
       .catch((err: unknown) => {
         if (controller.signal.aborted) return
@@ -67,8 +67,8 @@ export function MateSummaryNoteDialog({ open, onOpenChange, conversationId, onSa
         title: title.trim(),
         body: bodyRef.current,
         type: draft.type,
-        equipmentIds: draft.equipment.filter((e) => ticked[e.id]).map((e) => e.id),
-        removeEquipmentIds: draft.equipment.filter((e) => !ticked[e.id] && e.linked).map((e) => e.id),
+        equipmentIds: linkedIds,
+        removeEquipmentIds: draft.equipment.filter((e) => !linkedIds.includes(e.id) && e.linked).map((e) => e.id),
       })
       onSaved(result.noteId, result.created)
     } catch (err) {
@@ -118,21 +118,13 @@ export function MateSummaryNoteDialog({ open, onOpenChange, conversationId, onSa
                 </div>
               </div>
               {draft.equipment.length > 0 && (
-                <fieldset className="flex flex-col gap-2">
-                  <legend className="mb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-                    Link to equipment
-                  </legend>
-                  {draft.equipment.map((e) => (
-                    <div key={e.id} className="flex min-w-0 items-center gap-2 text-sm">
-                      <Checkbox
-                        aria-label={e.name}
-                        checked={ticked[e.id] === true}
-                        onCheckedChange={(checked) => setTicked((prev) => ({ ...prev, [e.id]: checked === true }))}
-                      />
-                      <span className="truncate">{e.name}</span>
-                    </div>
-                  ))}
-                </fieldset>
+                <ChoiceList
+                  multiple
+                  label={<span className="text-[10px] font-medium tracking-wider">Link to equipment</span>}
+                  choices={draft.equipment.map((e) => ({ value: e.id, label: e.name }))}
+                  value={linkedIds}
+                  onChange={setLinkedIds}
+                />
               )}
             </div>
           )}

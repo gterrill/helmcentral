@@ -23,6 +23,12 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   words and number fields now line up under each section's name, and you can tap
   anywhere on a section's row to tick it.
 
+- **Choices in more dialogs are easier to tap.** The choices in the place map
+  tile's settings, the lamp strip's CHK option, Mate's equipment links on a note
+  and the zone conflict questions on a tile now use the same rows as a watch's
+  page. You can tap anywhere on a row, and any words under a choice line up with
+  its name.
+
 - **The maps on Mate's marina and anchorage cards open full screen.** If a
   card's map is too small to read, tap the full screen button at the top of its
   buttons. The map fills the screen with zoom buttons, one finger drags it and

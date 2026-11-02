@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { ChoiceList } from '@/components/patterns'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -57,15 +58,6 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
 
   const canSave = isValidPoiMapConfig(config)
 
-  const toggleCategory = (id: string, checked: boolean) => {
-    setConfig((prev) => ({
-      ...prev,
-      categories: checked
-        ? [...prev.categories, id]
-        : prev.categories.filter((c) => c !== id),
-    }))
-  }
-
   const handleSave = () => {
     if (!canSave) return
     onSave(widget.id, { ...config, title: config.title.trim() })
@@ -74,7 +66,7 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Nearby map</DialogTitle>
           <DialogDescription>
@@ -110,31 +102,16 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
             </FieldDescription>
           </Field>
 
-          <Field>
-            <FieldLabel>Layout</FieldLabel>
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  name="poi-map-layout"
-                  value="map"
-                  checked={config.layout === 'map'}
-                  onChange={() => setConfig((prev) => ({ ...prev, layout: 'map' }))}
-                />
-                Map only
-              </label>
-              <label className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  name="poi-map-layout"
-                  value="split"
-                  checked={config.layout === 'split'}
-                  onChange={() => setConfig((prev) => ({ ...prev, layout: 'split' }))}
-                />
-                Map and list
-              </label>
-            </div>
-          </Field>
+          <ChoiceList
+            label="Layout"
+            value={config.layout}
+            onChange={(layout) => setConfig((prev) => ({ ...prev, layout }))}
+            listClassName="grid grid-cols-2"
+            choices={[
+              { value: 'map', label: 'Map only' },
+              { value: 'split', label: 'Map and list' },
+            ]}
+          />
 
           {config.layout === 'split' && (
             <Field>
@@ -161,21 +138,14 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
             </Field>
           )}
 
-          <Field>
-            <FieldLabel>Categories</FieldLabel>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
-              {POI_CATEGORIES.map((category) => (
-                <label key={category.id} className="flex items-center gap-1.5 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={config.categories.includes(category.id)}
-                    onChange={(e) => toggleCategory(category.id, e.target.checked)}
-                  />
-                  {category.label}
-                </label>
-              ))}
-            </div>
-          </Field>
+          <ChoiceList
+            multiple
+            label="Categories"
+            value={config.categories}
+            onChange={(categories) => setConfig((prev) => ({ ...prev, categories }))}
+            choices={POI_CATEGORIES.map((c) => ({ value: c.id, label: c.label }))}
+            listClassName="grid grid-cols-2 sm:grid-cols-3"
+          />
 
           <Field orientation="horizontal">
             <Switch

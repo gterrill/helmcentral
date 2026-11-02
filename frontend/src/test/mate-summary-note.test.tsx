@@ -109,6 +109,15 @@ describe('MateSummaryNoteDialog', () => {
     })
   })
 
+  it('offers the equipment links as a named group', async () => {
+    scriptSummary(jsonResponse(draftResponse))
+    renderDialog()
+
+    await screen.findByDisplayValue('Reverso polisher sampling')
+    const group = screen.getByRole('group', { name: 'Link to equipment' })
+    expect(within(group).getAllByRole('checkbox')).toHaveLength(2)
+  })
+
   it('shows the server message inline when the draft fails and offers no Save', async () => {
     scriptSummary(jsonResponse({ error: 'Nothing in this conversation to keep yet.' }, 422))
     renderDialog()

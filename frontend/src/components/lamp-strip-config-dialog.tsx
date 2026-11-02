@@ -10,7 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
+import { ChoiceList } from '@/components/patterns'
+import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useEquipmentTileContext } from '@/hooks/use-equipment-tile-context'
 import { useSignalKPaths } from '@/hooks/use-signalk-paths'
@@ -143,17 +144,20 @@ export function LampStripConfigDialog({ widget, onCancel, onSave, onRemove }: La
             />
           </Field>
 
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={config.showCheck ?? false}
-              onChange={(e) => setConfig((current) => ({ ...current, showCheck: e.target.checked }))}
-            />
-            Show the CHK indicator
-          </label>
-          <FieldDescription>
-            CHK takes the colour of the worst active alarm, including the ones your gauge zones raise. A cell turns amber or red while an active alarm is on its path.
-          </FieldDescription>
+          <ChoiceList
+            multiple
+            labelHidden
+            label="CHK indicator"
+            value={config.showCheck ? ['chk'] : []}
+            onChange={(next) => setConfig((current) => ({ ...current, showCheck: next.length > 0 }))}
+            choices={[
+              {
+                value: 'chk',
+                label: 'Show the CHK indicator',
+                details: 'CHK takes the colour of the worst active alarm, including the ones your gauge zones raise. A cell turns amber or red while an active alarm is on its path.',
+              },
+            ]}
+          />
 
           <datalist id="lamp-path-options">
             {paths.map((p) => <option key={p.path} value={p.path} />)}

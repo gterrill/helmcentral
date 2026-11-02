@@ -231,7 +231,7 @@ export function GaugeGroupConfigDialog({ widget, onCancel, onSave, onDuplicate }
           {kind !== '' && (
             <ZoneConflicts
               plan={zoneEditing.plan} choices={zoneEditing.choices} onChoose={zoneEditing.setChoice}
-              heldWithoutItem={zoneEditing.heldWithoutItem} idPrefix="gauge-group"
+              heldWithoutItem={zoneEditing.heldWithoutItem}
             />
           )}
 

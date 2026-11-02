@@ -436,11 +436,6 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 {profile ? 'Replaces the engine slots and fills any empty footer row. Readings are live; zones come from the profile.' : ''}
               </FieldDescription>
             </div>
-
-            <ZoneConflicts
-              plan={zoneEditing.plan} choices={zoneEditing.choices} onChoose={zoneEditing.setChoice}
-              heldWithoutItem={zoneEditing.heldWithoutItem} idPrefix="cluster"
-            />
           </div>
         )}
 
@@ -468,6 +463,12 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
             </TabsList>
 
             <div className="sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
+              {/* In the scrolling part: several conflicts would push Save off a short screen. */}
+              <ZoneConflicts
+                className="my-3"
+                plan={zoneEditing.plan} choices={zoneEditing.choices} onChoose={zoneEditing.setChoice}
+                heldWithoutItem={zoneEditing.heldWithoutItem}
+              />
               <TabsContent keepMounted value="dial" className="grid min-w-0 gap-3">
                 <SlotSection title="Ring">
                   {slotForm(config.ring, 'cluster-ring', (next) => setSlot((c) => ({ ...c, ring: next })))}
