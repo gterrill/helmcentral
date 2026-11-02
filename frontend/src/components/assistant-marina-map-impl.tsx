@@ -5,7 +5,7 @@ import { Layer, Source } from 'react-map-gl/maplibre'
 import { PLACE_FONT } from '@/components/map-place-labels'
 import { MapToggleButton } from '@/components/map-toggle-button'
 import { MateCardMap, POINT_LABEL_LAYOUT, RequireWebGL2, ROUND_LINE_LAYOUT, useThemeColours } from '@/components/mate-card-map'
-import { marinaFeatures, marinaFrame } from '@/lib/marina-card'
+import { marinaFeatures, marinaFrame, marinaTitle } from '@/lib/marina-card'
 import { themeColour } from '@/lib/map-theme'
 import type { MarinaCard } from '@/lib/mate-cards'
 
@@ -42,6 +42,7 @@ function MarinaMap({ card }: { card: MarinaCard }) {
 
   return (
     <MateCardMap
+      title={marinaTitle(card)}
       bounds={bounds}
       beforeId="marina-outline-casing"
       controls={hasAshore && <MapToggleButton icon={Store} label="Toggle shops and services ashore" on={showAshore} onToggle={() => setShowAshore((v) => !v)} />}

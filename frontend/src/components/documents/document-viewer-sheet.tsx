@@ -5,13 +5,12 @@ import { AskMateSelection } from '@/components/ask-mate-selection'
 import { NoteEditor } from '@/components/note-editor'
 import { NoteMarkdown } from '@/components/note-markdown'
 import { cn } from '@/lib/utils'
-import { LiveAlarmBanner } from '@/components/live-alarm-banner'
+import { FullscreenAlarmBanner } from '@/components/fullscreen-alarm-banner'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import type { DocumentRecord } from '@/hooks/use-documents'
 import type { NoteDetail, NotePatch } from '@/hooks/use-notes'
 import { apiRequest, useApiQuery } from '@/lib/api-query'
-import { useNavigate } from '@/hooks/use-app-location'
 import { documentContentUrl, downloadDocument } from '@/lib/document-download'
 import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-display'
 import type { NoteLink } from '@/lib/note-links'
@@ -43,14 +42,6 @@ export interface DocumentViewerSheetProps {
   /** Wraps download and pin so the caller's own error banner catches a
    * failure. Without it the viewer shows the error itself. */
   runAction?: (action: () => Promise<unknown>) => Promise<void>
-}
-
-// Full screen covers the app's own alarm banner, so the viewer shows one at
-// the top while it is up. A child, so the router and alarm hooks only run in
-// full screen. Opening Alarms closes the viewer first.
-function FullscreenAlarmBanner({ onClose }: { onClose: () => void }) {
-  const navigate = useNavigate()
-  return <LiveAlarmBanner onOpen={() => { onClose(); navigate.toPanel('alarms') }} />
 }
 
 export function DocumentViewerSheet({

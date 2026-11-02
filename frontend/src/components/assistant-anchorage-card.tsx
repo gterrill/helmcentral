@@ -14,6 +14,7 @@ import {
   kn,
   lengthText,
   METRES_PER_NM,
+  anchorageTitle,
   restrictedLine,
   timeText,
   waveText,
@@ -278,7 +279,7 @@ export const AssistantAnchorageCard = memo(function AssistantAnchorageCard({ car
         <Anchor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Anchorage</span>
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground" title={card.name}>
-          {card.name || 'Unnamed anchorage'}
+          {anchorageTitle(card)}
         </span>
       </div>
       <p data-testid="anchorage-stay" className="min-w-0 truncate text-xs tabular-nums text-muted-foreground" title={`Local time at the anchorage (${card.timezone})`}>

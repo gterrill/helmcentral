@@ -4,7 +4,7 @@ import { Layer, Source } from 'react-map-gl/maplibre'
 
 import { MateCardMap, POINT_LABEL_LAYOUT, RequireWebGL2, ROUND_LINE_LAYOUT, useThemeColours } from '@/components/mate-card-map'
 import { useAppConfig } from '@/hooks/use-app-config'
-import { anchorageFeatures, anchorageFrame, GRADE_TOKEN } from '@/lib/anchorage-card'
+import { anchorageFeatures, anchorageFrame, anchorageTitle, GRADE_TOKEN } from '@/lib/anchorage-card'
 import { themeColour } from '@/lib/map-theme'
 import type { AnchorageCard } from '@/lib/mate-cards'
 
@@ -54,7 +54,7 @@ function AnchorageMap({ card }: { card: AnchorageCard }) {
   })
 
   return (
-    <MateCardMap bounds={bounds} beforeId="anchorage-restricted-fill">
+    <MateCardMap title={anchorageTitle(card)} bounds={bounds} beforeId="anchorage-restricted-fill">
       <Source id="anchorage-restricted" type="geojson" data={features.restrictedAreas}>
         <Layer id="anchorage-restricted-fill" type="fill" paint={{ 'fill-color': restrictedColour, 'fill-opacity': 0.28 }} />
         <Layer id="anchorage-restricted-edge" type="line" paint={{ 'line-color': restrictedColour, 'line-width': 2 }} />

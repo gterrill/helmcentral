@@ -9,6 +9,13 @@ the map geometry out of the model's sight for this card). Follows the wind rose
 card ([ADR 0221](0221-mates-charts-stack-by-unit-and-average-angles-as-vectors.md))
 in how the card is stored and decoded.
 
+Amended: the inline map keeps cooperative gestures, and a Full screen button
+opens the same layers in a dialog with plain gestures and zoom buttons. Only
+one map exists at a time, because browsers cap WebGL contexts: the inline map
+unmounts while the dialog is open. Each surface frames afresh, with no pan or
+zoom carried across, as the Anchor watch tile and drawer keep their own fit.
+An active alarm still shows at the top of the dialog.
+
 ## Context
 
 `marina_details` gives Mate a compact answer: berths, fuel, arm names, the

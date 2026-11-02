@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
+import type { Ref } from 'react'
 
 import { cn } from '@/lib/utils'
 
@@ -9,14 +10,16 @@ export interface MapIconButtonProps {
   onClick: () => void
   disabled?: boolean
   className?: string
+  ref?: Ref<HTMLButtonElement>
 }
 
 /** The dark-glass square map button that zoom, recentre and full screen
  * share. The satellite and 3D toggles use MapToggleButton, which adds an
  * on state. */
-export function MapIconButton({ icon: Icon, label, onClick, disabled, className }: MapIconButtonProps) {
+export function MapIconButton({ icon: Icon, label, onClick, disabled, className, ref }: MapIconButtonProps) {
   return (
     <button
+      ref={ref}
       type="button"
       onClick={onClick}
       aria-label={label}

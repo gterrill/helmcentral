@@ -295,8 +295,11 @@ Under the answer, Mate shows an anchorage card. Here's what's on it:
   boat swings around the anchorage. The OpenSeaMap layer draws the marks, as on the anchor
   watch map, and the satellite button turns the imagery off. It doesn't move
   when you scroll the conversation past it: use two fingers, or hold ⌘ (Ctrl on
-  Windows or Linux) while you scroll, to pan and zoom it. A browser without
-  WebGL2 shows a line saying so.
+  Windows or Linux) while you scroll, to pan and zoom it. If the map's too
+  small to read, tap the full screen button. It opens the map across the whole
+  screen, with zoom buttons, and there one finger drags it and a pinch zooms it.
+  An active alarm still shows at the top there. Close it to come back to the
+  card. A browser without WebGL2 shows a line saying so.
 - **The bottom:** When the forecast was fetched, when the coastline was
   downloaded and "OpenStreetMap · data as of" the date the map was last updated.
   If the map server doesn't give a date, the card leaves it out. A part that
@@ -362,8 +365,11 @@ Under the answer, Mate shows a marina card. Here's what's on it:
   anchor watch map uses. Shops and services ashore are hidden until you tap the
   shop button on the map, and the satellite button turns the imagery off. The
   map doesn't move when you scroll the conversation past it: use two fingers,
-  or hold ⌘ (Ctrl on Windows or Linux) while you scroll, to pan and zoom it. If the marina has no
-  outline or pontoons mapped, the card has no map.
+  or hold ⌘ (Ctrl on Windows or Linux) while you scroll, to pan and zoom it. If the map's too
+  small to read, tap the full screen button. It opens the map across the whole
+  screen, with zoom buttons, and there one finger drags it and a pinch zooms it.
+  An active alarm still shows at the top there. Close it to come back to the
+  card. If the marina has no outline or pontoons mapped, the card has no map.
 - **Facilities:** Fuel, haul-out, ramp and the rest, one chip each. A fuel
   dock the map doesn't give a fuel type for reads "Fuel · type unknown".
 - **Folded sections:** The entrance marks, the pontoon arms, and the shops and
