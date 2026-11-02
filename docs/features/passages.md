@@ -168,7 +168,8 @@ touch the map while it comes down, the move stops where you are and the replay
 carries on from the start. The slider scrubs to any point, and Play from the middle just
 carries on with no zoom. The readout shows the local date and time at that
 point. The length list sets how long the replay takes to sail, 60, 30, 15 or 8
-seconds, however long the passage was. A sign's photo moment, described under
+seconds, however long the passage was. A cruise, or passages you select
+together, also offer 2 and 3 minutes, as described under Cruises below. A sign's photo moment, described under
 Signs, adds a couple of seconds of watching on top of that, and the slider still
 runs over the sailing alone. The **Overview map** switch puts a small
 map of the surrounding coast in the corner, with a box where the track is. It
@@ -359,8 +360,8 @@ Splitting, trimming, merging, hiding and moving are in
 A cruise is a named group of passages, such as "Whitsundays with Steve and
 Kim". A passage is in at most one cruise, and cruises don't nest. Legs are how you show stretches inside one passage, as
 described above. A cruise's
-page replays all its passages one after another, leaving out the days between
-them, and adds the figures that only make sense across a whole trip:
+page replays all its passages one after another, and adds the figures that
+only make sense across a whole trip:
 
 - first departure to last arrival, time underway and the number of nights
 - total distance and fuel
@@ -379,6 +380,40 @@ stays a suggestion until you press a button to confirm it.
 
 Deleting a cruise deletes only the grouping. Its passages stay and become
 unfiled.
+
+### Replaying a cruise
+
+A cruise's replay, and the replay of passages you select together on the
+**Combined** page, don't play the days between passages. Instead the boat
+stays:
+
+- **Stays:** Where one passage ends and the next begins, the replay holds for
+  about a second and a half. The boat sits where the first passage ended. The sun
+  and sky run from the time you arrived to the time you left, so a night at
+  anchor passes as dusk, dark and dawn. A stay of more than a day shows the last
+  day before you left: one evening, one night and one morning, ending on the
+  light you sailed in. Two passages less than a minute apart have no stay.
+- **The label:** A small label shows during the stay: how long it was, and where.
+  A stay across midnight counts nights by the boat's own dates, so arriving at
+  22:00 and leaving at 07:00 is "1 night". Nights are counted the way the cruise
+  figures count them. A stay that crosses no midnight reads like the rest of the
+  app, such as "3 h 05 m" or "42 m". The place is where the passage before it ended, or where
+  the next one set out from. If neither has a name, the label gives the time
+  alone. If the boat's time zone isn't known the label gives the time alone rather
+  than guess at nights.
+- **Time for each passage:** The length you choose is shared between the passages
+  by how long each took to sail, but every passage gets at least four seconds, so
+  a short hop between two long passages is still seen. The others are scaled down
+  to fit. If four seconds for each passage comes to more than the length, every
+  passage gets the same share.
+- **Length:** The list adds 2 and 3 minutes, and a cruise starts on 60 seconds.
+  The stays and any photo moments are added on top of the length, as photo
+  moments are on a single passage.
+- **Seeking:** A jump on the slider to where a passage begins lands after the stay
+  that comes before it. Skipping, or touching the map, ends a stay as it ends a
+  photo moment.
+
+The video you export from a cruise holds at each stay in the same way.
 
 ## Sharing
 

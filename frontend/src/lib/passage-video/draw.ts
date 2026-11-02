@@ -6,6 +6,7 @@
 import { FONT_STACK, fitText, paintOverlay, roundRectPath, wrapLines, type Measure } from '@/lib/passage-export-layout'
 import { measureWithCanvas } from '@/lib/passage-export-image'
 import type { ClosingLayout } from '@/lib/passage-video/closing'
+import { STAY_LABEL } from '@/lib/replay-stay'
 import { NOTE_FONT, type Box, type OverlayCard, type OverlayModel } from '@/lib/passage-video/overlay'
 import type { VideoSize } from '@/lib/passage-video/schedule'
 import { SIGN_CARD_GAP_PX, SIGN_CARD_PAD_PX, SIGN_NOTE_LINE_PX, SIGN_TITLE_LINE_PX } from '@/lib/replay-signs'
@@ -165,6 +166,36 @@ function drawMoment(ctx: CanvasRenderingContext2D, m: NonNullable<OverlayModel['
   ctx.stroke()
 }
 
+/** The small label of a stay: the page's own (components/passages/stay-label), in the page's card and text colours. */
+function drawStayLabel(ctx: CanvasRenderingContext2D, stay: NonNullable<OverlayModel['stay']>, t: Theme) {
+  const { box } = stay
+  if (box.alpha <= 0 || box.maxW <= 0) return
+  const labelFont = font(STAY_LABEL.weight, box.fontPx)
+  const text = fitText(stay.text, box.maxW - 2 * box.padX, labelFont, (s, f) => { ctx.font = f; return ctx.measureText(s).width })
+  ctx.font = labelFont
+  const w = ctx.measureText(text).width + 2 * box.padX
+  const h = box.fontPx * STAY_LABEL.lineHeight + 2 * box.padY
+  const rect: Box = { x: box.cx - w / 2, y: box.y, w, h }
+  ctx.save()
+  ctx.globalAlpha = box.alpha
+  ctx.shadowColor = t.shadow
+  ctx.shadowBlur = 3
+  ctx.shadowOffsetY = 1
+  roundRectPath(ctx, rect, STAY_LABEL.radius)
+  ctx.globalAlpha = box.alpha * STAY_LABEL.bgAlpha
+  ctx.fillStyle = t.card
+  ctx.fill()
+  ctx.restore()
+  ctx.save()
+  ctx.globalAlpha = box.alpha
+  ctx.font = labelFont
+  ctx.fillStyle = t.text
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, rect.x + box.padX, rect.y + h / 2)
+  ctx.restore()
+}
+
 /** The signs, the dot and the moment's photo over a frame that already has the map. */
 export function drawOverlay(ctx: CanvasRenderingContext2D, model: OverlayModel, photos: ReadonlyMap<string, ImageBitmap>, theme: Theme) {
   ctx.save()
@@ -173,6 +204,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: OverlayModel, 
   for (const pin of model.pins) drawPin(ctx, pin, theme)
   for (const card of model.cards) drawCard(ctx, card, photos, theme)
   if (model.moment) drawMoment(ctx, model.moment, photos, theme)
+  if (model.stay) drawStayLabel(ctx, model.stay, theme)
   ctx.restore()
 }
 

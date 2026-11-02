@@ -119,6 +119,14 @@ appeared first if two others are showing.
   Moving it onto the map, and carrying the choice in the exported card, is later
   work.
 
+## Later
+
+The hold is now general. A photo moment is one kind of hold, and a stay between
+two passages of a cruise is another, of its own length. The time map keeps a
+single ordered list of holds, so seeking, skipping, the controller's frame and
+the exporter treat them alike. A moment at the end of a passage plays before the
+stay that follows it. Nothing above changed for a single passage.
+
 ## Rejected
 
 - **A per-passage setting.** Signs and shots are keyed by time and survive a

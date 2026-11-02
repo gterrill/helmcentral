@@ -21,7 +21,8 @@ import { lightFor, lightKey, type ReplayLight } from '@/lib/replay-light'
 import { MAX_SPEED_SEGMENTS, SPEED_RAMP_DARK, SPEED_RAMP_LIGHT, speedFrameAt, speedTrack, type SpeedFrame, type SpeedTrack, type WakeView } from '@/lib/replay-speed'
 import { sunPosition } from '@/lib/sun'
 import type { ResolvedShot } from '@/lib/replay-clock'
-import { MOMENT_TOTAL_S, momentView, type MomentAt, type MomentView, type ReplayTime } from '@/lib/replay-time'
+import { momentView, type HoldAt, type MomentView, type ReplayTime } from '@/lib/replay-time'
+import { stayView, type ReplayStay, type StayView } from '@/lib/replay-stay'
 import { MAX_SIGN_CARDS, visibleSigns, type ResolvedSign } from '@/lib/replay-signs'
 import { locate, positionAt, sailedAt, type Timeline, type TimelineEntry } from '@/lib/passages'
 
@@ -62,9 +63,9 @@ export class ReplayPlayer {
     return this.at.clock
   }
 
-  /** The photo moment the replay is in, or null. */
-  get moment(): MomentAt | null {
-    return this.at.moment
+  /** The hold the replay is in (a photo moment or a stay), or null. */
+  get hold(): HoldAt | null {
+    return this.at.hold
   }
 
   /** The replay has run to its end, holds and all. */
@@ -87,15 +88,16 @@ export class ReplayPlayer {
       this.rewind()
       return
     }
-    if (here.moment) {
-      // In a hold: the same second of the same moment if it is still there, else the start of that place.
-      const moment = next.moments.find((m) => m.id === here.moment!.id)
-      this.wall = moment ? moment.startWall + Math.min(here.moment.elapsed, MOMENT_TOTAL_S) : next.wallAtClock(here.clock, { onSign: true })
+    if (here.hold) {
+      // In a hold: the same second of the same one if it is still there, else the start of that place.
+      const inHold = here.hold
+      const hold = next.holds.find((h) => h.id === inHold.id)
+      this.wall = hold ? hold.startWall + Math.min(inHold.elapsed, hold.durationS) : next.wallAtClock(here.clock, { onSign: true })
     } else {
       // Not in a hold, but perhaps standing at the clock of one: past it. A hold that has been seen stays seen.
       // The very start is the exception: nothing has been seen there, and a moment standing at the start is still to come.
-      const seen = new Set(old.moments.filter((m) => Math.abs(m.clock - here.clock) < CLOCK_EPS && m.startWall + MOMENT_TOTAL_S <= wall + CLOCK_EPS).map((m) => m.id))
-      const unseen = next.moments.find((m) => Math.abs(m.clock - here.clock) < CLOCK_EPS && !seen.has(m.id))
+      const seen = new Set(old.holds.filter((h) => Math.abs(h.clock - here.clock) < CLOCK_EPS && h.startWall + h.durationS <= wall + CLOCK_EPS).map((h) => h.id))
+      const unseen = next.holds.find((h) => Math.abs(h.clock - here.clock) < CLOCK_EPS && !seen.has(h.id))
       // Past some holds here and short of another: at its start. Otherwise clear of every hold at this clock.
       this.wall = wall <= CLOCK_EPS ? 0 : seen.size > 0 && unseen ? unseen.startWall : next.wallAtClock(here.clock)
     }
@@ -111,7 +113,7 @@ export class ReplayPlayer {
 
   /** Over sailing time. Lands clear of every hold, after those of a sign
    * standing at that clock; only a jump `onSign` lands at the start of its moment. */
-  seek(clock: number, opts?: { onSign?: boolean }) {
+  seek(clock: number, opts?: { onSign?: boolean; at?: number }) {
     this.wall = this.time.wallAtClock(clock, opts)
   }
 
@@ -170,8 +172,10 @@ export function sailedToAt(
 
 export interface ReplayConfig {
   timeline: Timeline
-  /** How the watching maps to the timeline: the sailing, the shots' paces and the photo moments. */
+  /** How the watching maps to the timeline: the sailing, the shots' paces, the photo moments and the stays. */
   time: ReplayTime
+  /** The stays between passages, which the time map holds the replay for. None for a single passage. */
+  stays?: readonly ReplayStay[]
   /** The camera shots placed on the replay, in order. */
   resolved: readonly ResolvedShot[]
   /** The signs that draw something (a join awaiting its name is left out). */
@@ -204,6 +208,10 @@ export interface FrameInput {
 export interface ReplayFrame {
   /** The photo moment under way, or null. */
   moment: MomentView | null
+  /** The stay between two passages under way, or null. During it the boat sits where the passage before it ended. */
+  stay: StayView | null
+  /** The hold the replay is held in, a photo moment or a stay: the camera stands still for it. */
+  hold: HoldAt | null
   here: { entry: TimelineEntry; at: number } | null
   boat: { lat: number; lon: number } | null
   /** The bow's smoothed heading, or null. */
@@ -246,7 +254,7 @@ export class ReplayController {
   /** The speed frame on screen, which the next one keeps its gradients and lines from. */
   private speedPrev: SpeedFrame | null = null
   // Memory of work already done for the same inputs; it holds no state of the replay.
-  private memo: { parts: unknown[]; track: SpeedTrack | null; sailed: Map<number, Map<string, SailedTo> | null>; cards: Map<number, ResolvedSign[]> } | null = null
+  private memo: { parts: unknown[]; track: SpeedTrack | null; sailed: Map<string, Map<string, SailedTo> | null>; cards: Map<number, ResolvedSign[]>; stays: Map<string, ReplayStay>; entries: Map<string, TimelineEntry> } | null = null
 
   /** The speeds along the track. A track cut into more segments than the colours take has none, and the replay draws its plain line; that is said once, here, with the count. */
   private trackFor(pieces: readonly DrawnPiece[]): SpeedTrack | null {
@@ -259,18 +267,31 @@ export class ReplayController {
   }
 
   private memoFor(config: ReplayConfig) {
-    const parts = [config.timeline, config.time, config.resolved, config.signs, config.pieces]
-    if (!this.memo || this.memo.parts.some((v, i) => v !== parts[i])) this.memo = { parts, track: this.trackFor(config.pieces), sailed: new Map(), cards: new Map() }
+    const parts = [config.timeline, config.time, config.resolved, config.signs, config.pieces, config.stays]
+    if (!this.memo || this.memo.parts.some((v, i) => v !== parts[i])) {
+      this.memo = {
+        parts, track: this.trackFor(config.pieces), sailed: new Map(), cards: new Map(),
+        stays: new Map((config.stays ?? []).map((s) => [s.id, s])),
+        entries: new Map(config.timeline.entries.map((e) => [e.id, e])),
+      }
+    }
     return this.memo
   }
 
   /** The frame at the clock. Changes nothing the controller holds. */
   frameAt(config: ReplayConfig, input: FrameInput): ReplayFrame {
     const { nowMs, playing, reduced, wall } = input
-    // Where the watching is, once: the timeline position, and the moment if it is in a hold.
+    // Where the watching is, once: the timeline position, and the hold if it is in one.
     const at = config.time.at(wall)
     const clock = at.clock
-    const here = locate(config.timeline, clock)
+    const memo = this.memoFor(config)
+    // A stay: the boat has arrived and sits at the end of the passage before.
+    const stay = at.hold?.kind === 'stay' ? memo.stays.get(at.hold.id) : undefined
+    const arrived = stay ? memo.entries.get(stay.fromId) : undefined
+    // A photo moment is at its sign, in the passage the sign is in: at a join, that is the passage it ends or the one it starts, whichever the clock says.
+    const heldSign = at.hold?.kind === 'moment' ? config.signs.find((r) => r.sign.id === at.hold!.id) : undefined
+    const signEntry = heldSign ? memo.entries.get(heldSign.entryId) : undefined
+    const here = arrived ? { entry: arrived, at: arrived.end } : heldSign && signEntry ? { entry: signEntry, at: heldSign.at } : locate(config.timeline, clock)
     const boat = here ? positionAt(here.entry.segments, here.at) : null
 
     // The bow follows the course sailed; a held heading carries on only while
@@ -278,23 +299,24 @@ export class ReplayController {
     const raw = input.wantHeading && here ? nextHeading(this.lastHeading, { id: here.entry.id, at: here.at }, here.entry.segments) : null
     const { smoothed, smoother } = this.smoothHeading(clock, playing, nowMs, reduced, here ? here.entry.id : null, raw ? raw.heading : null)
 
-    const memo = this.memoFor(config)
-    let sailedTo = memo.sailed.get(clock)
+    // At the end of one passage and the start of the next, the clock is the same; where the boat is is not.
+    const sailedKey = `${clock}|${here?.entry.id ?? ''}`
+    let sailedTo = memo.sailed.get(sailedKey)
     if (sailedTo === undefined) {
       sailedTo = sailedToAt(config.timeline, clock, here?.entry.id, boat)
       memo.sailed.clear()
-      memo.sailed.set(clock, sailedTo)
+      memo.sailed.set(sailedKey, sailedTo)
     }
     // Cards come and go on watched time; before the replay has moved off the
     // start every sign is a pin, and the pins show while the sign editor is open.
     const replaying = wall > 0
     // A photo moment: the replay is held at a sign and its photo grows from the card.
-    const inMoment = replaying ? at.moment : null
+    const inMoment = replaying && at.hold?.kind === 'moment' ? at.hold : null
     const momentSign = inMoment ? config.signs.find((r) => r.sign.id === inMoment.id) : undefined
     const moment = inMoment && momentSign ? momentView(inMoment.id, inMoment.elapsed, reduced) : null
     let cards = memo.cards.get(wall)
     if (!cards) {
-      cards = replaying ? visibleSigns(config.signs, wall, (c) => config.time.wallAtClock(c, { onSign: true })) : []
+      cards = replaying ? visibleSigns(config.signs, wall, (c, r) => config.time.wallAtClock(c, { onSign: true, at: r.at })) : []
       // The photo grows from, and shrinks back into, the card, so the card is up for the whole moment.
       if (momentSign && !cards.includes(momentSign)) {
         if (cards.length < MAX_SIGN_CARDS) cards = [...cards, momentSign]
@@ -308,7 +330,10 @@ export class ReplayController {
       memo.cards.clear()
       memo.cards.set(wall, cards)
     }
-    const sun = boat && here ? sunPosition((here.at + (input.sunOffsetH ?? 0) * 3600) * 1000, boat.lat, boat.lon) : null
+    const stayAt = stay && at.hold ? stayView(stay, at.hold.elapsed) : null
+    // The light runs with the stay's own clock, from the arrival to the departure.
+    const sunTime = stayAt ? stayAt.sunAt : here?.at
+    const sun = boat && here && sunTime !== undefined ? sunPosition((sunTime + (input.sunOffsetH ?? 0) * 3600) * 1000, boat.lat, boat.lon) : null
     let light: ReplayLight | null = null
     if (sun) {
       // The light is built only when the rounded sun has changed.
@@ -316,7 +341,7 @@ export class ReplayController {
       this.lightCache = light
     }
     const speed = sailedTo && memo.track ? speedFrameAt(config.pieces, memo.track, sailedTo, config.isDarkTheme ? SPEED_RAMP_DARK : SPEED_RAMP_LIGHT, this.speedPrev, input.view) : null
-    const frame: ReplayFrame = { here, boat, heading: smoothed.out, sailedTo, cards, pins: !replaying || input.signsOpen ? config.signs : [], light, speed, moment }
+    const frame: ReplayFrame = { here, boat, heading: smoothed.out, sailedTo, cards, pins: !replaying || input.signsOpen ? config.signs : [], light, speed, moment, stay: stayAt, hold: moment || stayAt ? at.hold : null }
     this.pending.set(frame, { config, input, clock, lastHeading: raw, smoothed, smoother, speed })
     return frame
   }
@@ -363,7 +388,7 @@ export class ReplayController {
         nowMs,
         reduced: input.reduced,
         resume: input.resume,
-        hold: c.frame.moment !== null,
+        hold: c.frame.hold !== null,
         boat: { lat: boat.lat, lon: boat.lon, heading },
         current: env.current,
       },

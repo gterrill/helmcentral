@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
 
-import { DEFAULT_REPLAY_LENGTH, type ReplaySpeedId } from '@/hooks/use-replay'
+import { CRUISE_REPLAY_LENGTHS, DEFAULT_CRUISE_REPLAY_LENGTH, DEFAULT_REPLAY_LENGTH, type ReplaySpeedId } from '@/lib/replay-lengths'
 import type { DistanceUnits } from '@/config/app-config'
 import type { PassagesFilter } from '@/lib/app-location'
 import { CruiseEditPanel } from '@/components/passages/cruise-edit-panel'
@@ -169,7 +169,7 @@ function SinglePassage({ id, units, canWrite, isDarkTheme, list, filter, cruises
 
 function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage }: PassageDetailsPageProps & { id: string }) {
   const { data, loading, error } = useCruiseDetails(id)
-  const [replayLength, setReplayLength] = useState<ReplaySpeedId>(DEFAULT_REPLAY_LENGTH)
+  const [replayLength, setReplayLength] = useState<ReplaySpeedId>(DEFAULT_CRUISE_REPLAY_LENGTH)
   const visible = (data?.passages ?? []).filter((p) => !p.hidden)
   const { passages, error: tracksError } = usePassageDetails(visible.map((p) => p.id))
   const timeZone = firstTimeZone(passages)
@@ -208,7 +208,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
               <div className="flex justify-end">
                 <PassageExportMenu kind="cruise" title={data.cruise.name} passages={passages} cruiseStats={data.stats} units={units} isDarkTheme={isDarkTheme} replayLength={replayLength} />
               </div>
-              <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} length={replayLength} onLengthChange={setReplayLength} />
+              <ReplayPanel passages={passages} isDarkTheme={isDarkTheme} length={replayLength} lengths={CRUISE_REPLAY_LENGTHS} onLengthChange={setReplayLength} />
             </>
           )}
           <CruiseStatsPanel stats={data.stats} units={units} timeZone={timeZone} canWrite={canWrite} onLabelRise={(r, l) => void labelRise(r, l)} />
@@ -222,7 +222,7 @@ function CruiseDetails({ id, units, canWrite, isDarkTheme, onBack, onOpenPassage
 
 function CombinedPassages({ ids, units, canWrite, isDarkTheme, list, onBack, onOpenPassage, onOpenCruise }: PassageDetailsPageProps & { ids: string[] }) {
   const { passages, loading, error } = usePassageDetails(ids)
-  const [replayLength, setReplayLength] = useState<ReplaySpeedId>(DEFAULT_REPLAY_LENGTH)
+  const [replayLength, setReplayLength] = useState<ReplaySpeedId>(DEFAULT_CRUISE_REPLAY_LENGTH)
   const [saveOpen, setSaveOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const ordered = [...passages].sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
@@ -263,7 +263,7 @@ function CombinedPassages({ ids, units, canWrite, isDarkTheme, list, onBack, onO
             {canWrite && <MergePassagesButton selected={ordered} all={list} onMerged={onOpenPassage} />}
             <PassageExportMenu kind="combined" title={combinedTitle(ordered)} passages={ordered} units={units} isDarkTheme={isDarkTheme} replayLength={replayLength} />
           </div>
-          <ReplayPanel passages={ordered} isDarkTheme={isDarkTheme} length={replayLength} onLengthChange={setReplayLength} />
+          <ReplayPanel passages={ordered} isDarkTheme={isDarkTheme} length={replayLength} lengths={CRUISE_REPLAY_LENGTHS} onLengthChange={setReplayLength} />
         </DetailsLayout>
       )}
       <NameCruiseDialog

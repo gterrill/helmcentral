@@ -11,6 +11,8 @@ import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { PhotoMoment } from '@/components/passages/photo-moment'
+import { StayLabel } from '@/components/passages/stay-label'
+import { useElementSize } from '@/hooks/use-element-size'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useSignMoments } from '@/hooks/use-sign-moments'
 import { useCameraShots } from '@/hooks/use-camera-shots'
@@ -24,6 +26,7 @@ import { replaySignsKey } from '@/hooks/use-replay-signs'
 import { replaySignsApi, type ReplaySignPatch } from '@/lib/replay-signs-api'
 import { usePassageLegs } from '@/hooks/use-passage-legs'
 import { labelledSigns, legPassages, piecesOf, playableShots, replayItems, wantsHeading } from '@/lib/replay-plan'
+import { staysOf } from '@/lib/replay-stay'
 import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_LIFT_PX, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX } from '@/lib/replay-signs'
 import { moveByCapture, placeByCapture } from '@/lib/sign-placement'
 import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-photo'
@@ -31,10 +34,11 @@ import { shotStartState } from '@/lib/replay-camera'
 import { playedIds } from '@/lib/replay-time'
 import { INTRO_MS, introStartCamera } from '@/lib/replay-intro'
 import { ReplayController } from '@/lib/replay-controller'
-import { paceSpans, type CameraMode } from '@/lib/replay-clock'
+import { cruisePaceSpans, type CameraMode } from '@/lib/replay-clock'
 import { REPLAY_3D_PITCH } from '@/lib/terrain'
 import { zoneKnown, zoneOffsetMinutes } from '@/lib/vessel-time'
-import { replaySeconds, useReplay, type ReplaySpeedId } from '@/hooks/use-replay'
+import { useReplay } from '@/hooks/use-replay'
+import { replaySeconds, type ReplayLength, type ReplaySpeedId } from '@/lib/replay-lengths'
 import {
   buildTimeline,
   formatLocalDateTime, localDateTimeParts,
@@ -55,6 +59,8 @@ export interface ReplayPanelProps {
   isDarkTheme: boolean
   /** How long the replay runs: the page holds it, since the video export makes the video of the replay as it is set. */
   length: ReplaySpeedId
+  /** The lengths on offer; a single passage's unless the page says more. */
+  lengths?: readonly ReplayLength[]
   onLengthChange: (length: ReplaySpeedId) => void
   /** Written with the replay position as it moves, for the edit buttons. */
   cursorRef?: MutableRefObject<ReplayCursor | null>
@@ -66,7 +72,7 @@ const round = (v: number, digits: number) => Math.round(v * 10 ** digits) / 10 *
 /** An angle brought into -180..180. */
 const signedDeg = (d: number) => ((((d % 360) + 540) % 360) - 180)
 
-export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cursorRef }: ReplayPanelProps) {
+export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthChange, cursorRef }: ReplayPanelProps) {
   const [cameraOpen, setCameraOpen] = useState(false)
   const [selectedShotId, setSelectedShotId] = useState<string | null>(null)
   const [shotBusy, setShotBusy] = useState(false)
@@ -93,6 +99,8 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
   const [flying, setFlying] = useState(false)
   const introClock = useRef(0)
   const mapHandle = useRef<PassageMapHandle>(null)
+  // How big the map is, kept as it is resized: the label of a stay is placed by it.
+  const [mapBoxRef, mapSize] = useElementSize<HTMLDivElement>()
 
   const built = useMemo(() => {
     try {
@@ -154,8 +162,10 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
       })
   }
   const resolved = useMemo(() => playableShots(shots, timeline), [shots, timeline])
-  const spans = useMemo(() => paceSpans(resolved), [resolved])
   const lengthS = replaySeconds(length)
+  // A cruise shares its length between the passages, each at least a few seconds, and holds for a stay between each pair.
+  const spans = useMemo(() => cruisePaceSpans(resolved, timeline, lengthS), [resolved, timeline, lengthS])
+  const stays = useMemo(() => staysOf(timeline, passages), [timeline, passages])
 
   // Signs, like shots, belong to real time: the ones inside the replayed
   // passages are the ones placed; a trimmed-out sign is kept but not shown.
@@ -166,7 +176,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
   const labelled = useMemo(() => labelledSigns(placedSigns), [placedSigns])
   // A sign with a photo holds the replay for a moment where the boat meets it.
   const moments = useSignMoments(placedSigns)
-  const replay = useReplay(timeline.total, lengthS, spans, moments)
+  const replay = useReplay(timeline.total, lengthS, spans, moments, stays)
 
   const hull = useBoatHull()
   // The bow follows the course sailed; worked out only when there is a model
@@ -195,7 +205,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
   }
   // Working the frame out changes nothing; it is taken once this render is the
   // one on screen, before the map places its camera against it.
-  const frame = controller.frameAt({ timeline, time: replay.time, resolved, signs: labelled, pieces, isDarkTheme }, frameInput)
+  const frame = controller.frameAt({ timeline, time: replay.time, stays, resolved, signs: labelled, pieces, isDarkTheme }, frameInput)
   useLayoutEffect(() => { controller.commit(frame) })
   const { here, boat, sailedTo, cards, pins } = frame
   const shownHeading = frame.heading
@@ -312,7 +322,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
     const entry = live.current.timeline.entries.find((e) => at >= e.start && at <= e.end)
     if (!entry) return
     replay.setPlaying(false)
-    replay.setClock(entry.offset + (at - entry.start), { onSign: true })
+    replay.setClock(entry.offset + (at - entry.start), { onSign: true, at })
     setResume((n) => n + 1)
   }
   const addSign = () => {
@@ -563,7 +573,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
 
   return (
     <div className="flex flex-col overflow-hidden rounded-md border border-border bg-card" data-testid="replay-panel">
-      <div className="relative h-[26rem] min-h-0">
+      <div ref={mapBoxRef} className="relative h-[26rem] min-h-0">
         <PassageMap
           className="h-full"
           ref={mapHandle}
@@ -580,7 +590,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
           speed={frame.speed}
           onZoomBucket={setZoomBucket}
           light={frame.light}
-          momentActive={frame.moment !== null && replay.playing}
+          momentActive={frame.hold !== null && replay.playing}
           onInterrupt={interrupt}
           onFlatChange={setMapFlat}
           controlsDisabled={replay.playing || flying}
@@ -613,6 +623,9 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
             ) : null
           }
         />
+        {frame.stay && (
+          <StayLabel view={frame.stay} container={mapSize} insetCorner={insetOn && !flying && insetView ? insetView.corner : null} />
+        )}
         {frame.moment && momentAt && (
           <PhotoMoment
             view={frame.moment}
@@ -628,6 +641,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, onLengthChange, cur
         playing={replay.playing}
         readout={here ? formatLocalDateTime(here.at, timeZone) : '--'}
         speed={length}
+        lengths={lengths}
         insetOn={insetOn}
         disabled={timeline.total <= 0 || flying}
         onToggle={() => void handlePlay()}

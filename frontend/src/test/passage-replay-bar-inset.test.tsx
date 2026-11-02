@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { PassageReplayBar, type PassageReplayBarProps } from '@/components/passages/passage-replay-bar'
+import { CRUISE_REPLAY_LENGTHS, DEFAULT_CRUISE_REPLAY_LENGTH, DEFAULT_REPLAY_LENGTH, replaySeconds } from '@/lib/replay-lengths'
 import { DEFAULT_INSET_VIEW, type InsetView } from '@/lib/passage-inset-view'
 
 function bar(over: Partial<PassageReplayBarProps> = {}) {
@@ -104,6 +105,35 @@ describe('the replay length select', () => {
     fireEvent.pointerUp(option)
     fireEvent.click(option)
     expect(onSpeed).toHaveBeenCalledWith('8s')
+  })
+})
+
+describe('the replay lengths on offer', () => {
+  const labels = async () => {
+    fireEvent.click(screen.getByRole('combobox', { name: 'Replay length' }))
+    return (await screen.findAllByRole('option')).map((o) => o.textContent)
+  }
+
+  it('are 60, 30, 15 and 8 seconds for a single passage', async () => {
+    bar()
+    expect(await labels()).toEqual(['60 s', '30 s', '15 s', '8 s'])
+  })
+
+  it('add 2 and 3 minutes when the page asks for the cruise lengths', async () => {
+    bar({ speed: '60s', lengths: CRUISE_REPLAY_LENGTHS })
+    expect(await labels()).toEqual(['3 min', '2 min', '60 s', '30 s', '15 s', '8 s'])
+  })
+
+  it('shows a cruise length it is set to', () => {
+    bar({ speed: '180s', lengths: CRUISE_REPLAY_LENGTHS })
+    expect(screen.getByRole('combobox', { name: 'Replay length' })).toHaveTextContent('3 min')
+  })
+
+  it('start a cruise on a minute and a single passage on 15 seconds', () => {
+    expect(DEFAULT_CRUISE_REPLAY_LENGTH).toBe('60s')
+    expect(DEFAULT_REPLAY_LENGTH).toBe('15s')
+    expect(replaySeconds('120s')).toBe(120)
+    expect(replaySeconds('180s')).toBe(180)
   })
 })
 

@@ -1,14 +1,16 @@
 // The replay's time. Two clocks run through it: the timeline (the slider,
 // the boat, the passages end to end) and the watching (seconds the operator
-// sits through). The length the operator picks, 8, 15, 30 or 60 s, is the
-// sailing; a camera shot's pace slows the sailing, and each photo moment adds
-// its hold on top, during which the timeline stands still.
+// sits through). The length the operator picks, 8 s to 3 min, is the
+// sailing; a camera shot's pace slows the sailing, and each hold (a photo
+// moment, or a stay between two passages) adds its time on top, during which
+// the timeline stands still.
 //
 // Everything here is pure, so the live replay and a video of it can share it.
 // (The HTML export player keeps its own timing and does not use this yet.)
 
 import { easeInOut } from '@/lib/replay-camera'
 import { timelineAtWall, wallAtTimeline, type PaceSpan } from '@/lib/replay-clock'
+import { firstWhere, lowerBound } from '@/lib/sorted-search'
 
 // ── a photo moment ───────────────────────────────────────────────────────
 
@@ -86,11 +88,17 @@ export function momentRect(view: MomentView, card: Rect, frame: { w: number; h: 
 
 // ── the time map ─────────────────────────────────────────────────────────
 
-/** A sign whose photo gets a moment, where the boat meets it. */
-export interface ReplayMoment {
+/** Seconds a stay between two passages holds the replay. */
+export const STAY_S = 1.5
+
+/** Where the replay holds: the timeline position, and a name for the hold
+ * (a sign's id for a photo moment, a stay's id for a stay). */
+export interface ReplayHoldInput {
   /** Timeline seconds. */
   clock: number
   id: string
+  /** The real instant (Unix seconds) it happens at. Holds at one clock play in the order of their real times: at a join, the sign at the end of the arriving passage, then the stay, then the sign at the start of the next. */
+  at?: number
 }
 
 export interface ReplayTimeInput {
@@ -99,27 +107,47 @@ export interface ReplayTimeInput {
   /** Seconds of sailing the operator chose. */
   lengthS: number
   spans: readonly PaceSpan[]
-  moments: readonly ReplayMoment[]
+  /** Photo moments, each holding the replay for MOMENT_TOTAL_S. */
+  moments: readonly ReplayHoldInput[]
+  /** Stays between passages, each holding it for STAY_S. */
+  stays?: readonly ReplayHoldInput[]
 }
 
-export interface MomentAt {
+/** A hold: the timeline stands still at `clock` for `durationS` seconds of watching. */
+export interface Hold {
+  kind: 'moment' | 'stay'
+  id: string
+  clock: number
+  /** The real instant it happens at; 0 when the input gave none. */
+  at: number
+  durationS: number
+  /** The watching time the hold starts at. */
+  startWall: number
+}
+
+/** The hold the watching is in. */
+export interface HoldAt {
+  kind: Hold['kind']
   id: string
   /** Seconds into the hold. */
   elapsed: number
+  durationS: number
 }
 
 export interface ReplayTime {
-  /** Every moment, in order, with the watching time its hold starts at. */
-  moments: readonly (ReplayMoment & { startWall: number })[]
+  /** Every hold, a photo moment or a stay, in order. The time map has no special case for either. */
+  holds: readonly Hold[]
   /** Seconds of watching from end to end: the sailing and every hold. */
   totalWall: number
-  /** The timeline position, and the moment if the watching is in a hold, `wall` seconds in. */
-  at(wall: number): { clock: number; moment: MomentAt | null }
+  /** The timeline position, and the hold if the watching is in one, `wall` seconds in. */
+  at(wall: number): { clock: number; hold: HoldAt | null }
   /** The watching time to put a timeline position at. A seek (the slider, a
    * shot's tick) lands clear of every hold, after those of any signs standing
-   * at that clock, so reaching the end is the end. A jump to a sign itself
-   * (`onSign`) lands at the start of its moment. */
-  wallAtClock(clock: number, opts?: { onSign?: boolean }): number
+   * at that clock and the stay that ends there, so reaching the end is the end.
+   * A jump to a sign itself (`onSign`) lands before the holds at that clock,
+   * and, given the sign's real time (`at`), after those that happen before it:
+   * a sign at the start of a passage lands after the stay that came first. */
+  wallAtClock(clock: number, opts?: { onSign?: boolean; at?: number }): number
   /** The timeline's length, in timeline seconds. */
   total: number
   /** Seconds of sailing alone (no holds) to reach a timeline position. */
@@ -128,51 +156,53 @@ export interface ReplayTime {
   holdEnd(wall: number): number
 }
 
-/** How many of the items in a list sorted by `key` come before `x` (or, with `orAt`, up to and including it). */
-function lowerBound<T>(list: readonly T[], key: (item: T) => number, x: number, orAt = false): number {
-  let lo = 0
-  let hi = list.length
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1
-    if (key(list[mid]) < x || (orAt && key(list[mid]) === x)) lo = mid + 1
-    else hi = mid
-  }
-  return lo
-}
-
-export function buildReplayTime({ total, lengthS, spans, moments }: ReplayTimeInput): ReplayTime {
+export function buildReplayTime({ total, lengthS, spans, moments, stays = [] }: ReplayTimeInput): ReplayTime {
   const sailWall = (clock: number) => wallAtTimeline(total, lengthS, spans, clock)
-  const ordered = [...moments].sort((a, b) => a.clock - b.clock).map((m, i) => ({ ...m, startWall: sailWall(m.clock) + MOMENT_TOTAL_S * i }))
-  const totalWall = sailWall(total) + MOMENT_TOTAL_S * ordered.length
+  // At one clock, by real time; with the same time, a moment before a stay (a sign at the arrival shows, then the stay begins).
+  const drafts = [
+    ...moments.map((m) => ({ kind: 'moment' as const, id: m.id, clock: m.clock, at: m.at ?? 0, durationS: MOMENT_TOTAL_S })),
+    ...stays.map((s) => ({ kind: 'stay' as const, id: s.id, clock: s.clock, at: s.at ?? 0, durationS: STAY_S })),
+  ].sort((a, b) => a.clock - b.clock || a.at - b.at || (a.kind === b.kind ? 0 : a.kind === 'moment' ? -1 : 1))
+  // before[i] is the watching time the holds ahead of hold i add.
+  const before: number[] = [0]
+  for (const h of drafts) before.push(before[before.length - 1] + h.durationS)
+  const holds: Hold[] = drafts.map((h, i) => ({ ...h, startWall: sailWall(h.clock) + before[i] }))
+  const totalWall = sailWall(total) + before[holds.length]
 
-  /** How many moments have started by `wall`. */
-  const startedBy = (wall: number) => lowerBound(ordered, (m) => m.startWall, wall, true)
+  /** The last hold that has started by `wall`, or -1: the watching is in it, or past it. */
+  const lastStarted = (wall: number) => lowerBound(holds, (h) => h.startWall, wall, true) - 1
+  /** Whether the watching is inside hold `i`. */
+  const within = (i: number, wall: number) => i >= 0 && wall < holds[i].startWall + holds[i].durationS - WALL_EPS
 
   return {
-    moments: ordered,
+    holds,
     totalWall,
     at(wall) {
-      if (wall >= totalWall) return { clock: total, moment: null }
+      if (wall >= totalWall) return { clock: total, hold: null }
       const w = Math.max(0, wall)
-      // The last moment that has started by now: in its hold, or past it.
-      const i = startedBy(w) - 1
-      if (i >= 0 && w < ordered[i].startWall + MOMENT_TOTAL_S - WALL_EPS) {
-        return { clock: ordered[i].clock, moment: { id: ordered[i].id, elapsed: w - ordered[i].startWall } }
+      const i = lastStarted(w)
+      if (within(i, w)) {
+        const h = holds[i]
+        return { clock: h.clock, hold: { kind: h.kind, id: h.id, elapsed: w - h.startWall, durationS: h.durationS } }
       }
-      const sailing = w - MOMENT_TOTAL_S * (i + 1)
-      // Past the hold of moment i, so no earlier than its clock, whatever the rounding says.
-      const clock = Math.min(total, timelineAtWall(total, lengthS, spans, sailing))
-      return { clock: i >= 0 ? Math.max(clock, ordered[i].clock) : clock, moment: null }
+      const clock = Math.min(total, timelineAtWall(total, lengthS, spans, w - before[i + 1]))
+      // Past the hold i, so no earlier than its clock, whatever the rounding says.
+      return { clock: i >= 0 ? Math.max(clock, holds[i].clock) : clock, hold: null }
     },
     wallAtClock(clock, opts) {
       const c = Math.max(0, Math.min(total, clock))
-      return sailWall(c) + MOMENT_TOTAL_S * lowerBound(ordered, (m) => m.clock, c, !opts?.onSign)
+      if (opts?.onSign && opts.at !== undefined) {
+        // Before the sign: the holds at earlier clocks, and at this clock the ones that happen earlier in real time.
+        const at = opts.at
+        return sailWall(c) + before[firstWhere(holds, (h) => h.clock > c || (h.clock === c && h.at >= at))]
+      }
+      return sailWall(c) + before[lowerBound(holds, (h) => h.clock, c, !opts?.onSign)]
     },
     total,
     sailingWallAt: sailWall,
     holdEnd(wall) {
-      const i = startedBy(wall) - 1
-      return i >= 0 && wall >= ordered[i].startWall && wall < ordered[i].startWall + MOMENT_TOTAL_S - WALL_EPS ? ordered[i].startWall + MOMENT_TOTAL_S : wall
+      const i = lastStarted(wall)
+      return within(i, wall) ? holds[i].startWall + holds[i].durationS : wall
     },
   }
 }

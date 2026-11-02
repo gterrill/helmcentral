@@ -27,7 +27,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks() })
 describe('useSignMoments', () => {
   it('lists the signs whose photos hold the replay', () => {
     const { result } = renderHook(() => useSignMoments([placed('a', 100), placed('b', 300)]))
-    expect(result.current).toEqual([{ clock: 100, id: 'a' }, { clock: 300, id: 'b' }])
+    expect(result.current).toEqual([{ clock: 100, id: 'a', at: 0 }, { clock: 300, id: 'b', at: 0 }])
   })
 
   it('leaves a moment out once its photo has failed to load, and says so', async () => {
@@ -49,7 +49,7 @@ describe('useSignMoments', () => {
     await act(async () => { await Promise.resolve() })
     expect(result.current).toEqual([])
     rerender({ signs: [placed('s', 100, { photo_url: '/api/documents/fixed/content' })] })
-    expect(result.current).toEqual([{ clock: 100, id: 's' }])
+    expect(result.current).toEqual([{ clock: 100, id: 's', at: 0 }])
   })
 
   it('does not load a photo that will not be used', () => {
@@ -66,7 +66,7 @@ describe('useSignMoments', () => {
     // Moved, or switched off: a different list.
     rerender({ signs: [placed('a', 150)] })
     expect(result.current).not.toBe(first)
-    expect(result.current).toEqual([{ clock: 150, id: 'a' }])
+    expect(result.current).toEqual([{ clock: 150, id: 'a', at: 0 }])
     rerender({ signs: [placed('a', 150, { photo_moment: false })] })
     expect(result.current).toEqual([])
   })

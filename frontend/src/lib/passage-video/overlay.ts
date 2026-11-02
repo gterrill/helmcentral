@@ -9,7 +9,8 @@
 
 import { FONT_STACK, wrapLines, type Measure } from '@/lib/passage-export-layout'
 import type { ReplayFrame } from '@/lib/replay-controller'
-import { SIGN_LIFT_PX, signCardBox, signCardPhotoRect, signCardRect, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
+import { stayLabelBox, type StayLabelBox } from '@/lib/replay-stay'
+import { CARD_FADE_S, SIGN_LIFT_PX, signCardBox, signCardPhotoRect, signCardRect, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
 import { momentRect, type MomentView } from '@/lib/replay-time'
 
 /** Design pixels to video pixels. */
@@ -17,8 +18,6 @@ export const UI_SCALE = 1.5
 /** The note's font on a card, and the most lines of it a card shows. */
 export const NOTE_FONT = `400 12px ${FONT_STACK}`
 const NOTE_MAX_LINES = 2
-/** Seconds a card takes to fade in, as on the page. */
-export const CARD_FADE_S = 0.3
 
 export interface Point { x: number; y: number }
 export interface Box { x: number; y: number; w: number; h: number }
@@ -46,6 +45,8 @@ export interface OverlayModel {
   pins: Point[]
   moment: { signId: string; rect: Box; scale: number; fill: number } | null
   dot: Point | null
+  /** The label of the stay under way, where it goes, in design pixels. */
+  stay: { text: string; box: StayLabelBox } | null
 }
 
 export interface OverlayInput {
@@ -112,5 +113,6 @@ export function buildOverlay({ frame, size, project, wall, firstSeen, bitmaps, m
   }
 
   const dot = boatDot && frame.boat ? toDesign(frame.boat.lon, frame.boat.lat) : null
-  return { scale: UI_SCALE, design, cards, pins, moment, dot }
+  const stay = frame.stay ? { text: frame.stay.stay.label, box: stayLabelBox(design, frame.stay.elapsed) } : null
+  return { scale: UI_SCALE, design, cards, pins, moment, dot, stay }
 }

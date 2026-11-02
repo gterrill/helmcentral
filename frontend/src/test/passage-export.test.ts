@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { midnightsSince } from '@/lib/boat-nights'
 import {
   dateRangeLabel,
   combinedTitle,
@@ -13,7 +14,6 @@ import {
   exportFileName,
   generateEmbed,
   generateStandalonePage,
-  midnightsSince,
   playerScript,
   POINT_BUDGET,
   prepareExport,

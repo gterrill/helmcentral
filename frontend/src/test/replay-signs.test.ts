@@ -190,7 +190,7 @@ describe('momentsOf', () => {
   })
 
   it('lists the signs whose photos hold the replay, where the boat meets them', () => {
-    expect(momentsOf([placed('a', 100), placed('b', 300)])).toEqual([{ clock: 100, id: 'a' }, { clock: 300, id: 'b' }])
+    expect(momentsOf([placed('a', 100), placed('b', 300)])).toEqual([{ clock: 100, id: 'a', at: 0 }, { clock: 300, id: 'b', at: 0 }])
   })
 
   it('leaves out a sign without a photo, one switched off, and one with no title yet', () => {
@@ -199,7 +199,7 @@ describe('momentsOf', () => {
       placed('off', 2, { photo_moment: false }),
       placed('untitled', 3, { title: '' }),
       placed('on', 4, { photo_moment: true }),
-    ])).toEqual([{ clock: 4, id: 'on' }])
+    ])).toEqual([{ clock: 4, id: 'on', at: 0 }])
   })
 })
 
