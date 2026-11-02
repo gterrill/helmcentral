@@ -16,9 +16,9 @@ import { HelpMarkdown } from '@/components/help-markdown'
 // await has resolved.
 
 // The impl chunk drags in react-markdown's module graph, which is slow to
-// transform on a cold or loaded worker, longer than findBy's 1 s wait. Import
-// it here, under the hook's own timeout, so React.lazy resolves from the module
-// cache and the tests wait only on React.
+// transform on a cold or loaded worker, and can eat much of a test's own 5 s
+// timeout. Import it here, under the hook's own timeout, so React.lazy resolves
+// from the module cache and the tests wait only on React.
 beforeAll(async () => {
   await import('@/components/help-markdown-impl')
 }, 60_000)

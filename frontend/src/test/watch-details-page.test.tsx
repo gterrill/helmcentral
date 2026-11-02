@@ -162,7 +162,7 @@ describe('WatchDetailsPage settings', () => {
     const name = await screen.findByDisplayValue('Overnight check')
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     fireEvent.change(name, { target: { value: 'Night watch' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled())
     expect(sent('PATCH')).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(sent('PATCH')).toHaveLength(1))
@@ -178,7 +178,7 @@ describe('WatchDetailsPage settings', () => {
     preview = () => ({ valid: false, error: '"* * * * *" runs more often than every 15 minutes', boat_time_known: true, next: [] })
     renderPage()
     fireEvent.change(await screen.findByDisplayValue('Overnight check'), { target: { value: 'Renamed' } })
-    expect(await screen.findByText(/runs more often than every 15 minutes/, undefined, { timeout: 3000 })).toBeInTheDocument()
+    expect(await screen.findByText(/runs more often than every 15 minutes/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 
@@ -191,7 +191,7 @@ describe('WatchDetailsPage settings', () => {
       next: [],
     })
     renderPage()
-    expect(await screen.findByText("No boat position, so the boat's time is not known", undefined, { timeout: 3000 })).toBeInTheDocument()
+    expect(await screen.findByText("No boat position, so the boat's time is not known")).toBeInTheDocument()
     expect(screen.getByText('Every day at 06:00 boat time')).toBeInTheDocument()
   })
 
@@ -232,7 +232,7 @@ describe('WatchDetailsPage settings', () => {
     fireEvent.pointerDown(option)
     fireEvent.pointerUp(option)
     fireEvent.click(option)
-    await waitFor(() => expect(calls.some((c) => c.url.includes('schedule-preview') && (c.body as { schedule: string }).schedule === '0 * * * *')).toBe(true), { timeout: 3000 })
+    await waitFor(() => expect(calls.some((c) => c.url.includes('schedule-preview') && (c.body as { schedule: string }).schedule === '0 * * * *')).toBe(true))
   })
 })
 
@@ -242,7 +242,7 @@ describe('WatchDetailsPage new watch', () => {
     renderPage({ mode: { kind: 'new', template: WATCH_TEMPLATES[1] }, onCreated })
     expect(await screen.findByDisplayValue('Overnight check')).toBeInTheDocument()
     expect(sent('POST')).toHaveLength(0)
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Create watch' }))
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('new-1'))
     expect(sent('POST')[0].body).toMatchObject({ name: 'Overnight check', schedule: '0 22-23,0-6 * * *' })
@@ -418,7 +418,7 @@ describe('WatchDetailsPage read-only viewer', () => {
   it('still sees what the schedule means and when it next runs', async () => {
     renderPage({ canWrite: false })
     const box = await screen.findByTestId('watch-schedule-preview')
-    await waitFor(() => expect(within(box).getByText('Thu 29 Oct 22:00 NZDT')).toBeInTheDocument(), { timeout: 3000 })
+    await waitFor(() => expect(within(box).getByText('Thu 29 Oct 22:00 NZDT')).toBeInTheDocument())
     expect(within(box).getByText('Every hour from 22:00 to 06:00')).toBeInTheDocument()
   })
 })
@@ -446,7 +446,7 @@ describe('WatchDetailsPage changed elsewhere', () => {
   it('does not call its own save a change made elsewhere', async () => {
     renderPage()
     fireEvent.change(await screen.findByDisplayValue('Overnight check'), { target: { value: 'Night watch' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled())
     detail = { ...detail, watch: record({ name: 'Night watch' }) }
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument())
@@ -576,7 +576,7 @@ describe('WatchDetailsPage notifications', () => {
     expect(within(group).getByText(/A problem that stays is not sent again every hour\./)).toBeInTheDocument()
     expect(within(group).getByText('Including the ones that find nothing.')).toBeInTheDocument()
     fireEvent.click(within(group).getByRole('radio', { name: /Every report/ }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(sent('PATCH')[0].body).toMatchObject({ send: 'every' }))
   })
@@ -594,7 +594,7 @@ describe('WatchDetailsPage notifications', () => {
     await waitFor(() => expect(within(group).queryByRole('checkbox', { name: 'Email' })).not.toBeInTheDocument())
     fireEvent.click(within(group).getByRole('checkbox', { name: 'Phone and browser push' }))
     fireEvent.click(within(group).getByRole('checkbox', { name: 'ntfy' }))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     await waitFor(() => expect(sent('PATCH')).toHaveLength(1))
     expect(sent('PATCH')[0].body).toMatchObject({ notify: ['webpush'], send: 'findings' })
@@ -633,7 +633,7 @@ describe('a new watch', () => {
     const group = await screen.findByRole('group', { name: 'Send to' })
     await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Dawn check' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Create watch' }))
     await waitFor(() => expect(sent('POST').filter((c) => c.url.endsWith('/api/watches'))).toHaveLength(1))
     const body = sent('POST').find((c) => c.url.endsWith('/api/watches'))?.body as Record<string, unknown>
@@ -647,7 +647,7 @@ describe('a new watch', () => {
     await waitFor(() => expect(within(group).getByRole('checkbox', { name: 'ntfy' })).toBeChecked())
     fireEvent.click(within(group).getByRole('checkbox', { name: 'ntfy' }))
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Dawn check' } })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled(), { timeout: 3000 })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Create watch' })).toBeEnabled())
     fireEvent.click(screen.getByRole('button', { name: 'Create watch' }))
     await waitFor(() => expect(sent('POST').filter((c) => c.url.endsWith('/api/watches'))).toHaveLength(1))
     expect(sent('POST').find((c) => c.url.endsWith('/api/watches'))?.body).toMatchObject({ notify: ['webpush'] })
@@ -682,7 +682,7 @@ describe('a link to a run', () => {
     const card = within(pinned).getByTestId('watch-run')
     expect(card).toHaveAttribute('data-highlighted', 'true')
     expect(card.id).toBe('run-old')
-    await waitFor(() => expect(card).toHaveAttribute('data-highlighted', 'false'), { timeout: 5000 })
+    await waitFor(() => expect(card).toHaveAttribute('data-highlighted', 'false'))
     expect(screen.getAllByTestId('watch-run')).toHaveLength(2)
   })
 

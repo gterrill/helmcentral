@@ -1,8 +1,20 @@
 import '@testing-library/jest-dom'
+import { configure } from '@testing-library/dom'
 import { afterEach, beforeEach, vi } from 'vitest'
 import { resetQueryStore } from '@/lib/api-query'
 import { resetTelemetryStoresForTest } from '@/lib/test-reset'
 import { setViewportWidth } from './viewport'
+
+// A lazy chunk's first import can take seconds on a loaded worker, longer than
+// findBy*'s default 1000 ms, and the test then fails with nothing wrong. A wait
+// ends as soon as its element appears, so only a failing test pays for this.
+// It stays under vitest's 5000 ms test timeout, so a wait that starts within
+// about a second of the test starting still fails with Testing Library's error
+// naming the element; a wait that starts later can hit the bare test timeout.
+// This is the dom package's configure on purpose: importing @testing-library/react
+// here registers its cleanup before this file's afterEach, so the stores below
+// would reset while a test's components are still mounted.
+configure({ asyncUtilTimeout: 4000 })
 
 // jsdom has no canvas to measure text with. The sign cards wrap their notes by measuring them, so tests measure at 6 px a character; a test of the real measure takes it back with vi.importActual.
 vi.mock('@/lib/sign-note', async (importOriginal) => ({

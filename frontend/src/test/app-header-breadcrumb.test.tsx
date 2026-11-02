@@ -204,9 +204,9 @@ function breadcrumbNav() {
 }
 
 // Settings and Inventory are App's lazy chunks, and their graphs are slow to
-// transform on a cold or loaded worker, longer than findBy's 1 s wait. Import
-// them here, under the hook's own timeout, so App's React.lazy resolves from
-// the module cache and the tests wait only on React.
+// transform on a cold or loaded worker, and can eat much of a test's own 5 s
+// timeout. Import them here, under the hook's own timeout, so App's React.lazy
+// resolves from the module cache and the tests wait only on React.
 beforeAll(async () => {
   await Promise.all([
     import('@/components/settings/settings-route-panel'),

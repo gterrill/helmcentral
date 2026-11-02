@@ -199,9 +199,9 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 // Settings is App's lazy chunk, and its graph is slow to transform on a cold
-// or loaded worker, longer than findBy's 1 s wait. Import it here, under the
-// hook's own timeout, so App's React.lazy resolves from the module cache and
-// the test waits only on React.
+// or loaded worker, and can eat much of the test's own 5 s timeout. Import it
+// here, under the hook's own timeout, so App's React.lazy resolves from the
+// module cache and the test waits only on React.
 beforeAll(async () => {
   await import('@/components/settings/settings-route-panel')
 }, 60_000)

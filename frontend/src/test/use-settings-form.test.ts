@@ -41,7 +41,7 @@ describe('useSettingsForm', () => {
     await waitFor(() => expect(form.result.current.loading).toBe(false))
 
     await act(async () => { await form.result.current.save({ offline_coastline: { enabled: true } }) })
-    await waitFor(() => expect(coast.result.current.status?.state).toBe('idle'), { timeout: 1500 })
+    await waitFor(() => expect(coast.result.current.status?.state).toBe('idle'))
   })
 
   it('reports loaded only when a settings read succeeded', async () => {

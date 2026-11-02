@@ -3,7 +3,6 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { NoteEditor } from '@/components/note-editor'
 import { uploadDocument } from '@/lib/document-upload'
-import { LAZY_NOTE_EDITOR_TIMEOUT_MS } from './helpers/lazy-note-editor'
 
 // ImageButton's Take photo/Add from library path (2026-09-27) runs every
 // picked file through lib/image-downscale.ts before it ever reaches the
@@ -43,23 +42,15 @@ const mockedUploadDocument = vi.mocked(uploadDocument)
 // simpler and more robust than driving a real Slate selection through
 // Testing Library's fireEvent.
 
-// The first render() in this file to reach this await pays the lazy editor
-// chunk's one-off ~2s import cost (see helpers/lazy-note-editor.ts) - every
-// test below uses this instead of a bare screen.findByText so that await
-// gets a timeout generous enough to survive it, whichever test that turns
-// out to be. Only the await immediately after render() needs it; a second
-// findByText later in the same test (the editor already resolved by then)
-// is left on the default.
-async function findEditorLoaded(text: string) {
-  return screen.findByText(text, {}, { timeout: LAZY_NOTE_EDITOR_TIMEOUT_MS })
-}
+// The first render() in this file to reach a findBy* pays the lazy editor
+// chunk's one-off ~2s import cost, which the wait in test/setup.ts allows for.
 
 describe('TestNoteEditor_OpeningANoteDoesNotMarkItDirty', () => {
   it('mounts and unmounts a note with no save ever firing', async () => {
     const onSave = vi.fn()
     const { unmount } = render(<NoteEditor value={'# Genset start-up\n'} onSave={onSave} />)
 
-    await findEditorLoaded('Genset start-up')
+    await screen.findByText('Genset start-up')
     unmount()
 
     expect(onSave).not.toHaveBeenCalled()
@@ -69,7 +60,7 @@ describe('TestNoteEditor_OpeningANoteDoesNotMarkItDirty', () => {
     const onSave = vi.fn()
     render(<NoteEditor value={'# Genset start-up\n'} onSave={onSave} />)
 
-    await findEditorLoaded('Genset start-up')
+    await screen.findByText('Genset start-up')
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled()
   })
 })
@@ -79,7 +70,7 @@ describe('TestNoteEditor_SourceToggleIsAuthoritative', () => {
     const onSave = vi.fn()
     render(<NoteEditor value={'- [ ] Todo\n'} onSave={onSave} />)
 
-    await findEditorLoaded('Todo')
+    await screen.findByText('Todo')
 
     fireEvent.click(screen.getByRole('button', { name: 'Markdown source' }))
     const textarea = await screen.findByLabelText('Note markdown source')
@@ -96,7 +87,7 @@ describe('TestNoteEditor_DisabledNodesAreAbsentFromTheToolbar', () => {
     const onSave = vi.fn()
     render(<NoteEditor value={'# Genset start-up\n'} onSave={onSave} />)
 
-    await findEditorLoaded('Genset start-up')
+    await screen.findByText('Genset start-up')
 
     for (const label of [
       'Heading 1', 'Heading 2', 'Heading 3',
@@ -131,7 +122,7 @@ describe('TestNoteEditor_LinkButtonRefusesAnUnsafeScheme', () => {
   it('refuses javascript: with a visible reason and inserts nothing', async () => {
     const onSave = vi.fn()
     render(<NoteEditor value={'Seacocks\n'} onSave={onSave} />)
-    await findEditorLoaded('Seacocks')
+    await screen.findByText('Seacocks')
 
     fireEvent.click(screen.getByRole('button', { name: 'Link' }))
     fireEvent.change(await screen.findByLabelText('Link URL'), {
@@ -146,7 +137,7 @@ describe('TestNoteEditor_LinkButtonRefusesAnUnsafeScheme', () => {
   it('accepts an hc-note: reference and an https: URL', async () => {
     const onSave = vi.fn()
     render(<NoteEditor value={'Seacocks\n'} onSave={onSave} />)
-    await findEditorLoaded('Seacocks')
+    await screen.findByText('Seacocks')
 
     fireEvent.click(screen.getByRole('button', { name: 'Link' }))
     fireEvent.change(await screen.findByLabelText('Link URL'), {
@@ -176,7 +167,7 @@ describe('TestNoteEditor_ImageButtonPastesADocumentId', () => {
   it('inserts a reference to an existing document by pasted id, uploading nothing', async () => {
     const onSave = vi.fn()
     render(<NoteEditor value={'Engine bay\n'} onSave={onSave} />)
-    await findEditorLoaded('Engine bay')
+    await screen.findByText('Engine bay')
 
     fireEvent.click(screen.getByRole('button', { name: 'Image' }))
     fireEvent.change(await screen.findByLabelText('Document id'), { target: { value: UUID } })
@@ -193,7 +184,7 @@ describe('TestNoteEditor_ImageButtonPastesADocumentId', () => {
   it('refuses a non-UUID id with a visible reason and inserts nothing', async () => {
     const onSave = vi.fn()
     render(<NoteEditor value={'Engine bay\n'} onSave={onSave} />)
-    await findEditorLoaded('Engine bay')
+    await screen.findByText('Engine bay')
 
     fireEvent.click(screen.getByRole('button', { name: 'Image' }))
     fireEvent.change(await screen.findByLabelText('Document id'), { target: { value: 'not-a-uuid' } })
@@ -209,7 +200,7 @@ describe('TestNoteEditor_ImageButtonTakePhotoUploadsAndInserts', () => {
     mockedUploadDocument.mockResolvedValue({ id: UUID, duplicate: false })
     const onSave = vi.fn()
     render(<NoteEditor value={'Engine bay\n'} onSave={onSave} />)
-    await findEditorLoaded('Engine bay')
+    await screen.findByText('Engine bay')
 
     fireEvent.click(screen.getByRole('button', { name: 'Image' }))
     fireEvent.change(await screen.findByLabelText('Photo caption'), { target: { value: 'Alternator belt' } })
@@ -233,7 +224,7 @@ describe('TestNoteEditor_ImageButtonTakePhotoUploadsAndInserts', () => {
       .mockResolvedValueOnce({ id: UUID_2, duplicate: false })
     const onSave = vi.fn()
     const { container } = render(<NoteEditor value={'Engine bay\n'} onSave={onSave} />)
-    await findEditorLoaded('Engine bay')
+    await screen.findByText('Engine bay')
 
     fireEvent.click(screen.getByRole('button', { name: 'Image' }))
     const fileA = new File(['a'], 'a.jpg', { type: 'image/jpeg' })
@@ -257,7 +248,7 @@ describe('TestNoteEditor_ImageButtonUploadFailureInsertsNothing', () => {
     mockedUploadDocument.mockRejectedValue(new Error('upload failed: file too large'))
     const onSave = vi.fn()
     render(<NoteEditor value={'Engine bay\n'} onSave={onSave} />)
-    await findEditorLoaded('Engine bay')
+    await screen.findByText('Engine bay')
 
     fireEvent.click(screen.getByRole('button', { name: 'Image' }))
     const file = new File(['photo-bytes'], 'IMG_0002.jpg', { type: 'image/jpeg' })
