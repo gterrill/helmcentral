@@ -298,34 +298,38 @@ function maxOrNull(values: (number | null)[]): number | null {
   return present.length === 0 ? null : Math.max(...present)
 }
 
-function statsStrip(input: ExportInput, nights: number): { l: string; v: string }[] {
-  const { passages, cruiseStats, units } = input
-  let distance: number
-  let underway: number
-  let fuel: number | null
-  let gust: number | null
-  let nightCount: number | null = null
-  if (input.kind === 'cruise' && cruiseStats) {
-    distance = cruiseStats.distance_nm
-    underway = cruiseStats.underway_seconds
-    fuel = cruiseStats.fuel_burned_l
-    gust = maxOrNull([cruiseStats.underway_max_gust_kts, cruiseStats.anchor_max_gust_kts])
-    nightCount = nights
-  } else {
-    distance = passages.reduce((n, p) => n + p.stats.distance_nm, 0)
-    underway = passages.reduce((n, p) => n + p.stats.underway_seconds, 0)
-    fuel = sumOrNull(passages.map((p) => p.stats.fuel_burned_l))
-    gust = maxOrNull(passages.map((p) => p.stats.max_gust_kts))
-    if (input.kind !== 'passage') nightCount = nights
-  }
-  const strip = [
-    { l: 'Distance', v: fmtNM(distance) },
-    { l: 'Underway', v: fmtDuration(underway) },
-    { l: 'Nights', v: nightCount === null ? ABSENT : String(nightCount) },
-    { l: 'Fuel', v: fmtVolume(fuel, units) },
-    { l: 'Max gust', v: fmtKn(gust) },
-  ]
-  return strip.filter((s) => s.v !== ABSENT)
+/** The figures on the strip, widest claim first: the layout drops them from
+ * the end when there is no room, so the gust goes first. The passage count
+ * appears only when the export holds more than one, and agrees with the
+ * figures beside it: a cruise's own count, or the passages with a track that
+ * a selection sums. */
+function statsStrip(input: ExportInput, passages: PassageDetail[], nights: number): { l: string; v: string }[] {
+  const { cruiseStats, units } = input
+  const cruise = input.kind === 'cruise' && cruiseStats ? cruiseStats : null
+  const count = cruise ? cruise.passage_count : passages.length
+  const several = count > 1
+  const strip = cruise
+    ? {
+      distance: cruise.distance_nm,
+      underway: cruise.underway_seconds,
+      fuel: cruise.fuel_burned_l,
+      gust: maxOrNull([cruise.underway_max_gust_kts, cruise.anchor_max_gust_kts]),
+    }
+    : {
+      distance: passages.reduce((n, p) => n + p.stats.distance_nm, 0),
+      underway: passages.reduce((n, p) => n + p.stats.underway_seconds, 0),
+      fuel: sumOrNull(passages.map((p) => p.stats.fuel_burned_l)),
+      gust: maxOrNull(passages.map((p) => p.stats.max_gust_kts)),
+    }
+  const showNights = cruise !== null || input.kind !== 'passage'
+  return [
+    { l: 'Distance', v: fmtNM(strip.distance) },
+    { l: 'Underway', v: fmtDuration(strip.underway) },
+    { l: 'Passages', v: several ? String(count) : ABSENT },
+    { l: 'Nights', v: showNights ? String(nights) : ABSENT },
+    { l: 'Fuel', v: fmtVolume(strip.fuel, units) },
+    { l: 'Max gust', v: fmtKn(strip.gust) },
+  ].filter((s) => s.v !== ABSENT)
 }
 
 const round = (v: number, places: number) => Math.round(v * 10 ** places) / 10 ** places
@@ -433,7 +437,7 @@ function buildExport(input: ExportInput): ExportData {
     shots: exportShots(input.shots ?? [], passages),
     signs: exportSigns(input.signs ?? [], passages, input.photos),
     bounds: bounds.map((v) => round(v, 5)) as ExportData['bounds'],
-    stats: statsStrip(input, totalNights),
+    stats: statsStrip(input, withTracks.map((x) => x.p), totalNights),
     passages,
     map: {
       style: EXPORT_BASE_STYLE_URL,

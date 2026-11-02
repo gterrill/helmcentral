@@ -464,6 +464,16 @@ own colour in both. A still picture shows
 the satellite photographs when the map is showing them, with the credit added
 along the bottom. The blog map is always the chart.
 
+The strip of figures on the still pictures, the blog card and the end of an
+exported video gives distance, time underway, the nights, fuel and the
+strongest gust. When the export holds more than one passage, it also says how
+many, after the time underway. For a cruise that is the cruise's own count of
+passages, the same as on the cruise page. For a selection it is the passages
+that have a track, which are the ones the distance beside it adds up. Where
+the strip is short of room, figures drop off its end, so the strongest gust
+goes first. On a satellite picture the map credit moves to a line of its own
+under the figures rather than push one off.
+
 The blog map plays the same 3D land, boat model and camera shots as the replay
 on the boat. It plays your signs too, if **Include signs** is ticked. The notes
 and the photos are shrunk, have their location details removed, and are written

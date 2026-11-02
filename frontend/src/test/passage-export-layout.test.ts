@@ -77,13 +77,15 @@ describe('composeImageLayout', () => {
   })
 
   it('drops the figures that do not fit, from the end, and never overlaps the attribution', () => {
-    const narrow = composeImageLayout(spec({ width: 800, height: 420 }), measure)
+    const narrow = composeImageLayout(spec({ width: 420, height: 420 }), measure)
     expect(narrow.stats.length).toBeLessThan(5)
     expect(narrow.stats.length).toBeGreaterThan(0)
     const last = narrow.stats[narrow.stats.length - 1]
     const lastEnd = last.value.x + measure(last.value.text, last.value.font)
     const attrStart = narrow.attribution.x - measure(narrow.attribution.text, narrow.attribution.font)
-    expect(lastEnd).toBeLessThan(attrStart)
+    // Clear of the credit beside it, or the credit is on a line below the figures.
+    expect(lastEnd < attrStart || narrow.attribution.y > last.value.y).toBe(true)
+    expect(lastEnd).toBeLessThan(420 - 36)
     expect(narrow.stats[0].label.text).toBe('DISTANCE')
   })
 

@@ -5,6 +5,9 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { midnightsSince } from '@/lib/boat-nights'
+import { IMAGE_SIZES, composeImageLayout } from '@/lib/passage-export-layout'
+import { closingCardLayout } from '@/lib/passage-video/closing'
+import { VIDEO_SIZES } from '@/lib/passage-video/schedule'
 import {
   dateRangeLabel,
   combinedTitle,
@@ -242,8 +245,124 @@ describe('stats strip', () => {
     expect(captioned).toBe(5)
     expect(cruiseStats.nights).toBe(5)
     expect(data.stats.map((s) => [s.l, s.v])).toEqual([
-      ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Nights', String(captioned)], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
+      ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Passages', '2'], ['Nights', String(captioned)], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
     ])
+  })
+})
+
+describe('the number of passages on the strip', () => {
+  const cruiseStats = {
+    passage_count: 3, distance_nm: 100, underway_seconds: 36000, nights: 5, fuel_burned_l: 300,
+    underway_max_gust_kts: 20, anchor_max_gust_kts: 33,
+  } as CruiseStats
+  const three = () => [passage({ id: 'a', t0: T0 }), passage({ id: 'b', t0: T0 + 86400 }), passage({ id: 'c', t0: T0 + 2 * 86400 })]
+  const count = (stats: { l: string; v: string }[]) => stats.find((s) => s.l === 'Passages')?.v
+  const labels = (stats: { l: string; v: string }[]) => stats.map((s) => s.l)
+  const withGust = (list: PassageDetail[]) => list.map((p) => ({ ...p, stats: { ...p.stats, max_gust_kts: 31, fuel_burned_l: 40 } }))
+
+  it('shows the count for a cruise, and for a selection of more than one', () => {
+    expect(count(prepareExport(input({ kind: 'cruise', cruiseStats, passages: three() })).stats)).toBe('3')
+    expect(count(prepareExport(input({ kind: 'combined', passages: three() })).stats)).toBe('3')
+  })
+
+  it('puts it after the time underway and keeps the strongest gust, last', () => {
+    const combined = prepareExport(input({ kind: 'combined', passages: withGust(three()) })).stats
+    const cruise = prepareExport(input({ kind: 'cruise', cruiseStats, passages: three() })).stats
+    expect(labels(combined)).toEqual(['Distance', 'Underway', 'Passages', 'Nights', 'Fuel', 'Max gust'])
+    expect(labels(cruise)).toEqual(['Distance', 'Underway', 'Passages', 'Nights', 'Fuel', 'Max gust'])
+  })
+
+  it('does not show it for a single passage, whose strip is as it was', () => {
+    const strip = prepareExport(input()).stats
+    expect(count(strip)).toBeUndefined()
+    expect(labels(strip)).toEqual(['Distance', 'Underway', 'Fuel', 'Max gust'])
+  })
+
+  it('does not show it for a cruise of one passage, which keeps its gust', () => {
+    const one = { ...cruiseStats, passage_count: 1 } as CruiseStats
+    const strip = prepareExport(input({ kind: 'cruise', cruiseStats: one, passages: [passage({ id: 'a', t0: T0 })] })).stats
+    expect(count(strip)).toBeUndefined()
+    expect(labels(strip)).toContain('Max gust')
+  })
+
+  it('does not show it for a selection left with one passage that has a track', () => {
+    const bare = passage({ id: 'bare', t0: T0 + 86400 })
+    bare.track = []
+    bare.track_times = []
+    const strip = prepareExport(input({ kind: 'combined', passages: withGust([passage({ id: 'a', t0: T0 }), bare]) })).stats
+    expect(count(strip)).toBeUndefined()
+    expect(labels(strip)).toContain('Max gust')
+  })
+
+  it('counts a selection by the passages the export carries, so it agrees with the distance beside it', () => {
+    const bare = passage({ id: 'bare', t0: T0 + 3 * 86400 })
+    bare.track = []
+    bare.track_times = []
+    const stats = prepareExport(input({ kind: 'combined', passages: [...three(), bare] })).stats
+    expect(count(stats)).toBe('3')
+    expect(stats.find((s) => s.l === 'Distance')?.v).toBe(prepareExport(input({ kind: 'combined', passages: three() })).stats.find((s) => s.l === 'Distance')?.v)
+  })
+
+  it('counts a cruise by its own figure, as the cruise page does, even when one passage has no track', () => {
+    const four = { ...cruiseStats, passage_count: 4 } as CruiseStats
+    const bare = passage({ id: 'bare', t0: T0 + 3 * 86400 })
+    bare.track = []
+    bare.track_times = []
+    expect(count(prepareExport(input({ kind: 'cruise', cruiseStats: four, passages: [...three(), bare] })).stats)).toBe('4')
+  })
+
+  describe('where the strip is drawn', () => {
+    // Text wider than the real bold fonts: 0.75 em for a capital (Helvetica Bold's widest, M and W, are 0.83 but the labels are mostly
+    // 0.7 to 0.75), 0.6 em for everything else (bold digits are 0.556). A fit here is a fit in the browser.
+    const measure = (t: string, f: string) => {
+      const px = Number(/(\d+)px/.exec(f)![1])
+      return [...t].reduce((n, ch) => n + px * (/[A-Z]/.test(ch) ? 0.75 : 0.6), 0)
+    }
+    const stats = prepareExport(input({
+      kind: 'cruise',
+      cruiseStats: { ...cruiseStats, distance_nm: 486.4, underway_seconds: 27 * 3600 + 900, nights: 12, fuel_burned_l: 212, underway_max_gust_kts: 33 } as CruiseStats,
+      passages: three(),
+    })).stats
+    const title = 'Fairey Reef to Blue Pearl Bay'
+    const dates = '24 Oct to 28 Oct 2026'
+    const shown = (l: { stats: { label: { text: string } }[] }) => l.stats.map((s) => s.label.text)
+    const upToFuel = ['DISTANCE', 'UNDERWAY', 'PASSAGES', 'NIGHTS', 'FUEL']
+
+    it('on both images, the blog card and the 2:1 image keep every figure including the gust', () => {
+      for (const kind of ['og', 'wide'] as const) {
+        const z = IMAGE_SIZES[kind]
+        const l = composeImageLayout({ width: z.width, height: z.height, title, dates, stats, inset: false }, measure)
+        expect(shown(l)).toEqual([...upToFuel, 'MAX GUST'])
+      }
+    })
+
+    it('on satellite images the longer credit does not cost the fuel: it takes a line of its own', () => {
+      for (const kind of ['og', 'wide'] as const) {
+        const z = IMAGE_SIZES[kind]
+        const l = composeImageLayout({ width: z.width, height: z.height, title, dates, stats, inset: false, satellite: true }, measure)
+        expect(shown(l).slice(0, 5)).toEqual(upToFuel)
+        // Below the figures, inside the image.
+        expect(l.attribution.y).toBeGreaterThan(l.stats[0].value.y)
+        expect(l.attribution.y).toBeLessThanOrEqual(z.height)
+        expect(l.band.y + l.band.h).toBe(z.height)
+      }
+    })
+
+    it('on the closing card of a video, landscape and portrait, with and without satellite', () => {
+      for (const o of ['landscape', 'portrait'] as const) {
+        for (const satellite of [false, true]) {
+          const c = closingCardLayout(VIDEO_SIZES[o], { title, dates, stats }, satellite, measure)
+          expect(shown(c.layout).slice(0, 5)).toEqual(upToFuel)
+          expect(c.brand.y).toBeLessThan(c.layout.band.y)
+        }
+      }
+    })
+
+    it('drops the gust first when the room is tight', () => {
+      const l = composeImageLayout({ width: 800, height: 630, title, dates, stats, inset: false }, measure)
+      expect(shown(l)).toEqual(upToFuel.slice(0, shown(l).length))
+      expect(shown(l)).not.toContain('MAX GUST')
+    })
   })
 })
 
