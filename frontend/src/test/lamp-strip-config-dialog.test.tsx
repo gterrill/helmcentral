@@ -57,6 +57,8 @@ describe('LampStripConfigDialog', () => {
     expect(screen.getByRole('checkbox', { name: 'Show the CHK indicator' })).toHaveAccessibleDescription(
       /CHK takes the colour of the worst active alarm/,
     )
+    // A lone option has no group to name.
+    expect(screen.queryByRole('group', { name: 'CHK indicator' })).not.toBeInTheDocument()
   })
 
   test('defaults a fresh per-page widget to "Status"', () => {

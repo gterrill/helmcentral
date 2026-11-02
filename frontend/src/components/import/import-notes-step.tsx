@@ -1,5 +1,7 @@
+import { CHOICE_INDENT } from '@/components/patterns'
 import { Checkbox } from '@/components/ui/checkbox'
 import { recordAction } from '@/lib/import-run'
+import { cn } from '@/lib/utils'
 import { AlreadyImported, Pill, RowCard, StepHeading, type StepProps } from '@/components/import/import-shared'
 
 // Step 7: notes, and YachtWave tasks that arrive as notes. A note that looks
@@ -43,7 +45,7 @@ export function ImportNotesStep({ run, decisions, setDecision }: StepProps) {
                 <Pill>{note.kind === 'task' ? 'Task' : 'Note'}</Pill>
                 <AlreadyImported run={run} keyName={note.key} />
               </div>
-              {note.body !== '' && <p className="line-clamp-3 whitespace-pre-line text-sm text-muted-foreground">{note.body}</p>}
+              {note.body !== '' && <p className={cn('line-clamp-3 whitespace-pre-line text-sm text-muted-foreground', CHOICE_INDENT)}>{note.body}</p>}
             </RowCard>
           ),
         )}

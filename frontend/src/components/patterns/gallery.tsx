@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import {
+  ChoiceCheckbox,
   ChoiceList,
   ConfirmDelete,
   DetailsLayout,
@@ -111,6 +112,7 @@ export function PatternsGallery() {
   const [reportWhen, setReportWhen] = useState('findings')
   const [reportChannels, setReportChannels] = useState<string[]>(['push'])
   const [reportNumber, setReportNumber] = useState('')
+  const [reportOn, setReportOn] = useState(true)
   const [pagerIndex, setPagerIndex] = useState(1)
   const [treeSelected, setTreeSelected] = useState('all')
   const [settingsDraft, setSettingsDraft] = useState(SETTINGS_FIXTURE)
@@ -287,10 +289,17 @@ export function PatternsGallery() {
       <Separator />
 
       <GallerySection
-        title="ChoiceList"
-        description="A short list of choices where one or several can be picked, each with a title and a line saying what picking it means. Use it instead of a bare checkbox or radio group when a choice needs explaining, or needs something to appear once it is picked. Tapping anywhere on the row toggles the choice; content below the row does not. Use selectedContent for a follow-up that only matters once picked, and secondaryContent for a field that stays up either way, such as one whose bad value blocks Save."
+        title="ChoiceList + ChoiceCheckbox"
+        description="ChoiceCheckbox is the same row for one on/off option, with no group around it. ChoiceList is a short list of choices where one or several can be picked, each with a title and a line saying what picking it means. Use it instead of a bare checkbox or radio group when a choice needs explaining, or needs something to appear once it is picked. Tapping anywhere on the row toggles the choice; content below the row does not. Use selectedContent for a follow-up that only matters once picked, and secondaryContent for a field that stays up either way, such as one whose bad value blocks Save."
       >
         <div className="grid gap-6 md:grid-cols-2">
+          <ChoiceCheckbox
+            className="md:col-span-2"
+            label="Send a morning report"
+            details="One summary at 06:00, whether or not it found anything."
+            checked={reportOn}
+            onCheckedChange={setReportOn}
+          />
           <ChoiceList
             label="When to send"
             value={reportWhen}

@@ -2,6 +2,7 @@ import { BellRing, Pencil, Plus, Sparkles, Trash2, TriangleAlert } from 'lucide-
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
+import { ChoiceCheckbox } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -696,19 +697,16 @@ function RuleForm({ draft, error, isEditing, unitsByPath, mateOn, onChange, onCa
             onChange={(e) => set('path', e.target.value)}
             placeholder="electrical.batteries.house.voltage"
           />
-          <label className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={draft.path_role === 'house_bank_soc'}
-              onChange={(e) => onChange({ ...draft, path_role: e.target.checked ? 'house_bank_soc' : undefined })}
-            />
-            Follow the house bank's state of charge
-          </label>
-          {draft.path_role === 'house_bank_soc' && draft.path === '' && (
-            <p role="status" className="mt-1 text-xs text-amber-600 dark:text-amber-400">
-              No house bank is chosen, so this rule watches nothing. Choose one under Settings, SignalK, Roles.
-            </p>
-          )}
+          <ChoiceCheckbox
+            label="Follow the house bank's state of charge"
+            checked={draft.path_role === 'house_bank_soc'}
+            onCheckedChange={(on) => onChange({ ...draft, path_role: on ? 'house_bank_soc' : undefined })}
+            selectedContent={draft.path === '' && (
+              <p role="status" className="text-xs text-amber-600 dark:text-amber-400">
+                No house bank is chosen, so this rule watches nothing. Choose one under Settings, SignalK, Roles.
+              </p>
+            )}
+          />
         </Field>
         <Field>
           <FieldLabel htmlFor="alarm-op">Condition</FieldLabel>
@@ -798,30 +796,21 @@ function RuleForm({ draft, error, isEditing, unitsByPath, mateOn, onChange, onCa
         </div>
       )}
 
-      <label className="mt-3 flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
-        <input type="checkbox" checked={draft.enabled} onChange={(e) => set('enabled', e.target.checked)} />
-        Enabled
-      </label>
-
       <div className="mt-3">
-        <label htmlFor="alarm-mate-reviews" className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
-          {/* With Mate off the switch can only be turned off: the setting stays visible, and nothing can be switched on that would not run. */}
-          <input
-            id="alarm-mate-reviews"
-            type="checkbox"
-            checked={draft.mate_reviews ?? false}
-            disabled={!mateOn && !draft.mate_reviews}
-            onChange={(e) => set('mate_reviews', e.target.checked)}
-          />
-          Mate reviews it
-        </label>
-        {mateOn ? (
-          <p className="mt-1 text-xs text-muted-foreground">
-            When this alarm goes off, Mate reads what the reading has been doing, writes a short review and sends the first sentence to this alarm's channels. Each review is billed by your model provider, and this alarm is reviewed at most once an hour.
-          </p>
-        ) : (
-          <p className="mt-1 text-xs text-muted-foreground">Mate is off, so it won't review this</p>
-        )}
+        <ChoiceCheckbox label="Enabled" checked={draft.enabled} onCheckedChange={(on) => set('enabled', on)} />
+        {/* With Mate off the switch can only be turned off: the setting stays visible, and nothing can be switched on that would not run. */}
+        <ChoiceCheckbox
+          id="alarm-mate-reviews"
+          label="Mate reviews it"
+          details={
+            mateOn
+              ? "When this alarm goes off, Mate reads what the reading has been doing, writes a short review and sends the first sentence to this alarm's channels. Each review is billed by your model provider, and this alarm is reviewed at most once an hour."
+              : "Mate is off, so it won't review this"
+          }
+          checked={draft.mate_reviews ?? false}
+          disabled={!mateOn && !draft.mate_reviews}
+          onCheckedChange={(on) => set('mate_reviews', on)}
+        />
       </div>
 
 

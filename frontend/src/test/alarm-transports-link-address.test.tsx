@@ -62,6 +62,35 @@ describe('the address for links', () => {
   })
 })
 
+describe('the transport checkboxes', () => {
+  it('are named by the transport and described by the sentence under it', async () => {
+    stub('')
+    render(<AlarmTransportsProvider><AlarmTransportsForm /></AlarmTransportsProvider>)
+    await screen.findByLabelText('Address for links')
+    expect(screen.getByRole('checkbox', { name: 'ntfy (phone push)' })).toHaveAccessibleDescription(
+      /Self-host it, or use ntfy.sh free with no account/,
+    )
+    expect(screen.getByRole('checkbox', { name: 'Publish to SignalK' })).toHaveAccessibleDescription(
+      /Writes alarms back to notifications/,
+    )
+    expect(screen.getByRole('checkbox', { name: 'Email' })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: 'Webhook' })).toBeInTheDocument()
+  })
+
+  it('show the fields for a transport only while it is on, and saves the change', async () => {
+    stub('')
+    render(<AlarmTransportsProvider><AlarmTransportsForm /><SaveProbe /></AlarmTransportsProvider>)
+    await screen.findByLabelText('Address for links')
+    expect(screen.queryByLabelText('Topic')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'ntfy (phone push)' }))
+    expect(await screen.findByLabelText('Topic')).toBeInTheDocument()
+    expect(screen.getByLabelText('Topic').closest('.pl-7')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'save-dirty' }))
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0]).toMatchObject({ ntfy: { enabled: true } })
+  })
+})
+
 describe('the notifications anchor', () => {
   it('scrolls to and focuses the section once drawn when a link asked for it', async () => {
     stub('')

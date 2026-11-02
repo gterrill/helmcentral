@@ -1,9 +1,11 @@
 import { memo, useState } from 'react'
 
+import { CHOICE_INDENT, ChoiceCheckbox } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useWebPush } from '@/hooks/use-web-push'
+import { cn } from '@/lib/utils'
 
 /**
  * Web push has two independent levels, and conflating them is the obvious
@@ -33,27 +35,21 @@ export const WebPushSection = memo(function WebPushSection({ enabled, onEnabledC
 
   return (
     <section className="rounded-md border bg-background/60 p-3">
-      <label
-        htmlFor="webpush-enabled"
-        className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground"
-      >
-        <input
-          id="webpush-enabled"
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => onEnabledChange(e.target.checked)}
-        />
-        Web push (browser &amp; phone)
-      </label>
-      <p className="mt-1 text-xs text-muted-foreground">
-        Alarms on the lock screen of any browser registered below, with the dashboard closed. No app to install.
-      </p>
+      <ChoiceCheckbox
+        id="webpush-enabled"
+        label="Web push (browser & phone)"
+        details="Alarms on the lock screen of any browser registered below, with the dashboard closed. No app to install."
+        checked={enabled}
+        onCheckedChange={onEnabledChange}
+      />
 
       {enabled && (
-        <div className="mt-3 rounded-md border bg-card p-3">
-          <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">This device</p>
-          <div className="mt-2">{renderDeviceState()}</div>
-          {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+        <div className={cn('mt-3', CHOICE_INDENT)}>
+          <div className="rounded-md border bg-card p-3">
+            <p className="text-[10px] uppercase tracking-[0.16em] text-muted-foreground">This device</p>
+            <div className="mt-2">{renderDeviceState()}</div>
+            {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+          </div>
         </div>
       )}
     </section>

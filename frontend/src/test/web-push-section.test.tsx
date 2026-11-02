@@ -44,6 +44,14 @@ describe('WebPushSection', () => {
     expect(WebPushSection).toBeTruthy()
   })
 
+  it('describes the transport checkbox with its sentence', async () => {
+    await renderSection({ support: { kind: 'ok' } })
+
+    expect(screen.getByRole('checkbox', { name: 'Web push (browser & phone)' })).toHaveAccessibleDescription(
+      /Alarms on the lock screen of any browser registered below/,
+    )
+  })
+
   /**
    * The headline case on a boat. Helmcentral is served over plain HTTP on a LAN
    * address, so the Push API is absent entirely — the operator needs to be told
