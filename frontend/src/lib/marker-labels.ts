@@ -38,6 +38,19 @@ export interface MarkerLabelPoint {
 export const LABEL_COLLISION_RADIUS_PX = 50
 export const AIS_LABEL_COLLISION_RADIUS_PX = 65
 
+/**
+ * Two label-suppression sets are equal when their contents match, regardless
+ * of identity. Callers use it so a declutter pass only calls setState (and
+ * renders the map again) when the result actually changed.
+ */
+export function suppressedIdsEqual(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const id of a) {
+    if (!b.has(id)) return false
+  }
+  return true
+}
+
 export function resolveMarkerLabelSuppression(
   points: MarkerLabelPoint[],
   avoidZones: ScreenRect[],

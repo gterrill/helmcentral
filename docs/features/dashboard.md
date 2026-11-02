@@ -290,7 +290,7 @@ The tile lists only the tanks you've given an equipment item.
 
 ## Nearby map
 
-The Nearby map is a moving map centred on the vessel. It shows the points of
+The Nearby map is a map of the area around the vessel. It shows the points of
 interest within a range you set: anchorages, marinas, fuel, dive sites and more.
 You add it from the tile picker like an embed or a gauge. You can add more than
 one to a page, or to different pages, each with its own range and categories.
@@ -299,20 +299,24 @@ one to a page, or to different pages, each with its own range and categories.
   trail.
 - **Footer:** It names the current data provider and how old its answer is. The
   age keeps counting visibly rather than going blank when a fetch fails.
-- **Framing:** The map keeps the vessel at the centre with the five nearest
-  matches in view, but it never zooms in tighter than the range.
+- **Framing:** The map is framed with the vessel at the centre and the five
+  nearest matches in view. The range sets how far Helmcentral searches, not
+  how far the map shows, so a close-up is possible, and places beyond the five
+  nearest can fall off the map. After that it stays still while the boat marker moves. It reframes with one instant jump
+  when the boat gets near the edge, or when you resize the tile or change its
+  layout or range. It also reframes when a different set of five matches comes
+  into range.
 - **Highlighted match:** In the map-and-list layout, one row at a time is
   highlighted. It moves to the next match every few seconds and goes back to the
   first once it reaches the end, and that match's marker gets a ring. The row's
   description shows too when it has one, though many points of interest,
   especially from OpenStreetMap, don't have any.
-- **Camera tour:** The map dives in to the first match and tilts, then holds
-  there. It flies straight on to each next match in a high arc that rises far
-  enough to show the boat and the whole area on the way. After the last match,
-  it pulls back out to the view centred on the boat and rests there before
-  starting again.
-- **Summary cycle:** A longer Summary cycle, 15 to 20 seconds, gives each place
-  a longer hold.
+- **Arrow:** In the map-and-list layout, a curved arrow runs from the boat to
+  the highlighted match, so you can see where it is without reading the list. It
+  switches to the next match with the list. It's left out when the match is too
+  close to the boat for an arc, and while the GNSS badge shows.
+- **Summary cycle:** The Summary cycle is how long each match stays highlighted.
+  A longer one, 15 to 20 seconds, gives you more time to read a description.
 - **Route:** The route SignalK is navigating shows as a line, with the leg
   you're on drawn brighter.
 

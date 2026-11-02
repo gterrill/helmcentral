@@ -1,15 +1,17 @@
 import 'maplibre-gl/dist/maplibre-gl.css'
 import maplibregl from 'maplibre-gl'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Map, Marker, Source, Layer, type MapRef } from 'react-map-gl/maplibre'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Map, Marker, Source, Layer, useMap, type MapRef } from 'react-map-gl/maplibre'
 import { MapPin, Settings2, Ship } from 'lucide-react'
 
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { MapPlaceLabels } from '@/components/map-place-labels'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
-import { MAP_LABEL_HALO, resolveMarkerLabelSuppression, type MarkerLabelPoint } from '@/lib/marker-labels'
-import { fitCameraAroundPoint, formatBearing, framePlaceWithBoat, poiCategoryById, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
+import { MAP_LABEL_HALO, resolveMarkerLabelSuppression, suppressedIdsEqual, type MarkerLabelPoint } from '@/lib/marker-labels'
+import { fitCameraAroundPoint, formatBearing, poiCategoryById, pointInCameraFrame, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
+import { poiArrowGeometry, type PoiArrowGeometry } from '@/lib/poi-arrow'
+import { lonNearest } from '@/lib/geo'
 import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
 import { usePoi } from '@/hooks/use-poi'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
@@ -71,11 +73,11 @@ export interface PoiMapTileProps {
    * False on the wall kiosk (ADR: kiosk maps are display-only): passed
    * straight through as maplibre's own `interactive` option, which detaches
    * every mouse/touch/keyboard handler so there's no zoom, pan, rotate or
-   * gesture handling left for a display with no touchscreen. The map still
-   * follows the vessel (the easeTo/jumpTo effect below is imperative, not a
-   * handler) and markers/trails still update - there's just nothing for the
-   * operator to interact with. Defaults to true so every existing host
-   * keeps today's behaviour.
+   * gesture handling left for a display with no touchscreen. The camera
+   * still re-frames when it must (the jumpTo effect below is imperative, not
+   * a handler) and markers/trails/the arrow still update - there's just
+   * nothing for the operator to interact with. Defaults to true so every
+   * existing host keeps today's behaviour.
    */
   interactive?: boolean
 }
@@ -85,95 +87,10 @@ export interface PoiMapTileProps {
 const POI_FETCH_LIMIT = 50
 const RANKED_LIST_SIZE = 5
 
-// One easeTo at most per this interval while following the vessel, so a
-// stream of position fixes (SignalK publishes several a second) doesn't
-// fight the operator's own pan/zoom or animate constantly.
-const FOLLOW_THROTTLE_MS = 2000
-const FOLLOW_EASE_DURATION_MS = 500
-
-// The camera tours the ranked places. The first place is a dive from the
-// overview (a long eased flight that ends tilted); each later place is a hop
-// straight from the previous one, a single high arc whose peak is the
-// overview altitude so the boat and the whole area are in view mid-flight.
-// Only after the last place does the camera pull out to the boat-centred
-// overview and pause there before the cycle wraps to the first place. The
-// wall display is the only home of this tile, so the motion is wanted.
-// flyTo keeps MapLibre's default arc (curve 1.42: zoom out, travel, zoom in).
-// The place zoom is a street-level close-up, two levels in from the overview
-// where that is tighter, but the boat never leaves the frame: once it won't
-// fit around a centred place, the camera pans toward the boat and zooms only
-// as far out as it must to hold both inside the fit padding, less
-// PLACE_PITCH_ZOOM_HEADROOM because the tilt magnifies the near half of the
-// view. It never goes wider than the overview, which already has the boat in
-// frame from any ranked place. POI_MAP_MAX_ZOOM caps only the overview fit; the
-// overview never passes 16, so this tops out at 18, which both the basemap
-// and OpenSeaMap still draw.
-const PLACE_ZOOM = 17
-const PLACE_ZOOM_MIN_STEP = 2
-const PLACE_PITCH_DEG = 30
-const PLACE_PITCH_ZOOM_HEADROOM = 0.25
-const DIVE_TARGET_MS = 2800
-const HOP_TARGET_MS = 3500
-const PULL_OUT_TARGET_MS = 2500
-const OVERVIEW_PAUSE_TARGET_MS = 1500
-// The moves of the busiest cycle (a hop that is also the last place: hop,
-// pull-out, pause) may take at most this share of a cycle; a short cycle
-// scales every move down together so no hold is negative.
-const TOUR_MOVES_MAX_SHARE_OF_CYCLE = 0.85
-
-export interface PlaceTourTimings {
-  diveMs: number
-  // Hold after a dive that is also the last place (single place, or a tour
-  // restarted on the last one): up to the pull-out.
-  holdMs: number
-  // From the highlight change to the start of the pull-out. Counted back from
-  // the end of the cycle, so it is the same whichever flight brought the
-  // camera to the last place.
-  pullOutStartMs: number
-  pullOutMs: number
-  pauseMs: number
-  hopMs: number
-  // Hold after a hop to a place that is not the last: the rest of the cycle.
-  hopHoldMs: number
-}
-
-// The last place of a tour has dive-or-hop + hold + pull-out + pause adding
-// up to the cycle; any other place has dive-or-hop + hold. Moves keep their
-// target length unless the busiest cycle would exceed 85% of T, in which case
-// all of them shrink by the same factor; a longer cycle only lengthens holds.
-export function placeTourTimings(cycleSeconds: number): PlaceTourTimings {
-  const cycleMs = cycleSeconds * 1000
-  const busiestMs = HOP_TARGET_MS + PULL_OUT_TARGET_MS + OVERVIEW_PAUSE_TARGET_MS
-  const scale = Math.min(1, (cycleMs * TOUR_MOVES_MAX_SHARE_OF_CYCLE) / busiestMs)
-  const diveMs = DIVE_TARGET_MS * scale
-  const hopMs = HOP_TARGET_MS * scale
-  const pullOutMs = PULL_OUT_TARGET_MS * scale
-  const pauseMs = OVERVIEW_PAUSE_TARGET_MS * scale
-  const pullOutStartMs = cycleMs - pullOutMs - pauseMs
-  return { diveMs, holdMs: pullOutStartMs - diveMs, pullOutStartMs, pullOutMs, pauseMs, hopMs, hopHoldMs: cycleMs - hopMs }
-}
-
-// Jump under reduced motion, otherwise an eased flight; minZoom is the arc's
-// zenith for a hop between places.
-function travelTo(map: MapRef, reduced: boolean, center: MapPoint, zoom: number, pitch: number, duration: number, minZoom?: number) {
-  const view = { center: [center.lon, center.lat] as [number, number], zoom, pitch, bearing: 0 }
-  if (reduced) map.jumpTo(view)
-  else map.flyTo({ ...view, duration, easing: easeInOutCubic, ...(minZoom === undefined ? {} : { minZoom }) })
-}
-
-function easeInOutCubic(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
-}
-
-function prefersReducedMotion(): boolean {
-  return typeof window.matchMedia === 'function'
-    && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-}
-
 // Clearance kept around the farthest ranked POI in the vessel-centred fit, in
 // screen pixels, so a marker (h-9 w-9, 36px) plus its name label doesn't sit
 // flush against the tile's edge. Exported for the test suite, which computes
-// the same fit independently to check the tile's jumpTo/easeTo calls against.
+// the same fit independently to check the tile's jumpTo calls against.
 export const POI_MAP_FIT_PADDING_PX = 44
 
 // Fallback box for the one frame before ResizeObserver reports a real size
@@ -232,14 +149,16 @@ function waypointsToPointsGeoJSON(waypoints: PoiMapActiveRouteWaypoint[]): GeoJS
 }
 
 /**
- * The Nearby widget (ADR 0091 phase 3b): a moving map of points of interest
- * near the vessel, with an optional ranked list beside it.
+ * The Nearby widget (ADR 0091 phase 3b): a map of points of interest near the
+ * vessel, with an optional ranked list beside it. The map holds still while
+ * the boat marker moves; in the split layout a curved arrow runs from the boat
+ * to the place the list is highlighting.
  *
  * No masking fallback: use-poi.ts keeps the last good features on a failed
  * poll, and this tile shows their age and the error in muted text rather
  * than an empty or fabricated list (see the footer). When gnssCriticalAlert
- * is set the map holds its last good centre and shows an amber GNSS badge
- * instead of following a position that may not be real.
+ * is set the map holds its last good centre, draws no arrow and shows an amber
+ * GNSS badge instead of trusting a position that may not be real.
  */
 export default function PoiMapTileImpl({
   config,
@@ -280,15 +199,17 @@ export default function PoiMapTileImpl({
   // with nothing to advance through. The highlight always lands somewhere;
   // the summary text underneath it only shows when that POI actually has
   // one (see PoiListRow below).
-  // A plain, order-sensitive key rather than the array itself: identical ids
-  // in a new array (every poll gives rankedList a fresh reference) must not
-  // reset the cycle, but a real change to the set - a POI dropping out of
-  // range or the ranking reordering - should. See useCyclingIndex's own doc
-  // for why this is what it takes as resetKey.
-  const rankedListKey = useMemo(() => rankedList.map((f) => f.id).join('|'), [rankedList])
+  // A plain, order-insensitive key rather than the array itself: identical
+  // ids in a new array (every poll gives rankedList a fresh reference) must
+  // not reset the cycle, nor must two places swapping rank, which changes
+  // nothing on screen; a real change to the set - a POI dropping out of range
+  // or a new one arriving - should. The camera's framing key uses it too. See
+  // useCyclingIndex's own doc for why this is what it takes as resetKey.
+  const placeSetKey = useMemo(() => rankedList.map((f) => f.id).sort().join('|'), [rankedList])
   const summaryCycleSeconds = config.summaryCycleSeconds ?? POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT
-  const cycleIndex = useCyclingIndex(rankedList.length, summaryCycleSeconds, rankedListKey)
-  const expandedPoiId = cycleIndex !== null ? rankedList[cycleIndex].id : null
+  const cycleIndex = useCyclingIndex(rankedList.length, summaryCycleSeconds, placeSetKey)
+  const expandedPoi = cycleIndex !== null ? rankedList[cycleIndex] : null
+  const expandedPoiId = expandedPoi?.id ?? null
 
   const dark = isDarkTheme || forceDark
   const mapStyle = dark ? STYLE_DARK : STYLE_LIGHT
@@ -306,220 +227,99 @@ export default function PoiMapTileImpl({
   const heightPx = measuredBox.height > 0 ? measuredBox.height : FALLBACK_HEIGHT
   const widthPx = measuredBox.width > 0 ? measuredBox.width : FALLBACK_WIDTH
 
-  // The floor: never zoom in tighter than the configured range gives against
-  // whichever of width/height is more restrictive - previously this always
-  // used height, which is fine in "map" layout (full width) but let POIs
-  // fall off the sides in "split" layout's half-width map pane even though
-  // this same number said they'd fit.
+  // The zoom the configured range gives against whichever of width/height is
+  // more restrictive. It frames the map only while nothing is ranked yet (the
+  // range is how far Helmcentral searches, not how far the map shows), and is
+  // what the map shows for the one frame before the camera effect runs.
   const rangeZoomFloor = zoomForRangeNm(config.rangeNm, latitude ?? 0, Math.min(widthPx, heightPx))
 
   // The camera: stays centred on the vessel and zooms out until the ranked
   // list (not every fetched feature - the ranked list is what the operator
   // can actually see named in the split layout's rows, and what topPoi
   // already limits to RANKED_LIST_SIZE) fits inside the measured viewport,
-  // padded for marker size and labels. Falls back to the old vessel-centred range zoom when there's
-  // nothing ranked yet (feed still loading, or "map" layout content aside,
-  // topPoi is layout-independent). Never tighter than rangeZoomFloor, so a
-  // single close POI doesn't zoom in past what the configured range implies.
-  // Deliberately excludes cycleIndex/expandedPoiId from its own inputs: this
-  // is the boat-centred overview the camera returns to between places. The
-  // fly-in to the highlighted place below is a separate, timed excursion.
+  // padded for marker size and labels. The fit's own zoom alone: the range no
+  // longer limits how far in it goes, so a far-flung search area can still
+  // frame the five nearest places closely, and places beyond them can fall off
+  // the map. fitCameraAroundPoint's own maximum zoom still stops a lone close
+  // place from zooming in without limit. Falls back to the vessel-centred range
+  // zoom when there's nothing ranked yet (feed still loading, or "map" layout
+  // content aside, topPoi is layout-independent).
+  // Deliberately excludes cycleIndex/expandedPoiId from its own inputs: the
+  // camera never moves to the highlighted place, an arrow points at it.
   const cameraTarget = useMemo((): { center: MapPoint; zoom: number } | null => {
     if (latitude === null || longitude === null) return null
     const vessel: MapPoint = { lat: latitude, lon: longitude }
     if (rankedList.length === 0) return { center: vessel, zoom: rangeZoomFloor }
     const points: MapPoint[] = rankedList.map((f) => ({ lat: f.lat, lon: f.lon }))
     const fit = fitCameraAroundPoint(vessel, points, widthPx, heightPx, POI_MAP_FIT_PADDING_PX)
-    return { center: fit.center, zoom: Math.min(fit.zoom, rangeZoomFloor) }
+    return { center: fit.center, zoom: fit.zoom }
   }, [latitude, longitude, rankedList, widthPx, heightPx, rangeZoomFloor])
 
-  const hasCenteredRef = useRef(false)
-  const lastEaseAtRef = useRef(0)
-  // True from the first dive until the pull-out after the last place ends
-  // (or the highlight clears), so the follow effect doesn't ease the camera
-  // back to the boat while it is on, or flying between, places.
-  const holdingPlaceRef = useRef(false)
-
-  // Follow the vessel-centred fit: first fix jumps straight there,
-  // later fixes ease in, throttled to at most one per FOLLOW_THROTTLE_MS.
-  // Holding still while gnssCriticalAlert is set (last good centre, no
-  // jump/ease at all) is the same rule the anchor-watch gate uses for the
-  // position sentinel. This runs regardless of `interactive`: it drives the
-  // camera imperatively (map.jumpTo/easeTo), not through one of maplibre's
-  // own gesture handlers, so the kiosk's non-interactive map still follows.
-  // Always level: following only happens on the overview, and a tour that
-  // stopped mid-dive or mid-pull-out would otherwise leave the tilt behind.
+  // The camera only ever jumps, and only when it must: the wall's processor
+  // is too slow for eased or flown moves (each one also pulls in new tiles).
+  // The first fix jumps to the overview. After that the boat marker moves and
+  // the map stays still, until (a) the boat leaves the padded frame of the
+  // camera the map is on, or (b) the framing key - the set of ranked places,
+  // the measured box and the configured range - differs from the one last
+  // framed. The places are sorted so that two of them swapping rank, which
+  // changes nothing on screen, does not jump; the box is rounded so a
+  // fractional resize does not either. Holding still while gnssCriticalAlert
+  // is set (last good centre, no jump at all) is the same rule the
+  // anchor-watch gate uses for the position sentinel; the framing key is
+  // recorded only when a jump really ran, so a re-frame that was due during
+  // the alert happens when it clears. This runs regardless of `interactive`:
+  // it drives the camera imperatively (map.jumpTo), not through one of
+  // maplibre's own gesture handlers.
+  const framingKey = `${placeSetKey}|${Math.round(widthPx)}x${Math.round(heightPx)}|${config.rangeNm}`
+  const framedRef = useRef<{ key: string; camera: { center: MapPoint; zoom: number } } | null>(null)
+  // react-maplibre creates the map in a Promise, so mapRef is still empty when
+  // the camera effect first runs. onLoad flips this and runs the effect again,
+  // which frames a boat that never moves.
+  const [mapReady, setMapReady] = useState(false)
   useEffect(() => {
     if (gnssCriticalAlert) return
-    if (!cameraTarget) return
-    if (holdingPlaceRef.current) return
+    if (!cameraTarget || latitude === null || longitude === null) return
     const map = mapRef.current
     if (!map) return
 
-    const { center, zoom } = cameraTarget
+    const framed = framedRef.current
+    if (framed && framed.key === framingKey
+      && pointInCameraFrame({ lat: latitude, lon: longitude }, framed.camera, widthPx, heightPx, POI_MAP_FIT_PADDING_PX)) return
 
-    if (!hasCenteredRef.current) {
-      hasCenteredRef.current = true
-      lastEaseAtRef.current = Date.now()
-      map.jumpTo({ center: [center.lon, center.lat], zoom, pitch: 0 })
-      return
-    }
-
-    const now = Date.now()
-    if (now - lastEaseAtRef.current < FOLLOW_THROTTLE_MS) return
-    lastEaseAtRef.current = now
-    map.easeTo({ center: [center.lon, center.lat], zoom, pitch: 0, duration: FOLLOW_EASE_DURATION_MS })
-  }, [cameraTarget, gnssCriticalAlert])
-
-  // Tour the places: when the highlight moves to a place the camera dives to
-  // it from the overview, or hops to it from the previous place through the
-  // overview altitude, and tilts. After the last ranked place it holds, pulls
-  // out to the boat-centred overview and rests there until the cycle wraps
-  // (see placeTourTimings). The highlight already showing at mount is skipped
-  // (the first fix jumps to the overview instead). A lone place never
-  // advances the cycle, so it dives and pulls out once. Held still under
-  // gnssCriticalAlert, like the follow effect, and runs regardless of
-  // `interactive`. Split layout only: with no list beside it, a map-only tile
-  // has nothing that says where it flew or why. The latest inputs are read
-  // through a ref so only a change of highlight restarts a flight. The hold on
-  // the follow effect is deliberately not released by this effect's cleanup,
-  // since the next place continues the tour; only the pull-out, a cleared
-  // highlight or an unmount ends it. Reduced motion jumps and never tilts.
-  const latestRef = useRef({ cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout, expandedPoiId, box: { width: widthPx, height: heightPx } })
-  latestRef.current = { cameraTarget, rankedList, gnssCriticalAlert, summaryCycleSeconds, layout: config.layout, expandedPoiId, box: { width: widthPx, height: heightPx } }
-  const previousHighlightRef = useRef(expandedPoiId)
-  // True while the camera is left tilted by a dive or hop, so a path that
-  // skips the pull-out can still level it.
-  const tiltedRef = useRef(false)
-  // Set when a highlight change just flew, so the pull-out effect times from
-  // the highlight change rather than from a mid-hold change of the list.
-  const freshFlightRef = useRef(false)
-  useEffect(() => () => { holdingPlaceRef.current = false }, [])
-  useEffect(() => {
-    const previous = previousHighlightRef.current
-    previousHighlightRef.current = expandedPoiId
-    if (expandedPoiId === null) {
-      // The highlight cleared mid-tour (the list emptied): the follow effect
-      // already bailed while held, so fly back to the boat-centred overview
-      // and level, rather than leaving the camera on a place no longer listed.
-      const wasHolding = holdingPlaceRef.current
-      holdingPlaceRef.current = false
-      const { cameraTarget: overview, gnssCriticalAlert: gnss } = latestRef.current
-      const map = mapRef.current
-      if (!map || !(wasHolding || tiltedRef.current)) return
-      tiltedRef.current = false
-      if (gnss || !overview) {
-        map.jumpTo({ pitch: 0 })
-        return
-      }
-      lastEaseAtRef.current = Date.now()
-      travelTo(
-        map, prefersReducedMotion(), overview.center, overview.zoom, 0,
-        placeTourTimings(latestRef.current.summaryCycleSeconds).pullOutMs,
-      )
-      return
-    }
-    if (expandedPoiId === previous) return
-    const { cameraTarget: overview, rankedList: places, gnssCriticalAlert: gnss, summaryCycleSeconds: cycle, layout, box } = latestRef.current
-    const map = mapRef.current
-    const level = () => {
-      holdingPlaceRef.current = false
-      if (!tiltedRef.current || !map) return
-      tiltedRef.current = false
-      map.jumpTo({ pitch: 0 })
-    }
-    if (layout !== 'split' || gnss || !overview || !hasCenteredRef.current) { level(); return }
-    const place = places.find((f) => f.id === expandedPoiId)
-    if (!place || !map) { level(); return }
-
-    const reduced = prefersReducedMotion()
-    const timings = placeTourTimings(cycle)
-    // Already on, or flying between, places: hop with the arc. Otherwise the
-    // camera is on the overview, so dive.
-    const hopping = holdingPlaceRef.current
-    holdingPlaceRef.current = true
-    tiltedRef.current = !reduced
-    // The overview is centred on the boat.
-    const frame = framePlaceWithBoat(
-      place, overview.center, box.width, box.height, POI_MAP_FIT_PADDING_PX,
-      Math.max(PLACE_ZOOM, overview.zoom + PLACE_ZOOM_MIN_STEP),
-      reduced ? 0 : PLACE_PITCH_ZOOM_HEADROOM,
-      overview.zoom,
-    )
-    travelTo(
-      map, reduced, frame.center, frame.zoom, reduced ? 0 : PLACE_PITCH_DEG,
-      hopping ? timings.hopMs : timings.diveMs,
-      hopping ? overview.zoom : undefined,
-    )
-    freshFlightRef.current = true
-  }, [expandedPoiId])
-
-  // The pull-out after the last place. Keyed on whether the highlighted place
-  // is the last of the current list as well as on the highlight, so a list
-  // that changes shape while the camera is held re-decides it without
-  // re-flying: a place dropping out makes the held one the last (pull out
-  // after a hold from now), a place appearing after it cancels the pull-out
-  // and the camera hops onward when the highlight moves. The follow effect
-  // stays off through the pull-out too: an easeTo mid-flight would cancel it
-  // and carry the tilt.
-  const isLastPlace = rankedList[rankedList.length - 1]?.id === expandedPoiId
-  useEffect(() => {
-    const fresh = freshFlightRef.current
-    freshFlightRef.current = false
-    if (!isLastPlace || !holdingPlaceRef.current) return
-    const map = mapRef.current
-    if (!map) return
-    const timings = placeTourTimings(latestRef.current.summaryCycleSeconds)
-    let pulledOut = false
-    const pullOutTimer = setTimeout(() => {
-      pulledOut = true
-      const latest = latestRef.current
-      if (latest.gnssCriticalAlert || !latest.cameraTarget) {
-        holdingPlaceRef.current = false
-        if (tiltedRef.current) {
-          tiltedRef.current = false
-          map.jumpTo({ pitch: 0 })
-        }
-        return
-      }
-      lastEaseAtRef.current = Date.now()
-      tiltedRef.current = false
-      travelTo(map, prefersReducedMotion(), latest.cameraTarget.center, latest.cameraTarget.zoom, 0, timings.pullOutMs)
-    }, fresh ? timings.pullOutStartMs : timings.holdMs)
-    const heldId = expandedPoiId
-    const releaseTimer = setTimeout(() => {
-      // A highlight that moved on has its own flight and its own hold.
-      if (latestRef.current.expandedPoiId !== heldId) return
-      holdingPlaceRef.current = false
-      lastEaseAtRef.current = Date.now()
-    }, (fresh ? timings.pullOutStartMs : timings.holdMs) + timings.pullOutMs)
-    return () => {
-      clearTimeout(pullOutTimer)
-      // Once the pull-out has started the hold must still end with it, even if
-      // the list changed shape (the place stopped being last) mid-flight;
-      // otherwise the follow effect would stay off with nothing to release it.
-      if (!pulledOut) clearTimeout(releaseTimer)
-    }
-  }, [expandedPoiId, isLastPlace])
+    framedRef.current = { key: framingKey, camera: cameraTarget }
+    map.jumpTo({ center: [cameraTarget.center.lon, cameraTarget.center.lat], zoom: cameraTarget.zoom, pitch: 0, bearing: 0 })
+  }, [cameraTarget, gnssCriticalAlert, framingKey, widthPx, heightPx, latitude, longitude, mapReady])
 
   // Declutter POI marker labels on move-end, priority by rank then distance
   // (an unranked feature always yields to a ranked one, matching the ranked
-  // list's own ordering) — see resolveMarkerLabelSuppression's own doc for
-  // why this is a pure, projected-screen-space computation. Kept regardless
-  // of `interactive`: on the kiosk this only ever fires from the follow
-  // effect's own jumpTo/easeTo above, not from a user gesture, and the
+  // list's own ordering; the highlighted place outranks both) — see
+  // resolveMarkerLabelSuppression's own doc for why this is a pure, projected-screen-space computation. Kept regardless
+  // of `interactive`: on the kiosk this only ever fires from the camera
+  // effect's own jumpTo above, not from a user gesture, and the
   // labels still need to stay decluttered as POIs move on/off screen.
   const [suppressedLabelIds, setSuppressedLabelIds] = useState<Set<string>>(new Set())
+  // Only the split layout has an arrow and a list to say which place is
+  // current; a map-only tile keeps the plain rank order.
+  const labelHighlightId = config.layout === 'split' ? expandedPoiId : null
   const declutterLabels = useCallback(() => {
     const map = mapRef.current
     if (!map || typeof map.project !== 'function') return
     const points: MarkerLabelPoint[] = poi.features.map((f) => ({
       id: f.id,
       ...map.project([f.lon, f.lat]),
-      priority: rankById[f.id] ?? 100000 + f.distanceM,
+      // The highlighted place always wins: it is the one the arrow points at,
+      // so a neighbour must never hide its name.
+      priority: f.id === labelHighlightId ? 0 : rankById[f.id] ?? 100000 + f.distanceM,
     }))
-    setSuppressedLabelIds(resolveMarkerLabelSuppression(points, []))
-  }, [poi.features, rankById])
+    const next = resolveMarkerLabelSuppression(points, [])
+    setSuppressedLabelIds((prev) => (suppressedIdsEqual(prev, next) ? prev : next))
+  }, [poi.features, rankById, labelHighlightId])
+  const handleLoad = useCallback(() => {
+    setMapReady(true)
+    declutterLabels()
+  }, [declutterLabels])
+  // Re-resolve when the highlight moves, not only when the map does.
+  useEffect(() => { declutterLabels() }, [declutterLabels])
 
   // selfTrail is a snapshot that is a new array only when a trail poll
   // lands points (use-server-trails.ts), so the GeoJSON follows the trail
@@ -598,18 +398,16 @@ export default function PoiMapTileImpl({
                 initialViewState={{
                   latitude: latitude ?? 0,
                   longitude: longitude ?? 0,
-                  // The mount-time jumpTo in the follow effect above fires
-                  // right after this first paint and takes over from here
-                  // (to the vessel-centred fitted camera, once the ranked
-                  // list has anything in it) - this is only what's on screen
-                  // for that one frame before it does.
+                  // The camera effect above jumps to the vessel-centred fitted
+                  // camera once the map has loaded (onLoad), and takes over
+                  // from here - this is only what's on screen until it does.
                   zoom: rangeZoomFloor,
                 }}
                 style={{ width: '100%', height: '100%' }}
                 mapStyle={mapStyle}
                 interactive={interactive}
                 dragRotate={false}
-                onLoad={declutterLabels}
+                onLoad={handleLoad}
                 onMoveEnd={declutterLabels}
                 // Same reasoning as anchor-watch-map.tsx: OpenSeaMap requires attribution, and
                 // compact keeps it to a single "i" until tapped rather than a
@@ -727,51 +525,41 @@ export default function PoiMapTileImpl({
                   )
                 })}
 
-                {poi.features.map((feature) => {
-                  const rank = rankById[feature.id]
-                  const category = poiCategoryById(feature.category)
-                  const Icon = category?.icon ?? MapPin
-                  const suppressed = suppressedLabelIds.has(feature.id)
-                  const expanded = feature.id === expandedPoiId
-                  return (
-                    <Marker key={feature.id} latitude={feature.lat} longitude={feature.lon}>
-                      <div className="flex flex-col items-center" aria-label={`Point of interest: ${feature.name || category?.label || feature.category}`}>
-                        <div
-                          data-testid={expanded ? 'poi-marker-expanded' : undefined}
-                          className={cn(
-                            'relative flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-md',
-                            // Subtle: the ranked list's own row already carries the
-                            // full summary, this ring only helps the eye match
-                            // that row back to its marker on the map.
-                            expanded && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
-                          )}
-                        >
-                          <Icon className="h-5 w-5 text-foreground" />
-                          {rank !== undefined && (
-                            <span
-                              data-testid={`poi-marker-rank-${feature.id}`}
-                              className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground"
-                            >
-                              {rank}
-                            </span>
-                          )}
-                        </div>
-                        {!suppressed && feature.name && (
-                          <div className={`mt-0.5 max-w-28 truncate text-center text-xs font-semibold text-white ${MAP_LABEL_HALO}`}>
-                            {feature.name}
-                          </div>
-                        )}
-                      </div>
-                    </Marker>
-                  )
-                })}
+                {poi.features.map((feature) => (
+                  <PoiMarker
+                    key={feature.id}
+                    id={feature.id}
+                    name={feature.name}
+                    category={feature.category}
+                    lat={feature.lat}
+                    lon={feature.lon}
+                    rank={rankById[feature.id]}
+                    suppressed={suppressedLabelIds.has(feature.id)}
+                    expanded={feature.id === expandedPoiId}
+                  />
+                ))}
 
                 {latitude !== null && longitude !== null && (
-                  <Marker latitude={latitude} longitude={longitude}>
+                  <Marker latitude={latitude} longitude={longitude} style={VESSEL_MARKER_STYLE}>
                     <div className="flex items-center justify-center" style={{ width: 40, height: 40 }}>
                       <VesselArrow headingDeg={headingTrue} scale={1} />
                     </div>
                   </Marker>
+                )}
+
+                {/* The arrow from the boat to the highlighted place. Split
+                    layout only: with no list beside it, a map-only tile has
+                    nothing that says what the arrow points at. Not under a
+                    GNSS alert, when the boat's position may not be real. */}
+                {config.layout === 'split' && !gnssCriticalAlert && latitude !== null && longitude !== null && expandedPoi && (
+                  <PoiArrow
+                    boatLat={latitude}
+                    boatLon={longitude}
+                    placeLat={expandedPoi.lat}
+                    placeLon={lonNearest(expandedPoi.lon, longitude)}
+                    width={widthPx}
+                    height={heightPx}
+                  />
                 )}
               </Map>
 
@@ -823,6 +611,140 @@ export default function PoiMapTileImpl({
     </Tile>
   )
 }
+
+/**
+ * The curved arrow from the boat to the highlighted place: an SVG over the map
+ * rather than a map layer, so a change of place never makes the map redraw.
+ * It sits inside <Map> and subscribes to the map's own 'move' event, so a pan
+ * redraws this component alone and the tile above it is not involved. Plain
+ * strings of whole pixels: a small movement of the boat gives the same strings
+ * and React leaves the DOM alone.
+ */
+function PoiArrow({
+  boatLat,
+  boatLon,
+  placeLat,
+  placeLon,
+  width,
+  height,
+}: {
+  boatLat: number
+  boatLon: number
+  placeLat: number
+  placeLon: number
+  width: number
+  height: number
+}) {
+  const { current: mapRef } = useMap()
+  const map = mapRef?.getMap()
+  const [geometry, setGeometry] = useState<PoiArrowGeometry | null>(null)
+  // The 'move' subscription lives as long as the map, so a position fix does
+  // not unsubscribe and resubscribe; it reads the latest inputs from a ref.
+  const inputsRef = useRef({ boatLat, boatLon, placeLat, placeLon, width, height })
+  const redraw = useCallback(() => {
+    if (!map) return
+    const i = inputsRef.current
+    const next = poiArrowGeometry(
+      map.project([i.boatLon, i.boatLat]),
+      map.project([i.placeLon, i.placeLat]),
+      { width: i.width, height: i.height },
+    )
+    setGeometry((prev) => (prev?.path === next?.path && prev?.head === next?.head ? prev : next))
+  }, [map])
+
+  useEffect(() => {
+    if (!map) return
+    map.on('move', redraw)
+    return () => { map.off('move', redraw) }
+  }, [map, redraw])
+
+  // A layout effect, so a frame never paints a new highlight with the old arrow.
+  useLayoutEffect(() => {
+    inputsRef.current = { boatLat, boatLon, placeLat, placeLon, width, height }
+    redraw()
+  }, [redraw, boatLat, boatLon, placeLat, placeLon, width, height])
+
+  return (
+    <svg data-testid="poi-map-arrow" aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 h-full w-full">
+      {geometry && (
+        <>
+          {/* The wider stroke in the background token lifts the arrow off the chart. */}
+          <path d={geometry.path} className="fill-none stroke-background" strokeWidth={5} strokeLinecap="round" />
+          <path data-testid="poi-map-arrow-path" d={geometry.path} className="fill-none stroke-primary" strokeWidth={2.5} strokeLinecap="round" />
+          <polygon points={geometry.head} className="fill-primary stroke-background" strokeWidth={1.5} strokeLinejoin="round" />
+        </>
+      )}
+    </svg>
+  )
+}
+
+// react-map-gl applies a Marker's style to maplibre's marker element, which is
+// what stacks. The highlighted place is raised so a neighbour cannot cover it.
+// An explicit base style is passed too: the library only applies styles it is
+// given, so a marker that stops being highlighted would keep its raised index.
+const BASE_MARKER_STYLE = { zIndex: 0 }
+const RAISED_MARKER_STYLE = { zIndex: 1 }
+const VESSEL_MARKER_STYLE = { zIndex: 2 }
+
+// Memoised on flat primitives, not the feature object: usePoi builds new
+// objects on every poll, which would defeat memo. A position fix renders no
+// POI marker, and a highlight tick renders the two whose ring moves.
+const PoiMarker = memo(function PoiMarker({
+  id,
+  name,
+  category: categoryId,
+  lat,
+  lon,
+  rank,
+  suppressed,
+  expanded,
+}: {
+  id: string
+  name: string
+  category: string
+  lat: number
+  lon: number
+  rank: number | undefined
+  suppressed: boolean
+  expanded: boolean
+}) {
+  const category = poiCategoryById(categoryId)
+  const Icon = category?.icon ?? MapPin
+  return (
+    <Marker latitude={lat} longitude={lon} style={expanded ? RAISED_MARKER_STYLE : BASE_MARKER_STYLE}>
+      <div className="relative" aria-label={`Point of interest: ${name || category?.label || categoryId}`}>
+        <div
+          data-testid={expanded ? 'poi-marker-expanded' : undefined}
+          className={cn(
+            'relative flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card shadow-md',
+            // Subtle: the ranked list's own row already carries the
+            // full summary, this ring only helps the eye match
+            // that row back to its marker on the map.
+            expanded && 'ring-2 ring-primary ring-offset-1 ring-offset-background',
+          )}
+        >
+          <Icon className="h-5 w-5 text-foreground" />
+          {rank !== undefined && (
+            <span
+              data-testid={`poi-marker-rank-${id}`}
+              className="absolute -right-1 -top-1 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[9px] font-bold leading-none text-primary-foreground"
+            >
+              {rank}
+            </span>
+          )}
+        </div>
+        {/* Out of flow, so the marker box is only the icon: the projected
+            point is the icon's centre, whether or not declutter has hidden
+            the label, and the arrow's clearances are measured from it. */}
+        {!suppressed && name && (
+          <div className={`absolute left-1/2 top-full mt-0.5 max-w-28 -translate-x-1/2 truncate text-center text-xs font-semibold text-white ${MAP_LABEL_HALO}`}>
+            {name}
+          </div>
+        )}
+      </div>
+    </Marker>
+  )
+})
 
 function PoiListRow({
   rank,

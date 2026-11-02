@@ -163,7 +163,7 @@ const (
 var validClusterFuelSides = map[string]bool{"left": true, "right": true}
 
 // POI map widgets (ADR 0091 phase 3b) are the sixth multi-instance widget: a
-// moving map of points of interest near the vessel, following the same
+// map of points of interest near the vessel, following the same
 // <kind>:<token> id scheme every other multi-instance widget uses.
 const poiMapWidgetIDPrefix = "poi-map:"
 

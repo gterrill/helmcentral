@@ -23,7 +23,7 @@ export function useCyclingIndex(count: number, intervalSeconds: number, resetKey
 
   // Reset during render, not in an effect: an effect would let one render
   // through with the old index, and a caller that acts on each new index
-  // (the Nearby map flies to it) would start toward a place that has moved.
+  // (the Nearby map's arrow points at it) would aim at a place that has moved.
   const resetting = resetKey !== lastResetKey
   if (resetting) {
     setLastResetKey(resetKey)

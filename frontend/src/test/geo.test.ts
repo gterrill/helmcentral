@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { haversineMeters, bearingDeg, circlePolygon, destinationPoint } from '@/lib/geo'
+import { haversineMeters, bearingDeg, circlePolygon, destinationPoint, lonNearest } from '@/lib/geo'
 
 describe('circlePolygon', () => {
   it('is a closed [lon, lat] ring at the radius from the centre', () => {
@@ -51,5 +51,17 @@ describe('destinationPoint', () => {
     const bearing = bearingDeg(37.8, -122.4, lat, lon)
     expect(distance).toBeCloseTo(5000, 0)
     expect(bearing).toBeCloseTo(90, 0)
+  })
+})
+
+describe('lonNearest', () => {
+  it('leaves a longitude within 180 degrees of the reference alone', () => {
+    expect(lonNearest(149.2, 148.9)).toBe(149.2)
+    expect(lonNearest(-3, 4)).toBe(-3)
+  })
+
+  it('moves a longitude across the antimeridian to the copy nearest the reference', () => {
+    expect(lonNearest(-179.9, 179.9)).toBeCloseTo(180.1, 9)
+    expect(lonNearest(179.9, -179.9)).toBeCloseTo(-180.1, 9)
   })
 })

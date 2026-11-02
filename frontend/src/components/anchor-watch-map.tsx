@@ -33,6 +33,7 @@ import {
 import {
   MAP_LABEL_HALO,
   resolveMarkerLabelSuppression,
+  suppressedIdsEqual,
   markerScaleForZoom,
   AIS_LABEL_COLLISION_RADIUS_PX,
   LABEL_COLLISION_RADIUS_PX,
@@ -230,18 +231,6 @@ function trailToGeoJSON(points: TrailPoint[]): GeoJSON.Feature<GeoJSON.LineStrin
     },
     properties: {},
   }
-}
-
-// Two label-suppression sets are equal when their contents match,
-// regardless of identity - used so the AIS-label effect below only calls
-// setState (and forces a second full render of this 1,748-line map) when
-// the result actually changed.
-function suppressedIdsEqual(a: Set<string>, b: Set<string>): boolean {
-  if (a.size !== b.size) return false
-  for (const id of a) {
-    if (!b.has(id)) return false
-  }
-  return true
 }
 
 // A map click that hasn't been committed to a placemark yet — the tooltip
