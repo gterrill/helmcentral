@@ -121,6 +121,24 @@ appeared first if two others are showing.
 
 ## Later
 
+The moment grows the whole sign card, not just its photo. The geometry contract
+changed with it: `momentRect` takes the card as it stands on the map and the
+card's own size, and returns the card's rectangle, the photo's rectangle, the
+factor the card is made bigger by, and the slow zoom, which is for the photo
+inside its frame alone. The page lays the card out at its own size and scales it
+by a transform, and the video draws the same card at that scale, so the caption
+wraps as it does on the map. The card's place on the map comes from
+`placeSignCard`, which now keeps the card whole inside the map (above, then
+below, then beside the point, and smaller if none fits), so the moment starts
+from where the card really is. It returns one result, the card's rectangle, its
+scale, its place against the point and the leader to it, which the page's map,
+the video's canvas and the exported player all draw. A card keeps its place
+until it no longer fits, and the notes are wrapped by measuring the text
+(`lib/sign-note`), so every drawing of a card is the same height. On a short
+map the moment grows the card to ninety percent of the frame, not seventy, when
+seventy would barely enlarge it.
+
+
 The hold is now general. A photo moment is one kind of hold, and a stay between
 two passages of a cruise is another, of its own length. The time map keeps a
 single ordered list of holds, so seeking, skipping, the controller's frame and

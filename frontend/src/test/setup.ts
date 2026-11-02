@@ -1,8 +1,14 @@
 import '@testing-library/jest-dom'
-import { afterEach, beforeEach } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import { resetQueryStore } from '@/lib/api-query'
 import { resetTelemetryStoresForTest } from '@/lib/test-reset'
 import { setViewportWidth } from './viewport'
+
+// jsdom has no canvas to measure text with. The sign cards wrap their notes by measuring them, so tests measure at 6 px a character; a test of the real measure takes it back with vi.importActual.
+vi.mock('@/lib/sign-note', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/sign-note')>()),
+  signMeasure: () => (text: string) => text.length * 6,
+}))
 
 // jsdom doesn't implement the Popover API. The real @oddbird/popover-polyfill
 // (used in production) depends on document.adoptedStyleSheets, which jsdom

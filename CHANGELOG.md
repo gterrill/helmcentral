@@ -33,8 +33,29 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   nearest matches, however wide the range is. The range still sets how far
   Helmcentral searches.
 
+- **A photo moment now grows the whole sign card.** The card's frame and its
+  title and note grow with the photo, to fill about seventy percent of the map,
+  so you can read the caption as well as see the picture. On a short map, where
+  seventy percent would hardly be bigger than the card already is, it grows up
+  to ninety percent of the map's height instead, and never smaller than it was.
+  Only the photo zooms slowly inside its frame while the card holds still. The
+  video you export does the same. With reduced motion the card shows at full
+  size for the moment and then goes.
+
 ### Fixed
 
+- **A sign card no longer runs off the map.** On a short map, such as a wide
+  one 400 pixels high, a card whose boat was near the middle could hang off the
+  bottom, with the lower part of its photo and the whole caption cut off. The
+  card now always stays whole inside the map: above the boat if there is room,
+  else below it, else beside it, and if the map is too short for any of those it
+  is shown smaller. A card stays on the side of the boat it is on until that side
+  has no room, so it doesn't jump across as the camera moves. When the boat has
+  just crossed the edge of the map its card stays whole inside it, with no line to
+  the boat, and a boat far off the map shows no card. The notes are wrapped by
+  measuring the text, so the card on the map, the photo moment and the video agree
+  on the card's height. The video's cards and the cards in the HTML card you put on
+  your blog follow the same rule.
 - **Collision Profile Not Changed no longer goes stale or floods the log.** If
   the boat moves to a navigation state with no collision profile of its own,
   the warning now clears after about a minute, once Helmcentral can read the

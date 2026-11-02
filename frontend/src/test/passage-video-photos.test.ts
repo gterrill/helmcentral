@@ -11,11 +11,16 @@ const sign = (id: string, photo = true): ReplaySign => ({
 afterEach(() => { vi.unstubAllGlobals() })
 
 describe('photoDrawWidth', () => {
-  it('is the width of the moment at full size, with room for its slow zoom', () => {
-    // 70 percent of 1080 high is 756, as wide as 4:3 makes 1008; the slow zoom is 6 percent more.
-    expect(photoDrawWidth(VIDEO_SIZES.landscape)).toBe(Math.ceil(1008 * 1.06))
-    // Portrait is limited by its width: 70 percent of 1080.
-    expect(photoDrawWidth(VIDEO_SIZES.portrait)).toBe(Math.ceil(756 * 1.06))
+  it('is the photo in the biggest card a moment makes, to the end of the slow zoom, in the video\'s pixels', () => {
+    // Landscape: the frame is 1280 by 720 in the card's pixels, and 70 percent of the 720 high is 504, 2.25 times the 224 high card. The 240 wide photo is then 540, made 1.5 times bigger for the video and 6 percent more by the zoom.
+    expect(photoDrawWidth(VIDEO_SIZES.landscape)).toBe(Math.ceil(240 * 2.25 * 1.5 * 1.06))
+    // Portrait: 720 wide, and 70 percent of it is 504, 1.96875 times the card's 256.
+    expect(photoDrawWidth(VIDEO_SIZES.portrait)).toBe(Math.ceil(240 * 1.96875 * 1.5 * 1.06))
+  })
+
+  it('is less than the width of the frame, which the old rule gave it', () => {
+    expect(photoDrawWidth(VIDEO_SIZES.landscape)).toBeLessThan(1068)
+    expect(photoDrawWidth(VIDEO_SIZES.portrait)).toBeLessThan(VIDEO_SIZES.portrait.width)
   })
 })
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { MOMENT_FRAME_FRACTION, MOMENT_GROW_S, MOMENT_TOTAL_S, buildReplayTime, momentRect, momentView, playedIds } from '@/lib/replay-time'
+import { MOMENT_FRAME_FRACTION, MOMENT_GROW_S, MOMENT_TOTAL_S, buildReplayTime, momentGrowth, momentRect, momentView, playedIds } from '@/lib/replay-time'
 
 // 1000 timeline seconds watched in 10: 100 timeline seconds a second at full pace.
 const TOTAL = 1000
@@ -196,51 +196,154 @@ describe('momentView', () => {
 })
 
 describe('momentRect', () => {
-  const card = { x: 100, y: 50, w: 240, h: 180 }
+  // A card with a photo: 256 by 224 at its own size.
+  const face = { w: 256, h: 224 }
+  const card = { x: 100, y: 50, w: 256, h: 224 }
   const frame = { w: 1000, h: 400 }
+  const full = (view = momentView('a', MOMENT_GROW_S + 0.1, false), c = card, f = frame, fc = face) => momentRect(view, c, fc, f)
+  const fits = (r: { x: number; y: number; w: number; h: number }, f: { w: number; h: number }) => {
+    expect(r.x).toBeGreaterThanOrEqual(0)
+    expect(r.y).toBeGreaterThanOrEqual(0)
+    expect(r.x + r.w).toBeLessThanOrEqual(f.w + 1e-6)
+    expect(r.y + r.h).toBeLessThanOrEqual(f.h + 1e-6)
+  }
 
-  it('is the card\'s photo at the start', () => {
-    expect(momentRect(momentView('a', 0, false), card, frame)).toEqual({ ...card, scale: 1 })
+  it('is the card as it stands on the map at the start', () => {
+    const r = momentRect(momentView('a', 0, false), card, face, frame)
+    expect(r.card).toEqual(card)
+    expect(r.k).toBe(1)
   })
 
-  it('fills 70 percent of the frame when full, in the 4 by 3 shape, in the middle', () => {
-    const r = momentRect(momentView('a', MOMENT_GROW_S + 0.1, false), card, frame)
-    // 70 percent of the 400 high, and 4 by 3: 280 high, 373 wide.
-    expect(r.h).toBeCloseTo(280)
-    expect(r.w).toBeCloseTo(373.33, 1)
-    expect(r.x).toBeCloseTo((1000 - r.w) / 2)
-    expect(r.y).toBeCloseTo(60)
+  it('is the card as it stands, smaller than its own size, when the map made it smaller', () => {
+    const small = { x: 100, y: 50, w: 128, h: 112 }
+    const r = momentRect(momentView('a', 0, false), small, face, frame)
+    expect(r.card).toEqual(small)
+    expect(r.k).toBeCloseTo(0.5)
   })
 
-  it('fits a tall frame by its width', () => {
-    const r = momentRect(momentView('a', MOMENT_GROW_S + 0.1, false), card, { w: 400, h: 1000 })
-    expect(r.w).toBeCloseTo(280)
-    expect(r.h).toBeCloseTo(210)
+  it('fills 70 percent of the frame when full: the whole card, in its own shape, in the middle', () => {
+    const r = full(undefined, card, { w: 1000, h: 600 })
+    // 70 percent of the 600 high is 420, and the card is 256 by 224: 480 wide.
+    expect(r.card.h).toBeCloseTo(420)
+    expect(r.card.w).toBeCloseTo(480)
+    expect(r.card.x).toBeCloseTo((1000 - r.card.w) / 2)
+    expect(r.card.y).toBeCloseTo(90)
+    expect(r.k).toBeCloseTo(1.875)
+    expect(r.card.w / r.card.h).toBeCloseTo(256 / 224, 5)
+  })
+
+  describe('on a map too short for 70 percent to be much of a growth', () => {
+    it('grows it, up to 90 percent of the frame, when 70 percent would be under 1.25 times the card', () => {
+      // 300 high: 70 percent is 210, a card of 224 would shrink. 90 percent is 270.
+      const r = full(undefined, card, { w: 1076, h: 300 })
+      expect(r.card.h).toBeCloseTo(270)
+      expect(r.k).toBeCloseTo(270 / 224, 5)
+      expect(r.k).toBeGreaterThan(1)
+      fits(r.card, { w: 1076, h: 300 })
+    })
+
+    it('does so on a 416 map with a note, the card 256 high', () => {
+      const withNote = { w: 256, h: 256 }
+      const r = full(undefined, { x: 100, y: 50, w: 256, h: 256 }, { w: 1076, h: 416 }, withNote)
+      // 70 percent of 416 is 291, which is under 1.25 times 256 (320): 90 percent is 374.
+      expect(r.card.h).toBeCloseTo(374.4)
+      expect(r.k).toBeCloseTo(1.4625)
+      fits(r.card, { w: 1076, h: 416 })
+    })
+
+    it('does so for a card 264 high', () => {
+      const tall = { w: 256, h: 264 }
+      const r = full(undefined, { x: 100, y: 50, w: 256, h: 264 }, { w: 1076, h: 416 }, tall)
+      expect(r.card.h).toBeCloseTo(374.4)
+      expect(r.k).toBeGreaterThan(1.4)
+      fits(r.card, { w: 1076, h: 416 })
+    })
+
+    it('never makes the card smaller than it stands on the map, and always fits the frame', () => {
+      for (const h of [120, 200, 224, 260, 300, 416, 800]) {
+        const r = full(undefined, card, { w: 1076, h })
+        if (h >= 224) expect(r.card.w).toBeGreaterThanOrEqual(256 - 1e-6)
+        fits(r.card, { w: 1076, h })
+      }
+      // Already made smaller by a short map: it grows from there.
+      const small = { x: 300, y: 20, w: 230, h: 201.6 }
+      const r = full(undefined, small, { w: 1076, h: 260 }, face)
+      expect(r.card.w).toBeGreaterThan(small.w)
+      fits(r.card, { w: 1076, h: 260 })
+    })
+  })
+
+  it('fits inside a short, wide map: 1076 by 416, in the middle', () => {
+    const r = full(undefined, card, { w: 1076, h: 416 })
+    fits(r.card, { w: 1076, h: 416 })
+    expect(r.card.x + r.card.w / 2).toBeCloseTo(538)
+    expect(r.card.y + r.card.h / 2).toBeCloseTo(208)
+  })
+
+  it('fits a tall frame by its width, in portrait', () => {
+    const r = full(undefined, card, { w: 1080, h: 1920 })
+    // 70 percent of 1080 wide is 756, and the card is 256 by 224: 662 high.
+    expect(r.card.w).toBeCloseTo(756)
+    expect(r.card.h).toBeCloseTo(661.5, 0)
+    expect(r.card.x).toBeCloseTo(162)
+    fits(r.card, { w: 1080, h: 1920 })
+    const narrow = full(undefined, card, { w: 400, h: 1000 })
+    // 70 percent of 400 is 280, barely more than the card: it takes up to 90 percent, 360.
+    expect(narrow.card.w).toBeCloseTo(360)
+    fits(narrow.card, { w: 400, h: 1000 })
+  })
+
+  it('fits a text-only card too, by its own shape', () => {
+    const text = { w: 224, h: 56 }
+    const r = momentRect(momentView('a', MOMENT_GROW_S + 0.1, false), { x: 10, y: 10, w: 224, h: 56 }, text, frame)
+    // 70 percent of the 1000 wide frame, the shape of a wide, low card.
+    expect(r.card.w).toBeCloseTo(700)
+    expect(r.card.h).toBeCloseTo(175)
+    fits(r.card, frame)
   })
 
   it('is between the two while it grows and shrinks, and the same either way round', () => {
-    const grow = momentRect(momentView('a', 0.2, false), card, frame)
-    expect(grow.w).toBeGreaterThan(card.w)
-    expect(grow.w).toBeLessThan(373.4)
-    expect(grow.x).toBeGreaterThan(card.x)
-    const shrink = momentRect(momentView('a', MOMENT_TOTAL_S - 0.2, false), card, frame)
-    expect(shrink.w).toBeCloseTo(grow.w, 3)
+    const grow = momentRect(momentView('a', 0.2, false), card, face, { w: 1000, h: 600 })
+    expect(grow.card.w).toBeGreaterThan(card.w)
+    expect(grow.card.w).toBeLessThan(480.1)
+    expect(grow.card.x).toBeGreaterThan(card.x)
+    const shrink = momentRect(momentView('a', MOMENT_TOTAL_S - 0.2, false), card, face, { w: 1000, h: 600 })
+    expect(shrink.card.w).toBeCloseTo(grow.card.w, 3)
   })
 
-  it('carries the zoom inside the frame', () => {
-    expect(momentRect(momentView('a', MOMENT_GROW_S + 0.75, false), card, frame).scale).toBeGreaterThan(1)
+  it('carries the slow zoom, for the photo inside its frame alone', () => {
+    const early = full(momentView('a', MOMENT_GROW_S + 0.1, false))
+    const late = full(momentView('a', MOMENT_GROW_S + 1.3, false))
+    expect(late.zoom).toBeGreaterThan(early.zoom)
+    expect(late.zoom).toBeLessThanOrEqual(1.06)
+    // The card does not move through the hold.
+    expect(late.card).toEqual(early.card)
+    expect(late.k).toBe(early.k)
   })
 
-  it('is full from the first moment with reduced motion', () => {
-    const r = momentRect(momentView('a', 0, true), card, frame)
-    expect(r.h).toBeCloseTo(280)
+  it('is full from the first moment with reduced motion, and still', () => {
+    const r = momentRect(momentView('a', 0, true), card, face, { w: 1000, h: 600 })
+    expect(r.card.h).toBeCloseTo(420)
+    expect(r.zoom).toBe(1)
+    expect(momentRect(momentView('a', 1.2, true), card, face, { w: 1000, h: 600 })).toEqual(r)
   })
 
   it('depends on its inputs alone', () => {
     const v = momentView('a', 0.3, false)
-    const a = momentRect(v, card, frame)
-    momentRect(momentView('a', 1, false), { x: 0, y: 0, w: 1, h: 1 }, { w: 10, h: 10 })
-    expect(momentRect(v, card, frame)).toEqual(a)
+    const a = momentRect(v, card, face, frame)
+    momentRect(momentView('a', 1, false), { x: 0, y: 0, w: 1, h: 1 }, { w: 1, h: 1 }, { w: 10, h: 10 })
+    expect(momentRect(v, card, face, frame)).toEqual(a)
+  })
+})
+
+describe('momentGrowth', () => {
+  it('is the 70 percent fill where that is a real growth', () => {
+    expect(momentGrowth({ w: 256, h: 224 }, { w: 1000, h: 600 })).toBeCloseTo(1.875)
+  })
+  it('is never below what the card already is, nor beyond the frame', () => {
+    expect(momentGrowth({ w: 256, h: 224 }, { w: 1076, h: 200 }, 0.8)).toBeGreaterThanOrEqual(0.8)
+    expect(momentGrowth({ w: 256, h: 224 }, { w: 1076, h: 200 }, 0.8) * 224).toBeLessThanOrEqual(200)
+    expect(momentGrowth({ w: 256, h: 224 }, { w: 100, h: 100 }) * 256).toBeLessThanOrEqual(100)
   })
 })
 

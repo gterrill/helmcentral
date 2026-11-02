@@ -1,13 +1,14 @@
 import type maplibregl from 'maplibre-gl'
 
 import { openOffscreenMap } from '@/lib/offscreen-map'
+import { measureWithCanvas } from '@/lib/text-measure'
 import { seamarkLayer } from '@/lib/replay-map-style'
 
 import { worldImageryVisibleAtZoom } from '@/lib/world-imagery'
 import { addExportImagery } from '@/lib/passage-export-style'
 import type { ExportData } from '@/lib/passage-export'
 import { exportLegSegments } from '@/lib/passage-legs'
-import { IMAGE_SIZES, composeImageLayout, mapCropRect, paintOverlay, roundRectPath, type ImageKind, type ImageLayout, type Measure } from '@/lib/passage-export-layout'
+import { IMAGE_SIZES, composeImageLayout, mapCropRect, paintOverlay, roundRectPath, type ImageKind, type ImageLayout } from '@/lib/passage-export-layout'
 
 // Static images of a passage for the blog's feature image or a social card
 // (ADR 0174). The map is drawn offscreen with MapLibre in the same Voyager and
@@ -166,14 +167,4 @@ export async function renderPassageImage(data: ExportData, kind: ImageKind, sate
   return await new Promise<Blob>((resolve, reject) => {
     out.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode the image'))), 'image/png')
   })
-}
-
-/** Measures text with a canvas, as it will be drawn. */
-export function measureWithCanvas(): Measure {
-  const ctx = document.createElement('canvas').getContext('2d')
-  if (!ctx) throw new Error('This browser cannot draw the image')
-  return (text, f) => {
-    ctx.font = f
-    return ctx.measureText(text).width
-  }
 }

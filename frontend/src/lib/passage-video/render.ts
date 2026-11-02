@@ -20,6 +20,7 @@ import { createCanvasCompositor, type Compositor } from '@/lib/passage-video/dra
 import { checkEncoderSupport, createVideoSink, type VideoSink } from '@/lib/passage-video/encoder'
 import { PassageVideoError, cancelled } from '@/lib/passage-video/errors'
 import { buildOverlay } from '@/lib/passage-video/overlay'
+import type { CardMode } from '@/lib/replay-signs'
 import { loadPhotos, photoDrawWidth, type PhotoSet } from '@/lib/passage-video/photos'
 import { FPS, VIDEO_SIZES, frameSchedule, type VideoSize } from '@/lib/passage-video/schedule'
 import type { SceneFrame, SceneSpec, VideoScene } from '@/lib/passage-video/scene'
@@ -123,6 +124,8 @@ export async function renderPassageVideo(input: PassageVideoInput, options: Rend
     const landing = introLanding(framing, config.timeline)
 
     const controller = new ReplayController()
+    // Where each card was put last frame, so it keeps its place while it fits.
+    const modes = new Map<string, CardMode>()
     const frameMs = 1000 / FPS
     const introMs = schedule.intro * frameMs
     controller.startIntro(start, landing, 0)
@@ -137,7 +140,7 @@ export async function renderPassageVideo(input: PassageVideoInput, options: Rend
       scene!.show(f)
       await raceCancel(scene!.settle(index, schedule.total), signal)
       const model = buildOverlay({
-        frame: f.frame, size, project: (lon, lat) => scene!.project(lon, lat), wall, firstSeen, bitmaps,
+        frame: f.frame, size, project: (lon, lat) => scene!.project(lon, lat), wall, firstSeen, modes, bitmaps,
         momentSign: f.frame.moment ? momentSigns.get(f.frame.moment.signId) : undefined, boatDot: scene!.boatDot, measure: compositor.measure,
       })
       compositor.frame(scene!.canvas, model)

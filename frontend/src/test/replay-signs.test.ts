@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { buildTimeline, type TimedSegment } from '@/lib/passages'
-import { MAX_SIGN_CARDS, SIGN_LEAD_S, momentsOf, placeSignCard, resolveSigns, signCardBox, signCardPhotoRect, visibleSigns, type ReplaySign } from '@/lib/replay-signs'
+import { MAX_SIGN_CARDS, SIGN_LEAD_S, momentsOf, placeSignCard, resolveSigns, signCardBox, signCardPlacement, visibleSigns, type CardMode, type ReplaySign } from '@/lib/replay-signs'
 
 const sign = (id: string, t: number, extra: Partial<ReplaySign> = {}): ReplaySign => ({
   id, t_ms: t * 1000, title: id, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, photo_moment: null, ...extra,
@@ -133,54 +133,109 @@ describe('placeSignCard', () => {
   const container = { w: 800, h: 600 }
   const card = { w: 256, h: 220 }
   const base = { container, card, lift: 20 }
+  const inside = (r: { x: number; y: number; w: number; h: number }, c = container) => {
+    expect(r.x).toBeGreaterThanOrEqual(-1e-6)
+    expect(r.x + r.w).toBeLessThanOrEqual(c.w + 1e-6)
+    expect(r.y).toBeGreaterThanOrEqual(6 - 1e-6)
+    expect(r.y + r.h).toBeLessThanOrEqual(c.h - 6 + 1e-6)
+  }
 
-  it('leaves a card alone when it fits above its point', () => {
-    expect(placeSignCard({ ...base, point: { x: 400, y: 400 } })).toEqual({ dx: 0, below: false, leader: 20 })
+  it('leaves a card alone when it fits above its point, the leader running up to it', () => {
+    const r = placeSignCard({ ...base, point: { x: 400, y: 400 } })
+    expect(r).toMatchObject({ mode: 'above', scale: 1, hidden: false, rect: { x: 272, y: 156, w: 256, h: 220 } })
+    expect(r.leader).toEqual({ x1: 400, y1: 400, x2: 400, y2: 376 })
   })
 
-  it('shifts a card left past the right edge and right past the left edge', () => {
-    // card centred on 780 ends at 908; it must end at 794
-    expect(placeSignCard({ ...base, point: { x: 780, y: 400 } }).dx).toBe(-114)
-    expect(placeSignCard({ ...base, point: { x: 20, y: 400 } }).dx).toBe(114)
+  it('slides a card left past the right edge and right past the left edge, the leader still on it', () => {
+    const right = placeSignCard({ ...base, point: { x: 780, y: 400 } })
+    expect(right.rect.x).toBe(800 - 6 - 256)
+    expect(right.leader!.x2).toBe(780)
+    expect(right.leader!.x2).toBeLessThanOrEqual(right.rect.x + right.rect.w)
+    const left = placeSignCard({ ...base, point: { x: 20, y: 400 } })
+    expect(left.rect.x).toBe(6)
+    expect(left.leader!.x2).toBe(20)
   })
 
-  it('never shifts so far that the leader leaves the card', () => {
-    expect(placeSignCard({ ...base, point: { x: -500, y: 400 } }).dx).toBe(122)
-    expect(placeSignCard({ ...base, point: { x: 1500, y: 400 } }).dx).toBe(-122)
+  it('puts a card beside a point at the very edge of the map, where the leader could not meet a card that stays whole', () => {
+    const r = placeSignCard({ ...base, point: { x: 2, y: 400 } })
+    expect(r.mode).toBe('right')
+    inside(r.rect)
+    expect(r.leader).not.toBeNull()
   })
 
-  it('centres a card wider than the map, and copes with a tiny one', () => {
-    expect(placeSignCard({ ...base, container: { w: 200, h: 600 }, point: { x: 50, y: 400 } }).dx).toBe(0)
-    expect(placeSignCard({ ...base, card: { w: 4, h: 220 }, point: { x: 790, y: 400 } }).dx).toBe(0)
+  it('keeps a card whole when its point has just crossed the edge, with no leader to run', () => {
+    for (const x of [-1, -10, -40, 801, 810, 840]) {
+      const r = placeSignCard({ ...base, point: { x, y: 400 } })
+      inside(r.rect)
+      expect(r.hidden).toBe(false)
+      expect(r.leader).toBeNull()
+    }
+    const above = placeSignCard({ ...base, point: { x: 400, y: -20 } })
+    inside(above.rect)
+    expect(above.leader).toBeNull()
+  })
+
+  it('shows no card for a point far off the map, which would be off it with its point', () => {
+    for (const point of [{ x: -500, y: 400 }, { x: 1500, y: 400 }, { x: 400, y: -900 }, { x: 400, y: 1900 }]) {
+      expect(placeSignCard({ ...base, point }).hidden).toBe(true)
+    }
+  })
+
+  it('shrinks a card wider than the map to fit it, and copes with a tiny one', () => {
+    const r = placeSignCard({ ...base, container: { w: 200, h: 600 }, point: { x: 50, y: 400 } })
+    inside(r.rect, { w: 200, h: 600 })
+    expect(r.scale).toBeLessThan(1)
+    expect(placeSignCard({ ...base, card: { w: 4, h: 220 }, point: { x: 790, y: 400 } }).hidden).toBe(false)
   })
 
   it('leaves the card as preferred while its size or the map size is unknown', () => {
-    expect(placeSignCard({ ...base, card: { w: 0, h: 0 }, point: { x: 790, y: 10 } })).toEqual({ dx: 0, below: false, leader: 20 })
-    expect(placeSignCard({ ...base, container: { w: 0, h: 0 }, point: { x: 790, y: 10 } })).toEqual({ dx: 0, below: false, leader: 20 })
+    expect(placeSignCard({ ...base, card: { w: 0, h: 0 }, point: { x: 790, y: 10 } })).toMatchObject({ mode: 'above', scale: 1, hidden: false })
+    const r = placeSignCard({ ...base, container: { w: 0, h: 0 }, point: { x: 790, y: 10 } })
+    expect(r.mode).toBe('above')
+    expect(r.leader).toEqual({ x1: 790, y1: 10, x2: 790, y2: 10 - 4 - 20 })
   })
 
   it('puts the card below its point when there is no room above', () => {
     const r = placeSignCard({ ...base, point: { x: 400, y: 120 } })
-    expect(r.below).toBe(true)
-    expect(r.leader).toBe(20)
+    expect(r.mode).toBe('below')
+    expect(r.rect.y).toBe(120 + 4 + 20)
+    expect(r.leader).toEqual({ x1: 400, y1: 120, x2: 400, y2: 144 })
   })
 
-  it('stays above, leader squeezed to the minimum, when neither side has room', () => {
-    expect(placeSignCard({ ...base, container: { w: 800, h: 300 }, point: { x: 400, y: 200 } })).toMatchObject({ below: false, leader: 8 })
+  it('goes beside its point when there is room neither above nor below, centred on it as far as the map allows', () => {
+    const r = placeSignCard({ ...base, container: { w: 800, h: 300 }, point: { x: 400, y: 200 } })
+    expect(r.mode).toBe('right')
+    expect(r.scale).toBe(1)
+    expect(r.rect).toEqual({ x: 420, y: 74, w: 256, h: 220 })
+    expect(r.leader).toEqual({ x1: 400, y1: 200, x2: 420, y2: 200 })
   })
 
   it('keeps the top margin clear: a card does not run under the map controls', () => {
     // room above = 260 - 220 - 48 = -8: not enough, so it goes below
-    expect(placeSignCard({ ...base, point: { x: 400, y: 260 } }).below).toBe(true)
+    expect(placeSignCard({ ...base, point: { x: 400, y: 260 } }).mode).toBe('below')
     // 48 + 220 + 8 above the point is just enough, with the leader shortened to 8
-    expect(placeSignCard({ ...base, point: { x: 400, y: 276 } })).toMatchObject({ below: false, leader: 8 })
+    const r = placeSignCard({ ...base, point: { x: 400, y: 276 } })
+    expect(r.mode).toBe('above')
+    expect(r.leader!.y1 - r.leader!.y2).toBe(12)
+  })
+
+  it('does not drop the top margin to put a card beside its point on a short map: it is made smaller instead', () => {
+    const c = { w: 1076, h: 260 }
+    const r = placeSignCard({ container: c, card: { w: 256, h: 224 }, lift: 20, point: { x: 538, y: 130 } })
+    expect(r.scale).toBeLessThan(1)
+    expect(r.rect.y).toBeGreaterThanOrEqual(48)
+    inside(r.rect, c)
+    // The same card on a map tall enough keeps its full size and the margin.
+    const tall = placeSignCard({ container: { w: 1076, h: 300 }, card: { w: 256, h: 224 }, lift: 20, point: { x: 538, y: 150 } })
+    expect(tall.scale).toBe(1)
+    expect(tall.rect.y).toBeGreaterThanOrEqual(48)
   })
 
   it('shortens the second card leader so it fits a 416px map', () => {
     const r = placeSignCard({ container: { w: 800, h: 416 }, card, lift: 104, point: { x: 400, y: 300 } })
-    expect(r.below).toBe(false)
-    expect(r.leader).toBe(32)
-    expect(300 - r.leader - 220).toBeGreaterThanOrEqual(48)
+    expect(r.mode).toBe('above')
+    expect(r.leader!.y1 - r.leader!.y2).toBe(32 + 4)
+    expect(r.rect.y).toBeGreaterThanOrEqual(44)
   })
 })
 
@@ -203,64 +258,147 @@ describe('momentsOf', () => {
   })
 })
 
-describe('signCardPhotoRect', () => {
-  const container = { w: 1000, h: 400 }
-  const at = (point: { x: number; y: number }, extra: Partial<ReplaySign> = {}, lift = 20, box = container) =>
-    signCardPhotoRect(sign('a', 0, { photo_url: '/p', document_id: 'd', ...extra }), point, box, lift)
+describe('a card keeps the place it has while it fits', () => {
+  const c = { w: 1076, h: 416 }
+  const card = { w: 256, h: 224 }
+  const at = (x: number, y: number, previous?: CardMode) => placeSignCard({ container: c, card, lift: 20, point: { x, y }, previous })
 
-  it('is the photo inside a card that floats above its point on the leader', () => {
-    // 256 wide with 8 around the photo: 240 by 180. The card is centred over the point.
-    expect(at({ x: 500, y: 300 })).toEqual({ x: 380, y: 60, w: 240, h: 180 })
+  it('does not flip across the boat as the camera dithers about the middle of the map', () => {
+    // With no memory the side follows whichever has more room.
+    expect([at(530, 215).mode, at(546, 215).mode]).toEqual(['right', 'left'])
+    // With it, a card put on the right stays there across the middle.
+    let mode: CardMode | undefined
+    const seen = [530, 538, 546, 550, 541, 533, 538].map((x) => { mode = at(x, 215, mode).mode; return mode })
+    expect(new Set(seen)).toEqual(new Set(['right']))
   })
 
-  it('moves up with a note, which makes the card taller', () => {
-    const noted = at({ x: 500, y: 300 }, { note: 'A humpback off the bow, very close' })
-    expect(noted.y).toBeLessThan(60)
-    expect(noted.h).toBe(180)
+  it('leaves the side it has only when that side runs out of room', () => {
+    let mode: CardMode | undefined = at(500, 215).mode
+    expect(mode).toBe('right')
+    // Still room on the right for a card standing 20 px off the point: until the point is 6 + 256 + 20 from the edge.
+    expect(at(1076 - 6 - 256 - 20, 215, mode).mode).toBe('right')
+    expect(at(1076 - 6 - 256 - 20 + 2, 215, mode).mode).toBe('left')
   })
 
-  it('floats higher for a card in the second place', () => {
-    expect(at({ x: 500, y: 300 }, {}, 104).y).toBeLessThan(at({ x: 500, y: 300 }).y)
+  it('does not hop between above and below on small moves of the camera', () => {
+    const tall = { w: 800, h: 600 }
+    const put = (y: number, previous?: CardMode) => placeSignCard({ container: tall, card: { w: 256, h: 220 }, lift: 20, point: { x: 400, y }, previous })
+    // At y=300 both fit; above wins with no memory, and below is kept when that is where it was.
+    expect(put(300).mode).toBe('above')
+    expect(put(300, 'below').mode).toBe('below')
+    let mode: CardMode | undefined = 'below'
+    for (const y of [300, 290, 310, 296, 304]) mode = put(y, mode).mode
+    expect(mode).toBe('below')
+    // Out of room below, it goes above.
+    expect(put(560, 'below').mode).toBe('above')
   })
 
-  it('goes under its point when there is no room above it', () => {
-    const r = at({ x: 500, y: 60 })
-    expect(r.y).toBeGreaterThan(60)
+  it('does not hop between beside and above either', () => {
+    const put = (y: number, previous?: CardMode) => placeSignCard({ container: c, card, lift: 20, point: { x: 538, y }, previous })
+    // y=330: above has room (330-224-48 = 58). Put beside, it stays beside.
+    expect(put(330).mode).toBe('above')
+    expect(put(330, 'right').mode).toBe('right')
+    // Run out of room beside (too tall for the map): back to above.
+    const short = placeSignCard({ container: { w: 1076, h: 260 }, card, lift: 20, point: { x: 538, y: 250 }, previous: 'right' })
+    expect(short.mode === 'right' ? short.scale : 1).toBeLessThan(1.0001)
   })
 
-  it('slides along to stay inside the map', () => {
-    const r = at({ x: 20, y: 300 })
-    expect(r.x).toBeGreaterThanOrEqual(6)
-    expect(at({ x: 990, y: 300 }).x + 240).toBeLessThanOrEqual(1000 - 6 + 8)
-  })
-
-  it('narrows to a narrow map, as the card does', () => {
-    expect(at({ x: 100, y: 300 }, {}, 20, { w: 200, h: 400 }).w).toBe(200 - 2 * 6 - 2 * 8)
+  it('forgets a place that no longer exists', () => {
+    // A previous 'left' on a point at the left edge cannot be had.
+    expect(at(60, 215, 'left').mode).toBe('right')
   })
 })
 
 describe('signCardBox', () => {
   it('is 256 wide with a photo and 224 with text alone, as the card is', () => {
-    expect(signCardBox(sign('a', 0, { photo_url: '/p' }), 1000).w).toBe(256)
-    expect(signCardBox(sign('a', 0), 1000).w).toBe(224)
+    expect(signCardBox(sign('a', 0, { photo_url: '/p' }), 1000, 0).w).toBe(256)
+    expect(signCardBox(sign('a', 0), 1000, 0).w).toBe(224)
   })
 
   it('has the photo at 4 by 3 inside the padding, and the text under it', () => {
-    const b = signCardBox(sign('a', 0, { photo_url: '/p' }), 1000)
+    const b = signCardBox(sign('a', 0, { photo_url: '/p' }), 1000, 0)
     expect([b.photoW, b.photoH]).toEqual([240, 180])
     // padding, photo, gap, one line of title, padding
     expect(b.h).toBe(8 + 180 + 8 + 20 + 8)
   })
 
-  it('grows a line for each line of the note, to two', () => {
-    const h = (note: string) => signCardBox(sign('a', 0, { photo_url: '/p', note }), 1000).h
-    expect(h('Short')).toBe(h('') + 16)
-    expect(h('x'.repeat(60))).toBe(h('') + 32)
-    expect(h('x'.repeat(500))).toBe(h('') + 32)
-    expect(h('one\ntwo\nthree')).toBe(h('') + 32)
+  it('grows a line for each line of the note it is given', () => {
+    const h = (lines: number) => signCardBox(sign('a', 0, { photo_url: '/p' }), 1000, lines).h
+    expect(h(1)).toBe(h(0) + 16)
+    expect(h(2)).toBe(h(0) + 32)
   })
 
   it('narrows to the map, with its margins', () => {
-    expect(signCardBox(sign('a', 0, { photo_url: '/p' }), 200).w).toBe(188)
+    expect(signCardBox(sign('a', 0, { photo_url: '/p' }), 200, 0).w).toBe(188)
+  })
+})
+
+// ── always whole inside the map ───────────────────────────────────────────
+
+describe('a sign card is always whole inside the map', () => {
+  const photoSign = (extra: Partial<ReplaySign> = {}) => sign('a', 0, { photo_url: '/p', document_id: 'd', title: 'Everyone is heading south for summer', ...extra })
+  /** The card's rectangle must lie within the map, less the margin kept above the foot and below the controls. */
+  const inside = (r: { x: number; y: number; w: number; h: number }, c: { w: number; h: number }) => {
+    expect(r.x).toBeGreaterThanOrEqual(-1e-6)
+    expect(r.x + r.w).toBeLessThanOrEqual(c.w + 1e-6)
+    expect(r.y).toBeGreaterThanOrEqual(6 - 1e-6)
+    expect(r.y + r.h).toBeLessThanOrEqual(c.h - 6 + 1e-6)
+  }
+  const sweep = (c: { w: number; h: number }, sg: ReplaySign, lines = 0, lift = 20, margin = 0) => {
+    const out: { x: number; y: number; p: ReturnType<typeof signCardPlacement> }[] = []
+    for (let y = -margin; y <= c.h + margin; y += c.h / 40) for (let x = -margin; x <= c.w + margin; x += c.w / 20) out.push({ x, y, p: signCardPlacement(sg, { x, y }, c, lift, lines) })
+    return out
+  }
+
+  it('does not cut it off on a 1076 by 416 map, with the boat in the lower half (the reproduced case)', () => {
+    const c = { w: 1076, h: 416 }
+    const sg = photoSign()
+    // The boat at 215 used to put a 224 high card under it, running 35 px off the foot of the map.
+    for (const y of [190, 200, 215, 228, 240]) inside(signCardPlacement(sg, { x: 538, y }, c, 20, 0).rect, c)
+    const r = signCardPlacement(sg, { x: 538, y: 215 }, c, 20, 0)
+    // Neither above nor below fits whole, so it stands beside the boat, at its full size.
+    expect(['left', 'right']).toContain(r.mode)
+    expect(r.scale).toBe(1)
+    expect(r.rect.h).toBe(224)
+  })
+
+  it('keeps the whole card, photo and caption, in the map wherever the boat is on that map', () => {
+    for (const { p } of sweep({ w: 1076, h: 416 }, photoSign())) inside(p.rect, { w: 1076, h: 416 })
+  })
+
+  it('does so for a card with a note and a long title: two lines of note', () => {
+    const c = { w: 1076, h: 416 }
+    const sg = photoSign({ title: 'Everyone is heading south for summer, and so are we, to the reef', note: 'The wind is behind us and the swell is easing off now.' })
+    expect(signCardBox(sg, c.w, 2).h).toBe(2 * 8 + 180 + 8 + 20 + 32)
+    for (const { p } of sweep(c, sg, 2)) inside(p.rect, c)
+  })
+
+  it('keeps it whole for a point just past the edge, too', () => {
+    const c = { w: 1076, h: 416 }
+    for (const { p } of sweep(c, photoSign(), 0, 20, 30)) if (!p.hidden) inside(p.rect, c)
+  })
+
+  it('scales it down to fit, instead of cutting it off, on a map too short to hold it', () => {
+    const c = { w: 1076, h: 200 }
+    const sg = photoSign()
+    for (const { p } of sweep(c, sg)) {
+      inside(p.rect, c)
+      expect(p.scale).toBeLessThan(1)
+    }
+    // Still the same card in miniature: its shape is kept.
+    const r = signCardPlacement(sg, { x: 500, y: 100 }, c, 20, 0).rect
+    expect(r.w / r.h).toBeCloseTo(256 / 224, 5)
+    inside(signCardPlacement(sg, { x: 500, y: 40 }, { w: 1076, h: 90 }, 20, 0).rect, { w: 1076, h: 90 })
+  })
+
+  it('does so in portrait, wide enough for it or not', () => {
+    for (const c of [{ w: 1080, h: 1920 }, { w: 360, h: 640 }, { w: 240, h: 640 }]) {
+      for (const { p } of sweep(c, photoSign())) inside(p.rect, c)
+    }
+  })
+
+  it('changes nothing for a card that has room', () => {
+    const r = signCardPlacement(photoSign(), { x: 538, y: 500 }, { w: 1076, h: 800 }, 20, 0)
+    expect(r).toMatchObject({ mode: 'above', scale: 1, rect: { h: 224 } })
   })
 })

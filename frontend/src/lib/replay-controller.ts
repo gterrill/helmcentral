@@ -318,14 +318,14 @@ export class ReplayController {
     // Cards come and go on watched time; before the replay has moved off the
     // start every sign is a pin, and the pins show while the sign editor is open.
     const replaying = wall > 0
-    // A photo moment: the replay is held at a sign and its photo grows from the card.
+    // A photo moment: the replay is held at a sign and its card grows, photo and caption with it.
     const inMoment = replaying && at.hold?.kind === 'moment' ? at.hold : null
     const momentSign = inMoment ? config.signs.find((r) => r.sign.id === inMoment.id) : undefined
     const moment = inMoment && momentSign ? momentView(inMoment.id, inMoment.elapsed, reduced) : null
     let cards = memo.cards.get(wall)
     if (!cards) {
       cards = replaying ? visibleSigns(config.signs, wall, (c, r) => config.time.wallAtClock(c, { onSign: true, at: r.at })) : []
-      // The photo grows from, and shrinks back into, the card, so the card is up for the whole moment.
+      // The card grows from, and shrinks back to, where it stands, so the card is up for the whole moment.
       if (momentSign && !cards.includes(momentSign)) {
         if (cards.length < MAX_SIGN_CARDS) cards = [...cards, momentSign]
         else {

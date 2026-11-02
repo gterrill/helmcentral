@@ -4,11 +4,18 @@
 import { apiBaseUrl } from '@/config/api'
 import { cancelled } from '@/lib/passage-video/errors'
 import type { ReplaySign } from '@/lib/replay-signs'
-import { MOMENT_FRAME_FRACTION, MOMENT_KEN_BURNS, PHOTO_ASPECT } from '@/lib/replay-time'
+import { UI_SCALE } from '@/lib/passage-video/overlay'
+import { SIGN_CARD_PAD_PX, SIGN_CARD_PHOTO_W_PX } from '@/lib/replay-signs'
+import { MOMENT_KEN_BURNS, momentGrowth } from '@/lib/replay-time'
 
-/** The widest a photo is ever drawn in a video of this size: its moment at full size, zoomed to the end of its slow zoom. A bitmap wider than this is memory for nothing. */
+/** The widest a photo is ever drawn in a video of this size: in its card, made
+ * as big as a photo moment makes it, and zoomed to the end of its slow zoom.
+ * A bitmap wider than this is memory for nothing. The card is the shortest a
+ * card with a photo can be (no note), which grows the most. */
 export function photoDrawWidth(size: { width: number; height: number }): number {
-  return Math.ceil(Math.min(size.width * MOMENT_FRAME_FRACTION, size.height * MOMENT_FRAME_FRACTION * PHOTO_ASPECT) * MOMENT_KEN_BURNS)
+  const card = { w: SIGN_CARD_PHOTO_W_PX, h: 2 * SIGN_CARD_PAD_PX + (SIGN_CARD_PHOTO_W_PX - 2 * SIGN_CARD_PAD_PX) * 0.75 + SIGN_CARD_PAD_PX + 20 }
+  const k = momentGrowth(card, { w: size.width / UI_SCALE, h: size.height / UI_SCALE })
+  return Math.ceil((SIGN_CARD_PHOTO_W_PX - 2 * SIGN_CARD_PAD_PX) * k * UI_SCALE * MOMENT_KEN_BURNS)
 }
 
 export interface PhotoSet {
