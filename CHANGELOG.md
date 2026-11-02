@@ -11,7 +11,34 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Breaking
+
+- **The generator role no longer tells the overnight checks about charging.**
+  They now read the power coming into the inverter. Choose your inverter under
+  **Settings → SignalK → Roles**, or the morning report's overnight finding says
+  charging wasn't checked. If your generator feeds standalone chargers instead
+  of the inverter, its charging isn't seen, so a night it charged can sit in the
+  comparison.
+
 ### Changed
+
+- **The morning report compares the late night, and counts generator charging.**
+  The overnight finding now measures each night from 10.00 PM to dawn, so an
+  evening spent charging doesn't make the usual drain look lighter than it is.
+  It shows its working: what it compared, when most of the fall came, and how
+  many nights with charging it left out. Charging is read from the inverter you
+  chose under **Settings → SignalK → Roles**, from shore or from the generator,
+  because the generator's own state doesn't change when it runs. If no inverter
+  is chosen, or it has no history, the finding says charging wasn't checked.
+  The Battery & Power tile's Dawn figure still looks at the whole night, but it
+  now skips any night with the inverter charging, so it can read lower than it
+  did. A night the inverter logged nothing for is skipped too, and the Dawn
+  hover text says "charging not checked" when there is no inverter history.
+  The finding no longer waits for the Dawn figure to find enough clean whole
+  nights, so it still runs on a boat that charges most evenings. Mate also sees
+  the nights that were compared and left out, and where the logbook puts the
+  boat, and says so when your explanation doesn't fit them. If the logbook
+  can't be read, the report says so.
 
 - **A watch's page puts its settings at the side and folds its run history.**
   The schedule, report sections and notifications now sit in a column beside

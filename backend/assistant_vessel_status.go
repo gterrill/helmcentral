@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -194,9 +195,36 @@ type vesselObservation struct {
 	Ratio                   float64 `json:"ratio"`
 	NightsCompared          int     `json:"nights_compared"`
 	NightStart              string  `json:"night_start,omitempty"`
+	// Window is the span every night was measured over. ChargingChecked says
+	// whether nights with charging were screened out; when it is false, any
+	// night in the comparison may have had charging. LastNightDate and
+	// LastNightPlace say which night this was and where the boat was.
+	Window          string `json:"window,omitempty"`
+	ChargingChecked bool   `json:"charging_checked"`
+	LastNightDate   string `json:"last_night_date,omitempty"`
+	LastNightPlace  string `json:"last_night_place,omitempty"`
+	// Nights are the nights before last night that the scan looked at, most
+	// recent first: those compared, with their rate, and those left out, with
+	// why. An empty list is not "none were left out" unless the summary says so.
+	Nights []observationNight `json:"nights,omitempty"`
 	// The night window and the bank, for a watch's chart. Not on the wire.
 	nightStart, nightEnd time.Time
 	bankPath             string
+}
+
+// placeNotKnown is the place given for a night the logbook cannot place.
+const placeNotKnown = "not known"
+
+// observationNight is one earlier night as Mate is shown it. DrainPercentPerHour
+// is set for a night that was compared; LeftOut says why a night was not.
+type observationNight struct {
+	Date                string   `json:"date"`
+	DrainPercentPerHour *float64 `json:"drain_percent_per_hour,omitempty"`
+	LeftOut             string   `json:"left_out_because,omitempty"`
+	// Place is where the Passages logbook puts the boat that night, or
+	// "not known".
+	Place      string `json:"place"`
+	start, end time.Time
 }
 
 type vesselStatusResult struct {
@@ -804,19 +832,26 @@ func (d assistantToolDeps) vesselObservationsFor(now time.Time) ([]vesselObserva
 	switch {
 	case reason != "":
 		unchecked = append(unchecked, "overnight house bank draw: "+reason)
-	case night.Basis != "history":
+	case len(night.RuleNights) == 0:
+		// The scan never reached the nights (no fix, no sun, no InfluxDB, a
+		// failed query). The tile's basis is not consulted: the rule stands on
+		// its own 22:00-to-dawn nights.
 		why := "there is no overnight history to compare against"
 		if night.Reason != nil {
 			why = *night.Reason
 		}
 		unchecked = append(unchecked, "overnight house bank draw: "+why)
-	case night.LastNightRatePercentPerHour == nil:
-		unchecked = append(unchecked, "overnight house bank draw: the last completed night has no usable record (a gap in the data, shore power, the generator, or the bank charging)")
-	case len(night.PriorNightRatesPercentPerHour) < observationMinPriorNights:
+	case night.lastNight() == nil:
+		unchecked = append(unchecked, "overnight house bank draw: the last completed night has no usable record (a gap in the data, shore power, charging, or the charge rising)")
+	case len(night.priorRates()) < observationMinPriorNights:
 		unchecked = append(unchecked, fmt.Sprintf("overnight house bank draw: only %d earlier usable nights, need %d",
-			len(night.PriorNightRatesPercentPerHour), observationMinPriorNights))
+			len(night.priorRates()), observationMinPriorNights))
 	default:
 		if o := overnightDrawObservation(night); o != nil {
+			if err := d.addNightPlaces(o); err != nil {
+				log.Printf("assistant: the logbook could not be read, so the overnight draw finding has no places: %v", err)
+				unchecked = append(unchecked, "overnight house bank draw: the logbook could not be read, so where the boat lay on each night is not known ("+firstErrorLine(err)+")")
+			}
 			observations = append(observations, *o)
 		}
 	}
@@ -828,20 +863,22 @@ func (d assistantToolDeps) vesselObservationsFor(now time.Time) ([]vesselObserva
 // there are at least observationMinPriorNights earlier nights and last night
 // drained at least observationDrawRatio times as fast and
 // observationMinExtraPercentPerHour faster than typical. The summary states the
-// figures and offers no cause.
+// working (what was compared, when the fall came, what charging was left out)
+// and offers no cause. Every night is measured from 22:00 boat time to dawn.
 func overnightDrawObservation(r overnightResult) *vesselObservation {
-	if r.LastNightRatePercentPerHour == nil || len(r.PriorNightRatesPercentPerHour) < observationMinPriorNights {
+	lastNight, prior := r.lastNight(), r.priorRates()
+	if lastNight == nil || len(prior) < observationMinPriorNights {
 		return nil
 	}
-	drains := make([]float64, len(r.PriorNightRatesPercentPerHour))
-	for i, s := range r.PriorNightRatesPercentPerHour {
+	drains := make([]float64, len(prior))
+	for i, s := range prior {
 		drains[i] = -s
 	}
 	typical, ok := medianNightRate(drains)
 	if !ok || typical <= 0 {
 		return nil
 	}
-	last := -*r.LastNightRatePercentPerHour
+	last := -*lastNight.RatePercentPerHour
 	if last < typical*observationDrawRatio || last-typical < observationMinExtraPercentPerHour {
 		return nil
 	}
@@ -851,15 +888,183 @@ func overnightDrawObservation(r overnightResult) *vesselObservation {
 		TypicalPercentPerHour:   roundTo(typical, 2),
 		Ratio:                   roundTo(last/typical, 2),
 		NightsCompared:          len(drains),
+		ChargingChecked:         r.ChargingChecked,
+		LastNightPlace:          placeNotKnown,
 	}
-	if !r.LastNightStart.IsZero() {
-		o.NightStart = r.LastNightStart.UTC().Format(time.RFC3339)
-	}
-	o.nightStart, o.nightEnd = r.LastNightStart, r.LastNightEnd
+	o.NightStart = lastNight.Start.UTC().Format(time.RFC3339)
+	o.nightStart, o.nightEnd = lastNight.Start, lastNight.End
 	o.bankPath = strings.TrimSuffix(r.SocPath, ".capacity.stateOfCharge")
-	o.Summary = fmt.Sprintf("On the last completed night the house bank drained at %.2f %% of charge an hour, %.1f times the %.2f %% an hour it usually drains over the %d nights before.",
-		o.LastNightPercentPerHour, o.Ratio, o.TypicalPercentPerHour, o.NightsCompared)
+
+	// computeOvernight sets the boat's zone whenever it rates a night.
+	loc := r.Loc
+	window := nightWindow{Start: lastNight.Start, End: lastNight.End}
+	o.Window = overnightClock(window.Start, loc) + " to dawn, boat time"
+	chargingLeftOut, shoreLeftOut := 0, 0
+	for _, n := range r.RuleNights {
+		if n.Latest {
+			o.LastNightDate = n.date(loc)
+			continue
+		}
+		switch n.LeftOut {
+		case leftOutCharging:
+			chargingLeftOut++
+		case leftOutShore:
+			shoreLeftOut++
+		}
+		night := observationNight{Date: n.date(loc), LeftOut: n.LeftOut, Place: placeNotKnown, start: n.Start, end: n.End}
+		if n.RatePercentPerHour != nil {
+			drain := roundTo(-*n.RatePercentPerHour, 2)
+			night.DrainPercentPerHour = &drain
+		}
+		o.Nights = append(o.Nights, night)
+	}
+	o.Summary = overnightDrawFigures{
+		Last: o.LastNightPercentPerHour, Typical: o.TypicalPercentPerHour, Ratio: o.Ratio, Compared: o.NightsCompared,
+		Window: window, Loc: loc, Heaviest: r.LastNightHeaviest,
+		LeftOutCharging: chargingLeftOut, LeftOutShore: shoreLeftOut, ChargingChecked: r.ChargingChecked,
+	}.summary()
 	return o
+}
+
+// overnightDrawFigures is what the overnight_draw finding says. It shows the
+// working: what was compared, when within the window the fall came, and the
+// charging it left out. It offers no cause.
+type overnightDrawFigures struct {
+	Last, Typical, Ratio float64
+	Compared             int
+	Window               nightWindow
+	Loc                  *time.Location
+	// Heaviest is the two-hour stretch holding most of the fall, nil when the
+	// drain was even.
+	Heaviest *nightWindow
+	// LeftOutCharging counts the nights left out for charging and LeftOutShore
+	// those left out for shore power; the two are worded apart.
+	LeftOutCharging, LeftOutShore int
+	ChargingChecked               bool
+}
+
+// overnightClock writes a time the way the report reads it: 10.00 PM.
+func overnightClock(t time.Time, loc *time.Location) string {
+	return t.In(loc).Format("3.04 PM")
+}
+
+func (f overnightDrawFigures) summary() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Between %s and dawn the house bank drained at %.2f %% of charge an hour, %.1f times the usual %.2f %%, compared over %d nights.",
+		overnightClock(f.Window.Start, f.Loc), f.Last, f.Ratio, f.Typical, f.Compared)
+	if h := f.Heaviest; h != nil {
+		end := "dawn"
+		if !h.End.Equal(f.Window.End) {
+			end = overnightClock(h.End, f.Loc)
+		}
+		fmt.Fprintf(&b, " Most of it fell between %s and %s.", overnightClock(h.Start, f.Loc), end)
+	}
+	charging := f.LeftOutCharging
+	if !f.ChargingChecked {
+		b.WriteString(" Charging was not checked, so a night with charging may be in the comparison.")
+		charging = 0
+	}
+	b.WriteString(leftOutSentence(charging, f.LeftOutShore))
+	return b.String()
+}
+
+// leftOutSentence says how many nights were left out for charging and how many
+// for shore power, each counted on its own. It is empty when there are none.
+func leftOutSentence(charging, shore int) string {
+	nights := func(n int) string {
+		if n == 1 {
+			return "1 night"
+		}
+		return fmt.Sprintf("%d nights", n)
+	}
+	switch {
+	case charging > 0 && shore > 0:
+		return fmt.Sprintf(" %s with charging and %d on shore power in those hours were left out.", nights(charging), shore)
+	case charging > 0:
+		return fmt.Sprintf(" %s with charging in those hours %s left out.", nights(charging), wasWere(charging))
+	case shore > 0:
+		return fmt.Sprintf(" %s on shore power in those hours %s left out.", nights(shore), wasWere(shore))
+	}
+	return ""
+}
+
+func wasWere(n int) string {
+	if n == 1 {
+		return "was"
+	}
+	return "were"
+}
+
+// addNightPlaces fills in where the Passages logbook puts the boat on last
+// night and on each night listed. The logbook is the only source: with it
+// absent or silent about a night, the place is "not known". A logbook that is
+// there but cannot be read leaves the places "not known" too and returns the
+// error, for the caller to report.
+func (d assistantToolDeps) addNightPlaces(o *vesselObservation) error {
+	if d.passageLog == nil {
+		return nil
+	}
+	store := d.passageLog()
+	if store == nil {
+		return nil
+	}
+	passages, err := store.ListPassages()
+	if err != nil {
+		return err
+	}
+	hidden, err := store.hiddenPassageSpans()
+	if err != nil {
+		return err
+	}
+	open, err := openPassage(store)
+	if err != nil {
+		return err
+	}
+	o.LastNightPlace = boatPlaceForNight(passages, hidden, open, o.nightStart, o.nightEnd)
+	for i := range o.Nights {
+		o.Nights[i].Place = boatPlaceForNight(passages, hidden, open, o.Nights[i].start, o.Nights[i].end)
+	}
+	return nil
+}
+
+// boatPlaceForNight is where the logbook puts the boat for the night from
+// start to end: the arrival place of the last passage that ended before the
+// night, provided no passage was under way during it and no hidden passage
+// moved the boat since. A passage still under way (open, nil when none) began
+// before the night ended if it overlaps it, as one that has ended would.
+// Anything less certain is "not known".
+func boatPlaceForNight(passages []passageRecord, hidden [][2]time.Time, open *logbookOpen, start, end time.Time) string {
+	if open != nil && open.start.Before(end) {
+		return "under way on a passage"
+	}
+	var arrived *passageRecord
+	for i := range passages {
+		p := &passages[i]
+		if p.Start.Before(end) && p.End.After(start) {
+			return "under way on a passage"
+		}
+		if !p.End.After(start) && (arrived == nil || p.End.After(arrived.End)) {
+			arrived = p
+		}
+	}
+	if arrived == nil || arrived.ToName == "" {
+		return placeNotKnown
+	}
+	if hiddenBetween(hidden, arrived.End, end) {
+		return placeNotKnown
+	}
+	return arrived.ToName
+}
+
+// hiddenBetween says a hidden passage overlaps the span from one time to the
+// other.
+func hiddenBetween(hidden [][2]time.Time, from, to time.Time) bool {
+	for _, h := range hidden {
+		if h[1].After(from) && h[0].Before(to) {
+			return true
+		}
+	}
+	return false
 }
 
 // ── registry record ──────────────────────────────────────────────────────

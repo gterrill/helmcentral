@@ -361,6 +361,7 @@ func buildWatchReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 		"- Lead with your judgement. At most four short sentences, then up to three questions for the skipper. Do not restate the report: the skipper reads it beside your review.\n" +
 		"- Never claim anything the report's figures do not show. Say an alarm is still going only when the report marks it active now; never say one cleared.\n" +
 		"- Never suggest a remedy or a setting change (muting an alarm, raising a threshold) unless the figures point to it, and never name a cause the figures do not show.\n" +
+		"- When the skipper offers an explanation for an overnight draw finding, check it against the nights compared and left out (overnight_draw_nights in the power section, or get_vessel_status), and say plainly if it does not explain the figures rather than agreeing. Never say a charger or shore power affected the baseline unless the left-out list or the data shows it.\n" +
 		"- Attach a chart to a finding only where the trend is the evidence (a figure that fell or climbed over hours); most findings need none.\n" +
 		"- If nothing needs attention, say so in one sentence.\n" +
 		"- Use tools only to check something the report does not show; start from the report. The tools only read.\n")

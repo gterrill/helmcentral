@@ -896,6 +896,9 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"Put an observation as a question, such as \"The house bank drained faster than usual " +
 		"last night, is anything running that wouldn't normally be?\", stating its figures, and never guess a cause. " +
 		"observations_unchecked lists what could not be looked at; an empty observations list does not clear those. " +
+		"When the skipper offers an explanation for an overnight draw observation, check it against the nights compared and left out in the observation's nights list, " +
+		"and say plainly if it does not explain the figures rather than agreeing. " +
+		"Never say a charger or shore power affected the baseline unless the left-out list or the data shows it. " +
 		"Offer a chart of the reading behind an observation, and draw it with show_telemetry_chart only if they say yes. " +
 		"If there is nothing, end with the single line \"Nothing else to note.\" and no section.\n\n")
 

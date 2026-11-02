@@ -66,11 +66,12 @@ export interface BatteryPowerTileProps {
  * the window's nights weren't clean enough to use.
  */
 function historyBasisTitle(overnightProjection: OvernightProjection): string {
-  const { nightsUsed, lookbackNights, nightsExcludedShore, nightsExcludedGenerator } = overnightProjection
-  const skippedClause = nightsExcludedShore + nightsExcludedGenerator > 0
-    ? `; skipped ${nightsExcludedShore} on shore power and ${nightsExcludedGenerator} with the generator running`
+  const { nightsUsed, lookbackNights, nightsExcludedShore, nightsExcludedCharging } = overnightProjection
+  const skippedClause = nightsExcludedShore + nightsExcludedCharging > 0
+    ? `; skipped ${nightsExcludedShore} on shore power and ${nightsExcludedCharging} with the bank charging`
     : ''
-  return `Median of ${nightsUsed} clean nights from the last ${lookbackNights}${skippedClause}, then the current rate until sunset`
+  const uncheckedClause = overnightProjection.chargingChecked === false ? '; charging not checked' : ''
+  return `Median of ${nightsUsed} clean nights from the last ${lookbackNights}${skippedClause}${uncheckedClause}, then the current rate until sunset`
 }
 
 /**
