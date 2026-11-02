@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.59.0] - 2026-11-02
+
 ### Breaking
 
 - **Mate's "Anchorage shelter" lookup is now "Anchorage details", and a
@@ -2637,7 +2639,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.58.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.59.0...HEAD
+[0.59.0]: https://github.com/gterrill/helmcentral/compare/v0.58.0...v0.59.0
 [0.58.0]: https://github.com/gterrill/helmcentral/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/gterrill/helmcentral/compare/v0.56.0...v0.57.0
 [0.56.0]: https://github.com/gterrill/helmcentral/compare/v0.55.0...v0.56.0
