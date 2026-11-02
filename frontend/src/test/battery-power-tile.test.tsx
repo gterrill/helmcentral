@@ -309,7 +309,8 @@ function overnightFixture(overrides: Partial<OvernightProjection> = {}): Overnig
     nightsConsidered: 7,
     lookbackNights: 30,
     nightsExcludedShore: 0,
-    nightsExcludedGenerator: 0,
+    nightsExcludedCharging: 0,
+    chargingChecked: true,
     reason: null,
     ...overrides,
   }
@@ -345,11 +346,11 @@ test('renders the dawn estimate for a history basis with the nights-used token',
   expect(outer).toHaveAttribute('title', 'Median of 4 clean nights from the last 30, then the current rate until sunset')
 })
 
-test('the history title names the nights skipped for shore power and the generator', () => {
+test('the history title names the nights skipped for shore power and charging', () => {
   vi.useFakeTimers()
   vi.setSystemTime(DAYTIME_NOW)
 
-  const overnight = overnightFixture({ nightsExcludedShore: 3, nightsExcludedGenerator: 1 })
+  const overnight = overnightFixture({ nightsExcludedShore: 3, nightsExcludedCharging: 1 })
   render(
     <BatteryPowerTile
       {...baseProps}
@@ -362,7 +363,7 @@ test('the history title names the nights skipped for shore power and the generat
   const outer = screen.getByText(/Dawn/)
   expect(outer).toHaveAttribute(
     'title',
-    'Median of 4 clean nights from the last 30; skipped 3 on shore power and 1 with the generator running, then the current rate until sunset',
+    'Median of 4 clean nights from the last 30; skipped 3 on shore power and 1 with the bank charging, then the current rate until sunset',
   )
 })
 
@@ -370,7 +371,7 @@ test('the history title omits the skipped clause when no nights were excluded', 
   vi.useFakeTimers()
   vi.setSystemTime(DAYTIME_NOW)
 
-  const overnight = overnightFixture({ nightsExcludedShore: 0, nightsExcludedGenerator: 0 })
+  const overnight = overnightFixture({ nightsExcludedShore: 0, nightsExcludedCharging: 0 })
   render(
     <BatteryPowerTile
       {...baseProps}
@@ -382,6 +383,30 @@ test('the history title omits the skipped clause when no nights were excluded', 
 
   const outer = screen.getByText(/Dawn/)
   expect(outer).toHaveAttribute('title', expect.not.stringContaining('skipped'))
+})
+
+test('the history title says when charging was not checked, and only then', () => {
+  vi.useFakeTimers()
+  vi.setSystemTime(DAYTIME_NOW)
+
+  const titleFor = (chargingChecked: boolean | null) => {
+    const { unmount } = render(
+      <BatteryPowerTile
+        {...baseProps}
+        batterySocPercent={63}
+        batteryRatePercentPerHour={2.8}
+        overnight={overnightFixture({ chargingChecked })}
+      />,
+    )
+    const title = screen.getByText(/Dawn/).getAttribute('title')
+    unmount()
+    return title
+  }
+
+  expect(titleFor(false)).toBe('Median of 4 clean nights from the last 30; charging not checked, then the current rate until sunset')
+  expect(titleFor(true)).not.toContain('not checked')
+  // An older backend that does not say is not claimed to have skipped the check.
+  expect(titleFor(null)).not.toContain('not checked')
 })
 
 test('renders the dawn estimate for a linear basis with the backend reason in its title', () => {

@@ -263,10 +263,17 @@ What each one does:
   the item's name. Not set, or a battery that isn't reporting, leaves the
   voltage out.
 
-The shore charger and the generator also decide which nights the dawn projection
-trusts. A night when shore power was connected or the generator ran is skipped,
-because the bank didn't discharge naturally. A night is only screened for the
-ones you chose.
+The shore charger and the inverter also decide which nights the dawn projection
+and the morning report's overnight check trust. A night when shore power was
+connected is skipped. So is a night when the inverter was charging the bank from
+shore or from the generator, because the bank didn't discharge naturally. A
+night is only screened for the ones you chose. A night the inverter logged
+nothing for is skipped too, because there is nothing to say it didn't charge.
+With no inverter chosen, or no history for it at all, charging isn't checked and
+nights stay in. The Dawn figure's hover text says "charging not checked" then,
+and so does the morning report's overnight finding whenever it appears. The
+generator itself isn't used for this, because it can run without its own state
+ever changing.
 
 ## Hour meters
 

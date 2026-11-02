@@ -102,7 +102,8 @@ why when it can't.
 
 - **Power:** House bank charge, voltage and current, solar watts, and DC load.
   It also says whether the house bank drained faster overnight than it usually
-  does.
+  does. That check compares each night from 10.00 PM to dawn, so an evening with
+  the generator running doesn't make the usual drain look lighter than it is.
 - **Anchor:** Whether the boat is inside the anchor watch radius, and how far it
   is from the anchor. With no anchor watch set, it says "No anchor watch set".
 - **Alarms:** The alarms active now, and the ones raised since the last report
@@ -131,7 +132,19 @@ watch. These are the defaults:
 - **Alarms:** Any alarm raised since the last report.
 - **Instruments:** Any frozen, out of range or silent sensor.
 - **Power:** The house bank draining overnight at least one and a half times
-  faster than it usually does.
+  faster than it usually does. The finding shows its working, for example:
+  "Between 10.00 PM and dawn the house bank drained at 2.52 % of charge an hour,
+  1.6 times the usual 1.61 %, compared over 6 nights. Most of it fell between
+  10.00 PM and 12.00 AM. 2 nights with charging in those hours were left out."
+  It says when the fall came only if one two-hour stretch held more than half of
+  it. It counts the nights it left out for charging and for shore power, each
+  on its own, only if there were some. A night the inverter logged nothing for is
+  left out as well, and is listed with Mate's nights. If the roles name no
+  inverter, or the inverter has no history, the finding says charging wasn't
+  checked. This check counts its own nights from 10.00 PM, so it still runs when
+  the Battery & Power tile has too few clean whole nights for its Dawn figure.
+  When the Passages logbook can't be read, the report says so and the finding
+  gives no places.
 - **Anchor:** The boat outside the anchor watch radius.
 - **Tanks:** A level that has changed by 10 percentage points or more since the
   last report.
@@ -152,8 +165,8 @@ your phone or inbox carries it as a picture.
 
 - **Pressure down:** The pressure over the last 12 hours, with a dashed line at
   the fall limit from 3 hours earlier.
-- **Overnight draw:** The house bank's charge and current over the night it
-  measured, one above the other.
+- **Overnight draw:** The house bank's charge and current from 10.00 PM to dawn
+  on the night it measured, one above the other.
 - **A tank that moved:** That tank's level since the last report, with its
   warning level as a dashed line. It always covers at least the last hour.
 - **Findings Mate adds:** Mate can attach a chart of one reading over 1 to 48

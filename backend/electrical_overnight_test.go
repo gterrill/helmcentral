@@ -202,11 +202,11 @@ func concatPoints(nightly ...[]telemetryPoint) []telemetryPoint {
 
 // lookbackQuery builds the fake query computeOvernight now calls exactly
 // three times per compute - once for socPath, once for the shore path and
-// once for the generator path - each covering the single wide
+// once for the inverter's AC-in power path - each covering the single wide
 // [oldest-window-start, now] range the real implementation asks for. It
 // dispatches on which path was requested and filters that path's series by
 // [start, stop], the same filtering queryInfluxPathRange itself does.
-func lookbackQuery(t *testing.T, socSeries, shoreSeries, generatorSeries []telemetryPoint) func(path string, start, stop time.Time, every string) ([]telemetryPoint, error) {
+func lookbackQuery(t *testing.T, socSeries, shoreSeries, inverterSeries []telemetryPoint) func(path string, start, stop time.Time, every string) ([]telemetryPoint, error) {
 	t.Helper()
 	filterRange := func(points []telemetryPoint, start, stop time.Time) []telemetryPoint {
 		var out []telemetryPoint
@@ -223,8 +223,8 @@ func lookbackQuery(t *testing.T, socSeries, shoreSeries, generatorSeries []telem
 			return filterRange(socSeries, start, stop), nil
 		case testShoreMeasurement:
 			return filterRange(shoreSeries, start, stop), nil
-		case testGeneratorMeasurement:
-			return filterRange(generatorSeries, start, stop), nil
+		case testInverterMeasurement:
+			return filterRange(inverterSeries, start, stop), nil
 		default:
 			t.Fatalf("query called with unexpected path %q", path)
 			return nil, nil
@@ -401,28 +401,35 @@ func TestComputeOvernight_ShorePowerNightsExcluded(t *testing.T) {
 	}
 }
 
-// TestComputeOvernight_GeneratorNightExcluded checks a single 15-minute
-// sample of generator stateNumber > 0 is enough on its own to exclude a
-// night, even though the SoC series for that night is flat in exactly the
-// shape a charger-fed night would be (the shore series is empty, so only
-// the generator check is doing anything here).
-func TestComputeOvernight_GeneratorNightExcluded(t *testing.T) {
+// TestComputeOvernight_ChargingNightExcluded checks a single 15-minute
+// sample of inverter AC-in power above the threshold is enough on its own to
+// exclude a night, even though the SoC series for that night is flat in
+// exactly the shape a charger-fed night would be (the shore series is empty,
+// so only the charging check is doing anything here). The inverter reads 0 W
+// the rest of the time, as it does when idle.
+func TestComputeOvernight_ChargingNightExcluded(t *testing.T) {
 	now, windows := allLookbackWindows(t)
-	genPoint := []telemetryPoint{{Timestamp: windows[0].Start.Add(time.Hour), Value: 1}}
+	chargingPoint := concatPoints(
+		[]telemetryPoint{
+			{Timestamp: windows[0].Start.Add(30 * time.Minute), Value: 0},
+			{Timestamp: windows[0].Start.Add(time.Hour), Value: 8000},
+		},
+		idleInverter(windows[1]), idleInverter(windows[2]),
+	)
 	socSeries := concatPoints(
 		syntheticSlopeSeries(windows[0], overnightSampleInterval, 65, 65),
 		syntheticSlopeSeries(windows[1], overnightSampleInterval, 65, 65+(-1.0)*windows[1].End.Sub(windows[1].Start).Hours()),
 		syntheticSlopeSeries(windows[2], overnightSampleInterval, 65, 65+(-0.8)*windows[2].End.Sub(windows[2].Start).Hours()),
 	)
-	query := lookbackQuery(t, socSeries, nil, genPoint)
+	query := lookbackQuery(t, socSeries, nil, chargingPoint)
 
 	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, query)
 
 	if result.Basis != "history" {
 		t.Fatalf("basis: got %q, want history (reason=%v)", result.Basis, result.Reason)
 	}
-	if result.NightsExcludedGenerator != 1 {
-		t.Fatalf("nights_excluded_generator: got %d, want 1", result.NightsExcludedGenerator)
+	if result.NightsExcludedCharging != 1 {
+		t.Fatalf("nights_excluded_charging: got %d, want 1", result.NightsExcludedCharging)
 	}
 	if result.NightsUsed != 2 {
 		t.Fatalf("nights_used: got %d, want 2", result.NightsUsed)
@@ -609,11 +616,11 @@ const defaultSocMeasurement = "electrical.batteries.0.capacity.stateOfCharge"
 // The exclusion series are named after the instances the operator picked in
 // Vessel settings; these are arbitrary test instances, not defaults.
 const (
-	testShoreMeasurement     = "electrical.chargers.5.acin.1.current"
-	testGeneratorMeasurement = "electrical.generator.3.stateNumber"
+	testShoreMeasurement    = "electrical.chargers.5.acin.1.current"
+	testInverterMeasurement = "electrical.inverters.276.acin.power"
 )
 
-var testOvernightPaths = overnightPaths{Soc: defaultSocMeasurement, Shore: testShoreMeasurement, Generator: testGeneratorMeasurement}
+var testOvernightPaths = overnightPaths{Soc: defaultSocMeasurement, Shore: testShoreMeasurement, Inverter: testInverterMeasurement}
 
 func TestSocMeasurementPathFollowsTheHouseBank(t *testing.T) {
 	useHouseBank(t, &vesselHouseBankSetting{Path: "electrical.batteries.51"})
@@ -804,13 +811,14 @@ func TestOvernightCache_KeyedOnSocPath(t *testing.T) {
 func TestOvernightMeasurementPathsFollowTheChosenInstances(t *testing.T) {
 	saveElectricalVessel(t, vesselView{
 		HouseBank:  &vesselHouseBankSetting{Path: "electrical.batteries.51"},
-		Electrical: vesselElectricalSettings{GeneratorInstance: "3", ShoreChargerInstance: "276"},
+		Electrical: vesselElectricalSettings{GeneratorInstance: "3", InverterInstance: "276", ShoreChargerInstance: "5"},
 	})
 	paths, err := overnightMeasurementPaths()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paths.Generator != "electrical.generator.3.stateNumber" || paths.Shore != "electrical.chargers.276.acin.1.current" {
+	// The generator role no longer matters: its state number stays 0 while it runs.
+	if paths.Inverter != "electrical.inverters.276.acin.power" || paths.Shore != "electrical.chargers.5.acin.1.current" {
 		t.Fatalf("got %+v", paths)
 	}
 }
@@ -823,12 +831,12 @@ func TestOvernightMeasurementPathsAreEmptyWhenTheInstancesAreNotSet(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if paths.Generator != "" || paths.Shore != "" {
+	if paths.Inverter != "" || paths.Shore != "" {
 		t.Fatalf("the retired environment variables must be ignored, got %+v", paths)
 	}
 }
 
-// With no generator or shore charger chosen the night is not checked for
+// With no inverter or shore charger chosen the night is not checked for
 // that source, the query for it is never made, and the result says so
 // instead of implying the nights were screened.
 func TestComputeOvernight_UnsetExclusionsAreSkippedAndReported(t *testing.T) {
@@ -845,10 +853,10 @@ func TestComputeOvernight_UnsetExclusionsAreSkippedAndReported(t *testing.T) {
 	}
 
 	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, overnightPaths{Soc: defaultSocMeasurement}, true, true, query)
-	if result.ShoreChecked || result.GeneratorChecked {
-		t.Fatalf("checked flags: shore %v generator %v, want both false", result.ShoreChecked, result.GeneratorChecked)
+	if result.ShoreChecked || result.ChargingChecked {
+		t.Fatalf("checked flags: shore %v charging %v, want both false", result.ShoreChecked, result.ChargingChecked)
 	}
-	if result.NightsExcludedShore != 0 || result.NightsExcludedGenerator != 0 {
+	if result.NightsExcludedShore != 0 || result.NightsExcludedCharging != 0 {
 		t.Fatalf("nothing can be excluded without a series: %+v", result)
 	}
 	if result.Basis != "history" {
@@ -859,22 +867,23 @@ func TestComputeOvernight_UnsetExclusionsAreSkippedAndReported(t *testing.T) {
 func TestComputeOvernight_SetExclusionsAreReportedAsChecked(t *testing.T) {
 	now, windows := allLookbackWindows(t)
 	socSeries := syntheticSlopeSeries(windows[0], overnightSampleInterval, 65, 60)
-	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
-	if !result.ShoreChecked || !result.GeneratorChecked {
-		t.Fatalf("checked flags: shore %v generator %v, want both true", result.ShoreChecked, result.GeneratorChecked)
+	idle := []telemetryPoint{{Timestamp: windows[0].Start.Add(time.Hour), Value: 0}}
+	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, idle))
+	if !result.ShoreChecked || !result.ChargingChecked {
+		t.Fatalf("checked flags: shore %v charging %v, want both true", result.ShoreChecked, result.ChargingChecked)
 	}
 }
 
 func TestOvernightCache_KeyedOnTheExclusionPaths(t *testing.T) {
-	soc := overnightPaths{Soc: "soc", Shore: "shore-a", Generator: "gen-a"}
-	if soc.cacheKey() == (overnightPaths{Soc: "soc", Shore: "shore-b", Generator: "gen-a"}).cacheKey() {
+	soc := overnightPaths{Soc: "soc", Shore: "shore-a", Inverter: "inv-a"}
+	if soc.cacheKey() == (overnightPaths{Soc: "soc", Shore: "shore-b", Inverter: "inv-a"}).cacheKey() {
 		t.Fatal("choosing another shore charger must not be served the old result")
 	}
-	if soc.cacheKey() == (overnightPaths{Soc: "soc", Shore: "shore-a", Generator: "gen-b"}).cacheKey() {
-		t.Fatal("choosing another generator must not be served the old result")
+	if soc.cacheKey() == (overnightPaths{Soc: "soc", Shore: "shore-a", Inverter: "inv-b"}).cacheKey() {
+		t.Fatal("choosing another inverter must not be served the old result")
 	}
 	if soc.cacheKey() == (overnightPaths{Soc: "soc", Shore: "shore-a"}).cacheKey() {
-		t.Fatal("clearing the generator must not be served the old result")
+		t.Fatal("clearing the inverter must not be served the old result")
 	}
 }
 

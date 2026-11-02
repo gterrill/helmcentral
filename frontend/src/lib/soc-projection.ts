@@ -25,8 +25,14 @@ export interface OvernightProjection {
   lookbackNights: number
   /** Nights within the lookback window dropped because shore power was on. */
   nightsExcludedShore: number
-  /** Nights within the lookback window dropped because the generator ran. */
-  nightsExcludedGenerator: number
+  /** Nights within the lookback window dropped because the inverter was charging the bank (shore or generator). */
+  nightsExcludedCharging: number
+  /**
+   * Whether nights were screened for charging through the inverter. False when
+   * no inverter is chosen or it has no history, so a zero count beside it means
+   * "not checked". Null when an older backend does not say.
+   */
+  chargingChecked: boolean | null
   reason: string | null
 }
 
@@ -86,7 +92,10 @@ export function parseOvernightProjection(payload: unknown): OvernightProjection 
   // rather than an unparsable payload.
   const lookbackNights = typeof body.lookback_nights === 'number' ? body.lookback_nights : 0
   const nightsExcludedShore = typeof body.nights_excluded_shore === 'number' ? body.nights_excluded_shore : 0
-  const nightsExcludedGenerator = typeof body.nights_excluded_generator === 'number' ? body.nights_excluded_generator : 0
+  const nightsExcludedCharging = typeof body.nights_excluded_charging === 'number' ? body.nights_excluded_charging : 0
+
+  // Unlike the counts, a missing flag is not read as an answer either way.
+  const chargingChecked = typeof body.charging_checked === 'boolean' ? body.charging_checked : null
 
   return {
     socPath: body.soc_path,
@@ -98,7 +107,8 @@ export function parseOvernightProjection(payload: unknown): OvernightProjection 
     nightsConsidered: body.nights_considered,
     lookbackNights,
     nightsExcludedShore,
-    nightsExcludedGenerator,
+    nightsExcludedCharging,
+    chargingChecked,
     reason: body.reason,
   }
 }

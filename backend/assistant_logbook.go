@@ -496,12 +496,7 @@ func logbookStays(ps []logbookPassage, hidden [][2]time.Time) (all []cruiseStay)
 		if a.ToName != "" && b.FromName != "" && a.ToName != b.FromName {
 			s.NextDeparture = b.FromName
 		}
-		for _, h := range hidden {
-			if h[0].Before(b.Start) && h[1].After(a.End) {
-				s.HiddenBetween = true
-				break
-			}
-		}
+		s.HiddenBetween = hiddenBetween(hidden, a.End, b.Start)
 		all = append(all, s)
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Days > all[j].Days })

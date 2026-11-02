@@ -87,21 +87,28 @@ describe('parseOvernightProjection', () => {
       ...validPayload,
       lookback_nights: 30,
       nights_excluded_shore: 3,
-      nights_excluded_generator: 1,
+      nights_excluded_charging: 1,
       nights_excluded_gap: 2,
       nights_excluded_rise: 0,
       oldest_night_start: '2026-08-08T00:00:00Z',
     })
     expect(result?.lookbackNights).toBe(30)
     expect(result?.nightsExcludedShore).toBe(3)
-    expect(result?.nightsExcludedGenerator).toBe(1)
+    expect(result?.nightsExcludedCharging).toBe(1)
+  })
+
+  it('reads whether charging was checked, and leaves it unknown when the backend omits it', () => {
+    expect(parseOvernightProjection({ ...validPayload, charging_checked: true })?.chargingChecked).toBe(true)
+    expect(parseOvernightProjection({ ...validPayload, charging_checked: false })?.chargingChecked).toBe(false)
+    expect(parseOvernightProjection(validPayload)?.chargingChecked).toBeNull()
+    expect(parseOvernightProjection({ ...validPayload, charging_checked: 'yes' })?.chargingChecked).toBeNull()
   })
 
   it('defaults the lookback window and exclusion counts to zero when an older backend omits them', () => {
     const result = parseOvernightProjection(validPayload)
     expect(result?.lookbackNights).toBe(0)
     expect(result?.nightsExcludedShore).toBe(0)
-    expect(result?.nightsExcludedGenerator).toBe(0)
+    expect(result?.nightsExcludedCharging).toBe(0)
   })
 })
 
@@ -116,7 +123,8 @@ function baseProjection(overrides: Partial<OvernightProjection> = {}): Overnight
     nightsConsidered: 7,
     lookbackNights: 30,
     nightsExcludedShore: 0,
-    nightsExcludedGenerator: 0,
+    nightsExcludedCharging: 0,
+    chargingChecked: true,
     reason: null,
     ...overrides,
   }

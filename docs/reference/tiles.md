@@ -170,14 +170,19 @@ that rate to tonight, after first running the current rate forward to sunset.
 A clean night meets all of these:
 
 - **Sunset to sunrise:** It runs the whole way from sunset to sunrise.
-- **No shore power and no generator run:** These are checked against the shore
-  charger and generator you picked under Settings, SignalK, Roles. A night
-  isn't screened for one you left as Not set.
+- **No shore power and no charging:** Shore power is checked against the shore
+  charger you picked under Settings, SignalK, Roles. Charging is checked against
+  the inverter you picked there, so a night with the generator feeding the
+  inverter at any point from sunset to sunrise is skipped. A night isn't
+  screened for one you left as Not set, and charging isn't screened when the
+  inverter has no history. A night the inverter logged nothing for is skipped,
+  because nothing shows it didn't charge.
 - **Enough samples:** There are enough samples to trust the slope.
 - **No rise:** The bank didn't somehow rise.
 
 A night that fails any test is skipped rather than averaged in. Hovering the
-figure shows how many nights were skipped and why.
+figure shows how many nights were skipped and why, and "charging not checked"
+when no inverter history was available to screen with.
 
 Short of two clean nights, the same spot reads `Dawn 6:08 · 61% · at current
 rate` instead, holding whatever rate the bank is charging or discharging

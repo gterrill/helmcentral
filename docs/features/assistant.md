@@ -541,6 +541,14 @@ figures. For example: "The bank fell 0.9 percent an hour last night, against
 about 0.5 on the nights before. Is anything running that normally isn't?" It
 doesn't guess what caused it.
 
+Mate also has the nights behind that comparison: each night's date, how fast the
+bank drained, where the Passages logbook puts the boat, and why any night was
+left out (shore power, charging, a gap in the data or the charge rising). Where
+the logbook can't place the boat, Mate says "not known". If you offer an
+explanation, Mate checks it against those nights and tells you plainly when it
+doesn't explain the figures. It won't say a charger or shore power affected the
+usual figure unless the nights it left out show that.
+
 A reading that can't be right, such as a charge above 100 percent or a negative
 solar figure, is left out the same way. A tank whose warn and alarm levels don't
 make a sensible pair is shown with a note that its alarm isn't running.
@@ -557,8 +565,8 @@ gap with an older figure or an estimate.
 
 The overnight check needs three things. Your house bank must be chosen under
 **Settings → SignalK → Roles**. InfluxDB must be set up. And there must be at
-least four recent nights at anchor, with no shore power or generator, for Mate to
-compare. Without them Mate leaves that check out and tells you why.
+least four recent nights at anchor, with no shore power or charging after 10.00
+PM, for Mate to compare. Each night is measured from 10.00 PM to dawn, boat time. Without them Mate leaves that check out and tells you why.
 
 The overnight check is a question for you and never an alarm, so nothing is sent
 to your phone. Mate doesn't yet notice a sensor reading differently from its

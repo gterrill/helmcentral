@@ -247,6 +247,17 @@ func watchPowerSection(_ savedWatch, in watchReportInput) (watchReportSection, [
 			f := ruleFinding(watchSectionPower, "overnight_draw", o.Summary)
 			f.chart = overnightChartSpec(o)
 			findings = append(findings, f)
+			// The review is shown the nights behind the finding: which were
+			// compared, which were left out and why, and where the boat was.
+			if s.Figures == nil {
+				s.Figures = map[string]any{}
+			}
+			s.Figures["overnight_draw_nights"] = map[string]any{
+				"window":           o.Window,
+				"charging_checked": o.ChargingChecked,
+				"last_night":       map[string]any{"date": o.LastNightDate, "place": o.LastNightPlace},
+				"earlier_nights":   o.Nights,
+			}
 		}
 	}
 	return s, findings

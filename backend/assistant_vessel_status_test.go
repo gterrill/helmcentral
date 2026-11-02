@@ -517,12 +517,19 @@ func TestVesselStatus_ToolFailsPlainlyWithoutLiveData(t *testing.T) {
 // ── observations ────────────────────────────────────────────────────────
 
 func nightsResult(last float64, prior ...float64) overnightResult {
-	return overnightResult{
-		Basis:                         "history",
-		LastNightStart:                time.Date(2026, 10, 27, 8, 40, 0, 0, time.UTC),
-		LastNightRatePercentPerHour:   &last,
-		PriorNightRatesPercentPerHour: prior,
+	start := time.Date(2026, 10, 27, 22, 0, 0, 0, time.UTC)
+	nights := []overnightRuleNight{{Start: start, End: start.Add(7 * time.Hour), Latest: true, RatePercentPerHour: &last}}
+	for i := range prior {
+		s := start.AddDate(0, 0, -(i + 1))
+		nights = append(nights, overnightRuleNight{Start: s, End: s.Add(7 * time.Hour), RatePercentPerHour: &prior[i]})
 	}
+	return overnightResult{Basis: "history", Loc: time.UTC, ChargingChecked: true, RuleNights: nights}
+}
+
+// withLastNightLeftOut turns last night in r into one the rule left out.
+func withLastNightLeftOut(r overnightResult) overnightResult {
+	r.RuleNights[0].RatePercentPerHour, r.RuleNights[0].LeftOut = nil, leftOutGap
+	return r
 }
 
 func TestOvernightDrawObservation_Threshold(t *testing.T) {
@@ -537,7 +544,7 @@ func TestOvernightDrawObservation_Threshold(t *testing.T) {
 		{"only two prior nights", nightsResult(-1.5, -0.5, -0.5), false},
 		{"a big ratio on a tiny draw stays quiet", nightsResult(-0.15, -0.05, -0.05, -0.05), false},
 		{"quieter than usual is not an observation", nightsResult(-0.2, -0.5, -0.5, -0.5), false},
-		{"last night not usable", overnightResult{Basis: "history", PriorNightRatesPercentPerHour: []float64{-0.5, -0.5, -0.5}}, false},
+		{"last night not usable", withLastNightLeftOut(nightsResult(-0.9, -0.5, -0.5, -0.5)), false},
 	}
 	for _, c := range cases {
 		got := overnightDrawObservation(c.res)
@@ -607,22 +614,23 @@ func TestVesselStatus_ObservationsNotCheckedSaysWhy(t *testing.T) {
 // against the typical rate does not include the night being judged.
 func TestComputeOvernight_ExposesLastNightApartFromThePriorOnes(t *testing.T) {
 	now, windows := allLookbackWindows(t)
-	hours := func(i int) float64 { return windows[i].End.Sub(windows[i].Start).Hours() }
 	socSeries := concatPoints(
-		syntheticSlopeSeries(windows[0], overnightSampleInterval, 65, 65+(-1.5)*hours(0)),
-		syntheticSlopeSeries(windows[1], overnightSampleInterval, 65, 65+(-0.5)*hours(1)),
-		syntheticSlopeSeries(windows[2], overnightSampleInterval, 65, 65+(-0.6)*hours(2)),
-		syntheticSlopeSeries(windows[3], overnightSampleInterval, 65, 65+(-0.4)*hours(3)),
+		nightSeries(t, windows[0], -1.5),
+		nightSeries(t, windows[1], -0.5),
+		nightSeries(t, windows[2], -0.6),
+		nightSeries(t, windows[3], -0.4),
 	)
 	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
-	if result.LastNightRatePercentPerHour == nil || !near(result.LastNightRatePercentPerHour, -1.5, 0.001) {
-		t.Fatalf("last night: %v", result.LastNightRatePercentPerHour)
+	last := result.lastNight()
+	if last == nil || !near(last.RatePercentPerHour, -1.5, 0.001) {
+		t.Fatalf("last night: %v", last)
 	}
-	if !result.LastNightStart.Equal(windows[0].Start) {
-		t.Errorf("last night start: %v want %v", result.LastNightStart, windows[0].Start)
+	// The rule measures from 10 PM boat time, not from the start of the night.
+	if want := ruleWindowFor(t, windows[0]).Start; !last.Start.Equal(want) {
+		t.Errorf("last night start: %v want %v", last.Start, want)
 	}
-	if len(result.PriorNightRatesPercentPerHour) != 3 || !near(&result.PriorNightRatesPercentPerHour[0], -0.5, 0.001) {
-		t.Errorf("prior: %v", result.PriorNightRatesPercentPerHour)
+	if prior := result.priorRates(); len(prior) != 3 || !near(&prior[0], -0.5, 0.001) {
+		t.Errorf("prior: %v", prior)
 	}
 	// The dawn projection's own median still covers all four usable nights.
 	if result.NightsUsed != 4 {
@@ -641,8 +649,8 @@ func TestComputeOvernight_LastNightUnusableLeavesItNil(t *testing.T) {
 		syntheticSlopeSeries(windows[3], overnightSampleInterval, 65, 65+(-0.4)*hours(3)),
 	)
 	result := computeOvernight(now, boatAtForTest(t, vesselLat, vesselLon), vesselLat, vesselLon, testOvernightPaths, true, true, lookbackQuery(t, socSeries, nil, nil))
-	if result.LastNightRatePercentPerHour != nil || len(result.PriorNightRatesPercentPerHour) != 0 {
-		t.Errorf("last night should not be judged: %v %v", result.LastNightRatePercentPerHour, result.PriorNightRatesPercentPerHour)
+	if result.lastNight() != nil || len(result.priorRates()) != 0 {
+		t.Errorf("last night should not be judged: %v %v", result.lastNight(), result.priorRates())
 	}
 }
 
