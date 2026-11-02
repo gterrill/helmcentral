@@ -152,6 +152,37 @@ describe('WatchDetailsPage settings', () => {
     expect(screen.getByText(/the watermaker runs overnight; tell me if the fridge draw climbs/)).toBeInTheDocument()
   })
 
+  it('lines a section note and its threshold up under the section name, ticked or not', async () => {
+    renderPage()
+    await screen.findByDisplayValue('Overnight check')
+    expect(screen.getByRole('checkbox', { name: 'Power' })).toHaveAccessibleDescription(/house bank drains/)
+    expect(screen.getByRole('checkbox', { name: 'Weather' })).not.toBeChecked()
+    expect(screen.getByLabelText('Pressure fall that counts (hPa)').closest('.pl-7')).not.toBeNull()
+    expect(screen.getByRole('checkbox', { name: 'Alarms' })).toBeChecked()
+    expect(screen.getByLabelText('Alarms raised that count').closest('.pl-7')).not.toBeNull()
+  })
+
+  it('drops a stored section that has no row, so it cannot block Save or stand in for a ticked one', async () => {
+    detail = { ...detail, watch: record({ sections: ['power', 'engine'] }) }
+    renderPage()
+    await screen.findByDisplayValue('Overnight check')
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Power' }))
+    expect(screen.getByText('Pick at least one section.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Tanks' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled())
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    await waitFor(() => expect(sent('PATCH')).toHaveLength(1))
+    expect(sent('PATCH')[0].body).toMatchObject({ sections: ['tanks'] })
+  })
+
+  it('keeps a bad threshold on screen after its section is unticked, so Save never blocks on something hidden', async () => {
+    renderPage()
+    await screen.findByDisplayValue('Overnight check')
+    fireEvent.change(screen.getByLabelText('Alarms raised that count'), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Alarms' }))
+    expect(screen.getByText('A whole number from 1 to 100.')).toBeInTheDocument()
+  })
+
   it('reads the stored cron back into its preset and Custom when no preset writes it', async () => {
     detail = { ...detail, watch: record({ schedule: '0 */5 * * *' }) }
     renderPage()

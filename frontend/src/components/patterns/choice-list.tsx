@@ -11,17 +11,21 @@ import { cn } from '@/lib/utils'
 // Plain rows, no cards. The <label> holds the title and details, and its ::after
 // stretches over the row so tapping anywhere there toggles the control. It sits
 // beside the control rather than around it because a label wrapped around Base
-// UI's Checkbox toggles it twice. `selectedContent` sits outside the row so a
-// link or field in there does not toggle. The control is named by the title
-// alone and described by the details and any `selectedContent`. With `multiple`, a
-// value in `value` that matches no choice is kept when the selection changes,
-// so a stored choice survives a row that is not drawn.
+// UI's Checkbox toggles it twice. `secondaryContent` and `selectedContent` sit
+// outside the row so a link or field in there does not toggle. The control is
+// named by the title alone and described by the details and any
+// `selectedContent`; a field in `secondaryContent` has its own label, so it is
+// not read out as the control's description. With `multiple`, a change of
+// selection returns only drawn choices: a stored value with no row has nothing
+// on screen to untick it, so it must not be sent back for ever.
 
 export interface ChoiceListChoice<T extends string = string> {
   value: T
   label: ReactNode
   /** Always visible under the label: what picking this choice means. */
   details?: ReactNode
+  /** Always visible below the row, e.g. a field whose error must not hide when the choice is off. The caller disables a field in here. */
+  secondaryContent?: ReactNode
   /** Visible only while this choice is selected, e.g. a warning or a follow-up field. */
   selectedContent?: ReactNode
   disabled?: boolean
@@ -30,6 +34,8 @@ export interface ChoiceListChoice<T extends string = string> {
 interface ChoiceListBase<T extends string> {
   /** The legend. */
   label: ReactNode
+  /** Keeps the legend for screen readers only, when a heading above already says it. */
+  labelHidden?: boolean
   choices: ChoiceListChoice<T>[]
   /** Wins over each choice's own `disabled`. */
   disabled?: boolean
@@ -49,21 +55,19 @@ export type ChoiceListProps<T extends string = string> = ChoiceListBase<T> &
   )
 
 export function ChoiceList<T extends string = string>(props: ChoiceListProps<T>) {
-  const { label, choices, disabled, error, details, empty, className } = props
+  const { label, labelHidden, choices, disabled, error, details, empty, className } = props
   const base = useId()
 
   const toggle = (value: T, on: boolean) => {
     if (!props.multiple) return
-    const known = new Set<T>(choices.map((c) => c.value))
-    const next = choices.filter((c) => (c.value === value ? on : props.value.includes(c.value))).map((c) => c.value)
-    props.onChange([...next, ...props.value.filter((v) => !known.has(v))])
+    props.onChange(choices.filter((c) => (c.value === value ? on : props.value.includes(c.value))).map((c) => c.value))
   }
 
   const isSelected = (value: T) => (props.multiple ? props.value.includes(value) : props.value === value)
 
   return (
     <FieldSet data-slot="choice-list" className={className}>
-      <FieldLegend variant="label">{label}</FieldLegend>
+      <FieldLegend variant="label" className={labelHidden ? 'sr-only' : undefined}>{label}</FieldLegend>
       {error && <FieldError className="text-xs">{error}</FieldError>}
       {choices.length === 0 ? (
         empty
@@ -116,7 +120,8 @@ export function ChoiceList<T extends string = string>(props: ChoiceListProps<T>)
                     {hasDetails && <span id={detailsId} className="text-xs text-muted-foreground">{c.details}</span>}
                   </label>
                 </div>
-                {showSelected && <div id={selectedId} className="-mt-1 pl-7">{c.selectedContent}</div>}
+                {c.secondaryContent ? <div className="-mt-1 pb-2 pl-7">{c.secondaryContent}</div> : null}
+                {showSelected && <div id={selectedId} className={cn('pl-7', !c.secondaryContent && '-mt-1')}>{c.selectedContent}</div>}
               </div>
             )
           })}

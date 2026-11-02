@@ -401,14 +401,17 @@ duplication problem this ADR exists to close.
   side by side in a wide main column and single-column in the aside or on a
   phone.
 - `ChoiceList` replaces hand-built groups of radios and checkboxes, starting
-  with a watch's Notifications section. It follows Shopify's `s-choice-list`
-  with one difference: `details` is always visible, as Shopify's is, but what
-  Shopify calls `secondary-content` is `selectedContent` here and shows only
-  while its choice is selected. With `multiple`, a value that matches no drawn
-  choice survives a change of selection, so hiding a row cannot lose what was
-  stored; a single choice replaces whatever was there. Radios
-  stay native because `ui` has no radio primitive, and one consumer did not
-  justify adding it.
+  with a watch's Notifications and Report sections. It follows Shopify's `s-choice-list`
+  with one addition: `details` and `secondaryContent` are always visible, as
+  Shopify's `details` and `secondary-content` are, and `selectedContent` shows
+  only while its choice is selected. A field goes in `secondaryContent` when a
+  bad value in it blocks Save, because hiding it would hide the error, which
+  is why a watch's section thresholds stay up with the section off. With
+  `multiple`, a change of selection returns only drawn choices. An earlier cut
+  kept a stored value with no row, but the server refuses ids it no longer
+  knows and nothing on screen could untick one, so that watch could never be
+  saved. Radios stay native because `ui` has no radio primitive, and one
+  consumer did not justify adding it.
 - Equipment's Save button now genuinely does move onto `SaveBar`, reversing
   this ADR's own earlier call. Two existing tests
   (`equipment-editor.test.tsx`) used to Save a just-loaded, undirtied record
