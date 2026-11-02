@@ -3,7 +3,7 @@
 // screen at a given moment of watching. Everything here is pure.
 
 import { positionAt, type Timeline } from '@/lib/passages'
-import { PHOTO_ASPECT } from '@/lib/replay-time'
+import { PHOTO_ASPECT, type Rect } from '@/lib/replay-time'
 
 export type SignVisibility = 'always' | 'passing' | 'after'
 
@@ -36,7 +36,7 @@ export interface ReplaySign {
   /** A join: the track from here on is drawn as a new leg. Only a join may
    * have no title; it waits for a name from the track. */
   starts_leg: boolean
-  /** The operator's choice for the photo to fill the frame in a replay. Null is the default (see photoMomentOn). */
+  /** The operator's choice for the card to grow to fill the frame, with its photo, in a replay. Null is the default (see photoMomentOn). */
   photo_moment: boolean | null
 }
 
@@ -160,42 +160,125 @@ export interface SignPlacementInput {
   card: { w: number; h: number }
   /** The leader line length the card would like. */
   lift: number
+  /** Where the card was last put. It stays there for as long as it fits, so it
+   * does not hop from one side of the boat to the other on a small move of the camera. */
+  previous?: CardMode
 }
 
-export interface SignPlacement {
-  /** Sideways shift of the card; the leader and dot stay on the point. */
-  dx: number
-  /** The card sits under its point, the leader going up to it. */
-  below: boolean
-  /** The leader line's length. */
-  leader: number
+/** Where a card sits against its point: above it, below it, or beside it. */
+export type CardMode = 'above' | 'below' | 'left' | 'right'
+
+/** A line from the sign's point to the nearest place on its card's edge. */
+export interface Leader { x1: number; y1: number; x2: number; y2: number }
+
+/** Where a card goes on the map, in the map's pixels: one result, which the
+ * page's marker, the video's canvas and the exported player all draw from. */
+export interface CardPlacement {
+  /** What the card takes up on the map: smaller than its own size by `scale` when the map is too short to hold it. */
+  rect: Rect
+  /** 1 at the card's own size. The card is drawn at its own size and made this much smaller. */
+  scale: number
+  mode: CardMode
+  /** From the point to the card, or null when the point is off the map (it has no dot to run a line from) or the card sits over it. */
+  leader: Leader | null
+  /** The point is so far off the map that its card is not shown (it would be off the map with it). */
+  hidden: boolean
 }
 
-/** Where a card sits so it stays whole inside the map. It slides sideways near
- * an edge, drops below its point when there is more room there, and shortens
- * its leader (down to a minimum) when it is tight. With an unknown map or card
- * size it is left as it prefers. Shared by the app and the exported player. */
-export function placeSignCard({ point, container, card, lift }: SignPlacementInput): SignPlacement {
-  if (container.w <= 0 || container.h <= 0 || card.w <= 0 || card.h <= 0) return { dx: 0, below: false, leader: lift }
+/** How far a card beside its point stands from it: the leader across. */
+export const SIGN_SIDE_LEADER_PX = 16
+const SIGN_SCALE_STEP = 0.05
+
+interface Found { rect: Rect; leader: Leader | null }
+
+/** The card at one size in one place against its point; null if it fits there
+ * whole inside the map. */
+function tryMode(mode: CardMode, input: SignPlacementInput, w: number, h: number): Found | null {
+  const { point, container, lift } = input
   const m = SIGN_EDGE_MARGIN_PX
-  let dx = 0
-  if (card.w + 2 * m <= container.w) {
-    const left = point.x - card.w / 2
-    if (left < m) dx = m - left
-    else if (left + card.w > container.w - m) dx = container.w - m - (left + card.w)
-    const reach = Math.max(0, card.w / 2 - LEADER_INSET_PX)
-    dx = Math.max(-reach, Math.min(reach, dx))
+  const onMap = point.x >= 0 && point.x <= container.w && point.y >= 0 && point.y <= container.h
+  if (mode === 'above' || mode === 'below') {
+    // Across: centred on the point, slid to stay within the map's margin, and the leader must still meet the card.
+    if (w + 2 * m > container.w || h + 2 * m > container.h) return null
+    let x = Math.max(m, Math.min(container.w - m - w, point.x - w / 2))
+    if (onMap) {
+      // The leader must still meet the card, so it may sit a little closer to the edge than the margin, but never off the map.
+      x = Math.max(point.x - w + LEADER_INSET_PX, Math.min(point.x - LEADER_INSET_PX, x))
+      if (x < 0 || x + w > container.w) return null
+    }
+    let y: number
+    if (mode === 'above') {
+      // With the top clear for the map's controls.
+      const room = point.y - h - SIGN_TOP_MARGIN_PX
+      if (room < SIGN_MIN_LEADER_PX) return null
+      y = point.y - SIGN_DOT_NET_PX - Math.min(lift, room) - h
+    } else {
+      const under = container.h - m - point.y - SIGN_DOT_NET_PX - h
+      if (under < SIGN_MIN_LEADER_PX) return null
+      y = point.y + SIGN_DOT_NET_PX + Math.min(lift, under)
+    }
+    // A point just past the top or foot of the map still has its card whole inside it.
+    if (!onMap) y = Math.max(m, Math.min(container.h - m - h, y))
+    const edge = mode === 'above' ? y + h : y
+    return { rect: { x, y, w, h }, leader: onMap ? { x1: point.x, y1: point.y, x2: point.x, y2: edge } : null }
   }
-  const room = point.y - card.h - SIGN_TOP_MARGIN_PX
-  if (room >= SIGN_MIN_LEADER_PX) return { dx, below: false, leader: Math.min(lift, room) }
-  const under = container.h - m - point.y - card.h
-  if (under > room) return { dx, below: true, leader: Math.max(SIGN_MIN_LEADER_PX, Math.min(lift, under)) }
-  return { dx, below: false, leader: SIGN_MIN_LEADER_PX }
+  // Beside the point, centred on it as far as the map allows, and never in the band kept clear for the controls.
+  if (h + SIGN_TOP_MARGIN_PX + m > container.h) return null
+  const reach = SIGN_DOT_NET_PX + SIGN_SIDE_LEADER_PX
+  const x = mode === 'right' ? Math.max(m, point.x + reach) : Math.min(container.w - m - w, point.x - reach - w)
+  if (x < m - 1e-6 || x + w > container.w - m + 1e-6) return null
+  const y = Math.max(SIGN_TOP_MARGIN_PX, Math.min(container.h - m - h, point.y - h / 2))
+  const nearest = Math.max(y, Math.min(y + h, point.y))
+  return { rect: { x, y, w, h }, leader: onMap ? { x1: point.x, y1: point.y, x2: mode === 'right' ? x : x + w, y2: nearest } : null }
+}
+
+/** Where a card sits so it is always whole inside the map. Above its point
+ * when there is room, else below it, else beside it; a card keeps the place it
+ * had (`previous`) for as long as that still fits. When the map is too short
+ * for any of those, the card is made smaller until one fits, rather than cut
+ * off. A point just past the edge of the map still has its card whole inside
+ * it, with no leader to run; one far off the map has no card shown. Shared by
+ * the app, the video and the exported player. */
+export function placeSignCard(input: SignPlacementInput): CardPlacement {
+  const { point, container, card, lift, previous } = input
+  if (container.w <= 0 || container.h <= 0 || card.w <= 0 || card.h <= 0) {
+    const rect = { x: point.x - card.w / 2, y: point.y - SIGN_DOT_NET_PX - lift - card.h, w: card.w, h: card.h }
+    return { rect, scale: 1, mode: 'above', leader: { x1: point.x, y1: point.y, x2: point.x, y2: rect.y + rect.h }, hidden: false }
+  }
+  // Far off the map: the card goes with its point, off the map, and is not shown.
+  if (point.x < -card.w || point.x > container.w + card.w || point.y < -card.h || point.y > container.h + card.h) {
+    const rect = { x: point.x - card.w / 2, y: point.y - SIGN_DOT_NET_PX - lift - card.h, w: card.w, h: card.h }
+    return { rect, scale: 1, mode: 'above', leader: null, hidden: true }
+  }
+  const reach = SIGN_DOT_NET_PX + SIGN_SIDE_LEADER_PX
+  const roomRight = container.w - SIGN_EDGE_MARGIN_PX - (point.x + reach + card.w)
+  const roomLeft = point.x - reach - card.w - SIGN_EDGE_MARGIN_PX
+  const sides: CardMode[] = roomRight >= roomLeft ? ['right', 'left'] : ['left', 'right']
+  const preferred: CardMode[] = ['above', 'below', ...sides]
+  const order: CardMode[] = previous ? [previous, ...preferred.filter((mode) => mode !== previous)] : preferred
+  for (let scale = 1; scale > SIGN_SCALE_STEP; scale -= SIGN_SCALE_STEP) {
+    const w = card.w * scale
+    const h = card.h * scale
+    for (const mode of order) {
+      const found = tryMode(mode, input, w, h)
+      if (found) return { rect: found.rect, scale, mode, leader: found.leader, hidden: false }
+    }
+  }
+  // A map too small for any way round: the card is fitted to it, beside the point where it can.
+  const m = SIGN_EDGE_MARGIN_PX
+  const scale = Math.max(0.01, Math.min(1, (container.w - 2 * m) / card.w, (container.h - 2 * m) / card.h))
+  const w = card.w * scale
+  const h = card.h * scale
+  const x = Math.max(m, Math.min(container.w - m - w, point.x + SIGN_DOT_NET_PX + SIGN_SIDE_LEADER_PX))
+  const y = Math.max(m, Math.min(container.h - m - h, point.y - h / 2))
+  const over = point.x >= x && point.x <= x + w && point.y >= y && point.y <= y + h
+  const mode: CardMode = x > point.x ? 'right' : 'left'
+  return { rect: { x, y, w, h }, scale, mode, leader: over ? null : { x1: point.x, y1: point.y, x2: mode === 'right' ? x : x + w, y2: Math.max(y, Math.min(y + h, point.y)) }, hidden: false }
 }
 
 // ── the card's size ──────────────────────────────────────────────────────
 // SignCard is built from these, so the page and the replay's photo moment, which
-// grows from the card's photo, cannot disagree about where the photo is.
+// grows from the card, cannot disagree about where the card is.
 
 /** Seconds a card takes to fade in, and the stay's label to fade in and out. */
 export const CARD_FADE_S = 0.3
@@ -209,57 +292,33 @@ export const SIGN_CARD_GAP_PX = 8
 /** The line heights of the title and of the note, which shows two lines at most. */
 export const SIGN_TITLE_LINE_PX = 20
 export const SIGN_NOTE_LINE_PX = 16
-const SIGN_NOTE_MAX_LINES = 2
-/** About how many characters of the note fit on a line of a card with a photo. */
-const SIGN_NOTE_LINE_CHARS = 36
+/** The most lines of the note a card shows. */
+export const SIGN_NOTE_MAX_LINES = 2
 /** How far the card's leader meets the point: the dot's height that shows. */
 const SIGN_DOT_NET_PX = 4
 
-/** How many lines of the note the card shows. */
-function noteLines(note: string): number {
-  if (note === '') return 0
-  const lines = note.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / SIGN_NOTE_LINE_CHARS)), 0)
-  return Math.min(SIGN_NOTE_MAX_LINES, lines)
-}
-
 /** The size of a sign's card in a map `containerW` wide, and of its photo. The
- * height is worked out from the contents, since the page has not measured it:
- * the note's lines are a guess by characters unless the caller has measured
- * them and says how many (`measuredNoteLines`). */
-export function signCardBox(sign: Pick<ReplaySign, 'note' | 'photo_url'>, containerW: number, measuredNoteLines?: number): { w: number; h: number; photoW: number; photoH: number } {
+ * height comes from the contents: the photo, the title's one line, and the
+ * `noteLines` lines of the note, which the caller has wrapped by measuring the
+ * text (lib/sign-note), so this is exact. A photo that cannot be loaded is a
+ * placeholder of the photo's size, with its words inside. */
+export function signCardBox(sign: Pick<ReplaySign, 'photo_url'>, containerW: number, noteLines: number): { w: number; h: number; photoW: number; photoH: number } {
   const w = Math.min(sign.photo_url != null ? SIGN_CARD_PHOTO_W_PX : SIGN_CARD_TEXT_W_PX, Math.max(0, containerW - 2 * SIGN_EDGE_MARGIN_PX))
   const photoW = w - 2 * SIGN_CARD_PAD_PX
   const photoH = photoW / PHOTO_ASPECT
-  const text = SIGN_TITLE_LINE_PX + (measuredNoteLines ?? noteLines(sign.note)) * SIGN_NOTE_LINE_PX
+  const text = SIGN_TITLE_LINE_PX + noteLines * SIGN_NOTE_LINE_PX
   return { w, h: 2 * SIGN_CARD_PAD_PX + (sign.photo_url != null ? photoH + SIGN_CARD_GAP_PX : 0) + text, photoW, photoH }
 }
 
-/** Where a sign's card is in the map, in the map's pixels: as `placeSignCard`
- * puts it for the sign's point. */
-export function signCardRect(
-  sign: Pick<ReplaySign, 'note' | 'photo_url'>,
+/** Where a sign's card is, as `placeSignCard` puts it for the sign's point. */
+export function signCardPlacement(
+  sign: Pick<ReplaySign, 'photo_url'>,
   point: { x: number; y: number },
   container: { w: number; h: number },
   lift: number,
-  measuredNoteLines?: number,
-): { x: number; y: number; w: number; h: number; below: boolean; leader: number } {
-  const { w, h } = signCardBox(sign, container.w, measuredNoteLines)
-  const place = placeSignCard({ point, container, card: { w, h }, lift })
-  const x = point.x - w / 2 + place.dx
-  const y = place.below ? point.y + SIGN_DOT_NET_PX + place.leader : point.y - SIGN_DOT_NET_PX - place.leader - h
-  return { x, y, w, h, below: place.below, leader: place.leader }
-}
-
-/** Where the photo of a sign's card is in the map, in the map's pixels: the
- * card inside which it sits, less the padding. */
-export function signCardPhotoRect(
-  sign: Pick<ReplaySign, 'note' | 'photo_url'>,
-  point: { x: number; y: number },
-  container: { w: number; h: number },
-  lift: number,
-  measuredNoteLines?: number,
-): { x: number; y: number; w: number; h: number } {
-  const card = signCardRect(sign, point, container, lift, measuredNoteLines)
-  const { photoW, photoH } = signCardBox(sign, container.w, measuredNoteLines)
-  return { x: card.x + SIGN_CARD_PAD_PX, y: card.y + SIGN_CARD_PAD_PX, w: photoW, h: photoH }
+  noteLines: number,
+  previous?: CardMode,
+): CardPlacement {
+  const { w, h } = signCardBox(sign, container.w, noteLines)
+  return placeSignCard({ point, container, card: { w, h }, lift, previous })
 }

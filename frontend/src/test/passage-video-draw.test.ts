@@ -7,7 +7,7 @@ import { stayLabelBox } from '@/lib/replay-stay'
 import { createCanvasCompositor, drawOverlay, paintClosingCard, themeFor, wrapLines } from '@/lib/passage-video/draw'
 import { UI_SCALE, type OverlayModel } from '@/lib/passage-video/overlay'
 import { VIDEO_SIZES } from '@/lib/passage-video/schedule'
-import type { ReplaySign } from '@/lib/replay-signs'
+import type { CardPlacement, ReplaySign } from '@/lib/replay-signs'
 
 // A drawing surface that writes down what it is asked to do.
 function recorder() {
@@ -29,8 +29,12 @@ const sign = (extra: Partial<ReplaySign> = {}): ReplaySign => ({
 })
 const model = (extra: Partial<OverlayModel> = {}): OverlayModel => ({ scale: UI_SCALE, design: { w: 1280, h: 720 }, cards: [], pins: [], moment: null, dot: null, stay: null, passage: null, ...extra })
 const card = (extra: Partial<OverlayModel['cards'][number]> = {}): OverlayModel['cards'][number] => ({
-  sign: sign(), point: { x: 600, y: 500 }, rect: { x: 472, y: 276, w: 256, h: 224 }, below: false, leader: 20, lift: 20, noteLines: ['A humpback off the bow'], alpha: 1, photo: 'bitmap', ...extra,
+  sign: sign(), point: { x: 600, y: 500 }, placement: placed({ x: 472, y: 276, w: 256, h: 224 }), lift: 20, noteLines: ['A humpback off the bow'], alpha: 1, photo: 'bitmap', ...extra,
 })
+/** A card's placement: where it is, the leader from the point to it, and how much smaller than its own size. */
+function placed(rect: { x: number; y: number; w: number; h: number }, extra: Partial<CardPlacement> = {}): CardPlacement {
+  return { rect, scale: 1, mode: 'above', hidden: false, leader: { x1: 600, y1: 500, x2: 600, y2: rect.y + rect.h }, ...extra }
+}
 const bitmap = { width: 800, height: 600 } as unknown as ImageBitmap
 const photos = new Map<string, ImageBitmap>([['a', bitmap]])
 
@@ -212,13 +216,81 @@ describe('drawOverlay', () => {
     expect(r.ops('arc').some((c) => c.args[0] === 300 && c.args[1] === 300)).toBe(true)
   })
 
-  it('draws the moment\'s photo in its rect, zoomed, over the card', () => {
-    const r = recorder()
-    drawOverlay(r.ctx, model({ cards: [card()], moment: { signId: 'a', rect: { x: 100, y: 80, w: 600, h: 450 }, scale: 1.04, fill: 1 } }), photos, themeFor(false))
-    const draws = r.ops('drawImage')
-    expect(draws).toHaveLength(2)
-    expect(r.ops('translate').some((c) => c.args[0] === 400 && c.args[1] === 305)).toBe(true)
-    expect(r.ops('scale').some((c) => c.args[0] === 1.04)).toBe(true)
+  describe('the photo moment', () => {
+    const moment = (extra: Partial<NonNullable<OverlayModel['moment']>> = {}): NonNullable<OverlayModel['moment']> => ({
+      sign: sign(), noteLines: ['A humpback off the bow'], card: { x: 240, y: 90, w: 320, h: 280 }, k: 1.25, face: { w: 256, h: 224 }, zoom: 1.04, ...extra,
+    })
+
+    it('draws the whole card, grown: the frame, the photo and the caption, at the scale of the card', () => {
+      const r = recorder()
+      drawOverlay(r.ctx, model({ moment: moment() }), photos, themeFor(false))
+      // The card is put where it stands and made 1.25 times bigger, then drawn at its own size.
+      expect(r.ops('translate')[0].args).toEqual([240, 90])
+      expect(r.ops('scale').some((c) => c.args[0] === 1.25 && c.args[1] === 1.25)).toBe(true)
+      expect(r.texts()).toEqual(['Whale', 'A humpback off the bow'])
+      expect(r.ops('roundRect')[0].args).toEqual([0, 0, 256, 224, 6])
+      expect(r.ops('drawImage')).toHaveLength(1)
+    })
+
+    it('zooms the photo inside its frame alone: the caption and the frame are not zoomed', () => {
+      const r = recorder()
+      drawOverlay(r.ctx, model({ moment: moment({ zoom: 1.04 }) }), photos, themeFor(false))
+      const zoomAt = r.calls.findIndex((c) => c.op === 'scale' && c.args[0] === 1.04)
+      expect(zoomAt).toBeGreaterThan(-1)
+      const photoAt = r.calls.findIndex((c) => c.op === 'drawImage')
+      const textAt = r.calls.findIndex((c) => c.op === 'fillText' && c.args[0] === 'Whale')
+      // The zoom is set before the photo is drawn and gone (restored) before the title is written.
+      expect(zoomAt).toBeLessThan(photoAt)
+      expect(r.calls.slice(photoAt, textAt).some((c) => c.op === 'restore')).toBe(true)
+      expect(r.ops('scale').filter((c) => c.args[0] === 1.04)).toHaveLength(1)
+    })
+
+    it('has the photo in the 4 by 3 frame of the card, whole', () => {
+      const r = recorder()
+      drawOverlay(r.ctx, model({ moment: moment({ zoom: 1 }) }), photos, themeFor(false))
+      const img = r.ops('drawImage')[0].args
+      // The bitmap is 800 by 600: the whole picture, no crop, into 240 by 180.
+      expect(img.slice(1, 5)).toEqual([0, 0, 800, 600])
+      expect(img.slice(5)).toEqual([8, 8, 240, 180])
+    })
+
+    it('draws nothing when the photo is not there', () => {
+      const r = recorder()
+      drawOverlay(r.ctx, model({ moment: moment({ sign: sign({ id: 'gone' }) }) }), photos, themeFor(false))
+      expect(r.ops('fillText')).toHaveLength(0)
+    })
+  })
+
+  describe('a card beside its point, or made smaller', () => {
+    it('is drawn at its own size, then made smaller, with a leader to its edge', () => {
+      const r = recorder()
+      const point = { x: 680, y: 256 }
+      drawOverlay(r.ctx, model({ cards: [card({ point, placement: placed({ x: 700, y: 200, w: 128, h: 112 }, { scale: 0.5, mode: 'right', leader: { x1: 680, y1: 256, x2: 700, y2: 256 } }) })] }), photos, themeFor(false))
+      expect(r.ops('translate')[0].args).toEqual([700, 200])
+      expect(r.ops('scale').some((c) => c.args[0] === 0.5)).toBe(true)
+      expect(r.ops('roundRect')[0].args).toEqual([0, 0, 256, 224, 6])
+      // The leader runs from the card's left edge, level with the point, to the point.
+      expect(r.ops('moveTo')[0].args).toEqual([700, 256])
+      expect(r.ops('lineTo')[0].args).toEqual([680, 256])
+    })
+
+    it('has the leader from the card\'s right edge when it is on the left', () => {
+      const r = recorder()
+      const point = { x: 376, y: 500 }
+      drawOverlay(r.ctx, model({ cards: [card({ point, placement: placed({ x: 100, y: 200, w: 256, h: 224 }, { mode: 'left', leader: { x1: 376, y1: 500, x2: 356, y2: 424 } }) })] }), photos, themeFor(false))
+      expect(r.ops('moveTo')[0].args).toEqual([356, 424])
+      expect(r.ops('lineTo')[0].args).toEqual([376, 500])
+    })
+
+    it('has no leader when the point is off the map, and no card when it is far off', () => {
+      const off = recorder()
+      drawOverlay(off.ctx, model({ cards: [card({ placement: placed({ x: 6, y: 100, w: 256, h: 224 }, { leader: null }) })] }), photos, themeFor(false))
+      expect(off.ops('moveTo')).toHaveLength(0)
+      expect(off.texts()).toContain('Whale')
+      const far = recorder()
+      drawOverlay(far.ctx, model({ cards: [card({ placement: placed({ x: -900, y: 100, w: 256, h: 224 }, { hidden: true }) })] }), photos, themeFor(false))
+      expect(far.ops('fillText')).toHaveLength(0)
+    })
   })
 
   it('draws nothing for an empty model', () => {

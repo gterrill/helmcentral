@@ -281,10 +281,24 @@ that is made the first time, or chosen from a photo already in Documents.
   but can't be loaded, the card says "Photo not available" instead of hiding
   it.
 
+A sign's card always stays whole inside the map. It sits above the boat when
+there is room, else below it, else beside it, and a card stays on the side it is
+on until that side has no room, so it doesn't jump as the camera moves. If the map
+is too short for any of those, the card is shown smaller rather than cut off. It
+never goes under the controls at the top. When the boat has just crossed the edge
+of the map its card stays inside it with no line to the boat, and when the boat is
+far off the map the card isn't shown. The video's cards, and the cards in the
+blog card you export, follow the same rule.
+
 A sign with a photo also gets a photo moment. When the replay reaches the sign,
-the replay holds still while the photo grows out of the card to fill about
-seventy percent of the map. It zooms in slowly for a second and a half, then
-shrinks back into the card and the replay carries on. The whole moment takes
+the replay holds still while the whole card grows, its frame and its title and
+note as well as the photo, to fill about seventy percent of the map, so you can
+read the caption at that size. On a short map, where seventy percent would
+barely be bigger than the card is already, the card grows to ninety percent of
+the map's height instead. The photo zooms in slowly inside its frame for a
+second and a half while the card holds still. Then the card shrinks back to where
+it was and the replay carries on. With reduced motion the card shows at full size
+for the moment and goes. The whole moment takes
 about 2.3 seconds, and it is added on top of the length you chose, so a replay
 with three photo moments takes about seven seconds longer to watch. In the sign
 editor, the **Photo moment** switch turns it off for one sign. It shows only for

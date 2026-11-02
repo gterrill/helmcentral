@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { passageLabelBox } from '@/lib/replay-passage-label'
 import { stayLabelBox, stayView } from '@/lib/replay-stay'
 import { UI_SCALE, buildOverlay, type OverlayInput } from '@/lib/passage-video/overlay'
-import { CARD_FADE_S, signCardBox, signCardPhotoRect, signCardRect, SIGN_LIFT_PX, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
+import { CARD_FADE_S, signCardBox, signCardPlacement, SIGN_LIFT_PX, type CardMode, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
 import type { ReplayFrame } from '@/lib/replay-controller'
 import { MOMENT_GROW_S, momentRect, momentView } from '@/lib/replay-time'
 
@@ -54,15 +54,15 @@ describe('buildOverlay and a stay', () => {
 
 describe('buildOverlay', () => {
   it('sizes a card from the note as it is wrapped, so a second line is inside the card', () => {
-    // 33 characters: one line by the guess of 36 to a line, but two at 7 px a character in 208 px.
+    // 33 characters: two lines at 7 px a character in the 208 px of a text card.
     const note = 'A humpback and her calf off bow'.padEnd(33, 'x')
     const a = placed(sign('a', { note }))
     const m = buildOverlay(input(frame({ cards: [a] })))
     const card = m.cards[0]
     expect(card.noteLines.length).toBe(2)
     expect(card.noteLines.join(' ').replace(/…/g, '')).toContain('humpback')
-    expect(card.rect.h).toBe(signCardBox(a.sign, m.design.w, 2).h)
-    expect(card.rect.h).toBeGreaterThan(signCardBox(a.sign, m.design.w).h)
+    expect(card.placement.rect.h).toBe(signCardBox(a.sign, m.design.w, 2).h)
+    expect(card.placement.rect.h).toBeGreaterThan(signCardBox(a.sign, m.design.w, 1).h)
   })
 
   it('keeps a short note on one line, and no note on none', () => {
@@ -81,11 +81,9 @@ describe('buildOverlay', () => {
     const a = placed(sign('a', photo), 149, -20)
     const m = buildOverlay(input(frame({ cards: [a] }), { bitmaps: new Set(['a']) }))
     const p = project(149, -20)
-    const want = signCardRect(a.sign, { x: p.x / 1.5, y: p.y / 1.5 }, m.design, SIGN_LIFT_PX[0])
+    const want = signCardPlacement(a.sign, { x: p.x / 1.5, y: p.y / 1.5 }, m.design, SIGN_LIFT_PX[0], 0)
     expect(m.cards).toHaveLength(1)
-    expect(m.cards[0].rect).toEqual({ x: want.x, y: want.y, w: want.w, h: want.h })
-    expect(m.cards[0].below).toBe(want.below)
-    expect(m.cards[0].leader).toBe(want.leader)
+    expect(m.cards[0].placement).toEqual(want)
     expect(m.cards[0].point).toEqual({ x: p.x / 1.5, y: p.y / 1.5 })
   })
 
@@ -112,6 +110,30 @@ describe('buildOverlay', () => {
     expect(buildOverlay(input(frame({ cards: [a] }), { wall: 10, firstSeen: seen })).cards[0].alpha).toBe(0)
     expect(buildOverlay(input(frame({ cards: [a] }), { wall: 10.15, firstSeen: seen })).cards[0].alpha).toBeCloseTo(0.5)
     expect(buildOverlay(input(frame({ cards: [a] }), { wall: 11, firstSeen: seen })).cards[0].alpha).toBe(1)
+  })
+
+  it('keeps a card where it was put while it fits, from one frame to the next', () => {
+    // A boat low on the map: the card goes beside it, to the right or the left by where there is more room.
+    const a = placed(sign('a', photo), 149, -20)
+    const low = (x: number): Parameters<typeof buildOverlay>[0]['project'] => () => ({ x: x * 1.5, y: 215 * 1.5 })
+    const modes = new Map<string, CardMode>()
+    const mode = (x: number) => buildOverlay(input(frame({ cards: [a] }), { project: low(x), size: { width: 1614, height: 624 }, modes })).cards[0].placement.mode
+    expect(mode(500)).toBe('right')
+    // Across the middle of the map it does not flip to the other side.
+    expect([mode(530), mode(540), mode(560), mode(530)]).toEqual(['right', 'right', 'right', 'right'])
+    // Out of room on the right, it goes to the left.
+    expect(mode(900)).toBe('left')
+    // And a card with no memory goes by the room alone.
+    const fresh = buildOverlay(input(frame({ cards: [a] }), { project: low(540), size: { width: 1614, height: 624 } })).cards[0].placement.mode
+    expect(fresh).toBe('left')
+  })
+
+  it('shows the moment from the card as the card stands, in the place the card was kept in', () => {
+    const a = placed(sign('a', photo), 149, -20)
+    const modes = new Map<string, CardMode>([['a', 'left']])
+    const m = buildOverlay(input(frame({ cards: [a], moment: momentView('a', 0, false) }), { momentSign: a, bitmaps: new Set(['a']), project: () => ({ x: 800, y: 322 }), size: { width: 1614, height: 624 }, modes }))
+    expect(m.cards[0].placement.mode).toBe('left')
+    expect(m.moment!.card).toEqual(m.cards[0].placement.rect)
   })
 
   it('forgets a card that has gone, so it fades in again next time', () => {
@@ -141,12 +163,33 @@ describe('buildOverlay', () => {
     const a = placed(sign('a', photo), 149, -20)
     const view = momentView('a', MOMENT_GROW_S + 0.2, false)
 
-    it('is the rect lib/replay-time works out from the card\'s photo', () => {
+    it('is the whole card lib/replay-time works out from the card as it stands', () => {
       const m = buildOverlay(input(frame({ cards: [a], moment: view }), { momentSign: a, bitmaps: new Set(['a']) }))
       const p = project(149, -20)
       const point = { x: p.x / 1.5, y: p.y / 1.5 }
-      const want = momentRect(view, signCardPhotoRect(a.sign, point, m.design, SIGN_LIFT_PX[0]), m.design)
-      expect(m.moment).toMatchObject({ signId: 'a', rect: { x: want.x, y: want.y, w: want.w, h: want.h }, scale: want.scale })
+      const card = signCardPlacement(a.sign, point, m.design, SIGN_LIFT_PX[0], 0)
+      const box = signCardBox(a.sign, m.design.w, 0)
+      const want = momentRect(view, card.rect, { w: box.w, h: box.h }, m.design)
+      expect(m.moment).toMatchObject({ card: want.card, k: want.k, zoom: want.zoom, face: { w: box.w, h: box.h } })
+      expect(m.moment!.sign.id).toBe('a')
+    })
+
+    it('has the caption of the card, wrapped as the card wraps it', () => {
+      const withNote = placed(sign('a', { ...photo, title: 'Whale', note: 'A humpback and her calf off the bow of the boat' }), 149, -20)
+      const m = buildOverlay(input(frame({ cards: [withNote], moment: view }), { momentSign: withNote, bitmaps: new Set(['a']) }))
+      expect(m.moment!.noteLines).toEqual(m.cards[0].noteLines)
+      expect(m.moment!.noteLines.length).toBeGreaterThan(0)
+    })
+
+    it('stays inside the video\'s frame, in portrait and in landscape', () => {
+      for (const size of [{ width: 1920, height: 1080 }, { width: 1080, height: 1920 }]) {
+        const m = buildOverlay(input(frame({ cards: [a], moment: view }), { size, momentSign: a, bitmaps: new Set(['a']) }))
+        const c = m.moment!.card
+        expect(c.x).toBeGreaterThanOrEqual(0)
+        expect(c.y).toBeGreaterThanOrEqual(0)
+        expect(c.x + c.w).toBeLessThanOrEqual(m.design.w)
+        expect(c.y + c.h).toBeLessThanOrEqual(m.design.h)
+      }
     })
 
     it('is nothing without the photo, which could not be loaded', () => {

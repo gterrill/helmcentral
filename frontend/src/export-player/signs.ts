@@ -7,7 +7,7 @@
 import type * as MapLibre from 'maplibre-gl'
 
 import { isExportPhoto } from '@/lib/passage-export-signs'
-import { SIGN_LIFT_PX, placeSignCard, type ResolvedSign } from '@/lib/replay-signs'
+import { SIGN_LIFT_PX, placeSignCard, type CardMode, type ResolvedSign } from '@/lib/replay-signs'
 
 /** What a card measures before the browser can say. */
 const CARD_W = 256
@@ -51,6 +51,8 @@ interface Item {
   photoBtn: HTMLButtonElement | null
   close: HTMLButtonElement
   line: HTMLElement
+  /** Where the card was put last; it stays there for as long as it fits. */
+  mode: CardMode | undefined
   cardShown: boolean
   pinShown: boolean
 }
@@ -132,7 +134,8 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     pin.setAttribute('aria-label', `Sign: ${sign.title}`)
 
     // The marker element is a point; the box inside it is placed round that
-    // point in place(), so a card can slide or flip to stay inside the map.
+    // point in place(), so a card can slide, go beside the point or shrink to
+    // stay whole inside the map.
     const card = el('div', 'hcp-sign')
     card.hidden = true
     const box = el('div', 'hcp-sign-box')
@@ -164,10 +167,11 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     const dot = el('span', 'hcp-sign-dot')
     dot.setAttribute('aria-hidden', 'true')
     surface.appendChild(close)
-    box.append(surface, line, dot)
-    card.appendChild(box)
+    box.appendChild(surface)
+    // The card, the leader and the dot are placed from the point, by place().
+    card.append(box, line, dot)
 
-    const item: Item = { r, photo, pin, card, box, surface, photoBtn, close, line, cardShown: false, pinShown: false }
+    const item: Item = { r, photo, pin, card, box, surface, photoBtn, close, line, mode: undefined, cardShown: false, pinShown: false }
     pin.addEventListener('click', () => { openIndex = i; render(); close.focus() })
     close.addEventListener('click', () => { openIndex = null; render(); pin.focus() })
     photoBtn?.addEventListener('click', () => openDialog(item, photoBtn as HTMLElement))
@@ -225,9 +229,9 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     place(up)
   }
 
-  // Each shown card sits above its point on a leader line. Near an edge it
-  // slides sideways (the leader stays under it), is shortened, or goes below
-  // its point, so it is always whole inside the map.
+  // Each shown card is put where lib/replay-signs says, the same as on the app's
+  // map and in a video: above its point on a leader line, or below it, or beside
+  // it, or made smaller if the map is too short, so it is always whole inside the map.
   function place(up: Map<number, number>) {
     const c = map.getContainer()
     const W = c.clientWidth
@@ -235,19 +239,27 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     for (const [i, slot] of up) {
       const it = items[i]
       const lift: number = SIGN_LIFT_PX[Math.min(slot, SIGN_LIFT_PX.length - 1)]
-      let r = { dx: 0, below: false, leader: lift }
-      if (W > 0 && H > 0) {
-        const p = map.project([it.r.lon, it.r.lat])
-        r = placeSignCard({
-          point: { x: p.x, y: p.y },
-          container: { w: W, h: H },
-          card: { w: it.surface.offsetWidth || CARD_W, h: it.surface.offsetHeight || (it.photo ? CARD_H_PHOTO : CARD_H_TEXT) },
-          lift,
-        })
+      const p = W > 0 && H > 0 ? map.project([it.r.lon, it.r.lat]) : { x: 0, y: 0 }
+      const r = placeSignCard({
+        point: { x: p.x, y: p.y },
+        container: { w: W, h: H },
+        card: { w: it.surface.offsetWidth || CARD_W, h: it.surface.offsetHeight || (it.photo ? CARD_H_PHOTO : CARD_H_TEXT) },
+        lift,
+        previous: it.mode,
+      })
+      it.mode = r.mode
+      // The card's top left, from the point, and how much smaller than its own size it is.
+      it.box.style.left = `${Math.round(r.rect.x - p.x)}px`
+      it.box.style.top = `${Math.round(r.rect.y - p.y)}px`
+      it.box.style.transform = r.scale === 1 ? '' : `scale(${Math.round(r.scale * 1000) / 1000})`
+      it.box.style.visibility = r.hidden ? 'hidden' : ''
+      it.line.hidden = r.leader === null || r.hidden
+      if (r.leader) {
+        const dx = r.leader.x2 - r.leader.x1
+        const dy = r.leader.y2 - r.leader.y1
+        it.line.style.width = `${Math.round(Math.hypot(dx, dy))}px`
+        it.line.style.transform = `rotate(${Math.round((Math.atan2(dy, dx) * 1800) / Math.PI) / 10}deg)`
       }
-      it.surface.style.transform = r.dx === 0 ? '' : `translateX(${Math.round(r.dx)}px)`
-      it.box.classList.toggle('hcp-below', r.below)
-      it.line.style.height = `${Math.round(r.leader)}px`
     }
   }
   // A map that moves under a paused card moves its anchor, so it is placed again.

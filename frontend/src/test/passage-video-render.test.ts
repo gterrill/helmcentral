@@ -5,6 +5,7 @@ import type { OverlayModel } from '@/lib/passage-video/overlay'
 import type { PhotoSet } from '@/lib/passage-video/photos'
 import type { Compositor } from '@/lib/passage-video/draw'
 import { renderPassageVideo, type RenderDeps } from '@/lib/passage-video/render'
+import { photoDrawWidth } from '@/lib/passage-video/photos'
 import { FPS, VIDEO_SIZES, frameSchedule } from '@/lib/passage-video/schedule'
 import type { SceneFrame, SceneSpec, VideoScene } from '@/lib/passage-video/scene'
 import type { VideoSink } from '@/lib/passage-video/encoder'
@@ -211,7 +212,7 @@ describe('renderPassageVideo', () => {
       await renderPassageVideo(input({ lengthS: 8, signs: [sign('on', 500), sign('off', 90_000)] }), {}, f.deps)
       expect(spy).toHaveBeenCalledTimes(1)
       expect((spy.mock.calls[0][0] as ReplaySign[]).map((x) => x.id)).toEqual(['on'])
-      expect(spy.mock.calls[0][1]).toBe(Math.ceil(1008 * 1.06))
+      expect(spy.mock.calls[0][1]).toBe(photoDrawWidth(VIDEO_SIZES.landscape))
     })
 
     it('holds for each stay between passages of a cruise, with the light and the boat of the stay', async () => {

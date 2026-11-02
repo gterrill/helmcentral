@@ -30,13 +30,27 @@ export interface SignCardProps {
   onOpenPhoto: (sign: ReplaySign) => void
   /** Present on a card opened from a pin: closes it again. */
   onClose?: () => void
+  /** The note, wrapped into the lines the card shows (lib/sign-note), which is what makes the card the height lib/replay-signs says. */
+  noteLines: string[]
   /** The most the card may be wide, in pixels: the map's width less its margins. */
   maxWidthPx?: number
   className?: string
 }
 
+/** The title (one line) and the note (the lines it was wrapped into), which the card and the photo moment both show. */
+export function SignCardCaption({ sign, noteLines }: { sign: Pick<ReplaySign, 'title'>; noteLines: readonly string[] }) {
+  return (
+    <span className="flex min-w-0 flex-col text-left">
+      <span style={{ lineHeight: `${SIGN_TITLE_LINE_PX}px` }} className="truncate text-sm font-semibold text-foreground">{sign.title}</span>
+      {noteLines.map((line, i) => (
+        <span key={i} style={{ lineHeight: `${SIGN_NOTE_LINE_PX}px` }} className="truncate whitespace-pre text-xs text-muted-foreground">{line}</span>
+      ))}
+    </span>
+  )
+}
+
 /** A sign on the chart: the photo above the title and note. */
-export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, maxWidthPx, className }: SignCardProps) {
+export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, noteLines, maxWidthPx, className }: SignCardProps) {
   const src = signPhotoSrc(sign)
   // The photo is there on the server but would not load: say so, do not hide it.
   const [failed, setFailed] = useState(false)
@@ -54,15 +68,13 @@ export function SignCard({ sign, canOpenPhoto, still, onOpenPhoto, onClose, maxW
         <img src={src} alt="" loading="lazy" style={{ aspectRatio: PHOTO_ASPECT }} className="w-full shrink-0 rounded-sm bg-muted object-cover" onError={() => { logPhotoFailure(sign); setFailed(true) }} />
       )}
       {src && failed && (
-        <span style={{ aspectRatio: PHOTO_ASPECT }} className="flex w-full shrink-0 items-center justify-center rounded-sm bg-muted text-muted-foreground" data-testid="sign-photo-missing">
+        // The words are in the photo's place, so a card with a photo that will not load is the height of one with it.
+        <span style={{ aspectRatio: PHOTO_ASPECT }} className="flex w-full shrink-0 flex-col items-center justify-center gap-1 rounded-sm bg-muted text-xs text-muted-foreground" data-testid="sign-photo-missing">
           <ImageOff className="h-6 w-6" aria-hidden="true" />
+          Photo not available
         </span>
       )}
-      <span className="flex min-w-0 flex-col text-left">
-        <span style={{ lineHeight: `${SIGN_TITLE_LINE_PX}px` }} className="truncate text-sm font-semibold text-foreground">{sign.title}</span>
-        {sign.note && <span style={{ lineHeight: `${SIGN_NOTE_LINE_PX}px` }} className="line-clamp-2 whitespace-pre-line text-xs text-muted-foreground">{sign.note}</span>}
-        {src && failed && <span className="text-xs text-muted-foreground">Photo not available</span>}
-      </span>
+      <SignCardCaption sign={sign} noteLines={noteLines} />
     </>
   )
   // The photo leads, full width; a note-only sign stays a compact text card.

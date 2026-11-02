@@ -14,15 +14,15 @@ import { firstWhere, lowerBound } from '@/lib/sorted-search'
 
 // ── a photo moment ───────────────────────────────────────────────────────
 
-/** Seconds the photo takes to grow from the sign's card to fill the frame. */
+/** Seconds the card takes to grow from where it stands on the map to fill the frame. */
 export const MOMENT_GROW_S = 0.4
-/** Seconds it stays, zooming slowly. */
+/** Seconds it stays, with the photo zooming slowly in its frame. */
 const MOMENT_HOLD_S = 1.5
-/** Seconds it takes to shrink back into the card. */
+/** Seconds it takes to shrink back to where it stood. */
 const MOMENT_SHRINK_S = 0.4
 /** The whole hold, which the replay adds to its length for each moment. */
 export const MOMENT_TOTAL_S = MOMENT_GROW_S + MOMENT_HOLD_S + MOMENT_SHRINK_S
-/** How much of the frame the photo fills when it is grown (each way). */
+/** How much of the frame the card fills when it is grown (each way). */
 export const MOMENT_FRAME_FRACTION = 0.7
 /** The slow zoom across the hold. */
 export const MOMENT_KEN_BURNS = 1.06
@@ -38,14 +38,14 @@ type MomentPhase = 'grow' | 'hold' | 'shrink'
 export interface MomentView {
   signId: string
   phase: MomentPhase
-  /** From the sign's card (0) to the photo at full size (1), eased. */
+  /** From the sign's card as it stands on the map (0) to the card at full size (1), eased. */
   fill: number
   /** The zoom inside the photo's frame, 1 to 1.06. */
   scale: number
 }
 
 /** The moment `elapsedS` seconds in. Reduced motion has no growing, shrinking
- * or zoom: the photo is full and still for the whole moment. */
+ * or zoom: the card is full and still for the whole moment. */
 export function momentView(signId: string, elapsedS: number, reduced: boolean): MomentView {
   const e = Math.max(0, Math.min(MOMENT_TOTAL_S, elapsedS))
   let phase: MomentPhase = 'hold'
@@ -68,22 +68,55 @@ export function momentView(signId: string, elapsedS: number, reduced: boolean): 
 
 export interface Rect { x: number; y: number; w: number; h: number }
 
-/** Where the photo is, `view` through its moment: from the card's photo to the
- * photo at full size (70 percent of the frame, in its own shape, in the
- * middle), by how far it has grown. All in the frame's pixels. The zoom inside
- * the photo's frame goes with it. */
-export function momentRect(view: MomentView, card: Rect, frame: { w: number; h: number }): Rect & { scale: number } {
-  const w = Math.min(frame.w * MOMENT_FRAME_FRACTION, frame.h * MOMENT_FRAME_FRACTION * PHOTO_ASPECT)
-  const h = w / PHOTO_ASPECT
+/** The card at its own size. */
+export interface CardFace {
+  w: number
+  h: number
+}
+
+/** The card, `view` through its moment, in the frame's pixels. */
+export interface MomentCard {
+  /** The whole card: its frame, its photo and its caption. */
+  card: Rect
+  /** How much the card's own size is made bigger by: it is laid out and drawn at its own size, then scaled. */
+  k: number
+  /** The slow zoom inside the photo's frame, 1 to 1.06. The frame and the caption stay as they are. */
+  zoom: number
+}
+
+/** How much bigger than the card stands on the map it is grown, at least. A
+ * moment that barely changed the card would not read as one. */
+const MOMENT_MIN_GROWTH = 1.25
+/** The most of the frame's height and width the card fills, on a map too short for the usual 70 percent to be much of a growth. */
+const MOMENT_LARGE_FRACTION = 0.9
+
+/** How much the card's own size is made bigger by at the top of the moment:
+ * to fill 70 percent of the frame each way, or, where that is hardly bigger
+ * than the card is on the map (`onMap`, its scale there: a short or narrow map),
+ * up to 90 percent. Never smaller than it is on the map, and wholly inside the frame. */
+export function momentGrowth(face: CardFace, frame: { w: number; h: number }, onMap = 1): number {
+  const fill = (fraction: number) => Math.min((frame.w * fraction) / face.w, (frame.h * fraction) / face.h)
+  const k = fill(MOMENT_FRAME_FRACTION) >= onMap * MOMENT_MIN_GROWTH ? fill(MOMENT_FRAME_FRACTION) : fill(MOMENT_LARGE_FRACTION)
+  return Math.min(Math.max(k, onMap), fill(1))
+}
+
+/** Where the card is, `view` through its moment: from where it stands on the
+ * map (`card`) to full size (see `momentGrowth`), in the middle of the frame,
+ * by how far it has grown. The whole card grows as one, so the photo and the
+ * caption are at the same scale as its frame. All in the frame's pixels. */
+export function momentRect(view: MomentView, card: Rect, face: CardFace, frame: { w: number; h: number }): MomentCard {
+  const kFull = momentGrowth(face, frame, card.w / face.w)
+  const w = face.w * kFull
+  const h = face.h * kFull
   const full: Rect = { x: (frame.w - w) / 2, y: (frame.h - h) / 2, w, h }
   const t = view.fill
-  return {
+  const rect: Rect = {
     x: card.x + (full.x - card.x) * t,
     y: card.y + (full.y - card.y) * t,
     w: card.w + (full.w - card.w) * t,
     h: card.h + (full.h - card.h) * t,
-    scale: view.scale,
   }
+  return { card: rect, k: rect.w / face.w, zoom: view.scale }
 }
 
 // ── the time map ─────────────────────────────────────────────────────────
