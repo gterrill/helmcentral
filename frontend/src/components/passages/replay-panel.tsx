@@ -11,7 +11,8 @@ import { use3dPreference } from '@/lib/passage-3d-preference'
 import { useInsetPreference } from '@/lib/passage-inset-preference'
 import { PassageReplayBar } from '@/components/passages/passage-replay-bar'
 import { PhotoMoment } from '@/components/passages/photo-moment'
-import { StayLabel } from '@/components/passages/stay-label'
+import { MapLabel } from '@/components/passages/map-label'
+import { passageLabelBox, passageLabelsOf } from '@/lib/replay-passage-label'
 import { useElementSize } from '@/hooks/use-element-size'
 import { useBoatHull } from '@/hooks/use-boat-hull'
 import { useSignMoments } from '@/hooks/use-sign-moments'
@@ -26,7 +27,7 @@ import { replaySignsKey } from '@/hooks/use-replay-signs'
 import { replaySignsApi, type ReplaySignPatch } from '@/lib/replay-signs-api'
 import { usePassageLegs } from '@/hooks/use-passage-legs'
 import { labelledSigns, legPassages, piecesOf, playableShots, replayItems, wantsHeading } from '@/lib/replay-plan'
-import { staysOf } from '@/lib/replay-stay'
+import { boatOffsetHours as boatOffsetOf, staysOf, stayLabelBox } from '@/lib/replay-stay'
 import { AWAITING_NAME, placeAt, resolveSigns, type ReplaySign, SIGN_LIFT_PX, SIGN_SHOW_DEFAULT, SIGN_TITLE_MAX } from '@/lib/replay-signs'
 import { moveByCapture, placeByCapture } from '@/lib/sign-placement'
 import { captureOfDocument, captureOfFile, uploadSignPhoto } from '@/lib/sign-photo'
@@ -35,12 +36,13 @@ import { playedIds } from '@/lib/replay-time'
 import { INTRO_MS, introStartCamera } from '@/lib/replay-intro'
 import { ReplayController } from '@/lib/replay-controller'
 import { cruisePaceSpans, type CameraMode } from '@/lib/replay-clock'
+import { introLanding } from '@/lib/replay-framing'
 import { REPLAY_3D_PITCH } from '@/lib/terrain'
-import { zoneKnown, zoneOffsetMinutes } from '@/lib/vessel-time'
 import { useReplay } from '@/hooks/use-replay'
 import { replaySeconds, type ReplayLength, type ReplaySpeedId } from '@/lib/replay-lengths'
 import {
   buildTimeline,
+  isMultiPassage,
   formatLocalDateTime, localDateTimeParts,
   segmentBounds,
   type PassageDetail,
@@ -116,10 +118,10 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   const timeline = useMemo(() => buildTimeline(built.items), [built.items])
   const allSegments = useMemo(() => built.items.flatMap((i) => i.line), [built.items])
   const bounds = useMemo(() => segmentBounds(allSegments), [allSegments])
-  // The server cuts nights by the zone of the first fix; read the clock the same way.
-  const timeZone = passages[0]?.timezone ?? null
-  // Hours east of UTC at the first departure, for reading a camera's own clock as boat time. Null when the passage has no known zone: a photo with no zone of its own is then not placed by its time.
-  const boatOffsetHours: number | null = timeZone && zoneKnown(timeZone) && passages[0] ? zoneOffsetMinutes(timeZone, Date.parse(passages[0].start)) / 60 : null
+  // The server cuts nights by the zone of the first fix; read the clock the same way. The first passage is the earliest, whatever order they are given in: the same one the offset below, the stays and the day labels count by.
+  const timeZone = useMemo(() => (timeline.entries[0] ? passages.find((p) => p.id === timeline.entries[0].id)?.timezone ?? null : null), [timeline, passages])
+  // Hours east of UTC at the first departure, for reading a camera's own clock as boat time: the offset the stays and the day labels count by too. Null when the passage has no known zone: a photo with no zone of its own is then not placed by its time.
+  const boatOffsetHours = useMemo(() => boatOffsetOf(timeline, passages), [timeline, passages])
 
   // Camera shots belong to real time, so the ones inside the replayed
   // passages are the ones that play; a trimmed-out shot is simply not there.
@@ -143,6 +145,8 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   const insetWrites = useRef(0)
   const insetQueue = useRef<Promise<void>>(Promise.resolve())
   const insetView = pendingInset ?? savedInset
+  // The corner the overview map is shown in, which the labels over the map keep clear of.
+  const labelInset = insetOn && !flying && insetView ? insetView.corner : null
   useEffect(() => {
     if (insetError) toast.error('Could not read where the overview map goes', { description: insetError })
   }, [insetError])
@@ -166,6 +170,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   // A cruise shares its length between the passages, each at least a few seconds, and holds for a stay between each pair.
   const spans = useMemo(() => cruisePaceSpans(resolved, timeline, lengthS), [resolved, timeline, lengthS])
   const stays = useMemo(() => staysOf(timeline, passages), [timeline, passages])
+  const passageLabels = useMemo(() => passageLabelsOf(timeline, passages), [timeline, passages])
 
   // Signs, like shots, belong to real time: the ones inside the replayed
   // passages are the ones placed; a trimmed-out sign is kept but not shown.
@@ -205,7 +210,7 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   }
   // Working the frame out changes nothing; it is taken once this render is the
   // one on screen, before the map places its camera against it.
-  const frame = controller.frameAt({ timeline, time: replay.time, stays, resolved, signs: labelled, pieces, isDarkTheme }, frameInput)
+  const frame = controller.frameAt({ timeline, time: replay.time, stays, passageLabels, resolved, signs: labelled, pieces, isDarkTheme }, frameInput)
   useLayoutEffect(() => { controller.commit(frame) })
   const { here, boat, sailedTo, cards, pins } = frame
   const shownHeading = frame.heading
@@ -265,7 +270,9 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
     const framing = replay.wall <= 0 || replay.ended ? mapHandle.current?.getFraming() : null
     if (framing && bounds) {
       const from = introStartCamera(bounds, framing.bearing)
-      controller.startIntro(from, framing.overview, performance.now(), reducedMotion ? 0 : INTRO_MS)
+      // A cruise opens on its first passage; a single passage on the whole track.
+      const landing = introLanding(framing, timeline)
+      controller.startIntro(from, landing, performance.now(), reducedMotion ? 0 : INTRO_MS)
       introClock.current = replay.clock
       setFlying(true)
       introFlatAt.current = undefined
@@ -278,9 +285,10 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
   }
 
   // The camera: asked for by clock position; the map applies it per frame.
-  const cameraDriver: CameraDriver | null = resolved.length > 0 && !flying
+  const cameraDriver: CameraDriver | null = (resolved.length > 0 || isMultiPassage(timeline)) && !flying
     ? {
         clock: replay.clock,
+        wall: replay.wall,
         reduced: reducedMotion,
         resume,
         resolve: (env) => controller.cameraAt(env, performance.now()),
@@ -623,9 +631,8 @@ export function ReplayPanel({ passages, isDarkTheme, length, lengths, onLengthCh
             ) : null
           }
         />
-        {frame.stay && (
-          <StayLabel view={frame.stay} container={mapSize} insetCorner={insetOn && !flying && insetView ? insetView.corner : null} />
-        )}
+        {mapSize && frame.stay && <MapLabel testId="stay-label" text={frame.stay.stay.label} box={stayLabelBox(mapSize, frame.stay.elapsed, labelInset)} />}
+        {mapSize && frame.passageLabel && <MapLabel testId="passage-label" text={frame.passageLabel.label.text} box={passageLabelBox(mapSize, frame.passageLabel.elapsed, labelInset)} />}
         {frame.moment && momentAt && (
           <PhotoMoment
             view={frame.moment}

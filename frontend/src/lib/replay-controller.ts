@@ -13,7 +13,7 @@
 
 import { HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
 import {
-  type Camera, type CameraEnv, type CameraResult, CameraDirector, shotStartState,
+  type Camera, type CameraEnv, type CameraResult, CameraDirector, TRANSITION_S, blendCameras, easeInOut, shotStartState,
 } from '@/lib/replay-camera'
 import type { DrawnPiece } from '@/lib/passage-legs'
 import { INTRO_MS, introProjectionAt, makeIntroPath, type IntroProjection } from '@/lib/replay-intro'
@@ -21,10 +21,12 @@ import { lightFor, lightKey, type ReplayLight } from '@/lib/replay-light'
 import { MAX_SPEED_SEGMENTS, SPEED_RAMP_DARK, SPEED_RAMP_LIGHT, speedFrameAt, speedTrack, type SpeedFrame, type SpeedTrack, type WakeView } from '@/lib/replay-speed'
 import { sunPosition } from '@/lib/sun'
 import type { ResolvedShot } from '@/lib/replay-clock'
+import { cruiseCamera } from '@/lib/replay-framing'
 import { momentView, type HoldAt, type MomentView, type ReplayTime } from '@/lib/replay-time'
 import { stayView, type ReplayStay, type StayView } from '@/lib/replay-stay'
+import { passageLabelView, type PassageLabelView, type ReplayPassageLabel } from '@/lib/replay-passage-label'
 import { MAX_SIGN_CARDS, visibleSigns, type ResolvedSign } from '@/lib/replay-signs'
-import { locate, positionAt, sailedAt, type Timeline, type TimelineEntry } from '@/lib/passages'
+import { isMultiPassage, locate, positionAt, sailedAt, type Timeline, type TimelineEntry } from '@/lib/passages'
 
 /** Timeline seconds within which a position counts as standing at a moment's clock. */
 const CLOCK_EPS = 1e-6
@@ -176,6 +178,8 @@ export interface ReplayConfig {
   time: ReplayTime
   /** The stays between passages, which the time map holds the replay for. None for a single passage. */
   stays?: readonly ReplayStay[]
+  /** The lower-third naming each passage as it starts. None for a single passage. */
+  passageLabels?: readonly ReplayPassageLabel[]
   /** The camera shots placed on the replay, in order. */
   resolved: readonly ResolvedShot[]
   /** The signs that draw something (a join awaiting its name is left out). */
@@ -212,6 +216,8 @@ export interface ReplayFrame {
   stay: StayView | null
   /** The hold the replay is held in, a photo moment or a stay: the camera stands still for it. */
   hold: HoldAt | null
+  /** The lower-third naming the passage the boat has just set sail on, or null. It holds nothing up. */
+  passageLabel: PassageLabelView | null
   here: { entry: TimelineEntry; at: number } | null
   boat: { lat: number; lon: number } | null
   /** The bow's smoothed heading, or null. */
@@ -254,7 +260,7 @@ export class ReplayController {
   /** The speed frame on screen, which the next one keeps its gradients and lines from. */
   private speedPrev: SpeedFrame | null = null
   // Memory of work already done for the same inputs; it holds no state of the replay.
-  private memo: { parts: unknown[]; track: SpeedTrack | null; sailed: Map<string, Map<string, SailedTo> | null>; cards: Map<number, ResolvedSign[]>; stays: Map<string, ReplayStay>; entries: Map<string, TimelineEntry> } | null = null
+  private memo: { parts: unknown[]; track: SpeedTrack | null; sailed: Map<string, Map<string, SailedTo> | null>; cards: Map<number, ResolvedSign[]>; stays: Map<string, ReplayStay>; entries: Map<string, TimelineEntry>; labels: Map<string, { label: ReplayPassageLabel; startWall: number }> } | null = null
 
   /** The speeds along the track. A track cut into more segments than the colours take has none, and the replay draws its plain line; that is said once, here, with the count. */
   private trackFor(pieces: readonly DrawnPiece[]): SpeedTrack | null {
@@ -267,12 +273,14 @@ export class ReplayController {
   }
 
   private memoFor(config: ReplayConfig) {
-    const parts = [config.timeline, config.time, config.resolved, config.signs, config.pieces, config.stays]
+    const parts = [config.timeline, config.time, config.resolved, config.signs, config.pieces, config.stays, config.passageLabels]
     if (!this.memo || this.memo.parts.some((v, i) => v !== parts[i])) {
+      const entries = new Map(config.timeline.entries.map((e) => [e.id, e]))
       this.memo = {
         parts, track: this.trackFor(config.pieces), sailed: new Map(), cards: new Map(),
         stays: new Map((config.stays ?? []).map((s) => [s.id, s])),
-        entries: new Map(config.timeline.entries.map((e) => [e.id, e])),
+        entries,
+        labels: new Map((config.passageLabels ?? []).map((l) => [l.id, { label: l, startWall: config.time.wallAtClock(entries.get(l.id)!.offset) }])),
       }
     }
     return this.memo
@@ -333,6 +341,9 @@ export class ReplayController {
     const stayAt = stay && at.hold ? stayView(stay, at.hold.elapsed) : null
     // The light runs with the stay's own clock, from the arrival to the departure.
     const sunTime = stayAt ? stayAt.sunAt : here?.at
+    // The passage's label, from the moment its sailing begins (after the fly-in, after a stay and the signs at the departure).
+    const named = here && !stayAt && replaying ? memo.labels.get(here.entry.id) : undefined
+    const passageLabel = named ? passageLabelView(named.label, wall - named.startWall) : null
     const sun = boat && here && sunTime !== undefined ? sunPosition((sunTime + (input.sunOffsetH ?? 0) * 3600) * 1000, boat.lat, boat.lon) : null
     let light: ReplayLight | null = null
     if (sun) {
@@ -341,7 +352,7 @@ export class ReplayController {
       this.lightCache = light
     }
     const speed = sailedTo && memo.track ? speedFrameAt(config.pieces, memo.track, sailedTo, config.isDarkTheme ? SPEED_RAMP_DARK : SPEED_RAMP_LIGHT, this.speedPrev, input.view) : null
-    const frame: ReplayFrame = { here, boat, heading: smoothed.out, sailedTo, cards, pins: !replaying || input.signsOpen ? config.signs : [], light, speed, moment, stay: stayAt, hold: moment || stayAt ? at.hold : null }
+    const frame: ReplayFrame = { here, boat, heading: smoothed.out, sailedTo, cards, pins: !replaying || input.signsOpen ? config.signs : [], light, speed, moment, stay: stayAt, hold: moment || stayAt ? at.hold : null, passageLabel }
     this.pending.set(frame, { config, input, clock, lastHeading: raw, smoothed, smoother, speed })
     return frame
   }
@@ -373,7 +384,7 @@ export class ReplayController {
     if (!c || !c.frame.boat) return null
     const { config, input } = c.pending
     const { boat, heading } = c.frame
-    return this.director.frame(
+    const shot = this.director.frame(
       {
         overview: env.overview,
         flat: env.flat,
@@ -391,8 +402,65 @@ export class ReplayController {
         hold: c.frame.hold !== null,
         boat: { lat: boat.lat, lon: boat.lon, heading },
         current: env.current,
+        passageId: c.frame.here?.entry.id,
+        inStay: c.frame.stay !== null,
       },
     )
+    // A single passage: the shots, or none.
+    if (!isMultiPassage(config.timeline) || !env.passages || !c.frame.here) return shot
+    // A saved shot frames the boat wherever one applies.
+    if (shot && shot.mode !== 'before') return this.remember(shot, input.wall)
+    return this.cruiseCameraFor(c, env, input)
+  }
+
+  /** The camera in force the last time the camera was asked for, which the next framing eases from. Only a replay of several passages keeps it. */
+  private last: { key: string; camera: Camera; wall: number } | null = null
+  /** The camera the pull-out of a stay began from, and the framing change being eased. */
+  private stayFrom: { key: string; camera: Camera | undefined } | null = null
+  private ease: { key: string; from: Camera; startWall: number } | null = null
+
+  private remember(result: CameraResult, wall: number): CameraResult {
+    this.last = { key: result.shotKey, camera: result.camera, wall }
+    return result
+  }
+
+  /** The camera of a replay of several passages when no shot applies: each passage framed on its own, the stays between pulling out to the whole cruise and in again, and the end resting on the whole cruise. A change of framing without one of those moves is eased the way the director eases between shots. */
+  private cruiseCameraFor(c: NonNullable<ReplayController['committed']>, env: CameraEnv, input: FrameInput): CameraResult {
+    const { config } = c.pending
+    const frame = c.frame
+    const here = frame.here!
+    const stay = frame.stay
+    const stayKey = stay ? `stay:${stay.stay.fromId}>${stay.stay.toId}` : null
+    // The camera on screen as the stay begins is what it pulls out from.
+    if (stayKey && this.stayFrom?.key !== stayKey) this.stayFrom = { key: stayKey, camera: this.last?.camera }
+    else if (!stayKey) this.stayFrom = null
+    // The last moments of the replay, on the last passage: out to the whole cruise.
+    const entries = config.timeline.entries
+    const finale = !stay && here.entry.id === entries[entries.length - 1].id
+    const endRaw = (input.wall - (config.time.totalWall - TRANSITION_S)) / TRANSITION_S
+    const placed = cruiseCamera(
+      { overview: env.overview, passages: env.passages! },
+      {
+        passageId: here.entry.id,
+        stay: stay ? { fromId: stay.stay.fromId, toId: stay.stay.toId, progress: stay.progress } : null,
+        endProgress: finale && endRaw > 0 ? Math.min(1, endRaw) : undefined,
+      },
+      input.reduced,
+      this.stayFrom?.camera,
+    )
+    let camera = placed.camera
+    // A passage framing that follows something else (the last passage, a shot that ended, a stay) is eased in, when the replay is playing on from it. A seek cuts.
+    if (placed.key.startsWith('passage:') && !input.reduced) {
+      const last = this.last
+      if (last && last.key !== placed.key && input.playing && input.wall - last.wall >= 0 && input.wall - last.wall <= 0.5) {
+        this.ease = { key: placed.key, from: last.camera, startWall: input.wall }
+      }
+      const ease = this.ease
+      if (ease && ease.key === placed.key && input.wall >= ease.startWall && input.wall - ease.startWall < TRANSITION_S) {
+        camera = blendCameras(ease.from, placed.camera, easeInOut((input.wall - ease.startWall) / TRANSITION_S))
+      }
+    }
+    return this.remember({ camera, shotKey: placed.key, mode: 'overview' }, input.wall)
   }
 
   // ── the opening move ───────────────────────────────────────────────────

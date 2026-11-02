@@ -152,7 +152,7 @@ describe('stayLabelBox', () => {
   const frame = { w: 1280, h: 720 }
   it('sits low and in the middle, small, inside the frame', () => {
     const b = stayLabelBox(frame, STAY_S / 2)
-    expect(b.cx).toBe(640)
+    expect(b.x).toBe(640)
     expect(b.y).toBeGreaterThan(frame.h / 2)
     expect(b.y).toBeLessThan(frame.h)
     expect(b.fontPx).toBeLessThanOrEqual(14)
@@ -175,23 +175,23 @@ describe('stayLabelBox and the overview map', () => {
 
   it('is centred and as wide as the map allows when no overview map is shown', () => {
     const b = stayLabelBox(narrow, 0.75, null)
-    expect(b.cx).toBe(200)
+    expect(b.x).toBe(200)
     expect(b.maxW).toBe(352)
   })
 
   it('keeps clear of an overview map in the bottom-left corner of a narrow map', () => {
     const b = stayLabelBox(narrow, 0.75, 'bottom-left')
-    const left = b.cx - b.maxW / 2
+    const left = b.x - b.maxW / 2
     // The overview map is 176 px wide, 8 px in from the side.
     expect(left).toBeGreaterThanOrEqual(8 + 176)
-    expect(b.cx + b.maxW / 2).toBeLessThanOrEqual(narrow.w - 24)
+    expect(b.x + b.maxW / 2).toBeLessThanOrEqual(narrow.w - 24)
     expect(b.maxW).toBeGreaterThan(0)
   })
 
   it('keeps clear of one in the bottom-right corner', () => {
     const b = stayLabelBox(narrow, 0.75, 'bottom-right')
-    expect(b.cx + b.maxW / 2).toBeLessThanOrEqual(narrow.w - 8 - 176)
-    expect(b.cx - b.maxW / 2).toBeGreaterThanOrEqual(24)
+    expect(b.x + b.maxW / 2).toBeLessThanOrEqual(narrow.w - 8 - 176)
+    expect(b.x - b.maxW / 2).toBeGreaterThanOrEqual(24)
   })
 
   it('does not move for an overview map up in a top corner', () => {

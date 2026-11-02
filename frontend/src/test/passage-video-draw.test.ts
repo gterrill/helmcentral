@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { BRAND_LINE, CLOSING_SCALE, closingCardLayout } from '@/lib/passage-video/closing'
-import { STAY_LABEL, stayLabelBox } from '@/lib/replay-stay'
+import { passageLabelBox } from '@/lib/replay-passage-label'
+import { MAP_LABEL } from '@/lib/map-label'
+import { stayLabelBox } from '@/lib/replay-stay'
 import { createCanvasCompositor, drawOverlay, paintClosingCard, themeFor, wrapLines } from '@/lib/passage-video/draw'
 import { UI_SCALE, type OverlayModel } from '@/lib/passage-video/overlay'
 import { VIDEO_SIZES } from '@/lib/passage-video/schedule'
@@ -25,7 +27,7 @@ function recorder() {
 const sign = (extra: Partial<ReplaySign> = {}): ReplaySign => ({
   id: 'a', t_ms: 0, title: 'Whale', note: 'A humpback off the bow', document_id: 'd', photo_url: '/p', visibility: 'passing', show_s: 4, starts_leg: false, photo_moment: null, ...extra,
 })
-const model = (extra: Partial<OverlayModel> = {}): OverlayModel => ({ scale: UI_SCALE, design: { w: 1280, h: 720 }, cards: [], pins: [], moment: null, dot: null, stay: null, ...extra })
+const model = (extra: Partial<OverlayModel> = {}): OverlayModel => ({ scale: UI_SCALE, design: { w: 1280, h: 720 }, cards: [], pins: [], moment: null, dot: null, stay: null, passage: null, ...extra })
 const card = (extra: Partial<OverlayModel['cards'][number]> = {}): OverlayModel['cards'][number] => ({
   sign: sign(), point: { x: 600, y: 500 }, rect: { x: 472, y: 276, w: 256, h: 224 }, below: false, leader: 20, lift: 20, noteLines: ['A humpback off the bow'], alpha: 1, photo: 'bitmap', ...extra,
 })
@@ -87,23 +89,23 @@ describe('the stay label', () => {
     const w = s.text.length * 7 + 2 * s.box.padX
     // The card is as wide as its text and the padding, and centred on the box's middle.
     const card = r.ops('roundRect')[0].args
-    expect(card[0]).toBeCloseTo(s.box.cx - w / 2)
+    expect(card[0]).toBeCloseTo(s.box.x - w / 2)
     expect(card[1]).toBe(s.box.y)
     expect(card[2]).toBeCloseTo(w)
-    expect(card[3]).toBeCloseTo(s.box.fontPx * STAY_LABEL.lineHeight + 2 * s.box.padY)
-    expect(card[4]).toBe(STAY_LABEL.radius)
-    expect(text.args[1]).toBeCloseTo(s.box.cx - w / 2 + s.box.padX)
+    expect(card[3]).toBeCloseTo(s.box.fontPx * MAP_LABEL.lineHeight + 2 * s.box.padY)
+    expect(card[4]).toBe(MAP_LABEL.radius)
+    expect(text.args[1]).toBeCloseTo(s.box.x - w / 2 + s.box.padX)
   })
 
   it('takes the page\'s weight and its card and text colours from the theme', () => {
     const r = recorder()
     drawOverlay(r.ctx, model({ stay: stay(0.75) }), photos, themeFor(true))
     const fonts = r.calls.filter((c) => c.op === 'set font').map((c) => c.args[0] as string)
-    expect(fonts.every((f) => f.startsWith(`${STAY_LABEL.weight} 13px`))).toBe(true)
+    expect(fonts.every((f) => f.startsWith(`${MAP_LABEL.weight} 13px`))).toBe(true)
     const fills = r.calls.filter((c) => c.op === 'set fillStyle').map((c) => c.args[0])
     expect(fills).toEqual([themeFor(true).card, themeFor(true).text])
     const alphas = r.calls.filter((c) => c.op === 'set globalAlpha').map((c) => c.args[0])
-    expect(alphas).toContain(STAY_LABEL.bgAlpha)
+    expect(alphas).toContain(MAP_LABEL.bgAlpha)
   })
 
   it('fades with the stay: nothing at its start, and shortened to the room it has', () => {
@@ -117,6 +119,41 @@ describe('the stay label', () => {
 
   it('is not drawn when there is no stay', () => {
     const r = recorder()
+    drawOverlay(r.ctx, model(), photos, themeFor(false))
+    expect(r.ops('fillText')).toHaveLength(0)
+  })
+})
+
+describe('the passage label', () => {
+  const label = (elapsed: number) => ({ text: 'Day 3 \u00b7 Funnel Bay \u2192 Thomas Island', box: passageLabelBox({ w: 1280, h: 720 }, elapsed) })
+
+  it('writes the page\'s words on a card at the left, in the box the pure layout gives', () => {
+    const r = recorder()
+    const l = label(1)
+    drawOverlay(r.ctx, model({ passage: l }), photos, themeFor(false))
+    expect(r.texts()).toEqual([l.text])
+    const w = l.text.length * 7 + 2 * l.box.padX
+    const card = r.ops('roundRect')[0].args
+    // Left-aligned: the card starts at the box's left edge, not centred on it.
+    expect(card[0]).toBe(l.box.x)
+    expect(card[1]).toBe(l.box.y)
+    expect(card[2]).toBeCloseTo(w)
+    expect(card[3]).toBeCloseTo(l.box.fontPx * MAP_LABEL.lineHeight + 2 * l.box.padY)
+    expect(r.ops('fillText')[0].args[1]).toBeCloseTo(l.box.x + l.box.padX)
+  })
+
+  it('looks like the stay\'s label: the same weight, size and colours', () => {
+    const a = recorder()
+    const b = recorder()
+    drawOverlay(a.ctx, model({ passage: label(1) }), photos, themeFor(true))
+    drawOverlay(b.ctx, model({ stay: { text: 'x', box: stayLabelBox({ w: 1280, h: 720 }, 0.75) } }), photos, themeFor(true))
+    const look = (r: typeof a) => r.calls.filter((c) => ['set font', 'set fillStyle'].includes(c.op)).map((c) => [c.op, c.args[0]])
+    expect(look(a)).toEqual(look(b))
+  })
+
+  it('is not drawn at the start of its fade, or when there is none', () => {
+    const r = recorder()
+    drawOverlay(r.ctx, model({ passage: label(0) }), photos, themeFor(false))
     drawOverlay(r.ctx, model(), photos, themeFor(false))
     expect(r.ops('fillText')).toHaveLength(0)
   })

@@ -47,6 +47,7 @@ vi.mock('@/lib/offscreen-map', () => ({
 
 const spec: SceneSpec = {
   width: 1920, height: 1080, isDarkTheme: false, satellite: false, threeD: false, hull: null, bounds: [149, -20, 149.2, -20],
+  passageBounds: [{ id: 'a', bounds: [149, -20, 149.2, -20] }, { id: 'b', bounds: [149, -20.1, 149.2, -20.1] }],
   start: { center: [149.1, -20], zoom: 1.5, pitch: 0, bearing: 0 },
   pieces: [
     { key: 'a', passageId: 'a', colourIndex: 0, from: 0, to: 100, segments: [Array.from({ length: 11 }, (_, i) => ({ t: i * 10, lat: -20, lon: 149 + i * 0.02 }))] },

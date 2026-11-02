@@ -31,6 +31,8 @@ export interface PassageVideoInput {
 }
 
 export interface VideoSetup {
+  /** Each passage's own bounds, for framing it in a cruise. */
+  passageBounds: { id: string; bounds: [number, number, number, number] | null }[]
   /** The timeline, time map, shots, signs and pieces, as the controller takes them. */
   config: ReplayConfig
   bounds: [number, number, number, number]
@@ -46,6 +48,6 @@ export function prepareVideoReplay(input: PassageVideoInput, brokenPhotos: Reado
   if (!bounds || timeline.total <= 0) throw new PassageVideoError('source', 'No track was recorded for this passage, so there is nothing to make a video of.')
 
   const time = buildReplayTime({ total: timeline.total, lengthS: input.lengthS, spans: cruisePaceSpans(plan.resolved, timeline, input.lengthS), moments: momentsOf(plan.placed, brokenPhotos), stays: plan.stays })
-  const config: ReplayConfig = { timeline, time, stays: plan.stays, resolved: plan.resolved, signs: plan.labelled, pieces: plan.pieces, isDarkTheme: input.isDarkTheme }
-  return { config, bounds, wantHeading: plan.wantHeading }
+  const config: ReplayConfig = { timeline, time, stays: plan.stays, passageLabels: plan.passageLabels, resolved: plan.resolved, signs: plan.labelled, pieces: plan.pieces, isDarkTheme: input.isDarkTheme }
+  return { config, bounds, passageBounds: plan.passageBounds, wantHeading: plan.wantHeading }
 }

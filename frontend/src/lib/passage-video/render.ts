@@ -13,6 +13,7 @@ import { worldImageryVisibleAtZoom } from '@/lib/world-imagery'
 import { introStartCamera, MERCATOR } from '@/lib/replay-intro'
 import { ReplayController, type FrameInput } from '@/lib/replay-controller'
 import { zoomBucket, type Camera } from '@/lib/replay-camera'
+import { introLanding } from '@/lib/replay-framing'
 import { playedIds } from '@/lib/replay-time'
 import { closingCardLayout } from '@/lib/passage-video/closing'
 import { createCanvasCompositor, type Compositor } from '@/lib/passage-video/draw'
@@ -103,7 +104,7 @@ export async function renderPassageVideo(input: PassageVideoInput, options: Rend
     const start = introStartCamera(setup.bounds)
     const making = deps.createScene({
       width: size.width, height: size.height, isDarkTheme: input.isDarkTheme, satellite: input.satellite, threeD: input.threeD,
-      hull: input.hull, pieces: config.pieces, bounds: setup.bounds, start,
+      hull: input.hull, pieces: config.pieces, bounds: setup.bounds, passageBounds: setup.passageBounds, start,
     })
     try {
       scene = await raceCancel(making, signal)
@@ -118,11 +119,13 @@ export async function renderPassageVideo(input: PassageVideoInput, options: Rend
     const framing = scene.framing()
     if (!framing) throw new PassageVideoError('source', "The map couldn't work out where to look for the video. The video wasn't finished.")
     const overview = framing.overview
+    // A cruise opens on its first passage; a single passage on the whole track.
+    const landing = introLanding(framing, config.timeline)
 
     const controller = new ReplayController()
     const frameMs = 1000 / FPS
     const introMs = schedule.intro * frameMs
-    controller.startIntro(start, overview, 0)
+    controller.startIntro(start, landing, 0)
     const bitmaps = new Set(photos.bitmaps.keys())
     const firstSeen = new Map<string, number>()
     const momentSigns = new Map(config.signs.map((r) => [r.sign.id, r]))
@@ -167,9 +170,9 @@ export async function renderPassageVideo(input: PassageVideoInput, options: Rend
       const wall = Math.min(j / FPS, config.time.totalWall)
       const nowMs = introMs + j * frameMs
       const frame = controller.step(config, inputFor(wall, nowMs, true))
-      const placed = controller.cameraAt({ flat, overview, current: scene.camera() }, nowMs)
+      const placed = controller.cameraAt({ flat, overview, passages: framing.passages, current: scene.camera() }, nowMs)
       if (placed) camera = placed.camera
-      else if (j === 0) camera = overview
+      else if (j === 0) camera = landing
       await make(schedule.intro + j, { camera, projection: j === 0 ? MERCATOR : null, frame, playedIds: playedIds(config.timeline, config.time.at(wall).clock) }, wall)
     }
 

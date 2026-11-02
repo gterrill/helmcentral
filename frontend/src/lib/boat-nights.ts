@@ -4,6 +4,12 @@
 
 const localDay = (unix: number, offsetHours: number) => Math.floor((unix + offsetHours * 3600) / 86400)
 
+/** The boat-local date of an instant, counted from the date of the first
+ * departure: 0 on the day it set out, 1 the next day, and so on. */
+export function localDaysSince(firstStartUnix: number, unix: number, offsetHours: number): number {
+  return localDay(unix, offsetHours) - localDay(firstStartUnix, offsetHours)
+}
+
 /** Boat-local midnights from the first departure up to an instant: the rule
  * the cruise page uses for its nights. An instant exactly on midnight does not
  * count its own midnight. */

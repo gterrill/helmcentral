@@ -52,7 +52,9 @@ function fakes(opts: {
     canvas: { tag: 'map' } as unknown as CanvasImageSource,
     framing: () => {
       const overview = opts.framing ? opts.framing(s) : { center: [149.05, -20] as [number, number], zoom: s.width > s.height ? 11 : 9, pitch: 50, bearing: 0 }
-      return overview ? { overview } : null
+      // Each passage framed on its own: closer than the whole track, and as much closer in either shape.
+      const passages = new Map(s.passageBounds.filter((p) => p.bounds).map((p) => [p.id, { center: [(p.bounds![0] + p.bounds![2]) / 2, (p.bounds![1] + p.bounds![3]) / 2] as [number, number], zoom: (overview?.zoom ?? 0) + 2, pitch: 50, bearing: 0 }]))
+      return overview ? { overview, passages } : null
     },
     camera: () => camera,
     zoom: () => 12,
@@ -236,6 +238,81 @@ describe('renderPassageVideo', () => {
       const one = fakes()
       await renderPassageVideo(input({ lengthS: 8 }), {}, one.deps)
       expect(one.shown.every((x) => x.frame.stay === null)).toBe(true)
+    })
+
+    describe('the camera of a cruise', () => {
+      const cruise = (orientation: 'landscape' | 'portrait' = 'landscape') => {
+        const later = { ...passage(), id: 'p2', start: new Date((t0 + 90_000) * 1000).toISOString(), end: new Date((t0 + 91_000) * 1000).toISOString(),
+          track: [[[-20.5, 149.5], [-20.5, 149.6]]], track_times: [[t0 + 90_000, t0 + 91_000]], replay_track: [[[-20.5, 149.5], [-20.5, 149.55], [-20.5, 149.6]]],
+          replay_times: [[t0 + 90_000, t0 + 90_500, t0 + 91_000]] } as unknown as PassageDetail
+        return input({ lengthS: 8, orientation, passages: [passage(), later] })
+      }
+
+      it('frames each passage on its own, and pulls out to the whole cruise through the stay', async () => {
+        const f = fakes()
+        await renderPassageVideo(cruise(), {}, f.deps)
+        const sailing = f.shown.filter((x) => x.frame.stay === null)
+        const first = sailing.find((x) => x.frame.here?.entry.id === 'p1' && x.frame.sailedTo)!
+        // Partway through the second, before the replay eases out to the whole cruise at its end.
+        const second = sailing.filter((x) => x.frame.here?.entry.id === 'p2')[10]!
+        // Each at its own centre, close in.
+        expect(first.camera.center[0]).toBeCloseTo(149.05, 3)
+        expect(second.camera.center[0]).toBeCloseTo(149.55, 1)
+        expect(first.camera.zoom).toBeCloseTo(second.camera.zoom, 0)
+        // The stay goes out to the whole cruise (zoom 11 in the fake, passages at 13) and back.
+        const stay = f.shown.filter((x) => x.frame.stay !== null)
+        const zooms = stay.map((x) => x.camera.zoom)
+        expect(zooms[0]).toBeGreaterThan(zooms[Math.floor(zooms.length / 2)])
+        expect(Math.min(...zooms)).toBeCloseTo(11, 3)
+        expect(zooms[zooms.length - 1]).toBeGreaterThan(12)
+      })
+
+      it('goes through a passage with no track: it is framed on the whole cruise, and the video is made', async () => {
+        const f = fakes()
+        const at = (id: string, day: number, track: boolean) => ({
+          ...passage(), id, start: new Date((t0 + day * 86_400) * 1000).toISOString(), end: new Date((t0 + day * 86_400 + 1000) * 1000).toISOString(),
+          track: track ? [[[-20.5, 149.5], [-20.5, 149.6]]] : [], track_times: track ? [[t0 + day * 86_400, t0 + day * 86_400 + 1000]] : [],
+          replay_track: track ? [[[-20.5, 149.5], [-20.5, 149.55], [-20.5, 149.6]]] : [], replay_times: track ? [[t0 + day * 86_400, t0 + day * 86_400 + 500, t0 + day * 86_400 + 1000]] : [],
+        }) as unknown as PassageDetail
+        const i = input({ lengthS: 8, passages: [passage(), at('mid', 2, false), at('last', 4, true)] })
+        const blob = await renderPassageVideo(i, {}, f.deps)
+        expect(blob.type).toBe('video/mp4')
+        expect(f.added).toHaveLength(frameSchedule(prepareVideoReplay(i).config.time).total)
+        const inMiddle = f.shown.filter((x) => x.frame.stay === null && x.frame.here?.entry.id === 'mid')
+        expect(inMiddle.length).toBeGreaterThan(0)
+        // The whole cruise (zoom 11 in the fake), while the passages with a track are framed closer.
+        expect(inMiddle.every((x) => x.camera.zoom <= 11.01)).toBe(true)
+        expect(f.shown.some((x) => x.frame.here?.entry.id === 'last' && x.camera.zoom > 12)).toBe(true)
+      })
+
+      it('ends on the whole cruise, under the closing card', async () => {
+        const f = fakes()
+        await renderPassageVideo(cruise(), {}, f.deps)
+        expect(f.shown[f.shown.length - 1].camera.zoom).toBeCloseTo(11, 3)
+      })
+
+      it('opens the fly-in on the first passage', async () => {
+        const f = fakes()
+        await renderPassageVideo(cruise(), {}, f.deps)
+        const lastIntro = f.shown.filter((x) => x.frame.sailedTo === null).pop()!
+        expect(lastIntro.camera.zoom).toBeCloseTo(13, 1)
+        expect(lastIntro.camera.center[0]).toBeCloseTo(149.05, 1)
+      })
+
+      it('refits each passage to the portrait frame', async () => {
+        const land = fakes()
+        const port = fakes()
+        await renderPassageVideo(cruise('landscape'), {}, land.deps)
+        await renderPassageVideo(cruise('portrait'), {}, port.deps)
+        const during = (f: typeof land) => f.shown.find((x) => x.frame.here?.entry.id === 'p1' && x.frame.sailedTo)!.camera.zoom
+        expect(during(port)).toBeLessThan(during(land))
+      })
+
+      it('leaves a single passage as it was: the camera is the overview, not a passage framing', async () => {
+        const f = fakes()
+        await renderPassageVideo(input({ lengthS: 8 }), {}, f.deps)
+        expect(f.shown.filter((x) => x.frame.sailedTo).every((x) => x.camera.zoom === 11)).toBe(true)
+      })
     })
 
     it('gives no moment to a photo that would not load', async () => {

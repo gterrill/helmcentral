@@ -9,7 +9,9 @@
 
 import { FONT_STACK, wrapLines, type Measure } from '@/lib/passage-export-layout'
 import type { ReplayFrame } from '@/lib/replay-controller'
-import { stayLabelBox, type StayLabelBox } from '@/lib/replay-stay'
+import type { MapLabelBox } from '@/lib/map-label'
+import { passageLabelBox } from '@/lib/replay-passage-label'
+import { stayLabelBox } from '@/lib/replay-stay'
 import { CARD_FADE_S, SIGN_LIFT_PX, signCardBox, signCardPhotoRect, signCardRect, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
 import { momentRect, type MomentView } from '@/lib/replay-time'
 
@@ -46,7 +48,9 @@ export interface OverlayModel {
   moment: { signId: string; rect: Box; scale: number; fill: number } | null
   dot: Point | null
   /** The label of the stay under way, where it goes, in design pixels. */
-  stay: { text: string; box: StayLabelBox } | null
+  stay: { text: string; box: MapLabelBox } | null
+  /** The lower-third naming the passage just started, where it goes, in design pixels. */
+  passage: { text: string; box: MapLabelBox } | null
 }
 
 export interface OverlayInput {
@@ -114,5 +118,6 @@ export function buildOverlay({ frame, size, project, wall, firstSeen, bitmaps, m
 
   const dot = boatDot && frame.boat ? toDesign(frame.boat.lon, frame.boat.lat) : null
   const stay = frame.stay ? { text: frame.stay.stay.label, box: stayLabelBox(design, frame.stay.elapsed) } : null
-  return { scale: UI_SCALE, design, cards, pins, moment, dot, stay }
+  const passage = frame.passageLabel ? { text: frame.passageLabel.label.text, box: passageLabelBox(design, frame.passageLabel.elapsed) } : null
+  return { scale: UI_SCALE, design, cards, pins, moment, dot, stay, passage }
 }

@@ -10,8 +10,10 @@
 import type { BoatHull } from '@/lib/boat-model'
 import { drawnPieces, passageLegs, type DrawnPiece, type LegPassage } from '@/lib/passage-legs'
 import { buildTimeline, segmentBounds, timedSegments, type PassageDetail, type TimedSegment, type Timeline } from '@/lib/passages'
+import { passageBoundsOf, type Bounds } from '@/lib/replay-framing'
 import { resolveShots, type CameraShot, type ResolvedShot } from '@/lib/replay-clock'
 import { resolveSigns, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
+import { passageLabelsOf, type ReplayPassageLabel } from '@/lib/replay-passage-label'
 import { staysOf, type ReplayStay } from '@/lib/replay-stay'
 
 /** A passage as the replay reads it: the real times, the track it replays, and the track it draws. */
@@ -66,6 +68,10 @@ export interface ReplayPlan {
   wantHeading: boolean
   /** The stays between the passages, in order. */
   stays: ReplayStay[]
+  /** The lower-third for each passage of a replay of several. */
+  passageLabels: ReplayPassageLabel[]
+  /** Each passage's own bounds, which the camera frames it by in a replay of several. */
+  passageBounds: { id: string; bounds: Bounds | null }[]
 }
 
 export function planReplay(passages: readonly PassageDetail[], shots: readonly CameraShot[], signs: readonly ReplaySign[], hull: BoatHull | null, threeD: boolean): ReplayPlan {
@@ -84,5 +90,7 @@ export function planReplay(passages: readonly PassageDetail[], shots: readonly C
     labelled: labelledSigns(placed),
     wantHeading: wantsHeading(hull, threeD, resolved),
     stays: staysOf(timeline, passages),
+    passageLabels: passageLabelsOf(timeline, passages),
+    passageBounds: passageBoundsOf(items.map((i) => ({ id: i.id, segments: i.line }))),
   }
 }

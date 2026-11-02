@@ -413,7 +413,33 @@ stays:
   that comes before it. Skipping, or touching the map, ends a stay as it ends a
   photo moment.
 
-The video you export from a cruise holds at each stay in the same way.
+- **The camera:** With no camera shot in force, the camera frames the passage the
+  boat is on, fitted the way a single passage is, so each leg of the trip fills the
+  map. The fly-in lands on the first passage. During each stay it spends a third of
+  the stay pulling out to the whole cruise, a third holding there, and a third
+  coming in on the next passage, so you see the route so far. The pull-out starts
+  from the view you have at that moment, which may be a camera shot. Moving from
+  one passage's framing to another's without a stay, or from the end of a shot, is
+  eased over a second and a half. When the replay ends the camera eases out to the
+  whole cruise and rests there. A passage with no track is framed on the whole
+  cruise. With reduced motion the camera cuts instead of easing.
+- **Camera shots in a cruise:** A shot belongs to the passage you saved it in. It
+  frames the boat from where it starts until the next shot or the end of that
+  passage, and it wins over the passage framing there. It doesn't carry into the
+  next passage or through a stay. Both have their own framing, until a shot saved
+  in that passage begins. The pace you gave a shot still carries on, as it did.
+- **Passage labels:** As each passage sets sail, a small label names it for about
+  two seconds, such as "Day 3 · Funnel Bay → Thomas Island". The fly-in comes
+  first for the first passage, and the stay and any sign at the departure for the
+  rest. It doesn't hold the replay. The day is counted by the boat's own dates, so
+  Day 1 is the date the first passage set out and a passage that leaves just after
+  midnight is the next day. If a passage has only one name the label gives that
+  one, and with neither it gives the day alone. If the boat's time zone isn't known
+  there are no labels. They sit bottom left, clear of the overview map. A single
+  passage has none.
+
+The video you export from a cruise holds at each stay, frames each passage and
+shows the labels in the same way.
 
 ## Sharing
 

@@ -20,6 +20,8 @@ export interface CameraEnv {
   flat: boolean
   /** The framing of the whole replayed track. */
   overview: Camera
+  /** Each passage framed on its own, by passage id, for a replay of several. */
+  passages?: ReadonlyMap<string, Camera>
   /** The map's camera as it is this instant. */
   current: Camera
 }
@@ -69,6 +71,10 @@ export interface FrameInput {
   resume: number
   /** A photo moment holds the replay: time does not advance for the camera, which stays as it is. */
   hold?: boolean
+  /** The passage the boat is on, in a replay of several. A shot belongs to the passage it was saved in: it frames the boat there, until the next shot or the end of that passage. */
+  passageId?: string
+  /** The replay is in a stay between passages, which has a camera of its own: no shot applies. */
+  inStay?: boolean
   /** The boat now, with its held heading. */
   boat: BoatState
   /** The map's camera as it is this instant. */
@@ -142,10 +148,16 @@ export class CameraDirector {
       else break
     }
     const rs = index >= 0 ? resolved[index] : null
-    const key = rs ? rs.shot.id : 'before'
     const dt = playing && !input.hold && this.wasPlaying && this.lastNow !== null ? Math.max(0, Math.min(0.5, (nowMs - this.lastNow) / 1000)) : 0
     this.lastNow = nowMs
     this.wasPlaying = playing
+    // A shot that belongs to another passage than the boat is on, or a stay: none applies. The time still moves on, so the next shot's first frame is timed from the frame before it.
+    if (rs && (input.inStay || (input.passageId !== undefined && rs.entryId !== input.passageId))) {
+      this.key = null
+      this.lastResume = resume
+      return null
+    }
+    const key = rs ? rs.shot.id : 'before'
 
     if (key !== this.key) {
       let start: BoatState | null = null
