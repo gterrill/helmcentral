@@ -4,9 +4,8 @@ description: Carry finished work from your own worktree to an open PR, then watc
 ---
 
 Run every step in order. Each one ends on its **done** line; a step is not
-finished until that line is true. The rules behind each check (what it
-diffs, how to treat its findings) are in `AGENTS.md` under Checks Before
-Commit And Release, Fallback Policy and Test-First Policy.
+finished until that line is true. Fixes follow the Fallback and Test-First
+policies in `AGENTS.md`, including findings applied with `--fix`.
 
 ## 1. Check where you are
 
@@ -20,6 +19,10 @@ still sits in the main checkout, switch the session in first: `EnterWorktree`
 with the worktree's path. If it refuses (a session already in another
 worktree, or a subagent, whose switch never moves its parent), review
 `git diff origin/main...HEAD` inside the worktree by hand for steps 5 and 7.
+
+An isolated worktree session refuses Bash commands it cannot verify stay
+inside the worktree. Run one plain command per call with absolute paths, and
+make edits with `Edit`. Put this in the brief of any subagent you start there.
 
 **Done:** all three true, and the session's directory is the worktree. If
 the first two are not, stop and ask.
@@ -36,7 +39,9 @@ change; and every ADR and `docs/` page the change contradicts is updated.
 
 ## 3. Simplify
 
-For anything larger than a small edit, run `/simplify`.
+For anything larger than a small edit, run `/simplify`. It applies its fixes,
+so run it only in your own worktree or a tree holding nothing but your changes.
+Its edits are refactors: no test-first, no CHANGELOG entry.
 
 **Done:** its fixes are applied, or the change is a small edit.
 
@@ -47,6 +52,8 @@ Run every suite the change touches:
 - Backend: `make check-backend`
 - Frontend: `make check-frontend`
 - Help pages under `docs/`: `make docs-lint`
+- `CHANGELOG.md`: `sh scripts/check-changelog.sh`. A rebase merges this file
+  without a conflict, so this is what catches an entry left in a released section.
 
 Run the two check targets as they are, with no `tail` or `grep` on the end:
 they run every step, print the pass counts, FAIL lines and log paths, and exit
@@ -77,13 +84,15 @@ body says what the operator will notice, then gives each design point agreed in 
 or "dropped, because…"). End with the test pass counts. No "Generated with"
 footer.
 
-**Done:** the PR URL is in hand.
+**Done:** the PR URL is in hand, and no preview server from this worktree is
+still running.
 
 ## 7. Security review
 
-Run `/security-review`. It diffs `origin/HEAD...` in the session's directory,
-so it sees committed work only and runs after step 6. Fix each confirmed
-finding test-first, then go back to step 4.
+Run `/security-review`. It takes no arguments and never edits code, and it
+reports only HIGH and MEDIUM findings at 8/10 confidence or above. It diffs
+`origin/HEAD...` in the session's directory, so it sees committed work only and
+runs after step 6. Fix each confirmed finding test-first, then go back to step 4.
 
 **Done:** the report covers this branch's commits, and it has no findings or
 every finding is fixed and pushed. A report on an empty diff ran in the

@@ -1,6 +1,6 @@
 # Coding Standards
 
-Rules for UI code and operator-facing text. The mechanical parts are ESLint
+Rules for UI code, operator-facing text and saved data. The mechanical parts are ESLint
 rules (`frontend/eslint-rules`); the rest are judgement calls the review
 step checks by reading the diff.
 
@@ -65,6 +65,18 @@ it. See [ADR 0157](docs/adr/0157-alarm-cards-say-what-happened-not-where-it-came
   network are set on the server, so the card, the banner, Mate and every
   notification transport say the same thing. A new alarm source gets its own
   written title rather than leaning on the path-to-words fallback.
+
+## Saved Data
+
+Helmcentral has one operator and no installed base, so a change to a saved
+shape needs no migration framework or support for old versions. The operator's
+own data is still real: the cards in past Mate chats, settings, stores and
+exports all outlive the build that wrote them.
+
+When a diff changes a saved shape, it does one of two things, and the review
+checks which. It still loads what is already saved, usually by treating a new
+field as absent. Or it goes under **Breaking** in `CHANGELOG.md` and says what
+the operator must do.
 
 ## CRUD Pattern Library
 
