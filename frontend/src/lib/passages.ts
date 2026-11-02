@@ -381,6 +381,12 @@ export function buildTimeline(passages: { id: string; start: number; end: number
   return { entries, total: offset }
 }
 
+/** Whether a replay is of several passages (a cruise, or a selection), which
+ * stays between, frames one at a time and names as they start. */
+export function isMultiPassage(timeline: Timeline): boolean {
+  return timeline.entries.length > 1
+}
+
 /** The real instant a passage stands at for a replay clock value: its start
  * before the clock reaches it, its end once the clock is past. */
 export function sailedAt(entry: TimelineEntry, clock: number): number {

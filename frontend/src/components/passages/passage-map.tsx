@@ -25,7 +25,7 @@ import { INTRO_START_ZOOM, MERCATOR, type MapProjection } from '@/lib/replay-int
 import type { ReplayLight } from '@/lib/replay-light'
 import { applyLight, hillshadeLayer, imageryLayerProps, plainSailedOverlay, sailedEndFor, seamarkLayer, wholeLineOpacity, speedLineOverlay, tintLayer, wakeOverlay, wholeLineLayers, type OverlaySpec } from '@/lib/replay-map-style'
 import type { SpeedFrame } from '@/lib/replay-speed'
-import { overviewCameraFor } from '@/lib/replay-framing'
+import { cruiseFramingFor, overviewCameraFor, passageBoundsOf, type CruiseFraming } from '@/lib/replay-framing'
 import { drawnPieces, type DrawnPiece, type PassageLeg } from '@/lib/passage-legs'
 import { createSailedCache, segmentBounds, segmentsToGeoJSON, type TimedSegment } from '@/lib/passages'
 import {
@@ -53,7 +53,7 @@ export interface PassageMapHandle {
   getView: () => { zoom: number; pitch: number | null; bearing: number } | null
   /** The whole-track framing, and the bearing the map stands at, for the
    * replay's opening move; null until the map can say. */
-  getFraming: () => { overview: Camera; bearing: number } | null
+  getFraming: () => { overview: Camera; bearing: number; passages?: ReadonlyMap<string, Camera> } | null
   /** Places a camera: the replay's opening move, a frame at a time. */
   jumpTo: (camera: Camera) => void
   /** Where the map puts a point, in the map's own pixels, and how big the map is: for what is drawn over it. Null until the map can say. */
@@ -66,6 +66,8 @@ export interface PassageMapHandle {
  * changes: not when a shot is edited, so editing never moves the view. */
 export interface CameraDriver {
   clock: number
+  /** Seconds of watching. The clock stands still through a stay, which the camera moves through. */
+  wall: number
   /** The camera for the clock, given the map's whole-track framing, or null
    * when no shot applies. */
   resolve: (env: CameraEnv) => CameraResult | null
@@ -257,6 +259,24 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     return camera
   }, [bounds, boundsKey, pitch])
 
+  // A replay of several passages also frames each on its own, for the camera to
+  // move between (see cruiseCamera in lib/replay-framing). Remembered the same way.
+  const passageBounds = useMemo(() => {
+    const list = passageBoundsOf(passages)
+    return { list, key: list.map((p) => `${p.id}:${p.bounds?.join(',')}`).join(';') }
+  }, [passages])
+  const cruiseCache = useRef<{ key: string; framing: CruiseFraming } | null>(null)
+  const cruiseFraming = useCallback((map: MapInstance): CruiseFraming | null => {
+    if (!bounds || passageBounds.list.length === 0) return null
+    const c = map.getContainer()
+    const key = `${boundsKey}|${passageBounds.key}|${pitch}|${c.clientWidth}x${c.clientHeight}`
+    if (cruiseCache.current?.key === key) return cruiseCache.current.framing
+    const framing = cruiseFramingFor(map, bounds, passageBounds.list, pitch)
+    if (!framing) return null
+    cruiseCache.current = { key, framing }
+    return framing
+  }, [bounds, boundsKey, passageBounds, pitch])
+
   // On load, and whenever the passages change, the whole track is framed.
   const frame = useCallback(() => {
     const map = mapRef.current?.getMap?.()
@@ -299,9 +319,11 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     getFraming: () => {
       const map = mapRef.current?.getMap?.()
       const overview = map ? overviewCamera(map) : null
-      return map && overview ? { overview, bearing: map.getBearing() } : null
+      if (!map || !overview) return null
+      const cruise = cruiseFraming(map)
+      return { overview, bearing: map.getBearing(), ...(cruise ? { passages: cruise.passages } : {}) }
     },
-  }), [camera3d, overviewCamera])
+  }), [camera3d, overviewCamera, cruiseFraming])
 
   const handleLoad = useCallback(() => {
     loadedRef.current = true
@@ -402,6 +424,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     }
   }, [mapLoaded])
   const driverClock = cameraDriver ? cameraDriver.clock : null
+  const driverWall = cameraDriver ? cameraDriver.wall : null
   const driverResume = cameraDriver ? cameraDriver.resume : 0
   useEffect(() => {
     const driver = driverRef.current
@@ -410,7 +433,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     const overview = overviewCamera(map)
     if (!overview) return
     const current = readCamera(map)
-    const result = driver.resolve({ flat: !camera3d, overview, current })
+    const result = driver.resolve({ flat: !camera3d, overview, passages: cruiseFraming(map)?.passages, current })
     if (!result) return
     const place = gate.current.place({
       result,
@@ -427,7 +450,7 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
     if (place) map.jumpTo(place)
   // Placed when the replay clock moves or control is handed back.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [driverClock, driverResume])
+  }, [driverClock, driverWall, driverResume])
 
   // The opening move is the replay's to work out; the map places each camera
   // it is given. A person taking hold of the map ends it: the camera's own
@@ -475,7 +498,14 @@ export const PassageMap = forwardRef<PassageMapHandle, PassageMapProps>(function
   useEffect(() => {
     const map = mapRef.current?.getMap?.()
     if (!mapLoaded || !map) return
-    const read = () => zoomRef.current?.(zoomBucket(map.getZoom()))
+    // Told when the zoom moves to another step, not at every zoomend: the replay places the camera a frame at a time, and each placement ends in one.
+    let told: number | null = null
+    const read = () => {
+      const bucket = zoomBucket(map.getZoom())
+      if (bucket === told) return
+      told = bucket
+      zoomRef.current?.(bucket)
+    }
     read()
     map.on('zoomend', read)
     return () => { map.off('zoomend', read) }

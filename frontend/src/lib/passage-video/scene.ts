@@ -25,7 +25,7 @@ import type { Point } from '@/lib/passage-video/overlay'
 import { createSailedCache, segmentsToGeoJSON } from '@/lib/passages'
 import type { Camera } from '@/lib/replay-camera'
 import type { ReplayFrame } from '@/lib/replay-controller'
-import { overviewCameraFor } from '@/lib/replay-framing'
+import { cruiseFramingFor, type CruiseFraming } from '@/lib/replay-framing'
 import type { MapProjection } from '@/lib/replay-intro'
 import {
   TINT_LAYER_ID, hillshadeLayer, imageryLayerProps, lightController, plainSailedOverlay, sailedEndFor, seamarkLayer,
@@ -47,6 +47,8 @@ export interface SceneSpec {
   hull: BoatHull | null
   pieces: readonly DrawnPiece[]
   bounds: [number, number, number, number]
+  /** Each passage's own bounds, which a cruise frames it by. */
+  passageBounds: { id: string; bounds: [number, number, number, number] | null }[]
   /** Where the camera starts: high over the track. */
   start: Camera
 }
@@ -65,8 +67,8 @@ export interface SceneFrame {
 export interface VideoScene {
   /** The map's picture, as it stands after `settle`. */
   readonly canvas: CanvasImageSource
-  /** The whole track framed in this map's size and shape: portrait refits it. Null if it cannot be worked out. */
-  framing(): { overview: Camera } | null
+  /** The whole track, and each passage, framed in this map's size and shape: portrait refits them. Null if they cannot be worked out. */
+  framing(): CruiseFraming | null
   camera(): Camera
   zoom(): number
   /** The boat is drawn as a dot over the map, since there is no model. */
@@ -278,10 +280,7 @@ export async function createVideoScene(spec: SceneSpec): Promise<VideoScene> {
     return {
       canvas: map.getCanvas(),
       boatDot,
-      framing: () => {
-        const overview = overviewCameraFor(map, spec.bounds, spec.threeD ? REPLAY_3D_PITCH : 0)
-        return overview ? { overview } : null
-      },
+      framing: () => cruiseFramingFor(map, spec.bounds, spec.passageBounds, spec.threeD ? REPLAY_3D_PITCH : 0),
       camera: () => {
         const c = map.getCenter()
         return { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() }

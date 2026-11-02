@@ -61,7 +61,7 @@ const cam = (zoom: number): Camera => ({ center: [148.05, -20.05], zoom, pitch: 
 
 function driver(over: Partial<CameraDriver> & { zoom?: number; shotKey?: string } = {}): CameraDriver {
   const { zoom = 14, shotKey = 'a', ...rest } = over
-  return { clock: 1, reduced: false, resume: 0, resolve: () => ({ camera: cam(zoom), shotKey, mode: 'follow' }), ...rest }
+  return { clock: 1, wall: 1, reduced: false, resume: 0, resolve: () => ({ camera: cam(zoom), shotKey, mode: 'follow' }), ...rest }
 }
 
 function setup(d: CameraDriver | null, extra: { ref?: React.Ref<PassageMapHandle> } = {}) {
@@ -85,6 +85,50 @@ beforeEach(() => {
   m.jumpTo.mockClear()
   m.handlers = {}
   m.projected = { x: 400, y: 200 }
+})
+
+describe('PassageMap and the zoom it reports', () => {
+  // The replay's camera places the map a frame at a time, and each placement ends in a zoomend. Telling the page every one of them is a state update in an effect on every frame, which React reports as an update loop.
+  function withZoomReports() {
+    const told: number[] = []
+    const el = (cd: CameraDriver | null) => (
+      <PassageMap passages={passages} playedIds={new Set()} boat={boat} cameraDriver={cd} isDarkTheme={false} onZoomBucket={(z) => told.push(z)} />
+    )
+    const view = render(el(driver({ clock: 1 })))
+    act(() => { (m.props.onLoad as () => void)() })
+    return { told, rerender: (cd: CameraDriver) => view.rerender(el(cd)) }
+  }
+  const zoomTo = (zoom: number) => act(() => {
+    m.current = { ...m.current, zoom }
+    m.handlers.zoomend?.({})
+  })
+
+  it('tells the page the zoom once, and again only when it moves to another step', () => {
+    const { told } = withZoomReports()
+    const first = told.length
+    expect(first).toBeGreaterThan(0)
+    // A pull-out is a zoom per frame, most of them within the same quarter step.
+    for (const z of [12.51, 12.52, 12.55, 12.6, 12.49, 12.5]) zoomTo(z)
+    expect(told.length).toBe(first)
+    zoomTo(12.9)
+    expect(told[told.length - 1]).toBe(13)
+    expect(told.length).toBe(first + 1)
+    zoomTo(12.95)
+    zoomTo(13.05)
+    expect(told.length).toBe(first + 1)
+    zoomTo(13.3)
+    expect(told[told.length - 1]).toBe(13.25)
+  })
+
+  it('does not tell the page again for a camera placed within the step it is in', () => {
+    const { told, rerender } = withZoomReports()
+    const before = told.length
+    for (let clock = 2; clock < 40; clock++) {
+      m.jumpTo.mockImplementationOnce(() => zoomTo(12.5 + (clock % 5) * 0.01))
+      rerender(driver({ clock, wall: clock, zoom: 14 }))
+    }
+    expect(told.length).toBe(before)
+  })
 })
 
 describe('PassageMap camera shots', () => {

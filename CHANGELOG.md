@@ -44,6 +44,17 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A cruise replay frames each passage, and names it.** In the replay of a
+  cruise, or of passages you select together, the camera now frames the passage
+  the boat is on, rather than the whole trip. At each stay it pulls out to the
+  whole cruise, so the route so far builds up on the screen, and comes back in
+  on the next passage. As each passage sets sail, a small label names it, such
+  as "Day 3 · Funnel Bay → Thomas Island", with the day counted by the boat's own
+  dates from the first departure. A camera shot you saved still takes over
+  wherever it applies, on the passage you saved it in. The video you export from
+  a cruise does the same, in landscape and portrait. A single passage replay is
+  as it was.
+
 - **A cruise replay now stops at each anchorage.** The replay of a cruise, or
   of passages you select together, used to jump from one passage's end to the
   next one's start. Now it holds for a moment at each stay, with the sun and

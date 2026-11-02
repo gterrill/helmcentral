@@ -3,7 +3,7 @@
 // shot with a pace slows the timeline down for as long as it lasts, so the two
 // are related by a piecewise rate. Everything here is pure.
 
-import { locate, type Timeline } from '@/lib/passages'
+import { isMultiPassage, locate, type Timeline } from '@/lib/passages'
 import { lowerBound } from '@/lib/sorted-search'
 
 export type CameraMode = 'overview' | 'follow' | 'orbit'
@@ -174,7 +174,7 @@ export function passageShares(durations: readonly number[], lengthS: number, min
  * spans as they are. */
 export function cruisePaceSpans(resolved: readonly ResolvedShot[], timeline: Timeline, lengthS: number): PaceSpan[] {
   const shots = paceSpans(resolved)
-  if (timeline.entries.length < 2 || !(timeline.total > 0) || !(lengthS > 0)) return shots
+  if (!isMultiPassage(timeline) || !(timeline.total > 0) || !(lengthS > 0)) return shots
   const lengths = timeline.entries.map((e) => Math.max(0, e.end - e.start))
   const shares = passageShares(lengths, lengthS)
   // Relative to the pace the whole length would run at: 1 for a passage that gets what it earns.

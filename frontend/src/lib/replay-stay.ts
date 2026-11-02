@@ -9,9 +9,9 @@
 // and a video of it show the same stay.
 
 import { midnightsSince } from '@/lib/boat-nights'
+import { mapLabelBox, type MapLabelBox } from '@/lib/map-label'
 import type { InsetCorner } from '@/lib/passage-inset-view'
 import { fmtDuration, type Timeline } from '@/lib/passages'
-import { CARD_FADE_S } from '@/lib/replay-signs'
 import { STAY_S } from '@/lib/replay-time'
 import { zoneKnown, zoneOffsetMinutes } from '@/lib/vessel-time'
 
@@ -100,14 +100,21 @@ export function stayLabelText(arriving: StayPassage, next: StayPassage, arrival:
 
 // ── the stays of a replay ────────────────────────────────────────────────
 
+/** Hours east of UTC at the first departure, in the first passage's zone: the
+ * offset the cruise page counts its nights and days by. Null when that passage
+ * has no zone this browser knows. */
+export function boatOffsetHours(timeline: Timeline, passages: readonly Pick<StayPassage, 'id' | 'timezone'>[]): number | null {
+  const first = timeline.entries[0]
+  const zone = first ? passages.find((p) => p.id === first.id)?.timezone ?? null : null
+  return first && zone && zoneKnown(zone) ? zoneOffsetMinutes(zone, first.start * 1000) / 60 : null
+}
+
 /** The stays of a replay: one between each pair of passages that were sailed
  * with at least MIN_STAY_S between them. Nights are counted at the first
  * passage's zone, as the cruise page counts them. */
 export function staysOf(timeline: Timeline, passages: readonly StayPassage[]): ReplayStay[] {
   const byId = new Map(passages.map((p) => [p.id, p]))
-  const first = timeline.entries[0]
-  const zone = first ? byId.get(first.id)?.timezone ?? null : null
-  const offsetHours = first && zone && zoneKnown(zone) ? zoneOffsetMinutes(zone, first.start * 1000) / 60 : null
+  const offsetHours = boatOffsetHours(timeline, passages)
   const out: ReplayStay[] = []
   for (let i = 0; i + 1 < timeline.entries.length; i++) {
     const from = timeline.entries[i]
@@ -127,52 +134,7 @@ export function staysOf(timeline: Timeline, passages: readonly StayPassage[]): R
 
 // ── where it goes ────────────────────────────────────────────────────────
 
-/** How the label looks, for the page and a canvas alike: the page draws it with
- * these and the video draws the same. The colours are the page's card and text
- * colours, so a canvas takes them from its own theme. */
-export const STAY_LABEL = {
-  /** Font weight. */
-  weight: 500,
-  /** Corner radius, in the frame's pixels. */
-  radius: 6,
-  /** How much of the card colour shows behind the text, before the fade. */
-  bgAlpha: 0.8,
-  /** The line height as a multiple of the font size. */
-  lineHeight: 1.4,
-} as const
-
-/** The overview map sits in a corner of the page's map, `h-32 w-44` and 8 px
- * from the side, with the bottom ones 32 px up from the foot. */
-const INSET = { w: 176, h: 128, side: 8, bottom: 32 } as const
-/** The space kept between the label and the edge of the map, and between it and the overview map. */
-const EDGE = 24
-const INSET_GAP = 12
-
-export interface StayLabelBox {
-  /** The middle of the label, across the frame. */
-  cx: number
-  /** The top of the label. */
-  y: number
-  fontPx: number
-  padX: number
-  padY: number
-  /** The widest the text may be before it is shortened. */
-  maxW: number
-  /** 0 to 1: fades in and out over the stay. */
-  alpha: number
-}
-
-/** Where the label sits in a frame of `container`'s size, and how big, `elapsedS`
- * into the stay: quiet, small, low and in the middle, clear of the cards at the
- * sides. When the overview map is shown in a bottom corner (`insetCorner`) the
- * label keeps clear of it, narrowing to the room that is left. In the frame's
- * own pixels, so the page and a canvas draw it alike. */
-export function stayLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null): StayLabelBox {
-  const e = Math.max(0, Math.min(STAY_S, elapsedS))
-  const alpha = Math.max(0, Math.min(1, Math.min(e, STAY_S - e) / CARD_FADE_S))
-  let left = EDGE
-  let right = container.w - EDGE
-  if (insetCorner === 'bottom-left') left = Math.max(left, INSET.side + INSET.w + INSET_GAP)
-  if (insetCorner === 'bottom-right') right = Math.min(right, container.w - INSET.side - INSET.w - INSET_GAP)
-  return { cx: (left + right) / 2, y: container.h - 72, fontPx: 13, padX: 12, padY: 6, maxW: Math.max(0, right - left), alpha }
+/** Where the stay's label sits in a frame of `container`'s size, `elapsedS` into the stay: in the middle, and clear of the overview map in a bottom corner. */
+export function stayLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null): MapLabelBox {
+  return mapLabelBox(container, { align: 'center', elapsedS, durationS: STAY_S, insetCorner })
 }

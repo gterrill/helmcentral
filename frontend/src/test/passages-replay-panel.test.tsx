@@ -365,6 +365,21 @@ describe('ReplayPanel', () => {
   })
 })
 
+describe('ReplayPanel with passages given newest first', () => {
+  it('reads the time in the zone of the earliest passage, as the offset and the stays do', () => {
+    const earlier: PassageDetail = { ...passage, id: 'early', timezone: 'Australia/Brisbane' }
+    const day = 2 * 86400
+    const later: PassageDetail = {
+      ...passage, id: 'late', timezone: 'Pacific/Auckland',
+      start: new Date((start + day) * 1000).toISOString(), end: new Date((start + day + 1000) * 1000).toISOString(),
+      track_times: [[start + day, start + day + 1000]], replay_times: [[start + day, start + day + 250, start + day + 750, start + day + 1000]],
+    }
+    render(<ReplayPanel passages={[later, earlier]} isDarkTheme={false} />)
+    // 23:00 UTC on the 13th is 09:00 on the 14th in Brisbane, whichever passage came first in the list.
+    expect(screen.getByTestId('replay-readout')).toHaveTextContent('14 Mar 09:00 UTC+10')
+  })
+})
+
 describe('ReplayPanel tells the page its length', () => {
   it('reports the length chosen from the bar', async () => {
     const onLength = vi.fn()

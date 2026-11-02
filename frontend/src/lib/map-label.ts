@@ -1,0 +1,78 @@
+// The small labels over the replay's map: the stay's, centred, and the
+// passage's, at the left. They look alike and sit on one line, so how they look
+// and where they go is worked out here, in the frame's own pixels, and the
+// page (components/passages/map-label) and a video's canvas
+// (lib/passage-video/draw) both draw from it. Pure.
+
+import type { InsetCorner } from '@/lib/passage-inset-view'
+import { CARD_FADE_S } from '@/lib/replay-signs'
+
+/** How a label looks, for the page and a canvas alike. The colours are the
+ * page's card and text colours, so a canvas takes them from its own theme. */
+export const MAP_LABEL = {
+  /** Font weight. */
+  weight: 500,
+  /** Corner radius, in the frame's pixels. */
+  radius: 6,
+  /** How much of the card colour shows behind the text, before the fade. */
+  bgAlpha: 0.8,
+  /** The line height as a multiple of the font size. */
+  lineHeight: 1.4,
+  fontPx: 13,
+  padX: 12,
+  padY: 6,
+  /** How far above the foot of the map the top of a label is. */
+  aboveFoot: 72,
+  /** The space kept between a label and the edge of the map, and between it and the overview map. */
+  edge: 24,
+  insetGap: 12,
+} as const
+
+/** The overview map sits in a corner of the page's map, `h-32 w-44` and 8 px
+ * from the side, with the bottom ones 32 px up from the foot. */
+const INSET = { w: 176, h: 128, side: 8 } as const
+
+export interface MapLabelBox {
+  /** The middle of the label across the frame (`align` 'center'), or its left edge ('left'). */
+  x: number
+  align: 'left' | 'center'
+  /** The top of the label. */
+  y: number
+  fontPx: number
+  padX: number
+  padY: number
+  /** The widest the text may be before it is shortened. */
+  maxW: number
+  /** 0 to 1: fades in and out over the time the label is up. */
+  alpha: number
+}
+
+export interface MapLabelOptions {
+  align: MapLabelBox['align']
+  /** Seconds the label has been up, and how long it is up for. */
+  elapsedS: number
+  durationS: number
+  /** The corner the overview map is shown in, if it is: in a bottom one the label narrows to keep clear of it. */
+  insetCorner?: InsetCorner | null
+}
+
+/** Where a label sits in a frame of `container`'s size, and how big: quiet,
+ * small, low, clear of the cards at the sides and of the overview map in a
+ * bottom corner. */
+export function mapLabelBox(container: { w: number; h: number }, { align, elapsedS, durationS, insetCorner = null }: MapLabelOptions): MapLabelBox {
+  const e = Math.max(0, Math.min(durationS, elapsedS))
+  let left: number = MAP_LABEL.edge
+  let right = container.w - MAP_LABEL.edge
+  if (insetCorner === 'bottom-left') left = Math.max(left, INSET.side + INSET.w + MAP_LABEL.insetGap)
+  if (insetCorner === 'bottom-right') right = Math.min(right, container.w - INSET.side - INSET.w - MAP_LABEL.insetGap)
+  return {
+    x: align === 'center' ? (left + right) / 2 : left,
+    align,
+    y: container.h - MAP_LABEL.aboveFoot,
+    fontPx: MAP_LABEL.fontPx,
+    padX: MAP_LABEL.padX,
+    padY: MAP_LABEL.padY,
+    maxW: Math.max(0, right - left),
+    alpha: Math.max(0, Math.min(1, Math.min(e, durationS - e) / CARD_FADE_S)),
+  }
+}
