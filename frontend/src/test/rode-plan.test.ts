@@ -4,6 +4,7 @@ import {
   buildRodePlan,
   catenaryMethod,
   computeSwingRadiusM,
+  swingBreakdownText,
   maxExpectedDepthM,
   MIN_SCOPE_RATIO,
   planningFigureM,
@@ -895,5 +896,29 @@ describe('computeSwingRadiusM', () => {
 
   it('returns null when LOA is unresolved, rather than a circle smaller than the boat', () => {
     expect(computeSwingRadiusM(30, 2, null)).toBeNull()
+  })
+})
+
+describe('swingBreakdownText', () => {
+  it('names the three parts of the swing', () => {
+    expect(swingBreakdownText(54, 8, 15, false)).toBe('54 m rode + 8 m GPS to bow + 15 m boat')
+  })
+
+  it('leaves out the GPS to bow term when there is no bow offset', () => {
+    expect(swingBreakdownText(54, 0, 15, false)).toBe('54 m rode + 15 m boat')
+  })
+
+  it('lets the boat term take up the rounding so the parts add up to the total', () => {
+    expect(swingBreakdownText(54.4, 8.4, 15.4, false)).toBe('54 m rode + 8 m GPS to bow + 16 m boat')
+  })
+
+  it('leaves out the GPS to bow term when it rounds to zero', () => {
+    expect(swingBreakdownText(54, 0.4, 15, false)).toBe('54 m rode + 15 m boat')
+    expect(swingBreakdownText(54, 0, 15, false)).toBe('54 m rode + 15 m boat')
+  })
+
+  it('works in feet', () => {
+    // 10 m = 33 ft, 2 m = 7 ft, 24 m total = 79 ft
+    expect(swingBreakdownText(10, 2, 12, true)).toBe('33 ft rode + 7 ft GPS to bow + 39 ft boat')
   })
 })

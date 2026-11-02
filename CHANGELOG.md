@@ -29,6 +29,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   off stays at 960. **Re-export to get the new look.** Embeds you have already pasted
   into posts keep working as they were. The blog map still shows the chart only,
   never satellite photographs.
+- **Save depth moves into the rode planner.** On a wide screen the Anchor Watch
+  page no longer squeezes the map to make room for it, and the planner's
+  collapsed rail stays at the right edge. Open the rode planner and the line is
+  at the foot, below **Apply as alarm radius**: "4.2 m at datum, from the
+  sounder", with a **Save…** link. The confirm step now names the saved place it
+  will write to.
+- **The rode planner shows what its Swing is made of.** Under the Swing figure
+  it reads, for example, "54 m rode + 8 m GPS to bow + 16 m boat".
+- **The "anchor point corrected forward of GPS" note is gone from the top of
+  Anchor Watch.** If there was no heading when you dropped the anchor, the
+  readings now say "Anchor mark is at the GPS, not the bow". When the map is
+  showing, they add that you can move it with Adjust.
 - **A cruise's or a selection's figures now say how many passages it is of.**
   The strip of figures on the exported pictures, the blog card and the end of
   an exported video reads "Passages 3" after the time underway, whenever the

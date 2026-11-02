@@ -118,6 +118,17 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+describe('AnchorRodePlanner — save depth slot', () => {
+  it('shows the save-depth line below Apply once expanded, and not while collapsed', () => {
+    renderPlanner({ saveDepth: <div data-testid="slot">save</div> })
+    expect(screen.queryByTestId('slot')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+    const slot = screen.getByTestId('slot')
+    const apply = screen.getByRole('button', { name: /apply as alarm radius/i })
+    expect(apply.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
 describe('AnchorRodePlanner — collapse state', () => {
   it('is collapsed by default', () => {
     renderPlanner()
@@ -714,6 +725,36 @@ describe('AnchorRodePlanner — Swing on both method tabs', () => {
     const ratioSwing = within(selectMethodTab(/ratio/i)).getByText(/^Swing \d/).textContent
     const catenarySwing = within(selectMethodTab(/catenary/i)).getByText(/^Swing \d/).textContent
     expect(catenarySwing).not.toBe(ratioSwing)
+  })
+
+  it.each([
+    ['metric', false, 'm'],
+    ['imperial', true, 'ft'],
+  ])('spells out the swing under it so the parts add up to the Swing figure (%s)', (_name, isImperial, unit) => {
+    renderPlanner({ bowOffsetM: 8, isImperial })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    const panel = selectMethodTab(/ratio/i)
+    const swing = Number(within(panel).getByText(/^Swing \d/).textContent?.match(/\d+/)?.[0])
+    const line = within(panel).getByText(new RegExp(` rode \\+ \\d+ ${unit} GPS to bow \\+ \\d+ ${unit} boat$`))
+    const parts = [...(line.textContent ?? '').matchAll(/(\d+) (?:m|ft) /g)].map((m) => Number(m[1]))
+    expect(parts).toHaveLength(3)
+    expect(parts.reduce((a, b) => a + b, 0)).toBe(swing)
+  })
+
+  it('leaves the GPS to bow term out when the offset is zero', () => {
+    renderPlanner({ bowOffsetM: 0 })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(within(selectMethodTab(/ratio/i)).getByText(/^\d+ m rode \+ 12 m boat$/)).toBeInTheDocument()
+  })
+
+  it('gives no breakdown when LOA is unresolved', () => {
+    const props = baseProps()
+    renderPlanner({ anchorConfig: { ...props.anchorConfig, loaM: 0 }, vesselLengthOverallM: null })
+    fireEvent.click(screen.getByRole('button', { name: /expand rode planner/i }))
+
+    expect(within(methodPanel()).queryByText(/ rode \+ /)).toBeNull()
   })
 
   it('shows Swing in neither panel when LOA is unresolved', () => {

@@ -2,6 +2,7 @@ import type { HullType } from '@/config/app-config'
 import type { TideToday } from '@/hooks/use-tide-today'
 import { calculateCatenary, type SeabedType, type SeaState } from '@/lib/catenary'
 import type { GustWindow } from '@/lib/gust-windows'
+import { radiusDisplayValue } from '@/lib/anchor-adjust'
 
 const METERS_PER_FOOT = 3.28084
 
@@ -428,6 +429,22 @@ export function resolveLoaM(settingsLoaM: number, vesselLengthOverallM: number |
  */
 export function computeSwingRadiusM(recommendedRodeM: number, bowOffsetM: number, loaM: number | null): number | null {
   return loaM !== null ? recommendedRodeM + bowOffsetM + loaM : null
+}
+
+/**
+ * "54 m rode + 8 m GPS to bow + 16 m boat": the parts of a swing radius in
+ * whole display units. The total is rounded as the Swing figure is, and the
+ * boat term takes up the rounding, so the line always adds up to Swing. The GPS
+ * to bow term is left out when it rounds to zero.
+ */
+export function swingBreakdownText(rodeM: number, bowOffsetM: number, loaM: number, isImperial: boolean): string {
+  const unit = isImperial ? 'ft' : 'm'
+  const total = radiusDisplayValue(rodeM + bowOffsetM + loaM, isImperial)
+  const rodePart = radiusDisplayValue(rodeM, isImperial)
+  const bowPart = radiusDisplayValue(bowOffsetM, isImperial)
+  const boatPart = total - rodePart - bowPart
+  const bow = bowPart > 0 ? ` + ${bowPart} ${unit} GPS to bow` : ''
+  return `${rodePart} ${unit} rode${bow} + ${boatPart} ${unit} boat`
 }
 
 /**

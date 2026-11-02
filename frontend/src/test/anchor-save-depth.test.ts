@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { depthSourceText, dropDay, saveFigureM, saveTargetPlace, SAVE_DEPTH_RADIUS_M, saveDepthLabel } from '@/lib/anchor-save-depth'
+import { dropDay, saveFigureM, saveTargetPlace, SAVE_DEPTH_RADIUS_M, datumDepthLine } from '@/lib/anchor-save-depth'
 import type { SavedPlace } from '@/hooks/use-saved-places'
 
 const place = (id: string, lat: number, lon: number, extra: Partial<SavedPlace> = {}): SavedPlace => ({
@@ -45,13 +45,6 @@ describe('saveFigureM', () => {
   })
 })
 
-describe('depthSourceText', () => {
-  it('says where the figure came from', () => {
-    expect(depthSourceText('sounder')).toBe('from the sounder')
-    expect(depthSourceText('operator')).toBe('the depth you entered')
-  })
-})
-
 describe('dropDay', () => {
   it('is the date at the boat, not the device or UTC', () => {
     expect(dropDay('2026-11-01T20:00:00Z', 'Australia/Brisbane')).toBe('2026-11-02')
@@ -65,9 +58,14 @@ describe('dropDay', () => {
   })
 })
 
-describe('wording', () => {
-  it('words the button', () => {
-    expect(saveDepthLabel(4.2, 'metric')).toBe('Save 4.2 m at datum')
-    expect(saveDepthLabel(4.2, 'imperial')).toBe('Save 13.8 ft at datum')
+describe('datumDepthLine', () => {
+  it('says the figure at datum and where it came from', () => {
+    expect(datumDepthLine('4.2 m', 'sounder')).toBe('4.2 m at datum, from the sounder')
+    expect(datumDepthLine('4.2 m', 'operator')).toBe('4.2 m at datum, from the depth you entered')
+    expect(datumDepthLine('13.8 ft', 'sounder')).toBe('13.8 ft at datum, from the sounder')
+  })
+
+  it('leaves the source out when there is none', () => {
+    expect(datumDepthLine('4.2 m', null)).toBe('4.2 m at datum')
   })
 })

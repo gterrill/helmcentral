@@ -70,7 +70,7 @@ interface AnchorWatchDrawerProps {
   headingAtSetDeg?: number
   /** Empty until the background resolver pins one. Same Undo-restore use as headingAtSetDeg. */
   placeName?: string
-  /** Shown under the rode planner while a watch is set: the Save depth control, supplied by the live wrapper. */
+  /** Passed to the foot of the rode planner, which draws it only when it has content: the Save depth control, supplied by the live wrapper. */
   saveDepth?: ReactNode
   // The watch's set_at, passed straight through to the map: it centres on
   // the anchor whenever the session changes.
@@ -455,6 +455,7 @@ export function AnchorWatchDrawer({
   const adjustRadiusAtMin = adjustDisplayRadiusM <= adjustBounds.minM
   const adjustRadiusAtMax = adjustDisplayRadiusM >= adjustBounds.maxM
 
+  const noHeadingAtDrop = !bowOffsetApplied && bowOffsetReason === 'heading unavailable'
   // The depth/tide/clearance readings as one presenter (ADR 0212): compact
   // inside the map's own panel when there is a map, a standalone card when
   // there isn't. Only the layout differs.
@@ -466,6 +467,7 @@ export function AnchorWatchDrawer({
       tide={tide}
       lowWaterClearance={lowWaterClearance}
       isImperial={isImperial}
+      noHeadingAtDrop={noHeadingAtDrop}
     />
   ) : null
 
@@ -499,16 +501,6 @@ export function AnchorWatchDrawer({
           <p className="mt-1">{error} Drop anchor to start a new watch.</p>
         </div>
       )}
-      {bowOffsetApplied && (
-        <div className="rounded-md border border-border bg-background/60 px-3 py-2 text-xs text-muted-foreground">
-          Anchor point corrected {Math.round(bowOffsetM)}m forward of GPS — radius should cover rode + {Math.round(bowOffsetM)}m.
-        </div>
-      )}
-      {!bowOffsetApplied && bowOffsetReason === 'heading unavailable' && (
-        <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-500">
-          Anchor point not bow-corrected — no heading from SignalK.
-        </div>
-      )}
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row">
         <div
@@ -536,6 +528,7 @@ export function AnchorWatchDrawer({
               tide={tide}
               lowWaterClearance={lowWaterClearance}
               isImperial={isImperial}
+              noHeadingAtDrop={noHeadingAtDrop}
               adjustAction={showAdjustTextButton ? (
                 <Button ref={fallbackAdjustButtonRef} type="button" variant="outline" onClick={openAdjust} className="shrink-0">
                   Adjust
@@ -719,8 +712,8 @@ export function AnchorWatchDrawer({
           onUpdateRodeAndConditions={onUpdateRodeAndConditions}
           onApplyAlarmRadius={applyRadius}
           applyLockedReason={adjustActive ? 'Save or cancel Adjust first' : null}
+          saveDepth={saveDepth}
         />
-        {saveDepth}
       </div>
     </div>
   )

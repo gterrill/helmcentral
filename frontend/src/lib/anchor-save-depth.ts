@@ -1,7 +1,6 @@
 import type { SavedPlace } from '@/hooks/use-saved-places'
-import type { DistanceUnits } from '@/config/app-config'
+import type { AnchorWatchRecord } from '@/hooks/use-anchor-watch'
 import { haversineMeters } from '@/lib/geo'
-import { depthToText, depthUnitLabel } from '@/lib/saved-place-depth'
 import { formatDayKey } from '@/lib/vessel-time'
 
 /** 0.1 nm: how near a saved place must be to the anchor to take its depth (backend anchorage_details uses the same). */
@@ -38,11 +37,6 @@ export function saveFigureM(datumDepthM: number): number {
   return Math.round(datumDepthM * 100) / 100
 }
 
-/** Where the planning depth came from, for the panel. */
-export function depthSourceText(source: 'sounder' | 'operator'): string {
-  return source === 'sounder' ? 'from the sounder' : 'the depth you entered'
-}
-
 /** The calendar day the anchor went down, at the boat (ADR 0230). Null without a zone or a valid time. */
 export function dropDay(setAt: string | null, timeZone: string | null | undefined): string | null {
   if (!setAt || !timeZone) return null
@@ -50,7 +44,9 @@ export function dropDay(setAt: string | null, timeZone: string | null | undefine
   return Number.isNaN(at.getTime()) ? null : formatDayKey(at, timeZone)
 }
 
-/** "Save 4.2 m at datum". */
-export function saveDepthLabel(datumDepthM: number, units: DistanceUnits): string {
-  return `Save ${depthToText(datumDepthM, units)} ${depthUnitLabel(units)} at datum`
+/** "4.2 m at datum, from the sounder"; `figure` is the "4.2 m" string, and the source is left out when there is none. */
+export function datumDepthLine(figure: string, source: AnchorWatchRecord['planningDepthSource']): string {
+  const line = `${figure} at datum`
+  const from = source === 'sounder' ? 'from the sounder' : source === 'operator' ? 'from the depth you entered' : null
+  return from ? `${line}, ${from}` : line
 }
