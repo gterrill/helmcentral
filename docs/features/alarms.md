@@ -242,7 +242,14 @@ it leaves your choice and the warning clears. It stays up while the plugin is
 still on the profile it was on when Helmcentral refused, and the wording is
 updated if the reason changes. This holds across a Helmcentral restart. The
 warning also clears the next time the navigation state changes to one
-Helmcentral can switch to.
+Helmcentral can switch to. If the boat moves to a state that has no profile of
+its own, nothing is wanted. The warning clears once the boat has stayed there
+for a minute and Helmcentral can read the profiles.
+
+SignalK can let Helmcentral read the profiles but refuse the switch itself, for
+example over a login. Helmcentral then tries again at longer and longer gaps,
+from a minute up to ten minutes. A profile you pick by hand still clears the
+warning at the next check.
 
 Those numbers are yours, and the shipped harbor profile needs attention before a
 marina. It warns on any target closer than half a mile with a reported speed over
