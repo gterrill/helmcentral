@@ -21,6 +21,10 @@ const (
 	// authenticated call into another project's server.
 	collisionProfilePollInterval = time.Minute
 
+	// collisionSaveBackoffMax caps the wait between save retries while the
+	// plugin keeps refusing the write.
+	collisionSaveBackoffMax = 10 * time.Minute
+
 	collisionProfileRuleID = "collision-profile"
 	collisionProfileLabel  = "Collision Profile Not Changed"
 
@@ -175,6 +179,50 @@ type collisionProfileSyncer struct {
 
 	// persistMu orders the writes to persistRefusedOn, outside mu.
 	persistMu sync.Mutex
+
+	// The fields below are touched only by check() on the alarm service loop.
+
+	// saveRetry spaces out save retries after a failed save.
+	saveRetry saveBackoff
+
+	// unmappedSince is when the boat entered a state with no mapped profile,
+	// zero while it is in a mapped one. A standing refusal resolves only once
+	// the state has stayed unmapped for a poll interval, so a one-tick blip
+	// does not clear and re-raise it.
+	unmappedSince time.Time
+
+	// lastSaveErr is the last save failure since the refusal began, so the card
+	// can be reworded without another PUT while the retry is backed off.
+	lastSaveErr error
+
+	// lastRefusalLog and lastReadErr are the text last logged, so a repeated
+	// refusal or a persistently failing read is logged once, not every poll.
+	lastRefusalLog string
+	lastReadErr    string
+}
+
+// saveBackoff is the wait between save retries: one poll interval after the
+// first failure, doubling up to collisionSaveBackoffMax. Neither
+// notifyBackoffFor nor placeNameBackoffState fits: one counts attempts for a
+// queue, the other reads the wall clock and logs.
+type saveBackoff struct {
+	delay time.Duration
+	until time.Time
+}
+
+func (b *saveBackoff) reset() { *b = saveBackoff{} }
+
+// due reports whether a save may be tried at now.
+func (b *saveBackoff) due(now time.Time) bool { return !now.Before(b.until) }
+
+// fail records a failed save at now and schedules the next try.
+func (b *saveBackoff) fail(now time.Time) {
+	if b.delay == 0 {
+		b.delay = collisionProfilePollInterval
+	} else {
+		b.delay = min(2*b.delay, collisionSaveBackoffMax)
+	}
+	b.until = now.Add(b.delay)
 }
 
 func newCollisionProfileSyncer(snapshot *signalKSnapshot) *collisionProfileSyncer {
@@ -279,21 +327,35 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 	if state == "" {
 		return nil
 	}
+	// The one place that owns the unmapped clock: it starts when the boat is
+	// first seen in a state with no profile and stops when it enters a mapped
+	// one, so unmapped to unmapped does not restart it.
+	want, mapped := vesselStateProfiles[state]
+	if !mapped && s.unmappedSince.IsZero() {
+		s.unmappedSince = now
+	} else if mapped {
+		s.unmappedSince = time.Time{}
+	}
 	if state == s.lastState {
-		return s.pollStandingRefusal(now, state)
+		return s.pollStandingRefusal(now, state, want, mapped)
 	}
 	// Recorded before the work below, so a refusal is reported once for the
 	// transition rather than retried on every tick for as long as it lasts.
 	s.lastState = state
 
-	want, mapped := vesselStateProfiles[state]
 	if !mapped {
+		// Nothing is wanted here. A standing refusal is resolved by the poll
+		// once the state has stayed unmapped for an interval; clearing now
+		// would flap on a one-tick blip.
 		s.remember(state)
 		return nil
 	}
 
 	current, profiles, err := s.load()
 	if err != nil {
+		// Noted so the poll does not log the same failure again. The refusal
+		// below logs the error itself.
+		s.noteRead(err, false)
 		var statusErr *signalkStatusError
 		if errors.As(err, &statusErr) && (statusErr.Status == http.StatusUnauthorized || statusErr.Status == http.StatusForbidden) {
 			return s.refuse(want, "", err, fmt.Sprintf(
@@ -302,7 +364,44 @@ func (s *collisionProfileSyncer) check(now time.Time) []alarmEvent {
 		return s.refuse(want, "", err, fmt.Sprintf(
 			"Helmcentral could not read the collision profiles from SignalK, so the boat is %s on the old profile.", state))
 	}
+	s.noteRead(nil, true)
+	// The operator's own pick wins on a transition too: the state can flip
+	// before the next poll, and the pick must be neither overwritten nor taken
+	// for the baseline.
+	if s.movedByHand(current, profiles) {
+		return s.settleByHand(state, current)
+	}
 	return s.evaluate(state, want, current, profiles)
+}
+
+// causeClass is a stable name for a failure, so a log line is not repeated
+// because an ephemeral port or timestamp in the error text changed: the HTTP
+// status from SignalK if there is one, otherwise "other".
+func causeClass(err error) string {
+	var statusErr *signalkStatusError
+	if errors.As(err, &statusErr) {
+		return fmt.Sprintf("status %d", statusErr.Status)
+	}
+	return "other"
+}
+
+// noteRead records the outcome of reading the profiles, for the transition and
+// the poll alike. A failure is logged (when logFailure is set) only when its
+// class changes, and a recovery is logged once.
+func (s *collisionProfileSyncer) noteRead(err error, logFailure bool) {
+	if err == nil {
+		if s.lastReadErr != "" {
+			s.lastReadErr = ""
+			log.Printf("collision profile: the profiles can be read again")
+		}
+		return
+	}
+	if class := causeClass(err); class != s.lastReadErr {
+		s.lastReadErr = class
+		if logFailure {
+			log.Printf("collision profile: could not re-read the profiles to check the refusal: %v", err)
+		}
+	}
 }
 
 // evaluate decides what a state should do given what the plugin reports now.
@@ -329,19 +428,34 @@ func (s *collisionProfileSyncer) evaluate(state, want, current string, profiles 
 		return s.refuse(want, current, nil, fmt.Sprintf(
 			"The %q collision profile has every CPA and guard range at zero, so it would silence AIS collision alarms. The boat is %s on the old profile.", want, state))
 	}
+	// A failed save backs off: a plugin that allows reads but refuses the
+	// write would otherwise take a failed PUT every minute. Reads and the
+	// checks above still run on every poll.
+	if !s.saveRetry.due(s.checkedAt) && s.lastSaveErr != nil {
+		// No PUT, but the card still says what is true now: the state and the
+		// reason may have moved since the last failure.
+		return s.refuse(want, current, s.lastSaveErr, saveFailureMessage(want, state, s.lastSaveErr))
+	}
 	if err := s.save(want); err != nil {
-		var statusErr *signalkStatusError
-		if errors.As(err, &statusErr) && (statusErr.Status == http.StatusUnauthorized || statusErr.Status == http.StatusForbidden) {
-			return s.refuse(want, current, err, fmt.Sprintf(
-				"SignalK refused Helmcentral's login when switching to the %q collision profile, so the boat is %s on the old profile.", want, state))
-		}
-		return s.refuse(want, current, err, fmt.Sprintf(
-			"Helmcentral could not switch SignalK to the %q collision profile, so the boat is %s on the old profile.", want, state))
+		s.saveRetry.fail(s.checkedAt)
+		s.lastSaveErr = err
+		return s.refuse(want, current, err, saveFailureMessage(want, state, err))
 	}
 
 	log.Printf("collision profile: vessel is %s, selected %q", state, want)
 	s.remember(state)
 	return s.resolve()
+}
+
+// saveFailureMessage is the card body for a switch the plugin did not take.
+func saveFailureMessage(want, state string, err error) string {
+	var statusErr *signalkStatusError
+	if errors.As(err, &statusErr) && (statusErr.Status == http.StatusUnauthorized || statusErr.Status == http.StatusForbidden) {
+		return fmt.Sprintf(
+			"SignalK refused Helmcentral's login when switching to the %q collision profile, so the boat is %s on the old profile.", want, state)
+	}
+	return fmt.Sprintf(
+		"Helmcentral could not switch SignalK to the %q collision profile, so the boat is %s on the old profile.", want, state)
 }
 
 // movedByHand reports whether a refusal stands and the operator has put the
@@ -378,20 +492,31 @@ func (s *collisionProfileSyncer) settleByHand(state, current string) []alarmEven
 // profile. While a refusal stands, and the state has not changed, the profiles
 // are re-read about once a minute and the evaluation a transition runs is run
 // again for the current state:
-//   - the wanted profile now works and the plugin is not on it: switch to it;
-//   - the plugin is already on the wanted profile: clear;
 //   - the operator has put the plugin on a working profile other than the one
 //     it was on at the refusal: leave their choice and clear;
+//   - the wanted profile now works and the plugin is not on it: switch to it;
+//   - the plugin is already on the wanted profile: clear;
+//   - the state has no mapped profile and has stayed that way for a poll
+//     interval: nothing is wanted, so clear;
 //   - otherwise the refusal stands, and its words are updated if the reason
 //     has changed.
 //
-// A failed read is logged and leaves the warning up, since a warning that
-// clears on the strength of data we could not read would be a fallback.
-func (s *collisionProfileSyncer) pollStandingRefusal(now time.Time, state string) []alarmEvent {
+// A failed save backs off, doubling from one poll interval up to
+// collisionSaveBackoffMax. Only the save waits: the read and the checks above
+// run every poll, and a skipped save still rewords the card from the last
+// failure.
+//
+// A failed read never clears the warning, since a warning that clears on the
+// strength of data we could not read would be a fallback. A failing read, and
+// a recovery, are logged when the failure class changes, not once a poll.
+func (s *collisionProfileSyncer) pollStandingRefusal(now time.Time, state, want string, mapped bool) []alarmEvent {
 	s.mu.Lock()
 	standing, since := s.standing, s.refusedAt
 	s.mu.Unlock()
 	if !standing {
+		return nil
+	}
+	if !mapped && now.Sub(s.unmappedSince) < collisionProfilePollInterval {
 		return nil
 	}
 	if s.polledAt.After(since) {
@@ -403,19 +528,19 @@ func (s *collisionProfileSyncer) pollStandingRefusal(now time.Time, state string
 	s.polledAt = now
 
 	current, profiles, err := s.load()
+	s.noteRead(err, true)
 	if err != nil {
-		log.Printf("collision profile: could not re-read the profiles to check the refusal: %v", err)
 		return nil
+	}
+	if !mapped {
+		// Nothing is wanted in a state with no profile, and the read worked.
+		return s.resolve()
 	}
 	// The operator's own pick wins over the retry: switching would overwrite
 	// it, and a login that still fails would keep warning about a boat they
 	// have already sorted.
 	if s.movedByHand(current, profiles) {
 		return s.settleByHand(state, current)
-	}
-	want, mapped := vesselStateProfiles[state]
-	if !mapped {
-		return nil
 	}
 	return s.evaluate(state, want, current, profiles)
 }
@@ -424,21 +549,30 @@ func (s *collisionProfileSyncer) pollStandingRefusal(now time.Time, state string
 // Staying loud on the wrong profile is a worse night and a better outcome than
 // going quiet on the right one.
 func (s *collisionProfileSyncer) refuse(profile, current string, cause error, message string) []alarmEvent {
+	// Logged when the message or the cause text differs from the last line, so
+	// a 403 after a 401 shows but a refusal repeated each poll does not. The
+	// cause is compared by class, not text, which can carry a changing port.
+	key := message
+	logged := message
 	if cause != nil {
-		log.Printf("collision profile: refusing %q: %s: %v", profile, message, cause)
-	} else {
-		log.Printf("collision profile: refusing %q: %s", profile, message)
+		key += "|" + causeClass(cause)
+		logged += ": " + cause.Error()
+	}
+	if key != s.lastRefusalLog {
+		s.lastRefusalLog = key
+		log.Printf("collision profile: refusing %q: %s", profile, logged)
 	}
 	s.mu.Lock()
+	if s.standing && message == s.refusedMessage {
+		// One refusal is standing already, in the same words. Raising again on
+		// every navigation state change piled up hundreds of open rows in the
+		// alarm log.
+		s.mu.Unlock()
+		return nil
+	}
 	if s.standing {
-		// One refusal is standing already. Raising again on every navigation
-		// state change piled up hundreds of open rows in the alarm log. The
-		// standing card is updated in place when the words change, so it never
-		// shows an old state or cause.
-		if message == s.refusedMessage {
-			s.mu.Unlock()
-			return nil
-		}
+		// The standing card is updated in place when the words change, so it
+		// never shows an old state or cause.
 		s.refused, s.refusedMessage = profile, message
 		// A failed read passes no current profile; it must not wipe the known
 		// one.
@@ -459,6 +593,8 @@ func (s *collisionProfileSyncer) refuse(profile, current string, cause error, me
 }
 
 func (s *collisionProfileSyncer) resolve() []alarmEvent {
+	s.saveRetry.reset()
+	s.lastRefusalLog, s.lastReadErr, s.lastSaveErr = "", "", nil
 	s.mu.Lock()
 	if !s.standing {
 		s.mu.Unlock()

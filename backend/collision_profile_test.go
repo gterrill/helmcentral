@@ -974,8 +974,278 @@ func TestCollisionProfileSyncerPollRetriesAFailedSaveWhenNothingMoved(t *testing
 		t.Fatalf("still failing: want a retry and no event, got saves %d, %+v", *saves, events)
 	}
 	*failing = false
-	events := syncer.check(at.Add(collisionProfilePollInterval))
+	events := syncer.check(at.Add(2 * collisionProfilePollInterval)) // after the backoff
 	if *saves != 2 || len(events) != 1 || events[0].Kind != alarmEventCleared {
 		t.Fatalf("expected the retry to succeed and clear, saves %d, %+v", *saves, events)
+	}
+}
+
+// A refusal wants a profile for a state. Once the boat is in a state with no
+// mapped profile nothing is wanted, so nothing is refused.
+func TestCollisionProfileSyncerPollInAnUnmappedStateResolvesTheRefusal(t *testing.T) {
+	syncer, _, _, _ := standingRefusalSyncer(t)
+	fresh := &collisionProfileSyncer{snapshot: snapshotInState("aground"), load: syncer.load, save: syncer.save}
+	fresh.adoptOpenRefusal(alarmLogEntry{RuleID: collisionProfileRuleID, Message: syncer.refusedMessage, RaisedAt: alarmNow})
+	fresh.lastState = "aground"
+	// The first poll starts the clock on the unmapped state; the refusal goes
+	// once it has held for an interval.
+	if events := fresh.check(alarmNow.Add(collisionProfilePollInterval)); len(events) != 0 {
+		t.Fatalf("expected no event yet, got %+v", events)
+	}
+	events := fresh.check(alarmNow.Add(2 * collisionProfilePollInterval))
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected the refusal to resolve, got %+v", events)
+	}
+}
+
+// While the plugin refuses the write, the save retry backs off: 1, 2, 4 ...
+// minutes between saves, capped at 10. The read side still runs each minute.
+func TestCollisionProfileSyncerSaveRetryBacksOff(t *testing.T) {
+	syncer, _, saves, _ := failedSaveSyncer(t)
+	var at []int
+	last := 0
+	for minute := 1; minute <= 200; minute++ {
+		syncer.check(alarmNow.Add(time.Duration(minute) * time.Minute))
+		if *saves != last {
+			at = append(at, minute)
+			last = *saves
+		}
+	}
+	want := []int{1, 3, 7, 15, 25, 35, 45, 55, 65, 75, 85, 95, 105, 115, 125, 135, 145, 155, 165, 175, 185, 195}
+	if len(at) != len(want) {
+		t.Fatalf("save minutes: got %v, want %v", at, want)
+	}
+	for i := range want {
+		if at[i] != want[i] {
+			t.Fatalf("save minutes: got %v, want %v", at, want)
+		}
+	}
+}
+
+// A hand pick during the backoff still clears at the next poll.
+func TestCollisionProfileSyncerHandPickDuringBackoffClears(t *testing.T) {
+	syncer, setCurrent, saves, _ := failedSaveSyncer(t)
+	syncer.check(alarmNow.Add(1 * time.Minute))
+	syncer.check(alarmNow.Add(2 * time.Minute))
+	before := *saves
+	setCurrent("harbor")
+	events := syncer.check(alarmNow.Add(3 * time.Minute))
+	if len(events) != 1 || events[0].Kind != alarmEventCleared || *saves != before {
+		t.Fatalf("expected a clear with no save, got saves %d->%d, %+v", before, *saves, events)
+	}
+}
+
+// A brief unmapped tick between two anchored ticks must not clear and raise
+// again: that would open a new row and send a new notification each cycle.
+func TestCollisionProfileSyncerAnUnmappedBlipDoesNotFlapTheRefusal(t *testing.T) {
+	syncer, _, _, _ := standingRefusalSyncer(t)
+	syncer.snapshot = snapshotInState("aground")
+	if events := syncer.check(alarmNow.Add(10 * time.Second)); len(events) != 0 {
+		t.Fatalf("unmapped blip: expected no event, got %+v", events)
+	}
+	syncer.snapshot = snapshotInState("anchored")
+	if events := syncer.check(alarmNow.Add(20 * time.Second)); len(events) != 0 {
+		t.Fatalf("back to anchored: expected no event, got %+v", events)
+	}
+	if len(syncer.active()) != 1 {
+		t.Fatal("the refusal must still stand")
+	}
+}
+
+// Held unmapped past the interval, with a good read, the refusal clears.
+func TestCollisionProfileSyncerAnUnmappedStateHeldForTheIntervalResolves(t *testing.T) {
+	syncer, _, _, _ := standingRefusalSyncer(t)
+	syncer.snapshot = snapshotInState("aground")
+	if events := syncer.check(alarmNow.Add(10 * time.Second)); len(events) != 0 {
+		t.Fatalf("expected no event yet, got %+v", events)
+	}
+	events := syncer.check(alarmNow.Add(10*time.Second + collisionProfilePollInterval))
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected clear, got %+v", events)
+	}
+}
+
+// A failed read never clears, unmapped state or not.
+func TestCollisionProfileSyncerAnUnmappedStateWithFailingReadsKeepsTheRefusal(t *testing.T) {
+	syncer, _, setLoadErr, _ := standingRefusalSyncer(t)
+	setLoadErr(&signalkStatusError{Status: 401})
+	syncer.snapshot = snapshotInState("aground")
+	at := alarmNow
+	for i := 0; i < 4; i++ {
+		at = at.Add(collisionProfilePollInterval)
+		if events := syncer.check(at); len(events) != 0 {
+			t.Fatalf("poll %d: expected no event, got %+v", i+1, events)
+		}
+	}
+	if len(syncer.active()) != 1 {
+		t.Fatal("a failed read must keep the warning")
+	}
+}
+
+// The read side keeps its pace while the save backs off.
+func TestCollisionProfileSyncerReadsEveryIntervalWhileTheSaveBacksOff(t *testing.T) {
+	syncer, _, saves, _ := failedSaveSyncer(t)
+	loads := 0
+	inner := syncer.load
+	syncer.load = func() (string, map[string]collisionProfile, error) { loads++; return inner() }
+	for minute := 1; minute <= 10; minute++ {
+		syncer.check(alarmNow.Add(time.Duration(minute) * time.Minute))
+	}
+	if loads != 10 {
+		t.Fatalf("expected a read every minute, got %d", loads)
+	}
+	if *saves != 3 {
+		t.Fatalf("expected saves at minutes 1, 3 and 7, got %d", *saves)
+	}
+}
+
+// A flapping state must not bring back a PUT per tick: the backoff belongs to
+// the wanted profile, not to each transition.
+func TestCollisionProfileSyncerAnUnmappedBlipKeepsTheSaveBackoff(t *testing.T) {
+	syncer, _, saves, _ := failedSaveSyncer(t)
+	syncer.check(alarmNow.Add(1 * time.Minute))
+	before := *saves
+	for i := 0; i < 3; i++ {
+		syncer.snapshot = snapshotInState("aground")
+		syncer.check(alarmNow.Add(70*time.Second + time.Duration(i)*20*time.Second))
+		syncer.snapshot = snapshotInState("sailing")
+		syncer.check(alarmNow.Add(80*time.Second + time.Duration(i)*20*time.Second))
+	}
+	if *saves != before {
+		t.Fatalf("a blip must not retry the save, saves %d -> %d", before, *saves)
+	}
+}
+
+// Unmapped to unmapped does not restart the clock.
+func TestCollisionProfileSyncerUnmappedToUnmappedKeepsTheClock(t *testing.T) {
+	syncer, _, _, _ := standingRefusalSyncer(t)
+	syncer.snapshot = snapshotInState("aground")
+	syncer.check(alarmNow.Add(10 * time.Second))
+	syncer.snapshot = snapshotInState("adrift")
+	if events := syncer.check(alarmNow.Add(50 * time.Second)); len(events) != 0 {
+		t.Fatalf("expected no event yet, got %+v", events)
+	}
+	events := syncer.check(alarmNow.Add(10*time.Second + collisionProfilePollInterval))
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected clear 60s after the first unmapped tick, got %+v", events)
+	}
+}
+
+// The read-failure log is not repeated by the poll, and clears with the refusal.
+func TestCollisionProfileSyncerTracksTheReadErrorAcrossTransitionAndPoll(t *testing.T) {
+	syncer, _, setLoadErr, _ := standingRefusalSyncer(t)
+	syncer.resolve()
+	setLoadErr(errors.New("boom"))
+	syncer.lastState = ""
+	syncer.check(alarmNow.Add(time.Minute))
+	if syncer.lastReadErr != causeClass(errors.New("boom")) {
+		t.Fatalf("the transition must note the read error, got %q", syncer.lastReadErr)
+	}
+	syncer.resolve()
+	if syncer.lastReadErr != "" {
+		t.Fatalf("resolve must clear it, got %q", syncer.lastReadErr)
+	}
+}
+
+// A hand pick is honoured on a transition too: the state flips before the poll
+// sees it, and the pick must not be overwritten or taken as the baseline.
+func TestCollisionProfileSyncerATransitionHonoursAHandPick(t *testing.T) {
+	syncer, setCurrent, saves, _ := failedSaveSyncer(t)
+	setCurrent("harbor")
+	syncer.snapshot = snapshotInState("motoring")
+	events := syncer.check(alarmNow.Add(10 * time.Second))
+	if len(events) != 1 || events[0].Kind != alarmEventCleared {
+		t.Fatalf("expected clear, got %+v", events)
+	}
+	if *saves != 0 {
+		t.Fatalf("the operator's pick must not be overwritten, saves %d", *saves)
+	}
+}
+
+// A new wanted profile still waits for the running backoff, but the card is
+// reworded at once.
+func TestCollisionProfileSyncerATransitionDuringBackoffRewordsWithoutASave(t *testing.T) {
+	syncer, _, saves, _ := failedSaveSyncer(t)
+	syncer.check(alarmNow.Add(1 * time.Minute))
+	syncer.check(alarmNow.Add(3 * time.Minute))
+	before := *saves
+	syncer.snapshot = snapshotInState("moored")
+	events := syncer.check(alarmNow.Add(3*time.Minute + time.Second))
+	if *saves != before {
+		t.Fatalf("the save must wait for the backoff, saves %d -> %d", before, *saves)
+	}
+	if len(events) != 1 || events[0].Kind != alarmEventChanged || !strings.Contains(events[0].Status.Message, "harbor") {
+		t.Fatalf("the card must be reworded for the new state, got %+v", events)
+	}
+}
+
+// The words follow the state while the save is backed off.
+func TestCollisionProfileSyncerRewordsDuringBackoffWhenTheStateMoves(t *testing.T) {
+	syncer, _, saves, _ := failedSaveSyncer(t)
+	syncer.check(alarmNow.Add(1 * time.Minute))
+	before := *saves
+	syncer.snapshot = snapshotInState("motoring")
+	events := syncer.check(alarmNow.Add(1*time.Minute + time.Second))
+	if *saves != before {
+		t.Fatalf("no save during the backoff, saves %d -> %d", before, *saves)
+	}
+	if len(events) != 1 || events[0].Kind != alarmEventChanged ||
+		!strings.Contains(events[0].Status.Message, "motoring") ||
+		!strings.Contains(events[0].Status.Message, "refused Helmcentral's login") {
+		t.Fatalf("expected the card to say motoring and blame the login, got %+v", events)
+	}
+}
+
+// After reads recover, the card stops blaming the read even while the save is
+// backed off.
+func TestCollisionProfileSyncerRewordsDuringBackoffWhenReadsRecover(t *testing.T) {
+	syncer, _, _, _ := failedSaveSyncer(t)
+	inner := syncer.load
+	readFails := false
+	syncer.load = func() (string, map[string]collisionProfile, error) {
+		if readFails {
+			return "", nil, errors.New("boom")
+		}
+		return inner()
+	}
+	syncer.check(alarmNow.Add(1 * time.Minute)) // save fails, backs off to 3 min
+	readFails = true
+	syncer.snapshot = snapshotInState("motoring")
+	if events := syncer.check(alarmNow.Add(1*time.Minute + time.Second)); len(events) != 1 ||
+		!strings.Contains(events[0].Status.Message, "could not read") {
+		t.Fatalf("expected the card to blame the read, got %+v", events)
+	}
+	readFails = false
+	events := syncer.check(alarmNow.Add(2*time.Minute + 5*time.Second))
+	if len(events) != 1 || events[0].Kind != alarmEventChanged ||
+		!strings.Contains(events[0].Status.Message, "refused Helmcentral's login") {
+		t.Fatalf("expected the card to blame the login again, got %+v", events)
+	}
+}
+
+// Ephemeral ports in a connection error must not defeat the log dedup.
+func TestCollisionProfileCauseClassIgnoresTheErrorText(t *testing.T) {
+	a := causeClass(errors.New("dial tcp 127.0.0.1:50001: connect: connection refused"))
+	b := causeClass(errors.New("dial tcp 127.0.0.1:50002: connect: connection refused"))
+	if a != b {
+		t.Fatalf("classes differ: %q vs %q", a, b)
+	}
+	if causeClass(&signalkStatusError{Status: 401}) == causeClass(&signalkStatusError{Status: 403}) {
+		t.Fatal("different statuses must be different classes")
+	}
+}
+
+// A failing read is noted once per class; recovery clears it.
+func TestCollisionProfileSyncerNoteReadDedupesByClass(t *testing.T) {
+	syncer := &collisionProfileSyncer{}
+	syncer.noteRead(errors.New("dial tcp 127.0.0.1:50001: refused"), true)
+	first := syncer.lastReadErr
+	syncer.noteRead(errors.New("dial tcp 127.0.0.1:50002: refused"), true)
+	if syncer.lastReadErr != first || first == "" {
+		t.Fatalf("same class must not change the note, got %q then %q", first, syncer.lastReadErr)
+	}
+	syncer.noteRead(nil, true)
+	if syncer.lastReadErr != "" {
+		t.Fatalf("recovery must clear the note, got %q", syncer.lastReadErr)
 	}
 }
