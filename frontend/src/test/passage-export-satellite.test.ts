@@ -91,7 +91,9 @@ describe('satellite imagery in still images', () => {
     const data = JSON.stringify(prepareExport(input))
     const html = generateEmbed(input) + generateStandalonePage(input)
     for (const text of [data, html]) {
-      expect(text).not.toContain('world-imagery')
+      // The imagery's address and its credit: nothing of it reaches a page that can only show the chart.
+      expect(text).not.toContain('/api/world-imagery')
+      expect(text).not.toContain('arcgisonline')
       expect(text).not.toContain('Esri')
     }
   })

@@ -47,6 +47,14 @@ export interface MapLabelBox {
   alpha: number
 }
 
+/** A part of the frame a page keeps for something of its own (the exported card's time readout), in the frame's pixels. */
+export interface ReservedArea {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
 export interface MapLabelOptions {
   align: MapLabelBox['align']
   /** Seconds the label has been up, and how long it is up for. */
@@ -54,21 +62,48 @@ export interface MapLabelOptions {
   durationS: number
   /** The corner the overview map is shown in, if it is: in a bottom one the label narrows to keep clear of it. */
   insetCorner?: InsetCorner | null
+  /** An area the page keeps clear, which the label gives way to sideways if it would sit over it. */
+  reserved?: ReservedArea | null
+}
+
+/** How tall a label is: one line of its text and the padding. */
+const labelHeight = () => MAP_LABEL.fontPx * MAP_LABEL.lineHeight + 2 * MAP_LABEL.padY
+
+/** The style a label is drawn with, for the page (React, the exported card) and anything else that sets CSS: pixels are numbers. */
+export function mapLabelStyle(box: MapLabelBox) {
+  return {
+    left: box.x,
+    top: box.y,
+    transform: box.align === 'center' ? 'translateX(-50%)' : undefined,
+    fontSize: box.fontPx,
+    fontWeight: MAP_LABEL.weight,
+    lineHeight: MAP_LABEL.lineHeight,
+    borderRadius: MAP_LABEL.radius,
+    padding: `${box.padY}px ${box.padX}px`,
+    maxWidth: box.maxW,
+    opacity: box.alpha,
+  }
 }
 
 /** Where a label sits in a frame of `container`'s size, and how big: quiet,
  * small, low, clear of the cards at the sides and of the overview map in a
  * bottom corner. */
-export function mapLabelBox(container: { w: number; h: number }, { align, elapsedS, durationS, insetCorner = null }: MapLabelOptions): MapLabelBox {
+export function mapLabelBox(container: { w: number; h: number }, { align, elapsedS, durationS, insetCorner = null, reserved = null }: MapLabelOptions): MapLabelBox {
   const e = Math.max(0, Math.min(durationS, elapsedS))
   let left: number = MAP_LABEL.edge
   let right = container.w - MAP_LABEL.edge
   if (insetCorner === 'bottom-left') left = Math.max(left, INSET.side + INSET.w + MAP_LABEL.insetGap)
   if (insetCorner === 'bottom-right') right = Math.min(right, container.w - INSET.side - INSET.w - MAP_LABEL.insetGap)
+  const y = container.h - MAP_LABEL.aboveFoot
+  // Over something the page keeps clear: the label narrows from the side that thing is on.
+  if (reserved && reserved.y < y + labelHeight() && reserved.y + reserved.h > y) {
+    if (reserved.x + reserved.w / 2 < container.w / 2) left = Math.max(left, reserved.x + reserved.w + MAP_LABEL.insetGap)
+    else right = Math.min(right, reserved.x - MAP_LABEL.insetGap)
+  }
   return {
     x: align === 'center' ? (left + right) / 2 : left,
     align,
-    y: container.h - MAP_LABEL.aboveFoot,
+    y,
     fontPx: MAP_LABEL.fontPx,
     padX: MAP_LABEL.padX,
     padY: MAP_LABEL.padY,

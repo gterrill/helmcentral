@@ -44,6 +44,7 @@ import { useInsetPreference } from '@/lib/passage-inset-preference'
 import type { CruiseStats, PassageDetail } from '@/lib/passages'
 import { prepareSignPhotos } from '@/lib/passage-export-photos'
 import { CARD_LIMIT_BYTES, fmtMB, signSummary, signsInRange } from '@/lib/passage-export-signs'
+import { photoMomentOn } from '@/lib/replay-signs'
 import { saveBlob } from '@/lib/save-blob'
 import { errorMessage } from '@/lib/errors'
 
@@ -109,15 +110,17 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units, i
     [allSigns, exportable],
   )
   const photoSigns = useMemo(() => signsInCard.filter((s) => s.photo_url), [signsInCard])
-  const [photos, setPhotos] = useState<ReadonlyMap<string, string>>(new Map())
+  const [prepared, setPrepared] = useState<{ key: string; photos: ReadonlyMap<string, string> }>({ key: '', photos: NO_PHOTOS })
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
   const [photoError, setPhotoError] = useState<string | null>(null)
   // The photo signs the card needs, by sign and document: a change in the set
   // is a different job, and a run for an earlier set is not the answer to it.
-  const photoKey = useMemo(() => photoSigns.map((s) => `${s.id}:${s.document_id}`).sort().join('|'), [photoSigns])
+  const photoKey = useMemo(() => photoSigns.map((s) => `${s.id}:${s.document_id}:${photoMomentOn(s) ? 'm' : ''}`).sort().join('|'), [photoSigns])
   const latestKey = useRef(photoKey)
   latestKey.current = photoKey
   const preparing = useRef<{ key: string; promise: Promise<ReadonlyMap<string, string>> } | null>(null)
+  // Photos prepared for another set of signs, or another size, are not the answer to this one.
+  const photos = prepared.key === photoKey ? prepared.photos : NO_PHOTOS
   const ready = photoSigns.every((s) => photos.has(s.id))
 
   // Photos are fetched, shrunk and cleaned in this browser, one run per set of
@@ -129,8 +132,9 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units, i
     if (preparing.current?.key === key) return preparing.current.promise
     setPhotoError(null)
     const current = () => latestKey.current === key
+    // A sign whose card grows for a moment gets the larger size; the rest the card's own.
     const promise = prepareSignPhotos(photoSigns, { onProgress: (done, total) => { if (current()) setProgress({ done, total }) } })
-      .then((prepared) => { if (current()) setPhotos(prepared); return prepared })
+      .then((done) => { if (current()) setPrepared({ key, photos: done }); return done })
       .catch((err: unknown) => { if (current()) setPhotoError(errorMessage(err)); throw err })
       .finally(() => { if (preparing.current?.key === key) { preparing.current = null; setProgress(null) } })
     preparing.current = { key, promise }
@@ -143,10 +147,10 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units, i
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuOpen, includeSigns, photoKey, signsLoading])
 
-  const exportInput = (prepared: ReadonlyMap<string, string> = photos): ExportInput => ({
+  const exportInput = (done: ReadonlyMap<string, string> = photos): ExportInput => ({
     kind, title, passages, cruiseStats, units, zone: exportZone(passages), inset, ...(insetView ? { insetView } : {}), playSeconds, threeD, shots, hull,
     joins: allSigns,
-    ...(includeSigns ? { signs: signsInCard, photos: prepared } : {}),
+    ...(includeSigns ? { signs: signsInCard, photos: done } : {}),
   })
 
   // Join signs split the track into legs, so every export needs the signs,
@@ -260,7 +264,8 @@ export function PassageExportMenu({ kind, title, passages, cruiseStats, units, i
     const label = IMAGE_SIZES[imageKind].label
     const toastId = toast.loading(`Drawing the ${label} image`)
     try {
-      const input = exportInput()
+      // An image draws no signs, so it does not wait for their photos or fail for them.
+      const input = { ...exportInput(), signs: undefined, photos: undefined }
       const data = prepareExport(input)
       const { renderPassageImage } = await import('@/lib/passage-export-image')
       const blob = await renderPassageImage(data, imageKind, satellite)

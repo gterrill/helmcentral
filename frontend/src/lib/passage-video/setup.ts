@@ -8,11 +8,10 @@ import type { ExportData } from '@/lib/passage-export'
 import { PassageVideoError } from '@/lib/passage-video/errors'
 import type { VideoOrientation } from '@/lib/passage-video/schedule'
 import type { PassageDetail } from '@/lib/passages'
-import { planReplay } from '@/lib/replay-plan'
+import { planReplay, replayConfigOf } from '@/lib/replay-plan'
 import type { ReplayConfig } from '@/lib/replay-controller'
-import { cruisePaceSpans, type CameraShot } from '@/lib/replay-clock'
-import { momentsOf, type ReplaySign } from '@/lib/replay-signs'
-import { buildReplayTime } from '@/lib/replay-time'
+import type { CameraShot } from '@/lib/replay-clock'
+import type { ReplaySign } from '@/lib/replay-signs'
 
 export interface PassageVideoInput {
   orientation: VideoOrientation
@@ -47,7 +46,6 @@ export function prepareVideoReplay(input: PassageVideoInput, brokenPhotos: Reado
   const { timeline, bounds } = plan
   if (!bounds || timeline.total <= 0) throw new PassageVideoError('source', 'No track was recorded for this passage, so there is nothing to make a video of.')
 
-  const time = buildReplayTime({ total: timeline.total, lengthS: input.lengthS, spans: cruisePaceSpans(plan.resolved, timeline, input.lengthS), moments: momentsOf(plan.placed, brokenPhotos), stays: plan.stays })
-  const config: ReplayConfig = { timeline, time, stays: plan.stays, passageLabels: plan.passageLabels, resolved: plan.resolved, signs: plan.labelled, pieces: plan.pieces, isDarkTheme: input.isDarkTheme }
+  const config = replayConfigOf(plan, input.lengthS, input.isDarkTheme, brokenPhotos)
   return { config, bounds, passageBounds: plan.passageBounds, wantHeading: plan.wantHeading }
 }

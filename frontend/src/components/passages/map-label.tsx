@@ -1,4 +1,4 @@
-import { MAP_LABEL, type MapLabelBox } from '@/lib/map-label'
+import { mapLabelStyle, type MapLabelBox } from '@/lib/map-label'
 
 export interface MapLabelProps {
   text: string
@@ -16,18 +16,7 @@ export function MapLabel({ text, box, testId }: MapLabelProps) {
     <div className="pointer-events-none absolute inset-0 z-20 overflow-hidden" data-testid={testId}>
       <span
         className="absolute truncate bg-card/80 text-foreground shadow-sm backdrop-blur-sm"
-        style={{
-          left: box.x,
-          top: box.y,
-          transform: box.align === 'center' ? 'translateX(-50%)' : undefined,
-          fontSize: box.fontPx,
-          fontWeight: MAP_LABEL.weight,
-          lineHeight: MAP_LABEL.lineHeight,
-          borderRadius: MAP_LABEL.radius,
-          padding: `${box.padY}px ${box.padX}px`,
-          maxWidth: box.maxW,
-          opacity: box.alpha,
-        }}
+        style={mapLabelStyle(box)}
       >
         {text}
       </span>

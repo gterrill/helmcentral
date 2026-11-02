@@ -11,10 +11,12 @@ import type { BoatHull } from '@/lib/boat-model'
 import { drawnPieces, passageLegs, type DrawnPiece, type LegPassage } from '@/lib/passage-legs'
 import { buildTimeline, segmentBounds, timedSegments, type PassageDetail, type TimedSegment, type Timeline } from '@/lib/passages'
 import { passageBoundsOf, type Bounds } from '@/lib/replay-framing'
-import { resolveShots, type CameraShot, type ResolvedShot } from '@/lib/replay-clock'
-import { resolveSigns, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
-import { passageLabelsOf, type ReplayPassageLabel } from '@/lib/replay-passage-label'
-import { staysOf, type ReplayStay } from '@/lib/replay-stay'
+import { cruisePaceSpans, resolveShots, type CameraShot, type ResolvedShot } from '@/lib/replay-clock'
+import { momentsOf, resolveSigns, type ReplaySign, type ResolvedSign } from '@/lib/replay-signs'
+import { passageLabelsAtOffset, type ReplayPassageLabel } from '@/lib/replay-passage-label'
+import { boatOffsetHours, staysAtOffset, type ReplayStay, type StayPassage } from '@/lib/replay-stay'
+import type { ReplayConfig } from '@/lib/replay-controller'
+import { buildReplayTime } from '@/lib/replay-time'
 
 /** A passage as the replay reads it: the real times, the track it replays, and the track it draws. */
 export interface ReplayItem {
@@ -74,10 +76,23 @@ export interface ReplayPlan {
   passageBounds: { id: string; bounds: Bounds | null }[]
 }
 
-export function planReplay(passages: readonly PassageDetail[], shots: readonly CameraShot[], signs: readonly ReplaySign[], hull: BoatHull | null, threeD: boolean): ReplayPlan {
-  const items = replayItems(passages)
+/** The plan from passages already read into items, with the legs worked out
+ * and the zone offset known: what the exported page has, and what `planReplay`
+ * builds for the app. The offset is the boat's, in hours east of UTC at the
+ * first departure, or null when it is not known. */
+export function planFromItems(
+  items: ReplayItem[],
+  named: readonly StayPassage[],
+  legs: Parameters<typeof drawnPieces>[1],
+  shots: readonly CameraShot[],
+  signs: readonly ReplaySign[],
+  hull: BoatHull | null,
+  threeD: boolean,
+  offsetHours?: number | null,
+): ReplayPlan {
   const timeline = buildTimeline(items)
-  const legs = items.length > 0 ? passageLegs(legPassages(items), signs) : undefined
+  // The boat's offset, unless the caller carries it.
+  const offset = offsetHours !== undefined ? offsetHours : boatOffsetHours(timeline, named)
   const resolved = playableShots(shots, timeline)
   const placed = resolveSigns(signs, timeline)
   return {
@@ -89,8 +104,24 @@ export function planReplay(passages: readonly PassageDetail[], shots: readonly C
     placed,
     labelled: labelledSigns(placed),
     wantHeading: wantsHeading(hull, threeD, resolved),
-    stays: staysOf(timeline, passages),
-    passageLabels: passageLabelsOf(timeline, passages),
+    stays: staysAtOffset(timeline, named, offset),
+    passageLabels: passageLabelsAtOffset(timeline, named, offset),
     passageBounds: passageBoundsOf(items.map((i) => ({ id: i.id, segments: i.line }))),
   }
+}
+
+export function planReplay(passages: readonly PassageDetail[], shots: readonly CameraShot[], signs: readonly ReplaySign[], hull: BoatHull | null, threeD: boolean): ReplayPlan {
+  const items = replayItems(passages)
+  const legs = items.length > 0 ? passageLegs(legPassages(items), signs) : undefined
+  return planFromItems(items, passages, legs, shots, signs, hull, threeD)
+}
+
+/** The replay's time and what the controller is given, from a plan: the
+ * length the operator chose, the photo moments (less the signs whose photo
+ * would not load) and the stays. The video and the exported page both build
+ * their replay here. */
+export function replayConfigOf(plan: ReplayPlan, lengthS: number, isDarkTheme: boolean, brokenPhotos: ReadonlySet<string> = new Set()): ReplayConfig {
+  const { timeline } = plan
+  const time = buildReplayTime({ total: timeline.total, lengthS, spans: cruisePaceSpans(plan.resolved, timeline, lengthS), moments: momentsOf(plan.placed, brokenPhotos), stays: plan.stays })
+  return { timeline, time, stays: plan.stays, passageLabels: plan.passageLabels, resolved: plan.resolved, signs: plan.labelled, pieces: plan.pieces, isDarkTheme }
 }

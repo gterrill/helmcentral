@@ -5,7 +5,7 @@ import { measureWithCanvas } from '@/lib/text-measure'
 import { seamarkLayer } from '@/lib/replay-map-style'
 
 import { worldImageryVisibleAtZoom } from '@/lib/world-imagery'
-import { addExportImagery } from '@/lib/passage-export-style'
+import { TRACK_LAYERS, TRACK_SOURCE_ID, addExportImagery, exportColour } from '@/lib/passage-export-style'
 import type { ExportData } from '@/lib/passage-export'
 import { exportLegSegments } from '@/lib/passage-legs'
 import { IMAGE_SIZES, composeImageLayout, mapCropRect, paintOverlay, roundRectPath, type ImageKind, type ImageLayout } from '@/lib/passage-export-layout'
@@ -43,12 +43,15 @@ function bboxPolygon(b: ExportData['bounds']): GeoJSON.Feature<GeoJSON.Polygon> 
 
 function trackCollection(data: ExportData): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = []
+  // Each leg of every passage has the next colour of the palette.
+  let colourIndex = 0
   for (const p of data.passages) {
     const timed = p.s.map((seg) => seg.map(([t, lon, lat]) => ({ t, lon, lat })))
-    p.l.forEach((leg, k) => {
+    p.l.forEach((_leg, k) => {
+      const c = exportColour(colourIndex++)
       for (const seg of exportLegSegments(timed, p.l, k)) {
         if (seg.length < 2) continue
-        features.push({ type: 'Feature', properties: { c: leg.c }, geometry: { type: 'LineString', coordinates: seg.map((pt) => [pt.lon, pt.lat]) } })
+        features.push({ type: 'Feature', properties: { c }, geometry: { type: 'LineString', coordinates: seg.map((pt) => [pt.lon, pt.lat]) } })
       }
     })
   }
@@ -84,9 +87,9 @@ async function renderMap(data: ExportData, o: RenderMapOptions): Promise<{ canva
     m.addSource(seamarks.id, { type: 'raster', tiles: [seamarks.tiles], tileSize: 256 })
     m.addLayer({ id: seamarks.layerId, type: 'raster', source: seamarks.id, paint: seamarkLayer().paint })
     if (o.withTrack) {
-      m.addSource(data.map.trackSource, { type: 'geojson', data: trackCollection(data) })
-      for (const layer of data.map.layers) {
-        if ((layer as { source: string }).source === data.map.trackSource) m.addLayer(layer as maplibregl.LayerSpecification)
+      m.addSource(TRACK_SOURCE_ID, { type: 'geojson', data: trackCollection(data) })
+      for (const layer of TRACK_LAYERS) {
+        m.addLayer(layer as maplibregl.LayerSpecification)
       }
     }
     if (o.withBox) {

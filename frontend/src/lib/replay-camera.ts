@@ -231,6 +231,11 @@ export class CameraGate {
     this.yielded = true
   }
 
+  /** The person holds the camera now. */
+  get taken(): boolean {
+    return this.yielded
+  }
+
   /** The camera to place now, or null to leave the map where it is. */
   place({ result, resume, reduced, current, boatOutside }: PlaceInput): Camera | null {
     const resumed = this.resume !== resume

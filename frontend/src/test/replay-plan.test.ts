@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { prepareVideoReplay, type PassageVideoInput } from '@/lib/passage-video/setup'
 import { passageLegs } from '@/lib/passage-legs'
 import { buildTimeline, type PassageDetail } from '@/lib/passages'
-import { legPassages, labelledSigns, piecesOf, planReplay, playableShots, replayItems, wantsHeading } from '@/lib/replay-plan'
+import { legPassages, labelledSigns, piecesOf, planFromItems, planReplay, playableShots, replayConfigOf, replayItems, wantsHeading } from '@/lib/replay-plan'
 import type { CameraShot } from '@/lib/replay-clock'
 import { resolveSigns, type ReplaySign } from '@/lib/replay-signs'
 
@@ -76,5 +76,44 @@ describe('the video is made from the same plan', () => {
     expect(config.signs).toEqual(plan.labelled)
     expect(wantHeading).toBe(plan.wantHeading)
     expect(bounds).toEqual(plan.bounds)
+  })
+})
+
+describe('a plan from items the caller has already read (the exported page)', () => {
+  const named = passages.map((p) => ({ id: p.id, from_name: p.from_name, to_name: `To ${p.id}`, timezone: null as string | null }))
+  const items = replayItems(passages)
+
+  it('is the plan planReplay makes when the offset is the one the passages\' zone gives', () => {
+    const mine = planFromItems(items, passages, undefined, [], [], null, false, 10)
+    const theirs = planReplay(passages, [], [], null, false)
+    expect(mine.stays).toEqual(theirs.stays)
+    expect(mine.passageLabels).toEqual(theirs.passageLabels)
+  })
+
+  it('counts days at the offset it is given, not by a zone name it does not carry', () => {
+    // Without the zone and without an offset the days cannot be counted, and there are no labels.
+    expect(planFromItems(items, named, undefined, [], [], null, false).passageLabels).toEqual([])
+    // With the boat's offset (+10) they are counted as the cruise page counts them.
+    const known = planFromItems(items, named, undefined, [], [], null, false, 10)
+    expect(known.passageLabels.map((l) => l.text)).toEqual(['Day 1 \u00b7 to To a', 'Day 1 \u00b7 to To b'])
+  })
+
+  it('builds the controller\'s config the way the video does', () => {
+    const plan = planReplay(passages, shots, signs, null, true)
+    const input = { orientation: 'landscape', passages, shots, signs, hull: null, threeD: true, satellite: false, isDarkTheme: true, lengthS: 30, summary: {} } as unknown as PassageVideoInput
+    const mine = replayConfigOf(plan, 30, true)
+    const theirs = prepareVideoReplay(input).config
+    // The time map holds functions, so it is compared by what it says.
+    expect({ ...mine, time: undefined }).toEqual({ ...theirs, time: undefined })
+    expect(mine.time.totalWall).toBe(theirs.time.totalWall)
+    expect(mine.time.holds).toEqual(theirs.time.holds)
+    expect(replayConfigOf(plan, 30, false).isDarkTheme).toBe(false)
+  })
+
+  it('leaves out of the time map the moment of a sign whose photo would not load', () => {
+    const withPhoto = [sign('p', 300, { photo_url: '/api/documents/p/content' })]
+    const plan = planReplay(passages, [], withPhoto, null, false)
+    expect(replayConfigOf(plan, 30, false).time.holds.filter((h) => h.kind === 'moment')).toHaveLength(1)
+    expect(replayConfigOf(plan, 30, false, new Set(['p'])).time.holds.filter((h) => h.kind === 'moment')).toHaveLength(0)
   })
 })

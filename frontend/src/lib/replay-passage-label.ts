@@ -5,7 +5,7 @@
 // HTML and a video draws the same with a canvas.
 
 import { localDaysSince } from '@/lib/boat-nights'
-import { mapLabelBox, type MapLabelBox } from '@/lib/map-label'
+import { mapLabelBox, type MapLabelBox, type ReservedArea } from '@/lib/map-label'
 import type { InsetCorner } from '@/lib/passage-inset-view'
 import { isMultiPassage, type Timeline } from '@/lib/passages'
 import { boatOffsetHours, type StayPassage } from '@/lib/replay-stay'
@@ -38,8 +38,12 @@ export function passageLabelText(day: number, from: string, to: string): string 
 
 /** The labels of a replay of several passages, one for each; none for a single passage. Days are counted by the boat's own dates from the first departure, as the cruise page counts its nights; without a known zone there are none. */
 export function passageLabelsOf(timeline: Timeline, passages: readonly (StayPassage)[]): ReplayPassageLabel[] {
+  return passageLabelsAtOffset(timeline, passages, boatOffsetHours(timeline, passages))
+}
+
+/** The labels, with the boat's offset worked out already. */
+export function passageLabelsAtOffset(timeline: Timeline, passages: readonly (StayPassage)[], offset: number | null): ReplayPassageLabel[] {
   if (!isMultiPassage(timeline)) return []
-  const offset = boatOffsetHours(timeline, passages)
   // Without the boat's zone the days cannot be counted, and a label that guessed at them would be wrong: there are none.
   if (offset === null) return []
   const byId = new Map(passages.map((p) => [p.id, p]))
@@ -61,6 +65,6 @@ export function passageLabelView(label: ReplayPassageLabel, elapsedS: number): P
  * on the line the stay's label is on, and clear of the overview map in a bottom
  * corner. It is up while the boat sails and the stay's label while it is in
  * port, so the two are never up together. */
-export function passageLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null): MapLabelBox {
-  return mapLabelBox(container, { align: 'left', elapsedS, durationS: PASSAGE_LABEL_S, insetCorner })
+export function passageLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null, reserved: ReservedArea | null = null): MapLabelBox {
+  return mapLabelBox(container, { align: 'left', elapsedS, durationS: PASSAGE_LABEL_S, insetCorner, reserved })
 }

@@ -1,80 +1,30 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { generateEmbed, PLAYER_SOURCE, type ExportInput } from '@/lib/passage-export'
+import { generateEmbed, PLAYER_SOURCE } from '@/lib/passage-export'
 import { EXPORT_PHOTO_PREFIX } from '@/lib/passage-export-signs'
-import type { PassageDetail, PassageStats } from '@/lib/passages'
+import { MOMENT_TOTAL_S } from '@/lib/replay-time'
 import { placeSignCard, type ReplaySign } from '@/lib/replay-signs'
+
+import { FakeMap, FakeMarker, INTRO_AND_A_BIT_MS, T0, fullInput, lib, markup, passage, resetFakes, useClock } from './export-player-harness'
 
 // The card's signs, driven through the built player with MapLibre replaced by
 // a recorder. One passage of 3600 s played in 30 s: a sign at T0 + 600 s is
-// reached after 5 s of watching.
-
-const STATS: PassageStats = {
-  distance_nm: 10, underway_seconds: 3600, mean_sog_kts: 5, max_sog_kts: 6, fuel_burned_l: null,
-  tws_mean_kts: null, max_gust_kts: null, soc_start_pct: null, soc_end_pct: null, soc_min_pct: null,
-}
-const T0 = Date.UTC(2026, 8, 14, 0) / 1000
-function passage(): PassageDetail {
-  const times = Array.from({ length: 11 }, (_, i) => T0 + i * 360)
-  const pts = times.map((_, i) => [-20 + i * 0.01, 148 + i * 0.01] as [number, number])
-  return {
-    id: '1', start: new Date(T0 * 1000).toISOString(), end: new Date((T0 + 3600) * 1000).toISOString(),
-    from_name: 'A', to_name: 'B', title: 'Leg', notes: '', hidden: false, edited: false,
-    cruise_id: null, created_at: '', stats: STATS, timezone: 'Australia/Brisbane',
-    track: [pts], track_times: [times], replay_track: [pts], replay_times: [times],
-  }
-}
-
-class FakeMap {
-  static instances: FakeMap[] = []
-  handlers: Record<string, ((e?: unknown) => void)[]> = {}
-  sources = new Map<string, { setData: ReturnType<typeof vi.fn> }>()
-  constructor(public options: { container: HTMLElement }) { FakeMap.instances.push(this) }
-  on(evt: string, fn: (e?: unknown) => void) { (this.handlers[evt] ??= []).push(fn) }
-  off(evt: string, fn: (e?: unknown) => void) { this.handlers[evt] = (this.handlers[evt] ?? []).filter((h) => h !== fn) }
-  fire(evt: string) { for (const fn of [...(this.handlers[evt] ?? [])]) fn() }
-  addControl() {}
-  setProjection() {}
-  addSource(id: string) { this.sources.set(id, { setData: vi.fn() }) }
-  addLayer() {}
-  getSource(id: string) { return this.sources.get(id) }
-  setPaintProperty() {}
-  jumpTo() {}
-  fitBounds() {}
-  getCanvasContainer() { return this.options.container }
-  getContainer() { return this.options.container }
-  projected: { x: number; y: number } = { x: 450, y: 300 }
-  project() { return this.projected }
-}
-interface MarkerOptions { element?: HTMLElement; anchor?: string }
-class FakeMarker {
-  static all: FakeMarker[] = []
-  lngLat: [number, number] | null = null
-  constructor(public options: MarkerOptions = {}) { FakeMarker.all.push(this) }
-  setLngLat(p: [number, number]) { this.lngLat = p; return this }
-  addTo(map: FakeMap) { if (this.options.element) map.options.container.appendChild(this.options.element); return this }
-}
-const fakeMaplibre = { Map: FakeMap, Marker: FakeMarker, NavigationControl: class {} }
+// reached after 5 s of sailing. Which cards are up, and how a photo moment
+// goes, are the replay controller's; what is checked here is that the card
+// draws what it is told.
 
 const sign = (id: string, atS: number, over: Partial<ReplaySign> = {}): ReplaySign => ({
   id, t_ms: atS * 1000, title: `Sign ${id}`, note: `Note ${id}`, document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, photo_moment: null, ...over,
 })
 const URI = `${EXPORT_PHOTO_PREFIX}QUJD`
-const photoSign = (id: string, atS: number, over: Partial<ReplaySign> = {}) => sign(id, atS, { photo_url: `/api/documents/${id}/content`, ...over })
+// A card photo with no moment, unless a test asks for one.
+const photoSign = (id: string, atS: number, over: Partial<ReplaySign> = {}) => sign(id, atS, { photo_url: `/api/documents/${id}/content`, photo_moment: false, ...over })
+const momentSign = (id: string, atS: number, over: Partial<ReplaySign> = {}) => photoSign(id, atS, { photo_moment: null, ...over })
 
-function stripScripts(html: string) {
-  return html.replace(/<script[\s\S]*?<\/script>/g, (m) => (m.includes('application/json') ? m : '')).replace(/<link[^>]*>|<style>[\s\S]*?<\/style>/g, '')
-}
-
-let tick: FrameRequestCallback = () => {}
-let clockMs = 1000
+let driver: ReturnType<typeof useClock>
 
 function mount(signs: ReplaySign[], cardId = 'hcp-t', photos: Record<string, string> = {}, tamper?: (data: { signs: { ph?: string }[] }) => void) {
-  let html = generateEmbed({
-    kind: 'passage', title: 'Out', zone: { offsetHours: 10, label: 'UTC+10' }, units: 'metric', inset: false, playSeconds: 30,
-    cardId, passages: [passage()], signs, photos: new Map(Object.entries(photos)),
-  } satisfies ExportInput)
-  html = stripScripts(html)
+  let html = markup(fullInput({ signs, photos: new Map(Object.entries(photos)) }, cardId))
   if (tamper) {
     html = html.replace(/(<script type="application\/json"[^>]*>)([\s\S]*?)(<\/script>)/, (_m, a: string, body: string, c: string) => {
       const data = JSON.parse(body)
@@ -84,30 +34,29 @@ function mount(signs: ReplaySign[], cardId = 'hcp-t', photos: Record<string, str
   }
   document.body.insertAdjacentHTML('beforeend', html)
   const init = new Function(`${PLAYER_SOURCE}\nreturn HcPlayer.initCard`)() as (id: string, lib: unknown, doc: Document) => unknown
-  init(cardId, fakeMaplibre, document)
+  init(cardId, lib, document)
   const root = document.getElementById(cardId) as HTMLElement
-  const map = FakeMap.instances[FakeMap.instances.length - 1]
+  const map = FakeMap.all[FakeMap.all.length - 1]
   map.fire('style.load')
   return { root, map }
 }
 
-const play = (root: HTMLElement, map: FakeMap) => {
+/** Taps Play and lets the opening move land. */
+const play = (root: HTMLElement) => {
   ;(root.querySelector('.hcp-btn') as HTMLElement).click()
-  map.fire('moveend')
+  driver.advance(INTRO_AND_A_BIT_MS)
 }
 /** Watch for this many seconds more. */
-const advance = (s: number) => { clockMs += s * 1000; tick(clockMs) }
+const advance = (s: number) => driver.advance(s * 1000)
 const click = (el: Element | null) => (el as HTMLElement).click()
 const cards = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('.hcp-sign')]
 const shown = (root: HTMLElement) => cards(root).filter((c) => !c.hidden).map((c) => c.querySelector('.hcp-sign-title')?.textContent)
 const pinsShown = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('.hcp-sign-pin')].filter((p) => !p.hidden).map((p) => p.getAttribute('aria-label'))
 
 beforeEach(() => {
-  FakeMap.instances = []
-  FakeMarker.all = []
-  clockMs = 1000
-  vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((cb) => { tick = cb; return 1 })
-  vi.spyOn(performance, 'now').mockImplementation(() => clockMs)
+  resetFakes()
+  driver = useClock()
+  vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 afterEach(() => { document.body.innerHTML = ''; vi.restoreAllMocks() })
 
@@ -120,11 +69,12 @@ describe('signs on the card before and after the replay', () => {
 
   it('puts each sign on its point of the track', () => {
     mount([sign('a', T0 + 1800)])
-    const places = FakeMarker.all.filter((m) => m.lngLat && m.options.element?.className.includes('hcp-sign'))
+    const places = FakeMarker.all.filter((m) => m.lngLat && m.el.className.includes('hcp-sign'))
     expect(places.length).toBeGreaterThan(0)
     for (const m of places) {
-      expect(m.lngLat?.[0]).toBeCloseTo(148.05, 4)
-      expect(m.lngLat?.[1]).toBeCloseTo(-19.95, 4)
+      const at = m.lngLat as [number, number]
+      expect(at[0]).toBeCloseTo(148.05, 4)
+      expect(at[1]).toBeCloseTo(-19.95, 4)
     }
   })
 
@@ -138,9 +88,9 @@ describe('signs on the card before and after the replay', () => {
     expect(pinsShown(root)).toEqual(['Sign: Sign a'])
   })
 
-  it('goes back to pins when the replay ends', () => {
-    const { root, map } = mount([sign('a', T0 + 600)])
-    play(root, map)
+  it('goes back to pins when the replay ends, so a reader can open a photo', () => {
+    const { root } = mount([sign('a', T0 + 600)])
+    play(root)
     advance(5.2)
     expect(shown(root)).toEqual(['Sign a'])
     advance(60)
@@ -152,8 +102,8 @@ describe('signs on the card before and after the replay', () => {
 
 describe('signs while the replay plays', () => {
   it('follow the app\'s rules: lead-in, show time, then gone', () => {
-    const { root, map } = mount([sign('a', T0 + 600)])
-    play(root, map)
+    const { root } = mount([sign('a', T0 + 600)])
+    play(root)
     advance(4)
     expect(shown(root)).toEqual([])
     advance(0.6)
@@ -164,10 +114,10 @@ describe('signs while the replay plays', () => {
   })
 
   it('never show more than two, and the earliest gives way for good', () => {
-    const { root, map } = mount([
+    const { root } = mount([
       sign('a', T0 + 600, { show_s: 30 }), sign('b', T0 + 900, { show_s: 30 }), sign('c', T0 + 1200, { show_s: 3 }),
     ])
-    play(root, map)
+    play(root)
     advance(5.2)
     expect(shown(root)).toEqual(['Sign a'])
     advance(2)
@@ -180,15 +130,15 @@ describe('signs while the replay plays', () => {
   })
 
   it('keeps an always sign up and an after sign from its time on', () => {
-    const { root, map } = mount([sign('a', T0 + 1800, { visibility: 'always' }), sign('b', T0 + 600, { visibility: 'after' })])
-    play(root, map)
+    const { root } = mount([sign('a', T0 + 1800, { visibility: 'always' }), sign('b', T0 + 600, { visibility: 'after' })])
+    play(root)
     advance(5.2)
     expect(shown(root).sort()).toEqual(['Sign a', 'Sign b'])
   })
 
   it('cannot open a photo while playing', () => {
-    const { root, map } = mount([photoSign('a', T0 + 600)], 'hcp-t', { a: URI })
-    play(root, map)
+    const { root } = mount([photoSign('a', T0 + 600)], 'hcp-t', { a: URI })
+    play(root)
     advance(5.2)
     expect((root.querySelector('.hcp-sign-photo') as HTMLButtonElement).disabled).toBe(true)
   })
@@ -196,8 +146,8 @@ describe('signs while the replay plays', () => {
 
 describe('the photo', () => {
   it('opens full size in a dialog inside the card while paused, and Escape closes it', () => {
-    const { root, map } = mount([photoSign('a', T0 + 600, { title: 'Whale', note: 'Off the bow' })], 'hcp-t', { a: URI })
-    play(root, map)
+    const { root } = mount([photoSign('a', T0 + 600, { title: 'Whale', note: 'Off the bow' })], 'hcp-t', { a: URI })
+    play(root)
     advance(5.2)
     ;(root.querySelector('.hcp-btn') as HTMLElement).click()
     const photoBtn = root.querySelector('.hcp-sign-photo') as HTMLButtonElement
@@ -240,6 +190,117 @@ describe('the photo', () => {
     const { root } = mount([sign('a', T0 + 600)])
     expect(root.querySelectorAll('img[src]')).toHaveLength(0)
     expect(root.querySelector('.hcp-sign-photo')).toBeNull()
+  })
+})
+
+describe('a photo moment', () => {
+  // A card 256 by 224 on a map of 800 by 480: the moment grows it to 1.5 times its own size, in the middle.
+  beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return (this as HTMLElement).classList.contains('hcp-sign-card') ? 256 : 0 } })
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return (this as HTMLElement).classList.contains('hcp-sign-card') ? 224 : 0 } })
+  })
+  afterEach(() => {
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).offsetWidth
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).offsetHeight
+  })
+  const scaleOf = (root: HTMLElement) => Number(/scale\(([\d.]+)\)/.exec((root.querySelector('.hcp-sign-box') as HTMLElement).style.transform)?.[1] ?? 1)
+  const imgOf = (root: HTMLElement) => root.querySelector('.hcp-sign-img') as HTMLImageElement
+  /** Plays to the moment's start (5 s of sailing in), with the map as large as the box above. */
+  const settle = () => new Promise((resolve) => { setTimeout(resolve, 0) })
+  const toMoment = async (signs: ReplaySign[], tamper?: Parameters<typeof mount>[3]) => {
+    const card = mount(signs, 'hcp-t', { a: URI }, tamper)
+    play(card.root)
+    advance(4.9)
+    await settle()
+    return card
+  }
+
+  it('holds the replay at the sign, and grows the whole card to fill the map, with the same photo in it', async () => {
+    const { root } = await toMoment([momentSign('a', T0 + 600)])
+    advance(0.3)
+    const wall = driver.clock.now
+    // In the moment: the sailing stands still while the card grows (0.4 s) and holds.
+    expect(imgOf(root).getAttribute('src')).toBe(URI)
+    advance(1)
+    expect(scaleOf(root)).toBeCloseTo(1.5, 2)
+    expect(imgOf(root).getAttribute('src')).toBe(URI)
+    const box = root.querySelector('.hcp-sign-box') as HTMLElement
+    // Centred in the 800 by 480 map: the point is at (400, 240), the card 384 by 336 wide.
+    expect(parseFloat(box.style.left)).toBeCloseTo((800 - 384) / 2 - 400, 0)
+    expect(parseFloat(box.style.top)).toBeCloseTo((480 - 336) / 2 - 240, 0)
+    expect(driver.clock.now).toBeGreaterThan(wall)
+  })
+
+  it('zooms the photo slowly inside its frame, and shrinks the card back when it is done', async () => {
+    const { root } = await toMoment([momentSign('a', T0 + 600)])
+    advance(1.2)
+    const zoomed = Number(/scale\(([\d.]+)\)/.exec(imgOf(root).style.transform)?.[1] ?? 1)
+    expect(zoomed).toBeGreaterThan(1)
+    expect(zoomed).toBeLessThanOrEqual(1.06 + 1e-9)
+    advance(MOMENT_TOTAL_S)
+    expect(imgOf(root).style.transform).toBe('')
+    expect(scaleOf(root)).toBe(1)
+  })
+
+  it('does not grow a card whose moment was switched off', async () => {
+    const { root } = await toMoment([photoSign('a', T0 + 600)])
+    advance(1)
+    expect(imgOf(root).getAttribute('src')).toBe(URI)
+    expect(scaleOf(root)).toBe(1)
+  })
+
+  it('ends at a tap on the map, and at a tap on the grown card, as in the app, whose card lets touches through', async () => {
+    const { root, map } = await toMoment([momentSign('a', T0 + 600)])
+    advance(1)
+    expect(scaleOf(root)).toBeCloseTo(1.5, 2)
+    // A tap on the card, a marker on the map, is a tap on the map while the card is grown.
+    const marker = document.createElement('div')
+    marker.className = 'maplibregl-marker'
+    const inside = document.createElement('span')
+    marker.appendChild(inside)
+    map.surface.appendChild(marker)
+    inside.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    advance(0.1)
+    expect(scaleOf(root)).toBe(1)
+  })
+
+  it('ends at a tap on the map itself', async () => {
+    const { root, map } = await toMoment([momentSign('a', T0 + 600)])
+    advance(1)
+    expect(scaleOf(root)).toBeCloseTo(1.5, 2)
+    map.surface.dispatchEvent(Object.assign(new Event('pointerdown'), { pointerId: 1, clientX: 0, clientY: 0, pointerType: 'mouse' }))
+    advance(0.1)
+    expect(scaleOf(root)).toBe(1)
+  })
+
+  it('grows the card over the middle of the frame when its sign is far off the map', async () => {
+    const card = mount([momentSign('a', T0 + 600)], 'hcp-t', { a: URI })
+    card.map.projected = { x: -900, y: 215 }
+    play(card.root)
+    advance(4.9)
+    await settle()
+    advance(1)
+    const box = card.root.querySelector('.hcp-sign-box') as HTMLElement
+    expect(box.style.visibility).toBe('')
+    expect(scaleOf(card.root)).toBeCloseTo(1.5, 2)
+    // Centred in the 800 by 480 map, though the point is nowhere near it.
+    expect(parseFloat(box.style.left) - 900).toBeCloseTo((800 - 384) / 2, 0)
+    expect(parseFloat(box.style.top) + 215).toBeCloseTo((480 - 336) / 2, 0)
+    // And it goes back to nothing when the moment is over.
+    advance(MOMENT_TOTAL_S)
+    expect(box.style.visibility).toBe('hidden')
+  })
+
+  it('has the browser decode the photo while the card is up, ahead of the moment', async () => {
+    const decode = vi.fn(async () => {})
+    Object.defineProperty(HTMLImageElement.prototype, 'decode', { configurable: true, value: decode })
+    try {
+      const { root } = await toMoment([momentSign('a', T0 + 600)])
+      expect(decode).toHaveBeenCalled()
+      expect(decode.mock.contexts[0]).toBe(imgOf(root))
+    } finally {
+      delete (HTMLImageElement.prototype as unknown as Record<string, unknown>).decode
+    }
   })
 })
 
@@ -317,10 +378,6 @@ describe('layers', () => {
 })
 
 describe('keeping a card inside the map', () => {
-  const size = (el: HTMLElement, w: number, h: number) => {
-    Object.defineProperty(el, 'clientWidth', { configurable: true, value: w })
-    Object.defineProperty(el, 'clientHeight', { configurable: true, value: h })
-  }
   let card = { w: 220, h: 70 }
   beforeEach(() => {
     card = { w: 220, h: 70 }
@@ -335,7 +392,8 @@ describe('keeping a card inside the map', () => {
   const open = (x: number, y: number, map = { w: 900, h: 480 }, cardSize?: { w: number; h: number }) => {
     if (cardSize) card = cardSize
     const { root, map: fake } = mount([sign('a', T0 + 600)])
-    size(fake.options.container, map.w, map.h)
+    fake.size = { w: map.w, h: map.h }
+    fake.fire('resize')
     fake.projected = { x, y }
     click(root.querySelector('.hcp-sign-pin'))
     fake.fire('move')
@@ -439,8 +497,8 @@ describe('keeping a card inside the map', () => {
 
 describe('the button while paused', () => {
   it('shows the play triangle with Resume, and the pause bars only while playing', () => {
-    const { root, map } = mount([sign('a', T0 + 600)])
-    play(root, map)
+    const { root } = mount([sign('a', T0 + 600)])
+    play(root)
     advance(1)
     expect(root.classList.contains('hcp-paused')).toBe(false)
     click(root.querySelector('.hcp-btn'))
@@ -452,7 +510,7 @@ describe('the button while paused', () => {
   })
 
   it('is drawn by the card\'s own style: bars only when playing and not paused', () => {
-    const css = generateEmbed({ kind: 'passage', title: 'x', zone: { offsetHours: 0, label: 'UTC' }, units: 'metric', inset: false, playSeconds: 30, cardId: 'hcp-c', passages: [passage()] })
+    const css = generateEmbed({ kind: 'passage', title: 'x', zone: { offsetHours: 0, label: 'UTC' }, units: 'metric', inset: false, playSeconds: 30, cardId: 'hcp-c', passages: [passage('1')] })
     expect(css).toMatch(/#hcp-c\.hcp-playing:not\(\.hcp-paused\) \.hcp-btn-icon/)
   })
 })

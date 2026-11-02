@@ -4,7 +4,6 @@ import { join } from 'node:path'
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { buildPlan } from '@/export-player/plan'
 import { cspHint, warnCsp } from '@/export-player/csp'
 import { terrainLoader, TERRAIN_PROTOCOL, tileOfUrl, upstreamUrl, type PixelIO, type Pixels } from '@/export-player/terrain-protocol'
 import { loadThree } from '@/export-player/three-loader'
@@ -110,50 +109,6 @@ describe('the built player', () => {
   it('defines one entry and runs nothing by itself', () => {
     expect(PLAYER_SOURCE.startsWith('var HcPlayer=')).toBe(true)
     expect(new Function(`${PLAYER_SOURCE}\nreturn typeof HcPlayer.initCard`)()).toBe('function')
-  })
-})
-
-describe('the plan with shots', () => {
-  const run = (shots: CameraShot[], play: 15 | 30 | 60 = 30) => buildPlan(prepareExport(input({ shots, playSeconds: play })))
-
-  it('is today\'s plan without shots', () => {
-    const plan = run([])
-    expect(plan.total).toBeCloseTo(30, 9)
-    expect(plan.stateAt(15).t).toBeCloseTo(T0 + 1800, 6)
-  })
-
-  it('stretches the chosen length by a shot\'s pace for as long as it lasts', () => {
-    // 3600 s in 30 s is 120 timeline seconds per watched second. Half pace from
-    // the start doubles the first half; quarter pace from the middle takes four.
-    const plan = run([shot('a', T0, { pace: 0.5 }), shot('b', T0 + 1800, { pace: 0.25 })])
-    expect(plan.total).toBeCloseTo(30 + 15 + 3 * 15, 6)
-    // After 30 watched seconds at half pace the boat is 1800 s in.
-    expect(plan.stateAt(30).t).toBeCloseTo(T0 + 1800, 6)
-    // 30 s later, at quarter pace, 30 * 30 = 900 s further.
-    expect(plan.stateAt(60).t).toBeCloseTo(T0 + 2700, 6)
-    expect(plan.stateAt(plan.total).done).toBe(true)
-  })
-
-  it('gives the camera the replay clock the shots were laid on', () => {
-    const plan = run([shot('a', T0 + 1200)])
-    expect(plan.shots).toHaveLength(1)
-    expect(plan.shots[0].clock).toBeCloseTo(1200, 9)
-    expect(plan.stateAt(10).clock).toBeCloseTo(1200, 6)
-  })
-
-  it('stretches each play length the same way', () => {
-    for (const play of [15, 30, 60] as const) {
-      expect(run([shot('a', T0, { pace: 0.5 })], play).total).toBeCloseTo(play * 2, 6)
-    }
-  })
-
-  it('keeps nights out of the paces', () => {
-    const plan = buildPlan(prepareExport(input({
-      kind: 'combined', passages: [passage('1', T0), passage('2', T0 + 2 * 86400)], shots: [shot('a', T0, { pace: 0.5 })],
-    })))
-    const nights = plan.steps.filter((s) => s.kind === 'night')
-    expect(nights.reduce((n, s) => n + s.dur, 0)).toBeCloseTo(3, 9)
-    expect(plan.steps.filter((s) => s.kind === 'run').reduce((n, s) => n + s.dur, 0)).toBeCloseTo(60, 6)
   })
 })
 

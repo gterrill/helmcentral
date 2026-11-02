@@ -14,15 +14,17 @@ export const REPLAY_3D_MAX_PITCH = 70
 
 export const TERRAIN_ATTRIBUTION = 'Terrain: Mapzen, NASADEM, SRTM, GEBCO and others (AWS Open Data)'
 
-/** The raster-dem source spec, shared by the relief and the hillshade layer. */
-export const terrainSource = {
+/** The raster-dem source spec but for where the tiles are, which the exported page sets for itself (it cannot reach the boat). */
+export const terrainSourceSpec = {
   type: 'raster-dem' as const,
-  tiles: [TERRAIN_TILES],
   encoding: 'terrarium' as const,
   tileSize: 256,
   maxzoom: TERRAIN_MAX_ZOOM,
   attribution: TERRAIN_ATTRIBUTION,
 }
+
+/** The raster-dem source spec, shared by the relief and the hillshade layer. */
+export const terrainSource = { ...terrainSourceSpec, tiles: [TERRAIN_TILES] }
 
 // MapLibre paints with literal colours. Neutral and faint, so the shading
 // reads on both the light and the dark basemap and over imagery.
