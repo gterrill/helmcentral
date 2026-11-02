@@ -166,8 +166,9 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 }))
 
 // The Anchor Watch drawer is a lazy chunk, and its graph is slow to transform on
-// a cold or loaded worker, longer than findBy's 1 s wait. Import it here, under
-// the hook's own timeout, so the lazy resolves from the module cache.
+// a cold or loaded worker, and can eat much of a test's own 5 s timeout. Import
+// it here, under the hook's own timeout, so the lazy resolves from the module
+// cache.
 beforeAll(async () => {
   await import('@/components/anchor-watch-drawer')
 }, 60_000)

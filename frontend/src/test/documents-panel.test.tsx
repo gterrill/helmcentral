@@ -1372,11 +1372,11 @@ describe('DocumentsPanel', () => {
       fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Auto' }))
 
-      // A longer timeout than findByRole's default 1s: this is a
-      // lazy-loaded chunk (note-capture-sheet.tsx) resolving via dynamic
-      // import(), the same flakiness app-sidebar-navigation.test.tsx's
-      // deleted equivalent test used to guard against.
-      expect(await screen.findByRole('heading', { name: 'Capture a note' }, { timeout: 5000 })).toBeInTheDocument()
+      // The sheet is a lazy-loaded chunk (note-capture-sheet.tsx) resolving via
+      // dynamic import(), the same flakiness app-sidebar-navigation.test.tsx's
+      // deleted equivalent test used to guard against. The wait in
+      // test/setup.ts allows for a slow first import.
+      expect(await screen.findByRole('heading', { name: 'Capture a note' })).toBeInTheDocument()
       expect(screen.getByRole('combobox', { name: 'Note type' })).toHaveTextContent('Auto')
     })
 
@@ -1387,7 +1387,7 @@ describe('DocumentsPanel', () => {
       fireEvent.click(await screen.findByRole('menuitem', { name: 'New note' }))
       fireEvent.click(await screen.findByRole('menuitem', { name: 'Quirk' }))
 
-      expect(await screen.findByRole('heading', { name: 'Capture a note' }, { timeout: 5000 })).toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: 'Capture a note' })).toBeInTheDocument()
       expect(screen.getByRole('combobox', { name: 'Note type' })).toHaveTextContent('Quirk')
     })
 

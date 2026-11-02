@@ -271,7 +271,7 @@ describe('DeckEditor plan image', () => {
     // Old plan is 2000 x 1000 (2:1); the new one is 1500 x 1000 (3:2).
     vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({ width: 1500, height: 1000, close: () => {} }))
     pick(new File(['x'], 'plan.png', { type: 'image/png' }))
-    await screen.findByText(/different shape/i, {}, { timeout: 4000 })
+    await screen.findByText(/different shape/i)
   })
 
   it('does not warn for a shape within 2 percent', async () => {

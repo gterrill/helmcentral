@@ -19,12 +19,11 @@ import { NoteCaptureSheet } from '@/components/documents/note-capture-sheet'
 import { MaintenanceCompleteDialog, MaintenanceLogEntryDialog } from '@/components/inventory/maintenance-log-dialogs'
 import { useNotes } from '@/hooks/use-notes'
 import type { MaintenanceLogEntry, MaintenanceRule } from '@/hooks/use-maintenance'
-import { LAZY_NOTE_EDITOR_TIMEOUT_MS } from './helpers/lazy-note-editor'
 import { ITEM_RULE_PROVENANCE } from './maintenance-fixtures'
 import { testRouter } from './helpers/router'
 
 async function typeInSource(text: string) {
-  fireEvent.click(await screen.findByRole('button', { name: 'Markdown source' }, { timeout: LAZY_NOTE_EDITOR_TIMEOUT_MS }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Markdown source' }))
   fireEvent.change(await screen.findByLabelText('Note markdown source'), { target: { value: text } })
 }
 
@@ -32,7 +31,7 @@ describe('a note being edited', () => {
   it('counts as unsaved work once edited, and not before', async () => {
     const { wrapper, router } = testRouter('/documents')
     render(<NoteEditor value={'- [ ] Todo\n'} onSave={vi.fn().mockResolvedValue(undefined)} />, { wrapper })
-    await screen.findByText('Todo', {}, { timeout: LAZY_NOTE_EDITOR_TIMEOUT_MS })
+    await screen.findByText('Todo')
     expect(router.hasGuards()).toBe(false)
 
     await typeInSource('half a thought')
@@ -45,7 +44,7 @@ describe('a note being edited', () => {
   it('never holds a move: leaving the note is still allowed', async () => {
     const { wrapper, router } = testRouter('/documents')
     render(<NoteEditor value={'- [ ] Todo\n'} onSave={vi.fn()} />, { wrapper })
-    await screen.findByText('Todo', {}, { timeout: LAZY_NOTE_EDITOR_TIMEOUT_MS })
+    await screen.findByText('Todo')
     await typeInSource('half a thought')
     expect(router.navigate({ panel: 'radar' })).toBe(true)
   })
@@ -58,7 +57,7 @@ describe('the new-note sheet', () => {
     } as unknown as ReturnType<typeof useNotes>)
     const { wrapper, router } = testRouter('/documents')
     const { rerender } = render(<NoteCaptureSheet open onOpenChange={vi.fn()} />, { wrapper })
-    fireEvent.click(await screen.findByRole('button', { name: 'Markdown source' }, { timeout: LAZY_NOTE_EDITOR_TIMEOUT_MS }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Markdown source' }))
     const source = await screen.findByRole('textbox', { name: 'Note markdown source' })
     expect(router.hasGuards()).toBe(false)
 
