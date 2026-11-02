@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import {
+  ChoiceList,
   ConfirmDelete,
   DetailsLayout,
   EmptyState,
@@ -107,6 +108,9 @@ const TREE_FIXTURE: TreeNode[] = [
 const PAGER_FIXTURE = ['Main generator', 'Watermaker', 'Windlass', 'Autopilot']
 
 export function PatternsGallery() {
+  const [reportWhen, setReportWhen] = useState('findings')
+  const [reportChannels, setReportChannels] = useState<string[]>(['push'])
+  const [reportNumber, setReportNumber] = useState('')
   const [pagerIndex, setPagerIndex] = useState(1)
   const [treeSelected, setTreeSelected] = useState('all')
   const [settingsDraft, setSettingsDraft] = useState(SETTINGS_FIXTURE)
@@ -278,6 +282,59 @@ export function PatternsGallery() {
             <p className="text-sm text-muted-foreground">No documents linked yet.</p>
           </FormSection>
         </DetailsLayout>
+      </GallerySection>
+
+      <Separator />
+
+      <GallerySection
+        title="ChoiceList"
+        description="A short list of choices where one or several can be picked, each with a title and a line saying what picking it means. Use it instead of a bare checkbox or radio group when a choice needs explaining, or needs something to appear once it is picked. Tapping the title or the details toggles the choice; the follow-up under a selected choice does not."
+      >
+        <div className="grid gap-6 md:grid-cols-2">
+          <ChoiceList
+            label="When to send"
+            value={reportWhen}
+            onChange={setReportWhen}
+            choices={[
+              { value: 'findings', label: 'When it finds something', details: 'Only a finding the last report did not mention.' },
+              { value: 'every', label: 'Every report', details: 'Including the ones that find nothing.' },
+            ]}
+          />
+          <ChoiceList
+            multiple
+            label="Send to"
+            value={reportChannels}
+            onChange={setReportChannels}
+            details="Email is not set up for this boat."
+            choices={[
+              { value: 'push', label: 'Phone push', details: 'Reaches the crew ashore as well as aboard.' },
+              {
+                value: 'sms',
+                label: 'Text message',
+                details: 'Needs a mobile number.',
+                selectedContent: (
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Mobile number
+                    <Input value={reportNumber} onChange={(e) => setReportNumber(e.target.value)} />
+                  </label>
+                ),
+              },
+              { value: 'log', label: 'Logbook entry' },
+            ]}
+          />
+          <ChoiceList<string>
+            multiple
+            disabled
+            label="Send to (read-only)"
+            value={['push']}
+            onChange={() => {}}
+            error="Could not read which channels are on."
+            choices={[
+              { value: 'push', label: 'Phone push', details: 'Reaches the crew ashore as well as aboard.' },
+              { value: 'log', label: 'Logbook entry' },
+            ]}
+          />
+        </div>
       </GallerySection>
 
       <Separator />

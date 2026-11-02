@@ -84,7 +84,7 @@ Equipment, Locations, Profiles, Maintenance, Wall displays and Documents are
 record-keeping surfaces (an index, a details/edit page), not dashboard
 tiles. Build and extend them from `frontend/src/components/patterns`
 (`Page`, `IndexTable`, `IndexFilters`, `DetailsLayout`, `SettingsLayout`,
-`FormSection`, `SaveBar`, `EmptyState`, `ConfirmDelete`) rather than reaching for
+`FormSection`, `ChoiceList`, `SaveBar`, `EmptyState`, `ConfirmDelete`) rather than reaching for
 `components/ui/table` or hand-rolling a toolbar - an ESLint rule enforces
 this for `ui/table` already, with a shrinking allowlist for surfaces not yet
 migrated. The "Do not introduce new primitives" rule under High-Density

@@ -400,6 +400,15 @@ duplication problem this ADR exists to close.
   from `@md`, one below) that brings its own container, so the same pair is
   side by side in a wide main column and single-column in the aside or on a
   phone.
+- `ChoiceList` replaces hand-built groups of radios and checkboxes, starting
+  with a watch's Notifications section. It follows Shopify's `s-choice-list`
+  with one difference: `details` is always visible, as Shopify's is, but what
+  Shopify calls `secondary-content` is `selectedContent` here and shows only
+  while its choice is selected. With `multiple`, a value that matches no drawn
+  choice survives a change of selection, so hiding a row cannot lose what was
+  stored; a single choice replaces whatever was there. Radios
+  stay native because `ui` has no radio primitive, and one consumer did not
+  justify adding it.
 - Equipment's Save button now genuinely does move onto `SaveBar`, reversing
   this ADR's own earlier call. Two existing tests
   (`equipment-editor.test.tsx`) used to Save a just-loaded, undirtied record

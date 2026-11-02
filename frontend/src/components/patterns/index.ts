@@ -8,6 +8,7 @@
 // production bundle that imports anything from this module. App.tsx lazy-
 // loads it by its own path instead.
 
+export { ChoiceList, type ChoiceListChoice, type ChoiceListProps } from './choice-list'
 export { ConfirmDelete, type ConfirmDeleteProps } from './confirm-delete'
 export { DetailsLayout, type DetailsLayoutProps } from './details-layout'
 export { EmptyState, type EmptyStateProps } from './empty-state'
