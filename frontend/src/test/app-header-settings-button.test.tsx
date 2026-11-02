@@ -7,7 +7,7 @@
  * shortcut (there's nowhere for it to point), so the button is absent.
  * Mirrors app-header-breadcrumb.test.tsx's hook mocking (same App tree).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, screen, fireEvent, within } from '@testing-library/react'
@@ -197,6 +197,14 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 }))
 
 // ── tests ─────────────────────────────────────────────────────────────────────
+
+// Settings is App's lazy chunk, and its graph is slow to transform on a cold
+// or loaded worker, longer than findBy's 1 s wait. Import it here, under the
+// hook's own timeout, so App's React.lazy resolves from the module cache and
+// the test waits only on React.
+beforeAll(async () => {
+  await import('@/components/settings/settings-route-panel')
+}, 60_000)
 
 // The stream is up and has said nothing yet: every reading is unknown.
 installFakeTelemetryStream({ seeds: { 'vessel-state': {} } })

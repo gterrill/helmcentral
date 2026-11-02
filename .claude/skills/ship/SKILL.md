@@ -44,9 +44,14 @@ For anything larger than a small edit, run `/simplify`.
 
 Run every suite the change touches:
 
-- Backend: `cd backend && go vet ./... && go test -short ./...`
-- Frontend: `make check-frontend-deps && cd frontend && npm test && npm run lint && npm run knip:deps && npm run build`
+- Backend: `make check-backend`
+- Frontend: `make check-frontend`
 - Help pages under `docs/`: `make docs-lint`
+
+Run the two check targets as they are, with no `tail` or `grep` on the end:
+they run every step, print the pass counts, FAIL lines and log paths, and exit
+non-zero on any failure. A failure under load needs confirming by rerunning
+that test file alone before you call it a flake.
 
 **Done:** every suite you ran is green. Keep the pass counts for the PR body.
 

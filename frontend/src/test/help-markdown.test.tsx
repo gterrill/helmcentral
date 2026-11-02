@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { render, screen } from '@testing-library/react'
 
 import { HelpMarkdown } from '@/components/help-markdown'
@@ -14,6 +14,14 @@ import { HelpMarkdown } from '@/components/help-markdown'
 // assertion in each test below awaits it with findBy*; whatever follows on
 // the same rendered tree can stay a plain getBy*/queryBy* once that first
 // await has resolved.
+
+// The impl chunk drags in react-markdown's module graph, which is slow to
+// transform on a cold or loaded worker, longer than findBy's 1 s wait. Import
+// it here, under the hook's own timeout, so React.lazy resolves from the module
+// cache and the tests wait only on React.
+beforeAll(async () => {
+  await import('@/components/help-markdown-impl')
+}, 60_000)
 
 describe('HelpMarkdown heading ids', () => {
   it('gives an h2 (## in the markdown) the GitHub slug id', async () => {

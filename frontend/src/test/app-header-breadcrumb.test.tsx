@@ -8,7 +8,7 @@
  * unchanged. Mirrors app-sidebar-navigation.test.tsx's hook mocking (same
  * App tree).
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest'
 import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { render, screen, fireEvent, within } from '@testing-library/react'
@@ -202,6 +202,17 @@ vi.mock('@/hooks/use-dark-mode', () => ({
 function breadcrumbNav() {
   return screen.getByRole('navigation', { name: /breadcrumb/i })
 }
+
+// Settings and Inventory are App's lazy chunks, and their graphs are slow to
+// transform on a cold or loaded worker, longer than findBy's 1 s wait. Import
+// them here, under the hook's own timeout, so App's React.lazy resolves from
+// the module cache and the tests wait only on React.
+beforeAll(async () => {
+  await Promise.all([
+    import('@/components/settings/settings-route-panel'),
+    import('@/components/inventory/inventory-route-panel'),
+  ])
+}, 60_000)
 
 // The stream is up and has said nothing yet: every reading is unknown.
 installFakeTelemetryStream({ seeds: { 'vessel-state': {} } })

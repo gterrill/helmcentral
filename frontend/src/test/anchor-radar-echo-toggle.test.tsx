@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 import { landAnchorWatch } from './helpers/anchor-watch-poll'
 import { fireEvent, render, screen } from '@testing-library/react'
@@ -165,6 +165,13 @@ vi.mock('@/hooks/use-dark-mode', () => ({
   useDarkMode: () => [false, vi.fn()],
 }))
 
+// The Anchor Watch drawer is a lazy chunk, and its graph is slow to transform on
+// a cold or loaded worker, longer than findBy's 1 s wait. Import it here, under
+// the hook's own timeout, so the lazy resolves from the module cache.
+beforeAll(async () => {
+  await import('@/components/anchor-watch-drawer')
+}, 60_000)
+
 describe('Radar echo toggle wiring', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -188,7 +195,9 @@ describe('Radar echo toggle wiring', () => {
   it('shares one state between the tile and the fullscreen drawer, and persists it', async () => {
     render(<App />)
 
-    fireEvent.click(screen.getByLabelText('Toggle radar echo overlay'))
+    // The tile's map is a lazy chunk, so wait for it rather than relying on an
+    // earlier test in the file having resolved it.
+    fireEvent.click(await screen.findByLabelText('Toggle radar echo overlay'))
     expect(screen.getByTestId('radar-echo-state')).toHaveTextContent('on')
     expect(localStorage.getItem('anchorWatch.radarEcho.enabled')).toBe('true')
 
@@ -207,11 +216,12 @@ describe('Radar echo toggle wiring', () => {
     expect(localStorage.getItem('anchorWatch.radarEcho.enabled')).toBe('false')
   })
 
-  it('reads the persisted key back on mount', () => {
+  it('reads the persisted key back on mount', async () => {
     localStorage.setItem('anchorWatch.radarEcho.enabled', 'true')
 
     render(<App />)
 
-    expect(screen.getByTestId('radar-echo-state')).toHaveTextContent('on')
+    // The map is a lazy chunk: it is not on the page on the first render.
+    expect(await screen.findByTestId('radar-echo-state')).toHaveTextContent('on')
   })
 })

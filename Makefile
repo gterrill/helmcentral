@@ -1,4 +1,4 @@
-.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint worktree prune-merged check-vite-config check-frontend-deps
+.PHONY: dev down logs build-status e2e-up e2e-down e2e-reset e2e-logs help-stage docs-lint worktree prune-merged check-vite-config check-frontend-deps check-backend check-frontend
 
 # Stages the in-app help into backend/help for the assistant's
 # read_help tool and the in-app Help sheet's /api/help endpoint
@@ -74,6 +74,15 @@ worktree:
 # DIR's package-lock.json. DIR defaults to this checkout's frontend.
 check-frontend-deps:
 	@node scripts/check-frontend-deps.mjs "$(or $(DIR),frontend)"
+
+# The backend checks before a PR: go vet and go test -short. See scripts/check.sh.
+check-backend:
+	@sh scripts/check.sh backend
+
+# The frontend checks before a PR: the node_modules check, npm test, lint,
+# knip:deps and the build. See scripts/check.sh.
+check-frontend:
+	@sh scripts/check.sh frontend
 
 # Clears up after merged work: removes each worktree, local branch and remote
 # branch whose GitHub PR is merged. Lists what it would do by default;
