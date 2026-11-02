@@ -212,6 +212,27 @@ describe('ChoiceList', () => {
     expect(last.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
+  it('single: allows nothing selected and reports a click', () => {
+    const onChange = vi.fn()
+    render(<ChoiceList label="Pick" choices={CHOICES} value={undefined} onChange={onChange} />)
+    for (const radio of screen.getAllByRole('radio')) expect(radio).not.toBeChecked()
+    fireEvent.click(screen.getByRole('radio', { name: 'Bravo' }))
+    expect(onChange).toHaveBeenCalledWith('b')
+  })
+
+  it('merges listClassName onto the list wrapper', () => {
+    render(<ChoiceList label="Pick" listClassName="grid grid-cols-2" choices={CHOICES} value="a" onChange={() => {}} />)
+    expect(screen.getByRole('group', { name: 'Pick' }).querySelector('[data-slot="choice-list-rows"]')).toHaveClass('grid', 'grid-cols-2')
+  })
+
+  it('keeps the control on the first line when a label with no details wraps', () => {
+    render(<ChoiceList label="Pick" choices={CHOICES} value="a" onChange={() => {}} />)
+    const radio = screen.getByRole('radio', { name: 'Alpha' })
+    expect(radio.parentElement).toHaveClass('items-start')
+    expect(radio).toHaveClass('mt-3.5')
+    expect(screen.getByText('Alpha').closest('label')).toHaveClass('py-3')
+  })
+
   it('shows empty only when there are no choices', () => {
     const { rerender } = render(<ChoiceList label="Pick" empty={<p>Nothing here.</p>} choices={CHOICES} value="a" onChange={() => {}} />)
     expect(screen.queryByText('Nothing here.')).not.toBeInTheDocument()

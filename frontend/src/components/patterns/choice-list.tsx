@@ -46,16 +46,18 @@ interface ChoiceListBase<T extends string> {
   /** Drawn in place of the choices when `choices` is empty. */
   empty?: ReactNode
   className?: string
+  /** Merged onto the list of rows, e.g. a grid for a list of short labels in columns. */
+  listClassName?: string
 }
 
 export type ChoiceListProps<T extends string = string> = ChoiceListBase<T> &
   (
-    | { multiple?: false; value: T; onChange: (value: T) => void }
+    | { multiple?: false; value: T | undefined; onChange: (value: T) => void }
     | { multiple: true; value: T[]; onChange: (value: T[]) => void }
   )
 
 export function ChoiceList<T extends string = string>(props: ChoiceListProps<T>) {
-  const { label, labelHidden, choices, disabled, error, details, empty, className } = props
+  const { label, labelHidden, choices, disabled, error, details, empty, className, listClassName } = props
   const base = useId()
 
   const toggle = (value: T, on: boolean) => {
@@ -72,7 +74,7 @@ export function ChoiceList<T extends string = string>(props: ChoiceListProps<T>)
       {choices.length === 0 ? (
         empty
       ) : (
-        <div className="flex flex-col">
+        <div data-slot="choice-list-rows" className={cn('flex flex-col', listClassName)}>
           {choices.map((c, i) => {
             const id = `${base}-${i}`
             const titleId = `${id}-title`
@@ -82,6 +84,8 @@ export function ChoiceList<T extends string = string>(props: ChoiceListProps<T>)
             const selected = isSelected(c.value)
             const hasDetails = Boolean(c.details)
             const showSelected = selected && Boolean(c.selectedContent)
+            // On the title's first line, however far the label wraps.
+            const controlOffset = hasDetails ? 'mt-1' : 'mt-3.5'
             const control = {
               id,
               disabled: off,
@@ -92,15 +96,14 @@ export function ChoiceList<T extends string = string>(props: ChoiceListProps<T>)
               <div key={c.value} className="flex min-w-0 flex-col py-1">
                 <div
                   className={cn(
-                    'relative flex gap-3',
-                    hasDetails ? 'items-start' : 'items-center',
+                    'relative flex items-start gap-3',
                     off ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
                   )}
                 >
                   {props.multiple ? (
                     <Checkbox
                       {...control}
-                      className={cn('z-10', hasDetails && 'mt-1')}
+                      className={cn('z-10', controlOffset)}
                       checked={selected}
                       onCheckedChange={(on) => toggle(c.value, on)}
                     />
@@ -112,10 +115,16 @@ export function ChoiceList<T extends string = string>(props: ChoiceListProps<T>)
                       value={c.value}
                       checked={selected}
                       onChange={() => props.onChange(c.value)}
-                      className={cn('relative z-10 size-4 shrink-0 accent-primary', hasDetails && 'mt-1')}
+                      className={cn('relative z-10 size-4 shrink-0 accent-primary', controlOffset)}
                     />
                   )}
-                  <label htmlFor={id} className="flex min-h-11 min-w-0 flex-1 cursor-[inherit] flex-col justify-center gap-0.5 after:absolute after:inset-0">
+                  <label
+                    htmlFor={id}
+                    className={cn(
+                      'flex min-h-11 min-w-0 flex-1 cursor-[inherit] flex-col justify-center gap-0.5 after:absolute after:inset-0',
+                      !hasDetails && 'py-3',
+                    )}
+                  >
                     <span id={titleId} className="text-sm font-medium text-foreground">{c.label}</span>
                     {hasDetails && <span id={detailsId} className="text-xs text-muted-foreground">{c.details}</span>}
                   </label>

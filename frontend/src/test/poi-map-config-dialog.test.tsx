@@ -57,6 +57,13 @@ describe('PoiMapConfigDialog', () => {
     expect(trailSwitch()).not.toBeChecked()
   })
 
+  test('layout and categories are named groups', () => {
+    renderDialog()
+
+    expect(screen.getByRole('group', { name: 'Layout' })).toBeInTheDocument()
+    expect(screen.getByRole('group', { name: 'Categories' })).toBeInTheDocument()
+  })
+
   test('saves the trimmed title and current field values', () => {
     const { onSave, onOpenChange } = renderDialog()
 

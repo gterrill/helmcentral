@@ -50,6 +50,15 @@ describe('LampStripConfigDialog', () => {
     expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe('Status')
   })
 
+  test('the CHK checkbox is described by the CHK sentence', () => {
+    render(
+      <LampStripConfigDialog widget={{ id: 'lamps:m1x8abcd', lamps: statusStrip }} onCancel={vi.fn()} onSave={vi.fn()} />,
+    )
+    expect(screen.getByRole('checkbox', { name: 'Show the CHK indicator' })).toHaveAccessibleDescription(
+      /CHK takes the colour of the worst active alarm/,
+    )
+  })
+
   test('defaults a fresh per-page widget to "Status"', () => {
     render(
       <LampStripConfigDialog widget={{ id: 'lamps:m1x8abcd' }} onCancel={vi.fn()} onSave={vi.fn()} />,
