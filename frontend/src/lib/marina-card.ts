@@ -6,6 +6,11 @@ import type { MarinaCard, MarinaShape } from '@/lib/mate-cards'
 // words are the operator's: slugs like haul_out become "Haul-out", and a
 // figure the map does not record is left out rather than guessed.
 
+/** The marina's name as the card heading and its full-screen map say it. */
+export function marinaTitle(card: MarinaCard): string {
+  return card.name || 'Unnamed marina'
+}
+
 const KIND_LABELS: Record<string, string> = {
   fuel: 'Fuel',
   power: 'Power',

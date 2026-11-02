@@ -11,6 +11,7 @@ import {
   headerFacts,
   kindLabel,
   limitBadge,
+  marinaTitle,
   markLine,
   phoneHref,
   safeHref,
@@ -100,7 +101,7 @@ export function AssistantMarinaCard({ card }: { card: MarinaCard }) {
         <Anchor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="shrink-0 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Marina</span>
         <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground" title={card.name}>
-          {card.name || 'Unnamed marina'}
+          {marinaTitle(card)}
         </span>
       </div>
 

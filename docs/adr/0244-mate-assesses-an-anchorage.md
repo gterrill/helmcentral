@@ -11,6 +11,13 @@ built from the full data before the model's copy is shrunk). The draft check of
 points at the new tool. Part one of three; the follow-ups are under
 Consequences.
 
+Amended: the inline map keeps cooperative gestures, and a Full screen button
+opens the same layers in a dialog with plain gestures and zoom buttons. Only
+one map exists at a time, because browsers cap WebGL contexts: the inline map
+unmounts while the dialog is open. Each surface frames afresh, with no pan or
+zoom carried across, as the Anchor watch tile and drawer keep their own fit.
+An active alarm still shows at the top of the dialog.
+
 ## Context
 
 Choosing an anchorage takes four answers, and Mate gave them in four places.

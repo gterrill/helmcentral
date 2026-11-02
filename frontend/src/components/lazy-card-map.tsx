@@ -1,6 +1,19 @@
-import { Suspense, useRef, type ReactNode } from 'react'
+import { createContext, Suspense, useContext, useRef, useState, type ReactNode } from 'react'
 
 import { useNearViewport } from '@/hooks/use-near-viewport'
+
+type Expanded = readonly [boolean, (expanded: boolean) => void]
+const ExpandedContext = createContext<Expanded | null>(null)
+
+/**
+ * Whether the card's map is open full screen. A LazyCardMap owns the state, so
+ * it keeps the map mounted however far the card scrolls; outside one the card
+ * map keeps it for itself.
+ */
+export function useCardMapExpanded(): Expanded {
+  const own = useState(false)
+  return useContext(ExpandedContext) ?? own
+}
 
 const NOTE = 'flex h-full items-center justify-center text-[10px] uppercase tracking-[0.14em] text-muted-foreground'
 
@@ -16,23 +29,27 @@ const NOTE = 'flex h-full items-center justify-center text-[10px] uppercase trac
 export function LazyCardMap({ name, className, children }: { name: 'marina' | 'anchorage'; className: string; children: ReactNode }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const near = useNearViewport(boxRef)
+  const expandedState = useState(false)
+  const [expanded] = expandedState
   return (
-    <div ref={boxRef} data-testid={`${name}-map`} className={`relative min-w-0 overflow-hidden rounded-md border border-border bg-muted/30 ${className}`}>
-      {near === null ? null : near ? (
-        <Suspense
-          fallback={
-            <div className={NOTE} data-testid={`${name}-map-loading`}>
-              Loading map…
-            </div>
-          }
-        >
-          {children}
-        </Suspense>
-      ) : (
-        <div className={NOTE} data-testid={`${name}-map-idle`}>
-          Map loads as you scroll to it
-        </div>
-      )}
-    </div>
+    <ExpandedContext.Provider value={expandedState}>
+      <div ref={boxRef} data-testid={`${name}-map`} className={`relative min-w-0 overflow-hidden rounded-md border border-border bg-muted/30 ${className}`}>
+        {near === null ? null : near || expanded ? (
+          <Suspense
+            fallback={
+              <div className={NOTE} data-testid={`${name}-map-loading`}>
+                Loading map…
+              </div>
+            }
+          >
+            {children}
+          </Suspense>
+        ) : (
+          <div className={NOTE} data-testid={`${name}-map-idle`}>
+            Map loads as you scroll to it
+          </div>
+        )}
+      </div>
+    </ExpandedContext.Provider>
   )
 }

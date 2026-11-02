@@ -8,6 +8,11 @@ import { formatDayMonthIn, formatTimeOfDay, formatWeekday } from '@/lib/vessel-t
 // What the anchorage card says, worked out from the card and nothing else.
 // A figure the data does not carry is left out or marked, never guessed.
 
+/** The anchorage's name as the card heading and its full-screen map say it. */
+export function anchorageTitle(card: AnchorageCard): string {
+  return card.name || 'Unnamed anchorage'
+}
+
 export const GRADE_LABEL: Record<ShelterGrade, string> = {
   sheltered: 'Sheltered',
   partial: 'Partly sheltered',

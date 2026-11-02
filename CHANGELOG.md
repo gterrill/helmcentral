@@ -13,6 +13,11 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The maps on Mate's marina and anchorage cards open full screen.** If a
+  card's map is too small to read, tap the full screen button at the top of its
+  buttons. The map fills the screen with zoom buttons, one finger drags it and
+  a pinch zooms it. Close it to come back to the card.
+
 - **The blog map now plays exactly like the replay.** The animated map in a
   blog embed opens with the same fly-in from the globe, runs the same clock, and
   shows the same things: the light and sky following the sun, the track coloured

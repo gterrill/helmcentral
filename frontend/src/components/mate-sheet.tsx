@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { AssistantThread } from '@/components/assistant-thread'
 import { ConversationSearchOverlay } from '@/components/conversation-search-overlay'
+import { OverlayCloseContext } from '@/components/fullscreen-alarm-banner'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import type { AssistantScreenContext } from '@/hooks/use-assistant-chat'
@@ -327,15 +328,19 @@ export function MateSheet({ open, onOpenChange, initialQuestion, newConversation
               </div>
             </div>
           ) : (
-            <AssistantThread
-              canWrite={canWrite}
-              session={session}
-              queuedQuestion={queuedQuestion}
-              watch={watch}
-              autoFocus={!initialQuestion}
-              composerRef={composerRef}
-              onHasDraftChange={onHasDraftChange}
-            />
+            // A card's full-screen map opens Alarms from inside the thread, and
+            // the sheet would cover it.
+            <OverlayCloseContext.Provider value={() => onOpenChange(false)}>
+              <AssistantThread
+                canWrite={canWrite}
+                session={session}
+                queuedQuestion={queuedQuestion}
+                watch={watch}
+                autoFocus={!initialQuestion}
+                composerRef={composerRef}
+                onHasDraftChange={onHasDraftChange}
+              />
+            </OverlayCloseContext.Provider>
           )}
         </div>
       </SheetContent>
