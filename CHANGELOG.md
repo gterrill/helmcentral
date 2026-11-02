@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Changed
+
+- **A cruise's or a selection's figures now say how many passages it is of.**
+  The strip of figures on the exported pictures, the blog card and the end of
+  an exported video reads "Passages 3" after the time underway, whenever the
+  export holds more than one passage. The strongest gust stays at the end of
+  the strip wherever there is room for it. On a satellite picture the map
+  credit now drops onto a line of its own, when it would otherwise push a
+  figure off the strip.
+
 ### Added
 
 - **Documents open full screen.** The document viewer has a **Full screen**

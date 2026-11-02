@@ -90,7 +90,6 @@ export function composeImageLayout(spec: LayoutSpec, measure: Measure): ImageLay
   const { width, height } = spec
   const margin = 36
   const bandH = Math.round(height * 0.24)
-  const band: Rect = { x: 0, y: height - bandH, w: width, h: bandH }
 
   const titleFont = font(700, Math.round(bandH * 0.26))
   const datesFont = font(400, Math.round(bandH * 0.16))
@@ -98,31 +97,49 @@ export function composeImageLayout(spec: LayoutSpec, measure: Measure): ImageLay
   const valueFont = font(700, Math.round(bandH * 0.2))
   const attrFont = font(400, 12)
 
-  const row1 = band.y + Math.round(bandH * 0.1) + Math.round(bandH * 0.26)
   const datesW = measure(spec.dates, datesFont)
   const titleMax = width - margin * 2 - datesW - 24
+  const attrText = exportImageAttribution(spec.satellite ?? false)
+  const gap = 40
+  const widths = spec.stats.map((s) => Math.max(measure(s.l.toUpperCase(), labelFont), measure(s.v, valueFont)))
+  /** How many figures, from the first, fit in `room` px. */
+  const fitting = (room: number) => {
+    let x = 0
+    let n = 0
+    for (const w of widths) {
+      if (x + w > room) break
+      x += w + gap
+      n++
+    }
+    return n
+  }
+  const beside = fitting(width - margin * 2 - measure(attrText, attrFont) - 28)
+  const full = fitting(width - margin * 2)
+  // The credit sits beside the figures. When that would cost any of them but
+  // there is room across the whole band, it takes a line of its own below
+  // them instead. Figures that do not fit even then go from the end.
+  const ownLine = full > beside
+  const shown = ownLine ? full : beside
+  const creditH = ownLine ? 18 : 0
+  const band: Rect = { x: 0, y: height - bandH - creditH, w: width, h: bandH + creditH }
+
+  const row1 = band.y + Math.round(bandH * 0.1) + Math.round(bandH * 0.26)
   const title: TextItem = { text: fitText(spec.title, titleMax, titleFont, measure), x: margin, y: row1, font: titleFont, fill: INK, align: 'left' }
   const dates: TextItem = { text: spec.dates, x: width - margin, y: row1, font: datesFont, fill: MUTED, align: 'right' }
-
   const attribution: TextItem = {
-    text: exportImageAttribution(spec.satellite ?? false), x: width - margin, y: height - 14, font: attrFont, fill: MUTED, align: 'right',
+    text: attrText, x: width - margin, y: ownLine ? height - 8 : height - 14, font: attrFont, fill: MUTED, align: 'right',
   }
-  const statsMax = width - margin * 2 - measure(attribution.text, attrFont) - 28
-  const gap = 40
   const labelY = band.y + Math.round(bandH * 0.62)
   const valueY = labelY + Math.round(bandH * 0.2) + 6
   const stats: ImageLayout['stats'] = []
   let x = margin
-  for (const s of spec.stats) {
-    const label = s.l.toUpperCase()
-    const w = Math.max(measure(label, labelFont), measure(s.v, valueFont))
-    if (x + w - margin > statsMax) break
+  spec.stats.slice(0, shown).forEach((s, i) => {
     stats.push({
-      label: { text: label, x, y: labelY, font: labelFont, fill: MUTED, align: 'left' },
+      label: { text: s.l.toUpperCase(), x, y: labelY, font: labelFont, fill: MUTED, align: 'left' },
       value: { text: s.v, x, y: valueY, font: valueFont, fill: INK, align: 'left' },
     })
-    x += w + gap
-  }
+    x += widths[i] + gap
+  })
 
   const insetW = Math.round(width * 0.22)
   const insetH = Math.round(insetW * 0.68)
@@ -139,7 +156,7 @@ export function composeImageLayout(spec: LayoutSpec, measure: Measure): ImageLay
     : null
   return {
     width, height, band, title, titleRest: [], dates, stats, attribution, inset,
-    padding: { top: 48, right: 64, bottom: bandH + 48, left: 64 },
+    padding: { top: 48, right: 64, bottom: band.h + 48, left: 64 },
   }
 }
 
