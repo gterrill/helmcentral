@@ -7,7 +7,7 @@ import { useAppConfig } from '@/hooks/use-app-config'
 import { useSavedPlaces } from '@/hooks/use-saved-places'
 import type { AnchorWatchRecord } from '@/hooks/use-anchor-watch'
 import { useVesselStateSelector } from '@/hooks/use-vessel-state'
-import { depthSourceText, dropDay, saveDepthLabel, saveFigureM, saveTargetPlace } from '@/lib/anchor-save-depth'
+import { datumDepthLine, dropDay, saveFigureM, saveTargetPlace } from '@/lib/anchor-save-depth'
 import { errorMessage } from '@/lib/errors'
 import { depthSummary, depthToText, depthUnitLabel } from '@/lib/saved-place-depth'
 import { selectTimeZone } from '@/lib/vessel-time'
@@ -30,7 +30,6 @@ export function AnchorSaveDepth({ watch }: { watch: Watch }) {
   const [confirming, setConfirming] = useState(false)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
-  const [writeError, setWriteError] = useState<string | null>(null)
 
   const { anchorLat, anchorLon } = watch
   const target = useMemo(
@@ -59,13 +58,11 @@ export function AnchorSaveDepth({ watch }: { watch: Watch }) {
 
   const open = () => {
     setName(watch.placeName.slice(0, SAVED_PLACE_NAME_MAX))
-    setWriteError(null)
     setConfirming(true)
   }
 
   const confirm = async () => {
     setSaving(true)
-    setWriteError(null)
     try {
       const stamp = { depth_m: sendM, depth_source: 'sounded' as const, depth_date: day }
       if (target) {
@@ -77,42 +74,47 @@ export function AnchorSaveDepth({ watch }: { watch: Watch }) {
       }
       setConfirming(false)
     } catch (err) {
-      setWriteError(errorMessage(err))
+      toast.error(errorMessage(err))
     } finally {
       setSaving(false)
     }
   }
 
+  if (!confirming) {
+    return (
+      <div className="flex items-center justify-between gap-2" data-testid="anchor-save-depth">
+        <p className="text-xs text-muted-foreground">{datumDepthLine(shown, watch.planningDepthSource)}</p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="min-h-11 shrink-0 px-1 text-primary underline hover:bg-transparent hover:text-primary/80"
+          aria-label={target ? `Save depth to ${target.name}` : 'Save as a saved place'}
+          onClick={open}
+        >
+          Save…
+        </Button>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-2" data-testid="anchor-save-depth">
-      <p className="text-sm font-medium">{saveDepthLabel(sendM, units)}</p>
-      {watch.planningDepthSource && (
-        <p className="text-xs text-muted-foreground">{`Worked out from ${depthSourceText(watch.planningDepthSource)}.`}</p>
-      )}
-      {!confirming ? (
-        <Button type="button" variant="outline" size="sm" className="self-start" onClick={open}>
-          {target ? `Save depth to ${target.name}` : 'Save as a saved place'}
-        </Button>
-      ) : (
-        <div className="flex flex-col gap-2 rounded-md border p-3">
-          {target === null && (
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="anchor-save-depth-name" className="text-xs font-medium text-muted-foreground">Name</label>
-              <Input id="anchor-save-depth-name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
-            </div>
-          )}
-          <p className="text-xs">
-            {target !== null && target.depth_m !== null
-              ? `Replaces ${depthSummary(target, units)} with ${figure}.`
-              : `Saves ${figure}${target ? ` to ${target.name}` : ' at the anchor'}.`}
-          </p>
-          {writeError && <p role="alert" className="text-xs text-destructive">{writeError}</p>}
-          <div className="flex gap-2">
-            <Button type="button" size="sm" disabled={saving || nameBlank} onClick={() => void confirm()}>Confirm</Button>
-            <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={() => setConfirming(false)}>Cancel</Button>
-          </div>
+      {target === null && (
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="anchor-save-depth-name" className="text-xs font-medium text-muted-foreground">Name</label>
+          <Input id="anchor-save-depth-name" value={name} maxLength={80} onChange={(e) => setName(e.target.value)} />
         </div>
       )}
+      <p className="text-xs">
+        {target !== null && target.depth_m !== null
+          ? `Replaces ${depthSummary(target, units)} at ${target.name} with ${figure}.`
+          : `Saves ${figure}${target ? ` to ${target.name}` : ' at the anchor'}.`}
+      </p>
+      <div className="flex gap-2">
+        <Button type="button" size="sm" className="min-h-11" disabled={saving || nameBlank} onClick={() => void confirm()}>Confirm</Button>
+        <Button type="button" variant="ghost" size="sm" className="min-h-11" disabled={saving} onClick={() => setConfirming(false)}>Cancel</Button>
+      </div>
     </div>
   )
 }

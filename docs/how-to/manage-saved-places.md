@@ -40,18 +40,19 @@ need to have set the **Transducer Depth** in **Settings → Anchor Watch**. That
 how far below the waterline the depth transducer sits, so that Helmcentral can
 turn the reading into the depth at chart datum.
 
-1. Open **Anchor watch**.
-2. Under the rode planner, look at the line "Save 4.2 m at datum". That's the
-   figure Helmcentral will save. If it shows a sentence instead of a button,
-   the sentence says what's missing.
-3. Tap **Save depth to** and the name of the saved place. That's the nearest
-   place within 0.1 nautical mile of the anchor that already has a depth, which
-   is the one Mate reads. If none of them has a depth, it's the nearest place in
-   range. If there's none that close, tap **Save as a saved place** and check
-   the name. The place goes at the anchor's position.
-4. Read the confirm step. If the place has a depth already, it shows the old
-   figure and the new one, for example "Replaces 4.0 m (charted 2026-10-30) with
-   4.2 m (sounded 2026-11-01)".
+1. Open **Anchor watch** and open the rode planner. Its line is at the foot of
+   the planner, below **Apply as alarm radius**.
+2. Read the line, for example "4.2 m at datum, from the sounder". That's the
+   figure Helmcentral will save. If it shows a sentence instead of a **Save…**
+   link, the sentence says what's missing.
+3. Tap **Save…**. The figure goes to the nearest place within 0.1 nautical mile
+   of the anchor that already has a depth, which is the one Mate reads. If none
+   of them has a depth, it goes to the nearest place in range. If there's none
+   that close, you're asked for a name, and the new place goes at the anchor's
+   position.
+4. Read the confirm step. It names the place. If the place has a depth already,
+   it shows the old figure and the new one, for example "Replaces 4.0 m (charted
+   2026-10-30) at Butterfly Cove with 4.2 m (sounded 2026-11-01)".
 5. Tap **Confirm**. Tap **Cancel** to leave things as they were.
 
 The depth is saved as sounded, dated the day the anchor went down at the boat.

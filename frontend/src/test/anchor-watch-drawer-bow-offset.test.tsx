@@ -79,34 +79,53 @@ const baseProps = {
   onPlanningDepthChange: () => Promise.resolve(),
 }
 
-// Test 9: the drawer shows the corrected-by-d readout when the backend
-// applied the bow offset, and an explicit warning when it didn't because no
-// heading was available — never silence about a missing correction.
+// The routine "corrected forward of GPS" banner is gone from the top of the
+// drawer. The one case that still needs saying, a mark left at the GPS because
+// there was no heading at Drop, sits in the readings.
+const NO_HEADING_CARD = 'Anchor mark is at the GPS, not the bow. There was no heading at Drop.'
+const NO_HEADING = `${NO_HEADING_CARD} Move it with Adjust.`
+
 describe('AnchorWatchDrawer bow-offset readout', () => {
-  it('shows the corrected-by-d readout when applied', () => {
+  it('has no corrected-forward banner when the offset was applied', () => {
     render(<AnchorWatchDrawer {...baseProps} bowOffsetApplied bowOffsetM={8} bowOffsetReason="" />)
 
-    expect(screen.getByText(/corrected 8 ?m forward of GPS/i)).toBeInTheDocument()
+    expect(screen.queryByText(/forward of GPS/i)).toBeNull()
+    expect(screen.queryByText(NO_HEADING)).toBeNull()
   })
 
-  it('shows an explicit warning when configured but not applied (no heading)', () => {
+  it('warns in the map panel when the offset was not applied for want of a heading', () => {
+    render(
+      <AnchorWatchDrawer {...baseProps} bowOffsetApplied={false} bowOffsetM={0} bowOffsetReason="heading unavailable" />,
+    )
+
+    const note = screen.getByRole('note')
+    expect(note).toHaveTextContent(NO_HEADING)
+    expect(screen.getByTestId('anchor-watch-hud-header')).toContainElement(note)
+    expect(screen.queryByText(/not bow-corrected/i)).toBeNull()
+  })
+
+  it('warns in the readings card when there is no map', () => {
     render(
       <AnchorWatchDrawer
         {...baseProps}
+        vesselLat={null}
+        vesselLon={null}
+        hasGpsFix={false}
         bowOffsetApplied={false}
         bowOffsetM={0}
         bowOffsetReason="heading unavailable"
       />,
     )
 
-    expect(screen.getByText(/not bow-corrected/i)).toBeInTheDocument()
-    expect(screen.getByText(/no heading from SignalK/i)).toBeInTheDocument()
+    expect(screen.getByTestId('anchor-watch-header')).toContainElement(screen.getByText(NO_HEADING_CARD))
+    expect(screen.queryByText(/Move it with Adjust/)).toBeNull()
   })
 
   it('shows nothing when the offset was never configured', () => {
     render(<AnchorWatchDrawer {...baseProps} bowOffsetApplied={false} bowOffsetM={0} bowOffsetReason="" />)
 
-    expect(screen.queryByText(/bow-corrected/i)).toBeNull()
-    expect(screen.queryByText(/corrected .* forward of GPS/i)).toBeNull()
+    expect(screen.queryByText(NO_HEADING)).toBeNull()
+    expect(screen.queryByText(NO_HEADING_CARD)).toBeNull()
+    expect(screen.queryByText(/forward of GPS/i)).toBeNull()
   })
 })

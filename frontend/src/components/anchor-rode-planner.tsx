@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Link } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { toast } from 'sonner'
 import type { AnchorConfig, ScopeMethod } from '@/config/app-config'
 import type { AnchorWatchState } from '@/hooks/use-anchor-watch'
@@ -18,6 +18,7 @@ import {
   rodeMethods,
   scopeRatio,
   scopeStatus,
+  swingBreakdownText,
   tideHeightFtOrNull,
   WIND_BANDS,
   type PlanningDepthDatum,
@@ -43,6 +44,8 @@ const RODE_PLANNER_CONTENT_ID = 'rode-planner-content'
 const METERS_TO_FEET = 3.28084
 
 export interface AnchorRodePlannerProps {
+  /** The save-depth line, shown at the foot of the expanded planner and not while it is collapsed. */
+  saveDepth?: ReactNode
   anchorState: AnchorWatchState
   rodeDeployedM: number
   seaState: SeaState
@@ -134,6 +137,7 @@ export function AnchorRodePlanner({
   onUpdateRodeAndConditions,
   onApplyAlarmRadius,
   applyLockedReason = null,
+  saveDepth,
 }: AnchorRodePlannerProps) {
   const [open, setOpen] = useState<boolean>(() => globalThis.localStorage?.getItem(RODE_PLANNER_OPEN_KEY) === 'true')
 
@@ -684,6 +688,11 @@ export function AnchorRodePlanner({
                               <span>Swing {Math.round(toDisplayDistance(methodSwingRadiusM, isImperial))} {unit}</span>
                             )}
                           </div>
+                          {methodSwingRadiusM !== null && resolvedLoaM !== null && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {swingBreakdownText(result.recommendedRodeM, bowOffsetM, resolvedLoaM, isImperial)}
+                            </p>
+                          )}
                           {result.recommendedRodeM > anchorConfig.chainOnboardM && (
                             <p className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs text-amber-500">
                               Needs {Math.round(toDisplayDistance(result.recommendedRodeM, isImperial))} {unit} — only {Math.round(toDisplayDistance(anchorConfig.chainOnboardM, isImperial))} {unit} aboard
@@ -771,6 +780,7 @@ export function AnchorRodePlanner({
             Apply as alarm radius
           </Button>
         </SidebarFooter>
+        <div className="border-t px-3 py-2 empty:hidden">{saveDepth}</div>
       </Sidebar>
     </div>
   )

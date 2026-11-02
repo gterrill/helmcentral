@@ -119,3 +119,16 @@ and a second copy of the 0.1 nm rule for a list of a few dozen places.
 - **Working out the datum depth in the browser.** The sentinels and the unit
   conversion would be tested in a second place for no gain.
 - **A server route for the nearest saved place.** See above.
+
+## Amendment, 2026-11-02: the control moves to the planner's foot
+
+The save-depth control was a third item beside the map and the rode planner. On
+a wide screen it pushed the planner's collapsed rail in from the right edge and
+took width from the map. It now sits at the foot of the expanded rode planner,
+below Apply, and is not shown while the planner is collapsed. It is one quiet
+line, the figure at datum and where it came from, with a **Save…** link at the
+right. The link's accessible name still says what it does, "Save depth to" and
+the place's name, but the visible text no longer carries the name. The confirm
+step therefore names the place in every case, including "Replaces 4.0 m
+(charted 2026-10-30) at Butterfly Cove with 4.2 m (sounded 2026-11-02)." The
+figure, the date, the target rule and the write behaviour are unchanged.
