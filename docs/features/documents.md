@@ -18,6 +18,20 @@ file straight from Mate's composer (see [Documents](assistant.md#documents) on
 the Mate page). A chip on a past message opens the same viewer this panel
 uses.
 
+The viewer opens as a panel down the right-hand side, which is fine for a note
+but small for a network diagram or an engine drawing. Tap **Full screen**
+beside **Download** and the viewer fills the whole window. Tapping a picture
+does the same. On a phone the button only appears for a picture, because a PDF
+or a note already fills the width there.
+
+In full screen a picture is scaled up or down to fit the window without
+cropping, so a low-resolution diagram is as big as it can be. A PDF fills the
+window too, and a note you're editing stays as it was. A live alarm still shows
+across the top, and its **View** button closes the viewer and takes you to
+Alarms. Tap **Exit full screen** to go back to the panel. Closing the viewer
+also puts it back, so the next document opens in the panel. If you follow a
+link inside a note to another document, the viewer stays full screen.
+
 Notes you capture yourself, and folders marked as a manual for reading front to
 back, have their own page: [Notes and the manual](notes-and-the-manual.md).
 
