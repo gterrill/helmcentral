@@ -18,7 +18,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   the watch, or below everything on a phone. The run history shows the newest
   run open and folds every other run to its time, findings and cost. It also
   says when a run wasn't delivered. Tap a run to open it, and open several at
-  once to compare them.
+  once to compare them. The **When to send** choices are now plain rows, the
+  same as **Send to**, instead of bordered boxes.
 
 - **The maps on Mate's marina and anchorage cards open full screen.** If a
   card's map is too small to read, tap the full screen button at the top of its
