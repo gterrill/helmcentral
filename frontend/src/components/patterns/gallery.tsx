@@ -288,7 +288,7 @@ export function PatternsGallery() {
 
       <GallerySection
         title="ChoiceList"
-        description="A short list of choices where one or several can be picked, each with a title and a line saying what picking it means. Use it instead of a bare checkbox or radio group when a choice needs explaining, or needs something to appear once it is picked. Tapping the title or the details toggles the choice; the follow-up under a selected choice does not."
+        description="A short list of choices where one or several can be picked, each with a title and a line saying what picking it means. Use it instead of a bare checkbox or radio group when a choice needs explaining, or needs something to appear once it is picked. Tapping anywhere on the row toggles the choice; content below the row does not. Use selectedContent for a follow-up that only matters once picked, and secondaryContent for a field that stays up either way, such as one whose bad value blocks Save."
       >
         <div className="grid gap-6 md:grid-cols-2">
           <ChoiceList
@@ -319,7 +319,16 @@ export function PatternsGallery() {
                   </label>
                 ),
               },
-              { value: 'log', label: 'Logbook entry' },
+              {
+                value: 'log',
+                label: 'Logbook entry',
+                secondaryContent: (
+                  <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                    Entries to keep
+                    <Input defaultValue="30" className="max-w-40" />
+                  </label>
+                ),
+              },
             ]}
           />
           <ChoiceList<string>

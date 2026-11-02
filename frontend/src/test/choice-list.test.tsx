@@ -33,13 +33,13 @@ describe('ChoiceList', () => {
     expect(onChange).toHaveBeenLastCalledWith(['a'])
   })
 
-  it('multiple: keeps a stored value that matches no choice, after the rest', () => {
+  it('multiple: drops a stored value that has no row, since nothing on screen could untick it', () => {
     const onChange = vi.fn()
     render(<ChoiceList multiple label="Pick" choices={CHOICES} value={['gone', 'c']} onChange={onChange} />)
     fireEvent.click(screen.getByRole('checkbox', { name: 'Bravo' }))
-    expect(onChange).toHaveBeenLastCalledWith(['b', 'c', 'gone'])
+    expect(onChange).toHaveBeenLastCalledWith(['b', 'c'])
     fireEvent.click(screen.getByRole('checkbox', { name: 'Charlie' }))
-    expect(onChange).toHaveBeenLastCalledWith(['gone'])
+    expect(onChange).toHaveBeenLastCalledWith([])
   })
 
   it('always shows details, and the control is described by them but named by the title only', () => {
@@ -175,6 +175,23 @@ describe('ChoiceList', () => {
   it('prints nothing for a selected content of 0', () => {
     render(<ChoiceList label="Pick" choices={[{ value: 'a', label: 'Alpha', selectedContent: 0 }]} value="a" onChange={() => {}} />)
     expect(screen.getByRole('group', { name: 'Pick' })).not.toHaveTextContent('0')
+  })
+
+  it('shows secondary content whether or not the choice is selected, and clicking it does not toggle', () => {
+    const onChange = vi.fn()
+    const choices = [{ value: 'a', label: 'Alpha', secondaryContent: <button type="button">Extra</button> }]
+    const { rerender } = render(<ChoiceList multiple label="Pick" choices={choices} value={[]} onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Extra' }))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Extra' }).parentElement).toHaveClass('pl-7')
+    rerender(<ChoiceList multiple label="Pick" choices={choices} value={['a']} onChange={onChange} />)
+    expect(screen.getByRole('button', { name: 'Extra' })).toBeInTheDocument()
+  })
+
+  it('can hide its label from sight and still name the group', () => {
+    render(<ChoiceList labelHidden label="Pick" choices={CHOICES} value="a" onChange={() => {}} />)
+    expect(screen.getByRole('group', { name: 'Pick' })).toBeInTheDocument()
+    expect(screen.getByText('Pick')).toHaveClass('sr-only')
   })
 
   it('puts the error in an alert before the choices', () => {

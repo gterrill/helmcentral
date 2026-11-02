@@ -5,10 +5,9 @@ import { Play, Trash2 } from 'lucide-react'
 import { WatchNotifySection } from '@/components/watches/watch-notify-section'
 import { WatchRunCard, WatchRunList } from '@/components/watches/watch-run-list'
 import { schedulePreviewBlocksSave, WatchSchedulePicker } from '@/components/watches/watch-schedule-picker'
-import { ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar, type PagerProps } from '@/components/patterns'
+import { ChoiceList, ConfirmDelete, DetailsLayout, FormSection, Page, RefreshFailedNote, SaveBar, type PagerProps } from '@/components/patterns'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -205,13 +204,6 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
   const update = (patch: Partial<WatchDraft>) => setDraft((d) => ({ ...d, ...patch }))
   const setThreshold = (key: keyof WatchThresholds, n: number) =>
     setDraft((d) => ({ ...d, thresholds: { ...d.thresholds, [key]: n } }))
-  const toggleSection = (section: string, on: boolean) =>
-    setDraft((d) => ({
-      ...d,
-      sections: on
-        ? WATCH_SECTIONS.map((s) => s.id as string).filter((s) => s === section || d.sections.includes(s))
-        : d.sections.filter((s) => s !== section),
-    }))
 
   const performSave = useCallback(async () => {
     if (saveDisabled) throw new Error('Fix the highlighted fields first.')
@@ -337,40 +329,36 @@ export function WatchDetailsPage({ mode, linkedRunId = null, canWrite, canAdmin,
         title="Report sections"
         description="What each report covers, and how much of it counts as a finding."
       >
-        <div className="flex flex-col gap-4" role="group" aria-label="Report sections">
-          {WATCH_SECTIONS.map((s) => {
-            const on = draft.sections.includes(s.id)
+        <ChoiceList
+          multiple
+          labelHidden
+          label="Report sections"
+          value={draft.sections}
+          onChange={(sections) => update({ sections })}
+          disabled={readOnly}
+          error={errors.sections}
+          choices={WATCH_SECTIONS.map((s) => {
             const spec = THRESHOLDS[s.id]
-            return (
-              <div key={s.id} className="flex min-w-0 flex-col gap-2">
-                <div className="flex min-h-9 items-center gap-2">
-                  <Checkbox
-                    id={`watch-section-${s.id}`}
-                    checked={on}
-                    disabled={readOnly}
-                    onCheckedChange={(checked) => toggleSection(s.id, checked)}
-                  />
-                  <label htmlFor={`watch-section-${s.id}`} className="text-sm font-medium text-foreground">{s.label}</label>
-                </div>
-                {spec ? (
-                  <NumberField
-                    id={`watch-threshold-${spec.key}`}
-                    label={spec.label}
-                    hint={spec.hint}
-                    step={spec.step}
-                    value={draft.thresholds[spec.key]}
-                    error={errors[spec.key]}
-                    disabled={readOnly}
-                    onChange={(n) => setThreshold(spec.key, n)}
-                  />
-                ) : (
-                  <p className="min-w-0 text-xs text-muted-foreground">{SECTION_NOTES[s.id]}</p>
-                )}
-              </div>
-            )
+            return {
+              value: s.id,
+              label: s.label,
+              details: SECTION_NOTES[s.id],
+              // Stays up with the section off: a bad value there still blocks Save.
+              secondaryContent: spec && (
+                <NumberField
+                  id={`watch-threshold-${spec.key}`}
+                  label={spec.label}
+                  hint={spec.hint}
+                  step={spec.step}
+                  value={draft.thresholds[spec.key]}
+                  error={errors[spec.key]}
+                  disabled={readOnly}
+                  onChange={(n) => setThreshold(spec.key, n)}
+                />
+              ),
+            }
           })}
-          {errors.sections && <FieldError>{errors.sections}</FieldError>}
-        </div>
+        />
       </FormSection>
 
       <WatchNotifySection
