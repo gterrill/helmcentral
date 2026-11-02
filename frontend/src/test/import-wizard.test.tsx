@@ -213,7 +213,9 @@ describe('ImportWizard steps', () => {
 
     const live = screen.getByRole('region', { name: 'Kept with live instrument data' })
     // Export says 17.9 m length (live 17.9 m) and 1.2 m draft (live 1.5 m).
-    expect(within(live).getAllByText('Matches').length).toBeGreaterThan(0)
+    // The live values arrive on the telemetry stream after the step mounts, so
+    // the verdict pills are not there on the first render. Wait for the first.
+    expect((await within(live).findAllByText('Matches')).length).toBeGreaterThan(0)
     expect(within(live).getAllByText('Differs').length).toBeGreaterThan(0)
     expect(within(live).getAllByText(/live instrument data stays the source/)).not.toHaveLength(0)
   })

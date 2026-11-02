@@ -63,6 +63,11 @@ describe('alarms store', () => {
 
   it('does not tell the Alarms page "All clear" before the first alarms event', async () => {
     const { LiveAlarmsDrawer } = await import('@/components/live-drawers')
+    // The drawer is a React.lazy chunk with a large graph, and resetModules
+    // above means this test evaluates it afresh. Import it under this test's
+    // longer timeout so the lazy resolves from the module cache and findBy waits
+    // only on React.
+    await import('@/components/alarms-drawer')
     render(
       <LiveAlarmsDrawer />,
     )
@@ -71,7 +76,7 @@ describe('alarms store', () => {
 
     emit('alarms', { alarms: [], worst: 'normal' })
     expect(await screen.findByText('All clear')).toBeInTheDocument()
-  })
+  }, 60_000)
 })
 
 describe('vessel-state store', () => {
