@@ -34,6 +34,8 @@ interface AnchorWatchReadingsProps {
   isImperial: boolean
   /** Card only: the no-WebGL2 Adjust text button, beside the tide. */
   adjustAction?: ReactNode
+  /** True when Drop could not place the anchor mark at the bow because there was no heading. */
+  noHeadingAtDrop: boolean
 }
 
 /** Depth, tide and low-water clearance, as one presenter for both homes. */
@@ -45,6 +47,7 @@ export function AnchorWatchReadings({
   lowWaterClearance,
   isImperial,
   adjustAction,
+  noHeadingAtDrop,
 }: AnchorWatchReadingsProps) {
   const timeZone = useVesselStateSelector(selectTimeZone)
   const hud = variant === 'hud'
@@ -59,6 +62,7 @@ export function AnchorWatchReadings({
   const label = hud ? 'text-[10px] uppercase tracking-[0.16em] text-white/80' : 'text-[10px] uppercase tracking-[0.16em] text-muted-foreground'
   const quiet = hud ? 'text-white/80' : 'text-muted-foreground'
   const body = hud ? 'text-white' : 'text-foreground'
+  const warn = hud ? 'text-amber-400' : 'text-amber-600 dark:text-amber-400'
 
   const depthBlock = (
     <div className={cn(hud ? 'flex items-center justify-between gap-4 px-3 py-1.5' : 'min-w-0', depthStale && 'grayscale')}>
@@ -70,7 +74,7 @@ export function AnchorWatchReadings({
             title={depthStaleLabel ? `No update for ${depthStaleLabel}` : 'Source has stopped updating'}
             className={cn(
               'shrink-0 rounded-xs border border-amber-500/40 bg-amber-500/10 px-1.5 py-0.5 text-xs normal-case leading-none tracking-normal',
-              hud ? 'text-amber-400' : 'text-amber-600 dark:text-amber-400',
+              warn,
             )}
           >
             Stale{depthStaleLabel ? ` ${depthStaleLabel}` : ''}
@@ -180,12 +184,26 @@ export function AnchorWatchReadings({
     </>
   )
 
+  // Always shown, phone included: the mark is somewhere other than where the
+  // operator assumes. Moving it needs the map, which only the hud variant has,
+  // so only that variant points to Adjust. w-0 min-w-full lets the note wrap
+  // to the width the other rows set instead of widening the shrink-to-fit panel.
+  const bowWarning = noHeadingAtDrop && (
+    <p
+      role="note"
+      className={cn('text-xs', hud ? 'w-0 min-w-full border-t border-white/10 px-3 py-1.5' : 'mt-2', warn)}
+    >
+      Anchor mark is at the GPS, not the bow. There was no heading at Drop.{hud && ' Move it with Adjust.'}
+    </p>
+  )
+
   if (hud) {
     return (
       <div data-testid="anchor-watch-hud-header" className="max-w-[calc(100vw-7rem)] sm:max-w-none">
         {depthBlock}
         <div className="border-t border-white/10 px-3 py-1.5">{tideBlock}</div>
         {clearance}
+        {bowWarning}
       </div>
     )
   }
@@ -198,6 +216,7 @@ export function AnchorWatchReadings({
         {adjustAction}
       </div>
       {clearance}
+      {bowWarning}
     </div>
   )
 }

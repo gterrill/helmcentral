@@ -112,6 +112,25 @@ bottom left. During Adjust, Raise stays available. On a narrow screen it sits
 just above Cancel and Save. Raising closes Adjust. Without a map, they sit in a
 row below the page's map area.
 
+Your GPS antenna sits back from the bow, and the anchor goes down at the bow.
+If you've set how far the antenna is from the bow in Settings → Anchor Watch,
+**Drop** puts the anchor mark ahead of the GPS by that distance, in the direction
+the boat is heading. Once Drop has done that, the rode planner's Swing figure
+includes the distance. That's because the antenna can swing out to the rode plus
+that distance from the anchor. Under the Swing figure the planner spells it out, for
+example "54 m rode + 8 m GPS to bow + 16 m boat".
+
+In three cases the distance isn't in Swing, and the line under it leaves it out.
+Allow for it yourself if you set the radius by hand.
+
+- **Before Drop:** there's no anchor mark yet.
+- **A Drop with no heading:** the mark can't be moved forward, so it stays at
+  the GPS. The readings say "Anchor mark is at the GPS, not the bow. There was no
+  heading at Drop." With a map on screen they add "Move it with Adjust", because
+  moving the mark with Adjust needs the map.
+- **A mark you've placed by hand in Adjust:** you put it where you want it, so
+  Helmcentral doesn't add the distance again.
+
 **Drop** saves the watch and publishes its anchor coordinates onto the boat's
 instrument network. These are the stored coordinates, including the bow offset
 when it's applied. Moving the anchor's saved position in Adjust republishes the
@@ -181,9 +200,11 @@ alarm sounds. Raise by hand.
 
 While a watch is set, Anchor watch can give a saved place the depth under the
 anchor. Mate then has a figure of your own the next time you ask about that
-anchorage. The line under the rode planner shows what it will save, for example
-"Save 4.2 m at datum". It says whether the figure comes from the sounder or from
-the depth you entered. Nothing is saved until you tap the button and confirm.
+anchorage. The line at the foot of the rode planner shows what it will save, for
+example "4.2 m at datum, from the sounder". It says whether the figure comes from
+the sounder or from the depth you entered. Nothing is saved until you tap
+**Save…** and confirm, and the confirm step names the saved place it will write
+to. The line only shows while the planner is open.
 
 A sounder reading is the water below the transducer. Helmcentral adds how far
 below the waterline the transducer sits, then takes off the tide at the drop, so
@@ -195,8 +216,8 @@ counts as a real reading.
 The transducer depth is used here only. The rode planner and the low-water
 clearance check don't use it yet.
 
-If the depth, the tide at the drop or the transducer depth is missing, the button
-gives way to a sentence that says which. An older watch that doesn't record where
+If the depth, the tide at the drop or the transducer depth is missing, the
+**Save…** link gives way to a sentence that says which. An older watch that doesn't record where
 its depth came from asks you to enter the depth again in the rode planner.
 Helmcentral doesn't guess a replacement. The steps are
 in [Manage the places you've given Mate](../how-to/manage-saved-places.md#save-the-depth-from-your-anchor-watch).
