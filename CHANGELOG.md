@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Added
+
+- **Documents open full screen.** The document viewer has a **Full screen**
+  button beside **Download** that fills the whole window, so a network diagram
+  or an engine drawing is big enough to read without opening it in another
+  tab. Tapping a picture in the viewer does the same, and the picture then
+  scales to fit the window, even a small one. **Exit full screen** takes you
+  back to the side panel, and closing the viewer does too. A PDF fills the
+  window as well. See [Documents](docs/features/documents.md).
+
 ### Fixed
 
 - **Collision Profile Not Changed no longer goes stale or floods the log.** If

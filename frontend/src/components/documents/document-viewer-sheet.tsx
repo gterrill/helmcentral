@@ -1,14 +1,17 @@
-import { Download, Eye, Info, ListChecks, Pencil, Pin, PinOff } from 'lucide-react'
+import { Download, Eye, Info, ListChecks, Maximize2, Minimize2, Pencil, Pin, PinOff } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import { AskMateSelection } from '@/components/ask-mate-selection'
 import { NoteEditor } from '@/components/note-editor'
 import { NoteMarkdown } from '@/components/note-markdown'
+import { cn } from '@/lib/utils'
+import { LiveAlarmBanner } from '@/components/live-alarm-banner'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import type { DocumentRecord } from '@/hooks/use-documents'
 import type { NoteDetail, NotePatch } from '@/hooks/use-notes'
 import { apiRequest, useApiQuery } from '@/lib/api-query'
+import { useNavigate } from '@/hooks/use-app-location'
 import { documentContentUrl, downloadDocument } from '@/lib/document-download'
 import { documentDisplayName, formatBytes, mimeLabel } from '@/lib/document-display'
 import type { NoteLink } from '@/lib/note-links'
@@ -42,6 +45,14 @@ export interface DocumentViewerSheetProps {
   runAction?: (action: () => Promise<unknown>) => Promise<void>
 }
 
+// Full screen covers the app's own alarm banner, so the viewer shows one at
+// the top while it is up. A child, so the router and alarm hooks only run in
+// full screen. Opening Alarms closes the viewer first.
+function FullscreenAlarmBanner({ onClose }: { onClose: () => void }) {
+  const navigate = useNavigate()
+  return <LiveAlarmBanner onOpen={() => { onClose(); navigate.toPanel('alarms') }} />
+}
+
 export function DocumentViewerSheet({
   documentId: viewerId,
   onDocumentChange,
@@ -59,6 +70,12 @@ export function DocumentViewerSheet({
   // Covers reading a note, saving one, and (without a caller runAction) a
   // failed download or pin - same banner each time.
   const [viewerError, setViewerError] = useState<string | null>(null)
+  // Full screen is about the reader's window, not the document, so a link
+  // inside a note keeps it. Each opening starts as the drawer: resetting on
+  // open rather than on close keeps the sheet full width while it slides out.
+  const [fullscreen, setFullscreen] = useState(false)
+  const viewerOpen = viewerId !== null
+  useEffect(() => { if (viewerOpen) setFullscreen(false) }, [viewerOpen])
 
   const runAction = useCallback(async (action: () => Promise<unknown>) => {
     if (runActionProp) return runActionProp(action)
@@ -95,6 +112,7 @@ export function DocumentViewerSheet({
   const docId = viewerDoc?.id
   const docKind = viewerDoc?.kind
   const docMime = viewerDoc?.mime
+  const isImage = !!docMime?.startsWith('image/')
   const shownError = viewerError ?? fetched.error?.message ?? null
   const shownLoading = viewerLoading || fetched.isLoading
 
@@ -216,17 +234,46 @@ export function DocumentViewerSheet({
   }, [onDocumentChange])
 
   return (
-    <Sheet open={viewerId !== null} onOpenChange={(open) => { if (!open) onDocumentChange(null) }}>
-      <SheetContent side="right" className="flex h-full w-full flex-col gap-4 sm:max-w-2xl">
+    <Sheet open={viewerOpen} onOpenChange={(open) => { if (!open) onDocumentChange(null) }}>
+      {/* sm:max-w-none beats the variant's own sm:max-w-sm in the class
+          merge. The same element stays mounted, so a PDF or a note being
+          edited is not reloaded by the toggle. */}
+      <SheetContent
+        side="right"
+        className={cn('flex h-full w-full flex-col gap-4', fullscreen ? 'sm:max-w-none' : 'sm:max-w-2xl')}
+      >
+        {/* pr-8 keeps the banner's buttons clear of the sheet's close button. */}
+        {fullscreen && <div className="pr-8"><FullscreenAlarmBanner onClose={() => onDocumentChange(null)} /></div>}
         <SheetHeader>
           <SheetTitle>{viewerDoc ? documentDisplayName(viewerDoc) : shownError ? 'Document unavailable' : 'Loading…'}</SheetTitle>
           {viewerDoc && <SheetDescription>{mimeLabel(viewerDoc.mime)} · {formatBytes(viewerDoc.size_bytes)}</SheetDescription>}
         </SheetHeader>
         {viewerDoc && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => { void runAction(() => downloadDocument(viewerDoc.id, viewerDoc.filename)) }}>
               <Download className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
               Download
+            </Button>
+            {/* A PDF or a note is already full width on a phone, so the button
+                only shows there for a picture, or to leave full screen. */}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={isImage || fullscreen ? undefined : 'hidden sm:inline-flex'}
+              onClick={() => setFullscreen((prev) => !prev)}
+            >
+              {fullscreen ? (
+                <>
+                  <Minimize2 className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                  Exit full screen
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="h-4 w-4" data-icon="inline-start" aria-hidden="true" />
+                  Full screen
+                </>
+              )}
             </Button>
             {onEditDocument && (
               <Button type="button" size="sm" variant="outline" onClick={() => onEditDocument(viewerDoc.id)}>
@@ -290,14 +337,21 @@ export function DocumentViewerSheet({
             )}
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-auto rounded-md border">
+        <div className={cn('min-h-0 flex-1 overflow-auto rounded-md border', fullscreen && 'flex flex-col')}>
           {shownLoading && <p className="p-4 text-sm text-muted-foreground">Loading…</p>}
           {shownError && <p role="alert" className="p-4 text-sm text-destructive">{shownError}</p>}
           {!shownLoading && viewerDoc?.mime === 'application/pdf' && (
-            <iframe title={documentDisplayName(viewerDoc)} src={documentContentUrl(viewerDoc.id)} className="h-full min-h-[70vh] w-full" />
+            <iframe title={documentDisplayName(viewerDoc)} src={documentContentUrl(viewerDoc.id)} className={fullscreen ? 'min-h-0 w-full flex-1' : 'h-full min-h-[70vh] w-full'} />
           )}
-          {!shownLoading && viewerDoc?.mime.startsWith('image/') && (
-            <img src={documentContentUrl(viewerDoc.id)} alt={documentDisplayName(viewerDoc)} className="max-w-full" />
+          {/* The click is a pointer convenience; the toolbar button is the
+              keyboard route, so the image itself is not a control. */}
+          {!shownLoading && viewerDoc && isImage && (
+            <img
+              src={documentContentUrl(viewerDoc.id)}
+              alt={documentDisplayName(viewerDoc)}
+              onClick={fullscreen ? undefined : () => setFullscreen(true)}
+              className={fullscreen ? 'min-h-0 w-full flex-1 object-contain' : 'block max-w-full cursor-zoom-in'}
+            />
           )}
           {/* ADR 0116: a filed note is a document with mime: 'text/markdown'.
               Routed through the same NoteMarkdown the deleted
@@ -322,7 +376,7 @@ export function DocumentViewerSheet({
             </div>
           )}
           {!shownLoading && viewerDoc?.mime === 'text/markdown' && !viewerChecklistRunning && !(viewerDoc.kind === 'note' && viewerEditing) && (
-            <div className="p-4">
+            <div className={cn('p-4', fullscreen && 'mx-auto w-full max-w-3xl')}>
               <AskMateSelection
                 noteId={viewerDoc.id}
                 noteTitle={documentDisplayName(viewerDoc)}
@@ -334,7 +388,7 @@ export function DocumentViewerSheet({
             </div>
           )}
           {!shownLoading && viewerDoc && viewerDoc.mime !== 'text/markdown' && !viewerDoc.mime.startsWith('image/') && viewerDoc.mime !== 'application/pdf' && (
-            <pre className="whitespace-pre-wrap p-4 text-sm">{viewerText ?? ''}</pre>
+            <pre className={cn('whitespace-pre-wrap p-4 text-sm', fullscreen && 'mx-auto w-full max-w-3xl')}>{viewerText ?? ''}</pre>
           )}
         </div>
       </SheetContent>
