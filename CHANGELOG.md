@@ -16,9 +16,9 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **Collision Profile Not Changed no longer goes stale or floods the log.** If
   the boat moves to a navigation state with no collision profile of its own,
   the warning now clears after about a minute, once Helmcentral can read the
-  profiles, instead of describing the old state. If SignalK lets Helmcentral read the profiles but refuses the switch,
-  for example over its login, Helmcentral retries at longer and longer gaps, up
-  to every ten minutes. The log gets a line when the refusal or its cause
+  profiles, instead of describing the old state. If SignalK lets Helmcentral
+  read the profiles but refuses the switch, for example over its login,
+  Helmcentral retries at longer and longer gaps, up to every ten minutes. The log gets a line when the refusal or its cause
   changes, not one a minute. A profile you pick by hand still clears the
   warning at the next check. See [Alarms](docs/features/alarms.md).
 
