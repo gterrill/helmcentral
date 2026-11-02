@@ -13,6 +13,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **The blog map now plays exactly like the replay.** The animated map in a
+  blog embed opens with the same fly-in from the globe, runs the same clock, and
+  shows the same things: the light and sky following the sun, the track coloured
+  by speed with a wake behind the boat, and your photo moments, where the card
+  grows to fill the map. A cruise or a
+  selection holds on each stay, with a label such as "2 nights · Scawfell
+  Island", names each passage as it sets sail, frames each passage in turn, and
+  ends on the whole route. Each passage gets at least its share of the play
+  length. Tapping the map ends the fly-in or a photo moment, and pressing
+  **Play** part way through carries on without flying in again. An embed larger
+  than before is the price: the player is about 30 KB bigger, and a photo whose
+  moment is on is now shipped at 1280 pixels on its long edge instead of 960,
+  which the size shown in the **Export** menu includes. A photo with its moment
+  off stays at 960. **Re-export to get the new look.** Embeds you have already pasted
+  into posts keep working as they were. The blog map still shows the chart only,
+  never satellite photographs.
 - **A cruise's or a selection's figures now say how many passages it is of.**
   The strip of figures on the exported pictures, the blog card and the end of
   an exported video reads "Passages 3" after the time underway, whenever the

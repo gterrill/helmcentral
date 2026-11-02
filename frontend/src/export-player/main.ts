@@ -1,33 +1,47 @@
-// The replay player that ships inside a blog export (ADR 0174, 0205). It runs
-// in a reader's browser on a blog page, with MapLibre already loaded as a page
-// global, and knows nothing about Helmcentral. It is built from the same
-// modules as the app's replay (the clock, the camera director, the pitched fit,
-// the boat model) by vite-plugin-passage-player.ts and pasted into the snippet,
-// so it imports no React, no react-map-gl and nothing that touches the boat.
-// Every visible string is set with textContent.
+// The replay player that ships inside a blog export (ADR 0174, 0205, 0250). It
+// runs in a reader's browser on a blog page, with MapLibre already loaded as a
+// page global, and knows nothing about Helmcentral. It holds no clock, camera,
+// heading or sign timing of its own: the replay is the app's. The card's
+// passages, shots and signs go to the app's planner (./plan), the replay
+// controller works out each frame (the boat, its heading, the sailed track
+// coloured by speed, the light, the cards, the photo moment, the stays and the
+// passage labels), and this file puts the frame on a plain MapLibre map, the
+// way the video's map does. The player is built from those modules by
+// vite-plugin-passage-player.ts and pasted into the snippet, so it imports no
+// React, no react-map-gl and nothing that touches the boat. Every visible
+// string is set with textContent.
+//
+// It runs on a stranger's phone, so a frame reads nothing from the layout: the
+// map's size and the readout's box are measured when they change, and the page
+// is written to only where a value has changed.
 
 import type * as MapLibre from 'maplibre-gl'
 
 import { createBoatLayer, type BoatLayer } from '@/lib/boat-layer'
-import { boatMarkerKind, HeadingSmoother, nextHeading, type HeadingState } from '@/lib/boat-model'
-import { fitZoomForPitch } from '@/lib/pitch-fit'
+import { boatMarkerKind } from '@/lib/boat-model'
+import { MAP_LABEL, mapLabelStyle, type MapLabelBox, type ReservedArea } from '@/lib/map-label'
 import type { ExportData } from '@/lib/passage-export'
-import { exportLegSegments } from '@/lib/passage-legs'
-import { createSailedCache, type TimedSegment } from '@/lib/passages'
-import { visibleSigns } from '@/lib/replay-signs'
-import { CameraDirector, CameraGate, outsideCentral, shotStartState, type Camera } from '@/lib/replay-camera'
+import { exportColour } from '@/lib/passage-export-style'
+import { isMultiPassage } from '@/lib/passages'
+import { CameraGate, outsideCentral, zoomBucket, type Camera } from '@/lib/replay-camera'
+import { ReplayController, ReplayPlayer, type ReplayFrame } from '@/lib/replay-controller'
+import { FIT_PADDING, cruiseFramingFor, introLanding, type CruiseFraming } from '@/lib/replay-framing'
+import { INTRO_MS, introStartCamera, MERCATOR, type MapProjection } from '@/lib/replay-intro'
+import { hillshadeLayer, lightController, seamarkLayer, tintLayer } from '@/lib/replay-map-style'
+import { addSpecLayer, addWholeTrack, createFramePainter } from '@/lib/replay-overlays'
+import { passageLabelBox } from '@/lib/replay-passage-label'
+import { stayLabelBox } from '@/lib/replay-stay'
+import { playedIds } from '@/lib/replay-time'
 import {
-  hillshadePaint,
+  HILLSHADE_LAYER_ID,
   REPLAY_3D_MAX_PITCH,
   REPLAY_3D_PITCH,
-  skyFor,
-  TERRAIN_ATTRIBUTION,
-  TERRAIN_EXAGGERATION,
-  TERRAIN_MAX_ZOOM,
   TERRAIN_SOURCE_ID,
+  terrainSetting,
+  terrainSourceSpec,
 } from '@/lib/terrain'
 
-import { buildPlan, type CardState } from './plan'
+import { buildReplay, hullOf } from './plan'
 import { createSignLayer, type SignLayer } from './signs'
 import { TERRAIN_PROTOCOL, TERRAIN_PROTOCOL_TILES, terrainLoader } from './terrain-protocol'
 import { loadThree } from './three-loader'
@@ -35,14 +49,21 @@ import { loadThree } from './three-loader'
 type Lib = typeof MapLibre
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const HILLSHADE_LAYER_ID = 'hcp-hillshade'
 const MAP_ERROR = 'The map could not load. Check your connection and reload the page.'
-const FLY_MS = 3200
 const LEVEL_MS = 600
 /** How far a mouse moves while down before it counts as a drag. */
 const DRAG_YIELD_PX = 4
+/** How far a finger may move and still be a tap. Further, it is the page being scrolled. */
+const TAP_PX = 10
+/** The properties of a label's style that are pixels. */
+const PX = new Set(['left', 'top', 'fontSize', 'borderRadius', 'maxWidth'])
 
 const pad = (n: number) => (n < 10 ? '0' : '') + n
+
+/** Writes text only where it has changed. */
+function setText(e: HTMLElement, text: string) {
+  if (e.textContent !== text) e.textContent = text
+}
 
 export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Document) {
   const root = doc.getElementById(id) as HTMLElement
@@ -50,7 +71,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
   const part = (name: string) => root.querySelector(`.hcp-${name}`) as HTMLElement
   const els = {
     title: part('title'), dates: part('dates'), stats: part('stats'), map: part('map'),
-    inset: part('inset'), readout: part('readout'), caption: part('caption'),
+    inset: part('inset'), readout: part('readout'),
     passage: part('passage'), time: part('time'), btn: part('btn'), label: part('btn-label'),
     error: part('error'), notice: part('notice'),
   }
@@ -77,8 +98,10 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())} ${data.zone.l}`
   }
 
-  const plan = buildPlan(data)
-  const api = { data, steps: plan.steps, total: plan.total, stateAt: plan.stateAt, fmtLocal, plan, map: undefined as MapLibre.Map | undefined }
+  const { plan, config } = buildReplay(data)
+  const controller = new ReplayController()
+  const player = new ReplayPlayer(config.time)
+  const api = { data, plan, config, player, controller, fmtLocal, map: undefined as MapLibre.Map | undefined }
 
   if (!maplibregl) {
     els.error.textContent = MAP_ERROR
@@ -91,16 +114,14 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
   // ── the map ─────────────────────────────────────────────────────────────
 
   const bounds: [[number, number], [number, number]] = [[data.bounds[0], data.bounds[1]], [data.bounds[2], data.bounds[3]]]
-  const centre: [number, number] = [(data.bounds[0] + data.bounds[2]) / 2, (data.bounds[1] + data.bounds[3]) / 2]
   const win = root.ownerDocument.defaultView
   const reduced = !!(win && win.matchMedia && win.matchMedia('(prefers-reduced-motion: reduce)').matches)
-  const padding = { top: 56, bottom: 56, left: 40, right: 40 }
 
   const map = new lib.Map({
     container: els.map,
     style: data.map.style,
     bounds,
-    fitBoundsOptions: { padding, maxZoom: 14 },
+    fitBoundsOptions: { padding: FIT_PADDING, maxZoom: 14 },
     attributionControl: { compact: true },
     cooperativeGestures: true,
     // Rotating and tilting belong to the 3D card only; the flat card is as it
@@ -116,6 +137,15 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
   let terrain: 'ok' | 'failed' = 'ok'
   const flat = () => !data.d3 || terrain === 'failed'
 
+  // The map's size, measured when it changes (MapLibre says so with 'resize').
+  let size = { w: 0, h: 0 }
+  const measureMap = () => {
+    const c = map.getContainer()
+    size = { w: c.clientWidth, h: c.clientHeight }
+  }
+  measureMap()
+  map.on('resize', measureMap)
+
   // MapLibre opens its compact credit as a long strip the first time it fills,
   // which the readout would sit on. Keep it as the small icon until the reader
   // opens it themselves, as the app's own maps do.
@@ -130,6 +160,12 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     credit.classList.remove('maplibregl-compact-show')
     credit.removeAttribute('open')
   })
+
+  // The sky and light follow the sun over the boat, as the replay's do. The
+  // card has no theme of its own: it is the day sky, and no satellite imagery
+  // (the blog map is always the chart).
+  const scene = { isDarkTheme: false, satellite: false, terrain: data.d3, camera3d: data.d3 }
+  const light = lightController(map, scene)
 
   // ── terrain ─────────────────────────────────────────────────────────────
 
@@ -150,14 +186,10 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
 
   function addTerrain() {
     registerTerrainProtocol()
-    map.addSource(TERRAIN_SOURCE_ID, {
-      type: 'raster-dem', tiles: [TERRAIN_PROTOCOL_TILES], encoding: 'terrarium', tileSize: 256,
-      maxzoom: TERRAIN_MAX_ZOOM, attribution: TERRAIN_ATTRIBUTION,
-    })
-    map.addLayer({ id: HILLSHADE_LAYER_ID, type: 'hillshade', source: TERRAIN_SOURCE_ID, paint: hillshadePaint }, data.map.seamarks.layerId)
-    map.setTerrain({ source: TERRAIN_SOURCE_ID, exaggeration: TERRAIN_EXAGGERATION })
-    // The card has no theme of its own: it is always the day sky.
-    map.setSky(skyFor(false) as never)
+    // The tiles come from the card's own protocol: a public page cannot reach the boat's.
+    map.addSource(TERRAIN_SOURCE_ID, { ...terrainSourceSpec, tiles: [TERRAIN_PROTOCOL_TILES] })
+    addSpecLayer(map, { ...hillshadeLayer(), beforeId: data.map.seamarks.layerId }, TERRAIN_SOURCE_ID)
+    map.setTerrain(terrainSetting)
   }
 
   // Fail loud: a terrain tile that cannot be had drops the card back to flat
@@ -168,6 +200,8 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     console.error('Terrain unavailable', err)
     els.notice.textContent = 'Terrain unavailable'
     els.notice.hidden = false
+    scene.terrain = false
+    scene.camera3d = false
     try {
       map.setTerrain(null)
       map.setSky(undefined as never)
@@ -176,12 +210,11 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
       console.error('Terrain could not be taken off the map', e)
     }
     dropModel()
-    if (flying) {
+    if (controller.introActive) {
       // The fly-in is heading for a tilted view that will not be drawn: turn
       // it round to the flat framing, and let it begin the replay from there.
-      overviewCache = null
-      const flatView = overviewCamera()
-      if (flatView) arrive(flatView, FLY_MS / 2)
+      const f = framing()
+      if (f) controller.startIntro(readCamera(), introLanding(f, config.timeline), performance.now(), INTRO_MS / 2)
     } else if (!reduced) {
       map.easeTo({ pitch: 0, bearing: 0, duration: LEVEL_MS })
     } else {
@@ -191,25 +224,49 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
 
   // ── signs ───────────────────────────────────────────────────────────────
 
-  // Pins at rest, before Play and when the replay ends; cards from the app's
-  // own visibility rules while it plays. A photo opens only when the replay
-  // is not running.
+  // Pins at rest, before Play and when nothing is up; cards, and the photo
+  // moment, from the controller's frame while it plays. A photo opens only when
+  // the replay is not running.
   function showProblem(message: string) {
     els.error.textContent = message
     els.error.hidden = false
   }
-  const signLayer: SignLayer | null = plan.signs.length > 0
-    ? createSignLayer({ doc, root, stage: part('stage'), map, lib, id, signs: plan.signs, still: reduced, onProblem: showProblem })
+  const signLayer: SignLayer | null = plan.labelled.length > 0
+    ? createSignLayer({
+      doc, root, stage: part('stage'), map, lib, id, signs: plan.labelled, still: reduced, onProblem: showProblem,
+      container: () => size,
+    })
     : null
   signLayer?.update({ cards: [], pins: true, canOpenPhoto: true })
-  let lastRun = 0
-  function showSigns(cardsOn: boolean) {
-    if (!signLayer) return
-    signLayer.update({
-      cards: cardsOn ? visibleSigns(plan.signs, lastRun, plan.wallAt) : [],
-      pins: !cardsOn,
-      canOpenPhoto: !(cardsOn && !paused),
-    })
+
+  // ── labels ──────────────────────────────────────────────────────────────
+
+  // The stay's label and the passage's, placed by the rule the replay places
+  // them by, clear of the overview map in a bottom corner and of the readout.
+  const makeLabel = () => {
+    const e = doc.createElement('span')
+    e.className = 'hcp-maplabel'
+    e.style.background = `rgba(255, 255, 255, ${MAP_LABEL.bgAlpha})`
+    e.hidden = true
+    part('stage').appendChild(e)
+    return { e, drawn: '' }
+  }
+  const stayLabel = makeLabel()
+  const passageLabel = makeLabel()
+  function showLabel(label: { e: HTMLElement; drawn: string }, text: string | null, box: MapLabelBox | null) {
+    if (text === null || box === null) {
+      if (!label.e.hidden) { label.e.hidden = true; label.drawn = '' }
+      return
+    }
+    const style = mapLabelStyle(box)
+    const drawn = `${text}|${JSON.stringify(style)}`
+    if (drawn === label.drawn) return
+    label.drawn = drawn
+    label.e.hidden = false
+    setText(label.e, text)
+    for (const [k, v] of Object.entries(style)) {
+      ;(label.e.style as unknown as Record<string, string>)[k] = v === undefined ? '' : PX.has(k) ? `${v}px` : String(v)
+    }
   }
 
   // ── the boat ────────────────────────────────────────────────────────────
@@ -221,7 +278,7 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
   let modelLayer: BoatLayer | null = null
   let modelReady = false
   let lastPose: { lat: number; lon: number; headingDeg: number | null } | null = null
-  const hull = data.hull ? { type: data.hull.type, loaM: data.hull.loa, beamM: data.hull.beam } : null
+  const hull = hullOf(data)
 
   function showMarker() {
     const kind = boatMarkerKind({ threeD: data.d3, terrain: terrain === 'ok' ? 'ok' : 'failed', hull, layerReady: modelReady })
@@ -253,19 +310,23 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     })
   }
 
+  // ── what is on the map ──────────────────────────────────────────────────
+
   map.on('style.load', () => {
-    map.setProjection({ type: 'globe' })
     map.addSource(data.map.seamarks.id, {
       type: 'raster', tiles: [data.map.seamarks.tiles], tileSize: 256, attribution: data.map.seamarks.attribution,
     })
-    map.addLayer({ id: data.map.seamarks.layerId, type: 'raster', source: data.map.seamarks.id, paint: { 'raster-opacity': 0.85 } })
+    addSpecLayer(map, { ...seamarkLayer(), id: data.map.seamarks.layerId }, data.map.seamarks.id)
     if (data.d3) addTerrain()
-    map.addSource(data.map.trackSource, { type: 'geojson', data: fullGeo() })
-    map.addSource(data.map.doneSource, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-    for (const layer of data.map.layers) map.addLayer(layer as MapLibre.LayerSpecification)
+    // The time of day goes over the chart; the style's own place names go back
+    // over the time of day, so the names stay as readable at night as by day.
+    addSpecLayer(map, tintLayer(null, false))
+    for (const layer of map.getStyle().layers) if (layer.type === 'symbol') map.moveLayer(layer.id)
+    // The whole track, faint, with the sailed part drawn over it as it is sailed.
+    addWholeTrack(map, config.pieces, (p) => exportColour(p.colourIndex), false)
     loaded = true
     addModel()
-    if (wantStart) intro()
+    if (wantStart) begin()
   })
   map.on('error', (e: { error?: Error; sourceId?: string }) => {
     if (e && e.sourceId === TERRAIN_SOURCE_ID) { terrainFailed(e.error); return }
@@ -275,91 +336,48 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     }
   })
 
-  // ── what is drawn ───────────────────────────────────────────────────────
-
-  function fullGeo(): GeoJSON.FeatureCollection {
-    const features: GeoJSON.Feature[] = []
-    data.passages.forEach((p, i) => {
-      p.l.forEach((leg, k) => {
-        for (const seg of exportLegSegments(plan.segments[i], p.l, k)) {
-          if (seg.length < 2) continue
-          features.push({ type: 'Feature', properties: { c: leg.c }, geometry: { type: 'LineString', coordinates: seg.map((pt) => [pt.lon, pt.lat]) } })
-        }
-      })
-    })
-    return { type: 'FeatureCollection', features }
-  }
-
-  // A leg's track is cut once and kept, so the sailed cache can tell it is unchanged.
-  const legCache = new Map<string, TimedSegment[]>()
-  function legSegs(i: number, k: number): TimedSegment[] {
-    const key = `${i}-${k}`
-    let hit = legCache.get(key)
-    if (!hit) { hit = exportLegSegments(plan.segments[i], data.passages[i].l, k); legCache.set(key, hit) }
-    return hit
-  }
-
-  // The part of every passage the boat has covered, one MultiLineString each.
-  const sailed = createSailedCache()
-  function geoFor(s: CardState): GeoJSON.FeatureCollection {
-    const features: GeoJSON.Feature[] = []
-    for (let i = 0; i <= s.index; i++) {
-      const p = data.passages[i]
-      const through = i < s.index || s.night || s.done ? p.b : s.t
-      // Leg by leg, so each part is drawn in its own colour; the legs not yet
-      // reached add nothing.
-      p.l.forEach((leg, k) => {
-        if (p.l.length > 1 && through <= leg.a) return
-        const part = sailed.get(`${i}-${k}`, legSegs(i, k), through)
-        if (part.geometry.coordinates.length > 0) features.push({ type: 'Feature', properties: { c: leg.c }, geometry: part.geometry })
-      })
-    }
-    return { type: 'FeatureCollection', features }
-  }
-
-  function dimTrack(on: boolean) {
-    if (!loaded) return
-    map.setPaintProperty('hcp-track-casing', 'line-opacity', on ? 0.3 : 0.95)
-    map.setPaintProperty('hcp-track-line', 'line-opacity', on ? 0.3 : 1)
-  }
+  const paint = createFramePainter({
+    map, light, pieces: config.pieces, colourOf: (p) => exportColour(p.colourIndex), satellite: false, boatLayerId: () => modelLayer?.id ?? null,
+  })
 
   function setMode(mode: string, label: string) {
     root.className = `hcp hcp-${mode}`
     els.label.textContent = label
   }
 
-  const wantHeading = () => (data.d3 && hull !== null) || plan.shots.length > 0
-  let lastHeading: HeadingState | null = null
-  // The raw track heading twitches as its chord crosses fixes; the model and
-  // the camera both take this eased one, stepped in watched seconds.
-  const smoother = new HeadingSmoother()
-  let smoothedHeading: number | null = null
+  // The part of the map the readout covers, and how far up it a bottom-corner
+  // overview map sits; measured when the readout changes, not at every frame.
+  let readoutBox: ReservedArea | null = null
+  function showFrame(frame: ReplayFrame) {
+    paint(frame, playedIds(config.timeline, player.clock))
 
-  function showState(s: CardState) {
-    if (s.pos) {
-      boat.setLngLat(s.pos)
+    if (frame.boat) {
+      boat.setLngLat([frame.boat.lon, frame.boat.lat])
       if (!boatShown) { boat.addTo(map); boatShown = true }
+      lastPose = { lat: frame.boat.lat, lon: frame.boat.lon, headingDeg: frame.heading }
+    } else {
+      lastPose = null
     }
-    if (wantHeading() && s.pos) {
-      const at = s.night ? data.passages[s.index].b : s.t
-      const sameLeg = lastHeading !== null && lastHeading.id === String(s.index)
-      lastHeading = nextHeading(lastHeading, { id: String(s.index), at }, plan.segments[s.index])
-      smoothedHeading = smoother.step(lastHeading.heading, performance.now(), { snap: reduced || !sameLeg })
-      lastPose = { lat: s.pos[1], lon: s.pos[0], headingDeg: smoothedHeading }
-      if (modelReady && modelLayer) modelLayer.setPose(lastPose)
+    if (modelReady && modelLayer) modelLayer.setPose(lastPose)
+
+    if (frame.here) {
+      setText(els.passage, data.passages[Number(frame.here.entry.id)].n)
+      setText(els.time, fmtLocal(frame.stay ? frame.stay.sunAt : frame.here.at))
     }
-    els.passage.textContent = s.passage
-    els.time.textContent = fmtLocal(s.t)
-    const wasNight = !els.caption.hidden
-    els.caption.hidden = !s.night
-    els.caption.textContent = s.night ? `Night ${s.night.n}${s.night.place ? ` · ${s.night.place}` : ''}` : ''
-    if (wasNight !== !!s.night) liftInset()
-    const src = map.getSource(data.map.doneSource) as MapLibre.GeoJSONSource | undefined
-    if (src) src.setData(geoFor(s))
-    lastRun = s.run
-    showSigns(true)
+
+    const corner = data.inset ? data.insetCorner : null
+    showLabel(stayLabel, frame.stay ? frame.stay.stay.label : null, frame.stay ? stayLabelBox(size, frame.stay.elapsed, corner, readoutBox) : null)
+    showLabel(passageLabel, frame.passageLabel ? frame.passageLabel.label.text : null, frame.passageLabel ? passageLabelBox(size, frame.passageLabel.elapsed, corner, readoutBox) : null)
+
+    // Where the replay has run to its end the signs are pins again, as they were before it, so a reader can open a photo.
+    const rest = player.ended
+    signLayer?.update({ cards: rest ? [] : frame.cards, pins: rest || frame.pins.length > 0, canOpenPhoto: !player.playing, moment: rest ? null : frame.moment })
   }
 
+  // ── the overview map ────────────────────────────────────────────────────
+
+  const centre: [number, number] = [(data.bounds[0] + data.bounds[2]) / 2, (data.bounds[1] + data.bounds[3]) / 2]
+  let insetMap: MapLibre.Map | null = null
   function makeInset() {
     if (!data.inset || insetMap) return
     els.inset.hidden = false
@@ -384,17 +402,21 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     })
   }
   // A bottom-corner overview sits just above the readout, whatever height the
-  // readout has (a night caption makes it taller). The gap is the distance
-  // from the stage's bottom edge to the readout's top, plus a margin; unset
-  // while the readout is hidden, so the stylesheet's own offset applies.
-  function liftInset() {
-    if (els.readout.hidden) { root.style.removeProperty('--hcp-ro-gap'); return }
-    root.style.setProperty('--hcp-ro-gap', `${part('stage').clientHeight - els.readout.offsetTop + 8}px`)
+  // readout has. The gap is the distance from the stage's bottom edge to the
+  // readout's top, plus a margin; unset while the readout is hidden, so the
+  // stylesheet's own offset applies. The readout's box is what the labels keep
+  // clear of.
+  function measureReadout() {
+    if (els.readout.hidden) {
+      readoutBox = null
+      root.style.removeProperty('--hcp-ro-gap')
+      return
+    }
+    readoutBox = { x: els.readout.offsetLeft, y: els.readout.offsetTop, w: els.readout.offsetWidth, h: els.readout.offsetHeight }
+    root.style.setProperty('--hcp-ro-gap', `${part('stage').clientHeight - readoutBox.y + 8}px`)
   }
-  doc.defaultView?.addEventListener('resize', liftInset)
-  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(liftInset).observe(els.readout)
-
-  let insetMap: MapLibre.Map | null = null
+  doc.defaultView?.addEventListener('resize', measureReadout)
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(measureReadout).observe(els.readout)
 
   // ── the camera ──────────────────────────────────────────────────────────
 
@@ -403,202 +425,207 @@ export function initCard(id: string, maplibregl: Lib | null | undefined, doc: Do
     return { center: [c.lng, c.lat], zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() }
   }
 
-  // The whole track framed: MapLibre's own fit when flat; pitched, the zoom is
-  // backed off until every corner is inside the padding.
-  let overviewKey = ''
-  let overviewCache: Camera | null = null
-  function overviewCamera(): Camera | null {
-    const c = map.getContainer()
-    const key = `${c.clientWidth}x${c.clientHeight}|${flat() ? 0 : 1}`
-    if (overviewCache && key === overviewKey) return overviewCache
-    const fit = map.cameraForBounds(bounds, { padding, maxZoom: 14 })
-    if (!fit || !fit.center) return null
-    const fc = fit.center as MapLibre.LngLat | [number, number]
-    const [lon, lat] = Array.isArray(fc) ? fc : [fc.lng, fc.lat]
-    const zoom = fit.zoom ?? 0
-    const camera: Camera = flat()
-      ? { center: [lon, lat], zoom, pitch: 0, bearing: 0 }
-      : {
-        center: [lon, lat],
-        zoom: fitZoomForPitch({ bounds: data.bounds, centre: { lon, lat }, zoom, pitch: REPLAY_3D_PITCH, width: c.clientWidth, height: c.clientHeight, padding }),
-        pitch: REPLAY_3D_PITCH,
-        bearing: 0,
-      }
-    overviewKey = key
-    overviewCache = camera
-    return camera
+  // The whole track, and each passage of a cruise, framed in this map's size
+  // and shape; worked out again when either changes.
+  let framingKey = ''
+  let framed: CruiseFraming | null = null
+  function framing(): CruiseFraming | null {
+    const key = `${size.w}x${size.h}|${flat() ? 0 : 1}`
+    if (framed && key === framingKey) return framed
+    const next = cruiseFramingFor(map, data.bounds, plan.passageBounds, flat() ? 0 : REPLAY_3D_PITCH)
+    if (!next) {
+      console.error('The map could not work out where to look')
+      return null
+    }
+    framingKey = key
+    framed = next
+    return next
   }
 
-  // Shots. A person taking hold of the map (a drag, a wheel turn, a pinch)
-  // takes the camera until the next shot; a tap does not.
-  const director = new CameraDirector()
-  const gate = new CameraGate()
-  let resume = 0
-  // The camera's own jumps fire movestart and interrupt a drag in progress,
-  // so a drag is read from the pointer itself, as the app's map does: a mouse
-  // or pen moving past a few pixels, a second finger down, or the wheel (with
-  // Ctrl or Command, which is what zooms a card with cooperative gestures). A
-  // single finger is left to the page: it scrolls rather than moves the map.
-  const down = new Map<number, { x: number; y: number; touch: boolean }>()
+  // A person taking hold of the map (a drag, a wheel turn, a pinch) takes the
+  // camera until the next shot; a tap does not (it ends the opening move or a
+  // photo moment instead). The camera's own jumps fire movestart and interrupt
+  // a drag in progress, so a drag is read from the pointer itself, as the app's
+  // map does: a mouse or pen moving past a few pixels, a second finger down, or
+  // the wheel (with Ctrl or Command, which is what zooms a card with
+  // cooperative gestures). A single finger is left to the page: it scrolls
+  // rather than moves the map, so it is a tap only when it lifts having hardly
+  // moved; a mouse press is a tap at once.
+  let gate = new CameraGate()
+  const down = new Map<number, { x: number; y: number; touch: boolean; moved: boolean }>()
   const surface = map.getCanvasContainer()
   surface.addEventListener('pointerdown', (e) => {
-    down.set(e.pointerId ?? 0, { x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch' })
-    if (down.size > 1) gate.yield()
+    const touch = e.pointerType === 'touch'
+    down.set(e.pointerId ?? 0, { x: e.clientX, y: e.clientY, touch, moved: false })
+    if (down.size > 1) {
+      gate.yield()
+      for (const d of down.values()) d.moved = true
+    }
+    if (!touch) interrupt(e)
   })
   surface.addEventListener('pointermove', (e) => {
     const start = down.get(e.pointerId ?? 0)
-    if (start && !start.touch && Math.hypot(e.clientX - start.x, e.clientY - start.y) > DRAG_YIELD_PX) gate.yield()
+    if (!start) return
+    const far = Math.hypot(e.clientX - start.x, e.clientY - start.y)
+    if (!start.touch && far > DRAG_YIELD_PX) gate.yield()
+    if (far > TAP_PX) start.moved = true
   })
-  const lift = (e: PointerEvent) => { down.delete(e.pointerId ?? 0) }
-  surface.addEventListener('pointerup', lift)
-  surface.addEventListener('pointercancel', lift)
-  surface.addEventListener('wheel', (e) => { if (e.ctrlKey || e.metaKey) gate.yield() }, { passive: true })
+  surface.addEventListener('pointerup', (e) => {
+    const start = down.get(e.pointerId ?? 0)
+    down.delete(e.pointerId ?? 0)
+    if (start && start.touch && !start.moved) interrupt(e)
+  })
+  surface.addEventListener('pointercancel', (e) => { down.delete(e.pointerId ?? 0) })
+  surface.addEventListener('wheel', (e) => { if (e.ctrlKey || e.metaKey) { gate.yield(); interrupt(e) } }, { passive: true })
   map.on('movestart', (e: { originalEvent?: unknown }) => {
     // The camera's own jumps carry no originalEvent.
-    if (e.originalEvent) gate.yield()
+    if (e.originalEvent) { gate.yield(); interrupt() }
   })
 
-  function placeCamera(s: CardState, nowMs: number) {
-    if (plan.shots.length === 0 || !s.pos) return
-    const overview = overviewCamera()
-    if (!overview) return
+  function placeCamera(frame: ReplayFrame, nowMs: number) {
+    // A single passage with no shots leaves the camera where the opening move put it.
+    if (config.resolved.length === 0 && !isMultiPassage(config.timeline)) return
+    const f = framing()
+    if (!f || !frame.boat) return
     const current = readCamera()
-    const heading = wantHeading() && lastHeading ? smoothedHeading : null
-    const result = director.frame(
-      {
-        overview,
-        flat: flat(),
-        shotStart: (rs) => shotStartState(plan.timeline, rs),
-        elapsedAt: (rs, clock) => plan.wallAt(clock) - plan.wallAt(rs.clock),
-      },
-      { resolved: plan.shots, clock: s.clock, playing: true, nowMs, reduced, resume, boat: { lat: s.pos[1], lon: s.pos[0], heading }, current },
-    )
+    const result = controller.cameraAt({ flat: flat(), overview: f.overview, passages: f.passages, current }, nowMs)
     if (!result) return
     const place = gate.place({
       result, resume, reduced, current,
-      boatOutside: () => {
-        const c = map.getContainer()
-        return s.pos ? outsideCentral(map.project(s.pos), c.clientWidth, c.clientHeight) : false
-      },
+      boatOutside: () => (frame.boat ? outsideCentral(map.project([frame.boat.lon, frame.boat.lat]), size.w, size.h) : false),
     })
     if (place) map.jumpTo(place)
   }
 
   // ── playing ─────────────────────────────────────────────────────────────
 
-  let clock = 0
-  let playing = false
-  let paused = false
-  let started = false
+  let resume = 0
   let raf = 0
-  let introTimer: ReturnType<typeof setTimeout> | undefined
-  let lastTick = 0
+  let lastFrame: ReplayFrame | null = null
+  let introFlatAt: number | null | undefined
 
-  function frame(now: number) {
-    if (!playing) return
-    // A stalled frame (a background tab) is not eased across.
-    if (now - lastTick > 250) smoother.hold(performance.now())
-    if (!paused) {
-      clock = Math.min(plan.total, clock + (now - lastTick) / 1000)
-      const s = plan.stateAt(clock)
-      showState(s)
-      placeCamera(s, now)
-      if (s.done) { finish(); return }
-    }
-    lastTick = now
-    raf = requestAnimationFrame(frame)
+  /** The frame at the place the replay is at, with the camera for it placed before the cards are, so each card is put once against the camera it will be seen with. */
+  function render(nowMs: number, placing: boolean) {
+    const frame = controller.step(config, {
+      wall: player.wall, nowMs, playing: player.playing, resume, reduced, wantHeading: plan.wantHeading, signsOpen: false,
+      view: { zoom: zoomBucket(map.getZoom()) },
+    })
+    lastFrame = frame
+    if (placing) placeCamera(frame, nowMs)
+    showFrame(frame)
   }
+
+  function loop(now: number) {
+    raf = 0
+    if (controller.introActive) {
+      const at = controller.introAt(now)
+      if (!at) return
+      placeIntro(at)
+      if (at.done) land(now)
+      else raf = requestAnimationFrame(loop)
+      return
+    }
+    if (!player.playing) return
+    player.tick(now)
+    render(now, true)
+    if (player.ended) { finish(); return }
+    raf = requestAnimationFrame(loop)
+  }
+  const schedule = () => { if (!raf) raf = requestAnimationFrame(loop) }
 
   function finish() {
-    playing = false
-    paused = false
-    dimTrack(false)
+    player.pause()
     setMode('done', 'Replay')
-    showSigns(false)
   }
 
-  // Each press of Play starts a run with its own token. The fly-in's listener
-  // and timer belong to one run, are removed when a new one starts, and cannot
-  // start a newer run if one slips through.
-  let run = 0
-  let flying = false
-  let pendingMoveEnd: (() => void) | null = null
+  /** The camera and the projection (the globe, flat by the time it lands) go to the map; the projection when the zoom it is flat from changes. */
+  function placeIntro(at: { camera: Camera; projection: MapProjection; flatAtZoom: number | null }) {
+    map.jumpTo(at.camera)
+    if (at.flatAtZoom !== introFlatAt) {
+      introFlatAt = at.flatAtZoom
+      map.setProjection(at.projection)
+    }
+  }
 
-  function begin(token: number) {
-    if (token !== run || started) return
-    flying = false
-    started = true
-    clock = 0
-    lastHeading = null
-    smoother.hold(performance.now())
-    playing = true
-    paused = false
+  /** The opening move is over, or a hand took the map out of its hands: the replay plays from the start. */
+  function land(now: number) {
+    if (!controller.introActive) return
+    controller.endIntro()
+    // Left on the globe by a hand before it landed: the map goes flat at once.
+    if (introFlatAt !== null) { map.setProjection(MERCATOR); introFlatAt = null }
+    // The camera comes down on its framing, unless a hand has the map.
+    const f = framing()
+    if (f && !gate.taken) map.jumpTo(introLanding(f, config.timeline))
     setMode('playing', 'Pause')
     els.readout.hidden = false
-    liftInset()
+    measureReadout()
     makeInset()
-    showState(plan.stateAt(0))
-    lastTick = performance.now()
-    raf = requestAnimationFrame(frame)
+    player.rewind()
+    player.play(now)
+    render(now, false)
+    schedule()
   }
 
-  function clearPending() {
-    if (pendingMoveEnd) map.off('moveend', pendingMoveEnd)
-    pendingMoveEnd = null
-    clearTimeout(introTimer)
-  }
-
-  // Comes down onto a framing (null: MapLibre's own flat fit) and begins the
-  // replay when the camera lands, or after five seconds whatever happens.
-  function arrive(view: Camera | null, duration: number) {
-    clearPending()
-    const token = run
-    const land = () => { clearPending(); begin(token) }
-    pendingMoveEnd = land
-    map.on('moveend', land)
-    if (view) map.easeTo({ ...view, duration })
-    else map.fitBounds(bounds, { padding, maxZoom: 14, duration })
-    introTimer = setTimeout(() => { clearPending(); begin(token) }, 5000)
+  /** A tap on the map ends the opening move, or a photo moment. A tap on a small card on the map is not a hand on the map; on the grown card it is, as in the app, whose card lets touches through. */
+  function interrupt(e?: Event) {
+    const moment = player.playing && lastFrame?.moment ? lastFrame.moment : null
+    if (!moment && e?.target instanceof Element && e.target.closest('.maplibregl-marker')) return
+    const now = performance.now()
+    if (controller.introActive) { land(now); return }
+    if (moment) {
+      player.skipMoment()
+      render(now, false)
+    }
   }
 
   // Start high over the globe so a reader who does not know the coast sees
-  // where in the world this is, then come down onto the track.
-  function intro() {
-    clearPending()
-    run++
-    started = false
-    flying = true
+  // where in the world this is, then come down onto the track (a cruise comes
+  // down on its first passage).
+  function begin() {
     wantStart = false
-    dimTrack(true)
-    const done = map.getSource(data.map.doneSource) as MapLibre.GeoJSONSource
-    done.setData({ type: 'FeatureCollection', features: [] })
-    setMode('flying', 'Play')
-    showSigns(false)
-    const overview = flat() ? null : overviewCamera()
-    if (reduced) {
-      if (overview) map.jumpTo(overview)
-      else map.fitBounds(bounds, { padding, maxZoom: 14, duration: 0 })
-      begin(run)
+    measureMap()
+    const f = framing()
+    if (!f) {
+      showProblem(MAP_ERROR)
       return
     }
-    map.jumpTo({ center: centre, zoom: 1.5, bearing: 0, pitch: 0 })
-    arrive(overview, FLY_MS)
+    player.rewind()
+    gate = new CameraGate()
+    resume++
+    const now = performance.now()
+    introFlatAt = undefined
+    root.classList.remove('hcp-paused')
+    setMode('flying', 'Play')
+    controller.startIntro(introStartCamera(data.bounds, f.overview.bearing), introLanding(f, config.timeline), now, reduced ? 0 : INTRO_MS)
+    render(now, false)
+    const first = controller.introAt(now)
+    if (first) placeIntro(first)
+    if (first?.done) land(now)
+    else schedule()
   }
 
   els.btn.addEventListener('click', () => {
-    if (playing) {
-      paused = !paused
-      els.label.textContent = paused ? 'Resume' : 'Pause'
-      root.classList.toggle('hcp-paused', paused)
-      showSigns(true)
-      lastTick = performance.now()
-      smoother.hold(lastTick)
-      if (!paused) resume++
+    // Pressed again while the opening move flies: it carries on, once.
+    if (controller.introActive) return
+    const now = performance.now()
+    if (player.playing) {
+      player.pause()
+      els.label.textContent = 'Resume'
+      root.classList.add('hcp-paused')
+      render(now, false)
       return
     }
-    resume++
-    cancelAnimationFrame(raf)
-    if (loaded) intro()
+    // Paused part way: play on from there, with no opening move.
+    if (player.wall > 0 && !player.ended) {
+      resume++
+      player.play(now)
+      els.label.textContent = 'Pause'
+      root.classList.remove('hcp-paused')
+      render(now, false)
+      schedule()
+      return
+    }
+    if (loaded) begin()
     else { wantStart = true; setMode('flying', 'Play') }
   })
 

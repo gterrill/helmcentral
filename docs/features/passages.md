@@ -474,10 +474,35 @@ the strip is short of room, figures drop off its end, so the strongest gust
 goes first. On a satellite picture the map credit moves to a line of its own
 under the figures rather than push one off.
 
-The blog map plays the same 3D land, boat model and camera shots as the replay
-on the boat. It plays your signs too, if **Include signs** is ticked. The notes
-and the photos are shrunk, have their location details removed, and are written
-into the card. A card can be at most 3 MB. See
+The blog map is the replay. It uses the same clock, camera and signs as the
+replay on the boat, so a page, a video and the replay all show the same thing.
+
+- **Opening:** It starts from the globe and comes down onto the track. On a
+  cruise it comes down on the first passage.
+- **The sun:** The sky, the light and the shading on the hills follow the sun
+  over the boat, and the chart is tinted for the time of day. The blog map never
+  shows satellite photographs.
+- **The track:** The part sailed is coloured by speed, with a wake behind the
+  boat, and the 3D land, boat model and camera shots play as they do on the boat.
+- **Stays and passages:** On a cruise or a selection, the map holds for a moment
+  at each stay with a label such as "2 nights · Scawfell Island", names each
+  passage as it sets sail, frames each passage in turn, and ends on the whole
+  route. Each passage gets at least a few seconds of the play length you chose.
+- **Photo moments:** If a sign's photo has its moment switched on, the map holds
+  at the sign and the card grows to fill the map. Such a photo is shipped at
+  about 1280 pixels on its long side, so it stays sharp when the card grows. A
+  photo smaller than that isn't enlarged. A photo with its moment switched off
+  is shipped at 960 pixels, as before.
+- **Taps and motion:** A tap on the map ends the opening or a photo moment, and so
+  does a tap on the grown photo card. A tap on a small card during the opening
+  doesn't, and neither does a finger resting on the map to scroll the page. **Play** part way through carries on from where
+  it was, without the opening. If a reader's device asks for reduced motion, the
+  opening and the camera moves are cut rather than animated.
+
+It plays your signs too, if **Include signs** is ticked. The notes and the
+photos are shrunk, have their location details removed, and are written into the
+card. A card can be at most 3 MB. A page you exported before this changed keeps
+the older player and works as it did, so export again to get the new look. See
 [Share a passage on your blog](../how-to/share-a-passage-on-your-blog.md).
 
 ### Video

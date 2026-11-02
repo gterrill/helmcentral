@@ -1,18 +1,16 @@
-// Signs in the blog card (ADR 0205): pins, cards on a leader line and the photo
-// dialog, built with DOM calls and textContent only. The rules for which cards
-// are up come from the app (lib/replay-signs.ts); this file only draws them.
+// Signs in the blog card (ADR 0205): pins, cards on a leader line, the photo
+// dialog and the photo moment, built with DOM calls and textContent only. Which
+// cards are up and how far a moment has grown come from the replay controller
+// (lib/replay-controller.ts, lib/replay-signs.ts, lib/replay-time.ts); this
+// file only draws them.
 // Everything is scoped to one card: its elements live inside the card's root
 // and carry ids made from the card's own id.
 
 import type * as MapLibre from 'maplibre-gl'
 
 import { isExportPhoto } from '@/lib/passage-export-signs'
-import { SIGN_LIFT_PX, placeSignCard, type CardMode, type ResolvedSign } from '@/lib/replay-signs'
-
-/** What a card measures before the browser can say. */
-const CARD_W = 256
-const CARD_H_PHOTO = 250
-const CARD_H_TEXT = 72
+import { SIGN_LIFT_PX, SIGN_NOTE_MAX_LINES, placeSignCard, signCardBox, type CardMode, type ResolvedSign } from '@/lib/replay-signs'
+import { momentRect, type MomentView } from '@/lib/replay-time'
 
 export interface SignView {
   /** The cards on screen now, in order; they win over a pin. */
@@ -21,6 +19,8 @@ export interface SignView {
   pins: boolean
   /** The replay is not running, so a tap on a photo opens it. */
   canOpenPhoto: boolean
+  /** The photo moment under way: the card grows from where it stands to fill the map. */
+  moment?: MomentView | null
 }
 
 export interface SignLayer {
@@ -39,11 +39,18 @@ export interface SignLayerOptions {
   still: boolean
   /** Told once when a sign's photo is not an image this card may show. */
   onProblem: (message: string) => void
+  /** The map's size in pixels, as the page last measured it: asked for every frame, so it must not touch the layout. */
+  container: () => { w: number; h: number }
 }
 
 interface Item {
   r: ResolvedSign
   photo: string | null
+  img: HTMLImageElement | null
+  /** The card at its own size, measured when it comes up and again if it is resized, not at every frame. */
+  face: { w: number; h: number } | null
+  /** What the card was last placed from, so a second look at the same place writes nothing. */
+  placed: string
   pin: HTMLButtonElement
   card: HTMLElement
   box: HTMLElement
@@ -143,12 +150,13 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     surface.setAttribute('role', 'group')
     surface.setAttribute('aria-label', `Sign: ${sign.title}`)
     let photoBtn: HTMLButtonElement | null = null
+    let img: HTMLImageElement | null = null
     if (photo) {
       photoBtn = el('button', 'hcp-sign-photo') as HTMLButtonElement
       photoBtn.type = 'button'
       photoBtn.disabled = true
       photoBtn.setAttribute('aria-label', `Open photo: ${sign.title}`)
-      const img = el('img', 'hcp-sign-img') as HTMLImageElement
+      img = el('img', 'hcp-sign-img') as HTMLImageElement
       img.src = photo
       img.alt = ''
       photoBtn.appendChild(img)
@@ -171,7 +179,7 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     // The card, the leader and the dot are placed from the point, by place().
     card.append(box, line, dot)
 
-    const item: Item = { r, photo, pin, card, box, surface, photoBtn, close, line, mode: undefined, cardShown: false, pinShown: false }
+    const item: Item = { r, photo, img, face: null, placed: '', pin, card, box, surface, photoBtn, close, line, mode: undefined, cardShown: false, pinShown: false }
     pin.addEventListener('click', () => { openIndex = i; render(); close.focus() })
     close.addEventListener('click', () => { openIndex = null; render(); pin.focus() })
     photoBtn?.addEventListener('click', () => openDialog(item, photoBtn as HTMLElement))
@@ -191,6 +199,24 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
     return item
   })
 
+  /** The card's own size, read once it is on the page (a hidden card has none). A browser that cannot say gets the size the app's card has. */
+  function measure(it: Item) {
+    const w = it.surface.offsetWidth
+    const h = it.surface.offsetHeight
+    if (w > 0 && h > 0) it.face = { w, h }
+    else {
+      const box = signCardBox(it.r.sign, o.container().w, it.r.sign.note ? SIGN_NOTE_MAX_LINES : 0)
+      it.face = { w: box.w, h: box.h }
+    }
+  }
+  items.forEach((it) => {
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { if (it.cardShown) { measure(it); it.placed = ''; place(slots) } }).observe(it.surface)
+  })
+  /** Has the browser decode the card's photo while the card is up, ahead of any moment, so growing it later does not stall a frame. */
+  function warm(it: Item) {
+    if (it.img && typeof it.img.decode === 'function') it.img.decode().catch(() => {})
+  }
+
   let slots = new Map<number, number>()
   let view: SignView = { cards: [], pins: true, canOpenPhoto: true }
 
@@ -209,7 +235,7 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
       const pinOn = view.pins && !cardOn
       if (it.pinShown !== pinOn) { it.pin.hidden = !pinOn; it.pinShown = pinOn }
       if (cardOn) {
-        it.card.style.zIndex = String(10 + place)
+        it.card.style.zIndex = view.moment?.signId === it.r.sign.id ? '30' : String(10 + place)
         it.close.hidden = openIndex !== i
         if (it.photoBtn) it.photoBtn.disabled = !view.canOpenPhoto
       }
@@ -217,7 +243,10 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
         it.cardShown = cardOn
         it.card.hidden = !cardOn
         it.card.classList.remove('hcp-in')
+        it.placed = ''
         if (cardOn) {
+          measure(it)
+          warm(it)
           // The entrance is a fade from the next frame on; reduced motion has none.
           const win = doc.defaultView
           if (still || !win) it.card.classList.add('hcp-in')
@@ -233,27 +262,30 @@ export function createSignLayer(o: SignLayerOptions): SignLayer {
   // map and in a video: above its point on a leader line, or below it, or beside
   // it, or made smaller if the map is too short, so it is always whole inside the map.
   function place(up: Map<number, number>) {
-    const c = map.getContainer()
-    const W = c.clientWidth
-    const H = c.clientHeight
+    const { w: W, h: H } = o.container()
     for (const [i, slot] of up) {
       const it = items[i]
+      const grown = view.moment && view.moment.signId === it.r.sign.id ? view.moment : null
       const lift: number = SIGN_LIFT_PX[Math.min(slot, SIGN_LIFT_PX.length - 1)]
       const p = W > 0 && H > 0 ? map.project([it.r.lon, it.r.lat]) : { x: 0, y: 0 }
-      const r = placeSignCard({
-        point: { x: p.x, y: p.y },
-        container: { w: W, h: H },
-        card: { w: it.surface.offsetWidth || CARD_W, h: it.surface.offsetHeight || (it.photo ? CARD_H_PHOTO : CARD_H_TEXT) },
-        lift,
-        previous: it.mode,
-      })
+      const face = it.face as { w: number; h: number }
+      const key = `${p.x}|${p.y}|${W}|${H}|${lift}|${face.w}|${face.h}|${grown ? `${grown.fill}|${grown.scale}` : ''}`
+      if (key === it.placed) continue
+      it.placed = key
+      const r = placeSignCard({ point: { x: p.x, y: p.y }, container: { w: W, h: H }, card: face, lift, previous: it.mode })
       it.mode = r.mode
-      // The card's top left, from the point, and how much smaller than its own size it is.
-      it.box.style.left = `${Math.round(r.rect.x - p.x)}px`
-      it.box.style.top = `${Math.round(r.rect.y - p.y)}px`
-      it.box.style.transform = r.scale === 1 ? '' : `scale(${Math.round(r.scale * 1000) / 1000})`
-      it.box.style.visibility = r.hidden ? 'hidden' : ''
-      it.line.hidden = r.leader === null || r.hidden
+      // A photo moment: the whole card (frame, photo and caption) grows from where it stands to the middle of the map, at the card's own size made bigger, and the photo zooms slowly inside its frame. A sign off the map has no place to grow from, so its card grows where it will end up, in the middle.
+      const from = r.hidden ? { x: (W - face.w) / 2, y: (H - face.h) / 2, w: face.w, h: face.h } : r.rect
+      const big = grown ? momentRect(grown, from, face, { w: W, h: H }) : null
+      if (it.img) it.img.style.transform = big && big.zoom !== 1 ? `scale(${Math.round(big.zoom * 1000) / 1000})` : ''
+      const at = big ? big.card : r.rect
+      // The card's top left, from the point, and how much smaller than its own size it is (or bigger, in a moment).
+      it.box.style.left = `${Math.round(at.x - p.x)}px`
+      it.box.style.top = `${Math.round(at.y - p.y)}px`
+      const k = big ? big.k : r.scale
+      it.box.style.transform = k === 1 ? '' : `scale(${Math.round(k * 1000) / 1000})`
+      it.box.style.visibility = r.hidden && !big ? 'hidden' : ''
+      it.line.hidden = r.leader === null || r.hidden || (!!grown && grown.fill > 0)
       if (r.leader) {
         const dx = r.leader.x2 - r.leader.x1
         const dy = r.leader.y2 - r.leader.y1

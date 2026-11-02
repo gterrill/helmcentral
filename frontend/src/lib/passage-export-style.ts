@@ -67,7 +67,6 @@ export const EXPORT_COLOURS = ['#0369a1', '#c2410c', '#047857', '#a21caf', '#be1
 export const exportColour = (index: number) => EXPORT_COLOURS[index % EXPORT_COLOURS.length]
 
 export const TRACK_SOURCE_ID = 'hcp-track'
-export const DONE_SOURCE_ID = 'hcp-done'
 export const SEAMARK_SOURCE_ID = 'hcp-seamarks'
 export const SEAMARK_LAYER_ID = 'hcp-seamarks'
 
@@ -82,8 +81,6 @@ function trackLayerPair(source: string, prefix: string) {
 
 /** The whole track: a white casing under a bold coloured line. */
 export const TRACK_LAYERS = trackLayerPair(TRACK_SOURCE_ID, 'hcp-track')
-/** The part the boat has already covered, drawn over a dimmed whole track. */
-export const DONE_LAYERS = trackLayerPair(DONE_SOURCE_ID, 'hcp-done')
 
 /** The zoom of the small overview map: the track's bounds about 25 times
  * over, so the coast and enough of the continent show to place it, between

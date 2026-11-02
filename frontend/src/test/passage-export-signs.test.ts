@@ -3,8 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { estimateEmbed, generateEmbed, prepareExport, safeJson, type ExportInput } from '@/lib/passage-export'
 import {
   CARD_LIMIT_BYTES,
+  ESTIMATED_MOMENT_PHOTO_BYTES,
   ESTIMATED_PHOTO_BYTES,
   EXPORT_PHOTO_PREFIX,
+  MOMENT_PHOTO_EDGE_PX,
+  PHOTO_EDGE_PX,
   cleanJpeg,
   exportSigns,
   fitWithin,
@@ -36,8 +39,10 @@ function passage(id: string, t0: number): PassageDetail {
 const sign = (id: string, atS: number, over: Partial<ReplaySign> = {}): ReplaySign => ({
   id, t_ms: atS * 1000, title: `Sign ${id}`, note: '', document_id: null, photo_url: null, visibility: 'passing', show_s: 4, starts_leg: false, photo_moment: null, ...over,
 })
+// A card photo and no moment, unless a test asks for one (photo_moment null is the default, which is on).
 const withPhoto = (id: string, atS: number, over: Partial<ReplaySign> = {}) =>
-  sign(id, atS, { document_id: `doc-${id}`, photo_url: `/api/documents/doc-${id}/content`, ...over })
+  sign(id, atS, { document_id: `doc-${id}`, photo_url: `/api/documents/doc-${id}/content`, photo_moment: false, ...over })
+const withMoment = (id: string, atS: number, over: Partial<ReplaySign> = {}) => withPhoto(id, atS, { photo_moment: null, ...over })
 
 const URI = `${EXPORT_PHOTO_PREFIX}QUJD`
 
@@ -67,6 +72,39 @@ describe('what the card carries for signs', () => {
   it('puts a prepared photo on its sign', () => {
     const d = prepareExport(input({ signs: [withPhoto('a', T0 + 100)], photos: new Map([['a', URI]]) }))
     expect(d.signs[0].ph).toBe(URI)
+  })
+
+  describe('and the one photo of a sign whose moment is on', () => {
+    it('flags the sign and carries its one photo, with no second copy', () => {
+      const d = prepareExport(input({ signs: [withMoment('a', T0 + 100)], photos: new Map([['a', URI]]) }))
+      expect(d.signs[0]).toEqual({ t: (T0 + 100) * 1000, ti: 'Sign a', no: '', v: 'passing', s: 4, ph: URI, mo: true })
+    })
+
+    it('sends no flag when the operator switched the moment off, or there is no photo', () => {
+      const d = prepareExport(input({ signs: [withPhoto('a', T0 + 100), sign('b', T0 + 200)], photos: new Map([['a', URI]]) }))
+      expect(d.signs[0]).toEqual({ t: (T0 + 100) * 1000, ti: 'Sign a', no: '', v: 'passing', s: 4, ph: URI })
+      expect(d.signs[1].mo).toBeUndefined()
+    })
+
+    it('stops the export, naming the sign, when its photo was not prepared', () => {
+      expect(() => prepareExport(input({ signs: [withMoment('a', T0 + 100, { title: 'Whale' })] }))).toThrow(/"Whale".*not prepared/)
+    })
+
+    it('counts the photo once in the size, and names a sign by it when the card is over the limit', () => {
+      const huge = `${EXPORT_PHOTO_PREFIX}${'A'.repeat(3_200_000)}`
+      expect(() => generateEmbed(input({ signs: [withMoment('a', T0 + 100, { title: 'Whale' })], photos: new Map([['a', huge]]) }))).toThrow(/Whale.*3\.1 MB/)
+    })
+
+    it('guesses the size a photo will be before it is prepared: larger with a moment, the card size without', () => {
+      const guess = (over: Partial<ReplaySign>) => estimateEmbed(input({ signs: [withMoment('a', T0 + 100, over)] }))
+      const withMomentOn = guess({})
+      const off = guess({ photo_moment: false })
+      expect(withMomentOn.exact).toBe(false)
+      expect(withMomentOn.bytes - off.bytes).toBeGreaterThanOrEqual(ESTIMATED_MOMENT_PHOTO_BYTES - ESTIMATED_PHOTO_BYTES - 1000)
+      expect(ESTIMATED_MOMENT_PHOTO_BYTES).toBeGreaterThan(ESTIMATED_PHOTO_BYTES)
+      // Once it is prepared the real size is used, and the figure is exact.
+      expect(estimateEmbed(input({ signs: [withMoment('a', T0 + 100)], photos: new Map([['a', URI]]) })).exact).toBe(true)
+    })
   })
 
   it('sends a sign whose photo document is gone as a note, as the app shows it', () => {
@@ -131,6 +169,12 @@ describe('the size of the card', () => {
     expect(message.indexOf('Whale')).toBeLessThan(message.indexOf('Quay'))
     expect(message).not.toContain('Tiny')
     expect(message).toMatch(/Include signs/)
+    expect(message).toMatch(/switch off Photo moment on a sign/)
+  })
+
+  it('has no signs, and no map data the page does not read, in what the card carries besides', () => {
+    const map = prepareExport(input()).map
+    expect(Object.keys(map).sort()).toEqual(['seamarks', 'style', 'three'])
   })
 
   it('lets a card under the limit through', () => {
@@ -319,5 +363,39 @@ describe('preparing the photos', () => {
 
   it('refuses output that is not a JPEG', async () => {
     await expect(prepareSignPhotos([withPhoto('a', 1, { title: 'Whale' })], { downscale: out(clean, 'image/png'), fetchFn: okFetch(), cache: new Map() })).rejects.toThrow(/"Whale".*JPEG/)
+  })
+})
+
+describe('the size a sign\'s photo is prepared at', () => {
+  const okFetch = () => vi.fn(async () => ({ ok: true, status: 200, blob: async () => new Blob([new Uint8Array([1])]) }) as unknown as Response)
+  const clean = jpeg([0xff, 0xdb, 0x00, 0x04, 0x00, 0x00])
+  const make = () => vi.fn<(blob: Blob, edge: number) => Promise<Blob>>(async () => new Blob([clean.buffer as ArrayBuffer], { type: 'image/jpeg' }))
+
+  it('is 1280 px on the long edge for a sign whose moment is on, and 960 px for one whose moment is off: one photo each', async () => {
+    const downscale = make()
+    const signs = [withMoment('a', 1), withPhoto('b', 2), sign('c', 3), withMoment('d', 4, { photo_moment: true })]
+    const result = await prepareSignPhotos(signs, { downscale, fetchFn: okFetch(), cache: new Map() })
+    expect([...result.keys()]).toEqual(['a', 'b', 'd'])
+    expect(downscale.mock.calls.map((c) => c[1])).toEqual([MOMENT_PHOTO_EDGE_PX, PHOTO_EDGE_PX, MOMENT_PHOTO_EDGE_PX])
+    expect([MOMENT_PHOTO_EDGE_PX, PHOTO_EDGE_PX]).toEqual([1280, 960])
+  })
+
+  it('prepares a photo again at the other size when the moment is switched on or off', async () => {
+    const downscale = make()
+    const cache = new Map<string, string>()
+    await prepareSignPhotos([withPhoto('a', 1)], { downscale, fetchFn: okFetch(), cache })
+    await prepareSignPhotos([withPhoto('a', 1)], { downscale, fetchFn: okFetch(), cache })
+    await prepareSignPhotos([withMoment('a', 1)], { downscale, fetchFn: okFetch(), cache })
+    expect(downscale.mock.calls.map((c) => c[1])).toEqual([PHOTO_EDGE_PX, MOMENT_PHOTO_EDGE_PX])
+  })
+
+  it('never enlarges a source smaller than the edge', () => {
+    expect(fitWithin(800, 600, MOMENT_PHOTO_EDGE_PX)).toEqual({ width: 800, height: 600 })
+    expect(fitWithin(4000, 3000, MOMENT_PHOTO_EDGE_PX)).toEqual({ width: 1280, height: 960 })
+  })
+
+  it('stops and names the sign when a photo cannot be prepared, as before', async () => {
+    const fetchFn = vi.fn(async () => ({ ok: false, status: 404 }) as unknown as Response)
+    await expect(prepareSignPhotos([withMoment('a', 1, { title: 'Whale' })], { downscale: make(), fetchFn, cache: new Map() })).rejects.toThrow(/"Whale".*404/)
   })
 })

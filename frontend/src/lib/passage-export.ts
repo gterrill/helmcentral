@@ -6,7 +6,6 @@ import playerCss from '@/lib/passage-export-player.css.txt?raw'
 import { passageLegs, type LegSign } from '@/lib/passage-legs'
 import { DEFAULT_INSET_VIEW, offsetInsetZoom, type InsetCorner, type InsetView } from '@/lib/passage-inset-view'
 import {
-  DONE_LAYERS,
   EXPORT_BASE_STYLE_URL,
   EXPORT_SEAMARK_ATTRIBUTION,
   EXPORT_SEAMARK_TILES,
@@ -18,8 +17,6 @@ import {
   SEAMARK_SOURCE_ID,
   THREE_SRI,
   THREE_URL,
-  TRACK_LAYERS,
-  exportColour,
   insetNeedsDot,
   insetZoom,
 } from '@/lib/passage-export-style'
@@ -38,9 +35,9 @@ import {
 } from '@/lib/passages'
 import { midnightsSince } from '@/lib/boat-nights'
 import { zoneOffsetLabel, zoneOffsetMinutes } from '@/lib/vessel-time'
-import { CARD_LIMIT_BYTES, ESTIMATED_PHOTO_BYTES, EXPORT_PHOTO_PREFIX, exportSigns, oversizeMessage, signsInRange, type ExportSign } from '@/lib/passage-export-signs'
+import { CARD_LIMIT_BYTES, ESTIMATED_MOMENT_PHOTO_BYTES, ESTIMATED_PHOTO_BYTES, EXPORT_PHOTO_PREFIX, exportSigns, oversizeMessage, signsInRange, type ExportSign } from '@/lib/passage-export-signs'
 import type { CameraMode, CameraShot } from '@/lib/replay-clock'
-import type { ReplaySign } from '@/lib/replay-signs'
+import { photoMomentOn, type ReplaySign } from '@/lib/replay-signs'
 
 // The blog export (ADR 0174): one passage, a cruise or a combined selection
 // turned into a single HTML snippet for a Ghost HTML card. The snippet carries
@@ -53,11 +50,6 @@ export const DEFAULT_PLAY_SECONDS: PlaySeconds = 30
 
 /** The most track points the snippet carries, across every passage. */
 export const POINT_BUDGET = 1500
-
-/** One night at anchor lasts this long on screen, and a long stay no more than
- * NIGHT_CAP_SECONDS in all. */
-export const NIGHT_SECONDS = 1.5
-export const NIGHT_CAP_SECONDS = 6
 
 export interface ExportInput {
   kind: 'passage' | 'cruise' | 'combined'
@@ -98,15 +90,13 @@ export interface ExportLeg {
   /** Start and end, Unix seconds. */
   a: number
   b: number
-  /** Line colour. */
-  c: string
 }
 
 /** One passage as the player reads it. Short keys keep the snippet small. */
 export interface ExportPassage {
   /** Heading shown in the readout. */
   n: string
-  /** The legs, in order: start and end in Unix seconds, and the line colour. One
+  /** The legs, in order: start and end in Unix seconds. One
    * leg unless a join sign falls inside the passage. */
   l: ExportLeg[]
   /** Start and end, Unix seconds. */
@@ -114,12 +104,9 @@ export interface ExportPassage {
   b: number
   /** Segments of [t, lon, lat]; a gap in the log is a new segment. */
   s: [number, number, number][][]
-  /** Nights at anchor between the previous passage and this one. */
-  nb: number
-  /** The number of the first of those nights. */
-  n0: number
-  /** Where those nights were spent: the previous passage's arrival. */
-  pl: string
+  /** Where it set out from and where it arrived, as named; empty when it has no name. */
+  f: string
+  t: string
 }
 
 /** One camera shot as the player reads it. Short keys keep the snippet small. */
@@ -157,8 +144,6 @@ export interface ExportData {
   insetDot: boolean
   /** Underway play length, seconds. */
   play: number
-  nightSeconds: number
-  nightCap: number
   /** Terrain in 3D and a tilted camera. Off draws the flat card. */
   d3: boolean
   /** The boat to draw as a model; null keeps the dot. Only with d3. */
@@ -171,9 +156,6 @@ export interface ExportData {
   map: {
     style: string
     seamarks: { id: string; layerId: string; tiles: string; attribution: string }
-    layers: unknown[]
-    trackSource: string
-    doneSource: string
     /** The pinned three.js build the card fetches for the boat model. Only
      * with d3 and a hull. */
     three: { url: string; sri: string } | null
@@ -395,22 +377,15 @@ function buildExport(input: ExportInput): ExportData {
   const passages: ExportPassage[] = withTracks.map(({ p }, i) => {
     const a = Date.parse(p.start) / 1000
     const b = Date.parse(p.end) / 1000
-    const prev = i > 0 ? withTracks[i - 1].p : null
-    const prevEnd = prev ? Date.parse(prev.end) / 1000 : 0
-    const nb = prev ? midnightsSince(prevEnd, a, input.zone.offsetHours) : 0
-    // Numbered from the first departure, so a night spent at sea on an
-    // overnight passage counts and the next night at anchor follows it.
-    const n0 = prev ? midnightsSince(firstStart, prevEnd, input.zone.offsetHours) + 1 : 1
-    const mine = legs.filter((l) => l.passageId === p.id).map((l) => ({ a: l.fromMs / 1000, b: l.toMs / 1000, c: exportColour(l.colourIndex) }))
+    const mine = legs.filter((l) => l.passageId === p.id).map((l) => ({ a: l.fromMs / 1000, b: l.toMs / 1000 }))
     const entry: ExportPassage = {
       n: passageHeading(p),
       l: mine,
       a,
       b,
       s: thinned[i].map((seg) => seg.map((pt) => [Math.round(pt.t), round(pt.lon, 5), round(pt.lat, 5)] as [number, number, number])),
-      nb,
-      n0,
-      pl: prev?.to_name ?? '',
+      f: p.from_name,
+      t: p.to_name,
     }
     return entry
   })
@@ -430,8 +405,6 @@ function buildExport(input: ExportInput): ExportData {
     insetCorner: inset.corner,
     insetDot: insetNeedsDot(bounds, insetFinalZoom),
     play: input.playSeconds,
-    nightSeconds: NIGHT_SECONDS,
-    nightCap: NIGHT_CAP_SECONDS,
     d3,
     hull: d3 && input.hull ? { type: input.hull.type, loa: input.hull.loaM, beam: input.hull.beamM } : null,
     shots: exportShots(input.shots ?? [], passages),
@@ -442,9 +415,6 @@ function buildExport(input: ExportInput): ExportData {
     map: {
       style: EXPORT_BASE_STYLE_URL,
       seamarks: { id: SEAMARK_SOURCE_ID, layerId: SEAMARK_LAYER_ID, tiles: EXPORT_SEAMARK_TILES, attribution: EXPORT_SEAMARK_ATTRIBUTION },
-      layers: [...TRACK_LAYERS, ...DONE_LAYERS],
-      trackSource: TRACK_LAYERS[0].source,
-      doneSource: DONE_LAYERS[0].source,
       three: d3 && input.hull ? { url: THREE_URL, sri: THREE_SRI } : null,
     },
   }
@@ -501,9 +471,10 @@ export function embedSize(input: ExportInput): number {
 export function estimateEmbed(input: ExportInput): { bytes: number; exact: boolean } {
   const ranges = exportablePassages(input.passages).map((x) => ({ a: Date.parse(x.p.start) / 1000, b: Date.parse(x.p.end) / 1000 }))
   const waiting = signsInRange(input.signs ?? [], ranges).filter((s) => s.photo_url && !input.photos?.has(s.id))
-  const guess = `${EXPORT_PHOTO_PREFIX}${'A'.repeat(Math.max(0, ESTIMATED_PHOTO_BYTES - EXPORT_PHOTO_PREFIX.length))}`
+  const guessOf = (bytes: number) => `${EXPORT_PHOTO_PREFIX}${'A'.repeat(Math.max(0, bytes - EXPORT_PHOTO_PREFIX.length))}`
   const photos = new Map(input.photos ?? [])
-  for (const s of waiting) photos.set(s.id, guess)
+  // A photo not yet prepared is guessed at the size it will be: larger when its card grows for a moment.
+  for (const s of waiting) photos.set(s.id, guessOf(photoMomentOn(s) ? ESTIMATED_MOMENT_PHOTO_BYTES : ESTIMATED_PHOTO_BYTES))
   return { bytes: embedSize({ ...input, photos }), exact: waiting.length === 0 }
 }
 
@@ -531,7 +502,7 @@ function buildEmbed(input: ExportInput): string {
     `  <div class="hcp-stage">`,
     `    <div class="hcp-map" role="region" aria-label="Passage map"></div>`,
     `    <div class="hcp-inset hcp-inset-${CORNER_CLASS[data.insetCorner]}" hidden></div>`,
-    `    <div class="hcp-readout" hidden><p class="hcp-caption" hidden></p><p class="hcp-passage"></p><p class="hcp-time"></p></div>`,
+    `    <div class="hcp-readout" hidden><p class="hcp-passage"></p><p class="hcp-time"></p></div>`,
     `    <button type="button" class="hcp-btn"><span class="hcp-btn-icon" aria-hidden="true"></span><span class="hcp-btn-label">Play</span></button>`,
     `    <p class="hcp-error" role="alert" hidden></p>`,
     `    <p class="hcp-notice" role="status" hidden></p>`,

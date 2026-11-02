@@ -355,6 +355,71 @@ describe('PassageExportMenu, cinematic card', () => {
       expect(photos.prepare).toHaveBeenCalledTimes(1)
     })
 
+    describe('and one photo for a sign whose moment is on', () => {
+      const momentOff = (id: string, at: number) => ({ ...photoSign(id, at), photo_moment: false })
+
+      it('prepares each sign\'s photo once, handing over the signs with their moment setting, and flags the ones that grow', async () => {
+        photos.prepare.mockImplementation(preparedFor)
+        signsHook.value = { signs: [photoSign('b', 200), momentOff('c', 300)], loading: false, error: null }
+        render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+        openMenu()
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+        const text = await embedText()
+        expect(photos.prepare).toHaveBeenCalledTimes(1)
+        expect(photos.prepare.mock.calls[0][0].map((x) => x.id)).toEqual(['b', 'c'])
+        const data = dataOf(text) as unknown as { signs: { ph: string; mo?: boolean }[] }
+        expect(data.signs.map((x) => x.mo)).toEqual([true, undefined])
+        expect(text).toContain(uriOf('b'))
+        expect(text).toContain(uriOf('c'))
+      })
+
+      it('prepares the photos again when a sign\'s moment is switched, since the size is not the same', async () => {
+        photos.prepare.mockImplementation(preparedFor)
+        signsHook.value = { signs: [photoSign('b', 200)], loading: false, error: null }
+        const { rerender } = render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+        openMenu()
+        await vi.waitFor(() => expect(photos.prepare).toHaveBeenCalledTimes(1))
+        signsHook.value = { signs: [momentOff('b', 200)], loading: false, error: null }
+        rerender(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+        await vi.waitFor(() => expect(photos.prepare).toHaveBeenCalledTimes(2))
+      })
+
+      it('draws an image without waiting for the photos, which it does not use', async () => {
+        photos.prepare.mockImplementation(() => new Promise(() => {}))
+        signsHook.value = { signs: [photoSign('b', 200)], loading: false, error: null }
+        render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+        openMenu()
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Download image 2:1' }))
+        await vi.waitFor(() => expect(render_.renderPassageImage).toHaveBeenCalledTimes(1))
+        expect(toast.error).not.toHaveBeenCalled()
+        expect((render_.renderPassageImage.mock.calls[0][0] as { signs: unknown[] }).signs).toEqual([])
+      })
+
+      it('says "about" until the photos are ready, and the exact size after', async () => {
+        let release: (m: Map<string, string>) => void = () => {}
+        photos.prepare.mockImplementation(() => new Promise((resolve) => { release = resolve }))
+        signsHook.value = { signs: [photoSign('b', 200)], loading: false, error: null }
+        render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+        openMenu()
+        await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).toMatch(/^Card about /))
+        release(new Map([['b', `data:image/jpeg;base64,${'A'.repeat(2_000_000)}`]]))
+        await vi.waitFor(() => expect(screen.getByTestId('card-size').textContent).toMatch(/^Card \d+(\.\d)? MB/))
+        expect(screen.getByTestId('card-size').textContent).not.toContain('about')
+        expect(Number(/(\d+(\.\d)?) MB/.exec(screen.getByTestId('card-size').textContent as string)?.[1])).toBeGreaterThan(1.9)
+      })
+
+      it('stops and names the sign when its photo cannot be prepared', async () => {
+        photos.prepare.mockRejectedValue(new Error('The photo for the sign "Photo b" could not be prepared: bad image'))
+        signsHook.value = { signs: [photoSign('b', 200)], loading: false, error: null }
+        render(<PassageExportMenu kind="passage" title="Out and back" passages={[passage(TRACK)]} units="metric" />)
+        openMenu()
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Copy blog embed' }))
+        await vi.waitFor(() => expect(toast.error).toHaveBeenCalled())
+        expect(toast.error.mock.calls[0][1]).toEqual({ description: expect.stringContaining('"Photo b"') })
+        expect(screen.queryByRole('textbox', { name: 'Blog embed' })).toBeNull()
+      })
+    })
+
     it('warns before anything is prepared that the card will probably be too big', async () => {
       photos.prepare.mockImplementation(() => new Promise(() => {}))
       signsHook.value = { signs: Array.from({ length: 12 }, (_, i) => photoSign(`p${i}`, 100 + i)), loading: false, error: null }

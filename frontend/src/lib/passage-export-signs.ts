@@ -1,4 +1,4 @@
-import type { ReplaySign, SignVisibility } from '@/lib/replay-signs'
+import { photoMomentOn, type ReplaySign, type SignVisibility } from '@/lib/replay-signs'
 
 // Signs in the blog card (ADR 0205). The card carries each sign's time, title,
 // note and visibility, and a photo as a small JPEG data URI the export itself
@@ -13,6 +13,8 @@ export const CARD_LIMIT_BYTES = 3 * 1024 * 1024
 
 /** Photos are shrunk so their longest side is this many pixels, never enlarged. */
 export const PHOTO_EDGE_PX = 960
+/** The same for a sign whose card grows to fill the map for a moment: its one photo is this size. */
+export const MOMENT_PHOTO_EDGE_PX = 1280
 export const PHOTO_QUALITY = 0.82
 
 /** A sign as the card's player reads it. Short keys keep the snippet small;
@@ -25,8 +27,10 @@ export interface ExportSign {
   v: SignVisibility
   /** Seconds a passing sign stays up. */
   s: number
-  /** The photo, a JPEG data URI; absent for a note-only sign. */
+  /** The photo, a JPEG data URI; absent for a note-only sign. With `mo` it is the larger size (MOMENT_PHOTO_EDGE_PX), which serves the small card and the moment alike. */
   ph?: string
+  /** The photo's card grows to fill the map for a moment in the replay. Only with a photo. */
+  mo?: true
 }
 
 /** True for a JPEG data URI of the kind the export writes, and nothing else. */
@@ -54,6 +58,7 @@ export function exportSigns(signs: readonly ReplaySign[], passages: readonly { a
       if (uri === undefined) throw new Error(`The photo for the sign "${s.title}" was not prepared`)
       if (!isExportPhoto(uri)) throw new Error(`The photo for the sign "${s.title}" is not a JPEG the export made`)
       out.ph = uri
+      if (photoMomentOn(s)) out.mo = true
     }
     return out
   })
@@ -146,7 +151,7 @@ export function oversizeMessage(totalBytes: number, signs: readonly ExportSign[]
   const largest = photos.slice(0, 3).map((p) => `"${p.title}" ${fmtMB(p.bytes)}`).join(', ')
   const head = `This card is ${fmtMB(totalBytes)}, over the ${CARD_LIMIT_BYTES / MB} MB limit.`
   if (photos.length === 0) return head
-  return `${head} Largest photos: ${largest}. Turn off Include signs, or remove photos from signs, and export again.`
+  return `${head} Largest photos: ${largest}. Turn off Include signs, remove photos from signs, or switch off Photo moment on a sign to ship its photo smaller, and export again.`
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
@@ -159,3 +164,5 @@ export function signSummary(signs: readonly Pick<ReplaySign, 'photo_url'>[]): st
 
 /** What a photo not yet prepared is guessed to add to the card, in bytes. */
 export const ESTIMATED_PHOTO_BYTES = 300_000
+/** The same for a photo whose card grows for a moment, which is shipped larger. */
+export const ESTIMATED_MOMENT_PHOTO_BYTES = 450_000

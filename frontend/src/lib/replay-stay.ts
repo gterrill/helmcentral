@@ -9,7 +9,7 @@
 // and a video of it show the same stay.
 
 import { midnightsSince } from '@/lib/boat-nights'
-import { mapLabelBox, type MapLabelBox } from '@/lib/map-label'
+import { mapLabelBox, type MapLabelBox, type ReservedArea } from '@/lib/map-label'
 import type { InsetCorner } from '@/lib/passage-inset-view'
 import { fmtDuration, type Timeline } from '@/lib/passages'
 import { STAY_S } from '@/lib/replay-time'
@@ -113,8 +113,12 @@ export function boatOffsetHours(timeline: Timeline, passages: readonly Pick<Stay
  * with at least MIN_STAY_S between them. Nights are counted at the first
  * passage's zone, as the cruise page counts them. */
 export function staysOf(timeline: Timeline, passages: readonly StayPassage[]): ReplayStay[] {
+  return staysAtOffset(timeline, passages, boatOffsetHours(timeline, passages))
+}
+
+/** The stays, with the boat's offset worked out already: a caller that carries it (the exported page) does not give the passages a zone name. */
+export function staysAtOffset(timeline: Timeline, passages: readonly StayPassage[], offsetHours: number | null): ReplayStay[] {
   const byId = new Map(passages.map((p) => [p.id, p]))
-  const offsetHours = boatOffsetHours(timeline, passages)
   const out: ReplayStay[] = []
   for (let i = 0; i + 1 < timeline.entries.length; i++) {
     const from = timeline.entries[i]
@@ -135,6 +139,6 @@ export function staysOf(timeline: Timeline, passages: readonly StayPassage[]): R
 // ── where it goes ────────────────────────────────────────────────────────
 
 /** Where the stay's label sits in a frame of `container`'s size, `elapsedS` into the stay: in the middle, and clear of the overview map in a bottom corner. */
-export function stayLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null): MapLabelBox {
-  return mapLabelBox(container, { align: 'center', elapsedS, durationS: STAY_S, insetCorner })
+export function stayLabelBox(container: { w: number; h: number }, elapsedS: number, insetCorner: InsetCorner | null = null, reserved: ReservedArea | null = null): MapLabelBox {
+  return mapLabelBox(container, { align: 'center', elapsedS, durationS: STAY_S, insetCorner, reserved })
 }

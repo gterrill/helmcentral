@@ -170,21 +170,26 @@ describe('prepareExport', () => {
     expect(() => prepareExport(input({ passages: [empty] }))).toThrow(/no track/)
   })
 
-  it('numbers the nights across the selection and names them for the arrival', () => {
-    const a = passage({ id: 'a', t0: T0, to_name: 'Scawfell' })
-    const b = passage({ id: 'b', t0: T0 + 3 * 86400, to_name: 'Hamilton' })
+  it('counts the nights across the selection, and names where each passage set out from and arrived', () => {
+    const a = passage({ id: 'a', t0: T0, from_name: 'Mackay', to_name: 'Scawfell' })
+    const b = passage({ id: 'b', t0: T0 + 3 * 86400, from_name: 'Scawfell', to_name: 'Hamilton' })
     const data = prepareExport(input({ kind: 'combined', passages: [b, a] }))
-    expect(data.passages.map((p) => p.nb)).toEqual([0, 3])
-    expect(data.passages[1].n0).toBe(1)
-    expect(data.passages[1].pl).toBe('Scawfell')
+    expect(data.passages.map((p) => [p.f, p.t])).toEqual([['Mackay', 'Scawfell'], ['Scawfell', 'Hamilton']])
     expect(data.stats.find((s) => s.l === 'Nights')?.v).toBe('3')
+  })
+
+  it('carries no clock of its own for the nights: the page works its stays out as the replay does', () => {
+    const data = prepareExport(input({ kind: 'combined', passages: [passage({ id: 'a', t0: T0 }), passage({ id: 'b', t0: T0 + 3 * 86400 })] }))
+    expect(Object.keys(data)).not.toContain('nightSeconds')
+    expect(Object.keys(data)).not.toContain('nightCap')
+    expect(Object.keys(data.passages[1])).not.toContain('nb')
   })
 
   it('gives each passage its own colour and its heading when untitled', () => {
     const a = passage({ id: 'a', t0: T0, title: 'Leg one' })
     const b = passage({ id: 'b', t0: T0 + 86400 })
     const data = prepareExport(input({ kind: 'combined', passages: [a, b] }))
-    expect(data.passages[0].l[0].c).not.toBe(data.passages[1].l[0].c)
+    expect(Object.keys(data.passages[0].l[0])).toEqual(['a', 'b'])
     expect(data.passages.map((p) => p.n)).toEqual(['Leg one', 'Hamilton Island → Airlie Beach'])
   })
 
@@ -196,8 +201,8 @@ describe('prepareExport', () => {
     expect(data.passages[0].l).toHaveLength(2)
     expect(data.passages[0].l[0].b).toBe(data.passages[0].l[1].a)
     expect(data.passages[1].l).toHaveLength(1)
-    const colours = data.passages.flatMap((p) => p.l.map((l) => l.c))
-    expect(new Set(colours).size).toBe(3)
+    // Three legs in all, which the page and the images colour one after another.
+    expect(data.passages.flatMap((p) => p.l)).toHaveLength(3)
   })
 
   it('stays under the point budget for a long track', () => {
@@ -234,18 +239,16 @@ describe('stats strip', () => {
     expect(strip.find((s) => s.l === 'Distance')?.v).toBe('84.6 NM')
   })
 
-  it('uses the cruise figures, with nights counted the way the captions count them', () => {
+  it('uses the cruise figures, with nights counted the way the cruise page counts them', () => {
     const cruiseStats = {
       passage_count: 2, distance_nm: 100, underway_seconds: 36000, nights: 5, fuel_burned_l: 300,
       underway_max_gust_kts: 20, anchor_max_gust_kts: 33,
     } as CruiseStats
     const two = [passage({ id: 'a', t0: T0 }), passage({ id: 'b', t0: T0 + 5 * 86400 })]
     const data = prepareExport(input({ kind: 'cruise', cruiseStats, passages: two }))
-    const captioned = data.passages.reduce((n, p) => n + p.nb, 0)
-    expect(captioned).toBe(5)
     expect(cruiseStats.nights).toBe(5)
     expect(data.stats.map((s) => [s.l, s.v])).toEqual([
-      ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Passages', '2'], ['Nights', String(captioned)], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
+      ['Distance', '100.0 NM'], ['Underway', '10 h 00 m'], ['Passages', '2'], ['Nights', '5'], ['Fuel', '300 L'], ['Max gust', '33.0 kn'],
     ])
   })
 })
@@ -409,7 +412,7 @@ describe('overview corner and zoom in the export', () => {
 
 describe('nights agree with the cruise page', () => {
   // Server rule: boat-local midnights from the first departure to the last arrival.
-  it('counts a night at sea, numbers the anchor nights after it, and matches the cruise figure', () => {
+  it('counts a night at sea and matches the cruise figure', () => {
     // Leg one leaves 14 Sep 20:00 UTC+10 and arrives 15 Sep 06:00 after ten hours: one midnight at sea.
     const leg1Start = Date.UTC(2026, 8, 14, 10) / 1000
     const leg1 = passage({ id: 'a', t0: leg1Start, points: 601 })
@@ -423,9 +426,6 @@ describe('nights agree with the cruise page', () => {
     } as CruiseStats
     const data = prepareExport(input({ kind: 'cruise', cruiseStats, passages: [leg1, leg2] }))
     expect(data.stats.find((s) => s.l === 'Nights')?.v).toBe(String(cruiseStats.nights))
-    // The sea night is night 1, so the first night at anchor is night 2.
-    expect(data.passages[1].nb).toBe(2)
-    expect(data.passages[1].n0).toBe(2)
   })
 })
 

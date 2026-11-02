@@ -19,8 +19,8 @@ needs to reach the boat.
    several passages together, select them in the list and open them together.
 2. Press **Export**.
 3. Under **Play length**, choose 15, 30 or 60 seconds. This is how long the
-   boat takes to cover the time actually spent underway. Each night at anchor
-   adds a short pause on top.
+   boat takes to cover the time actually spent underway. Each stay between
+   passages, and each photo moment, adds a short hold on top.
 4. Tick or untick **Overview map in the corner**. It's the small map that shows
    where the coast and the track sit in the wider country. Its corner and zoom
    are the ones saved for the passage (see
@@ -51,12 +51,16 @@ Any camera shots you've set on the replay go into the card as they are. There's
 nothing to tick. See [Film a passage replay](film-a-passage-replay.md) for
 setting them. If Helmcentral can't read your shots, **Copy blog embed** and
 **Download embed as HTML** tell you so and stop, rather than hand you a card
-without them. A passage with no shots plays as it always did.
+without them. A passage with no shots stays framed on the whole track, and a cruise
+frames each passage in turn.
 
 ### If the card is too big
 
 A card can be at most 3 MB. Photos are what make it big. Each one is shrunk to
-960 pixels on its longest side before it goes in, and a handful fit easily.
+960 pixels on its longest side before it goes in. A photo whose moment is
+switched on goes in at 1280 pixels instead, so that it stays sharp when its card
+grows. A photo smaller than that isn't enlarged. Watch the size the menu shows as
+you add signs, and switch off **Photo moment** on a sign if you need the room.
 
 If the signs you're exporting carry more than the card can hold, **Copy blog
 embed** and **Download embed as HTML** stop and name the largest photos and
@@ -90,11 +94,12 @@ The card opens showing the whole track with a **Play** button. Nothing moves
 until they tap it. The map then starts from a view of the whole globe, so that
 someone who doesn't know the coast sees where in the world it is. Then it comes
 down onto the track. The boat follows the line with a glow around it, and the
-track behind it is drawn bold. A label shows the boat's local date and time with
+track behind it is coloured by speed, with a wake in the water. A label shows the boat's local date and time with
 its zone, for example "16 Sep 08:56 UTC+10", and the name of the passage it's
-on. Each night at anchor shows as a pause captioned "Night 2 · Scawfell
-Island", using the place the passage before it ended at. At the end the button
-changes to **Replay**.
+on. On a cruise or a selection, each stay between passages holds the map for a
+moment with a label such as "2 nights · Scawfell Island", using the place the
+passage before it ended at, and each passage is named as it sets sail. At the
+end the button changes to **Replay**.
 
 With **3D** ticked, the land stands up, the sea stays flat, and the sky shows
 above the horizon. A model of your boat replaces the glow on the track. It's the
@@ -110,7 +115,10 @@ pace takes twice as long to watch, so the card can run longer than the 30
 seconds you picked.
 
 Readers can take hold of the map with a mouse drag or a pinch, and the replay
-leaves the camera alone until the next shot begins. A tap does nothing. Readers
+leaves the camera alone until the next shot begins. A tap on the map ends the
+opening or a photo moment, and so does a tap on the grown photo card. On a
+phone, a finger resting on the map to scroll the page doesn't count as a tap.
+A tap on a small card during the opening doesn't end it. Readers
 can't change 3D or add satellite photographs. The map's credit line shows as a
 small ⓘ in the corner, and it opens when a reader taps it. If their device asks
 for reduced motion, the camera cuts between framings instead of moving.
@@ -123,6 +131,9 @@ ticked.
 
 - **Before Play and after the end:** Each sign is a small blue marker on the
   track, and tapping one opens its note.
+- **Photo moments:** When the boat meets a sign whose photo has its moment
+  switched on, the replay holds and the card grows to fill the map, with the
+  photo zooming slowly in its frame.
 - **While the replay plays:** Signs come up as cards on a line from their point
   on the track, by their own setting. An *always* sign stays up. A *while
   passing* sign comes up just before the boat arrives and goes after its time.
@@ -137,7 +148,8 @@ ticked.
   fading in.
 
 Under the map, a row of figures shows distance, time underway, nights, fuel and
-the highest gust, in your Units setting. For cruises and selections, nights are
+the highest gust, in your Units setting, with the number of passages on a cruise
+or selection. For cruises and selections, nights are
 counted as midnights since the first departure, as on the cruise page. A figure
 the boat didn't record is left out rather than shown as `--`.
 
