@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0249](0249-nearby-map-stays-still-and-points.md). Was accepted. The tour was too slow on the wall display's processor, so the map stays still and an arrow points at the highlighted place.
 
 ## Context
 

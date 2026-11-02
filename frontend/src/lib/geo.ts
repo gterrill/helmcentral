@@ -67,6 +67,16 @@ export function mercatorY(lat: number): number {
   return 0.5 - Math.log(Math.tan(Math.PI / 4 + latRad / 2)) / (2 * Math.PI)
 }
 
+/**
+ * The copy of `lon` (some multiple of 360 degrees away) nearest `reference`,
+ * so two points either side of the antimeridian project a short distance
+ * apart instead of a world-width apart. The result can pass 180 or -180.
+ */
+export function lonNearest(lon: number, reference: number): number {
+  if (Math.abs(lon - reference) <= 180) return lon
+  return reference + ((((lon - reference + 180) % 360) + 360) % 360 - 180)
+}
+
 /** The longitude at a fraction of the world's width. */
 export function lonOfMercatorX(x: number): number {
   return x * 360 - 180

@@ -42,7 +42,7 @@ export const GAUGE_GROUP_WIDGET_ID_PREFIX = 'gauge-group:'
 export const LAMP_STRIP_WIDGET_ID_PREFIX = 'lamps:'
 /** Engine clusters (ADR 0054) — a ticked ring with mask-cut corner cards. */
 export const CLUSTER_WIDGET_ID_PREFIX = 'cluster:'
-/** The poi-map widget (ADR 0091 phase 3b) — a moving map of nearby points of interest. */
+/** The poi-map widget (ADR 0091 phase 3b) — a map of nearby points of interest. */
 export const POI_MAP_WIDGET_ID_PREFIX = 'poi-map:'
 export type EmbedWidgetId = `${typeof EMBED_WIDGET_ID_PREFIX}${string}`
 export type GaugeWidgetId = `${typeof GAUGE_WIDGET_ID_PREFIX}${string}`
@@ -457,7 +457,7 @@ export type ClusterFooter = { [K in ClusterFooterSlot]?: GaugeWidgetConfig }
 export type ResolvedClusterConfig = Omit<EngineClusterConfig, 'fuel'> & { fuel?: ClusterFuelRail }
 
 /**
- * A moving map of nearby points of interest (ADR 0091 phase 3b): a range, a
+ * A map of nearby points of interest (ADR 0091 phase 3b): a range, a
  * category subset, a layout, and two rendering toggles. Per-instance and
  * per-page, like every other multi-instance widget config.
  */

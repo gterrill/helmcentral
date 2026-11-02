@@ -88,7 +88,7 @@ describe('useCyclingIndex', () => {
   })
 
   it('never renders the stale index after resetKey changes, not even for one render', () => {
-    // A caller that acts on each new index (the Nearby map flies to it)
+    // A caller that acts on each new index (the Nearby map's arrow points at it)
     // would otherwise start toward the old position before the reset lands.
     vi.useFakeTimers()
     const seen: Array<number | null> = []

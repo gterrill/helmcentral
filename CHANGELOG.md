@@ -21,6 +21,18 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   back to the side panel, and closing the viewer does too. A PDF fills the
   window as well. See [Documents](docs/features/documents.md).
 
+### Changed
+
+- **The Nearby map stays still and draws an arrow to the highlighted match.**
+  The map used to fly in to each match in turn, which was too slow on the wall
+  display. Now it holds still while the boat marker moves, and reframes with a
+  single instant jump when the boat nears the edge or the nearest matches
+  change. In the map-and-list layout, a curved arrow runs from the boat to the
+  highlighted match. When a match is too close to the boat for an arrow, only
+  the ring on its marker shows. The map also now zooms in to fit the five
+  nearest matches, however wide the range is. The range still sets how far
+  Helmcentral searches.
+
 ### Fixed
 
 - **Collision Profile Not Changed no longer goes stale or floods the log.** If

@@ -6,8 +6,10 @@ You need write access, and you do this in layout mode.
 2. Choose **Add Tile**, then **Nearby map…**.
 3. Give it a title, or leave it blank for "Nearby".
 4. Set the range, 0.5 to 25 nautical miles. This is the radius searched around
-   the vessel. The map keeps the boat at the centre. It zooms out to keep the
-   nearest matches in view, and never gets tighter than this range.
+   the vessel, not how much of the map you see. The map keeps the boat at the
+   centre and zooms to fit the five nearest matches. A wide range with matches
+   close by gives a close-up, and matches further out than those five can fall
+   off the map.
 5. Choose a layout. **Map only** fills the tile with the map. **Map and list**
    adds a ranked list of the five nearest matches beside it, so it needs a
    wider tile.
@@ -16,7 +18,7 @@ You need write access, and you do this in layout mode.
    the next. The range is 3 to 120 seconds, and 10 is the default. A match's
    description shows too if it has one, though many points of interest don't.
    Leave this alone if you'd rather not think about it. Details of what the map
-   does during the cycle are below.
+   shows during the cycle are below.
 7. Tick the categories you want: anchorages, bays, islands, marinas, fuel, boat
    ramps, moorings, historic landmarks, lookouts, dive and snorkel spots, and
    walking trails. At least one is required.
@@ -42,19 +44,32 @@ the tile's title bar. To remove the tile, use the same X every other tile uses.
 
 ## What the map does during the summary cycle
 
-The map dives in to the first match and tilts, then holds there. It then flies
-on to each next one in a high arc that shows the boat and the whole area on the
-way. Each close-up keeps the boat in the picture.
+The map itself stays still, so that a slow display such as the wall screen
+isn't asked to redraw it. Only the highlight moves. In the map-and-list layout
+a curved arrow runs from the boat to the highlighted match, and it switches to
+the next match when the list does.
 
-- **A place right beside you:** It gets a street-level view centred on it.
-- **A place further off:** The view slides toward the boat, so that both stay
-  on screen.
-- **After the last match:** The map pulls back out to a view centred on the
-  boat, rests there for a moment and starts again.
+- **Close to the boat:** Sometimes a match is so near that the two markers
+  almost touch. There's no room for an arrow then, so only the ring shows.
+- **The name:** The highlighted match always keeps its name on the map, even if
+  another match sits close beside it.
+- **Map only:** There's no arrow in this layout, because there's no list to say
+  what it points at.
+- **GNSS warning:** While the GNSS badge shows, the position may not be real, so
+  the arrow is hidden and the map doesn't move.
 
-A longer cycle, 15 to 20 seconds, gives each place a longer hold. A very short
-one shortens the moves to fit. With reduced motion set on the display, the map
-jumps instead of flying and stays level.
+As the boat moves, its marker moves across the map. The map reframes, with one
+instant jump and no sliding, in these cases:
+
+- **The boat nears the edge:** The map recentres on the boat.
+- **The five nearest matches change:** A new place comes into the list or one
+  drops out, and the map fits the new set. Two matches swapping places in the
+  list doesn't count.
+- **The tile changes:** You resize it, switch between **Map only** and **Map and
+  list**, or change the range.
+
+You can pan and zoom the map yourself on a normal screen, and it stays where you
+left it until one of those things happens.
 
 ## Choosing a data source
 

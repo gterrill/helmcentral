@@ -78,7 +78,7 @@ export function PoiMapConfigDialog({ widget, open, onOpenChange, onSave }: PoiMa
         <DialogHeader>
           <DialogTitle>Nearby map</DialogTitle>
           <DialogDescription>
-            A moving map of points of interest near the vessel, ranked by distance.
+            A map of points of interest near the vessel, ranked by distance.
           </DialogDescription>
         </DialogHeader>
 

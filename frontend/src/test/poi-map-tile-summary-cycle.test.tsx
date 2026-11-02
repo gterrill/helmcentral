@@ -28,15 +28,16 @@ vi.mock('react-map-gl/maplibre', async () => {
         React.useImperativeHandle(ref, () => ({
           getCanvas: () => ({ style: {} }),
           getZoom: () => 12,
-          easeTo: vi.fn(),
           jumpTo: vi.fn(),
-          flyTo: vi.fn(),
           project: ([lng, lat]: [number, number]) => ({ x: lng, y: lat }),
         }))
         React.useEffect(() => { onLoad?.() }, [onLoad])
         return <div data-testid="map-root">{children}</div>
       },
     ),
+    useMap: () => ({
+      current: { getMap: () => ({ on: () => {}, off: () => {}, project: ([lng, lat]: [number, number]) => ({ x: lng, y: lat }) }) },
+    }),
     Marker: ({ children }: { children?: React.ReactNode }) => <div data-testid="marker">{children}</div>,
     Source: ({ children, id }: { children?: React.ReactNode; id: string }) => (
       <div data-testid={`source-${id}`}>{children}</div>

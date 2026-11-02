@@ -11,6 +11,7 @@ import {
   POI_MAP_MIN_ZOOM,
   fitCameraAroundPoint,
   formatBearing,
+  pointInCameraFrame,
   poiCategoryById,
   topPoi,
   zoomForRangeNm,
@@ -226,5 +227,49 @@ describe('formatBearing', () => {
   test('normalises an out-of-range or negative value', () => {
     expect(formatBearing(-10)).toBe('350° N')
     expect(formatBearing(370)).toBe('010° N')
+  })
+})
+
+describe('pointInCameraFrame', () => {
+  const camera = { center: { lat: -20.27, lon: 148.94 }, zoom: 12 }
+  // At zoom 12 the world is 512 * 4096 px wide.
+  const lonPerPx = 360 / (512 * 2 ** 12)
+
+  test('holds the centre, and a point just inside the padded frame', () => {
+    expect(pointInCameraFrame(camera.center, camera, 240, 240, 44)).toBe(true)
+    const inside = { lat: camera.center.lat, lon: camera.center.lon + 75 * lonPerPx }
+    expect(pointInCameraFrame(inside, camera, 240, 240, 44)).toBe(true)
+  })
+
+  test('rejects a point past the padded edge on either axis', () => {
+    const east = { lat: camera.center.lat, lon: camera.center.lon + 77 * lonPerPx }
+    expect(pointInCameraFrame(east, camera, 240, 240, 44)).toBe(false)
+    const west = { lat: camera.center.lat, lon: camera.center.lon - 77 * lonPerPx }
+    expect(pointInCameraFrame(west, camera, 240, 240, 44)).toBe(false)
+    // 0.02 degrees of latitude is about 124 px, past 76 px at zoom 12.
+    expect(pointInCameraFrame({ lat: camera.center.lat + 0.02, lon: camera.center.lon }, camera, 240, 240, 44)).toBe(false)
+  })
+
+  test('measures against the box shape, not just its height', () => {
+    const point = { lat: camera.center.lat, lon: camera.center.lon + 100 * lonPerPx }
+    expect(pointInCameraFrame(point, camera, 400, 240, 44)).toBe(true)
+    expect(pointInCameraFrame(point, camera, 240, 400, 44)).toBe(false)
+  })
+
+  test('keeps the box at least half the pane on a short pane, so jitter does not jump', () => {
+    // Padding is capped at a quarter of each dimension: an 80 px pane keeps
+    // 20 px either side of the centre, a 100 px pane 25.
+    const latPerPx = lonPerPx * Math.cos((camera.center.lat * Math.PI) / 180)
+    const north = (px: number) => ({ lat: camera.center.lat + px * latPerPx, lon: camera.center.lon })
+    expect(pointInCameraFrame(north(15), camera, 240, 80, 44)).toBe(true)
+    expect(pointInCameraFrame(north(25), camera, 240, 80, 44)).toBe(false)
+    expect(pointInCameraFrame(north(20), camera, 240, 100, 44)).toBe(true)
+    expect(pointInCameraFrame(north(30), camera, 240, 100, 44)).toBe(false)
+  })
+
+  test('scales with zoom', () => {
+    const point = { lat: camera.center.lat, lon: camera.center.lon + 100 * lonPerPx }
+    expect(pointInCameraFrame(point, { ...camera, zoom: 11 }, 240, 240, 44)).toBe(true)
+    expect(pointInCameraFrame(point, { ...camera, zoom: 12 }, 240, 240, 44)).toBe(false)
   })
 })
