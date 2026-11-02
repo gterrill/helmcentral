@@ -1,11 +1,5 @@
 # Agent Instructions
 
-## Release Tags
-
-- Use SemVer tags only (for example `v0.3.5`).
-- Do not create date-based or ad-hoc tags.
-- If tagging is requested, determine the next SemVer from existing tags.
-
 ## Release Notes
 
 - `CHANGELOG.md` is the release notes. The release workflow publishes the
@@ -16,9 +10,6 @@
 - Any change that makes an operator act on upgrade (moved setting, removed
   environment variable, changed URL, rewritten stored state, anything they
   must re-enter or place again) goes under **Breaking**, and says what to do.
-- Before tagging, rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`, add a
-  fresh empty `## [Unreleased]` above it, and update the compare links at the
-  foot of the file. Check it with `sh packaging/release-notes.sh vX.Y.Z`.
 - Entries are written for the operator with the `help-pages` skill: no ADR
   numbers, no implementation detail.
 
@@ -32,16 +23,12 @@
   
 ## Checks Before Commit And Release
 
-- Before `/code-review medium`, run `/simplify` on batches larger than a small
-  edit, then re-run the tests. It applies its fixes, so run it only in your own
-  worktree or a tree holding nothing but your changes. Its edits are refactors:
-  no test-first, no CHANGELOG entry.
-- Run `/code-review medium` on the working tree before committing a batch of changes.
-- Run `/code-review high` on the commits since the last tag before creating a release tag. For large migrations (framework or major dependency upgrades), use `/code-review ultra` instead.
-- Run `/security-review` once the changes are committed, before merging a branch or creating a release tag. It diffs `origin/HEAD...` in the session's own directory, whatever a `cd` says, so run it from the checkout holding the branch's commits (step 1 of the `ship` skill covers a worktree). A report on an empty diff checked nothing.
-- `/security-review` takes no arguments and never edits code. It returns a markdown report of HIGH/MEDIUM findings only and filters anything below 8/10 confidence.
-- Check each finding against the code before acting on it. `high` and above report uncertain findings.
-- Findings applied with `--fix` still have to follow the Fallback and Test-First policies below.
+- Every batch of changes passes `/code-review medium` before its commit and
+  `/security-review` before it merges, with or without the `ship` skill, which
+  holds the full steps. Check each finding against the code. A
+  `/security-review` report on an empty diff checked nothing.
+- Tags are SemVer only, such as `v0.3.5`. Every release goes through the
+  `release` skill.
 
 ## Shared Working Tree
 
@@ -58,17 +45,8 @@
   `make worktree NAME=<short-name>` creates one alongside this directory with
   `frontend/node_modules` symlinked, so tests run immediately. Only one
   checkout can run the dev stack; use the one that is already up.
-- To check a UI change made in a worktree, leave the dev stack alone and run
-  the worktree's frontend on the next free port against the same backend:
-  `cd frontend && npx vite --port 5175 --strictPort`. Vite proxies `/api` to
-  the running backend on :8080, so the page shows the same live data as :5173
-  and the two can be compared side by side. To see the boat's own data
-  instead, prefix `VITE_API_PROXY_TARGET=http://192.168.50.240:9091`; that
-  page writes to the boat, so use it to look and save on the dev stack.
-  Ports 5173 and 5174 belong to the dev and e2e stacks; go up from 5175 if
-  another worktree already holds it.
-  Stop the server once the change is checked; `make prune-merged` will not
-  remove a worktree while it runs.
+- To check a UI change made in a worktree, follow "Preview from a worktree" in
+  the `run-dashboard` skill.
 - Once a branch's PR is merged, `make prune-merged` lists the worktrees and
   local and remote branches it would clear; `CONFIRM=1` deletes them. It
   skips any worktree with uncommitted changes or with a process still
@@ -165,6 +143,7 @@ section before writing or reviewing:
   settings sections: **CRUD Pattern Library**.
 - Dashboard tiles, Tailwind classes, colours, type sizes and chart labels:
   **High-Density Tailwind UI/UX Specification**.
+- Anything saved to disk, a store or a Mate transcript: **Saved Data**.
 
 ## Modern Web Guidance
 

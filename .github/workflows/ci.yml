@@ -160,6 +160,19 @@ jobs:
       - name: Lint
         run: vale --no-global docs
 
+  # See scripts/check-changelog.sh. The push run catches a PR whose checks ran
+  # before a release was tagged.
+  changelog:
+    name: Changelog released sections
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+
+      - name: Check released sections
+        run: sh scripts/check-changelog.sh
+
   # PRs build linux/amd64 only, unless they touch the release config,
   # dependencies, workflows or platform-specific Go (an OS/arch file suffix or
   # a //go:build line), when they build every published target. Pushes to main

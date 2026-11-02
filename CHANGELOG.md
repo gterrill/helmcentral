@@ -56,6 +56,28 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **A cruise replay frames each passage, and names it.** In the replay of a
+  cruise, or of passages you select together, the camera now frames the passage
+  the boat is on, rather than the whole trip. At each stay it pulls out to the
+  whole cruise, so the route so far builds up on the screen, and comes back in
+  on the next passage. As each passage sets sail, a small label names it, such
+  as "Day 3 · Funnel Bay → Thomas Island", with the day counted by the boat's own
+  dates from the first departure. A camera shot you saved still takes over
+  wherever it applies, on the passage you saved it in. The video you export from
+  a cruise does the same, in landscape and portrait. A single passage replay is
+  as it was.
+
+- **A cruise replay now stops at each anchorage.** The replay of a cruise, or
+  of passages you select together, used to jump from one passage's end to the
+  next one's start. Now it holds for a moment at each stay, with the sun and
+  sky running from the day you arrived to the day you left, so a night at
+  anchor passes as dusk, dark and dawn, and a small label says how long you
+  stayed and where, such as "2 nights · Blue Pearl Bay". Every passage also
+  gets at least four seconds of the length you chose, so a short hop doesn't
+  flash past, and the length list for a cruise adds 2 and 3 minutes and starts
+  on 60 seconds. A single passage replay is as it was. The video you export
+  from a cruise holds at each stay the same way.
+
 - **Documents open full screen.** The document viewer has a **Full screen**
   button beside **Download** that fills the whole window, so a network diagram
   or an engine drawing is big enough to read without opening it in another
@@ -129,28 +151,6 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   Helmcentral, as described in [Provider plugins](docs/reference/plugins.md).
 
 ### Added
-
-- **A cruise replay frames each passage, and names it.** In the replay of a
-  cruise, or of passages you select together, the camera now frames the passage
-  the boat is on, rather than the whole trip. At each stay it pulls out to the
-  whole cruise, so the route so far builds up on the screen, and comes back in
-  on the next passage. As each passage sets sail, a small label names it, such
-  as "Day 3 · Funnel Bay → Thomas Island", with the day counted by the boat's own
-  dates from the first departure. A camera shot you saved still takes over
-  wherever it applies, on the passage you saved it in. The video you export from
-  a cruise does the same, in landscape and portrait. A single passage replay is
-  as it was.
-
-- **A cruise replay now stops at each anchorage.** The replay of a cruise, or
-  of passages you select together, used to jump from one passage's end to the
-  next one's start. Now it holds for a moment at each stay, with the sun and
-  sky running from the day you arrived to the day you left, so a night at
-  anchor passes as dusk, dark and dawn, and a small label says how long you
-  stayed and where, such as "2 nights · Blue Pearl Bay". Every passage also
-  gets at least four seconds of the length you chose, so a short hop doesn't
-  flash past, and the length list for a cruise adds 2 and 3 minutes and starts
-  on 60 seconds. A single passage replay is as it was. The video you export
-  from a cruise holds at each stay the same way.
 
 - **Export a passage replay as a video.** **Export**, then **Video**, on a
   passage, cruise or selection makes an MP4 of the replay as it's set: the

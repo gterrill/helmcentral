@@ -1,0 +1,2 @@
+# Two PRs can add to "## [Unreleased]" without a conflict; scripts/check-changelog.sh guards released sections.
+CHANGELOG.md merge=union

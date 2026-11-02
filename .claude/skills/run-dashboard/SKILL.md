@@ -1,6 +1,6 @@
 ---
 name: run-dashboard
-description: Launch and screenshot the Helmcentral dashboard (frontend + backend) to visually verify a UI change. Use when asked to run the app, start the dev server, take a screenshot of the dashboard, or confirm a frontend change looks right in the browser.
+description: Launch and screenshot the Helmcentral dashboard (frontend + backend) to visually verify a UI change. Use when asked to run the app, start the dev server, take a screenshot of the dashboard, preview a worktree's UI, or confirm a frontend change looks right in the browser.
 ---
 
 Helmcentral is a Vite/React frontend proxying `/api` to a Go backend
@@ -14,6 +14,7 @@ Pick the stack **before** you start, by what the script will do:
 |---|---|---|
 | Screenshot, visual/layout check, read-only browsing | dev stack | http://localhost:5173 |
 | Anything that submits a form, clicks Save/Connect/Apply, or otherwise mutates state | **E2E stack** (`make e2e-up`) | http://localhost:5174 |
+| Looking at a UI change made in a worktree | The worktree's own frontend (see "Preview from a worktree") | http://localhost:5175 |
 
 The dev stack bind-mounts the developer's **live** `settings.yaml` and
 writes runtime state into `./backend/data`. It is pointed at a real
@@ -75,10 +76,29 @@ must (e.g. compose is unavailable), kill it yourself when done; never
 `make down` the container stack unless the user asks — it's shared,
 long-running dev infrastructure.
 
+## Preview from a worktree
+
+Leave the dev stack alone and run the worktree's frontend on the next free port
+against the same backend:
+
+```bash
+cd frontend && npx vite --port 5175 --strictPort
+```
+
+Vite proxies `/api` to the running backend on :8080, so the page shows the same
+live data as :5173 and the two can be compared side by side. To see the boat's
+own data instead, prefix `VITE_API_PROXY_TARGET=http://192.168.50.240:9091`.
+That page writes to the boat, so use it only to look.
+
+Ports 5173 and 5174 belong to the dev and e2e stacks; go up from 5175 if another
+worktree already holds it. Stop the server once the change is checked: `make
+prune-merged` will not remove a worktree while it runs.
+
 ## 3. Screenshot it
 
 No `chromium-cli` in this environment. Use Playwright's screenshot CLI
-via `npx` (auto-downloads Chromium on first run, ~1min):
+via `npx` (auto-downloads Chromium on first run, ~1min). From a worktree, use
+its own port in place of 5173, or the shot shows the main checkout's code:
 
 ```bash
 npx --yes playwright screenshot \
