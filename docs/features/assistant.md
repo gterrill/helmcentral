@@ -113,6 +113,45 @@ On request, it can look up more than that. Here is what it can do:
 these draws on. It also explains what counts as "nearby" for a place search,
 and what you see when a lookup fails or isn't set up.
 
+### Positions you type
+
+When you type a position into a message, Helmcentral works out the decimal
+figures itself and tells Mate to use them, so Mate doesn't do the sum. A
+position worked out by a model can land a few tenths of a mile off, and the
+shelter check and passage estimate would then use the wrong spot. Mate keeps
+the last eight you gave in the conversation. Your figure wins over one from an
+earlier answer or a place search for the same place, and a newer one you give
+replaces an older one.
+
+Helmcentral reads a position when each half has N, S, E or W, a degree mark and a
+minute mark:
+
+- **Degrees and minutes:** `021º40.271' S / 150º17.341' E`.
+- **Degrees, minutes and seconds:** `20°32'40.5" S 149°07'08" E`.
+- **The letter first:** `S 21°40.271' E 150°17.341'`.
+- **Labelled:** `Lat 21°40.271' S, Lon 150°17.341' E`.
+
+The halves go in either order. Split them by a space, a comma, a slash, a dash, a
+new line or the word "and". A list of positions works too, one after another. If
+one message gives several, Mate goes by what you say about them.
+
+Helmcentral would rather read nothing than read a position wrongly, so it leaves
+some things alone:
+
+- Anything without those marks, like `20 32.676' S` or `Variation 12° E`.
+- Minutes of 60 or more, a latitude past 90 and a longitude past 180.
+- A position with something like half of one on the same line, like `Heading 150°
+  E,` right before it, or a number straight before its first half.
+
+Mate is told to ask you to rewrite a position in degrees and minutes that
+Helmcentral couldn't read, rather than working it out. Decimal degrees aren't
+converted, because Mate only has to copy them. That includes `21.6712 S`, where
+it only has to get the sign right.
+
+A position in a document or a web page isn't converted, and neither is one Mate
+finds by place name. Mate is told to use the figures you gave, but we can't make
+a model obey.
+
 ### A fair-tide departure
 
 For a passage leaving from where the boat is now, Mate can pick a departure

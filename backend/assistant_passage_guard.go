@@ -57,7 +57,7 @@ const (
 	assistantAnchorageDepthLead              = "Your draft states a water depth for an anchorage that has no source. " + ruleDepth
 	assistantAnchorageDepthInstruction       = assistantAnchorageDepthLead + " If the operator gave the figure, call anchorage_details with it as depth_m and base the answer on its result. Otherwise remove the depth."
 	assistantAnchorageDepthNoToolInstruction = assistantAnchorageDepthLead + " The anchorage tool cannot run here, so state a depth only if the operator gave you the figure in this conversation (say it is theirs) or you read it from a tool result this turn, such as the boat's depth sounder (say where it is from). Otherwise remove the depth and tell the operator to check the chart."
-	assistantAnchorageShelterInstruction     = "Your draft judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_details with its position (from find_places, or the boat's position if it is where you are now) and when the boat arrives, and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
+	assistantAnchorageShelterInstruction     = "Your draft judges shelter or exposure to the wind without the shoreline check having run. If the statements are about an anchorage, call anchorage_details with its position (a position the skipper gave, else from find_places, or the boat's position if it is where you are now) and when the boat arrives, and base the judgement on its sheltered, partly sheltered and exposed arcs compared against the forecast wind direction. Otherwise remove the statements about shelter and exposure."
 )
 
 var (

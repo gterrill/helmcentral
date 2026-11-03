@@ -34,6 +34,11 @@ type assistantPromptContext struct {
 	// can say a watch is running only when one is.
 	ActiveWatch *assistantWatchInfo
 
+	// OperatorPositions are the positions the skipper wrote in this
+	// conversation, already converted to decimal degrees, newest first. Rendered
+	// in the live part so the model never does the arithmetic itself.
+	OperatorPositions []operatorPosition
+
 	VesselName string
 	BoatModel  string
 	// LOAM is anchor.loa_m from settings, 0 when not entered (settings.go's
@@ -1166,6 +1171,14 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"from a tool you did not call in this turn (find_places, routes, distances, forecasts): label " +
 		"figures from earlier turns as from earlier, or fetch them again.\n\n" +
 
+		// A model converted 021º40.271' S to -21.67785, 0.4 nm off, and every
+		// lookup after it used that spot. Helmcentral converts what it can read
+		// (the live part lists it), so what is left is for the skipper to rewrite.
+		"Never convert a position the skipper gives in degrees and minutes, or degrees, minutes and seconds, yourself. If your " +
+		"instructions list no converted figure for it, ask them to write it like 21°40.271' S 150°17.341' E. " +
+		"Wherever these instructions or a tool say to take coordinates from find_places, a position the skipper gave " +
+		"for that place comes first.\n\n" +
+
 		// A message that opens with the check label is Helmcentral's, not the
 		// operator's. A model once read one as the operator objecting and
 		// apologised for a comment it had not made.
@@ -1362,6 +1375,11 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		fmt.Fprintf(&lb, "A watch you started is running in this conversation: %s, until %s. Its report will arrive in this conversation by itself when it ends.\n\n",
 			w.Subject, boatClock(w.EndsAt, pc.BoatTime.Loc))
 	}
+
+	// 5d. Positions the skipper wrote, already converted to decimals. Live,
+	// because they come from this conversation, and absent when there are none
+	// so a turn without a position renders exactly as before.
+	lb.WriteString(operatorPositionsNote(pc.OperatorPositions))
 
 	live = lb.String()
 
