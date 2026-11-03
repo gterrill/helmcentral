@@ -3,7 +3,7 @@ import { lazy, Suspense, memo, useMemo, type ComponentProps } from 'react'
 import { type PoiMapActiveRoute, type PoiMapActiveRouteWaypoint, type PoiMapTileProps } from '@/components/poi-map-tile-impl'
 import { TRAIL_POLL_MS } from '@/config/app-config'
 import { useAisCollisionAlarms } from '@/hooks/use-alarms'
-import { useNearbyVesselList } from '@/hooks/use-nearby-vessels'
+import { useNearbyVesselFeed, useNearbyVesselList } from '@/hooks/use-nearby-vessels'
 import { useRouteActivation } from '@/hooks/use-route-activation'
 import { useSelfTrail } from '@/hooks/use-server-trails'
 import { useVesselFields } from '@/hooks/use-vessel-state'
@@ -59,11 +59,12 @@ function useActiveRouteLayer() {
 
 /** The Nearby map tile: own ship from vessel state, the AIS contacts, the collision colours, the active route, and the boat's trail. The trail polls while the tile is mounted, and only when Show trail is on. */
 export const LivePoiMapTile = memo(function LivePoiMapTile(props: Omit<ComponentProps<typeof PoiMapTile>,
-  'aisCollisionAlarms' | 'selfTrail' | 'nearbyVessels' | 'activeRoute' | (typeof POI_FIELDS)[number]>) {
+  'aisCollisionAlarms' | 'selfTrail' | 'nearbyVessels' | 'nearbyVesselFeed' | 'activeRoute' | (typeof POI_FIELDS)[number]>) {
   const ownShip = useVesselFields(POI_FIELDS)
   const activeRoute = useActiveRouteLayer()
   const nearbyVessels = useNearbyVesselList()
+  const nearbyVesselFeed = useNearbyVesselFeed()
   const aisCollisionAlarms = useAisCollisionAlarms()
   const selfTrail = useSelfTrail(TRAIL_POLL_MS, props.config.showTrail === true)
-  return <PoiMapTile {...props} {...ownShip} activeRoute={activeRoute} nearbyVessels={nearbyVessels} aisCollisionAlarms={aisCollisionAlarms} selfTrail={selfTrail} />
+  return <PoiMapTile {...props} {...ownShip} activeRoute={activeRoute} nearbyVessels={nearbyVessels} nearbyVesselFeed={nearbyVesselFeed} aisCollisionAlarms={aisCollisionAlarms} selfTrail={selfTrail} />
 })

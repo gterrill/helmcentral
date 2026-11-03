@@ -6,49 +6,20 @@ import { memo, useMemo, useState, type ComponentProps } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tile } from '@/components/ui/tile'
 import { type DistanceUnits } from '@/config/app-config'
-import { ALARM_STATES, type AlarmState, useAisCollisionAlarms } from '@/hooks/use-alarms'
+import { type AlarmState, useAisCollisionAlarms } from '@/hooks/use-alarms'
 import { useVesselSightings, type VesselSighting } from '@/hooks/use-vessel-sightings'
 import { useNearbyVessels, type NearbyVessel } from '@/hooks/use-nearby-vessels'
 import { formatCoordinate } from '@/lib/format'
+import {
+  COLLISION_TIER_STYLE,
+  collisionTier,
+  formatRelativeAge,
+  formatSearchRange,
+  formatSightingSummary,
+  sortByCollisionAlarm,
+} from '@/lib/nearby-vessel-display'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
-
-// formatRelativeAge renders a seconds count on the shared s/m/h/d ladder.
-// Both the server-computed age_seconds (currently capped well under an hour
-// by nearbyVesselMaxAge) and formatLastSeen (a client-side delta against
-// last_seen_at, which can be days old) share this: age_seconds only ever
-// exercises the top of the ladder today, but keeping one implementation
-// means a future staleness-cutoff change can't silently reintroduce the
-// "2648m ago" bug by falling through a ladder that was never extended.
-function formatRelativeAge(seconds: number) {
-  const clamped = Math.max(0, seconds)
-  if (clamped < 60) {
-    return `${clamped}s ago`
-  }
-
-  const minutes = Math.floor(clamped / 60)
-  if (minutes < 60) {
-    return `${minutes}m ago`
-  }
-
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) {
-    return `${hours}h ago`
-  }
-
-  const days = Math.floor(hours / 24)
-  return `${days}d ago`
-}
-
-function formatLastSeen(lastSeenAt: string, nowMs = Date.now()) {
-  const parsedMs = Date.parse(lastSeenAt)
-  if (!Number.isFinite(parsedMs)) {
-    return 'unknown'
-  }
-
-  const deltaSeconds = Math.max(0, Math.floor((nowMs - parsedMs) / 1000))
-  return formatRelativeAge(deltaSeconds)
-}
 
 // vesselContactKey mirrors the backend's vesselContactKey resolution
 // (backend/nearby_contacts.go): the vessel's MMSI. The backend only ever
@@ -125,54 +96,6 @@ function VesselHistoryPopover({ vessel, children }: { vessel: NearbyVessel; chil
   )
 }
 
-/**
- * Two-tier collapse of the live collision-alarm ladder for this row (ADR
- * 0140). The anchor-watch map (ADR 0088) paints one red for every state from
- * `alert` through `emergency` — a marker has only one colour to spend, and
- * shape already says "this is AIS." A list row has room for a text label as
- * well as colour, so it keeps the split the map deliberately gives up:
- * `alert`/`warn` read as a still-forming risk (amber, "Collision warning"),
- * `alarm`/`emergency` as an imminent one (red, "Collision alarm") — the same
- * `alarm` cutoff the map uses for its own ring. `normal` is not a state
- * collisionAlarmStatesByVessel actually hands back, but the type doesn't
- * rule it out, so it is treated as no alarm rather than crashing the lookup.
- */
-type CollisionTier = 'warn' | 'alarm'
-
-function collisionTier(state: AlarmState | undefined): CollisionTier | null {
-  if (state === undefined || state === 'normal') return null
-  return ALARM_STATES.indexOf(state) >= ALARM_STATES.indexOf('alarm') ? 'alarm' : 'warn'
-}
-
-const COLLISION_TIER_STYLE: Record<CollisionTier, { row: string; text: string; label: string }> = {
-  alarm: {
-    row: 'border-red-500 bg-red-50 dark:bg-red-950/60',
-    text: 'text-red-600 dark:text-red-400',
-    label: 'Collision alarm',
-  },
-  warn: {
-    row: 'border-amber-500 bg-amber-50 dark:bg-amber-950/60',
-    text: 'text-amber-600 dark:text-amber-400',
-    label: 'Collision warning',
-  },
-}
-
-/**
- * Alarmed vessels first, worst state first; unalarmed vessels — and vessels
- * tied on tier — keep the order the feed gave them (nearest first, set by
- * the backend). Builds a new array rather than sorting `vessels` in place,
- * so the memoised prop from App.tsx is never mutated, and ties break on the
- * original index so the result doesn't depend on the sort being stable.
- */
-function sortByCollisionAlarm(vessels: NearbyVessel[], aisCollisionAlarms: ReadonlyMap<string, AlarmState> | undefined): NearbyVessel[] {
-  if (!aisCollisionAlarms || aisCollisionAlarms.size === 0) return vessels
-
-  return vessels
-    .map((vessel, index) => ({ vessel, index, rank: ALARM_STATES.indexOf(aisCollisionAlarms.get(vessel.id) ?? 'normal') }))
-    .sort((a, b) => (b.rank !== a.rank ? b.rank - a.rank : a.index - b.index))
-    .map((entry) => entry.vessel)
-}
-
 type NearbyVesselsTileProps = {
   vessels: NearbyVessel[]
   loading: boolean
@@ -208,15 +131,6 @@ function formatRange(rangeMeters: number, distanceUnits: DistanceUnits) {
     return `${Math.round(rangeMeters * 3.28084)} ft`
   }
   return `${Math.round(rangeMeters)} m`
-}
-
-// A search radius, in the units used for marine ranges elsewhere on the board:
-// km and nm (as the Nearby map tile does), metres under a kilometre.
-function formatSearchRange(rangeMeters: number, distanceUnits: DistanceUnits) {
-  const trim = (n: number) => String(Number(n.toFixed(1)))
-  if (distanceUnits === 'imperial') return `${trim(rangeMeters / 1852)} nm`
-  if (rangeMeters < 1000) return `${Math.round(rangeMeters)} m`
-  return `${trim(rangeMeters / 1000)} km`
 }
 
 export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, loading, distanceUnits, lastUpdateAgeS, aisCollisionAlarms, maxRangeM = null }: NearbyVesselsTileProps) {
@@ -255,8 +169,7 @@ export const NearbyVesselsTile = memo(function NearbyVesselsTile({ vessels, load
                 {typeof vessel.seen_count === 'number' && vessel.seen_count > 0 ? (
                   <VesselHistoryPopover vessel={vessel}>
                     <p className="mt-1 text-xs text-muted-foreground underline decoration-dotted underline-offset-2">
-                      Seen {vessel.seen_count}x before
-                      {typeof vessel.last_seen_at === 'string' && vessel.last_seen_at.trim() !== '' ? `, last ${formatLastSeen(vessel.last_seen_at)}` : ''}
+                      {formatSightingSummary(vessel)}
                     </p>
                   </VesselHistoryPopover>
                 ) : null}

@@ -13,7 +13,6 @@ import {
   groupMoorings,
   kn,
   lengthText,
-  METRES_PER_NM,
   anchorageTitle,
   restrictedLine,
   timeText,
@@ -22,6 +21,7 @@ import {
   type BadgeTone,
 } from '@/lib/anchorage-card'
 import { useAppConfig } from '@/hooks/use-app-config'
+import { METRES_PER_NM } from '@/lib/geo'
 import { distanceText, humanise } from '@/lib/marina-card'
 import type { AnchorageCard, ShelterGrade } from '@/lib/mate-cards'
 import { formatRowDate } from '@/lib/passage-dates'

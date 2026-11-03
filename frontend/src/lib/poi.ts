@@ -13,7 +13,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 
-import { mercatorX, mercatorY } from '@/lib/geo'
+import { mercatorX, mercatorY, METRES_PER_NM } from '@/lib/geo'
 
 /**
  * A point-of-interest feature exactly as GET /api/poi returns it (see
@@ -75,7 +75,6 @@ export function poiCategoryById(id: string): PoiCategory | undefined {
 // equatorial circumference over 512: 40075016.68557849 / 512. Same value and
 // reason as anchor-view.ts.
 const MAPLIBRE_METERS_PER_PIXEL_AT_ZOOM_0 = 78271.51696402048
-const METERS_PER_NM = 1852
 export const POI_MAP_MIN_ZOOM = 5
 export const POI_MAP_MAX_ZOOM = 16
 
@@ -91,7 +90,7 @@ export const POI_MAP_MAX_ZOOM = 16
  */
 export function zoomForRangeNm(rangeNm: number, lat: number, heightPx: number): number {
   if (!(rangeNm > 0) || !(heightPx > 0)) return POI_MAP_MIN_ZOOM
-  const diameterM = rangeNm * METERS_PER_NM * 2
+  const diameterM = rangeNm * METRES_PER_NM * 2
   const targetMetersPerPixel = diameterM / heightPx
   const latRad = (lat * Math.PI) / 180
   const zoom = Math.log2(
