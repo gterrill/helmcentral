@@ -28,6 +28,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Helmcentral converts the positions you type to Mate.** Mate once took
+  021º40.271' S / 150º17.341' E and worked it out wrongly, so the shelter check
+  and the passage estimate used a spot 0.4 nm south of where you meant. Now
+  Helmcentral reads positions in your messages itself and tells Mate the
+  decimal figures to use, and your figure wins over a place search. It reads
+  degrees and minutes, with or without seconds, when each half has N, S, E or W, a
+  degree mark and a minute mark. Anything it can't read exactly, such as 75
+  minutes, is left alone, and Mate is told to ask you to rewrite it. Decimal
+  degrees aren't converted, since Mate only has to copy them. We can't make a
+  model obey, so Mate could still ignore the figure it's given.
 - **Mate is told to carry on after its answer is sent back.** When Mate's first
   draft judges shelter or the wind without looking it up, Helmcentral sends it
   back to check. Mate once took that as you objecting, apologised, and asked

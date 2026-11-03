@@ -1189,6 +1189,8 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 	if watch, ok := globalAssistantWatches.get(id); ok && watch.Status == assistantWatchStatusWatching {
 		pc.ActiveWatch = &watch
 	}
+	// Helmcentral converts the skipper's own positions so the model never has to.
+	pc.OperatorPositions = operatorPositionsFromMessages(messages)
 	systemStable, systemLive := assistantSystemPromptParts(pc)
 	toolDefs := toolDeps.definitions()
 	history, err := assistantHistoryMessages(messages, assistantDocumentLookup)

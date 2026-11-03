@@ -28,8 +28,8 @@ var mateToolSavePlace = mateTool{
 		Description: "Offer to save a named position the operator gave you, so find_places knows it in later chats. " +
 			"Use it when the operator states coordinates for a named spot that find_places did not know. " +
 			"This changes NOTHING: the operator sees a card under your reply and taps Apply or Dismiss, so tell them to tap " +
-			"Apply and never say it is saved. Give lat and lon as signed decimal degrees (south and west negative): " +
-			"convert 20°32.676' S 149°07.136' E to -20.5446 and 149.118933 (keep at least six decimals). If the name is already saved this proposes moving it " +
+			"Apply and never say it is saved. Give lat and lon as signed decimal degrees (south and west negative), " +
+			"copying figures the operator gave that way as written, and using the converted figures in your instructions for degrees and minutes. If no figure is listed, ask the operator for one rather than working it out. If the name is already saved this proposes moving it " +
 			"and the card shows the old and new position. " +
 			ruleDepthArg + " It is recorded as charted, dated today, and replaces any depth already saved.",
 		Parameters: json.RawMessage(`{
