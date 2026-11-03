@@ -78,10 +78,10 @@ Vessels group next to the places. Here is what it shows:
 
 When the group can't list vessels it says why, in this order:
 
-- **Vessels need a GNSS fix:** Your position isn't trustworthy, so every
-  distance would be wrong. No vessels are listed.
 - **Loading…:** The tile hasn't heard from the AIS feed yet.
 - **AIS unavailable:** Helmcentral can't read AIS from SignalK.
+- **Vessels need a GNSS fix:** Your position isn't trustworthy, so every
+  distance would be wrong. No vessels are listed.
 - **No vessels within 5 km:** The feed is working and nothing is in range. The
   distance is the smaller of the tile's range and the feed's.
 
