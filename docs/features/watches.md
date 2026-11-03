@@ -4,7 +4,7 @@ A watch is a regular check of the boat. At the times you choose, Helmcentral
 reads the boat, builds a short report, and tells you whether anything in it
 needs a look. Mate then reads the report and adds what it makes of it. You find
 the result on the **Watches** page in the sidebar, newest first, so a skipper
-coming on deck at 06:00 can see what happened overnight without asking.
+coming on deck at 6.00 AM can see what happened overnight without asking.
 
 The name comes from the officer of the watch. It's a different thing from an
 [anchor watch](anchor-watch.md), which watches the anchor, and from a timed
@@ -13,7 +13,7 @@ watch on a reading, which is covered at the end of this page.
 ## What a watch gives you
 
 - **A report:** The same sections in the same order every time, with the figures
-  in your units. It looks the same at 06:00 on Tuesday as it did on Monday, so
+  in your units. It looks the same at 6.00 AM on Tuesday as it did on Monday, so
   you can read it at a glance.
 - **Findings:** A short list of the things that need a look, decided by rules you
   can read and change. When nothing needs a look, the list is empty.
@@ -28,8 +28,8 @@ If something is wrong right now, an alarm is what wakes you.
 Open **Watches** and tap **New watch**. The page starts empty, with three
 templates to begin from:
 
-- **Morning report:** Every day at 06:00.
-- **Overnight check:** Every hour from 22:00 to 06:00.
+- **Morning report:** Every day at 6.00 AM.
+- **Overnight check:** Every hour from 10.00 PM to 6.00 AM.
 - **At anchor:** Every 2 hours.
 
 A watch has a name, a schedule, the report sections it covers, the thresholds
@@ -61,10 +61,10 @@ three times it will run.
 
 - **Every hour:** On the hour, every hour.
 - **Every few hours:** Every 2, 3, 4, 6 or 12 hours, on the hour.
-- **Daily at a time:** For example "Every day at 06:00 boat time".
+- **Daily at a time:** For example "Every day at 6.00 AM boat time".
 - **Chosen weekdays at a time:** For example "Mondays, Wednesdays and Fridays at
-  07:30".
-- **Hours between two times:** For example "Every hour from 22:00 to 06:00".
+  7.30 AM".
+- **Hours between two times:** For example "Every hour from 10.00 PM to 6.00 AM".
 - **Custom (cron):** Five cron fields (minute, hour, day of month, month, day of
   week) for anything else. When you open a watch whose schedule none of the
   presets can write, the page shows Custom with the fields as they are saved.

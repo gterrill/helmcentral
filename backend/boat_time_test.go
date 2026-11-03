@@ -182,7 +182,7 @@ func TestBuildAssistantSystemPrompt_AZeroBoatTimeDoesNotPanicInWarningsOrWatchLi
 		ActiveWatch: &assistantWatchInfo{Subject: "the bilge", EndsAt: time.Date(2026, 10, 29, 3, 0, 0, 0, time.UTC)},
 	}
 	prompt := buildAssistantSystemPrompt(pc)
-	if !strings.Contains(prompt, "(UTC, no position yet)") || !strings.Contains(prompt, "as of 00:00") || !strings.Contains(prompt, "until 03:00") {
+	if !strings.Contains(prompt, "(UTC, no position yet)") || !strings.Contains(prompt, "as of 12.00 AM") || !strings.Contains(prompt, "until 3.00 AM") {
 		t.Fatalf("zero boat time should read as UTC with no position:\n%s", prompt)
 	}
 }

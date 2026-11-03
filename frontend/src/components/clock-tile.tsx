@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo } from 'react'
 import { Sunrise, Sunset } from 'lucide-react'
 
 import { Tile } from '@/components/ui/tile'
-import { formatClock, formatDate, formatWeekday, isSameLocalDate } from '@/lib/vessel-time'
+import { formatClock, formatDate, formatTimeOfDay, formatWeekday, isSameLocalDate } from '@/lib/vessel-time'
 import { moonPhaseEmoji, moonPhaseLabel } from '@/lib/moon-phase'
 import { FORECAST_REFRESH_SECONDS, PLACE_NAME_REFRESH_SECONDS } from '@/config/app-config'
 import { usePlaceName } from '@/hooks/use-place-name'
@@ -29,7 +29,7 @@ export interface ClockTileTripEta {
 }
 
 export interface ClockTileProps {
-  /** Backend-formatted, e.g. "6:02AM" (forecast[0].sunriseTime). Null when the forecast has no fix for it. */
+  /** An RFC3339 instant (forecast[0].sunriseTime), shown in the boat's zone. Null when the forecast has no fix for it. */
   sunriseTime: string | null
   sunsetTime: string | null
   moonPhase: string | null
@@ -101,11 +101,8 @@ export const ClockTile = memo(function ClockTile({
     // A zone this browser does not know has no clock to put the ETA on.
     if (zoneError) return `ETA ${tripEta.label ? `${tripEta.label} ` : ''}--`
     const dayPrefix = now === null || isSameLocalDate(tripEta.etaAt, now, timeZone) ? '' : `${formatWeekday(tripEta.etaAt, timeZone)} `
-    // Include the meridiem the same way the hero clock does (its own
-    // `clock.meridiem` span) - a bare "09:40" can't be told from 9:40 PM,
-    // and this line has no other AM/PM context of its own to lean on.
-    const etaClock = formatClock(tripEta.etaAt, timeZone)
-    const time = `${dayPrefix}${hhmm(etaClock.timePart)}${etaClock.meridiem ? ` ${etaClock.meridiem}` : ''}`
+    // The ETA is a time label, so it reads like every other one: "9.40 PM".
+    const time = `${dayPrefix}${formatTimeOfDay(tripEta.etaAt, timeZone)}`
     const labelPart = tripEta.label ? `${tripEta.label} ` : ''
     return `ETA ${labelPart}${time}`
   })()
@@ -140,11 +137,11 @@ export const ClockTile = memo(function ClockTile({
         <div className="flex flex-wrap items-center gap-3 text-lg tabular-nums">
           <span className="flex items-center gap-1.5">
             <Sunrise className="h-4 w-4 text-gauge-primary" aria-hidden="true" />
-            {sunriseTime ?? '—'}
+            {sunriseTime ? formatTimeOfDay(sunriseTime, timeZone) : '—'}
           </span>
           <span className="flex items-center gap-1.5">
             <Sunset className="h-4 w-4 text-gauge-primary" aria-hidden="true" />
-            {sunsetTime ?? '—'}
+            {sunsetTime ? formatTimeOfDay(sunsetTime, timeZone) : '—'}
           </span>
           <span className="flex items-center gap-1.5">
             <span aria-hidden="true">{moonPhase ? moonPhaseEmoji(moonPhase) : '—'}</span>

@@ -63,7 +63,7 @@ describe('units and times', () => {
   })
 
   it('reads times in the anchorage zone', () => {
-    expect(timeText('2026-11-02T05:00:00Z', 'Australia/Lindeman')).toBe('Mon 15:00')
+    expect(timeText('2026-11-02T05:00:00Z', 'Australia/Lindeman')).toBe('Mon 3.00 PM')
   })
 
   it('writes wind, gust and waves, leaving out what the row does not have', () => {
@@ -111,7 +111,7 @@ describe('moorings and restrictions', () => {
 describe('footerLines', () => {
   it('dates the forecast, the coastline and the map', () => {
     expect(footerLines(anchorageCard())).toEqual([
-      'Forecast fetched Mon 11:00',
+      'Forecast fetched Mon 11.00 AM',
       'Coastline downloaded 3 Oct 2026',
       'OpenStreetMap · data as of 31 Oct 2026',
     ])
@@ -227,7 +227,7 @@ describe('depthLines', () => {
 
   it('says how far the wind was checked when the forecast ends before the stay', () => {
     const base = anchoragePayload().depth as { rode: object }
-    const card = anchorageCard({ depth: { ...base, rode: { ...base.rode, wind_checked_until: '2026-11-02T23:00:00+10:00' } } })
+    const card = anchorageCard({ depth: { ...base, rode: { ...base.rode, wind_checked_until_iso: '2026-11-02T23:00:00+10:00' } } })
     expect(depthLines(card, 'metric')[2].detail).toMatch(/before the stay does, so the wind was only checked up to then\.$/)
   })
 
@@ -237,9 +237,9 @@ describe('depthLines', () => {
     const card = anchorageCard({
       depth: {
         ...base,
-        clearance: { ...base.clearance, tide_checked_until: until },
-        rode: { ...base.rode, tide_checked_until: until },
-        swing: { ...base.swing, tide_checked_until: until },
+        clearance: { ...base.clearance, tide_checked_until_iso: until },
+        rode: { ...base.rode, tide_checked_until_iso: until },
+        swing: { ...base.swing, tide_checked_until_iso: until },
       },
     })
     const lines = depthLines(card, 'metric')

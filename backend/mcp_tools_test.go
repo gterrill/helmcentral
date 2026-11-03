@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Every Mate tool needs a decision. A tool added to the registry without one
@@ -144,5 +145,41 @@ func TestMCPTools_ResultsStandAlone(t *testing.T) {
 		if !strings.Contains(strings.ToLower(def.Description), strings.ToLower(phrase)) {
 			t.Errorf("%s description lacks %q:\n%s", name, phrase, def.Description)
 		}
+	}
+}
+
+// The MCP server gives the same boat-time labels as Mate: a client that reads
+// a UTC bucket time quotes it as the boat clock.
+func TestMCPTools_PathHistoryBucketsAreBoatTimeLabels(t *testing.T) {
+	useFreshBoatZone(t)
+	now := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
+	bucket := time.Date(2026, 11, 2, 3, 30, 0, 0, time.UTC)
+	series := map[string][]telemetryPoint{
+		"min":  {{Timestamp: bucket, Value: 40}},
+		"mean": {{Timestamp: bucket, Value: 41}},
+		"max":  {{Timestamp: bucket, Value: 42}},
+	}
+	d := assistantToolDeps{
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{Latitude: -27.5, Longitude: 153}, nil },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLastNotFound,
+	}
+	def := mcpToolDefByName("get_path_history")
+	if def == nil {
+		t.Fatal("get_path_history is not offered")
+	}
+	out, err := def.Run(context.Background(), d, json.RawMessage(`{"path":"tanks.freshWater.0.currentLevel","hours_back":6}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"t":"Mon 2 Nov 1.30 PM"`) {
+		t.Errorf("bucket should read as boat time: %s", out)
+	}
+	if strings.Contains(out, "2026-11-02T03:30:00Z") {
+		t.Errorf("a UTC bucket time reached the client: %s", out)
+	}
+	if !strings.Contains(strings.ToLower(def.Description), "as given") {
+		t.Errorf("description should say to quote times as given: %s", def.Description)
 	}
 }

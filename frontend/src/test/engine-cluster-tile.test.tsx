@@ -707,7 +707,7 @@ describe('engine off (ADR 0163)', () => {
     const badge = screen.getByTestId('tile-off-badge')
     expect(badge).toHaveTextContent(/off/i)
     expect(badge.className).not.toMatch(/amber|red/)
-    expect(badge.getAttribute('title')).toMatch(/^Off since \d{1,2}:\d{2}/)
+    expect(badge.getAttribute('title')).toMatch(/^Off since \d{1,2}\.\d{2} [AP]M/)
     expect(screen.queryByTestId('tile-stale-badge')).not.toBeInTheDocument()
     // OFF is said once, in the title pill (above); the status chip is only for a running engine.
     expect(screen.queryByTestId('cluster-chip')).not.toBeInTheDocument()

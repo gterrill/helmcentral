@@ -82,6 +82,10 @@ func TestShowTileDepthTideCardsTheSnapshotTheModelReads(t *testing.T) {
 	if res.Tile != "depth-tide" || len(res.Missing) != 0 {
 		t.Errorf("result = %+v", res)
 	}
+	// The card keeps the instant; Mate reads a boat-time label.
+	if res.CapturedAt != "Thu 29 Oct 2.03 PM" {
+		t.Errorf("captured_at for Mate = %q, want a boat-time label", res.CapturedAt)
+	}
 	// The model reads exactly the numbers the frozen card holds.
 	var cardSnap, modelSnap map[string]any
 	if err := json.Unmarshal(p.Snapshot, &cardSnap); err != nil {
@@ -116,7 +120,7 @@ func TestShowTileDepthTideCardsTheSnapshotTheModelReads(t *testing.T) {
 	}
 	// Figures for the model in the operator's units.
 	// Times are boat time (148E is UTC+10), whatever offset the provider wrote.
-	if res.Display["next_high"] != "3.00 m at 14:12 AEST (UTC+10)" || res.Display["next_low"] != "0.50 m at 20:30 AEST (UTC+10)" {
+	if res.Display["next_high"] != "3.00 m at 2.12 PM AEST (UTC+10)" || res.Display["next_low"] != "0.50 m at 8.30 PM AEST (UTC+10)" {
 		t.Errorf("tide extremes = %v / %v", res.Display["next_high"], res.Display["next_low"])
 	}
 	if res.Display["depth"] != "3.3 m" || res.Display["tide_now"] != "2.00 m rising" {

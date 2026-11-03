@@ -223,7 +223,7 @@ func TestGetActiveAlarms_TimesInBoatLocalTime(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.Alarms[0].RaisedAt != "Wed 14 Oct 11:02" || got.Alarms[0].AckedAt != "Wed 14 Oct 12:30" {
+	if got.Alarms[0].RaisedAt != "Wed 14 Oct 11.02 AM" || got.Alarms[0].AckedAt != "Wed 14 Oct 12.30 PM" {
 		t.Errorf("want UTC+10 local times, got %+v", got.Alarms[0])
 	}
 	if got.Timezone != "AEST (UTC+10)" {
@@ -235,7 +235,7 @@ func TestGetActiveAlarms_TimesAreUTCAndSaySoBeforeAnyFix(t *testing.T) {
 	useFreshBoatZone(t)
 	deps := assistantToolDeps{activeAlarms: func() []alarmStatus { return []alarmStatus{sensorHealthAlarmForTest()} }}
 	out := runActiveAlarms(t, deps)
-	if !strings.Contains(out, `"timezone":"UTC (no position yet)"`) || !strings.Contains(out, "Wed 14 Oct 01:02") || !strings.Contains(out, "timezone_note") {
+	if !strings.Contains(out, `"timezone":"UTC (no position yet)"`) || !strings.Contains(out, "Wed 14 Oct 1.02 AM") || !strings.Contains(out, "timezone_note") {
 		t.Errorf("want labelled UTC times: %s", out)
 	}
 }
@@ -422,7 +422,7 @@ func TestGetActiveAlarms_ALostVesselReadKeepsTheLastFixZone(t *testing.T) {
 		vesselState:  func() (vesselStateData, error) { return vesselStateData{}, fmt.Errorf("signalk down") },
 	}
 	out := runActiveAlarms(t, deps)
-	if !strings.Contains(out, `"timezone":"AEST (UTC+10, last fix)"`) || !strings.Contains(out, "Wed 14 Oct 11:02") || strings.Contains(out, "timezone_note") {
+	if !strings.Contains(out, `"timezone":"AEST (UTC+10, last fix)"`) || !strings.Contains(out, "Wed 14 Oct 11.02 AM") || strings.Contains(out, "timezone_note") {
 		t.Errorf("want the last fix's zone, labelled: %s", out)
 	}
 }

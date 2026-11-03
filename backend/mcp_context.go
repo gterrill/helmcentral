@@ -26,7 +26,7 @@ Read the boat context first (the resource helmcentral://boat/context, or the too
 - A field that says "missing", or that has a missing reason, has no reading. Say that and give the reason. Never estimate it, and never quote an older reading in its place.
 - Report alarms as worded. Do not reword an alarm's title or body, and do not say an alarm is cleared or fixed unless the result says so.
 - Never guess a SignalK path. Use a path only if a tool or the context gave it to you. A device name on an alarm card is a label, not a path.
-- Times are boat-local unless a result says they are UTC. Use the boat's time zone from the context when you say a time.
+- Times come as finished labels in the boat's time zone, such as "Mon 2 Nov 1.30 PM". Quote a label as given. Do not convert it, add to it or work out a time from it. Any other time you write goes in the same form: "1.30 PM", with a dot, capital AM or PM, and the minutes always. Fields ending in _iso are UTC for passing to another tool, never for quoting.
 - Nothing here can change the boat. If asked to change something, say that this server can only read.`
 
 const (
@@ -68,16 +68,16 @@ func buildBoatContext(d assistantToolDeps, on func(string) bool) (string, error)
 	} else {
 		stateErr = errors.New("the boat's state reader is not wired")
 	}
+	bt := d.boatTime()
 	fmt.Fprintf(&b, "# Boat context: %s\n\n", name)
-	fmt.Fprintf(&b, "Generated from Helmcentral's own records at %s UTC. It is rebuilt on every read.\n\n", now.Format("2006-01-02 15:04"))
+	fmt.Fprintf(&b, "Generated from Helmcentral's own records at %s. It is rebuilt on every read.\n\n", boatDayClockWithZone(now, bt.Loc))
 
 	// Time zone.
 	b.WriteString("## Time zone\n\n")
-	bt := d.boatTime()
 	if bt.Err != nil {
 		fmt.Fprintf(&b, "Not available: the boat's time zone could not be read (%v).\n\n", bt.Err)
 	} else {
-		fmt.Fprintf(&b, "Boat time zone: %s. Times from the tools are boat-local unless they say UTC.\n\n", bt.PromptClock(now))
+		fmt.Fprintf(&b, "Boat time zone: %s. Times from the tools come as finished labels such as Mon 2 Nov 1.30 PM, in this zone. Quote a label as given.\n\n", bt.PromptClock(now))
 	}
 
 	// Units.

@@ -254,7 +254,7 @@ func buildWaveHourlySeriesByDay(hourly []waveHourPoint, localLocation *time.Loca
 		dayKey := localTime.Format("2006-01-02")
 
 		series[dayKey] = append(series[dayKey], waveDayHourlyData{
-			Label:            localTime.Format("3PM"),
+			Label:            boatAxisClock(localTime, localLocation),
 			HourOfDay:        localTime.Hour(),
 			WaveHeightM:      waveFigureOrAbsent(hp.WaveHeightM),
 			WavePeriodS:      waveFigureOrAbsent(hp.WavePeriodS),

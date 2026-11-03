@@ -1,39 +1,24 @@
+import { formatHourMinute } from '@/lib/vessel-time'
+
 export interface AutoThemeInput {
   now: Date
   /** The vessel's IANA zone. Undefined means the browser's zone. */
   timeZone: string | undefined
-  /** Backend-formatted, e.g. "6:12AM", in the vessel's zone (forecast[0].sunriseTime). */
+  /** RFC3339 instants from the forecast (forecast[0].sunriseTime); the time of day is read in `timeZone`. */
   sunriseTime: string | null
   sunsetTime: string | null
 }
 
 export interface AutoThemeResult {
   isDark: boolean
-  /** When the current theme ends, e.g. "6:12 AM". Sunrise at night, sunset by day. */
+  /** When the current theme ends, e.g. "6.12 AM". Sunrise at night, sunset by day. */
   until: string
 }
 
-const CLOCK = /^(\d{1,2}):(\d{2})\s*([AP]M)$/i
-
-/** Minutes after midnight for "6:12AM" / "5:48 PM", or null when the string is not that format. */
-export function parseClockMinutes(value: string | null): number | null {
-  if (value === null) return null
-  const match = CLOCK.exec(value.trim())
-  if (!match) return null
-  const hour12 = Number(match[1])
-  const minute = Number(match[2])
-  if (hour12 < 1 || hour12 > 12 || minute > 59) return null
-  const pm = match[3]!.toUpperCase() === 'PM'
-  return ((hour12 % 12) + (pm ? 12 : 0)) * 60 + minute
-}
-
-function formatMinutes(minutes: number): string {
-  const hour24 = Math.floor(minutes / 60)
-  const minute = String(minutes % 60).padStart(2, '0')
-  return `${hour24 % 12 === 0 ? 12 : hour24 % 12}:${minute} ${hour24 >= 12 ? 'PM' : 'AM'}`
-}
-
-function minutesOfDay(now: Date, timeZone: string | undefined): number | null {
+function minutesOfDay(instant: Date | string | null, timeZone: string | undefined): number | null {
+  if (instant === null) return null
+  const now = instant instanceof Date ? instant : new Date(instant)
+  if (Number.isNaN(now.getTime())) return null
   try {
     const parts = new Intl.DateTimeFormat('en-US', {
       hour: 'numeric',
@@ -56,11 +41,12 @@ function minutesOfDay(now: Date, timeZone: string | undefined): number | null {
  * are missing, unreadable, or sunset is not after sunrise.
  */
 export function resolveAutoTheme({ now, timeZone, sunriseTime, sunsetTime }: AutoThemeInput): AutoThemeResult | null {
-  const sunrise = parseClockMinutes(sunriseTime)
-  const sunset = parseClockMinutes(sunsetTime)
+  const sunrise = minutesOfDay(sunriseTime, timeZone)
+  const sunset = minutesOfDay(sunsetTime, timeZone)
   if (sunrise === null || sunset === null || sunset <= sunrise) return null
   const current = minutesOfDay(now, timeZone)
   if (current === null) return null
   const isDark = current < sunrise || current >= sunset
-  return { isDark, until: formatMinutes(isDark ? sunrise : sunset) }
+  const until = isDark ? sunrise : sunset
+  return { isDark, until: formatHourMinute(Math.floor(until / 60), until % 60) }
 }

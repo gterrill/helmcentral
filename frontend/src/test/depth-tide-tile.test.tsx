@@ -247,13 +247,13 @@ test('shows tide times in the boat\'s zone, not the device\'s', () => {
     lastUpdateAgeS: null,
   }
   const { container, rerender } = render(<DepthTideTile {...props} timeZone="Australia/Adelaide" />)
-  // Adelaide is UTC+9:30 in June: 04:00 UTC is 1:30 PM and 10:00 UTC is 7:30 PM.
-  expect(container.textContent).toContain('1:30 PM')
-  expect(container.textContent).toContain('7:30 PM')
+  // Adelaide is UTC+9:30 in June: 04:00 UTC is 1.30 PM and 10:00 UTC is 7.30 PM.
+  expect(container.textContent).toContain('1.30 PM')
+  expect(container.textContent).toContain('7.30 PM')
 
   rerender(<DepthTideTile {...props} timeZone="UTC" />)
-  expect(container.textContent).toContain('4:00 AM')
-  expect(container.textContent).toContain('10:00 AM')
+  expect(container.textContent).toContain('4.00 AM')
+  expect(container.textContent).toContain('10.00 AM')
 })
 
 test('shows -- for the tide times until the boat has reported a zone', () => {

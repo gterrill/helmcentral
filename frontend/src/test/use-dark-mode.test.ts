@@ -101,7 +101,7 @@ describe('useDarkMode', () => {
   // ── Auto ─────────────────────────────────────────────────────────────────
 
   const TZ = 'Australia/Brisbane'
-  const sun = { sunriseTime: '6:12AM', sunsetTime: '5:48PM', timeZone: TZ }
+  const sun = { sunriseTime: '2026-10-02T06:12:00+10:00', sunsetTime: '2026-10-02T17:48:00+10:00', timeZone: TZ }
   // Brisbane local hh:mm as a UTC instant (boat is UTC+10).
   const at = (hh: number, mm: number) => new Date(Date.UTC(2026, 9, 2, hh - 10, mm))
 
@@ -141,7 +141,7 @@ describe('useDarkMode', () => {
       localStorage.setItem(DARK_MODE_KEY, 'auto')
       const { result } = renderHook(() => useDarkMode(sun))
       expect(result.current[0]).toBe(true)
-      expect(result.current[2]).toEqual({ mode: 'auto', autoUntil: '6:12 AM' })
+      expect(result.current[2]).toEqual({ mode: 'auto', autoUntil: '6.12 AM' })
       expect(document.documentElement.classList.contains('dark')).toBe(true)
     })
 
@@ -150,7 +150,7 @@ describe('useDarkMode', () => {
       localStorage.setItem(DARK_MODE_KEY, 'auto')
       const { result } = renderHook(() => useDarkMode(sun))
       expect(result.current[0]).toBe(false)
-      expect(result.current[2].autoUntil).toBe('5:48 PM')
+      expect(result.current[2].autoUntil).toBe('5.48 PM')
     })
 
     it('flips on its own when sunset passes while open', () => {
@@ -215,7 +215,7 @@ describe('useDarkMode', () => {
       // Data arrives: Auto now decides (noon is day).
       rerender(sun)
       expect(result.current[0]).toBe(false)
-      expect(result.current[2].autoUntil).toBe('5:48 PM')
+      expect(result.current[2].autoUntil).toBe('5.48 PM')
 
       // And if it goes away again, the last decision holds.
       rerender({ sunriseTime: null, sunsetTime: null, timeZone: TZ })

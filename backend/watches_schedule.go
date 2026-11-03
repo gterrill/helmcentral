@@ -220,11 +220,11 @@ func watchScheduleSentence(spec string) (string, error) {
 	}
 	if dow == "*" {
 		if len(hours) == 1 {
-			return fmt.Sprintf("Every day at %02d:%02d boat time", hours[0], m), nil
+			return fmt.Sprintf("Every day at %s boat time", watchHourMinute(hours[0], m)), nil
 		}
 		if m == 0 {
 			if from, to, ok := watchCyclicRange(hours); ok {
-				return fmt.Sprintf("Every hour from %02d:00 to %02d:00", from, to), nil
+				return fmt.Sprintf("Every hour from %s to %s", watchHourMinute(from, 0), watchHourMinute(to, 0)), nil
 			}
 		}
 		return custom, nil
@@ -237,7 +237,7 @@ func watchScheduleSentence(spec string) (string, error) {
 		return custom, nil
 	}
 	days = watchNormalDays(days)
-	at := fmt.Sprintf("%02d:%02d", hours[0], m)
+	at := watchHourMinute(hours[0], m)
 	if len(days) == 5 && days[0] == 1 && days[4] == 5 {
 		return "Weekdays at " + at, nil
 	}
@@ -246,6 +246,11 @@ func watchScheduleSentence(spec string) (string, error) {
 		names[i] = watchWeekdayPlural[d]
 	}
 	return watchJoinAnd(names) + " at " + at, nil
+}
+
+// watchHourMinute is a cron hour and minute in the form the operator reads: 6.00 AM.
+func watchHourMinute(hour, minute int) string {
+	return boatClock(time.Date(2000, 1, 1, hour, minute, 0, 0, time.UTC), time.UTC)
 }
 
 // watchStepHours reads "*/N" for the N that divide the day evenly and are

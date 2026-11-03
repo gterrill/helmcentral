@@ -63,7 +63,7 @@ newer report from the same watch replaces an older one that's still waiting.
 | `run.outcome` | string | Always `ran`, because a skipped run is never sent. |
 | `findings` | array | Every finding of the run, possibly empty. Each has `section`, `rule`, `text` and `by`, which is `rules` or `mate`. |
 | `charts` | array | The run's charts, possibly empty. See [Charts](#charts). |
-| `report` | object or null | The report: `boat_time`, `since`, and `sections`. Each section has `name`, `title`, and either `lines` or `unavailable`, and sometimes `figures`. |
+| `report` | object or null | The report: `generated_at`, `boat_time`, `since`, `since_at` and `sections`. Each section has `name`, `title`, and either `lines` or `unavailable`, and sometimes `figures`. `generated_at` and `since_at` are UTC times like `2026-10-28T14:00:00Z`, for a program to read. `boat_time` and `since` are the same instants written for a person, like `Thu 29 Oct 3.00 AM UTC+13`. |
 | `review` | string or null | Mate's full review, or null when Mate didn't review the run. |
 | `path` | string | Where the run is in the app, such as `/watches/<watch id>?run=<run id>`. |
 | `link` | string | The full link, `path` after the address you set as **Address for links**. Left out when no address is set. |
@@ -103,7 +103,7 @@ front of `path`.
   "title": "Overnight check: 1 finding",
   "summary": "House bank drained 40 Ah overnight, more than usual.\nThe fridge ran longer than the night before.",
   "watch": { "id": "3f1c", "name": "Overnight check", "schedule_sentence": "Every hour" },
-  "run": { "id": "9a7e", "boat_time": "Thu 29 Oct 03:00 UTC+13", "outcome": "ran" },
+  "run": { "id": "9a7e", "boat_time": "Thu 29 Oct 3.00 AM UTC+13", "outcome": "ran" },
   "findings": [
     { "section": "power", "rule": "overnight_draw", "text": "House bank drained 40 Ah overnight, more than usual.", "by": "rules" }
   ],
@@ -111,8 +111,9 @@ front of `path`.
   "report": {
     "kind": "sections",
     "generated_at": "2026-10-28T14:00:00Z",
-    "boat_time": "Thu 29 Oct 03:00 UTC+13",
-    "since": "Thu 29 Oct 02:00 UTC+13",
+    "boat_time": "Thu 29 Oct 3.00 AM UTC+13",
+    "since": "Thu 29 Oct 2.00 AM UTC+13",
+    "since_at": "2026-10-28T13:00:00Z",
     "sections": [
       { "name": "power", "title": "Power", "lines": ["House bank 71% at 12.6 V"] }
     ]

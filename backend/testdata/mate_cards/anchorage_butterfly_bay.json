@@ -694,18 +694,21 @@
       "clearance": {
         "status": "ok",
         "skipped_reason": "",
-        "lowest_water_at": "2026-11-03T00:00:00+10:00",
+        "lowest_water_at": "Tue 3 Nov 12.00 AM",
+        "lowest_water_iso": "2026-11-03T00:00:00+10:00",
         "lowest_water_height_m": 0.8,
         "depth_at_low_m": 4.8,
         "draft_m": 1.4,
         "clearance_m": 3.4,
         "wanted_m": 0.5,
-        "tide_checked_until": ""
+        "tide_checked_until": "",
+        "tide_checked_until_iso": ""
       },
       "rode": {
         "status": "short",
         "skipped_reason": "",
-        "highest_water_at": "2026-11-03T06:00:00+10:00",
+        "highest_water_at": "Tue 3 Nov 6.00 AM",
+        "highest_water_iso": "2026-11-03T06:00:00+10:00",
         "highest_water_height_m": 3.2,
         "depth_at_high_m": 7.2,
         "method": "ratio",
@@ -715,7 +718,9 @@
         "chain_onboard_m": 40,
         "short_by_m": 20.9,
         "tide_checked_until": "",
-        "wind_checked_until": ""
+        "tide_checked_until_iso": "",
+        "wind_checked_until": "",
+        "wind_checked_until_iso": ""
       },
       "swing": {
         "status": "computed",
@@ -725,7 +730,8 @@
         "bow_offset_m": 3,
         "loa_m": 13,
         "all_chain_out": true,
-        "tide_checked_until": ""
+        "tide_checked_until": "",
+        "tide_checked_until_iso": ""
       }
     },
     "data_as_of": "2026-10-31T21:22:14Z"

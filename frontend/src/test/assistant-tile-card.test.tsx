@@ -27,8 +27,8 @@ vi.mock('@/hooks/use-tide-today', async (importOriginal) => {
   return { ...original, useTideToday: () => ({ tide: original.defaultTide, loading: false }) }
 })
 
-// 04:03 UTC is 14:03 in Brisbane: the card shows the boat's time, not the runner's.
-const clock = (iso: string) => ({ '2026-10-28T04:03:00Z': '14:03' })[iso] as string
+// 04:03 UTC is 2.03 PM in Brisbane: the card shows the boat's time, not the runner's.
+const clock = (iso: string) => ({ '2026-10-28T04:03:00Z': '2.03 PM' })[iso] as string
 
 describe('AssistantTileCard', () => {
   it('draws the live tile with a Live marker while its reply is the newest', async () => {

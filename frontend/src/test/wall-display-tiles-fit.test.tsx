@@ -58,8 +58,8 @@ function weatherDay(overrides: Partial<WeatherForecastDay> = {}): WeatherForecas
     precipitation: 20,
     humidityPct: 60,
     visibilityNm: 10,
-    sunriseTime: '6:02AM',
-    sunsetTime: '7:41PM',
+    sunriseTime: '2026-09-12T06:02:00+10:00',
+    sunsetTime: '2026-09-12T19:41:00+10:00',
     moonPhase: 'waxingGibbous',
     hourlyWind: Array.from({ length: 24 }, (_, h) => ({
       label: `${h}:00`, hourOfDay: h, windSpeed: 10 + h * 0.2, windGust: 15 + h * 0.2, windDirection: 'E', windDirectionDeg: 90,
@@ -145,8 +145,8 @@ describe('wall-display tiles fit their registered grid constraint', () => {
     const { minW, minH } = WIDGET_CONSTRAINTS.clock!
     renderAtGridBox(
       <ClockTile
-        sunriseTime="6:02AM"
-        sunsetTime="7:41PM"
+        sunriseTime="2026-09-12T06:02:00+10:00"
+        sunsetTime="2026-09-12T19:41:00+10:00"
         moonPhase="waxingGibbous"
         placeName="Airlie Beach, Queensland"
         tripEta={{ label: 'Mooloolaba Marina', etaAt: new Date('2026-06-15T04:00:00Z') }}

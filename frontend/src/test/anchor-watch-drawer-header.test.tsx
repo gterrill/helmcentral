@@ -3,6 +3,7 @@ import { render, screen, within, fireEvent, act } from '@testing-library/react'
 import { toast } from 'sonner'
 import { AnchorWatchDrawer } from '@/components/anchor-watch-drawer'
 import type { TideToday } from '@/hooks/use-tide-today'
+import { formatTimeOfDay } from '@/lib/vessel-time'
 import { installFakeTelemetryStream } from './helpers/fake-telemetry-stream'
 
 // ADR 0230: times are the boat's. The runner is on UTC.
@@ -257,7 +258,7 @@ describe('AnchorWatchDrawer header — tide context', () => {
     expect(header).not.toHaveTextContent(/\bHigh\b(?!er)/)
     // low_tide_height_ft 1 ft -> 0.3 m
     expect(header).toHaveTextContent('0.3')
-    const expectedTime = new Date(tide.low_tide_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    const expectedTime = formatTimeOfDay(tide.low_tide_time, Intl.DateTimeFormat().resolvedOptions().timeZone)
     expect(header).toHaveTextContent(expectedTime)
   })
 

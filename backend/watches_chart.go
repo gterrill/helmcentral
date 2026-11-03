@@ -339,11 +339,7 @@ func watchPathHistory(ctx context.Context, d assistantToolDeps, path string, fro
 		if b.Mean == nil {
 			continue
 		}
-		t, err := time.Parse(time.RFC3339, b.T)
-		if err != nil {
-			return nil, "", fmt.Errorf("a bucket time is unreadable: %w", err)
-		}
-		pts = append(pts, telemetryPoint{Value: *b.Mean, Timestamp: t})
+		pts = append(pts, telemetryPoint{Value: *b.Mean, Timestamp: b.At})
 	}
 	return pts, hp.Unit, nil
 }

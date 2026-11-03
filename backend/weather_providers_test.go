@@ -515,7 +515,7 @@ func TestBuildHourlySeriesByDay_BucketsHoursByLocalDate(t *testing.T) {
 	if len(day14Wind) != 1 {
 		t.Fatalf("expected 1 wind entry for Jun 14, got %d", len(day14Wind))
 	}
-	if day14Wind[0].Label != "11PM" || day14Wind[0].HourOfDay != 23 {
+	if day14Wind[0].Label != "11 PM" || day14Wind[0].HourOfDay != 23 {
 		t.Fatalf("unexpected day14 wind bucket: %+v", day14Wind[0])
 	}
 	if got := day14Wind[0].WindSpeedKts; got < 18.49 || got > 18.51 {
@@ -686,8 +686,20 @@ func TestBuildDayData_MapsUnitsAndSummaries(t *testing.T) {
 	if day.Condition != "Rain" {
 		t.Fatalf("expected condition Rain, got %q", day.Condition)
 	}
-	if day.SunriseTime == "" || day.SunsetTime == "" {
-		t.Fatalf("expected non-empty sunrise/sunset times, got sunrise=%q sunset=%q", day.SunriseTime, day.SunsetTime)
+	for name, c := range map[string]struct {
+		got  string
+		want time.Time
+	}{
+		"sunrise": {day.SunriseTime, dayPoint.Sunrise},
+		"sunset":  {day.SunsetTime, dayPoint.Sunset},
+	} {
+		at, err := time.Parse(time.RFC3339, c.got)
+		if err != nil {
+			t.Fatalf("%s should be an RFC3339 instant, got %q: %v", name, c.got, err)
+		}
+		if !at.Equal(c.want) {
+			t.Fatalf("%s = %v, want the instant %v", name, at, c.want)
+		}
 	}
 	if day.MoonPhase == "" {
 		t.Fatalf("expected a non-empty moon phase")

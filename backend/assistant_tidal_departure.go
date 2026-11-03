@@ -42,7 +42,6 @@ const (
 	// assistantTidalCrossStreamCos is cos(75 degrees): inside it the course is
 	// within about 15 degrees of square to the stream.
 	assistantTidalCrossStreamCos = 0.26
-	assistantTidalTimeLayout     = "Mon 2 Jan 15:04"
 	assistantTidalBasis          = "Stream phase comes from the station's high and low water times; the set direction is supplied (see flood_set_source); stream rate is not modelled."
 )
 
@@ -264,9 +263,9 @@ func (d assistantToolDeps) executePlanTidalDeparture(ctx context.Context, raw js
 			names[i] = p.Phase
 		}
 		return assistantTidalCandidate{
-			Departure:    c.dep.In(st.loc).Format(assistantTidalTimeLayout),
+			Departure:    boatDayClock(c.dep, st.loc),
 			DepartureISO: c.dep.UTC().Format(time.RFC3339),
-			Arrival:      arr.In(st.loc).Format(assistantTidalTimeLayout),
+			Arrival:      boatDayClock(arr, st.loc),
 			ArrivalISO:   arr.UTC().Format(time.RFC3339),
 			MeanAssist:   roundTo2(c.mean),
 			FairFraction: roundTo2(c.fair),
@@ -351,7 +350,7 @@ func tidalPhasesCrossed(cycles []tidalHalfCycle, dep, arr time.Time, loc *time.L
 		if c.flood {
 			name = "flood"
 		}
-		out = append(out, assistantStreamPhase{Phase: name, From: from.In(loc).Format("Mon 15:04"), To: to.In(loc).Format("Mon 15:04")})
+		out = append(out, assistantStreamPhase{Phase: name, From: boatWeekdayClock(from, loc), To: boatWeekdayClock(to, loc)})
 	}
 	return out
 }

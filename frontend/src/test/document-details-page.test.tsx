@@ -104,11 +104,11 @@ describe('DocumentDetailsPage', () => {
 
     renderPage(<DocumentDetailsPage documentId="doc-1" onOpenFolder={vi.fn()} onBack={vi.fn()} />)
 
-    // formatAlarmTime would print a bare "06:28" for a same-day timestamp -
+    // formatAlarmTime would print a bare time for a same-day timestamp -
     // the Details page needs formatDocumentTime's full date instead, since
     // an eighteen-month-old upload is the normal case here, not the
     // exception.
-    expect(screen.getAllByText('20 Sep 2026 06:28')).toHaveLength(2)
+    expect(screen.getAllByText('20 Sep 2026 6.28 AM')).toHaveLength(2)
   })
 
   it('shows "Not yet" for Last indexed when the document has never been indexed', () => {

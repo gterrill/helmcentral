@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -136,6 +137,9 @@ func TestExecuteCheckSignalKPaths_FilterMatchesPathsAcrossTree(t *testing.T) {
 		if !m.Stale {
 			t.Errorf("expected %q to be marked stale at 4 days old", m.Path)
 		}
+		if m.Path == "tanks.fuel.2.currentLevel" && (m.Timestamp != "Mon 21 Sep 12.30 AM UTC" || m.TimestampISO != "2026-09-21T00:30:00Z") {
+			t.Errorf("timestamp is a label (%q) and timestamp_iso the instant (%q)", m.Timestamp, m.TimestampISO)
+		}
 	}
 }
 
@@ -233,7 +237,7 @@ func TestSummarizeSignalKSources_SortsQuietSourcesFirstAndHandlesUnknownAge(t *t
 		{Path: "c", Source: "YachtDevices.6", AgeSeconds: 5 * 24 * 3600}, // freshest of this source's own paths wins
 		{Path: "d", Source: "", AgeSeconds: -1},                          // no source declared, no evidence of age
 	}
-	out := summarizeSignalKSources(samples, time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC))
+	out := summarizeSignalKSources(samples, time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC), boatTime{placeZone: utcZone})
 
 	if len(out) != 3 {
 		t.Fatalf("expected 3 distinct source labels, got %d: %+v", len(out), out)
@@ -365,8 +369,16 @@ func TestExecuteGetLastRecorded_ReturnsRowsSortedOldestFirst(t *testing.T) {
 	if result.Rows[0].AgeDays < 3.9 || result.Rows[0].AgeDays > 4.1 {
 		t.Errorf("expected age_days ~4, got %v", result.Rows[0].AgeDays)
 	}
-	if result.Rows[0].LastSeenAt != stopped.Format(time.RFC3339) {
-		t.Errorf("expected last_seen_at %q, got %q", stopped.Format(time.RFC3339), result.Rows[0].LastSeenAt)
+	// These deps have no fix, so the clock is UTC and the label says so.
+	if want := boatDayClock(stopped, time.UTC) + " UTC"; result.Rows[0].LastSeenAt != want {
+		t.Errorf("expected last_seen_at %q, got %q", want, result.Rows[0].LastSeenAt)
+	}
+	// The instant is kept for the get_path_history call that follows.
+	if want := stopped.UTC().Format(time.RFC3339); result.Rows[0].LastSeenISO != want {
+		t.Errorf("expected last_seen_iso %q, got %q", want, result.Rows[0].LastSeenISO)
+	}
+	if d := mateToolGetLastRecorded.function.Description; !strings.Contains(d, "last_seen_iso") {
+		t.Errorf("the tool text should describe last_seen_iso: %s", d)
 	}
 }
 
@@ -581,11 +593,11 @@ func TestExecuteGetPathHistory_ClampsSpanToMax90Days(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &result); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if !strings.Contains(result.Note, "2020-01-01T00:00:00Z") {
+	if !strings.Contains(result.Note, "Wed 1 Jan 12.00 AM") {
 		t.Errorf("expected the note to name the originally-requested start, got %q", result.Note)
 	}
-	if !strings.Contains(result.Note, result.StartISO) {
-		t.Errorf("expected the note to name the moved-to start %s, got %q", result.StartISO, result.Note)
+	if !strings.Contains(result.Note, result.Start) {
+		t.Errorf("expected the note to name the moved-to start %s, got %q", result.Start, result.Note)
 	}
 }
 
@@ -757,9 +769,9 @@ func TestExecuteGetPathHistory_FitsUnderCapWithNoTruncationForRepresentativeSpan
 			wantLast = at
 		}
 		gotLast := result.Buckets[len(result.Buckets)-1].T
-		if gotLast != wantLast.UTC().Format(time.RFC3339) {
+		if want := boatDayClock(wantLast, time.UTC); gotLast != want {
 			t.Errorf("hours_back=%v: expected the final bucket %s, got %s - was the tail dropped?",
-				hoursBack, wantLast.UTC().Format(time.RFC3339), gotLast)
+				hoursBack, want, gotLast)
 		}
 	}
 }
@@ -1259,14 +1271,14 @@ func TestExecuteGetPathHistory_CapsGapsToMostRecentIncludingOpenGap(t *testing.T
 		t.Fatalf("expected exactly %d reported gaps, got %d: %+v", assistantPathHistoryMaxReportedGaps, len(result.Gaps), result.Gaps)
 	}
 
-	wantOpenFrom := start.Add(openGapStartIndex * width).UTC().Format(time.RFC3339)
-	wantOpenTo := now.UTC().Format(time.RFC3339)
+	wantOpenFrom := boatDayClock(start.Add(openGapStartIndex*width), time.UTC)
+	wantOpenTo := boatDayClock(now, time.UTC)
 	last := result.Gaps[len(result.Gaps)-1]
 	if last.From != wantOpenFrom || last.To != wantOpenTo {
 		t.Errorf("expected the final reported gap to be the still-open one [%s, %s), got [%s, %s)", wantOpenFrom, wantOpenTo, last.From, last.To)
 	}
 
-	oldestFrom := start.Add(1 * width).UTC().Format(time.RFC3339)
+	oldestFrom := boatDayClock(start.Add(1*width), time.UTC)
 	for _, g := range result.Gaps {
 		if g.From == oldestFrom {
 			t.Errorf("expected the oldest gap %s to be dropped once gap_count exceeds the cap, but it is still reported: %+v", oldestFrom, result.Gaps)
@@ -1494,11 +1506,63 @@ func TestExecuteGetPathHistory_ReportsTrailingSilenceAsAGap(t *testing.T) {
 		t.Fatalf("expected exactly one gap (the trailing silence), got %+v", result.Gaps)
 	}
 	gap := result.Gaps[0]
-	if gap.From != "2026-10-04T09:05:00Z" || gap.To != now.Format(time.RFC3339) {
+	if gap.From != "Sun 4 Oct 9.05 AM" || gap.To != "Sun 4 Oct 12.00 PM" {
 		t.Fatalf("expected the trailing gap 09:05..12:00, got %+v", gap)
 	}
 	// 09:05 to 12:00 in 5-minute buckets.
 	if result.GapCount != 35 {
 		t.Fatalf("expected the trailing silence counted as 35 buckets, got %d", result.GapCount)
+	}
+}
+
+// The bucket time is a finished boat-time label, never UTC. A morning report
+// once said fresh water fell "between 02:00 and 04:00" because Mate read the
+// UTC bucket time as boat time; the fall was at 1.30 PM on a Brisbane clock.
+func TestExecuteGetPathHistory_BucketsAreBoatTimeLabels(t *testing.T) {
+	useFreshBoatZone(t)
+	now := time.Date(2026, 11, 2, 6, 0, 0, 0, time.UTC)
+	bucket := time.Date(2026, 11, 2, 3, 30, 0, 0, time.UTC)
+	series := map[string][]telemetryPoint{
+		"min":  {{Timestamp: bucket, Value: 40}},
+		"mean": {{Timestamp: bucket, Value: 41}},
+		"max":  {{Timestamp: bucket, Value: 42}},
+	}
+	deps := assistantToolDeps{
+		now:                        func() time.Time { return now },
+		vesselState:                func() (vesselStateData, error) { return vesselStateData{Latitude: -27.5, Longitude: 153}, nil },
+		influxPathHistoryStat:      stubInfluxPathHistoryStat(series, nil),
+		influxPathHistoryFirstLast: stubInfluxPathHistoryFirstLast(bucket.Add(time.Minute), bucket.Add(29*time.Minute), true),
+	}
+	raw, _, err := deps.execute(context.Background(), "get_path_history", json.RawMessage(`{"path":"tanks.freshWater.0.currentLevel","hours_back":6}`))
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	var result assistantGetPathHistoryResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(result.Buckets) != 1 || result.Buckets[0].T != "Mon 2 Nov 1.30 PM" {
+		t.Fatalf("bucket should read as boat time, got %+v", result.Buckets)
+	}
+	if result.FirstSeen != "Mon 2 Nov 1.31 PM" || result.LastSeen != "Mon 2 Nov 1.59 PM" {
+		t.Fatalf("first and last seen should read as boat time, got %q and %q", result.FirstSeen, result.LastSeen)
+	}
+	// UTC stays only where the next tool call needs it.
+	var generic map[string]any
+	if err := json.Unmarshal([]byte(raw), &generic); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"start_iso", "end_iso", "first_seen_iso", "last_seen_iso"} {
+		if _, ok := generic[key]; !ok {
+			t.Errorf("%s must stay for the next tool call", key)
+		}
+	}
+	delete(generic, "start_iso")
+	delete(generic, "end_iso")
+	delete(generic, "first_seen_iso")
+	delete(generic, "last_seen_iso")
+	rest, _ := json.Marshal(generic)
+	if regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[^"]*Z`).Match(rest) {
+		t.Fatalf("a UTC instant is left outside the _iso fields: %s", rest)
 	}
 }

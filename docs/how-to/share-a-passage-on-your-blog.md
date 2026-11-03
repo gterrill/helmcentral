@@ -95,7 +95,7 @@ until they tap it. The map then starts from a view of the whole globe, so that
 someone who doesn't know the coast sees where in the world it is. Then it comes
 down onto the track. The boat follows the line with a glow around it, and the
 track behind it is coloured by speed, with a wake in the water. A label shows the boat's local date and time with
-its zone, for example "16 Sep 08:56 UTC+10", and the name of the passage it's
+its zone, for example "16 Sep 8.56 AM UTC+10", and the name of the passage it's
 on. On a cruise or a selection, each stay between passages holds the map for a
 moment with a label such as "2 nights · Scawfell Island", using the place the
 passage before it ended at, and each passage is named as it sets sail. At the

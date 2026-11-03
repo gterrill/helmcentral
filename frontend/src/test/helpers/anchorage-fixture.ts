@@ -45,9 +45,9 @@ export function unknownDepth(): Record<string, unknown> {
     saved_source: '',
     saved_date: '',
     note: 'The depth is unknown: check the chart.',
-    clearance: { ...(d.clearance as object), ...SKIPPED, lowest_water_at: '', lowest_water_height_m: null, depth_at_low_m: null, draft_m: null, clearance_m: null, wanted_m: null, tide_checked_until: '' },
-    rode: { ...(d.rode as object), ...SKIPPED, highest_water_at: '', highest_water_height_m: null, depth_at_high_m: null, method: '', wind_kts: null, rode_needed_m: null, scope_ratio: null, chain_onboard_m: null, short_by_m: null, wind_checked_until: '', tide_checked_until: '' },
-    swing: { ...(d.swing as object), ...SKIPPED, radius_m: null, rode_m: null, bow_offset_m: null, loa_m: null, all_chain_out: false, tide_checked_until: '' },
+    clearance: { ...(d.clearance as object), ...SKIPPED, lowest_water_at: '', lowest_water_iso: '', lowest_water_height_m: null, depth_at_low_m: null, draft_m: null, clearance_m: null, wanted_m: null, tide_checked_until: '', tide_checked_until_iso: '' },
+    rode: { ...(d.rode as object), ...SKIPPED, highest_water_at: '', highest_water_iso: '', highest_water_height_m: null, depth_at_high_m: null, method: '', wind_kts: null, rode_needed_m: null, scope_ratio: null, chain_onboard_m: null, short_by_m: null, wind_checked_until: '', wind_checked_until_iso: '', tide_checked_until: '', tide_checked_until_iso: '' },
+    swing: { ...(d.swing as object), ...SKIPPED, radius_m: null, rode_m: null, bow_offset_m: null, loa_m: null, all_chain_out: false, tide_checked_until: '', tide_checked_until_iso: '' },
   }
 }
 

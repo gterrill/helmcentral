@@ -40,7 +40,7 @@ describe('AssistantWindRoseCard', () => {
     expect(within(facts).getByText(/under 1 kn/)).toBeInTheDocument()
     expect(within(facts).getByText(/Variable 5%/)).toBeInTheDocument()
     expect(within(facts).getByText(/Mean 11.4 kn/)).toBeInTheDocument()
-    expect(within(facts).getByText(/Strongest 24.6 kn, Sat 24 Oct 16:10/)).toBeInTheDocument()
+    expect(within(facts).getByText(/Strongest 24.6 kn, Sat 24 Oct 4.10 PM/)).toBeInTheDocument()
     expect(within(facts).getByText(/10-minute averages/)).toBeInTheDocument()
   })
 

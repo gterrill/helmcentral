@@ -398,10 +398,6 @@ type assistantResolvedTideStation struct {
 	info       assistantStationInfo
 }
 
-// toolTimeLayout is how the tide and forecast tools write a local time to the
-// model: weekday, day, month, clock.
-const toolTimeLayout = "Mon 2 Jan 15:04"
-
 // toAssistantTideExtreme renders one predicted high or low water in loc.
 func toAssistantTideExtreme(e tideExtremePoint, loc *time.Location) assistantTideExtreme {
 	kind := "low"
@@ -409,7 +405,7 @@ func toAssistantTideExtreme(e tideExtremePoint, loc *time.Location) assistantTid
 		kind = "high"
 	}
 	return assistantTideExtreme{
-		Time: e.Time.In(loc).Format(toolTimeLayout), ISO: e.Time.UTC().Format(time.RFC3339),
+		Time: boatDayClock(e.Time, loc), ISO: e.Time.UTC().Format(time.RFC3339),
 		Type: kind, HeightM: roundTo2(e.HeightM),
 	}
 }
@@ -446,7 +442,7 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 
 	var cachedAt *string
 	if !res.CachedAt.IsZero() {
-		s := res.CachedAt.UTC().Format(time.RFC3339)
+		s := boatDayClock(res.CachedAt, loc)
 		cachedAt = &s
 	}
 
@@ -455,7 +451,7 @@ func (d assistantToolDeps) executeGetTides(ctx context.Context, raw json.RawMess
 		Station:  stationInfo,
 		Provider: providerID,
 		Now: assistantTideNow{
-			Time:      localNow.Format(toolTimeLayout),
+			Time:      boatDayClock(localNow, loc),
 			HeightM:   res.CurrentHeightM,
 			Direction: res.Direction,
 		},
@@ -585,7 +581,7 @@ func (d assistantToolDeps) fetchWaveSeries(lat, lon float64, days int) waveSerie
 // gave as zero is unknown, never a calm. Shared by get_wind_forecast and
 // anchorage_details so the two cannot read the same hour differently.
 func buildWindHour(hp weatherHourPoint, loc *time.Location, waveByUnix map[int64]waveHourPoint, courseDeg *float64, shelter *shelterResult) assistantWindHour {
-	row := assistantWindHour{T: hp.Time.In(loc).Format("Mon 2 15:04")}
+	row := assistantWindHour{T: boatDayClock(hp.Time, loc)}
 
 	var windKts *int
 	if hp.WindSpeedMS != 0 {
@@ -739,7 +735,7 @@ func (d assistantToolDeps) executeGetWindForecast(ctx context.Context, raw json.
 
 	var cachedAt *string
 	if !bundle.CachedAt.IsZero() {
-		s := bundle.CachedAt.UTC().Format(time.RFC3339)
+		s := boatDayClock(bundle.CachedAt, place.Loc)
 		cachedAt = &s
 	}
 

@@ -2,7 +2,7 @@ import { render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import { ClockTile, type ClockTileProps } from '@/components/clock-tile'
-import { formatClock } from '@/lib/vessel-time'
+import { formatClock, formatTimeOfDay } from '@/lib/vessel-time'
 
 // formatClock renders in whatever timezone the test runner's Node process is
 // in (Intl.DateTimeFormat with no explicit timeZone), which fake-timing
@@ -60,8 +60,8 @@ describe('ClockTile', () => {
 
   test('renders the current time and date from the vessel clock', () => {
     renderClockTile({
-      sunriseTime: '6:02AM',
-      sunsetTime: '7:41PM',
+      sunriseTime: '2026-06-14T06:02:00+10:00',
+      sunsetTime: '2026-06-14T19:41:00+10:00',
       moonPhase: 'waxingGibbous',
       placeName: 'Airlie Beach',
     })
@@ -74,14 +74,14 @@ describe('ClockTile', () => {
 
   test('shows sunrise, sunset and moon phase when present', () => {
     renderClockTile({
-      sunriseTime: '6:02AM',
-      sunsetTime: '7:41PM',
+      sunriseTime: '2026-06-14T06:02:00+10:00',
+      sunsetTime: '2026-06-14T19:41:00+10:00',
       moonPhase: 'waxingGibbous',
       placeName: 'Airlie Beach',
-    })
+    }, { timezone: 'Australia/Brisbane' })
 
-    expect(screen.getByText('6:02AM')).toBeInTheDocument()
-    expect(screen.getByText('7:41PM')).toBeInTheDocument()
+    expect(screen.getByText('6.02 AM')).toBeInTheDocument()
+    expect(screen.getByText('7.41 PM')).toBeInTheDocument()
     expect(screen.getByText(/Waxing Gibbous/)).toBeInTheDocument()
   })
 
@@ -101,26 +101,27 @@ describe('ClockTile', () => {
     const etaAt = new Date('2026-06-14T18:05:00Z')
     renderClockTile({
       tripEta: { label: 'WP 3', etaAt },
+      timeZone: 'UTC',
     })
 
     const eta = screen.getByTestId('clock-eta')
     expect(eta).toHaveTextContent('ETA')
     expect(eta).toHaveTextContent('WP 3')
-    expect(eta).toHaveTextContent(hhmmFor(etaAt))
+    expect(eta).toHaveTextContent(formatTimeOfDay(etaAt, 'UTC'))
     expect(eta).not.toHaveTextContent(/plan/i)
   })
 
-  // A bare "09:40" can't be told from 9:40 PM - the ETA line must carry the
-  // same AM/PM meridiem the hero clock shows beside its own hh:mm.
+  // An ETA is a time label, so it reads like every other one: "6.05 PM", with AM or PM.
   test('includes the AM/PM meridiem in the ETA line, not just hh:mm', () => {
     const etaAt = new Date('2026-06-14T18:05:00Z')
     renderClockTile({
       tripEta: { label: 'WP 3', etaAt },
+      timeZone: 'UTC',
     })
 
     const eta = screen.getByTestId('clock-eta')
-    expect(eta).toHaveTextContent(hhmmFor(etaAt))
-    expect(eta).toHaveTextContent(formatClock(etaAt).meridiem)
+    expect(eta).toHaveTextContent(formatTimeOfDay(etaAt, 'UTC'))
+    expect(eta).toHaveTextContent(/[AP]M/)
   })
 
   test('shows the waypoint label with a dash for the time when no honest ETA exists', () => {
@@ -142,11 +143,11 @@ describe('ClockTile', () => {
   // rather than inventing a label.
   test('shows the ETA time with no label when the destination has none', () => {
     const etaAt = new Date('2026-06-14T15:05:00Z')
-    renderClockTile({ tripEta: { label: null, etaAt } })
+    renderClockTile({ tripEta: { label: null, etaAt }, timeZone: 'UTC' })
 
     const eta = screen.getByTestId('clock-eta')
     expect(eta).toHaveTextContent('ETA')
-    expect(eta).toHaveTextContent(hhmmFor(etaAt))
+    expect(eta).toHaveTextContent(formatTimeOfDay(etaAt, 'UTC'))
     expect(eta).not.toHaveTextContent('WP')
   })
 
@@ -181,8 +182,8 @@ describe('ClockTile', () => {
     // the tile's ~300px minW; the tile-local compact form must not.
     vi.setSystemTime(new Date(2026, 8, 12, 14, 32, 7))
     renderClockTile({
-      sunriseTime: '6:02AM',
-      sunsetTime: '7:41PM',
+      sunriseTime: '2026-06-14T06:02:00+10:00',
+      sunsetTime: '2026-06-14T19:41:00+10:00',
       moonPhase: 'waxingGibbous',
       placeName: 'Airlie Beach',
     })
@@ -192,8 +193,8 @@ describe('ClockTile', () => {
 
   test('marks the date line non-wrapping as a last line of defence against clipping the place chip', () => {
     renderClockTile({
-      sunriseTime: '6:02AM',
-      sunsetTime: '7:41PM',
+      sunriseTime: '2026-06-14T06:02:00+10:00',
+      sunsetTime: '2026-06-14T19:41:00+10:00',
       moonPhase: 'waxingGibbous',
       placeName: 'Airlie Beach',
     })
@@ -207,8 +208,8 @@ describe('ClockTile', () => {
     // of vertical room if the date line were ever allowed to wrap again.
     vi.setSystemTime(new Date(2026, 8, 16, 14, 32, 7))
     renderClockTile({
-      sunriseTime: '6:02AM',
-      sunsetTime: '7:41PM',
+      sunriseTime: '2026-06-14T06:02:00+10:00',
+      sunsetTime: '2026-06-14T19:41:00+10:00',
       moonPhase: 'waxingGibbous',
       placeName: 'Airlie Beach',
       tripEta: { label: 'Mooloolaba Marina', etaAt: new Date('2026-09-16T18:05:00Z') },

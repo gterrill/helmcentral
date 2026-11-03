@@ -455,6 +455,9 @@ func TestExecuteGetWindForecast_RoundsFiltersNullsAndJoinsWaves(t *testing.T) {
 	if weatherStub.gotDays != 2 {
 		t.Errorf("expected days=2 to pass straight through, got %d", weatherStub.gotDays)
 	}
+	if result.CachedAt == nil || *result.CachedAt != "Sat 12 Sep 10.30 AM" {
+		t.Errorf("expected cached_at as a label on the place's clock, got %v", result.CachedAt)
+	}
 
 	if len(result.Hourly) != 2 {
 		t.Fatalf("expected exactly 2 kept hourly rows (3-hourly, no past hours), got %d: %+v", len(result.Hourly), result.Hourly)
@@ -762,6 +765,9 @@ func TestExecuteGetTides_NearestStationWindowedExtremesAustraliaBrisbane(t *test
 	}
 	if !result.Cached {
 		t.Errorf("expected cached=true to pass through")
+	}
+	if result.CachedAt == nil || *result.CachedAt != "Sat 12 Sep 1.00 PM" {
+		t.Errorf("expected cached_at as a label on the station's clock, got %v", result.CachedAt)
 	}
 	if result.Note != "" {
 		t.Errorf("expected no note when extremes are found, got %q", result.Note)
@@ -1456,7 +1462,7 @@ func TestExecuteGetNearbyVessels_NameFilterNoLiveMatchFallsBackToSightingLog(t *
 	if got.Name != "Hot Chilli" || got.Mmsi != "234567890" {
 		t.Fatalf("expected Hot Chilli/234567890, got %+v", got)
 	}
-	wantSeenAt := seenAt.UTC().Format(time.RFC3339)
+	wantSeenAt := nearbyTestLabel(seenAt)
 	if got.LastSeenAt != wantSeenAt {
 		t.Fatalf("expected last_seen_at=%s, got %s", wantSeenAt, got.LastSeenAt)
 	}
@@ -1492,7 +1498,7 @@ func TestExecuteGetNearbyVessels_InRangeSinceFromNewestConfirmedSighting(t *test
 	if v.InRangeSince == nil {
 		t.Fatalf("expected in_range_since to be set for a confirmed sighting")
 	}
-	want := seenAt.UTC().Format(time.RFC3339)
+	want := nearbyTestLabel(seenAt)
 	if *v.InRangeSince != want {
 		t.Fatalf("expected in_range_since=%s, got %s", want, *v.InRangeSince)
 	}
@@ -1928,7 +1934,7 @@ func TestExecuteGetNearbyVessels_StationarySinceWalksBackToLastMovement(t *testi
 	if v.StationarySince == nil {
 		t.Fatalf("expected stationary_since to be set")
 	}
-	want := settled.UTC().Format(time.RFC3339)
+	want := nearbyTestLabel(settled)
 	if *v.StationarySince != want {
 		t.Fatalf("expected stationary_since=%s (the first point after the >100m move), got %s", want, *v.StationarySince)
 	}
@@ -1969,7 +1975,7 @@ func TestExecuteGetNearbyVessels_StationarySinceAllWithinThresholdUsesOldestPoin
 	if v.StationarySince == nil {
 		t.Fatalf("expected stationary_since to be set")
 	}
-	want := oldest.UTC().Format(time.RFC3339)
+	want := nearbyTestLabel(oldest)
 	if *v.StationarySince != want {
 		t.Fatalf("expected stationary_since to fall back to the oldest point (%s), got %s", want, *v.StationarySince)
 	}
@@ -2194,7 +2200,7 @@ func TestExecuteGetNearbyVessels_JustArrivedVesselIsReportedStationarySinceArriv
 	if v.StationarySince == nil {
 		t.Fatalf("expected stationary_since to be set for a vessel that has genuinely just arrived and settled")
 	}
-	want := arrived.UTC().Format(time.RFC3339)
+	want := nearbyTestLabel(arrived)
 	if *v.StationarySince != want {
 		t.Fatalf("expected stationary_since=%s (the moment it arrived), got %s", want, *v.StationarySince)
 	}
@@ -2312,7 +2318,7 @@ func TestExecuteGetNearbyVessels_HistoryLookupsRunConcurrentlyAndAreAttributedCo
 		if v.StationarySince == nil {
 			t.Fatalf("expected stationary_since for %s", v.Name)
 		}
-		want := byMmsi[v.Mmsi].UTC().Format(time.RFC3339)
+		want := nearbyTestLabel(byMmsi[v.Mmsi])
 		if *v.StationarySince != want {
 			t.Fatalf("attribution mismatch for mmsi %s: expected stationary_since=%s, got %s (a result landed on the wrong vessel)", v.Mmsi, want, *v.StationarySince)
 		}
@@ -3165,4 +3171,10 @@ func TestGetWindForecast_NoWaveDataIsSaidPlainlyNotAsAnError(t *testing.T) {
 	if !r.WavesNoData || r.WavesError != "" {
 		t.Errorf("got %+v", r)
 	}
+}
+
+// nearbyTestLabel is how the nearby-vessel tests expect an instant: the boat-time
+// label on the UTC+10 clock their fixtures put the boat on.
+func nearbyTestLabel(t time.Time) string {
+	return boatDayClock(t, time.FixedZone("AEST", 10*3600))
 }

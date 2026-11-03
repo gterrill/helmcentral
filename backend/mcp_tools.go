@@ -57,7 +57,7 @@ var mcpToolPolicies = []mcpToolPolicy{
 	{Name: "get_active_alarms", Plain: "Active alarms", Status: mcpDefaultOn,
 		Reason: "Titles and bodies are worded on the server for the watchkeeper. The investigate hint names tools that are also on offer.",
 		Extra: "Report each alarm as worded; do not reword its title or body. An empty list means nothing is alarming now. " +
-			"If times carry a timezone_note they are UTC, not boat time. Each alarm's investigate list says what to read next: " +
+			"If a result carries a timezone_note its times are UTC, not boat time: say UTC when you quote one. Each alarm's investigate list says what to read next: " +
 			"an entry that is a SignalK path goes to get_last_recorded (path_prefix) and get_path_history (path). " +
 			"If it is empty the alarm has no sensor of its own to read, so say that rather than guessing a path. " +
 			"Never use the alarm's own path field, and never a path guessed from the device name on the card."},
@@ -70,7 +70,8 @@ var mcpToolPolicies = []mcpToolPolicy{
 	{Name: "get_path_history", Plain: "Path history", Status: mcpDefaultOn,
 		Reason: "Recorded history of one reading. Needs InfluxDB and says so when it is not configured.",
 		Extra: "Use only a path the boat reported (from get_boat_context, get_last_recorded or an alarm's investigate list); never guess a path. " +
-			"It returns what was recorded and nothing else. Quote a mean direction as the tool gives it and never average angles yourself."},
+			"It returns what was recorded and nothing else. Quote a mean direction as the tool gives it and never average angles yourself. " +
+			"A bucket's t and the first_seen, last_seen and gap times are boat-time labels: quote them as given."},
 	{Name: "get_last_recorded", Plain: "Last recorded readings", Status: mcpDefaultOn,
 		Reason: "Finds the last recorded point per source. Result is self-describing.",
 		Extra:  "Use it to find paths and when a reading last arrived. Never guess a path: take it from this result, get_boat_context or an alarm's investigate list."},

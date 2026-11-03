@@ -834,7 +834,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"Give value and clear_value in the operator's units, as the card and list_alarm_rules show them (percent, " +
 		"degrees, knots), not SI. If the refusal says the boat reports no unit for the path, tell the operator to set that level in the Alarms drawer. For an above or below alarm always give a clear point so it does not chatter (an equal, notEqual or stale alarm has none), and always say how long it must hold " +
 		"(dwell_seconds), and say both in your reply with the severity you chose. The label is the alarm's title for " +
-		"someone reading it at 02:00: the event in a few words, such as \"House Bank Low\", never a path or a rule id, " +
+		"someone reading it at 2.00 AM: the event in a few words, such as \"House Bank Low\", never a path or a rule id, " +
 		"no exclamation marks. A proposal changes nothing until the operator taps Apply, so say it is waiting and " +
 		"never say the alarm is set, on or watching until the conversation shows it was applied. If the dry run is " +
 		"refused, read the reason, fix that field and propose again. Only when the operator asks what they should be " +
@@ -845,7 +845,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 
 	// 2a-iv-b. Watches (ADR 0227) - fixed wording, identical for every turn.
 	b.WriteString("When the operator asks for a regular check of the boat or a summary at a set time (\"check the boat every " +
-		"hour\", \"give me a morning report at 06:00 at anchor\"), first call list_watches, then propose a watch record " +
+		"hour\", \"give me a morning report at 6.00 AM at anchor\"), first call list_watches, then propose a watch record " +
 		"(type watch) with propose_changes: a short name, a schedule as five-field cron on the boat's clock (describe_record_type " +
 		"watch has examples), the report sections that matter (power, anchor, alarms, tanks, weather, instruments) and, in the " +
 		"operator's words, what to look out for. Propose a change to an existing watch rather than a second one. " +
@@ -921,7 +921,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"freshness and sources first with check_signalk_paths, then use get_last_recorded and get_path_history " +
 		"against InfluxDB (when configured) to find when a path or source actually stopped and what it did before " +
 		"then. Name the specific source that went quiet when you find one, e.g. \"every YachtDevices source " +
-		"stopped at 00:34 on the 21st and has not reported since\" is a better answer than \"tank data is " +
+		"stopped at 12.34 AM on the 21st and has not reported since\" is a better answer than \"tank data is " +
 		"missing\". Do not tell the operator to go check the SignalK admin console for something these tools can " +
 		"answer directly; only fall back to that if InfluxDB is not configured and the live snapshot has already " +
 		"forgotten the path (a path can be genuinely absent from the live tree yet still have InfluxDB history, so " +
@@ -988,7 +988,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"from the device name on the card (the name on a card is a label and may belong to a " +
 		"different sensor than the one that tripped). Keep the value at raise (sensors, evidence) apart from the " +
 		"live value now (live_sensors, live_evidence; live_same_as_raised means they match; only sensor-health alarms carry these, so a missing one says nothing for other alarms), and say which one " +
-		"you are quoting. If times carry a timezone_note they are UTC, not boat time. An empty list means " +
+		"you are quoting. If a result carries a timezone_note its times are UTC, not boat time: say UTC when you quote one. An empty list means " +
 		"nothing is alarming now; say so rather than guessing.\n\n")
 
 	// 2c1d. Asking about one alarm (ADR 0226) - fixed wording, identical for
@@ -1174,7 +1174,10 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		"If a tool returns an error, say so plainly; do not guess or fabricate a plausible answer.\n\n" +
 
 		"Use knots for wind speed, nautical miles for distance, and metres for wave height and depth; give every " +
-		"time in the local zone.\n\n" +
+		"time in the local zone. Tool results give each time as a finished label in the boat's time zone, such as \"Mon 2 Nov 1.30 PM\". " +
+		"Quote a label as given and never work out a time from one, add to it or convert it. Any other time you write goes in the same form: " +
+		"\"1.30 PM\", with a dot, capital AM or PM and the minutes always, \"10.00 PM\" for 10 at night and \"12.00 AM\" for midnight. " +
+		"A field ending in _iso is UTC for passing to another tool, never for quoting.\n\n" +
 
 		"Write like a delivery skipper briefing the owner before casting off. No exclamation marks, no opener " +
 		"like \"Good!\", no closing verdict line like \"looks like a comfortable passage\". Let length follow the " +
@@ -1231,8 +1234,8 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 		boat = boatTime{placeZone: utcZone, NoFix: true}
 		pc.BoatTime = boat
 	}
-	fmt.Fprintf(&lb, "Local time: %s (%s). Give every time in this zone unless a tool result states a different zone.\n\n",
-		pc.Now.In(boat.Loc).Format("Monday 2 January 2006 15:04"), boat.PromptClock(pc.Now))
+	fmt.Fprintf(&lb, "Local time: %s (%s). Give every time in this zone unless a tool result states a different zone, in the form 1.30 PM.\n\n",
+		pc.Now.In(boat.Loc).Format("Monday 2 January 2006")+" "+boatClock(pc.Now, boat.Loc), boat.PromptClock(pc.Now))
 
 	if hasUsableVesselPosition(pc.Latitude, pc.Longitude) {
 		if place := strings.TrimSpace(pc.PlaceName); place != "" {
@@ -1266,7 +1269,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	case !pc.WarningOK:
 		lb.WriteString("Marine warnings: the forecast warnings feed has not reported yet.\n\n")
 	case pc.WarningLevel <= 0:
-		fmt.Fprintf(&lb, "Marine warnings: no official marine warning as of %s.\n\n", pc.WarningFetchedAt.In(pc.BoatTime.Loc).Format("15:04"))
+		fmt.Fprintf(&lb, "Marine warnings: no official marine warning as of %s.\n\n", boatClock(pc.WarningFetchedAt, pc.BoatTime.Loc))
 	default:
 		line := fmt.Sprintf("Marine warnings: %s in force (wind level %d).", assistantWarningLevelLabel(pc.WarningLevel), pc.WarningLevel)
 		if pc.WarningSurf {
@@ -1326,7 +1329,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	// has something true to check against.
 	if w := pc.ActiveWatch; w != nil {
 		fmt.Fprintf(&lb, "A watch you started is running in this conversation: %s, until %s. Its report will arrive in this conversation by itself when it ends.\n\n",
-			w.Subject, w.EndsAt.In(pc.BoatTime.Loc).Format("15:04"))
+			w.Subject, boatClock(w.EndsAt, pc.BoatTime.Loc))
 	}
 
 	live = lb.String()

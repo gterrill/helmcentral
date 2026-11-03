@@ -72,6 +72,7 @@ export interface WeatherForecastDay {
   /** null when the provider reported no humidity/visibility data at all - distinct from a real 0. */
   humidityPct: number | null;
   visibilityNm: number | null;
+  /** RFC3339 instants; show them with formatTimeOfDay in the boat's zone. */
   sunriseTime: string | null;
   sunsetTime: string | null;
   moonPhase: string | null;

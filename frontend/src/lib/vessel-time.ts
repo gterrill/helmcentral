@@ -148,13 +148,13 @@ export function zoneClocksDiffer(a: string, b: string, at: Date | number): boole
   return zoneOffsetMinutes(a, at) !== zoneOffsetMinutes(b, at)
 }
 
-/** "14 Mar", "09:32" and "UTC+10" for an instant in `timeZone`. */
+/** "14 Mar", "9.32 AM" and "UTC+10" for an instant in `timeZone`. */
 export function zonedDateTimeParts(unixSeconds: number, timeZone: string): { date: string; time: string; zone: string } {
   if (!zoneKnown(timeZone)) return { date: NO_TIME, time: NO_TIME, zone: '' }
   const at = new Date(unixSeconds * 1000)
-  const parts = dateTimeFormat({ day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }, timeZone).formatToParts(at)
+  const parts = dateTimeFormat({ day: 'numeric', month: 'short' }, timeZone).formatToParts(at)
   const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
-  return { date: `${pick('day')} ${pick('month')}`, time: `${pick('hour')}:${pick('minute')}`, zone: zoneOffsetLabel(timeZone, at) }
+  return { date: `${pick('day')} ${pick('month')}`, time: formatTimeOfDay(at, timeZone), zone: zoneOffsetLabel(timeZone, at) }
 }
 
 /** The calendar date (YYYY-MM-DD) of an instant in `timeZone`. */
@@ -185,16 +185,32 @@ function partsIn(date: Date, timeZone: string, options: Intl.DateTimeFormatOptio
   return out
 }
 
-/** "14:05", or "2:05 PM" with hour12. */
-export function formatTimeOfDay(at: Instant, timeZone: string | undefined, options?: { hour12?: boolean }): string {
+// The one way the operator reads a time is "1.30 PM": a dot between hour and
+// minute, capital AM or PM, always the minutes, no leading zero. It is built
+// from the 24-hour parts, not from Intl's own 12-hour text, because that text
+// changes with the locale ("1:30 pm", "1.30 pm", a narrow no-break space).
+function clockParts(date: Date, timeZone: string): { hour: number; minute: number } {
+  const p = partsIn(date, timeZone, { hour: 'numeric', minute: '2-digit', hourCycle: 'h23' })
+  return { hour: Number(p.hour) % 24, minute: Number(p.minute) }
+}
+
+/** A clock reading already split into hour (0-23) and minute, as "1.30 PM". For a time that has no zone to look up: a schedule, a photo's own clock. */
+export function formatHourMinute(hour: number, minute: number): string {
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12
+  return `${hour12}.${String(minute).padStart(2, '0')} ${hour % 24 >= 12 ? 'PM' : 'AM'}`
+}
+
+/** "1.30 PM", "12.00 AM" for midnight, "9.05 AM". */
+export function formatTimeOfDay(at: Instant, timeZone: string | undefined): string {
   const date = toDate(at)
   if (!date || !timeZone || !zoneKnown(timeZone)) return NO_TIME
-  if (options?.hour12) {
-    const p = partsIn(date, timeZone, { hour: 'numeric', minute: '2-digit', hour12: true })
-    return `${p.hour}:${p.minute} ${p.dayPeriod}`
-  }
-  const p = partsIn(date, timeZone, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-  return `${p.hour}:${p.minute}`
+  const c = clockParts(date, timeZone)
+  return formatHourMinute(c.hour, c.minute)
+}
+
+/** The short form for a chart axis: "1 PM" on the hour, "1.30 PM" when the tick is not. */
+export function formatAxisTime(at: Instant, timeZone: string | undefined): string {
+  return formatTimeOfDay(at, timeZone).replace('.00 ', ' ')
 }
 
 /** "30 Aug", or "30 Aug 2026" with year. */

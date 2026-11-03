@@ -68,8 +68,8 @@ func logbookDeps(t *testing.T, s *passageStore) assistantToolDeps {
 }
 
 type listedPassage struct {
-	Start         string   `json:"start"`
-	End           string   `json:"end"`
+	Start         string   `json:"start_iso"`
+	End           string   `json:"end_iso"`
 	StartLocal    string   `json:"start_local"`
 	EndLocal      string   `json:"end_local"`
 	From          string   `json:"from"`
@@ -90,7 +90,7 @@ type listResult struct {
 	Note         string          `json:"note"`
 	Passages     []listedPassage `json:"passages"`
 	UnderWayNow  *struct {
-		Start      string  `json:"start"`
+		Start      string  `json:"start_iso"`
 		StartLocal string  `json:"start_local"`
 		DistanceNm float64 `json:"distance_nm_so_far"`
 	} `json:"under_way_now"`
@@ -142,10 +142,10 @@ func TestListPassages_ReadsTheLogbook(t *testing.T) {
 	}
 	// Times are also given in the zone at the passage's own start position
 	// (ADR 0230), the way the Passages page shows them.
-	if first.StartLocal != "2026-10-27 10:16 AEST (UTC+10)" || first.EndLocal != "2026-10-27 11:14 AEST (UTC+10)" {
+	if first.StartLocal != "Tue 27 Oct 10.16 AM AEST (UTC+10)" || first.EndLocal != "Tue 27 Oct 11.14 AM AEST (UTC+10)" {
 		t.Errorf("local time: %q to %q", first.StartLocal, first.EndLocal)
 	}
-	if !strings.HasPrefix(res.LogbookFirst, "2026-02-28T") || !strings.HasPrefix(res.LogbookLast, "2026-10-27T") {
+	if res.LogbookFirst != "Sun 1 Mar 7.11 AM AEDT (UTC+11)" || res.LogbookLast != "Tue 27 Oct 11.14 AM AEST (UTC+10)" {
 		t.Errorf("logbook span: %q to %q", res.LogbookFirst, res.LogbookLast)
 	}
 	// A year before the telemetry window: no 60-day ceiling.
@@ -290,7 +290,7 @@ func TestGetCruiseSummary_WholeLogbook(t *testing.T) {
 	if res.FirstPlace != "Pittwater" || res.LastPlace != "Haslewood Island" {
 		t.Errorf("places from the records: %q to %q", res.FirstPlace, res.LastPlace)
 	}
-	if !strings.HasPrefix(res.FirstDepart, "2026-02-28T") || !strings.HasPrefix(res.LastArrival, "2026-10-27T") {
+	if res.FirstDepart != "Sun 1 Mar 7.11 AM AEDT (UTC+11)" || res.LastArrival != "Tue 27 Oct 11.14 AM AEST (UTC+10)" {
 		t.Errorf("span: %q to %q", res.FirstDepart, res.LastArrival)
 	}
 	// Fuel is summed only over the passages that recorded it, and says so.
@@ -445,6 +445,20 @@ func TestPassageTools_Registered(t *testing.T) {
 	if strings.Contains(d, "InfluxDB") || strings.Contains(d, "speed over ground") {
 		t.Errorf("list_passages must no longer describe the telemetry: %s", d)
 	}
+	if strings.Contains(d, "(UTC,") || !strings.Contains(d, "start_iso") {
+		t.Errorf("list_passages must describe start_local/end_local as the times and start_iso/end_iso as UTC for later calls: %s", d)
+	}
+}
+
+func TestGetCruiseSummary_NoteSaysWhatTheTimesAre(t *testing.T) {
+	s, _ := loadLogbookFixture(t)
+	var res struct {
+		Note string `json:"note"`
+	}
+	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{}`, &res)
+	if strings.Contains(res.Note, "Times are UTC") || !strings.Contains(res.Note, "boat time") {
+		t.Errorf("the note must say times are labels on each passage's own clock: %q", res.Note)
+	}
 }
 
 var _ = sql.ErrNoRows
@@ -484,7 +498,7 @@ func TestGetCruiseSummary_LastPlaceAndArrivalAgree(t *testing.T) {
 	}
 	var res summaryResult
 	runTool(t, logbookDeps(t, s), "get_cruise_summary", `{}`, &res)
-	if res.LastPlace != "B" || res.LastArrival != "2026-05-01T10:00:00Z" {
+	if res.LastPlace != "B" || res.LastArrival != "Fri 1 May 10.00 AM UTC" {
 		t.Errorf("last: %q at %q", res.LastPlace, res.LastArrival)
 	}
 }
@@ -574,7 +588,7 @@ func TestListPassages_UsesTheZoneAtThePassageStart(t *testing.T) {
 	runTool(t, logbookDeps(t, s), "list_passages", `{}`, &res)
 	pittwater := res.Passages[9]
 	// 2026-02-28 20:11 UTC is 07:11 on 1 March at AEDT (UTC+11).
-	if pittwater.StartLocal != "2026-03-01 07:11 AEDT (UTC+11)" {
+	if pittwater.StartLocal != "Sun 1 Mar 7.11 AM AEDT (UTC+11)" {
 		t.Errorf("Pittwater start_local = %q", pittwater.StartLocal)
 	}
 	// A bare date is a day in that zone: 1 March finds it, 28 February does not.
@@ -583,6 +597,42 @@ func TestListPassages_UsesTheZoneAtThePassageStart(t *testing.T) {
 	runTool(t, logbookDeps(t, s), "list_passages", `{"from":"2026-02-28","to":"2026-02-28"}`, &before)
 	if on.Found != 1 || on.Passages[0].From != "Pittwater" || before.Found != 0 {
 		t.Errorf("1 March found %d, 28 February found %d", on.Found, before.Found)
+	}
+}
+
+// A logbook that spans years names the year on a record outside the current
+// boat year, and leaves it off the ones inside it.
+func TestListPassages_LabelsNameTheYearOutsideTheCurrentOne(t *testing.T) {
+	s := newTestPassageStore(t)
+	lat, lon := -33.6, 151.3
+	old := time.Date(2024, 9, 13, 23, 0, 0, 0, time.UTC) // Sat 14 Sep 9.00 AM AEST
+	recent := time.Date(2026, 9, 13, 23, 0, 0, 0, time.UTC)
+	for _, p := range []passageRecord{
+		{Start: old, End: old.Add(time.Hour)},
+		{Start: recent, End: recent.Add(time.Hour)},
+	} {
+		saved, err := s.InsertPassage(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf, _ := json.Marshal(passageFigures{StartLat: &lat, StartLon: &lon, Timezone: "Australia/Sydney"})
+		if _, err := s.db.Exec(`UPDATE passages SET stats_json = ? WHERE id = ?`, string(buf), saved.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var res listResult
+	runTool(t, logbookDeps(t, s), "list_passages", `{}`, &res)
+	if res.Found != 2 {
+		t.Fatalf("found %d", res.Found)
+	}
+	if got, want := res.Passages[1].StartLocal, "Sat 14 Sep 2024 9.00 AM AEST (UTC+10)"; got != want {
+		t.Errorf("old passage start_local = %q, want %q", got, want)
+	}
+	if got, want := res.Passages[0].StartLocal, "Mon 14 Sep 9.00 AM AEST (UTC+10)"; got != want {
+		t.Errorf("this year's passage start_local = %q, want %q", got, want)
+	}
+	if res.LogbookFirst != "Sat 14 Sep 2024 9.00 AM AEST (UTC+10)" {
+		t.Errorf("logbook_first_departure = %q", res.LogbookFirst)
 	}
 }
 

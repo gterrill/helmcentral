@@ -141,7 +141,7 @@ const ruleAnchorageDetails = "Shelter: " + ruleShelter + " Forecast: " + ruleWin
 func readingAnchorageDetails(leaveDefaulted bool, forecastErr, tideErr, featuresErr string, depth anchorageDepthSection) string {
 	var parts []string
 	if leaveDefaulted {
-		parts = append(parts, "No leave time was given, so the stay ends at 08:00 local time, the first at least six hours after arrival: say that is what you assumed.")
+		parts = append(parts, "No leave time was given, so the stay ends at 8.00 AM local time, the first at least six hours after arrival: say that is what you assumed.")
 	}
 	for _, e := range []struct{ label, err string }{{"forecast", forecastErr}, {"tide", tideErr}, {"features", featuresErr}} {
 		if e.err != "" {
@@ -160,10 +160,10 @@ func readingAnchorageDetails(leaveDefaulted bool, forecastErr, tideErr, features
 }
 
 // readingAnchorageFeatures carries what the map's restrictions mean for this call.
-func readingAnchorageFeatures(prohibited []string, truncated bool, cachedAt time.Time) string {
+func readingAnchorageFeatures(prohibited []string, truncated bool, cachedAt time.Time, loc *time.Location) string {
 	var parts []string
 	if !cachedAt.IsZero() {
-		parts = append(parts, fmt.Sprintf("The map features are from a lookup made at %s, kept for six hours.", cachedAt.UTC().Format(time.RFC3339)))
+		parts = append(parts, fmt.Sprintf("The map features are from a lookup made at %s, kept for six hours.", boatDayClock(cachedAt, loc)))
 	}
 	if len(prohibited) > 0 {
 		parts = append(parts, fmt.Sprintf("Anchoring is prohibited in: %s. Treat that as a no-go for anchoring there and say so first.", strings.Join(prohibited, ", ")))

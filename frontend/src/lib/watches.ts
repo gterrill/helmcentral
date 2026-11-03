@@ -273,13 +273,13 @@ export const WATCH_TEMPLATES: WatchTemplate[] = [
   {
     id: 'morning',
     title: 'Morning report',
-    detail: 'Daily 06:00',
+    detail: 'Daily 6.00 AM',
     draft: { name: 'Morning report', schedule: '0 6 * * *', sections: ALL_SECTIONS },
   },
   {
     id: 'overnight',
     title: 'Overnight check',
-    detail: 'Hourly 22:00–06:00',
+    detail: 'Hourly 10.00 PM to 6.00 AM',
     draft: { name: 'Overnight check', schedule: '0 22-23,0-6 * * *', sections: ['power', 'anchor', 'alarms', 'instruments'] },
   },
   {

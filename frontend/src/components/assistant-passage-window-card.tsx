@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { PassageDecisionControl } from '@/components/passage-decision-control'
 import { formatRowDate } from '@/lib/passage-dates'
 import type { PassageDecision, PassageMeasure, PassageState, PassageWindowCard, PassageWindowCell } from '@/lib/mate-cards'
+import { formatTimeOfDay } from '@/lib/vessel-time'
 
 const STALE_AFTER_MS = 6 * 60 * 60 * 1000
 
@@ -45,7 +46,7 @@ export function StateChip({ state }: { state: PassageState }) {
 }
 
 function formatTime(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
+  return formatTimeOfDay(iso, timeZone)
 }
 
 function formatStamp(iso: string, timeZone: string): string {
@@ -64,9 +65,9 @@ function localDay(iso: string, timeZone: string): string {
 }
 
 /**
- * "06:00 → 14:30", with the arrival weekday appended when it lands on a later
+ * "6.00 AM → 2.30 PM", with the arrival weekday appended when it lands on a later
  * local day and the departure weekday prefixed when the leg sails on another
- * day than its row's departure date ("Thu 06:00 → 11:34").
+ * day than its row's departure date ("Thu 6.00 AM → 11.34 AM").
  */
 function formatSpan(cell: PassageWindowCell, rowDate: string, timeZone: string): string {
   const lead = cell.date !== rowDate ? `${new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short' }).format(new Date(cell.depart))} ` : ''

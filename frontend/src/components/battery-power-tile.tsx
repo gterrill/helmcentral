@@ -418,7 +418,7 @@ export const BatteryPowerTile = memo(function BatteryPowerTile(props: BatteryPow
                     })}
                   >
                     {'Dawn '}
-                    {formatTimeOfDay(overnightProjection.sunrise, timeZone, { hour12: true })}
+                    {formatTimeOfDay(overnightProjection.sunrise, timeZone)}
                     {' · '}
                     <span data-testid="dawn-estimate" className={onShorePower ? 'text-muted-foreground' : dawnEstimateClass}>
                       {onShorePower ? 'on shore power' : dawnEstimateText}

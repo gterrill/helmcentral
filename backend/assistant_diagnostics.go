@@ -108,8 +108,11 @@ type assistantSignalKPathMatch struct {
 	Value      any      `json:"value"`
 	Units      string   `json:"units,omitempty"`
 	Source     string   `json:"source,omitempty"`
-	Timestamp  string   `json:"timestamp,omitempty"`
-	AgeSeconds *float64 `json:"age_seconds,omitempty"`
+	// Timestamp is the SignalK update time as a boat-time label; TimestampISO is
+	// the instant as SignalK gave it, for a later get_path_history call.
+	Timestamp    string   `json:"timestamp,omitempty"`
+	TimestampISO string   `json:"timestamp_iso,omitempty"`
+	AgeSeconds   *float64 `json:"age_seconds,omitempty"`
 	Stale      bool     `json:"stale"`
 }
 
@@ -155,6 +158,7 @@ func (d assistantToolDeps) executeCheckSignalKPaths(ctx context.Context, raw jso
 	sourceFilter := strings.ToLower(strings.TrimSpace(args.Source))
 
 	now := d.now()
+	boat := d.boatTime()
 	snap := d.signalKDiagnostics(now)
 	if !snap.HasSelfTree {
 		return "", fmt.Errorf("check_signalk_paths: no self tree yet - SignalK is not connected, or this vessel's context is not yet known")
@@ -170,10 +174,10 @@ func (d assistantToolDeps) executeCheckSignalKPaths(ctx context.Context, raw jso
 	if !snap.LastMessage.IsZero() {
 		ago := roundTo1(now.Sub(snap.LastMessage).Seconds())
 		result.Connection.LastMessageAgoS = &ago
-		result.Connection.LastMessageAt = snap.LastMessage.UTC().Format(time.RFC3339)
+		result.Connection.LastMessageAt = boat.DayClock(snap.LastMessage)
 	}
 
-	result.Sources = summarizeSignalKSources(snap.Samples, now)
+	result.Sources = summarizeSignalKSources(snap.Samples, now, boat)
 
 	if filter == "" && sourceFilter == "" {
 		result.Note = "no filter given: showing connection status and the source summary only. Pass filter and/or source to see matching paths."
@@ -196,7 +200,15 @@ func (d assistantToolDeps) executeCheckSignalKPaths(ctx context.Context, raw jso
 			Value:     s.Value,
 			Units:     s.Units,
 			Source:    s.Source,
-			Timestamp: s.Timestamp,
+		}
+		if s.Timestamp != "" {
+			// An update time that does not parse gets no label rather than a guess;
+			// the string SignalK sent is still there for the reader to see.
+			m.TimestampISO = s.Timestamp
+			if at, err := time.Parse(time.RFC3339, s.Timestamp); err == nil {
+				m.Timestamp = boat.DayClock(at)
+				m.TimestampISO = at.UTC().Format(time.RFC3339)
+			}
 		}
 		if s.AgeSeconds >= 0 {
 			age := s.AgeSeconds
@@ -255,7 +267,7 @@ func (d assistantToolDeps) executeCheckSignalKPaths(ctx context.Context, raw jso
 // Sorted oldest-first (largest age first, unknown last) so a source that has
 // gone quiet sorts above every source still updating every few seconds -
 // the whole point of a diagnostic answering "which source stopped".
-func summarizeSignalKSources(samples []signalKPathSample, now time.Time) []assistantSignalKSourceSummary {
+func summarizeSignalKSources(samples []signalKPathSample, now time.Time, boat boatTime) []assistantSignalKSourceSummary {
 	type aggregate struct {
 		count int
 		ages  []float64
@@ -284,7 +296,7 @@ func summarizeSignalKSources(samples []signalKPathSample, now time.Time) []assis
 		if age := freshestAge(agg.ages...); age >= 0 {
 			a := age
 			summary.AgeSeconds = &a
-			summary.NewestUpdate = now.Add(-time.Duration(age * float64(time.Second))).UTC().Format(time.RFC3339)
+			summary.NewestUpdate = boat.DayClock(now.Add(-time.Duration(age * float64(time.Second))))
 			summary.Stale = age > assistantDiagnosticsStaleAfter.Seconds()
 		}
 		out = append(out, summary)
@@ -338,7 +350,10 @@ type assistantLastRecordedRow struct {
 	Path       string  `json:"path"`
 	Source     string  `json:"source,omitempty"`
 	LastSeenAt string  `json:"last_seen_at"`
-	AgeDays    float64 `json:"age_days"`
+	// LastSeenISO is the same instant in UTC, for the start or end of a
+	// get_path_history call. Never quoted.
+	LastSeenISO string  `json:"last_seen_iso"`
+	AgeDays     float64 `json:"age_days"`
 	// LastValue is `any`, not float64: a string (mode/state enum) or
 	// boolean (alarm flag) path is just as legitimately "last recorded" as
 	// a numeric one - see influxLastRecordedRow's own doc comment (influx.go)
@@ -405,11 +420,13 @@ func (d assistantToolDeps) executeGetLastRecorded(ctx context.Context, raw json.
 
 	now := d.now()
 	rows := make([]assistantLastRecordedRow, 0, len(raws))
+	boat := d.boatTime()
 	for _, r := range raws {
 		rows = append(rows, assistantLastRecordedRow{
-			Path:       r.Path,
-			Source:     r.Source,
-			LastSeenAt: r.Time.UTC().Format(time.RFC3339),
+			Path:        r.Path,
+			Source:      r.Source,
+			LastSeenAt:  boat.DayClock(r.Time),
+			LastSeenISO: r.Time.UTC().Format(time.RFC3339),
 			AgeDays:    roundTo1(now.Sub(r.Time).Hours() / 24),
 			LastValue:  r.Value,
 		})
@@ -488,19 +505,22 @@ type assistantGetPathHistoryArgs struct {
 }
 
 // assistantPathHistoryBucket is one bucket's row in the tool result. It
-// carries a single UTC timestamp (T, "t") rather than a local-formatted
-// string alongside it - the top-level result already states Start/End/
-// Timezone once, so a per-bucket local string would triple the redundant
-// bytes buckets already needed to be trimmed of (a code-review finding,
-// 2026-09-25: "keep bucket entries compact"). Min/Mean/Max are always
+// carries a single boat-time label (T, "t"), never UTC: a model handed
+// "2026-11-02T03:30:00Z" beside a zone field quoted it as boat time. One
+// label keeps the entries compact (a code-review finding, 2026-09-25).
+// Min/Mean/Max are always
 // rounded (roundTo2) before they reach here, for the same reason - InfluxDB's
 // own float precision (e.g. 0.30452000000000856, seen live against the boat)
 // costs three times per bucket otherwise.
 type assistantPathHistoryBucket struct {
-	T    string   `json:"t"`
-	Min  *float64 `json:"min,omitempty"`
-	Mean *float64 `json:"mean,omitempty"`
-	Max  *float64 `json:"max,omitempty"`
+	// T is the bucket start as a finished boat-time label ("Mon 2 Nov 1.30 PM"),
+	// the only form Mate quotes. At is the same instant for code that does
+	// arithmetic on it; it never reaches the model.
+	T    string    `json:"t"`
+	At   time.Time `json:"-"`
+	Min  *float64  `json:"min,omitempty"`
+	Mean *float64  `json:"mean,omitempty"`
+	Max  *float64  `json:"max,omitempty"`
 	// Spread is an angle's circular standard deviation in degrees: how widely
 	// the samples in the bucket scattered round the mean. Only an angle has it.
 	Spread *float64 `json:"spread,omitempty"`
@@ -689,6 +709,26 @@ func computePathHistoryGaps(start, stop time.Time, width time.Duration, points [
 	return gaps, gapCount
 }
 
+// boatLabelGaps rewrites the gap ranges the shared history query gives in UTC
+// as boat-time labels. The query also feeds the telemetry API, which keeps
+// RFC3339, so the conversion belongs here. A gap time that does not parse is
+// a broken result, not one to pass on in UTC.
+func boatLabelGaps(gaps []assistantPathHistoryGap, loc *time.Location) ([]assistantPathHistoryGap, error) {
+	out := make([]assistantPathHistoryGap, 0, len(gaps))
+	for _, g := range gaps {
+		from, err := time.Parse(time.RFC3339, g.From)
+		if err != nil {
+			return nil, fmt.Errorf("a gap start is unreadable: %w", err)
+		}
+		to, err := time.Parse(time.RFC3339, g.To)
+		if err != nil {
+			return nil, fmt.Errorf("a gap end is unreadable: %w", err)
+		}
+		out = append(out, assistantPathHistoryGap{From: boatDayClock(from, loc), To: boatDayClock(to, loc)})
+	}
+	return out, nil
+}
+
 // executeGetPathHistory answers "what did X actually do around when it
 // stopped": one path's InfluxDB history over an explicit range, bucketed to
 // min/mean/max per bucket (a flat mean with min==max across many buckets is
@@ -771,14 +811,10 @@ func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage,
 	// 2026-09-25). rangeClampedNote, when non-empty, says exactly what start
 	// was requested and what it was moved to; it becomes part of the
 	// result's Note below, alongside (not instead of) any no-data/gaps note.
-	var rangeClampedNote string
+	var rangeClampedFrom time.Time
 	if stop.Sub(start) > assistantPathHistoryMaxSpan {
-		requestedStart := start
+		rangeClampedFrom = start
 		start = stop.Add(-assistantPathHistoryMaxSpan)
-		rangeClampedNote = fmt.Sprintf(
-			"requested start %s is more than this tool's %d-day limit before end; start moved to %s.",
-			requestedStart.UTC().Format(time.RFC3339), int(assistantPathHistoryMaxSpan/(24*time.Hour)), start.UTC().Format(time.RFC3339),
-		)
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -833,7 +869,7 @@ func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage,
 			// An angle's bucket: the vector mean in degrees and its spread.
 			// A bucket whose samples cancelled out stays in the list with no
 			// mean, so a reader sees the hour and that it had no direction.
-			b := assistantPathHistoryBucket{T: m.T.UTC().Format(time.RFC3339)}
+			b := assistantPathHistoryBucket{T: boatDayClock(m.T, loc), At: m.T}
 			if m.Mean != nil && m.Resultant != nil {
 				b.Mean = rp(floatPtr(angleDegrees(kind, *m.Mean)))
 				b.Spread = rp(floatPtr(circularSpreadDegrees(*m.Resultant)))
@@ -850,7 +886,7 @@ func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage,
 		// already see.
 		minV, meanV, maxV := rp(m.Min), rp(m.Mean), rp(m.Max)
 		buckets = append(buckets, assistantPathHistoryBucket{
-			T:   m.T.UTC().Format(time.RFC3339),
+			T: boatDayClock(m.T, loc), At: m.T,
 			Min: minV, Mean: meanV, Max: maxV,
 		})
 		if minV != nil && (overallMin == nil || *minV < *overallMin) {
@@ -882,9 +918,9 @@ func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage,
 		Path:     path,
 		Source:   source,
 		Timezone: tzLabel,
-		Start:    start.In(loc).Format("Mon 2 Jan 15:04"),
+		Start:    boatDayClock(start, loc),
 		StartISO: start.UTC().Format(time.RFC3339),
-		End:      stop.In(loc).Format("Mon 2 Jan 15:04"),
+		End:      boatDayClock(stop, loc),
 		EndISO:   stop.UTC().Format(time.RFC3339),
 		Bucket:   every,
 		Buckets:  buckets,
@@ -904,8 +940,11 @@ func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage,
 	// which buckets have no data at all, not the exact sample time within
 	// one - only first/last seen needed the precise query.
 	var notes []string
-	if rangeClampedNote != "" {
-		notes = append(notes, rangeClampedNote)
+	if !rangeClampedFrom.IsZero() {
+		notes = append(notes, fmt.Sprintf(
+			"requested start %s is more than this tool's %d-day limit before end; start moved to %s.",
+			boatDayClock(rangeClampedFrom, loc), int(assistantPathHistoryMaxSpan/(24*time.Hour)), boatDayClock(start, loc),
+		))
 	}
 	if kind != angleNone {
 		result.Unit = angleUnitLabel(path)
@@ -920,15 +959,15 @@ func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage,
 		}
 	}
 	if firstLastFound {
-		result.FirstSeen = firstSeenAt.In(loc).Format("Mon 2 Jan 15:04")
+		result.FirstSeen = boatDayClock(firstSeenAt, loc)
 		result.FirstSeenISO = firstSeenAt.UTC().Format(time.RFC3339)
-		result.LastSeen = lastSeenAt.In(loc).Format("Mon 2 Jan 15:04")
+		result.LastSeen = boatDayClock(lastSeenAt, loc)
 		result.LastSeenISO = lastSeenAt.UTC().Format(time.RFC3339)
 	}
 	if queryStart.After(start) || queryStop.Before(stop) {
 		notes = append(notes, fmt.Sprintf(
 			"nothing recorded before first_seen or after last_seen; buckets cover %s-%s at %s.",
-			queryStart.UTC().Format(time.RFC3339), queryStop.UTC().Format(time.RFC3339), every,
+			boatDayClock(queryStart, loc), boatDayClock(queryStop, loc), every,
 		))
 	}
 	if len(merged) == 0 {
@@ -940,6 +979,10 @@ func (d assistantToolDeps) pathHistory(ctx context.Context, raw json.RawMessage,
 	// and counted in buckets of the chosen width. Silence before first_seen
 	// is not, since first_seen already says nothing was recorded earlier.
 	gaps, gapCount := hist.Gaps, hist.GapCount
+	gaps, err = boatLabelGaps(gaps, loc)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get_path_history: %w", err)
+	}
 	result.GapCount = gapCount
 	if len(gaps) > assistantPathHistoryMaxReportedGaps {
 		// Keep the MOST RECENT gaps, not the oldest - gaps is already
@@ -990,7 +1033,8 @@ var mateToolCheckSignalKPaths = mateTool{
 			"value/age of any path matching a filter. Use this FIRST for any \"is X still updating\", " +
 			"\"why is X missing\" or \"when did X stop\" question, before get_last_recorded or " +
 			"get_path_history - a path can be genuinely missing from this live view even though it " +
-			"still has InfluxDB history, which those two tools read instead.",
+			"still has InfluxDB history, which those two tools read instead. Times are boat-time labels: " +
+			"quote them as given. timestamp_iso on a path is UTC, only for passing to another tool.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -1026,7 +1070,8 @@ var mateToolGetLastRecorded = mateTool{
 			"source matching a filter - this is what actually answers \"when did X stop\", including for " +
 			"a path no longer in the live SignalK tree at all (check_signalk_paths only sees what has " +
 			"arrived since this connection last started). Give path_prefix and/or source; at least one " +
-			"is required.",
+			"is required. Each row's last_seen_at is a boat-time label: quote it as given. last_seen_iso is the " +
+			"same instant in UTC, only for the start or end of a get_path_history call.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {
@@ -1072,7 +1117,9 @@ var mateToolGetPathHistory = mateTool{
 			"you get 1-minute buckets, so a short range gives the finest detail. Each bucket's min/max " +
 			"show transients shorter than the bucket. Use " +
 			"get_last_recorded or check_signalk_paths first to find the path and, if useful, its source. " +
-			"For \"the last passage\" style questions, get the time windows from list_passages (the Passages logbook).",
+			"For \"the last passage\" style questions, get the time windows from list_passages (the Passages logbook). " +
+			"Each bucket's t, and first_seen, last_seen and the gaps, are boat-time labels: quote them as given and do not work out a time from them. " +
+			"start_iso, end_iso, first_seen_iso and last_seen_iso are UTC, only for passing to another tool.",
 		Parameters: json.RawMessage(`{
 					"type": "object",
 					"properties": {

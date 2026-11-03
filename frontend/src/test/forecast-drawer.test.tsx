@@ -14,6 +14,11 @@ vi.mock('@/components/forecast-tide-section', () => ({
   ),
 }))
 
+vi.mock('@/hooks/use-vessel-state', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/hooks/use-vessel-state')>()),
+  useVesselStateSelector: (select: (state: { timeZone: string | null }) => unknown) => select({ timeZone: 'Australia/Brisbane' }),
+}))
+
 import { ForecastDrawer, HOURLY_CHART_TOP, formatRefreshAge, smoothUpperAirHeights } from '@/components/forecast-drawer'
 
 const HOUR_LABELS = [
@@ -104,8 +109,8 @@ function buildDay(overrides: Record<string, unknown> = {}) {
     precipitation: 5,
     humidityPct: 58,
     visibilityNm: 9.5,
-    sunriseTime: '6:32AM',
-    sunsetTime: '5:47PM',
+    sunriseTime: '2026-06-15T06:32:00+10:00',
+    sunsetTime: '2026-06-15T17:47:00+10:00',
     moonPhase: 'waningCrescent',
     hourlyWind: buildHourlyWind(),
     hourlyPrecip: buildHourlyPrecip(),
@@ -885,8 +890,8 @@ describe('ForecastDrawer refresh age', () => {
   it('shows sunrise, sunset and moon phase for the selected day', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByText('6:32AM')).toBeInTheDocument()
-    expect(screen.getByText('5:47PM')).toBeInTheDocument()
+    expect(screen.getByText('6.32 AM')).toBeInTheDocument()
+    expect(screen.getByText('5.47 PM')).toBeInTheDocument()
     expect(screen.getByText('Waning Crescent')).toBeInTheDocument()
   })
 
@@ -3578,8 +3583,8 @@ describe('ForecastDrawer still digits', () => {
   it('gives the sunrise and sunset times tabular-nums', () => {
     render(<ForecastDrawer forecast={[buildDay()]} loading={false} error={null} unit="metric" />)
 
-    expect(screen.getByText('6:32AM').className).toMatch(/\btabular-nums\b/)
-    expect(screen.getByText('5:47PM').className).toMatch(/\btabular-nums\b/)
+    expect(screen.getByText('6.32 AM').className).toMatch(/\btabular-nums\b/)
+    expect(screen.getByText('5.47 PM').className).toMatch(/\btabular-nums\b/)
   })
 
   it('gives the chart tooltip bubble numbers tabular-nums, since they are DOM text and change fastest while scrubbing', () => {

@@ -9,8 +9,8 @@ import { documentFailureMessage, documentIsImage, documentTypeBadge, formatDocum
 // normal case. formatDocumentTime always carries day/month/year.
 
 describe('formatDocumentTime', () => {
-  it('renders a known ISO string as "D Mon YYYY HH:MM"', () => {
-    expect(formatDocumentTime('2026-09-20T06:28:00')).toBe('20 Sep 2026 06:28')
+  it('renders a known ISO string as "D Mon YYYY 6.28 AM"', () => {
+    expect(formatDocumentTime('2026-09-20T06:28:00')).toBe('20 Sep 2026 6.28 AM')
   })
 
   it('returns null for a missing value', () => {

@@ -698,9 +698,9 @@ func buildAlarmReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 		fmt.Fprintf(&b, "The boat is at or near %s.\n", place)
 	}
 	if boatKnown {
-		fmt.Fprintf(&b, "Boat time: %s. All times in the alarm's details are boat time.\n", clockWithZone(now, loc, "Mon 2 Jan 2006 15:04"))
+		fmt.Fprintf(&b, "Boat time: %s. All times in the alarm's details are boat time, written like 1.30 PM; quote them as given and write any other time the same way.\n", boatDayClockWithZone(now, loc))
 	} else {
-		fmt.Fprintf(&b, "The boat has no position fix yet, so its own time zone is not known. The time is %s UTC. Times in the alarm's details are UTC, not boat time; say so if a time matters.\n", now.UTC().Format("Mon 2 Jan 2006 15:04"))
+		fmt.Fprintf(&b, "The boat has no position fix yet, so its own time zone is not known. The time is %s UTC. Times in the alarm's details are UTC, not boat time; say so if a time matters.\n", boatDayClock(now, time.UTC))
 	}
 	fmt.Fprintf(&b, "The operator's units are %s. Quote figures as the details give them; do not convert.\n", units)
 	if notes := strings.TrimSpace(pc.Notes); notes != "" {

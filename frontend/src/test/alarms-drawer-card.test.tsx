@@ -207,8 +207,8 @@ describe('AlarmsDrawer times', () => {
         can_acknowledge: false,
       }),
     ])
-    // Adelaide is UTC+10:30 in January: 05:41 UTC is 16:11 there, on the same day.
-    expect(screen.getByText(/2 Jan 16:11/)).toBeInTheDocument()
-    expect(screen.getByText(/2 Jan 16:42/)).toBeInTheDocument()
+    // Adelaide is UTC+10:30 in January: 05:41 UTC is 4.11 PM there, on the same day.
+    expect(screen.getByText(/2 Jan 4.11 PM/)).toBeInTheDocument()
+    expect(screen.getByText(/2 Jan 4.42 PM/)).toBeInTheDocument()
   })
 })

@@ -12,6 +12,7 @@ import {
   type SchedulePresetKind,
 } from '@/lib/watch-schedule'
 import { cn } from '@/lib/utils'
+import { formatHourMinute } from '@/lib/vessel-time'
 
 // ADR 0227: how the operator says when a watch runs. Each choice writes a cron
 // string the server understands; the sentence and the next three times under
@@ -73,7 +74,7 @@ export function WatchSchedulePicker({ value, onChange, preview, disabled = false
 
   const answer = preview.preview
   const invalid = answer !== null && !answer.valid
-  const hourLabel = (h: number) => `${pad(h)}:00`
+  const hourLabel = (h: number) => formatHourMinute(h, 0)
 
   return (
     <div className="flex flex-col gap-3" data-testid="watch-schedule-picker">

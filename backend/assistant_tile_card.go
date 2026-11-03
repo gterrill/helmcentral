@@ -37,7 +37,8 @@ type mateTilePayload struct {
 }
 
 // mateTileResult is what the model reads: the card's snapshot, the figures in
-// the operator's units, and the readings that could not be taken.
+// the operator's units, and the readings that could not be taken. CapturedAt is
+// a boat-time label here; the stored card keeps the instant.
 type mateTileResult struct {
 	Tile        string          `json:"tile"`
 	CapturedAt  string          `json:"captured_at"`
@@ -188,7 +189,7 @@ func depthTideSnapshot(ctx context.Context, d assistantToolDeps, now time.Time, 
 			}
 			when := at.UTC().Format(time.RFC3339)
 			if loc != nil {
-				when = at.In(loc).Format("15:04") + " " + boat.qualify(boat.Label(at))
+				when = boatClock(at, loc) + " " + boat.qualify(boat.Label(at))
 			}
 			display[e.key] = fmt.Sprintf("%s %s at %s", fixed(e.ft*perFt, decimals), unit, when)
 		}
@@ -282,7 +283,7 @@ func (d assistantToolDeps) executeShowTile(ctx context.Context, args json.RawMes
 		missing = []string{}
 	}
 	text, err := capToolResultJSON(mateTileResult{
-		Tile: in.Tile, CapturedAt: captured, Snapshot: raw, Display: display, Missing: missing,
+		Tile: in.Tile, CapturedAt: d.boatTime().DayClock(now), Snapshot: raw, Display: display, Missing: missing,
 		Note: strings.TrimSpace(spec.note + " " + zoneNote), Instruction: mateTileInstruction,
 	}, func() bool { return false })
 	if err != nil {

@@ -27,7 +27,7 @@ function run(over: Partial<WatchRun> = {}): WatchRun {
     watch_id: 'w1',
     started_at: '2026-10-29T12:00:00Z',
     finished_at: '2026-10-29T12:00:30Z',
-    boat_time: 'Thu 29 Oct 12:00 UTC+12',
+    boat_time: 'Thu 29 Oct 12.00 PM UTC+12',
     timezone: 'UTC+12',
     outcome: 'ran',
     report_kind: 'sections',
@@ -54,8 +54,8 @@ describe('WatchChart', () => {
     expect(within(card).getByText('Pressure, last 12 hours')).toBeInTheDocument()
     expect(within(card).getByText('Pressure (hPa)')).toBeInTheDocument()
     expect(within(card).getByText('3 h fall limit')).toBeInTheDocument()
-    // The window is shown on the boat's clock: 00:00 UTC is 12:00 at UTC+12.
-    expect(within(card).getByText(/12:00 .* 00:00/)).toBeInTheDocument()
+    // The window is shown on the boat's clock: 00:00 UTC is 12.00 PM at UTC+12.
+    expect(within(card).getByText(/12.00 PM .* 12.00 AM/)).toBeInTheDocument()
     expect(within(card).getByText('UTC+12')).toBeInTheDocument()
     expect(within(card).getByRole('img', { name: /Pressure, last 12 hours/ })).toBeInTheDocument()
   })

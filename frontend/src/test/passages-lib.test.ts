@@ -74,8 +74,8 @@ describe('volume follows the Units setting', () => {
 describe('boat-local time', () => {
   it('reads the zone the server names, daylight saving included', () => {
     const summer = Date.UTC(2026, 0, 14, 23, 30) / 1000
-    expect(localDateTimeParts(summer, 'Australia/Sydney')).toEqual({ date: '15 Jan', time: '10:30', zone: 'UTC+11' })
-    expect(localDateTimeParts(summer, 'Australia/Adelaide')).toEqual({ date: '15 Jan', time: '10:00', zone: 'UTC+10:30' })
+    expect(localDateTimeParts(summer, 'Australia/Sydney')).toEqual({ date: '15 Jan', time: '10.30 AM', zone: 'UTC+11' })
+    expect(localDateTimeParts(summer, 'Australia/Adelaide')).toEqual({ date: '15 Jan', time: '10.00 AM', zone: 'UTC+10:30' })
   })
 
   it('shows -- for a passage with no zone rather than another zone', () => {
@@ -85,8 +85,8 @@ describe('boat-local time', () => {
 
   it('labels the zone on the time and rolls the date', () => {
     const t = Date.UTC(2026, 2, 13, 23, 30) / 1000
-    expect(localDateTimeParts(t, 'Australia/Brisbane')).toEqual({ date: '14 Mar', time: '09:30', zone: 'UTC+10' })
-    expect(formatLocalDateTime(t, 'Australia/Brisbane')).toBe('14 Mar 09:30 UTC+10')
+    expect(localDateTimeParts(t, 'Australia/Brisbane')).toEqual({ date: '14 Mar', time: '9.30 AM', zone: 'UTC+10' })
+    expect(formatLocalDateTime(t, 'Australia/Brisbane')).toBe('14 Mar 9.30 AM UTC+10')
     expect(formatLocalDate(new Date(t * 1000).toISOString(), 'Australia/Brisbane')).toBe('14 Mar')
     expect(formatLocalDate('garbage', 'Australia/Brisbane')).toBe('--')
   })

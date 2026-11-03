@@ -40,7 +40,7 @@ describe('zones named by the server', () => {
 
   it('splits an instant into date, time and zone', () => {
     const t = Date.UTC(2026, 2, 13, 23, 30) / 1000
-    expect(zonedDateTimeParts(t, 'Australia/Brisbane')).toEqual({ date: '14 Mar', time: '09:30', zone: 'UTC+10' })
-    expect(zonedDateTimeParts(t, 'UTC')).toEqual({ date: '13 Mar', time: '23:30', zone: 'UTC' })
+    expect(zonedDateTimeParts(t, 'Australia/Brisbane')).toEqual({ date: '14 Mar', time: '9.30 AM', zone: 'UTC+10' })
+    expect(zonedDateTimeParts(t, 'UTC')).toEqual({ date: '13 Mar', time: '11.30 PM', zone: 'UTC' })
   })
 })

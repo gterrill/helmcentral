@@ -10,7 +10,7 @@ import { errorMessage } from '@/lib/errors'
  *
  * `subject` is the operator-words name the server built from Mate's labels
  * ("Port engine load and Starboard engine load"); paths never reach here.
- * `endsAtLocal` is the end time as Mate states it, "HH:MM" on the boat's
+ * `endsAtLocal` is the end time as Mate states it, "2.05 PM" on the boat's
  * clock, formatted by the server. `status` is `watching` while it samples
  * and `reporting` while Mate is being handed the report. A `finished` watch
  * is never shown; it only tells the hook that Mate's follow-up has started.

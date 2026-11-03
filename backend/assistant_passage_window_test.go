@@ -253,7 +253,7 @@ func TestAssessItinerary_ArrivalAfterSunsetIsNoGoWhenRequired(t *testing.T) {
 	if c.State != "no_go" || c.Limiting == nil || c.Limiting.Factor != "daylight" {
 		t.Fatalf("got %+v", c)
 	}
-	if want := "Arrives 22:00, after sunset 17:32 · Alpha → Bravo"; c.Limiting.Text != want {
+	if want := "Arrives 10.00 PM, after sunset 5.32 PM · Alpha → Bravo"; c.Limiting.Text != want {
 		t.Fatalf("text = %q, want %q", c.Limiting.Text, want)
 	}
 	if c.Limiting.Sector != nil {
@@ -1228,7 +1228,7 @@ func TestAssessItinerary_ArrivalBeforeSunriseIsNoGoWhenRequired(t *testing.T) {
 	if c.State != "no_go" || c.Limiting == nil || c.Limiting.Factor != "daylight" {
 		t.Fatalf("got %+v", c)
 	}
-	if want := "Arrives 04:10, before sunrise 05:45 · Alpha → Bravo"; c.Limiting.Text != want {
+	if want := "Arrives 4.10 AM, before sunrise 5.45 AM · Alpha → Bravo"; c.Limiting.Text != want {
 		t.Fatalf("text = %q, want %q", c.Limiting.Text, want)
 	}
 }

@@ -1,9 +1,9 @@
 import { captureUnix, type ExifCapture } from '@/lib/exif-time'
 import type { Timeline } from '@/lib/passages'
 import { placeAt } from '@/lib/replay-signs'
+import { formatHourMinute } from '@/lib/vessel-time'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-const two = (n: number) => String(n).padStart(2, '0')
 
 export interface SignPlacement {
   /** Unix seconds to pin the sign at. */
@@ -29,7 +29,7 @@ function readCapture(capture: ExifCapture | Error | null, boatOffsetHours: numbe
     return { kind: 'none', why: "This passage's time zone isn't known, so the photo's time can't be matched to the track" }
   }
   const { unix, zone, fromPhoto } = captureUnix(capture, boatOffsetHours ?? 0)
-  const shown = `${capture.day} ${MONTHS[capture.month - 1]} ${two(capture.hour)}:${two(capture.minute)} ${zone}`
+  const shown = `${capture.day} ${MONTHS[capture.month - 1]} ${formatHourMinute(capture.hour, capture.minute)} ${zone}`
   if (!placeAt(unix, timeline)) return { kind: 'none', why: `The photo was taken ${shown}, outside this replay` }
   return {
     kind: 'time',

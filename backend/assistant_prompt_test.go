@@ -32,7 +32,7 @@ func TestBuildAssistantSystemPrompt_TimeLabelAtLon149(t *testing.T) {
 	prompt := buildAssistantSystemPrompt(pc)
 
 	loc := queenslandLoc(t)
-	wantTimeLabel := pc.Now.In(loc).Format("Monday 2 January 2006 15:04")
+	wantTimeLabel := pc.Now.In(loc).Format("Monday 2 January 2006") + " " + boatClock(pc.Now, loc)
 	if !strings.Contains(prompt, wantTimeLabel) {
 		t.Fatalf("expected the prompt to contain the local time label %q, got:\n%s", wantTimeLabel, prompt)
 	}
@@ -44,12 +44,28 @@ func TestBuildAssistantSystemPrompt_TimeLabelAtLon149(t *testing.T) {
 	}
 }
 
+// Mate quotes a time label as given and writes every other time the one way the
+// operator reads it. A UTC stamp beside a zone field once went out as boat time.
+func TestBuildAssistantSystemPrompt_TellsMateHowToSayATime(t *testing.T) {
+	prompt := buildAssistantSystemPrompt(basePromptContext())
+	for _, want := range []string{"quote a label as given", "1.30 PM", "never work out a time"} {
+		if !strings.Contains(strings.ToLower(prompt), strings.ToLower(want)) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	for _, banned := range []string{"06:00", "00:34 on the 21st", "at 02:00"} {
+		if strings.Contains(prompt, banned) {
+			t.Errorf("prompt still carries the 24-hour time %q", banned)
+		}
+	}
+}
+
 func TestBuildAssistantSystemPrompt_ClockFollowsDaylightSaving(t *testing.T) {
 	pc := basePromptContext()
 	pc.BoatTime = boatTime{placeZone: mustZoneAt(-33.87, 151.21)}
 	pc.Now = time.Date(2026, 10, 29, 0, 34, 0, 0, time.UTC)
 	prompt := buildAssistantSystemPrompt(pc)
-	if !strings.Contains(prompt, "Local time: Thursday 29 October 2026 11:34 (Australia/Sydney, UTC+11).") {
+	if !strings.Contains(prompt, "Local time: Thursday 29 October 2026 11.34 AM (Australia/Sydney, UTC+11).") {
 		t.Fatalf("Sydney in October is on daylight saving, got:\n%s", prompt)
 	}
 }

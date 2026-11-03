@@ -4,6 +4,33 @@ Every time Helmcentral shows you or tells Mate is on the boat's own clock, not
 the clock of the phone, tablet or wall screen you're looking at. This page says
 how that clock is worked out, where you see it, and where it stops.
 
+## How a time is written
+
+Every time is written the same way, such as 1.30 PM. There's a dot between the
+hour and the minutes, AM or PM is in capitals, and the minutes are always
+there. There's no setting to change it.
+
+- **On the hour:** 10.00 PM, not 10 PM. Midnight is 12.00 AM and noon is
+  12.00 PM.
+- **With a day:** Mon 2 Nov 1.30 PM, when the day matters.
+- **With a year:** Mate's logbook times name the year when a passage isn't in
+  the current year, as in Sat 14 Sep 2024 9.00 AM. That keeps a logbook that
+  spans several years from being ambiguous.
+- **With seconds:** A watch on a live reading is sampled every second, so its
+  report gives seconds, as in 1.30.05 PM. Two spikes 20 seconds apart then read
+  differently.
+- **Chart axes:** An axis keeps it short, as in 1 PM, and gives the minutes only
+  when a mark isn't on the hour, as in 1.30 PM. The note that appears when you
+  point at a chart gives the full time.
+- **Mate:** Every time in a tool's result reaches Mate already written this
+  way, in the boat's zone, so Mate quotes it as it is and never works a time out
+  for itself. Any other time Mate writes follows the same form.
+- **Time fields you type into:** The time boxes on forms and the five cron
+  fields for a watch schedule keep the format your browser gives them. The
+  sentence under them reads as above.
+- **Past text:** Reports and alarm messages written before this change keep
+  their original wording.
+
 ## How the boat's clock is chosen
 
 Helmcentral looks up where the boat is and uses the time zone that place keeps.
@@ -41,7 +68,8 @@ above.
   "last fix" while this applies, and the clock tile shows "last fix" beside the
   time.
 - **There has never been a fix:** Times are UTC, and Mate says it's UTC because
-  there's no position yet. The clock tile shows "UTC · no position yet". Watches
+  there's no position yet. Each time a tool gives Mate then ends in "UTC", as in
+  Mon 2 Nov 3.30 AM UTC, so it can't be mistaken for boat time. The clock tile shows "UTC · no position yet". Watches
   don't run until the first fix, because a schedule can't be read without a
   clock.
 

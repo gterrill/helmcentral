@@ -329,7 +329,7 @@ func TestBuildWaveHourlySeriesByDay_BucketsHoursByLocalDate(t *testing.T) {
 	if len(day14) != 1 {
 		t.Fatalf("expected 1 entry for Jun 14, got %d", len(day14))
 	}
-	if day14[0].Label != "11PM" || day14[0].HourOfDay != 23 {
+	if day14[0].Label != "11 PM" || day14[0].HourOfDay != 23 {
 		t.Fatalf("unexpected day14 bucket: %+v", day14[0])
 	}
 	if day14[0].WaveHeightM != 1.2 || day14[0].WavePeriodS != 8.5 || day14[0].WaveDirectionDeg != 90 {

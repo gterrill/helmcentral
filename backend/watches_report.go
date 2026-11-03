@@ -70,12 +70,14 @@ type watchReportSection struct {
 }
 
 type watchReport struct {
-	Kind        string               `json:"kind"`
-	GeneratedAt string               `json:"generated_at"`
-	BoatTime    string               `json:"boat_time"`
-	Since       string               `json:"since"`
-	SinceNote   string               `json:"since_note,omitempty"`
-	Sections    []watchReportSection `json:"sections"`
+	Kind        string `json:"kind"`
+	GeneratedAt string `json:"generated_at"`
+	BoatTime    string `json:"boat_time"`
+	Since       string `json:"since"`
+	// SinceAt is Since as a UTC instant, for a receiver that reads times.
+	SinceAt   string               `json:"since_at"`
+	SinceNote string               `json:"since_note,omitempty"`
+	Sections  []watchReportSection `json:"sections"`
 }
 
 // watchStayForecast is what the planned stay's forecast says against the
@@ -126,6 +128,7 @@ func buildWatchReport(w savedWatch, in watchReportInput) (watchReport, []watchFi
 		GeneratedAt: in.Now.UTC().Format(time.RFC3339),
 		BoatTime:    watchClock(in.Now, loc),
 		Since:       watchClock(in.Since, loc),
+		SinceAt:     in.Since.UTC().Format(time.RFC3339),
 	}
 	if in.FirstRun {
 		report.SinceNote = "This is the first report, so it covers the last 24 hours."
@@ -167,10 +170,8 @@ func buildWatchReport(w savedWatch, in watchReportInput) (watchReport, []watchFi
 
 // watchClock is a time on the boat's clock, with its zone.
 func watchClock(t time.Time, loc *time.Location) string {
-	return clockWithZone(t, loc, "Mon 2 Jan 15:04")
+	return boatDayClockWithZone(t, loc)
 }
-
-func watchHM(t time.Time, loc *time.Location) string { return t.In(loc).Format("15:04") }
 
 func ruleFinding(section, rule, text string) watchFinding {
 	return watchFinding{Section: section, Rule: rule, Text: text, By: watchByRules}
@@ -353,7 +354,7 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 		}
 		entry := map[string]any{
 			"title": g.Title, "count": g.Count, "active_now": active[g.Title],
-			"first": g.First.UTC().Format(time.RFC3339), "last": g.Last.UTC().Format(time.RFC3339),
+			"first": watchClock(g.First, loc), "last": watchClock(g.Last, loc),
 		}
 		if g.Sources > 0 {
 			entry["sources"] = g.Sources
@@ -386,20 +387,20 @@ func watchAlarmsSection(w savedWatch, in watchReportInput, loc *time.Location) (
 const watchAlarmTitleCap = 5
 
 // watchDayTime is a time on the boat's clock that names its day when it is not
-// today: "15:42", "yesterday 15:42", "Tue 15:42" within the last week, and
-// "Wed 21 Oct 15:42" beyond it.
+// today: "3.42 PM", "yesterday 3.42 PM", "Tue 3.42 PM" within the last week,
+// and "Wed 21 Oct 3.42 PM" beyond it.
 func watchDayTime(t, now time.Time, loc *time.Location) string {
 	t, now = t.In(loc), now.In(loc)
 	day := func(x time.Time) time.Time { return time.Date(x.Year(), x.Month(), x.Day(), 12, 0, 0, 0, loc) }
 	switch days := int(day(now).Sub(day(t)).Hours()/24 + 0.5); {
 	case days <= 0:
-		return t.Format("15:04")
+		return boatClock(t, loc)
 	case days == 1:
-		return "yesterday " + t.Format("15:04")
+		return "yesterday " + boatClock(t, loc)
 	case days < 7:
-		return t.Format("Mon 15:04")
+		return boatWeekdayClock(t, loc)
 	default:
-		return t.Format("Mon 2 Jan 15:04")
+		return boatDayClock(t, loc)
 	}
 }
 
@@ -533,7 +534,7 @@ func watchTanksSection(w savedWatch, in watchReportInput) (watchReportSection, [
 			dir = "down"
 		}
 		f := ruleFinding(watchSectionTanks, "tank_change", fmt.Sprintf(
-			"%s is %s %.0f points since %s (%.0f %% to %.0f %%).", tank.Name, dir, math.Abs(delta), watchHM(in.PreviousAt, loc), was, now))
+			"%s is %s %.0f points since %s (%.0f %% to %.0f %%).", tank.Name, dir, math.Abs(delta), boatClock(in.PreviousAt, loc), was, now))
 		f.chart = tankChartSpec(tank, in)
 		findings = append(findings, f)
 	}
@@ -637,7 +638,7 @@ func watchInstrumentsSection(w savedWatch, in watchReportInput) (watchReportSect
 // UTC+0, never plain UTC).
 func watchBoatClock(t time.Time, loc *time.Location) string {
 	if loc == nil || loc == time.UTC || loc.String() == "UTC" {
-		return t.UTC().Format("Mon 2 Jan 15:04") + " UTC (boat time not known)"
+		return boatDayClock(t, time.UTC) + " UTC (boat time not known)"
 	}
 	return watchClock(t, loc)
 }

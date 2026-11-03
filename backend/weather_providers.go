@@ -529,7 +529,7 @@ func buildHourlySeriesByDay(hourly []weatherHourPoint, localLocation *time.Locat
 		}
 		localTime := hp.Time.In(localLocation)
 		dayKey := localTime.Format("2006-01-02")
-		label := localTime.Format("3PM")
+		label := boatAxisClock(localTime, localLocation)
 		hourOfDay := localTime.Hour()
 
 		windSpeedKts := sentinelSpeedKts(hp.WindSpeedMS)
@@ -602,11 +602,11 @@ func buildDayData(
 
 	sunriseTime := ""
 	if !dayPoint.Sunrise.IsZero() {
-		sunriseTime = dayPoint.Sunrise.In(localLocation).Format("3:04PM")
+		sunriseTime = dayPoint.Sunrise.In(localLocation).Format(time.RFC3339)
 	}
 	sunsetTime := ""
 	if !dayPoint.Sunset.IsZero() {
-		sunsetTime = dayPoint.Sunset.In(localLocation).Format("3:04PM")
+		sunsetTime = dayPoint.Sunset.In(localLocation).Format(time.RFC3339)
 	}
 
 	return weatherForecastDayData{
@@ -671,7 +671,7 @@ func buildWeatherHourlyStrip(hourly []weatherHourPoint, referenceDatetime time.T
 
 		if !insertedSunset && !sunsetAt.IsZero() && sunsetAt.After(referenceLocal) && localTime.After(sunsetAt) {
 			entries = append(entries, weatherHourlyEntryData{
-				Label: sunsetAt.Format("3:04PM"), Condition: "Sunset",
+				Label: boatClock(sunsetAt, localLocation), Condition: "Sunset",
 				TemperatureF: -1, WindSpeedKts: -1, WindGustKts: -1,
 				WindDirection: "—", WindDirectionDeg: -1, Kind: "sunset",
 			})
@@ -690,7 +690,7 @@ func buildWeatherHourlyStrip(hourly []weatherHourPoint, referenceDatetime time.T
 		windGustKts := sentinelGustKts(hp.WindGustMS, windSpeedKts)
 		windDirection, windDirectionDeg := sentinelDirection(hp.WindDirectionDeg)
 
-		label := localTime.Format("3PM")
+		label := boatAxisClock(localTime, localLocation)
 		if localTime.Equal(referenceHour) {
 			label = "Now"
 		}
@@ -708,7 +708,7 @@ func buildWeatherHourlyStrip(hourly []weatherHourPoint, referenceDatetime time.T
 	}
 
 	if !insertedSunset && !sunsetAt.IsZero() && sunsetAt.Format("2006-01-02") == localTodayKey && sunsetAt.After(referenceLocal) && len(entries) < weatherHourlyStripHours {
-		entries = append(entries, weatherHourlyEntryData{Label: sunsetAt.Format("3:04PM"), Condition: "Sunset", TemperatureF: -1, Kind: "sunset"})
+		entries = append(entries, weatherHourlyEntryData{Label: boatClock(sunsetAt, localLocation), Condition: "Sunset", TemperatureF: -1, Kind: "sunset"})
 	}
 
 	return entries

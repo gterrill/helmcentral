@@ -478,8 +478,88 @@ func zoneAbbreviation(t time.Time, loc *time.Location) string {
 	return offsetText(off)
 }
 
-// clockWithZone is t on loc's wall clock with the zone named: layout is a Go
-// layout without a zone element.
-func clockWithZone(t time.Time, loc *time.Location, layout string) string {
-	return t.In(loc).Format(layout) + " " + zoneAbbreviation(t, loc)
+// The one way the operator reads a time: "1.30 PM". A dot between hour and
+// minute, uppercase AM or PM, always the minutes, no leading zero on the hour,
+// and 12.00 AM for midnight. Mate's answers, report findings, alarm text,
+// notifications and tool results all come through these helpers, so the same
+// instant never reads two ways. Log lines and machine formats stay as they are.
+
+// boatClock is t on loc's wall clock: "1.30 PM".
+func boatClock(t time.Time, loc *time.Location) string {
+	lt := t.In(loc)
+	hour := lt.Hour() % 12
+	if hour == 0 {
+		hour = 12
+	}
+	period := "AM"
+	if lt.Hour() >= 12 {
+		period = "PM"
+	}
+	return fmt.Sprintf("%d.%02d %s", hour, lt.Minute(), period)
+}
+
+// boatClockSeconds is boatClock with seconds, for readings taken every second
+// where two events 20 s apart must not read the same: "1.30.05 PM".
+func boatClockSeconds(t time.Time, loc *time.Location) string {
+	lt := t.In(loc)
+	hour := lt.Hour() % 12
+	if hour == 0 {
+		hour = 12
+	}
+	period := "AM"
+	if lt.Hour() >= 12 {
+		period = "PM"
+	}
+	return fmt.Sprintf("%d.%02d.%02d %s", hour, lt.Minute(), lt.Second(), period)
+}
+
+// boatDayClockSeconds is the weekday, date and clock with seconds:
+// "Mon 2 Nov 1.30.05 PM".
+func boatDayClockSeconds(t time.Time, loc *time.Location) string {
+	return t.In(loc).Format("Mon 2 Jan") + " " + boatClockSeconds(t, loc)
+}
+
+// boatDayClock is the weekday, date and clock: "Mon 2 Nov 1.30 PM".
+func boatDayClock(t time.Time, loc *time.Location) string {
+	return t.In(loc).Format("Mon 2 Jan") + " " + boatClock(t, loc)
+}
+
+// boatDayYearClock is boatDayClock with the year named when t is not in
+// currentYear on loc's calendar: "Sat 14 Sep 2024 9.00 AM". A record in the
+// current year reads as boatDayClock does.
+func boatDayYearClock(t time.Time, loc *time.Location, currentYear int) string {
+	if t.In(loc).Year() == currentYear {
+		return boatDayClock(t, loc)
+	}
+	return t.In(loc).Format("Mon 2 Jan 2006") + " " + boatClock(t, loc)
+}
+
+// DayClock is t as a tool hands it to Mate: the weekday, date and clock on the
+// boat's zone. With no fix ever seen the zone is UTC, so the label says UTC and
+// is never read as boat time.
+func (b boatTime) DayClock(t time.Time) string {
+	label := boatDayClock(t, b.Loc)
+	if b.NoFix {
+		label += " UTC"
+	}
+	return label
+}
+
+// boatDayClockWithZone is "Mon 2 Nov 1.30 PM AEST".
+func boatDayClockWithZone(t time.Time, loc *time.Location) string {
+	return boatDayClock(t, loc) + " " + zoneAbbreviation(t, loc)
+}
+
+// boatAxisClock is the short form for a chart axis: "1 PM" on the hour and
+// "1.30 PM" when the tick is not.
+func boatAxisClock(t time.Time, loc *time.Location) string {
+	if t.In(loc).Minute() != 0 {
+		return boatClock(t, loc)
+	}
+	return strings.Replace(boatClock(t, loc), ".00", "", 1)
+}
+
+// boatWeekdayClock is the weekday and clock: "Mon 1.30 PM".
+func boatWeekdayClock(t time.Time, loc *time.Location) string {
+	return t.In(loc).Format("Mon") + " " + boatClock(t, loc)
 }

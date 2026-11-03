@@ -33,8 +33,19 @@ func alarmEmailFields(msg notificationMessage) [][2]string {
 	return [][2]string{
 		{"State", msg.State},
 		{"Value", formatAlarmReading(msg.Value, msg.Unit)},
-		{"Time", msg.At.UTC().Format(time.RFC3339)},
+		{"Time", alarmEmailTime(msg.At)},
 	}
+}
+
+// alarmEmailTime is the alarm's time on the boat's clock with the zone named. With no
+// fix ever seen the boat has no zone, so it says UTC rather than pass a UTC time
+// off as boat time.
+func alarmEmailTime(at time.Time) string {
+	loc, ok := currentVesselLocalLocation()
+	if !ok {
+		loc = time.UTC
+	}
+	return boatDayClockWithZone(at, loc)
 }
 
 // alarmEmailText is an alarm's plain text body, with a line saying why when its

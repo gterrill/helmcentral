@@ -140,7 +140,7 @@ describe('ChecklistRunner', () => {
     expect(screen.queryByText('Re-check')).not.toBeInTheDocument()
   })
 
-  it('resuming shows "Started HH:MM, x of y done" and lands on the first unchecked item', () => {
+  it('resuming shows "Started 2.05 PM, x of y done" and lands on the first unchecked item', () => {
     const run = makeRun({
       items: [
         { item_key: 'k1', occurrence: 0, text: 'Seacocks open', depth: 0, checked: true, checked_at: '2026-09-20T14:23:00Z' },
@@ -154,7 +154,7 @@ describe('ChecklistRunner', () => {
 
     render(<ChecklistRunner noteId="note-1" noteTitle="Shutdown" onExit={vi.fn()} />)
 
-    expect(screen.getByText(/Started \d{1,2}:\d{2}.*2 of 3 done/)).toBeInTheDocument()
+    expect(screen.getByText(/Started \d{1,2}\.\d{2} [AP]M.*2 of 3 done/)).toBeInTheDocument()
 
     const blowerButton = screen.getByText('Start blower').closest('button')
     expect(scrollSpy).toHaveBeenCalled()
