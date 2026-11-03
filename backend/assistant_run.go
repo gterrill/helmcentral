@@ -916,13 +916,16 @@ func (r *assistantRunner) run(ctx context.Context, systemStable, systemLive stri
 	var toolLog []assistantForcedFinalToolLogEntry
 
 	// runCalls is every tool call made this run, for the draft check
-	// (ADR 0234); draftSentBack makes the correction a one-time thing.
+	// (ADR 0234); sentBackTrigger makes the correction a one-time thing.
 	var runCalls []openRouterToolCall
 	// runResults is what each of those calls returned, by index: the tool
 	// message's content, or "" for a call that did not run. A check can tell a
 	// forecast that carried shelter labels from one that did not.
 	var runResults []string
-	draftSentBack := false
+	// sentBackTrigger and callsAtSendBack record what was sent back and how
+	// many calls the run had made then, so an answer that follows with no new
+	// result can be logged as a correction that changed nothing.
+	sentBackTrigger, callsAtSendBack := "", 0
 
 	// seen holds every call made so far, by assistantCallKey, and stalled
 	// counts the rounds in a row that made no progress: the budget (ADR 0240).
@@ -1201,14 +1204,22 @@ forcedLoop:
 			if checker, ok := r.tools.(assistantDraftChecker); ok && !forcedFinal && !r.options.Unattended {
 				trigger, instruction = checker.checkDraft(content, runCalls, runResults)
 			}
+			// An answer after a correction that led to no lookups may be a fair
+			// question back, so it is accepted; the log says the correction
+			// changed nothing. A second draft that still trips a trigger gets
+			// this line and the one below.
+			if sentBackTrigger != "" && strings.Join(runResults[callsAtSendBack:], "") == "" {
+				log.Printf("assistant: draft check: answer after the %s correction made no lookups; accepted as is", sentBackTrigger)
+			}
 			switch {
 			case trigger == "":
-			case draftSentBack:
+			case sentBackTrigger != "":
 				// The correction was sent and the draft still fails the
 				// check. Accept the answer, but say so in the log.
 				log.Printf("assistant: draft check: answer still has a %s; accepted as is", trigger)
 			case budgetReason(toolRounds) == "":
-				draftSentBack = true
+				sentBackTrigger, callsAtSendBack = trigger, len(runCalls)
+				tr.CheckTrigger, tr.CheckDraft = trigger, content
 				log.Printf("assistant: draft check: draft has a %s; sending it back once", trigger)
 				// The draft already streamed in part is withdrawn the same
 				// way a tool round's thinking aloud is.

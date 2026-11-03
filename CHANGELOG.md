@@ -28,6 +28,13 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Changed
 
+- **Mate is told to carry on after its answer is sent back.** When Mate's first
+  draft judges shelter or the wind without looking it up, Helmcentral sends it
+  back to check. Mate once took that as you objecting, apologised, and asked
+  where you were bound when you had already said. The message now tells Mate
+  that you didn't write it, not to mention it in the answer, and not to ask for
+  anything you've already told it. We can't make a model obey, so it may still
+  slip. **Run details** now shows a draft Mate was made to redo, and why.
 - **Every time reads the same way, like 1.30 PM.** Reports, Mate's answers,
   alarm text, emails, schedules and tiles all use one form, with a dot between
   the hour and minutes, AM or PM in capitals, and the minutes always shown. Chart

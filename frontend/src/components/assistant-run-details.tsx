@@ -72,6 +72,16 @@ function RoundBlock({ round }: { round: RunRound }) {
         <span className={cn(round.error !== '' ? 'text-destructive' : 'text-muted-foreground')}>{roundState(round)}</span>
       </div>
       {round.error !== '' && <p className="text-destructive">{round.error}</p>}
+      {round.checkDraft !== '' && (
+        <div className="mt-1 min-w-0">
+          <p className="text-muted-foreground">
+            Sent back for {round.checkTrigger}. Mate had to redo this draft.
+          </p>
+          <p data-testid="run-round-draft" className="mt-0.5 whitespace-pre-wrap break-words border-l-2 border-border pl-2">
+            {round.checkDraft}
+          </p>
+        </div>
+      )}
       {round.calls.length > 0 && (
         <ul className="mt-1 flex min-w-0 flex-col gap-0.5 pl-3">
           {round.calls.map((call) => (

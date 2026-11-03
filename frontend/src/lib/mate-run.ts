@@ -40,6 +40,9 @@ export interface RunRoundApi {
   progress: boolean
   error: string
   calls: RunCallApi[]
+  /** On a correction round, what the check found and the draft it sent back; empty otherwise. */
+  check_trigger: string
+  check_draft: string
 }
 
 export interface RunApi {
@@ -93,6 +96,8 @@ export interface RunRound {
   progress: boolean
   error: string
   calls: RunCall[]
+  checkTrigger: string
+  checkDraft: string
 }
 
 /** One run, without its rounds. */
@@ -150,6 +155,8 @@ export function mapRunTrace(api: RunApi): AssistantRunTrace {
     forcedFinal: r.forced_final,
     progress: r.progress,
     error: r.error,
+    checkTrigger: r.check_trigger,
+    checkDraft: r.check_draft,
     calls: r.calls.map((c): RunCall => ({
       seq: c.seq,
       name: c.name,

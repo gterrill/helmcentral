@@ -89,6 +89,13 @@ func createAssistantRunsSchema(db *sql.DB) error {
 			return fmt.Errorf("create %s: %w", stmt.what, err)
 		}
 	}
+	// check_trigger and check_draft arrived after the table did: the draft a
+	// correction round sent back. A row from before reads back empty.
+	for _, col := range []string{"check_trigger", "check_draft"} {
+		if err := addColumnIfMissing(db, "assistant_run_rounds", col, "TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -121,8 +128,8 @@ func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, erro
 		return assistantRunTrace{}, fmt.Errorf("insert run: %w", err)
 	}
 	roundStmt, err := tx.Prepare(`INSERT INTO assistant_run_rounds
-		(run_id, idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+		(run_id, idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error, check_trigger, check_draft)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return assistantRunTrace{}, fmt.Errorf("prepare insert run round: %w", err)
 	}
@@ -135,7 +142,7 @@ func (s *assistantStore) SaveRun(run assistantRunTrace) (assistantRunTrace, erro
 	}
 	defer callStmt.Close()
 	for _, r := range run.Rounds {
-		if _, err := roundStmt.Exec(run.ID, r.Index, r.Kind, r.StartOffsetMs, r.LatencyMs, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.CostUSD, boolToInt(r.ForcedFinal), boolToInt(r.Progress), r.Error); err != nil {
+		if _, err := roundStmt.Exec(run.ID, r.Index, r.Kind, r.StartOffsetMs, r.LatencyMs, r.PromptTokens, r.CompletionTokens, r.CachedTokens, r.CostUSD, boolToInt(r.ForcedFinal), boolToInt(r.Progress), r.Error, r.CheckTrigger, cutUTF8(r.CheckDraft, assistantToolCallMaxBytes)); err != nil {
 			return assistantRunTrace{}, fmt.Errorf("insert run round %d: %w", r.Index, err)
 		}
 		for _, c := range r.Calls {
@@ -232,7 +239,7 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 		return assistantRunTrace{}, false, fmt.Errorf("get run: %w", err)
 	}
 
-	roundRows, err := s.db.Query(`SELECT idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error
+	roundRows, err := s.db.Query(`SELECT idx, kind, start_offset_ms, latency_ms, prompt_tokens, completion_tokens, cached_tokens, cost_usd, forced_final, progress, error, check_trigger, check_draft
 		FROM assistant_run_rounds WHERE run_id = ? ORDER BY idx`, id)
 	if err != nil {
 		return assistantRunTrace{}, false, fmt.Errorf("get run rounds: %w", err)
@@ -243,7 +250,7 @@ func (s *assistantStore) GetRun(id string) (assistantRunTrace, bool, error) {
 	for roundRows.Next() {
 		var r assistantTraceRound
 		var forced, progress int
-		if err := roundRows.Scan(&r.Index, &r.Kind, &r.StartOffsetMs, &r.LatencyMs, &r.PromptTokens, &r.CompletionTokens, &r.CachedTokens, &r.CostUSD, &forced, &progress, &r.Error); err != nil {
+		if err := roundRows.Scan(&r.Index, &r.Kind, &r.StartOffsetMs, &r.LatencyMs, &r.PromptTokens, &r.CompletionTokens, &r.CachedTokens, &r.CostUSD, &forced, &progress, &r.Error, &r.CheckTrigger, &r.CheckDraft); err != nil {
 			return assistantRunTrace{}, false, fmt.Errorf("scan run round: %w", err)
 		}
 		r.ForcedFinal, r.Progress = forced != 0, progress != 0

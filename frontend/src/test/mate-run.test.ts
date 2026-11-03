@@ -48,10 +48,12 @@ describe('mapRun', () => {
       rounds: [{
         index: 0, kind: 'lookups', start_offset_ms: 0, latency_ms: 4100, prompt_tokens: 900, completion_tokens: 40, cached_tokens: 600,
         cost_usd: 0.004, forced_final: false, progress: true, error: '',
+        check_trigger: 'anchorage shelter', check_draft: 'A rejected draft.',
         calls: [{ seq: 0, name: 'find_places', args: '{"query":"Cairns"}', elapsed_ms: 2300, result_bytes: 812, error: '', cache: 'miss' }],
       }],
     }))
     expect(trace.roundCount).toBe(1)
+    expect(trace.rounds[0]).toMatchObject({ checkTrigger: 'anchorage shelter', checkDraft: 'A rejected draft.' })
     expect(trace.rounds[0].calls[0]).toMatchObject({ name: 'find_places', cache: 'miss', error: '', durationMs: 2300 })
   })
 
