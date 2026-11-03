@@ -148,6 +148,7 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
   const warning = signatureWarning({ row, label: signatureLabel })
   const timeZone = useVesselStateSelector(selectTimeZone)
   const reading = row.metrics.map((m) => `${m.label} ${m.text}`).join(' · ')
+  const busName = kind === 'battery' && row.reporting ? busNameNote(row) : ''
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true)
@@ -191,12 +192,10 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
           {row.reporting ? (reading === '' ? 'Reporting, no figures yet' : reading) : sentenceCase(notReportingText(row, timeZone))}
         </p>
         {warning !== '' && <p role="alert" className="text-xs text-destructive">{warning}</p>}
-        {kind === 'battery' && row.reporting && (
-          <p className="truncate text-xs text-muted-foreground">
-            {row.bus_name ? `The boat calls it ${row.bus_name}` : 'The boat gives it no name'}
-            {row.charger_input ? ' · Charger input, not a battery' : ''}
-          </p>
+        {kind === 'battery' && row.charger_input && (
+          <p className="text-xs text-muted-foreground">Charger input, not a battery</p>
         )}
+        {busName !== '' && <p className="truncate text-xs text-muted-foreground">{busName}</p>}
       </div>
 
       <div className="flex min-w-0 flex-col items-start gap-2 sm:items-end">
@@ -249,6 +248,13 @@ function DiscoveryRowView({ row, kind, signatureLabel, items, profiles }: Discov
       </div>
     </div>
   )
+}
+
+// An item's name sits beside the row, so a missing bus name only matters until
+// an item owns the source.
+function busNameNote(row: DiscoveryRow): string {
+  if (row.bus_name) return `The boat calls it ${row.bus_name}`
+  return row.item ? '' : 'The boat gives it no name'
 }
 
 function sentenceCase(text: string): string {

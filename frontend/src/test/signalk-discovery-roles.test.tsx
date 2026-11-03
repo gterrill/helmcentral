@@ -238,6 +238,42 @@ describe('Settings -> SignalK: Discovery', () => {
     expect(screen.getByText(/Charger input, not a battery/)).toBeInTheDocument()
   })
 
+  it('says a battery has no name only until an item names it', async () => {
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [
+        row('electrical.batteries.239', '239', [{ label: 'Voltage', text: '28.29 V' }], { item: { id: 'bat-1', name: 'House bank' } }),
+        row('electrical.batteries.7', '7', [{ label: 'Voltage', text: '13.10 V' }]),
+        row('electrical.batteries.0', '0', [{ label: 'Voltage', text: '27.20 V' }], { item: { id: 'bat-3', name: 'Lithium bank' }, bus_name: 'Batrium-BMS' }),
+      ] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.239')
+    const rowFor = (source: string) => within(screen.getByText(source).parentElement as HTMLElement)
+    expect(rowFor('electrical.batteries.239').queryByText('The boat gives it no name')).toBeNull()
+    expect(rowFor('electrical.batteries.7').getByText('The boat gives it no name')).toBeInTheDocument()
+    expect(rowFor('electrical.batteries.0').getByText('The boat calls it Batrium-BMS')).toBeInTheDocument()
+  })
+
+  it('marks a charger input on its own line, even once it stops reporting', async () => {
+    discoveryBody = {
+      ...discoveryBody,
+      groups: [{ kind: 'battery', mappable: true, rows: [
+        row('electrical.batteries.1', '1', [{ label: 'Voltage', text: '76.70 V' }], { bus_name: 'BlueSolar', charger_input: true }),
+        row('electrical.batteries.2', '2', [], { reporting: false, charger_input: true }),
+      ] }],
+    }
+    render(<SignalKDiscoverySection />)
+
+    await screen.findByText('electrical.batteries.1')
+    const rowFor = (source: string) => within(screen.getByText(source).parentElement as HTMLElement)
+    expect(rowFor('electrical.batteries.1').getByText('Charger input, not a battery')).toBeInTheDocument()
+    expect(rowFor('electrical.batteries.1').getByText('The boat calls it BlueSolar')).toBeInTheDocument()
+    expect(rowFor('electrical.batteries.2').getByText('Charger input, not a battery')).toBeInTheDocument()
+    expect(rowFor('electrical.batteries.2').queryByText('The boat gives it no name')).toBeNull()
+  })
+
   it('says so when Helmcentral has no SignalK data, instead of an empty list', async () => {
     discoveryBody = { connected: false, groups: [], detectors: {} }
     render(<SignalKDiscoverySection />)

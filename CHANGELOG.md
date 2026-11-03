@@ -11,6 +11,16 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+### Fixed
+
+- **Discovery no longer says a named battery has no name.** "The boat gives it
+  no name" now only appears on a battery that you haven't assigned to an
+  equipment item yet.
+- **Discovery keeps marking a charger input when it goes quiet.** "Charger
+  input, not a battery" now has its own line, so a long name can't cut it off,
+  and it stays when the source stops reporting, so that you don't assign a
+  charger input as a battery by mistake.
+
 ## [0.60.0] - 2026-11-04
 
 ### Breaking
