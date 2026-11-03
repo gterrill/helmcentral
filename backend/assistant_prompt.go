@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -125,6 +126,14 @@ type assistantPromptContext struct {
 	// true number it left out, so the count travels separately.
 	PinnedNotesTotal int
 	ManualSections   []assistantManual
+
+	// Memories are the lasting facts the skipper asked Mate to keep, oldest
+	// first. They go in the stable part of every chat prompt and into every
+	// review prompt.
+	Memories []mateMemory
+	// MemoriesUnreadable is set when the facts could not be read, so the
+	// prompt says so instead of reading as an empty list.
+	MemoriesUnreadable bool
 
 	// PassageLimits is the one-line status of the operator's passage limits
 	// (assistant.passage_limits), read fresh each turn by
@@ -526,6 +535,13 @@ func collectAssistantPromptContext(settingsPath string, now time.Time) assistant
 		}
 		if manuals, err := collectAssistantManualSections(); err == nil {
 			pc.ManualSections = manuals
+		}
+		if memories, err := readMateMemories(globalDocumentStore); err != nil {
+			// Said, not hidden: the prompt tells Mate the facts could not be read.
+			log.Printf("assistant: could not read Mate's memory, so this turn runs without the kept facts: %v", err)
+			pc.MemoriesUnreadable = true
+		} else {
+			pc.Memories = memories
 		}
 	}
 
@@ -1218,6 +1234,15 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	if pinnedSection := pinnedNotesPromptSection(pc.PinnedNotes, pc.PinnedNotesTotal); pinnedSection != "" {
 		b.WriteString(pinnedSection)
 		b.WriteString("\n\n")
+	}
+
+	// 4b. Kept facts (Mate's memory). Change only when a fact is kept, edited
+	// or removed, so they sit in the stable prefix. The rules about keeping
+	// one are fixed wording and come first.
+	b.WriteString(mateMemoryPromptRules)
+	if section := mateMemoriesPromptFor(pc, pc.BoatTime.Loc, true); section != "" {
+		b.WriteString(section)
+		b.WriteString("\n")
 	}
 
 	stable = b.String()

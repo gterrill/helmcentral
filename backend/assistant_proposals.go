@@ -26,6 +26,9 @@ const (
 	// its validation against the schedule as it now stands. It is stored, with
 	// the reason, so a reloaded card and Mate's next turn both know.
 	assistantProposalStale = "stale"
+	// assistantProposalUndone is an applied proposal the skipper took back with
+	// Undo. It is final: the card shows it undone, with no Undo left.
+	assistantProposalUndone = "undone"
 )
 
 // The refusals Apply and Dismiss report. All are expected conditions, not
@@ -35,6 +38,12 @@ var (
 	errAssistantProposalStale     = errors.New("a record changed since Mate proposed this, so nothing was applied")
 	errAssistantProposalDismissed = errors.New("this proposal was dismissed and can no longer be applied")
 	errAssistantProposalApplied   = errors.New("this proposal was already applied and can no longer be dismissed")
+	errAssistantProposalUndone    = errors.New("this proposal was undone and can no longer be applied or dismissed")
+	// errAssistantProposalNotUndoable is Undo on anything but a kept fact that
+	// was applied.
+	errAssistantProposalNotUndoable = errors.New("only a fact Mate kept can be undone")
+	// errMateMemoryChanged is Undo on a fact rewritten since it was kept.
+	errMateMemoryChanged = errors.New("that fact was changed after Mate kept it, so Undo left it alone. Someone who can open Settings, under Mate, can remove it")
 )
 
 // assistantProposal is one card under an assistant message: a validated
@@ -61,24 +70,62 @@ type assistantProposal struct {
 // meaning without the message that carries it, and deleting a conversation
 // already deletes its messages.
 func createAssistantProposalsSchema(db *sql.DB) error {
-	if _, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS assistant_message_proposals (
-			id          TEXT PRIMARY KEY,
-			message_id  TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-			position    INTEGER NOT NULL,
-			ops         TEXT NOT NULL,
-			status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'dismissed', 'stale')),
-			stale_reason TEXT NOT NULL DEFAULT '',
-			resolved_at INTEGER,
-			result      TEXT NOT NULL DEFAULT '',
-			created_at  INTEGER NOT NULL
-		)`); err != nil {
+	if _, err := db.Exec(assistantProposalsTableDDL); err != nil {
 		return fmt.Errorf("create assistant_message_proposals table: %w", err)
+	}
+	if err := allowUndoneProposalStatus(db); err != nil {
+		return err
 	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS assistant_message_proposals_message ON assistant_message_proposals (message_id)`); err != nil {
 		return fmt.Errorf("index assistant_message_proposals table: %w", err)
 	}
 	return convertLegacyProposals(db)
+}
+
+const assistantProposalsTableDDL = `
+	CREATE TABLE IF NOT EXISTS assistant_message_proposals (
+		id          TEXT PRIMARY KEY,
+		message_id  TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+		position    INTEGER NOT NULL,
+		ops         TEXT NOT NULL,
+		status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'applied', 'dismissed', 'stale', 'undone')),
+		stale_reason TEXT NOT NULL DEFAULT '',
+		resolved_at INTEGER,
+		result      TEXT NOT NULL DEFAULT '',
+		created_at  INTEGER NOT NULL
+	)`
+
+// allowUndoneProposalStatus rebuilds a proposals table made before 'undone'
+// existed, because SQLite cannot change a CHECK in place. Every row is kept.
+func allowUndoneProposalStatus(db *sql.DB) error {
+	var ddl string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'assistant_message_proposals'`).Scan(&ddl); err != nil {
+		return fmt.Errorf("read assistant_message_proposals definition: %w", err)
+	}
+	if strings.Contains(ddl, "'undone'") {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin rebuild of assistant_message_proposals: %w", err)
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		`DROP INDEX IF EXISTS assistant_message_proposals_message`,
+		`ALTER TABLE assistant_message_proposals RENAME TO assistant_message_proposals_old`,
+		assistantProposalsTableDDL,
+		`INSERT INTO assistant_message_proposals (` + assistantProposalColumns + `, position)
+		 SELECT ` + assistantProposalColumns + `, position FROM assistant_message_proposals_old`,
+		`DROP TABLE assistant_message_proposals_old`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("rebuild assistant_message_proposals: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit rebuild of assistant_message_proposals: %w", err)
+	}
+	return nil
 }
 
 const assistantProposalColumns = `id, message_id, ops, status, stale_reason, resolved_at, result, created_at`
@@ -105,6 +152,15 @@ func scanAssistantProposal(row rowScanner) (assistantProposal, error) {
 	return p, nil
 }
 
+// newAppliedProposal is a proposal a tool carried out itself: applied at the
+// given time, with what each operation wrote. For a kept fact the write itself
+// waits for the message save (commitKeptFactsTx), so a run that saves no reply
+// keeps no fact.
+func newAppliedProposal(id string, ops []changeOp, result json.RawMessage, at time.Time) assistantProposal {
+	resolved := at.UTC()
+	return assistantProposal{ID: id, Ops: ops, Status: assistantProposalApplied, ResolvedAt: &resolved, Result: result}
+}
+
 // insertAssistantProposalsTx saves a message's proposals in the transaction
 // that saves the message, so a run that fails or is cancelled (which saves no
 // message) saves no proposal, and a message is never saved without them. It
@@ -124,14 +180,40 @@ func insertAssistantProposalsTx(tx *sql.Tx, messageID string, proposals []assist
 			return fmt.Errorf("encode proposal %s ops: %w", p.ID, err)
 		}
 		p.MessageID = messageID
-		p.Status = assistantProposalPending
-		p.ResolvedAt = nil
-		p.Result = nil
 		p.CreatedAt = now
+		// A proposal comes in pending (the zero value), or applied through
+		// newAppliedProposal: one the tool already carried out because the
+		// skipper asked for it (remember_fact), saved with what it wrote so the
+		// card can show it and offer an undo. Anything else is a mistake.
+		var resolvedAt any
+		switch p.Status {
+		case "", assistantProposalPending:
+			if p.ResolvedAt != nil || len(p.Result) > 0 {
+				return fmt.Errorf("insert proposal %s: a pending proposal has no result", p.ID)
+			}
+			p.Status = assistantProposalPending
+		case assistantProposalApplied:
+			if p.ResolvedAt == nil || len(p.Result) == 0 {
+				return fmt.Errorf("insert proposal %s: an applied proposal needs its result and time", p.ID)
+			}
+			resolvedAt = p.ResolvedAt.Unix()
+			// The tool kept nothing yet: the fact commits here, with its card.
+			// A full list or a fact kept meanwhile must not cost the reply: the
+			// card is stored stale, saying it was not kept and why.
+			if err := commitKeptFactsTx(tx, *p, now); err != nil {
+				reason := notKeptReason(err)
+				if reason == "" {
+					return err
+				}
+				p.Status, p.StaleReason, p.Result = assistantProposalStale, reason, nil
+			}
+		default:
+			return fmt.Errorf("insert proposal %s: cannot be saved as %q", p.ID, p.Status)
+		}
 		if _, err := tx.Exec(
-			`INSERT INTO assistant_message_proposals (id, message_id, position, ops, status, resolved_at, result, created_at)
-			 VALUES (?, ?, ?, ?, 'pending', NULL, '', ?)`,
-			p.ID, messageID, i, string(opsJSON), now.Unix()); err != nil {
+			`INSERT INTO assistant_message_proposals (id, message_id, position, ops, status, stale_reason, resolved_at, result, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			p.ID, messageID, i, string(opsJSON), p.Status, p.StaleReason, resolvedAt, string(p.Result), now.Unix()); err != nil {
 			return fmt.Errorf("insert proposal %s: %w", p.ID, err)
 		}
 	}
@@ -236,11 +318,81 @@ func dismissProposalTx(tx *sql.Tx, now time.Time, id string) (assistantProposal,
 		return p, nil
 	case assistantProposalApplied:
 		return assistantProposal{}, errAssistantProposalApplied
+	case assistantProposalUndone:
+		return assistantProposal{}, errAssistantProposalUndone
 	case assistantProposalStale:
 		return assistantProposal{}, &staleProposalError{reason: p.StaleReason}
 	}
 	if _, err := tx.Exec(`UPDATE assistant_message_proposals SET status = 'dismissed', resolved_at = ? WHERE id = ?`, now.Unix(), id); err != nil {
 		return assistantProposal{}, fmt.Errorf("dismiss proposal: %w", err)
+	}
+	return assistantProposalByID(tx, id)
+}
+
+// undoAssistantProposal takes back an applied proposal that kept a fact: it
+// removes the fact and marks the proposal undone, which is final. It refuses
+// when the fact was rewritten since it was kept, so Undo never removes
+// something other than what the card shows. A fact already removed counts as
+// undone. It runs in records.RunTx, so it waits for any apply in progress.
+func undoAssistantProposal(assistant *assistantStore, records *documentStore, id string) (assistantProposal, error) {
+	if err := checkProposalStores(assistant, records); err != nil {
+		return assistantProposal{}, err
+	}
+	var p assistantProposal
+	err := records.RunTx("undo proposal", func(tx *sql.Tx, now time.Time) error {
+		var err error
+		p, err = undoProposalTx(tx, id)
+		return err
+	})
+	if err != nil {
+		return assistantProposal{}, err
+	}
+	return p, nil
+}
+
+func undoProposalTx(tx *sql.Tx, id string) (assistantProposal, error) {
+	p, err := assistantProposalByID(tx, id)
+	if err != nil {
+		return assistantProposal{}, err
+	}
+	switch p.Status {
+	case assistantProposalUndone:
+		return p, nil
+	case assistantProposalApplied:
+	default:
+		return assistantProposal{}, errAssistantProposalNotUndoable
+	}
+	var res changeResult
+	if len(p.Result) > 0 {
+		if err := json.Unmarshal(p.Result, &res); err != nil {
+			return assistantProposal{}, fmt.Errorf("read proposal %s result: %w", id, err)
+		}
+	}
+	kept := 0
+	for i, op := range p.Ops {
+		if op.Type != recordTypeMateMemory || op.Action != changeCreate || i >= len(res.Ops) {
+			return assistantProposal{}, errAssistantProposalNotUndoable
+		}
+		kept++
+		m, err := mateMemoryByIDQ(tx, res.Ops[i].ID)
+		if errors.Is(err, errMateMemoryNotFound) {
+			continue
+		}
+		if err != nil {
+			return assistantProposal{}, err
+		}
+		if m.Text != stringOf(op.Fields["text"]) || !m.UpdatedAt.Equal(m.CreatedAt) {
+			return assistantProposal{}, errMateMemoryChanged
+		}
+		if err := deleteMateMemoryTx(tx, m.ID); err != nil {
+			return assistantProposal{}, err
+		}
+	}
+	if kept == 0 {
+		return assistantProposal{}, errAssistantProposalNotUndoable
+	}
+	if _, err := tx.Exec(`UPDATE assistant_message_proposals SET status = 'undone' WHERE id = ?`, id); err != nil {
+		return assistantProposal{}, fmt.Errorf("mark proposal undone: %w", err)
 	}
 	return assistantProposalByID(tx, id)
 }
@@ -365,6 +517,8 @@ func applyProposalTx(tx *sql.Tx, now, today time.Time, id string) (assistantProp
 		return p, nil, nil
 	case assistantProposalDismissed:
 		return assistantProposal{}, nil, errAssistantProposalDismissed
+	case assistantProposalUndone:
+		return assistantProposal{}, nil, errAssistantProposalUndone
 	case assistantProposalStale:
 		return assistantProposal{}, nil, &staleProposalError{reason: p.StaleReason}
 	}
@@ -468,6 +622,9 @@ func assistantProposalErrorStatus(err error) (int, bool) {
 		return http.StatusNotFound, true
 	case errors.Is(err, errAssistantProposalStale),
 		errors.Is(err, errAssistantProposalDismissed),
+		errors.Is(err, errAssistantProposalUndone),
+		errors.Is(err, errAssistantProposalNotUndoable),
+		errors.Is(err, errMateMemoryChanged),
 		errors.Is(err, errAssistantProposalApplied):
 		return http.StatusConflict, true
 	}

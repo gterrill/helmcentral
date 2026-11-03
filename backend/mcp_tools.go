@@ -144,6 +144,7 @@ var mcpToolPolicies = []mcpToolPolicy{
 	{Name: "read_conversation", Plain: "", Status: mcpNever, Reason: "Mate's chat history is the operator's, not an outside assistant's."},
 	{Name: "propose_changes", Plain: "", Status: mcpNever, Reason: "Writes and proposals are out of scope: this server is read-only."},
 	{Name: "save_place", Plain: "", Status: mcpNever, Reason: "Proposes a write; this server is read-only."},
+	{Name: "remember_fact", Plain: "", Status: mcpNever, Reason: "Keeps a fact in Mate's memory; this server is read-only. The kept facts are read in the boat context."},
 	{Name: "fill_form", Plain: "", Status: mcpNever, Reason: "Drives Helmcentral's own forms; writes."},
 	{Name: "inspect_form", Plain: "", Status: mcpNever, Reason: "Reads a form on the operator's screen, which an outside assistant has no screen for."},
 	{Name: "start_watch", Plain: "", Status: mcpNever, Reason: "Creates a watch: a write."},

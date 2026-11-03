@@ -30,7 +30,9 @@ so it works when Mate is switched off.
   Helmcentral writes this page fresh every time. It draws on your equipment and
   your roles, such as which battery is the house bank and which engines you
   have. It also covers your units, your alarm thresholds, your tank levels and
-  the boat's time zone. Because of it, "how's the house bank" gets the right
+  the boat's time zone. It also lists the [facts Mate
+  keeps](assistant.md#facts-mate-keeps) about your boat, which the assistant can
+  read but never change. Because of it, "how's the house bank" gets the right
   battery without you explaining your boat.
 - **One token for each program:** Every program you connect has its own token,
   made in **Settings, Outside assistants**. You see the token once, when you

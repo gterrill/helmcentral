@@ -82,7 +82,7 @@ func TestMateTools_CollectWiredForProposalsAndForms(t *testing.T) {
 		}
 	}
 	sort.Strings(got)
-	if strings.Join(got, ",") != "fill_form,propose_changes,save_place" {
+	if strings.Join(got, ",") != "fill_form,propose_changes,remember_fact,save_place" {
 		t.Fatalf("collect is wired on %v", got)
 	}
 }

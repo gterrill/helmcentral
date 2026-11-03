@@ -133,6 +133,10 @@ func buildBoatContext(d assistantToolDeps, on func(string) bool) (string, error)
 		b.WriteString("## Alarm rules\n\n")
 		mcpWriteAlarmRules(&b, d)
 	}
+	// The kept facts come from no switchable tool, and no outside tool changes
+	// one, so this part is always read-only and always there.
+	b.WriteString("## Facts the skipper asked Mate to keep\n\n")
+	mcpWriteMemories(&b, d)
 
 	return b.String(), nil
 }

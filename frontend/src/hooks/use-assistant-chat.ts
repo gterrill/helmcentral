@@ -4,6 +4,7 @@ import { MATE_REPLY_NOT_SHOWN, MateEventError, readMateEvents } from '@/lib/mate
 import { todayISO } from '@/lib/local-date'
 import { registerMateWatch, removeMateWatch } from '@/lib/mate-watch-store'
 import { mapMessage, type AssistantConversation, type AssistantMessage } from '@/hooks/use-assistant-conversations'
+import { refreshMemoriesForReply } from '@/hooks/use-mate-memories'
 import type { ConversationApi } from '@/lib/mate-api'
 import { errorMessage } from '@/lib/errors'
 
@@ -202,6 +203,7 @@ export function useAssistantChat() {
           break
         case 'message':
           resolved = { ...mapMessage(event.message), clientKey: streamKey }
+          refreshMemoriesForReply(resolved.proposals)
           deliveredRef.current = true
           setDeliveredMessageId(resolved.id)
           onMessage?.(resolved)

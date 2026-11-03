@@ -1829,6 +1829,8 @@ func assistantProposalHistoryBlock(p assistantProposal) string {
 		status = "the operator tapped Apply: these changes ARE now made"
 	case assistantProposalDismissed:
 		status = "the operator dismissed it: NONE of these changes were made; do not propose them again unless asked"
+	case assistantProposalUndone:
+		status = "the skipper undid it: the fact is NOT kept; do not keep it again unless they ask"
 	case assistantProposalStale:
 		status = "it went stale and could NOT be applied: NONE of these changes were made (" + p.StaleReason +
 			"); do not propose them again unless the operator asks, and if they do, read the records again and make a fresh proposal"

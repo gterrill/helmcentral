@@ -153,6 +153,20 @@ func TestAppendMessage_OnlyAnAssistantMessageCarriesProposals(t *testing.T) {
 	}
 }
 
+func TestAppendMessage_AHalfFormedAppliedProposalIsAnErrorNotPending(t *testing.T) {
+	env := newProposalEnv(t)
+	p := runPropose(t, env.deps, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"X","interval_months":12}}]}`)
+	p.Status = assistantProposalApplied // no result, no time
+	_, err := env.asst.AppendMessage(assistantMessage{ConversationID: env.conv.ID, Role: "assistant", Content: "hi", Proposals: []assistantProposal{p}})
+	if err == nil {
+		t.Fatal("expected an applied proposal with no result to be refused")
+	}
+	msgs, lerr := env.asst.ListMessages(env.conv.ID)
+	if lerr != nil || len(msgs) != 0 {
+		t.Fatalf("nothing should be saved: %v %+v", lerr, msgs)
+	}
+}
+
 func TestDeleteConversation_RemovesItsProposals(t *testing.T) {
 	env := newProposalEnv(t)
 	p := env.propose(t, `{"operations":[{"type":"maintenance_rule","action":"create","fields":{"description":"X","interval_months":12}}]}`)

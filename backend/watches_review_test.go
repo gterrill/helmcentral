@@ -311,7 +311,7 @@ func TestWatchReview_TheLastRunsMateFindingsGoInSoTheSameIssueKeepsItsKey(t *tes
 		{Section: "power", Rule: "mate_review", Text: "The port alternator is giving less than the starboard one.", By: watchByMate, Key: "port_alternator_output"},
 		{Section: "tanks", Rule: "tank_change", Text: "A rules finding is not Mate's.", By: watchByRules},
 	}
-	ctx := withWatchPreviousMate(context.Background(), previous)
+	ctx := withWatchPreviousRun(context.Background(), watchPreviousRun{Mate: mateFindings(previous)})
 	runWatchReview(ctx, reviewConfig(t), w, report, findings, watchTestTime(29, 6, 0), time.UTC)
 
 	message := ""

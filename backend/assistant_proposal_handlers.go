@@ -40,6 +40,19 @@ func dismissAssistantProposalHandler(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{"proposal": p})
 }
 
+// POST /api/assistant/proposals/:id/undo
+//
+// The Undo on a card for a fact Mate kept: removes the fact and stores the
+// proposal as undone, so a reload shows the same. A fact rewritten since it was
+// kept, or a proposal that is not a kept fact, is a 409 and nothing is removed.
+func undoAssistantProposalHandler(c echo.Context) error {
+	p, err := undoAssistantProposal(globalAssistantStore, globalDocumentStore, c.Param("id"))
+	if err != nil {
+		return writeAssistantProposalError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"proposal": p})
+}
+
 // writeAssistantProposalError answers with the status an apply or dismiss
 // failure deserves: the proposal's own 404/409, a maintenance command's
 // validation or refusal, or the maintenance sentinels' usual mapping.
@@ -51,8 +64,10 @@ func writeAssistantProposalError(c echo.Context, err error) error {
 		switch {
 		case errors.Is(err, errAssistantProposalDismissed):
 			body["proposal_status"] = assistantProposalDismissed
-		case errors.Is(err, errAssistantProposalApplied):
+		case errors.Is(err, errAssistantProposalApplied), errors.Is(err, errMateMemoryChanged):
 			body["proposal_status"] = assistantProposalApplied
+		case errors.Is(err, errAssistantProposalUndone):
+			body["proposal_status"] = assistantProposalUndone
 		case errors.Is(err, errAssistantProposalStale):
 			body["proposal_status"] = assistantProposalStale
 		}

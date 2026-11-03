@@ -1269,6 +1269,54 @@ records and past conversations first.
 Mate can only recall conversations that are still in the list. If you delete a
 conversation, Mate no longer knows what was in it.
 
+## Facts Mate keeps
+
+Searching old conversations finds what was said, but only if Mate thinks to look.
+For the things you never want to explain twice, Mate has a short list of facts
+about your boat. Every conversation starts with the whole list in front of Mate,
+and so does every [watch](watches.md) review and every alarm review. The list is
+separate from your standing notes, which you write yourself.
+
+A kept fact is one plain sentence that stays true, such as "the fuel polisher has
+no sampling port on its discharge manifold". Mate doesn't keep where you are, a
+tank level, a reading or the weather. Those change, and the boat can measure
+them, so a kept copy would only go stale.
+
+A fact is kept in one of two ways:
+
+- **You ask:** Say "remember that" and state the fact. Mate keeps it with its
+  reply and shows a card under it with an **Undo** button. The fact has to be
+  what you said. If Mate words it differently enough that it no longer matches
+  your message, it shows a card to tap instead. A fact that comes from anything
+  but your own message, such as Mate's own conclusion or a document's text, always
+  waits for a tap. If the reply fails or you stop it, nothing is kept.
+- **Mate offers:** If Mate works out something worth keeping, it shows a card
+  with **Remember this** and **Dismiss**. Mate never keeps a fact of its own making
+  without your tap, whatever the model decides.
+
+**Undo** removes the fact, and the card then reads *Undone*, also after a reload.
+If the fact has been rewritten since Mate kept it, Undo leaves it alone and says
+so. Someone who can open Settings can remove it there.
+
+If a new fact contradicts one already kept, Mate shows a card with the old
+fact and the new one and offers to replace it. That card always waits for your
+tap, even straight after "remember that". Mate never keeps both and never
+overwrites one quietly.
+
+The list holds 50 facts of up to 300 characters each. When it's full, Mate says
+so, and someone who can open Settings has to remove a fact before it can keep
+another. It never drops one itself.
+
+Settings → Mate shows the list under the standing notes, with the day each fact
+was kept, in the boat's time. Use **Edit** and **Remove** on a fact, or **Add
+fact** to write one yourself. A read-only session can't open Settings, so it
+can't see or change the list there, though Mate still reads the whole list in
+every conversation. Outside assistants that you've connected can read the list
+as part of the boat's context, but they can't change it.
+
+If Mate can't read the list, it says so in that conversation or review instead
+of carrying on as though no facts were kept.
+
 ## Keeping what a conversation worked out
 
 Sometimes a conversation settles something about your boat, such as a fitting

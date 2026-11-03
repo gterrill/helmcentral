@@ -439,22 +439,35 @@ func recordWatchNotSent(watchID, runID, reason string) {
 	}
 }
 
-type watchPreviousMateKey struct{}
+// watchPreviousRun is what the next review is told about the last one: the
+// findings Mate added (so it can give the same issue the same key), the
+// review's own text, and what the skipper said in the chats opened on that
+// run. Replies to any older run are not carried.
+type watchPreviousRun struct {
+	Mate    []watchFinding
+	Review  string
+	Replies []string
+}
 
-// withWatchPreviousMate hands a review the findings Mate added to the previous
-// run, so it can give the same issue the same key.
-func withWatchPreviousMate(ctx context.Context, previous []watchFinding) context.Context {
+// mateFindings keeps the findings Mate added to a run.
+func mateFindings(all []watchFinding) []watchFinding {
 	var mine []watchFinding
-	for _, f := range previous {
+	for _, f := range all {
 		if f.By == watchByMate {
 			mine = append(mine, f)
 		}
 	}
-	return context.WithValue(ctx, watchPreviousMateKey{}, mine)
+	return mine
 }
 
-func watchPreviousMateFrom(ctx context.Context) []watchFinding {
-	v, _ := ctx.Value(watchPreviousMateKey{}).([]watchFinding)
+type watchPreviousRunKey struct{}
+
+func withWatchPreviousRun(ctx context.Context, prev watchPreviousRun) context.Context {
+	return context.WithValue(ctx, watchPreviousRunKey{}, prev)
+}
+
+func watchPreviousRunFrom(ctx context.Context) watchPreviousRun {
+	v, _ := ctx.Value(watchPreviousRunKey{}).(watchPreviousRun)
 	return v
 }
 
