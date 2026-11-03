@@ -74,7 +74,8 @@ describe('alarms store', () => {
     expect(await screen.findByText('Waiting for the alarm list')).toBeInTheDocument()
     expect(screen.queryByText('All clear')).not.toBeInTheDocument()
 
-    emit('alarms', { alarms: [], worst: 'normal' })
+    // The text can appear before the effect that opens the stream has run.
+    await vi.waitFor(() => emit('alarms', { alarms: [], worst: 'normal' }))
     expect(await screen.findByText('All clear')).toBeInTheDocument()
   }, 60_000)
 })
