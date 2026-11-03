@@ -1,5 +1,5 @@
 import type { DistanceUnits } from '@/config/app-config'
-import { circlePolygon, destinationPoint } from '@/lib/geo'
+import { circlePolygon, destinationPoint, METRES_PER_NM } from '@/lib/geo'
 import { dataDateText, distanceText, featureCollection, humanise, lonLat, pointsBounds, type Bounds } from '@/lib/marina-card'
 import type { AnchorageCard, AnchorageDepth, AnchorageMooring, AnchorageRestrictedArea, MarinaShape, ShelterGrade } from '@/lib/mate-cards'
 import { metersToFeet } from '@/lib/units'
@@ -34,7 +34,6 @@ export const GRADE_TOKEN: Record<ShelterGrade, string> = {
 
 /** The longest ray the shelter estimate casts, in nautical miles. */
 export const MAX_FETCH_NM = 15
-export const METRES_PER_NM = 1852
 
 export interface RoseSector {
   bearingDeg: number

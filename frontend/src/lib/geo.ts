@@ -1,3 +1,6 @@
+/** Metres in one nautical mile. */
+export const METRES_PER_NM = 1852
+
 // ── Haversine distance (m) ──────────────────────────────────────────────────
 export function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371000

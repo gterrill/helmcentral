@@ -6,21 +6,23 @@ import { MapPin, Settings2, Ship } from 'lucide-react'
 
 import { Tile, tilePillButtonClass } from '@/components/ui/tile'
 import { MapPlaceLabels } from '@/components/map-place-labels'
+import { VesselGroup } from '@/components/nearby-vessel-group'
 import { VesselArrow } from '@/components/vessel-arrow-marker'
 import { STYLE_LIGHT, STYLE_DARK, OPENSEAMAP_TILES } from '@/lib/basemap'
 import { MAP_LABEL_HALO, resolveMarkerLabelSuppression, suppressedIdsEqual, type MarkerLabelPoint } from '@/lib/marker-labels'
 import { fitCameraAroundPoint, formatBearing, poiCategoryById, pointInCameraFrame, topPoi, zoomForRangeNm, type MapPoint, type PoiFeature } from '@/lib/poi'
 import { poiArrowGeometry, type PoiArrowGeometry } from '@/lib/poi-arrow'
-import { lonNearest } from '@/lib/geo'
+import { lonNearest, METRES_PER_NM } from '@/lib/geo'
 import { POI_MAP_SUMMARY_CYCLE_SECONDS_DEFAULT, type PoiMapWidgetConfig } from '@/lib/dashboard-widgets'
 import { usePoi } from '@/hooks/use-poi'
 import { useCollapsedMapAttribution } from '@/hooks/use-collapsed-map-attribution'
 import { useCyclingIndex } from '@/hooks/use-cycling-index'
-import { type NearbyVessel } from '@/hooks/use-nearby-vessels'
+import { type NearbyVessel, type NearbyVesselFeed } from '@/hooks/use-nearby-vessels'
 import { type AlarmState } from '@/hooks/use-alarms'
 import { type TrailPoint } from '@/hooks/use-server-trails'
 import { type DistanceUnits } from '@/config/app-config'
 import { formatPoiDistance } from '@/lib/format'
+import { selectListedVessels, sortByCollisionAlarm } from '@/lib/nearby-vessel-display'
 import { formatDataAge, isStale } from '@/lib/staleness'
 import { cn } from '@/lib/utils'
 import { hasWebGL2 } from '@/lib/webgl'
@@ -63,6 +65,12 @@ export interface PoiMapTileProps {
   gnssCriticalAlert: boolean
   positionLastUpdateAgeS: number | null
   nearbyVessels: NearbyVessel[]
+  /**
+   * What the nearby-vessels feed said about itself: where the list came from
+   * and how far it searches. Null until the first event, which the Vessels
+   * group reads as "still loading", never as "no vessels".
+   */
+  nearbyVesselFeed?: NearbyVesselFeed | null
   aisCollisionAlarms?: ReadonlyMap<string, AlarmState>
   selfTrail: TrailPoint[]
   isDarkTheme: boolean
@@ -87,6 +95,25 @@ export interface PoiMapTileProps {
 const POI_FETCH_LIMIT = 50
 const RANKED_LIST_SIZE = 5
 
+// The list pane height from which the Vessels group stacks under the places
+// instead of sitting beside them. The kiosk list cannot scroll, so stacking
+// must never be chosen unless everything fits. Worst case, in pixels: footer
+// 24, five place rows 130, the highlighted row's three-line summary 50, group
+// heading 16, four two-line vessel rows 160 and gaps 16, which is 396. The
+// 272 px wall tile has about 230 px for the list, and a 12 x 22 tile has well
+// over this.
+const VESSELS_STACK_MIN_HEIGHT_PX = 420
+// The list pane width below which the two groups stack even when the pane is short.
+const VESSELS_SIDE_BY_SIDE_MIN_WIDTH_PX = 600
+
+// Vessel label ids in the declutter pass carry this prefix, so a vessel id can
+// never equal a place id in the suppressed set.
+const VESSEL_LABEL_PREFIX = 'vessel:'
+// Vessel labels yield to every place label, ranked or not. Unranked places use
+// 100000 + their distance in metres, which stays under this for any range the
+// tile allows.
+const VESSEL_LABEL_PRIORITY_BASE = 1_000_000
+
 // Clearance kept around the farthest ranked POI in the vessel-centred fit, in
 // screen pixels, so a marker (h-9 w-9, 36px) plus its name label doesn't sit
 // flush against the tile's edge. Exported for the test suite, which computes
@@ -104,19 +131,19 @@ const FALLBACK_WIDTH = 240
 // assuming height is always the binding constraint (in "split" layout the
 // map pane is half-width, so POIs east/west of the vessel used to fall off
 // the edge even though a height-only zoom said they'd fit).
-function useMeasuredBox() {
+function useMeasuredBox(active = true) {
   const ref = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState({ width: 0, height: 0 })
 
   useEffect(() => {
     const el = ref.current
-    if (!el) return
+    if (!el || !active) return
     const observer = new ResizeObserver(([entry]) => {
       setBox({ width: entry.contentRect.width, height: entry.contentRect.height })
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [])
+  }, [active])
 
   return [ref, box] as const
 }
@@ -171,6 +198,7 @@ export default function PoiMapTileImpl({
   gnssCriticalAlert,
   positionLastUpdateAgeS,
   nearbyVessels,
+  nearbyVesselFeed = null,
   aisCollisionAlarms,
   selfTrail,
   isDarkTheme,
@@ -224,6 +252,7 @@ export default function PoiMapTileImpl({
   const mapRef = useRef<MapRef | null>(null)
   const collapseAttribution = useCollapsedMapAttribution(mapRef)
   const [mapContainerRef, measuredBox] = useMeasuredBox()
+  const [listPaneRef, listPaneBox] = useMeasuredBox(config.layout === 'split')
   const heightPx = measuredBox.height > 0 ? measuredBox.height : FALLBACK_HEIGHT
   const widthPx = measuredBox.width > 0 ? measuredBox.width : FALLBACK_WIDTH
 
@@ -290,7 +319,7 @@ export default function PoiMapTileImpl({
     map.jumpTo({ center: [cameraTarget.center.lon, cameraTarget.center.lat], zoom: cameraTarget.zoom, pitch: 0, bearing: 0 })
   }, [cameraTarget, gnssCriticalAlert, framingKey, widthPx, heightPx, latitude, longitude, mapReady])
 
-  // Declutter POI marker labels on move-end, priority by rank then distance
+  // Declutter POI marker labels on move-end, priority by rank then distance, vessels last in the order the feed gives them
   // (an unranked feature always yields to a ranked one, matching the ranked
   // list's own ordering; the highlighted place outranks both) — see
   // resolveMarkerLabelSuppression's own doc for why this is a pure, projected-screen-space computation. Kept regardless
@@ -301,6 +330,22 @@ export default function PoiMapTileImpl({
   // Only the split layout has an arrow and a list to say which place is
   // current; a map-only tile keeps the plain rank order.
   const labelHighlightId = config.layout === 'split' ? expandedPoiId : null
+  // The vessel list changes every five seconds as age_seconds ticks, and the
+  // declutter pass projects every point, so the pass must not run on every new
+  // list. This key says only when to run it: ids and positions rounded to about
+  // 110 m. The grid is coarse on purpose: a contact under way crosses an 11 m
+  // boundary on nearly every tick, but 110 m barely moves a label against the
+  // 50 px collision radius. The pass itself reads the latest list from a ref and
+  // projects real positions, so projection stays exact at any zoom.
+  const nearbyVesselsRef = useRef(nearbyVessels)
+  useEffect(() => { nearbyVesselsRef.current = nearbyVessels }, [nearbyVessels])
+  const vesselLabelKey = useMemo(() => {
+    if (!config.showAis) return ''
+    return nearbyVessels
+      .filter((v) => v.lat !== undefined && v.lon !== undefined && v.name !== '')
+      .map((v) => `${v.id}@${Math.round(v.lat! * 1e3)},${Math.round(v.lon! * 1e3)}`)
+      .join('|')
+  }, [config.showAis, nearbyVessels])
   const declutterLabels = useCallback(() => {
     const map = mapRef.current
     if (!map || typeof map.project !== 'function') return
@@ -311,15 +356,22 @@ export default function PoiMapTileImpl({
       // so a neighbour must never hide its name.
       priority: f.id === labelHighlightId ? 0 : rankById[f.id] ?? 100000 + f.distanceM,
     }))
+    if (config.showAis) {
+      const labelled = nearbyVesselsRef.current.filter((v) => v.lat !== undefined && v.lon !== undefined && v.name !== '')
+      // Alarmed vessels first, so a vessel in alarm keeps its name; places still outrank all of them.
+      sortByCollisionAlarm(labelled, aisCollisionAlarms).forEach((v, i) => {
+        points.push({ id: VESSEL_LABEL_PREFIX + v.id, ...map.project([v.lon!, v.lat!]), priority: VESSEL_LABEL_PRIORITY_BASE + i })
+      })
+    }
     const next = resolveMarkerLabelSuppression(points, [])
     setSuppressedLabelIds((prev) => (suppressedIdsEqual(prev, next) ? prev : next))
-  }, [poi.features, rankById, labelHighlightId])
+  }, [poi.features, rankById, labelHighlightId, config.showAis, aisCollisionAlarms])
   const handleLoad = useCallback(() => {
     setMapReady(true)
     declutterLabels()
   }, [declutterLabels])
   // Re-resolve when the highlight moves, not only when the map does.
-  useEffect(() => { declutterLabels() }, [declutterLabels])
+  useEffect(() => { declutterLabels() }, [declutterLabels, vesselLabelKey])
 
   // selfTrail is a snapshot that is a new array only when a trail poll
   // lands points (use-server-trails.ts), so the GeoJSON follows the trail
@@ -355,8 +407,46 @@ export default function PoiMapTileImpl({
     return waypoint ? waypointsToPointsGeoJSON([waypoint]) : null
   }, [activeRoute])
 
+  // The Vessels group: the contacts inside the smaller of the configured range
+  // and the feed's own search range, alarmed first and then nearest. The map
+  // keeps drawing every contact; only the list is limited. It plays no part in
+  // the highlight cycle, the arrow or the camera framing.
+  const showVesselGroup = config.layout === 'split' && config.showAis
+  const vesselLimitM = Math.min(config.rangeNm * METRES_PER_NM, nearbyVesselFeed?.maxRangeM ?? Infinity)
+  const qualifyingVessels = useMemo(() => {
+    if (!showVesselGroup) return []
+    return selectListedVessels(nearbyVessels, vesselLimitM, aisCollisionAlarms)
+  }, [showVesselGroup, nearbyVessels, vesselLimitM, aisCollisionAlarms])
+  // Beside the places only when the pane is tall enough to hold everything
+  // stacked, or wide enough for two columns. Below VESSELS_SIDE_BY_SIDE_MIN_WIDTH_PX
+  // each column is too narrow for a name beside the distance and bearing, and a
+  // place row also spends about 45 px on rank and icon. An unmeasured (0 x 0)
+  // pane stays side by side.
+  const stackVessels = listPaneBox.height >= VESSELS_STACK_MIN_HEIGHT_PX
+    || (listPaneBox.width > 0 && listPaneBox.width < VESSELS_SIDE_BY_SIDE_MIN_WIDTH_PX)
+
   const title = config.title.trim() || 'Nearby'
   const stale = isStale(positionLastUpdateAgeS)
+
+  const placesContent = rankedList.length === 0 ? (
+    <div className="flex h-full items-center justify-center text-center text-xs text-muted-foreground">
+      {poi.error && poi.fetchedAt === null
+        ? 'POI feed unavailable'
+        : poi.loading
+          ? 'Loading…'
+          : 'No points of interest in range'}
+    </div>
+  ) : (
+    rankedList.map((feature, index) => (
+      <PoiListRow
+        key={feature.id}
+        rank={index + 1}
+        feature={feature}
+        distanceUnits={distanceUnits}
+        expanded={feature.id === expandedPoiId}
+      />
+    ))
+  )
 
   return (
     <Tile
@@ -372,9 +462,11 @@ export default function PoiMapTileImpl({
         ) : undefined
       }
     >
+      {/* A fixed row: the list's content must not stretch the map beside it,
+          because a change in the map's measured size re-frames the camera. */}
       <div
         className={cn(
-          'grid h-full min-h-0 gap-2',
+          'grid h-full min-h-0 grid-rows-[minmax(0,1fr)] gap-2',
           config.layout === 'split' ? 'grid-cols-2' : 'grid-cols-1',
         )}
       >
@@ -508,20 +600,15 @@ export default function PoiMapTileImpl({
 
                 {config.showAis && nearbyVessels.map((vessel) => {
                   if (vessel.lat === undefined || vessel.lon === undefined) return null
-                  const collisionState = aisCollisionAlarms?.get(vessel.id)
-                  const inCollisionAlarm = collisionState !== undefined
                   return (
-                    <Marker key={vessel.id} latitude={vessel.lat} longitude={vessel.lon}>
-                      <div
-                        className={cn(
-                          'flex h-7 w-7 items-center justify-center rounded-full shadow-lg',
-                          inCollisionAlarm ? 'bg-red-600' : 'bg-amber-500/90',
-                        )}
-                        aria-label={`AIS vessel: ${vessel.name}`}
-                      >
-                        <Ship className="h-4 w-4 text-white" />
-                      </div>
-                    </Marker>
+                    <VesselMarker
+                      key={vessel.id}
+                      name={vessel.name}
+                      lat={vessel.lat}
+                      lon={vessel.lon}
+                      alarmed={aisCollisionAlarms?.get(vessel.id) !== undefined}
+                      suppressed={suppressedLabelIds.has(VESSEL_LABEL_PREFIX + vessel.id)}
+                    />
                   )
                 })}
 
@@ -576,26 +663,27 @@ export default function PoiMapTileImpl({
         </div>
 
         {config.layout === 'split' && (
-          <div className="flex h-full min-h-0 flex-col gap-1 overflow-y-auto pr-1">
-            {rankedList.length === 0 ? (
-              <div className="flex h-full items-center justify-center text-center text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-                {poi.error && poi.fetchedAt === null
-                  ? 'POI feed unavailable'
-                  : poi.loading
-                    ? 'Loading…'
-                    : 'No points of interest in range'}
-              </div>
-            ) : (
-              rankedList.map((feature, index) => (
-                <PoiListRow
-                  key={feature.id}
-                  rank={index + 1}
-                  feature={feature}
+          <div ref={listPaneRef} data-testid="poi-list-pane" className="flex h-full min-h-0 flex-col gap-1 overflow-y-auto pr-1">
+            {showVesselGroup ? (
+              <div
+                data-testid="poi-list-groups"
+                data-stacked={stackVessels}
+                className={cn('grid min-h-0 flex-1 gap-2', stackVessels ? 'grid-cols-1 content-start' : 'grid-cols-2')}
+              >
+                <div className="flex min-h-0 flex-col gap-1">{placesContent}</div>
+                <VesselGroup
+                  vessels={qualifyingVessels}
+                  ownLat={latitude}
+                  ownLon={longitude}
+                  gnssCriticalAlert={gnssCriticalAlert}
+                  feed={nearbyVesselFeed}
+                  limitM={vesselLimitM}
                   distanceUnits={distanceUnits}
-                  expanded={feature.id === expandedPoiId}
+                  aisCollisionAlarms={aisCollisionAlarms}
+                  stacked={stackVessels}
                 />
-              ))
-            )}
+              </div>
+            ) : placesContent}
             <div className="mt-auto border-t border-border/60 pt-1 text-xs text-muted-foreground">
               {poi.provider ? <span className="capitalize">{poi.provider.replace(/-/g, ' ')}</span> : null}
               {poi.fetchedAt && (
@@ -799,3 +887,45 @@ function PoiListRow({
     </div>
   )
 }
+
+// Memoised on flat primitives, like PoiMarker: the vessel list is rebuilt every
+// five seconds as age_seconds ticks, and the wall's processor cannot afford a
+// marker render for each contact each time.
+const VesselMarker = memo(function VesselMarker({
+  name,
+  lat,
+  lon,
+  alarmed,
+  suppressed,
+}: {
+  name: string
+  lat: number
+  lon: number
+  alarmed: boolean
+  suppressed: boolean
+}) {
+  return (
+    <Marker latitude={lat} longitude={lon}>
+      <div className="relative">
+        <div
+          className={cn(
+            'flex h-7 w-7 items-center justify-center rounded-full shadow-lg',
+            alarmed ? 'bg-red-600' : 'bg-amber-500/90',
+          )}
+          aria-label={`AIS vessel: ${name}`}
+        >
+          <Ship className="h-4 w-4 text-white" />
+        </div>
+        {/* Out of flow, as the place labels are, so the marker box stays the icon. */}
+        {!suppressed && name && (
+          <div
+            data-testid="poi-vessel-label"
+            className={`absolute left-1/2 top-full mt-0.5 max-w-28 -translate-x-1/2 truncate text-center text-xs font-semibold text-white ${MAP_LABEL_HALO}`}
+          >
+            {name}
+          </div>
+        )}
+      </div>
+    </Marker>
+  )
+})

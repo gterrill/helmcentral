@@ -23,7 +23,8 @@ You need write access, and you do this in layout mode.
    ramps, moorings, historic landmarks, lookouts, dive and snorkel spots, and
    walking trails. At least one is required.
 8. Toggle **Show AIS traffic** and **Show own trail** as you want them. Both
-   can be changed later.
+   can be changed later. **Show AIS traffic** also adds a Vessels group to the
+   list in the **Map and list** layout. See the section on Vessels below.
 9. Choose **Save**.
 
 The tile starts polling immediately. The first few points may take a moment to
@@ -41,6 +42,50 @@ anchored page.
 
 To change the settings later, reopen layout mode and choose the gear icon on
 the tile's title bar. To remove the tile, use the same X every other tile uses.
+
+## Vessels in the list
+
+With **Show AIS traffic** on and the **Map and list** layout, the list has a
+Vessels group next to the places. Here is what it shows:
+
+- Which vessels: the ones inside the smaller of the tile's range and the
+  distance the AIS feed searches, which is 5 km. Alarmed vessels come first,
+  worst first, then the nearest. A vessel in a collision alarm or warning is
+  listed even when it's outside the tile's range. It lists four, with "+N more"
+  beside the heading when others qualify. The map still draws every contact it
+  has.
+- Each row: the vessel's name on the left, and its distance and bearing from you
+  on the right. A vessel with no name shows the short ID Helmcentral gives it. The
+  bearing is left out when the vessel's position or yours isn't known.
+- Sighting history: a vessel you've met before reads "Seen 7x before, last 2d
+  ago". A vessel with no history shows nothing, because a count of zero isn't
+  reliable enough to call it a first sighting.
+- Collision alarms: a vessel in a collision alarm or warning takes the same red
+  or amber row and "Collision alarm" or "Collision warning" label as the Nearby
+  Vessels tile.
+- Old positions: when the last position is more than three minutes old, the row
+  adds "position 5m old". Anchored vessels report about every three minutes, so a
+  younger position is normal.
+- Layout: on a short tile, such as a wall display, the Vessels group sits to the
+  right of the places. On a tall tile it stacks underneath. Places keep their
+  numbers, and the vessels aren't part of the highlight cycle, the arrow or how
+  the map is framed.
+- Names on the map: each ship marker shows the vessel's name below it. A place's
+  name wins when the two would overlap.
+
+When the group can't list vessels it says why, in this order:
+
+- **Vessels need a GNSS fix:** Your position isn't trustworthy, so every
+  distance would be wrong. No vessels are listed.
+- **Loading…:** The tile hasn't heard from the AIS feed yet.
+- **AIS unavailable:** Helmcentral can't read AIS from SignalK.
+- **No vessels within 5 km:** The feed is working and nothing is in range. The
+  distance is the smaller of the tile's range and the feed's.
+
+There's one limit to know about. If your AIS receiver goes silent while
+SignalK is still running, Helmcentral can't tell. The group reads "No vessels
+within" the range, as it would on an empty sea. If that looks wrong, check the
+receiver.
 
 ## What the map does during the summary cycle
 

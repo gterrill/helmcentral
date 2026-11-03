@@ -26,6 +26,21 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   `generated_at` and `since_at` instead. Both are UTC times written for a
   program, like 2026-10-28T14:00:00Z, and they don't change.
 
+### Added
+
+- **The Nearby map lists the vessels around you.** With **Show AIS traffic** on
+  and the **Map and list** layout, the list gains a Vessels group beside the
+  places, or under them on a tall tile. It shows up to four contacts within 5 km,
+  alarmed first and then nearest, with distance, bearing, and "Seen 7x before,
+  last 2d ago" for vessels you have met. A vessel in a collision alarm or warning
+  takes the same red or amber as the Nearby Vessels tile and is listed even
+  outside the tile's range, and a position more than three minutes old says so.
+  Ship markers now show the vessel's name. When the group can't list vessels it
+  says why: "Vessels need a GNSS fix", "AIS
+  unavailable" or "No vessels within 5 km". If your AIS receiver goes silent
+  while SignalK is still running, Helmcentral can't tell, and the group reads as
+  no vessels.
+
 ### Changed
 
 - **Mate is told to carry on after its answer is sent back.** When Mate's first

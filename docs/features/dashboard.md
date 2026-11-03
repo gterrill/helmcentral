@@ -315,6 +315,14 @@ one to a page, or to different pages, each with its own range and categories.
   the highlighted match, so you can see where it is without reading the list. It
   switches to the next match with the list. It's left out when the match is too
   close to the boat for an arc, and while the GNSS badge shows.
+- **Vessels:** With **Show AIS traffic** on, the map-and-list layout adds a
+  Vessels group to the list. It shows up to four AIS contacts within 5 km (or
+  the tile's range, if that is smaller), alarmed first and then nearest, with
+  distance, bearing and "Seen 7x before, last 2d ago" for vessels you have met.
+  On a short tile it sits beside the places, and on a tall tile below them. It
+  says why when it can't list vessels, for example "AIS unavailable". If the AIS
+  receiver goes silent while SignalK is still up, it reads as no vessels. See
+  [Add a Nearby map](../how-to/add-a-nearby-map.md#vessels-in-the-list).
 - **Summary cycle:** The Summary cycle is how long each match stays highlighted.
   A longer one, 15 to 20 seconds, gives you more time to read a description.
 - **Route:** The route SignalK is navigating shows as a line, with the leg

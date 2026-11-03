@@ -2,7 +2,7 @@ import { useMemo } from 'react'
 
 import { ageFromPayload, shownAge } from '@/lib/staleness'
 
-import { createTelemetryStore, keepUnchangedItems, sameJSON, type TelemetryUpdate } from '@/lib/telemetry-store'
+import { createTelemetryStore, keepUnchangedItems, sameJSON, sameShallow, type TelemetryUpdate } from '@/lib/telemetry-store'
 
 export type NearbyVessel = {
   id: string
@@ -20,6 +20,7 @@ export type NearbyVessel = {
 type NearbyVesselsResponse = {
   vessels?: NearbyVessel[]
   max_range_m?: unknown
+  source?: unknown
 }
 
 /** What the nearby-vessels store holds. */
@@ -31,9 +32,13 @@ export interface NearbyVesselsValue {
   // How far the backend searches, in metres. Null until a payload carries it;
   // the empty state then names no distance rather than inventing one.
   maxRangeM: number | null
+  // Where the backend got the list: "signalk" when it read the live AIS feed,
+  // anything else (it sends "backend-fallback") when it could not. Null until a
+  // payload carries it.
+  source: string | null
 }
 
-const INITIAL: NearbyVesselsValue = { vessels: [], lastUpdateAgeS: null, maxRangeM: null }
+const INITIAL: NearbyVesselsValue = { vessels: [], lastUpdateAgeS: null, maxRangeM: null, source: null }
 
 function isVessel(item: NearbyVessel): boolean {
   return typeof item.id === 'string' &&
@@ -68,15 +73,17 @@ function applyNearbyVessels(previous: NearbyVesselsValue, payload: unknown): Tel
   const list = Array.isArray(data.vessels) ? data.vessels : []
   const vessels = keepUnchangedItems(previous.vessels, list.filter(isVessel).map(toVessel), (v) => v.id, sameJSON)
   const maxRangeM = typeof data.max_range_m === 'number' && Number.isFinite(data.max_range_m) && data.max_range_m > 0 ? data.max_range_m : null
+  const source = typeof data.source === 'string' ? data.source : null
   const age = ageFromPayload(data.last_update_age_s)
   const lastUpdateAgeS = shownAge(age) === shownAge(previous.lastUpdateAgeS) ? previous.lastUpdateAgeS : age
-  if (vessels === previous.vessels && maxRangeM === previous.maxRangeM && lastUpdateAgeS === previous.lastUpdateAgeS) return null
-  return { state: { vessels, lastUpdateAgeS, maxRangeM } }
+  if (vessels === previous.vessels && maxRangeM === previous.maxRangeM && source === previous.source && lastUpdateAgeS === previous.lastUpdateAgeS) return null
+  return { state: { vessels, lastUpdateAgeS, maxRangeM, source } }
 }
 
 const store = createTelemetryStore('nearby-vessels', INITIAL, applyNearbyVessels)
 
 const selectAll = (state: NearbyVesselsValue) => state
+const selectFeed = (state: NearbyVesselsValue) => ({ source: state.source, maxRangeM: state.maxRangeM })
 const selectVessels = (state: NearbyVesselsValue) => state.vessels
 
 /** The Nearby Vessels list: the vessels, `loading` until the first event, the feed age and the search range. */
@@ -93,4 +100,15 @@ export function useNearbyVessels() {
 /** The vessels alone, for the maps' AIS markers: a change to the feed age leaves them alone. */
 export function useNearbyVesselList(): NearbyVessel[] {
   return store.useSelector(selectVessels)
+}
+
+export type NearbyVesselFeed = Pick<NearbyVesselsValue, 'source' | 'maxRangeM'>
+
+/**
+ * What the Nearby map needs to word an empty Vessels group: the feed's source
+ * and search range. Null until the first event. Compared by value, so the
+ * five-second age ticks and feed-age changes never re-render the reader.
+ */
+export function useNearbyVesselFeed(): NearbyVesselFeed | null {
+  return store.useHeardSelector(selectFeed, sameShallow)
 }
