@@ -7,6 +7,10 @@ description: Edits and drafts architecture decision records in docs/adr, combini
 
 Apply this framework to architecture decision records in `docs/adr`. Help pages and CHANGELOG entries are written for the operator with the `help-pages` skill instead. Deliver concrete, conversational explanations anchored by strict editorial discipline: tight prose, prominent structural scaffolding, explicit failure modes, and deliberate sentence architecture.
 
+## What an ADR holds
+
+`docs/adr/` is the internal record and sits outside the help pages' Diátaxis tree: context, the decision, what was rejected, and what a later ADR reversed. Wrong turns belong here and only here. An ADR may describe what an operator will see; the steps for doing it live in `docs/how-to/`.
+
 ## 1. Editorial Scaffolding & Structural Discipline
 - **Prominent Canonical Headings:** Use direct, authoritative headings (e.g., `## What it knows`, `## What leaves the boat`, `## What it is not`, `## When it can't run`). Avoid vague meta-labels.
 - **Categorical & Parallel Chunking:** When an architecture spans multiple operational domains, organize it into clean, parallel components (e.g., a 4-part data sourcing taxonomy, a 2-mode entry model).

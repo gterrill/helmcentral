@@ -36,8 +36,8 @@ function markdownFilesUnder(dir: string): string[] {
   try {
     entries = readdirSync(dir, { withFileTypes: true })
   } catch {
-    // A tree that does not exist yet (docs/tutorials, per the documentation
-    // location policy, is created only when something needs it) is not a
+    // A tree that does not exist yet (docs/tutorials, per the help-pages
+    // skill's table, is created only when something needs it) is not a
     // failure.
     return []
   }

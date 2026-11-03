@@ -79,60 +79,18 @@
   - Dependency upgrades and package manager lockfile updates.
   - Pure refactoring that doesn't change public interfaces.
 
-## Documentation Location Policy
+## Documentation
 
-Two audiences, two trees. Operator-facing documentation exists to explain what
-Helmcentral does and how to use it. ADRs exist to record why it was built that
-way. Mixing them produces feature pages that read like engineering history and
-decision records that read like manuals, and both get worse.
-
-### The user-facing tree
-
-`docs/` follows the [Diátaxis](https://diataxis.fr/) split, indexed by
-`docs/index.md`:
-
-| Content | Location |
-| --- | --- |
-| What a feature does, what it gives the operator, where it stops | `docs/features/` |
-| Steps to accomplish a specific task | `docs/how-to/` |
-| Fields, formats, environment variables, state paths | `docs/reference/` |
-| Guided first run (none yet; create only when something needs it) | `docs/tutorials/` |
-
-A feature normally gets one `features/` page as its entry point, and grows
-`how-to/` and `reference/` pages as it needs them. Do not create empty
-directories or placeholder pages in advance.
-
-#### Writing help pages
-
-Before writing or editing these pages or a `CHANGELOG.md` entry, read
-`.claude/skills/help-pages/SKILL.md` (Claude loads it as the `help-pages`
-skill). It holds the reader, the voice, worked examples and the shape of each
-kind of page. Run `make docs-lint` before
-committing a help page. Errors fail CI, and the warnings mark sentences to
-split.
-
-### The engineering tree
-
-`docs/adr/` holds architecture decision records and is **not part of the
-Diátaxis tree.** It is the internal record: context, the decision, what was
-rejected, and what a later ADR reversed. Wrong turns belong here and only here.
-
-### The rule that keeps them apart
-
-- **User-facing pages do not cite ADR numbers.** If a `features/`, `how-to/` or
-  `reference/` page only makes sense once the reader has followed a decision
-  record, the page is not finished. State the behaviour and the reason for it in
-  the page's own words.
-- **ADRs do not carry operator instructions.** An ADR may describe what an
-  operator will see; the steps for doing it live in `docs/how-to/`.
-- Component READMEs (`backend/README.md`, `frontend/README.md`) hold neither.
-  No durable feature specs or architecture notes there.
-
-### When behaviour changes
-
-A change affecting architecture or a feature contract needs both: create or
-update the ADR in `docs/adr/`, **and** update the affected page under `docs/`.
-An ADR alone leaves the operator-facing docs silently wrong.
+- Operator help pages live in `docs/features`, `docs/how-to`, `docs/reference`,
+  `docs/tutorials` and `docs/index.md`. Before writing or editing one, or a
+  `CHANGELOG.md` entry, read `.claude/skills/help-pages/SKILL.md`.
+- `docs/adr/` records why Helmcentral was built this way. Before writing or
+  editing an ADR, read `.claude/skills/clarity-and-grace/SKILL.md`.
+- A change affecting architecture or a feature contract creates or updates its
+  ADR and updates the affected help page. An ADR alone leaves the help pages
+  silently wrong.
+- Feature specs and architecture notes stay out of the component READMEs
+  (`backend/README.md`, `frontend/README.md`).
 
 ## Coding Standards
 
