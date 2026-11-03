@@ -302,7 +302,7 @@ func zoneDerivedAlarmRules() []alarmRule {
 					}
 					collectSlot(widget.ID, at, slotItem(c.EquipmentID, *slot), c.Source, c.Title, *slot)
 				}
-				for i, slot := range c.Footer.slots() {
+				for i, slot := range c.Footer.readSlots() {
 					if slot != nil {
 						collectSlot(widget.ID, clusterFooterZoneIndexBase+i, slotItem(c.EquipmentID, *slot), c.Source, c.Title, *slot)
 					}

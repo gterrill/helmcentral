@@ -446,12 +446,27 @@ export const CLUSTER_FOOTER_SLOTS = [
 
 export type ClusterFooterSlot = (typeof CLUSTER_FOOTER_SLOTS)[number]
 
+/** The footer slots that read the footer's one alternator: they hold a reading and nothing else. */
+export const CLUSTER_ALTERNATOR_SLOTS = ['altAmps', 'altWatts', 'altTemp', 'altStage', 'altLimit'] as const
+
+export type ClusterAlternatorSlot = (typeof CLUSTER_ALTERNATOR_SLOTS)[number]
+
+export const isClusterAlternatorSlot = (key: string): key is ClusterAlternatorSlot =>
+  (CLUSTER_ALTERNATOR_SLOTS as readonly string[]).includes(key)
+
 /**
  * Each footer slot is a gauge slot, bound or absent. Transmission slots read
- * the cluster's engine; the battery, alternator and exhaust name their own
- * equipment item (`equipmentId`) and read a suffix of its source.
+ * the cluster's engine; the battery and exhaust name their own equipment item
+ * (`equipmentId`) and read a suffix of its source. The five alternator slots
+ * name no item: they read the footer's `alternatorId`.
  */
-export type ClusterFooter = { [K in ClusterFooterSlot]?: GaugeWidgetConfig }
+export type ClusterFooter = { [K in ClusterFooterSlot]?: GaugeWidgetConfig } & {
+  /**
+   * The alternator the alternator slots read. Absent means never chosen; an
+   * empty string means the operator cleared it. Neither reads anything.
+   */
+  alternatorId?: string
+}
 
 /** What the cluster tile draws: every slot has its path and zones, the rail its tanks' paths. */
 export type ResolvedClusterConfig = Omit<EngineClusterConfig, 'fuel'> & { fuel?: ClusterFuelRail }

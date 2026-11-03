@@ -103,6 +103,22 @@ func TestEquipmentDependantsNameTilesByPageAndTitle(t *testing.T) {
 	}
 }
 
+// A cluster's footer alternator is shown on the tile, so deleting it must list the tile.
+func TestEquipmentDependantsCountTheFootersAlternator(t *testing.T) {
+	setUpDependants(t)
+	alt := newTileItem(t, "Port alternator", "electrical.alternator.2", "")
+	dashboardPagesMu.Lock()
+	dashboardPagesState["page-a"].Widgets[1].Cluster.Footer = &dashboardClusterFooter{AlternatorID: stringPtr(alt)}
+	dashboardPagesMu.Unlock()
+	got, err := equipmentDependantsFor(alt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Tiles) != 1 || got.Tiles[0].TileID != "cluster:other000" || got.Tiles[0].Title != "Starboard" {
+		t.Fatalf("expected the starboard cluster to depend on its alternator, got %+v", got.Tiles)
+	}
+}
+
 func TestEquipmentDependantsTankBarCountsTheClusterOnce(t *testing.T) {
 	f := setUpDependants(t)
 	got, err := equipmentDependantsFor(f.tankID)

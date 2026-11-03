@@ -39,6 +39,25 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   water fell between 02:00 and 04:00 when it fell at 1.30 PM on the boat. Mate now
   receives every time already written on the boat's clock, and quotes it as given
   instead of working it out.
+- **Saved Engine Cluster tiles need the alternator chosen again.** The
+  alternator is now one choice for the whole tile, so the alternator choices a
+  tile had saved row by row are no longer used. Until you save, the tile's
+  alternator part shows nothing, and the alarms raised from its readings don't
+  run. Re-save each tile straight after upgrading. Open each Engine Cluster
+  tile's settings, check that the alternator filled in from Roles, and choose
+  **Save**. If it didn't fill in, choose the alternator on the **Alternator &
+  more** tab first. Readings already on the tile are kept.
+
+### Changed
+
+- **An Engine Cluster tile asks for the alternator once.** The tile's **Footer**
+  tab is now called **Alternator & more**. You choose the alternator at the top
+  of it, and the current, output power, temperature, charge stage and charge
+  current limit all read from it. It starts as the alternator you named under
+  **Settings → SignalK → Roles** for the engine's side, and each part fills in
+  with the reading the alternator sends. If you type a reading the alternator
+  isn't sending, the tile won't save until you pick another or clear it, and an
+  alternator that sends nothing at all gets a note under it.
 - **The morning report compares the late night, and counts generator charging.**
   The overnight finding now measures each night from 10.00 PM to dawn, so an
   evening spent charging doesn't make the usual drain look lighter than it is.

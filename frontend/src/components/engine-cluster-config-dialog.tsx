@@ -22,11 +22,15 @@ import { useVesselRoles } from '@/hooks/use-vessel-roles'
 import { useSlotZoneEditing } from '@/hooks/use-slot-zone-editing'
 import { ZoneConflicts } from '@/components/zone-conflicts'
 import {
+  CLUSTER_ALTERNATOR_SLOTS,
   CLUSTER_MAX_CORNERS,
   CLUSTER_MAX_CORNER_ROWS,
   CLUSTER_MAX_FUEL_BARS,
   CLUSTER_FOOTER_SLOTS,
   GAUGE_GROUP_TITLE_MAX_LENGTH,
+  isClusterAlternatorSlot,
+  type ClusterAlternatorSlot,
+  type ClusterFooter,
   type ClusterFooterSlot,
   type ClusterFuelRailRef,
   type ClusterSide,
@@ -36,7 +40,7 @@ import {
   type GaugeWidgetConfig,
 } from '@/lib/dashboard-widgets'
 import { CLUSTER_ICON_NAMES, iconForSlot } from '@/lib/cluster-icons'
-import { findItem, profileGaugeFor, profileOf, type EquipmentTileContext } from '@/lib/equipment-tiles'
+import { findItem, profileGaugeFor, profileOf, type EquipmentTileContext, type TileItem } from '@/lib/equipment-tiles'
 import type { EngineProfile } from '@/lib/engine-profiles'
 import { liveReadings } from '@/lib/live-readings'
 import { ROLE_NONE } from '@/lib/vessel-settings'
@@ -70,26 +74,36 @@ const SLOT_SUFFIXES = {
 } as const
 
 /**
- * The footer slots that read another item than the engine: the kind of item
- * each takes, the reading it starts on, and a blank slot's own quantity (used
- * until the item's profile has a gauge for the reading). None carries a scale or
- * a threshold: both come from the item's profile.
+ * The footer slots that read another item than the engine and name it
+ * themselves: the kind of item each takes, the reading it starts on, and a blank
+ * slot's own quantity (used until the item's profile has a gauge for the
+ * reading). None carries a scale or a threshold: both come from the item's
+ * profile. The alternator rows are not here: they share the footer's one
+ * alternator.
  */
-const FOREIGN_SLOTS: Record<'battery' | 'altAmps' | 'altWatts' | 'altTemp' | 'altStage' | 'altLimit' | 'egt', {
-  kind: 'battery' | 'alternator' | 'engine'
+const FOREIGN_SLOTS: Record<'battery' | 'egt', {
+  kind: 'battery' | 'engine'
   suffix: string
   slot: GaugeWidgetConfig
 }> = {
   battery: { kind: 'battery', suffix: 'voltage', slot: { path: '', label: 'Battery', display: 'numeric', quantity: 'potential', unit: 'V', decimals: 1 } },
-  altAmps: { kind: 'alternator', suffix: 'current', slot: { path: '', label: 'Alternator', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 } },
-  altWatts: { kind: 'alternator', suffix: 'power', slot: { path: '', label: 'Alt output', display: 'numeric', quantity: 'power', unit: 'W', decimals: 0 } },
-  altTemp: { kind: 'alternator', suffix: 'temperature', slot: { path: '', label: 'Alt temp', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0 } },
-  // The regulator reports its stage as a number; the tile names it.
-  altStage: { kind: 'alternator', suffix: 'chargingModeNumber', slot: { path: '', label: 'Charge stage', display: 'numeric', quantity: 'raw', unit: 'raw', decimals: 0 } },
-  altLimit: { kind: 'alternator', suffix: '', slot: { path: '', label: 'Charge limit', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 } },
   // The scale and any band (raw-water loss on a wet exhaust) are the exhaust
   // item's profile's to hold.
   egt: { kind: 'engine', suffix: 'exhaustTemperature', slot: { path: '', label: 'Exhaust', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0 } },
+}
+
+/**
+ * The five alternator rows: the reading each starts on (none for the charge
+ * limit, which the operator chooses) and a blank row's own quantity, used until
+ * the alternator's profile has a gauge for the reading.
+ */
+const ALTERNATOR_SLOTS: Record<ClusterAlternatorSlot, { suffix: string; slot: GaugeWidgetConfig }> = {
+  altAmps: { suffix: 'current', slot: { path: '', label: 'Alternator', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 } },
+  altWatts: { suffix: 'power', slot: { path: '', label: 'Alt output', display: 'numeric', quantity: 'power', unit: 'W', decimals: 0 } },
+  altTemp: { suffix: 'temperature', slot: { path: '', label: 'Alt temp', display: 'numeric', quantity: 'temperature', unit: 'C', decimals: 0 } },
+  // The regulator reports its stage as a number; the tile names it.
+  altStage: { suffix: 'chargingModeNumber', slot: { path: '', label: 'Charge stage', display: 'numeric', quantity: 'raw', unit: 'raw', decimals: 0 } },
+  altLimit: { suffix: '', slot: { path: '', label: 'Charge limit', display: 'numeric', quantity: 'current', unit: 'A', decimals: 0 } },
 }
 
 const FOOTER_TITLES: Record<ClusterFooterSlot, string> = {
@@ -98,9 +112,107 @@ const FOOTER_TITLES: Record<ClusterFooterSlot, string> = {
   altWatts: 'Alternator output power',
   altTemp: 'Alternator temperature',
   altStage: 'Charge stage (regulator state number)',
-  altLimit: 'Charge current limit from the battery management system',
+  altLimit: 'Charge current limit',
   transPressure: 'Transmission oil pressure',
   egt: 'Exhaust temperature',
+}
+
+/** The tab that holds the alternator and the other footer rows. */
+const FOOTER_TAB_NAME = 'Alternator & more'
+
+/** The order the tab lists its rows in: the alternator's five, then the rest. */
+const FOOTER_TAB_ROWS: ClusterFooterSlot[] = [
+  ...CLUSTER_ALTERNATOR_SLOTS,
+  ...CLUSTER_FOOTER_SLOTS.filter((key) => !isClusterAlternatorSlot(key)),
+]
+
+type AlternatorRows = Partial<Record<ClusterAlternatorSlot, GaugeWidgetConfig>>
+
+/** A slot without the equipment id it once named. */
+function withoutEquipment(slot: GaugeWidgetConfig): GaugeWidgetConfig {
+  const { equipmentId: _dropped, ...rest } = slot
+  void _dropped
+  return rest
+}
+
+/** Whether the item can show this reading: SignalK sends it now, or its profile has a gauge for it. */
+function itemSends(item: TileItem, ctx: EquipmentTileContext, live: readonly string[], suffix: string): boolean {
+  return live.includes(suffix) || (profileOf(ctx, item)?.gauges ?? []).some((g) => g.path_suffix === suffix)
+}
+
+const blankAlternatorRow = (key: ClusterAlternatorSlot): GaugeWidgetConfig => ({ ...ALTERNATOR_SLOTS[key].slot, suffix: '' })
+
+/**
+ * One alternator row set to a reading. Quantity, unit and scale reset to the
+ * row's own, and any zones go, unless the alternator's profile has a gauge for
+ * the reading, which then decides them. The row holds no equipment.
+ */
+function alternatorRow(key: ClusterAlternatorSlot, base: GaugeWidgetConfig | undefined, suffix: string, item: TileItem | undefined, ctx: EquipmentTileContext): GaugeWidgetConfig {
+  const spec = ALTERNATOR_SLOTS[key].slot
+  const next = { ...withoutEquipment(base ?? spec), suffix }
+  const gauge = item && suffix.trim() !== '' ? profileGaugeFor(profileOf(ctx, item), suffix.trim()) : undefined
+  if (gauge) return slotFromProfileGauge({ ...next, zones: undefined }, gauge)
+  const { quantity, unit, decimals, display } = spec
+  return { ...next, quantity, unit, decimals, display, min: undefined, max: undefined, zones: undefined }
+}
+
+/**
+ * Each alternator row after `choose` says which reading it takes: given the
+ * reading the row has, the one it expects, what SignalK sends and whether the
+ * alternator can show a reading, it returns the new reading ('' for blank), or
+ * undefined to leave the row as it is. `livePaths` is null while SignalK's paths
+ * are not known, and then only the profile can vouch for a reading.
+ */
+function mapAlternatorRows(
+  rows: AlternatorRows, item: TileItem | undefined, ctx: EquipmentTileContext, livePaths: readonly string[] | null,
+  choose: (have: string, expected: string, live: readonly string[], sends: (suffix: string) => boolean) => string | undefined,
+): Record<ClusterAlternatorSlot, GaugeWidgetConfig> {
+  const live = item && livePaths ? liveReadings(item.signalk_source, livePaths) : []
+  const sends = (suffix: string) => item !== undefined && itemSends(item, ctx, live, suffix)
+  return Object.fromEntries(CLUSTER_ALTERNATOR_SLOTS.map((key) => {
+    const suffix = choose((rows[key]?.suffix ?? '').trim(), ALTERNATOR_SLOTS[key].suffix, live, sends)
+    return [key, suffix === undefined ? (rows[key] ?? blankAlternatorRow(key)) : alternatorRow(key, rows[key], suffix, item, ctx)]
+  })) as Record<ClusterAlternatorSlot, GaugeWidgetConfig>
+}
+
+/**
+ * The five alternator rows after the alternator changes to `item` (none when
+ * the picker is cleared). A row keeps its reading if the new alternator sends
+ * it, live or on its profile. Otherwise it takes its expected reading if that
+ * is sent, and otherwise goes blank.
+ */
+export function switchAlternatorRows(
+  rows: AlternatorRows, item: TileItem | undefined, ctx: EquipmentTileContext, livePaths: readonly string[] | null,
+): Record<ClusterAlternatorSlot, GaugeWidgetConfig> {
+  return mapAlternatorRows(rows, item, ctx, livePaths, (have, expected, live, sends) => {
+    if (!item) return ''
+    if (have !== '' && sends(have)) return have
+    return expected !== '' && live.includes(expected) ? expected : ''
+  })
+}
+
+/**
+ * The alternator rows with every blank one given its expected reading, if the
+ * alternator is sending it. A row that already has a reading stays as the
+ * operator chose it. With the paths unknown nothing is filled.
+ */
+export function fillBlankAlternatorRows(
+  rows: AlternatorRows, item: TileItem | undefined, ctx: EquipmentTileContext, livePaths: readonly string[] | null,
+): Record<ClusterAlternatorSlot, GaugeWidgetConfig> {
+  return mapAlternatorRows(rows, item, ctx, livePaths, (have, expected, live) =>
+    (have === '' && item && expected !== '' && live.includes(expected) ? expected : undefined))
+}
+
+/**
+ * The alternator the Roles setting names for an Engine side: the starboard one
+ * for a starboard engine, the port one otherwise. Empty when Roles names none,
+ * says the boat has none, or can't be read.
+ */
+export function defaultAlternatorId(
+  side: ClusterSide | undefined, roles: { port_alternator: string; starboard_alternator: string } | null,
+): string {
+  const id = (side === 'stbd' ? roles?.starboard_alternator : roles?.port_alternator) ?? ''
+  return id === ROLE_NONE ? '' : id
 }
 
 /** Port or starboard from an engine's source, `propulsion.starboard` and so on; port when it says neither. */
@@ -161,11 +273,12 @@ function blankArc(label: string, min: number, max: number): GaugeWidgetConfig {
 
 /**
  * Builds the slots of a cluster from the engine's profile; the equipment is
- * already chosen. The alternator is the one the Roles setting names for this
- * engine's side, when it names one: there is no default and no guess otherwise.
+ * already chosen. The alternator is the one on the alternator picker, which
+ * this leaves alone: it only fills the alternator's blank rows, with readings
+ * the alternator is sending. With no alternator chosen there is nothing to fill.
  */
 export function clusterFromProfile(
-  profile: EngineProfile, current: EngineClusterConfig, ctx: EquipmentTileContext, roles: { port_alternator: string; starboard_alternator: string } | null,
+  profile: EngineProfile, current: EngineClusterConfig, ctx: EquipmentTileContext,
   /** Every path SignalK publishes now, or null while that is not known. */
   livePaths: readonly string[] | null = null,
 ): EngineClusterConfig {
@@ -191,34 +304,21 @@ export function clusterFromProfile(
 
   const engine = findItem(ctx, current.equipmentId)
   const side = sideOf(engine?.signalk_source)
-  const roleAlternator = (side === 'stbd' ? roles?.starboard_alternator : roles?.port_alternator) ?? ''
-  // "This boat has none" is an answer, not an item.
-  const alternatorId = roleAlternator === ROLE_NONE ? '' : roleAlternator
 
   const footer: NonNullable<EngineClusterConfig['footer']> = {}
+  if (current.footer?.alternatorId !== undefined) footer.alternatorId = current.footer.alternatorId
   for (const key of CLUSTER_FOOTER_SLOTS) {
     if (!isForeign(key)) continue
     const spec = FOREIGN_SLOTS[key]
-    // What the operator already chose for this slot stays; only blanks are seeded.
+    // What the operator already chose for this slot stays.
     const existing = (current.footer?.[key]?.suffix ?? '').trim() !== '' ? current.footer?.[key] : undefined
-    if (existing) {
-      footer[key] = existing
-      continue
-    }
-    const seededItem = spec.kind === 'alternator' && spec.suffix !== '' && alternatorId ? alternatorId : ''
-    if (seededItem === '') {
-      footer[key] = { ...spec.slot, suffix: spec.suffix }
-      continue
-    }
-    // Item and reading are seeded together, and only when the alternator is
-    // known to send the reading. Otherwise the slot stays blank and is left out.
-    const sends = livePaths !== null && liveReadings(findItem(ctx, seededItem)?.signalk_source, livePaths).includes(spec.suffix)
-    if (!sends) {
-      footer[key] = { ...spec.slot, suffix: '' }
-      continue
-    }
-    footer[key] = { ...spec.slot, suffix: spec.suffix, equipmentId: seededItem }
+    footer[key] = existing ?? { ...spec.slot, suffix: spec.suffix }
   }
+  // What the alternator sends fills the rows still blank; a reading already
+  // chosen stays.
+  Object.assign(footer, fillBlankAlternatorRows(
+    alternatorRowsOf(current), findItem(ctx, current.footer?.alternatorId || undefined), ctx, livePaths,
+  ))
   footer.transPressure = { ...pick(SLOT_SUFFIXES.transPressure, 'Gear press'), decimals: 0 }
 
   return {
@@ -240,10 +340,42 @@ export function clusterFromProfile(
   }
 }
 
-/** Every optional slot present, blank where unset, so each has a form to fill. */
+/**
+ * The footer slot if it reads something, else undefined: it has a reading, and
+ * for another item's slot the item too, and for an alternator row the footer's
+ * alternator. One rule for what the tab counts and what a save keeps.
+ */
+function boundFooterSlot(footer: ClusterFooter | undefined, key: ClusterFooterSlot): GaugeWidgetConfig | undefined {
+  const slot = footer?.[key]
+  if (!slot || (slot.suffix ?? '').trim() === '') return undefined
+  if (isClusterAlternatorSlot(key)) return (footer?.alternatorId ?? '') !== '' ? slot : undefined
+  if (isForeign(key) && (slot.equipmentId ?? '') === '') return undefined
+  return slot
+}
+
+/** The alternator rows a config holds, as they are. */
+function alternatorRowsOf(config: EngineClusterConfig): AlternatorRows {
+  return Object.fromEntries(CLUSTER_ALTERNATOR_SLOTS.flatMap((key) => {
+    const row = config.footer?.[key]
+    return row ? [[key, row]] : []
+  })) as AlternatorRows
+}
+
+/**
+ * Every optional slot present, blank where unset, so each has a form to fill.
+ * The alternator rows hold readings of the footer's alternator, so no row keeps
+ * an equipment id of its own (an old card named one per row, which is ignored).
+ * An old card's readings stay on its rows, with their zones. With no alternator
+ * chosen they read nothing and a save drops them.
+ */
 function withBlankSlots(config: EngineClusterConfig): EngineClusterConfig {
   const footer: NonNullable<EngineClusterConfig['footer']> = { ...config.footer }
   for (const key of CLUSTER_FOOTER_SLOTS) {
+    if (isClusterAlternatorSlot(key)) {
+      const row = withoutEquipment(footer[key] ?? ALTERNATOR_SLOTS[key].slot)
+      footer[key] = { ...row, suffix: row.suffix ?? '' }
+      continue
+    }
     if (footer[key]) continue
     footer[key] = isForeign(key)
       ? { ...FOREIGN_SLOTS[key].slot, suffix: '' }
@@ -263,19 +395,22 @@ function withBlankSlots(config: EngineClusterConfig): EngineClusterConfig {
  * Drops every optional slot with no reading, so an unbound slot is absent from
  * the saved config rather than a placeholder the tile and the backend would
  * each have to interpret. A foreign slot with a reading but no item is dropped
- * too: it could read nothing.
+ * too: it could read nothing, and so is an alternator row with no alternator.
+ * An alternator row is saved with its reading alone. The alternator itself is
+ * kept even as an empty string, which is the operator's answer that there is
+ * none, and apart from never having chosen.
  */
 function pruneUnbound(config: EngineClusterConfig): EngineClusterConfig {
-  const bound = (slot: GaugeWidgetConfig | undefined, needsItem = false) =>
-    slot && (slot.suffix ?? '').trim() !== '' && (!needsItem || (slot.equipmentId ?? '') !== '') ? slot : undefined
+  const hasReading = (slot: GaugeWidgetConfig | undefined) => (slot && (slot.suffix ?? '').trim() !== '' ? slot : undefined)
 
-  const left = bound(config.arcs?.left)
-  const right = bound(config.arcs?.right)
+  const left = hasReading(config.arcs?.left)
+  const right = hasReading(config.arcs?.right)
   const footer: NonNullable<EngineClusterConfig['footer']> = {}
   for (const key of CLUSTER_FOOTER_SLOTS) {
-    const slot = bound(config.footer?.[key], isForeign(key))
-    if (slot) footer[key] = slot
+    const slot = boundFooterSlot(config.footer, key)
+    if (slot) footer[key] = isClusterAlternatorSlot(key) ? withoutEquipment(slot) : slot
   }
+  if (config.footer?.alternatorId !== undefined) footer.alternatorId = config.footer.alternatorId
 
   const { arcs: _arcs, footer: _footer, ...rest } = config
   void _arcs
@@ -306,12 +441,76 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
   const [saveError, setSaveError] = useState<string | null>(null)
   const [tab, setTab] = useState<ClusterTab>('dial')
 
+  // A saved alternator, and one the operator picked in this dialog, are theirs
+  // and stay put. One the Roles setting supplied follows the Engine side.
+  const savedAlternator = widget?.cluster?.footer?.alternatorId !== undefined
+  const operatorChose = useRef(false)
+  // The reading each alternator row held when the dialog opened tells a typed
+  // reading from one carried over.
+  const openedReadings = useMemo(
+    () => (widget?.cluster ? withBlankSlots(widget.cluster) : null),
+    [widget?.cluster],
+  )
+  // Set when an alternator was picked before SignalK's paths (or its item) were
+  // known. The rows keep their readings until they are, and then are switched
+  // over to the new alternator.
+  const switchPending = useRef(false)
+
   useEffect(() => {
     setConfig(widget?.cluster ? withBlankSlots(structuredClone(widget.cluster)) : null)
     setSaveError(null)
+    operatorChose.current = false
+    switchPending.current = false
   }, [widget?.id, widget?.cluster])
 
   useEffect(() => { setTab('dial') }, [widget?.id])
+
+  /**
+   * The config with the alternator set to `id` (undefined for never chosen). The
+   * rows are switched over to it too, unless that has to wait for what SignalK
+   * sends.
+   */
+  const withAlternator = (c: EngineClusterConfig, id: string | undefined, switchRows: boolean): EngineClusterConfig => {
+    const rows = switchRows ? switchAlternatorRows(alternatorRowsOf(c), findItem(ctx, id), ctx, pathNames) : {}
+    const footer = { ...c.footer, ...rows }
+    if (id === undefined) delete footer.alternatorId
+    else footer.alternatorId = id
+    return { ...c, footer }
+  }
+
+  const setAlternator = (id: string | undefined) => {
+    // A new alternator can only be judged once SignalK's paths and its item are
+    // known. Clearing it needs neither.
+    const waiting = !!id && (pathsState !== 'ready' || findItem(ctx, id) === undefined)
+    switchPending.current = waiting
+    setConfig((c) => (c ? withAlternator(c, id, !waiting) : c))
+  }
+
+  // The Roles default: while the operator hasn't chosen one, the alternator on
+  // the picker is the one Roles names for the Engine side. This runs when a card
+  // opens, when an engine is picked and when the side changes. With no role it
+  // leaves the picker as it is, and never guesses.
+  useEffect(() => {
+    if (!config || (config.equipmentId ?? '') === '' || roles === null) return
+    if (savedAlternator || operatorChose.current) return
+    // An Engine side that was set wins. Otherwise the engine's own source says.
+    const side = config.side ?? sideOf(findItem(ctx, config.equipmentId)?.signalk_source)
+    const wanted = defaultAlternatorId(side, roles)
+    if (wanted === (config.footer?.alternatorId ?? '')) return
+    setAlternator(wanted === '' ? undefined : wanted)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config?.equipmentId, config?.side, config?.footer?.alternatorId, roles, ctx])
+
+  // Once SignalK's paths and the alternator's item are known, switch the rows an
+  // earlier pick had to leave as they were.
+  useEffect(() => {
+    if (!switchPending.current || pathsState !== 'ready' || !config) return
+    const alternator = findItem(ctx, config.footer?.alternatorId || undefined)
+    if (!alternator) return
+    switchPending.current = false
+    setConfig((c) => (c ? { ...c, footer: { ...c.footer, ...switchAlternatorRows(alternatorRowsOf(c), alternator, ctx, pathNames) } } : c))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathsState, ctx, config?.footer?.alternatorId])
 
   const item = findItem(ctx, config?.equipmentId)
   const zoneEditing = useSlotZoneEditing(ctx, item, config ? clusterSlotList(config) : [], paths)
@@ -358,6 +557,26 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
     })
     : []
 
+  // What the chosen alternator sends, for the rows, the picker's notes and the save check.
+  const alternatorId = config?.footer?.alternatorId ?? ''
+  const alternator = findItem(ctx, alternatorId || undefined)
+  const choices = useReadingChoices(alternator, ctx, pathNames, pathsState)
+  // Chosen, but not found. With an empty list that is only the list not loaded yet,
+  // so only a loaded list says the alternator is gone.
+  const alternatorUnresolved = alternatorId !== '' && alternator === undefined
+  const alternatorMissing = alternatorUnresolved && ctx.items.length > 0
+
+  // A reading typed in this dialog on an alternator row that the alternator isn't
+  // sending: saving it would draw a blank. One already there when the dialog
+  // opened, or the row's own expected reading, doesn't block.
+  const alternatorUnsent = config && choices.ready
+    ? CLUSTER_ALTERNATOR_SLOTS.map((key) => (config.footer?.[key]?.suffix ?? '').trim()).filter((suffix, i) => {
+      const key = CLUSTER_ALTERNATOR_SLOTS[i]
+      return suffix !== '' && suffix !== (openedReadings?.footer?.[key]?.suffix ?? '').trim() && suffix !== ALTERNATOR_SLOTS[key].suffix
+        && !choices.sends(suffix)
+    })
+    : []
+
   const saveReason = ((): string | null => {
     if (!config) return null
     if ((config.equipmentId ?? '') === '') return 'Pick the engine.'
@@ -365,7 +584,10 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
     if (cornersAttention) return 'Choose a reading for every readout card.'
     if (zoneEditing.unresolved > 0) return 'Settle the zone conflicts above.'
     if (slotsNeedingReading.length > 0) {
-      return `On the Footer tab, ${slotsNeedingReading.map((key) => FOOTER_TITLES[key]).join('; ')}${slotsNeedingReading.length === 1 ? ' needs a reading' : ' need a reading'}. Pick one it sends, or clear its equipment.`
+      return `On the ${FOOTER_TAB_NAME} tab, ${slotsNeedingReading.map((key) => FOOTER_TITLES[key]).join('; ')}${slotsNeedingReading.length === 1 ? ' needs a reading' : ' need a reading'}. Pick one it sends, or clear its equipment.`
+    }
+    if (alternator && alternatorUnsent.length > 0) {
+      return `On the ${FOOTER_TAB_NAME} tab, ${alternator.name} isn't sending ${alternatorUnsent.join(', ')}. Pick a reading it sends, or clear it.`
     }
     if (fuelAttention) return 'Choose a tank for every fuel bar, or remove the rail.'
     return null
@@ -427,13 +649,13 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
               <Button
                 variant="secondary"
                 disabled={!profile}
-                onClick={() => setSlot((c) => clusterFromProfile(profile!, c, ctx, roles, pathsState === 'ready' ? pathNames : null))}
+                onClick={() => setSlot((c) => clusterFromProfile(profile!, c, ctx, pathsState === 'ready' ? pathNames : null))}
               >
                 Fill slots from profile
               </Button>
               <FieldDescription className="min-w-0 flex-1 basis-56">
                 {item && !profile ? "This engine has no profile, so there's nothing to fill from and no zones." : ''}
-                {profile ? 'Replaces the engine slots and fills any empty footer row. Readings are live; zones come from the profile.' : ''}
+                {profile ? 'Replaces the engine slots and fills any empty alternator row from the alternator you picked. Readings are live; zones come from the profile.' : ''}
               </FieldDescription>
             </div>
           </div>
@@ -451,7 +673,7 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 {cornersAttention ? <AttentionMark /> : <TabCount shown={config.corners.length} spoken={`${config.corners.length} cards`} />}
               </TabsTrigger>
               <TabsTrigger value="footer" className="text-sm">
-                Footer
+                {FOOTER_TAB_NAME}
                 <TabCount shown={`${footerBound}/${CLUSTER_FOOTER_SLOTS.length}`} spoken={`${footerBound} of ${CLUSTER_FOOTER_SLOTS.length} shown`} />
               </TabsTrigger>
               <TabsTrigger value="fuel" className="text-sm">
@@ -547,33 +769,43 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
                 </Button>
               </TabsContent>
 
-              <TabsContent keepMounted value="footer" className="min-w-0">
+              <TabsContent keepMounted value="footer" className="grid min-w-0 gap-3">
+                <div className="grid gap-2 rounded-md border border-border p-3">
+                  <EquipmentPicker
+                    idPrefix="cluster-alternator"
+                    label="Alternator"
+                    kind="alternator"
+                    value={alternatorId}
+                    onChange={(id) => { operatorChose.current = true; setAlternator(id) }}
+                    ctx={ctx}
+                  />
+                  {alternatorMissing && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400">That alternator is no longer in Equipment. Pick another.</p>
+                  )}
+                  <AlternatorNote item={alternator} pathsState={pathsState} live={choices.live} ready={choices.ready} />
+                </div>
                 <div className="divide-y divide-border rounded-md border border-border">
-                  {CLUSTER_FOOTER_SLOTS.map((key) => {
+                  {FOOTER_TAB_ROWS.map((key) => {
                     const slot = config.footer?.[key]
                     const set = (next: GaugeWidgetConfig) => setSlot((c) => ({ ...c, footer: { ...c.footer, [key]: next } }))
                     const bound = footerSlotBound(config, key)
                     const reading = (slot?.suffix ?? '').trim()
+                    const notSending = isClusterAlternatorSlot(key) && choices.ready
+                      && reading === '' && ALTERNATOR_SLOTS[key].suffix !== '' && !choices.live.includes(ALTERNATOR_SLOTS[key].suffix)
                     return (
                       <details key={key} className="group">
                         <summary className="flex cursor-pointer list-none items-center gap-2 p-3 text-sm focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
                           <span className="min-w-0 flex-1 truncate">{FOOTER_TITLES[key]}</span>
-                          {bound && slot ? (
-                            <span className="flex min-w-0 max-w-[50%] items-baseline gap-1.5 text-xs">
-                              {isForeign(key) && !findItem(ctx, slot.equipmentId)
-                                ? <span className="truncate text-amber-600 dark:text-amber-400">{ctx.items.length === 0 ? '--' : 'Equipment missing'}</span>
-                                : <span className="truncate">{isForeign(key) ? findItem(ctx, slot.equipmentId)?.name : (slot.label || reading)}</span>}
-                              {isForeign(key) && <span className="truncate text-muted-foreground">{reading}</span>}
-                            </span>
-                          ) : isForeign(key) && slot && (slot.equipmentId ?? '') !== '' ? (
-                            <span className="truncate text-xs text-amber-600 dark:text-amber-400">Needs a reading</span>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Not shown</span>
-                          )}
+                          <RowSummary rowKey={key} slot={slot} bound={bound} reading={reading} notSending={notSending} alternatorMissing={alternatorUnresolved} ctx={ctx} />
                           <ChevronRight aria-hidden className="size-4 flex-none text-muted-foreground transition-transform group-open:rotate-90 motion-reduce:transition-none" />
                         </summary>
                         <div className="px-3 pb-3">
-                          {isForeign(key) ? (
+                          {isClusterAlternatorSlot(key) ? (
+                            <AlternatorRowForm
+                              idPrefix={`cluster-footer-${key}`} slotKey={key} slot={slot ?? blankAlternatorRow(key)}
+                              alternator={alternator} choices={choices} ctx={ctx} onChange={set}
+                            />
+                          ) : isForeign(key) ? (
                             <ForeignSlotForm
                               idPrefix={`cluster-footer-${key}`} slotKey={key} slot={slot ?? { ...FOREIGN_SLOTS[key].slot, suffix: '' }}
                               ctx={ctx} paths={pathNames} pathsState={pathsState} onChange={set}
@@ -677,10 +909,13 @@ export function EngineClusterConfigDialog({ widget, onCancel, onSave }: EngineCl
 
 type ClusterTab = 'dial' | 'readouts' | 'footer' | 'fuel'
 
-/** Whether a footer slot reads something: a reading, and for another item's slot, the item too. Mirrors pruneUnbound. */
+/**
+ * Whether a footer slot reads something: a reading, and for another item's slot
+ * the item too, and for an alternator row the footer's alternator. Mirrors
+ * pruneUnbound.
+ */
 function footerSlotBound(config: EngineClusterConfig, key: ClusterFooterSlot): boolean {
-  const slot = config.footer?.[key]
-  return !!slot && (slot.suffix ?? '').trim() !== '' && (!isForeign(key) || (slot.equipmentId ?? '') !== '')
+  return boundFooterSlot(config.footer, key) !== undefined
 }
 
 /** A tab's count: the figure on screen, and what it counts for a screen reader. */
@@ -742,6 +977,75 @@ function CardLocator({ active, side }: { active: ClusterTab; side: ClusterSide }
  */
 type PathsState = 'loading' | 'error' | 'ready'
 
+/** What an item can show: SignalK's live readings under its source, its profile's, and the two together as the choices to offer. */
+interface ReadingChoices {
+  profile: EngineProfile | undefined
+  profileSuffixes: readonly string[]
+  live: readonly string[]
+  options: readonly string[]
+  /** The item exists and SignalK's paths are known (it may still have no source). */
+  ready: boolean
+  /** Ready, and the item has a source to look under. */
+  known: boolean
+  /** Whether the item can show this reading: sent now, or on its profile. */
+  sends: (suffix: string) => boolean
+}
+
+function useReadingChoices(
+  item: TileItem | undefined, ctx: EquipmentTileContext, paths: readonly string[], pathsState: PathsState,
+): ReadingChoices {
+  const profile = item ? profileOf(ctx, item) : undefined
+  const profileSuffixes = useMemo(() => (profile?.gauges ?? []).map((g) => g.path_suffix), [profile])
+  const source = item?.signalk_source ?? ''
+  const live = useMemo(() => (pathsState === 'ready' ? liveReadings(source, paths) : []), [pathsState, source, paths])
+  const options = useMemo(() => [...new Set([...profileSuffixes, ...live])].filter((v) => v !== ''), [profileSuffixes, live])
+  const ready = item !== undefined && pathsState === 'ready'
+  return {
+    profile, profileSuffixes, live, options, ready, known: ready && source !== '',
+    sends: (suffix) => item !== undefined && itemSends(item, ctx, live, suffix),
+  }
+}
+
+/** The right-hand side of a footer row's summary: what it shows, or why it shows nothing. */
+function RowSummary({ rowKey, slot, bound, reading, notSending, alternatorMissing, ctx }: {
+  rowKey: ClusterFooterSlot
+  slot: GaugeWidgetConfig | undefined
+  bound: boolean
+  reading: string
+  notSending: boolean
+  /** The footer's alternator is chosen but isn't found in Equipment. */
+  alternatorMissing: boolean
+  ctx: EquipmentTileContext
+}) {
+  const amber = 'truncate text-xs text-amber-600 dark:text-amber-400'
+  if (!bound || !slot) {
+    if (isForeign(rowKey) && slot && (slot.equipmentId ?? '') !== '') return <span className={amber}>Needs a reading</span>
+    if (notSending) return <span className={amber}>Not sending</span>
+    return <span className="text-xs text-muted-foreground">Not shown</span>
+  }
+  const wrap = 'flex min-w-0 max-w-[50%] items-baseline gap-1.5 text-xs'
+  if (isClusterAlternatorSlot(rowKey)) {
+    // The alternator may have been deleted: the row reads nothing, as the battery's would.
+    return (
+      <span className={wrap}>
+        {alternatorMissing
+          ? <span className="truncate text-amber-600 dark:text-amber-400">{ctx.items.length === 0 ? '--' : 'Equipment missing'}</span>
+          : <span className="truncate">{reading}</span>}
+      </span>
+    )
+  }
+  if (!isForeign(rowKey)) return <span className={wrap}><span className="truncate">{slot.label || reading}</span></span>
+  const owner = findItem(ctx, slot.equipmentId)
+  return (
+    <span className={wrap}>
+      {owner
+        ? <span className="truncate">{owner.name}</span>
+        : <span className="truncate text-amber-600 dark:text-amber-400">{ctx.items.length === 0 ? '--' : 'Equipment missing'}</span>}
+      <span className="truncate text-muted-foreground">{reading}</span>
+    </span>
+  )
+}
+
 function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, paths, pathsState, onChange }: {
   idPrefix: string
   slotKey: keyof typeof FOREIGN_SLOTS
@@ -754,12 +1058,9 @@ function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, paths, pathsState, onCh
 }) {
   const spec = FOREIGN_SLOTS[slotKey]
   const item = findItem(ctx, slot.equipmentId)
-  const profile = item ? profileOf(ctx, item) : undefined
-  const profileSuffixes = useMemo(() => (profile?.gauges ?? []).map((g) => g.path_suffix), [profile])
+  const { profile, live, options, known, sends } = useReadingChoices(item, ctx, paths, pathsState)
   const source = item?.signalk_source ?? ''
-  const live = useMemo(() => (pathsState === 'ready' ? liveReadings(source, paths) : []), [pathsState, source, paths])
   const suffix = (slot.suffix ?? '').trim()
-  const known = item !== undefined && source !== '' && pathsState === 'ready'
 
   const set = (patch: Partial<GaugeWidgetConfig>) => {
     const next = { ...slot, ...patch }
@@ -779,16 +1080,11 @@ function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, paths, pathsState, onCh
   // to send it. Clearing the field afterwards is the operator's, and stays.
   const filledFor = useRef('')
   useEffect(() => {
-    if (!known || filledFor.current === item.id) return
+    if (!item || !known || filledFor.current === item.id) return
     filledFor.current = item.id
     if (suffix === '' && spec.suffix !== '' && live.includes(spec.suffix)) set({ suffix: spec.suffix })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [known, item?.id])
-
-  const options = useMemo(
-    () => [...new Set([...profileSuffixes, ...live])].filter((v) => v !== ''),
-    [profileSuffixes, live],
-  )
 
   const pickItem = (id: string) => {
     const picked = id === '' ? undefined : findItem(ctx, id)
@@ -805,11 +1101,11 @@ function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, paths, pathsState, onCh
   let note: string
   if (item && source === '') note = `${item.name} has no SignalK source, so it has no readings to pick from.`
   else if (item && pathsState === 'error') note = "Helmcentral can't read what SignalK is sending right now. Type the reading, or try again."
-  else if (known && suffix === '' && !live.includes(spec.suffix)) {
+  else if (item && known && suffix === '' && !live.includes(spec.suffix)) {
     note = spec.suffix !== ''
       ? `${item.name} isn't sending ${spec.suffix}. Pick a reading it sends.`
       : `Pick a reading ${item.name} sends.`
-  } else if (known && suffix !== '' && !live.includes(suffix) && !profileSuffixes.includes(suffix)) {
+  } else if (item && known && suffix !== '' && !sends(suffix)) {
     note = `${item.name} isn't sending ${suffix}. Pick a reading it sends.`
   } else if (item && !profile) note = 'This equipment has no profile, so the reading has no zones.'
   else note = 'Zones come from the equipment\'s profile; edit them on the equipment.'
@@ -831,6 +1127,71 @@ function ForeignSlotForm({ idPrefix, slotKey, slot, ctx, paths, pathsState, onCh
         <FieldDescription>{note} Leave equipment empty to leave this out.</FieldDescription>
       </Field>
     </div>
+  )
+}
+
+/** What to tell the operator about the chosen alternator: it has no source, SignalK can't be read, or it sends nothing. */
+function AlternatorNote({ item, pathsState, live, ready }: { item: TileItem | undefined; pathsState: PathsState; live: readonly string[]; ready: boolean }) {
+  if (!item) return null
+  if (item.signalk_source === '') {
+    return <FieldDescription>{item.name} has no SignalK source, so it has no readings to pick from.</FieldDescription>
+  }
+  if (pathsState === 'error') {
+    return <FieldDescription>Helmcentral can't read what SignalK is sending right now. Type the readings, or try again.</FieldDescription>
+  }
+  if (ready && live.length === 0) {
+    return (
+      <p className="text-xs text-amber-600 dark:text-amber-400">
+        {item.name} isn't sending anything. Check its source in Equipment.
+      </p>
+    )
+  }
+  return null
+}
+
+/**
+ * One alternator row: only the reading, since the alternator is the footer's
+ * one picker. Its zones come from the alternator's profile and are edited there.
+ * Leaving the reading empty leaves the row off the card.
+ */
+function AlternatorRowForm({ idPrefix, slotKey, slot, alternator, choices, ctx, onChange }: {
+  idPrefix: string
+  slotKey: ClusterAlternatorSlot
+  slot: GaugeWidgetConfig
+  alternator: TileItem | undefined
+  choices: ReadingChoices
+  ctx: EquipmentTileContext
+  onChange: (next: GaugeWidgetConfig) => void
+}) {
+  const { live, options, known, sends } = choices
+  const expected = ALTERNATOR_SLOTS[slotKey].suffix
+  const suffix = (slot.suffix ?? '').trim()
+
+  // A reading on the alternator's profile brings the profile's quantity, unit and
+  // scale. Any other reading is only renamed: the row's own scale and zones stay.
+  const set = (next: string) => {
+    const gauge = alternator ? profileGaugeFor(profileOf(ctx, alternator), next.trim()) : undefined
+    onChange(gauge ? alternatorRow(slotKey, slot, next, alternator, ctx) : { ...slot, suffix: next })
+  }
+
+  let note: string
+  if (!alternator) note = 'Pick the alternator above first.'
+  else if (known && suffix !== '' && !sends(suffix)) note = `${alternator.name} isn't sending ${suffix}. Pick a reading it sends.`
+  else if (known && suffix === '' && expected !== '' && !live.includes(expected)) note = `${alternator.name} isn't sending ${expected}. Pick a reading it sends.`
+  else if (alternator && !profileOf(ctx, alternator)) note = 'This alternator has no profile, so the reading has no zones.'
+  else note = "Zones come from the alternator's profile; edit them on the equipment."
+
+  return (
+    <Field>
+      <FieldLabel htmlFor={`${idPrefix}-suffix`}>Reading</FieldLabel>
+      <Input id={`${idPrefix}-suffix`} list={`${idPrefix}-suffixes`} value={slot.suffix ?? ''} disabled={!alternator}
+        placeholder={alternator ? 'reading this alternator sends' : 'pick the alternator first'}
+        onChange={(e) => set(e.target.value)} />
+      <datalist id={`${idPrefix}-suffixes`}>
+        {options.map((v) => <option key={v} value={v} />)}
+      </datalist>
+      <FieldDescription>{note} Leave empty to leave this out.</FieldDescription>
+    </Field>
   )
 }
 
