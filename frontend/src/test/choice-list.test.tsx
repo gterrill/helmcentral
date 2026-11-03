@@ -1,6 +1,62 @@
 import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, within } from '@testing-library/react'
-import { ChoiceList, type ChoiceListChoice } from '@/components/patterns'
+import { ChoiceCheckbox, ChoiceList, type ChoiceListChoice } from '@/components/patterns'
+
+describe('ChoiceCheckbox', () => {
+  it('is named by its label only and is not in a group', () => {
+    render(<ChoiceCheckbox label="Alpha" details="What alpha means." checked={false} onCheckedChange={() => {}} />)
+    expect(screen.getByRole('checkbox', { name: 'Alpha' })).toBeInTheDocument()
+    expect(screen.queryByRole('group')).not.toBeInTheDocument()
+  })
+
+  it('is described by details, and by selected content while checked', () => {
+    const props = { label: 'Alpha', details: 'Plain.', selectedContent: <p>Off for the boat.</p>, onCheckedChange: () => {} }
+    const { rerender } = render(<ChoiceCheckbox {...props} checked />)
+    expect(screen.getByRole('checkbox', { name: 'Alpha' })).toHaveAccessibleDescription('Plain. Off for the boat.')
+    rerender(<ChoiceCheckbox {...props} checked={false} />)
+    expect(screen.getByRole('checkbox', { name: 'Alpha' })).toHaveAccessibleDescription('Plain.')
+    expect(screen.queryByText('Off for the boat.')).not.toBeInTheDocument()
+  })
+
+  it('calls onCheckedChange once for a click on the label', () => {
+    const onCheckedChange = vi.fn()
+    render(<ChoiceCheckbox label="Alpha" details="Tap me." checked={false} onCheckedChange={onCheckedChange} />)
+    fireEvent.click(screen.getByText('Alpha').closest('label')!)
+    expect(onCheckedChange).toHaveBeenCalledTimes(1)
+    expect(onCheckedChange).toHaveBeenCalledWith(true)
+  })
+
+  it('calls onCheckedChange once with the new value for a click on the box', () => {
+    const onCheckedChange = vi.fn()
+    render(<ChoiceCheckbox label="Alpha" checked onCheckedChange={onCheckedChange} />)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Alpha' }))
+    expect(onCheckedChange).toHaveBeenCalledTimes(1)
+    expect(onCheckedChange).toHaveBeenCalledWith(false)
+  })
+
+  it('does not toggle when disabled, and dims the row', () => {
+    const onCheckedChange = vi.fn()
+    render(<ChoiceCheckbox disabled label="Alpha" checked={false} onCheckedChange={onCheckedChange} />)
+    const box = screen.getByRole('checkbox', { name: 'Alpha' })
+    expect(box).toHaveAttribute('aria-disabled', 'true')
+    expect(box.parentElement).toHaveClass('opacity-60')
+    fireEvent.click(screen.getByText('Alpha'))
+    expect(onCheckedChange).not.toHaveBeenCalled()
+  })
+
+  it('puts id on the input the label points at', () => {
+    const { container } = render(<ChoiceCheckbox id="my-option" label="Alpha" checked={false} onCheckedChange={() => {}} />)
+    expect(container.querySelector('input#my-option')).not.toBeNull()
+    expect(screen.getByText('Alpha').closest('label')).toHaveAttribute('for', 'my-option')
+  })
+
+  it('shows secondary content always, and clicking it does not toggle', () => {
+    const onCheckedChange = vi.fn()
+    render(<ChoiceCheckbox label="Alpha" secondaryContent={<button type="button">Extra</button>} checked={false} onCheckedChange={onCheckedChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Extra' }))
+    expect(onCheckedChange).not.toHaveBeenCalled()
+  })
+})
 
 const CHOICES: ChoiceListChoice[] = [
   { value: 'a', label: 'Alpha' },

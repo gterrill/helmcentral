@@ -1,5 +1,7 @@
+import { CHOICE_INDENT } from '@/components/patterns'
 import { Checkbox } from '@/components/ui/checkbox'
 import { issuesFor, recordAction, usableEquipment, type StagedLogEntry } from '@/lib/import-run'
+import { cn } from '@/lib/utils'
 import { AlreadyImported, ImportSelect, Pill, RowCard, StepHeading, type StepProps } from '@/components/import/import-shared'
 
 // Step 6: the maintenance log. Each entry is ticked to come across or not.
@@ -60,9 +62,9 @@ export function ImportLogStep(props: StepProps) {
                 <AlreadyImported run={run} keyName={entry.key} />
                 {flagged.length > 0 && <Pill tone="warning">Looks like a duplicate</Pill>}
               </div>
-              {entry.body !== '' && <p className="line-clamp-2 text-sm text-muted-foreground">{entry.body}</p>}
+              {entry.body !== '' && <p className={cn('line-clamp-2 text-sm text-muted-foreground', CHOICE_INDENT)}>{entry.body}</p>}
               {ambiguous ? (
-                <label className="flex min-w-0 flex-col gap-1">
+                <label className={cn('flex min-w-0 flex-col gap-1', CHOICE_INDENT)}>
                   <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
                     Which equipment: the export says &ldquo;{entry.equipment_name}&rdquo;
                   </span>
@@ -87,7 +89,7 @@ export function ImportLogStep(props: StepProps) {
                   )}
                 </label>
               ) : (
-                <p className="truncate text-xs text-muted-foreground">
+                <p className={cn('truncate text-xs text-muted-foreground', CHOICE_INDENT)}>
                   Equipment: {single ? single.name : entry.equipment_name || 'none named'}
                 </p>
               )}

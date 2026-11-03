@@ -402,11 +402,16 @@ duplication problem this ADR exists to close.
   phone.
 - `ChoiceList` replaces hand-built groups of radios and checkboxes, starting
   with a watch's Notifications and Report sections, then the choices in the
-  place map, lamp strip, zone conflict and Mate note dialogs. The import
-  wizard's steps stay as cards, because their rows carry pills and dropdowns and
-  the notes step mixes in rows with no checkbox. It follows Shopify's
-  `s-choice-list` with one addition: `details` and `secondaryContent` are always visible, as
-  Shopify's `details` and `secondary-content` are, and `selectedContent` shows
+  place map, lamp strip, zone conflict and Mate note dialogs. `ChoiceCheckbox`
+  is the same row for one on/off option, with no group around it: a one-choice
+  list needed a made-up value and a hidden legend that only repeated the label.
+  The import wizard's steps stay as cards, because their rows carry pills and
+  dropdowns and the notes step mixes in rows with no checkbox. Three checkboxes
+  stay compact because they sit in a tight row with other controls: Menu and
+  Marker in the radar drawer, Live update in the logs, and Lit when off on each
+  lamp. Row selection in `IndexTable` is not a choice at all. It follows Shopify's
+  `s-choice-list` with one addition: `details` and `secondaryContent` are always
+  visible, as Shopify's `details` and `secondary-content` are, and `selectedContent` shows
   only while its choice is selected. A field goes in `secondaryContent` when a
   bad value in it blocks Save, because hiding it would hide the error, which
   is why a watch's section thresholds stay up with the section off. With

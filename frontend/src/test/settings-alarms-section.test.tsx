@@ -128,9 +128,9 @@ describe('Settings Alarms section', () => {
     openAlarms()
 
     expect(screen.getByRole('button', { name: /send test/i })).toBeInTheDocument()
-    expect(screen.getByLabelText(/ntfy \(phone push\)/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/publish to signalk/i)).toBeInTheDocument()
-    expect(screen.getByLabelText(/web push/i)).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /ntfy \(phone push\)/i })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /publish to signalk/i })).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: /web push/i })).toBeInTheDocument()
     expect(screen.getByLabelText(/alarm if no signalk data for/i)).toBeInTheDocument()
   })
 
@@ -141,7 +141,7 @@ describe('Settings Alarms section', () => {
     expect(screen.queryByRole('button', { name: /save notifications/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^save\b/i })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByLabelText(/webhook/i))
+    fireEvent.click(screen.getByRole('checkbox', { name: /webhook/i }))
     expect(screen.getAllByRole('button', { name: /^save\b/i })).toHaveLength(1)
     expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument()
   })
@@ -156,7 +156,7 @@ describe('Settings Alarms section saving', () => {
     onDirtyChange.mockClear()
 
     openAlarms()
-    fireEvent.click(screen.getByLabelText(/webhook/i))
+    fireEvent.click(screen.getByRole('checkbox', { name: /webhook/i }))
 
     await waitFor(() => expect(onDirtyChange).toHaveBeenLastCalledWith(true))
 
@@ -169,7 +169,7 @@ describe('Settings Alarms section saving', () => {
     renderSettings()
     openAlarms()
 
-    fireEvent.click(screen.getByLabelText(/webhook/i))
+    fireEvent.click(screen.getByRole('checkbox', { name: /webhook/i }))
     fireEvent.change(screen.getByLabelText(/^url$/i), { target: { value: 'https://hass.local/hook' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
@@ -184,7 +184,7 @@ describe('Settings Alarms section saving', () => {
     renderSettings()
     openAlarms()
 
-    fireEvent.click(screen.getByLabelText(/ntfy \(phone push\)/i))
+    fireEvent.click(screen.getByRole('checkbox', { name: /ntfy \(phone push\)/i }))
     const token = screen.getByLabelText(/access token/i) as HTMLInputElement
     fireEvent.change(token, { target: { value: 'tk_live' } })
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
@@ -198,14 +198,14 @@ describe('Settings Alarms section saving', () => {
     renderSettings()
     openAlarms()
 
-    const webhook = screen.getByLabelText(/webhook/i) as HTMLInputElement
-    expect(webhook.checked).toBe(false)
+    const webhook = screen.getByRole('checkbox', { name: /webhook/i })
+    expect(webhook).not.toBeChecked()
     fireEvent.click(webhook)
-    expect(webhook.checked).toBe(true)
+    expect(webhook).toBeChecked()
 
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }))
 
-    await waitFor(() => expect(webhook.checked).toBe(false))
+    await waitFor(() => expect(webhook).not.toBeChecked())
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument()
     expect(saveTransportsMock).not.toHaveBeenCalled()
   })
@@ -215,7 +215,7 @@ describe('Settings Alarms section saving', () => {
     render(<SettingsPage onOpenHelp={vi.fn()} ref={ref} />)
 
     openAlarms()
-    fireEvent.click(screen.getByLabelText(/webhook/i))
+    fireEvent.click(screen.getByRole('checkbox', { name: /webhook/i }))
 
     await ref.current!.save()
 
@@ -249,7 +249,7 @@ describe('Settings Alarms section saving', () => {
     renderSettings()
     openAlarms()
 
-    fireEvent.click(screen.getByLabelText(/webhook/i))
+    fireEvent.click(screen.getByRole('checkbox', { name: /webhook/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByText(/notifications did not load/i)).toBeInTheDocument()
@@ -261,7 +261,7 @@ describe('Settings Alarms section saving', () => {
     renderSettings()
     openAlarms()
 
-    fireEvent.click(screen.getByLabelText(/webhook/i))
+    fireEvent.click(screen.getByRole('checkbox', { name: /webhook/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
     expect(await screen.findByText(/alarm-transports unreachable/i)).toBeInTheDocument()

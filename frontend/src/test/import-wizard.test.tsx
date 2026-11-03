@@ -329,6 +329,40 @@ describe('ImportWizard notes', () => {
   })
 })
 
+// The checkbox is 16px and the gap beside it 12px, so pl-7 (28px) puts the text
+// under the title rather than under the box.
+describe('ImportWizard text under a ticked row', () => {
+  it('indents a log entry body, its equipment line and its equipment choice under the title', async () => {
+    renderWizard()
+    await goToLogStep()
+    const bodies = document.querySelectorAll('p.line-clamp-2')
+    expect(bodies.length).toBeGreaterThan(0)
+    for (const body of bodies) expect(body).toHaveClass('pl-7')
+    for (const line of screen.getAllByText(/^Equipment:/)) expect(line).toHaveClass('pl-7')
+    const ambiguous = run.staged.log_entries.find((e) => e.candidates.length > 1)!
+    expect(screen.getByLabelText(entryLabel(ambiguous, 'Equipment for')).closest('label')).toHaveClass('pl-7')
+  })
+
+  it('indents a note body under the title', async () => {
+    untickAmbiguousLogEntries()
+    renderWizard()
+    await goToLogStep()
+    next()
+    await screen.findByRole('heading', { name: 'Notes' })
+    const bodies = document.querySelectorAll('p.line-clamp-3')
+    expect(bodies.length).toBeGreaterThan(0)
+    for (const body of bodies) expect(body).toHaveClass('pl-7')
+  })
+
+  it('indents a flagged particular under its label', async () => {
+    renderWizard()
+    await screen.findByText('What is in the export')
+    next()
+    await screen.findByRole('heading', { name: 'Vessel' })
+    expect(screen.getByText(/Displacement is exported as/)).toHaveClass('pl-7')
+  })
+})
+
 describe('ImportWizard photos and documents', () => {
   async function goToFirstFile() {
     untickAmbiguousLogEntries()

@@ -2052,6 +2052,9 @@ describe('EquipmentEditor', () => {
     expect(thumbs.map((img) => img.getAttribute('src'))).toEqual(
       expect.arrayContaining([expect.stringContaining('/api/documents/p1/content'), expect.stringContaining('/api/documents/p2/content')]),
     )
+    // Beside the box, not its description: twelve photos would read out twelve times.
+    expect(checkboxSpan).not.toHaveAccessibleDescription(/Photo to delete/)
+    expect(thumbs[0].parentElement).toHaveClass('pl-7')
   })
 
   // ── photo strip: unlink vs. "Remove and delete" (2026-09-25 amendment) ──

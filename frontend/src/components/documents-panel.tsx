@@ -33,7 +33,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -48,6 +47,7 @@ import { Label } from '@/components/ui/label'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
 import {
+  ChoiceCheckbox,
   ConfirmDelete,
   EmptyState,
   FolderTree,
@@ -1403,21 +1403,23 @@ export function DocumentsPanel({
           {/* "Creating a folder offers the kind" - only at the root, since
               only a top-level folder can ever become a manual. */}
           {folderId === null && (
-            <div className="flex items-center gap-2">
-              <Checkbox id="documents-new-folder-manual" checked={newFolderIsManual} onCheckedChange={(checked) => setNewFolderIsManual(checked === true)} />
-              <Label htmlFor="documents-new-folder-manual" className="text-sm font-normal">
-                Manual - ordered, with a reading view
-              </Label>
-              {onOpenHelp && (
-                <button
-                  type="button"
-                  onClick={() => onOpenHelp(MANUAL_HOWTO_HELP_TARGET)}
-                  className="text-xs font-semibold uppercase tracking-[0.1em] text-primary hover:underline"
-                >
-                  What to put in it
-                </button>
-              )}
-            </div>
+            <ChoiceCheckbox
+              id="documents-new-folder-manual"
+              label="Manual - ordered, with a reading view"
+              checked={newFolderIsManual}
+              onCheckedChange={setNewFolderIsManual}
+              secondaryContent={
+                onOpenHelp && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenHelp(MANUAL_HOWTO_HELP_TARGET)}
+                    className="text-xs font-semibold uppercase tracking-[0.1em] text-primary hover:underline"
+                  >
+                    What to put in it
+                  </button>
+                )
+              }
+            />
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setNewFolderOpen(false)}>Cancel</Button>

@@ -5,10 +5,10 @@ import { Download, ExternalLink, File as FileIcon, FileText, Plus, StickyNote, T
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldSeparator } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { ConfirmDelete, DetailsLayout, FormRow, FormSection, Page, RefreshFailedNote, ResourceItem, ResourceList, SaveBar } from '@/components/patterns'
+import { CHOICE_INDENT, ChoiceCheckbox, ConfirmDelete, DetailsLayout, FormRow, FormSection, Page, RefreshFailedNote, ResourceItem, ResourceList, SaveBar } from '@/components/patterns'
+import { cn } from '@/lib/utils'
 import { DocumentViewerSheet } from '@/components/documents/document-viewer-sheet'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
@@ -1458,19 +1458,18 @@ export function EquipmentEditor(
             that a delete never destroys a document without being asked. */}
         {(item?.exclusive_photo_ids.length ?? 0) > 0 && (
           <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                checked={deletePhotosOnDelete}
-                onCheckedChange={(checked) => setDeletePhotosOnDelete(checked === true)}
-              />
-              Also delete {item?.exclusive_photo_ids.length} photo{item?.exclusive_photo_ids.length === 1 ? '' : 's'} only this item uses
-            </label>
+            <ChoiceCheckbox
+              label={`Also delete ${item?.exclusive_photo_ids.length} photo${item?.exclusive_photo_ids.length === 1 ? '' : 's'} only this item uses`}
+              checked={deletePhotosOnDelete}
+              onCheckedChange={setDeletePhotosOnDelete}
+            />
             {/* Finding 3 (review): small thumbnails of exactly the photos
                 this checkbox would delete - a bare count gives the
                 operator nothing to actually recognise before confirming a
-                delete that takes them along with the item. */}
+                delete that takes them along with the item. Not the box's
+                selectedContent: each one's alt would join its description. */}
             {deletePhotosOnDelete && (
-              <div className="flex flex-wrap gap-1.5 pl-6">
+              <div className={cn('flex flex-wrap gap-1.5', CHOICE_INDENT)}>
                 {(item?.exclusive_photo_ids ?? []).map((photoId) => (
                   <img
                     key={photoId}

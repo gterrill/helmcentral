@@ -53,6 +53,22 @@ function renderDrawer(props: { rules?: AlarmRule[]; alarms?: ActiveAlarm[]; mate
   )
 }
 
+describe('the follow the house bank option', () => {
+  it('warns under the option, and reads the warning out with it, when no house bank is chosen', () => {
+    renderDrawer({ rules: [rule({ path: '', path_role: 'house_bank_soc' })] })
+    fireEvent.click(screen.getByRole('button', { name: /edit barometer falling/i }))
+    const box = screen.getByRole('checkbox', { name: "Follow the house bank's state of charge" })
+    expect(box).toBeChecked()
+    expect(box).toHaveAccessibleDescription(/No house bank is chosen/)
+  })
+
+  it('has no warning once a house bank is chosen', () => {
+    renderDrawer({ rules: [rule({ path: 'electrical.batteries.house.capacity.stateOfCharge', path_role: 'house_bank_soc' })] })
+    fireEvent.click(screen.getByRole('button', { name: /edit barometer falling/i }))
+    expect(screen.queryByText(/No house bank is chosen/)).not.toBeInTheDocument()
+  })
+})
+
 describe('the Mate reviews it switch', () => {
   it('is off in a new rule', () => {
     expect(newAlarmRuleDraft().mate_reviews).toBe(false)
@@ -61,9 +77,9 @@ describe('the Mate reviews it switch', () => {
   it('is shown but cannot be turned on while Mate is off, with a line saying why', () => {
     renderDrawer({ rules: [rule()], mateOn: false })
     fireEvent.click(screen.getByRole('button', { name: /edit barometer falling/i }))
-    const box = screen.getByLabelText(/mate reviews it/i) as HTMLInputElement
-    expect(box.checked).toBe(false)
-    expect(box.disabled).toBe(true)
+    const box = screen.getByRole('checkbox', { name: /mate reviews it/i })
+    expect(box).not.toBeChecked()
+    expect(box).toHaveAttribute('aria-disabled', 'true')
     expect(screen.getByText("Mate is off, so it won't review this")).toBeInTheDocument()
   })
 
@@ -71,13 +87,26 @@ describe('the Mate reviews it switch', () => {
     const updateRule: UpdateRuleMock = vi.fn<(id: string, draft: AlarmRuleDraft) => Promise<void>>().mockResolvedValue(undefined)
     renderDrawer({ rules: [rule({ mate_reviews: true })], mateOn: false, updateRule })
     fireEvent.click(screen.getByRole('button', { name: /edit barometer falling/i }))
-    const box = screen.getByLabelText(/mate reviews it/i) as HTMLInputElement
-    expect(box.checked).toBe(true)
-    expect(box.disabled).toBe(false)
+    const box = screen.getByRole('checkbox', { name: /mate reviews it/i })
+    expect(box).toBeChecked()
+    expect(box).not.toHaveAttribute('aria-disabled', 'true')
     fireEvent.click(box)
     fireEvent.click(screen.getByRole('button', { name: /save rule/i }))
     await vi.waitFor(() => expect(updateRule).toHaveBeenCalled())
     expect(updateRule.mock.calls[0][1]).toMatchObject({ mate_reviews: false })
+  })
+
+  it('describes the checkbox with the line under it, whichever line that is', () => {
+    renderDrawer({ rules: [rule()], mateOn: false })
+    fireEvent.click(screen.getByRole('button', { name: /edit barometer falling/i }))
+    expect(screen.getByRole('checkbox', { name: 'Mate reviews it' })).toHaveAccessibleDescription("Mate is off, so it won't review this")
+    expect(screen.getByRole('checkbox', { name: 'Enabled' })).toBeChecked()
+  })
+
+  it('describes the checkbox with what a review does while Mate is on', () => {
+    renderDrawer({ rules: [rule()], mateOn: true })
+    fireEvent.click(screen.getByRole('button', { name: /edit barometer falling/i }))
+    expect(screen.getByRole('checkbox', { name: 'Mate reviews it' })).toHaveAccessibleDescription(/Mate reads what the reading has been doing/)
   })
 
   it('shows no "Mate is off" line while Mate is on', () => {
@@ -91,8 +120,8 @@ describe('the Mate reviews it switch', () => {
     renderDrawer({ rules: [rule()], mateOn: true, updateRule })
     fireEvent.click(screen.getByRole('button', { name: /edit barometer falling/i }))
 
-    const box = screen.getByLabelText(/mate reviews it/i) as HTMLInputElement
-    expect(box.checked).toBe(false)
+    const box = screen.getByRole('checkbox', { name: /mate reviews it/i })
+    expect(box).not.toBeChecked()
     fireEvent.click(box)
     fireEvent.click(screen.getByRole('button', { name: /save rule/i }))
 
@@ -104,7 +133,7 @@ describe('the Mate reviews it switch', () => {
   it('shows a rule that already has it on as checked', () => {
     renderDrawer({ rules: [rule({ mate_reviews: true })], mateOn: true })
     fireEvent.click(screen.getByRole('button', { name: /edit barometer falling/i }))
-    expect((screen.getByLabelText(/mate reviews it/i) as HTMLInputElement).checked).toBe(true)
+    expect(screen.getByRole('checkbox', { name: /mate reviews it/i })).toBeChecked()
   })
 
   it('keeps a rule\'s setting when it is saved while Mate is off', async () => {

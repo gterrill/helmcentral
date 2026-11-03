@@ -1653,6 +1653,22 @@ describe('DocumentsPanel', () => {
       await waitFor(() => expect(flagManual).toHaveBeenCalledWith('new-1'))
     })
 
+    it('the "What to put in it" help sits under the Manual option, opens help and does not tick it', () => {
+      const onOpenHelp = vi.fn()
+      render(<DocumentsPanel onOpenHelp={onOpenHelp} />)
+      fireEvent.click(screen.getByRole('button', { name: 'More actions' }))
+      fireEvent.click(screen.getByRole('menuitem', { name: 'New folder' }))
+
+      const box = screen.getByRole('checkbox', { name: 'Manual - ordered, with a reading view' })
+      const help = screen.getByRole('button', { name: 'What to put in it' })
+      // Outside the row's label, so it is not part of the checkbox's name.
+      expect(help.closest('label')).toBeNull()
+      expect(help.parentElement).toHaveClass('pl-7')
+      fireEvent.click(help)
+      expect(onOpenHelp).toHaveBeenCalledTimes(1)
+      expect(box).not.toBeChecked()
+    })
+
     it('does not offer the Manual checkbox when creating a folder inside another folder', () => {
       render(<DocumentsPanel initialFolderId="parent-1" />)
       fireEvent.click(screen.getByRole('button', { name: 'More actions' }))

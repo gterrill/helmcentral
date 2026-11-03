@@ -1,23 +1,15 @@
 import { memo } from 'react'
 
-import { FormSection } from '@/components/patterns'
+import { CHOICE_INDENT, ChoiceCheckbox, FormSection } from '@/components/patterns'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useSetupFocus } from '@/hooks/use-setup-focus'
+import { cn } from '@/lib/utils'
 import { WebPushSection } from '@/components/web-push-section'
 import { useAlarmTransportsFormContext } from '@/components/settings/alarm-transports-context'
 
 const acceptsNotifications = (control: string) => control === 'notifications'
-
-function Toggle({ id, checked, label, onChange }: { id: string; checked: boolean; label: string; onChange: (v: boolean) => void }) {
-  return (
-    <label htmlFor={id} className="flex items-center gap-2 text-xs uppercase tracking-[0.16em] text-muted-foreground">
-      <input id={id} type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      {label}
-    </label>
-  )
-}
 
 /**
  * Notification delivery. Every transport here is self-hosted or free — no
@@ -68,13 +60,11 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
 
       <div className="flex flex-col gap-4">
         <section className="rounded-md border bg-background/60 p-3">
-          <Toggle id="ntfy-enabled" checked={draft.ntfy.enabled} label="ntfy (phone push)"
-            onChange={(enabled) => setSection('ntfy', { enabled })} />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Self-host it, or use ntfy.sh free with no account. Subscribe to the same topic in the ntfy app.
-          </p>
+          <ChoiceCheckbox id="ntfy-enabled" checked={draft.ntfy.enabled} label="ntfy (phone push)"
+            details="Self-host it, or use ntfy.sh free with no account. Subscribe to the same topic in the ntfy app."
+            onCheckedChange={(enabled) => setSection('ntfy', { enabled })} />
           {draft.ntfy.enabled && (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className={cn('mt-3 grid gap-3 sm:grid-cols-2', CHOICE_INDENT)}>
               <Field>
                 <FieldLabel htmlFor="ntfy-server">Server</FieldLabel>
                 <Input id="ntfy-server" value={draft.ntfy.server} placeholder="https://ntfy.sh"
@@ -97,10 +87,10 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
         </section>
 
         <section className="rounded-md border bg-background/60 p-3">
-          <Toggle id="smtp-enabled" checked={draft.smtp.enabled} label="Email"
-            onChange={(enabled) => setSection('smtp', { enabled })} />
+          <ChoiceCheckbox id="smtp-enabled" checked={draft.smtp.enabled} label="Email"
+            onCheckedChange={(enabled) => setSection('smtp', { enabled })} />
           {draft.smtp.enabled && (
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className={cn('mt-3 grid gap-3 sm:grid-cols-2', CHOICE_INDENT)}>
               <Field>
                 <FieldLabel htmlFor="smtp-host">Server</FieldLabel>
                 <Input id="smtp-host" value={draft.smtp.host} placeholder="smtp.example.com"
@@ -138,10 +128,10 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
         </section>
 
         <section className="rounded-md border bg-background/60 p-3">
-          <Toggle id="webhook-enabled" checked={draft.webhook.enabled} label="Webhook"
-            onChange={(enabled) => setSection('webhook', { enabled })} />
+          <ChoiceCheckbox id="webhook-enabled" checked={draft.webhook.enabled} label="Webhook"
+            onCheckedChange={(enabled) => setSection('webhook', { enabled })} />
           {draft.webhook.enabled && (
-            <Field className="mt-3">
+            <Field className={cn('mt-3', CHOICE_INDENT)}>
               <FieldLabel htmlFor="webhook-url">URL</FieldLabel>
               <Input id="webhook-url" value={draft.webhook.url} placeholder="https://home-assistant.local/api/webhook/…"
                 onChange={(e) => setSection('webhook', { url: e.target.value })} />
@@ -150,11 +140,9 @@ export const AlarmTransportsForm = memo(function AlarmTransportsForm() {
         </section>
 
         <section className="rounded-md border bg-background/60 p-3">
-          <Toggle id="signalk-enabled" checked={draft.signalk.enabled} label="Publish to SignalK"
-            onChange={(enabled) => setSection('signalk', { enabled })} />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Writes alarms back to notifications.* so a buzzer or MFD reacts. Needs no internet.
-          </p>
+          <ChoiceCheckbox id="signalk-enabled" checked={draft.signalk.enabled} label="Publish to SignalK"
+            details="Writes alarms back to notifications.* so a buzzer or MFD reacts. Needs no internet."
+            onCheckedChange={(enabled) => setSection('signalk', { enabled })} />
         </section>
 
         <WebPushSection

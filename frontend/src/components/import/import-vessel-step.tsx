@@ -1,9 +1,11 @@
+import { CHOICE_INDENT } from '@/components/patterns'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useVesselFields } from '@/hooks/use-vessel-state'
 
 // What the boat reports for its own size, offered beside the stored figures.
 const PARTICULARS_FIELDS = ['boatName', 'vesselLengthOverallM', 'vesselDraftM'] as const
 import { issuesFor, type StagedParticular } from '@/lib/import-run'
+import { cn } from '@/lib/utils'
 import { Pill, RowCard, StepHeading, type StepProps } from '@/components/import/import-shared'
 
 // Step 3: the vessel. Particulars the boat's live instrument data does not
@@ -68,7 +70,7 @@ export function ImportVesselStep({ run, decisions, setDecision }: StepProps) {
                     {run.already_imported.includes(p.key) && <Pill>Already imported</Pill>}
                   </div>
                   {flagged.map((issue) => (
-                    <p key={issue.code} className="text-sm text-amber-700 dark:text-amber-400">{issue.message}</p>
+                    <p key={issue.code} className={cn('text-sm text-amber-700 dark:text-amber-400', CHOICE_INDENT)}>{issue.message}</p>
                   ))}
                 </RowCard>
               )
