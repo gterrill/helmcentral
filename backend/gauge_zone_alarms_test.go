@@ -467,7 +467,7 @@ func TestClusterHeldZoneIndexSpaceKeepsIssuedIDs(t *testing.T) {
 	if clusterFooterZoneIndexBase < 24 {
 		t.Fatalf("the footer must start past the old telltale cap (18..23), got %d", clusterFooterZoneIndexBase)
 	}
-	if clusterRightArcZoneIndex != clusterFooterZoneIndexBase+len((&dashboardClusterFooter{}).slots()) {
+	if clusterRightArcZoneIndex != clusterFooterZoneIndexBase+len((&dashboardClusterFooter{}).entries()) {
 		t.Fatalf("the right arc follows the footer without a gap: %d", clusterRightArcZoneIndex)
 	}
 	if clusterLeftArcZoneIndex <= clusterRightArcZoneIndex {
@@ -518,7 +518,7 @@ func TestZoneDerivedAlarmRulesCoverAFooterSlotsOwnItem(t *testing.T) {
 			EquipmentID: engine, Title: "Port",
 			Ring:   dashboardGaugeConfig{Suffix: "revolutions", Display: "radial", Quantity: "frequency", Unit: "rpm"},
 			Centre: dashboardGaugeConfig{Suffix: "runTime", Display: "numeric", Quantity: "duration", Unit: "h"},
-			Footer: &dashboardClusterFooter{AltAmps: &dashboardGaugeConfig{EquipmentID: alt, Suffix: "current", Display: "numeric", Quantity: "current", Unit: "A"}},
+			Footer: &dashboardClusterFooter{AlternatorID: stringPtr(alt), AltAmps: &dashboardGaugeConfig{Suffix: "current", Display: "numeric", Quantity: "current", Unit: "A"}},
 		},
 	})
 
@@ -611,5 +611,71 @@ func TestZoneDerivedAlarmRulesSkipAFooterSlotWhoseOwnItemIsGone(t *testing.T) {
 	})
 	if rules := zoneDerivedAlarmRules(); len(rules) != 0 {
 		t.Fatalf("no alarm on a reading that cannot be read, got %+v", rules)
+	}
+}
+
+func altClusterWithZones(engine string, footer *dashboardClusterFooter) dashboardLayoutItem {
+	return dashboardLayoutItem{
+		ID: "cluster:abcd1234", X: 0, Y: 0, W: 6, H: 14,
+		Cluster: &dashboardClusterConfig{
+			EquipmentID: engine, Source: "propulsion.port", Title: "Port",
+			Ring:   dashboardGaugeConfig{Suffix: "revolutions", Display: "radial", Quantity: "frequency", Unit: "rpm"},
+			Centre: dashboardGaugeConfig{Suffix: "runTime", Display: "numeric", Quantity: "duration", Unit: "h"},
+			Footer: footer,
+		},
+	}
+}
+
+func heldAltLimit() *dashboardGaugeConfig {
+	held := *zoneGaugeConfig(0, 100, gaugeZone{From: 80, To: 100, State: alarmStateWarn})
+	held.Path, held.Suffix = "", "limitAmps"
+	return &held
+}
+
+// The alternator rows read the footer's one alternator. A row that holds zones
+// keeps its place in the id space, so the id is the same as it was per row.
+func TestZoneDerivedAlarmRulesAlternatorRowsReadTheFootersAlternator(t *testing.T) {
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	alt := newTileItem(t, "Port alternator", "electrical.alternator.2", "")
+	withPages(t, altClusterWithZones(engine, &dashboardClusterFooter{AlternatorID: stringPtr(alt), AltLimit: heldAltLimit()}))
+
+	rules := zoneDerivedAlarmRules()
+	want := fmt.Sprintf("%scluster:abcd1234:%d:0", zoneDerivedAlarmRuleIDPrefix, clusterFooterZoneIndexBase+5)
+	if len(rules) != 1 || rules[0].ID != want || rules[0].Path != "electrical.alternator.2.limitAmps" {
+		t.Fatalf("expected one rule %q on the alternator, got %+v", want, rules)
+	}
+}
+
+// An old card's per-row equipment id is ignored: the footer's alternator wins.
+func TestZoneDerivedAlarmRulesIgnoreAnAlternatorRowsOwnItem(t *testing.T) {
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	alt := newTileItem(t, "Port alternator", "electrical.alternator.2", "")
+	other := newTileItem(t, "Other alternator", "electrical.alternator.9", "")
+	row := heldAltLimit()
+	row.EquipmentID = other
+	withPages(t, altClusterWithZones(engine, &dashboardClusterFooter{AlternatorID: stringPtr(alt), AltLimit: row}))
+
+	rules := zoneDerivedAlarmRules()
+	if len(rules) != 1 || rules[0].Path != "electrical.alternator.2.limitAmps" {
+		t.Fatalf("expected the rule on the footer's alternator, got %+v", rules)
+	}
+}
+
+// With no alternator chosen (never set, or cleared) the rows read nothing. They
+// must not fall back to the engine's source.
+func TestZoneDerivedAlarmRulesAlternatorRowsNeverFallBackToTheEngine(t *testing.T) {
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	old := heldAltLimit()
+	old.EquipmentID = newTileItem(t, "Old alternator", "electrical.alternator.2", "")
+	for name, footer := range map[string]*dashboardClusterFooter{
+		"never set": {AltLimit: heldAltLimit()},
+		"cleared":   {AlternatorID: stringPtr(""), AltLimit: heldAltLimit()},
+		"old card":  {AltLimit: old},
+		"gone":      {AlternatorID: stringPtr("deleted-item"), AltLimit: heldAltLimit()},
+	} {
+		withPages(t, altClusterWithZones(engine, footer))
+		if rules := zoneDerivedAlarmRules(); len(rules) != 0 {
+			t.Fatalf("%s: no alarm on a reading with no alternator, got %+v", name, rules)
+		}
 	}
 }

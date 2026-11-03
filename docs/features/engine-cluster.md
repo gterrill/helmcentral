@@ -82,18 +82,53 @@ See Staleness in [Tiles](../reference/tiles.md).
 
 The engine's own readings (revs, oil, boost, load, fuel flow, coolant, gearbox)
 come from the engine you pick. The starter battery, the alternator and the
-exhaust are separate equipment, so you choose each one in the tile's settings.
-The alternator follows the side: **Fill slots from profile** picks the port or
-starboard alternator you named under Roles in **Settings → SignalK**. If you
-haven't named an alternator there, the alternator parts stay empty until you
-choose one.
+exhaust are separate equipment, so you choose each one on the tile's
+**Alternator & more** tab.
 
-When you pick a piece of equipment for a footer part, Helmcentral looks at what
-that equipment is sending and fills in the reading for you. Pick the starter
-battery and its voltage is set. If the equipment isn't sending the reading
-that part needs, the field says so and lists what it does send. You can't save
-a footer part that has equipment but no reading. Pick a reading, or clear the
-equipment to leave the part out.
+The alternator is chosen once, at the top of that tab, and all five of its
+parts read from it: current, output power, temperature, charge stage and charge
+current limit. Here's how the choice behaves:
+
+- **Where it starts:** When you pick an engine, or open a tile that has no
+  alternator yet, the alternator is the one you named under Roles in
+  **Settings → SignalK**. It follows the **Engine side**: Starboard gets the
+  starboard alternator and Port gets the port one. If the side isn't set, it
+  comes from the engine. If you haven't named an alternator, or you said the
+  boat has none, the alternator stays empty until you choose it.
+- **If you change the side:** The alternator follows the **Engine side** you pick
+  for as long as you haven't chosen the alternator yourself. Once you have, it
+  stays where you put it. A starboard tile can use the port alternator, and
+  Helmcentral doesn't warn you about it.
+- **Which readings it fills:** Helmcentral looks at what the alternator is
+  sending and fills in each part with the reading that part expects. A part the
+  alternator doesn't send stays blank and is left off the tile, and its row on
+  the tab says **Not sending**. The charge current limit has no expected reading,
+  so it stays blank until you choose one, and its row says **Not shown**.
+- **If you swap alternators:** A part keeps its reading if the new alternator
+  sends it. If it doesn't, the part goes back to the reading it expects, or goes
+  blank if the new alternator isn't sending that either.
+- **If it sends nothing:** The alternator may be mapped but not sending any
+  readings. A note under the picker then says so and tells you to check its
+  source in Equipment. You can still save.
+- **If you clear it:** Clearing the alternator blanks all five parts.
+
+**Fill slots from profile** doesn't change the alternator. It fills any blank
+alternator part from the alternator you picked, and leaves readings you've
+already chosen alone.
+
+The starter battery and the exhaust each have their own equipment, picked on
+their own row. Helmcentral fills in the reading for them in the same way. Pick
+the starter battery and its voltage is set. If the equipment isn't sending the
+reading that part needs, the field says so and lists what it does send. You
+can't save a battery or exhaust part that has equipment but no reading. Pick a
+reading, or clear the equipment to leave the part out.
+
+You can type a reading on an alternator part yourself. Helmcentral checks it
+against what the alternator is sending, and against the alternator's profile.
+The part's own expected reading always passes. If your reading is none of
+those, you can't save, and the line beside **Save** names it. Pick one the
+alternator sends, or clear it. If Helmcentral can't read what the boat is
+sending, it doesn't block you.
 
 ## What it does not do
 
