@@ -11,6 +11,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ## [Unreleased]
 
+## [0.60.0] - 2026-11-04
+
 ### Breaking
 
 - **The generator role no longer tells the overnight checks about charging.**
@@ -23,8 +25,10 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   `boat_time` and `since` now read like Thu 29 Oct 3.00 AM UTC+13, the same way
   as everywhere else in Helmcentral, and the run's `boat_time` does too. If a
   receiver reads `boat_time` or `since` as a date and time, change it to read
-  `generated_at` and `since_at` instead. Both are UTC times written for a
-  program, like 2026-10-28T14:00:00Z, and they don't change.
+  `generated_at` and `since_at` in the report instead. Both are UTC times written
+  for a program, like 2026-10-28T14:00:00Z. `since_at` is new in this version, so
+  change the receiver after you upgrade. The run's own `boat_time` has no such
+  field, and a webhook with no report has neither.
 - **Saved Engine Cluster tiles need the alternator chosen again.** The
   alternator is now one choice for the whole tile, so the alternator choices a
   tile had saved row by row are no longer used. Until you save, the tile's
@@ -41,7 +45,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 - **The Nearby map lists the vessels around you.** With **Show AIS traffic** on
   and the **Map and list** layout, the list gains a Vessels group beside the
   places, or under them on a tall tile. It shows up to four contacts within 5 km,
-  alarmed first and then nearest, with distance, bearing, and "Seen 7x before,
+  or the tile's range if that's shorter, alarmed first and then nearest, with
+  distance, bearing, and "Seen 7x before,
   last 2d ago" for vessels you have met. A vessel in a collision alarm or warning
   takes the same red or amber as the Nearby Vessels tile and is listed even
   outside the tile's range, and a position more than three minutes old says so.
@@ -255,7 +260,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
   read the profiles but refuses the switch, for example over its login,
   Helmcentral retries at longer and longer gaps, up to every ten minutes. If
   the boat moves to a state that wants a different profile, that profile is
-  tried at once, without waiting out the gap. The log gets a line when the
+  tried at once, unless it's still waiting out a gap from its own earlier
+  failure. The log gets a line when the
   refusal or its cause changes, not one a minute. A profile you pick by hand still clears the
   warning at the next check. See [Alarms](docs/features/alarms.md).
 
@@ -2887,7 +2893,8 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 - Everything on a dashboard page is called a tile.
 
-[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.59.0...HEAD
+[Unreleased]: https://github.com/gterrill/helmcentral/compare/v0.60.0...HEAD
+[0.60.0]: https://github.com/gterrill/helmcentral/compare/v0.59.0...v0.60.0
 [0.59.0]: https://github.com/gterrill/helmcentral/compare/v0.58.0...v0.59.0
 [0.58.0]: https://github.com/gterrill/helmcentral/compare/v0.57.0...v0.58.0
 [0.57.0]: https://github.com/gterrill/helmcentral/compare/v0.56.0...v0.57.0
