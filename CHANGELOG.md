@@ -138,6 +138,22 @@ releases use [Semantic Versioning](https://semver.org/). While the version is
 
 ### Added
 
+- **Mate keeps lasting facts about your boat.** Say "remember that" and a fact,
+  such as "the fuel polisher has no sampling port on its discharge manifold",
+  and Mate keeps it and reads it in every conversation and every watch review.
+  A card under the reply has an **Undo** button. If Mate works out a fact for
+  itself, it offers it on a card and keeps it only when you tap **Remember
+  this**. A fact that contradicts one already kept shows both and waits for you
+  to tap **Replace fact**.
+  Where you are and other things that change aren't kept. Settings → Mate lists
+  the facts under the standing notes, with **Edit**, **Remove** and **Add
+  fact**. The list holds 50. Outside assistants can read it but not change it.
+- **Mate's morning report stops asking what you've already answered.** The next
+  review gets its own last review and is told not to repeat a question unless the
+  figures changed. If you tapped **Ask Mate about this run** and told Mate
+  something, the next review also gets what you said, marked as your words and
+  not as instructions. Only your messages about the last run are passed on, and
+  never Mate's replies.
 - **A cruise replay frames each passage, and names it.** In the replay of a
   cruise, or of passages you select together, the camera now frames the passage
   the boat is on, rather than the whole trip. At each stay it pulls out to the

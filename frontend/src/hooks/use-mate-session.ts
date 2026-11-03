@@ -184,12 +184,15 @@ export function useMateSession(options: MateSessionOptions = {}) {
       setStoppedIn(null)
       setRefusedIn(null)
 
+      // Read at the moment of sending: a chat opened from a watch run is
+      // linked to that run when it is created.
+      const screen = typeof screenRef.current === 'function' ? screenRef.current() : screenRef.current
       let conversationId = sendOptions.newConversation ? null : activeIdRef.current
       if (conversationId === null) {
         conversationId = await create((id) => {
           sendingIntoRef.current = id
           activeIdRef.current = id
-        })
+        }, screen?.watch_run_id)
         if (conversationId === null) return { answered: false, message: null }
       }
 
@@ -214,7 +217,6 @@ export function useMateSession(options: MateSessionOptions = {}) {
       let refused = false
       let shown: AssistantMessage | null = null
       const ids = attachments.map((a) => a.documentId)
-      const screen = typeof screenRef.current === 'function' ? screenRef.current() : screenRef.current
       await chatSend(askedIn, text, {
         ...(sendOptions.spoken ? { spoken: true } : {}),
         ...(screen !== undefined ? { screen } : {}),

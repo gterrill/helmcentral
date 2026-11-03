@@ -706,6 +706,9 @@ func buildAlarmReviewPrompt(pc assistantPromptContext, units string, now time.Ti
 	if notes := strings.TrimSpace(pc.Notes); notes != "" {
 		b.WriteString("The operator's standing notes about the boat:\n" + clipRunes(notes, 1500) + "\n")
 	}
+	if memories := mateMemoriesPromptFor(pc, loc, false); memories != "" {
+		b.WriteString("\n" + memories + "You cannot keep, change or remove a kept fact in a review; the skipper does that.\n")
+	}
 	b.WriteString("\nRules:\n" +
 		"- Start from the alarm's details. Say what the reading is doing and whether it needs the watchkeeper now, in that order. The first sentence is sent to the phone on its own, so it must carry both.\n" +
 		"- Use the named source. When the details name where a reading comes from, use it; never guess a cause the figures do not show, and say so when you cannot tell.\n" +

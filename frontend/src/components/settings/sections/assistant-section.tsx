@@ -15,6 +15,7 @@ import { ModelCatalogDialog, ModelPicker } from '@/components/settings/sections/
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { MateMemoryList } from '@/components/settings/sections/mate-memory-list'
 
 const isAssistantSetupControl = (control: string) => control === 'passage-limits'
 
@@ -468,6 +469,8 @@ export function AssistantSection({ draft, onChange }: AssistantSectionProps) {
               </Field>
             </FieldGroup>
           </FormSection>
+
+          <MateMemoryList />
 
           {/* ADR 0093 voice phase: push-to-talk input, reading the spoken summary
               back aloud, and the always-listening "Hey Mate" wake word - each its

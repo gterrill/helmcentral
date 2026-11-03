@@ -206,6 +206,17 @@ is what it does with them:
   names a cause it can't see in the figures.
 - **Reads only:** It can look at the boat, the alarms, the history, the forecast
   and your logbook. It can't change anything or propose anything.
+- **Remembers what it said:** Mate also gets its own review of the last report,
+  and it's told not to repeat a question from it unless the figures have
+  changed.
+- **Reads your answers:** If you tapped **Ask Mate about this run** on the last
+  report and told Mate something, the next review gets your words, marked as
+  what you said and not as instructions. It reads only what you wrote, never
+  Mate's replies, and only from chats about the last run. Words from older runs
+  aren't passed on. If you've deleted the chat, there's nothing to pass on.
+- **Reads the facts it keeps:** Every review reads the [facts Mate
+  keeps](assistant.md#facts-mate-keeps) about your boat. A review can read
+  them, but it can't keep, change or remove one.
 
 If Mate isn't ready, for example because no model is chosen, the report is still
 recorded and the run says why there is no review.
@@ -221,7 +232,8 @@ Each run shows what its review cost. The page also shows the total for the last
 not known". Nothing is paused or skipped because of a cost.
 
 You can tap **Ask Mate about this run** on any run. It opens a conversation with
-that run already in front of Mate.
+that run already in front of Mate. The conversation stays linked to the run, so
+what you tell Mate there reaches the next review.
 
 ## Notifications
 

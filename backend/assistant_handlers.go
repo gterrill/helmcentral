@@ -744,6 +744,9 @@ func searchAssistantConversationsHandler(c echo.Context) error {
 func createAssistantConversationHandler(c echo.Context) error {
 	var body struct {
 		Title string `json:"title"`
+		// WatchRunID links a chat opened with "Ask Mate about this run" to that
+		// run, so the next review of the watch reads the skipper's replies.
+		WatchRunID string `json:"watch_run_id"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return c.JSON(http.StatusBadRequest, map[string]string{"error": "invalid body"})
@@ -753,8 +756,12 @@ func createAssistantConversationHandler(c echo.Context) error {
 	if title == "" {
 		title = "New conversation"
 	}
+	runID := strings.TrimSpace(body.WatchRunID)
+	if len([]rune(runID)) > assistantScreenAlarmIDMaxRunes {
+		return c.JSON(http.StatusBadRequest, map[string]string{"error": "watch_run_id is too long"})
+	}
 
-	conv, err := globalAssistantStore.CreateConversation(title)
+	conv, err := globalAssistantStore.CreateConversationForWatchRun(title, runID)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
 	}
@@ -1193,6 +1200,9 @@ func beginAssistantTurn(runCtx context.Context, run *assistantRun, id string, me
 	// The conversation rides on the run's context so start_watch (ADR 0160)
 	// knows where to report back.
 	runCtx = withAssistantConversationID(runCtx, id)
+	// The skipper's own words that start this turn, which remember_fact reads
+	// to see whether they ask for a fact to be kept and state it.
+	runCtx = withSkipperMessage(runCtx, skipperMessage(messages))
 	// The run's trace (ADR 0240): the runner records its rounds here and the
 	// goroutine below stores it however the run ends.
 	recorder := &assistantRunRecorder{}
@@ -1442,6 +1452,7 @@ func assistantRoutes() []apiRoute {
 		// schedule exactly as the Maintenance forms do.
 		{http.MethodPost, "/api/assistant/proposals/:id/apply", tierWrite, applyAssistantProposalHandler},
 		{http.MethodPost, "/api/assistant/proposals/:id/dismiss", tierWrite, dismissAssistantProposalHandler},
+		{http.MethodPost, "/api/assistant/proposals/:id/undo", tierWrite, undoAssistantProposalHandler},
 		{http.MethodPost, "/api/assistant/form-drafts/:id/save", tierWrite, saveFormDraftHandler},
 		{http.MethodPost, "/api/assistant/form-drafts/:id/dismiss", tierWrite, dismissFormDraftHandler},
 

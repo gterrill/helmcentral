@@ -5,6 +5,7 @@ import { PLANNED_STAY_PATH } from '@/hooks/use-planned-stay'
 import { ALARM_RULES_PATH } from '@/hooks/use-alarm-rules'
 import { SAVED_PLACES_PATH } from '@/hooks/use-saved-places'
 import { WATCHES_PATH } from '@/hooks/use-watches'
+import { MATE_MEMORIES_PATH } from '@/hooks/use-mate-memories'
 import { decksRecordApplied, equipmentRecordApplied, zonesRecordApplied } from '@/hooks/use-inventory'
 import { maintenanceLogRecordApplied, maintenanceRulesRecordApplied } from '@/hooks/use-maintenance'
 import { documentRecordApplied } from '@/hooks/use-documents'
@@ -25,6 +26,7 @@ export const PROPOSAL_REFRESH: Record<string, (op: AssistantProposalOp) => void>
   alarm_rule: reads(ALARM_RULES_PATH),
   watch: reads(WATCHES_PATH),
   saved_place: reads(SAVED_PLACES_PATH),
+  memory: reads(MATE_MEMORIES_PATH),
   equipment: (op) => equipmentRecordApplied(op.action, op.id),
   location: zonesRecordApplied,
   bin: zonesRecordApplied,
@@ -92,4 +94,13 @@ export async function applyAssistantProposal(id: string): Promise<AssistantPropo
 
 export function dismissAssistantProposal(id: string): Promise<AssistantProposal> {
   return post(`/api/assistant/proposals/${encodeURIComponent(id)}/dismiss`)
+}
+
+/** Undo on a card for a fact Mate kept: the server removes the fact and stores
+ * the proposal as undone, or refuses (a 409 with its reason) when the fact was
+ * rewritten since. */
+export async function undoAssistantProposal(id: string): Promise<AssistantProposal> {
+  const undone = await post(`/api/assistant/proposals/${encodeURIComponent(id)}/undo`)
+  refreshPagesFor(undone)
+  return undone
 }

@@ -50,6 +50,10 @@ type watchHost struct {
 	// review has Mate read it.
 	review func(ctx context.Context, cfg watchConfig, w savedWatch, rep watchReport, findings []watchFinding, now time.Time, loc *time.Location) watchReviewOutcome
 
+	// skipperReplies reads what the skipper said in the chats opened on a run,
+	// for the review that follows it. Nil in a host with no chats.
+	skipperReplies func(runID string) ([]string, error)
+
 	// chartSources reads the history findings' charts are drawn from. Nil in a
 	// host with none, where a finding that wants a chart says so.
 	chartSources func() watchChartSources
@@ -245,7 +249,19 @@ func (h *watchHost) runLocked(ctx context.Context, cfg watchConfig, w savedWatch
 	}); err != nil {
 		log.Printf("watches: %q: could not read the previous run, so Mate is not told which issues it already raised and may word one differently: %v", w.Name, err)
 	} else if hadPrevious {
-		reviewCtx = withWatchPreviousMate(ctx, previous.Findings)
+		prev := watchPreviousRun{Mate: mateFindings(previous.Findings)}
+		if previous.Review != nil {
+			prev.Review = *previous.Review
+		}
+		if h.skipperReplies != nil {
+			replies, err := h.skipperReplies(previous.ID)
+			if err != nil {
+				log.Printf("watches: %q: could not read what the skipper said about the previous run, so Mate is not told: %v", w.Name, err)
+			} else {
+				prev.Replies = replies
+			}
+		}
+		reviewCtx = withWatchPreviousRun(ctx, prev)
 	}
 	review := h.review(reviewCtx, cfg, w, report, findings, now, loc)
 	all := append(append([]watchFinding{}, findings...), review.Added...)
@@ -348,6 +364,12 @@ func newProductionWatchHost(settingsPath string) *watchHost {
 			return productionWatchReport(settingsPath, w, now, loc)
 		},
 		review: runWatchReview,
+		skipperReplies: func(runID string) ([]string, error) {
+			if globalAssistantStore == nil {
+				return nil, errors.New("the chat store is not open")
+			}
+			return globalAssistantStore.SkipperRepliesForWatchRun(runID, watchSkipperRepliesMaxChars)
+		},
 		dispatchReport: func(report watchReportMessage, channels []string) {
 			if globalAlarmDispatcher == nil {
 				log.Printf("watches: %q was not sent: the notification dispatcher is not running", report.Title)

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"golang.org/x/text/unicode/norm"
@@ -29,6 +30,10 @@ type assistantConversation struct {
 	// outlive the note: handlers go through liveAssistantSummaryNoteID, which
 	// reports a deleted note as none.
 	SummaryNoteID *string `json:"summary_note_id,omitempty"`
+	// WatchRunID is the watch run this chat was opened from ("Ask Mate about
+	// this run"), nil for any other chat. The next review of that watch reads
+	// the skipper's messages here.
+	WatchRunID *string `json:"watch_run_id,omitempty"`
 }
 
 // assistantMessage is one row of a conversation. User and assistant roles
@@ -240,6 +245,20 @@ func createAssistantSchema(db *sql.DB) error {
 		}
 	}
 
+	// watch_run_id links a chat opened from a watch run ("Ask Mate about this
+	// run") to that run, so the next review can read the skipper's replies.
+	// Added by hand for the same reason as summary_note_id.
+	if err := addColumnIfMissing(db, "conversations", "watch_run_id", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS conversations_watch_run ON conversations (watch_run_id)`); err != nil {
+		return fmt.Errorf("index conversations.watch_run_id: %w", err)
+	}
+
+	if err := createMateMemorySchema(db); err != nil {
+		return err
+	}
+
 	if err := createAssistantSearchSchema(db); err != nil {
 		return err
 	}
@@ -310,6 +329,13 @@ func (s *assistantStore) Close() error {
 // is the one place that knows what a good placeholder like "New
 // conversation" is.
 func (s *assistantStore) CreateConversation(title string) (assistantConversation, error) {
+	return s.CreateConversationForWatchRun(title, "")
+}
+
+// CreateConversationForWatchRun starts a thread opened from a watch run, linked
+// to it so the next review can read what the skipper says here. An empty run id
+// makes an ordinary thread.
+func (s *assistantStore) CreateConversationForWatchRun(title, watchRunID string) (assistantConversation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -320,13 +346,73 @@ func (s *assistantStore) CreateConversation(title string) (assistantConversation
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
+	var link any
+	if watchRunID != "" {
+		conv.WatchRunID = &watchRunID
+		link = watchRunID
+	}
 
 	if _, err := s.db.Exec(
-		`INSERT INTO conversations (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)`,
-		conv.ID, conv.Title, conv.CreatedAt.Unix(), conv.UpdatedAt.Unix()); err != nil {
+		`INSERT INTO conversations (id, title, created_at, updated_at, watch_run_id) VALUES (?, ?, ?, ?, ?)`,
+		conv.ID, conv.Title, conv.CreatedAt.Unix(), conv.UpdatedAt.Unix(), link); err != nil {
 		return assistantConversation{}, fmt.Errorf("create conversation: %w", err)
 	}
 	return conv, nil
+}
+
+// SkipperRepliesForWatchRun returns the skipper's own messages from the chats
+// linked to a watch run, oldest first, newest kept when the total passes
+// maxChars. Only user rows: Mate's words in those chats do not travel. The
+// first user row of such a chat is the question "Ask Mate about this run" sent
+// for the skipper ("What do you make of the Morning report from 7.00 AM?"), not
+// something they wrote, so it is left out. A chat that has been deleted has no
+// rows, so it gives nothing.
+func (s *assistantStore) SkipperRepliesForWatchRun(runID string, maxChars int) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	rows, err := s.db.Query(`
+		SELECT m.content FROM messages m
+		JOIN conversations c ON c.id = m.conversation_id
+		WHERE c.watch_run_id = ? AND m.role = 'user'
+		  AND m.seq > (SELECT MIN(f.seq) FROM messages f WHERE f.conversation_id = c.id AND f.role = 'user')
+		ORDER BY m.created_at, c.id, m.seq`, runID)
+	if err != nil {
+		return nil, fmt.Errorf("read replies to watch run: %w", err)
+	}
+	defer rows.Close()
+	var all []string
+	for rows.Next() {
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			return nil, fmt.Errorf("scan reply to watch run: %w", err)
+		}
+		if content = strings.TrimSpace(content); content != "" {
+			all = append(all, content)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Newest first until the cap is reached, then back to reading order.
+	var kept []string
+	total := 0
+	for i := len(all) - 1; i >= 0; i-- {
+		n := utf8.RuneCountInString(all[i])
+		if total+n > maxChars {
+			// A lone reply over the cap is cut rather than dropped.
+			if len(kept) == 0 {
+				kept = append(kept, truncateRunes(all[i], maxChars))
+			}
+			break
+		}
+		total += n
+		kept = append(kept, all[i])
+	}
+	for i, j := 0, len(kept)-1; i < j; i, j = i+1, j-1 {
+		kept[i], kept[j] = kept[j], kept[i]
+	}
+	return kept, nil
 }
 
 // ListConversations returns every conversation, most recently active first -
@@ -364,12 +450,12 @@ func (s *assistantStore) GetConversation(id string) (assistantConversation, bool
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	row := s.db.QueryRow(`SELECT id, title, created_at, updated_at, summary_note_id FROM conversations WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, title, created_at, updated_at, summary_note_id, watch_run_id FROM conversations WHERE id = ?`, id)
 
 	var conv assistantConversation
 	var created, updated int64
-	var noteID sql.NullString
-	err := row.Scan(&conv.ID, &conv.Title, &created, &updated, &noteID)
+	var noteID, runID sql.NullString
+	err := row.Scan(&conv.ID, &conv.Title, &created, &updated, &noteID, &runID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return assistantConversation{}, false, nil
 	}
@@ -380,6 +466,9 @@ func (s *assistantStore) GetConversation(id string) (assistantConversation, bool
 	conv.UpdatedAt = time.Unix(updated, 0).UTC()
 	if noteID.Valid {
 		conv.SummaryNoteID = &noteID.String
+	}
+	if runID.Valid {
+		conv.WatchRunID = &runID.String
 	}
 	return conv, true, nil
 }

@@ -343,4 +343,107 @@ describe('AssistantProposalCard with the server payload', () => {
     rerender(<AssistantProposalCard proposal={proposal({ status: 'applied', ops: [{ ...op, href: '/documents/d1' }] })} canWrite onChange={vi.fn()} />)
     expect(screen.getByRole('link', { name: /On Berth map/ })).toHaveAttribute('href', '/documents/d1')
   })
+
+  describe('a kept fact', () => {
+    const kept: AssistantProposal = {
+      id: 'p9',
+      messageId: 'm9',
+      status: 'applied',
+      ops: [{ type: 'memory', action: 'create', description: 'Keep this fact: The polisher has no port.', resultId: 'mem-1' }],
+    }
+
+    it('saved at the skipper\'s asking: Undo is a server action on the proposal and hands the answer up', async () => {
+      const fetchMock = respond(200, { proposal: { id: 'p9', message_id: 'm9', status: 'undone', ops: kept.ops, result: { ops: [{ type: 'memory', action: 'create', id: 'mem-1' }] } } })
+      vi.stubGlobal('fetch', fetchMock)
+      const onChange = vi.fn()
+      render(<AssistantProposalCard proposal={kept} canWrite onChange={onChange} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ id: 'p9', status: 'undone' })))
+      expect(fetchMock.mock.calls[0][0]).toBe('/api/assistant/proposals/p9/undo')
+      expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: 'POST' })
+    })
+
+    it('an undone card, as a reload shows it, reads Undone with no Undo and no Applied beside Removed', () => {
+      render(<AssistantProposalCard proposal={{ ...kept, status: 'undone' }} canWrite onChange={vi.fn()} />)
+
+      expect(screen.getByText('Removed from Mate\'s memory')).toBeInTheDocument()
+      expect(screen.getByText('Undone')).toBeInTheDocument()
+      expect(screen.queryByText('Applied')).not.toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+    })
+
+    it('a fact that could not be kept: says Not kept and why, with no Undo and no redo prompt', () => {
+      const reason = 'Not kept. That fact was already kept.'
+      render(<AssistantProposalCard proposal={{ ...kept, status: 'stale', staleReason: reason }} canWrite onChange={vi.fn()} />)
+
+      expect(screen.getByText('Not kept')).toBeInTheDocument()
+      expect(screen.getByRole('alert')).toHaveTextContent(reason)
+      expect(screen.getByRole('alert')).not.toHaveTextContent('Ask Mate to redo it')
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+    })
+
+    it('a fact rewritten since it was kept: shows the server\'s plain reason and keeps the card as it was', async () => {
+      const reason = 'that fact was changed after Mate kept it, so Undo left it alone.'
+      vi.stubGlobal('fetch', respond(409, { error: reason, proposal_status: 'applied' }))
+      const onChange = vi.fn()
+      render(<AssistantProposalCard proposal={kept} canWrite onChange={onChange} />)
+
+      fireEvent.click(screen.getByRole('button', { name: 'Undo' }))
+
+      await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(reason))
+      expect(onChange).not.toHaveBeenCalled()
+      expect(screen.getByRole('button', { name: 'Undo' })).toBeEnabled()
+    })
+
+    it('read-only sessions get no Undo', () => {
+      render(<AssistantProposalCard proposal={kept} canWrite={false} onChange={vi.fn()} />)
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+    })
+
+    it('a fact Mate offers waits on Remember this, and tapping it applies the proposal', async () => {
+      const fetchMock = respond(200, { proposal: { ...kept, status: 'applied' } })
+      vi.stubGlobal('fetch', fetchMock)
+      const offered: AssistantProposal = { ...kept, status: 'pending' }
+      render(<AssistantProposalCard proposal={offered} canWrite onChange={vi.fn()} />)
+
+      expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
+      fireEvent.click(screen.getByRole('button', { name: 'Remember this' }))
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled())
+      expect(String(fetchMock.mock.calls[0][0])).toContain('/apply')
+    })
+
+    it('a replacement shows the old and the new text and waits for Replace fact', () => {
+      const replacing: AssistantProposal = {
+        id: 'p10',
+        messageId: 'm10',
+        status: 'pending',
+        ops: [{
+          type: 'memory',
+          action: 'update',
+          id: 'mem-1',
+          description: 'Replace the kept fact with: The polisher has no sampling port.',
+          before: { text: 'The polisher has a sampling port.' },
+          after: { text: 'The polisher has no sampling port.' },
+        }],
+      }
+      render(<AssistantProposalCard proposal={replacing} canWrite onChange={vi.fn()} />)
+
+      expect(screen.getByText(/The polisher has a sampling port\./)).toBeInTheDocument()
+      expect(screen.getAllByText(/The polisher has no sampling port\./).length).toBeGreaterThan(0)
+      expect(screen.getByRole('button', { name: 'Replace fact' })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+    })
+
+    it('maps the id an applied save wrote from the stored result', () => {
+      const api: ProposalApi = {
+        id: 'p9', message_id: 'm9', status: 'applied',
+        ops: [{ type: 'memory', action: 'create', description: 'Keep this fact: x' }],
+        result: { ops: [{ type: 'memory', action: 'create', id: 'mem-1' }] },
+      }
+      expect(mapProposal(api).ops[0].resultId).toBe('mem-1')
+    })
+  })
 })

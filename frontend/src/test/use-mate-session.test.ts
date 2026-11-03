@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 
 import { useMateSession, type MateSendResult } from '@/hooks/use-mate-session'
+import { useMateMemories } from '@/hooks/use-mate-memories'
 import type { AssistantScreenContext } from '@/hooks/use-assistant-chat'
 import { todayISO } from '@/lib/local-date'
 import { removeMateWatch } from '@/lib/mate-watch-store'
@@ -36,6 +37,8 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
   const conversations = [...(initial.conversations ?? [])]
   const messages = new Map<string, MessageRecord[]>(Object.entries(initial.messages ?? {}))
   const posts: Array<{ conversationId: string; body: Record<string, unknown> }> = []
+  /** The body of every request that created a conversation. */
+  const createBodies: unknown[] = []
   const cancels: string[] = []
   const runs: string[] = []
   const ratings: Array<{ method: string; messageId: string; body?: Record<string, unknown> }> = []
@@ -59,6 +62,7 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
 
   const server = {
     posts,
+    createBodies,
     cancels,
     runs,
     ratings,
@@ -81,6 +85,7 @@ function fakeMateServer(initial: { conversations?: ConversationRecord[]; message
         return { ok: true, json: async () => ({ conversations }) }
       }
       if (url.endsWith('/api/assistant/conversations') && method === 'POST') {
+        createBodies.push(typeof init?.body === 'string' ? JSON.parse(init.body) : null)
         counter += 1
         const created = conversation(`new-${counter}`, 'New conversation')
         conversations.unshift(created)
@@ -537,6 +542,28 @@ describe('useMateSession', () => {
       expect(server.posts[0].body.screen).toEqual({ panel: 'settings', section: 'assistant' })
     })
 
+    it('links a chat opened from a watch run to that run when it creates the conversation', async () => {
+      const server = fakeMateServer()
+      const { result } = await renderSession({ screen: { panel: 'watches', watch_run_id: 'run-7', watch_name: 'Morning report' } })
+
+      await act(async () => {
+        await result.current.send('What do you make of the Morning report report?', { newConversation: true })
+      })
+
+      expect(server.createBodies).toEqual([{ watch_run_id: 'run-7' }])
+    })
+
+    it('creates an ordinary chat with no link when the screen names no run', async () => {
+      const server = fakeMateServer()
+      const { result } = await renderSession({ screen: { panel: 'forecast' } })
+
+      await act(async () => {
+        await result.current.send('How does tomorrow look?', { newConversation: true })
+      })
+
+      expect(server.createBodies).toEqual([{}])
+    })
+
     it('asks for a spoken answer only for a question that came in by voice', async () => {
       const server = fakeMateServer({ conversations: [conversation('c1')] })
       const { result } = await renderSession({ initialId: 'c1' })
@@ -753,6 +780,43 @@ describe('useMateSession', () => {
       expect(result.current.status.stopped).toBe(false)
       expect(result.current.messages.map((m) => m.content)).toContain('Turning at 14:10.')
       removeMateWatch('c1')
+    })
+  })
+
+  describe('a fact kept with the reply', () => {
+    it('reads the kept facts again when a reply arrives carrying an applied memory card', async () => {
+      const server = fakeMateServer()
+      let memoryReads = 0
+      vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+        if (url.endsWith('/api/assistant/memories')) {
+          memoryReads += 1
+          return { ok: true, status: 200, json: async () => ({ memories: [], limit: 50, max_chars: 300 }) }
+        }
+        return server.fetch(url, init)
+      })
+      server.onSend = (id) => {
+        const message = server.store(id, {
+          id: 'a-kept', role: 'assistant', content: 'Kept.',
+          proposals: [{
+            id: 'p-kept', message_id: 'a-kept', status: 'applied',
+            ops: [{ type: 'memory', action: 'create', description: 'Keep this fact: The hatch sticks.' }],
+            result: { ops: [{ type: 'memory', action: 'create', id: 'mem-1' }] },
+          }],
+        } as Parameters<typeof server.store>[1])
+        return { ok: true, body: sseStream([sseFrame('message', { message, conversation: conversation(id) })]) }
+      }
+      const memories = renderHook(() => useMateMemories())
+      await waitFor(() => expect(memories.result.current.loading).toBe(false))
+      const { result } = await renderSession()
+      const before = memoryReads
+
+      await act(async () => {
+        await result.current.send('Remember that the hatch sticks.')
+      })
+
+      await waitFor(() => expect(memoryReads).toBeGreaterThan(before))
+      memories.unmount()
+      removeMateWatch('new-1')
     })
   })
 

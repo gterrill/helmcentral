@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { fieldLabel, fieldView, formatFieldValue } from '@/components/assistant-proposal-views'
 import type { AssistantProposal, AssistantProposalOp } from '@/hooks/use-assistant-conversations'
-import { appliedProposalOf, applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus } from '@/lib/assistant-proposal-actions'
+import { appliedProposalOf, applyAssistantProposal, dismissAssistantProposal, ProposalActionError, refusedProposalStatus, undoAssistantProposal } from '@/lib/assistant-proposal-actions'
 import { cn } from '@/lib/utils'
 import { errorMessage } from '@/lib/errors'
 
@@ -71,9 +71,29 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
     [proposal, onChange, changeCount],
   )
 
+  // A fact kept because the skipper asked is saved with the reply. Undo is the
+  // server's: it removes the fact and stores the card as undone, or refuses
+  // with a reason when the fact has been rewritten since.
+  const keptFact = proposal.ops.some((op) => op.type === 'memory' && op.action === 'create')
+  const replacesFact = proposal.ops.some((op) => op.type === 'memory' && op.action === 'update')
+  const applyLabel = keptFact ? 'Remember this' : replacesFact ? 'Replace fact' : 'Apply'
+  const [undoing, setUndoing] = useState(false)
+  const undo = useCallback(async () => {
+    setUndoing(true)
+    setError(null)
+    try {
+      onChange(await undoAssistantProposal(proposal.id))
+    } catch (err) {
+      setError(errorMessage(err))
+    } finally {
+      setUndoing(false)
+    }
+  }, [proposal.id, onChange])
+
   const applied = proposal.status === 'applied'
   const dismissed = proposal.status === 'dismissed'
   const stale = proposal.status === 'stale'
+  const undone = proposal.status === 'undone'
   const pending = proposal.status === 'pending'
 
   return (
@@ -93,7 +113,7 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
           {changeCount === 1 ? 'Proposed change' : `Proposed changes (${changeCount})`}
         </span>
         <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-          {applied ? 'Applied' : dismissed ? 'Dismissed' : stale ? 'Out of date' : 'Not applied yet'}
+          {applied ? 'Applied' : dismissed ? 'Dismissed' : undone ? 'Undone' : stale ? (keptFact ? 'Not kept' : 'Out of date') : 'Not applied yet'}
         </span>
       </div>
 
@@ -101,7 +121,7 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         {proposal.ops.map((op, index) => (
           <li key={index} className="flex min-w-0 flex-col gap-1">
             <span
-              className={cn('min-w-0 break-words text-sm', dismissed || stale ? 'text-muted-foreground' : 'text-foreground', dismissed && 'line-through')}
+              className={cn('min-w-0 break-words text-sm', dismissed || stale || undone ? 'text-muted-foreground' : 'text-foreground', (dismissed || undone) && 'line-through')}
             >
               {applied && op.href ? (
                 <a href={op.href} className="text-primary underline underline-offset-2">
@@ -122,7 +142,8 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
 
       {stale && (
         <p role="alert" className="text-xs text-destructive">
-          {proposal.staleReason} Ask Mate to redo it.
+          {proposal.staleReason}
+          {keptFact ? '' : ' Ask Mate to redo it.'}
         </p>
       )}
 
@@ -132,11 +153,21 @@ export function AssistantProposalCard({ proposal, canWrite, onChange }: Assistan
         </p>
       )}
 
+      {undone && keptFact && <p className="text-xs text-muted-foreground">Removed from Mate&apos;s memory</p>}
+      {applied && keptFact && canWrite && (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" size="sm" variant="ghost" disabled={undoing} onClick={() => { void undo() }}>
+            {undoing && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
+            Undo
+          </Button>
+        </div>
+      )}
+
       {pending && canWrite && (
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="sm" disabled={busy !== null} onClick={() => { void run('apply') }}>
             {busy === 'apply' && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
-            {busy === 'apply' ? 'Applying…' : 'Apply'}
+            {busy === 'apply' ? 'Applying…' : applyLabel}
           </Button>
           <Button type="button" size="sm" variant="ghost" disabled={busy !== null} onClick={() => { void run('dismiss') }}>
             Dismiss

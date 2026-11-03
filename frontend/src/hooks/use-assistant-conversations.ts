@@ -19,7 +19,7 @@ interface ConversationApi {
   summary_note_id?: string
 }
 
-export type AssistantProposalStatus = 'pending' | 'applied' | 'dismissed' | 'stale'
+export type AssistantProposalStatus = 'pending' | 'applied' | 'dismissed' | 'stale' | 'undone'
 export type AssistantProposalAction = 'create' | 'update' | 'delete'
 
 interface ProposalOpApi {
@@ -122,6 +122,8 @@ export interface AssistantProposalOp {
   before?: Record<string, unknown>
   after?: Record<string, unknown>
   href?: string
+  /** The id of the record an applied operation wrote, from the stored result. */
+  resultId?: string
 }
 
 /** A change Mate proposed (ADR 0146, generalised by ADR 0158). `status` is the stored
@@ -214,6 +216,7 @@ export function mapProposal(api: ProposalApi): AssistantProposal {
       before: o.before,
       after: o.after,
       href: api.result?.ops[i]?.href,
+      resultId: api.result?.ops[i]?.id,
     })),
     staleReason: api.stale_reason,
     resolvedAt: api.resolved_at,
@@ -532,9 +535,12 @@ export function useAssistantConversations(options?: UseAssistantConversationsOpt
   // no read. `onCreated` runs before the new id becomes active, so a caller
   // can mark it (the Mate session is about to send into it and must not
   // look for a running answer there).
-  const create = useCallback(async (onCreated?: (id: string) => void): Promise<string | null> => {
+  // `watchRunId` links a chat opened with "Ask Mate about this run" to that run,
+  // so the next review of the watch reads what the skipper says here.
+  const create = useCallback(async (onCreated?: (id: string) => void, watchRunId?: string): Promise<string | null> => {
     try {
-      const created = mapConversation(await apiRequest<ConversationApi>(LIST_PATH, { method: 'POST', json: {} }))
+      const json = watchRunId ? { watch_run_id: watchRunId } : {}
+      const created = mapConversation(await apiRequest<ConversationApi>(LIST_PATH, { method: 'POST', json }))
       invalidateQueries([LIST_PATH])
       selectionSeqRef.current += 1
       onCreated?.(created.id)
