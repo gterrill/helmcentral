@@ -3036,7 +3036,7 @@ func TestValidateClusterAcceptsSideArcsAndFooter(t *testing.T) {
 	cluster.Side = "stbd"
 	cluster.Arcs = &dashboardClusterArcs{Left: g("temperature")}
 	cluster.Footer = &dashboardClusterFooter{
-		Battery: own("battery-1", "voltage"), AltAmps: own("alt-1", "current"),
+		Battery: own("battery-1", "voltage"), AlternatorID: stringPtr("alt-1"), AltAmps: g("current"),
 		TransPressure: g("transmission.oilPressure"), Egt: own("exhaust-1", "exhaustTemperature"),
 	}
 	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", cluster)}, ""); msg != "" {
@@ -3059,8 +3059,9 @@ func TestGaugeBoundPathsIncludesClusterArcsAndFooter(t *testing.T) {
 	cluster.EquipmentID = engine
 	cluster.Arcs = &dashboardClusterArcs{Left: g("", "temperature"), Right: g("", "transmission.oilTemperature")}
 	cluster.Footer = &dashboardClusterFooter{
-		Battery: g(batt, "voltage"), AltAmps: g(alt, "current"), AltWatts: g(alt, "power"),
-		AltTemp: g(alt, "temperature"), AltStage: g(alt, "chargingModeNumber"),
+		Battery: g(batt, "voltage"), AlternatorID: stringPtr(alt),
+		AltAmps: g("", "current"), AltWatts: g("", "power"),
+		AltTemp: g("", "temperature"), AltStage: g("", "chargingModeNumber"),
 		TransPressure: g("", "transmission.oilPressure"),
 		Egt:           g(exhaust, "exhaustTemperature"),
 	}
@@ -3080,6 +3081,109 @@ func TestGaugeBoundPathsIncludesClusterArcsAndFooter(t *testing.T) {
 		if !got[want] {
 			t.Fatalf("%s missing from gaugeBoundPaths: %v", want, gaugeBoundPaths())
 		}
+	}
+}
+
+// The alternator rows stream the footer's alternator, never the engine and never
+// the item an old card named on the row.
+func TestGaugeBoundPathsAlternatorRowsFollowTheFooterAlternator(t *testing.T) {
+	engine := newTileItem(t, "Port engine", "propulsion.port", "")
+	alt := newTileItem(t, "Port alternator", "electrical.alternator.2", "")
+	old := newTileItem(t, "Old alternator", "electrical.alternator.9", "")
+	row := func(item, suffix string) *dashboardGaugeConfig {
+		return &dashboardGaugeConfig{EquipmentID: item, Suffix: suffix, Display: "numeric", Quantity: "raw", Unit: "raw"}
+	}
+	for name, alternator := range map[string]*string{"never set": nil, "cleared": stringPtr("")} {
+		cluster := validClusterConfig()
+		cluster.EquipmentID = engine
+		cluster.Footer = &dashboardClusterFooter{AlternatorID: alternator, AltAmps: row(old, "current"), AltWatts: row("", "power")}
+		withPages(t, clusterWidget("cluster:abcd1234", cluster))
+		for _, p := range gaugeBoundPaths() {
+			if p == "propulsion.port.power" || p == "propulsion.port.current" || p == "electrical.alternator.9.current" {
+				t.Fatalf("%s: %s must not be streamed for an alternator row", name, p)
+			}
+		}
+	}
+
+	cluster := validClusterConfig()
+	cluster.EquipmentID = engine
+	cluster.Footer = &dashboardClusterFooter{AlternatorID: stringPtr(alt), AltAmps: row(old, "current"), AltWatts: row("", "power")}
+	withPages(t, clusterWidget("cluster:abcd1234", cluster))
+	got := map[string]bool{}
+	for _, p := range gaugeBoundPaths() {
+		got[p] = true
+	}
+	if !got["electrical.alternator.2.current"] || !got["electrical.alternator.2.power"] || got["electrical.alternator.9.current"] {
+		t.Fatalf("expected the footer's alternator only, got %v", gaugeBoundPaths())
+	}
+}
+
+// Absent and "" are different answers and both must come back as saved: absent
+// means never set, "" means the operator cleared it.
+func TestClusterFooterAlternatorIDKeepsAbsentApartFromCleared(t *testing.T) {
+	roundTrip := func(footer dashboardClusterFooter) map[string]json.RawMessage {
+		raw, err := json.Marshal(footer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back dashboardClusterFooter
+		if err := json.Unmarshal(raw, &back); err != nil {
+			t.Fatal(err)
+		}
+		again, err := json.Marshal(back)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(again, &fields); err != nil {
+			t.Fatal(err)
+		}
+		return fields
+	}
+	if _, ok := roundTrip(dashboardClusterFooter{})["alternatorId"]; ok {
+		t.Fatal("a footer that never set the alternator must not write one")
+	}
+	if got := string(roundTrip(dashboardClusterFooter{AlternatorID: stringPtr("")})["alternatorId"]); got != `""` {
+		t.Fatalf("a cleared alternator must be kept as an empty string, got %q", got)
+	}
+	if got := string(roundTrip(dashboardClusterFooter{AlternatorID: stringPtr("alt-1")})["alternatorId"]); got != `"alt-1"` {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestValidateClusterAlternatorID(t *testing.T) {
+	long := validClusterConfig()
+	long.Footer = &dashboardClusterFooter{AlternatorID: stringPtr(strings.Repeat("a", equipmentIDMaxLen+1))}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", long)}, ""); msg == "" {
+		t.Fatal("an alternator id past the equipment id limit must be refused")
+	}
+
+	// An alternator row with no alternator is a stray reading, not an error: the
+	// tile has an engine, and the row must not need the engine's item either.
+	bare := validClusterConfig()
+	bare.Footer = &dashboardClusterFooter{AlternatorID: stringPtr(""), AltAmps: &dashboardGaugeConfig{Display: "numeric", Quantity: "raw", Unit: "raw"}}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", bare)}, ""); msg != "" {
+		t.Fatalf("a blank alternator row with no alternator is accepted, got %q", msg)
+	}
+
+	// A reading is checked like any other.
+	bad := validClusterConfig()
+	bad.Footer = &dashboardClusterFooter{AlternatorID: stringPtr("alt-1"), AltAmps: &dashboardGaugeConfig{Suffix: "../../etc", Display: "numeric", Quantity: "raw", Unit: "raw"}}
+	if msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", bad)}, ""); msg == "" {
+		t.Fatal("a reading that escapes the source must be refused on an alternator row")
+	}
+}
+
+// A stale per-row equipment id is ignored in reading, but a huge one is still refused.
+func TestValidateClusterRefusesAStaleAlternatorRowIDThatIsTooLong(t *testing.T) {
+	cluster := validClusterConfig()
+	cluster.Footer = &dashboardClusterFooter{
+		AlternatorID: stringPtr("alt-1"),
+		AltAmps:      &dashboardGaugeConfig{EquipmentID: strings.Repeat("a", equipmentIDMaxLen+1), Suffix: "current", Display: "numeric", Quantity: "raw", Unit: "raw"},
+	}
+	msg := validateDashboardWidgets([]dashboardLayoutItem{clusterWidget("cluster:abcd1234", cluster)}, "")
+	if !strings.Contains(msg, "slot equipment id too long") {
+		t.Fatalf("expected the equipment id length to be refused, got %q", msg)
 	}
 }
 

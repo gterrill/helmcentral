@@ -1538,11 +1538,24 @@ func validateClusterWidget(w dashboardLayoutItem) string {
 			return msg
 		}
 	}
-	for i, slot := range w.Cluster.Footer.slots() {
-		if slot == nil {
+	if len(w.Cluster.Footer.alternator()) > equipmentIDMaxLen {
+		return "cluster alternator id too long: " + w.ID
+	}
+	for i, e := range w.Cluster.Footer.entries() {
+		if e.slot == nil {
 			continue
 		}
-		if msg := validateClusterSlot(*slot, hasItem, fmt.Sprintf("%s footer slot %d", w.ID, i+1)); msg != "" {
+		checked, tileHasItem := *e.slot, hasItem
+		if e.alternators {
+			// A stale id of the row's own is ignored in reading, but still bounded.
+			if len(checked.EquipmentID) > equipmentIDMaxLen {
+				return "slot equipment id too long: " + fmt.Sprintf("%s footer slot %d", w.ID, i+1)
+			}
+			// Read like any other slot, but as it reads: the footer's alternator
+			// (possibly none), and never the tile's engine.
+			checked, tileHasItem = w.Cluster.Footer.pinnedToAlternator(checked), false
+		}
+		if msg := validateClusterSlot(checked, tileHasItem, fmt.Sprintf("%s footer slot %d", w.ID, i+1)); msg != "" {
 			return msg
 		}
 	}
@@ -1857,7 +1870,7 @@ func gaugeBoundPaths() []string {
 						addSlot(id, *slot)
 					}
 				}
-				for _, slot := range widget.Cluster.Footer.slots() {
+				for _, slot := range widget.Cluster.Footer.readSlots() {
 					if slot != nil {
 						addSlot(id, *slot)
 					}

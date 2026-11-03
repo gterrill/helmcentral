@@ -30,11 +30,14 @@ boat reports. See [Set up your vessel](set-up-your-vessel.md).
      of the dial. The right arc is the gearbox oil temperature, filled from
      the engine's profile like the coolant arc.
    - **Readouts**: the four cards round the dial.
-   - **Footer**: the starter battery, the alternator, the gearbox oil pressure
-     and the exhaust. Open a row to choose its equipment and the reading it
-     shows. Filling the slots picks the alternator you named for that side
-     under **Roles**. A row without equipment says **Not shown** and is left
-     off the card.
+   - **Alternator & more**: the alternator, the starter battery, the gearbox
+     oil pressure and the exhaust. Choose the alternator once, under
+     **Alternator** at the top. Its five rows below it, current, output power,
+     temperature, charge stage and charge current limit, only need a reading.
+     The alternator starts as the one you named for that side under **Roles**.
+     For the battery and the exhaust, open the row to choose its equipment and
+     the reading it shows. A row that isn't showing says **Not shown** and is
+     left off the card.
    - **Fuel**: choose **Add fuel rail**, then choose a tank for each bar
      (forward and aft). The arcs sit on the outer edge for the engine's side.
      A bar takes its colours from the tank's own alarm levels, so there's

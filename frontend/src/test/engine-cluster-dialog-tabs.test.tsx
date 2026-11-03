@@ -64,18 +64,31 @@ describe('the tab strip', () => {
         transPressure: { path: '', suffix: 'transmission.oilPressure', label: 'Gear', display: 'numeric', quantity: 'pressure', unit: 'Pa' },
       },
     })
-    expect(screen.getByRole('tab', { name: /footer/i })).toHaveTextContent('2/8')
+    expect(screen.getByRole('tab', { name: /alternator & more/i })).toHaveTextContent('2/8')
+  })
+
+  // The alternator rows read the footer's alternator: a reading with none chosen reads nothing.
+  test('counts an alternator row only once an alternator is chosen', () => {
+    const row = { path: '', suffix: 'current', label: 'Alt', display: 'numeric', quantity: 'current', unit: 'A' } as const
+    open({ footer: { alternatorId: 'alt', altAmps: row } })
+    expect(screen.getByRole('tab', { name: /alternator & more/i })).toHaveTextContent('1/8')
+  })
+
+  test('is called Alternator & more, and there is no Footer tab', () => {
+    open()
+    expect(screen.getByRole('tab', { name: /alternator & more/i })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: /^footer/i })).toBeNull()
   })
 })
 
-describe('the footer tab', () => {
+describe('the Alternator & more tab', () => {
   test('lists the eight slots closed, with the item named on a bound one', () => {
     open({
       footer: {
         battery: { path: '', suffix: 'voltage', label: 'Battery', display: 'numeric', quantity: 'potential', unit: 'V', equipmentId: 'batt' },
       },
     })
-    fireEvent.click(screen.getByRole('tab', { name: /footer/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /alternator & more/i }))
     const rows = document.querySelectorAll('details')
     expect(rows).toHaveLength(8)
     rows.forEach((row) => expect(row).not.toHaveAttribute('open'))
@@ -92,14 +105,14 @@ describe('the footer tab', () => {
         battery: { path: '', suffix: 'voltage', label: 'Battery', display: 'numeric', quantity: 'potential', unit: 'V', equipmentId: 'gone' },
       },
     })
-    fireEvent.click(screen.getByRole('tab', { name: /footer/i }))
+    fireEvent.click(screen.getByRole('tab', { name: /alternator & more/i }))
     const battery = screen.getByText('Starter battery voltage').closest('details') as HTMLElement
     expect(within(battery.querySelector('summary') as HTMLElement).getByText('Equipment missing')).toBeInTheDocument()
   })
 
   test('names what the tab count counts', () => {
     open()
-    expect(screen.getByRole('tab', { name: /^footer 0 of 8 shown$/i })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: /^alternator & more 0 of 8 shown$/i })).toBeInTheDocument()
   })
 })
 

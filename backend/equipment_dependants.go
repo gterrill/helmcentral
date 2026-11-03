@@ -148,7 +148,7 @@ func lampsUse(lamps []dashboardLamp, id string) bool {
 // called: its own title, else the item's name, else the kind of tile.
 func dependantTileTitle(w dashboardLayoutItem, id, itemName string) (string, bool) {
 	if c := w.Cluster; c != nil {
-		uses := c.EquipmentID == id
+		uses := c.EquipmentID == id || (id != "" && c.Footer.alternator() == id)
 		if c.Fuel != nil {
 			for _, bar := range c.Fuel.Bars {
 				if bar.TankID == id {

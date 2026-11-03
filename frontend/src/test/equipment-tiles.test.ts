@@ -336,8 +336,9 @@ describe('resolveCluster: the arcs and footer of Engine Cluster v2', () => {
     fuel: undefined,
     arcs: { left: slot('temperature') },
     footer: {
+      alternatorId: 'alt-2',
       transPressure: slot('transmission.oilPressure'),
-      altAmps: slot('current', { equipmentId: 'alt-2' }),
+      altAmps: slot('current'),
       battery: slot('voltage', { equipmentId: 'batt', quantity: 'potential', unit: 'V' }),
       egt: slot('exhaustTemperature', { equipmentId: 'gone' }),
     },
@@ -396,5 +397,41 @@ describe('resolveCluster: the arcs and footer of Engine Cluster v2', () => {
     const r = resolveCluster(withFooter, ctx([item(), { ...batt, signalk_source: '' }, alt], { profiles: [yanmar, alternatorProfile] }))
     if (!r.ok) throw new Error('expected a resolved cluster')
     expect(r.config.footer?.battery?.path).toBe('')
+  })
+
+  describe('the alternator rows read the footer\'s alternator', () => {
+    const rows = { altAmps: slot('current'), altWatts: slot('power') }
+    const resolveWith = (footer: EngineClusterConfig['footer'], items = [item(), alt, batt]) => {
+      const r = resolveCluster({ ...cluster, fuel: undefined, footer }, ctx(items, { profiles: [yanmar, alternatorProfile] }))
+      if (!r.ok) throw new Error('expected a resolved cluster')
+      return r.config.footer
+    }
+
+    it('ignores an equipment id an old card kept on the row', () => {
+      const footer = resolveWith({ alternatorId: 'alt-2', altAmps: slot('current', { equipmentId: 'batt' }) })
+      expect(footer?.altAmps?.path).toBe('electrical.alternator.2.current')
+    })
+
+    it('reads no data when the alternator was never chosen, and never falls back to the engine', () => {
+      const footer = resolveWith({ ...rows })
+      expect(footer?.altAmps?.path).toBe('')
+      expect(footer?.altWatts?.path).toBe('')
+    })
+
+    it('reads no data when the alternator was cleared', () => {
+      const footer = resolveWith({ alternatorId: '', ...rows })
+      expect(footer?.altAmps?.path).toBe('')
+      expect(footer?.altAmps?.zones).toBeUndefined()
+    })
+
+    it('reads no data when the alternator item is gone or not mapped', () => {
+      expect(resolveWith({ alternatorId: 'deleted', ...rows })?.altAmps?.path).toBe('')
+      expect(resolveWith({ alternatorId: 'alt-2', ...rows }, [item(), { ...alt, signalk_source: '' }])?.altAmps?.path).toBe('')
+    })
+
+    it('takes zones from the alternator\'s profile', () => {
+      const footer = resolveWith({ alternatorId: 'alt-2', ...rows })
+      expect(footer?.altAmps?.zones).toEqual([{ from: 150, to: 200, state: 'warn' }])
+    })
   })
 })

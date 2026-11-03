@@ -6,6 +6,7 @@ import { convertBetweenUnits } from '@/lib/quantities'
 import { fuelBarZones } from '@/lib/tank-levels'
 import {
   CLUSTER_FOOTER_SLOTS,
+  isClusterAlternatorSlot,
   type EngineClusterConfig,
   type GaugeGroupWidgetConfig,
   type GaugeWidgetConfig,
@@ -180,18 +181,25 @@ export function resolveCluster(
   // A footer slot may read another item (the starter battery, the alternator,
   // the exhaust). One whose item is gone or unmapped has no path and reads as
   // no data; it does not fall back to the tile's engine.
-  const slotOf = (s: GaugeWidgetConfig | undefined): GaugeWidgetConfig | undefined => {
-    if (!s) return undefined
-    if (!s.equipmentId) return slot(s)
-    const own = findItem(ctx, s.equipmentId)
+  const ownedSlot = (s: GaugeWidgetConfig, ownId: string): GaugeWidgetConfig => {
+    const own = findItem(ctx, ownId)
     if (!own || own.signalk_source === '') return { ...s, path: '', zones: undefined }
     // Its scale is its own item's profile gauge's, the one the alarm raised from
     // the same zones uses, so a scale the slot once carried cannot bend a band.
     return resolveSlot(own, profileOf(ctx, own), { ...s, min: undefined, max: undefined })
   }
+  const slotOf = (s: GaugeWidgetConfig | undefined): GaugeWidgetConfig | undefined => {
+    if (!s) return undefined
+    return s.equipmentId ? ownedSlot(s, s.equipmentId) : slot(s)
+  }
+  // The alternator rows read the footer's one alternator, whatever equipment id
+  // an old card kept on the row. With none chosen (never set, or cleared) they
+  // read nothing, and never the engine.
+  const alternatorId = config.footer?.alternatorId ?? ''
   const footer = config.footer && Object.fromEntries(
     CLUSTER_FOOTER_SLOTS.flatMap((key) => {
-      const resolved = slotOf(config.footer?.[key])
+      const row = config.footer?.[key]
+      const resolved = row && isClusterAlternatorSlot(key) ? ownedSlot(row, alternatorId) : slotOf(row)
       return resolved ? [[key, resolved]] : []
     }),
   )

@@ -95,10 +95,19 @@ func TestFooterSlotOrderMatchesTheSharedFixture(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// alternatorId is the footer's one alternator, not a slot: it has no place in
+	// the alarm id space and stays last.
 	var tags []string
 	typ := reflect.TypeOf(dashboardClusterFooter{})
 	for i := 0; i < typ.NumField(); i++ {
-		tags = append(tags, strings.Split(typ.Field(i).Tag.Get("json"), ",")[0])
+		tag := strings.Split(typ.Field(i).Tag.Get("json"), ",")[0]
+		if tag == "alternatorId" {
+			if i != typ.NumField()-1 {
+				t.Fatalf("alternatorId must be the last field, it is %d of %d", i+1, typ.NumField())
+			}
+			continue
+		}
+		tags = append(tags, tag)
 	}
 	if !reflect.DeepEqual(tags, want) {
 		t.Fatalf("struct field order %v differs from the fixture %v", tags, want)
@@ -106,16 +115,19 @@ func TestFooterSlotOrderMatchesTheSharedFixture(t *testing.T) {
 
 	footer := &dashboardClusterFooter{}
 	v := reflect.ValueOf(footer).Elem()
-	for i := 0; i < v.NumField(); i++ {
+	for i := 0; i < len(want); i++ {
 		v.Field(i).Set(reflect.ValueOf(&dashboardGaugeConfig{Label: fmt.Sprint(i)}))
 	}
-	slots := footer.slots()
-	if len(slots) != len(want) {
-		t.Fatalf("slots() has %d entries for %d footer slots (no gaps)", len(slots), len(want))
+	entries := footer.entries()
+	if len(entries) != len(want) {
+		t.Fatalf("entries() has %d entries for %d footer slots (no gaps)", len(entries), len(want))
 	}
-	for i, slot := range slots {
-		if slot == nil || slot.Label != fmt.Sprint(i) {
-			t.Fatalf("slots()[%d] is not the field %q: %+v", i, want[i], slot)
+	for i, e := range entries {
+		if e.slot == nil || e.slot.Label != fmt.Sprint(i) {
+			t.Fatalf("entries()[%d] is not the field %q: %+v", i, want[i], e.slot)
+		}
+		if got := strings.HasPrefix(want[i], "alt"); e.alternators != got {
+			t.Fatalf("entries()[%d] (%s): alternator row is %v, want %v", i, want[i], e.alternators, got)
 		}
 	}
 }

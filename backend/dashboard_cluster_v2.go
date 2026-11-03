@@ -39,16 +39,71 @@ type dashboardClusterFooter struct {
 	AltLimit      *dashboardGaugeConfig `json:"altLimit,omitempty"`
 	TransPressure *dashboardGaugeConfig `json:"transPressure,omitempty"`
 	Egt           *dashboardGaugeConfig `json:"egt,omitempty"`
+
+	// AlternatorID is the one alternator the five alternator rows (AltAmps to
+	// AltLimit) read. It is not a slot and takes no place in the alarm ids, so it
+	// stays last. nil means never set; a pointer to "" means the operator cleared
+	// it, and both mean the rows read nothing.
+	AlternatorID *string `json:"alternatorId,omitempty"`
 }
 
-func (f *dashboardClusterFooter) slots() []*dashboardGaugeConfig {
+// footerEntry is one footer slot as saved, and whether it is one of the five
+// alternator rows, which read the footer's alternator.
+type footerEntry struct {
+	slot        *dashboardGaugeConfig
+	alternators bool
+}
+
+// entries lists every footer slot in the order that fixes the alarm ids, each
+// with the fact that it reads the footer's alternator. The order and that fact
+// live together here.
+func (f *dashboardClusterFooter) entries() []footerEntry {
 	if f == nil {
-		return make([]*dashboardGaugeConfig, clusterFooterSlotCount)
+		return make([]footerEntry, clusterFooterSlotCount)
 	}
-	return []*dashboardGaugeConfig{
-		f.Battery, f.AltAmps, f.AltWatts, f.AltTemp, f.AltStage, f.AltLimit,
-		f.TransPressure, f.Egt,
+	return []footerEntry{
+		{slot: f.Battery},
+		{slot: f.AltAmps, alternators: true}, {slot: f.AltWatts, alternators: true}, {slot: f.AltTemp, alternators: true},
+		{slot: f.AltStage, alternators: true}, {slot: f.AltLimit, alternators: true},
+		{slot: f.TransPressure},
+		{slot: f.Egt},
 	}
+}
+
+func (f *dashboardClusterFooter) alternator() string {
+	if f == nil || f.AlternatorID == nil {
+		return ""
+	}
+	return *f.AlternatorID
+}
+
+// pinnedToAlternator is an alternator row as it reads: the footer's alternator
+// whatever equipment id the row carries (an old card named one per row). The id
+// is empty when no alternator is chosen, and the row then reads nothing. It
+// never falls back to the engine.
+func (f *dashboardClusterFooter) pinnedToAlternator(slot dashboardGaugeConfig) dashboardGaugeConfig {
+	slot.EquipmentID = f.alternator()
+	return slot
+}
+
+// readSlots is slots() with what each slot reads settled: an alternator row is
+// pinned to the footer's alternator, and is nil when there is none. The others
+// are as saved.
+func (f *dashboardClusterFooter) readSlots() []*dashboardGaugeConfig {
+	entries := f.entries()
+	out := make([]*dashboardGaugeConfig, len(entries))
+	for i, e := range entries {
+		switch {
+		case e.slot == nil:
+		case !e.alternators:
+			out[i] = e.slot
+		default:
+			if pinned := f.pinnedToAlternator(*e.slot); pinned.EquipmentID != "" {
+				out[i] = &pinned
+			}
+		}
+	}
+	return out
 }
 
 // validateClusterSlot is validateSlotConfig plus the per-slot item.
