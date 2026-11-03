@@ -215,7 +215,7 @@ function LinkElement(props: PlateElementProps) {
   )
 }
 
-// Same trust boundary as note-markdown-impl.tsx / ADR 0116: `hc-doc:<uuid>`
+// Same trust boundary as note-markdown-impl.tsx / ADR 0116-a: `hc-doc:<uuid>`
 // is the only src shape rewritten to a real, same-origin <img>. A note
 // hand-edited outside Helmcentral could carry anything in `url` - the
 // editor is not exempt from the "no attacker-chosen outbound request"
@@ -650,7 +650,7 @@ function ToolbarButton({ label, icon: Icon, onClick }: { label: string; icon: Lu
 
 // Takes a URL the operator TYPES, which makes this the one control in the
 // editor that can put an arbitrary scheme into a note body. It refuses
-// anything resolveNoteHref calls `unsafe` (ADR 0116's allow-list:
+// anything resolveNoteHref calls `unsafe` (ADR 0116-a's allow-list:
 // hc-note:, hc-doc:, #anchor, http(s):, mailto:, tel:) rather than
 // inserting it.
 //
@@ -715,7 +715,7 @@ function LinkButton({ editor }: { editor: PlateEditor }) {
 // already in the library (plan §5's `hc-doc:<uuid>` scheme, pasted by id -
 // the button's original, and still fastest, path when the photo is already
 // uploaded), or a fresh Take photo/Add from library pick uploaded here and
-// then referenced the same way. docs/adr/0116's dated amendment covers why:
+// then referenced the same way. docs/adr/0116-a's dated amendment covers why:
 // an operator standing over the job photographs it and gets it into the
 // note in one step, rather than a trip to Documents first to upload it and
 // copy its id back.

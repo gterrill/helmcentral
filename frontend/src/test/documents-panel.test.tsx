@@ -932,7 +932,7 @@ describe('DocumentsPanel', () => {
     expect(onEditDocument).toHaveBeenCalledWith('doc-7')
   })
 
-  // ADR 0116: a filed note is a document with mime: 'text/markdown', and the
+  // ADR 0116-a: a filed note is a document with mime: 'text/markdown', and the
   // viewer renders it through NoteMarkdown - the same renderer the Notes
   // panel's own reader uses - rather than the raw <pre> every other text
   // mime still gets. This makes a note readable from Documents too, and
@@ -1364,7 +1364,7 @@ describe('DocumentsPanel', () => {
     // One New menu, Folder first, Note carrying its kinds in a submenu.
     // Auto leads that submenu and must pass NO kind, so the backend's own
     // classifier answers rather than the menu guessing on the operator's
-    // behalf (ADR 0116).
+    // behalf (ADR 0116-a).
     it('New note → Auto opens the capture sheet on Auto, with no onCaptureNote prop anywhere', async () => {
       render(<DocumentsPanel />)
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2026-10-07). Builds on [ADR 0131](0131-mate-diagnoses-missing-and-stale-telemetry.md), which gave Mate
+Accepted (2026-10-07). Builds on [ADR 0131-a](0131-a-mate-diagnoses-missing-and-stale-telemetry.md), which gave Mate
 `check_signalk_paths`, `get_last_recorded` and `get_path_history`.
 
 ## Context
@@ -15,7 +15,7 @@ state of charge and voltages for every passage.
 
 Two causes:
 
-1. The only prompt guidance pointing at InfluxDB (ADR 0131) is about telemetry that is missing, stale,
+1. The only prompt guidance pointing at InfluxDB (ADR 0131-a) is about telemetry that is missing, stale,
    frozen or unavailable. Nothing said that a question about how a reading behaved over time, or on past
    runs, belongs to the same tools.
 2. Mate had no way to turn "the last few passages" into time windows. `get_path_history` needs an exact
@@ -23,7 +23,7 @@ Two causes:
 
 ## Decision
 
-- **A prompt rule, fixed wording, next to the ADR 0131 block.** For questions about what a reading did
+- **A prompt rule, fixed wording, next to the ADR 0131-a block.** For questions about what a reading did
   over time, past behaviour, trends, when something started or stopped, or "on the last few passages",
   the logged telemetry is the primary source: find paths with `check_signalk_paths` or
   `get_last_recorded`, get windows from `list_passages`, then call `get_path_history` per window.
@@ -51,7 +51,7 @@ Two causes:
   motoring slowly through a long no-wake zone, is misjudged. The result states the threshold so Mate can
   say how it found the windows.
 - Distance is an integral of 5-minute mean speeds and is approximate.
-- The operator needs the history log set up, as for the ADR 0131 tools.
+- The operator needs the history log set up, as for the ADR 0131-a tools.
 
 ## Alternatives considered
 

@@ -322,7 +322,7 @@ func TestVesselStatus_EnginesRunningOffAndSilent(t *testing.T) {
 	d.telemetry = func(time.Time) (telemetryReader, error) { return statusTestTelemetry(), nil }
 
 	// Keyed off: the engine computer is powered down so its readings stop, and
-	// the engine state says so (ADR 0163).
+	// the engine state says so (ADR 0163-a).
 	tel := statusTestTelemetry()
 	delete(tel.Samples, "propulsion.0.revolutions")
 	d.telemetry = func(time.Time) (telemetryReader, error) { return tel, nil }

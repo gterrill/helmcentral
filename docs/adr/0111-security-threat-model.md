@@ -146,7 +146,7 @@ MCP endpoint at `/mcp`.
 
 ## Addendum (2026-10-30): the public address for /mcp
 
-ADR 0232 allows one deliberate exception to the trusted-LAN model. An operator
+ADR 0232-a allows one deliberate exception to the trusted-LAN model. An operator
 who wants Claude's phone and web connectors to reach the boat can mount `/mcp`
 alone on Tailscale Funnel, which gives it a public HTTPS address.
 

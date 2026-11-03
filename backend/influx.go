@@ -413,7 +413,7 @@ func queryInfluxPathRange(path string, start, stop time.Time, every string) ([]t
 // aggregated to every-sized buckets, optionally restricted to one $source tag
 // value. It generalises queryInfluxPathRange (which always mean-aggregates,
 // with no source filter) two ways for get_path_history's per-bucket
-// min/mean/max (Mate diagnostics, ADR 0131): aggFn picks which InfluxDB
+// min/mean/max (Mate diagnostics, ADR 0131-a): aggFn picks which InfluxDB
 // aggregate function runs per bucket, and source, when given, narrows to one
 // $source rather than mixing every source that has ever published this path.
 //
@@ -647,7 +647,7 @@ func buildInfluxFirstLastFlux(bucket, field, path, source string, start, stop ti
 }
 
 // influxLastRecordedRow is one measurement+source pair's most recent
-// recorded point, as get_last_recorded (Mate diagnostics, ADR 0131) reports
+// recorded point, as get_last_recorded (Mate diagnostics, ADR 0131-a) reports
 // it. This answers "when did X stop" for a path that queryInfluxPathTrend/
 // queryInfluxPathRange cannot: both need the path named up front and a
 // window to look in, and return nothing once no point falls in that window -

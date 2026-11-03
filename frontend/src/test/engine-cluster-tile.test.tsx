@@ -696,7 +696,7 @@ describe('staleness (ADR 0083)', () => {
  * stop. The tile then shows OFF in muted chrome instead of a stale alarm, and a
  * lost feed keeps the amber stale treatment.
  */
-describe('engine off (ADR 0163)', () => {
+describe('engine off (ADR 0163-a)', () => {
   const since = '2026-10-06T04:30:00Z'
   const engineAges = Object.fromEntries(Object.keys(values).filter((p) => p.startsWith('propulsion.port.')).map((p) => [p, 9000]))
 

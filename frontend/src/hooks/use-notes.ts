@@ -3,7 +3,7 @@ import { apiRequest, useApiQuery } from '@/lib/api-query'
 import type { ChecklistItem, ChecklistRun } from './use-checklist-run'
 import { invalidateDocumentLists, type DocumentTag } from './use-documents'
 
-// Plan "Notes and the Boat's Manual" §7 / ADR 0116: the Notes inbox's data
+// Plan "Notes and the Boat's Manual" §7 / ADR 0116-a: the Notes inbox's data
 // layer. Deliberately small next to use-documents.ts - Phase 2 needs list,
 // get-one, create and patch, nothing else (no folder browsing, no search,
 // no tag/embeddings plumbing; those either don't apply to the inbox view or

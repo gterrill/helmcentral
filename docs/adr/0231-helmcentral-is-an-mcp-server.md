@@ -240,6 +240,6 @@ tools out of "never" (their rows below are the original decisions).
   `helmcentral.sqlite` as before. Tokens are in it, as hashes.
 - The go-sdk is a new dependency.
 - Phone and web Claude clients cannot connect over the LAN or Tailscale alone.
-  The tunnel decision is made in ADR 0232 (Tailscale Funnel, `/mcp` only).
+  The tunnel decision is made in ADR 0232-a (Tailscale Funnel, `/mcp` only).
 - Proposal tools, if ever offered, will need their own ADR and a token tier
   above read.

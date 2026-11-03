@@ -4,7 +4,7 @@
 
 Accepted (2026-10-04). Superseded in part by [ADR 0227](0227-watches.md): a timed watch is now a saved one-off watch, so it survives a restart and its report is also kept as a run. The sampling, the report and the chat follow-up below are unchanged; "a restart cancels every watch" no longer holds. Builds on [ADR 0093](0093-onboard-assistant-over-openrouter.md) (Mate and
 its tool loop), [ADR 0105](0105-mate-streams-its-answer.md) (a reply runs server-side and a page
-rejoins it) and [ADR 0131](0131-mate-diagnoses-missing-and-stale-telemetry.md) (Mate reads the live snapshot and
+rejoins it) and [ADR 0131-a](0131-a-mate-diagnoses-missing-and-stale-telemetry.md) (Mate reads the live snapshot and
 InfluxDB for path freshness and history).
 
 ## Context

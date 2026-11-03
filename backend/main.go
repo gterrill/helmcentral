@@ -99,7 +99,7 @@ func main() {
 	}))
 	e.Use(middleware.Recover())
 	// Through Tailscale Funnel only /mcp and its sign-in paths may be reached
-	// (funnel_guard.go, ADRs 0232 and 0233). Pre, so it runs ahead of routing
+	// (funnel_guard.go, ADRs 0232-a and 0233). Pre, so it runs ahead of routing
 	// and covers every path.
 	e.Pre(newFunnelGuard().middleware())
 	// corsMiddleware (cors.go) replaces AllowOrigins: []string{"*"}: that

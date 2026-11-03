@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { apiRequest, setQueryData, useApiQuery } from '@/lib/api-query'
 import { invalidateDocumentLists } from '@/hooks/use-documents'
 
-// Plan "Notes and the Boat's Manual" §7 / ADR 0116: the Manuals panel's data
+// Plan "Notes and the Boat's Manual" §7 / ADR 0116-a: the Manuals panel's data
 // layer. Reads go through useApiQuery and writes through apiRequest (ADR
 // 0173), which throws the server's own message (AGENTS.md fallback policy).
 // Like use-documents.ts's folderId, this hook is parametrised

@@ -4,7 +4,7 @@
 
 Accepted (2026-09-30). Amends [ADR 0138](0138-maintenance-rules-list-and-service-log.md),
 whose consequences named "no Mate tool" as out of scope for that cycle.
-Builds on [ADR 0131](0131-mate-diagnoses-missing-and-stale-telemetry.md)
+Builds on [ADR 0131-a](0131-a-mate-diagnoses-missing-and-stale-telemetry.md)
 (Mate's read-only diagnostic tools), [ADR 0106](0106-documents-in-the-binary.md)'s
 search and citation links, and the "today" amendment to ADR 0138 (the server
 never works out the operator's date for itself).

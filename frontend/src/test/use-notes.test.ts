@@ -3,7 +3,7 @@ import { renderHook, act, waitFor } from '@testing-library/react'
 
 import { useNotes } from '@/hooks/use-notes'
 
-// ADR 0116 / plan §7: use-notes.ts owns list/get/create/patch for the Notes
+// ADR 0116-a / plan §7: use-notes.ts owns list/get/create/patch for the Notes
 // inbox. Same routedFetch idiom as use-documents.test.ts (a small router by
 // method + URL, since one hook action can trigger more than one request -
 // a write, then its own refresh).

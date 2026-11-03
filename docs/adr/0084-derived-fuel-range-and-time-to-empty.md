@@ -163,7 +163,7 @@ age became hours, and the two-minute guard blanked economy, time to empty and
 range on every single-engine run.
 
 An engine whose rate is older than the two-minute limit is now left out of
-the total burn only when the engine reads as off in ADR 0163's engine states,
+the total burn only when the engine reads as off in ADR 0163-a's engine states,
 the same reading that puts `OFF` on the Engine Cluster tile, so the tile and
 these figures never disagree. That state is ADR 0147's key-off test applied
 per propulsion id: every source publishing that engine has gone quiet, and

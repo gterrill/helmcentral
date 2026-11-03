@@ -1,4 +1,4 @@
-# ADR 0131: Mate Diagnoses Missing and Stale Telemetry
+# ADR 0131-a: Mate Diagnoses Missing and Stale Telemetry
 
 ## Status
 

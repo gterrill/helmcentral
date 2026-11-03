@@ -139,7 +139,7 @@ func signalKPathsHandler(c echo.Context) error {
 }
 
 // signalKPathSample is one leaf of the self tree as check_signalk_paths
-// (Mate diagnostics, ADR 0131) needs it: collectSignalKPaths' own walk,
+// (Mate diagnostics, ADR 0131-a) needs it: collectSignalKPaths' own walk,
 // extended to carry the fields it drops ($source, timestamp) plus an age
 // computed the same way pathAge computes one for a single known path.
 //

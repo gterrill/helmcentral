@@ -112,7 +112,7 @@ describe('TestNoteEditor_DisabledNodesAreAbsentFromTheToolbar', () => {
 // The Link toolbar button takes a URL the operator TYPES, which makes it the
 // one control in this editor that can put an arbitrary scheme into a note
 // body. note-markdown-impl.tsx already refuses to render an unsafe href (it
-// resolves to `kind: 'unsafe'` and comes out as inert text, ADR 0116), so
+// resolves to `kind: 'unsafe'` and comes out as inert text, ADR 0116-a), so
 // nothing here is an XSS hole - but silently accepting `javascript:` and
 // producing a link that quietly renders as dead text later is exactly the
 // masked failure AGENTS.md's fallback policy rules out. It refuses at the

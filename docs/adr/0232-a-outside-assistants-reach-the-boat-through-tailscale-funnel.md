@@ -1,4 +1,4 @@
-# ADR 0232: Outside Assistants Reach The Boat Through Tailscale Funnel
+# ADR 0232-a: Outside Assistants Reach The Boat Through Tailscale Funnel
 
 ## Status
 

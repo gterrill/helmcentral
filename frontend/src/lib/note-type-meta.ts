@@ -16,7 +16,7 @@ import type { NoteType } from '@/hooks/use-notes'
 // (both there and in the moved manual tree rows, components/documents/
 // manual-folder-view.tsx) that this table used to serve alone.
 //
-// The pre-attentive type table (plan §7, ADR 0116). Order matches the plan's
+// The pre-attentive type table (plan §7, ADR 0116-a). Order matches the plan's
 // own table (and classifyNoteType's ordering traps: a procedure containing a
 // phone number is still a procedure, so procedure is deliberately not first
 // just because contact happens to be listed first here - the DROPDOWN/facet

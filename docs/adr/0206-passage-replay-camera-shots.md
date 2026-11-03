@@ -116,5 +116,5 @@ passages themselves: the passage finder splits, the operator merges and trims
   re-imported with different times they show where the clock now says.
 - A shot time is validated only when it is created or moved; a later trim may
   leave a shot outside every passage, where it is kept but not played.
-- The pace stretches only the replay. Exports and the embedded player (ADR 0199)
+- The pace stretches only the replay. Exports and the embedded player (ADR 0199-a)
   do not use shots yet.

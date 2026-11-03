@@ -3,14 +3,14 @@
 ## Status
 
 Accepted (2026-09-20). Phase 4 of the plan
-[ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md) opened.
-ADR 0116 named this ADR's number in advance ("ADR 0118 will cover checklist
+[ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md) opened.
+ADR 0116-a named this ADR's number in advance ("ADR 0118 will cover checklist
 runs, when that phase ships") — this is that phase.
 
 ## Context
 
 A note's checklist is GFM task-list syntax in its body: `- [ ] Seacocks
-open`. ADR 0116 already renders that read-only wherever a note is read, and
+open`. ADR 0116-a already renders that read-only wherever a note is read, and
 ADR 0117's editor round-trips it losslessly. Neither of those decisions
 says anything about what happens when an operator actually runs the list —
 taps down the seacocks one by one during a shutdown, gets called away at
@@ -169,7 +169,7 @@ both foreign keys (`note_checklist_runs.document_id → documents.id`,
 
 First, deleting a note deletes every run and every tick it ever had, in
 one cascade, with no sweep, no orphan-detection job and no manual cleanup
-code anywhere in this feature. This is the entire orphan story ADR 0116
+code anywhere in this feature. This is the entire orphan story ADR 0116-a
 already leaned on for a note's blob-on-disk; the same foreign-key
 machinery does the identical job here for a run's rows.
 
@@ -189,7 +189,7 @@ statement per tick, nowhere near enough to justify a dedicated store.
 used unmodified from both places a note is read: `documents-panel.tsx`'s
 viewer Sheet and `documents/manual-folder-view.tsx`'s reading pane (the
 "one panel, not three" revision means there are exactly two, not three —
-see ADR 0116's own addendum). "Start checklist" swaps `NoteMarkdown` for
+see ADR 0116-a's own addendum). "Start checklist" swaps `NoteMarkdown` for
 `ChecklistRunner` in place; there is no route, no second Sheet and no
 navigation event, consistent with ADR 0074's existing rule that a note's
 reading and editing sessions stay out of the URL.

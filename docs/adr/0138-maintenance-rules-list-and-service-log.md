@@ -6,9 +6,9 @@ Accepted (2026-09-27). Builds on [ADR 0123](0123-inventory-begins-with-the-equip
 (the equipment registry), whose own consequences section named exactly this
 gap: "Service intervals remain parsed, served and unconsumed. The instance
 record they were waiting for now exists, which is what makes the
-maintenance cycle buildable." Reuses [ADR 0131](0131-mate-diagnoses-missing-and-stale-telemetry.md)'s
+maintenance cycle buildable." Reuses [ADR 0131-a](0131-a-mate-diagnoses-missing-and-stale-telemetry.md)'s
 live-path-reading machinery for hours, [ADR 0127](0127-bins-open-from-a-tag-items-carry-photos.md)'s
-shared upload intake for log-entry photos, and [ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md)'s
+shared upload intake for log-entry photos, and [ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md)'s
 note store for procedure notes.
 
 ## Context
@@ -77,7 +77,7 @@ rule applies to defaults as much as to hard-coded thresholds.
 ### 3. Hours are read live, the same way Mate already does
 
 An item's current true hours come from its own `hour_meter_path` via the
-identical snapshot-reading path ADR 0131's diagnostic tools use
+identical snapshot-reading path ADR 0131-a's diagnostic tools use
 (`snapshotAlarmReader`/`pathAge`) - not a second way of asking SignalK "what
 does this say and how old is that." SignalK publishes runtime in seconds;
 `currentEquipmentHours` (`backend/maintenance_hours.go`) converts to hours
@@ -167,7 +167,7 @@ liferaft service belongs to.
 ### 8. A procedure note is a link, not a body
 
 A rule may link one document as its procedure - reusing the notes feature
-(ADR 0116) rather than inventing a second place to write steps. "Create
+(ADR 0116-a) rather than inventing a second place to write steps. "Create
 procedure note" (`createMaintenanceProcedureNote`) writes a minimal
 Procedure-type note titled from the rule's own description and links it in
 one action; this duplicates the small essential slice of

@@ -108,7 +108,7 @@ describe('HelpMarkdown img handling', () => {
     expect(container.querySelector('img')).toBeNull()
   })
 
-  // Regression guard (ADR 0116): note-markdown-impl.tsx introduced a SECOND
+  // Regression guard (ADR 0116-a): note-markdown-impl.tsx introduced a SECOND
   // markdown renderer that DOES permit an <img>, but only for one narrow,
   // validated src shape (hc-doc:<uuid>). This pins that HelpMarkdown itself
   // never grew that hole - disallowedElements={['img']} keeps dropping every

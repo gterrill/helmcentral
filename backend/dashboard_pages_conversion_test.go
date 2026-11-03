@@ -46,7 +46,7 @@ func TestLoadDashboardPages_ConvertsARealisticFileAndIsIdempotent(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 
 	out, err := os.ReadFile(path)
 	if err != nil {
@@ -125,7 +125,7 @@ func TestLoadDashboardPages_ConvertsARealisticFileAndIsIdempotent(t *testing.T) 
 
 	// Second load must change nothing.
 	before := string(out)
-	loadDashboardPages()
+	loadDashboardPagesForTest(t)
 	after, _ := os.ReadFile(path)
 	if string(after) != before {
 		t.Errorf("second load rewrote the file:\n--- before ---\n%s\n--- after ---\n%s", before, after)

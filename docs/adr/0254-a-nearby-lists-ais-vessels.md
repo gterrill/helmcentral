@@ -1,4 +1,4 @@
-# ADR 0254: The Nearby List Shows AIS Vessels In A Group Of Their Own
+# ADR 0254-a: The Nearby List Shows AIS Vessels In A Group Of Their Own
 
 ## Status
 

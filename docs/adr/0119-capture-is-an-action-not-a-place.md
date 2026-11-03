@@ -7,7 +7,7 @@ ADR 0121; the rest stands.
 
 ## Context
 
-[ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md) built a
+[ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md) built a
 note as a document and a manual as a folder, then shipped both behind a
 dedicated Notes panel: a sidebar row whose whole page was a capture textarea
 above an unfiled-notes list. That panel's own comment called out its
@@ -15,7 +15,7 @@ guiding rule directly — "capture is global, retrieval is a panel" — and
 then built capture as the top of one specific panel anyway, because at the
 time that panel was also the only place retrieval happened.
 
-Once Documents absorbed retrieval (ADR 0116's addendum), that reasoning
+Once Documents absorbed retrieval (ADR 0116-a's addendum), that reasoning
 stopped applying. Capture sitting at the top of a Documents view is no
 better than it was at the top of a Notes view: a skipper mid-repair with an
 observation worth writing down is, by definition, not already looking at a
@@ -52,7 +52,7 @@ opening the capture sheet writes nothing to `window.location`.
 ### A synthetic `Auto` type default
 
 The sheet's type select defaults to a value that is not one of the six real
-`note_type`s: `Auto`. This is deliberately not the same choice ADR 0116
+`note_type`s: `Auto`. This is deliberately not the same choice ADR 0116-a
 made for the inbox row's icon, which showed a real classified type the
 moment the note existed. Capture happens *before* classification does, so a
 pre-filled real type would be showing a guess as though the operator had
@@ -83,7 +83,7 @@ sends `type: "<value>"`, which the same handler records as
 (`backend/notes_store.go`) already refuses to let anything — Mate's later
 enrichment included — overwrite an operator's choice. `Auto` is therefore
 not a seventh value threaded through the backend; it is purely a frontend
-convention for "send nothing," resolved entirely by logic ADR 0116 already
+convention for "send nothing," resolved entirely by logic ADR 0116-a already
 shipped.
 
 ### `Auto` resolves locally, and only ever locally, at capture time
@@ -92,7 +92,7 @@ shipped.
 memory — no network call, no OpenRouter round trip, no dependency on Mate
 being configured at all. Choosing `Auto` in the sheet can never make capture
 wait on anything beyond the `POST /api/notes` itself. This is not an
-optimisation; it is load-bearing. ADR 0116 states the rule this feature
+optimisation; it is load-bearing. ADR 0116-a states the rule this feature
 answers to directly: **Mate is an accelerant, never a dependency.**
 PRODUCT.md promises no cloud account or subscription, so an operator with no
 OpenRouter key — or simply no signal — is a fully supported user, and the
@@ -101,7 +101,7 @@ instant it happens) is exactly the moment a network call is least
 acceptable to gate on.
 
 Mate may still upgrade `auto` to `mate` later, during enrichment, precisely
-as ADR 0116 §"Type is a column, derived locally, and the operator always
+as ADR 0116-a §"Type is a column, derived locally, and the operator always
 wins" already specifies. Nothing about `Auto`'s meaning at capture time
 changes that later, optional step.
 
@@ -127,7 +127,7 @@ about consent. Architecturally, it reverses the "never blocks on the
 network" property this ADR's whole point is to guarantee — the instant
 `Auto` sometimes calls out and sometimes doesn't, the operator can no longer
 predict whether pressing Capture will hang on a bad connection. On consent:
-ADR 0116 already set `enrich = false` as the default for a captured note,
+ADR 0116-a already set `enrich = false` as the default for a captured note,
 on the reasoning that a one-tap capture at the helm is not the same
 deliberate act as an upload, and *"ring Dave about the mooring, 0412…"* is
 exactly the kind of note an operator would not expect to leave the boat
@@ -163,13 +163,13 @@ on first paint; its own `useNotes()` instance only ever fetches once the
 operator has opened it for the first time.
 
 Nothing under `backend/` changed. `Auto`'s entire behaviour is already
-`createNoteHandler`'s handling of an absent `type` field, which ADR 0116
+`createNoteHandler`'s handling of an absent `type` field, which ADR 0116-a
 shipped; this ADR only decided what the frontend's default selection means
 and documented why it must stay that way.
 
 ## Related
 
-- [ADR 0116](0116-notes-are-documents-and-folders-are-the-manual.md) is the
+- [ADR 0116-a](0116-a-notes-are-documents-and-folders-are-the-manual.md) is the
   substrate this sits on top of, including `classifyNoteType`,
   `note_type_source` and why enrichment defaults off for a note.
 - [ADR 0117](0117-markdown-is-the-storage-format-not-the-authoring-format.md)

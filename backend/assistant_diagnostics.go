@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// This file implements the three read-only diagnostic tools (ADR 0131) that
+// This file implements the three read-only diagnostic tools (ADR 0131-a) that
 // let Mate answer "when did X stop updating" and "is X still live" itself,
 // instead of sending the operator to the SignalK admin console:
 //
@@ -326,7 +326,7 @@ const (
 	// plenty for the ordinary "did this stop recently" question; the ceiling
 	// is a conservative guess, not a read of the InfluxDB bucket's actual
 	// configured retention (this backend has no way to introspect that - see
-	// ADR 0131) - asking past the bucket's real retention simply finds
+	// ADR 0131-a) - asking past the bucket's real retention simply finds
 	// nothing that far back, which InfluxDB treats as an empty range rather
 	// than an error, so a ceiling wider than the real retention is safe, just
 	// sometimes pointless.

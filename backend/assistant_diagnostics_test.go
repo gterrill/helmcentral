@@ -19,7 +19,7 @@ import (
 // cleanly rather than panic on an unset dep.
 var errNoVesselState = errors.New("vessel state unavailable in test")
 
-// This file tests the three Mate diagnostic tools (ADR 0131):
+// This file tests the three Mate diagnostic tools (ADR 0131-a):
 // check_signalk_paths (executeCheckSignalKPaths, assistant_diagnostics.go),
 // get_last_recorded and get_path_history, plus the Flux-building helpers in
 // influx.go they depend on. Every test injects a fake dependency - no live
@@ -103,7 +103,12 @@ func TestExecuteCheckSignalKPaths_NoFilterShowsConnectionAndSourcesOnly(t *testi
 	}
 }
 
+// The tests that start with useFreshBoatZone build tool deps with no vessel
+// state, so the boat's clock follows the last-fix rule. Another test's
+// remembered zone would change every label they check; start each such test
+// with it.
 func TestExecuteCheckSignalKPaths_FilterMatchesPathsAcrossTree(t *testing.T) {
+	useFreshBoatZone(t)
 	now := time.Date(2026, 9, 25, 6, 0, 0, 0, time.UTC)
 	snap := signalKDiagnosticsSnapshot{
 		HasSelfTree: true,
@@ -326,6 +331,7 @@ func TestExecuteGetLastRecorded_RequiresPathPrefixOrSource(t *testing.T) {
 }
 
 func TestExecuteGetLastRecorded_ReturnsRowsSortedOldestFirst(t *testing.T) {
+	useFreshBoatZone(t)
 	now := time.Date(2026, 9, 25, 0, 34, 0, 0, time.UTC)
 	stopped := time.Date(2026, 9, 21, 0, 34, 0, 0, time.UTC) // 4 days before now
 	stillFresh := now.Add(-2 * time.Minute)
@@ -566,6 +572,7 @@ func TestExecuteGetPathHistory_EndMustBeAfterStart(t *testing.T) {
 }
 
 func TestExecuteGetPathHistory_ClampsSpanToMax90Days(t *testing.T) {
+	useFreshBoatZone(t)
 	now := time.Date(2026, 9, 25, 0, 0, 0, 0, time.UTC)
 	var calls []capturedPathHistoryCall
 	deps := assistantToolDeps{
@@ -730,6 +737,7 @@ func stubInfluxPathHistoryStatFullyPopulated(t *testing.T) func(ctx context.Cont
 // assistantMaxToolResultChars, and that when a shrink is needed it must not
 // discard the most recent (final) bucket.
 func TestExecuteGetPathHistory_FitsUnderCapWithNoTruncationForRepresentativeSpans(t *testing.T) {
+	useFreshBoatZone(t)
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	for _, hoursBack := range []float64{3, 24 * 7} {
 		deps := assistantToolDeps{
@@ -1225,6 +1233,7 @@ func TestBuildInfluxPathStatFlux_RejectsHostileInterpolationInPath(t *testing.T)
 // once gap_count exceeded the cap, while several long-past, less relevant
 // gaps were kept instead.
 func TestExecuteGetPathHistory_CapsGapsToMostRecentIncludingOpenGap(t *testing.T) {
+	useFreshBoatZone(t)
 	now := time.Date(2026, 9, 25, 12, 0, 0, 0, time.UTC)
 	const hoursBack = 24.0
 	start := now.Add(-hoursBack * time.Hour)
@@ -1482,6 +1491,7 @@ func TestExecuteGetPathHistory_FullSpanDataIsUnchanged(t *testing.T) {
 // Narrowing the buckets to the span that holds data must not hide it, while
 // the empty time before first_seen stays unreported (first_seen says that).
 func TestExecuteGetPathHistory_ReportsTrailingSilenceAsAGap(t *testing.T) {
+	useFreshBoatZone(t)
 	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	firstSeen := now.Add(-6*time.Hour + 10*time.Second) // 06:00:10
 	lastSeen := now.Add(-3 * time.Hour)                 // 09:00:00

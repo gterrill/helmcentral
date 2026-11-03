@@ -9,6 +9,10 @@ import (
 // not as an RFC3339 UTC stamp.
 func TestAlarmEmailTimeIsBoatTime(t *testing.T) {
 	useFreshBoatZone(t)
+	// A fix counts only while the GNSS gate trusts it; another test's critical
+	// gate would turn this position into "no fix".
+	resetGNSSPositionValidationState()
+	t.Cleanup(resetGNSSPositionValidationState)
 	orig := globalSignalKSnapshot
 	globalSignalKSnapshot = snapshotWithSelfValues(map[string]any{
 		"navigation.position": map[string]any{"latitude": -27.5, "longitude": 153.0},

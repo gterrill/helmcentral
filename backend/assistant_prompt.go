@@ -932,7 +932,7 @@ func assistantSystemPromptParts(pc assistantPromptContext) (stable, live string)
 	b.WriteString("The composable units of a Helmcentral dashboard page are called tiles, and tile is the word " +
 		"to use when talking to the operator about one. Widget is not a term this product uses.\n\n")
 
-	// 2c1. Diagnostics (ADR 0131) - fixed wording, identical for every turn.
+	// 2c1. Diagnostics (ADR 0131-a) - fixed wording, identical for every turn.
 	// This is the fix for the exact failure the ADR opens with: asked when a
 	// feed stopped, Mate used to say it had no access to historical logs or
 	// per-path timestamps and pointed the operator at the SignalK admin

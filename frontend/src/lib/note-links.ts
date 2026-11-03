@@ -1,4 +1,4 @@
-// ADR 0116: links inside note markdown. Pure and React-free, like
+// ADR 0116-a: links inside note markdown. Pure and React-free, like
 // help-links.ts and app-location.ts - it turns a markdown href into where
 // the note viewer should send the operator, with no react-markdown, no DOM
 // API and nothing that isn't testable as plain data.
@@ -8,7 +8,7 @@
 // pattern before it is ever used to build a real request. That is what keeps
 // `![Fuel manifold](hc-doc:<uuid>)` from being a string an attacker (or a
 // hallucinating Mate) can turn into an outbound request to a host of their
-// choosing; see ADR 0116's "Photographs and links carry no host" and
+// choosing; see ADR 0116-a's "Photographs and links carry no host" and
 // ADR 0111's threat model, which this mirrors for the same reason.
 
 /**
@@ -22,7 +22,7 @@
  * unlike `external`, there is no string here a careless caller could still
  * interpolate into an `href` or `src`. A caller that switches on `kind` has
  * nothing to render for `unsafe` but plain text (or the link's own visible
- * label, the markdown-link equivalent of ADR 0116's "photo missing"
+ * label, the markdown-link equivalent of ADR 0116-a's "photo missing"
  * placeholder), which is the point.
  */
 export type NoteLink =
@@ -74,7 +74,7 @@ function isUnsafe(href: string): boolean {
 
 // Resolves a markdown link's `href`, found inside a note's body, to where the
 // note viewer should send the operator: another note, a document (almost
-// always a photo, per ADR 0116), an anchor on the same note, an external URL,
+// always a photo, per ADR 0116-a), an anchor on the same note, an external URL,
 // or nothing renderable at all.
 export function resolveNoteHref(href: string): NoteLink {
   // hc-note:/hc-doc: are ours - anything after the prefix that isn't exactly

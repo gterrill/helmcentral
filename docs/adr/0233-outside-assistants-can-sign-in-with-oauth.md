@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted (2026-10-30). Reverses ADR 0232's "OAuth now" rejection, now that a
-client needs it. Leaves ADR 0231's token model and ADR 0232's Funnel route in
+Accepted (2026-10-30). Reverses ADR 0232-a's "OAuth now" rejection, now that a
+client needs it. Leaves ADR 0231's token model and ADR 0232-a's Funnel route in
 place.
 
 ## Context
@@ -11,7 +11,7 @@ place.
 ADR 0231 gave each outside assistant a bearer token, `hcmcp_…`, sent in the
 `Authorization` header. Claude Code, Claude Desktop's config file and Claude's
 custom connectors all send it, the last through their "Request headers"
-setting. ADR 0232 rejected OAuth because no client needed it.
+setting. ADR 0232-a rejected OAuth because no client needed it.
 
 ChatGPT does. Its custom MCP servers, under developer mode, take OAuth or no
 authentication. OpenAI's documentation says ChatGPT supports neither
@@ -112,7 +112,7 @@ bound to it.
 The OAuth endpoints sit under `/mcp/` so the existing Funnel mount already
 carries them. The three metadata documents can't: RFC 9728 and RFC 8414 put
 them at the root. Funnel therefore needs one more mount, `/.well-known`. The
-help pages add it to both of ADR 0232's routes. A Claude connector that sends
+help pages add it to both of ADR 0232-a's routes. A Claude connector that sends
 the header works with or without that mount.
 
 ### The sign-in page

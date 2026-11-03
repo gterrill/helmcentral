@@ -1,4 +1,4 @@
-# ADR 0116: Notes Are Documents, And Folders Are The Manual
+# ADR 0116-a: Notes Are Documents, And Folders Are The Manual
 
 ## Status
 

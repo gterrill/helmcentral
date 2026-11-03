@@ -12,7 +12,7 @@ import {
 } from '@/lib/note-editor-config'
 
 // Plan "Notes and the Boat's Manual" §7 (Phase 2b) / ADR 0117, Risk 6: the
-// golden-file corpus. The bytes of a note ARE its identity (ADR 0116) - a
+// golden-file corpus. The bytes of a note ARE its identity (ADR 0116-a) - a
 // WYSIWYG editor that reflows a note on every save turns an edit that didn't
 // change meaning into a new blob, a re-index and an embedding charge. Every
 // fixture here must parse -> Plate value -> serialise back to the EXACT
